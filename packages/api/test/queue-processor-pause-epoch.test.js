@@ -768,7 +768,7 @@ describe('QueueProcessor pause epoch', () => {
     assert.equal(terminal?.queueCustody, undefined);
   });
 
-  it('fences a secondary replacement before a multi-cat queued start resumes after record creation', async () => {
+  it('preserves a secondary replacement and defers the still-owned multi-cat carrier after record creation', async () => {
     const tracker = new InvocationTracker();
     const queue = new InvocationQueue();
     const oldCreate = deferred();
@@ -811,9 +811,11 @@ describe('QueueProcessor pause epoch', () => {
       (call) =>
         call.arguments[0] === 'inv-old' &&
         call.arguments[1]?.status === 'canceled' &&
-        call.arguments[1]?.error === 'queue_processing_reservation_replaced',
+        call.arguments[1]?.error === 'queue_target_busy',
     );
-    assert.ok(canceledUpdate, 'the whole old carrier cancels before mutating any target tracker');
+    assert.ok(canceledUpdate, 'the old attempt stops before mutating any target tracker');
+    assert.equal(queue.list('thread-1', 'user-1')[0]?.status, 'queued', 'its source still owns pending work');
+    assert.deepEqual(queue.list('thread-1', 'user-1')[0]?.queuedFailedByCatIds ?? [], []);
   });
 
   it('rejects replacement acquisition when a processing reservation belongs to another user', async () => {
@@ -990,7 +992,7 @@ describe('QueueProcessor pause epoch', () => {
     assert.ok(canceledUpdate, 'superseded carrier cancels before tracker registration');
   });
 
-  it('rechecks every target after action preflight before multi-cat tracker start', async () => {
+  it('rechecks every target after action preflight and retains an unstarted carrier behind a busy sibling', async () => {
     const tracker = new InvocationTracker();
     const queue = new InvocationQueue();
     const preflightEntered = asyncGate();
@@ -1050,13 +1052,15 @@ describe('QueueProcessor pause epoch', () => {
       (call) =>
         call.arguments[0] === 'inv-stub' &&
         call.arguments[1]?.status === 'canceled' &&
-        call.arguments[1]?.error === 'queue_processing_reservation_replaced',
+        call.arguments[1]?.error === 'queue_target_busy',
     );
     assert.ok(
       canceledUpdate,
-      `superseded multi-cat carrier cancels before tracker registration; updates=${JSON.stringify(
+      `busy multi-cat attempt stops before tracker registration; updates=${JSON.stringify(
         deps.invocationRecordStore.update.mock.calls.map((call) => call.arguments),
       )}`,
     );
+    assert.equal(queue.list('thread-1', 'user-1')[0]?.status, 'queued');
+    assert.deepEqual(queue.list('thread-1', 'user-1')[0]?.queuedFailedByCatIds ?? [], []);
   });
 });

@@ -4,7 +4,7 @@ import { parseAssistantReturnCursorFields } from './assistant-return-cursor.js';
 type PersonalChromeAssistantReturnCursorFields = ReturnType<typeof parseAssistantReturnCursorFields>;
 
 export const PERSONAL_CHROME_PROTOCOL_VERSION = 2 as const;
-export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.10' as const;
+export const PERSONAL_CHROME_EXTENSION_REVISION = '0.2.11' as const;
 export const PERSONAL_CHROME_PAGE_ADAPTER_REVISION = '2026-09-02.1' as const;
 export const PERSONAL_CHROME_MAX_TEXT_BYTES = 128 * 1024;
 export const PERSONAL_CHROME_MAX_LOCAL_FRAME_BYTES = 256 * 1024;

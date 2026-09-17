@@ -179,6 +179,14 @@ ASR 首案的 historical replay 也不是 live utility sample。故本阶段只�
 
 ## 7. 下一案 Decision Packet
 
+### F312 Phase E Episode 资格结论（2026-09-03）
+
+Episode surface 保留 source-linked reconstruction authority，但 `docs/episodes/` 当前只有 template，未形成
+production candidate，也没有 named invocation consumer。它因此在 Standing Reflex closure 中为 `exempt`，
+不是 sunset：fixture replay 继续证明 source-only、deterministic、content-free 合同，但不出生 detector、
+application receipt、outcome 或 utility eval。未来若出现真实 Episode Card 与 consumer，必须重新过 E0，
+并把 source correction、delete、supersession 与 drift 绑定到 exact revision 后才可进入 Cue Plane。
+
 **决策题**：在 ASR 首案完成真实 runtime closure 后，是否给 Taste 一个受限的 next-case design license？
 
 **推荐：Taste，条件式；Profile 暂缓。** 理由：Taste 的 proposal、operator adjudication、canonical

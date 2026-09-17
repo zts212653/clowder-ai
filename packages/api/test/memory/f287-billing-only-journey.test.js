@@ -119,6 +119,10 @@ describe('F287 D2 billing-only golden journey', () => {
     const { TasteCueResolver } = await import('../../dist/domains/memory/cue/resolvers/TasteCueResolver.js');
     const { ProfileCueResolver } = await import('../../dist/domains/memory/cue/resolvers/ProfileCueResolver.js');
     const { EventCueResolver } = await import('../../dist/domains/memory/cue/resolvers/EventCueResolver.js');
+    const { DecisionCueResolver } = await import('../../dist/domains/memory/cue/resolvers/DecisionCueResolver.js');
+    const { CatOwnedSeedCueResolver } = await import(
+      '../../dist/domains/memory/cue/resolvers/CatOwnedSeedCueResolver.js'
+    );
     const { ProjectKnowledgeCueResolver } = await import(
       '../../dist/domains/memory/cue/resolvers/ProjectKnowledgeCueResolver.js'
     );
@@ -143,12 +147,14 @@ describe('F287 D2 billing-only golden journey', () => {
     const episodeStore = new MemoryCueEpisodeStore(evidenceStore.getDb());
     const handles = new MemoryCueDrillHandleService(Buffer.alloc(32, 7), episodeStore);
     const registry = new MemoryCueResolverRegistry([
-      new PersonEntityCueResolver({ resolve: async () => null }),
+      new PersonEntityCueResolver({ resolve: async () => null }, { isCurrentVisibleRevision: () => false }),
       new OperationalPrecedentCueResolver(source),
       new TasteCueResolver({ resolve: async () => null }),
       new ProfileCueResolver(),
       new EventCueResolver({ resolve: async () => null }),
-      new ProjectKnowledgeCueResolver(),
+      new DecisionCueResolver({ resolve: async () => null }),
+      new ProjectKnowledgeCueResolver({ resolve: async () => null }),
+      new CatOwnedSeedCueResolver({ resolve: async () => null }),
     ]);
     const service = new MemoryCueInvocationPromptService({
       plane: new MemoryCuePlaneService(registry, episodeStore),
@@ -174,6 +180,7 @@ describe('F287 D2 billing-only golden journey', () => {
       ],
       serverScope: { ownerUserId: 'owner-1', threadId: 'thread-gate', invocationId: 'invocation-1' },
       now: 1_785_600_000_001,
+      consumerCatId: 'codex-sol',
     };
     const resolution = await service.resolve(promptInput);
     assert.equal(resolution.admittedOpportunityIds.length, 1);

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { capabilityProfileRevisionRefV1Schema, catRegistry } from '@cat-cafe/shared';
-import { type DossierProfile, isDossierAvailable, loadDossierProfiles } from '@cat-cafe/shared/dossier';
+import { type DossierProfile, loadDossierSnapshot } from '@cat-cafe/shared/dossier';
 import type {
   CapabilityPendingProposalReader,
   CapabilityProfileRevisionLoadInput,
@@ -58,23 +58,37 @@ export class DossierCapabilityProfileRevisionSource implements CapabilityProfile
   }
 
   async load(input: CapabilityProfileRevisionLoadInput): Promise<CapabilityProfileRevisionLoadResult> {
-    const profilesByCat = loadDossierProfiles(this.projectRoot);
-    const dossierAvailable = isDossierAvailable(this.projectRoot);
+    const dossier = loadDossierSnapshot(this.projectRoot);
     const candidateIds = affectedCandidates(input);
 
-    if (!dossierAvailable) {
+    if (dossier.state === 'absent') {
       if (this.dossierMode === 'required') {
         return { status: 'degraded', reason: 'dossier_unavailable', affectedCatIds: candidateIds };
       }
       return { status: 'fresh', profiles: [], absentCatIds: candidateIds };
     }
 
-    if (profilesByCat.size === 0 && this.dossierMode === 'required' && candidateIds.length > 0) {
+    if (dossier.state === 'unreadable') {
       return {
         status: 'degraded',
         reason: 'dossier_unreadable_or_empty',
         affectedCatIds: candidateIds,
       };
+    }
+
+    // A damaged block cannot invalidate unrelated candidates or their availability.
+    // Never mutate the canonical cached map used by tolerant roster consumers.
+    const invalidCatIds = new Set(
+      dossier.diagnostics
+        .filter((diagnostic) => diagnostic.reason === 'unclosed_block' || diagnostic.reason === 'invalid_identity')
+        .map((diagnostic) => diagnostic.catId),
+    );
+    const profilesByCat = new Map([...dossier.profiles].filter(([catId]) => !invalidCatIds.has(catId)));
+    if (
+      profilesByCat.size === 0 &&
+      (dossier.diagnostics.length > 0 || (this.dossierMode === 'required' && candidateIds.length > 0))
+    ) {
+      return { status: 'degraded', reason: 'dossier_unreadable_or_empty', affectedCatIds: candidateIds };
     }
 
     const absentCatIds = candidateIds.filter((catId) => !profilesByCat.has(catId));

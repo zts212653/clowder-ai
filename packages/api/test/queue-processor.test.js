@@ -122,6 +122,19 @@ async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
 }
 
 describe('QueueProcessor', () => {
+  it('F293 preserves the durable queue source separately from replay provenance', async () => {
+    for (const source of ['user', 'connector', 'agent']) {
+      const deps = stubDeps();
+      const processor = new QueueProcessor(deps);
+      enqueueEntry(deps.queue, { source, ownerAuthProvenance: 'strict' });
+      await processor.processNext('t1', 'u1');
+      await waitFor(() => deps.router.routeExecution.mock.calls.length > 0);
+      const options = deps.router.routeExecution.mock.calls[0].arguments[6];
+      assert.equal(options.humanDispositionInvocationOrigin, 'queue_replay');
+      assert.equal(options.routingQueueSource, source);
+    }
+  });
+
   let deps;
   let processor;
 
@@ -1460,14 +1473,17 @@ describe('QueueProcessor', () => {
       });
     });
 
-    it('retires an exact coordination terminal dispatch before committing its handled receipt', async () => {
+    it('commits its handled receipt before awaiting exact coordination retirement', async () => {
       const durableStore = new MessageStore();
       const seenAt = 1_751;
       let releaseRetirement;
       const retirementFence = new Promise((resolve) => {
         releaseRetirement = resolve;
       });
-      const completeFromCoordinationTerminal = mock.fn(async () => retirementFence);
+      const completeFromCoordinationTerminal = mock.fn(async () => {
+        await retirementFence;
+        return { outcome: 'applied' };
+      });
       const durableDeps = stubDeps({
         messageStore: durableStore,
         a2aDispatchDispositionService: {
@@ -1528,8 +1544,9 @@ describe('QueueProcessor', () => {
       assert.equal(started.started, true);
       await waitFor(() => completeFromCoordinationTerminal.mock.calls.length === 1);
       assert.equal(completeFromCoordinationTerminal.mock.calls[0].arguments[0], message.id);
-      assert.equal(durableStore.getById(message.id).deliveryStatus, 'queued');
-      assert.notEqual(durableStore.getById(message.id).queueCustody.status, 'terminal');
+      assert.equal(durableStore.getById(message.id).deliveryStatus, 'delivered');
+      assert.equal(durableStore.getById(message.id).queueCustody.status, 'terminal');
+      assert.equal(durableDeps.queue.list('t1', 'u1').length, 0);
 
       releaseRetirement();
       await waitFor(() => durableStore.getById(message.id)?.deliveryStatus === 'delivered');

@@ -143,6 +143,37 @@ describe('F284 WorkspaceLauncher', () => {
     expect(container.querySelector('[data-testid="workspace-companion-controls"]')).not.toBeNull();
   });
 
+  it('locks the F315 audit census to the exact destinations rendered by the canonical launcher', async () => {
+    await renderLauncher();
+
+    const renderedDestinations = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-workspace-destination]'),
+      (element) => element.dataset.workspaceDestination,
+    );
+
+    expect(renderedDestinations).toEqual([
+      'surface:files',
+      'surface:changes',
+      'surface:git',
+      'surface:terminal',
+      'workspace:capability-evolution',
+      'surface:browser',
+      'host:status',
+      'action:theater',
+      'mode:team',
+      'mode:needs-me',
+      'mode:product-schedule',
+      'mode:tasks',
+      'mode:schedule',
+      'mode:approval',
+      'mode:recall',
+      'mode:trajectory',
+      'mode:artifacts',
+      'mode:community',
+      'mode:eval',
+    ]);
+  });
+
   it('keeps product Schedule distinct from background scheduler management', async () => {
     await renderLauncher();
 

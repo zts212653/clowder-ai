@@ -1,6 +1,6 @@
 /**
  * External review recovery state machine — the external counterpart to
- * recoverActiveLocalReviewVerdict.
+ * the external-review recovery service.
  *
  * Settles one active stale-HEAD generation when:
  * 1. The external review WAS conducted (persisted GitHub review artifact)
@@ -46,7 +46,7 @@ export type RecoverActiveExternalReviewVerdictResult =
 
 /**
  * Atomic lease transition for external review recovery. Structurally identical
- * to recoverActiveLocalReviewVerdict — same identity/holder/generation/untouched
+ * to external review recovery — same identity/holder/generation/untouched
  * guards. The difference is upstream: the service verifies a GitHub review
  * artifact instead of a local message, and requires a server-observed HEAD
  * advance (freshness mismatch) instead of a local message store lookup.

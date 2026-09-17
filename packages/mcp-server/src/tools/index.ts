@@ -3,6 +3,7 @@
  * 导出所有 MCP 工具
  */
 
+export { artifactReviewTools } from './artifact-review-tools.js';
 export {
   audioCaptureStartInputSchema,
   audioCaptureStatusInputSchema,
@@ -76,6 +77,19 @@ export {
   updateTaskInputSchema,
 } from './callback-tools.js';
 export {
+  advanceEvolutionProgramChangeInputSchema,
+  capabilityEvolutionChangeTools,
+  handleAdvanceEvolutionProgramChange,
+} from './capability-evolution-change-tools.js';
+export {
+  beginEvolutionPreparationInputSchema,
+  capabilityEvolutionPreparationTools,
+  handleBeginEvolutionPreparationWork,
+  handleSubmitEvolutionPreparation,
+  submitEvolutionPreparationCommandSchema,
+  submitEvolutionPreparationInputSchema,
+} from './capability-evolution-preparation-tools.js';
+export {
   capabilityEvolutionRoundTools,
   constituteEvolutionProgramInputSchema,
   handleConstituteEvolutionProgram,
@@ -93,11 +107,19 @@ export {
   startEvolutionProgramInputSchema,
   updateEvolutionProgramInputSchema,
 } from './capability-evolution-tools.js';
+export { collectiveParticipationTools } from './collective-participation-tools.js';
 export {
   communityRouteAcceptanceInputSchema,
   communityRouteAcceptanceTools,
   handleCommunityRouteAcceptance,
 } from './community-route-acceptance-tool.js';
+export {
+  contentEditorTools,
+  editOfficeDocumentInputSchema,
+  handleEditOfficeDocument,
+  handleInspectOfficeDocument,
+  inspectOfficeDocumentInputSchema,
+} from './content-editor-tools.js';
 export {
   distillationTools,
   handleMarkGeneralizable,
@@ -170,6 +192,7 @@ export {
   graphTools,
   handleGraphResolve,
 } from './graph-tools.js';
+export { handleHomeStateSelf, homeStateSelfInputSchema, homeStateTools } from './home-state-tools.js';
 export {
   handlePreviewOpen,
   handleWorkspaceNavigate,
@@ -202,13 +225,6 @@ export {
   limbTools,
 } from './limb-tools.js';
 export {
-  handleLocalReviewVerdict,
-  handleRecoverLocalReviewVerdict,
-  localReviewRecoveryInputSchema,
-  localReviewVerdictInputSchema,
-  localReviewVerdictTools,
-} from './local-review-verdict-tool.js';
-export {
   handleReadMeetingArtifact,
   meetingArtifactTools,
   readMeetingArtifactInputSchema,
@@ -238,6 +254,15 @@ export {
 // F192 Phase H AC-H4: cat_cafe_publish_verdict tool
 export { handlePublishVerdict, publishVerdictInputSchema, publishVerdictTools } from './publish-verdict-tool.js';
 export {
+  handleRealtimeCompanionStart,
+  handleRealtimeCompanionStatus,
+  handleRealtimeCompanionStop,
+  realtimeCompanionStartInputSchema,
+  realtimeCompanionStatusInputSchema,
+  realtimeCompanionStopInputSchema,
+  realtimeCompanionTools,
+} from './realtime-companion-tools.js';
+export {
   handleListRecent,
   listRecentInputSchema,
   recentTools,
@@ -248,6 +273,11 @@ export {
   richBlockRulesInputSchema,
   richBlockRulesTools,
 } from './rich-block-rules-tool.js';
+export {
+  handleRequestUserInput,
+  requestUserInputInputSchema,
+  runtimeInteractionTools,
+} from './runtime-interaction-tools.js';
 export {
   handleListScheduleTemplates,
   handlePreviewScheduledTask,
@@ -294,12 +324,22 @@ export {
   signalsTools,
 } from './signals-tools.js';
 export {
+  bindRequestReviewConsumptionInputSchema,
   createSkillConsumptionTools,
+  dismissRequestReviewConsumptionInputSchema,
   dismissSkillConsumptionInputSchema,
+  handleBindRequestReviewConsumption,
+  handleDismissRequestReviewConsumption,
   handleDismissSkillConsumption,
   handleOpenWithWorkspaceNavigator,
+  handlePrepareRequestReviewConsumption,
   handlePrepareSkillConsumption,
+  handleRecordRequestReviewConsumption,
+  handleRecordRequestReviewOwnerFact,
   openWithWorkspaceNavigatorInputSchema,
+  prepareRequestReviewConsumptionInputSchema,
   prepareSkillConsumptionInputSchema,
+  recordRequestReviewConsumptionInputSchema,
+  recordRequestReviewOwnerFactInputSchema,
   skillConsumptionTools,
 } from './skill-consumption-tools.js';

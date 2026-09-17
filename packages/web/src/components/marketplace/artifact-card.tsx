@@ -41,7 +41,9 @@ export function ArtifactCard({
 
       <div className="mt-2 flex items-center justify-between text-micro text-cafe-muted">
         <span>{result.sourceLocator}</span>
-        {result.publisherIdentity && <span>{result.publisherIdentity}</span>}
+        <span>
+          {result.providerSource ? 'Codex ' + result.providerSource.providerVersion : result.publisherIdentity}
+        </span>
       </div>
     </article>
   );

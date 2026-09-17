@@ -69,6 +69,7 @@ describe('PersonalChromePluginPanel', () => {
   });
 
   beforeEach(() => {
+    window.history.replaceState(null, '', '/settings?s=plugins');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -83,6 +84,18 @@ describe('PersonalChromePluginPanel', () => {
 
   afterAll(() => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it('expands the Personal ChatGPT Pro card when opened from the Session Chain deep link', async () => {
+    window.history.replaceState(null, '', '/settings?s=plugins#personal-chatgpt-pro');
+    mockApiFetch.mockResolvedValue(jsonResponse(state()));
+
+    await act(async () => root.render(<PersonalChromePluginPanel />));
+    await flushEffects();
+
+    expect(container.querySelector('#personal-chatgpt-pro')).not.toBeNull();
+    expect(findButton(container, '查看 Personal ChatGPT Pro 详情')?.getAttribute('aria-expanded')).toBe('true');
+    expect(container.textContent).toContain('在目标 ChatGPT 会话点击“授权此会话”');
   });
 
   it('uses the formal gpt-pro logo and reports publication truth without an unpacked path', async () => {

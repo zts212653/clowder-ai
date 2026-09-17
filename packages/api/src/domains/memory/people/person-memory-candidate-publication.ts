@@ -74,6 +74,7 @@ export class PersonMemoryCandidatePublication {
   async stage(input: StagePersonMemoryCandidateInput): Promise<StoredPersonMemoryCandidate> {
     const {
       deferredReceiptClaimId: _deferredReceiptClaimId,
+      deferredReceiptProcessorInvocationId: _deferredReceiptProcessorInvocationId,
       deltaFingerprint: _deltaFingerprint,
       ...candidateContract
     } = input;
@@ -145,6 +146,7 @@ export class PersonMemoryCandidatePublication {
     const renewedCandidate: StoredPersonMemoryCandidate = {
       ...current,
       deferredReceiptClaimId: input.nextClaimId,
+      deferredReceiptProcessorInvocationId: input.processorInvocationId,
     };
     const personId = candidatePersonId(current);
     const result = String(
@@ -164,6 +166,7 @@ export class PersonMemoryCandidatePublication {
         rawCandidate,
         JSON.stringify(renewedCandidate),
         personId ? '1' : '0',
+        input.processorInvocationId,
       ),
     );
     if (result === 'RENEWED' || result === 'REPLAYED') {
@@ -195,7 +198,11 @@ export class PersonMemoryCandidatePublication {
       throw new Error('F276 candidate is not staged');
     }
     const presentedAt = Date.now();
-    const { deferredReceiptClaimId: _claimId, ...candidateAfterClaim } = candidate;
+    const {
+      deferredReceiptClaimId: _claimId,
+      deferredReceiptProcessorInvocationId: _processorInvocationId,
+      ...candidateAfterClaim
+    } = candidate;
     const anchored: StoredPersonMemoryCandidate = {
       ...candidateAfterClaim,
       state: 'pending_approval',
@@ -275,7 +282,10 @@ export class PersonMemoryCandidatePublication {
     const receiptId = candidate.deferredReceiptId;
     const claimId = candidate.deferredReceiptClaimId;
     const fingerprint = candidate.deltaFingerprint;
-    if (!receiptId || !claimId || !fingerprint) throw new DeferredPersonMemoryCommitConflictError('INCOMPLETE');
+    const processorInvocationId = candidate.deferredReceiptProcessorInvocationId;
+    if (!receiptId || !claimId || !fingerprint || !processorInvocationId) {
+      throw new DeferredPersonMemoryCommitConflictError('INCOMPLETE');
+    }
     const receiptKey = DeferredPersonMemoryReceiptKeys.receipt(candidate.ownerUserId, receiptId);
     const rawReceipt = await this.redis.get(receiptKey);
     const receipt = rawReceipt ? deferredPersonMemoryReceiptSchema.safeParse(JSON.parse(rawReceipt)) : null;
@@ -321,6 +331,7 @@ export class PersonMemoryCandidatePublication {
         deferredReceiptLineageMarker(receiptId),
         personMemoryProposalLineageMarker(candidate.candidateId),
         personId ? '1' : '0',
+        processorInvocationId,
       ),
     );
     if (result !== 'ANCHORED') throw new DeferredPersonMemoryCommitConflictError(result);

@@ -35,7 +35,7 @@ export interface ProposePersonMemoryDeps {
   socketManager: SocketManager;
   approvalIngress?: Pick<ApprovalIngress, 'publish'>;
   ownerPrivateArtifactResolver?: OwnerPrivateArtifactResolver;
-  deferredReceiptStore?: Pick<DeferredPersonMemoryReceiptStore, 'get'>;
+  deferredReceiptStore?: Pick<DeferredPersonMemoryReceiptStore, 'bindProcessorInvocation'>;
   writeOpportunityDeliveryStore?: WriteOpportunityDeliveryStore;
   writeOpportunityTerminalLedger?: WriteOpportunityTerminalLedger;
 }

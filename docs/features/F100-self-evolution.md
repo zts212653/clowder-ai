@@ -4,7 +4,7 @@ related_features: [F042, F086, F038, F102]
 topics: [skills, sop, governance, self-improvement, knowledge-management, mode-c, knowledge-evolution]
 doc_kind: spec
 created: 2026-03-11
-updated: 2026-03-16
+updated: 2026-09-07
 ---
 
 # F100: Self-Evolution — 猫猫自我进化机制
@@ -12,7 +12,7 @@ updated: 2026-03-16
 > **Status**: in-progress | **Owner**: Ragdoll | **Priority**: P1
 > Phase 1 完成：行为层 skill（A/B/C 三模式触发规则）
 > Phase 2 完成：三模式知识对象化（A 守护记录 + B 流程提案闭环 + C 知识蒸馏验证 + 五级阶梯 + 元认知）
-> Phase 3 待建：可观测层 — **blocked on F102 close**，需基于 F102 终态重新定义
+> Phase 3（可观测层）不再单独建：事件/轨迹由 F299 + F153 承接，效果评估由 F192 承接；本 feat 当前角色 = **进化资产 owner**（如 `cat-cafe-skills/request-review/SKILL.md`）+ 行为协议（Mode A/B/C），进化机制由 F311 Program 编排（`evolution-program:ba0f4524…`）
 
 ## Why
 
@@ -53,6 +53,22 @@ updated: 2026-03-16
 
 - Thread: `[thread-id]`（Ragdoll + Maine Coon GPT-5.4 讨论 A+B 模式）
 - operator追加 Mode C（知识进化）：不只从错误学，也从有价值的经验成长
+
+## User Journey
+
+### Primary Journey: 从一次真实协作中形成可见、可验证的改进
+
+- **Scope unit**: 一个 thread / feature 内的一次协作 episode；每次只处理一个已发生的 scope 偏移、重复流程问题或可复用知识线索。
+- **Actor**: operator、正在协作的猫、对应流程或知识资产 owner。
+- **Entry**: 协作进行中出现 scope 漂移，或任务闭环后确认了重复流程缺口、值得复用的方法。
+- **Flow**:
+  1. 猫猫先判断意图的时间方向：面向过去收束经验留在 F100；面向未来主动改变某个能力则转入 F311 Capability Evolution。
+  2. Scope 漂移走 Mode A：猫猫复述当前愿景，提出继续、拆 feature、parking lot 或碰头的明确出口，并记录operator实际选择。
+  3. 重复流程问题走 Mode B：先修完当前任务并扫描当前 scope 的同型问题，再用至少两份证据提出最小杠杆改进；获接受后绑定真实 commit / PR，30 天后复查是否仍发生。
+  4. 可复用知识走 Mode C：通过复用性、非显然性、衰减性三问后形成 Episode Card；只有经过蒸馏与 replay eval 的内容才逐级成为 Method 或 Skill。
+  5. 产物进入既有真相源并保持可回看；猫猫随后返回原任务，不把记录动作冒充当前交付，也不静默替operator批准规则变化。
+- **Success evidence**: Scope Guard outcome、Evolution Proposal 的 source refs 与落地 commit / PR、或 Episode → Method / Skill → Eval Ledger 的可追溯链；单次触发不产生未经验证的团队标准。
+- **Non-goals**: 要求operator给每次对话打标签；把一次性 bug 自动升级为规则；把 F100 当成面向未来创建 Program 的入口；自建 Dashboard、事件总线或新的知识仓库。
 
 ## Deliverables
 

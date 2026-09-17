@@ -49,6 +49,12 @@ const typedRevision = {
   over: [{ type: 'quota_pool' as const, poolId: 'private-review' }],
 };
 
+function openPreferenceForm(container: HTMLElement) {
+  const open = container.querySelector<HTMLButtonElement>('[data-testid="routing-preference-open-form"]');
+  if (!open) throw new Error('expected the on-demand preference form entry');
+  act(() => open.click());
+}
+
 describe('F293 RoutingPreferenceControls', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -66,11 +72,69 @@ describe('F293 RoutingPreferenceControls', () => {
     container.remove();
   });
 
+  it('does not claim a refresh happened when the post-conflict re-read also failed', async () => {
+    const { RoutingContextCommandError } = await import('../routing-context-client');
+    mocks.create.mockRejectedValueOnce(new RoutingContextCommandError('conflict', 409));
+    const onChanged = vi.fn().mockResolvedValue(false);
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={onChanged} />));
+
+    openPreferenceForm(container);
+    const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
+    const over = container.querySelector<HTMLInputElement>('[name="preference-over"]');
+    const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
+    if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
+    act(() => {
+      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
+      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
+      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+    });
+    await act(async () =>
+      container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+
+    // A 409 means someone else moved the preference; if the re-read also failed we do
+    // not have the latest version and must not say we do.
+    expect(container.textContent).toContain('偏好已在别处更新');
+    expect(container.textContent).not.toContain('已刷新最新版本');
+    expect(container.textContent).toContain('读取失败');
+  });
+
+  it('says the write landed even when the follow-up read fails', async () => {
+    mocks.create.mockResolvedValueOnce({ outcome: 'created' });
+    const onChanged = vi.fn().mockResolvedValue(false);
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={onChanged} />));
+
+    openPreferenceForm(container);
+    const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
+    const over = container.querySelector<HTMLInputElement>('[name="preference-over"]');
+    const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
+    if (!prefer || !over || !rationale) throw new Error('preference draft inputs were not rendered');
+    act(() => {
+      Simulate.change(prefer, { target: { value: 'opus5' } } as never);
+      Simulate.change(over, { target: { value: 'codex-sol' } } as never);
+      Simulate.change(rationale, { target: { value: '复杂终审' } } as never);
+    });
+    await act(async () =>
+      container.querySelector('form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+    );
+
+    expect(mocks.create).toHaveBeenCalledOnce();
+    // The durable write happened; only the re-read failed. Neither fact may be hidden.
+    expect(container.textContent).toContain('已保存');
+    expect(container.textContent).toContain('最新状态读取失败');
+    expect(container.textContent).not.toContain('协作偏好写入失败');
+  });
+
   it('keeps a new preference draft when the durable append fails', async () => {
     mocks.create.mockRejectedValueOnce(new Error('偏好写入失败'));
     const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
-    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn()} />));
+    await act(async () =>
+      root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn().mockResolvedValue(true)} />),
+    );
 
+    openPreferenceForm(container);
     const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
     const over = container.querySelector<HTMLInputElement>('[name="preference-over"]');
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
@@ -110,7 +174,11 @@ describe('F293 RoutingPreferenceControls', () => {
   it('round-trips typed subjects and requireEligible when superseding', async () => {
     mocks.supersede.mockResolvedValueOnce({ outcome: 'appended' });
     const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
-    await act(async () => root.render(<RoutingPreferenceControls revisions={[typedRevision]} onChanged={vi.fn()} />));
+    await act(async () =>
+      root.render(
+        <RoutingPreferenceControls revisions={[typedRevision]} onChanged={vi.fn().mockResolvedValue(true)} />,
+      ),
+    );
     const edit = [...container.querySelectorAll('button')].find((button) => button.textContent === '编辑');
     await act(async () => edit?.click());
     await act(async () =>
@@ -130,7 +198,10 @@ describe('F293 RoutingPreferenceControls', () => {
   it('reuses the same command id when a failed create is retried', async () => {
     mocks.create.mockRejectedValueOnce(new Error('网络断开')).mockResolvedValueOnce({ outcome: 'replayed' });
     const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
-    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn()} />));
+    await act(async () =>
+      root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn().mockResolvedValue(true)} />),
+    );
+    openPreferenceForm(container);
     const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
     const over = container.querySelector<HTMLInputElement>('[name="preference-over"]');
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
@@ -150,7 +221,10 @@ describe('F293 RoutingPreferenceControls', () => {
   it('mints a new command id when the owner changes a failed draft', async () => {
     mocks.create.mockRejectedValueOnce(new Error('网络断开')).mockResolvedValueOnce({ outcome: 'appended' });
     const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
-    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn()} />));
+    await act(async () =>
+      root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn().mockResolvedValue(true)} />),
+    );
+    openPreferenceForm(container);
     const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
     const over = container.querySelector<HTMLInputElement>('[name="preference-over"]');
     const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
@@ -171,7 +245,8 @@ describe('F293 RoutingPreferenceControls', () => {
   it('refreshes canonical truth and exits a stale editor after a 409', async () => {
     const { RoutingContextCommandError } = await import('../routing-context-client');
     mocks.supersede.mockRejectedValueOnce(new RoutingContextCommandError('conflict', 409));
-    const onChanged = vi.fn().mockResolvedValue(undefined);
+    // refresh() now reports whether the re-read actually succeeded; true = we hold the latest.
+    const onChanged = vi.fn().mockResolvedValue(true);
     const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
     await act(async () =>
       root.render(<RoutingPreferenceControls revisions={[activeRevision]} onChanged={onChanged} />),

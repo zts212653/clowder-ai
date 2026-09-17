@@ -47,6 +47,10 @@ export interface FreshnessSupplementAggregate {
   requiredFrontierMessageId: string;
   status: FreshnessSupplementStatus;
   runningInvocationId?: string;
+  /** Exact first transition into running; absent only on legacy records. */
+  claimedAt?: number;
+  /** Exact immutable terminal transition time; absent only on legacy records. */
+  terminalAt?: number;
   committedMessageId?: string;
   declineReason?: 'checked_no_supplement_needed';
   failureReason?: FreshnessSupplementFailureReason;

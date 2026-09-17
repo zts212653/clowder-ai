@@ -12,10 +12,7 @@ import {
 
 export type ActionTerminalCompletionResolverId = 'review_delivery' | 'task_done_status';
 export type ActionTerminalFreshnessResolverId = 'community_current_head' | 'task_active_owner';
-export type ActionTerminalCompletionProducerId =
-  | 'external_review_verdict'
-  | 'local_review_verdict'
-  | 'task_status_transition';
+export type ActionTerminalCompletionProducerId = 'external_review_verdict' | 'task_status_transition';
 export type ActionTerminalRuntimePortId =
   | 'community_projection'
   | 'message_store'
@@ -44,18 +41,7 @@ export interface ActionTerminalCapabilityRuntimeReadiness {
   readonly producers: ReadonlySet<ActionTerminalCompletionProducerId>;
 }
 
-const MACHINE_EVIDENCE_PREFIXES = [
-  'community:',
-  'github:',
-  'local-review:',
-  'ci:',
-  'test:',
-  'verdict:',
-  'git:',
-  'commit:',
-  'task:',
-];
-const REVIEW_REENTRY_EVIDENCE_PREFIXES = [...MACHINE_EVIDENCE_PREFIXES, 'message:'];
+const MACHINE_EVIDENCE_PREFIXES = ['community:', 'github:', 'ci:', 'test:', 'verdict:', 'git:', 'commit:', 'task:'];
 
 export interface CanonicalActionTerminalPredicate {
   readonly kind: ActionTerminalPredicateKind;
@@ -200,19 +186,14 @@ function canonicalizeTaskDone(
  */
 export const ACTION_TERMINAL_CAPABILITY_REGISTRY: readonly ActionTerminalCapability[] = Object.freeze([
   {
-    actionFamily: DISPATCH_PROPOSED_ACTION_CAPABILITIES[0].actionFamily,
-    kind: DISPATCH_PROPOSED_ACTION_CAPABILITIES[0].terminalPredicateKind,
+    actionFamily: 'review',
+    kind: 'review_delivered',
     schema: parseReviewDeliveredPredicate,
     canonicalizer: canonicalizeReviewDelivered,
     completionResolver: 'review_delivery',
     freshnessResolver: 'community_current_head',
-    producers: ['external_review_verdict', 'local_review_verdict'],
-    requiredPorts: [
-      'community_projection',
-      'message_store',
-      'action_successor_preflight',
-      'action_successor_completion',
-    ],
+    producers: ['external_review_verdict'],
+    requiredPorts: ['community_projection', 'action_successor_preflight', 'action_successor_completion'],
   },
   {
     actionFamily: DISPATCH_PROPOSED_ACTION_CAPABILITIES[1].actionFamily,
@@ -309,16 +290,5 @@ export function canonicalizeActionTerminalPredicate(input: {
 
 export function isMachineCheckableCompletionEvidenceRef(value: string): boolean {
   const normalized = value.trim().toLowerCase();
-  if (/^local-review:[^:\s]+:g[1-9]\d*:(?:approved|changes_requested|commented)$/.test(normalized)) return true;
-  return (
-    normalized.length > 0 &&
-    MACHINE_EVIDENCE_PREFIXES.some((prefix) => prefix !== 'local-review:' && normalized.startsWith(prefix))
-  );
-}
-
-export function isDurableReviewReentryEvidenceRef(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return REVIEW_REENTRY_EVIDENCE_PREFIXES.some(
-    (prefix) => normalized.startsWith(prefix) && normalized.length > prefix.length,
-  );
+  return normalized.length > 0 && MACHINE_EVIDENCE_PREFIXES.some((prefix) => normalized.startsWith(prefix));
 }

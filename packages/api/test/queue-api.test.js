@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import Fastify from 'fastify';
+import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
@@ -42,6 +43,11 @@ function buildDeps(overrides = {}) {
     releaseSlot: mock.fn(() => {}),
     releaseThread: mock.fn(() => {}),
     finalizeRemovedEntry: mock.fn(async () => true),
+    retryFailedTargetWithoutCustody: mock.fn(async (threadId, userId, entryId, catId, recoveryActionId) => {
+      return invocationQueue.retryFailedTarget(threadId, userId, entryId, catId)
+        ? { outcome: 'retried', attemptId: recoveryActionId }
+        : { outcome: 'not_retryable' };
+    }),
   };
   queueProcessor.processExactSteerReservation = mock.fn(async (threadId, userId) =>
     queueProcessor.processNext(threadId, userId),
@@ -242,6 +248,241 @@ describe('Queue Management API', () => {
       opus: 'seen',
       codex: 'queued',
     });
+  });
+
+  for (const activeParent of [false, true]) {
+    for (const messagePresent of [false, true]) {
+      for (const state of ['queued', 'processing', 'failed']) {
+        it(`projects an executable recovery for ${state} × message=${messagePresent ? 'present' : 'null'} × parent=${activeParent ? 'active' : 'absent'}`, async () => {
+          deps.invocationTracker.getActiveSlots.mock.mockImplementation(() =>
+            activeParent ? [{ catId: 'opus', startedAt: 100 }] : [],
+          );
+          deps.invocationTracker.getUserId.mock.mockImplementation(() => (activeParent ? 'user-a' : null));
+          deps.invocationTracker.getExecutionId.mock.mockImplementation(() =>
+            activeParent ? 'inv-active' : undefined,
+          );
+          const queued = enqueueEntry(deps.invocationQueue, {
+            source: messagePresent ? 'user' : 'agent',
+            sourceCategory: messagePresent ? undefined : 'a2a',
+            autoExecute: !messagePresent,
+            messageId: messagePresent ? 'msg-recovery' : null,
+          });
+          if (state === 'processing') {
+            deps.invocationQueue.markProcessingById('t1', queued.entry.id, 'opus');
+          } else if (state === 'failed') {
+            deps.invocationQueue.markQueuedFailedForCatAcrossUsers(
+              't1',
+              'opus',
+              'inv-failed',
+              new Set([queued.entry.id]),
+              'invocation_failed',
+              1234,
+            );
+          }
+
+          const res = await app.inject({
+            method: 'GET',
+            url: '/api/threads/t1/queue',
+            headers: { 'x-cat-cafe-user': 'user-a' },
+          });
+          const [entry] = JSON.parse(res.body).queue;
+          const expectedKind =
+            state === 'processing'
+              ? 'force_reset'
+              : state === 'failed' && !messagePresent
+                ? 'retry_target'
+                : state === 'failed' || messagePresent
+                  ? 'withdraw'
+                  : 'steer';
+
+          assert.equal(res.statusCode, 200);
+          assert.ok(entry.recoveryActions.some((action) => action.kind === expectedKind));
+          if (state === 'failed' && messagePresent) {
+            assert.equal(
+              entry.recoveryActions.some((action) => action.kind === 'retry_target'),
+              false,
+              'message-backed Retry must not be published until durable custody proves it executable',
+            );
+          }
+        });
+      }
+    }
+  }
+
+  it('executes the projected fallback when a failed message-backed row has no durable custody', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, { messageId: 'msg-missing-custody' });
+    deps.invocationQueue.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'opus',
+      'inv-failed',
+      new Set([queued.entry.id]),
+      'invocation_failed',
+      1234,
+    );
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const [entry] = JSON.parse(projection.body).queue;
+
+    assert.equal(projection.statusCode, 200);
+    assert.deepEqual(
+      entry.recoveryActions.map((action) => action.kind),
+      ['withdraw'],
+      'known-missing custody must retain only the real fallback action',
+    );
+    const [action] = entry.recoveryActions;
+    const executed = await app.inject({
+      method: action.request.method,
+      url: action.request.path,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+
+    assert.equal(executed.statusCode, 200, executed.body);
+    assert.equal(deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id), null);
+  });
+
+  it('executes exact retry for message-less failed A2A once and preserves the failed sibling', async () => {
+    const queued = enqueueEntry(deps.invocationQueue, {
+      source: 'agent',
+      sourceCategory: 'a2a',
+      autoExecute: true,
+      messageId: null,
+      targetCats: ['opus', 'codex'],
+    });
+    deps.invocationQueue.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'opus',
+      'inv-opus-failed',
+      new Set([queued.entry.id]),
+      'invocation_failed',
+      1234,
+    );
+    deps.invocationQueue.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'codex',
+      'inv-codex-failed',
+      new Set([queued.entry.id]),
+      'invocation_failed',
+      1235,
+    );
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const entry = JSON.parse(projection.body).queue[0];
+    const action = entry.recoveryActions.find(
+      (candidate) => candidate.kind === 'retry_target' && candidate.targetCatId === 'opus',
+    );
+    assert.ok(action, 'message-less failed target must receive exact executable Retry');
+
+    const first = await app.inject({
+      method: action.request.method,
+      url: action.request.path,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: action.request.body,
+    });
+    const second = await app.inject({
+      method: action.request.method,
+      url: action.request.path,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: action.request.body,
+    });
+
+    assert.equal(first.statusCode, 202, first.body);
+    assert.equal(second.statusCode, 409, 'the same recovery fence must be idempotently rejected');
+    const current = deps.invocationQueue.getEntrySnapshot('t1', 'user-a', queued.entry.id);
+    assert.deepEqual(current.queuedFailedByCatIds, ['codex'], 'retrying one target must not reopen its sibling');
+  });
+
+  it('maps a message-backed Queue recovery action to the existing durable retry authority', async () => {
+    await app.close();
+    const retryCalls = [];
+    const commitCalls = [];
+    const authorityCalls = [];
+    const messageById = new Map();
+    deps = buildDeps({
+      messageStore: {
+        markCanceled: mock.fn(async () => ({ deliveryStatus: 'canceled', deliveryTransitioned: true })),
+        getById: mock.fn(async (messageId) => messageById.get(messageId) ?? null),
+      },
+      retryAuthorityPreflight: {
+        preflight: mock.fn(async (input) => {
+          authorityCalls.push(input);
+          return { ok: true, kind: 'user' };
+        }),
+      },
+      retryAuthorityCommitter: {
+        commit: mock.fn(async (input) => {
+          commitCalls.push(input);
+          return { outcome: 'committed' };
+        }),
+      },
+    });
+    deps.queueProcessor.retryFailedTarget = mock.fn(async (...args) => {
+      retryCalls.push(args);
+      await args[5]([]);
+      return { outcome: 'retried', attemptId: 'entry-durable:opus:2' };
+    });
+    const queued = enqueueEntry(deps.invocationQueue, { messageId: 'msg-durable' });
+    deps.invocationQueue.markQueuedFailedForCatAcrossUsers(
+      't1',
+      'opus',
+      'inv-failed',
+      new Set([queued.entry.id]),
+      'invocation_failed',
+      1234,
+    );
+    messageById.set('msg-durable', {
+      id: 'msg-durable',
+      userId: 'user-a',
+      threadId: 't1',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: queued.entry.id,
+        allTargetCats: ['opus'],
+        pendingTargetCats: ['opus'],
+        failedByCatIds: ['opus'],
+        targetAttempts: [
+          {
+            id: 'entry-durable:opus:1',
+            targetCatId: 'opus',
+            sequence: 1,
+            state: 'failed',
+            createdAt: 1000,
+            updatedAt: 1234,
+            terminalReason: 'invocation_failed',
+          },
+        ],
+      }),
+    });
+    const { queueRoutes } = await import('../dist/routes/queue.js');
+    app = Fastify();
+    await app.register(queueRoutes, deps);
+    await app.ready();
+
+    const projection = await app.inject({
+      method: 'GET',
+      url: '/api/threads/t1/queue',
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    const action = JSON.parse(projection.body).queue[0].recoveryActions.find(
+      (candidate) => candidate.kind === 'retry_target',
+    );
+    const response = await app.inject({
+      method: action.request.method,
+      url: action.request.path,
+      headers: { 'x-cat-cafe-user': 'user-a', 'content-type': 'application/json' },
+      payload: action.request.body,
+    });
+
+    assert.equal(response.statusCode, 202, response.body);
+    assert.deepEqual(retryCalls[0].slice(0, 5), ['t1', 'user-a', queued.entry.id, 'opus', 'entry-durable:opus:1']);
+    assert.equal(authorityCalls.length, 1);
+    assert.equal(commitCalls.length, 1);
   });
 
   it('GET /queue projects the exact provider carrier for each active target', async () => {

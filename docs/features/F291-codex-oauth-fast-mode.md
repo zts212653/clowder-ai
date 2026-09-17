@@ -156,7 +156,7 @@ Thread ⋮
 - [x] AC-B2: Thread `⋮` 的“速度档位”与“思考档位”平级且紧邻；菜单顺序与键盘可访问性有组件测试。
 - [x] AC-B3: 面板 participant-first，且只列 OAuth Codex 猫；每行显示 inherit/member/thread 来源、请求档位、unsupported/dormant 状态。
 - [x] AC-B4: 保存成功、失败回滚、清除继承、下一轮生效与窄屏 viewport 行为有组件测试，文案不把 requested tier 说成实际 serviced tier。
-- [x] AC-B5: Alpha 功能旅程已验证 OAuth-only 列表、Fast/Standard 显式覆盖、清除后继承与非 OAuth fail-closed；三张归档截图与约 15 秒录屏未生成，由 operator 在现场前端 UAT 后签字降级（proposal `0001786251707776-000847-488ca63e`；signoff `0001786272749140-000009-6dd96346`），不冒充视觉素材已归档。
+- [x] AC-B5: Alpha 功能旅程已验证 OAuth-only 列表、Fast/Standard 显式覆盖、清除后继承与非 OAuth fail-closed；三张归档截图与约 15 秒录屏未生成，由 operator 在现场前端 UAT 后签字降级（proposal `private-source-id`；signoff `private-source-id`），不冒充视觉素材已归档。
 - [x] AC-B6: F244 tip 指向 `成员配置 / thread ⋮ → 速度档位` 的真实入口，不伪造不存在的 action。
 
 ## 需求点 Checklist

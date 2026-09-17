@@ -1,17 +1,9 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 
 const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 const callbacksSource = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
-const localReviewRouteSource = readFileSync(
-  new URL('../src/routes/callback-local-review-verdict-route.ts', import.meta.url),
-  'utf8',
-);
-const localReviewBootstrapUrl = new URL(
-  '../src/domains/ball-custody/LocalReviewCompletionBootstrap.ts',
-  import.meta.url,
-);
 
 function block(startMarker, endMarker) {
   const start = source.indexOf(startMarker);
@@ -47,27 +39,15 @@ describe('F167 successor runtime wiring', () => {
     assert.match(verdictWiring, /action_successor_completion: completeActionLease/);
     assert.match(verdictWiring, /preflightLease: preflightActionLease/);
     assert.match(verdictWiring, /completeActionLease,/);
-    assert.match(verdictWiring, /local_review_verdict/);
+    assert.doesNotMatch(verdictWiring, /local_review_verdict/);
     assert.doesNotMatch(verdictWiring, /\.\.\.\(actionSuccessor(?:LeaseStore|CompletionService)/);
   });
 
-  it('keeps local-review construction in a focused bootstrap module', () => {
-    assert.equal(existsSync(localReviewBootstrapUrl), true, 'focused local-review bootstrap module must exist');
-    const bootstrapSource = readFileSync(localReviewBootstrapUrl, 'utf8');
-    assert.ok(bootstrapSource.split('\n').length <= 350, 'focused bootstrap module must remain below hard limit');
-    assert.match(source, /createLocalReviewCompletionBootstrap\(/);
-    assert.doesNotMatch(source, /new localReview(?:Evidence|Verdict)Mod\./);
-    assert.match(bootstrapSource, /new MessageStoreLocalReviewEvidenceProvider\(/);
-    assert.match(bootstrapSource, /new LocalReviewVerdictService\(/);
-  });
-
-  it('keeps the local review callback in a focused route module', () => {
-    assert.match(callbacksSource, /registerCallbackLocalReviewVerdictRoute/);
-    assert.doesNotMatch(callbacksSource, /app\.post\('\/api\/callbacks\/record-local-review-verdict'/);
-    assert.match(localReviewRouteSource, /app\.post\('\/api\/callbacks\/record-local-review-verdict'/);
-    assert.match(localReviewRouteSource, /app\.post\('\/api\/callbacks\/recover-local-review-verdict'/);
-    assert.match(localReviewRouteSource, /resolveActionSuccessorCarrier/);
-    assert.ok(localReviewRouteSource.split('\n').length <= 350, 'focused callback module must remain below hard limit');
+  it('keeps local review out of action lease settlement and recovery wiring', () => {
+    assert.doesNotMatch(source, /LocalReview(?:CompletionBootstrap|VerdictService|EvidenceProvider)/);
+    assert.doesNotMatch(callbacksSource, /record-local-review-verdict|recover-local-review-verdict/);
+    assert.match(callbacksSource, /localReviewVerdict/);
+    assert.match(callbacksSource, /reviewedHeadSha/);
   });
 
   it('reconciles pending return carriers at boot and periodically through the existing queue', () => {

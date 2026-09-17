@@ -1,6 +1,6 @@
 ---
 name: pencil-design
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "2026-09-15 interaction-narrative handoff: clarifies when an unresolved journey needs concept design before existing Pencil work; no new design tool or product surface."
 description: >
   使用 Pencil MCP 创建/编辑 .pen 设计文件，或导出为 React 代码。
   Use when: 设计 UI、编辑 .pen 文件、从设计稿生成代码。
@@ -19,7 +19,9 @@ triggers:
 Pencil 是装在 **Antigravity IDE** 上的设计扩展。
 .pen 文件是加密格式，**只能通过 Pencil MCP 工具读写**，Read/Grep/cat 无法解析。
 
-配置要求：MCP 配置必须加 `--app antigravity`（不是默认 IDE）。
+配置要求：当前 Antigravity IDE 的 MCP 参数是 `--app antigravity_ide`；
+VS Code 是 `--app visual_studio_code`。不要沿用旧的 `antigravity` / `vscode`
+socket 标识；Clowder AI 的 resolver 会按扩展安装目录自动生成正确参数。
 
 ## SOP 位置
 
@@ -32,6 +34,8 @@ pencil-design 在 **spec 确认后、写代码前**。先把 UX 做对，再动�
 **可观测性 / 状态 / 失败相关 UI 必读**：动手画之前先过 Design Gate 的 **现场可感知性自检**（`../.cat-cafe-shared-refs/in-context-observability-checklist.md`）。Clowder AI 的可观测性哲学是"明厨亮灶"——in-context 富块 + entity 自带状态点优先于 dashboard。否则容易画成上个世纪的 stats card 被打回（F174 D2b 教训）。
 
 ## 🔴 风格一致性门禁（Style Consistency Gate）
+
+用户任务、信息先后或跨界面交接尚未明确时，先按[交互叙事](../.cat-cafe-shared-refs/interaction-narrative.md)厘清，需可点验证则交 concept-demo-design。已确认的设计或纯样式工作直接进入本技能，不追加叙事/黄金路径重做。
 
 **这是最重要的规则。** 在创建任何新设计之前，必须完成以下步骤：
 
@@ -138,7 +142,7 @@ get_screenshot（验证）
 | **🔴 做独立 dashboard 而不是集成扩展** | 和产品割裂 | 问清楚是"扩展"还是"全新" |
 | 用 Read/Grep 读 .pen 文件 | 乱码，无法解析 | 只用 Pencil MCP 工具 |
 | batch_design 超过 25 ops | 工具报错 | 拆成多次调用 |
-| MCP 配置未加 `--app antigravity` | 工具不可用 | 加上后等下次激活 |
+| MCP 使用旧 `--app antigravity` / `vscode` 标识 | 找得到扩展却连不上当前 IDE socket | 让 resolver 生成 `antigravity_ide` / `visual_studio_code`，新 invocation 生效 |
 | 跨调用复用 binding | binding 失效 | 每次调用重新声明 |
 | `open_document("new")` 后忘记保存 | 内容丢失 | 告诉operator完整路径，请求 Cmd+S |
 | `get_style_guide` 的 tags 传字符串 | 参数格式错误 | 必须传 JSON 数组 |

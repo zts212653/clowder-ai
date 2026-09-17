@@ -1,7 +1,11 @@
-import { type CloudBridgeOutboundReceiptV1, createCatId, isCloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import {
+  type CloudBridgeOutboundReceiptV1,
+  type CloudBridgeRecoveryV1,
+  isCloudBridgeOutboundReceiptV1,
+} from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
-import { resolveVisibleReplyParent } from '../../stores/visibility.js';
+import { validateOutboundReceipt } from './cloud-outbound-receipt-provenance.js';
 import type { PersistenceContext } from './route-helpers.js';
 
 const log = createModuleLogger('route-system-info-persistence');
@@ -124,6 +128,7 @@ function parseVisibleNotice(
       tone: 'info' | 'warning';
       replyTo?: string;
       outboundReceipt?: CloudBridgeOutboundReceiptV1;
+      needsBindingRecovery?: boolean;
       idempotencyKey?: string;
       sessionRollover?: SessionRolloverNoticeMetadata;
     }
@@ -176,6 +181,7 @@ function parseVisibleNotice(
               outboundReceipt,
             }
           : {}),
+        ...(parsed.reason === 'needs-binding' ? { needsBindingRecovery: true } : {}),
       };
     }
     return undefined;
@@ -210,6 +216,19 @@ async function appendVisibleNotice(
         receipt: notice.outboundReceipt,
       })
     : undefined;
+  const cloudBridgeRecovery: CloudBridgeRecoveryV1 | undefined =
+    notice.needsBindingRecovery &&
+    outboundReceipt?.sourceSender.kind === 'user' &&
+    outboundReceipt.status === 'failed' &&
+    outboundReceipt.hostMessageId === undefined
+      ? {
+          v: 1,
+          kind: 'needs_binding',
+          sourceMessageId: outboundReceipt.sourceMessageId,
+          targetCatId: outboundReceipt.targetCatId,
+          dispatchInvocationId: outboundReceipt.dispatchInvocationId,
+        }
+      : undefined;
   await messageStore.append({
     userId: 'system',
     catId: null,
@@ -228,59 +247,10 @@ async function appendVisibleNotice(
         noticeTone: notice.tone,
         ...(notice.sessionRollover ? { sessionRollover: notice.sessionRollover } : {}),
         ...(outboundReceipt ? { cloudBridgeOutboundReceipt: outboundReceipt } : {}),
+        ...(cloudBridgeRecovery ? { cloudBridgeRecovery } : {}),
       },
     },
   });
-}
-
-async function validateOutboundReceipt(args: {
-  messageStore: IMessageStore;
-  threadId: string;
-  catId: string;
-  expectedSourceMessageId: string | undefined;
-  expectedDispatchInvocationId: string | undefined;
-  receipt: CloudBridgeOutboundReceiptV1;
-}): Promise<CloudBridgeOutboundReceiptV1 | undefined> {
-  const { receipt } = args;
-  if (
-    !args.expectedSourceMessageId ||
-    receipt.sourceMessageId !== args.expectedSourceMessageId ||
-    !args.expectedDispatchInvocationId ||
-    receipt.dispatchInvocationId !== args.expectedDispatchInvocationId ||
-    receipt.targetCatId !== args.catId
-  ) {
-    log.warn(
-      {
-        threadId: args.threadId,
-        catId: args.catId,
-        sourceMessageId: receipt.sourceMessageId,
-        dispatchInvocationId: receipt.dispatchInvocationId,
-      },
-      'Dropping cloud outbound receipt with mismatched server dispatch context',
-    );
-    return undefined;
-  }
-  const source = await resolveVisibleReplyParent(args.messageStore, receipt.sourceMessageId, {
-    threadId: args.threadId,
-    viewer: { type: 'cat', catId: createCatId(args.catId) },
-    publicReply: true,
-  });
-  if (!source) return undefined;
-
-  const senderMatches =
-    receipt.sourceSender.kind === 'user'
-      ? source.catId === null && source.userId === receipt.sourceSender.id
-      : source.catId === createCatId(receipt.sourceSender.id);
-  if (!senderMatches) return undefined;
-  if (receipt.sourceSender.invocationId) {
-    const storedInvocationIds = new Set(
-      [source.extra?.stream?.turnInvocationId, source.extra?.stream?.invocationId].filter((value): value is string =>
-        Boolean(value),
-      ),
-    );
-    if (!storedInvocationIds.has(receipt.sourceSender.invocationId)) return undefined;
-  }
-  return receipt;
 }
 
 function recordPersistenceFailure(

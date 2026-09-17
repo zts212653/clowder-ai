@@ -1,0 +1,291 @@
+.f290-assembly-experience {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  height: 100%;
+  overflow: hidden;
+}
+
+.f290-channel-scene {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  background: var(--cafe-canvas);
+}
+
+.f290-scene-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 26px;
+  border-bottom: 1px solid var(--cafe-border);
+  background: rgb(255 250 243 / 82%);
+}
+
+.f290-scene-header p,
+.f290-scene-header span,
+.f290-truth-label,
+.f290-context-panel small {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.f290-scene-header p {
+  margin: 0 0 4px;
+  color: var(--cafe-accent-ink);
+  font-weight: 600;
+}
+
+.f290-scene-header h2 {
+  margin: 0 0 4px;
+  font-size: 22px;
+}
+
+.f290-header-actions,
+.f290-composer > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.f290-header-actions button,
+.f290-context-panel button,
+.f290-message footer button {
+  border: 1px solid var(--cafe-border-strong);
+  border-radius: 9px;
+  background: var(--cafe-surface);
+  padding: 7px 9px;
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+
+.f290-message-flow {
+  overflow: auto;
+  padding: 18px 26px 28px;
+}
+
+.f290-endpoint-card,
+.f290-message,
+.f290-context-panel section,
+.f290-empty-state {
+  border: 1px solid var(--cafe-border);
+  border-radius: 14px;
+  background: var(--cafe-surface);
+  box-shadow: 0 6px 18px rgb(89 66 45 / 6%);
+}
+
+.f290-endpoint-card {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+}
+
+.f290-endpoint-card span,
+.f290-endpoint-card small,
+.f290-message header span,
+.f290-message footer span {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+
+.f290-message {
+  margin-top: 12px;
+  padding: 13px 15px;
+}
+
+.f290-message header,
+.f290-message footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.f290-message header strong {
+  font-size: 13px;
+}
+
+.f290-message p {
+  margin: 10px 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
+.f290-message [data-attention="pending"] {
+  color: var(--cafe-accent-ink);
+}
+.f290-message [data-attention="responded"],
+.f290-message [data-attention="result"] {
+  color: var(--cafe-success);
+}
+
+.f290-empty-state {
+  margin: 12vh auto 0;
+  max-width: 430px;
+  padding: 24px;
+  color: var(--cafe-text-secondary);
+  text-align: center;
+}
+
+.f290-composer {
+  display: grid;
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid var(--cafe-border);
+  background: var(--cafe-panel);
+}
+
+.f290-composer label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+
+.f290-composer select,
+.f290-composer textarea {
+  width: 100%;
+  border: 1px solid var(--cafe-border-strong);
+  border-radius: 10px;
+  background: var(--cafe-surface);
+  padding: 9px 11px;
+  color: var(--cafe-text);
+  resize: vertical;
+}
+
+.f290-composer label select {
+  width: auto;
+}
+.f290-composer small {
+  flex: 1;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.f290-composer button {
+  border: 0;
+  border-radius: 9px;
+  background: var(--cafe-accent);
+  color: white;
+  padding: 9px 12px;
+  font-weight: 600;
+}
+
+.f290-context-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding: 18px;
+  border-left: 1px solid var(--cafe-border);
+  background: var(--cafe-panel);
+}
+
+.f290-context-panel section {
+  display: grid;
+  gap: 8px;
+  padding: 13px;
+}
+.f290-context-panel h3,
+.f290-context-panel p {
+  margin: 0;
+}
+.f290-context-panel h3 {
+  font-size: 14px;
+}
+.f290-context-panel p {
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.f290-context-panel .f290-host-notice {
+  color: var(--cafe-accent-ink);
+}
+.f290-context-panel .f290-revoke {
+  color: var(--cafe-danger);
+}
+.f290-destination-list .f290-destination-heading {
+  margin-top: 18px;
+}
+
+.f290-candidate-action {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px dashed var(--cafe-border-strong);
+  border-radius: 10px;
+  background: var(--cafe-surface-sunken);
+}
+
+.f290-candidate-action label {
+  display: grid;
+  gap: 5px;
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+}
+
+.f290-candidate-action input {
+  width: 100%;
+  border: 1px solid var(--cafe-border-strong);
+  border-radius: 8px;
+  background: var(--cafe-surface);
+  padding: 7px 9px;
+  color: var(--cafe-text);
+}
+
+.f290-mobile-channel-navigation {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .collective-shell[data-experience-gate="f290-assembly"],
+  .collective-shell[data-experience-gate="f290-assembly"][data-embedded="true"] {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 100dvh;
+  }
+  .collective-shell[data-experience-gate="f290-assembly"] .global-rail,
+  .collective-shell[data-experience-gate="f290-assembly"] .destination-pane {
+    display: none;
+  }
+  .f290-assembly-experience {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+  .f290-mobile-channel-navigation {
+    position: relative;
+    display: grid;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--cafe-border);
+    background: var(--cafe-panel);
+  }
+  .f290-mobile-channel-navigation > button,
+  .f290-mobile-channel-navigation nav button {
+    width: 100%;
+    border: 1px solid var(--cafe-border-strong);
+    border-radius: 9px;
+    background: var(--cafe-surface);
+    padding: 8px 10px;
+    color: var(--cafe-text-secondary);
+    font-size: 12px;
+    text-align: left;
+  }
+  .f290-mobile-channel-navigation nav {
+    display: grid;
+    gap: 6px;
+  }
+  .f290-context-panel {
+    border-top: 1px solid var(--cafe-border);
+    border-left: 0;
+    overflow: visible;
+  }
+  .f290-channel-scene {
+    min-height: 620px;
+  }
+  .f290-scene-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

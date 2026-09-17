@@ -10,7 +10,7 @@ related_decisions: [ADR-031]
 topics: [eval-philosophy, eval-charter, gt-yardstick, judge-economics, goodhart, anti-gaming, burden-of-proof-chain, living-bench, eval-runtime-topology]
 created: 2026-08-10
 updated: 2026-08-25
-status: ratified-v2.2   # operator signoff: [thread-id] / 0001787659851779-000368-9a16b8c4; v2.1 prior baseline: 0001787282733166-000287-cb1eabb5
+status: ratified-v2.2   # operator signoff: [thread-id] / private-source-id; v2.1 prior baseline: private-source-id
 authors:
   - "Ragdoll/claude-fable-5（v1 六公理起草 + v2 增补 + v2.1 修订采纳）"
   - "You（GT 标尺提出、三阶段信号供应链、方向拍板）"
@@ -36,7 +36,7 @@ related_docs:
 >
 > **状态边界**：v2.2 已由 operator 于 2026-08-25 signoff，成为当前 ratified 基线；
 > v2.1 保留为上一版已 ratified 基线。签字坐标：`[thread-id]` /
-> `0001787659851779-000368-9a16b8c4`。
+> `private-source-id`。
 >
 > **血统**：2026-07-17 六公理草案（v0.1.2 三轮 red-team + Alden 三日 + PR #3017
 > 五轮实弹）→ 2026-07-28 至 08-04 自进化思辨独立绕行（whitepaper《河床、水流与
@@ -346,7 +346,7 @@ fixture development/holdout 分工行动项。
 | 6 | 三病的链上定位（附 E） | 本次 v2 综合 | 整合——从并列体检表升级为结构诊断 |
 | 7 | **被推翻的 v1 条款：零** | 二十日独立绕行验证 | 六公理全部存活；此为升宪的实证背书 |
 | 8 | **v2 → v2.1（Maine Coon思辨轮收敛）**：E0 根条款从"判分贵"精确化为"外部新鲜 bit 不可约"（贵降为启发层代理，双世界证明入根）+ 自治上限条款；额度条款升 calibration runway 三账向量 + 分级停止 + exhaustion_action + 守门猫 consumer；E4 折旧句收窄（不完备信号 + 适应性选择限定，折旧对象分类，隔离与代谢两条腿）；结构改名"一门一链六护栏"；五病资产/流程分治 | Maine Coon红队 + Ragdoll复核采纳 | **修正 3 处过满表述，E0/E4 核心全部存活；红队未找到穿透"外部 bit 不可约"的真反例** |
-| 9 | **v2.1 → v2.2 修正案**：E5 禁区扩到未经独立验证的自评断言；E0 补 runway 记账成本的递归付薪；E3/E4 补四角色分权与纵向运行拓扑 | Prime/DSH 野外尸检；F303/F299 触发事故；原始分析 `0001787547947236-000137-abc9a9ba`；operator 启动 `0001787548635186-000148-43681799`；operator signoff `0001787659851779-000368-9a16b8c4` | **边界修正 + 操作化**——不新增公理、不新增第六病，补齐“何时醒、何时成熟、凭什么行动” |
+| 9 | **v2.1 → v2.2 修正案**：E5 禁区扩到未经独立验证的自评断言；E0 补 runway 记账成本的递归付薪；E3/E4 补四角色分权与纵向运行拓扑 | Prime/DSH 野外尸检；F303/F299 触发事故；原始分析 `private-source-id`；operator 启动 `private-source-id`；operator signoff `private-source-id` | **边界修正 + 操作化**——不新增公理、不新增第六病，补齐“何时醒、何时成熟、凭什么行动” |
 
 反方向欠账（不属本文件 scope，登记不遗失）：E1/E2/E5 的刀未进对外叙事
 （wechat-series），E5 反身性为候选第六面。
@@ -445,12 +445,12 @@ F192/F263 的 AC 开始引用条款号（如 "per E4 代谢条款"）。
 
 **v2.2 已转正（2026-08-25）**：三条 delta 已落宪法与 `eval-design` v0.3；
 独立 Skill review 已覆盖实质内容，operator 以
-`0001787659851779-000368-9a16b8c4` 完成最终措辞 signoff。v2.1 作为上一版
+`private-source-id` 完成最终措辞 signoff。v2.1 作为上一版
 ratified 基线与本轮来源坐标一并保留在 delta 账本。
 
 *v2 增补 + v2.1 修订：Ragdoll/claude-fable-5 · 2026-08-10 · 方向：You（"补完
 eval-philosophy 然后让Maine Coon一起头脑风暴"）· 思辨轮红队：Maine Coon/GPT-5.6 Sol ·
 全部条款有 whitepaper/PR/红队一手锚，无一条来自纯推演。v2.2 修正案：Maine Coon/
 GPT-5.6 Sol · 2026-08-23 起草、2026-08-25 ratified · operator 启动来源：
-`0001787548635186-000148-43681799` · signoff：
-`0001787659851779-000368-9a16b8c4`。*
+`private-source-id` · signoff：
+`private-source-id`。*

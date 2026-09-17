@@ -89,6 +89,7 @@ describe('F311 Evolution Program permanent API', { skip: redisIsolationSkipReaso
     assert.equal(body.projection.program.stage, 'constituting');
     assert.equal(body.surface.type, 'evolution-program');
     assert.equal(body.surface.objectRef.id, body.projection.program.programId);
+    assert.equal(body.surface.capabilities.mainAreaAttention, true);
     assert.ok(body.projection.blockers.some((blocker) => blocker.code === 'calibrator_missing'));
     assert.deepEqual(await service.get(body.projection.program.programId), body.projection);
 
@@ -115,6 +116,60 @@ describe('F311 Evolution Program permanent API', { skip: redisIsolationSkipReaso
         payload: { ...createBody, ...smuggled },
       });
       assert.equal(response.statusCode, 400);
+    }
+  });
+
+  it('owns the explicit Program name across create, replay, listing and its exact surface', async () => {
+    const app = await createApp({ kind: 'session', userId: 'operator' });
+    const payload = { ...createBody, displayName: '视频讲解能力' };
+    const created = await app.inject({ method: 'POST', url: '/api/capability-evolution/programs', payload });
+    assert.equal(created.statusCode, 201);
+    const { projection, surface } = created.json();
+    assert.equal(projection.program.displayName, payload.displayName);
+    assert.equal(surface.title, payload.displayName);
+    assert.equal((await service.get(projection.program.programId)).program.displayName, payload.displayName);
+    const listed = (await app.inject({ url: '/api/capability-evolution/programs' })).json();
+    assert.equal(listed.surfaces[0].title, payload.displayName);
+    const collision = await app.inject({
+      method: 'POST',
+      url: '/api/capability-evolution/programs',
+      payload: { ...payload, displayName: '另一项目' },
+    });
+    assert.equal(collision.statusCode, 409);
+  });
+
+  it('names an old Program without advancing its journey, preserving sequence and workspace fences', async () => {
+    const app = await createApp({ kind: 'session', userId: 'operator' });
+    const created = (
+      await app.inject({ method: 'POST', url: '/api/capability-evolution/programs', payload: createBody })
+    ).json();
+    const before = created.projection;
+    const url = `/api/capability-evolution/programs/${encodeURIComponent(before.program.programId)}/commands`;
+    const payload = {
+      expectedSequence: 1,
+      clientMessageId: 'name-program',
+      action: { type: 'name', displayName: '视频讲解能力' },
+    };
+    const stranger = await createApp({ kind: 'session', userId: 'other' });
+    const anonymous = await createApp();
+    assert.equal((await stranger.inject({ method: 'POST', url, payload })).statusCode, 404);
+    assert.equal((await anonymous.inject({ method: 'POST', url, payload })).statusCode, 401);
+    const result = await app.inject({ method: 'POST', url, payload });
+    assert.equal(result.statusCode, 200);
+    assert.equal(result.json().projection.program.displayName, '视频讲解能力');
+    assert.equal(result.json().surface.title, '视频讲解能力');
+    assert.equal(result.json().projection.program.stage, before.program.stage);
+    assert.deepEqual(result.json().projection.cycles, before.cycles);
+    assert.equal((await app.inject({ method: 'POST', url, payload })).json().outcome, 'duplicate');
+    const stale = await app.inject({ method: 'POST', url, payload: { ...payload, clientMessageId: 'stale-name' } });
+    assert.equal(stale.statusCode, 409);
+    for (const displayName of ['', 'x'.repeat(121), 'title\nspoof']) {
+      const invalid = await app.inject({
+        method: 'POST',
+        url,
+        payload: { ...payload, action: { type: 'name', displayName } },
+      });
+      assert.equal(invalid.statusCode, 400);
     }
   });
 

@@ -27,6 +27,10 @@ import {
   type ExternalCloudReviewClassification,
   type ExternalCloudReviewWaitResult,
 } from '../../domains/community/external-review/external-cloud-review-classifier.js';
+import {
+  classifyGitHubReviewLoopBrake,
+  type GitHubReviewLoopBrake,
+} from '../../domains/github-signals/github-wait-renderer.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
@@ -56,6 +60,7 @@ export interface ReviewFeedbackSignal {
   resultDecision?: string;
   resultReviewer?: string;
   subjectState?: 'merged' | 'closed';
+  reviewLoopBrake?: GitHubReviewLoopBrake;
   validateRoutingRepairFresh?: () => Promise<boolean>;
   commitRoutingRepair?: () => Promise<boolean>;
   commitCursor: () => Promise<void>;
@@ -135,6 +140,31 @@ export interface ReviewFeedbackTaskSpecOptions {
 
 const DEFAULT_CLOUD_REVIEWER_LOGINS = ['chatgpt-codex-connector[bot]'];
 const DEFAULT_CLOUD_REVIEW_TIMEOUT_MS = 30 * 60_000;
+
+async function resolveReviewLoopBrake(input: {
+  opts: ReviewFeedbackTaskSpecOptions;
+  repoFullName: string;
+  prNumber: number;
+  prAuthorLogin?: string;
+  newDecisions: readonly PrReviewDecision[];
+}): Promise<GitHubReviewLoopBrake | undefined> {
+  const changesRequested = input.newDecisions.filter((review) => review.state === 'CHANGES_REQUESTED');
+  if (changesRequested.length === 0) return undefined;
+  try {
+    const history = await input.opts.fetchReviews(input.repoFullName, input.prNumber);
+    return classifyGitHubReviewLoopBrake(
+      history,
+      changesRequested.map((review) => review.id),
+      input.prAuthorLogin,
+    );
+  } catch (error) {
+    input.opts.log.warn(
+      { error, repoFullName: input.repoFullName, prNumber: input.prNumber },
+      '[review-feedback] review-loop history unavailable; R4 brake is warn-open',
+    );
+    return { kind: 'warn_open', reason: 'github_review_history_unavailable' };
+  }
+}
 
 interface ExternalCloudResolution {
   readonly comments: PrFeedbackComment[];
@@ -812,6 +842,14 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
               continue;
             }
 
+            const reviewLoopBrake = await resolveReviewLoopBrake({
+              opts,
+              repoFullName,
+              prNumber,
+              prAuthorLogin: prMetadata?.authorLogin,
+              newDecisions,
+            });
+
             const requestedThreadIds =
               activeAwait?.continuation.when.flatMap((predicate) =>
                 predicate.kind === 'pr_review_thread_changed' ? predicate.reviewThreadIds : [],
@@ -846,6 +884,7 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
                         : {}),
                     }
                   : {}),
+                ...(reviewLoopBrake ? { reviewLoopBrake } : {}),
                 validateRoutingRepairFresh: repairResult.validateRoutingRepairFresh,
                 commitRoutingRepair: repairResult.commitRoutingRepair,
                 commitCursor: () =>
@@ -923,10 +962,13 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
             ...(signal.resultDecision ? { resultDecision: signal.resultDecision } : {}),
             ...(signal.resultReviewer ? { resultReviewer: signal.resultReviewer } : {}),
             ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
+            ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
           },
           { taskId: repairedTask.id },
         );
         if (routeResult.kind !== 'notified') return;
+
+        if (signal.reviewLoopBrake?.kind === 'pause_once') return;
 
         if (opts.invokeTrigger) {
           const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');

@@ -140,6 +140,7 @@ export async function createProviderProfile(projectRoot, opts) {
   // clowder-ai#340: protocol not persisted — derived at runtime from well-known account IDs.
   accounts[id] = {
     authType,
+    ...(opts.clientId || opts.provider ? { clientId: opts.clientId || opts.provider } : {}),
     ...(opts.displayName || opts.name ? { displayName: opts.displayName || opts.name } : {}),
     ...(opts.baseUrl ? { baseUrl: opts.baseUrl.trim().replace(/\/+$/, '') } : {}),
     ...(opts.models?.length ? { models: opts.models } : {}),

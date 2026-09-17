@@ -1,6 +1,6 @@
 kind: f267-measurement-bundle-census
 schemaVersion: 2
-generatedAt: 2026-09-03T00:17:12Z
+generatedAt: 2026-09-16T03:15:08Z
 sources:
   registryDir: docs/harness-feedback/eval-domains
   instructionMap: packages/api/src/infrastructure/harness-eval/eval-cat-invocation.ts#DOMAIN_INSTRUCTIONS
@@ -215,7 +215,7 @@ entries:
     enabled: true
     decisionConsumer:
       featureId: F254
-      ownerCatId: codex
+      ownerCatId: codex-sol
       allowedActions:
         - keep_observe
         - fix

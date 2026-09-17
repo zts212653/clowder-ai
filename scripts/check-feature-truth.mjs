@@ -23,10 +23,13 @@ function isDoneStatus(status) {
   // Strip markdown bold (**) AND leading decorations (emoji / ✅ / symbols / whitespace)
   // before testing — feature docs use **done**, closed, "✅ closed", "done ✅", etc.
   // (F180 used an emoji *prefix* "✅ closed" which broke the bare ^(done|closed) match.)
+  // Terminal statuses: done, closed, and failed-close (a feature closed by operator decision
+  // without reaching its goal, e.g. F233 "failed-close (partial-value-preserved)").
+  // All three leave BACKLOG, which lists active features only.
   const plain = String(status ?? '')
     .replace(/\*+/g, '')
     .replace(/^[^A-Za-z]+/, '');
-  return /^(done|closed)\b/i.test(plain);
+  return /^(done|closed|failed-close)\b/i.test(plain);
 }
 
 function parseBacklogFeatureIds(markdown) {

@@ -11,10 +11,12 @@ import { createBrowserSurface, createFileSurface } from './workbench/real-surfac
 export function WorkspacePanel({
   threadId,
   defaultCatId = 'opus',
+  visible = true,
   statusSurface,
 }: {
   threadId?: string;
   defaultCatId?: string;
+  visible?: boolean;
   statusSurface?: ReactNode;
 }) {
   const {
@@ -27,7 +29,7 @@ export function WorkspacePanel({
     searchError,
     search,
     resetSearch,
-  } = useWorkspace();
+  } = useWorkspace({ loadContent: false });
   const setOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
   const openFilePath = useChatStore((state) => state.workspaceOpenFilePath);
   const openFileLine = useChatStore((state) => state.workspaceOpenFileLine);
@@ -112,6 +114,7 @@ export function WorkspacePanel({
     <F307ExperienceWorkbench
       threadId={threadId}
       defaultCatId={defaultCatId}
+      visible={visible}
       statusSurface={statusSurface}
       onSelectDevSurface={setViewMode}
       worktreeId={activeWorktreeId}

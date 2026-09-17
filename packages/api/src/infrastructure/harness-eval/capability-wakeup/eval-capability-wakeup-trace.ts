@@ -46,6 +46,22 @@ export function buildCapabilityTrace(input: CapabilityTraceInput): CapabilityTra
     }
   }
 
+  for (const prompt of input.promptEvents ?? []) {
+    if (!transcriptInvocationIds.has(prompt.invocationId)) continue;
+    const trace = ensureInvocation(byInvocation, prompt.invocationId, undefined, prompt.timestamp);
+    trace.promptEvents.push(prompt);
+    trace.promptFallbackAllowed = false;
+    trace.startTime = Math.min(trace.startTime, prompt.timestamp);
+  }
+
+  for (const unavailable of input.promptUnavailableEvents ?? []) {
+    if (!transcriptInvocationIds.has(unavailable.invocationId)) continue;
+    const trace = ensureInvocation(byInvocation, unavailable.invocationId, undefined, unavailable.timestamp);
+    trace.promptUnavailableReasons.push(unavailable.reason);
+    trace.promptFallbackAllowed = trace.promptFallbackAllowed && unavailable.status === 'historical_unavailable';
+    trace.startTime = Math.min(trace.startTime, unavailable.timestamp);
+  }
+
   for (const event of input.toolEvents) {
     if (event.threadId !== input.threadId) continue;
     if (event.catId !== input.catId) continue;
@@ -128,6 +144,9 @@ function ensureInvocation(
     endTime: timestamp,
     changedFiles: [],
     referencedPaths: [],
+    promptEvents: [],
+    promptUnavailableReasons: [],
+    promptFallbackAllowed: true,
     textEvents: [],
     transcriptToolUses: [],
     normalizedUsageCandidates: [],

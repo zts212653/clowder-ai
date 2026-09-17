@@ -44,7 +44,14 @@ const MAX_EXPLANATION_CHARS = 640;
 const MAX_AGENT_MESSAGE_CHARS = 800;
 const MAX_TOOL_LABEL_CHARS = 240;
 
-const TOOL_ITEM_TYPES = new Set(['command_execution', 'file_change', 'mcp_tool_call', 'dynamic_tool_call']);
+const TOOL_ITEM_TYPES = new Set([
+  'command_execution',
+  'file_change',
+  'mcp_tool_call',
+  'dynamic_tool_call',
+  // The app-server mapper preserves this native spelling.
+  'collabAgentToolCall',
+]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
@@ -109,6 +116,9 @@ function toolLabel(item: Record<string, unknown>): string {
   }
   if (item.type === 'dynamic_tool_call') {
     return boundedText(item.tool, MAX_TOOL_LABEL_CHARS) ?? 'dynamic tool call';
+  }
+  if (item.type === 'collabAgentToolCall') {
+    return boundedText(item.tool, MAX_TOOL_LABEL_CHARS) ?? 'agent collaboration';
   }
   return 'file change';
 }
@@ -188,7 +198,15 @@ export class CodexCapacityRecoveryCheckpoint {
   }
 
   canResumeAfterTools(): boolean {
-    return Boolean(this.hasExactAnchor() && this.latestPlan && !this.hasInFlightTool() && this.hasObservedTools());
+    // Native plans are optional in ordinary turns. Completed progress from this
+    // invocation is also a checkpoint; neither source replaces the exact task
+    // anchor or proves that an unfinished tool completed.
+    return Boolean(
+      this.hasExactAnchor() &&
+        (this.latestPlan || this.lastAgentMessage) &&
+        !this.hasInFlightTool() &&
+        this.hasObservedTools(),
+    );
   }
 
   nextIncompleteStep(): CodexCapacityPlanItem | undefined {

@@ -12,6 +12,8 @@ describe('Listen Mode player placement', () => {
     const workbench = readComponent('workbench/F307ExperienceWorkbench.tsx');
 
     expect(appShell).toContain('<ListenModePlayer variant="mini"');
+    expect(appShell).toContain("const workspaceVisible = isChatRoute && rightPanelMode === 'workspace';");
+    expect(appShell).not.toContain("workspaceMode !== 'approval'");
     expect(workbench).toContain('<ListenModePlayer />');
   });
 });

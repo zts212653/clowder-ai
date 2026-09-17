@@ -22,7 +22,12 @@ import {
 } from '../ball-custody/wait-state-machine.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import { type GitHubWaitFacts, matchGitHubWaitPredicates } from './GitHubWaitPredicateCatalog.js';
-import { renderGitHubWaitOutcome } from './github-wait-renderer.js';
+import {
+  type GitHubReviewLoopBrake,
+  REVIEW_LOOP_BRAKE_NEXT_STEP,
+  REVIEW_LOOP_HISTORY_WARN_NEXT_STEP,
+  renderGitHubWaitOutcome,
+} from './github-wait-renderer.js';
 
 export interface GitHubCollectorPatch {
   readonly review?: NonNullable<PrAutomationState['review']>;
@@ -39,6 +44,8 @@ export interface GitHubWaitObservation {
   readonly at?: number;
   /** Source-owned, typed metadata for the connector message created by this observation. */
   readonly deliveryExtra?: ConnectorDeliveryInput['extra'];
+  /** Action-time review-history observation; projected only through the existing outcome nextStep. */
+  readonly reviewLoopBrake?: GitHubReviewLoopBrake;
 }
 
 export type GitHubWaitLifecycleResult =
@@ -152,6 +159,22 @@ export class GitHubWaitLifecycleService {
       }
 
       const at = input.at ?? this.now();
+      const nextStepOverride =
+        input.reviewLoopBrake?.kind === 'pause_once'
+          ? REVIEW_LOOP_BRAKE_NEXT_STEP
+          : input.reviewLoopBrake?.kind === 'warn_open'
+            ? `${REVIEW_LOOP_HISTORY_WARN_NEXT_STEP}${active.continuation.then}`
+            : null;
+      const transitionState: AutomationState = nextStepOverride
+        ? ({
+            ...collectorState,
+            await: {
+              ...active,
+              // biome-ignore lint/suspicious/noThenProperty: F280 continuation contract field.
+              continuation: { ...active.continuation, then: nextStepOverride },
+            },
+          } as AutomationState)
+        : collectorState;
       let transition: WaitTransitionEvent;
       if (input.subjectState) {
         transition = {
@@ -176,7 +199,7 @@ export class GitHubWaitLifecycleService {
         };
       }
 
-      const transitioned = transitionWaitState(collectorState, transition);
+      const transitioned = transitionWaitState(transitionState, transition);
       if (!transitioned.applied) {
         return { kind: 'deduped', reason: transitioned.reason };
       }

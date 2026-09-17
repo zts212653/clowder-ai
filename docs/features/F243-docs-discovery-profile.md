@@ -8,7 +8,7 @@ description: 定义知识型文档的稳定简介、来源字段和目录生成�
 description_source: human
 description_author: codex
 description_updated_at: 2026-06-30T17:55:01Z
-tips_exempt: "F243 Phase E finalizer + AC-C4 drift-scan lifecycle (CI hot-path → on-demand `pnpm health:docs-discovery-drift`) are internal owner/maintainer tooling; no new cat-facing capability, no discoverable user workflow, no product surface change."
+tips_exempt: "Renewed 2026-09-05 for the ADR-046 catalog-ownership clarification: this changes internal finalizer ownership guards only, with no new cat-facing capability or discoverable user workflow."
 ---
 
 # F243: Docs Discovery Profile — OKF-inspired metadata + generated index
@@ -215,8 +215,9 @@ Signal 强度: 6 次 × 4 类 producer × 平均 30 min 下游 unblock 延迟 �
 |---|---|---|---|
 | F243 managed generated indexes | merge 后 `.github/workflows/f243-finalizer.yml` | 只改 source docs，禁止 add/edit/delete index | 当前 generator output models + 既有 F243 generated marker 的并集 |
 | `docs/taste/index.md` | F221 Taste runtime / approved proposal writer | 保持 F221 的 vignette + index 原子更新 | hand-authored allowlist；`writeVignette.ts` / `TasteRepository.ts` 直接消费 |
+| `docs/catalogs/index.md` | ADR-046 dedicated catalog owner via `scripts/docs-discovery/generate-catalogs.mjs` (`f243-catalog-*` marker) | 不由 generic finalizer 生成；catalog owner 也不产 `index.md` 本身（仅 `README.md` + `external-projects.md` 等命名派生物） | HAND_AUTHORED_INDEX_PATHS exclusion + `scripts/docs-discovery/lib/catalog-ownership.mjs` 双向守门 |
 
-后者不是 F243 派生物：把 taste 域塞进 finalizer 会破坏 F221 持久化契约，因此明确留在 managed set 之外；不是双轨 fallback。
+后二者都不是 F243 generic 派生物：把 taste 域塞进 finalizer 会破坏 F221 持久化契约；把 catalog 域塞进 generic finalizer 会与 ADR-046 dedicated catalog owner 契约冲突（PR #4322 R1 P1 复现：finalizer 若 fabricate `docs/catalogs/index.md` 用 `f243-index-v1` marker，`catalog-ownership.mjs` 立即 red 主 baseline gate）。两条明确留在 managed set 之外；不是双轨 fallback。`HAND_AUTHORED_INDEX_PATHS` 从 `generate-index.mjs` export 给 `guard-managed-index-ownership.mjs` 使用，允许"OUT-of-managed-set migration"（例如迁移中的 base 上仍存 generic marker 的旧 `index.md` 允许被删除），regression 测试 `docs-discovery-managed-index-ownership.test.mjs` 覆盖。
 
 **AC-E1 Finalizer workflow**: `.github/workflows/f243-finalizer.yml` 覆盖 `push: branches: [main]`（merge commit / squash merge / rebase merge / 授权 direct push 最终都表现为 main push），并提供 `workflow_dispatch` 作为基础设施失败或 non-fast-forward 冲突后的显式恢复入口。workflow 跑 `finalizer-run.mjs --commit`；若 drift，生成 exact-path auto-commit 后以 `git push origin HEAD:main` 非 force 推送。Auto-commit signature: `docs(F243-finalizer): auto-sync {index-list} after {triggering-commit-SHA}`, Co-Authored-By 明确列 producer author。
 
@@ -230,7 +231,7 @@ Signal 强度: 6 次 × 4 类 producer × 平均 30 min 下游 unblock 延迟 �
 
 **AC-E6 Fixture matrix (必测)**:
 - ① source-doc-only feature branch 不重建 index 仍通过 ownership gate；新增/编辑/删除 managed index 全部失败
-- ② `docs/taste/index.md` 作为 F221 hand-authored consumer 明确不被误拦
+- ② `docs/taste/index.md` 作为 F221 hand-authored consumer 明确不被误拦；`docs/catalogs/index.md` 作为 ADR-046 dedicated-owner exclusion 从 managed set 迁出并允许删除（PR #4322 R1 P1 regression fixture）
 - ③ finalizer 无 drift no-op；有 drift exact-path commit；连续运行 recursion/idempotency 成立
 - ④ working tree 预存非 F243 变化时 fail-closed，不夹带 commit
 - ⑤ workflow schema 硬测 main-push + manual recovery、`contents: write`、`--commit`、non-force push、失败 issue + exit 1

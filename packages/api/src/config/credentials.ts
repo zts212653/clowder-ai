@@ -5,19 +5,16 @@
  * Override: CAT_CAFE_GLOBAL_CONFIG_ROOT env → uses that root instead.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import type { CredentialEntry } from '@cat-cafe/shared';
+import { resolveAccountWriteRoot } from './account-store-topology.js';
 import { assertSafeTestConfigRoot } from './test-config-write-guard.js';
 
 const CONFIG_SUBDIR = '.cat-cafe';
 const CREDENTIALS_FILENAME = 'credentials.json';
 
 function resolveGlobalRoot(projectRoot?: string): string {
-  const envRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
-  if (envRoot) return resolve(envRoot);
-  if (projectRoot) return resolve(projectRoot);
-  return homedir();
+  return resolveAccountWriteRoot(projectRoot);
 }
 
 export function resolveCredentialsPath(projectRoot?: string): string {

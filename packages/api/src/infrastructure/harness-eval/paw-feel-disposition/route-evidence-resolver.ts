@@ -1,5 +1,12 @@
+import {
+  ownerTruthRefV1Schema,
+  type PawFeelDirectRepairBindingV1,
+  type PawFeelDispositionProjection,
+} from '@cat-cafe/shared';
 import type { ActionSuccessorLeaseStore } from '../../../domains/ball-custody/ActionSuccessorLeaseStore.js';
 import type { ITaskStore } from '../../../domains/cats/services/stores/ports/TaskStore.js';
+import type { PawFeelRepairProgress } from './continuation/follow-up-resolver.js';
+import type { PawFeelRepairTerminalTruth } from './direct-repair/direct-repair-outcome-resolver.js';
 import type { PawFeelFixResolver } from './service.js';
 
 type LeaseReader = Pick<ActionSuccessorLeaseStore, 'get' | 'preflight'>;
@@ -46,6 +53,91 @@ export class PawFeelFixEvidenceResolver implements PawFeelFixResolver {
       leaseId,
       leaseGeneration: lease.generation,
       custodyEvidenceRef: `action-lease:${leaseId}:generation:${lease.generation}`,
+    };
+  }
+
+  async resolveProgress(projection: PawFeelDispositionProjection): Promise<PawFeelRepairProgress> {
+    const leaseId = projection.actionLeaseRef?.leaseId;
+    const generation = projection.actionLeaseRef?.generation;
+    if (!leaseId || generation === undefined || !projection.taskId || !projection.ownerCatId) {
+      return { status: 'interrupted', evidenceRefs: [projection.signalId] };
+    }
+    const evidenceRefs = [`task:${projection.taskId}`, `action-lease:${leaseId}:generation:${generation}`];
+    const [lease, task] = await Promise.all([
+      this.options.leaseStore.get(leaseId),
+      this.options.taskStore.get(projection.taskId),
+    ]);
+    if (
+      !lease ||
+      !task ||
+      lease.generation !== generation ||
+      task.ownerCatId !== projection.ownerCatId ||
+      !lease.holderCatIds.includes(projection.ownerCatId)
+    ) {
+      return { status: 'interrupted', evidenceRefs };
+    }
+    const holderOutcome = lease.holderOutcomes?.[projection.ownerCatId];
+    if (holderOutcome) evidenceRefs.push(holderOutcome.evidenceRef);
+    if (holderOutcome && holderOutcome.outcome !== 'succeeded') {
+      return { status: 'interrupted', evidenceRefs };
+    }
+    if (task.status === 'done') return { status: 'done_unverified', evidenceRefs };
+    const preflight = await this.options.leaseStore.preflight(leaseId, generation);
+    return preflight.ok
+      ? { status: 'active', evidenceRefs }
+      : { status: 'interrupted', evidenceRefs: [...evidenceRefs, `lease-preflight:${preflight.reason}`] };
+  }
+
+  async resolveTerminal(
+    projection: PawFeelDispositionProjection,
+    binding: PawFeelDirectRepairBindingV1,
+  ): Promise<PawFeelRepairTerminalTruth> {
+    const leaseId = projection.actionLeaseRef?.leaseId;
+    const generation = projection.actionLeaseRef?.generation;
+    if (!leaseId || generation === undefined || !projection.taskId || !projection.ownerCatId) {
+      throw new Error('fix projection has no exact task/F167 identity');
+    }
+    if (binding.ownerCatId !== projection.ownerCatId) throw new Error('binding owner differs from fix owner');
+    const [lease, task] = await Promise.all([
+      this.options.leaseStore.get(leaseId),
+      this.options.taskStore.get(projection.taskId),
+    ]);
+    if (!lease || lease.leaseId !== leaseId || lease.generation !== generation) {
+      throw new Error('terminal F167 lease is unavailable or stale');
+    }
+    if (!task || task.id !== projection.taskId || task.status !== 'done') throw new Error('task is not done');
+    if (lease.subjectRef !== `subject:task:${projection.taskId}`) {
+      throw new Error('terminal F167 lease does not resolve to the exact task subject');
+    }
+    if (
+      lease.mode !== 'single' ||
+      lease.holderCatIds.length !== 1 ||
+      task.ownerCatId !== projection.ownerCatId ||
+      lease.holderCatIds[0] !== projection.ownerCatId
+    ) {
+      throw new Error('terminal Task/F167 owner differs from fix owner');
+    }
+    if (task.threadId !== lease.holderThreadId) throw new Error('terminal Task/F167 thread binding drifted');
+    if (projection.custodyEvidenceRef !== `action-lease:${leaseId}:generation:${generation}`) {
+      throw new Error('terminal Task/F167 custody evidence differs from the fix binding');
+    }
+    const holderOutcome = lease.holderOutcomes?.[projection.ownerCatId];
+    if (!holderOutcome || holderOutcome.outcome !== 'succeeded' || lease.status !== 'completed') {
+      throw new Error('F167 lease has no successful terminal holder outcome');
+    }
+    if (!Number.isFinite(task.updatedAt)) throw new Error('task terminal revision is unavailable');
+    return {
+      ownerCatId: projection.ownerCatId,
+      taskTerminalRef: ownerTruthRefV1Schema.parse({
+        ownerFeatureId: 'F310',
+        ownerStateRef: `task-terminal:${task.id}`,
+        version: String(task.updatedAt),
+      }),
+      leaseTerminalRef: ownerTruthRefV1Schema.parse({
+        ownerFeatureId: 'F167',
+        ownerStateRef: `action-successor-terminal:${lease.leaseId}`,
+        version: `${lease.generation}:${holderOutcome.at}`,
+      }),
     };
   }
 }

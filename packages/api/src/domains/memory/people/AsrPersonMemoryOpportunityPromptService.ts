@@ -22,6 +22,8 @@ export interface BoundAsrPersonMemoryScene {
   readonly source: {
     readonly kind: 'message';
     readonly threadId: string;
+    /** Transport/presentation scope when a system clerk processes an owner source from another thread. */
+    readonly presentationThreadId?: string;
     readonly sourceMessageId: string;
     readonly authorUserId: string;
     readonly authorRole: 'owner';
@@ -162,7 +164,7 @@ export class AsrPersonMemoryOpportunityPromptService {
         candidate.source.authorRole !== 'owner' ||
         candidate.source.visibility !== 'verified_live_owner_message' ||
         candidate.source.authorUserId !== input.serverScope.ownerUserId ||
-        candidate.source.threadId !== input.serverScope.threadId
+        (candidate.source.presentationThreadId ?? candidate.source.threadId) !== input.serverScope.threadId
       ) {
         continue;
       }

@@ -1,8 +1,11 @@
 'use client';
 
-import type { EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
+import type { ArtifactReviewView, EntrustedWorkOwnerReadV1 } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef } from 'react';
+import { ReviewArtifactButton } from '@/components/content-review/ReviewArtifactButton';
+import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
+import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 
 export type PreparedArtifactCoordinate = NonNullable<EntrustedWorkOwnerReadV1['preparedArtifact']>;
 
@@ -23,13 +26,6 @@ function primaryTime(ownerRead: EntrustedWorkOwnerReadV1) {
   );
 }
 
-function artifactLabel(ownerRead: EntrustedWorkOwnerReadV1): string {
-  const ref = ownerRead.preparedArtifact?.artifactRef;
-  if (!ref) return '托付工作';
-  const label = ref.split(/[/:]/).filter(Boolean).at(-1);
-  return label?.replaceAll('-', ' ') || '托付工作';
-}
-
 function formatBusinessTime(value: number, currentTime: number): string {
   const formatted = new Intl.DateTimeFormat('zh-CN', {
     month: 'short',
@@ -42,10 +38,14 @@ function formatBusinessTime(value: number, currentTime: number): string {
 
 export function ProductSchedulePanel({
   onOpenArtifact,
+  artifactsLoading = false,
+  onOpenReview,
   selectedItemRef,
   now = Date.now,
 }: {
   onOpenArtifact?: (artifact: PreparedArtifactCoordinate, itemRef: string) => void;
+  artifactsLoading?: boolean;
+  onOpenReview?: (review: ArtifactReviewView, itemRef: string) => void;
   selectedItemRef?: string | null;
   now?: () => number;
 }) {
@@ -106,7 +106,9 @@ export function ProductSchedulePanel({
           const time = primaryTime(ownerRead);
           if (!time) return null;
           const artifact = ownerRead.preparedArtifact;
-          const actionable = ownerRead.attentionReceipts.some((receipt) => receipt.eligible);
+          const artifactLoading =
+            artifactsLoading && Boolean(artifact && !reviewSurfaceFromPreparedRef(artifact.openInWorkspaceRef));
+          const actionable = ownerRead.brief.needsMe.state === 'needed';
           const itemRef = scheduleItemRef(ownerRead);
           const selected = selectedItemRef === itemRef;
           return (
@@ -124,11 +126,9 @@ export function ProductSchedulePanel({
               data-owner-revision={ownerRead.envelope.revision}
             >
               <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
+                <div className="min-w-0 flex-[1_1_16rem]">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <h3 className="min-w-0 break-words text-sm font-semibold text-cafe-black">
-                      {artifactLabel(ownerRead)}
-                    </h3>
+                    <h3 className="min-w-0 break-words text-sm font-semibold text-cafe-black">托付工作</h3>
                     <span className="rounded-full bg-cafe-accent/10 px-2 py-0.5 text-micro font-medium text-cafe-accent">
                       {actionable ? '需要判断' : '安静进行中'}
                     </span>
@@ -136,28 +136,28 @@ export function ProductSchedulePanel({
                   <p className="mt-2 text-xs font-medium text-cafe-secondary">
                     {TIME_LABELS[time.role]} · {formatBusinessTime(time.value, currentTime)}
                   </p>
-                  {artifact ? (
-                    <p
-                      className="mt-1 break-words text-micro text-cafe-muted"
-                      title={artifact.completenessRef}
-                      data-artifact-ref={artifact.artifactRef}
-                    >
-                      Artifact r{artifact.artifactRevision} · 准备状态来自产物 owner
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-micro text-cafe-muted">产物尚在准备</p>
-                  )}
+                  <EntrustedWorkBrief ownerRead={ownerRead} />
                 </div>
                 {artifact ? (
-                  <button
-                    type="button"
-                    data-testid="product-schedule-open-artifact"
-                    data-open-ref={artifact.openInWorkspaceRef}
-                    className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover"
-                    onClick={() => onOpenArtifact?.(artifact, itemRef)}
-                  >
-                    在 Workspace 打开
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    {onOpenReview ? (
+                      <ReviewArtifactButton
+                        ownerRead={ownerRead}
+                        onPrepared={(review) => onOpenReview(review, itemRef)}
+                      />
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="product-schedule-open-artifact"
+                      data-open-ref={artifact.openInWorkspaceRef}
+                      disabled={artifactLoading}
+                      aria-busy={artifactLoading}
+                      className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:cursor-wait disabled:opacity-60"
+                      onClick={() => onOpenArtifact?.(artifact, itemRef)}
+                    >
+                      {artifactLoading ? '正在加载产物…' : '在 Workspace 打开'}
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </article>

@@ -17,13 +17,18 @@ import type { WorkspaceDevSurface } from '@/components/workspace/WorkspaceLaunch
 import type { LauncherWorkspaceSearch } from '@/components/workspace/WorkspaceLauncherSearch';
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import type { WorkspaceOpenRequest } from '@/stores/chat-types';
+import { resolveArtifactReviewTarget } from './artifact-review-surface';
 import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
 import { F307OwnerSurfaceRenderer } from './F307OwnerSurfaceRenderer';
 import { F307SurfacePane } from './F307SurfacePane';
 import { F307WorkbenchSidecar } from './F307WorkbenchSidecar';
 import { F307WorkbenchTabs } from './F307WorkbenchTabs';
 import { F307WorkspaceHomePage } from './F307WorkspaceHomePage';
-import { createTeamWorkspaceSurface, createWorkspaceModeSurface } from './real-surface-adapters';
+import {
+  createEvolutionProgramSurface,
+  createTeamWorkspaceSurface,
+  createWorkspaceModeSurface,
+} from './real-surface-adapters';
 
 function WorkbenchActivity({
   layout,
@@ -86,10 +91,10 @@ function RecentlyClosedSurfaces({
   if (layout.recentlyClosed.length === 0) return null;
   return (
     <aside
-      className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[calc(100%-1.5rem)]"
+      className="shrink-0 border-t border-cafe-subtle bg-[var(--console-panel-bg)] px-3 py-2"
       data-testid="f307-recently-closed"
     >
-      <div className="pointer-events-auto flex flex-wrap items-center gap-1.5 rounded-xl border border-cafe-subtle bg-cafe-surface/95 p-1.5 shadow-lg backdrop-blur">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
@@ -161,7 +166,9 @@ function useExplicitWorkspaceNavigation({
     const surface =
       request.target.kind === 'team'
         ? createTeamWorkspaceSurface({ threadId, subject: request.target.subject })
-        : createWorkspaceModeSurface(request.target.mode, threadId);
+        : request.target.kind === 'evolution-program'
+          ? createEvolutionProgramSurface(request.target.programId)
+          : createWorkspaceModeSurface(request.target.mode, threadId);
     consumedRevision.current = request.revision;
     const existing = layout.surfaces.find((candidate) => candidate.id === surface.id);
     const alreadyFocused =
@@ -176,13 +183,34 @@ function useExplicitWorkspaceNavigation({
       });
     }
     setHomeOpen(false);
+    if (request.target.kind === 'evolution-program') {
+      useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surface.id);
+    }
     onConsumed?.(request.revision);
   }, [dispatch, hydrated, layout.activeSurfaceId, layout.surfaces, onConsumed, request, setHomeOpen, threadId]);
+}
+
+function ownerSurfaceVisible(
+  workbenchVisible: boolean,
+  homeFocused: boolean,
+  visibleSurfaceIds: ReadonlySet<string>,
+  surfaceId: string,
+): boolean {
+  return workbenchVisible && !homeFocused && visibleSurfaceIds.has(surfaceId);
+}
+
+function ownerSidecarVisible(
+  workbenchVisible: boolean,
+  homeFocused: boolean,
+  mainAreaAttentionSurfaceId: string | null,
+): boolean {
+  return workbenchVisible && !homeFocused && mainAreaAttentionSurfaceId === null;
 }
 
 export function F307ExperienceWorkbench({
   threadId,
   defaultCatId = 'opus',
+  visible = true,
   statusSurface,
   onSelectDevSurface,
   f284WorkspaceState,
@@ -198,6 +226,7 @@ export function F307ExperienceWorkbench({
 }: {
   threadId?: string;
   defaultCatId?: string;
+  visible?: boolean;
   statusSurface?: ReactNode;
   onSelectDevSurface: (surface: WorkspaceDevSurface) => void;
   f284WorkspaceState?: F284WorkspaceSnapshot;
@@ -217,10 +246,24 @@ export function F307ExperienceWorkbench({
   const hydrated = useF307ExperienceWorkbenchStore((state) => state.hydrated);
   const dispatch = useF307ExperienceWorkbenchStore((state) => state.dispatch);
   const hydrate = useF307ExperienceWorkbenchStore((state) => state.hydrate);
+  const mainAreaAttentionSurfaceId = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId);
+  const enterMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.enterMainAreaAttention);
+  const exitMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.exitMainAreaAttention);
+  const activeReviewSurfaceId = layout.surfaces.find(
+    (surface) => surface.id === layout.activeSurfaceId && resolveArtifactReviewTarget(surface),
+  )?.id;
 
   useEffect(() => {
     if (!hydrated) hydrate(f284WorkspaceState);
   }, [f284WorkspaceState, hydrate, hydrated]);
+
+  useEffect(() => {
+    if (hydrated && isDesktop && activeReviewSurfaceId) enterMainAreaAttention(activeReviewSurfaceId);
+  }, [activeReviewSurfaceId, enterMainAreaAttention, hydrated, isDesktop]);
+
+  useEffect(() => {
+    if (!isDesktop && mainAreaAttentionSurfaceId !== null) exitMainAreaAttention();
+  }, [exitMainAreaAttention, isDesktop, mainAreaAttentionSurfaceId]);
 
   useExplicitWorkspaceNavigation({
     dispatch,
@@ -236,35 +279,38 @@ export function F307ExperienceWorkbench({
   const zeroTopology = projection.visibleSurfaceIds.length === 0;
   const homeFocused = homeOpen || zeroTopology;
   const topologyContract = zeroTopologyContract(hydrated, zeroTopology, homeFocused);
-  const visibleSurfaceIds = new Set(projection.visibleSurfaceIds);
+  const visibleSurfaceIds = new Set(
+    mainAreaAttentionSurfaceId === null ? projection.visibleSurfaceIds : [mainAreaAttentionSurfaceId],
+  );
   const openSurfaceIds = new Set(layout.surfaces.map((surface) => surface.id));
   const hostedSurfaces = [
     ...layout.surfaces,
     ...layout.recentlyClosed.filter((surface) => !openSurfaceIds.has(surface.id)),
   ];
-  const renderOwnerSurface = (surface: (typeof hostedSurfaces)[number]) => (
+  const renderOwnerSurface = (surface: (typeof hostedSurfaces)[number], surfaceVisible: boolean) => (
     <F307OwnerSurfaceRenderer
       surface={surface}
+      surfaceVisible={surfaceVisible}
       statusSurface={statusSurface}
-      onOpenSurface={(nextSurface) =>
+      onOpenSurface={(nextSurface) => {
         dispatch({
           type: 'open-surface',
           surface: nextSurface,
           entitlement: { kind: 'user', reason: 'workspace-home-selection' },
-        })
-      }
-      onOpenArtifactWithReturn={({ artifact, returnSurface }) =>
+        });
+      }}
+      onOpenArtifactWithReturn={({ artifact, returnSurface }) => {
         dispatch({
           type: 'open-artifact-with-return',
           artifact,
           returnSurface,
           presentation: isDesktop ? 'desktop' : 'mobile',
           entitlement: { kind: 'user', reason: 'workspace-home-selection' },
-        })
-      }
+        });
+      }}
       onRefreshSurface={(nextSurface) => dispatch({ type: 'refresh-surface', surface: nextSurface })}
       onRequestDetach={() => {
-        if (surface.type === 'artifact') {
+        if (surface.type === 'artifact' || surface.ownerStateRef.owner === 'f309-content-review') {
           dispatch({
             type: 'close-artifact-to-return',
             artifactSurfaceId: surface.id,
@@ -297,15 +343,23 @@ export function F307ExperienceWorkbench({
       data-pinned-surfaces={layout.pinnedSurfaceIds.join(',')}
       data-workbench-focus={homeFocused ? 'home' : 'surface'}
       data-zero-topology-contract={topologyContract}
+      data-main-area-attention={mainAreaAttentionSurfaceId ?? ''}
     >
       <ListenModePlayer />
       {!zeroTopology && (
         <F307WorkbenchTabs
           layout={layout}
           dispatch={dispatch}
-          onAddSurface={() => setHomeOpen(true)}
+          onAddSurface={() => {
+            exitMainAreaAttention();
+            setHomeOpen(true);
+          }}
           onActivateSurface={() => setHomeOpen(false)}
           homeFocused={homeFocused}
+          isDesktop={isDesktop}
+          mainAreaAttentionSurfaceId={mainAreaAttentionSurfaceId}
+          onEnterMainAreaAttention={enterMainAreaAttention}
+          onExitMainAreaAttention={exitMainAreaAttention}
         />
       )}
 
@@ -343,12 +397,17 @@ export function F307ExperienceWorkbench({
         >
           {hostedSurfaces.map((surface) => (
             <F307SurfacePane key={surface.id} surface={surface} visible={visibleSurfaceIds.has(surface.id)}>
-              {renderOwnerSurface(surface)}
+              {renderOwnerSurface(surface, ownerSurfaceVisible(visible, homeFocused, visibleSurfaceIds, surface.id))}
             </F307SurfacePane>
           ))}
         </div>
         {layout.sidecar !== null && (
-          <F307WorkbenchSidecar surface={layout.sidecar} dispatch={dispatch} renderSurface={renderOwnerSurface} />
+          <F307WorkbenchSidecar
+            surface={layout.sidecar}
+            dispatch={dispatch}
+            renderSurface={renderOwnerSurface}
+            visible={ownerSidecarVisible(visible, homeFocused, mainAreaAttentionSurfaceId)}
+          />
         )}
       </div>
 

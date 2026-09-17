@@ -320,6 +320,126 @@ exit 97
     }
   });
 
+  it('resolves one exact existing publication and rejects a different source message', async () => {
+    const { repoRoot, remoteRoot } = createRepoWithOrigin();
+    const fakeBin = fs.mkdtempSync(join(tmpdir(), 'publish-wt-resolve-bin-'));
+    const fakeGh = join(fakeBin, 'gh');
+    const originalPath = process.env.PATH;
+    const branchName = 'measurement/auto/capability-evolution/existing-proof';
+    const sourceMessageId = 'source-message-existing-proof';
+    const artifactRef = 'docs/harness-feedback/certificates/existing-proof.yaml';
+    try {
+      execFileSync('git', ['checkout', '-b', branchName], { cwd: repoRoot, stdio: 'ignore' });
+      mkdirSync(dirname(join(repoRoot, artifactRef)), { recursive: true });
+      writeFileSync(join(repoRoot, artifactRef), 'kind: exact-existing-proof\n');
+      execFileSync('git', ['add', '--', artifactRef], { cwd: repoRoot, stdio: 'ignore' });
+      execFileSync('git', ['commit', '-m', `eval(F267): issue existing-proof\n\nSource-Message: ${sourceMessageId}`], {
+        cwd: repoRoot,
+        stdio: 'ignore',
+      });
+      const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+      const baseSha = execFileSync('git', ['rev-parse', 'HEAD^'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+      execFileSync('git', ['push', '-u', 'origin', branchName], { cwd: repoRoot, stdio: 'ignore' });
+      execFileSync('git', ['checkout', 'main'], { cwd: repoRoot, stdio: 'ignore' });
+      writeFileSync(
+        fakeGh,
+        `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[{"number":7,"url":"https://github.test/cat-cafe/pull/7","state":"OPEN","headRefOid":"${headSha}","baseRefOid":"${baseSha}","baseRefName":"main"}]\\n'
+  exit 0
+fi
+exit 97
+`,
+      );
+      fs.chmodSync(fakeGh, 0o755);
+      process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+
+      const { createGitWorktreePublisher } = await import(
+        `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-resolve`
+      );
+      const publisher = createTestPublisher(createGitWorktreePublisher, repoRoot);
+      let validations = 0;
+      const resolved = await publisher.resolvePublishedOnIsolatedWorktree({
+        branchName,
+        sourceMessageId,
+        expectedPaths: [artifactRef],
+        validate: async (worktreeRoot) => {
+          validations += 1;
+          assert.equal(readFileSync(join(worktreeRoot, artifactRef), 'utf8'), 'kind: exact-existing-proof\n');
+        },
+      });
+
+      assert.deepEqual(resolved, {
+        commitSha: headSha,
+        prUrl: 'https://github.test/cat-cafe/pull/7',
+      });
+      assert.equal(validations, 1);
+      await assert.rejects(
+        publisher.resolvePublishedOnIsolatedWorktree({
+          branchName,
+          sourceMessageId: 'different-source-message',
+          expectedPaths: [artifactRef],
+          validate: async () => assert.fail('mismatched trailer must stop before artifact validation'),
+        }),
+        /source message trailer mismatch/,
+      );
+      await assert.rejects(
+        publisher.resolvePublishedOnIsolatedWorktree({
+          branchName,
+          sourceMessageId,
+          expectedPaths: [artifactRef, 'docs/harness-feedback/certificates/unexpected.yaml'],
+          validate: async () => assert.fail('path mismatch must stop before artifact validation'),
+        }),
+        /changed paths do not match the exact artifact set/,
+      );
+
+      const injectedBranchName = 'measurement/auto/capability-evolution/injected-source-trailer';
+      execFileSync('git', ['checkout', '-b', injectedBranchName, 'main'], { cwd: repoRoot, stdio: 'ignore' });
+      mkdirSync(dirname(join(repoRoot, artifactRef)), { recursive: true });
+      writeFileSync(join(repoRoot, artifactRef), 'kind: exact-existing-proof\n');
+      execFileSync('git', ['add', '--', artifactRef], { cwd: repoRoot, stdio: 'ignore' });
+      execFileSync(
+        'git',
+        [
+          'commit',
+          '-m',
+          'eval(F267): issue injected-source-trailer\n\nSource-Message: source-a\n\nSource-Message: source-b',
+        ],
+        { cwd: repoRoot, stdio: 'ignore' },
+      );
+      const injectedHeadSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      }).trim();
+      execFileSync('git', ['push', '-u', 'origin', injectedBranchName], { cwd: repoRoot, stdio: 'ignore' });
+      execFileSync('git', ['checkout', 'main'], { cwd: repoRoot, stdio: 'ignore' });
+      writeFileSync(
+        fakeGh,
+        `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  printf '[{"number":8,"url":"https://github.test/cat-cafe/pull/8","state":"OPEN","headRefOid":"${injectedHeadSha}","baseRefOid":"${baseSha}","baseRefName":"main"}]\\n'
+  exit 0
+fi
+exit 97
+`,
+      );
+      await assert.rejects(
+        publisher.resolvePublishedOnIsolatedWorktree({
+          branchName: injectedBranchName,
+          sourceMessageId: 'source-b',
+          expectedPaths: [artifactRef],
+          validate: async () => assert.fail('dual source trailer must stop before artifact validation'),
+        }),
+        /source message trailer mismatch/,
+      );
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(repoRoot, { recursive: true, force: true });
+      rmSync(remoteRoot, { recursive: true, force: true });
+      rmSync(fakeBin, { recursive: true, force: true });
+    }
+  });
+
   // 砚砚 PR #2682 R1: with `--no-verify` bypassing the pre-commit guards (biome /
   // Brand / Shared-State / Root hygiene), the publisher itself MUST hard-reject any
   // stage path outside the 5 legitimate verdict prefixes. Otherwise a future generator

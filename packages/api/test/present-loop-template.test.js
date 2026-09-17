@@ -104,6 +104,19 @@ describe('F255 present-loop contract and scheduler template', () => {
         },
       },
     );
+    assert.equal(
+      await store.hasOwnedSeedIntentApplication(OWNER, CAT, 'inv-setup', setupSettlement.proactive.seed.seedId),
+      true,
+    );
+    assert.equal(
+      await store.hasOwnedSeedIntentApplication(
+        OWNER,
+        'codex-terra',
+        'inv-setup',
+        setupSettlement.proactive.seed.seedId,
+      ),
+      false,
+    );
     await store.ingestPendingCue({
       outputId: 'output-private-cue',
       ownerUserId: OWNER,
@@ -157,11 +170,16 @@ describe('F255 present-loop contract and scheduler template', () => {
     assert.equal(deliveries.length, 1, 'same task slot must not dispatch twice');
     assert.equal(invocations.length, 1);
     assert.equal(deliveries[0].extra.scheduler.hiddenTrigger, true);
+    assert.equal(deliveries[0].extra.memoryCue.catOwnedSeed.producingCatId, CAT);
+    assert.equal(deliveries[0].extra.memoryCue.catOwnedSeed.runId, deliveries[0].content.match(/runId=(\S+)/)?.[1]);
+    assert.match(deliveries[0].extra.memoryCue.catOwnedSeed.sourceRevision, /^sha256:[0-9a-f]{64}$/);
     assert.match(deliveries[0].content, /runId=/);
     assert.doesNotMatch(deliveries[0].content, /窗边|月光去哪了|秘密愿望|私人时间才能读的线索/);
     assert.match(invocations[0][3], /窗边/);
     assert.match(invocations[0][3], /月光去哪了/);
-    assert.match(invocations[0][3], /秘密愿望/);
+    assert.doesNotMatch(invocations[0][3], /秘密愿望/);
+    assert.match(invocations[0][3], /seedId/);
+    assert.match(invocations[0][3], /sourceRevision/);
     assert.match(invocations[0][3], /私人时间才能读的线索/);
     assert.match(invocations[0][3], /迟到 60 分钟/);
     assert.match(invocations[0][3], /missedSlots=1/);

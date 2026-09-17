@@ -22,9 +22,14 @@ import {
   successorResponsesAfterTerminalState,
   unresolvedSubjectWithoutActiveCustodyTotal,
 } from '../../../../../infrastructure/telemetry/instruments.js';
-import { emitQueueUpdated, enrichQueueEntries } from '../../../../../utils/queue-enrichment.js';
+import {
+  emitQueueUpdated,
+  enrichQueueEntries,
+  failedQueueRecoveryActionId,
+} from '../../../../../utils/queue-enrichment.js';
 import type { A2ADispatchDispositionService } from '../../../../ball-custody/A2ADispatchDispositionService.js';
 import type { ActionSuccessorLeaseStore } from '../../../../ball-custody/ActionSuccessorLeaseStore.js';
+import { retireConsumedCoordinationTerminal } from '../../../../ball-custody/CoordinationTerminalRetirement.js';
 import type { TurnCustodyWakeProvenance } from '../../../../ball-custody/TurnCustodyProjectionService.js';
 import {
   resolveQueueTurnCustodyWake,
@@ -113,9 +118,10 @@ import {
   isTerminalDispositionEvent,
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
-import { queuedCarrierOwnsPendingTarget } from './QueuedMessageCustodyCarrierProjection.js';
+import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
+import { projectUnconsumedQueueCarrier, readQueueCarrierMessages } from './QueueCarrierSourceProjection.js';
+import { carrierEntryId } from './QueuedMessageCustodyCarrierProjection.js';
 import {
-  createCrossThreadQueueEntryFromCustody,
   createInitialQueuedMessageCustody,
   type QueuedMessageCustodyCoordinator,
 } from './QueuedMessageCustodyCoordinator.js';
@@ -137,6 +143,10 @@ import {
   resolveQueueSourceResponseEvidence,
   resolveQueueSourceResponseEvidenceFromMessages,
 } from './queue-source-response-evidence.js';
+import {
+  normalizeQueueTerminalConsumptions,
+  type QueueTerminalConsumptionCollection,
+} from './queue-terminal-consumption.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
 import {
   type CommitInvocationInput,
@@ -204,6 +214,8 @@ interface QueueExecutionResult {
   terminalConsumptionByInvocationId: Record<string, readonly QueueTerminalConsumptionWitness[]>;
   /** The primary row was rolled back to queued after this failed attempt. */
   primaryEntryRequeued?: boolean;
+  /** No provider started; the independent busy owner will trigger the next drain. */
+  deferredForBusyTarget?: boolean;
 }
 
 type ProcessingSlotReservation = PrestartRetirementReservation;
@@ -247,6 +259,16 @@ interface PromptMessagesExposedInput {
   seenAt: number;
 }
 
+interface PromptExposureAdoptionReservation {
+  commit(): void;
+  abort(): void;
+}
+
+interface PromptMessagesSeenOptions {
+  /** Resolve every fallible adoption dependency before append-only exposure is persisted. */
+  prepareAdoption?: (wakes: readonly TurnCustodyWakeProvenance[]) => Promise<PromptExposureAdoptionReservation | null>;
+}
+
 interface PromptMessagesAwakenedInput {
   threadId: string;
   userId: string;
@@ -262,80 +284,6 @@ export interface InvocationRecordStoreLike {
   create(input: Record<string, unknown>): Promise<{ outcome: string; invocationId: string }>;
   get?(id: string): InvocationRecord | null | Promise<InvocationRecord | null>;
   update(id: string, data: Record<string, unknown>): Promise<unknown | null>;
-}
-
-function isQueueTerminalConsumptionWitness(value: unknown): value is QueueTerminalConsumptionWitness {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.kind === 'terminal_silent' &&
-    candidate.projectionState === 'covered_empty' &&
-    candidate.wake === 'coordination_terminal'
-  ) {
-    return true;
-  }
-  if (
-    candidate.kind === 'dispatch_handled_continuation' &&
-    typeof candidate.sourceMessageId === 'string' &&
-    candidate.sourceMessageId.length > 0 &&
-    typeof candidate.dispositionEventId === 'string' &&
-    candidate.dispositionEventId.length > 0 &&
-    typeof candidate.dispositionAt === 'number' &&
-    Number.isFinite(candidate.dispositionAt) &&
-    candidate.dispositionAt >= 0
-  ) {
-    return true;
-  }
-  if (candidate.kind === 'source_response') {
-    const outputMessageIds = candidate.outputMessageIds;
-    return (
-      Array.isArray(outputMessageIds) &&
-      outputMessageIds.length > 0 &&
-      outputMessageIds.every((messageId) => typeof messageId === 'string' && messageId.length > 0) &&
-      new Set(outputMessageIds).size === outputMessageIds.length
-    );
-  }
-  return (
-    candidate.kind === 'managed_hold_continued' &&
-    typeof candidate.sourceMessageId === 'string' &&
-    candidate.sourceMessageId.length > 0 &&
-    typeof candidate.taskId === 'string' &&
-    candidate.taskId.length > 0 &&
-    (candidate.transition === 'reheld' ||
-      candidate.transition === 'event_wait' ||
-      candidate.transition === 'transferred')
-  );
-}
-
-type QueueTerminalConsumptionCollection = QueueTerminalConsumptionWitness | readonly QueueTerminalConsumptionWitness[];
-
-function normalizeQueueTerminalConsumptions(value: unknown): readonly QueueTerminalConsumptionWitness[] {
-  const candidates = Array.isArray(value) ? value : value ? [value] : [];
-  const result: QueueTerminalConsumptionWitness[] = [];
-  for (const candidate of candidates) {
-    if (!isQueueTerminalConsumptionWitness(candidate)) continue;
-    const key =
-      candidate.kind === 'terminal_silent'
-        ? candidate.kind
-        : candidate.kind === 'source_response'
-          ? `${candidate.kind}:${candidate.outputMessageIds.join(',')}`
-          : `${candidate.kind}:${candidate.sourceMessageId}`;
-    if (
-      result.some((existing) => {
-        const existingKey =
-          existing.kind === 'terminal_silent'
-            ? existing.kind
-            : existing.kind === 'source_response'
-              ? `${existing.kind}:${existing.outputMessageIds.join(',')}`
-              : `${existing.kind}:${existing.sourceMessageId}`;
-        return existingKey === key;
-      })
-    ) {
-      continue;
-    }
-    result.push(candidate);
-  }
-  return result;
 }
 
 function queueTerminalConsumptionForMessage(
@@ -944,24 +892,24 @@ export class QueueProcessor {
     return this.processingSlots.get(key) === reservation && reservation.invocationId === invocationId;
   }
 
-  private canStartReservedTargetSet(
+  private reservedTargetStartBlocker(
     threadId: string,
     targetCats: readonly string[],
     primaryCat: string,
     reservation: ProcessingSlotReservation,
     invocationId: string,
-  ): boolean {
+  ): 'reservation_replaced' | 'target_busy' | undefined {
     if (!this.ownsProcessingSlotInvocation(QueueProcessor.slotKey(threadId, primaryCat), reservation, invocationId)) {
-      return false;
+      return 'reservation_replaced';
     }
 
     for (const catId of new Set(targetCats)) {
-      if (this.deps.invocationTracker.has(threadId, catId)) return false;
+      if (this.deps.invocationTracker.has(threadId, catId)) return 'target_busy';
       const currentReservation = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
       if (!currentReservation) continue;
-      if (catId !== primaryCat || currentReservation !== reservation) return false;
+      if (catId !== primaryCat || currentReservation !== reservation) return 'target_busy';
     }
-    return true;
+    return undefined;
   }
 
   private canReplaceExternalTargetSet(threadId: string, catIds: readonly string[], userId: string): boolean {
@@ -1048,20 +996,43 @@ export class QueueProcessor {
       const scope = QueueProcessor.parseSlotKey(key);
       if (scope?.threadId === threadId && reservation.userId === userId) catIds.push(scope.catId);
     }
-    if (catIds.length === 0) return { outcome: 'none', retiredCatIds: [] };
+    const retiredCatIds = new Set<string>();
+    if (catIds.length > 0) {
+      const retirements = this.preparePrestartRetirements(threadId, catIds, userId);
+      if (!retirements || retirements.length === 0) return { outcome: 'state_changed', retiredCatIds: [] };
+      if (!(await this.terminalizePreparedPrestartRetirements(retirements))) {
+        return { outcome: 'terminalization_failed', retiredCatIds: [] };
+      }
+      if (!this.commitPreparedPrestartRetirements(retirements)) {
+        return { outcome: 'state_changed', retiredCatIds: [] };
+      }
+      for (const retirement of retirements) retiredCatIds.add(retirement.targetCatId);
+    }
 
-    const retirements = this.preparePrestartRetirements(threadId, catIds, userId);
-    if (!retirements || retirements.length === 0) return { outcome: 'state_changed', retiredCatIds: [] };
-    if (!(await this.terminalizePreparedPrestartRetirements(retirements))) {
-      return { outcome: 'terminalization_failed', retiredCatIds: [] };
+    // A pre-start coroutine may have exited and released its slot while leaving
+    // a processing row. Reuse the same durable retirement protocol for this
+    // ownerless group; never infer a live owner from the row's status alone.
+    const candidates = this.deps.queue.list(threadId, userId).filter((entry) => entry.status === 'processing');
+    for (const candidate of candidates) {
+      const current = this.deps.queue.getEntrySnapshot(threadId, userId, candidate.id);
+      if (!current || current.status !== 'processing') continue;
+      const group = this.deps.queue.getProcessingGroupAcrossUsers(threadId, current.id);
+      if (!group || group.some((entry) => entry.userId !== userId)) {
+        return { outcome: 'state_changed', retiredCatIds: [...retiredCatIds] };
+      }
+      const targets = [...new Set(group.flatMap((entry) => entry.targetCats))];
+      const target = current.prestartRetirement?.targetCatId ?? targets[0];
+      if (!target || targets.some((catId) => this.hasActiveExecutionForCat(threadId, catId))) {
+        return { outcome: 'state_changed', retiredCatIds: [...retiredCatIds] };
+      }
+      // This is synchronous with the ownership check. Any newer acquisition
+      // replaces the exact object and makes the existing commit fence reject.
+      this.reserveProcessingSlot(QueueProcessor.slotKey(threadId, target), current.id, userId);
+      const outcome = await this.retirePrestartProcessingGroup(threadId, target, userId);
+      if (outcome !== 'retired') return { outcome, retiredCatIds: [...retiredCatIds] };
+      retiredCatIds.add(target);
     }
-    if (!this.commitPreparedPrestartRetirements(retirements)) {
-      return { outcome: 'state_changed', retiredCatIds: [] };
-    }
-    return {
-      outcome: 'retired',
-      retiredCatIds: [...new Set(retirements.map((retirement) => retirement.targetCatId))],
-    };
+    return { outcome: retiredCatIds.size > 0 ? 'retired' : 'none', retiredCatIds: [...retiredCatIds] };
   }
 
   /**
@@ -1365,44 +1336,85 @@ export class QueueProcessor {
    * current invocation prompt. This is the prompt-transport analogue of an
    * explicit full-body get_thread_context read.
    */
-  async markPromptMessagesSeen(input: PromptMessagesExposedInput): Promise<readonly TurnCustodyWakeProvenance[]> {
+  async markPromptMessagesSeen(
+    input: PromptMessagesExposedInput,
+    options: PromptMessagesSeenOptions = {},
+  ): Promise<readonly TurnCustodyWakeProvenance[]> {
     const exposed = new Set(input.messageIds);
     const expectedWitnessMessageIds = new Set<string>();
     let receiptChanged = false;
-
+    const candidates: QueueEntry[] = [];
+    const candidateMessageIds = new Set<string>();
     for (const candidate of this.deps.queue.list(input.threadId, input.userId)) {
       const entryMessageIds = this.fullyExposedCandidateMessageIds(candidate, input.catId, exposed);
       if (!entryMessageIds) continue;
-      const persisted = await this.persistPromptCandidateSeen(candidate, input);
-      for (const messageId of persisted.witnessMessageIds) expectedWitnessMessageIds.add(messageId);
-      receiptChanged = persisted.receiptChanged || receiptChanged;
+      candidates.push(candidate);
+      for (const messageId of entryMessageIds) candidateMessageIds.add(messageId);
     }
 
-    await this.deps.queueCustodyCoordinator?.assertPromptExposurePersisted(
-      [...expectedWitnessMessageIds],
-      input.catId,
-      input.invocationId,
-    );
-    await this.deps.queueCustodyCoordinator?.assertPromptBodiesNotRecalled(
-      input.messageIds,
-      input.catId,
-      input.invocationId,
-    );
+    let adoptedWakes: readonly TurnCustodyWakeProvenance[] = [];
+    let adoptionReservation: PromptExposureAdoptionReservation | null | undefined;
+    if (options.prepareAdoption) {
+      adoptedWakes = await this.resolvePromptMessageCustodyWakes({
+        ...input,
+        messageIds: [...candidateMessageIds],
+      });
+      adoptionReservation = adoptedWakes.length > 0 ? await options.prepareAdoption(adoptedWakes) : undefined;
+      if (adoptedWakes.length > 0 && !adoptionReservation) {
+        throw new Error('turn custody adoption owner unavailable before prompt exposure');
+      }
+    }
+
+    try {
+      for (const candidate of candidates) {
+        const persisted = await this.persistPromptCandidateSeen(candidate, input);
+        for (const messageId of persisted.witnessMessageIds) expectedWitnessMessageIds.add(messageId);
+        receiptChanged = persisted.receiptChanged || receiptChanged;
+      }
+
+      await this.deps.queueCustodyCoordinator?.assertPromptExposurePersisted(
+        [...expectedWitnessMessageIds],
+        input.catId,
+        input.invocationId,
+      );
+      await this.deps.queueCustodyCoordinator?.assertPromptBodiesNotRecalled(
+        input.messageIds,
+        input.catId,
+        input.invocationId,
+      );
+      if (!options.prepareAdoption) {
+        adoptedWakes = await this.resolvePromptMessageCustodyWakes({
+          ...input,
+          messageIds: [...expectedWitnessMessageIds],
+        });
+      }
+      adoptionReservation?.commit();
+    } catch (error) {
+      adoptionReservation?.abort();
+      throw error;
+    }
 
     if (receiptChanged) {
-      await emitQueueUpdated(
-        this.deps.socketManager,
-        input.userId,
-        input.threadId,
-        this.deps.queue.list(input.threadId, input.userId),
-        this.deps.messageStore,
-        'queued_seen',
-      );
+      try {
+        await emitQueueUpdated(
+          this.deps.socketManager,
+          input.userId,
+          input.threadId,
+          this.deps.queue.list(input.threadId, input.userId),
+          this.deps.messageStore,
+          'queued_seen',
+        );
+      } catch (error) {
+        this.deps.log.warn(
+          { error, threadId: input.threadId, catId: input.catId, invocationId: input.invocationId },
+          '[F236] queue exposure persisted but queue_updated projection failed',
+        );
+      }
     }
-    return this.resolvePromptMessageCustodyWakes(input);
+    return adoptedWakes;
   }
 
-  /** Resolve structured obligations only after exact body exposure is durable. */
+  /** Resolve the structured obligations that must be prepared before exact body exposure is committed. */
   async resolvePromptMessageCustodyWakes(
     input: Pick<PromptMessagesExposedInput, 'threadId' | 'catId' | 'messageIds'>,
   ): Promise<readonly TurnCustodyWakeProvenance[]> {
@@ -1503,6 +1515,18 @@ export class QueueProcessor {
     const reservation = this.processingSlots.get(QueueProcessor.slotKey(threadId, catId));
     if (reservation) return true;
     return this.deps.queue.hasQueuedOrProcessingForCat(threadId, catId);
+  }
+
+  /**
+   * Admission ownership truth for one target slot. Queued leftovers are work,
+   * not a dequeue trigger; only a live tracker owner or a pre-start processor
+   * reservation can justify putting newly authored work behind that target.
+   */
+  hasActiveExecutionForCat(threadId: string, catId: string): boolean {
+    return (
+      this.deps.invocationTracker.has(threadId, catId) ||
+      this.processingSlots.has(QueueProcessor.slotKey(threadId, catId))
+    );
   }
 
   /**
@@ -1639,6 +1663,7 @@ export class QueueProcessor {
     finalStatus: InvocationFinalStatus,
     custody: 'durable' | 'legacy_unbound' | 'absent',
     durableTerminalOwner: QueueEntryDurableTerminalOwner = { kind: 'none' },
+    deferredForBusyTarget = false,
   ): Promise<{ requeued: boolean }> {
     const current = this.deps.queue.getEntrySnapshot(attempted.threadId, attempted.userId, attempted.id);
     const terminalReason =
@@ -1662,6 +1687,16 @@ export class QueueProcessor {
       durableTerminalOwner,
       custody,
     });
+
+    if (deferredForBusyTarget) {
+      const requeued = this.deps.queue.rollbackProcessing(attempted.threadId, attempted.id);
+      if (requeued && custody === 'durable') {
+        await this.persistQueueEntry(
+          this.deps.queue.getEntrySnapshot(attempted.threadId, attempted.userId, attempted.id),
+        );
+      }
+      return { requeued };
+    }
 
     if (disposition === 'retain' || disposition === 'transfer') return { requeued: false };
 
@@ -2082,67 +2117,16 @@ export class QueueProcessor {
     return blocked;
   }
 
-  private queueMessageOwnsPendingTarget(message: StoredMessage, entryId: string): boolean {
-    const custody = message.queueCustody;
-    return custody ? queuedCarrierOwnsPendingTarget(custody, entryId) : false;
-  }
-
-  private rebuildQueueEntryAfterSourceSettlement(current: QueueEntry, activeMessages: StoredMessage[]): QueueEntry {
-    const ordered = [...activeMessages].sort(
-      (left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id),
-    );
-    if (ordered.some((message) => message.queueCustody?.carrierByTargetCatId)) {
-      return createCrossThreadQueueEntryFromCustody(ordered, current.id);
-    }
-    const primary = ordered[0];
-    if (!primary) throw new Error(`active Queue carrier ${current.id} has no source message`);
-    const pendingTargets = [...new Set(ordered.flatMap((message) => message.queueCustody?.pendingTargetCats ?? []))];
-    if (pendingTargets.length === 0) throw new Error(`active Queue carrier ${current.id} has no pending target`);
-    const targetSet: ReadonlySet<string> = new Set<string>(pendingTargets);
-    const filterTargets = (values: readonly string[] | undefined): string[] => [
-      ...new Set((values ?? []).filter((catId) => targetSet.has(catId))),
-    ];
-    const filterMap = <T>(values: Readonly<Record<string, T>> | undefined): Record<string, T> =>
-      Object.fromEntries(Object.entries(values ?? {}).filter(([catId]) => targetSet.has(catId)));
-    return {
-      ...current,
-      content: ordered.map((message) => message.content).join('\n'),
-      messageId: primary.id,
-      mergedMessageIds: ordered.slice(1).map((message) => message.id),
-      targetCats: pendingTargets,
-      allTargetCats: [...new Set(ordered.flatMap((message) => message.queueCustody?.allTargetCats ?? []))],
-      status: 'queued',
-      processingStartedAt: undefined,
-      queuedNotifiedByCatIds: filterTargets(current.queuedNotifiedByCatIds),
-      queuedAwakenedInvocationIdByCatId: filterMap(current.queuedAwakenedInvocationIdByCatId),
-      queuedAwakenedAtByCatId: filterMap(current.queuedAwakenedAtByCatId),
-      queuedSeenByCatIds: filterTargets(current.queuedSeenByCatIds),
-      queuedSeenInvocationIdByCatId: filterMap(current.queuedSeenInvocationIdByCatId),
-      queuedBodyExposures: current.queuedBodyExposures?.filter((exposure) => targetSet.has(exposure.targetCatId)),
-      queuedFailedByCatIds: filterTargets(current.queuedFailedByCatIds),
-      queuedHandledByCatIds: filterTargets(current.queuedHandledByCatIds),
-      steerRequestedByCatIds: filterTargets(current.steerRequestedByCatIds),
-      steeredInvocationIdByCatId: filterMap(current.steeredInvocationIdByCatId),
-    };
-  }
-
   private async reconcileQueueCarrierAfterSourceSettlement(entry: QueueEntry): Promise<boolean> {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const current = this.deps.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
       if (!current) return true;
-      const messages = (
-        await Promise.all(
-          this.queueEntryMessageIds(current).map((messageId) => this.deps.messageStore.getById(messageId)),
-        )
-      ).filter((message): message is StoredMessage => !!message);
-      const activeMessages = messages.filter((message) => this.queueMessageOwnsPendingTarget(message, current.id));
+      const messages = await readQueueCarrierMessages(current, this.deps.messageStore);
+      const projected = projectUnconsumedQueueCarrier(current, messages);
       const changed =
-        activeMessages.length === 0
+        projected === null
           ? this.deps.queue.removeEntrySnapshotIfUnchanged(current)
-          : this.deps.queue.restoreEntrySnapshotIfUnchanged(
-              current,
-              this.rebuildQueueEntryAfterSourceSettlement(current, activeMessages),
-            );
+          : this.deps.queue.restoreEntrySnapshotIfUnchanged(current, projected);
       if (changed) return true;
     }
     return false;
@@ -2224,6 +2208,9 @@ export class QueueProcessor {
             throw new Error(`Queue carrier ${entry.id} changed during source response settlement`);
           }
           changed = true;
+          for (const message of settlement.perMessage) {
+            await this.retireConsumedCoordinationTerminal(message.messageId);
+          }
         } catch (err) {
           this.deps.log.error(
             {
@@ -2360,9 +2347,15 @@ export class QueueProcessor {
           () =>
             !this.deps.queue
               .list(input.threadId, message.userId)
-              .some((entry) => entry.id === custody.entryId && entry.targetCats.includes(input.catId)),
+              .some(
+                (entry) => entry.id === carrierEntryId(custody, input.catId) && entry.targetCats.includes(input.catId),
+              ),
         );
         if (completion.handledTargetCats.includes(targetCatId)) {
+          const physicalId = carrierEntryId(custody, input.catId);
+          const carrier = physicalId ? this.deps.queue.getEntrySnapshotForUserById(message.userId, physicalId) : null;
+          if (carrier) await this.reconcileQueueCarrierAfterSourceSettlement(carrier);
+          await this.retireConsumedCoordinationTerminal(message.id);
           this.deps.socketManager.broadcastToRoom(`thread:${input.threadId}`, 'message_receipt_updated', {
             threadId: input.threadId,
             messageId: message.id,
@@ -2440,10 +2433,6 @@ export class QueueProcessor {
           continue;
         }
         try {
-          for (const messageId of h.messageIds) {
-            const exactConsumption = queueTerminalConsumptionForMessage(consumptions, messageId);
-            await this.retireConsumedCoordinationTerminal(messageId, exactConsumption);
-          }
           const settlement = await this.deps.queueCustodyCoordinator.commitSuccessfulTargetsForMessages(
             h.entrySnapshot,
             h.messageIds,
@@ -2457,6 +2446,7 @@ export class QueueProcessor {
           const handledMessages = settlement.perMessage.filter((message) => message.handledTargetCats.includes(catId));
           if (handledMessages.length !== settlement.perMessage.length) {
             this.deps.queue.restoreQueuedHandledResult(h);
+            await this.reconcileQueueCarrierAfterSourceSettlement(h.entrySnapshot);
             this.deps.log.error(
               {
                 threadId,
@@ -2491,6 +2481,16 @@ export class QueueProcessor {
           }
         } catch (err) {
           this.deps.queue.restoreQueuedHandledResult(h);
+          // A multi-source commit may have succeeded partially, or a later
+          // publication may have failed. Never restore already-consumed bodies.
+          try {
+            await this.reconcileQueueCarrierAfterSourceSettlement(h.entrySnapshot);
+          } catch (reconcileErr) {
+            this.deps.log.error(
+              { err: reconcileErr, threadId, catId, queueEntryId: h.entryId },
+              '[QueueProcessor] failed to reconcile carrier from committed source outcomes',
+            );
+          }
           this.deps.log.error(
             { err, threadId, catId, queueEntryId: h.entryId },
             '[QueueProcessor] Queue custody success commit failed; restored queued entry',
@@ -2511,9 +2511,21 @@ export class QueueProcessor {
 
       committedHandled.push(h);
       outcomeByEntryId.set(h.entryId, outcome);
+      // Ball retirement is downstream of message truth. Its failure cannot
+      // veto the receipt or reintroduce a provider-executable Queue carrier.
+      if (durablyCustodied) {
+        for (const messageId of h.messageIds) {
+          await this.retireConsumedCoordinationTerminal(messageId);
+        }
+      }
     }
 
     if (committedHandled.length === 0) return;
+
+    for (const h of committedHandled) {
+      const reservationId = h.entrySnapshot?.exactSteerBatch?.reservationId;
+      if (reservationId) this.deps.queue.pruneExactUserBatchReservation(reservationId);
+    }
 
     for (const h of committedHandled) {
       recordQueuedHandledTelemetry({ fullyConsumed: h.fullyConsumed });
@@ -2526,19 +2538,23 @@ export class QueueProcessor {
             disposition: 'completed_with_turn' as const,
             evidenceRef: { kind: 'turn_execution' as const, invocationId },
           };
-          await this.deps.freshnessEventLog.append({
-            kind: 'queued_handled',
-            threadId,
-            catId: catId as CatId,
-            invocationId,
-            timestamp: Date.now(),
-            queueEntryId: h.entryId,
-            messageIds: h.messageIds,
-            disposition: terminalOutcome.disposition,
-            evidenceRef: terminalOutcome.evidenceRef,
-            remainingTargetCats: h.remainingTargetCats,
-          });
+          await this.deps.freshnessEventLog.append(
+            {
+              kind: 'queued_handled',
+              threadId,
+              catId: catId as CatId,
+              invocationId,
+              timestamp: Date.now(),
+              queueEntryId: h.entryId,
+              messageIds: h.messageIds,
+              disposition: terminalOutcome.disposition,
+              evidenceRef: terminalOutcome.evidenceRef,
+              remainingTargetCats: h.remainingTargetCats,
+            },
+            { ownerUserId: h.userId },
+          );
           await this.deps.freshnessEventLog.markProviderNoticesHandled({
+            ownerUserId: h.userId,
             invocationId,
             catId: catId as CatId,
             queueEntryId: h.entryId,
@@ -2570,21 +2586,19 @@ export class QueueProcessor {
     }
   }
 
-  private async retireConsumedCoordinationTerminal(
-    messageId: string,
-    consumption: QueueTerminalConsumptionWitness | undefined,
-  ): Promise<void> {
-    if (consumption?.kind !== 'terminal_silent') return;
-    const message = await this.deps.messageStore.getById(messageId);
-    if (message?.extra?.coordination?.phase !== 'terminal') return;
-    const sourceMessageId = message.extra.causal?.triggerMessageId;
-    if (!sourceMessageId) return;
-    const sourceMessage = await this.deps.messageStore.getById(sourceMessageId);
-    if (sourceMessage?.extra?.coordination?.phase !== 'active') return;
-    if (!this.deps.a2aDispatchDispositionService) {
-      throw new Error('a2a_dispatch_disposition_service_unavailable');
+  private async retireConsumedCoordinationTerminal(messageId: string): Promise<void> {
+    try {
+      await retireConsumedCoordinationTerminal(
+        messageId,
+        this.deps.messageStore,
+        this.deps.a2aDispatchDispositionService,
+      );
+    } catch (err) {
+      this.deps.log.warn(
+        { err, messageId },
+        '[QueueProcessor] consumed coordination retirement deferred; source outcome remains authoritative',
+      );
     }
-    await this.deps.a2aDispatchDispositionService.completeFromCoordinationTerminal(messageId);
   }
 
   private async markQueuedFailedOnFailure(
@@ -3262,6 +3276,21 @@ export class QueueProcessor {
     return this.tryExecuteNextForUser(threadId, userId);
   }
 
+  /** Producer recovery confirms custody; it is never a user request to clear pause or override queue order. */
+  async progressOwnedCarrier(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
+    const current = this.deps.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    if (!current) throw new Error('Owned Queue carrier disappeared before progress');
+    if (current.status === 'processing') return 'already_processing';
+    if (this.isAutoResumeSuppressed(entry.threadId, targetCatId)) return 'owned_deferred_suppressed';
+    if (this.isPaused(entry.threadId, targetCatId)) return 'owned_deferred_paused';
+    const slotKey = QueueProcessor.slotKey(entry.threadId, targetCatId);
+    if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(entry.threadId, targetCatId)) {
+      return 'owned_deferred_busy';
+    }
+    const result = await this.tryExecuteNextAcrossUsers(entry.threadId, targetCatId, { onlyTargetCat: true });
+    return result.started && result.entry?.id === entry.id ? 'started' : 'owned_deferred_busy';
+  }
+
   /**
    * Claim one Steer reservation by its unforgeable process-local identity.
    * The route calls this immediately after preemption; generic queue mutations
@@ -3277,7 +3306,6 @@ export class QueueProcessor {
     if (!current || current.status !== 'queued') return { started: false };
     const entryCat = exactSteerReservationTarget(current, reservationId);
     if (!entryCat) return { started: false };
-    const eligibleTargetCats = current.targetCats.filter((catId) => isOrdinaryQueueTargetEligible(current, catId));
     const slotKey = QueueProcessor.slotKey(threadId, entryCat);
     this.clearPause(threadId, entryCat);
     if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(threadId, entryCat)) {
@@ -3285,7 +3313,7 @@ export class QueueProcessor {
     }
     const entry = this.deps.queue.claimExactSteerReservation(threadId, userId, entryId, reservationId);
     if (!entry) return { started: false };
-    if (!(await this.startReservedEntry(entry, slotKey, entryCat, eligibleTargetCats))) return { started: false };
+    if (!(await this.startReservedEntry(entry, slotKey, entryCat, [entryCat]))) return { started: false };
     return { started: true, entry };
   }
 
@@ -3322,16 +3350,8 @@ export class QueueProcessor {
     if (custodyRetry.outcome !== 'retried') return custodyRetry;
 
     const attempt = custodyRetry.attempt;
-    const retry = this.deps.queue.retryFailedTarget(threadId, userId, entryId, catId);
+    const retry = this.deps.queue.retryFailedTarget(threadId, userId, entryId, catId, attempt.id);
     if (!retry) {
-      this.deps.log.warn(
-        { threadId, entryId, catId, attemptId: attempt.id },
-        '[QueueProcessor] durable retry attempt awaits startup recovery after Queue carrier changed',
-      );
-      return { outcome: 'retried', attemptId: attempt.id };
-    }
-    const boundRetry = this.deps.queue.bindRetryAttemptId(threadId, userId, entryId, catId, attempt.id);
-    if (!boundRetry) {
       this.deps.log.warn(
         { threadId, entryId, catId, attemptId: attempt.id },
         '[QueueProcessor] durable retry attempt awaits startup recovery after Queue carrier changed',
@@ -3350,6 +3370,45 @@ export class QueueProcessor {
       this.deps.log.warn({ err, threadId, entryId, catId }, '[QueueProcessor] retry queue dispatch failed');
     });
     return { outcome: 'retried', attemptId: attempt.id };
+  }
+
+  /**
+   * Exact recovery for process-local A2A carriers that intentionally have no
+   * stored message custody. Queue failure facts provide the CAS fence; no
+   * second ledger is created. Message-backed entries must use durable custody.
+   */
+  async retryFailedTargetWithoutCustody(
+    threadId: string,
+    userId: string,
+    entryId: string,
+    catId: string,
+    expectedRecoveryActionId: string,
+  ): Promise<{ outcome: 'retried'; attemptId: string } | { outcome: 'not_retryable' }> {
+    const entry = this.deps.queue.getEntrySnapshot(threadId, userId, entryId);
+    if (
+      !entry ||
+      entry.messageId !== null ||
+      entry.mergedMessageIds.length > 0 ||
+      entry.source !== 'agent' ||
+      failedQueueRecoveryActionId(entry, catId) !== expectedRecoveryActionId
+    ) {
+      return { outcome: 'not_retryable' };
+    }
+    const attemptId = `${expectedRecoveryActionId}:attempt`;
+    const retry = this.deps.queue.retryFailedTarget(threadId, userId, entryId, catId, attemptId);
+    if (!retry) return { outcome: 'not_retryable' };
+    await emitQueueUpdated(
+      this.deps.socketManager,
+      userId,
+      threadId,
+      this.deps.queue.list(threadId, userId),
+      this.deps.messageStore,
+      'queued_retry',
+    );
+    void this.executeRetryTarget(threadId, userId, entryId, catId).catch((err) => {
+      this.deps.log.warn({ err, threadId, entryId, catId }, '[QueueProcessor] message-less retry dispatch failed');
+    });
+    return { outcome: 'retried', attemptId };
   }
 
   /**
@@ -3541,6 +3600,18 @@ export class QueueProcessor {
           this.signalDeliveryBatchDone(entry.threadId, result.status);
           return;
         }
+        if (result.deferredForBusyTarget) {
+          void emitQueueUpdated(
+            this.deps.socketManager,
+            entry.userId,
+            entry.threadId,
+            this.deps.queue.list(entry.threadId, entry.userId),
+            this.deps.messageStore,
+            'target_busy',
+          );
+          this.signalDeliveryBatchDone(entry.threadId, result.status);
+          return;
+        }
         const completion = this.onInvocationComplete(
           entry.threadId,
           catId,
@@ -3656,7 +3727,7 @@ export class QueueProcessor {
         continue;
       }
 
-      if (!(await this.startReservedEntry(entry, entrySk, entryCat, eligibleTargetCats))) {
+      if (!(await this.startReservedEntry(entry, entrySk, entryCat, exact ? [entryCat] : eligibleTargetCats))) {
         this.emitContinuationDiagnostic(threadId, catId, 'start_rejected', deferredForBusySlot, entry.id);
         return { started: false };
       }
@@ -3736,7 +3807,8 @@ export class QueueProcessor {
     if (!entry) return { started: false };
 
     // Fire-and-forget execution — exact reservation cleanup owns completion side effects.
-    if (!(await this.startReservedEntry(entry, sk, entryCat, eligibleTargetCats))) return { started: false };
+    if (!(await this.startReservedEntry(entry, sk, entryCat, exact ? [entryCat] : eligibleTargetCats)))
+      return { started: false };
 
     return { started: true, entry };
   }
@@ -3773,12 +3845,12 @@ export class QueueProcessor {
     let finalStatus: InvocationFinalStatus = 'failed';
     let replayClaimLost = false;
     let processingReservationReplaced = false;
+    let deferredForBusyTarget = false;
     const terminalDispositions = new PerCatTerminalDispositionCollector({
       targetCatIds: targetCats,
       isCanceled: (catId) => invocationTracker.getSlotState?.(threadId, catId) === 'canceled',
     });
     const observedChildInvocationIdByCatId = new Map<string, string>();
-    const terminalConsumptionByInvocationId = new Map<string, QueueTerminalConsumptionWitness[]>();
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
     const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
@@ -3815,6 +3887,7 @@ export class QueueProcessor {
       const currentEntry = queue.getEntrySnapshot(threadId, userId, entry.id);
       const result: QueueExecutionResult = {
         status,
+        ...(deferredForBusyTarget ? { deferredForBusyTarget: true } : {}),
         ...(invocationId ? { invocationId } : {}),
         successfulCatIds: status === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
         attemptedQueueEntryIds: [entry.id, ...batchedEntryIds],
@@ -3825,7 +3898,7 @@ export class QueueProcessor {
             return exactInvocationId ? [[catId, exactInvocationId]] : [];
           }),
         ),
-        terminalConsumptionByInvocationId: Object.fromEntries(terminalConsumptionByInvocationId),
+        terminalConsumptionByInvocationId: terminalDispositions.getTerminalConsumptionByInvocationId(),
       };
       returnedExecutionResult = result;
       return result;
@@ -4290,18 +4363,19 @@ export class QueueProcessor {
         // immediately after the await, before interpreting or mutating supplement truth;
         // otherwise this stale coroutine can report a generic carrier cancellation (or
         // race a claim) instead of closing its own InvocationRecord as superseded.
-        if (
-          processingReservation &&
-          !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
-        ) {
-          processingReservationReplaced = true;
+        const startBlocker = processingReservation
+          ? this.reservedTargetStartBlocker(threadId, targetCats, primaryCat, processingReservation, invocationId)
+          : undefined;
+        if (startBlocker) {
+          processingReservationReplaced = startBlocker === 'reservation_replaced';
+          deferredForBusyTarget = startBlocker === 'target_busy';
           log.info(
-            { threadId, entryId: entry.id, invocationId },
-            '[QueueProcessor] canceled supplement preflight after processing reservation was replaced',
+            { threadId, entryId: entry.id, invocationId, startBlocker },
+            '[QueueProcessor] deferred pre-start execution at target ownership fence',
           );
           await invocationRecordStore.update(invocationId, {
             status: 'canceled',
-            error: 'queue_processing_reservation_replaced',
+            error: processingReservationReplaced ? 'queue_processing_reservation_replaced' : 'queue_target_busy',
           });
           finalStatus = 'canceled';
           return executionResult('canceled');
@@ -4725,18 +4799,19 @@ export class QueueProcessor {
       // secondary target must still be free. The first attempt is synchronous; if a
       // session-seal CAS rejects admission, the retry path below re-fences the exact
       // processing reservation after waiting for the guard to release.
-      if (
-        processingReservation &&
-        !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
-      ) {
-        processingReservationReplaced = true;
+      const startBlocker = processingReservation
+        ? this.reservedTargetStartBlocker(threadId, targetCats, primaryCat, processingReservation, invocationId)
+        : undefined;
+      if (startBlocker) {
+        processingReservationReplaced = startBlocker === 'reservation_replaced';
+        deferredForBusyTarget = startBlocker === 'target_busy';
         log.info(
-          { threadId, entryId: entry.id, invocationId },
-          '[QueueProcessor] canceled pre-start execution after async preflight replaced its reservation',
+          { threadId, entryId: entry.id, invocationId, startBlocker },
+          '[QueueProcessor] deferred pre-start execution at target ownership fence',
         );
         await invocationRecordStore.update(invocationId, {
           status: 'canceled',
-          error: 'queue_processing_reservation_replaced',
+          error: processingReservationReplaced ? 'queue_processing_reservation_replaced' : 'queue_target_busy',
         });
         finalStatus = 'canceled';
         return executionResult('canceled');
@@ -4750,18 +4825,19 @@ export class QueueProcessor {
           '[QueueProcessor] queued admission parked behind session-seal CAS',
         );
         await invocationTracker.waitForSessionSealRelease(threadId, targetCats);
-        if (
-          processingReservation &&
-          !this.canStartReservedTargetSet(threadId, targetCats, primaryCat, processingReservation, invocationId)
-        ) {
-          processingReservationReplaced = true;
+        const startBlocker = processingReservation
+          ? this.reservedTargetStartBlocker(threadId, targetCats, primaryCat, processingReservation, invocationId)
+          : undefined;
+        if (startBlocker) {
+          processingReservationReplaced = startBlocker === 'reservation_replaced';
+          deferredForBusyTarget = startBlocker === 'target_busy';
           log.info(
-            { threadId, entryId: entry.id, invocationId },
-            '[QueueProcessor] canceled parked execution after its processing reservation was replaced',
+            { threadId, entryId: entry.id, invocationId, startBlocker },
+            '[QueueProcessor] deferred pre-start execution at target ownership fence',
           );
           await invocationRecordStore.update(invocationId, {
             status: 'canceled',
-            error: 'queue_processing_reservation_replaced',
+            error: processingReservationReplaced ? 'queue_processing_reservation_replaced' : 'queue_target_busy',
           });
           finalStatus = 'canceled';
           return executionResult('canceled');
@@ -5042,6 +5118,7 @@ export class QueueProcessor {
                 triggerMessage: stored,
                 ownerUserId: userId,
                 threadId,
+                targetCatId: primaryCat,
                 messageStore,
               })),
             );
@@ -5109,6 +5186,7 @@ export class QueueProcessor {
           messageId,
           expectedThreadId: threadId,
           expectedUserId: userId,
+          expectedTargetCatIds: targetCats,
           messageStore,
         });
       } catch (err) {
@@ -5131,7 +5209,9 @@ export class QueueProcessor {
         { intent, ...(entry.suggestedSkill ? { promptTags: [`skill:${entry.suggestedSkill}`] } : {}) },
         {
           ownerAuthProvenance: entry.ownerAuthProvenance,
+          ...(entry.executionScope ? { executionScope: entry.executionScope } : {}),
           humanDispositionInvocationOrigin: 'queue_replay',
+          routingQueueSource: entry.source,
           ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
           ...(asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
           turnCustodyWakeForCat: (catId: string) => retargetTurnCustodyWake(turnCustodyWake, catId),
@@ -5273,7 +5353,6 @@ export class QueueProcessor {
           childInvocationId.length > 0 &&
           terminalConsumptions.length > 0
         ) {
-          terminalConsumptionByInvocationId.set(childInvocationId, [...terminalConsumptions]);
           const dispatchConsumption = terminalConsumptions.find(
             (candidate) => candidate.kind === 'dispatch_handled_continuation',
           );
@@ -5719,9 +5798,10 @@ export class QueueProcessor {
       // Supplement state is the durable lifecycle; the Queue row is only its
       // carrier. If terminalization fails, `none` deliberately preserves the
       // ordinary rollback path instead of consuming unowned work.
-      const durableTerminalOwner: QueueEntryDurableTerminalOwner = processingReservationReplaced
-        ? { kind: 'none' }
-        : await this.terminalizeFreshnessSupplementCarrier(entry, invocationId, finalStatus, executionError);
+      const durableTerminalOwner: QueueEntryDurableTerminalOwner =
+        processingReservationReplaced || deferredForBusyTarget
+          ? { kind: 'none' }
+          : await this.terminalizeFreshnessSupplementCarrier(entry, invocationId, finalStatus, executionError);
       if (!processingReservationReplaced) {
         try {
           const settlement = await this.settleAttemptQueueEntry(
@@ -5733,6 +5813,7 @@ export class QueueProcessor {
                 ? 'legacy_unbound'
                 : 'absent',
             durableTerminalOwner,
+            deferredForBusyTarget,
           );
           if (returnedExecutionResult && settlement.requeued) returnedExecutionResult.primaryEntryRequeued = true;
         } catch (err) {
@@ -5793,6 +5874,8 @@ export class QueueProcessor {
             batched,
             finalStatus,
             custodyEntryIds.has(bid) ? 'durable' : legacyUnboundEntryIds.has(bid) ? 'legacy_unbound' : 'absent',
+            { kind: 'none' },
+            deferredForBusyTarget,
           );
         } catch (err) {
           log.error(

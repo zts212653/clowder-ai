@@ -1,4 +1,4 @@
-import type { RichPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
+import type { DeferredPersonMemoryReceipt, RichPersonMemoryProposalCardBlock } from '@cat-cafe/shared';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { DeferredPersonMemoryReceiptStore } from '../domains/memory/DeferredPersonMemoryReceiptStore.js';
 import type {
@@ -30,7 +30,7 @@ export interface PreparedProposalCandidate {
 export interface ProposalCandidateExecutionDeps {
   store: PersonMemoryStore;
   messageStore: IMessageStore;
-  deferredReceiptStore?: Pick<DeferredPersonMemoryReceiptStore, 'get'>;
+  deferredReceiptStore?: Pick<DeferredPersonMemoryReceiptStore, 'bindProcessorInvocation'>;
 }
 
 async function resolvePriorCandidate(
@@ -59,6 +59,7 @@ async function resolvePriorCandidate(
     receiptId: input.deferredReceiptId,
     previousClaimId: validation.deferredClaimRenewal.previousClaimId,
     nextClaimId: validation.deferredClaimRenewal.nextClaimId,
+    processorInvocationId: validation.deferredClaimRenewal.processorInvocationId,
     deltaFingerprint: validation.deferredClaimRenewal.deltaFingerprint,
     renewedAt: Date.now(),
   });
@@ -71,7 +72,7 @@ function candidateInput(
   prepared: PreparedPersonMemoryProposal,
   person: Parameters<typeof makeCandidateInput>[0]['person'],
   evidence: ResolvedProposalEvidence,
-  deferredOrigin: Parameters<typeof makeCandidateInput>[5],
+  deferredReceipt: DeferredPersonMemoryReceipt | null,
   opportunityBinding: ProposalOpportunityBinding,
 ): StagePersonMemoryCandidateInput {
   const { auth, body } = prepared;
@@ -82,8 +83,11 @@ function candidateInput(
       prepared.originMessageId,
       evidence.interactionSourceEvidence,
       evidence.sourceResolution.bundle,
-      deferredOrigin,
+      deferredReceipt?.originMessageRef,
     ),
+    ...(deferredReceipt?.processorInvocationId
+      ? { deferredReceiptProcessorInvocationId: deferredReceipt.processorInvocationId }
+      : {}),
     ...(opportunityBinding.status === 'resolved'
       ? {
           writeOpportunityLineage: {
@@ -109,7 +113,10 @@ export async function prepareProposalCandidate(
   const deferred = await resolveDeferredProposalReceipt({
     lineage: body.deferredReceipt,
     ownerUserId: auth.userId,
-    requesterCatId: auth.catId,
+    processorCatId: auth.catId,
+    processingThreadId: auth.threadId,
+    processingMessageId: prepared.originMessageId,
+    processorInvocationId: auth.invocationId,
     targetPersonId: body.targetPersonId,
     person,
     sourceBundle: evidence.sourceResolution.bundle,
@@ -117,7 +124,7 @@ export async function prepareProposalCandidate(
     receiptStore: deps.deferredReceiptStore,
   });
   if (deferred.status === 'error') return deferred;
-  const input = candidateInput(prepared, person, evidence, deferred.value?.originMessageRef, opportunityBinding);
+  const input = candidateInput(prepared, person, evidence, deferred.value, opportunityBinding);
   const priorResolution = await resolvePriorCandidate(
     input,
     person,

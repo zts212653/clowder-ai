@@ -1,8 +1,11 @@
 import type { ClientPhase, CollectiveMe } from './client-types.js';
 
+export { trustedGitHubAppRegistrationUrl } from './github-app-manifest.js';
+
 export type EntryMode = 'bootstrap' | 'invite' | 'missing';
 
 export const HUMAN_AUTH_WINDOW_NAME = 'collective-human-auth';
+export const PROVIDER_SETUP_WINDOW_NAME = 'collective-provider-setup';
 
 export interface HumanAuthCompletionMessage {
   readonly type: 'collective:human-auth-completion';
@@ -27,6 +30,52 @@ export interface HumanAuthErrorMessage {
 }
 
 export type HumanAuthResultMessage = HumanAuthCompletionMessage | HumanAuthErrorMessage;
+
+const PROVIDER_SETUP_ERROR_CODES = ['authorization_denied', 'provider_unavailable'] as const;
+
+export type ProviderSetupErrorCode = (typeof PROVIDER_SETUP_ERROR_CODES)[number];
+
+export type ProviderSetupResultMessage =
+  | {
+      readonly type: 'collective:provider-setup-completion';
+      readonly serviceUrl: string;
+    }
+  | {
+      readonly type: 'collective:provider-setup-error';
+      readonly serviceUrl: string;
+      readonly errorCode: ProviderSetupErrorCode;
+    };
+
+export function trustedProviderSetupResult(
+  event: { readonly origin: string; readonly source: unknown; readonly data: unknown },
+  serviceOrigin: string,
+  setupWindow: unknown,
+): ProviderSetupResultMessage | undefined {
+  if (event.origin !== serviceOrigin || event.source !== setupWindow) return undefined;
+  if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) return undefined;
+  const data = event.data as Record<string, unknown>;
+  if (data.serviceUrl !== serviceOrigin) return undefined;
+  if (data.type === 'collective:provider-setup-completion') {
+    return Object.keys(data).every((key) => ['type', 'serviceUrl'].includes(key))
+      ? { type: data.type, serviceUrl: serviceOrigin }
+      : undefined;
+  }
+  if (
+    data.type !== 'collective:provider-setup-error' ||
+    Object.keys(data).some((key) => !['type', 'serviceUrl', 'errorCode'].includes(key)) ||
+    typeof data.errorCode !== 'string' ||
+    !PROVIDER_SETUP_ERROR_CODES.some((code) => code === data.errorCode)
+  ) {
+    return undefined;
+  }
+  return { type: data.type, serviceUrl: serviceOrigin, errorCode: data.errorCode as ProviderSetupErrorCode };
+}
+
+export function providerSetupErrorMessage(code: ProviderSetupErrorCode): string {
+  return code === 'authorization_denied'
+    ? 'GitHub 登录应用创建已取消；准备好后可以重新开始'
+    : 'GitHub 登录应用暂时无法完成，请稍后重试';
+}
 
 export function trustedHumanAuthResult(
   event: { readonly origin: string; readonly source: unknown; readonly data: unknown },

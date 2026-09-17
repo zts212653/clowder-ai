@@ -5,6 +5,7 @@ import type {
   RoutingSignalMarkCommandV1,
   RoutingSubjectRefV1,
 } from '@cat-cafe/shared';
+import { routingSignalClosures } from '@cat-cafe/shared';
 
 type AssertedRoutingSignal = Extract<RoutingSignalEventV1, { eventType: 'asserted' }>;
 
@@ -35,7 +36,7 @@ export function buildSignalMarkCommand(input: {
 }
 
 export function openRoutingSignalAssertions(events: readonly RoutingSignalEventV1[]): AssertedRoutingSignal[] {
-  const closed = new Set(events.flatMap((event) => (event.eventType === 'asserted' ? [] : event.closesSignalIds)));
+  const closed = routingSignalClosures(events);
   return events.filter(
     (event): event is AssertedRoutingSignal => event.eventType === 'asserted' && !closed.has(event.eventId),
   );

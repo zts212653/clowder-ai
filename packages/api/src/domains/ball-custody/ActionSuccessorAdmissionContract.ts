@@ -80,8 +80,7 @@ export type ActionSuccessorAdmissionResult =
         | 'completion_present'
         | 'terminal_predicate_mismatch'
         | 'predecessor_missing'
-        | 'parallel_return_unsupported'
-        | 'review_reentry_ineligible';
+        | 'parallel_return_unsupported';
       lease: ActionSuccessorLease;
     }
   | { admit: false; outcome: 'subject_terminal'; terminal: ActionSubjectTerminalTruth };

@@ -16,7 +16,7 @@ export interface LiveExecutionCandidate {
   readonly catId: string;
   readonly startedAt: number;
   readonly executionId?: string;
-  /** Exact child process id; internal only and never serialized. */
+  /** Exact child identity; projected for navigation only after the principal check. */
   readonly invocationId?: string;
   /** Runtime principal. Visibility and control authority are separate decisions. */
   readonly ownerUserId?: string;
@@ -140,6 +140,7 @@ function projectLiveExecution(
     trackerExecutionId === realExecutionId;
   return {
     executionId,
+    ...(canControl && candidate.invocationId ? { turnInvocationId: candidate.invocationId } : {}),
     threadId: thread.id,
     threadTitle: thread.title,
     catId: candidate.catId,

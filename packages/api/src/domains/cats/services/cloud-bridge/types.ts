@@ -125,6 +125,7 @@ export type BridgeDispatchOutcome =
 export type BridgeFallbackReason =
   | 'adapter-not-ready'
   | 'no-adapter'
+  | 'needs-binding'
   | 'invalid-captured-url'
   | 'inject-failed'
   | 'host-append-failed'

@@ -4,7 +4,7 @@ import { before, describe, it } from 'node:test';
 const LINEAGE = `write_lineage_${'a'.repeat(32)}`;
 const ORIGINAL_ID = `write_opp_${'a'.repeat(24)}00000001`;
 
-function scene(generation = 1) {
+function scene(generation = 1, threadId = 'thread-1', catId = 'codex-sol') {
   return {
     v: 1,
     kind: 'memory_write_opportunity',
@@ -16,8 +16,8 @@ function scene(generation = 1) {
       reflexVersion: 1,
       generation,
       producer: 'meeting_artifact',
-      consumer: { kind: 'cat', catId: 'codex-sol' },
-      scope: { ownerUserId: 'owner-1', threadId: 'thread-1' },
+      consumer: { kind: 'cat', catId },
+      scope: { ownerUserId: 'owner-1', threadId },
       observedAt: 1,
       eligibleAt: generation,
       expiresAt: 10_000,
@@ -105,6 +105,7 @@ describe('F276 scheduler re-entry carrier', () => {
       triggerMessage: trigger,
       ownerUserId: 'owner-1',
       threadId: 'thread-1',
+      targetCatId: 'codex-sol',
       messageStore: { getById: async () => source },
     });
   }
@@ -142,6 +143,39 @@ describe('F276 scheduler re-entry carrier', () => {
 
     assert.equal(result.length, 1);
     assert.equal(result[0].scene.opportunity.generation, 3);
+  });
+
+  it('binds a batched delegated generation to the system-thread processor without rewriting provenance', async () => {
+    const { source, trigger } = messages({
+      trigger: {
+        threadId: 'thread_memory_operations',
+        extra: {
+          scheduler: { hiddenTrigger: true },
+          writeOpportunityReentries: [
+            {
+              v: 1,
+              sourceMessageRef: { kind: 'message', threadId: 'thread-1', messageId: 'owner-message-1' },
+              sourceOpportunityId: ORIGINAL_ID,
+              priorGeneration: 1,
+              scene: scene(2, 'thread_memory_operations', 'codex-terra'),
+            },
+          ],
+        },
+      },
+    });
+    const result = await bind({
+      triggerMessage: trigger,
+      ownerUserId: 'owner-1',
+      threadId: 'thread_memory_operations',
+      targetCatId: 'codex-terra',
+      messageStore: { getById: async () => source },
+    });
+
+    assert.equal(result.length, 1);
+    assert.equal(result[0].scene.opportunity.scope.threadId, 'thread_memory_operations');
+    assert.equal(result[0].scene.opportunity.consumer.catId, 'codex-terra');
+    assert.equal(result[0].source.threadId, 'thread-1');
+    assert.equal(result[0].source.presentationThreadId, 'thread_memory_operations');
   });
 
   it('fails closed on source deletion, source revision drift, or a forged generation', async () => {

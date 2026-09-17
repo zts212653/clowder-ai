@@ -19,7 +19,7 @@
  * (AC-AA6/AA7).
  */
 
-import type { CatId, ReportingMode } from '@cat-cafe/shared';
+import type { CatId, DeclaredWorkMode, ReportingMode } from '@cat-cafe/shared';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import { primaryMentionHandleForCatId } from '../utils/cat-mention-handle.js';
 
@@ -213,6 +213,8 @@ export function enrichWithParentThreadHeader(
   reportingMode: ReportingMode = DEFAULT_REPORTING_MODE,
   /** Phase AA (AC-AA6): stable handle of the source cat for routing credentials. */
   sourceCatHandle?: string | null,
+  /** F277: immutable placement truth selected at approval. */
+  declaredWorkMode?: DeclaredWorkMode,
 ): string {
   let isParallelMode = false;
   if (rawInitialMessage) {
@@ -228,7 +230,17 @@ export function enrichWithParentThreadHeader(
   );
 
   const titleLine = sourceThreadTitle ? `\n标题: ${sourceThreadTitle}` : '';
-  const headerLines: string[] = ['---', '## 主 Thread', `ID: \`${sourceThreadId}\`${titleLine}`, ''];
+  const workModeLabel: Record<DeclaredWorkMode, string> = {
+    subtask: '持续跟随来源对话',
+    parallel: '同组并行推进',
+    investigation: '一次性相关调查',
+    standalone: '独立推进；只保留出生来源',
+  };
+  const headerLines: string[] = ['---', '## 主 Thread', `ID: \`${sourceThreadId}\`${titleLine}`];
+  if (declaredWorkMode) {
+    headerLines.push(`**协作方式**: ${declaredWorkMode}（${workModeLabel[declaredWorkMode]}）`);
+  }
+  headerLines.push('');
 
   // Report-back section: orthogonal to wake mode, driven by reportingMode (C-Y6).
   // Phase AA: routing credentials (sourceThreadId + sourceCatHandle) injected into

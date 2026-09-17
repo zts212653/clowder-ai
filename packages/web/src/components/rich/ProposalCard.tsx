@@ -10,8 +10,10 @@ import { apiFetch } from '@/utils/api-client';
 import { executeSidebarFieldCommand } from '@/utils/sidebar-commands';
 import { CafeIcon } from './CafeIcons';
 import {
+  DeclaredWorkModeEdit,
   displayProposalTitle,
   EditField,
+  formatDeclaredWorkMode,
   formatReportingMode,
   ProjectPathEdit,
   ProposalCardIcon,
@@ -25,6 +27,7 @@ import {
   type ProposalFieldEdits,
   type ProposalSnapshot,
   parsePreferredCats,
+  readDeclaredWorkModeEdit,
   readField,
   readProjectPathEdit,
   readReportingModeEdit,
@@ -51,6 +54,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
   const [effectiveReportingMode, setEffectiveReportingMode] = useState<ReportingModeEditValue>(() =>
     readReportingModeEdit(block),
   );
+  const [effectiveDeclaredWorkMode, setEffectiveDeclaredWorkMode] = useState(() => readDeclaredWorkModeEdit(block));
   const [edits, setEdits] = useState<ProposalFieldEdits>(() => ({
     title: block.title.replace(/^(?:📥 )?提议新建 thread：/, ''),
     parentThreadId: readField(block, '父 Thread'),
@@ -58,9 +62,11 @@ export function ProposalCard({ block }: ProposalCardProps) {
     initialMessage: readField(block, '首条消息'),
     projectPath: readProjectPathEdit(block),
     reportingMode: readReportingModeEdit(block),
+    declaredWorkMode: readDeclaredWorkModeEdit(block),
   }));
   const projectOwnership = readField(block, '项目归属');
   const reportingMode = formatReportingMode(effectiveReportingMode);
+  const declaredWorkMode = formatDeclaredWorkMode(effectiveDeclaredWorkMode);
   const needsProjectChoice = isDefaultProjectOwnership(projectOwnership);
   const existingProjects = useChatStore(useShallow(selectExistingProjectPaths));
 
@@ -79,6 +85,13 @@ export function ProposalCard({ block }: ProposalCardProps) {
           if (data.proposal.reportingMode) {
             setEffectiveReportingMode(data.proposal.reportingMode);
             setEdits((prev) => ({ ...prev, reportingMode: data.proposal.reportingMode ?? prev.reportingMode }));
+          }
+          if (data.proposal.declaredWorkMode) {
+            setEffectiveDeclaredWorkMode(data.proposal.declaredWorkMode);
+            setEdits((prev) => ({
+              ...prev,
+              declaredWorkMode: data.proposal.declaredWorkMode ?? prev.declaredWorkMode,
+            }));
           }
         }
       } catch {
@@ -102,6 +115,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
         setEffectiveReportingMode(detail.reportingMode);
         setEdits((prev) => ({ ...prev, reportingMode: detail.reportingMode ?? prev.reportingMode }));
       }
+      if (detail.declaredWorkMode) {
+        setEffectiveDeclaredWorkMode(detail.declaredWorkMode);
+        setEdits((prev) => ({ ...prev, declaredWorkMode: detail.declaredWorkMode ?? prev.declaredWorkMode }));
+      }
     };
     window.addEventListener('cat-cafe:proposal-updated', handler);
     return () => {
@@ -123,6 +140,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
           // child thread. Backend validates + fail-loud rejects an invalid path (400).
           projectPath: edits.projectPath.trim() || undefined,
           reportingMode: edits.reportingMode,
+          declaredWorkMode: edits.declaredWorkMode || undefined,
         }
       : {};
     try {
@@ -135,6 +153,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       const newThreadId = data.threadId ?? null;
       setEffectiveReportingMode(editing ? edits.reportingMode : effectiveReportingMode);
+      setEffectiveDeclaredWorkMode(editing ? edits.declaredWorkMode : effectiveDeclaredWorkMode);
       setResultThreadId(newThreadId);
       setStatus('approved');
       setEditing(false);
@@ -161,7 +180,7 @@ export function ProposalCard({ block }: ProposalCardProps) {
     } finally {
       setLoading(false);
     }
-  }, [proposalId, editing, edits, effectiveReportingMode, pinOnApprove]);
+  }, [proposalId, editing, edits, effectiveReportingMode, effectiveDeclaredWorkMode, pinOnApprove]);
 
   const reject = useCallback(async () => {
     if (!proposalId) return;
@@ -215,6 +234,9 @@ export function ProposalCard({ block }: ProposalCardProps) {
             <span className="font-mono break-all">{edits.preferredCats || '（未指定）'}</span>
           </div>
           <div className="sm:col-span-2">
+            <span className="text-cafe-muted">协作方式:</span> <span>{declaredWorkMode}</span>
+          </div>
+          <div className="sm:col-span-2">
             <span className="text-cafe-muted">回报模式:</span> <span>{reportingMode}</span>
           </div>
           {projectOwnership && (
@@ -252,6 +274,10 @@ export function ProposalCard({ block }: ProposalCardProps) {
           <ReportingModeEdit
             value={edits.reportingMode}
             onChange={(v) => setEdits((p) => ({ ...p, reportingMode: v }))}
+          />
+          <DeclaredWorkModeEdit
+            value={edits.declaredWorkMode}
+            onChange={(value) => setEdits((previous) => ({ ...previous, declaredWorkMode: value }))}
           />
           <EditField
             label="建议成员 (逗号分隔)"

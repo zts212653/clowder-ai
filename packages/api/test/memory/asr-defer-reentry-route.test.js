@@ -16,6 +16,9 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
   let purges;
   let hardForgotten;
   let afterRearm;
+  let processingMessageId;
+  let processorGrant;
+  let invalidationError;
 
   const deliveredRecord = (overrides = {}) => ({
     v: 1,
@@ -72,6 +75,38 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
           await afterRearm?.();
           return { outcome: 'rearmed', receipt: { receiptId: input.receiptId, state: 'deferred' } };
         },
+        async bindProcessorInvocation(input) {
+          const processingMessage = await messageStore.getById(input.processingMessageId);
+          if (
+            input.receiptId !== `deferred_person_${'f'.repeat(32)}` ||
+            input.claimId !== 'claim-gen-2' ||
+            input.processorCatId !== 'codex-sol' ||
+            input.processingThreadId !== 'thread-current' ||
+            input.processingMessageId !== processingMessageId ||
+            processingMessage?.threadId !== input.processingThreadId ||
+            processingMessage?.userId !== input.ownerUserId ||
+            (processorGrant !== undefined && processorGrant !== input.processorInvocationId)
+          ) {
+            return { outcome: 'conflict' };
+          }
+          const outcome = processorGrant === input.processorInvocationId ? 'replayed' : 'bound';
+          processorGrant = input.processorInvocationId;
+          return {
+            outcome,
+            receipt: {
+              receiptId: input.receiptId,
+              ownerUserId: input.ownerUserId,
+              requesterCatId: 'codex-sol',
+              state: 'claimed',
+              claimId: input.claimId,
+              claimUntil: input.now + 60_000,
+              processorCatId: input.processorCatId,
+              processingThreadId: input.processingThreadId,
+              processingMessageId: input.processingMessageId,
+              processorInvocationId: input.processorInvocationId,
+            },
+          };
+        },
         async hardForget(...args) {
           hardForgotten.push(args);
           return { outcome: 'purged' };
@@ -106,6 +141,7 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
           terminals.push(input);
         },
         async recordInvalidated(input) {
+          if (invalidationError) throw invalidationError;
           invalidations.push(input);
         },
         async readLineageStates() {
@@ -125,6 +161,9 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
     purges = [];
     hardForgotten = [];
     afterRearm = undefined;
+    processingMessageId = undefined;
+    processorGrant = undefined;
+    invalidationError = undefined;
   });
 
   async function ownerMessage(threadId, content) {
@@ -148,6 +187,7 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
       undefined,
       origin.id,
     );
+    processingMessageId ??= origin.id;
     record?.(auth);
     return app.inject({
       method: 'POST',
@@ -213,5 +253,46 @@ describe('F276 generation+1 defer re-arms the claimed receipt', () => {
     assert.equal(response.statusCode, 409);
     assert.equal(response.json().error, 'write_opportunity_reentry_receipt_required');
     assert.equal(rearmed.length, 0);
+  });
+
+  it('does not erase a re-armed receipt or report source drift before durable invalidation succeeds', async () => {
+    const origin = await ownerMessage('thread-current', 'owner turn');
+    const fact = await ownerMessage('thread-history', '黄挺 是产品经理');
+    const opportunityId = `write_opp_${'5'.repeat(32)}`;
+    invalidationError = new Error('terminal ledger unavailable');
+    afterRearm = () => messageStore.softDelete(fact.id, 'owner-1');
+
+    const response = await invoke(reentryBody(fact.id, opportunityId), origin, (auth) => {
+      delivered.push(deliveredRecord({ opportunityId, invocationId: auth.invocationId }));
+    });
+
+    assert.equal(response.statusCode, 503, response.body);
+    assert.deepEqual(response.json(), { error: 'write_opportunity_invalidation_unavailable' });
+    assert.deepEqual(hardForgotten, []);
+    assert.deepEqual(purges, []);
+    assert.deepEqual(terminals, []);
+  });
+
+  it('rejects a latest same-cat successor that did not receive the re-entry grant', async () => {
+    const grantedOrigin = await ownerMessage('thread-current', 'granted Memory Operations turn');
+    const granted = await registry.create(
+      'owner-1',
+      'codex-sol',
+      grantedOrigin.threadId,
+      undefined,
+      undefined,
+      undefined,
+      grantedOrigin.id,
+    );
+    processingMessageId = grantedOrigin.id;
+    processorGrant = granted.invocationId;
+    const successorOrigin = await ownerMessage('thread-current', 'later unrelated turn');
+    const fact = await ownerMessage('thread-history', '黄挺 是产品经理');
+
+    const response = await invoke(reentryBody(fact.id, `write_opp_${'6'.repeat(32)}`), successorOrigin);
+
+    assert.equal(response.statusCode, 409, response.body);
+    assert.deepEqual(response.json(), { error: 'deferred_receipt_conflict' });
+    assert.deepEqual(rearmed, []);
   });
 });

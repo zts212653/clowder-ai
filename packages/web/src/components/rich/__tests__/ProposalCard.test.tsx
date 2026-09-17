@@ -35,6 +35,7 @@ const baseBlock: RichCardBlock = {
   fields: [
     { label: '父 Thread', value: 'thread_x' },
     { label: '建议成员', value: '@gemini25' },
+    { label: '协作方式', value: '并行推进（同组并发）' },
     { label: '回报模式', value: 'autonomous（无强制回报）' },
     { label: '项目归属', value: '/home/user/cat-cafe' },
   ],
@@ -145,5 +146,65 @@ describe('ProposalCard (F225 猫猫化 — emoji → CafeIcon SVG)', () => {
     const approveCall = posts.find((p) => p.url.includes('/approve'));
     expect(approveCall).toBeDefined();
     expect(approveCall?.body.title).toBe('通知卡片猫猫化');
+  });
+
+  it('lets the owner override the declared work mode before approval', async () => {
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse((init.body as string) || '{}') as Record<string, unknown> });
+        return okJson({ threadId: 'thread_new' });
+      }
+      return okJson({ proposal: { status: 'pending', declaredWorkMode: 'parallel' } });
+    });
+    await act(async () => {
+      root.render(<ProposalCard block={baseBlock} />);
+    });
+    const editBtn = [...container.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    await act(async () => {
+      editBtn?.click();
+    });
+    const workMode = container.querySelector('select[aria-label="协作方式"]') as HTMLSelectElement;
+    expect(workMode.querySelector('option[value=""]')).toBeNull();
+    await act(async () => {
+      workMode.value = 'investigation';
+      workMode.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const approveBtn = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('批准'));
+    await act(async () => {
+      approveBtn?.click();
+    });
+    expect(posts.find((post) => post.url.includes('/approve'))?.body.declaredWorkMode).toBe('investigation');
+  });
+
+  it('does not invent a declared work mode when a legacy proposal left it unknown', async () => {
+    const unknownModeBlock: RichCardBlock = {
+      ...baseBlock,
+      fields: baseBlock.fields?.map((field) =>
+        field.label === '协作方式' ? { ...field, value: '（未声明）' } : field,
+      ),
+    };
+    const posts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    vi.mocked(apiFetch).mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts.push({ url, body: JSON.parse((init.body as string) || '{}') as Record<string, unknown> });
+        return okJson({ threadId: 'thread_new' });
+      }
+      return okJson({ proposal: { status: 'pending' } });
+    });
+    await act(async () => {
+      root.render(<ProposalCard block={unknownModeBlock} />);
+    });
+    const editBtn = [...container.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    await act(async () => editBtn?.click());
+    const workMode = container.querySelector('select[aria-label="协作方式"]') as HTMLSelectElement;
+    expect(workMode.value).toBe('');
+    const unknownOption = workMode.querySelector('option[value=""]') as HTMLOptionElement;
+    expect(unknownOption.disabled).toBe(true);
+    expect(unknownOption.textContent).toContain('历史未声明');
+    const approveBtn = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('批准'));
+    await act(async () => approveBtn?.click());
+
+    expect(posts.find((post) => post.url.includes('/approve'))?.body).not.toHaveProperty('declaredWorkMode');
   });
 });

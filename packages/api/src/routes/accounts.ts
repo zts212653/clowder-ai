@@ -7,12 +7,13 @@ import { existsSync } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { relative, resolve, win32 } from 'node:path';
-import type { AccountConfig } from '@cat-cafe/shared';
+import { type AccountConfig, builtinAccountFamilyForRef } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { inspectAccountCatalog, readAccountStoreSnapshot } from '../config/account-store-snapshot.js';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { deleteCatalogAccount, readCatalogAccounts, writeCatalogAccount } from '../config/catalog-accounts.js';
+import { deleteCatalogAccount, writeCatalogAccount } from '../config/catalog-accounts.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { deleteCredential, hasCredential, writeCredential } from '../config/credentials.js';
 
@@ -22,28 +23,10 @@ import { redirectRuntimeProjectPath, resolvePersistentProjectPathDetailed } from
 import { resolveUserId } from '../utils/request-identity.js';
 
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
-const BUILTIN_CLIENT_FOR_ID: Record<string, string> = {
-  claude: 'anthropic',
-  codex: 'openai',
-  gemini: 'google',
-  kimi: 'kimi',
-  opencode: 'opencode',
-  // Canonical OAuth IDs (reachable via deriveAccountId slugging display names)
-  anthropic: 'anthropic',
-  openai: 'openai',
-  google: 'google',
-  // builtin_* prefixed (explicit reserved form):
-  builtin_anthropic: 'anthropic',
-  builtin_openai: 'openai',
-  builtin_google: 'google',
-  builtin_kimi: 'kimi',
-  builtin_opencode: 'opencode',
-};
-
 /** Synthesize a ProviderProfileView-compatible object from AccountConfig. */
 function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean) {
   const isBuiltin = account.authType === 'oauth';
-  const builtinClient = BUILTIN_CLIENT_FOR_ID[id];
+  const builtinClient = builtinAccountFamilyForRef(id);
   const clientId = account.clientId ?? (isBuiltin ? builtinClient : undefined);
   return {
     id,
@@ -66,13 +49,14 @@ function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolea
 }
 
 /** Derive a slug-like ID from display name, avoiding collisions with existing accounts. */
-function deriveAccountId(displayName: string, existingIds: Set<string>): string {
-  const seed =
+function deriveAccountId(displayName: string, existingIds: Set<string>, customApiKey: boolean): string {
+  let seed =
     displayName
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || `account-${Date.now()}`;
+  if (customApiKey && builtinAccountFamilyForRef(seed)) seed = `custom-${seed}`;
   if (!existingIds.has(seed)) return seed;
   let counter = 2;
   while (existingIds.has(`${seed}-${counter}`)) counter += 1;
@@ -184,6 +168,9 @@ const createBodySchema = z
     envVars: envVarsSchema,
   })
   .superRefine((value, ctx) => {
+    if ((value.authType ?? 'api_key') === 'api_key' && !value.clientId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['clientId'], message: 'API key accounts require clientId' });
+    }
     if (!value.name && !value.displayName) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -268,14 +255,16 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
       return { error: 'Invalid project path: must be an existing directory under allowed roots' };
     }
 
-    const accounts = readCatalogAccounts(projectRoot);
-    const providers = Object.entries(accounts).map(([id, account]) =>
-      accountToView(id, account, hasCredential(id, projectRoot)),
-    );
-    return {
-      projectPath: projectRoot,
-      providers,
-    };
+    try {
+      const snapshot = inspectAccountCatalog(projectRoot);
+      const providers = Object.entries(snapshot.entries).map(([id, entry]) =>
+        accountToView(id, entry.account, entry.credential !== undefined),
+      );
+      return { projectPath: projectRoot, providers, unavailableAccounts: snapshot.unavailableAccounts };
+    } catch (error) {
+      reply.status(400);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
   });
 
   app.post('/api/accounts', async (request, reply) => {
@@ -309,10 +298,10 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
         ...((body.displayName ?? body.name) ? { displayName: body.displayName ?? body.name } : {}),
         ...(body.envVars && Object.keys(body.envVars).length > 0 ? { envVars: body.envVars } : {}),
       };
-      const existingAccounts = readCatalogAccounts(projectRoot);
       const profileId = deriveAccountId(
         body.displayName ?? body.name ?? body.provider ?? 'custom',
-        new Set(Object.keys(existingAccounts)),
+        new Set(readAccountStoreSnapshot(projectRoot).refs),
+        account.authType === 'api_key',
       );
       writeCatalogAccount(projectRoot, profileId, account);
       if (body.apiKey) writeCredential(profileId, { apiKey: body.apiKey }, projectRoot);
@@ -353,7 +342,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const params = request.params as { profileId: string };
 
     try {
-      const existing = readCatalogAccounts(projectRoot)[params.profileId];
+      const existing = readAccountStoreSnapshot(projectRoot).resolve(params.profileId).account;
       if (!existing) {
         reply.status(404);
         return { error: `Account "${params.profileId}" not found` };
@@ -438,8 +427,7 @@ export const accountsRoutes: FastifyPluginAsync = async (app) => {
     const params = request.params as { profileId: string };
 
     try {
-      const accounts = readCatalogAccounts(projectRoot);
-      const accountExists = Object.hasOwn(accounts, params.profileId);
+      const accountExists = readAccountStoreSnapshot(projectRoot).resolve(params.profileId).account !== undefined;
 
       // Check the runtime catalog for dangling references. Template is bootstrap-only
       // and is not part of runtime binding truth after catalog creation.

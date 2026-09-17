@@ -65,6 +65,7 @@ function makeEntry(
     targetStates?: Record<string, string>;
     source?: QueueEntry['source'];
     callerCatId?: string;
+    recoveryActions?: QueueEntry['recoveryActions'];
   } = {},
 ): QueueEntry {
   return {
@@ -82,6 +83,7 @@ function makeEntry(
     targetStates: opts.targetStates as QueueEntry['targetStates'],
     queueReceipt: opts.queueReceipt,
     callerCatId: opts.callerCatId,
+    recoveryActions: opts.recoveryActions,
   };
 }
 
@@ -424,6 +426,14 @@ describe('F264 Queue UX hierarchy — component claims', () => {
       content: 'steer test',
       targetCats: ['opus'],
       targetStates: { opus: 'queued' },
+      recoveryActions: [
+        {
+          id: 'queue-steer:q-steer',
+          entryId: 'q-steer',
+          kind: 'steer',
+          request: { method: 'POST', path: '/api/threads/thread-1/queue/q-steer/steer' },
+        },
+      ],
     });
     useChatStore.setState({ queue: [entry] });
     renderQueuePanel();

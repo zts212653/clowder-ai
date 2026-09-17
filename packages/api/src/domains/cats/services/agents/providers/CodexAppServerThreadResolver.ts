@@ -52,6 +52,9 @@ export class CodexAppServerCarrierReplacementRequiredError extends Error {
   }
 }
 
+/** Capacity continuation has no user prompt to bootstrap a replacement context. */
+export class CodexAppServerExactResumeRequiredError extends Error {}
+
 /**
  * Does this provider rejection positively mean "the requested thread does not
  * exist"?
@@ -94,11 +97,15 @@ export async function resolveCodexAppServerThread(input: {
   startParams?: Record<string, unknown>;
   /** Provenance retained while a dead resume carrier is replaced. */
   resumeReplacement?: CodexNativeResumeReplacementProvenance;
+  /** Recovery must retain the original native history, including completed tools. */
+  requireExactResume?: boolean;
   localLiveLease: boolean;
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   now: () => number;
 }): Promise<CodexAppServerThreadVerdict> {
   if (input.thread.kind === 'start') {
+    if (input.requireExactResume)
+      throw new CodexAppServerExactResumeRequiredError('Capacity recovery requires a resume');
     const raw = await input.request('thread/start', input.params);
     const threadId = threadIdOf(raw);
     if (input.resumeReplacement) {
@@ -144,6 +151,7 @@ export async function resolveCodexAppServerThread(input: {
     // attempts another RPC on the dead carrier.
     const rejection = classifyNativeResumeRejection(failure.message);
     if (!rejection) throw failure;
+    if (input.requireExactResume) throw new CodexAppServerExactResumeRequiredError(failure.message);
     // Not-found is a JSON-RPC provider verdict. The observed max-payload
     // terminal instead closes the carrier request without an RPC envelope, but
     // it is equally bounded: exact text, during thread/resume, before turn/start.
@@ -169,6 +177,9 @@ export async function resolveCodexAppServerThread(input: {
   }
 
   const threadId = threadIdOf(raw);
+  if (input.requireExactResume && threadId !== requestedThreadId) {
+    throw new CodexAppServerExactResumeRequiredError('Capacity recovery did not resume the original native thread');
+  }
   // A response for a different id is never coerced to resumed.
   if (threadId !== requestedThreadId) {
     return { kind: 'mismatched', requestedThreadId, threadId, raw };

@@ -22,21 +22,42 @@ const ACTOR_ROLE_TO_ROSTER_ROLES: Record<ActorRole, string[]> = {
   'health-monitor': ['architect', 'peer-reviewer'],
 };
 
+export interface ActorResolutionPolicy {
+  isScarce(catId: string): boolean;
+}
+
+function requiredRoles(role: ActorRole, costTier: CostTier, policy?: ActorResolutionPolicy): string[] {
+  if (role === 'memory-curator' && costTier === 'cheap' && policy) {
+    return ['memory-spike', 'assistant', 'thinker', 'reasoning', 'coder', 'architect'];
+  }
+  return ACTOR_ROLE_TO_ROSTER_ROLES[role];
+}
+
 /**
  * Factory: creates a resolver function bound to a roster source.
  * Returns catId or null if no match.
  */
-export function createActorResolver(getRoster: RosterGetter): (role: ActorRole, costTier: CostTier) => string | null {
+export function createActorResolver(
+  getRoster: RosterGetter,
+  policy?: ActorResolutionPolicy,
+): (role: ActorRole, costTier: CostTier) => string | null {
   return (role: ActorRole, costTier: CostTier): string | null => {
     const roster = getRoster();
-    const requiredRoles = ACTOR_ROLE_TO_ROSTER_ROLES[role];
+    const acceptedRoles = requiredRoles(role, costTier, policy);
 
     const candidates = Object.entries(roster)
-      .filter(([, entry]) => {
+      .filter(([catId, entry]) => {
         if (!entry.available) return false;
-        return requiredRoles.some((r) => entry.roles.includes(r));
+        if (role === 'memory-curator' && costTier === 'cheap' && policy?.isScarce(catId)) return false;
+        return acceptedRoles.some((r) => entry.roles.includes(r));
       })
-      .map(([catId, entry]) => ({ catId, lead: entry.lead }));
+      .map(([catId, entry]) => ({
+        catId,
+        lead: entry.lead,
+        roleRank: Math.min(
+          ...entry.roles.map((entryRole) => acceptedRoles.indexOf(entryRole)).filter((rank) => rank >= 0),
+        ),
+      }));
 
     if (candidates.length === 0) return null;
 
@@ -44,7 +65,10 @@ export function createActorResolver(getRoster: RosterGetter): (role: ActorRole, 
     candidates.sort((a, b) => {
       const aLead = a.lead ? 1 : 0;
       const bLead = b.lead ? 1 : 0;
-      return costTier === 'deep' ? bLead - aLead : aLead - bLead;
+      const leadOrder = costTier === 'deep' ? bLead - aLead : aLead - bLead;
+      if (leadOrder !== 0) return leadOrder;
+      if (a.roleRank !== b.roleRank) return a.roleRank - b.roleRank;
+      return a.catId.localeCompare(b.catId);
     });
 
     return candidates[0].catId;

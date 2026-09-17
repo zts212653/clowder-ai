@@ -8,6 +8,7 @@ import type {
   ApprovalEnvelope,
   ApprovalPublication,
   CatId,
+  DeclaredWorkMode,
   ProposalApproveOverrides,
   ReportingMode,
   ThreadProposal,
@@ -27,6 +28,8 @@ export interface CreateProposalInput {
   initialMessage?: string;
   /** F128: reporting mode for the created thread (default final-only if omitted). */
   reportingMode?: ReportingMode;
+  /** F277: declared placement role; omitted only for legacy proposals. */
+  declaredWorkMode?: DeclaredWorkMode;
   createdBy: string;
   /**
    * Optional explicit proposalId. When supplied, the store uses this value instead of
@@ -150,6 +153,7 @@ export class InMemoryProposalStore implements IProposalStore {
       publication: { state: 'staged', stagedAt: now },
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
+      ...(input.declaredWorkMode ? { declaredWorkMode: input.declaredWorkMode } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
     return cloneProposal(proposal);
@@ -299,6 +303,7 @@ function applyInMemoryOverrides(proposal: ThreadProposal, overrides: ProposalApp
   if (overrides.preferredCats !== undefined) proposal.preferredCats = [...overrides.preferredCats];
   if (overrides.projectPath !== undefined) proposal.projectPath = overrides.projectPath;
   if (overrides.reportingMode !== undefined) proposal.reportingMode = overrides.reportingMode;
+  if (overrides.declaredWorkMode !== undefined) proposal.declaredWorkMode = overrides.declaredWorkMode;
   if (overrides.initialMessage === null) delete proposal.initialMessage;
   else if (typeof overrides.initialMessage === 'string') proposal.initialMessage = overrides.initialMessage;
 }

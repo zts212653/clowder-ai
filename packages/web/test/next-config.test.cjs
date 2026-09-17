@@ -3,9 +3,12 @@ const fs = require('node:fs');
 const Module = require('node:module');
 const path = require('node:path');
 const { describe, it } = require('node:test');
+const { pathToFileURL } = require('node:url');
 
 const configPath = path.resolve(__dirname, '../next.config.js');
 const packageJsonPath = path.resolve(__dirname, '../package.json');
+const browserTestPath = path.resolve(__dirname, 'browser');
+const nextDevTestEnvironmentPath = path.join(browserTestPath, 'next-dev-test-environment.mjs');
 const ENV_KEYS = [
   'NEXT_PUBLIC_API_URL',
   'API_SERVER_PORT',
@@ -165,6 +168,47 @@ describe('next.config rewrites', () => {
       () => withEnv({ CAT_CAFE_WEB_TEST_DIST_DIR: '.next-test-f294-example' }, () => {}),
       /must be provided together/,
     );
+  });
+
+  it('keeps every browser-test Next dev server out of the production .next directory', () => {
+    const offenders = fs
+      .readdirSync(browserTestPath, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.mjs'))
+      .filter((entry) => {
+        const source = fs.readFileSync(path.join(browserTestPath, entry.name), 'utf8');
+        if (!source.includes("[NEXT_BIN, 'dev'")) return false;
+        const usesSharedIsolation =
+          source.includes("from './next-dev-test-environment.mjs'") && /env:\s*[A-Za-z_$][\w$]*\.env/.test(source);
+        const configuresIsolationDirectly =
+          source.includes('CAT_CAFE_WEB_TEST_DIST_DIR') && source.includes('CAT_CAFE_WEB_TEST_TSCONFIG');
+        return !usesSharedIsolation && !configuresIsolationDirectly;
+      })
+      .map((entry) => entry.name)
+      .sort();
+
+    assert.deepEqual(
+      offenders,
+      [],
+      `Next dev browser tests must isolate build artifacts from production .next: ${offenders.join(', ')}`,
+    );
+  });
+
+  it('creates and cleans a paired isolated Next dev artifact environment', async () => {
+    const { createNextDevTestEnvironment } = await import(pathToFileURL(nextDevTestEnvironmentPath));
+    const isolation = await createNextDevTestEnvironment('contract', { NEXT_PUBLIC_API_URL: 'http://fixture' });
+
+    try {
+      assert.match(isolation.env.CAT_CAFE_WEB_TEST_DIST_DIR, /^\.next-test-contract-/);
+      assert.match(isolation.env.CAT_CAFE_WEB_TEST_TSCONFIG, /^tsconfig\.next-test-contract-.*\.json$/);
+      assert.equal(isolation.env.NEXT_PUBLIC_API_URL, 'http://fixture');
+      assert.equal(fs.existsSync(isolation.distDirPath), true);
+      assert.equal(fs.existsSync(isolation.tsconfigPath), true);
+    } finally {
+      await isolation.cleanup();
+    }
+
+    assert.equal(fs.existsSync(isolation.distDirPath), false);
+    assert.equal(fs.existsSync(isolation.tsconfigPath), false);
   });
 
   it('keeps next-pwa in dependencies because next.config requires it at build time', () => {

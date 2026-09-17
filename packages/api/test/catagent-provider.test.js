@@ -343,7 +343,10 @@ test('P3: real invoke() → callApi() with credential fixture (no test override)
   const tmpDir = join(tmpdir(), `catagent-p3-${Date.now()}`);
   const catCafeDir = join(tmpDir, '.cat-cafe');
   mkdirSync(catCafeDir, { recursive: true });
-  writeFileSync(join(catCafeDir, 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
+  writeFileSync(
+    join(catCafeDir, 'accounts.json'),
+    JSON.stringify({ 'test-ant': { authType: 'api_key', clientId: 'anthropic' } }),
+  );
   writeFileSync(join(catCafeDir, 'credentials.json'), JSON.stringify({ 'test-ant': { apiKey: 'sk-real-path' } }));
 
   // Point credential resolver to temp dir

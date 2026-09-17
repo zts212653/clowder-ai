@@ -5,6 +5,7 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -82,6 +83,7 @@ export function createContinuityHarness() {
   let browser;
   let context;
   let baseUrl;
+  let nextDev;
   const serverOutput = [];
 
   async function waitForPage(url) {
@@ -156,9 +158,10 @@ export function createContinuityHarness() {
   async function start() {
     const port = await findFreePort();
     baseUrl = `http://127.0.0.1:${port}`;
+    nextDev = await createNextDevTestEnvironment('rich-html-continuity', { NEXT_PUBLIC_API_URL: baseUrl });
     server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'development', NEXT_PUBLIC_API_URL: baseUrl },
+      env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     server.stdout.on('data', (chunk) => serverOutput.push(chunk.toString()));
@@ -172,10 +175,12 @@ export function createContinuityHarness() {
   async function stop() {
     await context?.close();
     await browser?.close();
-    if (!server || server.exitCode !== null) return;
-    server.kill('SIGTERM');
-    await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-    if (server.exitCode === null) server.kill('SIGKILL');
+    if (server?.exitCode === null) {
+      server.kill('SIGTERM');
+      await Promise.race([once(server, 'exit'), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+      if (server.exitCode === null) server.kill('SIGKILL');
+    }
+    await nextDev?.cleanup();
   }
 
   return { activeWidget, openFixture, start, stop };

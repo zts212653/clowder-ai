@@ -22,7 +22,7 @@ import type {
 import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { bootstrapCatCatalog, readCatCatalogRaw } from './cat-catalog-store.js';
+import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
   hasOccupiedMentionAlias,
@@ -458,9 +458,9 @@ function removeUnavailableTemplateVariants(
  * Merge template + catalog with #772 template-only breed filter applied.
  * Shared by loadCatConfig() and getAcpConfig() to avoid duplicate merge paths.
  */
-function mergeTemplateWithCatalog(templatePath: string): string | null {
+function mergeTemplateWithCatalog(templatePath: string, options: CatCatalogReadOptions = {}): string | null {
   const projectRoot = dirname(templatePath);
-  const catalogRaw = readCatCatalogRaw(projectRoot);
+  const catalogRaw = readCatCatalogRaw(projectRoot, options);
   if (catalogRaw === null) return null;
 
   const baseRaw = readTemplate(templatePath);
@@ -536,9 +536,9 @@ function parseCatConfig(raw: string): CatCafeConfig {
   return result.data as unknown as CatCafeConfig;
 }
 
-export function loadResolvedCatConfig(templatePath?: string): CatCafeConfig {
+export function loadResolvedCatConfig(templatePath?: string, options: CatCatalogReadOptions = {}): CatCafeConfig {
   const resolvedTemplatePath = templatePath ?? process.env.CAT_TEMPLATE_PATH ?? DEFAULT_CAT_TEMPLATE_PATH;
-  const raw = mergeTemplateWithCatalog(resolvedTemplatePath) ?? readTemplate(resolvedTemplatePath);
+  const raw = mergeTemplateWithCatalog(resolvedTemplatePath, options) ?? readTemplate(resolvedTemplatePath);
   return parseCatConfig(raw);
 }
 

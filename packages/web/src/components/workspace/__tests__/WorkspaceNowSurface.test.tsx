@@ -1,7 +1,9 @@
+import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
@@ -48,8 +50,49 @@ describe('F284 WorkspaceNowSurface', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('keeps both parallel cats visible and preserves the remaining row on refresh', async () => {
+    const executions: ActiveExecutionProjection[] = ['codex-astra', 'fable5'].map((catId) => ({
+      executionId: 'shared-parent',
+      turnInvocationId: `turn-${catId}`,
+      threadId: 'thread-a',
+      threadTitle: 'Parallel sampling',
+      catId,
+      kind: 'live_invocation',
+      startedAt: 100,
+      cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+    }));
+    const store = useActiveExecutionStore.getState();
+    const hydrate = (items: ActiveExecutionProjection[]) =>
+      store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), {
+        projectPath: '/project/cafe',
+        executions: items,
+      });
+    hydrate(executions);
+    const onSelectExecution = vi.fn();
+    const consoleError = vi.spyOn(console, 'error');
+    try {
+      await act(async () => root.render(<WorkspaceNowSurface onSelectExecution={onSelectExecution} />));
+      expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(2);
+      expect(container.textContent).toContain('2 件工作正在进行');
+      const buttons = container.querySelectorAll<HTMLButtonElement>('[data-testid="workspace-open-running-object"]');
+      act(() => buttons[0]?.click());
+      act(() => buttons[1]?.click());
+      expect(onSelectExecution.mock.calls.map(([execution]) => execution.catId)).toEqual(['codex-astra', 'fable5']);
+
+      const remainingRow = container.querySelectorAll('[data-testid="workspace-running-object"]')[1];
+      await act(async () => hydrate(executions.slice(1)));
+      expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(1);
+      expect(container.querySelector('[data-testid="workspace-running-object"]')).toBe(remainingRow);
+      expect(container.textContent).toContain('fable5');
+      expect(container.textContent).not.toContain('codex-astra');
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it('renders exactly the real running objects instead of a permanent tool inventory', async () => {
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [
@@ -93,12 +136,12 @@ describe('F284 WorkspaceNowSurface', () => {
     expect(container.querySelectorAll('[data-testid="workspace-running-object"]')).toHaveLength(2);
     expect(container.textContent).toContain('cat-cafe');
     expect(container.textContent).toContain('feat/f284-ux-implementation');
-    expect(container.textContent).toContain('Foreground thread · 实时回合');
-    expect(container.textContent).toContain('Background thread · 全量门禁');
+    expect(container.textContent).toContain('Foreground thread回复中');
+    expect(container.textContent).toContain('Background thread等待后台完成 · 全量门禁');
   });
 
   it('shows an explicit reason when canonical truth cannot offer a safe cancel target', async () => {
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [
@@ -121,12 +164,13 @@ describe('F284 WorkspaceNowSurface', () => {
   });
 
   it('offers the real live invocation to an adapter without treating a managed command as Agent Run', async () => {
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [
         {
           executionId: 'inv-1',
+          turnInvocationId: 'turn-1',
           threadId: 'thread-a',
           threadTitle: 'Live run',
           catId: 'codex-sol',
@@ -152,5 +196,59 @@ describe('F284 WorkspaceNowSurface', () => {
     expect(openButtons).toHaveLength(1);
     act(() => openButtons[0]?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(onSelectExecution).toHaveBeenCalledWith(expect.objectContaining({ executionId: 'inv-1' }));
+  });
+
+  it('offers Chat for live, managed and unresolved work without inventing a detail target', async () => {
+    const request = useActiveExecutionStore.getState().beginHydration('thread-host', '/project/cafe');
+    useActiveExecutionStore.getState().applySnapshot('thread-host', request, {
+      projectPath: '/project/cafe',
+      executions: [
+        {
+          executionId: 'parent-a',
+          turnInvocationId: 'child-a',
+          threadId: 'thread-a',
+          threadTitle: 'A',
+          catId: 'kimi',
+          kind: 'live_invocation',
+          startedAt: 1,
+          cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+        },
+        {
+          executionId: 'command-b',
+          threadId: 'thread-b',
+          threadTitle: 'B',
+          catId: 'kimi',
+          kind: 'managed_command',
+          startedAt: 2,
+          cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
+        },
+        {
+          executionId: 'unresolved-c',
+          threadId: 'thread-c',
+          threadTitle: 'C',
+          catId: 'kimi',
+          kind: 'live_invocation',
+          startedAt: 3,
+          cancelability: { state: 'not_cancelable', reason: 'control_plane_unavailable' },
+        },
+      ],
+    });
+    const onSelectExecution = vi.fn();
+    await act(async () => root.render(<WorkspaceNowSurface onSelectExecution={onSelectExecution} />));
+    const chatLinks = Array.from(container.querySelectorAll<HTMLAnchorElement>('a')).filter(
+      (link) => link.textContent === 'Chat',
+    );
+    expect(chatLinks.map((link) => link.getAttribute('href'))).toEqual([
+      '/thread/thread-a',
+      '/thread/thread-b',
+      '/thread/thread-c',
+    ]);
+    expect(container.querySelectorAll('[data-testid="workspace-open-running-object"]')).toHaveLength(1);
+    useChatStore.getState().setRightPanelMode('workspace');
+    useChatStore.getState().setRightPanelOpen(true);
+    act(() => chatLinks[0]?.click());
+    expect(window.location.pathname).toBe('/thread/thread-a');
+    expect(useChatStore.getState().rightPanelMode).toBe('status');
+    expect(useChatStore.getState().rightPanelOpen).toBe(false);
   });
 });

@@ -2,7 +2,7 @@
  * ExternalReviewRecoveryService — settles stale external review lease
  * generations when the GitHub HEAD has advanced past the reviewed HEAD.
  *
- * This is the external counterpart to LocalReviewVerdictService.recover().
+ * This owns the external GitHub-artifact recovery path; local review uses ordinary messages.
  * It authenticates the predecessor principal (author cat + tenant), verifies
  * the GitHub review artifact URL, confirms a server-observed HEAD advance,
  * and atomically settles the old generation via CAS.

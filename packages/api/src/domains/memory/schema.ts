@@ -2,6 +2,7 @@
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
 import type Database from 'better-sqlite3';
+import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -70,7 +71,13 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 41;
+export const CURRENT_SCHEMA_VERSION = 45;
+
+function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
+  return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
+    ({ name }) => name === 'consumer_cat_id',
+  );
+}
 
 // F163 Phase A: experiment infrastructure tables (cohorts, suggestions, logs)
 export const SCHEMA_V13_TABLES = `
@@ -1212,8 +1219,14 @@ export function applyMigrations(db: Database.Database): void {
   // SQLite cannot alter a CHECK constraint in place, so rebuild the table transactionally
   // while preserving every content-free receipt and its immutable coordinates.
   if (currentVersion < 41) {
-    db.transaction(() => {
-      db.exec(`
+    if (memoryCueLedgerHasConsumerBinding(db)) {
+      // A repair of an earlier migration can rewind schema_version while the physical
+      // ledger already has the stricter V43 shape. Never downgrade that table or erase
+      // its exact consumer binding merely to replay an older marker.
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(41, new Date().toISOString());
+    } else {
+      db.transaction(() => {
+        db.exec(`
         CREATE TABLE memory_cue_events_v41 (
           event_id TEXT PRIMARY KEY,
           idempotency_key TEXT NOT NULL UNIQUE,
@@ -1262,7 +1275,172 @@ export function applyMigrations(db: Database.Database): void {
           SELECT RAISE(ABORT, 'memory cue events are append-only');
         END;
       `);
-      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(41, new Date().toISOString());
+        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(41, new Date().toISOString());
+      })();
+    }
+  }
+
+  // V42: F312 Phase D — admit Decision receipts to the existing content-free Cue Plane ledger.
+  // Rebuild the SQLite CHECK constraint without changing the persisted coordinate-only shape.
+  if (currentVersion < 42) {
+    if (memoryCueLedgerHasConsumerBinding(db)) {
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(42, new Date().toISOString());
+    } else {
+      db.transaction(() => {
+        db.exec(`
+        CREATE TABLE memory_cue_events_v42 (
+          event_id TEXT PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          cue_id TEXT NOT NULL,
+          opportunity_id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          invocation_id TEXT NOT NULL,
+          resolver_family TEXT NOT NULL CHECK (
+            resolver_family IN (
+              'person_entity', 'operational_precedent', 'taste', 'profile', 'event', 'decision', 'project_knowledge'
+            )
+          ),
+          source_anchor TEXT NOT NULL,
+          source_revision TEXT NOT NULL,
+          axis TEXT NOT NULL CHECK (axis IN ('consumption', 'invalidation')),
+          consumption_outcome TEXT CHECK (
+            consumption_outcome IN ('presented', 'drilled', 'applied', 'dismissed')
+          ),
+          invalidation_reason TEXT CHECK (
+            invalidation_reason IN ('source_corrected', 'source_forgotten', 'scope_revoked', 'superseded', 'expired')
+          ),
+          catalog_version INTEGER NOT NULL,
+          resolver_version INTEGER NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          CHECK (
+            (axis = 'consumption' AND consumption_outcome IS NOT NULL AND invalidation_reason IS NULL)
+            OR
+            (axis = 'invalidation' AND invalidation_reason IS NOT NULL AND consumption_outcome IS NULL)
+          )
+        );
+        INSERT INTO memory_cue_events_v42 SELECT * FROM memory_cue_events;
+        DROP TABLE memory_cue_events;
+        ALTER TABLE memory_cue_events_v42 RENAME TO memory_cue_events;
+        CREATE INDEX idx_memory_cue_events_cue_scope
+          ON memory_cue_events(owner_user_id, cue_id, occurred_at);
+        CREATE INDEX idx_memory_cue_events_opportunity
+          ON memory_cue_events(owner_user_id, opportunity_id, occurred_at);
+        CREATE TRIGGER memory_cue_events_no_update
+        BEFORE UPDATE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+        CREATE TRIGGER memory_cue_events_no_delete
+        BEFORE DELETE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+      `);
+        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(42, new Date().toISOString());
+      })();
+    }
+  }
+
+  // V43: F312 Phase E — bind new receipts to the exact consuming cat and admit
+  // cat-owned Seed coordinates without persisting the private seed body.
+  if (currentVersion < 43) {
+    if (memoryCueLedgerHasConsumerBinding(db)) {
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(43, new Date().toISOString());
+    } else {
+      db.transaction(() => {
+        db.exec(`
+        CREATE TABLE memory_cue_events_v43 (
+          event_id TEXT PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          cue_id TEXT NOT NULL,
+          opportunity_id TEXT NOT NULL,
+          owner_user_id TEXT NOT NULL,
+          thread_id TEXT NOT NULL,
+          invocation_id TEXT NOT NULL,
+          consumer_cat_id TEXT NOT NULL,
+          resolver_family TEXT NOT NULL CHECK (
+            resolver_family IN (
+              'person_entity', 'operational_precedent', 'taste', 'profile', 'event', 'decision',
+              'project_knowledge', 'cat_owned_seed'
+            )
+          ),
+          source_anchor TEXT NOT NULL,
+          source_revision TEXT NOT NULL,
+          axis TEXT NOT NULL CHECK (axis IN ('consumption', 'invalidation')),
+          consumption_outcome TEXT CHECK (
+            consumption_outcome IN ('presented', 'drilled', 'applied', 'dismissed')
+          ),
+          invalidation_reason TEXT CHECK (
+            invalidation_reason IN ('source_corrected', 'source_forgotten', 'scope_revoked', 'superseded', 'expired')
+          ),
+          catalog_version INTEGER NOT NULL,
+          resolver_version INTEGER NOT NULL,
+          occurred_at INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          CHECK (
+            (axis = 'consumption' AND consumption_outcome IS NOT NULL AND invalidation_reason IS NULL)
+            OR
+            (axis = 'invalidation' AND invalidation_reason IS NOT NULL AND consumption_outcome IS NULL)
+          )
+        );
+        INSERT INTO memory_cue_events_v43 (
+          event_id, idempotency_key, cue_id, opportunity_id,
+          owner_user_id, thread_id, invocation_id, consumer_cat_id, resolver_family,
+          source_anchor, source_revision, axis, consumption_outcome, invalidation_reason,
+          catalog_version, resolver_version, occurred_at, created_at
+        )
+        SELECT
+          event_id, idempotency_key, cue_id, opportunity_id,
+          owner_user_id, thread_id, invocation_id, 'legacy-unbound', resolver_family,
+          source_anchor, source_revision, axis, consumption_outcome, invalidation_reason,
+          catalog_version, resolver_version, occurred_at, created_at
+        FROM memory_cue_events;
+        DROP TABLE memory_cue_events;
+        ALTER TABLE memory_cue_events_v43 RENAME TO memory_cue_events;
+        CREATE INDEX idx_memory_cue_events_cue_scope
+          ON memory_cue_events(owner_user_id, thread_id, invocation_id, consumer_cat_id, cue_id, occurred_at);
+        CREATE INDEX idx_memory_cue_events_opportunity
+          ON memory_cue_events(owner_user_id, opportunity_id, occurred_at);
+        CREATE TRIGGER memory_cue_events_no_update
+        BEFORE UPDATE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+        CREATE TRIGGER memory_cue_events_no_delete
+        BEFORE DELETE ON memory_cue_events
+        BEGIN
+          SELECT RAISE(ABORT, 'memory cue events are append-only');
+        END;
+      `);
+        db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(43, new Date().toISOString());
+      })();
+    }
+  }
+
+  // V44: F275 — persist managed-command owner authentication outside every
+  // public DynamicTaskDef / schedule-proposal projection. NULL is the only
+  // legacy shape and hydrates fail-closed as `unknown`; new hold producers
+  // write one immutable value in the same INSERT as the durable task.
+  if (currentVersion < 44) {
+    try {
+      db.exec(`
+        ALTER TABLE dynamic_task_defs ADD COLUMN owner_auth_provenance TEXT
+          CHECK (owner_auth_provenance IN ('strict', 'compatibility_fallback', 'unknown'))
+      `);
+    } catch {
+      // Column may already exist from a partial migration.
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(44, new Date().toISOString());
+  }
+
+  // V45: polling schedule summaries must not scan millions of retained runs.
+  // Backfill and triggers commit with the version marker, including for old writers.
+  if (currentVersion < 45) {
+    db.transaction(() => {
+      db.exec(RUN_LEDGER_STATS_SCHEMA);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(45, new Date().toISOString());
     })();
   }
 }

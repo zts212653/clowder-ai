@@ -8,7 +8,7 @@ import {
   type DispatchRecoveryResult,
 } from './ActionSuccessorDispatchRecovery.js';
 import type { ActionSuccessorLeaseStore } from './ActionSuccessorLeaseStore.js';
-import type { ActionSuccessorLease } from './action-successor-state-machine.js';
+import { type ActionSuccessorLease, isRecoverableActionSuccessorReturn } from './action-successor-state-machine.js';
 
 export {
   type ActionSuccessorDispatchDeliveryResult,
@@ -102,7 +102,9 @@ export class ActionSuccessorRecoverySweep {
   }
 
   async runOnce(): Promise<ActionSuccessorRecoveryStats> {
-    const leases = await this.deps.leaseStore.listPendingReturns(this.scanLimit);
+    const leases = (await this.deps.leaseStore.listPendingReturns(this.scanLimit)).filter(
+      isRecoverableActionSuccessorReturn,
+    );
     let delivered = 0;
     let pending = 0;
     let overdue = 0;

@@ -1,5 +1,5 @@
 import type { RichCardBlock } from '@/stores/chat-types';
-import type { ReportingModeEditValue } from './ProposalCardFields';
+import type { DeclaredWorkModeEditValue, ReportingModeEditValue } from './ProposalCardFields';
 
 export type ProposalCardStatus = 'pending' | 'approving' | 'approved' | 'rejected' | 'withdrawn';
 
@@ -8,6 +8,7 @@ export interface ProposalSnapshot {
   status: ProposalCardStatus;
   createdThreadId?: string;
   reportingMode?: ReportingModeEditValue;
+  declaredWorkMode?: DeclaredWorkModeEditValue;
 }
 
 export interface ProposalFieldEdits {
@@ -17,6 +18,7 @@ export interface ProposalFieldEdits {
   initialMessage: string;
   projectPath: string;
   reportingMode: ReportingModeEditValue;
+  declaredWorkMode: DeclaredWorkModeEditValue;
 }
 
 export function extractProposalId(block: RichCardBlock): string | null {
@@ -47,6 +49,15 @@ export function readReportingModeEdit(block: RichCardBlock): ReportingModeEditVa
   if (value.includes('state-transitions')) return 'state-transitions';
   if (value.includes('blocking-ack')) return 'blocking-ack';
   return 'final-only';
+}
+
+export function readDeclaredWorkModeEdit(block: RichCardBlock): DeclaredWorkModeEditValue {
+  const value = readField(block, '协作方式');
+  if (value.includes('并行')) return 'parallel';
+  if (value.includes('调查')) return 'investigation';
+  if (value.includes('独立')) return 'standalone';
+  if (value.includes('子任务')) return 'subtask';
+  return '';
 }
 
 export function isDefaultProjectOwnership(value: string): boolean {

@@ -52,6 +52,17 @@ export const writeOpportunityRefV1Schema = z
 
 export type WriteOpportunityRefV1 = z.infer<typeof writeOpportunityRefV1Schema>;
 
+export const DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS = ['awaiting_confirmation', 'insufficient_evidence'] as const;
+
+export const deferredPersonMemoryClerkDispositionInputSchema = z
+  .object({
+    receiptId: deferredPersonMemoryReceiptIdSchema,
+    claimId: boundedString(240),
+    disposition: z.enum(DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS),
+    writeOpportunityRef: writeOpportunityRefV1Schema.optional(),
+  })
+  .strict();
+
 export const deferredWriteOpportunitySourceRefV1Schema = z
   .object({
     artifactId: boundedString(240),
@@ -175,6 +186,7 @@ export const DEFERRED_PERSON_MEMORY_RECEIPT_STATES = [
   'claimed',
   'proposed',
   'withdrawn',
+  'not_actionable',
 ] as const;
 
 const receiptBaseSchema = z
@@ -193,6 +205,11 @@ const receiptBaseSchema = z
     state: z.enum(DEFERRED_PERSON_MEMORY_RECEIPT_STATES),
     claimId: boundedString(240).optional(),
     claimUntil: timestampSchema.optional(),
+    processorCatId: requesterCatIdSchema.optional(),
+    processingThreadId: boundedString(160).optional(),
+    processingMessageId: boundedString(240).optional(),
+    processorInvocationId: boundedString(240).optional(),
+    resolution: z.enum(['insufficient_evidence', 'unresolved_after_clerk_attempt']).optional(),
     proposalId: captureCandidateIdSchema.optional(),
     /**
      * Survivor field: deliberately excluded from the terminal payload-purge set below, because the
@@ -239,11 +256,51 @@ function validateDeferredReceiptLifecycle(value: DeferredReceiptShape, ctx: z.Re
   if (value.state === 'claimed' && (!value.claimId || value.claimUntil === undefined)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['claimId'], message: 'claimed receipt requires a lease' });
   }
-  if (value.state !== 'claimed' && (value.claimId !== undefined || value.claimUntil !== undefined)) {
+  const grant = [value.processorCatId, value.processingThreadId];
+  if (grant.some((part) => part !== undefined) && grant.some((part) => part === undefined)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['processorCatId'], message: 'processing grant is incomplete' });
+  }
+  if (value.state === 'claimed' && grant.some((part) => part === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['processorCatId'],
+      message: 'claimed receipt requires a processor',
+    });
+  }
+  if (value.processingMessageId !== undefined && grant.some((part) => part === undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['processingMessageId'],
+      message: 'processing message requires a processor grant',
+    });
+  }
+  if (value.processorInvocationId !== undefined && value.processingMessageId === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['processorInvocationId'],
+      message: 'processor invocation requires an exact processing message',
+    });
+  }
+  if (
+    value.state !== 'claimed' &&
+    (value.claimId !== undefined ||
+      value.claimUntil !== undefined ||
+      value.processorCatId !== undefined ||
+      value.processingThreadId !== undefined ||
+      value.processingMessageId !== undefined ||
+      value.processorInvocationId !== undefined)
+  ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['claimId'],
       message: 'only claimed receipts may retain a lease',
+    });
+  }
+  if ((value.state === 'not_actionable') !== (value.resolution !== undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['resolution'],
+      message: 'not_actionable receipt requires a terminal resolution',
     });
   }
   if ((value.state === 'proposed') !== (value.proposalId !== undefined)) {
@@ -295,6 +352,7 @@ export const deferredPersonMemoryReceiptSchema = receiptBaseSchema.superRefine((
 });
 
 export type DeferredPersonMemoryInput = z.infer<typeof deferredPersonMemoryInputSchema>;
+export type DeferredPersonMemoryClerkDispositionInput = z.infer<typeof deferredPersonMemoryClerkDispositionInputSchema>;
 export type DeferredPersonMemoryReceipt = z.infer<typeof deferredPersonMemoryReceiptSchema>;
 export type DeferredPersonMemoryResolvedSource = z.infer<typeof deferredPersonMemoryResolvedSourceSchema>;
 export type DeferredPersonMemorySourceInput = z.infer<typeof deferredPersonMemorySourceInputSchema>;

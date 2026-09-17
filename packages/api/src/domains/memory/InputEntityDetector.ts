@@ -24,7 +24,7 @@
  */
 
 import type Database from 'better-sqlite3';
-import { normalizeEntityAlias } from './EntityRegistry.js';
+import { EntityRegistryStore, entitySourceRevision, normalizeEntityAlias } from './EntityRegistry.js';
 import type { EntityProvenance } from './interfaces.js';
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -73,6 +73,8 @@ export interface DetectedEntity {
   visibilityScope?: string;
   /** Canonical display name from entity_registry (may differ from matchedAlias). */
   canonicalName?: string;
+  /** Exact current Entity projection revision. Present only for registry identities. */
+  sourceRevision?: string;
 }
 
 /** Options for InputEntityDetector.detect(). */
@@ -162,7 +164,11 @@ export class InputEntityDetector {
    */
   lastPrivacyBlockedCount = 0;
 
-  constructor(private readonly db: Database.Database) {}
+  private readonly registry: EntityRegistryStore;
+
+  constructor(private readonly db: Database.Database) {
+    this.registry = new EntityRegistryStore(db);
+  }
 
   /**
    * Scan input text for entity references from both entity_registry and doc_aliases.
@@ -239,6 +245,7 @@ export class InputEntityDetector {
     // Privacy gate runs once per entity to avoid overcounting (P2 fix).
     const bestByEntity = new Map<string, DetectedEntity>();
     const blocked = new Set<string>(); // entity IDs already privacy-blocked
+    const revisionByEntity = new Map<string, string>();
 
     for (const row of this.loadEntityAliases()) {
       if (row.status !== 'active') continue;
@@ -265,6 +272,13 @@ export class InputEntityDetector {
 
       const existing = bestByEntity.get(row.entity_id);
       if (!existing || confidence > existing.confidence) {
+        let sourceRevision = revisionByEntity.get(row.entity_id);
+        if (!sourceRevision) {
+          const current = this.registry.get(row.entity_id);
+          if (!current) continue;
+          sourceRevision = entitySourceRevision(current);
+          revisionByEntity.set(row.entity_id, sourceRevision);
+        }
         bestByEntity.set(row.entity_id, {
           entityId: row.entity_id,
           matchedAlias: row.alias,
@@ -275,6 +289,7 @@ export class InputEntityDetector {
           stance: row.stance,
           visibilityScope: row.visibility_scope,
           canonicalName: row.canonical_name,
+          sourceRevision,
         });
       }
     }

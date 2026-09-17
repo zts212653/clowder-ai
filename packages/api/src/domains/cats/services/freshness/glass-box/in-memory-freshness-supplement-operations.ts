@@ -37,6 +37,12 @@ export class InMemoryFreshnessSupplementOperations {
     );
   }
 
+  listAll(): FreshnessSupplementAggregate[] {
+    return [...this.supplements.values()]
+      .sort((left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id))
+      .map(clone);
+  }
+
   listRecoverable(): FreshnessSupplementAggregate[] {
     return [...this.supplements.values()]
       .filter((supplement) => supplement.status === 'pending' || supplement.status === 'running')

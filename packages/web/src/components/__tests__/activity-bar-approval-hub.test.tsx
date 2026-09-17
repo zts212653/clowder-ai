@@ -1,19 +1,16 @@
-/**
- * F246 AC-D3 + F310 compatibility: ActivityBar — Approval Hub bell regression tests.
- *
- * Proves: global Needs Me does not replace the existing approval badge/entry.
- */
-
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// --- Mocks ---
 let mockCount = 0;
 let mockWorkspaceMode = 'dev';
 let mockRightPanelMode: string = 'status';
 let mockRightPanelOpen = false;
 let mockActiveSurface: Record<string, unknown> | null = null;
+let mockNeedsMeCount = 0;
+let mockNeedsMeLoading = false;
+let mockNeedsMeError = false;
+let mockApprovalUnavailable: 'loading' | 'error' | null = null;
 const mockFetchPending = vi.fn();
 const mockSetWorkspaceMode = vi.fn((mode: string) => {
   mockWorkspaceMode = mode;
@@ -30,9 +27,30 @@ vi.mock('@/hooks/useApprovalHub', () => ({
   useApprovalHubSync: vi.fn(),
 }));
 
+vi.mock('@/hooks/useEntrustedWorkProjection', () => ({
+  useEntrustedWorkProjection: (projection: string) => {
+    if (projection !== 'needs-me') throw new Error(`unexpected projection: ${projection}`);
+    return {
+      ownerReads: [],
+      loading: mockNeedsMeLoading,
+      error: mockNeedsMeError,
+      refetch: vi.fn(),
+    };
+  },
+}));
+
+vi.mock('@/components/growing/needs-me-items', () => ({
+  selectNeedsMeItems: () => Array.from({ length: mockNeedsMeCount }),
+}));
+
 vi.mock('@/stores/approvalHubStore', () => ({
   useApprovalHubStore: (selector: (s: Record<string, unknown>) => unknown) =>
-    selector({ count: mockCount, fetchPending: mockFetchPending }),
+    selector({
+      count: mockCount,
+      isLoading: mockApprovalUnavailable === 'loading',
+      error: mockApprovalUnavailable === 'error' ? 'unavailable' : null,
+      fetchPending: mockFetchPending,
+    }),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
@@ -90,7 +108,7 @@ vi.mock('@/components/ThreadSidebar/thread-navigation', () => ({
 
 import { ActivityBar } from '@/components/ActivityBar';
 
-describe('F246 AC-D3 + F310 compatibility — Approval Hub bell', () => {
+describe('F246 AC-D3 + F310 — distinct attention entries', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -110,6 +128,10 @@ describe('F246 AC-D3 + F310 compatibility — Approval Hub bell', () => {
     mockRightPanelMode = 'status';
     mockRightPanelOpen = false;
     mockActiveSurface = null;
+    mockNeedsMeCount = 0;
+    mockNeedsMeLoading = false;
+    mockNeedsMeError = false;
+    mockApprovalUnavailable = null;
     mockFetchPending.mockClear();
     mockSetWorkspaceMode.mockClear();
     mockSetRightPanelMode.mockClear();
@@ -149,27 +171,9 @@ describe('F246 AC-D3 + F310 compatibility — Approval Hub bell', () => {
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]');
     expect(bellBtn).not.toBeNull();
-  });
-
-  it('no badge when count=0', async () => {
-    mockCount = 0;
-    await act(async () => {
-      root.render(React.createElement(ActivityBar));
-    });
-
-    const badge = container.querySelector('[data-testid="approval-hub-badge"]');
-    expect(badge).toBeNull();
-  });
-
-  it('shows badge with count when count > 0', async () => {
-    mockCount = 3;
-    await act(async () => {
-      root.render(React.createElement(ActivityBar));
-    });
-
-    const badge = container.querySelector('[data-testid="approval-hub-badge"]') as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('3');
+    expect(bellBtn?.getAttribute('aria-label')).toBe('审批');
+    expect(bellBtn?.getAttribute('title')).toBe('审批');
+    expect(container.querySelector('[data-testid="approval-hub-badge"]')).toBeNull();
   });
 
   it('caps badge at 99+ for count > 99', async () => {
@@ -181,23 +185,6 @@ describe('F246 AC-D3 + F310 compatibility — Approval Hub bell', () => {
     const badge = container.querySelector('[data-testid="approval-hub-badge"]') as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('99+');
-  });
-
-  it('bell click opens Workspace with Approval Hub', async () => {
-    mockWorkspaceMode = 'dev';
-    mockRightPanelMode = 'status';
-    await act(async () => {
-      root.render(React.createElement(ActivityBar));
-    });
-
-    const bellBtn = container.querySelector('[data-testid="approval-hub-button"]');
-    expect(bellBtn).not.toBeNull();
-    await act(async () => {
-      bellBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(mockSetWorkspaceMode).toHaveBeenCalledWith('approval');
-    expect(mockFetchPending).toHaveBeenCalledTimes(1);
   });
 
   it('bell click toggles close when already on Approval Hub in Workspace', async () => {
@@ -288,23 +275,75 @@ describe('F246 AC-D3 + F310 compatibility — Approval Hub bell', () => {
     expect(mockFetchPending).toHaveBeenCalledTimes(1);
   });
 
-  it('bell title shows count when pending items exist', async () => {
+  it('Approval title and aria expose only the Approval count', async () => {
     mockCount = 7;
     await act(async () => {
       root.render(React.createElement(ActivityBar));
     });
 
     const bellBtn = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
-    expect(bellBtn.getAttribute('title')).toBe('7 项需要处理');
+    expect(bellBtn.getAttribute('title')).toBe('审批 · 7 项待处理');
+    expect(bellBtn.getAttribute('aria-label')).toBe('审批，7 项待处理');
   });
 
-  it('bell title shows generic label when no pending items', async () => {
+  it.each(['loading', 'error'] as const)('hides a stale Approval count while its read is %s', async (state) => {
+    mockCount = 2;
+    mockApprovalUnavailable = state;
+    await act(async () => root.render(React.createElement(ActivityBar)));
+    const bell = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
+    const expectedLabel = state === 'loading' ? '审批正在读取' : '审批暂时不可用';
+    expect(bell.getAttribute('title')).toBe(expectedLabel);
+    expect(bell.getAttribute('aria-label')).toBe(expectedLabel);
+    expect(container.querySelector('[data-testid="approval-hub-badge"]')).toBeNull();
+  });
+
+  it('keeps a stable Needs Me entry at zero without inventing a badge', async () => {
     mockCount = 0;
     await act(async () => {
       root.render(React.createElement(ActivityBar));
     });
 
-    const bellBtn = container.querySelector('[data-testid="approval-hub-button"]') as HTMLElement;
-    expect(bellBtn.getAttribute('title')).toBe('Needs Me');
+    const needsMeButton = container.querySelector('[data-testid="needs-me-button"]') as HTMLElement;
+    expect(needsMeButton).not.toBeNull();
+    expect(needsMeButton.getAttribute('title')).toBe('Needs Me');
+    expect(needsMeButton.getAttribute('aria-label')).toBe('Needs Me');
+    expect(container.querySelector('[data-testid="needs-me-badge"]')).toBeNull();
+    await act(async () => {
+      needsMeButton.click();
+    });
+    expect(mockSetWorkspaceMode).toHaveBeenCalledWith('needs-me');
+    expect(mockFetchPending).not.toHaveBeenCalled();
+  });
+
+  it('shows simultaneous Approval and Needs Me counts as separate truths', async () => {
+    mockCount = 2;
+    mockNeedsMeCount = 3;
+    await act(async () => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    const approvalButton = container.querySelector<HTMLButtonElement>('[data-testid="approval-hub-button"]');
+    const needsMeButton = container.querySelector<HTMLButtonElement>('[data-testid="needs-me-button"]');
+    expect(container.querySelector('[data-testid="approval-hub-badge"]')?.textContent).toBe('2');
+    expect(container.querySelector('[data-testid="needs-me-badge"]')?.textContent).toBe('3');
+    expect(approvalButton?.getAttribute('title')).toBe('审批 · 2 项待处理');
+    expect(needsMeButton?.getAttribute('title')).toBe('Needs Me · 3 项待处理');
+
+    await act(async () => approvalButton?.click());
+    await act(async () => needsMeButton?.click());
+    expect(mockSetWorkspaceMode).toHaveBeenNthCalledWith(1, 'approval');
+    expect(mockSetWorkspaceMode).toHaveBeenNthCalledWith(2, 'needs-me');
+  });
+
+  it('does not present a stale Needs Me count while its owner projection is unavailable', async () => {
+    mockNeedsMeCount = 1;
+    mockNeedsMeError = true;
+    await act(async () => {
+      root.render(React.createElement(ActivityBar));
+    });
+
+    const needsMeButton = container.querySelector('[data-testid="needs-me-button"]') as HTMLElement;
+    expect(needsMeButton.getAttribute('title')).toBe('Needs Me 暂时不可用');
+    expect(container.querySelector('[data-testid="needs-me-badge"]')).toBeNull();
   });
 });

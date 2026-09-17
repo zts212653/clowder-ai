@@ -12,6 +12,7 @@ vi.mock('@/utils/api-client', () => ({
 }));
 
 import { PawFeelInboxSection } from '../PawFeelInboxSection';
+import { buildTestIssue, countTestIssues } from './paw-feel-test-fixtures';
 
 async function chooseViewOption(container: HTMLElement, kind: 'filter' | 'sort', label: string) {
   const trigger = container.querySelector<HTMLButtonElement>(`[data-testid="paw-feel-${kind}-trigger"]`);
@@ -47,6 +48,7 @@ function buildItem(signalId: string, state: PawFeelInboxItem['disposition']['sta
       captureAssessment: 'confirmed',
     },
     responsibility,
+    issue: buildTestIssue(state),
     source: {
       availability: 'available',
       preview: `原消息预览 ${signalId}`,
@@ -77,6 +79,7 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
         rawSignalCount: 1,
         stateCounts: { [item.disposition.state]: 1 },
         responsibility: item.responsibility,
+        issue: item.issue,
       })),
     bundleCounts: overrides.bundleCounts ?? {
       total: overrides.counts?.total ?? items.length,
@@ -105,6 +108,7 @@ function buildPage(overrides: Partial<PawFeelInboxPage> = {}): PawFeelInboxPage 
       blocked: 0,
       terminal: overrides.counts?.disposed ?? 0,
     },
+    issueCounts: overrides.issueCounts ?? countTestIssues(items),
     degraded: false,
     coverage: {
       coverageStartAt: '2026-07-19T00:00:00.000Z',
@@ -164,7 +168,7 @@ describe('PawFeelInboxSection polling navigation', () => {
       if (url === '/api/paw-feel/duty') {
         return { ok: true, json: async () => ({ config: { primaryCatId: 'opus' } }) };
       }
-      if (url.includes('states=closed%2Cduplicate%2Cno_action')) {
+      if (url.includes('resolution=resolved')) {
         disposedReads += 1;
         return {
           ok: true,
@@ -213,9 +217,7 @@ describe('PawFeelInboxSection polling navigation', () => {
     await act(async () => newestButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await act(async () => {});
 
-    expect(mocks.apiFetch).toHaveBeenLastCalledWith(
-      '/api/paw-feel/inbox?limit=50&sort=newest&states=new%2Cseen%2Croute_pending%2Crouted%2Cfix%2Csignature_waiting%2Cblocked',
-    );
+    expect(mocks.apiFetch).toHaveBeenLastCalledWith('/api/paw-feel/inbox?limit=50&sort=newest&resolution=open');
     expect(container.textContent).toContain('原消息预览 fresh');
     expect(container.textContent).not.toContain('原消息预览 closed');
   });
@@ -227,7 +229,7 @@ describe('PawFeelInboxSection polling navigation', () => {
       if (url === '/api/paw-feel/duty') {
         return { ok: true, json: async () => ({ config: { primaryCatId: 'opus' } }) };
       }
-      if (url.includes('states=closed%2Cduplicate%2Cno_action')) {
+      if (url.includes('resolution=resolved')) {
         disposedReads += 1;
         return {
           ok: true,

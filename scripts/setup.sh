@@ -512,8 +512,8 @@ if [ "$HAS_REDIS" = true ]; then
     echo "    2. Start: pnpm start"
     echo "       启动: pnpm start"
 else
-    echo "    2. Start (no Redis): pnpm start --memory"
-    echo "       启动（无 Redis）: pnpm start --memory"
+    echo "    2. Start (no Redis): pnpm start -- --memory"
+    echo "       启动（无 Redis）: pnpm start -- --memory"
 fi
 echo ""
 echo "    3. Open http://localhost:3003"
@@ -531,8 +531,8 @@ if [ "$ENABLE_ASR" = true ] || [ "$ENABLE_TTS" = true ] || [ "$ENABLE_LLM_PP" = 
     echo ""
 fi
 
-echo "  Documentation / 文档: https://zts212653.github.io/clowder-ai/docs.html"
-echo "  Issues: https://github.com/zts212653/clowder-ai/issues"
+echo "  Documentation / 文档: SETUP.md"
+echo "  Issues: https://github.com/your-org/clowder-ai/issues"
 echo ""
 
 # ─── F239 Phase B: stale HOME-level skill link detection (ADR-025 第 8 条) ───

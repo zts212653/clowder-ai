@@ -40,10 +40,11 @@ export const memoryCueDrillCoordinateSchema = z
     catalogVersion: z.literal(RECALL_OPPORTUNITY_CATALOG_VERSION),
     resolverFamily: z.enum(RECALL_RESOLVER_FAMILIES),
     resolverVersion: z.number().int().positive(),
-    family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event']),
+    family: z.enum(['person_memory', 'evidence', 'taste', 'profile', 'event', 'owned_seed']),
     anchor: identifierSchema,
     revision: identifierSchema,
     scope: recallScopeV1Schema,
+    consumerCatId: z.string().trim().min(1).max(120).optional(),
     expiresAt: z.number().int().nonnegative().finite(),
   })
   .strict();
@@ -59,7 +60,12 @@ const memoryCueDrillReferenceSchema = z.tuple([
 type MemoryCueDrillReference = z.infer<typeof memoryCueDrillReferenceSchema>;
 
 export interface MemoryCuePresentedCoordinateReader {
-  findPresentedCoordinate(scope: RecallScopeV1, cueId: string, expiresAt: number): MemoryCueDrillCoordinate | null;
+  findPresentedCoordinate(
+    scope: RecallScopeV1,
+    cueId: string,
+    expiresAt: number,
+    consumerCatId?: string,
+  ): MemoryCueDrillCoordinate | null;
 }
 
 export type MemoryCueDrillHandleVerification =
@@ -90,6 +96,10 @@ function scopeDigest(scope: RecallScopeV1): string {
     .toString('base64url');
 }
 
+function consumerBindingAad(consumerCatId: string | undefined): Buffer {
+  return Buffer.from(`memory-cue-consumer\0${consumerCatId ?? 'legacy-unbound'}`, 'utf8');
+}
+
 /**
  * Creates one process-lifecycle key. Cue envelopes are deliberately ephemeral:
  * restarting the API invalidates old handles instead of restoring derived cue bodies.
@@ -118,9 +128,13 @@ export class MemoryCueDrillHandleService {
 
   issue(candidate: unknown): string {
     const coordinate = memoryCueDrillCoordinateSchema.parse(candidate);
+    // The immutable presented receipt already binds cue + scope to consumerCatId.
+    // Keep the opaque carrier coordinate-only so cat identifiers do not inflate the
+    // prompt budget; verify() joins the authenticated callback cat to that receipt.
     const reference: MemoryCueDrillReference = [coordinate.cueId, coordinate.expiresAt, scopeDigest(coordinate.scope)];
     const iv = randomBytes(HANDLE_IV_BYTES);
     const cipher = createCipheriv('aes-256-gcm', this.key, iv);
+    cipher.setAAD(consumerBindingAad(coordinate.consumerCatId));
     const ciphertext = Buffer.concat([cipher.update(JSON.stringify(reference), 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
     const handle = [
@@ -135,19 +149,27 @@ export class MemoryCueDrillHandleService {
     return handle;
   }
 
-  verify(handle: string, serverScope: RecallScopeV1, now: number): MemoryCueDrillHandleVerification {
-    const reference = this.decrypt(handle);
+  verify(
+    handle: string,
+    serverScope: RecallScopeV1,
+    now: number,
+    serverCatId?: string,
+  ): MemoryCueDrillHandleVerification {
+    const reference = this.decrypt(handle, serverCatId);
     if (!reference) return { ok: false, reason: 'invalid_handle' };
     const [cueId, expiresAt, expectedScopeDigest] = reference;
     if (scopeDigest(serverScope) !== expectedScopeDigest) return { ok: false, reason: 'scope_mismatch' };
-    const coordinate = this.presentedCoordinates.findPresentedCoordinate(serverScope, cueId, expiresAt);
+    const coordinate = this.presentedCoordinates.findPresentedCoordinate(serverScope, cueId, expiresAt, serverCatId);
     if (!coordinate) return { ok: false, reason: 'presentation_required' };
     if (!sameScope(coordinate.scope, serverScope)) return { ok: false, reason: 'scope_mismatch' };
+    if (coordinate.consumerCatId && coordinate.consumerCatId !== serverCatId) {
+      return { ok: false, reason: 'scope_mismatch' };
+    }
     if (now >= coordinate.expiresAt) return { ok: false, reason: 'expired', coordinate };
     return { ok: true, coordinate };
   }
 
-  private decrypt(handle: string): MemoryCueDrillReference | null {
+  private decrypt(handle: string, serverCatId: string | undefined): MemoryCueDrillReference | null {
     if (handle.length > MAX_HANDLE_LENGTH) return null;
     const parts = encodedHandlePartsSchema.safeParse(handle.split('.'));
     if (!parts.success) return null;
@@ -157,6 +179,7 @@ export class MemoryCueDrillHandleService {
       const ciphertext = Buffer.from(ciphertextPart, 'base64url');
       const tag = Buffer.from(tagPart, 'base64url');
       const decipher = createDecipheriv('aes-256-gcm', this.key, iv);
+      decipher.setAAD(consumerBindingAad(serverCatId));
       decipher.setAuthTag(tag);
       const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
       const parsed = memoryCueDrillReferenceSchema.safeParse(JSON.parse(plaintext));

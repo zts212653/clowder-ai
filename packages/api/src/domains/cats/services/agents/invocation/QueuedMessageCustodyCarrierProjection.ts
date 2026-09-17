@@ -1,6 +1,6 @@
 import type { QueuedMessageCustody, StoredMessage } from '../../stores/ports/MessageStore.js';
 
-function carrierEntryId(custody: QueuedMessageCustody, catId: string): string | undefined {
+export function carrierEntryId(custody: QueuedMessageCustody, catId: string): string | undefined {
   return custody.carrierByTargetCatId?.[catId]?.entryId ?? custody.entryId;
 }
 

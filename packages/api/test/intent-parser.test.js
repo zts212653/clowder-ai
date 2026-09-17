@@ -65,6 +65,27 @@ describe('parseIntent', () => {
     assert.deepEqual(r.promptTags, []);
   });
 
+  it('wakes custody recognition for an explicit time-bound deliverable', () => {
+    const r = parseIntent('下周一下午 3 点前帮我准备两个方案，做完回来让我选', 1);
+    assert.deepEqual(r.promptTags, ['skill:custody-recognition']);
+  });
+
+  it('wakes custody recognition for an implicit future obligation', () => {
+    const r = parseIntent('别忘了下周把发布清单整理出来', 1);
+    assert.deepEqual(r.promptTags, ['skill:custody-recognition']);
+  });
+
+  it('wakes custody recognition for a natural time-bound work introduction mixed with anxiety', () => {
+    const r = parseIntent('@codex-astra 有个活儿，周四 F311 需要去演示，我现在好焦虑怎么办！', 1);
+    assert.deepEqual(r.promptTags, ['skill:custody-recognition']);
+  });
+
+  it('does not treat venting or a one-turn request as durable custody', () => {
+    assert.deepEqual(parseIntent('下周又要写汇报，想想就烦', 1).promptTags, []);
+    assert.deepEqual(parseIntent('下周有个活儿，想到就烦', 1).promptTags, []);
+    assert.deepEqual(parseIntent('帮我看看这段代码', 1).promptTags, []);
+  });
+
   it('unknown tags are ignored', () => {
     const r = parseIntent('@布偶 #foobar #critique 测试', 1);
     assert.deepEqual(r.promptTags, ['critique']);

@@ -4,12 +4,12 @@ related_features: [F221, F203, F102, F200, F229, F260, F263, F287, F296, F312]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
-tips_exempt: "Renewed 2026-09-02 for F312 Phase C: authenticated Profile recall remains an agent-facing read of the existing approved capsule and adds no standalone user action or Hub discovery surface."
+tips_exempt: "Renewed 2026-09-07 after Phase E implementation: corpus layer adds owner-wide shared facts via cat-initiated propose_profile_update(targetLayer:'corpus'), approved by operator in Approval Hub. This is internal cat infrastructure — no new user-facing action or surface to advertise."
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
 
-> **Status**: in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1
+> **Status**: in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）**merged** PR #4416（squash `f7f0338bf7`，2026-09-08）——AC-E1/E2/E3 ✅） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -117,7 +117,7 @@ Profile UAT。
 
 - 不做多租户用户体系（社区版 per-user 隔离架构是 F229/PoE 层面议题，本 feat 只留单用户文件约定 + 接口注释）
 - 不把云端Maine Coon复制成本地Maine Coon（云端是关系样本，本地背生产责任；守门纪律不软化）
-- 不做"静默写真相源"——高代价客观事实走 operator 签字，低代价偏好/印象猫自治写入但必须带 provenance（来源坐标 + proposer cat + 状态标记 + 纠正路径，KD-12），且只进 persona relationship 层、不直接进 shared capsule（KD-15）；绝不无来源静默改画像
+- 不做"静默写真相源"——高代价客观事实走 operator 签字，低代价偏好/印象猫自治写入但必须带 provenance（来源坐标 + proposer cat + 状态标记 + 纠正路径，KD-12），且只进 persona relationship 层、不直接进 shared capsule（KD-15）——**"不直接进"指不猫自治直写，不等于无提案路径；owner-wide 事实的 operator 审批提案路径见 Phase E / AC-E1（2026-09-05 登记）**；绝不无来源静默改画像
 
 ## Eval / Tracking Contract
 
@@ -140,6 +140,24 @@ Profile UAT。
 - 若 runtime 原生跨对话记忆成熟到画像自动在场（模型/harness 升级），capsule 注入机制降级为画像数据源
 - F200 消费数据显示 primer 连续 3 个月零引用 → primer 形态需重审
 
+### Phase E: 共享 profile corpus（owner-wide 层）——写侧提案路径 + 读侧 revision + KD-17 注入第三级（2026-09-05 登记；**Design Gate closed 2026-09-06**，terminal schema 与 INV 见 discussion，执行见 plan）
+
+**触发**：F316 Phase E investigate 路由（`[thread-id]` coord-65960a67，subject `feature:F231/shared-capsule-proposal-contract-gap`）+ 证据 `[thread-id]#private-source-id`（operator："asr 哦！这个难道不是应该更新到 taste！……这几个 proposal……search evidence 也能搜回来比较好"）及其调查 `#private-source-id`（sol：owner-wide 事实无合法提案入口，系统迫使猫错投 primer 或沉默）。独立第三来源：fable-5 2026-09-05 memory note 同结论（primer 记录为入口缺失期的次优，待迁移）。
+
+**契约缺口（spec owner 认账）**：KD-15 承诺 shared 层"高门槛晋升（operator 签字 or 多猫印证）"，AC-C1 文本写"capsule/primer 更新提议路径"，但实现只落 primer：`callback-propose-profile-update-routes.ts:99` 硬派生 `targetPath = relationshipPrimerRelativePath(relationshipKey)`，tool description（PR #2921 后）写"you cannot target … the shared capsule"——把 KD-15 的"不**直接**写 shared capsule"收窄成"无任何提案路径"，且未显式 descope。owner-wide 低代价事实（KD-12：非健康/安全/不可逆）因此没有目的地。
+
+**路由裁定**：
+1. owner-wide 事实的目的地是 **KD-17 shared profile corpus**（`${CAT_CAFE_DATA_DIR}/profiles/<userId>/` 内 owner-wide 层，KD-19 canonical repository），**不是 300 字 capsule 锚**——锚 299/300 已满，且 KD-17 明定锚只保留身份、画像正文进 corpus。晋升进锚仍是 operator 手动的稀有动作，不开提案通道。
+2. 写侧提案复用既有 Approval Hub writer + provenance（KD-8/KD-12/KD-15），operator approve 为门槛；多猫印证作后续加速器不在本 Phase。**无合法目的地时 typed fail**，禁止 capsule→primer 静默降级；primer 只承载 persona 关系内容。
+3. 读侧：corpus 注册进既有私有 `domain:user-profile` collection（owner-auth `search_evidence` 可达，默认 project/library 索引不含），复用 F312 cue/drill 契约；read/drill 响应暴露并绑定 canonical content revision（F316 Phase A 2026-09-04 finding），correction/forget 后旧 revision 坐标 fail closed。**不新增** store / index engine / cue engine / 审批权。
+4. KD-17 注入第三级（profile index + 动态 recall）随本 Phase 登记 AC——KD-17 自 2026-06-18 closed 至今无 AC 承载，是"决策无交付跟踪"缺口。
+
+**Non-goals（本 Phase 明确不吸收）**：Taste 半句（"转录瑕疵结合上下文容错、只在关键歧义追问"）归 F221 `cat_cafe_propose_taste`（Astra 已提卡）；一句话拆多 lane 的 semantic-splitting 税与自然语言统一写/读 front door 归 F316 证据矩阵之后的**跨 lane Design Gate**（OQ-8），不塞进 F231；F316 AC-B1 `blocked:ineligible_invocation` 是 carrier 真相（A2A、非 strict owner-auth interactive），本 Phase 不制造 synthetic receipt。
+
+**过渡协议（AC-E1 落地前）**：owner-wide 事实可暂存 per-cat memory 并标 `scope: owner-wide, pending F231 AC-E1`，**禁入 relationship primer**；tool description 改为"owner-wide facts: no lawful destination yet (F231 AC-E1 pending)"而非"by design cannot"（文案改动随 AC-E1 PR 走，本登记不改代码）。
+
+**边界与 custody**：全部内容留在 gitignored canonical profile repository，owner-auth only，未授权读返回 typed no-candidate、不泄漏存在性，永不出库（KD-1/KD-5/KD-6/KD-19 不变）。与 OQ-7/AC-D6 正交（owner-wide 层 per-user，不涉 persona 粒度），不被其阻塞。本 Phase 由 investigate 路由登记，**不转移实现 custody**；实现分配走 Design Gate（分工惯例：fable spec/plan，opus 家族实现；repository 侧涉 Sol 的 KD-19 topology）。
+
 ## Acceptance Criteria
 
 <!-- 每条 AC trace 回 Why：A1-A3→"没做 thread 启动注入"；A4→"这是我的Maine Coon不是其他人的"（隐私分层）；B 组→第一个养熟样本；C 组→"养熟"机制本体。 -->
@@ -157,7 +175,7 @@ Profile UAT。
 - [x] AC-B3: 锚点回归测试在仓且 **fixture 隔离**：fixture overlay 编译断言 private 锚点生效；公共 baseline 断言缺 overlay 可编译 + 无私有锚点泄漏（CI/社区环境稳定，不依赖本机 gitignored 数据）（✅ 2026-06-16 四项 compile-level 回归：capsule+primer overlay / section ordering / capsule-only no-primer / public baseline zero-private；`compile-system-prompt-l0.test.mjs` F231 全 18 tests pass）
 
 ### Phase C（养熟循环）
-- [x] AC-C1: 关系信号→capsule/primer 更新提议路径落地（三段管道 KD-8，KD-12 分层写入制），至少 1 次真实更新走完全程（跑在白名单采集 + runtime-neutral trigger 真骨架上，非 L0 反射脚手架）（✅ PR #2296 merged 2026-06-15：profile-update proposal store/routes/tool/card + approve/reject write path + provenance audit + settled-card recovery；`pnpm gate` passed at `be6185ad`）
+- [x] AC-C1: 关系信号→capsule/primer 更新提议路径落地（三段管道 KD-8，KD-12 分层写入制），至少 1 次真实更新走完全程（跑在白名单采集 + runtime-neutral trigger 真骨架上，非 L0 反射脚手架）（✅ PR #2296 merged 2026-06-15：profile-update proposal store/routes/tool/card + approve/reject write path + provenance audit + settled-card recovery；`pnpm gate` passed at `be6185ad`）（**2026-09-05 spec-owner 补注**：交付为 primer-only；文本中"capsule"半段在实现期被 KD-15 读窄为无提案路径且未显式 descope——重新登记为 AC-E1，本勾不回退）
 - [x] AC-C2: 正向轨迹沉淀有真实样本（≥1 条"做对的时刻"进 primer/capsule，对照"只记检讨书"基线）（✅ 2026-06-17 proposal_mqg11vxc8ypclgv4：3 条正向轨迹 opus-primer.md + operator approve + provenance 归档；但 operator 指出 C1 merged 2 天零有机使用 → C3 必须做不可后置）
 - [x] AC-C3: 采集白名单（KD-9）写成机器可检查的数据契约（lint/test 守护禁 classifier 采集源）+ 蒸馏 trigger runtime-neutral（KD-10，不依赖 provider Stop hook，codex/gpt52 path 有 fallback 覆盖）（✅ 2026-06-17 `b6de921f0`：COLLECTION_SIGNAL_KINDS 6 种白名单 frozen enum + isAllowedCollectionSignal() type guard + 4 OTel eval counters (proposed/approved/rejected/distillation_triggered) + ProfileDistillationTrigger.onSessionSealed() + SessionSealer.registerPostSealHook() 机制；13 tests RED→GREEN）
 
@@ -170,6 +188,39 @@ Profile UAT。
 - [x] AC-D5: propose→approve→write→provenance 全链只经同一 `FileProfileRepository`，现有 optimistic lock / crash recovery / idempotency 回归绿。
 - [ ] AC-D6: migration 代码已支持 dry-run、backup、byte-identical dedupe、hash-guarded conflict resolution、rerun与防覆盖 rollback；真实 dry-run 已发现两组 family target 下各三份不同 hash并保持零写入。**live apply 先等 OQ-7 决定 relationship granularity，而不是先等 operator 合并 collision content**；若选 individual persona，迁移计划必须重新投影 target manifest，并只对同一 individual target 的真实冲突请求内容签字。
 - [x] AC-D7: ADR-031 三层闭环：soft（迁移/读取说明）+ hard（path/cache/auth/migration tests + no-legacy-pointer guard）+ eval（pointer emitted/resolved/missing counters）。
+
+### Phase E（共享 profile corpus / owner-wide 层，Design Gate closed 2026-09-06 → ✅ merged PR #4416）
+
+#### INV-9 Index Projection State Machine（R3 design, R4 blocked/error, R7 catalog×store state matrix）
+
+Post-approve index lifecycle for `domain:user-profile` collection.
+
+**Catalog × Store State Matrix** (R7: decision at top of `refreshCanonicalProfileIndex`, before any I/O):
+
+| catalog \ store | store **absent** | store **present** |
+|-----------------|-----------------|-------------------|
+| catalog **absent** | hot-reg if eligible, else `skipped/not_registered` | `error/store_catalog_skew` |
+| catalog **archived** | `skipped/archived` (no I/O) | `skipped/archived` (no rebuild) |
+| catalog **non-archived** (active/blocked) | `error/catalog_store_skew` | normal refresh → `refreshed` |
+
+**Transition table** (only reachable after state matrix gate):
+
+| State | Trigger | Next | Invariant |
+|-------|---------|------|-----------|
+| `absent` | First approve writes profile root | `registered` (hot-register + rebuild) | INV-9a: immediately searchable |
+| `active` | Subsequent approve writes content | `refreshed` (rebuild on existing store) | INV-9a |
+| any | Rebuild returns `blocked=true` | `error` (`rebuild_blocked` / `hot_registration_rebuild_blocked`) | INV-9c |
+| any | Rebuild/register throws | `error` (surfaced in response, not swallowed) | INV-9c |
+| any | userId ≠ manifest.ownerUserId | `skipped` (owner_mismatch) | INV-9b |
+
+- **INV-9a**: Approved content searchable after approve response returns (awaited, not fire-and-forget).
+- **INV-9b**: User A approve never refreshes/exposes User B collection.
+- **INV-9c**: Refresh failure surfaced in `indexRefreshStatus` response field — never `.catch(() => {})`. `registerCanonicalProfile` propagates errors (no internal catch-all); startup call wraps in try/catch for fail-open.
+- **INV-9d**: Profile durably approved but index failed → approve still 200 (profile IS written); index error visible.
+- **INV-9e** (R4): `CollectionRebuildResult.blocked` checked in both hot-registration and normal refresh paths — `blocked=true` reports `error` status, not false success.
+- **INV-9f** (R7): Catalog/store state matrix checked **before** any store construction or I/O. `registerCanonicalProfile` means only actual first-time registration; all decision logic lives in `refreshCanonicalProfileIndex`.
+- [x] AC-E1: owner-wide 事实有合法提案入口——`cat_cafe_propose_profile_update { targetLayer: 'corpus' }`（`ProfileUpdateTargetLayer = 'primer'|'corpus'`，无 `capsule`）→ 路由持久化真实层、按层派生 `targetPath = corpus/shared-facts.md`、经 Approval Hub operator approve 由 `approveProfileUpdate` 在 lock 内 hash-guarded 原子写入 `${CAT_CAFE_DATA_DIR}/profiles/<userId>/corpus/shared-facts.md` + provenance（`-corpus.md`）；枚举外/不可解析目标 → typed fail（`invalid_target_layer` / `corpus_target_unavailable`），**零 primer 降级**；tool description / L0 §8 wakeup / capability-wakeup-index 同步
+- [x] AC-E3: KD-17 注入第三级按 **KD-20** 闭合——pull 三通道：L0 单行指针 `共享事实: cat-cafe-profile://corpus/current`（corpus 存在时，fixture 三态 + baseline 泄漏检测 + budget cap 断言仍绿）+ F312 cue/drill（strict owner-auth interactive）+ owner-auth `search_evidence`；**不建 per-turn push 注入**（新 cue/ranking engine，归 roadmap M3 跨 lane gate）
 
 ## Dependencies
 
@@ -210,6 +261,7 @@ Profile UAT。
 | KD-17 | OQ-5 closed：画像注入第三级 = **静态 capsule + profile index + 动态 recall**。L0 常驻只保留 ≤300 字 capsule（身份锚）+ primer 指针；画像正文、per-cat primer、user-signal lane 进入可索引 profile corpus；每轮按当前任务/上下文动态召回相关片段注入。入库判断仍走 KD-8/KD-12/KD-15，注入判断只做相关性检索，不重新判断"什么算画像"；敏感/高代价事实可入索引但默认不自动召回，除非 operator 显式签字或当前任务强相关。 | operator 2026-06-18："很多的可以变成索引类似的？甚至可能需要动态 recall" + "我是 我觉得ok的"。这保留"醒来第一眼看到主人"的 capsule 体验，同时避免画像变厚后挤爆 L0；把 50k→5k→500 的第三级从静态堆 prompt 改成可验证 retrieval。实现细节（index schema / scorer / 注入位置 / eval 指标 / F102/F200 接法）猫猫自决。 | 2026-06-18 |
 | KD-18 | Relationship primer keyed by **persona/family (`relationshipKey`)**，不是 per-catId 或 UI grouping breed。家猫三族：Ragdoll=ragdoll（所有 Claude 猫）、Maine Coon=maine-coon（所有 GPT 猫）、Siamese=siamese（所有 Gemini 猫）。外部平台猫 identity 跟平台走不跟底层模型走：斑斑=bengal（AGY/Google Agent 平台，底层虽为 Opus 但 identity 是Bengal）、金渐层=golden-chinchilla（opencode 平台）。实现显式投影 `relationshipKey = CatConfig.relationshipKey`：普通 breed 默认自身 id，独立/version breed 必须显式声明 family key；禁止从 model/client/displayName 推断。现有 `{catId}-primer.md` 通过可审计迁移收敛为 `{relationshipKey}-primer.md`，不允许 alias 覆盖冲突。**精炼 KD-2**：Primer 从 per-(user×catId) 收敛为 per-(user×persona/family)。 | operator 2026-07-10：“Ragdoll = claude 家的猫猫 Maine Coon = gpt 家的猫猫，我认可的”——日常相处按家族称呼，catId 区分只在干活分工时；外部平台猫 identity 跟平台走（“斑斑现在是用谷歌家 agent 的 opus！opencode 的猫无论接谁 = 金渐层”） | 2026-07-10 |
 | KD-19 | Profile truth 离开 worktree：canonical root = `CAT_CAFE_DATA_DIR/profiles/<userId>/`；L0 用 logical URI + authenticated resolver，不保留 cwd fallback、不发 host absolute path。 | 2026-07-10 live evidence：source/runtime 两套 gitignored profile root 已分叉，approved Sol primer 在 runtime 存在但 source-cwd pointer ENOENT；fallback/absolute path 只能换一种方式延续拓扑耦合。 | 2026-07-10 |
+| KD-20 | AC-E3/KD-17 "动态 recall" 在 F231 内以 pull 三通道闭合（L0 指针 + F312 cue/drill + 私有 collection search）；**不建 per-turn 相关性 push 注入**，push 若立项 owner = roadmap M3 跨 lane Design Gate | F316/roadmap 硬约束"不新增 cue engine"；KD-17 授权"实现细节猫猫自决"；显式 scope 决议（非 follow-up 尾巴） | 2026-09-06 |
 
 > **KD-18 reopen notice（2026-07-12）**：保留 2026-07-10 的历史决策与代码 provenance，但暂停其“所有同家族猫合并为一个 relationshipKey”的迁移解释。operator 正在重评 family identity 与 individual relationship 的层级；OQ-7 关闭前，KD-18 只证明“关系不应跟 raw model 能力画像混为一谈”，不授权 family-collapse live apply。
 
@@ -228,6 +280,8 @@ Profile UAT。
 | B3 | ✅ 完成 | `compile-system-prompt-l0.test.mjs` 4 项 compile-level regression |
 | C2 | ✅ 完成 | `proposal_mqg11vxc8ypclgv4` operator approved，但 2 天零有机使用 → C3 必须 |
 | **C3** | ✅ merged | PR #2354 (`37f7dedc`) — KD-9 whitelist enum + KD-10 eval counters + distillation trigger |
+| D1-D5,D7 | ✅ merged | PR #2858 (`b21699029`) — canonical repository + per-persona projection + authenticated read_profile |
+| **E1-E3** | ✅ merged | PR #4416 (`f7f0338bf7`) — corpus propose/read/typed-fail/INV-9/L0 pointer/layer labels; cloud P1 dedup-ordering fix |
 
 ### Wave 2 ✅（已完成）
 

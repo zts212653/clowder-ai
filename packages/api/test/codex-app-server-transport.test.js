@@ -80,6 +80,7 @@ class ProtocolWire {
     this.experimentalApiEnabled = false;
     this.rejectApprovalsReviewer = options.rejectApprovalsReviewer ?? false;
     this.rejectOutputSchema = options.rejectOutputSchema ?? false;
+    this.turnId = options.turnId ?? 'turn-1';
   }
 
   read() {
@@ -115,7 +116,7 @@ class ProtocolWire {
       });
       return;
     }
-    this.inbox.push({ id: message.id, result: { turn: { id: 'turn-1', status: 'inProgress' } } });
+    this.inbox.push({ id: message.id, result: { turn: { id: this.turnId, status: 'inProgress' } } });
   }
 
   async write(message) {
@@ -653,7 +654,7 @@ test('post-accept stream end transitions through failed before cleanup', async (
   assert.match(lifecycle.find((snapshot) => snapshot.stage === 'failed').failureReason, /stream ended/);
 });
 
-test('pre-turn transport failure retries once without changing a requested thread identity', async () => {
+test('pre-turn transport recovery preserves thread identity and typed capability policy without replaying a card', async () => {
   const first = new ProtocolWire();
   first.read = () => ({
     [Symbol.asyncIterator]() {
@@ -663,15 +664,55 @@ test('pre-turn transport failure retries once without changing a requested threa
   const second = new ProtocolWire();
   const wires = [first, second];
   let factoryCalls = 0;
+  const interactionRequests = [];
   const run = collect(
     runCodexAppServerWithRecovery({
       sessionFactory: async () => wires[factoryCalls++],
       sessionOptions: { command: 'codex', args: ['app-server', '--stdio'], invocationId: 'inv-retry' },
-      runInput: { prompt: frozenPrompt('continue'), thread: { kind: 'resume', threadId: 'thread-existing' } },
+      runInput: {
+        prompt: frozenPrompt('continue'),
+        thread: { kind: 'resume', threadId: 'thread-existing' },
+        runtimeInteraction: {
+          owner: {
+            userId: 'user-1',
+            threadId: 'cat-thread-1',
+            catId: 'codex-sol',
+            invocationId: 'inv-retry',
+          },
+          declaredMcpServerNames: ['pencil'],
+          port: {
+            request: async (request) => {
+              interactionRequests.push(request);
+              return { kind: 'decision', decisionId: 'decline' };
+            },
+          },
+        },
+      },
       retryBudget: 1,
     }),
   );
   await waitFor(() => second.writes.some((message) => message.method === 'turn/start'));
+  second.inbox.push({
+    id: 91,
+    method: 'mcpServer/elicitation/request',
+    params: {
+      serverName: 'cua_repl',
+      threadId: 'thread-existing',
+      turnId: 'turn-1',
+      mode: 'form',
+      message: 'Allow Computer Use to use "Pencil"?',
+      requestedSchema: { type: 'object', properties: {}, additionalProperties: false },
+      _meta: {
+        codex_approval_kind: 'mcp_tool_call',
+        connector_id: 'computer-use',
+        tool_name: 'snapshot',
+        tool_params: { app: 'dev.pencil.desktop' },
+      },
+    },
+  });
+  await waitFor(() => second.writes.some((message) => message.id === 91));
+  assert.equal(interactionRequests.length, 0);
+  assert.equal(second.writes.find((message) => message.id === 91)?.result?.action, 'accept');
   second.inbox.push({
     method: 'turn/completed',
     params: { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } },
@@ -803,7 +844,7 @@ test('active-writer diagnostics classify a reused healthy affinity host as a loc
     }
     return firstWrite(message);
   };
-  const second = new ProtocolWire();
+  const second = new ProtocolWire({ turnId: 'turn-new' });
   const wires = [first, second];
   let factoryCalls = 0;
   const run = collect(
@@ -850,7 +891,7 @@ test('active-writer diagnostics remain external-or-unknown when thread/read has 
     }
     return firstWrite(message);
   };
-  const second = new ProtocolWire();
+  const second = new ProtocolWire({ turnId: 'turn-new' });
   const wires = [first, second];
   let factoryCalls = 0;
   const run = collect(
@@ -1104,7 +1145,7 @@ test('model-capacity failure without exact Clowder AI task coordinates blocks in
 
 test('model-capacity recovery after completed tools resumes the exact invocation checkpoint', async () => {
   const first = new ProtocolWire();
-  const second = new ProtocolWire();
+  const second = new ProtocolWire({ turnId: 'turn-2' });
   const wires = [first, second];
   let factoryCalls = 0;
   const run = collect(
@@ -1191,8 +1232,8 @@ test('model-capacity recovery after completed tools resumes the exact invocation
 
 test('repeated model-capacity attempts reuse one hidden recovery context without adding user messages', async () => {
   const first = new ProtocolWire();
-  const second = new ProtocolWire();
-  const third = new ProtocolWire();
+  const second = new ProtocolWire({ turnId: 'turn-2' });
+  const third = new ProtocolWire({ turnId: 'turn-3' });
   const wires = [first, second, third];
   let factoryCalls = 0;
   const run = collect(

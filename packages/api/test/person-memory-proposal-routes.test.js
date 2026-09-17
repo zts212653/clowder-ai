@@ -182,18 +182,12 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     return { response, origin };
   }
 
-  async function proposeFromOrigin(body, origin, onAuth) {
-    const auth = await registry.create(
-      'owner-1',
-      'codex-sol',
-      origin.threadId,
-      undefined,
-      undefined,
-      undefined,
-      origin.id,
-    );
-    onAuth?.(auth);
-    const response = await app.inject({
+  async function createAuthForOrigin(origin) {
+    return registry.create('owner-1', 'codex-sol', origin.threadId, undefined, undefined, undefined, origin.id);
+  }
+
+  async function proposeFromAuth(body, origin, auth) {
+    return app.inject({
       method: 'POST',
       url: '/api/callbacks/propose-person-memory',
       headers: {
@@ -203,7 +197,12 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       },
       payload: { sourceMessageId: origin.id, ...body },
     });
-    return response;
+  }
+
+  async function proposeFromOrigin(body, origin, onAuth) {
+    const auth = await createAuthForOrigin(origin);
+    onAuth?.(auth);
+    return proposeFromAuth(body, origin, auth);
   }
 
   const proposalBody = {
@@ -395,8 +394,24 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       claimId: 'daily-claim-1',
       now: Date.now(),
       leaseMs: 60_000,
+      processorCatId: 'codex-sol',
+      processingThreadId: origin.threadId,
     });
     assert.equal(claimedReceipt.outcome, 'claimed');
+    assert.equal(
+      (
+        await receiptStore.bindProcessingMessage({
+          ownerUserId: 'owner-1',
+          receiptId,
+          claimId: 'daily-claim-1',
+          processorCatId: 'codex-sol',
+          processingThreadId: origin.threadId,
+          processingMessageId: origin.id,
+          now: Date.now(),
+        })
+      ).outcome,
+      'bound',
+    );
     deferredReceipt = claimedReceipt.receipt;
     const body = {
       ...proposalBody,
@@ -489,15 +504,48 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       claimId: 'daily-claim-ready',
       now: Date.now(),
       leaseMs: 60_000,
+      processorCatId: 'codex-sol',
+      processingThreadId: origin.threadId,
     });
     assert.equal(readyClaim.outcome, 'claimed');
+    assert.equal(
+      (
+        await receiptStore.bindProcessingMessage({
+          ownerUserId: 'owner-1',
+          receiptId: readyReceiptId,
+          claimId: 'daily-claim-ready',
+          processorCatId: 'codex-sol',
+          processingThreadId: origin.threadId,
+          processingMessageId: origin.id,
+          now: Date.now(),
+        })
+      ).outcome,
+      'bound',
+    );
     deferredReceipt = readyClaim.receipt;
     const readyBody = {
       ...body,
       deferredReceipt: { receiptId: readyReceiptId, claimId: 'daily-claim-ready' },
       clientRequestId: readyReceiptId,
     };
-    const extraSource = await proposeFromOrigin(
+    await createAuthForOrigin(origin);
+    const successorOrigin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: 'unrelated successor turn in the same Memory Operations thread',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: origin.threadId,
+    });
+    const successorAuth = await createAuthForOrigin(successorOrigin);
+    const stageCallsBeforeSuccessor = stageCalls;
+    const successor = await proposeFromAuth(readyBody, successorOrigin, successorAuth);
+    assert.equal(successor.statusCode, 409, successor.body);
+    assert.deepEqual(successor.json(), { error: 'deferred_receipt_conflict' });
+    assert.equal(stageCalls, stageCallsBeforeSuccessor);
+
+    const readyAuth = await createAuthForOrigin(origin);
+    const extraSource = await proposeFromAuth(
       {
         ...readyBody,
         sourceBundle: {
@@ -514,11 +562,12 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
         },
       },
       origin,
+      readyAuth,
     );
     assert.equal(extraSource.statusCode, 409);
     assert.equal(JSON.parse(extraSource.body).error, 'deferred_receipt_source_conflict');
 
-    const response = await proposeFromOrigin(readyBody, origin);
+    const response = await proposeFromAuth(readyBody, origin, readyAuth);
 
     assert.equal(response.statusCode, 200, response.body);
     const result = JSON.parse(response.body);
@@ -583,8 +632,24 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       claimId: 'daily-claim-a',
       now: Date.now(),
       leaseMs: 60_000,
+      processorCatId: 'codex-sol',
+      processingThreadId: origin.threadId,
     });
     assert.equal(claimA.outcome, 'claimed');
+    assert.equal(
+      (
+        await receiptStore.bindProcessingMessage({
+          ownerUserId: 'owner-1',
+          receiptId,
+          claimId: 'daily-claim-a',
+          processorCatId: 'codex-sol',
+          processingThreadId: origin.threadId,
+          processingMessageId: origin.id,
+          now: Date.now(),
+        })
+      ).outcome,
+      'bound',
+    );
 
     const body = {
       ...proposalBody,
@@ -667,8 +732,24 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
       claimId: 'daily-claim-b',
       now: Date.now(),
       leaseMs: 60_000,
+      processorCatId: 'codex-sol',
+      processingThreadId: origin.threadId,
     });
     assert.equal(claimB.outcome, 'claimed');
+    assert.equal(
+      (
+        await receiptStore.bindProcessingMessage({
+          ownerUserId: 'owner-1',
+          receiptId,
+          claimId: 'daily-claim-b',
+          processorCatId: 'codex-sol',
+          processingThreadId: origin.threadId,
+          processingMessageId: origin.id,
+          now: Date.now(),
+        })
+      ).outcome,
+      'bound',
+    );
     const retried = await proposeFromOrigin(
       { ...body, deferredReceipt: { receiptId, claimId: 'daily-claim-b' } },
       origin,

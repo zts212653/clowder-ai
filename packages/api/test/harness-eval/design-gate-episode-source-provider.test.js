@@ -76,7 +76,7 @@ episodes:
     exactHeadRef: git:${HEAD}
     gateReceiptRef: github:pr:zts212653/cat-cafe#3901@${HEAD}#validation/pnpm-gate
     reviewMessageRef: cat-cafe:thread:thread_mt5xeb8e7qs467i2/message:${REVIEW_MESSAGE_ID}
-    reviewVerdictRef: local-review:${REVIEW_MESSAGE_ID}:g1:approved
+    reviewVerdictRef: local-review:${REVIEW_MESSAGE_ID}:approved
     landedAlphaReceiptRef: repo:docs/harness-feedback/design-gate/receipts/f303-phase-c-pr3901-alpha.yaml
 `,
   );
@@ -105,7 +105,13 @@ function reviewMessage(overrides = {}) {
     threadId: 'thread_mt5xeb8e7qs467i2',
     catId: 'opus-47',
     content: `Local Review Verdict: APPROVED\nExact HEAD: \`${HEAD}\``,
-    extra: { localReviewVerdict: { verdict: 'approved', clientMessageId: 'review-f303-phase-c' } },
+    extra: {
+      localReviewVerdict: {
+        verdict: 'approved',
+        clientMessageId: 'review-f303-phase-c',
+        reviewedHeadSha: HEAD,
+      },
+    },
     ...overrides,
   };
 }

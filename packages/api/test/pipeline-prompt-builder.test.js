@@ -90,6 +90,24 @@ describe('PipelinePromptBuilder (AC-P2-6)', () => {
     assert.ok(output.includes('布偶猫'), 'Contains identity anchor');
   });
 
+  it('routes a natural time-bound work introduction into the custody-recognition hook', async () => {
+    const { parseIntent } = await import('../dist/domains/cats/services/context/IntentParser.js');
+    const intent = parseIntent('@codex-astra 有个活儿，周四 F311 需要去演示，我现在好焦虑怎么办！', 1);
+
+    const output = ppb.buildInvocationContextViaHookPipeline({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      promptTags: intent.promptTags,
+    });
+
+    assert.ok(
+      output.includes('load skill: custody-recognition'),
+      'D11 should tell the owner cat to load the custody-recognition policy',
+    );
+  });
+
   // -- Full system prompt ------------------------------------------------------
 
   it('buildSystemPromptViaHookPipeline combines session + turn', () => {

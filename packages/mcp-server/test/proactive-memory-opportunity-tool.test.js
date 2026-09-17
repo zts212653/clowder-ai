@@ -132,10 +132,17 @@ describe('cat_cafe_defer_person_memory_delta MCP tool', () => {
     });
   });
 
-  test('registers exact receipt withdraw and hard-forget lifecycle tools', async () => {
+  test('registers exact receipt disposition, withdraw, and hard-forget lifecycle tools', async () => {
     const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const dispose = callbackTools.find((entry) => entry.name === 'cat_cafe_dispose_deferred_person_memory');
     const withdraw = callbackTools.find((entry) => entry.name === 'cat_cafe_withdraw_deferred_person_memory');
     const forget = callbackTools.find((entry) => entry.name === 'cat_cafe_forget_deferred_person_memory');
+    assert.deepEqual(Object.keys(dispose.inputSchema).sort(), [
+      'claimId',
+      'disposition',
+      'receiptId',
+      'writeOpportunityRef',
+    ]);
     assert.deepEqual(Object.keys(withdraw.inputSchema), ['receiptId']);
     assert.deepEqual(Object.keys(forget.inputSchema), ['receiptId']);
     assert.match(forget.description, /destructive/i);
@@ -144,15 +151,40 @@ describe('cat_cafe_defer_person_memory_delta MCP tool', () => {
     const calls = [];
     const toolset = createDeferredPersonMemoryTool(async (path, body) => {
       calls.push({ path, body });
-      return { content: [{ type: 'text', text: JSON.stringify({ status: 'purged' }) }] };
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              path.endsWith('/dispose')
+                ? { receiptId: body.receiptId, status: 'not_actionable' }
+                : { status: 'purged' },
+            ),
+          },
+        ],
+      };
     });
     const input = { receiptId: 'deferred_person_0123456789abcdef0123456789abcdef' };
+    const disposition = { ...input, claimId: 'claim-1', disposition: 'insufficient_evidence' };
+    const dispositionResult = await toolset.handleDisposeDeferredPersonMemory(disposition);
     await toolset.handleWithdrawDeferredPersonMemory(input);
     await toolset.handleForgetDeferredPersonMemory(input);
 
     assert.deepEqual(calls, [
+      { path: '/api/callbacks/person-memory/deferred/dispose', body: disposition },
       { path: '/api/callbacks/person-memory/deferred/withdraw', body: input },
       { path: '/api/callbacks/person-memory/deferred/forget', body: input },
     ]);
+    assert.deepEqual(JSON.parse(dispositionResult.content[0].text), {
+      receiptId: input.receiptId,
+      status: 'not_actionable',
+    });
+
+    const { EXPLICIT_TOOL_ANNOTATIONS } = await import('../dist/server-toolsets.js');
+    assert.deepEqual(EXPLICIT_TOOL_ANNOTATIONS.cat_cafe_dispose_deferred_person_memory, {
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
   });
 });

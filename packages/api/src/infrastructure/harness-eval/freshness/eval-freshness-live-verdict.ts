@@ -6,6 +6,13 @@ import type { EvalDomainRegistryEntry } from '../domain/eval-domain-registry.js'
 import { formatLiveVerdictMarkdown } from '../live-verdict-markdown.js';
 import { parseVerdictHandoffPacket, type VerdictHandoffPacket } from '../verdict-handoff.js';
 import type { FreshnessReplayBundle, FreshnessReplayViolation } from './freshness-replay-types.js';
+import {
+  addWindowedSnapshotCounts,
+  FRESHNESS_WINDOWED_METRIC_REFS,
+  signalCount,
+  windowedSignalComponent,
+  windowedTrendMetrics,
+} from './freshness-windowed-verdict-projection.js';
 
 const SAFE_VERDICT_ID = /^[a-z0-9][a-z0-9-]*$/;
 const COMPONENT_ID = 'freshness-closure-replay';
@@ -68,6 +75,7 @@ export function generateFreshnessLiveVerdict(input: GenerateFreshnessLiveVerdict
         'metric:freshness.replay.eligible_samples',
         'metric:freshness.replay.failed_samples',
         'metric:freshness.replay.attention_samples',
+        ...FRESHNESS_WINDOWED_METRIC_REFS,
       ],
       sampleTraceRefs:
         input.replay.samples.length > 0
@@ -80,6 +88,7 @@ export function generateFreshnessLiveVerdict(input: GenerateFreshnessLiveVerdict
         eligible_samples: report.eligibleSampleCount,
         failed_samples: report.failedSampleCount,
         attention_samples: report.attentionSampleCount,
+        ...windowedTrendMetrics(input.replay),
       },
       baseline: { failed_samples: 0, attention_samples: 0 },
       threshold: { failed_samples: 0, attention_samples: 0 },
@@ -108,6 +117,9 @@ function assertInput(input: GenerateFreshnessLiveVerdictInput): void {
   }
   if (input.submittedPacket.harnessUnderEval.featureId !== input.domain.handoffTargetResolver.featureId) {
     throw new Error('submitted_packet_evidence_mismatch: freshness feature id');
+  }
+  if (input.replay.measurementMaturity.status !== 'ready') {
+    throw new Error(`measurement_validity_gate: ${input.replay.measurementMaturity.reasons.join(',')}`);
   }
 }
 
@@ -154,6 +166,7 @@ function buildSnapshot(
       item.violations.includes(violation),
     ).length;
   }
+  addWindowedSnapshotCounts(input.replay, activationCounts, frictionCounts);
   return {
     verdictId: input.verdictId,
     evalSnapshotId,
@@ -166,6 +179,7 @@ function buildSnapshot(
     },
     replayVerdict: report.verdict,
     healthy: report.healthy,
+    measurementMaturity: structuredClone(input.replay.measurementMaturity),
     ...(report.noDataReason ? { noDataReason: report.noDataReason } : {}),
     rawReplaySha256: rawSha256,
     components: [
@@ -176,6 +190,7 @@ function buildSnapshot(
         activationCounts,
         frictionCounts,
       },
+      windowedSignalComponent(input.replay),
       {
         id: 'provider-native-freshness-coverage',
         name: 'F254 provider by carrier by tool-surface coverage',
@@ -241,10 +256,16 @@ function buildAttribution(input: GenerateFreshnessLiveVerdictInput, generatedAt:
       : {
           noFindingRecord: {
             reason:
-              input.replay.report.verdict === 'no_data' ? 'no_eligible_samples' : 'all_replay_invariants_satisfied',
+              input.replay.report.verdict === 'no_data'
+                ? input.replay.windowedSignals.observedActivityCount > 0
+                  ? 'no_legacy_closure_samples'
+                  : 'no_eligible_samples'
+                : 'all_replay_invariants_satisfied',
             evidence:
-              input.replay.report.noDataReason ??
-              `${input.replay.report.eligibleSampleCount} replay samples satisfied all F254 invariants.`,
+              input.replay.report.verdict === 'no_data' && input.replay.windowedSignals.observedActivityCount > 0
+                ? `${input.replay.windowedSignals.observedActivityCount} owner-scoped lifecycle/signal observations resolved; structural legacy closure replay had no live sample.`
+                : (input.replay.report.noDataReason ??
+                  `${input.replay.report.eligibleSampleCount} replay samples satisfied all F254 invariants.`),
           },
         };
   return {
@@ -265,6 +286,14 @@ function buildReplayDetailBullets(replay: FreshnessReplayBundle): string[] {
     `- Eligible samples: ${report.eligibleSampleCount}`,
     `- Failed samples: ${report.failedSampleCount}`,
     `- Attention samples: ${report.attentionSampleCount}`,
+    `- Measurement maturity: \`${replay.measurementMaturity.status}\``,
+    `- Windowed lifecycle/signal observations: ${replay.windowedSignals.observedActivityCount}`,
+    `- Queue admitted / seen / handled: ${replay.windowedSignals.queue.admittedCount} / ${replay.windowedSignals.queue.seenCount} / ${replay.windowedSignals.queue.handledCount}`,
+    `- Queue seen but unhandled at window end: ${replay.windowedSignals.queue.seenUnhandledAtWindowEndCount}`,
+    `- Supplements offered / terminal: ${replay.windowedSignals.supplements.offeredCount} / ${replay.windowedSignals.supplements.terminalCount}`,
+    `- Gate held / forward: ${signalCount(replay, 'held_decision')} / ${signalCount(replay, 'forward_decision')}`,
+    `- Notice attached / acked: ${signalCount(replay, 'notice_attached')} / ${signalCount(replay, 'notice_implicit_acked')}`,
+    `- Reinvoke triggered / skipped: ${signalCount(replay, 'reinvoke_triggered')} / ${signalCount(replay, 'reinvoke_skipped')}`,
     `- Provider-native coverage: \`${replay.providerNativeCoverage.verdict}\``,
     `- Provider-native all-tool carriers: ${replay.providerNativeCoverage.carriers.filter((carrier) => carrier.allToolCoverage).length}`,
     ...(report.noDataReason ? [`- No-data reason: ${report.noDataReason}`] : []),

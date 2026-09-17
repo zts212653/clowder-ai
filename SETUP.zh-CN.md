@@ -268,10 +268,11 @@ NEXT_PUBLIC_API_URL=http://localhost:3004
 **自动配置：** 能力编排器会自动检测你的 Pencil 安装，按以下顺序扫描：
 
 1. `PENCIL_MCP_BIN` 环境变量（显式路径 — 最高优先级）
-2. `~/.antigravity/extensions/highagency.pencildev-*/`
-3. `~/.vscode/extensions/highagency.pencildev-*/`
-4. `~/.cursor/extensions/highagency.pencildev-*/`
-5. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
+2. `~/.antigravity-ide/extensions/highagency.pencildev-*/`
+3. `~/.antigravity/extensions/highagency.pencildev-*/`（旧版 Antigravity）
+4. `~/.vscode/extensions/highagency.pencildev-*/`
+5. `~/.cursor/extensions/highagency.pencildev-*/`
+6. `~/.vscode-insiders/extensions/highagency.pencildev-*/`
 
 自动选择所有编辑器中最新的版本。当两个编辑器安装了相同版本时，优先选择 Antigravity。
 

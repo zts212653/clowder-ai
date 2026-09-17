@@ -120,13 +120,61 @@ describe('RedisDeferredPersonMemoryReceiptStore', { skip: redisIsolationSkipReas
       claimId: 'claim-1',
       now: 200,
       leaseMs: 50,
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
     });
+    assert.equal(
+      (
+        await store.bindProcessingMessage({
+          ownerUserId: 'owner-1',
+          receiptId: created.receipt.receiptId,
+          claimId: 'claim-1',
+          processorCatId: 'codex-terra',
+          processingThreadId: 'thread_memory_operations',
+          processingMessageId: 'message-daily-a',
+          now: 201,
+        })
+      ).outcome,
+      'bound',
+    );
+    assert.equal(
+      (
+        await store.bindProcessorInvocation({
+          ownerUserId: 'owner-1',
+          receiptId: created.receipt.receiptId,
+          claimId: 'claim-1',
+          processorCatId: 'codex-terra',
+          processingThreadId: 'thread_memory_operations',
+          processingMessageId: 'message-daily-a',
+          processorInvocationId: 'invocation-daily-a',
+          now: 202,
+        })
+      ).outcome,
+      'bound',
+    );
+    assert.equal(
+      (
+        await store.bindProcessorInvocation({
+          ownerUserId: 'owner-1',
+          receiptId: created.receipt.receiptId,
+          claimId: 'claim-1',
+          processorCatId: 'codex-terra',
+          processingThreadId: 'thread_memory_operations',
+          processingMessageId: 'message-daily-a',
+          processorInvocationId: 'invocation-successor',
+          now: 203,
+        })
+      ).outcome,
+      'conflict',
+    );
     const blocked = await store.claim({
       ownerUserId: 'owner-1',
       receiptId: created.receipt.receiptId,
       claimId: 'claim-2',
       now: 220,
       leaseMs: 50,
+      processorCatId: 'codex-sol',
+      processingThreadId: 'thread_memory_operations',
     });
     const recovered = await store.claim({
       ownerUserId: 'owner-1',
@@ -134,12 +182,137 @@ describe('RedisDeferredPersonMemoryReceiptStore', { skip: redisIsolationSkipReas
       claimId: 'claim-3',
       now: 251,
       leaseMs: 50,
+      processorCatId: 'codex-sol',
+      processingThreadId: 'thread_memory_operations',
     });
 
     assert.equal(first.outcome, 'claimed');
     assert.equal(blocked.outcome, 'claimed_elsewhere');
     assert.equal(recovered.outcome, 'claimed');
     assert.equal(recovered.receipt.claimId, 'claim-3');
+    assert.equal(recovered.receipt.processorCatId, 'codex-sol');
+    assert.equal(recovered.receipt.processingThreadId, 'thread_memory_operations');
+    assert.equal(recovered.receipt.processingMessageId, undefined);
+    assert.equal(recovered.receipt.processorInvocationId, undefined);
+  });
+
+  it('disposes only the exact live processor grant and terminalizes stale attempts', async () => {
+    const created = await store.stage(stageInput());
+    const claimed = await store.claim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      now: 200,
+      leaseMs: 50,
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+    });
+    assert.equal(claimed.outcome, 'claimed');
+    await store.bindProcessingMessage({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-disposition',
+      now: 201,
+    });
+    await store.bindProcessorInvocation({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-disposition',
+      processorInvocationId: 'invocation-disposition',
+      now: 202,
+    });
+
+    const wrongProcessor = await store.disposeClaim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      processorCatId: 'codex-sol',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-disposition',
+      disposition: 'insufficient_evidence',
+      now: 220,
+    });
+    assert.equal(wrongProcessor.outcome, 'conflict');
+    const wrongInvocation = await store.disposeClaim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-successor',
+      disposition: 'insufficient_evidence',
+      now: 220,
+    });
+    assert.equal(wrongInvocation.outcome, 'conflict');
+
+    const expired = await store.expireClaim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-disposition',
+      now: 251,
+    });
+    assert.equal(expired.outcome, 'not_actionable');
+    assert.equal(expired.receipt.resolution, 'unresolved_after_clerk_attempt');
+    assert.equal(expired.receipt.subject, undefined);
+    assert.deepEqual(await store.listReady('owner-1', 10, 251), []);
+    const duplicate = await store.stage(
+      stageInput({ receiptId: `deferred_person_${'6'.repeat(32)}`, invocationId: 'later-capture' }),
+    );
+    assert.equal(duplicate.outcome, 'deduped');
+    assert.equal(duplicate.receipt.receiptId, created.receipt.receiptId);
+    assert.equal(duplicate.receipt.state, 'not_actionable');
+  });
+
+  it('moves a live claim to awaiting confirmation without leaving a processor lease', async () => {
+    const created = await store.stage(stageInput());
+    await store.claim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-confirmation',
+      now: 200,
+      leaseMs: 100,
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+    });
+    await store.bindProcessingMessage({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-confirmation',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-confirmation',
+      now: 201,
+    });
+    await store.bindProcessorInvocation({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-confirmation',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-confirmation',
+      processorInvocationId: 'invocation-confirmation',
+      now: 202,
+    });
+    const disposed = await store.disposeClaim({
+      ownerUserId: 'owner-1',
+      receiptId: created.receipt.receiptId,
+      claimId: 'claim-confirmation',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-confirmation',
+      disposition: 'awaiting_confirmation',
+      now: 220,
+    });
+    assert.equal(disposed.outcome, 'awaiting_confirmation');
+    assert.equal(disposed.receipt.claimId, undefined);
+    assert.equal(disposed.receipt.processorCatId, undefined);
+    assert.deepEqual(await store.listReady('owner-1', 10, 220), []);
   });
 
   it('withdraws with payload purge and hard-forgets every receipt index', async () => {

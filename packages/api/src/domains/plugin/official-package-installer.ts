@@ -1,6 +1,8 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
+import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { snapshotEditorAssets } from './content-editor-runtime/surface-assets.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/index.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
@@ -235,7 +237,16 @@ export class OfficialPluginPackageInstaller {
         );
       }
       if (located.manifest.runtime.transport !== 'stdio') {
-        throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package is not a stdio runtime');
+        const staticEditors = staticEditorContributions(located.manifest);
+        if (staticEditors.length === 0 || entry.effectiveGrants.length !== 0) {
+          throw new OfficialPluginInstallError(
+            'UNSUPPORTED_TRANSPORT',
+            'official package has no supported Host runtime',
+          );
+        }
+        // Static builtin admission still consumes the exact archive and public
+        // manifest. Validate renderer bytes now; admission never starts a server.
+        await snapshotEditorAssets(located, staticEditors);
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
       return await accept({

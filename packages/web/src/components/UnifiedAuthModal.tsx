@@ -54,9 +54,10 @@ interface UnifiedAuthModalProps {
 
 export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initialClientId }: UnifiedAuthModalProps) {
   const isEdit = Boolean(editProfile);
-  const defaultClientId = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+  const defaultClientId =
+    editProfile?.clientId ?? initialClientId ?? (editProfile?.authType === 'api_key' ? undefined : 'anthropic');
   const [authMode, setAuthMode] = useState<AuthMode>(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
-  const [clientId, setClientId] = useState<BuiltinAccountClient>(defaultClientId);
+  const [clientId, setClientId] = useState<BuiltinAccountClient | undefined>(defaultClientId);
   const [displayName, setDisplayName] = useState(editProfile?.displayName ?? '');
   const [baseUrl, setBaseUrl] = useState(editProfile?.baseUrl ?? '');
   const [apiKey, setApiKey] = useState('');
@@ -74,7 +75,8 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
   const prevOpenRef = useRef(open);
   useEffect(() => {
     if (open && !prevOpenRef.current) {
-      const cid = editProfile?.clientId ?? initialClientId ?? 'anthropic';
+      const cid =
+        editProfile?.clientId ?? initialClientId ?? (editProfile?.authType === 'api_key' ? undefined : 'anthropic');
       setClientId(cid);
       setAuthMode(editProfile?.authType === 'api_key' ? 'api_key' : 'oauth');
       setDisplayName(editProfile?.displayName ?? '');
@@ -126,9 +128,11 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
     onClose();
   };
 
-  const canSubmit = isOAuth
-    ? Boolean(displayName.trim())
-    : Boolean(displayName.trim()) && models.length > 0 && (isEdit || Boolean(baseUrl.trim() && apiKey.trim()));
+  const canSubmit =
+    Boolean(clientId) &&
+    (isOAuth
+      ? Boolean(displayName.trim())
+      : Boolean(displayName.trim()) && models.length > 0 && (isEdit || Boolean(baseUrl.trim() && apiKey.trim())));
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -142,9 +146,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           models,
           envVars: envVars ?? {},
         };
-        if (editProfile?.clientId) {
-          patch.clientId = clientId;
-        }
+        patch.clientId = initialClientId ?? clientId;
         if (baseUrl.trim()) patch.baseUrl = baseUrl.trim();
         if (apiKey.trim()) patch.apiKey = apiKey.trim();
         const res = await apiFetch(`/api/accounts/${encodeURIComponent(editProfile!.id)}`, {
@@ -188,7 +190,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
           body: JSON.stringify({
             displayName: displayName.trim(),
             authType: 'api_key',
-            ...(initialClientId ? { clientId: initialClientId } : {}),
+            clientId: initialClientId ?? clientId,
             baseUrl: baseUrl.trim(),
             apiKey: apiKey.trim(),
             models,
@@ -277,27 +279,33 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             />
           </div>
 
-          {/* OAuth mode: Client dropdown */}
-          {isOAuth && (
-            <div>
-              <label className="mb-1 block text-xs font-medium text-cafe-secondary">Client</label>
-              {initialClientId ? (
-                <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
-              ) : (
-                <select
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
-                  className={formInputClass}
-                >
-                  {CLIENT_OPTIONS.map((c) => (
-                    <option key={c} value={c}>
-                      {builtinClientLabel(c)}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+          {/* Authentication mode does not erase account identity. */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-cafe-secondary">
+              {isOAuth ? 'Client' : 'API Key 归属'}
+            </label>
+            {initialClientId ? (
+              <p className={formInputClass}>{builtinClientLabel(initialClientId)}</p>
+            ) : (
+              <select
+                aria-label={isOAuth ? 'Client' : 'API Key 归属'}
+                value={clientId ?? ''}
+                onChange={(e) => setClientId(e.target.value as BuiltinAccountClient)}
+                className={formInputClass}
+              >
+                {!clientId && (
+                  <option value="" disabled>
+                    请选择账户归属
+                  </option>
+                )}
+                {CLIENT_OPTIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {builtinClientLabel(c)}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
 
           {/* API Key mode: Base URL + API Key */}
           {!isOAuth && (
@@ -344,6 +352,7 @@ export function UnifiedAuthModal({ open, onClose, onCreated, editProfile, initia
             />
             {/* Model suggestions for builtin clients */}
             {isOAuth &&
+              clientId &&
               (MODEL_SUGGESTIONS[initialClientId ?? clientId] ?? []).filter((m) => !models.includes(m)).length > 0 && (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1">
                   <span className="text-micro text-cafe-muted">推荐</span>

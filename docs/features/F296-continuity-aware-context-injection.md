@@ -15,11 +15,11 @@ tips_exempt: "续租 2026-08-28 / PR #4040：AgentRouter authority 接线、reru
 
 > **Status**: done / production loaded；Phase A + Phase B contract、production bridge 与 merged-main Alpha 均已关闭 | **Completed**: 2026-08-31 | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
-> **operator kickoff**: `0001786766025646-000156-269d3cfb` — F148 若已关闭则新立 related
+> **operator kickoff**: `private-source-id` — F148 若已关闭则新立 related
 > feature，由Maine Coon选择正确路径并执行。
 >
 > **Kickoff content review**: Ragdoll (@fable5) 在
-> `0001786765483390-000144-af03a4c3` 放行 `contextMode / deltaSize` 骨架与五元组合同，
+> `private-source-id` 放行 `contextMode / deltaSize` 骨架与五元组合同，
 > 要求补上 compaction 转移边、明确无 invalidator 的 regex `openQuestions` 不得进正文，
 > 并按“先确定性止血、再终态合同”落地。
 

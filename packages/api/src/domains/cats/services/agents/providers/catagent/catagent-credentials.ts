@@ -11,6 +11,8 @@
 import type { CatConfig } from '@cat-cafe/shared';
 import { resolveForClient } from '../../../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-account-binding.js';
+import { assertProviderCredentialDestination } from '../../../../../../config/provider-credential-policy.js';
+import { buildProviderEndpoint } from '../../../../../../config/provider-endpoint.js';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('catagent-creds');
@@ -45,6 +47,11 @@ export function resolveApiCredentials(
     return null;
   }
 
+  assertProviderCredentialDestination(
+    profile,
+    'anthropic',
+    buildProviderEndpoint({ protocol: 'anthropic', baseUrl: profile.baseUrl }),
+  );
   log.info(`[${catId}] Resolved API key from bound account: ${boundRef}`);
   return { apiKey: profile.apiKey, baseURL: profile.baseUrl, source: `bound:${boundRef}` };
 }

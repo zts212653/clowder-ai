@@ -15,10 +15,14 @@ import { catRegistry } from '@cat-cafe/shared';
 import {
   type BuiltinAccountClient,
   builtinAccountIdForClient,
+  resolveByAccountRef,
   resolveForClient,
 } from '../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../config/cat-account-binding.js';
 import { getCatModel } from '../../../../config/cat-models.js';
+import { assertProviderCredentialDestination } from '../../../../config/provider-credential-policy.js';
+import { buildProviderEndpoint } from '../../../../config/provider-endpoint.js';
+import { resolveActiveProjectRoot } from '../../../../utils/active-project-root.js';
 import type { AIActionResponse, AIProvider } from '../game/werewolf/WerewolfAIPlayer.js';
 
 const LLM_TIMEOUT_MS = 10_000;
@@ -64,31 +68,41 @@ export class LlmAIProvider implements AIProvider {
         case 'kimi':
           return await this.callKimi(prompt, controller.signal);
         default:
-          // Unsupported providers (antigravity, etc.) — fall through to Anthropic
-          return await this.callAnthropic(prompt, controller.signal);
+          throw new Error(`Unsupported game provider: ${this.provider}`);
       }
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** Resolve API key via deterministic binding — never discovery chain (502 regression). */
-  private resolveApiKey(client: BuiltinAccountClient): string | undefined {
+  /** Keep deterministic builtin fallback, and authorize the same destination that fetch receives. */
+  private resolveRequest(client: Exclude<BuiltinAccountClient, 'opencode'>): { apiKey: string; url: string } {
+    const root = resolveActiveProjectRoot(process.cwd());
     const entry = catRegistry.tryGet(this.catId);
-    const accountRef =
-      (entry ? resolveBoundAccountRefForCat(process.cwd(), this.catId, entry.config) : undefined) ??
-      builtinAccountIdForClient(client) ??
-      undefined;
-    const profile = resolveForClient(process.cwd(), client, accountRef);
-    return profile?.apiKey;
+    const accountRef = entry ? resolveBoundAccountRefForCat(root, this.catId, entry.config) : undefined;
+    const builtinRef = builtinAccountIdForClient(client);
+    const profile = accountRef
+      ? resolveForClient(root, client, accountRef)
+      : builtinRef
+        ? resolveByAccountRef(root, builtinRef)
+        : null;
+    if (!profile?.apiKey) throw new Error(`No ${client} API key in the selected account`);
+    const url = buildProviderEndpoint({
+      protocol: client,
+      baseUrl: profile.baseUrl,
+      model: this.model,
+      ...(client === 'google' ? { apiKey: profile.apiKey } : {}),
+    });
+    assertProviderCredentialDestination(profile, client, url);
+    return { apiKey: profile.apiKey, url };
   }
 
   private async callAnthropic(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('anthropic');
-    if (!apiKey) throw new Error('No Anthropic API key in credentials.json — run install-auth-config.mjs to configure');
+    const { apiKey, url } = this.resolveRequest('anthropic');
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch(url, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'content-type': 'application/json',
         'x-api-key': apiKey,
@@ -112,11 +126,11 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callOpenAI(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('openai');
-    if (!apiKey) throw new Error('No OpenAI API key in credentials.json — run install-auth-config.mjs to configure');
+    const { apiKey, url } = this.resolveRequest('openai');
 
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+    const resp = await fetch(url, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${apiKey}`,
@@ -139,21 +153,18 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callGoogle(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('google');
-    if (!apiKey) throw new Error('No Google API key in credentials.json — run install-auth-config.mjs to configure');
+    const { url } = this.resolveRequest('google');
 
-    const resp = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 256 },
-        }),
-        signal,
-      },
-    );
+    const resp = await fetch(url, {
+      method: 'POST',
+      redirect: 'error',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 256 },
+      }),
+      signal,
+    });
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
@@ -165,11 +176,11 @@ export class LlmAIProvider implements AIProvider {
   }
 
   private async callKimi(prompt: string, signal: AbortSignal): Promise<LlmCallResult> {
-    const apiKey = this.resolveApiKey('kimi');
-    if (!apiKey) throw new Error('No Kimi API key in credentials or MOONSHOT_API_KEY env');
+    const { apiKey, url } = this.resolveRequest('kimi');
 
-    const resp = await fetch('https://api.moonshot.ai/v1/chat/completions', {
+    const resp = await fetch(url, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${apiKey}`,

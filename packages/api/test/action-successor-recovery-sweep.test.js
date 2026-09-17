@@ -12,11 +12,11 @@ import { describe, test } from 'node:test';
 function returnedLease(overrides = {}) {
   return {
     leaseId: 'lease-1',
-    key: 'user-1\npr:owner/repo#3019\nreview\nreviewer',
+    key: 'user-1\nsubject:task:task-3019\nimplement\nimplementer',
     tenantScope: 'user-1',
-    subjectRef: 'pr:owner/repo#3019',
-    actionFamily: 'review',
-    successorSlot: 'reviewer',
+    subjectRef: 'subject:task:task-3019',
+    actionFamily: 'implement',
+    successorSlot: 'implementer',
     mode: 'single',
     holderCatIds: ['codex-sol'],
     holderThreadId: 'thread-source',
@@ -131,7 +131,7 @@ describe('F167 S.1-c ActionSuccessorRecoverySweep', () => {
       userId: 'user-1',
       targetCatId: 'codex-sol',
       callerCatId: 'codex-terra',
-      content: '[ActionSuccessor return recovery]\nlease=lease-1 generation=2 subject=pr:owner/repo#3019',
+      content: '[ActionSuccessor return recovery]\nlease=lease-1 generation=2 subject=subject:task:task-3019',
       idempotencyKey: 'action-return:lease-1:2:codex-sol',
       fence: {
         leaseId: 'lease-1',
@@ -151,6 +151,45 @@ describe('F167 S.1-c ActionSuccessorRecoverySweep', () => {
       },
     ]);
     assert.equal(h.lease().returnDeliveryState, 'delivered');
+  });
+
+  test('leaves a pre-cutover direct local-review return inert', async () => {
+    const { ActionSuccessorRecoverySweep } = await loadSweep();
+    const h = harness({
+      lease: returnedLease({
+        key: 'user-1\npr:owner/repo#3019\nreview\nreviewer',
+        subjectRef: 'pr:owner/repo#3019',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        dispatchId: 'return:legacy-local-review:g2',
+      }),
+    });
+    const sweep = new ActionSuccessorRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 0, delivered: 0, pending: 0, overdue: 0 });
+    assert.equal(h.attempts.length, 0);
+    assert.equal(h.deliveries.length, 0);
+    assert.equal(h.delivered.length, 0);
+  });
+
+  test('preserves return recovery for an Approval Hub external-review carrier', async () => {
+    const { ActionSuccessorRecoverySweep } = await loadSweep();
+    const h = harness({
+      lease: returnedLease({
+        key: 'user-1\npr:owner/repo#3019\nreview\nreviewer',
+        subjectRef: 'pr:owner/repo#3019',
+        actionFamily: 'review',
+        successorSlot: 'reviewer',
+        dispatchId: 'return:external-review:g2',
+        dispatchDeliveryState: 'delivered',
+        dispatchDeliveredMessageId: 'message:approved-review-carrier',
+      }),
+    });
+    const sweep = new ActionSuccessorRecoverySweep(h.deps);
+
+    assert.deepEqual(await sweep.runOnce(), { scanned: 1, delivered: 1, pending: 0, overdue: 0 });
+    assert.equal(h.attempts.length, 1);
+    assert.equal(h.deliveries.length, 1);
   });
 
   test('keeps custody pending across transport failure and retries idempotently', async () => {

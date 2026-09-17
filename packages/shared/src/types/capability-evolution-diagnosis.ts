@@ -38,7 +38,8 @@ export const EVOLUTION_GATE_BLOCKER_CODES = [
   'replay_cohort_missing', 'promotion_holdout_missing', 'promotion_holdout_contaminated',
   'holdout_exposure_proof_missing', 'holdout_exposure_status_missing', 'intervention_falsifier_missing',
   'rubric_reopen_trigger_missing', 'cost_missing', 'rollback_missing', 'intervention_layer_missing',
-  'gate_receipt_missing', 'gate_evidence_not_owner_held',
+  'gate_receipt_missing', 'gate_evidence_not_owner_held', 'intervention_action_missing',
+  'intervention_not_authority_requesting',
 ] as const;
 
 const layerSchema = z.enum(EVOLUTION_ATTRIBUTION_LAYERS);

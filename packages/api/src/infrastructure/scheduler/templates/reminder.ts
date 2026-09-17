@@ -45,6 +45,7 @@ export const reminderTemplate: TaskTemplate = {
     const message = (p.params.message as string) || '定时提醒';
     const targetCatId = (p.params.targetCatId as string) || null;
     const triggerUserId = (p.params.triggerUserId as string) || 'default-user';
+    const ownerAuthProvenance = instanceId.startsWith('hold-ball-') ? p.ownerAuthProvenance : undefined;
     const threadId = p.deliveryThreadId;
     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
     // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
@@ -100,6 +101,7 @@ export const reminderTemplate: TaskTemplate = {
               void Promise.resolve(
                 ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
                   sourceCategory: 'scheduled',
+                  ...(ownerAuthProvenance ? { ownerAuthProvenance } : {}),
                 }),
               ).catch(() => {});
             } catch {

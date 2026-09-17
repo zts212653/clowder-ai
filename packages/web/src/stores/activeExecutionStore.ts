@@ -1,8 +1,14 @@
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
 import { create } from 'zustand';
 
-export function activeExecutionKey(execution: Pick<ActiveExecutionProjection, 'kind' | 'executionId'>): string {
-  return `${execution.kind}:${execution.executionId}`;
+export function activeExecutionKey(
+  execution: Pick<ActiveExecutionProjection, 'kind' | 'threadId' | 'catId' | 'executionId'>,
+): string {
+  // Parallel cats share a parent executionId; live identity follows the exact cancel slot.
+  // Managed commands retain their globally unique task identity (also read by ConnectorBubble).
+  return execution.kind === 'managed_command'
+    ? `${execution.kind}:${execution.executionId}`
+    : JSON.stringify([execution.kind, execution.threadId, execution.catId, execution.executionId]);
 }
 
 interface ActiveExecutionState {
@@ -13,7 +19,7 @@ interface ActiveExecutionState {
   hydration: 'idle' | 'loading' | 'ready' | 'error';
   hydrationError: string | null;
   requestVersion: number;
-  beginHydration(anchorThreadId: string): number;
+  beginHydration(anchorThreadId: string, projectPath: string | null): number;
   applySnapshot(anchorThreadId: string, requestVersion: number, response: ActiveExecutionListResponse): void;
   failHydration(anchorThreadId: string, requestVersion: number, error: unknown): void;
   beginCancellation(execution: ActiveExecutionProjection): boolean;
@@ -34,16 +40,17 @@ const INITIAL_STATE = {
 
 export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) => ({
   ...INITIAL_STATE,
-  beginHydration(anchorThreadId) {
+  beginHydration(anchorThreadId, projectPath) {
     const current = get();
     const requestVersion = current.requestVersion + 1;
-    const anchorChanged = current.anchorThreadId !== anchorThreadId;
+    const projectChanged = current.projectPath !== projectPath;
     set({
       anchorThreadId,
+      projectPath,
       requestVersion,
-      hydration: anchorChanged || current.hydration === 'idle' ? 'loading' : current.hydration,
-      ...(anchorChanged
-        ? { projectPath: null, executionsByKey: {}, cancelPendingByKey: {}, hydrationError: null }
+      hydration: projectChanged || current.hydration === 'idle' ? 'loading' : current.hydration,
+      ...(projectChanged || projectPath === null
+        ? { executionsByKey: {}, cancelPendingByKey: {}, hydrationError: null }
         : {}),
     });
     return requestVersion;

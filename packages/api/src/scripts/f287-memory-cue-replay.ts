@@ -16,6 +16,8 @@ import {
 import { MemoryCuePlaneService } from '../domains/memory/cue/MemoryCuePlaneService.js';
 import { type MemoryCueResolver, MemoryCueResolverRegistry } from '../domains/memory/cue/MemoryCueResolverRegistry.js';
 import { getRecallOpportunityCatalogEntry } from '../domains/memory/cue/RecallOpportunityCatalog.js';
+import { CatOwnedSeedCueResolver } from '../domains/memory/cue/resolvers/CatOwnedSeedCueResolver.js';
+import { DecisionCueResolver } from '../domains/memory/cue/resolvers/DecisionCueResolver.js';
 import { EventCueResolver } from '../domains/memory/cue/resolvers/EventCueResolver.js';
 import { OperationalPrecedentCueResolver } from '../domains/memory/cue/resolvers/OperationalPrecedentCueResolver.js';
 import { PersonEntityCueResolver } from '../domains/memory/cue/resolvers/PersonEntityCueResolver.js';
@@ -34,6 +36,21 @@ const OWNER_SCOPE: RecallScopeV1 = Object.freeze({
   invocationId: 'f287-eval-invocation',
 });
 const NOW = 10_001;
+const FIXTURE_ENTITY_REVISION = 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const FIXTURE_ENTITY_REVISIONS = {
+  isCurrentVisibleRevision(entityId: string, expectedRevision: string, viewerUserId: string): boolean {
+    return (
+      entityId === 'person:alden' &&
+      expectedRevision === FIXTURE_ENTITY_REVISION &&
+      viewerUserId === OWNER_SCOPE.ownerUserId
+    );
+  },
+};
+const NO_ENTITY_REVISIONS = {
+  isCurrentVisibleRevision: () => false,
+};
+const DEFAULT_OVERSIZED_HANDLE_SEGMENTS = 316;
+const TASTE_OVERSIZED_HANDLE_SEGMENTS = 1_200;
 
 type EvaluatedFamily = Extract<RecallResolverFamily, 'person_entity' | 'operational_precedent' | 'taste'>;
 type FixtureSourceState = 'relevant' | 'irrelevant' | 'budget';
@@ -97,6 +114,7 @@ function makeOpportunity(family: EvaluatedFamily, scope: RecallScopeV1 = OWNER_S
         entityId: 'person:alden',
         matchedAlias: 'Alden',
         sourceMessageId: 'f287-eval-person-message',
+        sourceRevision: FIXTURE_ENTITY_REVISION,
       },
     };
   }
@@ -157,12 +175,15 @@ function sourceProjection(state: FixtureSourceState) {
 
 function createRegistry(state: FixtureSourceState): MemoryCueResolverRegistry {
   return new MemoryCueResolverRegistry([
-    new PersonEntityCueResolver({
-      async resolve(input) {
-        if (input.ownerUserId !== OWNER_SCOPE.ownerUserId || input.entityId !== 'person:alden') return null;
-        return sourceProjection(state);
+    new PersonEntityCueResolver(
+      {
+        async resolve(input) {
+          if (input.ownerUserId !== OWNER_SCOPE.ownerUserId || input.entityId !== 'person:alden') return null;
+          return sourceProjection(state);
+        },
       },
-    }),
+      FIXTURE_ENTITY_REVISIONS,
+    ),
     new OperationalPrecedentCueResolver({
       async resolve(input) {
         if (
@@ -196,13 +217,18 @@ function createRegistry(state: FixtureSourceState): MemoryCueResolverRegistry {
     }),
     new ProfileCueResolver(),
     new EventCueResolver({ resolve: async () => null }),
-    new ProjectKnowledgeCueResolver(),
+    new DecisionCueResolver({ resolve: async () => null }),
+    new ProjectKnowledgeCueResolver({ resolve: async () => null }),
+    new CatOwnedSeedCueResolver({ resolve: async () => null }),
   ]);
 }
 
 function createDrillHandle(oversized: boolean): (input: { family: string; anchor: string }) => string {
-  return (input) =>
-    oversized ? `opaque:${input.family}:${'123456'.repeat(316)}` : `opaque:${input.family}:${input.anchor}:f287-eval`;
+  return (input) => {
+    if (!oversized) return `opaque:${input.family}:${input.anchor}:f287-eval`;
+    const segments = input.family === 'taste' ? TASTE_OVERSIZED_HANDLE_SEGMENTS : DEFAULT_OVERSIZED_HANDLE_SEGMENTS;
+    return `opaque:${input.family}:${'123456'.repeat(segments)}`;
+  };
 }
 
 async function resolveOnce(input: {
@@ -297,7 +323,7 @@ function createPersonLifecycleHarness(): LifecycleHarness {
     },
   });
   return {
-    resolver: new PersonEntityCueResolver(source),
+    resolver: new PersonEntityCueResolver(source, FIXTURE_ENTITY_REVISIONS),
     mutate(state) {
       if (state === 'source_forgotten') {
         available = false;
@@ -408,12 +434,16 @@ function createLifecycleHarness(family: EvaluatedFamily): LifecycleHarness {
 
 function createLifecycleRegistry(family: EvaluatedFamily, resolver: MemoryCueResolver): MemoryCueResolverRegistry {
   return new MemoryCueResolverRegistry([
-    family === 'person_entity' ? resolver : new PersonEntityCueResolver({ resolve: async () => null }),
+    family === 'person_entity'
+      ? resolver
+      : new PersonEntityCueResolver({ resolve: async () => null }, NO_ENTITY_REVISIONS),
     family === 'operational_precedent' ? resolver : new OperationalPrecedentCueResolver({ resolve: async () => null }),
     family === 'taste' ? resolver : new TasteCueResolver({ resolve: async () => null }),
     new ProfileCueResolver(),
     new EventCueResolver({ resolve: async () => null }),
-    new ProjectKnowledgeCueResolver(),
+    new DecisionCueResolver({ resolve: async () => null }),
+    new ProjectKnowledgeCueResolver({ resolve: async () => null }),
+    new CatOwnedSeedCueResolver({ resolve: async () => null }),
   ]);
 }
 

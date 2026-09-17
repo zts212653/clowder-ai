@@ -135,6 +135,28 @@ describe('F299 request-generation source policy', () => {
             },
           },
         },
+        {
+          envelope: {
+            candidate: {
+              subjectKey: 'memory-cue:cat_owned_seed:owned-seed:codex-sol:seed_1',
+              asOf: { kind: 'version', value: 'rev-seed' },
+            },
+            admission: {
+              producerOwner: 'present_loop',
+              sourceRefs: ['owned-seed:codex-sol:seed_1'],
+            },
+            receipt: {
+              domain: 'memory_cue',
+              receipt: {
+                event: {
+                  resolverFamily: 'cat_owned_seed',
+                  sourceAnchor: 'owned-seed:codex-sol:seed_1',
+                  sourceRevision: 'rev-seed',
+                },
+              },
+            },
+          },
+        },
       ],
       omitted: [],
     });
@@ -144,6 +166,7 @@ describe('F299 request-generation source policy', () => {
       userId: 'owner-1',
       threadId: 'thread-1',
       invocationId: 'inv-1',
+      catId: 'codex-sol',
       memoryCueSourceReader: {
         read: async (coordinate) => {
           reads.push(coordinate);
@@ -157,12 +180,14 @@ describe('F299 request-generation source policy', () => {
       [
         { family: 'person_memory', anchor: 'person-memory:p-1', expectedRevision: 'rev-1' },
         { family: 'evidence', anchor: 'feature:F299', expectedRevision: 'rev-2' },
+        { family: 'owned_seed', anchor: 'owned-seed:codex-sol:seed_1', expectedRevision: 'rev-seed' },
       ],
     );
     assert.deepEqual(
       refs.map((ref) => states.get(requestGenerationSourceKey(ref))),
-      ['available', 'available'],
+      ['available', 'available', 'available'],
     );
+    assert.equal(reads[2].consumerCatId, 'codex-sol');
   });
 
   it('attributes submitted message bytes only to admitted presentations and concrete assembly owners', () => {

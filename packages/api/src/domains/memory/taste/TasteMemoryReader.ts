@@ -5,6 +5,7 @@ import { parse as parseYaml } from 'yaml';
 import type { TasteRepository } from '../../taste/services/TasteRepository.js';
 
 export const MAX_TASTE_DECISION_PAYLOAD_CHARS = 16_384;
+export const TASTE_MEMORY_READER_CONTRACT_REF = 'packages/api/src/domains/memory/taste/TasteMemoryReader.ts';
 
 const MAX_WHEN_CHARS = 64;
 const MAX_QUOTE_CHARS = 2_000;

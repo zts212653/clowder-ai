@@ -41,6 +41,8 @@ export interface SchedulerMessageExtra {
   };
   /** F276: server-written, content-free carrier for one deferred write-opportunity re-entry. */
   writeOpportunityReentry?: import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1;
+  /** F276: one unified clerk invocation may carry up to eight independent re-entries. */
+  writeOpportunityReentries?: readonly import('./memory-write-opportunity.js').WriteOpportunityReentryCarrierV1[];
   /** F292/F296: server-written, refs-only retry for one unchanged write-opportunity generation. */
   writeOpportunityPresentationRetry?: import('./memory-write-opportunity.js').WriteOpportunityPresentationRetryCarrierV1;
 }

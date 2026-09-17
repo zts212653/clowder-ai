@@ -15,16 +15,27 @@ import type {
   WriteOpportunityReentryCarrierV1,
 } from '@cat-cafe/shared';
 import {
+  acceptedRevisionSchema,
+  acceptedSourceRefSchema,
   asrPersonMemoryDynamicSceneEntryV1Schema,
+  catOwnedSeedCueCarrierV1Schema,
+  collectiveOwnerAdmissionV1Schema,
+  collectiveWorkInvocationV1Schema,
   deliveryDecisionCueCarrierV1Schema,
+  evolutionPreparationSubmissionV1Schema,
   isProviderSemanticEvent,
+  isValidAcceptedSource,
+  isValidReviewSubjectRef,
+  localReviewGitRevisionSchema,
   MessageBundleCarrierV1Schema,
   MessageContentsSchema,
+  routingPreflightReceiptV1Schema,
   writeOpportunityPresentationRetryCarrierV1Schema,
   writeOpportunityReentryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import { parsePluginMessageExtra } from '../../../../messaging/envelope.js';
-import type { MessageMetadata } from '../../types.js';
+import { MAX_PERSISTED_SUBEXECUTION_EVENTS, type MessageMetadata } from '../../types.js';
+import { parseMessageDeliveryBoundary } from '../message-delivery-boundary.js';
 import type {
   MessageRecallMarker,
   StoredMessage,
@@ -174,11 +185,16 @@ type ExtraCarrierPersistenceClassification<
  * Every StoredMessage.extra key must be classified when it is introduced.
  */
 type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
+  collectiveOwnerAdmissionV1: 'parsed';
+  collectiveWorkInvocationV1: 'parsed';
+  collectiveAuthorizationInvalid: 'derived';
   semanticEvent: 'parsed';
+  realtimeCompanion: 'parsed';
   rich: 'parsed';
   isExplicitPost: 'parsed';
   stream: 'parsed';
   causal: 'parsed';
+  deliveryBoundary: 'parsed';
   proactive: 'parsed';
   memoryCue: 'parsed';
   turnExecution: 'parsed';
@@ -186,13 +202,13 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   crossPost: 'parsed';
   coordination: 'parsed';
   localReviewVerdict: 'parsed';
-  legacyLocalReviewDisposition: 'parsed';
   callbackDedup: 'parsed';
   targetCats: 'parsed';
   messageBundle: 'parsed';
   meetingArtifact: 'parsed';
   dynamicSceneEntries: 'parsed';
   writeOpportunityReentry: 'parsed';
+  writeOpportunityReentries: 'parsed';
   writeOpportunityPresentationRetry: 'parsed';
   freshness: 'parsed';
   supplement: 'parsed';
@@ -200,36 +216,48 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   scheduler: 'parsed';
   tracing: 'parsed';
   systemKind: 'parsed';
+  systemInfo: 'parsed';
   a2aRouting: 'parsed';
   queueReceipt: 'derived';
   pluginMessage: 'parsed';
   custodyOfferV1: 'derived';
+  evolutionPreparationSubmissionV1: 'parsed';
 }>;
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
+function isOptionalLocalReviewHead(value: unknown): boolean {
+  return value === undefined || localReviewGitRevisionSchema.safeParse(value).success;
+}
+
+function isValidOptionalAcceptedSourceAnchor(candidate: Record<string, unknown>): boolean {
+  const values = [candidate.reviewSubjectRef, candidate.acceptedSourceRef, candidate.acceptedRevision];
+  if (values.every((value) => value === undefined)) return true;
+  if (values.some((value) => typeof value !== 'string')) return false;
+  const reviewSubjectRef = candidate.reviewSubjectRef as string;
+  const acceptedSourceRef = candidate.acceptedSourceRef as string;
+  const acceptedRevision = candidate.acceptedRevision as string;
+  return (
+    isValidReviewSubjectRef(reviewSubjectRef) &&
+    acceptedSourceRefSchema.safeParse(acceptedSourceRef).success &&
+    acceptedRevisionSchema.safeParse(acceptedRevision).success &&
+    isValidAcceptedSource(acceptedSourceRef, acceptedRevision)
+  );
+}
+
 function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['localReviewVerdict'] {
   if (typeof value !== 'object' || value === null) return undefined;
   const candidate = value as Record<string, unknown>;
   const verdict = candidate.verdict;
-  const carrierlessLeaseFence = candidate.carrierlessLeaseFence as Record<string, unknown> | undefined;
   if (
     (verdict !== 'approved' && verdict !== 'changes_requested' && verdict !== 'commented') ||
     typeof candidate.clientMessageId !== 'string' ||
     candidate.clientMessageId.length === 0 ||
     candidate.clientMessageId.length > 200 ||
-    (candidate.reviewedHeadSha !== undefined &&
-      (typeof candidate.reviewedHeadSha !== 'string' ||
-        !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha))) ||
-    (candidate.carrierlessLeaseFence !== undefined &&
-      (typeof candidate.carrierlessLeaseFence !== 'object' ||
-        candidate.carrierlessLeaseFence === null ||
-        !isNonEmptyString(carrierlessLeaseFence?.leaseId) ||
-        carrierlessLeaseFence.leaseId.length > 200 ||
-        !Number.isInteger(carrierlessLeaseFence?.generation) ||
-        Number(carrierlessLeaseFence.generation) < 1))
+    !isOptionalLocalReviewHead(candidate.reviewedHeadSha) ||
+    !isValidOptionalAcceptedSourceAnchor(candidate)
   ) {
     return undefined;
   }
@@ -237,51 +265,9 @@ function parseLocalReviewVerdictCarrier(value: unknown): StoredMessageExtra['loc
     verdict,
     clientMessageId: candidate.clientMessageId,
     ...(typeof candidate.reviewedHeadSha === 'string' ? { reviewedHeadSha: candidate.reviewedHeadSha } : {}),
-    ...(carrierlessLeaseFence
-      ? {
-          carrierlessLeaseFence: {
-            leaseId: carrierlessLeaseFence.leaseId as string,
-            generation: carrierlessLeaseFence.generation as number,
-          },
-        }
-      : {}),
-  };
-}
-
-function parseLegacyLocalReviewDispositionCarrier(value: unknown): StoredMessageExtra['legacyLocalReviewDisposition'] {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const candidate = value as Record<string, unknown>;
-  if (
-    !isNonEmptyString(candidate.sourceMessageId) ||
-    candidate.sourceMessageId.length > 200 ||
-    !isNonEmptyString(candidate.leaseId) ||
-    candidate.leaseId.length > 200 ||
-    !Number.isInteger(candidate.generation) ||
-    Number(candidate.generation) < 1 ||
-    !isNonEmptyString(candidate.subjectRef) ||
-    candidate.subjectRef.length > 256 ||
-    !isNonEmptyString(candidate.reviewerCatId) ||
-    candidate.reviewerCatId.length > 100 ||
-    !isNonEmptyString(candidate.predecessorCatId) ||
-    candidate.predecessorCatId.length > 100 ||
-    typeof candidate.reviewedHeadSha !== 'string' ||
-    !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(candidate.reviewedHeadSha) ||
-    (candidate.verdict !== 'approved' && candidate.verdict !== 'changes_requested') ||
-    !isNonEmptyString(candidate.decisionId) ||
-    candidate.decisionId.length > 200
-  ) {
-    return undefined;
-  }
-  return {
-    sourceMessageId: candidate.sourceMessageId,
-    leaseId: candidate.leaseId,
-    generation: candidate.generation as number,
-    subjectRef: candidate.subjectRef,
-    reviewerCatId: candidate.reviewerCatId,
-    predecessorCatId: candidate.predecessorCatId,
-    reviewedHeadSha: candidate.reviewedHeadSha,
-    verdict: candidate.verdict,
-    decisionId: candidate.decisionId,
+    ...(typeof candidate.reviewSubjectRef === 'string' ? { reviewSubjectRef: candidate.reviewSubjectRef } : {}),
+    ...(typeof candidate.acceptedSourceRef === 'string' ? { acceptedSourceRef: candidate.acceptedSourceRef } : {}),
+    ...(typeof candidate.acceptedRevision === 'string' ? { acceptedRevision: candidate.acceptedRevision } : {}),
   };
 }
 
@@ -296,6 +282,20 @@ function parseProactiveCarrier(value: unknown): StoredMessageExtra['proactive'] 
     return undefined;
   }
   return { visitId: candidate.visitId, intentId: candidate.intentId, source: 'private_time' };
+}
+
+function parseRealtimeCompanionCarrier(value: unknown): StoredMessageExtra['realtimeCompanion'] {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    (candidate.consumer !== 'watch_video' && candidate.consumer !== 'meeting_companion') ||
+    !isNonEmptyString(candidate.invocationId) ||
+    candidate.invocationId.length > 128 ||
+    !/^realtime-companion-[0-9a-f-]+$/.test(candidate.invocationId)
+  ) {
+    return undefined;
+  }
+  return { consumer: candidate.consumer, invocationId: candidate.invocationId };
 }
 
 function parseMeetingArtifactCarrier(value: unknown): StoredMessageExtra['meetingArtifact'] {
@@ -351,9 +351,39 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     const result: StoredMessageExtra = {};
     let hasField = false;
+    if (parsed.collectiveOwnerAdmissionV1 !== undefined) {
+      const admission = collectiveOwnerAdmissionV1Schema.safeParse(parsed.collectiveOwnerAdmissionV1);
+      if (admission.success) result.collectiveOwnerAdmissionV1 = admission.data;
+      else result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (parsed.collectiveWorkInvocationV1 !== undefined) {
+      const invocation = collectiveWorkInvocationV1Schema.safeParse(parsed.collectiveWorkInvocationV1);
+      if (invocation.success) result.collectiveWorkInvocationV1 = invocation.data;
+      else result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
+    if (parsed.collectiveAuthorizationInvalid === true) {
+      result.collectiveAuthorizationInvalid = true;
+      hasField = true;
+    }
 
     if (isProviderSemanticEvent(parsed.semanticEvent)) {
       result.semanticEvent = parsed.semanticEvent;
+      hasField = true;
+    }
+
+    const evolutionPreparationSubmission = evolutionPreparationSubmissionV1Schema.safeParse(
+      parsed.evolutionPreparationSubmissionV1,
+    );
+    if (evolutionPreparationSubmission.success) {
+      result.evolutionPreparationSubmissionV1 = evolutionPreparationSubmission.data;
+      hasField = true;
+    }
+
+    const realtimeCompanion = parseRealtimeCompanionCarrier(parsed.realtimeCompanion);
+    if (realtimeCompanion) {
+      result.realtimeCompanion = realtimeCompanion;
       hasField = true;
     }
 
@@ -364,8 +394,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
 
     const deliveryDecision = deliveryDecisionCueCarrierV1Schema.safeParse(parsed.memoryCue?.deliveryDecision);
-    if (deliveryDecision.success) {
-      result.memoryCue = { deliveryDecision: deliveryDecision.data };
+    const catOwnedSeed = catOwnedSeedCueCarrierV1Schema.safeParse(parsed.memoryCue?.catOwnedSeed);
+    if (deliveryDecision.success || catOwnedSeed.success) {
+      result.memoryCue = {
+        ...(deliveryDecision.success ? { deliveryDecision: deliveryDecision.data } : {}),
+        ...(catOwnedSeed.success ? { catOwnedSeed: catOwnedSeed.data } : {}),
+      };
       hasField = true;
     }
 
@@ -410,12 +444,30 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
+    if (Array.isArray(parsed.writeOpportunityReentries) && parsed.writeOpportunityReentries.length <= 8) {
+      const reentries = (parsed.writeOpportunityReentries as unknown[]).map((candidate: unknown) =>
+        writeOpportunityReentryCarrierV1Schema.safeParse(candidate),
+      );
+      if (reentries.length > 0 && reentries.every((candidate) => candidate.success)) {
+        result.writeOpportunityReentries = reentries.map(
+          (candidate) => candidate.data as WriteOpportunityReentryCarrierV1,
+        );
+        hasField = true;
+      }
+    }
+
     const writeOpportunityPresentationRetry = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
       parsed.writeOpportunityPresentationRetry,
     );
     if (writeOpportunityPresentationRetry.success) {
       result.writeOpportunityPresentationRetry =
         writeOpportunityPresentationRetry.data as WriteOpportunityPresentationRetryCarrierV1;
+      hasField = true;
+    }
+
+    const deliveryBoundary = parseMessageDeliveryBoundary(parsed.deliveryBoundary);
+    if (deliveryBoundary) {
+      result.deliveryBoundary = deliveryBoundary;
       hasField = true;
     }
 
@@ -494,17 +546,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       hasField = true;
     }
 
-    // #1371 PR1b: the typed verdict is the only settlement fact. Public prose
-    // is presentation, so Redis hydration must preserve this carrier exactly.
+    // #1371: the typed verdict is durable review evidence. Public prose is
+    // presentation, so Redis hydration must preserve this carrier exactly;
+    // merge-gate separately requires an exact reviewedHeadSha for authority.
     const localReviewVerdict = parseLocalReviewVerdictCarrier(parsed.localReviewVerdict);
     if (localReviewVerdict) {
       result.localReviewVerdict = localReviewVerdict;
-      hasField = true;
-    }
-
-    const legacyLocalReviewDisposition = parseLegacyLocalReviewDispositionCarrier(parsed.legacyLocalReviewDisposition);
-    if (legacyLocalReviewDisposition) {
-      result.legacyLocalReviewDisposition = legacyLocalReviewDisposition;
       hasField = true;
     }
 
@@ -656,6 +703,13 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
       result.systemKind = parsed.systemKind;
       hasField = true;
     }
+    if (parsed.systemInfo?.v === 1) {
+      const receipt = routingPreflightReceiptV1Schema.safeParse(parsed.systemInfo.payload);
+      if (receipt.success) {
+        result.systemInfo = { v: 1, payload: receipt.data, fallbackCatId: receipt.data.target.targetCatId };
+        hasField = true;
+      }
+    }
 
     if (parsed.a2aRouting && typeof parsed.a2aRouting === 'object') {
       const routing: NonNullable<typeof result.a2aRouting> = {};
@@ -694,6 +748,49 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
     }
 
     return hasField ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type PawFeelSourceExtra = Pick<NonNullable<StoredMessage['extra']>, 'stream' | 'crossPost'>;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+function parsePawFeelSourceStream(value: unknown): PawFeelSourceExtra['stream'] | undefined {
+  const stream = asRecord(value);
+  if (!stream) return undefined;
+  const invocationId = typeof stream.invocationId === 'string' ? stream.invocationId : undefined;
+  const turnInvocationId = typeof stream.turnInvocationId === 'string' ? stream.turnInvocationId : undefined;
+  return invocationId || turnInvocationId
+    ? {
+        ...(invocationId ? { invocationId } : {}),
+        ...(turnInvocationId ? { turnInvocationId } : {}),
+      }
+    : undefined;
+}
+
+function parsePawFeelSourceCrossPost(value: unknown): PawFeelSourceExtra['crossPost'] | undefined {
+  const crossPost = asRecord(value);
+  return typeof crossPost?.sourceThreadId === 'string' ? { sourceThreadId: crossPost.sourceThreadId } : undefined;
+}
+
+/**
+ * F278 reads canonical marker sources without hydrating history-only carriers.
+ * The source verifier needs only stream invocation grouping and cross-post origin;
+ * keep this narrow parser aligned to those two consumers rather than decoding rich
+ * blocks or every optional extra carrier for each global inbox source.
+ */
+export function safeParsePawFeelSourceExtra(raw: string | undefined): PawFeelSourceExtra | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = asRecord(JSON.parse(raw));
+    if (!parsed) return undefined;
+    const stream = parsePawFeelSourceStream(parsed.stream);
+    const crossPost = parsePawFeelSourceCrossPost(parsed.crossPost);
+    return stream || crossPost ? { ...(stream ? { stream } : {}), ...(crossPost ? { crossPost } : {}) } : undefined;
   } catch {
     return undefined;
   }
@@ -753,7 +850,18 @@ export function safeParseMetadata(raw: string | undefined): MessageMetadata | un
       typeof parsed.provider === 'string' &&
       typeof parsed.model === 'string'
     ) {
-      return parsed as MessageMetadata;
+      const metadata = { ...parsed } as MessageMetadata;
+      if (Object.hasOwn(parsed, 'subexecutionEvents')) {
+        const events = (parsed as Record<string, unknown>).subexecutionEvents;
+        if (
+          !Array.isArray(events) ||
+          events.length > MAX_PERSISTED_SUBEXECUTION_EVENTS ||
+          !events.every((event) => isProviderSemanticEvent(event) && event.kind === 'subexecution')
+        ) {
+          delete metadata.subexecutionEvents;
+        }
+      }
+      return metadata;
     }
     return undefined;
   } catch {

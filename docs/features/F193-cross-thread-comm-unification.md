@@ -5,7 +5,7 @@ topics: [mcp, cross-thread, agent-first, harness]
 doc_kind: spec
 created: 2026-05-07
 user_journey_exempt: infrastructure feature — dispatch routing is invisible to end user
-tips_exempt: "Renewed 2026-08-27 for public-link projection only; the infrastructure change adds no user-facing capability."
+tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; the infrastructure change adds no user-facing capability."
 ---
 
 # F193: Cross-Thread Communication Unification
@@ -182,7 +182,7 @@ SessionStart / shell hook 检测到 main 上有 unexpected 状态（untracked do
 ## Post-close Follow-up: Duplicate Legacy MCP Topology
 
 **Status**: open follow-up, do not reopen F193 close.
-**Task**: `[F193/F209] Fix duplicate legacy cat-cafe MCP topology when cat-cafe-limb is external` (`0001779676617089-000049-765d9510`).
+**Task**: `[F193/F209] Fix duplicate legacy cat-cafe MCP topology when cat-cafe-limb is external` (`private-source-id`).
 **Found during**: F209 D.0 dogfood, 2026-05-24.
 
 ### Symptom

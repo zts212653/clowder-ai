@@ -78,7 +78,7 @@ Feature IDs (`F001`, `F002`, ...) are assigned by **maintainers**, not by contri
 
 ### Runtime ports
 
-The default ports are `3003` (Frontend) and `3004` (API). See [SETUP.md](SETUP.md) for full configuration.
+The default ports are `3003` (API) and `3004` (Frontend). See [SETUP.md](SETUP.md) for full configuration.
 
 ---
 

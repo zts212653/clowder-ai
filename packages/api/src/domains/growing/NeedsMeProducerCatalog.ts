@@ -1,29 +1,25 @@
-import {
-  PHASE_B_NEEDS_ME_PRODUCER_IDS,
-  type PhaseBNeedsMeProducerId,
-  type ProducerAttentionReceiptV1,
-} from '@cat-cafe/shared';
+import { NEEDS_ME_PRODUCER_IDS, type NeedsMeProducerId, type ProducerAttentionReceiptV1 } from '@cat-cafe/shared';
 import type {
   NeedsMeProducerAdapter,
   NeedsMeProducerReevaluateInput,
   NeedsMeProducerReevaluationResult,
 } from './NeedsMeProducerAdapter.js';
 
-/** Closed Phase B catalog. Adding a producer requires a shared ID, owner adapter, and contract coverage together. */
+/** Closed product catalog. Every ID requires its real owner adapter and contract coverage in the same integration. */
 export class NeedsMeProducerCatalog {
-  private readonly adapters: ReadonlyMap<PhaseBNeedsMeProducerId, NeedsMeProducerAdapter>;
+  private readonly adapters: ReadonlyMap<NeedsMeProducerId, NeedsMeProducerAdapter>;
 
   constructor(adapters: readonly NeedsMeProducerAdapter[]) {
     const byId = new Map(adapters.map((adapter) => [adapter.producerId, adapter]));
-    const missing = PHASE_B_NEEDS_ME_PRODUCER_IDS.filter((id) => !byId.has(id));
+    const missing = NEEDS_ME_PRODUCER_IDS.filter((id) => !byId.has(id));
     if (missing.length > 0) throw new Error(`Needs Me producer bindings missing: ${missing.join(', ')}`);
-    if (byId.size !== PHASE_B_NEEDS_ME_PRODUCER_IDS.length || adapters.length !== byId.size) {
+    if (byId.size !== NEEDS_ME_PRODUCER_IDS.length || adapters.length !== byId.size) {
       throw new Error('Needs Me producer bindings contain a duplicate or unsupported producer');
     }
     this.adapters = byId;
   }
 
-  get(producerId: PhaseBNeedsMeProducerId): NeedsMeProducerAdapter {
+  get(producerId: NeedsMeProducerId): NeedsMeProducerAdapter {
     const adapter = this.adapters.get(producerId);
     if (!adapter) throw new Error(`Needs Me producer is not registered: ${producerId}`);
     return adapter;
@@ -43,7 +39,7 @@ export class NeedsMeProducerCatalog {
   }
 
   reEvaluate(
-    producerId: PhaseBNeedsMeProducerId,
+    producerId: NeedsMeProducerId,
     input: NeedsMeProducerReevaluateInput,
   ): Promise<NeedsMeProducerReevaluationResult> {
     return this.get(producerId).reEvaluate(input);

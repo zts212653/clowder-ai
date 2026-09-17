@@ -161,6 +161,7 @@ const MCP_TOOL_CAPABILITY: Record<string, CapabilityName> = {
   read_invocation_detail: 'memory-drilldown',
   update_workflow: 'update-workflow',
   update_workflow_sop: 'update-workflow',
+  start_evolution_program: 'capability-evolution',
 };
 
 export function normalizeAuditCandidates(

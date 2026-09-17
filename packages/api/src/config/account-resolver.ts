@@ -7,14 +7,23 @@
 import {
   type AccountConfig,
   type AccountProtocol,
+  BUILTIN_ACCOUNT_CLIENT_FOR_ID,
   type BuiltinAccountClient,
   builtinAccountFamilyForClient,
+  builtinAccountFamilyForRef,
   builtinAccountIdForClient,
   type ClientId,
+  type CredentialEntry,
+  legacyAccountFamilyForRef,
   protocolForClient,
 } from '@cat-cafe/shared';
-import { readCatalogAccounts } from './catalog-accounts.js';
-import { readCredential } from './credentials.js';
+import { readAccountSnapshot, readAccountStoreSnapshot } from './account-store-snapshot.js';
+import {
+  assertProviderCredentialDestination,
+  officialProviderFamily,
+  profileFamilyIdentity,
+} from './provider-credential-policy.js';
+import { buildProviderEndpoint } from './provider-endpoint.js';
 
 // ── Types surviving from provider-profiles.types.ts (F136 Phase 4d) ──
 export { type BuiltinAccountClient, builtinAccountIdForClient } from '@cat-cafe/shared';
@@ -25,6 +34,8 @@ export interface RuntimeProviderProfile {
   authType: 'oauth' | 'api_key';
   kind?: ProviderProfileKind;
   client?: BuiltinAccountClient;
+  /** Preserve explicit non-family identities (e.g. ACP), which must not fall back to an ID alias. */
+  persistedClientId?: string;
   protocol?: AccountProtocol;
   baseUrl?: string;
   apiKey?: string;
@@ -71,6 +82,11 @@ export function resolveAnthropicRuntimeProfile(
   const accountRef = preferredAccountRef ?? builtinAccountIdForClient('anthropic') ?? 'claude';
   const runtime = resolveForClient(projectRoot, 'anthropic', accountRef);
   if (runtime?.apiKey) {
+    assertProviderCredentialDestination(
+      runtime,
+      'anthropic',
+      buildProviderEndpoint({ protocol: 'anthropic', baseUrl: runtime.baseUrl }),
+    );
     return {
       id: runtime.id,
       mode: runtime.authType === 'oauth' ? 'subscription' : 'api_key',
@@ -83,13 +99,20 @@ export function resolveAnthropicRuntimeProfile(
   // Checks all known aliases (claude, builtin_anthropic) — not just the default accountRef.
   // Single deterministic ref — NOT the discovery chain.
   if (!preferredAccountRef) {
-    const accounts = readCatalogAccounts(projectRoot);
-    const hasRealAnthropicBuiltin = Object.entries(BUILTIN_ACCOUNT_MAP).some(
-      ([id, info]) => info === 'anthropic' && id in accounts,
+    const store = readAccountStoreSnapshot(projectRoot);
+    // Healthy-only catalog projections cannot distinguish rejected aliases from absence.
+    // Adjudicate an existing builtin before deciding installer fallback is eligible.
+    const hasRealAnthropicBuiltin = Object.entries(BUILTIN_ACCOUNT_CLIENT_FOR_ID).some(
+      ([id, info]) => info === 'anthropic' && store.refs.includes(id) && store.resolve(id).account !== undefined,
     );
     if (!hasRealAnthropicBuiltin) {
       const installer = resolveForClient(projectRoot, 'anthropic', 'installer-anthropic');
       if (installer?.apiKey) {
+        assertProviderCredentialDestination(
+          installer,
+          'anthropic',
+          buildProviderEndpoint({ protocol: 'anthropic', baseUrl: installer.baseUrl }),
+        );
         return {
           id: installer.id,
           mode: 'api_key',
@@ -104,23 +127,8 @@ export function resolveAnthropicRuntimeProfile(
 
 // Known builtin OAuth account refs — both legacy names and new naming convention.
 // clowder-ai#340: protocol is derived from client identity, no longer stored on accounts.
-const BUILTIN_ACCOUNT_MAP: Record<string, BuiltinAccountClient> = {
-  claude: 'anthropic',
-  builtin_anthropic: 'anthropic',
-  codex: 'openai',
-  builtin_openai: 'openai',
-  gemini: 'google',
-  builtin_google: 'google',
-  kimi: 'kimi',
-  builtin_kimi: 'kimi',
-  opencode: 'opencode',
-  builtin_opencode: 'opencode',
-};
-
-const GOOGLE_OWNED_DOMAINS = ['generativelanguage.googleapis.com', 'googleapis.com'];
-
 function isOfficialGoogleHostname(hostname: string): boolean {
-  return GOOGLE_OWNED_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+  return officialProviderFamily(hostname) === 'google';
 }
 
 function parseHostname(baseUrl: string): string | null {
@@ -137,12 +145,11 @@ function parseHostname(baseUrl: string): string | null {
  * that haven't been migrated to the catalog yet (fresh installs).
  */
 export function resolveByAccountRef(projectRoot: string, accountRef: string): RuntimeProviderProfile | null {
-  const accounts = readCatalogAccounts(projectRoot);
-  const account = accounts[accountRef];
-  if (account) return accountToRuntimeProfile(accountRef, account, projectRoot);
+  const snapshot = readAccountSnapshot(projectRoot, accountRef);
+  if (snapshot.account) return accountToRuntimeProfile(accountRef, snapshot.account, snapshot.credential);
 
   // Synthetic builtin profile for known OAuth refs
-  const builtinClient = BUILTIN_ACCOUNT_MAP[accountRef];
+  const builtinClient = builtinAccountFamilyForRef(accountRef);
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
   if (builtinClient) {
     return {
@@ -169,14 +176,14 @@ export function resolveForClient(
   client: BuiltinAccountClient | AccountProtocol,
   preferredAccountRef?: string,
 ): RuntimeProviderProfile | null {
-  const accounts = readCatalogAccounts(projectRoot);
+  const store = readAccountStoreSnapshot(projectRoot);
 
   // Try preferred first — fail closed if explicit ref doesn't resolve.
   if (preferredAccountRef) {
-    const preferred = accounts[preferredAccountRef];
-    if (preferred) return accountToRuntimeProfile(preferredAccountRef, preferred, projectRoot);
+    const preferred = store.resolve(preferredAccountRef);
+    if (preferred.account) return accountToRuntimeProfile(preferredAccountRef, preferred.account, preferred.credential);
     // Not in accounts — only allow synthetic builtin (fresh install with empty accounts).
-    const builtinClient = BUILTIN_ACCOUNT_MAP[preferredAccountRef];
+    const builtinClient = builtinAccountFamilyForRef(preferredAccountRef);
     const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
     if (builtinClient) {
       return {
@@ -197,11 +204,15 @@ export function resolveForClient(
   if (normalizedClient) {
     const wellKnownId = builtinAccountIdForClient(normalizedClient);
     if (!wellKnownId) return null;
-    const candidateIds = [wellKnownId, `builtin_${normalizedClient}`, `installer-${normalizedClient}`];
+    const candidateIds = [
+      ...new Set([wellKnownId, normalizedClient, `builtin_${normalizedClient}`, `installer-${normalizedClient}`]),
+    ];
     let firstMatch: RuntimeProviderProfile | null = null;
     for (const id of candidateIds) {
-      if (accounts[id]) {
-        const profile = accountToRuntimeProfile(id, accounts[id], projectRoot);
+      const snapshot = store.resolve(id);
+      if (snapshot.account) {
+        const profile = accountToRuntimeProfile(id, snapshot.account, snapshot.credential);
+        if (profile.persistedClientId !== undefined && profileFamilyIdentity(profile) !== normalizedClient) continue;
         if (profile.authType === 'api_key' && profile.apiKey) return profile;
         firstMatch ??= profile;
       }
@@ -213,7 +224,7 @@ export function resolveForClient(
   // (fresh install, test env with empty accounts)
   if (normalizedClient) {
     const wellKnownRef = builtinAccountIdForClient(normalizedClient);
-    const builtinClient = wellKnownRef ? BUILTIN_ACCOUNT_MAP[wellKnownRef] : undefined;
+    const builtinClient = wellKnownRef ? builtinAccountFamilyForRef(wellKnownRef) : null;
     const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
     if (builtinClient && wellKnownRef) {
       return {
@@ -231,27 +242,21 @@ export function resolveForClient(
 
 /** Map a client ID or protocol string to its BuiltinAccountClient equivalent. */
 function normalizeToClient(clientOrProtocol: string): BuiltinAccountClient | null {
-  switch (clientOrProtocol) {
-    case 'anthropic':
-    case 'openai':
-    case 'google':
-    case 'kimi':
-    case 'opencode':
-      return clientOrProtocol;
-    case 'openai-responses':
-      return 'openai';
-    default:
-      return null;
-  }
+  if (clientOrProtocol === 'openai-responses') return 'openai';
+  return Object.values(BUILTIN_ACCOUNT_CLIENT_FOR_ID).find((family) => family === clientOrProtocol) ?? null;
 }
 
-function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoot?: string): RuntimeProviderProfile {
-  const credential = readCredential(ref, projectRoot);
+function accountToRuntimeProfile(
+  ref: string,
+  account: AccountConfig,
+  credential?: CredentialEntry,
+): RuntimeProviderProfile {
   const apiKey = credential?.apiKey;
 
-  // clowder-ai#340: Derive client and protocol solely from well-known account ID map.
-  // account.protocol is retired — not read, not written.
-  const builtinClient = BUILTIN_ACCOUNT_MAP[ref];
+  // Persisted identity wins; only legacy accounts use the shared ref identity table.
+  // Retired account.protocol does not establish credential identity.
+  const builtinClient =
+    account.clientId !== undefined ? normalizeToClient(account.clientId) : legacyAccountFamilyForRef(ref);
   const builtinProtocol = builtinClient ? protocolForClient(builtinClient) : null;
   const isOAuth = account.authType === 'oauth';
   const isBuiltin = !!builtinClient && isOAuth;
@@ -259,7 +264,8 @@ function accountToRuntimeProfile(ref: string, account: AccountConfig, projectRoo
     id: ref,
     authType: account.authType,
     kind: isBuiltin ? 'builtin' : 'api_key',
-    ...(isBuiltin && builtinClient ? { client: builtinClient } : {}),
+    ...(builtinClient ? { client: builtinClient } : {}),
+    ...(account.clientId !== undefined ? { persistedClientId: account.clientId } : {}),
     ...(builtinProtocol ? { protocol: builtinProtocol } : {}),
     ...(account.baseUrl ? { baseUrl: account.baseUrl } : {}),
     ...(apiKey ? { apiKey } : {}),
@@ -278,6 +284,25 @@ export function validateRuntimeProviderBinding(
   profile: RuntimeProviderProfile,
   _defaultModel?: string | null,
 ): string | null {
+  const protocol = protocolForClient(clientId);
+  const concreteProtocol = clientId === 'opencode' ? null : protocol;
+  if (profile.baseUrl || concreteProtocol) {
+    try {
+      assertProviderCredentialDestination(
+        profile,
+        protocol ?? 'openai',
+        // Framework transports own their default destination, but an explicit
+        // baseUrl still cannot receive credentials belonging to another family.
+        profile.baseUrl ??
+          buildProviderEndpoint({
+            protocol: concreteProtocol!,
+            ...(concreteProtocol === 'google' ? { model: _defaultModel || 'binding-check' } : {}),
+          }),
+      );
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
   // Allow api_key accounts for google only when using third-party gateways.
   if (clientId === 'google' && profile.authType !== 'oauth') {
     const trimmedBaseUrl = profile.baseUrl?.trim();

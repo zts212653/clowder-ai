@@ -74,10 +74,6 @@ export {
   type DispatchProposedActionInput,
   dispatchProposedActionInputSchema,
   isAllowedActionSuccessorSlot,
-  REVIEW_REENTRY_REASONS,
-  type ReviewReentry,
-  type ReviewReentryReason,
-  reviewReentrySchema,
 } from './action-successor.js';
 // F295 execution-scoped liveness and cancellation projection.
 export type {
@@ -235,7 +231,13 @@ export type {
 } from './capability.js';
 // Capability evolution control-plane contracts (F311 Phase 1)
 export * from './capability-evolution.js';
+export * from './capability-evolution-asset-review.js';
+export * from './capability-evolution-exploration.js';
+export * from './capability-evolution-exploration-record.js';
+export * from './capability-evolution-name.js';
 export * from './capability-evolution-observation.js';
+export * from './capability-evolution-preparation.js';
+export * from './capability-evolution-preparation-review.js';
 export * from './capability-evolution-refs.js';
 // Cat types
 export type {
@@ -275,8 +277,11 @@ export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
+  BUILTIN_ACCOUNT_CLIENT_FOR_ID,
   builtinAccountFamilyForClient,
+  builtinAccountFamilyForRef,
   builtinAccountIdForClient,
+  legacyAccountFamilyForRef,
   protocolForClient,
 } from './client-routing.js';
 export type {
@@ -286,10 +291,12 @@ export type {
   CloudBridgeOutboundReceiptV1,
   CloudBridgeOutboundStatus,
   CloudBridgeOutboundTransport,
+  CloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export {
   isCloudBridgeFailureDiagnosticV1,
   isCloudBridgeOutboundReceiptV1,
+  isCloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export * from './collective.js';
 // Command types (F142 Phase B — slash command framework)
@@ -528,6 +535,12 @@ export {
   type RegisteredCustodyGrantV1,
   registeredCustodyGrantV1Schema,
 } from './entrusted-work-actions.js';
+export {
+  type EntrustedWorkBriefV1,
+  type EntrustedWorkOwnerReadV1,
+  entrustedWorkBriefV1Schema,
+  entrustedWorkOwnerReadV1Schema,
+} from './entrusted-work-owner-read.js';
 // F227: Event Memory types (cognitive-transition event index)
 export {
   COGNITIVE_TRANSITIONS,
@@ -674,13 +687,13 @@ export {
   custodyAdmissionResultV1Schema,
   custodyAdmissionStateV1Schema,
   custodyOfferV1Schema,
-  type EntrustedWorkOwnerReadV1,
   type EntrustedWorkTaskRefV1,
   type EntrustedWorkV1,
-  entrustedWorkOwnerReadV1Schema,
   entrustedWorkTaskRefV1Schema,
   entrustedWorkV1Schema,
   growingSourceMessageRevisionV1Schema,
+  NEEDS_ME_PRODUCER_IDS,
+  type NeedsMeProducerId,
   PHASE_B_NEEDS_ME_PRODUCER_IDS,
   type PhaseBNeedsMeProducerId,
   type ProducerAttentionReceiptV1,
@@ -859,8 +872,10 @@ export type {
   MarketplaceAdapter,
   MarketplaceArtifactKind,
   MarketplaceEcosystem,
+  MarketplaceSearchPage,
   MarketplaceSearchQuery,
   MarketplaceSearchResult,
+  MarketplaceSourceStatus,
   TrustLevel,
 } from './marketplace.js';
 export {
@@ -921,7 +936,9 @@ export {
 } from './memory-architecture-closure.js';
 // F287 Phase C: bounded Memory Cue Plane shared contract.
 export {
+  type CatOwnedSeedCueCarrierV1,
   type CueEnvelopeV1,
+  catOwnedSeedCueCarrierV1Schema,
   cueEnvelopeV1Schema,
   type DeliveryDecisionCueCarrierV1,
   type DeliveryDecisionOpportunityV1,
@@ -934,6 +951,8 @@ export {
   MEMORY_CUE_INVALIDATORS,
   type MemoryCueInvalidator,
   memoryCueDrillFamilyForResolver,
+  type OwnedSeedAvailableOpportunityV1,
+  ownedSeedAvailableOpportunityV1Schema,
   type ProfileRevisionAvailableOpportunityV1,
   profileRevisionAvailableOpportunityV1Schema,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
@@ -1037,9 +1056,27 @@ export type {
   ResolverType,
   WorkflowAction,
 } from './pack.js';
+export {
+  PAW_FEEL_CONTINUATION_KINDS,
+  PAW_FEEL_ISSUE_RESOLUTIONS,
+  type PawFeelApprovalContinuationV1,
+  type PawFeelContinuationKind,
+  type PawFeelContinuationProjection,
+  type PawFeelDirectRepairAuthorityDecisionV1,
+  type PawFeelDirectRepairBindingV1,
+  type PawFeelDirectRepairOutcomeV1,
+  type PawFeelDirectRepairOwnerAuthorityV1,
+  type PawFeelDirectRepairOwnerRouteV1,
+  type PawFeelIssueCounts,
+  type PawFeelIssueProjection,
+  type PawFeelIssueResolution,
+  type PawFeelResumeConditionV1,
+  type PawFeelResumeSelectorV1,
+  type SourceToolRouteRefV1,
+  type VerifiedPawFeelDirectRepairSourceV1,
+} from './paw-feel-continuation.js';
 // F278: Paw-Feel Disposition Inbox contracts
 export {
-  isCompletePawFeelDutyConfig,
   PAW_FEEL_DISPOSITION_STATES,
   PAW_FEEL_INBOX_SORTS,
   PAW_FEEL_NO_ACTION_REASONS,
@@ -1052,14 +1089,12 @@ export {
   type PawFeelDispositionEvent,
   type PawFeelDispositionProjection,
   type PawFeelDispositionState,
-  type PawFeelDutyConfig,
   type PawFeelEventBase,
   type PawFeelInboxCounts,
   type PawFeelInboxItem,
   type PawFeelInboxPage,
   type PawFeelInboxSort,
   type PawFeelNoActionReason,
-  type PawFeelReconciliationCoverage,
   type PawFeelResponsibilityBlocker,
   type PawFeelResponsibilityCounts,
   type PawFeelResponsibilityExitKind,
@@ -1074,6 +1109,11 @@ export {
   type PawFeelSourceRef,
   type PawFeelSourceResolution,
 } from './paw-feel-disposition.js';
+export {
+  isCompletePawFeelDutyConfig,
+  type PawFeelDutyConfig,
+  type PawFeelReconciliationCoverage,
+} from './paw-feel-duty.js';
 // F276 owner-private people and relationship memory contracts
 export {
   type CandidateClaimDraft,
@@ -1178,12 +1218,15 @@ export type {
   PluginStatus,
 } from './plugin.js';
 export {
+  DEFERRED_PERSON_MEMORY_CLERK_DISPOSITIONS,
   DEFERRED_PERSON_MEMORY_RECEIPT_STATES,
+  type DeferredPersonMemoryClerkDispositionInput,
   type DeferredPersonMemoryInput,
   type DeferredPersonMemoryReceipt,
   type DeferredPersonMemoryResolvedSource,
   type DeferredPersonMemorySourceInput,
   type DeferredWriteOpportunityReceiptV1,
+  deferredPersonMemoryClerkDispositionInputSchema,
   deferredPersonMemoryInputSchema,
   deferredPersonMemoryReceiptIdSchema,
   deferredPersonMemoryReceiptSchema,
@@ -1216,10 +1259,11 @@ export type {
   ProfileUpdateSignalProvenance,
   ProfileUpdateTargetLayer,
 } from './profile-update.js';
-// Profile update proposal types (F231 Phase C 养熟循环)
+// Profile update proposal types (F231 Phase C 养熟循环 + Phase E corpus)
 export {
   COLLECTION_SIGNAL_KINDS,
   isAllowedCollectionSignal,
+  PROFILE_UPDATE_TARGET_LAYERS,
 } from './profile-update.js';
 export type {
   ActiveParticipantInput,
@@ -1252,11 +1296,13 @@ export type {
 } from './prompt-hook.js';
 // Proposal types (F128 Cat Thread Proposal)
 export type {
+  DeclaredWorkMode,
   ProposalApproveOverrides,
   ProposalStatus,
   ReportingMode,
   ThreadProposal,
 } from './proposal.js';
+export { suggestedReportingModeForWorkMode } from './proposal.js';
 export {
   isProviderSemanticEvent,
   normalizeThreadGoalObjective,
@@ -1272,6 +1318,8 @@ export {
   type ProviderSemanticEvent,
   type ProviderSemanticEventKind,
   type ProviderSemanticProvenance,
+  type ProviderSubexecutionSemanticEvent,
+  type ProviderSubexecutionStage,
   type ProviderWarningSemanticEvent,
 } from './provider-semantic-event.js';
 // F264: durable per-target queued-message receipt and manual reminder truth
@@ -1291,6 +1339,8 @@ export type {
   QueueMessageReceiptProjection,
   QueueReceiptTarget,
   QueueReceiptTargetState,
+  QueueRecoveryAction,
+  QueueRecoveryRequest,
   QueueReminderAttempt,
   QueueReminderAttemptState,
   QueueReminderMissedReason,
@@ -1506,7 +1556,7 @@ export type {
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';
-export { extractFeatureIds, isTrackingKind } from './task.js';
+export { extractFeatureIds, isTrackingKind, TASK_FEATURE_ID_MAX_LENGTH, taskFeatureIdSchema } from './task.js';
 // F193 Phase E: SuggestedCrossPostAction + DispatchGateState re-exported via task.ts
 // (canonical source: cross-thread-affordance.ts; E2/E4 consumers can also import directly)
 // Taste Proposal types (F221 品味信号捕获)
@@ -1571,6 +1621,9 @@ export type {
   MessageDispositionPreferenceSnapshot,
   MessageDispositionPreferenceSource,
   MessageDispositionPreferences,
+  ThreadAttentionGroup,
+  ThreadAttentionMemberSort,
+  ThreadAttentionPreferences,
   UserPreferences,
 } from './user-preferences.js';
 // F280: canonical wait termination event consumed by F281 feedback adapters.

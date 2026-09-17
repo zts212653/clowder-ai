@@ -45,9 +45,9 @@ export function checkReviewRoutingSurfaces({
       'no-comment',
       'task/tracker',
       'review-complete',
-      'coordination.phase=active',
-      'coordination.phase=terminal',
-      'reviewReentry',
+      'ordinary durable A2A',
+      'localReviewVerdict',
+      'reviewedHeadSha',
     ]),
     ...requireTokens(requestReviewSkill, 'request-review convention', [
       'author/custody/handoff source',
@@ -57,19 +57,21 @@ export function checkReviewRoutingSurfaces({
       'advisory_read_only',
       'no-comment',
       'review-complete',
-      'coordination.phase=active',
-      'coordination.phase=terminal',
-      'reviewReentry',
+      'ordinary durable A2A',
+      'localReviewVerdict',
+      'reviewedHeadSha',
     ]),
     ...requireTokens(receiveReviewSkill, 'receive-review re-entry convention', [
       'request-review',
-      'action.mode=single',
-      'coordination.phase=active',
-      'reviewReentry',
+      '普通 durable A2A',
+      'localReviewVerdict',
+      'reviewedHeadSha',
     ]),
     ...requireTokens(mergeGateSkill, 'merge-gate review provenance convention', [
-      'reviewReentry',
       'already-consumed exact-HEAD review',
+      'durable local review fact',
+      'localReviewVerdict',
+      'reviewedHeadSha',
       'no new information',
       '机械三方合并',
     ]),
@@ -85,12 +87,6 @@ export function checkReviewRoutingSurfaces({
       'no-comment',
       'review-complete',
     ]),
-    ...requireTokens(trackerToolSource, 'action successor tool description', [
-      'reviewReentry',
-      'behavioral_delta',
-      'stale_or_blocking',
-      'explicit_matrix_route',
-    ]),
     ...requireTokens(capabilityWakeupDomain, 'capability-wakeup domain', [
       'external-pr-review-route-classifier',
       'docs/harness-feedback/fixtures/external-pr-review-route-classifier.md',
@@ -104,6 +100,22 @@ export function checkReviewRoutingSurfaces({
   ];
   if (requestReviewSkill.includes('标准做法是 reviewer 用 PR comment')) {
     errors.push('request-review still forces every local verdict onto GitHub.');
+  }
+  for (const [label, source] of [
+    ['cross-cat-handoff convention', handoffSkill],
+    ['request-review convention', requestReviewSkill],
+    ['receive-review convention', receiveReviewSkill],
+    ['merge-gate convention', mergeGateSkill],
+  ]) {
+    const retiredControls = [
+      'coordination.phase=' + 'terminal',
+      'review' + 'Reentry',
+      'record_local_review_' + 'verdict',
+      'recover_local_review_' + 'verdict',
+    ];
+    for (const retired of retiredControls) {
+      if (source.includes(retired)) errors.push(`${label} still mentions retired local review control ${retired}.`);
+    }
   }
   return errors;
 }

@@ -103,6 +103,19 @@ export function HubAccountsTab() {
     <div className="space-y-4">
       {error && <SettingsStatusStrip tone="error">{error}</SettingsStatusStrip>}
 
+      {(data.unavailableAccounts?.length ?? 0) > 0 && (
+        <div role="group" aria-label="Unavailable Accounts" className="space-y-2">
+          <SettingsStatusStrip tone="error">
+            以下账户暂不可用，请核对并收敛账户配置后重试。其他账户仍可使用。
+          </SettingsStatusStrip>
+          {data.unavailableAccounts?.map((account) => (
+            <SettingsStatusStrip key={account.accountRef} tone="error">
+              <strong>{account.accountRef}</strong>：{account.reason}
+            </SettingsStatusStrip>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
         <SettingsPrimaryButton
           data-guide-id="accounts.create-form"

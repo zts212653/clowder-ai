@@ -35,6 +35,7 @@ import {
   type CodexRuntimeInteractionRunState,
   createCodexRuntimeInteractionRunState,
 } from './CodexRuntimeInteractionRun.js';
+import { createCodexSubexecutionTracker, isExactCodexRootTurnCompletion } from './CodexSubexecutionTracker.js';
 import {
   classifyCodexAppServerToolSurface,
   classifyCodexProtocolItem,
@@ -246,6 +247,7 @@ export class CodexAppServerClient {
           input.thread.kind === 'resume' ? { threadId: input.thread.threadId } : undefined,
         ),
         startParams: buildCodexAppServerThreadParams(input),
+        requireExactResume: Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
         localLiveLease: this.deps.wire.reusedSessionHost === true,
         request: (method, params) => this.request(method, params),
@@ -340,6 +342,11 @@ export class CodexAppServerClient {
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;
+      const subexecutionTracker = createCodexSubexecutionTracker({
+        binding: { threadId, turnId: activeTurnId },
+        readThread: (childThreadId) => this.request('thread/read', { threadId: childThreadId, includeTurns: false }),
+        ...(this.deps.now ? { now: this.deps.now } : {}),
+      });
       yield this.lifecycle.event(
         this.lifecycle.transition('turn_accepted', { threadId, turnId: activeTurnId, turnAccepted: true }),
       );
@@ -352,9 +359,13 @@ export class CodexAppServerClient {
         const next = await this.notifications.next();
         if (next.done) throw new Error('Codex app-server stream ended before turn completion');
         const envelope = next.value;
-        this.lifecycle.touch(timeoutMs, timeoutHandler);
         const record = asCodexAppServerRecord(envelope);
         const params = asCodexAppServerRecord(record?.params);
+        const subexecution = await subexecutionTracker.observe(envelope);
+        if (subexecution.scope === 'foreign') continue;
+        this.lifecycle.touch(timeoutMs, timeoutHandler);
+        if (subexecution.event) yield subexecution.event;
+        if (subexecution.scope === 'child') continue;
         const itemObserved = record?.method === 'item/started' || record?.method === 'item/completed';
         const exactCompletedItem =
           record?.method === 'item/completed' && params?.threadId === threadId && params?.turnId === activeTurnId;
@@ -418,7 +429,7 @@ export class CodexAppServerClient {
         await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
-        if (record?.method === 'turn/completed') {
+        if (isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
           runtimeInteraction?.close('provider_cancelled');
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);
@@ -555,6 +566,7 @@ export class CodexAppServerClient {
         const message = asCodexAppServerRecord(value);
         if (!message) continue;
         await this.deps.onEnvelope?.('inbound', message);
+        runtimeInteraction?.observe(message);
         if (typeof message.id === 'number' && (Object.hasOwn(message, 'result') || Object.hasOwn(message, 'error'))) {
           const pending = this.pending.get(message.id);
           if (!pending) continue;

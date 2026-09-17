@@ -548,7 +548,7 @@ describe('F167 A2A replacement Queue preflight', () => {
     );
   });
 
-  test('retires a replaced carrier when optional successor enrichment throws', async () => {
+  test('keeps the carrier live when successor metadata cannot prove causal lineage', async () => {
     const h = await dispositionHarness();
     const successor = h.messageStore.append({
       userId: 'user-1',
@@ -598,8 +598,8 @@ describe('F167 A2A replacement Queue preflight', () => {
     const result = await processor.executeEntry(queue.markProcessing('thread-1', 'user-1'));
 
     assert.equal(result.status, 'succeeded');
-    assert.equal(withdrawEntry.mock.calls.length, 1);
-    assert.equal(invocationCreate.mock.calls.length, 0);
-    assert.equal(routeExecution.mock.calls.length, 0);
+    assert.equal(withdrawEntry.mock.calls.length, 0);
+    assert.equal(invocationCreate.mock.calls.length, 1);
+    assert.equal(routeExecution.mock.calls.length, 1);
   });
 });

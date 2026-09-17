@@ -77,6 +77,7 @@ function terminalCandidate(
     interactionDraft: _interactionDraft,
     sourceBundle: _sourceBundle,
     deferredReceiptClaimId: _deferredReceiptClaimId,
+    deferredReceiptProcessorInvocationId: _deferredReceiptProcessorInvocationId,
     ...base
   } = candidate;
   return {

@@ -18,6 +18,7 @@ vi.mock('@/hooks/useEntrustedWorkProjection', () => ({
 }));
 
 import { NeedsMePanel, needsMeItemRef } from '../NeedsMePanel';
+import { selectNeedsMeItems } from '../needs-me-items';
 
 const artifacts: GlobalArtifactDTO[] = [
   {
@@ -35,14 +36,46 @@ const artifacts: GlobalArtifactDTO[] = [
 function ownerRead(input: { eligible: boolean; producerRevision?: number }): EntrustedWorkOwnerReadV1 {
   const producerRevision = input.producerRevision ?? 11;
   const subjectRef = 'task:work:tomorrow-ppt';
+  const ownerRef = 'task:item:tomorrow-ppt';
+  const producerRef = 'interaction:ppt-direction';
   return {
     envelope: {
       subjectRef,
-      ownerRef: 'task:item:tomorrow-ppt',
+      ownerRef,
+      admissionReceiptRef: 'task:receipt:tomorrow-ppt:4',
       sourceRefs: ['message:thread-ppt:message-source'],
       revision: 4,
       freshness: { state: 'current', observedRevision: 4 },
       visibility: { ownerUserId: 'owner-1', human: true, cat: true },
+    },
+    brief: {
+      outcome: {
+        state: 'known',
+        value: 'A reviewable presentation for tomorrow',
+        ownerRef,
+        revision: 4,
+      },
+      current: { state: 'doing', ownerRef, revision: 4 },
+      verifiedMilestone: input.eligible
+        ? { kind: 'needs_judgment', evidenceRef: producerRef, revision: producerRevision }
+        : {
+            kind: 'artifact_ready',
+            evidenceRef: 'message:thread-ppt:message-artifact#available:700',
+            revision: '700',
+          },
+      nextOwner: input.eligible
+        ? {
+            kind: 'human',
+            ownerRef: 'user:owner-1',
+            evidence: [{ producerId: 'f306.runtime_interaction', ownerRef: producerRef, revision: producerRevision }],
+          }
+        : { kind: 'cat', ownerRef: 'cat:codex-sol', evidenceRef: ownerRef, revision: 4 },
+      needsMe: input.eligible
+        ? {
+            state: 'needed',
+            evidence: [{ producerId: 'f306.runtime_interaction', ownerRef: producerRef, revision: producerRevision }],
+          }
+        : { state: 'not_needed', evidenceRef: ownerRef, revision: 4 },
     },
     preparedArtifact: {
       artifactRef: 'artifact:ppt:tomorrow',
@@ -58,8 +91,8 @@ function ownerRead(input: { eligible: boolean; producerRevision?: number }): Ent
             eligible: true,
             producer: {
               producerId: 'f306.runtime_interaction',
-              ownerRef: 'interaction:ppt-direction',
-              subjectRef: 'interaction:ppt-direction',
+              ownerRef: producerRef,
+              subjectRef: producerRef,
               revision: producerRevision,
             },
             taskRef: { subjectRef, observedRevision: 4 },
@@ -117,6 +150,38 @@ describe('F310 NeedsMePanel', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
+  it('derives the global count from the same visible-item predicate as the panel', () => {
+    const withoutArtifact = { ...ownerRead({ eligible: true }), preparedArtifact: undefined };
+    expect(
+      selectNeedsMeItems([ownerRead({ eligible: false }), withoutArtifact, ownerRead({ eligible: true })]),
+    ).toHaveLength(1);
+  });
+
+  it('explains the quiet state in the user situation without internal design commentary', async () => {
+    await act(async () => {
+      root.render(<NeedsMePanel artifacts={artifacts} />);
+    });
+
+    expect(container.textContent).toContain('猫会先把能做的做好；只有真的需要你决定时，才带着准备好的内容回来。');
+    expect(container.textContent).toContain('暂时没有要你判断的事');
+    expect(container.textContent).not.toContain('原 owner');
+    expect(container.textContent).not.toContain('Schedule');
+    expect(container.textContent).not.toContain('不复制一份审批状态');
+  });
+
+  it('keeps an unavailable read honest and recoverable without exposing owner internals', async () => {
+    mocks.error = true;
+
+    await act(async () => {
+      root.render(<NeedsMePanel artifacts={artifacts} />);
+    });
+
+    expect(container.textContent).toContain('暂时无法读取需要你判断的事');
+    expect(container.textContent).toContain('任务和准备好的内容仍然保留');
+    expect(container.textContent).toContain('请稍后刷新');
+    expect(container.textContent).not.toContain('owner truth');
+  });
+
   it('renders exactly the current producer judgment with prepared Artifact truth', async () => {
     mocks.ownerReads = [ownerRead({ eligible: false }), ownerRead({ eligible: true })];
     const onOpenArtifact = vi.fn();
@@ -132,7 +197,14 @@ describe('F310 NeedsMePanel', () => {
     expect(items[0]?.textContent).toContain('Use the evidence-first storyline');
     expect(items[0]?.textContent).toContain('Tomorrow partner presentation.pptx');
     expect(items[0]?.textContent).toContain('Artifact r700');
+    expect(items[0]?.querySelector('[data-testid="entrusted-work-brief-artifact"]')?.textContent).toContain(
+      'artifact:ppt:tomorrow',
+    );
     expect(items[0]?.textContent).toContain('已可查看');
+    expect(items[0]?.textContent).toContain('A reviewable presentation for tomorrow');
+    expect(items[0]?.textContent).toContain('已到需要你判断的节点');
+    expect(items[0]?.textContent).toContain('You');
+    expect(items[0]?.textContent).toContain('现在需要你');
     expect(items[0]?.getAttribute('data-producer-revision')).toBe('11');
 
     await act(async () => {

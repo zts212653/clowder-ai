@@ -13,9 +13,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 
 // 1x1 transparent PNG (68 bytes)
@@ -24,26 +25,51 @@ const TINY_PNG = Buffer.from(
   'base64',
 );
 
+async function findRegisteredWorktreeAtRoot(worktrees, canonicalRoot) {
+  for (const worktree of worktrees) {
+    try {
+      if ((await realpath(worktree.root)) === canonicalRoot) return worktree;
+    } catch (error) {
+      // `git worktree list` includes prunable registrations whose roots no
+      // longer exist. Ignore only that stale-registration case; other I/O
+      // failures still surface instead of silently changing fixture scope.
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  return undefined;
+}
+
 describe('workspace file/raw endpoint (integration)', () => {
   let app;
+  let testBase;
+  let testDir;
   let worktreeId;
-  const TEST_DIR = '__raw_endpoint_test__';
 
   before(async () => {
     // Import real route plugin and security module
     const { workspaceRoutes } = await import('../dist/routes/workspace.js');
     const { listWorktrees } = await import('../dist/domains/workspace/workspace-security.js');
 
-    // Find this worktree's ID
+    // Bind fixtures to this test file's worktree. Full gates for different
+    // worktrees run concurrently, so falling back to worktrees[0] would make
+    // them share and delete the same directory in the main checkout.
     const worktrees = await listWorktrees();
-    const thisWt = worktrees.find((w) => w.root.endsWith('cat-cafe-f063p2b4'));
-    // Fallback: use the main worktree if this one isn't found
-    const wt = thisWt ?? worktrees[0];
+    const repoRoot = await realpath(resolve(fileURLToPath(import.meta.url), '../../../..'));
+    // Keep this regression deterministic even after an operator eventually
+    // prunes the repository's currently stale worktree registrations.
+    const staleRegistration = {
+      id: '__stale_raw_endpoint_fixture__',
+      root: join(repoRoot, `__missing_worktree_registration__-${process.pid}`),
+      branch: 'prunable',
+      head: '',
+    };
+    const wt = await findRegisteredWorktreeAtRoot([staleRegistration, ...worktrees], repoRoot);
+    assert.ok(wt, `current test worktree is not registered: ${repoRoot}`);
     worktreeId = wt.id;
 
-    // Create temp test files inside the worktree root
-    const testBase = join(wt.root, TEST_DIR);
-    await mkdir(testBase, { recursive: true });
+    // A unique directory also protects overlapping invocations in one worktree.
+    testBase = await mkdtemp(join(wt.root, '__raw_endpoint_test__-'));
+    testDir = basename(testBase);
     await writeFile(join(testBase, 'logo.png'), TINY_PNG);
     await writeFile(join(testBase, 'photo.jpg'), TINY_PNG); // fake jpg
     await writeFile(join(testBase, 'literal%20image.png'), Buffer.from([0x11, 0x22, 0x33]));
@@ -61,12 +87,7 @@ describe('workspace file/raw endpoint (integration)', () => {
 
   after(async () => {
     await app?.close();
-    // Clean up test files — find the worktree root from the resolved path
-    const { listWorktrees } = await import('../dist/domains/workspace/workspace-security.js');
-    const worktrees = await listWorktrees();
-    const thisWt = worktrees.find((w) => w.root.endsWith('cat-cafe-f063p2b4'));
-    const wt = thisWt ?? worktrees[0];
-    await rm(join(wt.root, TEST_DIR), { recursive: true, force: true });
+    if (testBase) await rm(testBase, { recursive: true, force: true });
   });
 
   // ── Image files served correctly via real route ──
@@ -74,7 +95,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('serves PNG with correct Content-Type', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/logo.png`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/logo.png`,
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'image/png');
@@ -85,7 +106,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('serves JPG with correct Content-Type', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/photo.jpg`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/photo.jpg`,
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'image/jpeg');
@@ -94,7 +115,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('preserves native percent bytes in raw media paths', async () => {
     const query = new URLSearchParams({
       worktreeId,
-      path: `${TEST_DIR}/literal%20image.png`,
+      path: `${testDir}/literal%20image.png`,
     });
     const res = await app.inject({ method: 'GET', url: `/api/workspace/file/raw?${query}` });
 
@@ -107,7 +128,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('serves MP3 with correct Content-Type', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/clip.mp3`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/clip.mp3`,
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'audio/mpeg');
@@ -117,7 +138,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('serves MP4 with correct Content-Type', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/demo.mp4`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/demo.mp4`,
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.headers['content-type'], 'video/mp4');
@@ -128,7 +149,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('rejects non-media files with 400', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/code.ts`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/code.ts`,
     });
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.payload);
@@ -158,7 +179,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('rejects missing worktreeId with 400', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?path=${TEST_DIR}/logo.png`,
+      url: `/api/workspace/file/raw?path=${testDir}/logo.png`,
     });
     assert.equal(res.statusCode, 400);
   });
@@ -176,7 +197,7 @@ describe('workspace file/raw endpoint (integration)', () => {
   it('returns 404 for nonexistent image', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${TEST_DIR}/missing.png`,
+      url: `/api/workspace/file/raw?worktreeId=${worktreeId}&path=${testDir}/missing.png`,
     });
     assert.equal(res.statusCode, 404);
   });

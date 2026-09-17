@@ -32,6 +32,7 @@ import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './Agen
 import { BootcampListModal } from './BootcampListModal';
 import { BootstrapOrchestrator } from './BootstrapOrchestrator';
 import { ChatContainerHeader } from './ChatContainerHeader';
+import { hydrateEvolutionFromCurrentUrl } from './capability-evolution/evolution-navigation';
 import { useConciergeConfirmations } from './concierge/useConciergeConfirmations';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
@@ -43,7 +44,6 @@ import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { GameIcon } from './icons/GameIcon';
 import { PawIcon } from './icons/PawIcon';
-import { MobileApprovalSheet } from './MobileApprovalSheet';
 import { ParallelStatusBar } from './ParallelStatusBar';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { RightStatusPanel } from './RightStatusPanel';
@@ -54,8 +54,8 @@ import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { ThreadChatExport, ThreadChatSurface, useThreadChatRuntime } from './thread-chat';
 import { type VoteConfig, VoteConfigModal } from './VoteConfigModal';
-
 import { WorkspacePanel } from './WorkspacePanel';
+import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
 import { ContextualWorkspaceChrome } from './workspace/ContextualWorkspaceChrome';
 import { FloatingTranscriptContainer } from './workspace/FloatingTranscriptContainer';
 import { ResizeHandle } from './workspace/ResizeHandle';
@@ -99,7 +99,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     settleUnreadAck,
     armUnreadSuppression,
     rightPanelMode,
-    workspaceMode,
     workspaceSurface,
     presentationLock,
     setWorkspaceMode,
@@ -119,7 +118,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       settleUnreadAck: s.settleUnreadAck,
       armUnreadSuppression: s.armUnreadSuppression,
       rightPanelMode: s.rightPanelMode,
-      workspaceMode: s.workspaceMode,
       workspaceSurface: s.workspaceSurface,
       presentationLock: s.presentationLock,
       setWorkspaceMode: s.setWorkspaceMode,
@@ -187,6 +185,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   // state (snapshotted in ThreadState), not route-local component state.
   const statusPanelOpen = useChatStore((s) => s.rightPanelOpen);
   const setRightPanelOpen = useChatStore((s) => s.setRightPanelOpen);
+  const mainAreaAttentionSurfaceId = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId);
+  const exitMainAreaAttention = useF307ExperienceWorkbenchStore((state) => state.exitMainAreaAttention);
   const [workspacePanelMounted, setWorkspacePanelMounted] = useState(rightPanelMode === 'workspace');
   const [activityPanelMounted, setActivityPanelMounted] = useState(false);
   const [showBootcampList, setShowBootcampList] = useState(false);
@@ -256,8 +256,9 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   // effect 立即重开，关不掉），再关闭。所有 close 入口（header toggle / ResizeHandle 折叠）统一走这里。
   // F284 × F120: closeRightPanel 同时退出 mode 并关闭 canonical visibility。
   const closeStatusPanel = useCallback(() => {
+    exitMainAreaAttention();
     closeRightPanel();
-  }, [closeRightPanel]);
+  }, [closeRightPanel, exitMainAreaAttention]);
 
   const openWorkspaceLauncher = useCallback(() => {
     setWorkspacePanelMounted(true);
@@ -268,6 +269,21 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   }, [setRightPanelMode, setWorkspaceMode, setWorkspaceSurface, setRightPanelOpen]);
 
   const isDesktop = useIsDesktop();
+  const mainAreaAttentionActive =
+    viewMode === 'single' &&
+    isDesktop &&
+    statusPanelOpen &&
+    rightPanelMode === 'workspace' &&
+    mainAreaAttentionSurfaceId !== null;
+
+  useEffect(() => {
+    if (
+      mainAreaAttentionSurfaceId !== null &&
+      (viewMode !== 'single' || !isDesktop || !statusPanelOpen || rightPanelMode !== 'workspace')
+    ) {
+      exitMainAreaAttention();
+    }
+  }, [exitMainAreaAttention, isDesktop, mainAreaAttentionSurfaceId, rightPanelMode, statusPanelOpen, viewMode]);
 
   useEffect(() => {
     if (isDesktop || !statusPanelOpen) return;
@@ -590,6 +606,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
 
   useEffect(() => {
     hydrateInvocationTrajectoryFromCurrentUrl();
+    hydrateEvolutionFromCurrentUrl();
   }, []);
 
   // Restore projectPath from the canonical Sidebar projection; the legacy store
@@ -800,7 +817,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   }
 
   return (
-    <div ref={containerRef} className="flex h-screen h-dvh">
+    <div ref={containerRef} className="relative flex h-screen h-dvh">
       {connectionStatus.updateRequired && <RuntimeUpdateRequiredDialog onReload={() => window.location.reload()} />}
       {/* Mobile-only sidebar overlay — desktop sidebar is in AppShell */}
       {sidebarOpen && !isDesktop && (
@@ -817,7 +834,9 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       )}
 
       <div
-        className="flex flex-col min-w-0"
+        className={`flex min-w-0 flex-col ${mainAreaAttentionActive ? 'invisible pointer-events-none' : ''}`}
+        aria-hidden={mainAreaAttentionActive || undefined}
+        data-testid="thread-chat-host"
         style={
           statusPanelOpen && isDesktop && (rightPanelMode === 'workspace' || rightPanelMode === 'transcript')
             ? { flexBasis: `${chatBasis}%`, flexGrow: 0, flexShrink: 0 }
@@ -1061,6 +1080,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
           At 768px+ they use the split host; below 768px the same host becomes a full-screen overlay. */}
       {statusPanelOpen &&
         isDesktop &&
+        !mainAreaAttentionActive &&
         (rightPanelMode === 'status' ? (
           <ResizeHandle
             direction="horizontal"
@@ -1081,28 +1101,33 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       {(statusPanelOpen || workspacePanelMounted || activityPanelMounted) && (
         <div
           className={
-            !statusPanelOpen || (!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval')
+            !statusPanelOpen
               ? 'hidden'
-              : isDesktop
-                ? 'flex min-h-0 flex-col overflow-hidden'
-                : 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]'
+              : mainAreaAttentionActive
+                ? 'absolute inset-0 z-40 flex min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]'
+                : isDesktop
+                  ? 'flex min-h-0 flex-col overflow-hidden'
+                  : 'fixed inset-0 z-50 flex min-h-0 flex-col overflow-hidden bg-[var(--console-panel-bg)]'
           }
           style={
-            statusPanelOpen && isDesktop
+            statusPanelOpen && isDesktop && !mainAreaAttentionActive
               ? rightPanelMode === 'status'
                 ? { width: statusPanelWidth, flexShrink: 0 }
                 : { flex: '1 1 0%', minWidth: 0 }
               : undefined
           }
           role="region"
-          aria-label="上下文侧栏"
+          aria-label={mainAreaAttentionActive ? '主区 Workspace' : '上下文侧栏'}
           aria-hidden={!statusPanelOpen}
           data-testid="contextual-workspace-host"
+          data-presentation={mainAreaAttentionActive ? 'main-area-attention' : 'right-rail'}
+          data-attention-surface={mainAreaAttentionActive ? mainAreaAttentionSurfaceId : undefined}
         >
           <ContextualWorkspaceChrome
             mode={rightPanelMode}
             onFold={closeStatusPanel}
             onNavigateHome={rightPanelMode === 'workspace' ? undefined : openWorkspaceLauncher}
+            showFold={!isDesktop && rightPanelMode === 'workspace'}
           >
             {activityPanelMounted && (
               <div className={rightPanelMode === 'status' ? 'flex min-h-0 flex-1' : 'hidden'}>
@@ -1127,6 +1152,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
                 <WorkspacePanel
                   threadId={threadId}
                   defaultCatId={targetCats[0] || 'opus'}
+                  visible={statusPanelOpen && rightPanelMode === 'workspace' && documentVisible}
                   statusSurface={
                     <RightStatusPanel
                       intentMode={intentMode}
@@ -1148,10 +1174,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         </div>
       )}
       <FloatingTranscriptContainer />
-      <MobileApprovalSheet
-        open={!isDesktop && rightPanelMode === 'workspace' && workspaceMode === 'approval'}
-        onClose={closeStatusPanel}
-      />
       {showFirstRunQuestPrompt &&
         createPortal(
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[var(--console-overlay-medium)] px-4 backdrop-blur-sm">

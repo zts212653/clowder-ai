@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { execFileSync, execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,14 +31,14 @@ describe('writeVignette persistence boundary', () => {
   let originDir;
 
   beforeEach(() => {
-    workspaceDir = join(tmpdir(), `vignette-persistence-test-${Date.now()}`);
+    workspaceDir = join(tmpdir(), `vignette-persistence-test-${randomUUID()}`);
     mkdirSync(workspaceDir, { recursive: true });
     execSync('git init -b main', { cwd: workspaceDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', { cwd: workspaceDir, stdio: 'pipe' });
     execSync('git config user.name "Test"', { cwd: workspaceDir, stdio: 'pipe' });
     writeFileSync(join(workspaceDir, 'README.md'), 'init');
     execSync('git add . && git commit -m "init"', { cwd: workspaceDir, stdio: 'pipe' });
-    originDir = join(tmpdir(), `vignette-persistence-origin-${Date.now()}.git`);
+    originDir = join(tmpdir(), `vignette-persistence-origin-${randomUUID()}.git`);
     execFileSync('git', ['init', '--bare', '--initial-branch=main', originDir], { stdio: 'pipe' });
     execFileSync('git', ['remote', 'add', 'origin', originDir], { cwd: workspaceDir, stdio: 'pipe' });
     execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
@@ -57,7 +58,7 @@ describe('writeVignette persistence boundary', () => {
     });
     execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
 
-    const runtimeDir = join(tmpdir(), `vignette-runtime-test-${Date.now()}`);
+    const runtimeDir = join(tmpdir(), `vignette-runtime-test-${randomUUID()}`);
     mkdirSync(runtimeDir, { recursive: true });
     execSync('git init -b runtime/main-sync', { cwd: runtimeDir, stdio: 'pipe' });
     const previousRuntimeRoot = process.env.CAT_CAFE_RUNTIME_ROOT;
@@ -101,7 +102,7 @@ describe('writeVignette persistence boundary', () => {
     });
     execFileSync('git', ['push', 'origin', 'main'], { cwd: workspaceDir, stdio: 'pipe' });
 
-    const runtimeDir = join(tmpdir(), `vignette-runtime-worktree-test-${Date.now()}`);
+    const runtimeDir = join(tmpdir(), `vignette-runtime-worktree-test-${randomUUID()}`);
     execFileSync('git', ['worktree', 'add', '-b', 'runtime/main-sync', runtimeDir], {
       cwd: workspaceDir,
       stdio: 'pipe',

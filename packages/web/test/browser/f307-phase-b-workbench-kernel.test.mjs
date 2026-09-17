@@ -8,6 +8,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next');
@@ -231,14 +232,10 @@ test(
 
     try {
       await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
-      const workbench = page.getByTestId('f307-experience-workbench');
       await page.getByRole('navigation', { name: '主导航' }).waitFor({ timeout: 20_000 });
       await page.locator('[data-chat-container]').waitFor();
-      await page.getByTestId('workspace-panel-toggle').click();
-      await workbench.waitFor({ timeout: 3_000 }).catch(async () => {
-        await page.getByTestId('workspace-panel-toggle').click();
-      });
-      await workbench.waitFor({ timeout: 20_000 });
+      await ensureWorkspaceOpen(page);
+      const workbench = page.getByTestId('f307-experience-workbench');
       await page.waitForFunction(
         () =>
           document.querySelector('[data-testid="f307-experience-workbench"]')?.getAttribute('data-layout-hydrated') ===

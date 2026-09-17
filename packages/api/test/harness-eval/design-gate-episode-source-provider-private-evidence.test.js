@@ -34,7 +34,13 @@ test('committed #3901 source map resolves its real anchored admission and trigge
         threadId: 'thread_mt5xeb8e7qs467i2',
         catId: 'opus-47',
         content: `Local Review Verdict: APPROVED\nExact HEAD: \`${HEAD}\``,
-        extra: { localReviewVerdict: { verdict: 'approved', clientMessageId: 'review-f303-phase-c' } },
+        extra: {
+          localReviewVerdict: {
+            verdict: 'approved',
+            clientMessageId: 'review-f303-phase-c',
+            reviewedHeadSha: HEAD,
+          },
+        },
       }),
     },
     gitTruth: {

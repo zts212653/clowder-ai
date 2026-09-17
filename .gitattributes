@@ -1,1 +1,2 @@
 packages/api/src/plugins/cloud-cat-personal-host/extension/content-script.js text eol=lf
+.cat-cafe-runtime-revision export-subst

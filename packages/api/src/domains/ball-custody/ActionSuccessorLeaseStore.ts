@@ -3,10 +3,6 @@ import type {
   RecoverActiveExternalReviewVerdictResult,
 } from './action-successor-external-review-recovery-state-machine.js';
 import type {
-  RecoverActiveLocalReviewVerdictInput,
-  RecoverActiveLocalReviewVerdictResult,
-} from './action-successor-local-review-recovery-state-machine.js';
-import type {
   ActionCompletionVerdict,
   ActionSuccessorDispatchFailureReason,
   ActionSuccessorIdentityInput,
@@ -111,10 +107,6 @@ export type ActionSuccessorCommitOutcomeResult =
       lease: ActionSuccessorLease | null;
     };
 
-export type ActionSuccessorLocalReviewRecoveryStoreResult =
-  | RecoverActiveLocalReviewVerdictResult
-  | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
-
 export type ActionSuccessorExternalReviewRecoveryStoreResult =
   | RecoverActiveExternalReviewVerdictResult
   | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
@@ -136,10 +128,6 @@ export interface ActionSuccessorLeaseStore {
       now: number;
     },
   ): Promise<ActionSuccessorCommitOutcomeResult>;
-  recoverLocalReviewVerdict(
-    leaseId: string,
-    input: RecoverActiveLocalReviewVerdictInput,
-  ): Promise<ActionSuccessorLocalReviewRecoveryStoreResult>;
   recoverExternalReviewVerdict(
     leaseId: string,
     input: RecoverActiveExternalReviewVerdictInput,

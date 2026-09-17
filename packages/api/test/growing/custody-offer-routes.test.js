@@ -53,7 +53,7 @@ function callbackHeaders(credentials) {
 }
 
 describe('F310 source conversation custody routes', () => {
-  test('implicit recognition creates one source offer and acceptance admits one Task idempotently', async () => {
+  test('time-bound offer stays source-local until retry supplies exact canonical time', async () => {
     const { app, messageStore, taskStore, events, credentials } = await harness();
     const source = appendSource(messageStore);
 
@@ -87,7 +87,34 @@ describe('F310 source conversation custody routes', () => {
     });
     assert.equal(accepted.statusCode, 200);
     assert.equal(accepted.json().offer.admission.state, 'resulted');
-    assert.equal(accepted.json().offer.admission.result.result, 'admitted');
+    assert.equal(accepted.json().offer.admission.result.result, 'needs_clarification');
+    assert.equal((await taskStore.listByThread('thread-f310')).length, 0);
+
+    const retried = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/custody-offers/retry-admission',
+      headers: callbackHeaders(credentials),
+      payload: {
+        sourceMessageId: source.id,
+        sourceMessageRevision: decision.sourceMessageRevision,
+        offerId: decision.offerId,
+        title: 'Prepare the presentation',
+        why: 'Resolved the source deadline before Task admission',
+        intendedOutcome: 'A reviewable presentation is ready',
+        closure: {
+          condition: 'The presentation is ready for review',
+          expectedSignal: 'artifact:final-presentation',
+        },
+        time: {
+          businessDeadline: {
+            value: 1_788_276_400_000,
+            sourceRef: `message:${source.id}`,
+          },
+        },
+      },
+    });
+    assert.equal(retried.statusCode, 200);
+    assert.equal(retried.json().offer.admission.result.result, 'admitted');
 
     const replay = await app.inject({
       method: 'POST',
@@ -98,7 +125,7 @@ describe('F310 source conversation custody routes', () => {
     assert.equal(replay.statusCode, 200);
     assert.equal(replay.json().transitioned, false);
     assert.equal((await taskStore.listByThread('thread-f310')).length, 1);
-    assert.equal(events.filter(({ event }) => event === 'custody_offer_updated').length, 2);
+    assert.equal(events.filter(({ event }) => event === 'custody_offer_updated').length, 3);
     assert.equal(events.filter(({ event }) => event === 'task_created').length, 1);
     await app.close();
   });

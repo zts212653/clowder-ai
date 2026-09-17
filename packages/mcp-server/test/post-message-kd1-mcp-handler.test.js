@@ -173,22 +173,22 @@ describe('F193 AC-A2: post_message MCP handler rejects invocation-token + thread
 
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     const action = {
-      subjectRef: 'pr:owner/repo#2915',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:f167:kd1-forwarding',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+      terminalPredicate: { kind: 'task_done' },
     };
     const result = await handlePostMessage({
-      content: 'Please review PR #2915',
+      content: 'Please implement the task',
       targetCats: ['codex'],
-      clientMessageId: 'review-2915',
+      clientMessageId: 'implement-f167-kd1-forwarding',
       action,
     });
 
     assert.equal(result.isError, undefined);
     assert.deepEqual(posted.action, action);
-    assert.equal(posted.clientMessageId, 'review-2915');
+    assert.equal(posted.clientMessageId, 'implement-f167-kd1-forwarding');
     assert.deepEqual(posted.targetCats, ['codex']);
   });
 
@@ -201,16 +201,16 @@ describe('F193 AC-A2: post_message MCP handler rejects invocation-token + thread
 
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     const result = await handlePostMessage({
-      content: 'Parallel review',
+      content: 'Parallel implementation',
       targetCats: ['codex', 'gpt52'],
-      clientMessageId: 'parallel-2915',
+      clientMessageId: 'parallel-f167-kd1',
       action: {
-        subjectRef: 'pr:owner/repo#2915',
-        actionFamily: 'review',
-        successorSlot: 'reviewer',
+        subjectRef: 'subject:f167:kd1-parallel',
+        actionFamily: 'implement',
+        successorSlot: 'implementer',
         mode: 'parallel',
-        parallelIntent: 'independent reviews',
-        terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+        parallelIntent: 'independent implementations',
+        terminalPredicate: { kind: 'task_done' },
       },
     });
 
@@ -222,18 +222,22 @@ describe('F193 AC-A2: post_message MCP handler rejects invocation-token + thread
   test('same-thread action requires explicit clientMessageId and exactly one target', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
     const action = {
-      subjectRef: 'pr:owner/repo#2915',
-      actionFamily: 'review',
-      successorSlot: 'reviewer',
+      subjectRef: 'subject:f167:kd1-validation',
+      actionFamily: 'implement',
+      successorSlot: 'implementer',
       mode: 'single',
-      terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
+      terminalPredicate: { kind: 'task_done' },
     };
 
-    const missingId = await handlePostMessage({ content: 'Review', targetCats: ['codex'], action });
+    const missingId = await handlePostMessage({ content: 'Implement', targetCats: ['codex'], action });
     assert.equal(missingId.isError, true);
     assert.match(missingId.content[0].text, /clientMessageId/);
 
-    const missingTarget = await handlePostMessage({ content: 'Review', clientMessageId: 'review-2915', action });
+    const missingTarget = await handlePostMessage({
+      content: 'Implement',
+      clientMessageId: 'implement-f167-kd1-validation',
+      action,
+    });
     assert.equal(missingTarget.isError, true);
     assert.match(missingTarget.content[0].text, /targetCats/);
   });

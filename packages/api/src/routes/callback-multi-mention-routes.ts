@@ -25,6 +25,7 @@ import {
   actionSuccessorFencesMatch,
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
+import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -186,6 +187,14 @@ const multiMentionSchema = z
   })
   .superRefine((value, ctx) => {
     if (!value.action) return;
+    if (value.action.actionFamily === 'review') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['action'],
+        message:
+          'Local review uses ordinary durable A2A delivery with localReviewVerdict, reviewedHeadSha, and accepted-source fields, not multi_mention action custody.',
+      });
+    }
     if (!value.idempotencyKey) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['idempotencyKey'], message: 'required with action metadata' });
     }
@@ -268,7 +277,8 @@ export interface MultiMentionRouteDeps {
       catId: string;
       invocationId: string;
       messageIds: readonly string[];
-    }): Promise<void>;
+      seenAt: number;
+    }): Promise<readonly TurnCustodyWakeProvenance[] | void>;
   };
 }
 

@@ -1,4 +1,5 @@
 import type {
+  CatId,
   DeferredPersonMemoryReceipt,
   PersonIdentityDraft,
   PersonMemoryResolvedSourceBundle,
@@ -14,7 +15,7 @@ import { normalizeCandidatePhrase } from '../domains/memory/proactive-memory-lex
 import type { PersonMemoryProposalFailure } from './person-memory-proposal-preflight.js';
 import type { ProposePersonMemoryBody } from './person-memory-proposal-source-contract.js';
 
-type ReceiptStore = Pick<DeferredPersonMemoryReceiptStore, 'get'>;
+type ReceiptStore = Pick<DeferredPersonMemoryReceiptStore, 'bindProcessorInvocation'>;
 type ReceiptResolution =
   | { status: 'ok'; value: DeferredPersonMemoryReceipt | null }
   | { status: 'error'; failure: PersonMemoryProposalFailure };
@@ -112,7 +113,10 @@ async function receiptMatchesProposal(input: {
 export async function resolveDeferredProposalReceipt(input: {
   lineage: ProposePersonMemoryBody['deferredReceipt'];
   ownerUserId: string;
-  requesterCatId: string;
+  processorCatId: CatId;
+  processingThreadId: string;
+  processingMessageId: string;
+  processorInvocationId: string;
   targetPersonId?: string;
   person: PersonIdentityDraft;
   sourceBundle: PersonMemoryResolvedSourceBundle;
@@ -123,15 +127,21 @@ export async function resolveDeferredProposalReceipt(input: {
   if (!input.receiptStore) {
     return { status: 'error', failure: { statusCode: 503, payload: { error: 'deferred_receipt_unavailable' } } };
   }
-  const receipt = await input.receiptStore.get(input.ownerUserId, input.lineage.receiptId);
-  if (
-    !receipt ||
-    receipt.state !== 'claimed' ||
-    receipt.claimId !== input.lineage.claimId ||
-    receipt.requesterCatId !== input.requesterCatId ||
-    !receipt.originMessageRef ||
-    (receipt.claimUntil ?? 0) <= Date.now()
-  ) {
+  const binding = await input.receiptStore.bindProcessorInvocation({
+    ownerUserId: input.ownerUserId,
+    receiptId: input.lineage.receiptId,
+    claimId: input.lineage.claimId,
+    processorCatId: input.processorCatId,
+    processingThreadId: input.processingThreadId,
+    processingMessageId: input.processingMessageId,
+    processorInvocationId: input.processorInvocationId,
+    now: Date.now(),
+  });
+  if (binding.outcome !== 'bound' && binding.outcome !== 'replayed') {
+    return { status: 'error', failure: { statusCode: 409, payload: { error: 'deferred_receipt_conflict' } } };
+  }
+  const receipt = binding.receipt;
+  if (!receipt.originMessageRef) {
     return { status: 'error', failure: { statusCode: 409, payload: { error: 'deferred_receipt_conflict' } } };
   }
   return (await receiptMatchesProposal({ ...input, receipt }))

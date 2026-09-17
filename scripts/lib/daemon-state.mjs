@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -15,9 +13,19 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import {
+  captureProcessIdentity,
+  captureReadableIdentity,
+  compareStoredIdentity,
+  identityInspectionIsUnreadable,
+  observeProcessIdentity,
+  spawnedIdentityRefusal,
+  waitUntilIdentityGone,
+} from './process-identity.mjs';
+
+export { captureProcessIdentity } from './process-identity.mjs';
 
 const STATE_VERSION = 1;
-const TOKEN_ARG = '--cat-cafe-daemon-token=';
 
 export class DaemonStateError extends Error {
   constructor(reason, message, details = {}) {
@@ -48,40 +56,6 @@ export function daemonStatePaths({ homeDir = homedir(), projectRoot, deploymentI
     stateFile: join(namespaceDir, 'daemon.json'),
     auditFile: join(namespaceDir, 'stop-audit.jsonl'),
   };
-}
-
-function psField(pid, field) {
-  return execFileSync('ps', ['-p', String(pid), '-o', `${field}=`], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-}
-
-function processCwd(pid) {
-  const procCwd = `/proc/${pid}/cwd`;
-  try {
-    return canonicalPath(readlinkSync(procCwd));
-  } catch {
-    const output = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const cwd = output
-      .split('\n')
-      .find((line) => line.startsWith('n'))
-      ?.slice(1);
-    if (!cwd) throw new Error(`Cannot resolve cwd for PID ${pid}`);
-    return canonicalPath(cwd);
-  }
-}
-
-export function captureProcessIdentity(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 1) throw new Error(`Invalid PID: ${pid}`);
-  process.kill(pid, 0);
-  const startedAt = psField(pid, 'lstart').replace(/\s+/g, ' ');
-  const command = psField(pid, 'command');
-  if (!startedAt || !command) throw new Error(`Cannot inspect PID ${pid}`);
-  return { startedAt, command, cwd: processCwd(pid) };
 }
 
 function atomicWriteJson(file, value) {
@@ -121,15 +95,25 @@ function stateFromIdentity({
   };
 }
 
-export function writeDaemonState({ paths, pid, projectRoot, deploymentId, launchToken, logFile, ports }) {
-  const identity = captureProcessIdentity(pid);
-  const expectedRoot = canonicalPath(projectRoot);
-  if (identity.cwd !== expectedRoot || !identity.command.includes(`${TOKEN_ARG}${launchToken}`)) {
-    throw new DaemonStateError(
-      'spawned-process-identity-mismatch',
-      `PID ${pid} is not the daemon spawned for ${expectedRoot}`,
-    );
+export function writeDaemonState({
+  paths,
+  pid,
+  projectRoot,
+  deploymentId,
+  launchToken,
+  logFile,
+  ports,
+  captureIdentity = captureProcessIdentity,
+}) {
+  let identity;
+  try {
+    identity = captureReadableIdentity(pid, { capture: captureIdentity });
+  } catch (error) {
+    throw new DaemonStateError(error.reason ?? 'spawned-process-identity-unreadable', error.message, error.details);
   }
+  const expectedRoot = canonicalPath(projectRoot);
+  const refusal = spawnedIdentityRefusal(pid, identity, expectedRoot, launchToken);
+  if (refusal) throw new DaemonStateError(refusal.reason, refusal.message, refusal.details);
   const state = stateFromIdentity({
     pid,
     identity,
@@ -153,13 +137,6 @@ function parseState(stateFile) {
   }
 }
 
-function identityMatches(state, identity) {
-  const stored = state.process;
-  if (!stored || stored.startedAt !== identity.startedAt || stored.cwd !== identity.cwd) return false;
-  if (stored.command !== identity.command) return false;
-  return !stored.launchToken || identity.command.includes(`${TOKEN_ARG}${stored.launchToken}`);
-}
-
 function isLegacyDaemonCommand(command, expectedRoot) {
   const match = command.match(/^(?:\S*\/)?(?:ba|z)?sh\s+(\S*scripts\/start-dev\.sh)(?:\s|$)/);
   if (!match) return false;
@@ -175,7 +152,12 @@ function skipLegacyMigration(paths, reason, details) {
   return { outcome: 'skipped', reason, ...details };
 }
 
-export function inspectDaemonState({ stateFile, expectedProjectRoot, expectedDeploymentId }) {
+export function inspectDaemonState({
+  stateFile,
+  expectedProjectRoot,
+  expectedDeploymentId,
+  captureIdentity = captureProcessIdentity,
+}) {
   if (!existsSync(stateFile)) return { kind: 'missing' };
   let state;
   try {
@@ -195,14 +177,18 @@ export function inspectDaemonState({ stateFile, expectedProjectRoot, expectedDep
     return { kind: 'mismatch', reason: 'state-owner-mismatch', state };
   }
 
-  let identity;
-  try {
-    identity = captureProcessIdentity(state.pid);
-  } catch {
+  const observed = observeProcessIdentity(state.pid, captureIdentity);
+  if (observed.status === 'absent') {
     return { kind: 'stale', reason: 'process-not-running', state };
   }
-  if (!identityMatches(state, identity)) {
-    return { kind: 'mismatch', reason: 'process-identity-mismatch', state, identity };
+  if (observed.status === 'unknown') {
+    return { kind: 'mismatch', reason: 'process-identity-unreadable', state, error: observed.error };
+  }
+  const identity = observed.identity;
+  const comparison = compareStoredIdentity(state, identity);
+  if (comparison !== 'match') {
+    const reason = comparison === 'unknown' ? 'process-argv-unavailable' : 'process-identity-mismatch';
+    return { kind: 'mismatch', reason, state, identity };
   }
   return { kind: 'running', state, identity };
 }
@@ -233,26 +219,37 @@ export function prepareDaemonStart({ paths, expectedProjectRoot, expectedDeploym
   throw refusalFromInspection(inspection);
 }
 
-const delay = (ms) => new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
-
-async function waitUntilIdentityGone(state, graceMs) {
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    try {
-      if (!identityMatches(state, captureProcessIdentity(state.pid))) return true;
-    } catch {
-      return true;
-    }
-    await delay(Math.min(25, Math.max(1, deadline - Date.now())));
-  }
-  return false;
+function refuseUnverifiedStop(paths, pid) {
+  appendAudit(paths, { action: 'stop', outcome: 'unverifiable', pid });
+  throw new DaemonStateError('stop-outcome-unknown', `Cannot tell whether PID ${pid} exited`, { pid });
 }
 
-export async function stopDaemon({ paths, expectedProjectRoot, expectedDeploymentId, graceMs = 15_000 }) {
+/**
+ * @param expectedIdentity F300: the exact daemon incarnation the caller opened
+ * against. This primitive picks its target by re-reading the state file, so a
+ * caller that verified the identity a moment earlier has verified nothing
+ * unless the constraint travels with the call -- a legitimate writer can swap
+ * the record in between and the signal lands on a daemon nobody authorized.
+ */
+function matchesExpectedIdentity(expected, state, identity) {
+  if (expected.pid !== state.pid) return false;
+  if (expected.startedAt && identity?.startedAt && expected.startedAt !== identity.startedAt) return false;
+  return !(expected.command && identity?.command && expected.command !== identity.command);
+}
+
+export async function stopDaemon({
+  paths,
+  expectedProjectRoot,
+  expectedDeploymentId,
+  graceMs = 15_000,
+  expectedIdentity,
+  captureIdentity = captureProcessIdentity,
+}) {
   const inspection = inspectDaemonState({
     stateFile: paths.stateFile,
     expectedProjectRoot,
     expectedDeploymentId,
+    captureIdentity,
   });
   if (inspection.kind === 'missing') throw new DaemonStateError('no-state', `No daemon state: ${paths.stateFile}`);
   if (inspection.kind === 'stale') {
@@ -266,18 +263,29 @@ export async function stopDaemon({ paths, expectedProjectRoot, expectedDeploymen
   }
 
   const { state } = inspection;
+  if (expectedIdentity && !matchesExpectedIdentity(expectedIdentity, state, inspection.identity)) {
+    throw new DaemonStateError(
+      'target-identity-changed',
+      `Daemon at ${paths.stateFile} is no longer the incarnation this stop was opened against`,
+      { expected: expectedIdentity, actual: { pid: state.pid, startedAt: inspection.identity?.startedAt } },
+    );
+  }
   process.kill(state.pid, 'SIGTERM');
   let forced = false;
-  if (!(await waitUntilIdentityGone(state, graceMs))) {
+  if (!(await waitUntilIdentityGone(state, graceMs, captureIdentity))) {
     const beforeKill = inspectDaemonState({
       stateFile: paths.stateFile,
       expectedProjectRoot,
       expectedDeploymentId,
+      captureIdentity,
     });
     if (beforeKill.kind === 'running') {
       process.kill(state.pid, 'SIGKILL');
       forced = true;
-      await waitUntilIdentityGone(state, 1_000);
+      if (!(await waitUntilIdentityGone(state, 1_000, captureIdentity))) refuseUnverifiedStop(paths, state.pid);
+    } else if (identityInspectionIsUnreadable(beforeKill)) {
+      // Signalled, but we cannot see whether it exited: keep the state and claim nothing.
+      refuseUnverifiedStop(paths, state.pid);
     }
   }
   rmSync(paths.stateFile, { force: true });
@@ -297,16 +305,17 @@ export function migrateLegacyDaemonState({
   if (!existsSync(legacyPidFile)) return { outcome: 'skipped', reason: 'legacy-state-missing' };
 
   const pid = Number.parseInt(readFileSync(legacyPidFile, 'utf8').trim(), 10);
-  let identity;
-  try {
-    identity = captureProcessIdentity(pid);
-  } catch {
+  const observed = observeProcessIdentity(pid);
+  if (observed.status === 'absent') {
     return { outcome: 'skipped', reason: 'legacy-process-not-running' };
   }
+  if (observed.status === 'unknown') return { outcome: 'skipped', reason: 'legacy-process-identity-unreadable' };
+  const identity = observed.identity;
   const expectedRoot = canonicalPath(expectedProjectRoot);
   if (identity.cwd !== expectedRoot) {
     return skipLegacyMigration(paths, 'legacy-owner-mismatch', { pid, foreignCwd: identity.cwd });
   }
+  if (identity.argvAvailable === false) return { outcome: 'skipped', reason: 'legacy-process-identity-unreadable' };
   if (!isLegacyDaemonCommand(identity.command, expectedRoot)) {
     return skipLegacyMigration(paths, 'legacy-command-mismatch', { pid });
   }

@@ -284,6 +284,17 @@ v2 合同整体保留（主指标 = alignment correctness；红线 = 显式行�
 
 ## Dependencies
 
+### F312 Phase E Cat-owned Seed Standing Reflex（2026-09-03）
+
+F255 Present Loop 是 cat-owned seed 唯一合格的 invocation consumer。server scheduler 在
+`beginScheduledRun` 后最多携带一枚 exact owner / producing cat / seed / source revision 的 content-free
+carrier；query 和 prompt 不含 seed claim。producing cat 按需 drill 当前 private seed 后，可以沉默或创建一条
+bounded intent；`applied` 必须由同 invocation、同 cat、同 seed 的 intent 证明，presented/drilled 不算采用。
+
+Seed 仍是 producing cat 的私有、有界假设，不能升级为operator事实、人物事实或团队共识。missing、source
+correction、owner/cat scope mismatch、dormant/retired 均使旧 cue fail closed；content-free receipt 绑定
+consumer cat 与 exact revision。现有 intent/visit/echo 只提供 bounded outcome lineage，不新增 utility eval。
+
 - **F258 看得见的猫咖**（世界入口 + 下游消费者）：承载“生活与作息”入口及 staged/off_duty/amber-seed/日记架消费；既有 render cell 继续只读，Phase A.1 写面另立相邻边界。
 - **F229 猫猫球**（遥控入口 + 下游消费者）：自然语言只做预览确认并回写 F255；另消费日记本 toolbar + provoke 气泡，不拥有生活配置。
 - **F139 Unified Schedule**（执行引擎）：按稳定身份接受 F255 配置投影并运行；在 F255 私人时间旅程中 SchedulePanel 是运维面而非主入口，F139 的其他通用任务入口与管理职责不变。

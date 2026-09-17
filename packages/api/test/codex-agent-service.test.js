@@ -12,10 +12,21 @@ import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
-const { CodexAgentService, buildCodexReasoningArgs, isGitRepositoryPath } = await import(
-  '../dist/domains/cats/services/agents/providers/CodexAgentService.js'
-);
+const {
+  CodexAgentService: ProductionCodexAgentService,
+  buildCodexReasoningArgs,
+  isGitRepositoryPath,
+} = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
+
+// Every invocation in this suite injects a mock spawn function. Resolve a
+// guaranteed executable first so the public runner never needs Codex itself
+// merely to reach that mock. Production still defaults to `codex`.
+class CodexAgentService extends ProductionCodexAgentService {
+  constructor(options = {}) {
+    super({ ...options, cliCommand: process.execPath });
+  }
+}
 
 /** Helper: collect all items from async iterable */
 async function collect(iterable) {
@@ -1500,7 +1511,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
           const pencilArgsArg = args.find((a) => a.includes('mcp_servers.pencil.args='));
           assert.ok(pencilArgsArg, 'pencil entry must inject args');
           assert.ok(pencilArgsArg.includes('--app'), 'pencil args must include --app');
-          assert.ok(pencilArgsArg.includes('vscode'), 'pencil args must include app name');
+          assert.ok(
+            pencilArgsArg.includes('visual_studio_code'),
+            'legacy vscode override must emit the current Pencil host identifier',
+          );
           // Must explicitly enable to override any stale config.toml disabled state
           assert.ok(
             args.includes('mcp_servers.pencil.enabled=true'),

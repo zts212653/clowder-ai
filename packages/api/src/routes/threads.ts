@@ -51,6 +51,7 @@ import {
   passesManagedHoldViewerBoundary,
   SYSTEM_USER_IDS,
 } from '../domains/cats/services/stores/visibility.js';
+import { projectThreadRelations } from '../domains/thread-navigation/thread-relation-projection.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { visibilityCursorUnresolvedRepair } from '../infrastructure/telemetry/instruments.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
@@ -955,6 +956,18 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
   });
 
   // GET /api/threads/:id - 获取对话详情
+  // F277: relation membership is a separate read model from F297 Sidebar rows.
+  // Keep this route before `/:id` so "relations" cannot be captured as a thread id.
+  app.get('/api/threads/relations', async (request, reply) => {
+    const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+    const threads = await threadStore.list(userId);
+    return projectThreadRelations(threads);
+  });
+
   app.get('/api/threads/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
     const thread = await threadStore.get(id);

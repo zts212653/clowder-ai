@@ -247,7 +247,7 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 | 主执行猫 / 当前持球猫 | 发起并主导当前任务的猫 | 当前 invocation 的 catId |
 | QA/审查猫 | 负责质量审查的猫 | 跨 family，有 peer-reviewer 角色 |
 | 视觉把关猫 | 负责审美/品牌/UX 审查的猫 | 跨 family，视觉设计能力猫 |
-| 守护猫 | 愿景守护（非 author 非 reviewer） | roster 排除 author + reviewer |
+| 守护猫 | 愿景守护（非 author 非 reviewer） | 按 `feat-lifecycle` 的作者范围与独立性要求从 roster 选择 |
 | 全部参与猫 | 所有参与当前任务的猫 | 按 roster 可用猫列表 |
 
 **为什么**：猫名硬编码在 skill 里不受 roster disable 过滤，disable 猫后其他猫仍会按 skill 指令分配任务给已下线的猫。角色词 + 动态 roster = 增减猫只需改 cat-config.json。
@@ -262,9 +262,11 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 
 猫猫是家庭成员，不是外包工具。讨论 Clowder AI 团队时用"我们" / "咱们" / "家里"，禁止用"你们" / "他们"指代三猫。
 
-## 1. 交接五件套
+## 1. 交接要求与五项参考
 
-跨猫传话/交接必须包含：
+跨猫传话/交接必须让接手者能够正确继续：明确目标与范围、关键缘由/约束、真实进度与证据、影响行动的风险/未知，以及下一步由谁做什么。已有且有效的上下文可以引用，实际责任、授权和接口字段仍按选中的交接路径满足。
+
+以下五项是可选的组织与查漏参考。可以直接使用、改造或替换；没有真实取舍或未决问题不要求造栏目，不能因没用五栏格式阻止交接，也不按模型资格决定方法选择。
 
 | # | 项目 | 说明 |
 |---|------|------|
@@ -289,10 +291,10 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 - 问开放问题，不问引导性问题
 - 展示思考过程，保护观点独立性
 
-## 4. Bug 修复先写 Bug Report
+## 4. Bug 修复保留诊断与验证证据
 
-先写 bug report 再动手修。至少包含：报告人、复现步骤、根因分析、修复方案、验证方式。
-存放：`docs/bug-report/<bug-name>/bug-report.md`
+修复必须明确现象与预期、复现/观察证据、根因依据、修复和验证；推测不能冒充事实。信息可留在已有 issue、PR、thread 或 bug report，不强制先填诊断胶囊再抄写报告。
+需要独立报告时存放：`docs/bug-report/<bug-name>/bug-report.md`。调查方法与模板见 `debugging` 的可选参考；已有精准失败检查可按 `tdd` 复用。
 
 ## 5. Commit 纪律
 
@@ -328,8 +330,8 @@ commit body 补一行 `Why:` 说明决策理由。
 
 - Reviewer 每个发现有明确立场，禁止"修不修都行"
 - Author 收到意见必须判断，不能全盘接受
-- 零分歧 = 走过场，双方反思
-- 分歧升级 → 问operator
+- 核实后零分歧合法，不为了表示独立而制造争论
+- 分歧按证据、适用性与替代方案讨论；价值取舍或跨猫僵局才按决策漏斗升级
 
 **证据权重排序**（当 review 意见和现实冲突时）：
 1. 需求/AC 原文
@@ -349,7 +351,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 1. 开始 Feature 前必须读原始 Discussion/Interview
 2. AC 全打勾 ≠ 完成，问"operator用这个功能体验是什么样？"
-3. 前端功能产出截图证据（≤3 截图 + 15s 录屏）
+3. 前端功能产出覆盖实际入口、内容态、主旅程与相关响应式状态的证据；形式和数量按证明需要选择，交互 claim 仍须实际操作验证（详见 `feat-lifecycle` 的 Design Gate 与 Completion）
 4. 请求 review 附原始需求摘录（≤5 行）
 5. 拿捏不准上升operator
 6. **涉及 UX/前端的验证必须打开浏览器实际操作**——不管是 author 自检、reviewer 审查还是愿景守护，看代码不等于看效果
@@ -422,7 +424,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 三类合法消息：
 - **BLOCKED**：真的卡住，需要对方现在决策
-- **REVIEW READY**：到了五件套/review 边界
+- **REVIEW READY**：交接信息与适用的 review 证据已齐备
 - **DONE / HANDOFF**：任务结束，明确下一棒
 
 接球后静默执行到下一个状态迁移点。中间产出留在代码/文档里，不发。
@@ -460,11 +462,11 @@ commit body 补一行 `Why:` 说明决策理由。
 
 - `../cat-cafe-runtime` 是单实例运行态，默认当作在线服务处理。
 - `../cat-cafe-runtime` 的 `localhost:3003/3004` 默认视为**在线 runtime 端口**；对这两个端口做浏览器 / Playwright / curl 操作，等同于在操作 runtime，不是本地沙箱。
-- 在 runtime 会话中禁止执行重启命令：`pnpm start`、`pnpm runtime:start`、`./scripts/start-dev.sh`。
+- 在 runtime 会话中禁止执行生产生命周期命令：`pnpm start`、`pnpm runtime:start`、`pnpm runtime:restart`、`pnpm runtime:stop`、`./scripts/start-dev.sh`。
 - 前端证据采集先复用现有服务：先查 `curl -sf http://localhost:3004/health`。
 - 如果目的是验证**未合入的本地改动**，必须先确认“当前 CWD / worktree”和“要访问的 URL”属于同一实例；看到 `3003/3004` 就先停下来，确认自己是不是误打到了 runtime。
-- 必须重启时先拿到operator明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行。
-- `--force` 只用于同步/脏树场景，不是重启 runtime 的授权令牌。
+- 必须重启时先拿到operator明确授权，再执行 `pnpm runtime:restart`；命令只表达动作，不自行证明授权。
+- `--force` 与 `CAT_CAFE_RUNTIME_RESTART_OK` 均已退出 runtime 生命周期入口；任何 shell 参数或环境变量都不能放宽进程归属检查。
 
 ## 13. 元思考触发器 §13（F086 M2）
 
@@ -497,7 +499,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 **为什么禁止重复唤起**：`start_vote` 内部已通过 `enqueueA2ATargets` dispatch 了所有 voter。再调 `multi_mention` = 同一只猫被唤起两次，产生重复通知和上下文噪音。投票 auto-close 后，后续 `[VOTE:xxx]` 会被静默忽略，但前面的冗余调度已经发生。
 
-## 14a. 全量测试三件套证据
+## 14a. 测试证据三件套
 
 说"测试全绿"必须附带三件证据，否则只算局部自测，不算全局证据：
 
@@ -507,7 +509,7 @@ commit body 补一行 `Why:` 说明决策理由。
 | 2 | **SHA** | `基于 abc1234` |
 | 3 | **是否 rebase 到最新 main** | `已 rebase origin/main` 或 `未 rebase（基于 3 天前的 main）` |
 
-**merge 前的全量门禁**：`pnpm gate`（= `scripts/pre-merge-check.sh`），自动 rebase + build + test + lint + check，通过后打印三件套。详见 `merge-gate` skill。
+**merge 前的 canonical gate 入口**：`pnpm gate`（= `scripts/pre-merge-check.sh`）先从 diff、冻结 base 与既有 receipts 机器选择 targeted/full；只有 classifier 或 `--risk <axis>` 加严为 full 时才运行全量 build/test/lint/check。targeted 仍须记录受影响检查、全仓跨包 typecheck、SHA 与 base。路由细节只由 `merge-gate` skill 维护，禁止在家规另建路径清单或手调内部 classifier。
 
 ## 14b. Rebase 冲突三屏规则
 
@@ -546,17 +548,15 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 **硬护栏**：`.githooks/pre-rebase` 会检查 `zdiff3` 是否设置，未设置则阻止 rebase。
 
-## 14c. 共享契约热点文件
+## 14c. 共享契约风险
 
-改以下路径的 PR **必须跑全量测试**（`pnpm gate`），不接受 `--filter` 局部测试：
+共享 schema、store、MCP tool 与跨包入口的改动必须按**真实契约影响**选择证据，不能只跑单文件测试，也不能再靠一份手写路径表无条件升级 full gate。统一入口是 `pnpm gate`：机器 route 为 full 就执行 full；机器看不见但存在外部契约风险时用 `pnpm gate -- --risk contract` 加严；可证明只影响局部实现时跑受影响测试 + 全仓跨包 typecheck，并把 consumer census 与命令写入 evidence manifest。说“不是我的 scope”不能免除已证明受影响的下游，但目录名本身也不是 full 的徽章。
 
-- `packages/shared/**`
-- `packages/web/src/stores/chatStore.ts`
-- `packages/mcp-server/src/tools/**`
-- `packages/mcp-server/src/server-toolsets.ts`
+## 14d. 安装器测试的副作用边界
 
-这些文件是跨包共享契约，改了一处可能导致多个包的测试挂掉。
-说"不是我的 scope"不成立——改了共享契约，所有下游测试都是你的 scope。
+- 测试 setup / installer / lifecycle function 时，必须在 source 任何脚本前设置任务专属 `HOME` / `CAT_CAFE_HOME`，不能等函数调用时才覆盖；脚本可能已在加载期冻结全局路径。
+- mock 最外层副作用边界（例如被委托的 installer executable、网络 client、package installer），不能只 mock 它旧实现里的内层 `python3` / `pip`；实现改成委托后，内层 stub 不再形成隔离。
+- 声称 dry-run / fixture-only 的测试必须证明所有写入目标位于临时根，且真实用户级 service venv、runtime 与 6399 均未被触达。发现逃逸立即停进程、只读核影响；没有旧版本账本时禁止猜测回滚。
 
 ## 14. 共享状态文件只在 main 改
 
@@ -597,14 +597,9 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 **禁止无证据说"没更新/没编译/没重启/还是旧代码"。**
 
-这不是"懒"，是**推卸责任**——在没有证据的情况下把operator的操作当成你的 bug 的替罪羊。启动脚本自动拉代码编译，"没更新"本来就极少发生。
+提出版本、实例或构建错配的诊断时，核到实际运行对象、加载版本与相关行为。仓库 HEAD、PID 启动时间或日志行数只能各自提供线索，不能单独证明进程加载了目标代码。
 
-遇到 runtime 行为异常时，在说出任何诊断判断之前：
-1. 查 PID + 启动时间（确认是哪个进程）
-2. 查 runtime HEAD 是否包含预期 commit
-3. grep 当前 PID 日志确认实际行为
-
-**三件套没完成 → 只能说"我还没查完"。** 详见 `debugging` skill 的 Runtime Preflight Gate。
+已有堆栈、失败测试等有效证据时，可沿该路径调查并说明已查实的现象，不为无关问题先采 API PID。方法见 `debugging` 的实例取证参考；运行环境与重启授权仍服从 §12。
 
 ### 16b. Spike/探索时工具优先级 + 卡 N 轮主动求助（2026-05-13 F198 spike 教训）
 
@@ -639,35 +634,9 @@ spike（拆机制、找方案、验证未知行为）时**禁止 web fetch 当�
 
 完整方法论见 `vision-rescue` skill。来源：F198 "拯救Ragdoll"，投降包装成理性收口，operator怒怼才打破。
 
-### 16d. Review 糊锅检测——Round 3 黄灯 / Round 4 停车（2026-05-14 F198 Phase B 教训）
+### 16d. Review loop brake（F314）
 
-> operator experience："你们在补锅ing！选错坐标系了！"（注：此处"补锅"本质是"糊锅"——在错误坐标系上打补丁。后 §16e 独占「补锅匠」magic word 指代坐标系对但只做点修复的场景，故本段改用"糊锅"区分。）
-
-**信号**：Review iteration ≥3 轮且 P1 没有收敛（数量不减 / 同类问题反复出现）= **糊锅模式**。
-不是 reviewer 太严也不是 coder 太差——是在错误的坐标系上反复打补丁。
-
-**Round 3 = 黄灯（自检）**：
-
-Coder 问自己：
-1. 我是在复用已有工具/抽象，还是在重新实现？（F198：BgCarrier 重写了 `buildClaudeEnvOverrides` 已有的逻辑）
-2. 这一轮改动是"修复"还是"补漏"？补漏 = 坐标系可能错了
-3. 如果把已有的同类 service 放在旁边对比，相似度多高？高 = 应该复用不是重写
-
-Reviewer 问自己：
-1. 我连续 3 轮的 P1 是不是同一类问题（错误处理 / 重复代码 / 缺抽象）？
-2. 50%+ P1 能映射到已有 production 代码吗？能 → **必须建议重构方向**，不能继续逐条 P1
-3. 写一份 **Finding Pattern Summary**：这些 P1 指向什么根因？（"缺 X 抽象" / "没复用 Y" / "坐标系 Z 选错了"）
-
-**Round 4 = 强制停车**：
-
-双方都停下来，做一次 **坐标系审计**：
-- 当前方案和已有 production 实现的**结构差异**在哪？
-- 差异是**有意为之**（需求不同）还是**认知缺失**（不知道有现成的）？
-- 认知缺失 → 重构复用。有意为之 → 写清楚为什么，然后继续
-
-**Hook 机制**：PR tracking 的 review feedback callback 在 Round 3+ 注入 Patch Spiral Guard 提醒给 author 和 reviewer 双方。
-
-来源：F198 Phase B `ClaudeBgCarrierService` 6 轮 cloud review、12 个 P1，operator一句"你们在糊锅"打断后 refactor `buildClaudeEnvOverrides` 复用，P1 大幅收敛。
+旧的 `Round 3 / Round 4` 与 PR-tracking Patch Spiral Hook 已退役；它们把历史计数、提醒和责任状态重复塞进 prose。现行唯一入口是 `request-review` 的 durable-fact action-time R4 brake：同一 subject 的第四条正式、非作者 `changes_requested` 到达时只暂停一次自动 re-request，author 回读 accepted source 并写 Finding Pattern Summary；第五条及以后继续，history 不完整则 warn-open。不得出生 Round/Reset、lease、generation 或第二套 review 状态。问题是否同型、是否选错坐标系，统一按下方 §16e failure-mode audit 判断。
 
 ### 16e. Failure-Mode Audit——同型第二次出现即触发（2026-05-29 全家族讨论教训）
 
@@ -788,13 +757,13 @@ beforeEach(() => {
 
 | 类型 | 例子 | 处置 |
 |------|------|------|
-| **无状态残留** | `*.log` / `forzadata-*.txt` / `cookies.json`（调试 / 自动化一次性产物） | hygiene 管：不许留根目录，写到 `tmp/`；`pnpm clean:root-debris` 清理 |
+| **无状态残留** | `*.log` / `forzadata-*.txt` / `cookies.json`（调试 / 自动化一次性产物） | hygiene 管：不许留根目录，写到 `tmp/`；merge 前由 `pnpm gate` 的 Root Artifact Guard 检查 |
 | **有状态核心存储** | `dump.rdb*` / `evidence.sqlite*` / `world.sqlite*`（Redis / Hindsight / World Engine） | **不归 hygiene**：位置是架构决策，迁移 = 不兼容修改 = 独立立项；**不动、不清、不迁** |
 
 **铁律**：
 1. 临时 / 调试 / 可重生成产物**不许写在根目录**——重定向到 `tmp/` / `data/` 等已 ignore 的专用目录。调试完 `> foo.log` 留根目录 = 下一只猫的认知噪声。
 2. 核心数据存储的位置是**架构决策**，不是卫生问题——`dump.rdb` / `*.sqlite` 在根目录是既成事实，迁移属独立立项，不在 hygiene 范畴。
-3. 清理脚本（`scripts/clean-root-debris.sh`）三重保险：删除条件 = untracked ∧ 匹配白名单 ∧ 不在硬保护清单；对任何 `*.rdb*` / `*.sqlite*` 硬拒绝。**宁可白名单不要黑名单**（`feedback_lsof_port_range_kills_sanctuary` 教训）。
+3. 需要主动清理时直接运行 `bash scripts/clean-root-debris.sh --dry-run` 核对，再显式选择 `--execute`；不存在 `pnpm clean:root-debris` 包命令。脚本三重保险：删除条件 = untracked ∧ 匹配白名单 ∧ 不在硬保护清单；对任何 `*.rdb*` / `*.sqlite*` 硬拒绝。**宁可白名单不要黑名单**（`feedback_lsof_port_range_kills_sanctuary` 教训）。
 4. `.gitignore` 防垃圾进 git（已覆盖大部分），但不防运行时产物**物理堆在根目录**污染 `ls`——主防御是铁律 1 的行为约束，`.gitignore` + pre-commit Root Hygiene Guard 是兜底（拦未 ignore 的新垃圾被 commit）。
 
 ## 21. Lifecycle 不分任务类型（LL-071）

@@ -140,6 +140,42 @@ describe('ThreadSidebar v9 tab redesign', () => {
     expect(harness.container.querySelector('[data-testid="virtual-thread-list"]')).not.toBeNull();
   });
 
+  it('keeps a large pinned list virtualized when explicit metadata forms a Group', async () => {
+    const pinnedThreads = Array.from({ length: 250 }, (_, index) =>
+      makeThread({
+        id: `grouped-${index}`,
+        title: `Grouped ${index}`,
+        pinned: true,
+        pinnedAt: NOW - index,
+        lastActiveAt: NOW - index,
+      }),
+    );
+    Object.assign(mockStore, {
+      currentThreadId: 'grouped-0',
+      threads: [makeThread({ id: 'default', title: '大厅' }), ...pinnedThreads],
+    });
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/labels') return jsonOk([]);
+      if (path === '/api/config/thread-attention') {
+        return jsonOk({
+          aliases: {},
+          open: {},
+          groups: [{ id: 'attention_virtualized', threadIds: pinnedThreads.map((thread) => thread.id) }],
+        });
+      }
+      return defaultSidebarApiMock(path);
+    });
+
+    await harness.render();
+    await harness.flush();
+
+    const renderedIds = visibleThreadIds(harness.container);
+    expect(renderedIds.length).toBeGreaterThan(0);
+    expect(renderedIds.length).toBeLessThan(50);
+    expect(renderedIds).toContain('grouped-0');
+    expect(harness.container.querySelector('[data-testid="virtual-attention-list"]')).not.toBeNull();
+  });
+
   it('keeps label filtering in the same row as sidebar tabs', async () => {
     mockStore.threads = [
       makeThread({ id: 'default', title: '大厅', lastActiveAt: NOW }),

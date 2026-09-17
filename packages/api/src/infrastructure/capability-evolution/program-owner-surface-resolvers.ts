@@ -1,3 +1,5 @@
+import type { IMessageStore } from '../../domains/cats/services/stores/ports/MessageStore.js';
+import { isDelivered } from '../../domains/cats/services/stores/ports/MessageStore.js';
 import type { ProgramOwnerSurfaceResolver } from './program-join-validator.js';
 
 interface PawFeelDiscovery {
@@ -15,6 +17,7 @@ interface EvolutionOwnerSurfaceResolverDependencies {
   humanDispositionLedger?: {
     get(ownerUserId: string, sourceRef: string): Promise<{ episode: { subjectRef: string } } | null>;
   };
+  messageStore?: Pick<IMessageStore, 'getById'>;
   threadStore: {
     get(
       threadId: string,
@@ -58,6 +61,7 @@ export function createEvolutionOwnerSurfaceResolvers(
     'subject:',
     'instrumentation:human-disposition-v1',
   );
+  const ownerMessageCoordinates = coordinates('F117', 'message:', 'thread:', 'instrumentation:owner-message-v1');
   return {
     'paw-feel-disposition': async (input) => {
       const resolved = pawFeelCoordinates(input);
@@ -81,6 +85,30 @@ export function createEvolutionOwnerSurfaceResolvers(
       }
       const entry = await dependencies.humanDispositionLedger.get(input.ownerUserId, resolved.ownerId);
       return entry?.episode.subjectRef === resolved.joinId ? { status: 'resolved' } : { status: 'missing' };
+    },
+    'owner-message': async (input) => {
+      const resolved = ownerMessageCoordinates(input);
+      if (!resolved) return { status: 'missing' };
+      if (!dependencies.messageStore) throw new Error('F117 owner-message owner read port is unavailable');
+      const message = await dependencies.messageStore.getById(resolved.ownerId);
+      if (
+        !message ||
+        message.userId !== input.ownerUserId ||
+        message.catId !== null ||
+        message.source !== undefined ||
+        message.sourceParseFailure === true ||
+        message.threadId !== resolved.joinId ||
+        message.deletedAt !== undefined ||
+        message._tombstone === true ||
+        !isDelivered(message) ||
+        (message.visibility === 'whisper' && message.revealedAt === undefined)
+      ) {
+        return { status: 'missing' };
+      }
+      const sourceThread = await dependencies.threadStore.get(message.threadId);
+      return sourceThread && !sourceThread.deletedAt && sourceThread.createdBy === input.ownerUserId
+        ? { status: 'resolved' }
+        : { status: 'missing' };
     },
   };
 }

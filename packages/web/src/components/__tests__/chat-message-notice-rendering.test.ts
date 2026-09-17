@@ -38,6 +38,10 @@ vi.mock('@/components/SystemNoticeBar', () => ({
   SystemNoticeBar: ({ message }: { message: ChatMessageType }) =>
     React.createElement('div', { 'data-testid': 'notice-bar' }, `${message.source?.connector}:${message.content}`),
 }));
+vi.mock('@/components/CloudBindingRecoveryCard', () => ({
+  CloudBindingRecoveryCard: ({ sourceMessageId }: { sourceMessageId: string }) =>
+    React.createElement('div', { 'data-testid': 'cloud-recovery-card' }, sourceMessageId),
+}));
 vi.mock('@/components/ConnectorBubble', () => ({
   ConnectorBubble: ({ message }: { message: ChatMessageType }) =>
     React.createElement(
@@ -57,7 +61,12 @@ vi.mock('@/components/rich/RichBlocks', () => ({ RichBlocks: () => null }));
 describe('ChatMessage notice rendering', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let ChatMessage: React.FC<{ message: ChatMessageType; getCatById: (id: string) => CatData | undefined }>;
+  let ChatMessage: React.FC<{
+    message: ChatMessageType;
+    threadId?: string;
+    timelineMessages?: readonly ChatMessageType[];
+    getCatById: (id: string) => CatData | undefined;
+  }>;
 
   beforeAll(async () => {
     (globalThis as { React?: typeof React }).React = React;
@@ -143,6 +152,86 @@ describe('ChatMessage notice rendering', () => {
     expect(container.textContent).toContain('缅因猫（sol） 的会话 #2');
     expect(container.textContent).not.toContain('cat-sol 的会话 #2');
     expect(mockApiFetch.mock.calls.filter((call) => call[0] === '/api/cats')).toHaveLength(1);
+  });
+
+  it('renders one recovery card beside the exact source and suppresses the linked standalone notice', async () => {
+    const source = {
+      id: 'source-needs-binding',
+      type: 'user',
+      content: '@gpt-pro hello',
+      timestamp: 1,
+      extra: {
+        queueReceipt: {
+          version: 1,
+          entryId: 'entry-needs-binding',
+          targets: [
+            {
+              catId: 'gpt-pro',
+              state: 'failed',
+              retryable: true,
+              attempts: [
+                {
+                  id: 'attempt-needs-binding',
+                  targetCatId: 'gpt-pro',
+                  sequence: 1,
+                  state: 'failed',
+                  createdAt: 1,
+                  updatedAt: 2,
+                },
+              ],
+            },
+          ],
+          reminderAttempts: [],
+        },
+      },
+    } as ChatMessageType;
+    const notice = {
+      id: 'notice-needs-binding',
+      type: 'connector',
+      content: '这条消息还没有发送',
+      timestamp: 2,
+      replyTo: source.id,
+      source: {
+        connector: 'cloud-bridge-status',
+        label: '云端猫投递',
+        icon: '☁️',
+        meta: {
+          presentation: 'system_notice',
+          cloudBridgeRecovery: {
+            v: 1,
+            kind: 'needs_binding',
+            sourceMessageId: source.id,
+            targetCatId: 'gpt-pro',
+            dispatchInvocationId: 'dispatch-needs-binding',
+          },
+        },
+      },
+    } as ChatMessageType;
+    const timeline = [source, notice];
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(ChatMessage, {
+            message: source,
+            threadId: 'thread-1',
+            timelineMessages: timeline,
+            getCatById: () => undefined,
+          }),
+          React.createElement(ChatMessage, {
+            message: notice,
+            threadId: 'thread-1',
+            timelineMessages: timeline,
+            getCatById: () => undefined,
+          }),
+        ),
+      );
+    });
+
+    expect(container.querySelectorAll('[data-testid="cloud-recovery-card"]')).toHaveLength(1);
+    expect(container.querySelector('[data-testid="notice-bar"]')).toBeNull();
   });
 
   it('renders inline mention hint as in-thread notice bar instead of connector bubble', () => {

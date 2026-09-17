@@ -15,6 +15,7 @@ describe('Collective onboarding scene', () => {
         providers={[githubReady]}
         onBootstrap={noop}
         onAuthenticate={noop}
+        onConfigureProvider={noop}
         onCreateCollective={noop}
       />,
     );
@@ -32,6 +33,7 @@ describe('Collective onboarding scene', () => {
         providers={[githubReady]}
         onBootstrap={noop}
         onAuthenticate={noop}
+        onConfigureProvider={noop}
         onCreateCollective={noop}
       />,
     );
@@ -50,11 +52,31 @@ describe('Collective onboarding scene', () => {
         providers={[{ id: 'github', ready: false, reason: 'not_configured' }]}
         onBootstrap={noop}
         onAuthenticate={noop}
+        onConfigureProvider={noop}
         onCreateCollective={noop}
       />,
     );
 
     expect(html).toContain('Human 登录尚未配置');
     expect(html).toContain('disabled');
+  });
+
+  it('lets the bootstrap owner create GitHub login without copying credentials', () => {
+    const html = renderToStaticMarkup(
+      <OnboardingScene
+        phase="bind-identity"
+        mode="missing"
+        providers={[{ id: 'github', ready: false, reason: 'not_configured', setupSupported: true }]}
+        onBootstrap={noop}
+        onAuthenticate={noop}
+        onConfigureProvider={noop}
+        onCreateCollective={noop}
+      />,
+    );
+
+    expect(html).toContain('创建 GitHub 登录应用');
+    expect(html).toContain('不需要复制 Client ID 或 secret');
+    expect(html).not.toContain('请联系 Service 管理者');
+    expect(html).not.toContain('disabled');
   });
 });

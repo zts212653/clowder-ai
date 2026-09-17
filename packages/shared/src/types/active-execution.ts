@@ -30,6 +30,8 @@ export type ActiveExecutionCancelability =
 
 export interface ActiveExecutionProjection {
   readonly executionId: string;
+  /** Canonical per-cat child for trajectory navigation; never substitute the parent/control identity. */
+  readonly turnInvocationId?: string;
   readonly threadId: string;
   readonly threadTitle: string | null;
   readonly catId: string;

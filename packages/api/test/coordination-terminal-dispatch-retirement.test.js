@@ -190,6 +190,7 @@ describe('coordination terminal → ordinary A2A dispatch retirement', () => {
       mentions: [createCatId('codex-sol')],
       timestamp: 1_900,
       threadId: 'thread-1',
+      replyTo: h.source.id,
       extra: {
         coordination: {
           id: 'coord-successor',

@@ -28,6 +28,7 @@ export interface ProfileItem {
 export interface AccountsResponse {
   projectPath: string;
   providers: ProfileItem[];
+  unavailableAccounts?: Array<{ accountRef: string; state: 'rejected'; reason: string }>;
 }
 
 export interface ProfileTestResult {

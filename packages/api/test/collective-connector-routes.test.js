@@ -63,6 +63,28 @@ async function harness(active = true, callbackRecordOverrides = {}) {
   });
   registerCollectiveConnectorRoutes(app, {
     runtime: { connector: () => (active ? connector : undefined) },
+    localService: {
+      status: async () => ({
+        state: 'setup_required',
+        serviceUrl: 'http://127.0.0.1:5201',
+        dataDirectory: '/home/user/.cat-cafe/collective-service',
+        serviceInstanceId: 'svc_local',
+        setupStep: 'github_app',
+      }),
+      provision: async () => {
+        calls.push(['provision-service']);
+        return {
+          service: {
+            state: 'setup_required',
+            serviceUrl: 'http://127.0.0.1:5201',
+            dataDirectory: '/home/user/.cat-cafe/collective-service',
+            serviceInstanceId: 'svc_local',
+            setupStep: 'github_app',
+          },
+          launchUrl: 'http://127.0.0.1:5201/#bootstrap=one-time-secret',
+        };
+      },
+    },
     callbackRegistry: {
       verify: async (invocationId, callbackToken) => {
         if (invocationId !== 'inv_1' || callbackToken !== 'callback-secret') {
@@ -112,7 +134,17 @@ test('projects Connector status without credentials and requires authenticated l
       remoteAddress: '127.0.0.1',
     });
     assert.equal(response.statusCode, 200, response.payload);
-    assert.deepEqual(response.json(), { runtimeStatus: 'active', connections: [connection] });
+    assert.deepEqual(response.json(), {
+      runtimeStatus: 'active',
+      connections: [connection],
+      localService: {
+        state: 'setup_required',
+        serviceUrl: 'http://127.0.0.1:5201',
+        dataDirectory: '/home/user/.cat-cafe/collective-service',
+        serviceInstanceId: 'svc_local',
+        setupStep: 'github_app',
+      },
+    });
     assert.equal(response.payload.includes('credential'), false);
   } finally {
     await app.close();
@@ -129,7 +161,49 @@ test('returns honest inactive state before the official plugin runtime is enable
       remoteAddress: '127.0.0.1',
     });
     assert.equal(response.statusCode, 200, response.payload);
-    assert.deepEqual(response.json(), { runtimeStatus: 'inactive', connections: [] });
+    assert.deepEqual(response.json(), {
+      runtimeStatus: 'inactive',
+      connections: [],
+      localService: {
+        state: 'setup_required',
+        serviceUrl: 'http://127.0.0.1:5201',
+        dataDirectory: '/home/user/.cat-cafe/collective-service',
+        serviceInstanceId: 'svc_local',
+        setupStep: 'github_app',
+      },
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('provisions the independent local Service only for the local owner and does not project its bootstrap link', async () => {
+  const { app, calls } = await harness();
+  try {
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/collective-connector/service/provision',
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(denied.statusCode, 403, denied.payload);
+
+    const status = await app.inject({
+      method: 'GET',
+      url: '/api/plugins/collective-connector',
+      headers: readHeaders,
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(status.payload.includes('one-time-secret'), false);
+
+    const provisioned = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/collective-connector/service/provision',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(provisioned.statusCode, 200, provisioned.payload);
+    assert.equal(provisioned.json().launchUrl, 'http://127.0.0.1:5201/#bootstrap=one-time-secret');
+    assert.deepEqual(calls.at(-1), ['provision-service']);
   } finally {
     await app.close();
   }
@@ -237,6 +311,32 @@ test('persists an owner-only Host route and maps an exact Collective Agent targe
     assert.equal(read.json().revision, 1);
   } finally {
     await app.close();
+  }
+});
+
+test('Collective participation and private Work cannot bypass the exact return operation through legacy owner send', async () => {
+  for (const override of [
+    { executionGrant: { kind: 'collective-participation' } },
+    { collectiveWorkBinding: { taskId: 'work' } },
+  ]) {
+    const { app, calls } = await harness(true, override);
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/collective-connector/con_12345678/send',
+        headers: { 'x-invocation-id': 'inv_1', 'x-callback-token': 'callback-secret' },
+        payload: {
+          clientEventId: 'new-event',
+          target: { kind: 'channel', channelId: 'elsewhere' },
+          body: 'Wrong target',
+        },
+      });
+      assert.equal(response.statusCode, 403, response.payload);
+      assert.equal(response.json().code, 'EXACT_COLLECTIVE_RETURN_REQUIRED');
+      assert.equal(calls.filter((call) => call[0] === 'send').length, 0);
+    } finally {
+      await app.close();
+    }
   }
 });
 

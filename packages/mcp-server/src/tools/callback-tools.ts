@@ -26,6 +26,8 @@ import type {
 } from '@cat-cafe/shared';
 import {
   ACTION_SUBJECT_REF_DESCRIPTION,
+  acceptedRevisionSchema,
+  acceptedSourceRefSchema,
   actionSuccessorMetadataSchema,
   CALLBACK_AUTH_FAILURE_REASONS,
   custodyAdmissionRequestV1Schema,
@@ -39,9 +41,14 @@ import {
   executableActionSuccessorMetadataSchema,
   extractFeatureIds,
   isCallbackAuthFailureReason,
+  isValidAcceptedSource,
+  isValidReviewSubjectRef,
   isValidRichBlock,
+  localReviewVerdictSchema,
   normalizeRichBlock,
+  reviewSubjectRefSchema,
   SOP_DEFINITION_IDS,
+  taskFeatureIdSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { sendCallbackRequest } from './callback-outbox.js';
@@ -113,6 +120,22 @@ const SYNTHESIZED_AUDIO_CALLBACK_TRANSPORT: CallbackTransportOptions = {
   retryDelaysMs: [],
   fetchTimeoutMs: SYNTHESIZED_AUDIO_CALLBACK_FETCH_TIMEOUT_MS,
 };
+
+interface LocalReviewAnchorInput {
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
+}
+
+function hasCompleteLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  if (!input.reviewSubjectRef || !isValidReviewSubjectRef(input.reviewSubjectRef)) return false;
+  if (!input.acceptedSourceRef || !input.acceptedRevision) return false;
+  return isValidAcceptedSource(input.acceptedSourceRef, input.acceptedRevision);
+}
+
+function hasAnyLocalReviewAnchor(input: LocalReviewAnchorInput): boolean {
+  return Boolean(input.reviewSubjectRef || input.acceptedSourceRef || input.acceptedRevision);
+}
 
 function requiresInlineAudioSynthesis(block: unknown): boolean {
   if (!block) return false;
@@ -330,8 +353,8 @@ function agentKeyOptions(input: AgentKeySelectable): { agentKeyCatId?: string | 
 }
 
 const PROPOSED_ACTION_EXECUTABLE_CONTRACT_DESCRIPTION =
-  'Executable pairs are closed: review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
-  'implement + implementer + task_done requires subject:task:<taskId>. Other family, slot, predicate, or subject combinations are rejected before publication.';
+  'Executable proposed action pairs are closed: external review + reviewer + review_delivered requires pr:<owner>/<repo>#<positive-number>; ' +
+  'implement + implementer + task_done requires subject:task:<taskId>. Local cat review uses an ordinary durable handoff with localReviewVerdict + reviewedHeadSha + accepted-source fields.';
 
 const postMessageThreadIdSchema = z.string().min(1);
 
@@ -390,26 +413,35 @@ export const postMessageInputSchema = {
       'Invocation-token same-thread coordination lifecycle. Use active for a real handoff and terminal for the final result. ' +
         'A courtesy reply to terminal is persisted without waking the prior cat.',
     ),
-  localReviewVerdict: z
-    .enum(['approved', 'changes_requested', 'commented'])
+  localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal post. Requires invocation-token credentials, coordination.phase="terminal", and clientMessageId. The carrier fast path derives the lease fields; carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject. Public prose is presentation only.',
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and an ordinary routed @author handoff. It is independent of action lease, coordination generation, and issuer route. Public prose is presentation only.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only when the current invocation no longer carries the review lease; it fences identity resolution but grants no authority.',
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
     ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
       'Optional same-thread structured successor identity. New dispatches require mode=single; a parallel holder may use returnToPredecessor with one predecessor target to record only its rejected-ownership terminal. Requires explicit clientMessageId and exactly one targetCats entry. ' +
         'Use claimOrigin=existing_standing plus groundingEvidenceRef to claim verified standing through the same custody CAS. ' +
         'New claims require terminalPredicate typed parameters; server catalog owns completion semantics, and carrier exit/text never counts as action success. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched current holder returns with returnToPredecessor={leaseId, expectedGeneration, groundingEvidenceRef}; targetCats must name the persisted predecessor. ' +
         'Use multi_mention for deliberate parallel review/ideation. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
@@ -437,15 +469,10 @@ export type PostMessageRegistrationPrincipal = 'invocation' | 'agent-key' | 'unc
  */
 export function projectPostMessageInputSchema(principal: PostMessageRegistrationPrincipal): Record<string, unknown> {
   const { threadId: _threadId, ...invocationCommon } = postMessageInputSchema;
-  const {
-    localReviewVerdict: _localReviewVerdict,
-    reviewedHeadSha: _reviewedHeadSha,
-    ...agentKeyCommon
-  } = invocationCommon;
   if (principal === 'invocation') return invocationCommon;
   if (principal === 'agent-key') {
     return {
-      ...agentKeyCommon,
+      ...invocationCommon,
       threadId: postMessageThreadIdSchema.describe(
         'Target thread ID. Required for agent-key auth because a persistent agent has no current invocation thread.',
       ),
@@ -697,7 +724,11 @@ export const admitEntrustedWorkInputSchema = {
   closure: entrustedWorkClosureSpecV1Schema
     .optional()
     .describe('Required closure condition and expected signal; omission returns needs_clarification'),
-  time: entrustedWorkV1Schema.shape.time.optional().describe('Optional user-authored scheduling hints'),
+  time: entrustedWorkV1Schema.shape.time
+    .optional()
+    .describe(
+      'Canonical source-backed businessDeadline/reviewBy facts. Required when the source states an unambiguous time; admission.timeHints alone never reaches Schedule.',
+    ),
   artifactRefs: z.array(z.string().trim().min(1).max(1000)).max(64).optional(),
 };
 
@@ -715,6 +746,9 @@ export const updateEntrustedWorkInputSchema = {
   taskId: entrustedWorkUpdateActionV1Schema.shape.taskId.describe('Entrusted-work Task ID'),
   expectedRevision: entrustedWorkUpdateActionV1Schema.shape.expectedRevision.describe(
     'Current entrusted-work revision used for compare-and-set update',
+  ),
+  status: entrustedWorkUpdateActionV1Schema.shape.status.describe(
+    'Optional Task progress: todo, doing, or blocked; completion requires close_entrusted_work',
   ),
   time: entrustedWorkUpdateActionV1Schema.shape.time.describe(
     'Optional businessDeadline/reviewBy patch; null clears one exact Task-owned time fact',
@@ -802,19 +836,29 @@ export const crossPostMessageInputSchema = {
         'Not available to agent-key target-thread writes because they have no source relay provenance. ' +
         'GOTCHA: Do not combine coordination with effectClass="assign_work"; approval proposals intentionally do not carry relay provenance.',
     ),
-  localReviewVerdict: z
-    .enum(['approved', 'changes_requested', 'commented'])
+  localReviewVerdict: localReviewVerdictSchema
     .optional()
     .describe(
-      'Typed local-review decision carried by the same terminal cross-post. Invocation-token credentials, coordination.phase="terminal", and clientMessageId are required. Carrier-free settlement additionally requires reviewedHeadSha and an inherited coordination subject; public prose is never parsed.',
+      'Durable local-review fact. Requires clientMessageId, exact reviewedHeadSha, reviewSubjectRef, acceptedSourceRef, acceptedRevision, and ordinary targetCats or a line-start @author. It is independent of action lease, coordination generation, and issuer route; public prose is never parsed.',
     ),
   reviewedHeadSha: z
     .string()
     .regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/)
     .optional()
     .describe(
-      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required only for carrier-free local-review settlement; it is checked against the frozen canonical lease predicate.',
+      'Reviewer-authored exact lowercase 40- or 64-character Git OID. Required with localReviewVerdict; merge-gate compares it with the current HEAD.',
     ),
+  reviewSubjectRef: reviewSubjectRefSchema
+    .optional()
+    .describe('Stable review subject, for example pr:owner/repo#123. Required with localReviewVerdict.'),
+  acceptedSourceRef: acceptedSourceRefSchema
+    .optional()
+    .describe(
+      'Accepted feature-document path or immutable threadId#messageId source. Required with localReviewVerdict.',
+    ),
+  acceptedRevision: acceptedRevisionSchema
+    .optional()
+    .describe('Exact feature Git OID or source message id corresponding to acceptedSourceRef.'),
   action: executableActionSuccessorMetadataSchema
     .optional()
     .describe(
@@ -823,7 +867,6 @@ export const crossPostMessageInputSchema = {
         'mode=parallel requires at least two targets plus parallelIntent. A duplicate active action returns safe_wait. ' +
         'Use claimOrigin=existing_standing plus groundingEvidenceRef for a verified self-claim. ' +
         'New claims require terminalPredicate typed parameters; server catalog owns completion semantics and exact revision freshness. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'Use returnToPredecessor for rejected custody: single mode returns the generation to the persisted predecessor; parallel mode records only the rejecting holder terminal and does not enqueue a whole-lease return. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
         ' ' +
@@ -855,6 +898,9 @@ export const listTasksInputSchema = {
     .enum(['work', 'pr_tracking'])
     .optional()
     .describe('Optional task kind filter (work = manual tasks, pr_tracking = PR automation)'),
+  featureId: taskFeatureIdSchema
+    .optional()
+    .describe('Exact bounded feature ID filter matched against canonical TaskItem.relatedFeatureId (for example F313)'),
   taskId: z
     .string()
     .min(1)
@@ -911,6 +957,9 @@ async function _executePostMessage(
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
     reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     proposedAction?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -918,25 +967,32 @@ async function _executePostMessage(
   transportOptions?: CallbackTransportOptions,
 ): Promise<ToolResult> {
   if (input.localReviewVerdict) {
-    if (!getInvocationAuthSignal().hasFullCredentials) {
-      return errorResult('post_message localReviewVerdict requires invocation-token credentials.');
-    }
-    if (input.coordination?.phase !== 'terminal') {
-      return errorResult('post_message localReviewVerdict requires coordination.phase="terminal".');
-    }
     if (!input.clientMessageId) {
       return errorResult(
         'post_message localReviewVerdict requires clientMessageId. Example: clientMessageId="review-owner-repo-1371-head".',
       );
     }
-    if (input.action || input.proposedAction) {
-      return errorResult('post_message localReviewVerdict cannot be combined with a new action or proposedAction.');
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
     }
   }
   if (input.reviewedHeadSha && !input.localReviewVerdict) {
     return errorResult(
       'post_message reviewedHeadSha requires localReviewVerdict. Example: localReviewVerdict="approved", reviewedHeadSha="<exact lowercase Git OID>".',
     );
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult('post_message accepted-source fields require localReviewVerdict.');
   }
   // F174 Phase E (AC-E2/E5): explicit kind:'none' policy. There's no useful
   // local fallback for post_message — losing the message is preferable to
@@ -958,6 +1014,9 @@ async function _executePostMessage(
           ...(input.coordination ? { coordination: input.coordination } : {}),
           ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
           ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+          ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+          ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+          ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
           ...(input.action ? { action: input.action } : {}),
           ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
           ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -1077,6 +1136,9 @@ export async function handlePostMessage(
       | undefined;
     localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
     reviewedHeadSha?: string | undefined;
+    reviewSubjectRef?: string | undefined;
+    acceptedSourceRef?: string | undefined;
+    acceptedRevision?: string | undefined;
     agentKeyCatId?: string | undefined;
     action?: ActionSuccessorRequestMetadata | undefined;
     acknowledgeHeld?: boolean | undefined;
@@ -1401,6 +1463,7 @@ export async function handleUpdateEntrustedWork(
         {
           taskId: input.taskId,
           expectedRevision: input.expectedRevision,
+          ...(input.status !== undefined ? { status: input.status } : {}),
           ...(input.time !== undefined ? { time: input.time } : {}),
           ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
         },
@@ -1547,6 +1610,9 @@ export async function handleCrossPostMessage(input: {
   coordination?: { phase: 'active' | 'terminal'; id?: string | undefined; subjectRef?: string | undefined } | undefined;
   localReviewVerdict?: 'approved' | 'changes_requested' | 'commented' | undefined;
   reviewedHeadSha?: string | undefined;
+  reviewSubjectRef?: string | undefined;
+  acceptedSourceRef?: string | undefined;
+  acceptedRevision?: string | undefined;
   action?: ActionSuccessorRequestMetadata | undefined;
   proposedAction?: ActionSuccessorRequestMetadata | undefined;
   acknowledgeHeld?: boolean | undefined;
@@ -1584,6 +1650,30 @@ export async function handleCrossPostMessage(input: {
         'Pass targetCats: ["catHandle"] OR add a line-start @catHandle in content. ' +
         'Without routing, the cross-thread message would land in the target thread but trigger no cat session.',
     );
+  }
+  if (input.localReviewVerdict) {
+    if (!input.clientMessageId) {
+      return errorResult('cross_post_message localReviewVerdict requires clientMessageId.');
+    }
+    if (!input.reviewedHeadSha) {
+      return errorResult('cross_post_message localReviewVerdict requires the exact reviewedHeadSha.');
+    }
+    if (!hasCompleteLocalReviewAnchor(input)) {
+      return errorResult(
+        'cross_post_message localReviewVerdict requires reviewSubjectRef plus a valid acceptedSourceRef and acceptedRevision.',
+      );
+    }
+    if (input.action || input.proposedAction || input.coordination) {
+      return errorResult(
+        'cross_post_message localReviewVerdict must use ordinary A2A without action, proposedAction, or coordination.',
+      );
+    }
+  }
+  if (input.reviewedHeadSha && !input.localReviewVerdict) {
+    return errorResult('cross_post_message reviewedHeadSha requires localReviewVerdict.');
+  }
+  if (!input.localReviewVerdict && hasAnyLocalReviewAnchor(input)) {
+    return errorResult('cross_post_message accepted-source fields require localReviewVerdict.');
   }
   if (input.action) {
     const parsedAction = executableActionSuccessorMetadataSchema.safeParse(input.action);
@@ -1629,6 +1719,9 @@ export async function handleCrossPostMessage(input: {
     ...(input.coordination ? { coordination: input.coordination } : {}),
     ...(input.localReviewVerdict ? { localReviewVerdict: input.localReviewVerdict } : {}),
     ...(input.reviewedHeadSha ? { reviewedHeadSha: input.reviewedHeadSha } : {}),
+    ...(input.reviewSubjectRef ? { reviewSubjectRef: input.reviewSubjectRef } : {}),
+    ...(input.acceptedSourceRef ? { acceptedSourceRef: input.acceptedSourceRef } : {}),
+    ...(input.acceptedRevision ? { acceptedRevision: input.acceptedRevision } : {}),
     ...(input.action ? { action: input.action } : {}),
     ...(input.proposedAction ? { proposedAction: input.proposedAction } : {}),
     ...(input.acknowledgeHeld ? { acknowledgeHeld: true } : {}),
@@ -1667,11 +1760,10 @@ function validateCrossPostProposedAction(input: {
   if (
     input.proposedAction.replace ||
     input.proposedAction.returnToPredecessor ||
-    input.proposedAction.reviewReentry ||
     input.proposedAction.claimOrigin === 'existing_standing'
   ) {
     return errorResult(
-      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, re-entry, or existing standing.',
+      'cross_post_message proposedAction supports only a new structured transfer; use direct action for replacement, return, or existing standing.',
     );
   }
   if (input.proposedAction.mode === 'single' && input.targetCats.length !== 1) {
@@ -1688,6 +1780,7 @@ export async function handleListTasks(input: {
   catId?: string | undefined;
   status?: 'todo' | 'doing' | 'blocked' | 'done' | undefined;
   kind?: 'work' | 'pr_tracking' | undefined;
+  featureId?: string | undefined;
   taskId?: string | undefined;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
@@ -1698,6 +1791,7 @@ export async function handleListTasks(input: {
       ...(input.catId ? { catId: input.catId } : {}),
       ...(input.status ? { status: input.status } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
+      ...(input.featureId ? { featureId: input.featureId } : {}),
       ...(input.taskId ? { taskId: input.taskId } : {}),
     },
     agentKeyOptions(input),
@@ -2299,7 +2393,6 @@ export const multiMentionInputSchema = {
         'Action-scoped calls require idempotencyKey. Fallback uses replace with the active leaseId+generation and succeeds only after server-recorded terminal/unavailable/cancel evidence. ' +
         'A grounded existing holder may self-claim with claimOrigin=existing_standing + groundingEvidenceRef. ' +
         'New claims require terminalPredicate typed parameters; server-side Evidence→Verdict, not response text, ends the action. ' +
-        'A completed review lease can continue on a fresh exact HEAD only with reviewReentry reason behavioral_delta, stale_or_blocking, or explicit_matrix_route plus durable evidenceRef; omit reviewReentry for the initial review. ' +
         'A mismatched single holder may atomically return to the persisted predecessor with returnToPredecessor; in parallel mode the same disposition terminates only the rejecting holder. Failed single-return delivery stays pending for recovery. ' +
         EXECUTABLE_ACTION_SUCCESSOR_CONTRACT_DESCRIPTION +
         ' ' +
@@ -2507,6 +2600,12 @@ export const proposeThreadInputSchema = {
     .describe(
       'Optional F128 reporting contract for the sub-thread (AC-AA1: default is final-only). final-only (default): report a summary once on completion via cross_post with routing credentials. none (autonomous): downstream self-governs, no required report-back (only escalate operator/blocker/irreversible/cross-feature conflict per house rules). state-transitions: report at each phase boundary. blocking-ack: wait for source-thread ack at each blocker. Triage/dispatch → none; fork-and-return needing a summary → final-only.',
     ),
+  declaredWorkMode: z
+    .enum(['subtask', 'parallel', 'investigation', 'standalone'])
+    .optional()
+    .describe(
+      'Optional F277 placement role. subtask: sustained child work under the source thread; parallel: sustained same-group parallel workstream; investigation: one-off related investigation; standalone: keep the exact birth/source audit but do not continuously group it with the source thread. This is independent from reportingMode and can be changed by the user before approval.',
+    ),
   parentThreadId: z.string().min(1).optional().describe('Optional parent thread ID. Defaults to the current thread.'),
   projectPath: z
     .string()
@@ -2530,6 +2629,7 @@ export async function handleProposeThread(input: {
   preferredCats?: string[] | undefined;
   initialMessage?: string | undefined;
   reportingMode?: 'none' | 'final-only' | 'state-transitions' | 'blocking-ack' | undefined;
+  declaredWorkMode?: 'subtask' | 'parallel' | 'investigation' | 'standalone' | undefined;
   parentThreadId?: string | undefined;
   projectPath?: string | undefined;
   clientRequestId?: string | undefined;
@@ -2545,6 +2645,7 @@ export async function handleProposeThread(input: {
   if (input.preferredCats?.length) body.preferredCats = input.preferredCats;
   if (input.initialMessage) body.initialMessage = input.initialMessage;
   if (input.reportingMode) body.reportingMode = input.reportingMode;
+  if (input.declaredWorkMode) body.declaredWorkMode = input.declaredWorkMode;
   if (input.parentThreadId) body.parentThreadId = input.parentThreadId;
   if (input.projectPath) body.projectPath = input.projectPath;
 
@@ -2660,10 +2761,25 @@ export async function handleProposeSessionHandoff(input: {
 
 export const readProfileInputSchema = {
   agentKeyCatId: agentKeyCatIdSchema,
+  layer: z
+    .enum(['primer', 'corpus'])
+    .optional()
+    .describe(
+      "Which profile layer to read. 'primer' (default) = this persona's relationship primer; 'corpus' = owner-wide shared facts (all personas see the same content). Omit for the default primer.",
+    ),
 };
 
-export async function handleReadProfile(input: { agentKeyCatId?: string | undefined }): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/profile', undefined, agentKeyOptions(input));
+export async function handleReadProfile(input: {
+  layer?: 'primer' | 'corpus' | undefined;
+  agentKeyCatId?: string | undefined;
+}): Promise<ToolResult> {
+  const params: Record<string, string> = {};
+  if (input.layer) params.layer = input.layer;
+  return callbackGet(
+    '/api/callbacks/profile',
+    Object.keys(params).length > 0 ? params : undefined,
+    agentKeyOptions(input),
+  );
 }
 
 export const proposeProfileUpdateInputSchema = {
@@ -2672,7 +2788,7 @@ export const proposeProfileUpdateInputSchema = {
     .min(1)
     .max(20000)
     .describe(
-      'The COMPLETE new persona primer content (whole-file replacement, NOT a diff/patch). On approval the server derives your authenticated relationshipKey and writes this verbatim into relationship/{relationshipKey}-primer.md. Include everything you want kept — anything you omit is dropped.',
+      'The COMPLETE new content (whole-file replacement, NOT a diff/patch). For primer: writes to relationship/{relationshipKey}-primer.md; for corpus: writes to corpus/shared-facts.md. Include everything you want kept — anything you omit is dropped.',
     ),
   rationale: z
     .string()
@@ -2685,6 +2801,12 @@ export const proposeProfileUpdateInputSchema = {
     .enum(['cat-declared', 'cvo-instructed'])
     .describe(
       "Where the relationship signal came from (provenance). 'cat-declared' = you observed/inferred it from the interaction; 'cvo-instructed' = the operator explicitly asked you to remember it. AC-C1 is manual-entry only (no auto-classifier).",
+    ),
+  targetLayer: z
+    .enum(['primer', 'corpus'])
+    .optional()
+    .describe(
+      "Which profile layer to target. 'primer' (default) = this persona's relationship primer (per-cat); 'corpus' = owner-wide shared facts (all personas see the same content, one file). Use corpus for personal facts that are independent of persona relationship (birthday, preferences, background). Omit for the default primer.",
     ),
   sourceMessageId: z
     .string()
@@ -2705,6 +2827,7 @@ export async function handleProposeProfileUpdate(input: {
   afterContent: string;
   rationale: string;
   signalKind: 'cat-declared' | 'cvo-instructed';
+  targetLayer?: 'primer' | 'corpus' | undefined;
   sourceMessageId?: string | undefined;
   clientRequestId?: string | undefined;
   agentKeyCatId?: string | undefined;
@@ -2715,6 +2838,7 @@ export async function handleProposeProfileUpdate(input: {
     afterContent: input.afterContent,
     rationale: input.rationale,
     signalKind: input.signalKind,
+    ...(input.targetLayer ? { targetLayer: input.targetLayer } : {}),
     ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
     clientRequestId: input.clientRequestId ?? randomUUID(),
   };
@@ -2744,8 +2868,12 @@ const proactiveMemoryAbstentionToolset = createProactiveMemoryAbstentionTool(cal
 const deferredPersonMemoryToolset = createDeferredPersonMemoryTool(callbackPost);
 export const { handleProposePersonMemory } = personMemoryProposalToolset;
 export const { handleRecordProactiveMemoryAbstention } = proactiveMemoryAbstentionToolset;
-export const { handleDeferPersonMemoryDelta, handleWithdrawDeferredPersonMemory, handleForgetDeferredPersonMemory } =
-  deferredPersonMemoryToolset;
+export const {
+  handleDeferPersonMemoryDelta,
+  handleDisposeDeferredPersonMemory,
+  handleWithdrawDeferredPersonMemory,
+  handleForgetDeferredPersonMemory,
+} = deferredPersonMemoryToolset;
 export const {
   handleGetPersonMemoryProposalStatus,
   handleRecallPersonRelationship,
@@ -2932,10 +3060,25 @@ export async function handleProposeTaste(input: {
 
 // ============ Thread Cats Discovery ============
 
-export const getThreadCatsInputSchema = {};
+export const getThreadCatsInputSchema = {
+  threadId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      'Thread to inspect. Invocation callers may omit for their current thread; agent-key callers must provide it.',
+    ),
+  agentKeyCatId: agentKeyCatIdSchema,
+};
 
-export async function handleGetThreadCats(input: AgentKeySelectable = {}): Promise<ToolResult> {
-  return callbackGet('/api/callbacks/thread-cats', undefined, agentKeyOptions(input));
+export async function handleGetThreadCats(input: AgentKeySelectable & { threadId?: string } = {}): Promise<ToolResult> {
+  return callbackGet(
+    '/api/callbacks/thread-cats',
+    input.threadId ? { threadId: input.threadId } : undefined,
+    agentKeyOptions(input),
+  );
 }
 
 // F155: Guide Engine
@@ -3064,6 +3207,14 @@ export async function handleHoldBall(input: {
   }
 
   return result;
+}
+
+/**
+ * F167 #1449 Slice 1 — Task-ID-independent hold observability.
+ * No input required; threadId + catId come from invocation auth.
+ */
+export async function handleGetHoldStatus(): Promise<ToolResult> {
+  return callbackGet('/api/callbacks/hold-ball/current');
 }
 
 export async function handleCompleteManagedHold(input: { disposition: 'handled' | 'completed' }): Promise<ToolResult> {
@@ -3212,7 +3363,8 @@ export const callbackTools = [
       'Output: the message is persisted in the principal-selected thread; routed targets are queued, and action conflicts return safe_wait without creating work. ' +
       'GOTCHA: action requires explicit clientMessageId + exactly one targetCats entry; ordinary single-cat notifications do not need action. ' +
       'For a direct Claim/Release chain, pass coordination.phase=active on work hops and terminal on the final delivery; terminal recipients may clean-stop without another @. ' +
-      'For a local review terminal, put localReviewVerdict on that same post; the carrier fast path derives the exact lease/HEAD/route. If the invocation no longer carries the lease, also provide reviewedHeadSha: the server resolves only the inherited coordination subject + reviewer identity against the canonical active lease, and the HEAD fact grants no authority. Public prose is never parsed. ' +
+      'A terminal id or bound subject that conflicts with the incoming coordination fails with HTTP 409 before message persistence or wake; start genuinely new work with phase=active. ' +
+      'For a local review result, route an ordinary @author message with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route. Public prose is never parsed. ' +
       'Existing standing uses claimOrigin="existing_standing" + groundingEvidenceRef; rejected custody uses returnToPredecessor and targets the persisted predecessor. ' +
       'GOTCHA: structured action metadata currently requires invocation-token auth; agent-key callers fail closed with the non-retryable action_agent_key_unsupported status and never send an unfenced fallback. ' +
       'F247: gpt-pro agent-key returns copy only replyTo=sourceMessageId from the runtime delta; the server admits it only when an exact server-custodied dispatch grant exists. ' +
@@ -3341,12 +3493,13 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_get_thread_cats',
     description:
-      'Discover which cats are in the current thread: participants (with activity stats), routable cats, and availability. ' +
-      'Use BEFORE multi_mention / start_vote / @mentions to find valid catIds — do NOT guess catIds from memory. ' +
-      'Returns: participants (catId, displayName, lastMessageAt, messageCount), routableNow, routableNotJoined, notRoutable.',
+      'Discover recipient catIds in an authorized thread. Use before choosing targetCats or starting a root collaboration. ' +
+      'Output: historical participants, routableNow (joined), routableNotJoined, and notRoutable from the shared registered-service and roster projection. ' +
+      'NOT an online/idle/quota probe or a delivery guarantee; dispatch revalidates availability. ' +
+      'Agent-key callers must supply threadId. Do not infer targets from private session chains or automatically target yourself.',
     inputSchema: getThreadCatsInputSchema,
     handler: handleGetThreadCats,
     governance: {
@@ -3355,7 +3508,7 @@ export const callbackTools = [
       action: 'read',
       authority: 'callback-thread',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full'],
+      runtimeProfiles: ['full', 'agent-key', 'desktop:cloud-pro-phase0'],
     },
   }),
   defineTool({
@@ -3420,7 +3573,8 @@ export const callbackTools = [
       'GOTCHA: Requires threadId — use feat_index/list_threads plus thread truth to verify the exact owning thread; never guess a nearby thread. ' +
       'PAW-FEEL: The original [爪感差: ...] message is already collected. Cross-post only a marker-free sourceMessageId reference to a verified owner; if none exists, use cat_cafe_propose_thread (F128). New responsibility uses effectClass=assign_work plus proposedAction for Approval Hub review. ' +
       'GOTCHA: For Claim/Release coordination, pass coordination.phase=active on Claim/work hops and terminal on Release. ' +
-      'For a local review terminal, include localReviewVerdict on that same cross-post; the carrier fast path settles the invocation-bound exact generation. If the invocation no longer carries the lease, also provide reviewedHeadSha so the server can resolve only the inherited coordination subject + reviewer identity against the canonical active lease; the HEAD fact grants no authority and prose is never parsed. ' +
+      'A terminal id or bound subject that conflicts with the incoming coordination fails with HTTP 409 before message persistence or wake; start genuinely new work with phase=active. ' +
+      'For a local review result, route one ordinary @author cross-post with localReviewVerdict + exact reviewedHeadSha + reviewSubjectRef + acceptedSourceRef + acceptedRevision + clientMessageId. This durable fact needs no action lease, coordination generation, replacement, or issuer route; prose is never parsed. ' +
       'The server carries a stable id across active hops; a direct courtesy ACK after terminal is recorded without waking another cat. ' +
       'If terminal reveals genuinely new work, start a new coordination with phase=active instead of ACKing the closed chain. ' +
       'GOTCHA: For a direct named external action, pass action + explicit clientMessageId + targetCats. For operator-gated new responsibility, pass proposedAction with effectClass=assign_work instead; action and assign_work remain mutually exclusive. ' +
@@ -3441,12 +3595,14 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_list_tasks',
     description:
-      'List tasks with optional threadId/catId/status filters for global task discovery. ' +
-      'Use when you need to see what tasks exist, who owns them, or what is blocked. ' +
-      'TIP: Filter by status="blocked" to find tasks that need attention.',
+      'Read a bounded list of durable tasks with optional threadId/catId/status/kind filters, or exact featureId matching canonical TaskItem.relatedFeatureId. ' +
+      'Use when: you need to see what tasks exist, who owns them, what is blocked, or which work belongs to one feature. ' +
+      'NOT for: creating or changing tasks (use cat_cafe_create_task or cat_cafe_update_task). ' +
+      'Output: up to 50 tasks plus totalMatched/truncated; feature-filtered reads also return a content-free queryRef for owner verification. ' +
+      'GOTCHA: overview why fields can be anchored; pass taskId to retrieve one task with its full untruncated why.',
     inputSchema: listTasksInputSchema,
     handler: handleListTasks,
     governance: {
@@ -3456,6 +3612,11 @@ export const callbackTools = [
       authority: 'callback-owner',
       risk: { level: 'read', openWorld: false },
       runtimeProfiles: ['full'],
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+      },
     },
   }),
   defineCanonicalTool({
@@ -3531,7 +3692,7 @@ export const callbackTools = [
     name: 'cat_cafe_update_entrusted_work',
     description:
       'Update the current open entrusted-work Task using its exact revision. ' +
-      'Use this after canonical business time or Artifact ownership becomes known; the same Task remains the owner and its revision advances once. ' +
+      'Use this when work starts, blocks, resumes, or canonical business time or Artifact ownership becomes known; the same Task remains the owner and its revision advances once. ' +
       'Artifact refs replace the canonical set and are deduplicated/sorted; null clears one time fact. ' +
       'No-op, stale, foreign-owner, and terminal updates fail closed; generic update_task remains forbidden.',
     inputSchema: updateEntrustedWorkInputSchema,
@@ -3950,14 +4111,15 @@ export const callbackTools = [
       runtimeProfiles: ['full'],
     },
   }),
-  // F231 Phase C: Cat-initiated profile-update proposal (operator approves before the primer is written)
-  defineTool({
+  // F231 Phase E: Promoted to canonical — corpus layer widens input schema (targetLayer + layer)
+  defineCanonicalTool({
     name: 'cat_cafe_read_profile',
     description:
-      'Read YOUR CURRENT authenticated relationship persona primer through the stable cat-cafe-profile://relationship/current URI. ' +
-      'Use when: L0 shows that URI, you are starting a session and need relationship context, or you need to verify the currently effective primer before proposing an update. ' +
+      'Read YOUR CURRENT authenticated profile layer through the stable cat-cafe-profile:// URI. ' +
+      'Supports two layers: primer (default, per-persona relationship) and corpus (owner-wide shared facts, all personas see the same content). ' +
+      'Use when: L0 shows the profile URI, you are starting a session and need relationship or owner context, or you need to verify the currently effective content before proposing an update. ' +
       'NOT for: searching project knowledge or old threads (use search_evidence), reading arbitrary workspace files (use read_file_slice), or reading another user/cat/persona. ' +
-      'Output: the current persona relationshipKey and complete primer content; this is read-only and does not change profile state. ' +
+      'Output: the current content + revision (sha256 hash); this is read-only and does not change profile state. ' +
       'GOTCHA: identity is derived from callback/agent-key authentication. There is intentionally no userId, catId, path, or relationshipKey input, so do not try to target another profile.',
     inputSchema: readProfileInputSchema,
     handler: handleReadProfile,
@@ -3970,17 +4132,18 @@ export const callbackTools = [
       runtimeProfiles: ['full', 'agent-key', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_propose_profile_update',
     description:
-      'Propose an update to YOUR CURRENT authenticated relationship-persona primer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
-      'Output: returns a proposalId, NOT a written file; the primer is only written after operator approval (reject/expire = nothing changes). ' +
+      'Propose an update to a profile layer — the "养熟循环" digest entry point (F231 KD-12/KD-18). ' +
+      'Supports two layers: primer (default, per-persona relationship primer) and corpus (owner-wide shared facts visible to all personas). ' +
+      'Output: returns a proposalId, NOT a written file; the content is only written after operator approval (reject/expire = nothing changes). ' +
       'Use when: the content is a durable fact about the authenticated person or this persona-operator relationship — personal context, preferred address, or a relationship-specific communication boundary. ' +
+      'Use targetLayer:corpus for owner-wide personal facts independent of persona relationship (birthday, background, preferences that all cats should know). ' +
       'NOT for reusable judgments about what makes output, design, expression, architecture, or systems good (use cat_cafe_propose_taste), repeated operational/tool/process rules (use code-as-harness), or one-off context. ' +
       'A correction, praise, or Magic Word does not choose the lane; semantic content does. ' +
-      'afterContent is the COMPLETE new primer (whole-file replacement, not a diff) — include everything you want kept. ' +
-      'The target is ALWAYS relationship/{relationshipKey}-primer.md, derived server-side from your authenticated cat/persona — you cannot target another user/persona or the shared capsule. ' +
-      'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share this primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
+      'afterContent is the COMPLETE new content (whole-file replacement, not a diff) — include everything you want kept. ' +
+      'Use cat_cafe_read_profile first when preserving existing content matters. GOTCHA: models sharing one persona also share the primer, so afterContent must preserve relevant family continuity. signalKind records provenance: cat-declared vs cvo-instructed.',
     inputSchema: proposeProfileUpdateInputSchema,
     handler: handleProposeProfileUpdate,
     governance: {
@@ -4145,11 +4308,11 @@ export const callbackTools = [
       '"let me think" / "I\'ll hold for now" → hesitation not hold, pick 接/退/升; ' +
       'review/analysis done → MUST @ author, conclusion ≠ endpoint; status updates → use post_message. ' +
       'Output: system schedules a one-shot wake-up after wakeAfterMs; you get re-invoked with reason + nextStep as trigger context. ' +
-      'GOTCHA: max 3 holds per (thread, cat) within a rolling ~1h window — 4th call returns 429, you MUST pass (@ another cat or @co-creator). ' +
+      'GOTCHA: max 3 holds per (thread, cat) within a sliding ~1h window (anchored to last successful hold) — 4th call returns 429 with retryAt/retryAfterMs, you MUST pass (@ another cat or @co-creator). ' +
       'GOTCHA: the counter is process-local best-effort (in-memory on the API node); API restart or multi-instance deploys may reset it, so do not treat the 429 as a hard security boundary — treat it as a self-discipline guardrail. ' +
       'GOTCHA: hold is an EXCEPTION state, not a default exit. Most turns should end with @ someone, not hold. ' +
       'GOTCHA (F167 Phase M): only hold for harness-INVISIBLE waits — external conditions nothing will call you back about (cloud review verdict, remote CI, external webhook). Background work the harness already tracks (a background Bash command, a spawned task) AUTO-RE-INVOKES you on completion; holding for that just stacks a redundant wake on top. Ask "will something call me back already?" — if yes, do NOT hold. A co-creator or another cat sending a message into this thread IS such a callback (it re-invokes you), so "waiting for co-creator to answer" must be @co-creator, never a hold. ' +
-      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Rolling-window counter still ticks per call. ' +
+      'GOTCHA: SINGLE-SLOT per (thread, cat) — calling hold_ball again while a previous hold is pending REPLACES the prior wake (prior taskId cancelled). This is intentional (KD-23): hold = "持一个球" exception, not a queue. If you need to track multiple waiting conditions, merge them into one nextStep (e.g. "等 CI + @co-creator 确认" 合并成一句). Sliding-window counter ticks on each successful hold; rejected 429 calls do not advance the window. ' +
       'NEW (F167 Phase Q): event-backed retirement only works when waitSourceRef.expectedSignal is one of these exact structured keys: assignment, review_posted, ci_complete, comment_posted, managed_command_complete, user_message. Free-text values like "CI pass" remain valid narrative context but will NOT retire a timer by event, by design. ' +
       'NEW (F167 Phase P): wakeWhen — instead of a timed delay, specify a shell command to run. The server spawns it, captures output, and wakes you when it completes (or times out). Use for: pnpm gate, pnpm test, build commands — anything you would run_in_background and poll. wakeWhen is for LOCAL COMMANDS ONLY — it does not turn hold_ball into a universal "smart wait": waiting on a person is still @co-creator / @ that cat, waiting on a cloud event (PR / CI / issue) is still register_pr_tracking / register_issue_tracking. wakeWhen and wakeAfterMs are MUTUALLY EXCLUSIVE — provide exactly one.',
     inputSchema: {
@@ -4225,15 +4388,44 @@ export const callbackTools = [
     },
   }),
   defineCanonicalTool({
+    name: 'cat_cafe_get_hold_status',
+    description:
+      'Check whether you currently have an active or observable hold_ball in this thread. ' +
+      'Returns the hold status, task ID, lifecycle mode/status, cancelability, and access-projected owner — ' +
+      'all without needing to know the internal task ID. ' +
+      'Covers: pending holds, retired carriers with running managed commands. ' +
+      'Use when: you need to check if a prior hold is still pending before deciding whether to hold again, ' +
+      'or to observe your own hold state for diagnostic/reporting purposes. ' +
+      'No input required — threadId and catId are derived from your invocation auth. ' +
+      'Auth: enforces hold-access policy (same gate as GET /:taskId/status); ' +
+      'lifecycle visibility is projected per access role.',
+    inputSchema: {},
+    handler: handleGetHoldStatus,
+    governance: {
+      implementationExport: 'handleGetHoldStatus',
+      resourceFamily: 'task-workflow',
+      action: 'read',
+      authority: 'callback-owner',
+      risk: { level: 'read', openWorld: false },
+      runtimeProfiles: ['full'],
+      targetExposure: 'lazy-discoverable',
+      standaloneReason: {
+        disposition: 'accepted-boundary',
+        kind: 'authority-boundary',
+        admissionRef: 'file:docs/features/F167-a2a-chain-quality.md',
+      },
+    },
+  }),
+  defineCanonicalTool({
     name: 'cat_cafe_complete_managed_hold',
     description:
       'Terminally dispose the exact managed hold wake bound to this invocation. ' +
-      'Use when: the current turn was triggered by a managed hold wake and its requested work is actually handled/completed. ' +
+      'Use when: the current turn was triggered by a managed hold wake, or a full-body read adopted one into this same invocation, and its work is actually handled/completed. ' +
       'NOT for: ordinary holds, unfinished work, re-hold, a structured event wait, transfer, or unrelated task completion. ' +
       'Output: marks the exact F264 target receipt handled and terminalizes the original F167 hold ball; ' +
       'the server derives and fences threadId, holderCatId, invocationId, sourceMessageId, and taskId. ' +
       'GOTCHA: full read, command exit, tests, merge truth, or ACK never substitute for this producer, ' +
-      'and the caller cannot select or close another subject.',
+      'and the caller cannot select or close another subject. Full-read managedHoldDisposition guidance reports a unique pending source, ambiguity, or no obligation; never guess through ambiguity.',
     inputSchema: {
       disposition: z
         .enum(['handled', 'completed'])

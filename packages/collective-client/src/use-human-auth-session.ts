@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef } from 'react';
-
+import { type ClientRequest, CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';
 import type {
   ClientSnapshot,
   CollectiveMe,
@@ -16,22 +16,17 @@ import {
   phaseForHuman,
   trustedHumanAuthResult,
 } from './human-auth-flow.js';
+import { finishProviderSetupCallback, useProviderSetup } from './use-provider-setup.js';
 
 export const SESSION_KEY = 'collective-session';
 
-export type ClientRequest = <Result>(path: string, init?: RequestInit) => Promise<Result>;
-
-export function collectiveClientErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export class CollectiveClientRequestError extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-  ) {
-    super(detail);
-  }
+function selectedCollective(me?: CollectiveMe) {
+  const id = new URLSearchParams(location.search).get('collectiveId');
+  return id
+    ? me?.collectives.find((item) => item.collectiveId === id)
+    : me?.collectives.length === 1
+      ? me.collectives[0]
+      : undefined;
 }
 
 type SnapshotSetter = Dispatch<SetStateAction<ClientSnapshot>>;
@@ -93,6 +88,7 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     context.request<{ readonly providers: readonly HumanAuthProviderStatus[] }>('/api/auth/providers'),
   ]);
   context.setSnapshot((current) => ({ ...current, meta, providers: authProviders.providers }));
+  if (finishProviderSetupCallback(context)) return;
   const callbackSearch = new URLSearchParams(location.search);
   if (callbackSearch.get('authCompleted') === '1') return finishAuthCompletion(context);
   const authErrorCode = parseHumanAuthErrorCode(callbackSearch.get('authError'));
@@ -108,7 +104,7 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     ...current,
     meta,
     me,
-    collective: me?.collectives[0],
+    collective: selectedCollective(me),
     phase: me ? phaseForHuman(me) : 'entry',
     error: authError,
   }));
@@ -162,7 +158,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         ...current,
         phase: phaseForHuman(me),
         me,
-        collective: me.collectives[0],
+        collective: selectedCollective(me),
         error: undefined,
       }));
     },
@@ -234,6 +230,8 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
     return () => window.removeEventListener('message', onAuthCompletion);
   }, [enterSession, setSnapshot]);
 
+  const configureProvider = useProviderSetup({ providers: snapshot.providers, request, setSnapshot });
+
   const bootstrap = useCallback(
     async (displayName: string) => {
       const secret = new URLSearchParams(location.hash.slice(1)).get('bootstrap');
@@ -270,5 +268,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
     }
   }, [invitationMode, request, snapshot.phase, snapshot.providers]);
 
-  return { token, request, loadMe, invitationMode, bootstrap, authenticate };
+  return { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider };
 }
+
+export { CollectiveClientRequestError, collectiveClientErrorMessage } from './client-request.js';

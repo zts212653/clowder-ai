@@ -1,5 +1,6 @@
 // F209 Phase B: deterministic entity registry / alias dictionary.
 
+import { createHash } from 'node:crypto';
 import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import { type EntityConflictMutationResult, resolveEntityConflict } from './entity-conflict-mutation.js';
@@ -51,6 +52,9 @@ interface CompiledAliasRow extends AliasRow {
   matchesNormalizedText: (textNorm: string) => boolean;
 }
 
+type StoredEntityRecord = EntityRecord &
+  Required<Pick<EntityRecord, 'stance' | 'visibilityScope' | 'status' | 'createdAt'>>;
+
 export interface EntityMentionDocFilters {
   kind?: EvidenceKind;
   excludeSessionAndThread?: boolean;
@@ -73,6 +77,33 @@ export interface EntityMentionPassageHit {
   speaker?: string;
   position?: number;
   createdAt?: string;
+}
+
+export type EntityAliasResolutionOutcome =
+  | { status: 'not_available'; registryRevision: string }
+  | { status: 'resolved'; registryRevision: string; match: QueryEntityMatch }
+  | { status: 'ambiguous'; registryRevision: string; matches: QueryEntityMatch[] };
+
+/** Stable content revision for one complete, persisted Entity identity projection. */
+export function entitySourceRevision(entity: StoredEntityRecord): string {
+  const aliases = [...entity.aliases].sort((left, right) => {
+    const normalized = normalizeEntityAlias(left).localeCompare(normalizeEntityAlias(right));
+    if (normalized !== 0) return normalized;
+    return left.localeCompare(right);
+  });
+  const projection = {
+    entityId: entity.entityId,
+    type: entity.type,
+    canonicalName: entity.canonicalName,
+    aliases,
+    provenance: entity.provenance,
+    stance: entity.stance,
+    visibilityScope: entity.visibilityScope,
+    status: entity.status,
+    createdAt: entity.createdAt,
+    updatedAt: entity.updatedAt,
+  };
+  return `sha256:${createHash('sha256').update(JSON.stringify(projection)).digest('hex')}`;
 }
 
 export function aliasMatchesText(text: string, alias: string): boolean {
@@ -101,7 +132,7 @@ export class EntityRegistryStore {
     return resolveEntityConflict(this.db, incoming, resolution, context);
   }
 
-  get(entityId: string): EntityRecord | null {
+  get(entityId: string): StoredEntityRecord | null {
     const row = this.db.prepare('SELECT * FROM entity_registry WHERE entity_id = ?').get(entityId) as
       | EntityRow
       | undefined;
@@ -137,6 +168,7 @@ export class EntityRegistryStore {
         canonicalName: row.canonical_name,
         matchedAlias: row.alias,
         provenance: parseProvenance(row.provenance_json),
+        sourceRevision: this.sourceRevisionForEntity(row.entity_id),
       });
     }
     return matches;
@@ -163,9 +195,55 @@ export class EntityRegistryStore {
         canonicalName: row.canonical_name,
         matchedAlias: row.alias,
         provenance: parseProvenance(row.provenance_json),
+        sourceRevision: this.sourceRevisionForEntity(row.entity_id),
       });
     }
     return matches.sort((left, right) => left.entityId.localeCompare(right.entityId));
+  }
+
+  /**
+   * Typed exact-alias read over the existing registry. The registry revision
+   * binds absence and ambiguity as well as a resolved identity; it is not a
+   * second registry or an external read endpoint.
+   */
+  resolveExactAliasOutcome(alias: string, viewerUserId: string): EntityAliasResolutionOutcome {
+    const matches = this.resolveExactAlias(alias, viewerUserId);
+    const registryRevision = this.visibleRegistryRevision(viewerUserId);
+    if (matches.length === 0) return { status: 'not_available', registryRevision };
+    if (matches.length === 1) return { status: 'resolved', registryRevision, match: matches[0] };
+    return { status: 'ambiguous', registryRevision, matches };
+  }
+
+  /**
+   * Fail-closed freshness check for downstream consumers of an Entity identity
+   * root. Hidden, retired, missing, and corrected projections all return false
+   * without exposing the current projection.
+   */
+  isCurrentVisibleRevision(entityId: string, expectedRevision: string, viewerUserId: string): boolean {
+    const entity = this.get(entityId);
+    if (!entity || entity.status !== 'active' || !isEntityVisibleToUser(entity.visibilityScope, viewerUserId)) {
+      return false;
+    }
+    return entitySourceRevision(entity) === expectedRevision;
+  }
+
+  private sourceRevisionForEntity(entityId: string): string {
+    const entity = this.get(entityId);
+    if (!entity) throw new Error(`Entity projection disappeared while resolving ${entityId}`);
+    return entitySourceRevision(entity);
+  }
+
+  private visibleRegistryRevision(viewerUserId: string): string {
+    const rows = this.db
+      .prepare("SELECT entity_id FROM entity_registry WHERE status = 'active' ORDER BY entity_id")
+      .all() as Array<{ entity_id: string }>;
+    const revisions = rows.flatMap((row) => {
+      const entity = this.get(row.entity_id);
+      if (!entity) return [];
+      if (!isEntityVisibleToUser(entity.visibilityScope, viewerUserId)) return [];
+      return [entitySourceRevision(entity)];
+    });
+    return `sha256:${createHash('sha256').update(JSON.stringify(revisions)).digest('hex')}`;
   }
 
   refreshMentions(docAnchors?: string[]): void {

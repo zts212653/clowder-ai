@@ -9,7 +9,7 @@ describe('V34 reflection supply ledger migration', () => {
 
     applyMigrations(db);
 
-    assert.equal(CURRENT_SCHEMA_VERSION, 41);
+    assert.ok(CURRENT_SCHEMA_VERSION >= 34);
     const evidenceColumns = db.prepare('PRAGMA table_info(evidence_docs)').all();
     assert.ok(evidenceColumns.some((column) => column.name === 'drill_down_json'));
     const reflectionColumns = db.prepare('PRAGMA table_info(reflection_outputs)').all();

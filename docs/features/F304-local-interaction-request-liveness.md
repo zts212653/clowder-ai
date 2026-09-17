@@ -8,7 +8,7 @@ description: "让 localhost 重负载下的前台创建操作仍能及时进入 
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-23T01:30:00-07:00
-cvo_signoff: "2026-08-21 — sourceMessageId 0001787369199918-000107-fe2d35ef：一个 Feature 统一管理；事故只用一个 PR，内部拆 commits，债务另行清理，禁止把 main 留在依赖下一 PR 的中间态。"
+cvo_signoff: "2026-08-21 — sourceMessageId private-source-id：一个 Feature 统一管理；事故只用一个 PR，内部拆 commits，债务另行清理，禁止把 main 留在依赖下一 PR 的中间态。"
 tips_exempt: "既有 Thread 创建旅程的可靠性修复与错误诚实化；不新增需要用户发现或学习的操作入口。"
 ---
 

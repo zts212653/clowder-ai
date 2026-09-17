@@ -137,7 +137,7 @@ export const externalReviewVerdictTools = [
       'Settle one active stale external-review generation from a persisted GitHub review artifact after the PR HEAD has advanced. ' +
       'Use when: record_external_review_verdict rejects with stale_head because the PR HEAD advanced after the review was conducted, ' +
       'and the sole holder verdict is durable (persisted as a GitHub review), but the original lease carrier is unavailable. ' +
-      'NOT for: ordinary holder completion, ordinary active replacement, current-HEAD reviews, local review verdicts (use recover_local_review_verdict), or admin closure. ' +
+      'NOT for: ordinary holder completion, ordinary active replacement, current-HEAD local reviews, or admin closure. ' +
       'Output: authenticates the predecessor (author) cat and tenant, verifies the GitHub review artifact URL, confirms server-observed HEAD advance, ' +
       'and atomically settles only the specified old generation so the current owner can dispatch a new review for the current HEAD. ' +
       'GOTCHA: actionLeaseRef is only a locator; it grants no authority and must name the exact active generation. ' +

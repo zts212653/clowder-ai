@@ -67,6 +67,33 @@ export interface CloudBridgeOutboundReceiptV1 {
   };
 }
 
+/**
+ * Owner-visible, refs-only recovery carrier for one direct-user cloud source.
+ * Conversation identity and authorization stay in the owner-only plugin API.
+ */
+export interface CloudBridgeRecoveryV1 {
+  readonly v: 1;
+  readonly kind: 'needs_binding';
+  readonly sourceMessageId: string;
+  readonly targetCatId: string;
+  readonly dispatchInvocationId: string;
+}
+
+const RECOVERY_FIELDS = new Set(['v', 'kind', 'sourceMessageId', 'targetCatId', 'dispatchInvocationId']);
+
+export function isCloudBridgeRecoveryV1(value: unknown): value is CloudBridgeRecoveryV1 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const recovery = value as Record<string, unknown>;
+  return (
+    Object.keys(recovery).every((field) => RECOVERY_FIELDS.has(field)) &&
+    recovery.v === 1 &&
+    recovery.kind === 'needs_binding' &&
+    isBoundedReceiptRef(recovery.sourceMessageId) &&
+    isBoundedReceiptRef(recovery.targetCatId) &&
+    isBoundedReceiptRef(recovery.dispatchInvocationId)
+  );
+}
+
 function isBoundedReceiptRef(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= 512;
 }

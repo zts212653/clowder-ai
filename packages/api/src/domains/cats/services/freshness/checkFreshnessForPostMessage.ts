@@ -566,28 +566,34 @@ async function recordFreshnessEvent(
 
   try {
     if (decision.decision === 'held') {
-      await eventLog.append({
-        kind: 'held_decision',
-        threadId: tid,
-        catId: cid,
-        invocationId,
-        timestamp: Date.now(),
-        toolName: decision.toolName || tName,
-        unseenCount: decision.unseenCount,
-        reason: decision.reason,
-        ...relevanceTelemetry,
-      });
+      await eventLog.append(
+        {
+          kind: 'held_decision',
+          threadId: tid,
+          catId: cid,
+          invocationId,
+          timestamp: Date.now(),
+          toolName: decision.toolName || tName,
+          unseenCount: decision.unseenCount,
+          reason: decision.reason,
+          ...relevanceTelemetry,
+        },
+        { ownerUserId: input.userId },
+      );
     } else {
-      await eventLog.append({
-        kind: 'forward_decision',
-        threadId: tid,
-        catId: cid,
-        invocationId,
-        timestamp: Date.now(),
-        toolName: decision.toolName || tName,
-        reason: decision.reason,
-        ...relevanceTelemetry,
-      });
+      await eventLog.append(
+        {
+          kind: 'forward_decision',
+          threadId: tid,
+          catId: cid,
+          invocationId,
+          timestamp: Date.now(),
+          toolName: decision.toolName || tName,
+          reason: decision.reason,
+          ...relevanceTelemetry,
+        },
+        { ownerUserId: input.userId },
+      );
     }
   } catch {
     // Fail-open: event recording should never block the gate decision

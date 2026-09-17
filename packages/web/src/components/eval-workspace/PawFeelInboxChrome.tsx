@@ -11,7 +11,7 @@ export function PawFeelInboxHeader({ title, page }: { title: string; page: PawFe
       <div className="min-w-0">
         <h3 className="text-base font-semibold text-cafe">{title}</h3>
         <p className="mt-1 max-w-3xl text-xs leading-relaxed text-cafe-secondary">
-          按消息与调用上下文组成确定性审阅包；展开后仍可逐条查看原始报告。问题族暂无权威语义分组。
+          按消息与调用上下文组成确定性审阅包；值班回执与问题是否解决分开显示。问题族暂无权威语义分组。
         </p>
       </div>
       {page?.coverage ? (

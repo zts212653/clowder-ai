@@ -29,7 +29,85 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
-  it('F167 preserves a typed local-review verdict for settlement and replay', async () => {
+  it('F311 preserves a valid preparation submission and drops malformed content without dropping siblings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const valid = {
+      schemaVersion: 1,
+      programId: 'evolution-program:0123456789abcdef0123456789abcdef',
+      section: 'baseline_diagnosis',
+      title: 'Baseline and initial diagnosis',
+      authorCatId: 'codex-sol',
+      revision: `sha256:${'a'.repeat(64)}`,
+      dependsOn: [],
+      body: {
+        kind: 'baseline_diagnosis',
+        summary: 'No customer baseline is connected.',
+        baselineState: 'unknown',
+        observationUnit: 'One complete project opportunity episode.',
+        facts: [],
+        competingExplanations: [
+          {
+            explanationId: 'missing-context',
+            hypothesis: 'The PM lacks current project context.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Replay with and without verified context.',
+          },
+          {
+            explanationId: 'policy-gap',
+            hypothesis: 'The PM policy does not express escalation boundaries.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Hold context fixed and compare the policy.',
+          },
+        ],
+        unknowns: ['No production records.'],
+        nextAction: 'Connect records before choosing a change.',
+      },
+    };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ evolutionPreparationSubmissionV1: valid }))?.evolutionPreparationSubmissionV1,
+      valid,
+    );
+    const malformed = safeParseExtra(
+      serializeExtra({
+        evolutionPreparationSubmissionV1: { ...valid, revision: 'mutable' },
+        targetCats: ['codex-sol'],
+      }),
+    );
+    assert.equal(malformed?.evolutionPreparationSubmissionV1, undefined);
+    assert.deepEqual(malformed?.targetCats, ['codex-sol']);
+  });
+  it('F293 preserves bounded routing receipt source refs and rejects malformed protocol data', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const payload = {
+      type: 'routing_preflight',
+      v: 1,
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      resolverState: 'fresh',
+      sourceMessageId: 'original-message',
+      retryInvocationId: 'original-invocation',
+      target: {
+        targetCatId: 'sol',
+        disposition: 'rejected',
+        automaticRetryAt: 30_000,
+        reasons: [{ code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['failure:1'] }],
+        alternatives: [],
+      },
+    };
+    const extra = { systemInfo: { v: 1, payload, fallbackCatId: 'sol' } };
+    assert.deepEqual(safeParseExtra(serializeExtra(extra)), extra);
+    assert.equal(
+      safeParseExtra(serializeExtra({ systemInfo: { v: 1, payload: { ...payload, target: {} } } }))?.systemInfo,
+      undefined,
+    );
+  });
+  it('F167 preserves a typed local-review verdict as a durable review fact', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
     );
@@ -39,12 +117,70 @@ describe('durable message extra carriers survive Redis round-trips', () => {
           verdict,
           clientMessageId: `local-review-verdict-roundtrip-${verdict}`,
           reviewedHeadSha: 'a'.repeat(40),
-          carrierlessLeaseFence: { leaseId: 'lease-review-roundtrip-1', generation: 3 },
+          reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'b'.repeat(40),
         },
       };
 
       assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
     }
+  });
+
+  it('preserves a legacy F167 local-review verdict without an accepted-source anchor', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      localReviewVerdict: {
+        verdict: 'approved',
+        clientMessageId: 'legacy-local-review-verdict',
+        reviewedHeadSha: 'a'.repeat(40),
+      },
+    };
+    assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
+  });
+
+  it('drops a partial accepted-source anchor without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'partial-anchor-local-review-verdict',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+        },
+        targetCats: ['opus5'],
+      }),
+    );
+
+    assert.deepEqual(parsed?.targetCats, ['opus5']);
+    assert.equal(parsed?.localReviewVerdict, undefined);
+  });
+
+  it('drops a malformed accepted-source revision without dropping valid sibling metadata', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const parsed = safeParseExtra(
+      serializeExtra({
+        localReviewVerdict: {
+          verdict: 'approved',
+          clientMessageId: 'malformed-anchor-local-review-verdict',
+          reviewedHeadSha: 'a'.repeat(40),
+          reviewSubjectRef: 'pr:zts212653/cat-cafe#4255',
+          acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+          acceptedRevision: 'not-a-git-oid',
+        },
+        targetCats: ['opus5'],
+      }),
+    );
+
+    assert.deepEqual(parsed?.targetCats, ['opus5']);
+    assert.equal(parsed?.localReviewVerdict, undefined);
   });
 
   it('F167 drops malformed local-review verdicts without dropping valid sibling metadata', async () => {
@@ -57,16 +193,6 @@ describe('durable message extra carriers survive Redis round-trips', () => {
       { verdict: 'approved', clientMessageId: 'x'.repeat(201) },
       { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'ABC1234' },
       { verdict: 'approved', clientMessageId: 'typed-verdict-1', reviewedHeadSha: 'a'.repeat(39) },
-      {
-        verdict: 'approved',
-        clientMessageId: 'typed-verdict-1',
-        carrierlessLeaseFence: { leaseId: '', generation: 1 },
-      },
-      {
-        verdict: 'approved',
-        clientMessageId: 'typed-verdict-1',
-        carrierlessLeaseFence: { leaseId: 'lease-review-1', generation: 0 },
-      },
     ]) {
       const parsed = safeParseExtra(
         serializeExtra({
@@ -77,63 +203,6 @@ describe('durable message extra carriers survive Redis round-trips', () => {
 
       assert.deepEqual(parsed?.targetCats, ['opus5']);
       assert.equal(parsed?.localReviewVerdict, undefined);
-    }
-  });
-
-  it('#1371 preserves an auditable operator legacy-review disposition without converting it to reviewer authority', async () => {
-    const { serializeExtra, safeParseExtra } = await import(
-      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
-    );
-    const input = {
-      legacyLocalReviewDisposition: {
-        sourceMessageId: 'legacy-review-terminal-1',
-        leaseId: 'lease-review-1',
-        generation: 2,
-        subjectRef: 'pr:owner/repo#4074',
-        reviewerCatId: 'codex-terra',
-        predecessorCatId: 'codex-sol',
-        reviewedHeadSha: 'a'.repeat(40),
-        verdict: 'changes_requested',
-        decisionId: 'decision-review-1',
-      },
-    };
-
-    const parsed = safeParseExtra(serializeExtra(input));
-    assert.deepEqual(parsed, input);
-    assert.equal(parsed?.localReviewVerdict, undefined);
-  });
-
-  it('#1371 drops malformed legacy-review dispositions without dropping sibling metadata', async () => {
-    const { serializeExtra, safeParseExtra } = await import(
-      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
-    );
-    for (const legacyLocalReviewDisposition of [
-      {
-        sourceMessageId: '',
-        leaseId: 'lease-review-1',
-        generation: 1,
-        subjectRef: 'pr:owner/repo#4074',
-        reviewerCatId: 'codex-terra',
-        predecessorCatId: 'codex-sol',
-        reviewedHeadSha: 'a'.repeat(40),
-        verdict: 'changes_requested',
-        decisionId: 'decision-review-1',
-      },
-      {
-        sourceMessageId: 'legacy-review-terminal-1',
-        leaseId: 'lease-review-1',
-        generation: 0,
-        subjectRef: 'pr:owner/repo#4074',
-        reviewerCatId: 'codex-terra',
-        predecessorCatId: 'codex-sol',
-        reviewedHeadSha: 'A'.repeat(40),
-        verdict: 'commented',
-        decisionId: 'decision-review-1',
-      },
-    ]) {
-      const parsed = safeParseExtra(serializeExtra({ legacyLocalReviewDisposition, targetCats: ['codex-sol'] }));
-      assert.equal(parsed?.legacyLocalReviewDisposition, undefined);
-      assert.deepEqual(parsed?.targetCats, ['codex-sol']);
     }
   });
 
@@ -242,6 +311,7 @@ describe('durable message extra carriers survive Redis round-trips', () => {
         sourceOpportunityId: dynamicScene.opportunity.opportunityId,
       },
     };
+    input.writeOpportunityReentries = [input.writeOpportunityReentry];
 
     assert.deepEqual(safeParseExtra(serializeExtra(input)), input);
   });

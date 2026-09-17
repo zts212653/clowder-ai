@@ -167,6 +167,28 @@ describe('deferred receipt carries write-opportunity lineage', { skip: redisIsol
     assert.equal(attributedDuplicate.outcome, 'conflict');
   });
 
+  it('promotes an attributed awaiting-confirmation receipt from a later owner confirmation', async () => {
+    const awaiting = await store.stage(
+      stageInput({ ready: false, writeOpportunityLineage: LINEAGE, writeOpportunityReceipt: WRITE_RECEIPT }),
+    );
+    assert.equal(awaiting.outcome, 'created');
+    assert.equal(awaiting.receipt.state, 'awaiting_confirmation');
+
+    const confirmed = await store.stage(
+      stageInput({
+        receiptId: `deferred_person_${'f'.repeat(32)}`,
+        invocationId: 'owner-confirmation-invocation',
+        ready: true,
+        createdAt: 500,
+      }),
+    );
+    assert.equal(confirmed.outcome, 'confirmed');
+    assert.equal(confirmed.receipt.receiptId, awaiting.receipt.receiptId);
+    assert.equal(confirmed.receipt.state, 'deferred');
+    assert.deepEqual(confirmed.receipt.writeOpportunityLineage, LINEAGE);
+    assert.deepEqual(confirmed.receipt.writeOpportunityReceipt, WRITE_RECEIPT);
+  });
+
   it('never lets lineage smuggle transcript payload into the receipt', async () => {
     const staged = await store.stage(
       stageInput({ writeOpportunityLineage: LINEAGE, writeOpportunityReceipt: WRITE_RECEIPT }),
@@ -185,19 +207,55 @@ describe('deferred receipt carries write-opportunity lineage', { skip: redisIsol
       claimId: 'claim-gen-2',
       now: 500,
       leaseMs: 1_000,
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
     });
     assert.equal(claimed.outcome, 'claimed');
+    await store.bindProcessingMessage({
+      ownerUserId: 'owner-1',
+      receiptId: staged.receipt.receiptId,
+      claimId: 'claim-gen-2',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-gen-2',
+      now: 500,
+    });
+    await store.bindProcessorInvocation({
+      ownerUserId: 'owner-1',
+      receiptId: staged.receipt.receiptId,
+      claimId: 'claim-gen-2',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processingMessageId: 'message-gen-2',
+      processorInvocationId: 'invocation-gen-2',
+      now: 500,
+    });
     const nextLineage = { ...LINEAGE, opportunityId: `write_opp_${'9'.repeat(32)}`, generation: 2 };
     const nextReceipt = {
       ...WRITE_RECEIPT,
       ...nextLineage,
       eligibleAt: 501,
     };
+    const wrongInvocation = await store.rearmWriteOpportunity({
+      ownerUserId: 'owner-1',
+      receiptId: staged.receipt.receiptId,
+      claimId: 'claim-gen-2',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-successor',
+      dedupeHash: staged.receipt.dedupeHash,
+      writeOpportunityLineage: nextLineage,
+      writeOpportunityReceipt: nextReceipt,
+      now: 500,
+    });
+    assert.equal(wrongInvocation.outcome, 'conflict');
     const expiredClaim = await store.rearmWriteOpportunity({
       ownerUserId: 'owner-1',
       receiptId: staged.receipt.receiptId,
       claimId: 'claim-gen-2',
-      requesterCatId: 'codex-sol',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-gen-2',
       dedupeHash: staged.receipt.dedupeHash,
       writeOpportunityLineage: nextLineage,
       writeOpportunityReceipt: nextReceipt,
@@ -208,7 +266,9 @@ describe('deferred receipt carries write-opportunity lineage', { skip: redisIsol
       ownerUserId: 'owner-1',
       receiptId: staged.receipt.receiptId,
       claimId: 'claim-gen-2',
-      requesterCatId: 'codex-sol',
+      processorCatId: 'codex-terra',
+      processingThreadId: 'thread_memory_operations',
+      processorInvocationId: 'invocation-gen-2',
       dedupeHash: staged.receipt.dedupeHash,
       writeOpportunityLineage: nextLineage,
       writeOpportunityReceipt: nextReceipt,

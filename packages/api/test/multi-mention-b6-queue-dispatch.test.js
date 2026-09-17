@@ -572,15 +572,15 @@ describe('B6: multi_mention queue dispatch', () => {
       headers: { 'x-invocation-id': creds.invocationId, 'x-callback-token': creds.callbackToken },
       payload: {
         targets: ['codex'],
-        question: 'Review the current head',
+        question: 'Implement the current task',
         callbackTo: 'opus',
         idempotencyKey: 'action-stale-head',
         action: {
-          subjectRef: 'pr:owner/repo#2868',
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          subjectRef: 'subject:task:task-2868',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'single',
-          terminalPredicate: { kind: 'review_delivered', headSha: '1111111111111111111111111111111111111111' },
+          terminalPredicate: { kind: 'task_done' },
         },
       },
     });
@@ -619,12 +619,12 @@ describe('B6: multi_mention queue dispatch', () => {
         callbackTo: 'opus',
         idempotencyKey: 'parallel-reject-1',
         action: {
-          subjectRef: 'pr:owner/repo#2868',
-          actionFamily: 'review',
-          successorSlot: 'reviewer',
+          subjectRef: 'subject:task:task-2868',
+          actionFamily: 'implement',
+          successorSlot: 'implementer',
           mode: 'parallel',
-          terminalPredicate: { kind: 'review_delivered', headSha: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee' },
-          parallelIntent: 'independent review',
+          terminalPredicate: { kind: 'task_done' },
+          parallelIntent: 'independent implementation',
           returnToPredecessor: {
             leaseId: 'lease-action-1',
             expectedGeneration: 1,

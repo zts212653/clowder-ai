@@ -5,25 +5,228 @@ descriptionForHuman: 猫工作时是否及时看见新消息，以及 queued rea
 metricGlossary:
   freshness.queued_seen:
     label: queued 正文已读
-    means: full contiguous get_thread_context 读取 same-target queued 正文并首次记录 queued_seen 的次数
+    means: 选定窗口内 TTL-0 Queue custody 首次留下 same-target exact-body exposure 的次数
     goodDirection: neutral
     category: activation
     component: F254-D1.2a
-    source: cat_cafe.freshness.queued_seen
+    source: derived:freshness-windowed-replay.queue
   freshness.queued_handled:
     label: queued 已处理闭环
-    means: queued_seen entry 由同 invocation 的 cat-level succeeded evidence 关闭并记录 queued_handled 的次数
+    means: 选定窗口内 Queue 当前 revision 由 exact target outcome evidence 关闭为 handled 的次数
     goodDirection: neutral
     category: activation
     component: F254-D1.2b
-    source: cat_cafe.freshness.queued_handled
+    source: derived:freshness-windowed-replay.queue
+  freshness.queue_admitted:
+    label: queued 责任入场
+    means: 选定窗口内 TTL-0 Queue custody 新建的 entry-target 生命周期数
+    goodDirection: neutral
+    category: activation
+    component: F254-E21/E22
+    source: derived:freshness-windowed-replay.queue
+  freshness.queue_withdrawn:
+    label: queued 责任撤回
+    means: 选定窗口内 Queue 当前 revision 以显式 withdrawn 终态关闭的 entry-target 数
+    goodDirection: neutral
+    category: context
+    component: F254-E21/E22
+    source: derived:freshness-windowed-replay.queue
+  freshness.queue_failed:
+    label: queued 执行失败
+    means: 选定窗口内 Queue 当前 revision 以 failed/interrupted/cancelled 证据关闭的 entry-target 数
+    goodDirection: lower
+    category: friction
+    component: F254-E21/E22
+    source: derived:freshness-windowed-replay.queue
+  freshness.queue_seen_unhandled_at_window_end:
+    label: 窗口末已读未闭环
+    means: 在窗口结束点已留下 exact-body exposure、但当前 Queue 生命周期尚无终态的 entry-target 数
+    goodDirection: lower
+    category: friction
+    component: F254-E21/E22
+    source: derived:freshness-windowed-replay.queue
+  freshness.queue_pending_at_window_end:
+    label: 窗口末 Queue 未终态
+    means: 在窗口结束点已入场但尚无 handled/withdrawn/failed 终态的 entry-target 数
+    goodDirection: lower
+    category: friction
+    component: F254-E21/E22
+    source: derived:freshness-windowed-replay.queue
   freshness.queued_handled_gap:
     label: queued read/handled 缺口
     means: queued_seen 与 queued_handled 的差距；持续升高说明读到但未闭环、失败保留、或 succeeded=handled 推断需要校准
     goodDirection: lower
     category: derived
     component: F254-D1.2
-    source: derived:cat_cafe.freshness.queued_seen-cat_cafe.freshness.queued_handled
+    source: derived:freshness-windowed-replay.queue
+  freshness.supplement_offered:
+    label: supplement 已提出
+    means: 选定窗口内新建的 TTL-0 FreshnessSupplement 生命周期数
+    goodDirection: neutral
+    category: activation
+    component: F254-E15
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_claimed:
+    label: supplement 已领取
+    means: 选定窗口内首次进入 running 的 FreshnessSupplement 数
+    goodDirection: neutral
+    category: activation
+    component: F254-E15
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_terminal:
+    label: supplement 已终态
+    means: 选定窗口内进入 committed/declined/failed 的 FreshnessSupplement 数
+    goodDirection: neutral
+    category: activation
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_committed:
+    label: supplement 已发表
+    means: 选定窗口内以 committed 终态关闭的 FreshnessSupplement 数
+    goodDirection: neutral
+    category: activation
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_declined:
+    label: supplement 无需追加
+    means: 选定窗口内以 declined 终态关闭的 FreshnessSupplement 数
+    goodDirection: neutral
+    category: context
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_failed:
+    label: supplement 执行失败
+    means: 选定窗口内以 failed 终态关闭的 FreshnessSupplement 数
+    goodDirection: lower
+    category: friction
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_budget_exhausted:
+    label: supplement 预算耗尽
+    means: 选定窗口内记录 budgetExhausted observation 的 FreshnessSupplement 数
+    goodDirection: lower
+    category: friction
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.supplement_unresolved_at_window_end:
+    label: 窗口末 supplement 未终态
+    means: 在窗口结束点已提出但尚未进入 committed/declined/failed 的 FreshnessSupplement 数
+    goodDirection: lower
+    category: friction
+    component: F254-E15/E18
+    source: derived:freshness-windowed-replay.supplement
+  freshness.gate_held:
+    label: freshness gate 暂缓
+    means: 选定窗口内 owner-scoped held_decision 事件数
+    goodDirection: neutral
+    category: context
+    component: F254-A/B
+    source: derived:freshness-windowed-replay.attention
+  freshness.gate_forward:
+    label: freshness gate 放行
+    means: 选定窗口内 owner-scoped forward_decision 事件数
+    goodDirection: neutral
+    category: context
+    component: F254-A/B
+    source: derived:freshness-windowed-replay.attention
+  freshness.notice_attached:
+    label: notice 已附加
+    means: 选定窗口内 owner-scoped notice_attached 事件数
+    goodDirection: neutral
+    category: activation
+    component: F254-B1
+    source: derived:freshness-windowed-replay.attention
+  freshness.notice_acked:
+    label: notice 已确认读取
+    means: 选定窗口内 seenCursor 前进所确认的 notice identity 数；按 noticeIds 计数
+    goodDirection: neutral
+    category: activation
+    component: F254-B1/B3
+    source: derived:freshness-windowed-replay.attention
+  freshness.notice_deferred:
+    label: notice 延后未读
+    means: 选定窗口内 hold 出口仍未解决的 notice identity 数；按 noticeIds 计数
+    goodDirection: lower
+    category: friction
+    component: F254-B2
+    source: derived:freshness-windowed-replay.attention
+  freshness.reinvoke_triggered:
+    label: freshness 再唤醒
+    means: 选定窗口内 owner-scoped reinvoke_triggered 事件数
+    goodDirection: neutral
+    category: activation
+    component: F254-B3
+    source: derived:freshness-windowed-replay.attention
+  freshness.reinvoke_skipped:
+    label: freshness 跳过再唤醒
+    means: 选定窗口内 owner-scoped reinvoke_skipped 事件数
+    goodDirection: neutral
+    category: context
+    component: F254-B3
+    source: derived:freshness-windowed-replay.attention
+  freshness.stream_stale:
+    label: stream 发现新输入
+    means: 选定窗口内 owner-scoped stream_stale_detected 事件数
+    goodDirection: neutral
+    category: friction
+    component: F254-D1
+    source: derived:freshness-windowed-replay.attention
+  freshness.stream_fresh:
+    label: stream 边界新鲜
+    means: 选定窗口内 owner-scoped stream_fresh 事件数
+    goodDirection: neutral
+    category: activation
+    component: F254-D1
+    source: derived:freshness-windowed-replay.attention
+  freshness.provider_notice_opportunity:
+    label: provider notice 机会
+    means: 选定窗口内 provider-native exact-boundary notice opportunity 数
+    goodDirection: neutral
+    category: context
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_notice_prepared:
+    label: provider notice 已准备
+    means: 选定窗口内已构造、等待 provider transport 接纳的 notice 数
+    goodDirection: neutral
+    category: activation
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_notice_delivered:
+    label: provider notice 已送达
+    means: 选定窗口内 exact active turn 接纳的 provider-native notice 数
+    goodDirection: neutral
+    category: activation
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_notice_seen:
+    label: provider notice 正文已读
+    means: 选定窗口内其 exact message identities 已被同猫完整读取的 provider-native notice 数
+    goodDirection: neutral
+    category: activation
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_notice_handled:
+    label: provider notice 已闭环
+    means: 选定窗口内由 exact target outcome evidence 关闭的 provider-native notice 数
+    goodDirection: neutral
+    category: activation
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_notice_missed:
+    label: provider notice 未送达
+    means: 选定窗口内留下 typed missReason 的 provider-native notice 数
+    goodDirection: lower
+    category: friction
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
+  freshness.provider_protocol_observed:
+    label: provider 协议边界观测
+    means: 选定窗口内进入 closed classifier 的 provider protocol item 数，包含 unknown 与 deferred/no-data
+    goodDirection: neutral
+    category: context
+    component: F254-D2
+    source: derived:freshness-windowed-replay.provider
   freshness.closure_stage:
     label: closure 正式阶段
     means: v1.2 记录 formal_committed 与 preflight_blocked，区分“页面曾显示”与“正式可水合”
@@ -33,7 +236,7 @@ metricGlossary:
     source: cat_cafe.freshness.closure_stage
   freshness.replay.eligible_samples:
     label: replay 合格样本
-    means: selector 从 TTL-0 closure 与显式 first-party fixture 中解析出的样本数；零样本是 no-data
+    means: selector 从兼容 TTL-0 legacy closure 与八类 server-owned fixture 中解析出的结构性样本数；无 live closure 时结构 verdict 为 no-data，但必须另读 windowed activity
     goodDirection: neutral
     category: context
     component: F254-AC-E9
@@ -73,7 +276,7 @@ threadPolicy:
 legacyScheduledTaskIds: []
 handoffTargetResolver:
   featureId: F254
-  ownerCatId: codex
+  ownerCatId: codex-sol
   threadLookup: feature-thread
 sla:
   acknowledgeHours: 48
@@ -103,6 +306,11 @@ fixtures:
   - id: connector-blocked
     featureId: F254
     path: docs/harness-feedback/fixtures/f254/connector-blocked.json
-# Generator/provider wiring is conditional on the durable closure store. The scheduler
-# receives the same wired-domain set, so a no-Redis runtime will not advertise publish.
+# Provider resolves one owner-scoped half-open window from four server-owned sources:
+# legacy closure compatibility, TTL-0 Queue custody, TTL-0 FreshnessSupplement, and
+# the retention-bounded attention/provider event index. Publication fails closed until
+# every source proves complete coverage, including a 60-second settled tail on the
+# event index. API restart/rollback advances the coverage start and any in-process
+# append failure records a blocking gap; process-cumulative OTel counters are never a
+# weekly denominator. All eight AC-E9 fixtures remain mandatory on every publication.
 enabled: true

@@ -18,6 +18,19 @@ export interface FreshnessRelevanceContext {
   coveredTriggerMessageIds?: ReadonlySet<string>;
 }
 
+export function isSameUserWaveSiblingReply(
+  message: FreshnessReadableMessage,
+  context: Pick<FreshnessRelevanceContext, 'catId' | 'coveredTriggerMessageIds'>,
+): boolean {
+  const explicitTargets = new Set([...(message.mentions ?? []), ...(message.extra?.targetCats ?? [])]);
+  const causal = message.extra?.causal;
+  return Boolean(
+    causal?.kind === 'invocation_reply' &&
+      context.coveredTriggerMessageIds?.has(causal.triggerMessageId) &&
+      !explicitTargets.has(context.catId),
+  );
+}
+
 /**
  * Target-aware relevance shared by callback, stream-output, and closure preflight checks.
  * Visibility answers "may this cat read it?"; this policy answers the narrower question
@@ -37,13 +50,7 @@ export function decideFreshnessRelevance(
   }
 
   const explicitTargets = new Set([...(message.mentions ?? []), ...(message.extra?.targetCats ?? [])]);
-  const explicitlyDirectedToCurrentCat = explicitTargets.has(context.catId);
-  const causal = message.extra?.causal;
-  if (
-    causal?.kind === 'invocation_reply' &&
-    context.coveredTriggerMessageIds?.has(causal.triggerMessageId) &&
-    !explicitlyDirectedToCurrentCat
-  ) {
+  if (isSameUserWaveSiblingReply(message, context)) {
     return { relevant: false, reason: 'same_user_wave_sibling_reply' };
   }
 

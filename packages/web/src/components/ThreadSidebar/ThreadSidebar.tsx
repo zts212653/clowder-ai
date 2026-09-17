@@ -19,11 +19,30 @@ import {
 } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import { AttentionArrangeToolbar } from './AttentionArrangeToolbar';
+import { AttentionClusterHeader, AttentionClusterMember } from './AttentionCluster';
+import { AttentionGroupableThreadRow } from './AttentionGroupableThreadRow';
 import { readProjectNames, writeProjectNames } from './active-workspace';
+import {
+  type AttentionListRow,
+  type AttentionRenderItem,
+  arrangeAttentionRows,
+  flattenAttentionRows,
+} from './attention-clusters';
+import { orderAttentionList } from './attention-list-order';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
+import {
+  SearchGroupAction,
+  SearchGroupFeedback,
+  type SearchGroupSuccess,
+  SearchGroupTip,
+  useSearchGroupTip,
+} from './SearchGroupFeedback';
+import { SearchGroupOrganizer } from './SearchGroupOrganizer';
 import { SectionGroup } from './SectionGroup';
 import { SidebarTabIcon } from './SidebarTabIcon';
+import type { SearchGroupRequest } from './search-group-types';
 import {
   createSidebarTabState,
   readBrowserSidebarTabPreference,
@@ -34,6 +53,7 @@ import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
+import { isGroupableThread, matchesThreadSearch } from './thread-search';
 import {
   buildSidebarTabContent,
   buildSidebarTabs,
@@ -43,9 +63,12 @@ import {
   type SidebarTabId,
   type ThreadGroup,
 } from './thread-utils';
+import { useAttentionClusters } from './use-attention-clusters';
+import { useAttentionListOrder } from './use-attention-list-order';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
+import { VirtualAttentionList } from './VirtualAttentionList';
 import { VIRTUAL_THREAD_LIST_THRESHOLD, VirtualThreadList, type VirtualThreadListHandle } from './VirtualThreadList';
 
 interface ThreadSidebarProps {
@@ -541,21 +564,99 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const liveThreads = threads;
-  const filteredThreads = useMemo(() => {
-    if (!normalizedQuery) return liveThreads;
-    return liveThreads.filter((thread) => {
-      const title = (thread.title ?? '').toLowerCase();
-      const fallback = (thread.id === 'default' ? '大厅' : '未命名对话').toLowerCase();
-      const project = (thread.projectPath ?? '').toLowerCase();
-      const threadId = thread.id.toLowerCase();
-      return (
-        title.includes(normalizedQuery) ||
-        fallback.includes(normalizedQuery) ||
-        project.includes(normalizedQuery) ||
-        threadId.includes(normalizedQuery)
-      );
-    });
-  }, [liveThreads, normalizedQuery]);
+  const {
+    clusters: attentionClusters,
+    isOpen: isAttentionClusterOpen,
+    toggle: toggleAttentionCluster,
+    titleFor: attentionClusterTitle,
+    rename: renameAttentionCluster,
+    savedGroups: attentionSavedGroups,
+    mutateGroup: mutateAttentionGroup,
+    preferenceError: attentionPreferenceError,
+    groupLoadState: attentionLoadState,
+    groupLoadError: attentionLoadError,
+    reloadGroups: reloadAttentionGroups,
+    openGroup: openAttentionGroup,
+    memberSort: attentionMemberSort,
+    changeMemberSort: changeAttentionMemberSort,
+    pendingSort: attentionPendingSort,
+  } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
+  const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
+  const [searchGroupRequest, setSearchGroupRequest] = useState<SearchGroupRequest | null>(null);
+  const searchGroupOperation = useRef(0);
+  const [searchGroupSuccess, setSearchGroupSuccess] = useState<SearchGroupSuccess | null>(null);
+  const [locateGroupId, setLocateGroupId] = useState<string | null>(null);
+  const searchGroupTip = useSearchGroupTip();
+  const openSearchGroup = useCallback((request: SearchGroupRequest) => {
+    setAttentionArrangeMode(false);
+    setSearchGroupRequest(request);
+  }, []);
+  const searchGroupMatches = useMemo(
+    () =>
+      normalizedQuery
+        ? liveThreads.filter((thread) => isGroupableThread(thread) && matchesThreadSearch(thread, normalizedQuery))
+        : [],
+    [liveThreads, normalizedQuery],
+  );
+  const [draggedAttentionThreadId, setDraggedAttentionThreadId] = useState<string | null>(null);
+  const draggedAttentionThreadIdRef = useRef<string | null>(null);
+  const attentionClusterByThreadId = useMemo(() => {
+    const byThreadId = new Map<string, (typeof attentionClusters)[number]>();
+    for (const cluster of attentionClusters) {
+      for (const memberId of cluster.memberIds) byThreadId.set(memberId, cluster);
+    }
+    return byThreadId;
+  }, [attentionClusters]);
+  const commitAttentionThreadDrop = useCallback(
+    (sourceThreadId: string, targetThreadId: string) => {
+      if (sourceThreadId === targetThreadId) return;
+      const targetCluster = attentionClusterByThreadId.get(targetThreadId);
+      if (targetCluster?.groupId) {
+        void mutateAttentionGroup({
+          action: 'move',
+          groupId: targetCluster.groupId,
+          threadId: sourceThreadId,
+          beforeThreadId: targetThreadId,
+        });
+        return;
+      }
+      const threadIds = targetCluster
+        ? [...new Set([...targetCluster.memberIds, sourceThreadId])]
+        : [targetThreadId, sourceThreadId];
+      void mutateAttentionGroup({ action: 'create', threadIds });
+    },
+    [attentionClusterByThreadId, mutateAttentionGroup],
+  );
+  const commitAttentionClusterDrop = useCallback(
+    (sourceThreadId: string, targetCluster: (typeof attentionClusters)[number]) => {
+      if (targetCluster.memberIds.includes(sourceThreadId)) return;
+      if (targetCluster.groupId) {
+        void mutateAttentionGroup({
+          action: 'move',
+          groupId: targetCluster.groupId,
+          threadId: sourceThreadId,
+        });
+        return;
+      }
+      void mutateAttentionGroup({
+        action: 'create',
+        threadIds: [...new Set([...targetCluster.memberIds, sourceThreadId])],
+      });
+    },
+    [mutateAttentionGroup],
+  );
+  const removeAttentionThreadFromGroup = useCallback(
+    (threadId: string) => {
+      const sourceCluster = attentionClusterByThreadId.get(threadId);
+      if (!sourceCluster?.groupId) return;
+      void mutateAttentionGroup({ action: 'remove', groupId: sourceCluster.groupId, threadId });
+    },
+    [attentionClusterByThreadId, mutateAttentionGroup],
+  );
+  const filteredThreads = useMemo(
+    () => liveThreads.filter((thread) => matchesThreadSearch(thread, normalizedQuery)),
+    [liveThreads, normalizedQuery],
+  );
 
   const { labels } = useLabelStore();
 
@@ -862,6 +963,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     () => buildSidebarTabContent(activeTab, labelFilteredThreads, pinnedProjects, unreadIds),
     [activeTab, labelFilteredThreads, pinnedProjects, unreadIds],
   );
+  const flatAttentionItems = useMemo(() => {
+    if (activeTabContent.kind !== 'flat' || (activeTab !== 'pinned' && activeTab !== 'recent')) return null;
+    const arranged = arrangeAttentionRows(activeTabContent.threads, liveThreads, attentionClusters, activeTab);
+    return arranged.some((item) => item.kind === 'cluster') ? arranged : null;
+  }, [activeTab, activeTabContent, attentionClusters, liveThreads]);
   const recentThreadIds = useMemo(
     () =>
       new Set(
@@ -891,6 +997,40 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     [liveThreads, pinnedProjects, unreadIds],
   );
   const threadGroups = activeTab === 'project' ? projectThreadGroups : [];
+
+  const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({
+    threadGroups: projectThreadGroups,
+    searchQuery: normalizedQuery,
+    currentThreadId,
+  });
+  const attentionLists = useMemo(() => {
+    const lists: Record<string, AttentionRenderItem[]> = {};
+    if (flatAttentionItems) lists.flat = flatAttentionItems;
+    if (activeTab === 'project') {
+      const sections = projectThreadGroups
+        .filter((group) => !isCollapsed(groupKeyForSection(group)))
+        .flatMap((group) => group.archivedGroups ?? [group])
+        .filter((section) => !isCollapsed(groupKeyForSection(section)));
+      for (const section of sections) {
+        lists[groupKeyForSection(section)] = arrangeAttentionRows(
+          section.threads,
+          section.threads,
+          attentionClusters,
+          'project',
+        );
+      }
+    }
+    return lists;
+  }, [activeTab, attentionClusters, flatAttentionItems, isCollapsed, projectThreadGroups]);
+  const attentionListRows = useAttentionListOrder(
+    attentionLists,
+    isAttentionClusterOpen,
+    attentionMemberSort,
+    JSON.stringify([activeTab, normalizedQuery, labelFilter, attentionArrangeMode]),
+    normalizedQuery,
+    attentionArrangeMode,
+  );
+  const flatAttentionRows = attentionListRows.flat ?? null;
 
   const filterKey =
     normalizedQuery.length === 0 && labelFilter === null ? '' : JSON.stringify([normalizedQuery, labelFilter]);
@@ -982,10 +1122,16 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const revealMissingVirtualThread = useCallback(
     (threadId: string) => {
       if (activeTabContent.kind !== 'flat') return;
-      const index = activeTabContent.threads.findIndex((thread) => thread.id === threadId);
+      const index = flatAttentionRows
+        ? flatAttentionRows.findIndex((row) =>
+            row.kind === 'thread'
+              ? row.thread.id === threadId
+              : row.kind === 'cluster-member' && row.member.id === threadId,
+          )
+        : activeTabContent.threads.findIndex((thread) => thread.id === threadId);
       if (index >= 0) virtualThreadListRef.current?.ensureIndexVisible(index);
     },
-    [activeTabContent],
+    [activeTabContent, flatAttentionRows],
   );
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
@@ -999,12 +1145,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     onSelectedThreadMissing: revealMissingVirtualThread,
   });
 
-  // F095: Collapse state with localStorage persistence + search/active auto-expand
-  const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({
-    threadGroups: projectThreadGroups,
-    searchQuery: normalizedQuery,
-    currentThreadId,
-  });
   const sidebarWidthClass = className === undefined ? 'w-60' : className;
 
   const scrollToActiveThread = useCallback(() => {
@@ -1035,6 +1175,20 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       targetTab === 'project'
         ? null
         : buildSidebarTabContent(targetTab, liveThreads, pinnedProjects, unreadIds).threads;
+    const targetAttentionRows =
+      activeTab === targetTab && !needsFilterClear && flatAttentionRows
+        ? flatAttentionRows
+        : targetFlatThreads && (targetTab === 'pinned' || targetTab === 'recent')
+          ? flattenAttentionRows(
+              orderAttentionList(
+                arrangeAttentionRows(targetFlatThreads, liveThreads, attentionClusters, targetTab),
+                isAttentionClusterOpen,
+                attentionArrangeMode ? {} : attentionMemberSort,
+              ).items,
+              isAttentionClusterOpen,
+              '',
+            )
+          : null;
     const needsTabSwitch = activeTab !== targetTab;
     if (needsTabSwitch) handleSelectTab(targetTab);
 
@@ -1044,7 +1198,15 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       ).find((candidate) => candidate.dataset.threadId === currentThreadId);
       if (!element) {
         if (allowVirtualScroll && targetFlatThreads) {
-          const index = targetFlatThreads.findIndex((thread) => thread.id === currentThreadId);
+          const attentionIndex = targetAttentionRows?.findIndex((row) => {
+            if (row.kind === 'thread') return row.thread.id === currentThreadId;
+            if (row.kind === 'cluster-member') return row.member.id === currentThreadId;
+            return row.cluster.memberIds.includes(currentThreadId);
+          });
+          const index =
+            attentionIndex !== undefined && attentionIndex >= 0
+              ? attentionIndex
+              : targetFlatThreads.findIndex((thread) => thread.id === currentThreadId);
           if (index >= 0 && virtualThreadListRef.current) {
             virtualThreadListRef.current.scrollToIndex(index);
             requestAnimationFrame(() => scrollAndHighlight(false));
@@ -1064,9 +1226,14 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     }
   }, [
     activeTab,
+    attentionArrangeMode,
+    attentionMemberSort,
+    flatAttentionRows,
+    attentionClusters,
     currentThreadId,
     handleSelectTab,
     isCollapsed,
+    isAttentionClusterOpen,
     labelFilter,
     liveThreads,
     pinnedProjects,
@@ -1077,38 +1244,118 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     unreadIds,
   ]);
 
-  const renderThreadItem = useCallback(
-    (thread: SidebarSnapshotRow, indented = false) => (
-      <ThreadItem
-        key={thread.id}
-        id={thread.id}
-        title={thread.title}
-        participants={thread.participants}
-        lastActiveAt={thread.lastActiveAt}
-        isActive={currentThreadId === thread.id}
-        onSelect={handleSelect}
-        onDelete={handleDeleteRequest}
-        onRename={handleRename}
-        onTogglePin={handleTogglePin}
-        onToggleFavorite={handleToggleFavorite}
-        onUpdatePreferredCats={handleUpdatePreferredCats}
-        onUpdateLabels={handleUpdateLabels}
-        onReplay={handleReplay}
-        isPinned={thread.pinned}
-        isFavorited={thread.favorited}
-        presence={thread.presence}
-        unreadCount={thread.unreadCount}
-        hasUserMention={thread.hasUserMention}
-        projectPath={thread.projectPath}
-        indented={indented}
-        preferredCats={thread.preferredCats}
-        threadLabels={thread.labels}
-        isHubThread={thread.isHubThread}
-        systemKind={thread.systemKind}
+  const revealSearchGroup = (
+    groupId: string,
+    memberIds = attentionSavedGroups.find((group) => group.id === groupId)?.threadIds ?? [],
+  ) => {
+    void openAttentionGroup(groupId);
+    setSearchQuery('');
+    setLabelFilter(null);
+    if (
+      activeTab !== 'project' &&
+      activeTab !== 'recent' &&
+      !(activeTab === 'pinned' && liveThreads.some((thread) => memberIds.includes(thread.id) && thread.pinned))
+    ) {
+      handleSelectTab('recent');
+    }
+    for (const group of unfilteredProjectThreadGroups) {
+      if (group.threads.some((thread) => memberIds.includes(thread.id)) && isCollapsed(groupKeyForSection(group)))
+        toggleGroup(groupKeyForSection(group));
+    }
+    setLocateGroupId(groupId);
+  };
+  useEffect(() => {
+    if (!locateGroupId || searchGroupRequest || normalizedQuery) return;
+    const index = flatAttentionRows?.findIndex(
+      (row) => row.kind === 'cluster-header' && row.cluster.groupId === locateGroupId,
+    );
+    if (index !== undefined && index >= 0) virtualThreadListRef.current?.scrollToIndex(index);
+    const frame = requestAnimationFrame(() => {
+      const element = scrollContainerRef.current?.querySelector<HTMLElement>(
+        `[data-attention-cluster="group:${locateGroupId}"]`,
+      );
+      if (element) {
+        element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        setLocateGroupId(null);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [locateGroupId, flatAttentionRows, searchGroupRequest, normalizedQuery, activeTab]);
+  const searchGroupAction =
+    searchGroupMatches.length > 0 ? (
+      <SearchGroupAction
+        count={searchGroupMatches.length}
+        loadState={attentionLoadState}
+        errorMessage={attentionLoadError}
+        onOpen={() => openSearchGroup({ query: searchQuery.trim() })}
+        onRetry={() => void reloadAttentionGroups()}
       />
-    ),
+    ) : null;
+
+  const renderThreadItem = useCallback(
+    (thread: SidebarSnapshotRow, indented = false) => {
+      const groupable = isGroupableThread(thread);
+      return (
+        <AttentionGroupableThreadRow
+          key={thread.id}
+          threadId={thread.id}
+          threadTitle={thread.title}
+          groupable={groupable}
+          arrangeMode={attentionArrangeMode}
+          draggedThreadId={draggedAttentionThreadId}
+          onEnterArrange={() => setAttentionArrangeMode(true)}
+          onDragStartThread={(threadId) => {
+            setDraggedAttentionThreadId(thread.id);
+            draggedAttentionThreadIdRef.current = threadId;
+          }}
+          onDragEndThread={() => {
+            draggedAttentionThreadIdRef.current = null;
+            setDraggedAttentionThreadId(null);
+          }}
+          getDraggedThreadId={() => draggedAttentionThreadIdRef.current}
+          onDropThread={commitAttentionThreadDrop}
+        >
+          <ThreadItem
+            id={thread.id}
+            title={thread.title}
+            participants={thread.participants}
+            lastActiveAt={thread.lastActiveAt}
+            isActive={currentThreadId === thread.id}
+            onSelect={handleSelect}
+            onDelete={handleDeleteRequest}
+            onRename={handleRename}
+            onTogglePin={handleTogglePin}
+            onToggleFavorite={handleToggleFavorite}
+            onUpdatePreferredCats={handleUpdatePreferredCats}
+            onUpdateLabels={handleUpdateLabels}
+            onOrganize={
+              groupable && attentionLoadState === 'ready'
+                ? () => openSearchGroup({ query: '', threadId: thread.id })
+                : undefined
+            }
+            onReplay={handleReplay}
+            isPinned={thread.pinned}
+            isFavorited={thread.favorited}
+            presence={thread.presence}
+            unreadCount={thread.unreadCount}
+            hasUserMention={thread.hasUserMention}
+            projectPath={thread.projectPath}
+            indented={indented}
+            preferredCats={thread.preferredCats}
+            threadLabels={thread.labels}
+            isHubThread={thread.isHubThread}
+            systemKind={thread.systemKind}
+          />
+        </AttentionGroupableThreadRow>
+      );
+    },
     [
+      attentionArrangeMode,
+      attentionLoadState,
+      openSearchGroup,
+      commitAttentionThreadDrop,
       currentThreadId,
+      draggedAttentionThreadId,
       handleDeleteRequest,
       handleRename,
       handleReplay,
@@ -1117,6 +1364,83 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       handleTogglePin,
       handleUpdateLabels,
       handleUpdatePreferredCats,
+    ],
+  );
+
+  const renderAttentionRow = useCallback(
+    (row: AttentionListRow) => {
+      if (row.kind === 'thread') {
+        return (
+          <div key={row.key} className="h-20">
+            {renderThreadItem(row.thread)}
+          </div>
+        );
+      }
+      if (row.kind === 'cluster-member') {
+        return (
+          <AttentionClusterMember
+            key={row.key}
+            cluster={row.cluster}
+            member={row.member}
+            isFirst={row.isFirst}
+            isLast={row.isLast}
+            renderThread={renderThreadItem}
+          />
+        );
+      }
+      return (
+        <div
+          key={row.key}
+          role="group"
+          className="h-20"
+          aria-label={`对话组：${attentionClusterTitle(row.cluster)}`}
+          data-attention-drop-group={row.cluster.anchor}
+          onDragOver={(event) => {
+            if (!draggedAttentionThreadId || row.cluster.memberIds.includes(draggedAttentionThreadId)) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const sourceThreadId =
+              draggedAttentionThreadIdRef.current || event.dataTransfer?.getData('text/plain') || null;
+            if (sourceThreadId) commitAttentionClusterDrop(sourceThreadId, row.cluster);
+            draggedAttentionThreadIdRef.current = null;
+            setDraggedAttentionThreadId(null);
+          }}
+        >
+          <AttentionClusterHeader
+            cluster={row.cluster}
+            members={row.members}
+            expanded={row.expanded}
+            displayTitle={attentionClusterTitle(row.cluster)}
+            onToggle={() => toggleAttentionCluster(row.cluster)}
+            onRename={(alias) => renameAttentionCluster(row.cluster, alias)}
+            onAdd={() => openSearchGroup({ query: '', groupId: row.cluster.groupId })}
+            memberSort={attentionArrangeMode ? 'manual' : (attentionMemberSort[row.cluster.anchor] ?? 'manual')}
+            onMemberSort={(mode) => {
+              void changeAttentionMemberSort(row.cluster, mode);
+            }}
+            sortingDisabled={
+              attentionArrangeMode || attentionLoadState !== 'ready' || attentionPendingSort.has(row.cluster.anchor)
+            }
+          />
+        </div>
+      );
+    },
+    [
+      attentionArrangeMode,
+      attentionMemberSort,
+      attentionPendingSort,
+      attentionLoadState,
+      changeAttentionMemberSort,
+      attentionClusterTitle,
+      openSearchGroup,
+      commitAttentionClusterDrop,
+      draggedAttentionThreadId,
+      renameAttentionCluster,
+      renderThreadItem,
+      toggleAttentionCluster,
     ],
   );
 
@@ -1141,7 +1465,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
           onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
         >
-          {group.threads.map((thread) => renderThreadItem(thread, true))}
+          {attentionListRows[groupKey]?.map(renderAttentionRow)}
         </SectionGroup>
       );
     },
@@ -1151,10 +1475,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       handleOpenInFinder,
       handleQuickCreate,
       handleRenameProject,
+      attentionListRows,
       isCollapsed,
       pinnedProjects,
       projectNames,
-      renderThreadItem,
+      renderAttentionRow,
       toggleGroup,
       toggleProjectPin,
     ],
@@ -1356,102 +1681,183 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           )}
 
           <div className="space-y-1 pt-1.5" data-testid="sidebar-tab-content">
-            {activeTabContent.kind === 'flat' && (
+            {searchGroupSuccess && (
+              <SearchGroupFeedback
+                key={searchGroupSuccess.operationId}
+                success={searchGroupSuccess}
+                onCommand={mutateAttentionGroup}
+                onClose={() => setSearchGroupSuccess(null)}
+                onLocate={() => revealSearchGroup(searchGroupSuccess.groupId)}
+              />
+            )}
+            {searchGroupRequest ? (
+              <SearchGroupOrganizer
+                request={searchGroupRequest}
+                threads={liveThreads}
+                groups={attentionSavedGroups}
+                renderThread={renderThreadItem}
+                onCommand={mutateAttentionGroup}
+                onReload={reloadAttentionGroups}
+                onClose={() => setSearchGroupRequest(null)}
+                onSaved={(preferences, groupId, count) => {
+                  setSearchGroupRequest(null);
+                  setSearchGroupSuccess({
+                    operationId: ++searchGroupOperation.current,
+                    groupId,
+                    count,
+                    undo: preferences.undo,
+                  });
+                  searchGroupTip.dismiss();
+                  revealSearchGroup(groupId, preferences.groups.find((group) => group.id === groupId)?.threadIds);
+                }}
+              />
+            ) : (
               <>
-                <div
-                  className="flex items-center justify-between px-3 py-1 text-micro text-cafe-muted"
-                  data-testid="flat-toolbar"
-                >
-                  <span>{activeTabContent.threads.length} 个对话</span>
-                  <button
-                    type="button"
-                    onClick={scrollToActiveThread}
-                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
-                    data-testid="select-open-session-btn"
-                    aria-label="定位当前对话"
-                    title="定位当前对话"
-                  >
-                    <LocateThreadIcon />
-                  </button>
-                </div>
-                {activeTabContent.threads.length >= VIRTUAL_THREAD_LIST_THRESHOLD ? (
-                  <VirtualThreadList
-                    ref={virtualThreadListRef}
-                    threads={activeTabContent.threads}
-                    scrollContainerRef={scrollContainerRef}
-                    renderItem={renderThreadItem}
+                {attentionArrangeMode && (
+                  <AttentionArrangeToolbar
+                    draggedThreadId={draggedAttentionThreadId}
+                    canRemoveDragged={Boolean(
+                      draggedAttentionThreadId && attentionClusterByThreadId.get(draggedAttentionThreadId)?.groupId,
+                    )}
+                    onRemoveDragged={(threadId) => {
+                      removeAttentionThreadFromGroup(threadId);
+                      draggedAttentionThreadIdRef.current = null;
+                      setDraggedAttentionThreadId(null);
+                    }}
+                    onDone={() => {
+                      draggedAttentionThreadIdRef.current = null;
+                      setDraggedAttentionThreadId(null);
+                      setAttentionArrangeMode(false);
+                    }}
                   />
-                ) : (
-                  activeTabContent.threads.map((thread) => renderThreadItem(thread))
+                )}
+                {activeTabContent.kind === 'flat' && (
+                  <>
+                    <div
+                      className="flex items-center justify-between px-3 py-1 text-micro text-cafe-muted"
+                      data-testid="flat-toolbar"
+                    >
+                      <span>
+                        {activeTabContent.threads.length} {normalizedQuery ? '条匹配' : '个对话'}
+                      </span>
+                      {searchGroupAction}
+                      <button
+                        type="button"
+                        onClick={scrollToActiveThread}
+                        className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                        data-testid="select-open-session-btn"
+                        aria-label="定位当前对话"
+                        title="定位当前对话"
+                      >
+                        <LocateThreadIcon />
+                      </button>
+                    </div>
+                    {searchGroupMatches.length > 1 && !searchGroupTip.dismissed && (
+                      <SearchGroupTip onDismiss={searchGroupTip.dismiss} />
+                    )}
+                    {attentionPreferenceError && (
+                      <div
+                        role="alert"
+                        className="mx-3 mb-1 rounded-md bg-conn-amber-bg px-2 py-1 text-micro text-conn-amber-text"
+                      >
+                        {attentionPreferenceError}
+                      </div>
+                    )}
+                    {activeTabContent.threads.length >= VIRTUAL_THREAD_LIST_THRESHOLD ? (
+                      flatAttentionRows ? (
+                        <VirtualAttentionList
+                          ref={virtualThreadListRef}
+                          rows={flatAttentionRows}
+                          scrollContainerRef={scrollContainerRef}
+                          renderItem={renderAttentionRow}
+                        />
+                      ) : (
+                        <VirtualThreadList
+                          ref={virtualThreadListRef}
+                          threads={activeTabContent.threads}
+                          scrollContainerRef={scrollContainerRef}
+                          renderItem={renderThreadItem}
+                        />
+                      )
+                    ) : flatAttentionRows ? (
+                      flatAttentionRows.map(renderAttentionRow)
+                    ) : (
+                      activeTabContent.threads.map((thread) => renderThreadItem(thread))
+                    )}
+                  </>
+                )}
+
+                {activeTabContent.kind === 'project' && (threadGroups.length > 0 || searchGroupMatches.length > 0) && (
+                  <div
+                    className="flex items-center justify-between px-3 py-1 text-micro text-cafe-muted"
+                    data-testid="project-toolbar"
+                  >
+                    <span>{threadGroups.length} 个项目</span>
+                    {searchGroupAction}
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={scrollToActiveThread}
+                        className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                        data-testid="project-select-open-session-btn"
+                        aria-label="定位当前对话"
+                        title="定位当前对话"
+                      >
+                        <LocateThreadIcon />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={expandAll}
+                        className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                        data-testid="expand-all-btn"
+                        aria-label="展开全部项目"
+                        title="展开全部"
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.4}
+                        >
+                          <path d="M5 7l3-3 3 3" />
+                          <path d="M5 9l3 3 3-3" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={collapseAll}
+                        className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
+                        data-testid="collapse-all-btn"
+                        aria-label="折叠全部项目"
+                        title="折叠全部"
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.4}
+                        >
+                          <path d="M5 4l3 3 3-3" />
+                          <path d="M5 12l3-3 3 3" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeTabContent.kind === 'project' && searchGroupMatches.length > 1 && !searchGroupTip.dismissed && (
+                  <SearchGroupTip onDismiss={searchGroupTip.dismiss} />
+                )}
+                {activeTabContent.kind === 'project' && threadGroups.map((group) => renderProjectTabGroup(group))}
+
+                {(normalizedQuery.length > 0 || labelFilter) && activeTabIsEmpty && (
+                  <div className="px-3 py-4 text-xs text-cafe-muted">没有匹配的对话</div>
                 )}
               </>
-            )}
-
-            {activeTabContent.kind === 'project' && threadGroups.length > 0 && (
-              <div
-                className="flex items-center justify-between px-3 py-1 text-micro text-cafe-muted"
-                data-testid="project-toolbar"
-              >
-                <span>{threadGroups.length} 个项目</span>
-                <div className="flex items-center gap-0.5">
-                  <button
-                    type="button"
-                    onClick={scrollToActiveThread}
-                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
-                    data-testid="project-select-open-session-btn"
-                    aria-label="定位当前对话"
-                    title="定位当前对话"
-                  >
-                    <LocateThreadIcon />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={expandAll}
-                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
-                    data-testid="expand-all-btn"
-                    aria-label="展开全部项目"
-                    title="展开全部"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.4}
-                    >
-                      <path d="M5 7l3-3 3 3" />
-                      <path d="M5 9l3 3 3-3" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={collapseAll}
-                    className="flex items-center justify-center rounded p-1 text-cafe-muted transition-colors hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent"
-                    data-testid="collapse-all-btn"
-                    aria-label="折叠全部项目"
-                    title="折叠全部"
-                  >
-                    <svg
-                      aria-hidden="true"
-                      className="h-3.5 w-3.5"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={1.4}
-                    >
-                      <path d="M5 4l3 3 3-3" />
-                      <path d="M5 12l3-3 3 3" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {activeTabContent.kind === 'project' && threadGroups.map((group) => renderProjectTabGroup(group))}
-
-            {(normalizedQuery.length > 0 || labelFilter) && activeTabIsEmpty && (
-              <div className="px-3 py-4 text-xs text-cafe-muted">没有匹配的对话</div>
             )}
           </div>
         </div>

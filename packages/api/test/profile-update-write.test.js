@@ -153,3 +153,93 @@ describe('writeProfilePrimer + writeProfileProvenance (split commit points)', ()
     assert.equal(readFileSync(writtenPath, 'utf8'), 'NEW primer content');
   });
 });
+
+// --- T3: Phase E generic writeProfileTarget + provenance layer naming ---
+
+describe('writeProfileTarget + layer-aware provenance (Phase E)', () => {
+  let profileDir;
+  let mod;
+
+  beforeEach(async () => {
+    profileDir = mkdtempSync(join(tmpdir(), 'f231-write-target-'));
+    mod = await import('../dist/domains/cats/services/profile/writeProfileUpdate.js');
+  });
+
+  afterEach(() => rmSync(profileDir, { recursive: true, force: true }));
+
+  const corpusProposal = (over = {}) => ({
+    proposalId: 'prop_corpus_1',
+    sourceCatId: 'opus',
+    sourceThreadId: 'thread_c1',
+    targetLayer: 'corpus',
+    targetPath: 'corpus/shared-facts.md',
+    afterContent: 'ASR accuracy: 99%',
+    beforeContent: '',
+    baseContentHash: '',
+    rationale: 'operator mentioned ASR',
+    signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_c1' },
+    ...over,
+  });
+
+  it('writeProfileTarget writes afterContent at the given absolute path (hash guard)', () => {
+    const absPath = join(profileDir, 'corpus', 'shared-facts.md');
+    const proposal = corpusProposal({ baseContentHash: mod.hashContent('') });
+    const r = mod.writeProfileTarget(proposal, absPath);
+    assert.equal(readFileSync(absPath, 'utf8'), 'ASR accuracy: 99%');
+    assert.equal(r.writtenPath, absPath);
+  });
+
+  it('writeProfileTarget throws StaleProfileUpdateError when content changed', () => {
+    const absPath = join(profileDir, 'corpus', 'shared-facts.md');
+    mkdirSync(join(profileDir, 'corpus'), { recursive: true });
+    writeFileSync(absPath, 'old content', 'utf8');
+    const proposal = corpusProposal({ baseContentHash: mod.hashContent('STALE') });
+    assert.throws(() => mod.writeProfileTarget(proposal, absPath), mod.StaleProfileUpdateError);
+    assert.equal(readFileSync(absPath, 'utf8'), 'old content');
+  });
+
+  it('provenance filename uses targetLayer (corpus → -corpus.md)', () => {
+    const proposal = corpusProposal();
+    const pPath = mod.provenancePathFor(profileDir, proposal);
+    assert.match(pPath, /-corpus\.md$/);
+    assert.ok(!pPath.endsWith('-primer.md'));
+  });
+
+  it('provenance filename uses targetLayer (primer → -primer.md, backward compat)', () => {
+    const primerProposal = {
+      proposalId: 'prop_p1',
+      sourceCatId: 'codex',
+      targetLayer: 'primer',
+    };
+    const pPath = mod.provenancePathFor(profileDir, primerProposal);
+    assert.match(pPath, /-primer\.md$/);
+  });
+
+  it('provenance content includes layer: line', () => {
+    const proposal = corpusProposal();
+    const { provenancePath } = mod.writeProfileProvenance(proposal, profileDir);
+    const prov = readFileSync(provenancePath, 'utf8');
+    assert.match(prov, /layer: corpus/);
+  });
+
+  it('writeProfilePrimer behavior unchanged (INV-7)', () => {
+    mkdirSync(join(profileDir, 'relationship'), { recursive: true });
+    const rel = join('relationship', 'maine-coon-primer.md');
+    writeFileSync(join(profileDir, rel), 'OLD primer', 'utf8');
+    const hash = mod.hashContent('OLD primer');
+    const proposal = {
+      proposalId: 'prop_compat',
+      sourceCatId: 'codex',
+      sourceThreadId: 'thread_1',
+      targetLayer: 'primer',
+      targetPath: rel,
+      afterContent: 'NEW primer',
+      beforeContent: 'OLD primer',
+      baseContentHash: hash,
+      rationale: 'test',
+      signalProvenance: { kind: 'cat-declared', sourceThreadId: 'thread_1' },
+    };
+    const { writtenPath } = mod.writeProfilePrimer(proposal, profileDir, 'maine-coon');
+    assert.equal(readFileSync(writtenPath, 'utf8'), 'NEW primer');
+  });
+});

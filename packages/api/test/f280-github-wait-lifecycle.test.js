@@ -9,6 +9,7 @@ const { WaitLifecycleRecoverySweep } = await import('../dist/domains/ball-custod
 const { PrWaitMigrationService } = await import('../dist/domains/ball-custody/PrWaitMigrationService.js');
 const { CiCdRouter, classifyCiWaitBucket } = await import('../dist/infrastructure/email/CiCdRouter.js');
 const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
+const { REVIEW_LOOP_BRAKE_NEXT_STEP } = await import('../dist/domains/github-signals/github-wait-renderer.js');
 
 function activeState(when = [{ kind: 'pr_head_changed' }]) {
   return {
@@ -190,6 +191,34 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal(events.length, 1);
     assert.equal(events[0].kind, 'wait.terminated');
     assert.equal(events[0].reason, 'matched');
+  });
+
+  it('projects the fourth-review brake through the existing outcome without adding round state', async () => {
+    const { lifecycle, taskStore, task } = await harness([{ kind: 'pr_review_decision_changed' }]);
+    const result = await lifecycle.observe({
+      taskId: task.id,
+      facts: {
+        headSha: 'aaaa1111',
+        review: { decisionCursor: 41, decision: 'CHANGES_REQUESTED' },
+      },
+      collectorPatch: {
+        review: {
+          lastInlineCommentCursor: 20,
+          lastConversationCommentCursor: 30,
+          lastDecisionCursor: 41,
+        },
+      },
+      reviewLoopBrake: { kind: 'pause_once', formalChangesRequested: 4 },
+    });
+
+    assert.equal(result.kind, 'notified');
+    assert.match(result.content, /automatic re-request paused once/i);
+    const state = (await taskStore.get(task.id)).automationState;
+    assert.equal(state.waitOutcome.nextStep, REVIEW_LOOP_BRAKE_NEXT_STEP);
+    const serialized = JSON.stringify(state).toLowerCase();
+    for (const forbidden of ['reviewround', 'reviewreset', 'reviewlease', 'reviewverdict']) {
+      assert.doesNotMatch(serialized, new RegExp(forbidden));
+    }
   });
 
   it('a bot-authored CI terminal fact wakes only an explicit CI waiter', async () => {

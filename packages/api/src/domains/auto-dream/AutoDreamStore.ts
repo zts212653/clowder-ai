@@ -42,6 +42,8 @@ import type {
 } from './private-seed-contract.js';
 import {
   decidePrivateSeed as decidePrivateSeedOperation,
+  getOwnedSeed as getOwnedSeedOperation,
+  hasOwnedSeedIntentApplication as hasOwnedSeedIntentApplicationOperation,
   ingestPendingCue as ingestPendingCueOperation,
   listOwnedSeeds as listOwnedSeedsOperation,
   listPrivateCues as listPrivateCuesOperation,
@@ -248,6 +250,19 @@ export class AutoDreamStore implements F255PendingCueSink {
     options: OwnedSeedListOptions = {},
   ): Promise<OwnedSeedRecord[]> {
     return listOwnedSeedsOperation(this.context(), ownerUserId, catId, options);
+  }
+
+  async getOwnedSeed(ownerUserId: string, catId: string, seedId: string): Promise<OwnedSeedRecord | null> {
+    return getOwnedSeedOperation(this.context(), ownerUserId, catId, seedId);
+  }
+
+  async hasOwnedSeedIntentApplication(
+    ownerUserId: string,
+    catId: string,
+    invocationId: string,
+    seedId: string,
+  ): Promise<boolean> {
+    return hasOwnedSeedIntentApplicationOperation(this.context(), ownerUserId, catId, invocationId, seedId);
   }
 
   async decidePrivateSeed(

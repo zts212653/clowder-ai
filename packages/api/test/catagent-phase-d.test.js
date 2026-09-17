@@ -61,7 +61,10 @@ before(() => {
   // Credential fixtures for service-level tests
   catCafeDir = join(tmpDir, '.cat-cafe');
   mkdirSync(catCafeDir, { recursive: true });
-  writeFileSync(join(catCafeDir, 'accounts.json'), JSON.stringify({ 'test-ant': { authType: 'api_key' } }));
+  writeFileSync(
+    join(catCafeDir, 'accounts.json'),
+    JSON.stringify({ 'test-ant': { authType: 'api_key', clientId: 'anthropic' } }),
+  );
   writeFileSync(join(catCafeDir, 'credentials.json'), JSON.stringify({ 'test-ant': { apiKey: 'sk-test-d' } }));
 });
 

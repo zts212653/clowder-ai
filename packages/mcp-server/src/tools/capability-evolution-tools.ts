@@ -1,3 +1,4 @@
+import { evolutionProgramDisplayNameSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackGet, callbackPost } from './callback-tools.js';
@@ -14,6 +15,12 @@ const admissionReason = {
   admissionRef: 'file:docs/features/F311-capability-evolution-workspace.md' as const,
 };
 
+const measurementAdmissionReason = {
+  disposition: 'accepted-boundary' as const,
+  kind: 'authority-boundary' as const,
+  admissionRef: 'file:docs/features/F267-eval-measurement-validity.md' as const,
+};
+
 const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
@@ -24,6 +31,12 @@ const ownerRef = z
   .strict();
 const programId = z.string().regex(/^evolution-program:[0-9a-f]{32}$/);
 const clientMessageId = bounded(240);
+const sourceMessageId = z
+  .string()
+  .min(1)
+  .max(240)
+  .refine((value) => value === value.trim(), { message: 'source message id must not be normalized' })
+  .refine((value) => !/[\r\n]/.test(value), { message: 'source message id must be a single line' });
 const ttlSeconds = z.number().int().positive().max(31_536_000);
 const agentKeyCatId = bounded(120)
   .optional()
@@ -31,6 +44,7 @@ const agentKeyCatId = bounded(120)
     'Persistent-agent identity selector. Required for shared agent-key MCP variants; ignored under invocation auth.',
   );
 const commandAction = z.union([
+  z.object({ type: z.literal('name'), displayName: evolutionProgramDisplayNameSchema }).strict(),
   z.object({ type: z.literal('pause'), reasonRef: ownerRef }).strict(),
   z.object({ type: z.literal('resume'), resumeRef: ownerRef }).strict(),
   z
@@ -63,6 +77,9 @@ const commandAction = z.union([
 
 export const startEvolutionProgramInputSchema = {
   targetRef: ownerRef.describe('Canonical ref to the one capability/object being evolved; never copy its payload.'),
+  displayName: evolutionProgramDisplayNameSchema.describe(
+    'Readable project name from the user’s stated goal X. Required at creation; do not translate an opaque target slug or invent an asset name.',
+  ),
   clientMessageId: clientMessageId.describe('Stable idempotency id for the user message that requested this Program.'),
   agentKeyCatId,
 };
@@ -77,6 +94,14 @@ export const updateEvolutionProgramInputSchema = {
   expectedSequence: z.number().int().nonnegative().describe('Current Program sequence for CAS.'),
   clientMessageId: clientMessageId.describe('Stable idempotency id for this lifecycle command.'),
   action: commandAction.describe('One lifecycle command; owner truth remains ref-only.'),
+  agentKeyCatId,
+};
+
+export const issueCapabilityEvolutionMeasurementInputSchema = {
+  programId: programId.describe(
+    'Exact canonical Evolution Program id whose target owner supplies the source manifest.',
+  ),
+  clientMessageId: sourceMessageId.describe('Stable source message id for the immutable issuance PR.'),
   agentKeyCatId,
 };
 
@@ -109,6 +134,7 @@ export const linkEvolutionProgramObservationInputSchema = {
 };
 
 export interface StartEvolutionProgramInput {
+  displayName: string;
   targetRef: z.infer<typeof ownerRef>;
   clientMessageId: string;
   agentKeyCatId?: string;
@@ -137,11 +163,18 @@ export interface LinkEvolutionProgramObservationInput {
   agentKeyCatId?: string;
 }
 
+export interface IssueCapabilityEvolutionMeasurementInput {
+  programId: string;
+  clientMessageId: string;
+  agentKeyCatId?: string;
+}
+
 export function handleStartEvolutionProgram(input: StartEvolutionProgramInput): Promise<ToolResult> {
   return callbackPost(
     '/api/callbacks/evolution-programs',
     {
       targetRef: input.targetRef,
+      displayName: input.displayName,
       clientMessageId: input.clientMessageId,
     },
     { agentKeyCatId: input.agentKeyCatId },
@@ -183,12 +216,41 @@ export function handleLinkEvolutionProgramObservation(
   );
 }
 
+export function handleIssueCapabilityEvolutionMeasurement(
+  input: IssueCapabilityEvolutionMeasurementInput,
+): Promise<ToolResult> {
+  return callbackPost(
+    `/api/callbacks/evolution-programs/${encodeURIComponent(input.programId)}/measurement-issuance`,
+    { clientMessageId: input.clientMessageId },
+    { agentKeyCatId: input.agentKeyCatId },
+  );
+}
+
 export const capabilityEvolutionTools = [
+  defineTool({
+    name: 'cat_cafe_issue_capability_evolution_measurement',
+    description:
+      'Ask F267 to issue the canonical measurement chain for one Evolution Program from its target owner source-owner manifest. ' +
+      'Use only the exact Program id + source message id after the owner has committed a real certificate, role assignment, and revision-bound cohort; consumer-consumption, optimizer-exposure, or independent-holdout proof may be absent and then resolves as typed insufficient. ' +
+      'NOT for: uploading evidence payloads, inventing defaults, relabeling content as measurement proof, or advancing the F311 Program. ' +
+      'Output: an immutable owner-backed artifact PR, or typed insufficient with the precise missing owner contract; issuance does not advance the Program. ' +
+      'GOTCHA: only the configured eval-domain cat may issue; shared persistent MCP callers pass agentKeyCatId.',
+    inputSchema: issueCapabilityEvolutionMeasurementInputSchema,
+    handler: handleIssueCapabilityEvolutionMeasurement,
+    governance: {
+      implementationExport: 'handleIssueCapabilityEvolutionMeasurement',
+      action: 'create',
+      authority: 'eval-callback',
+      risk: { level: 'write', openWorld: false },
+      runtimeProfiles: ['full', 'agent-key'],
+      standaloneReason: measurementAdmissionReason,
+    },
+  }),
   defineTool({
     name: 'cat_cafe_start_evolution_program',
     description:
       'Start the permanent Evolution Program when the user says “我们来进化 X” or clearly asks to evolve one capability. ' +
-      'Use only targetRef + clientMessageId: the server drafts the Goal/claim, economic and measurement refs, and role refs; typed blocker explains anything still missing，不让用户填写大表. ' +
+      'Pass targetRef + displayName from the user’s stated goal X + clientMessageId: the server drafts the Goal/claim, economic and measurement refs, and role refs; typed blocker explains anything still missing，不让用户填写大表. ' +
       'NOT for: copying owner payload, caller-authored lifecycle/stage/certificates, mock cards, or a second queue. ' +
       'Output: appended/duplicate plus the canonical Program projection and its F307 Workbench surface descriptor. ' +
       'GOTCHA: shared persistent MCP callers pass agentKeyCatId so callback auth selects the matching Cat sidecar key.',
@@ -205,10 +267,10 @@ export const capabilityEvolutionTools = [
   defineTool({
     name: 'cat_cafe_get_evolution_program',
     description:
-      'Read the caller workspace canonical Evolution Program projection or list. ' +
-      'Use for lifecycle, constitution progress, typed blockers, refs, and the next action. ' +
+      'Read one exact caller-workspace Evolution Program projection, or a lightweight Program list. ' +
+      'Use for lifecycle, constitution progress, typed blockers, refs and next action; exact reads also return versioned preparation bodies, history, source status and real invocation activity. ' +
       'NOT for: reading owner payloads or inferring readiness beyond the projection. ' +
-      'Output: the same durable truth consumed by REST and F307 Workbench. ' +
+      'Output: the same durable truth consumed by REST and F307 Workbench; list results intentionally omit preparation bodies. ' +
       'GOTCHA: shared persistent MCP callers pass agentKeyCatId so callback auth selects the matching Cat sidecar key.',
     inputSchema: getEvolutionProgramInputSchema,
     handler: handleGetEvolutionProgram,

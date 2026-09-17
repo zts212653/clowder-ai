@@ -81,6 +81,76 @@ describe('F311 Phase 3 evaluation ingress on the real Program stream', () => {
     assert.deepEqual(ready.projection.attribution.whyNotChange, []);
   });
 
+  it('keeps an owner-declared observe action on automatic recheck with zero change-owner contact', async () => {
+    let changeOwnerCalls = 0;
+    const { eventLog, service, programId } = await observingProgram({
+      bundle: { proposedAction: 'keep_observe' },
+      changeOwner: {
+        async requestApproval() {
+          changeOwnerCalls += 1;
+          throw new Error('observe must not request Approval');
+        },
+      },
+    });
+    await service.linkMeasurement({ ...base(programId, 4, 'measure'), ...measurementRefs() });
+    await service.linkAttribution({
+      ...base(programId, 5, 'attribute'),
+      ...measurementRefs(),
+      candidates: [candidate('execution')],
+    });
+    const observed = await service.linkIntervention({
+      ...base(programId, 6, 'gate'),
+      ownerUserId: 'operator',
+      autoRecheckRef: owner('F192', 'eval-trigger:program'),
+    });
+
+    assert.equal(observed.projection.program.stage, 'observing');
+    assert.equal(observed.projection.attribution.gate.status, 'blocked');
+    assert.ok(
+      observed.projection.attribution.gate.blockers.some(
+        (entry) => entry.code === 'intervention_not_authority_requesting',
+      ),
+    );
+    assert.equal(changeOwnerCalls, 0);
+    const events = await eventLog.read(programId);
+    assert.equal(events.at(-1).event.type, 'observe_or_insufficient_recorded');
+    assert.equal(
+      events.some((entry) => entry.event.type === 'change_cycle_linked'),
+      false,
+    );
+  });
+
+  it('routes a non-actionable attribution through the zero-approval gate instead of deciding', async () => {
+    let changeOwnerCalls = 0;
+    const { eventLog, service, programId } = await observingProgram({
+      bundle: { discriminatingLayers: [] },
+      changeOwner: {
+        async requestApproval() {
+          changeOwnerCalls += 1;
+          throw new Error('an unresolved attribution must not request Approval');
+        },
+      },
+    });
+    await service.linkMeasurement({ ...base(programId, 4, 'measure'), ...measurementRefs() });
+    const unresolved = await service.linkAttribution({
+      ...base(programId, 5, 'attribute'),
+      ...measurementRefs(),
+      candidates: [candidate('execution')],
+    });
+    assert.equal(unresolved.projection.attribution.verdict, 'unresolved');
+    assert.equal(unresolved.projection.program.stage, 'awaiting_intervention');
+
+    const observed = await service.linkIntervention({
+      ...base(programId, 6, 'gate'),
+      ownerUserId: 'operator',
+      autoRecheckRef: owner('F192', 'eval-trigger:program'),
+    });
+    assert.equal(observed.projection.program.stage, 'observing');
+    assert.equal(observed.projection.attribution.gate.status, 'blocked');
+    assert.equal(changeOwnerCalls, 0);
+    assert.equal((await eventLog.read(programId)).at(-1).event.type, 'observe_or_insufficient_recorded');
+  });
+
   it('keeps Change Review closed when the owner published no structured card', async () => {
     // The legacy F267 intervention card is free text end to end. It may describe a plan; it can
     // never open Change Review, because a paragraph is not a resolvable falsifier, holdout or
@@ -121,7 +191,7 @@ describe('F311 Phase 3 evaluation ingress on the real Program stream', () => {
     // Round one's gate must BLOCK for the Cycle to return to observing and round two to open; an
     // owner card missing a falsifier is the honest way there, since a complete card opens Change
     // Review instead.
-    const { service, programId } = await observingProgram({
+    const { eventLog, service, programId } = await observingProgram({
       bundle: { interventionCard: completeCard({ interventionFalsifierRef: undefined }) },
     });
     await service.linkMeasurement({ ...base(programId, 4, 'measure'), ...measurementRefs() });
@@ -150,8 +220,15 @@ describe('F311 Phase 3 evaluation ingress on the real Program stream', () => {
     assert.equal(explanation.verdict, 'incomparable');
     assert.equal(explanation.comparability.status, 'incomparable');
     assert.ok(!explanation.comparability.label.includes('跑满'));
-    // Not actionable, so the Cycle goes to deciding rather than awaiting an intervention.
-    assert.equal(attributed.projection.program.stage, 'deciding');
+    // Not actionable still crosses the gate so the auto-recheck receipt and typed reason land.
+    assert.equal(attributed.projection.program.stage, 'awaiting_intervention');
+    const rechecking = await service.linkIntervention({
+      ...base(programId, 10, 'gate-incomparable'),
+      ownerUserId: 'operator',
+      autoRecheckRef: owner('F192', 'eval-trigger:program'),
+    });
+    assert.equal(rechecking.projection.program.stage, 'observing');
+    assert.equal((await eventLog.read(programId)).at(-1).event.result, 'insufficient');
   });
 
   it('drops the previous round diagnosis when a new evaluation starts', async () => {

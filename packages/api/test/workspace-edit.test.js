@@ -24,7 +24,11 @@ function sha256(content) {
   return createHash('sha256').update(content).digest('hex');
 }
 
-const TEST_DIR = '__edit_endpoint_test__';
+// Full gates can execute this suite concurrently from multiple worktrees while
+// the legacy fixture lookup below resolves every process to the same discovered
+// worktree. Keep each Node process in its own directory so setup/cleanup and
+// conflict assertions cannot overwrite one another's files.
+const TEST_DIR = `__edit_endpoint_test__-${process.pid}`;
 
 describe('workspace edit endpoints (integration)', () => {
   let app;
@@ -58,11 +62,7 @@ describe('workspace edit endpoints (integration)', () => {
 
   after(async () => {
     await app?.close();
-    const { listWorktrees } = await import('../dist/domains/workspace/workspace-security.js');
-    const worktrees = await listWorktrees();
-    const thisWt = worktrees.find((w) => w.root.endsWith('cat-cafe-f063p2b5'));
-    const wt = thisWt ?? worktrees[0];
-    await rm(join(wt.root, TEST_DIR), { recursive: true, force: true });
+    await rm(join(wtRoot, TEST_DIR), { recursive: true, force: true });
   });
 
   // ── Token issuance ──

@@ -140,6 +140,17 @@ export type ActionSuccessorLease = ActionSuccessorLeaseBase &
       }
   );
 
+/**
+ * Direct local-review custody was retired after it proved less live than the
+ * durable message carrier. Approved external-review leases remain identifiable
+ * by the dispatch receipt written atomically by Approval Hub; implement leases
+ * retain their existing return recovery.
+ */
+export function isRecoverableActionSuccessorReturn(lease: ActionSuccessorLease): boolean {
+  if (lease.actionFamily !== 'review') return true;
+  return lease.dispatchDeliveryState === 'delivered' && Boolean(lease.dispatchDeliveredMessageId);
+}
+
 export interface ClaimActionSuccessorInput extends ActionSuccessorIdentityInput {
   leaseId: string;
   mode: ActionSuccessorMode;

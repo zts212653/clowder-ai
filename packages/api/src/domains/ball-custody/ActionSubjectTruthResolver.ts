@@ -12,7 +12,6 @@ import {
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
 import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
 import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
-import { type LocalReviewEvidenceProvider, parseLocalReviewEvidenceRef } from './LocalReviewEvidenceProvider.js';
 
 type TerminalResolution = {
   terminal: true;
@@ -113,7 +112,6 @@ export class ActionSubjectTruthResolver {
     private readonly communityStore: Pick<ICommunityObjectStore, 'get'>,
     private readonly trackingFreshnessProvider?: TrackingFreshnessProvider,
     private readonly taskActionTruthProvider?: TaskActionTruthProvider,
-    private readonly localReviewEvidenceProvider?: LocalReviewEvidenceProvider,
     private readonly livePrFreshnessProvider?: LivePrFreshnessProvider,
   ) {}
 
@@ -189,7 +187,7 @@ export class ActionSubjectTruthResolver {
   async resolveCompletion(
     predicate: CanonicalActionTerminalPredicate,
     candidate: ActionCompletionCandidateSnapshot,
-    context?: ActionCompletionLeaseContext,
+    _context?: ActionCompletionLeaseContext,
   ): Promise<ActionCompletionVerdict> {
     const capability = getActionTerminalCapabilityForPredicateKind(predicate.kind);
     if (capability.completionResolver === 'task_done_status') {
@@ -213,59 +211,9 @@ export class ActionSubjectTruthResolver {
         candidate,
       );
     }
-    let localFailure: { status: 'mismatch' | 'insufficient'; reason: string } | undefined;
-    const localEvidenceRefs = candidate.evidenceRefs.filter((ref) => ref.startsWith('local-review:'));
-    if (localEvidenceRefs.length > 0) {
-      if (!context || !predicate.headSha || !this.localReviewEvidenceProvider) {
-        localFailure = { status: 'insufficient', reason: 'local review evidence resolver unavailable' };
-      } else {
-        for (const evidenceRef of localEvidenceRefs) {
-          const parsedEvidence = parseLocalReviewEvidenceRef(evidenceRef);
-          if (!parsedEvidence) {
-            localFailure = { status: 'mismatch', reason: 'local review evidence ref is malformed' };
-            continue;
-          }
-          const localResolution = await this.localReviewEvidenceProvider.resolve({
-            messageId: parsedEvidence.messageId,
-            leaseId: context.leaseId,
-            generation: context.generation,
-            reviewerCatId: context.catId,
-            holderThreadId: context.holderThreadId,
-            predecessorCatId: context.predecessorCatId,
-            predecessorThreadId: context.predecessorThreadId,
-            tenantScope: context.tenantScope,
-          });
-          if (localResolution.status === 'verified') {
-            if (localResolution.evidenceRef !== evidenceRef) {
-              localFailure = { status: 'mismatch', reason: 'local review typed verdict does not match evidence ref' };
-              continue;
-            }
-            const freshness = await this.resolveFreshness(predicate);
-            if (freshness.status === 'verified') {
-              return bindActionCompletionVerdict(
-                {
-                  status: 'verified',
-                  evidenceRef: localResolution.evidenceRef,
-                  predicateDigest: predicate.digest,
-                  freshnessKey: predicate.freshnessKey,
-                },
-                candidate,
-              );
-            }
-            localFailure = freshness;
-            continue;
-          }
-          localFailure = localResolution;
-        }
-      }
-    }
-
     const projection = await this.communityStore.get(predicate.subjectRef);
     const projected = resolveProjectedActionCompletion(predicate, projection, candidate);
-    if (projected.status === 'verified' || !localFailure) {
-      return bindActionCompletionVerdict(projected, candidate);
-    }
-    return bindActionCompletionVerdict(localFailure, candidate);
+    return bindActionCompletionVerdict(projected, candidate);
   }
 
   async resolveFreshness(predicate: CanonicalActionTerminalPredicate): Promise<ActionFreshnessResolution> {

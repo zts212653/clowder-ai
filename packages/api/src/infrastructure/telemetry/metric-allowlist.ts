@@ -31,11 +31,13 @@ import {
   GROUNDING_SOURCE_TIER,
   GROUNDING_VERDICT,
   OPERATION_NAME,
+  PROFILE_LAYER,
   ROUTING_EVENT_WAIT_REASON,
   SEAL_REASON,
   SIGNAL_KIND,
   STATUS,
   STREAM_ERROR_PATH,
+  TARGET_LAYER,
   THREAD_SYSTEM_KIND,
   TRIGGER,
 } from './genai-semconv.js';
@@ -84,6 +86,9 @@ export const ALLOWED_METRIC_ATTRIBUTES: ReadonlySet<string> = new Set([
   CONTEXT_PROJECTION_DELTA_SIZE,
   CONTEXT_PROJECTION_TIER,
   CONTEXT_PROJECTION_LEDGER_OUTCOME,
+  // F231 Phase E: profile layer telemetry (bounded enum: 'primer' | 'corpus').
+  PROFILE_LAYER,
+  TARGET_LAYER,
 ]);
 
 const allowedKeys = [...ALLOWED_METRIC_ATTRIBUTES];

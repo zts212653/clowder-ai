@@ -21,7 +21,7 @@ describe('action successor shared contract', () => {
     expect(isAllowedActionSuccessorSlot('merge', 'reviewer')).toBe(true);
   });
 
-  it('keeps reserved vocabulary out of executable direct carriers', () => {
+  it('keeps local review and reserved vocabulary out of executable direct carriers', () => {
     expect(
       executableActionSuccessorMetadataSchema.safeParse({
         subjectRef: 'pr:owner/repo#2868',
@@ -39,7 +39,7 @@ describe('action successor shared contract', () => {
         mode: 'single',
         terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       executableActionSuccessorMetadataSchema.safeParse({
         subjectRef: 'subject:task:task-1',
@@ -136,7 +136,7 @@ describe('action successor shared contract', () => {
     ).toBe(true);
   });
 
-  it('admits only typed local-review re-entry reasons with durable evidence', () => {
+  it('drops the retired local-review re-entry control field from action metadata', () => {
     const base = {
       subjectRef: 'pr:owner/repo#2868',
       actionFamily: 'review',
@@ -145,33 +145,12 @@ describe('action successor shared contract', () => {
       terminalPredicate: { kind: 'review_delivered', headSha: FULL_HEAD_SHA },
     } as const;
 
-    for (const reason of ['behavioral_delta', 'stale_or_blocking', 'explicit_matrix_route'] as const) {
-      const parsed = actionSuccessorMetadataSchema.parse({
-        ...base,
-        reviewReentry: { reason, evidenceRef: `message:review-route:${reason}` },
-      });
-      expect(parsed.reviewReentry).toEqual({ reason, evidenceRef: `message:review-route:${reason}` });
-    }
-
-    expect(
-      actionSuccessorMetadataSchema.safeParse({
-        ...base,
-        reviewReentry: { reason: 'cloud_finding', evidenceRef: 'message:wrong-gate-owner' },
-      }).success,
-    ).toBe(false);
-    expect(
-      actionSuccessorMetadataSchema.safeParse({
-        ...base,
-        reviewReentry: { reason: 'behavioral_delta', evidenceRef: '   ' },
-      }).success,
-    ).toBe(false);
-    expect(
-      actionSuccessorMetadataSchema.safeParse({
-        ...base,
-        actionFamily: 'merge',
-        reviewReentry: { reason: 'explicit_matrix_route', evidenceRef: 'message:not-a-review-action' },
-      }).success,
-    ).toBe(false);
+    const parsed = actionSuccessorMetadataSchema.safeParse({
+      ...base,
+      reviewReentry: { reason: 'behavioral_delta', evidenceRef: 'message:review-route' },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).not.toHaveProperty('reviewReentry');
   });
 
   it('requires durable grounding evidence for an existing-standing self claim', () => {

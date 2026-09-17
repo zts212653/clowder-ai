@@ -42,7 +42,7 @@ test('bootstraps alpha.9 policy and hot-refreshes release coordinates without wi
   let now = 1_000;
   let fetches = 0;
   const catalog = new RefreshingOfficialPluginCatalog({
-    policies: OFFICIAL_PLUGIN_POLICIES,
+    policies: [policy],
     now: () => now,
     refreshTtlMs: 1_000,
     fetchFn: async () => {
@@ -87,7 +87,7 @@ test('joins concurrent refreshes and retains last-known-good with bounded degrad
     release = resolve;
   });
   const catalog = new RefreshingOfficialPluginCatalog({
-    policies: OFFICIAL_PLUGIN_POLICIES,
+    policies: [policy],
     now: () => now,
     refreshTtlMs: 1_000,
     fetchFn: async () => {
@@ -124,7 +124,7 @@ test('rejects a newer release that reuses any previously accepted digest', async
   let now = 1_000;
   let next = metadata('0.1.0-alpha.10', alpha10Digest);
   const catalog = new RefreshingOfficialPluginCatalog({
-    policies: OFFICIAL_PLUGIN_POLICIES,
+    policies: [policy],
     now: () => now,
     refreshTtlMs: 1_000,
     fetchFn: async () => response(next),
@@ -209,7 +209,7 @@ for (const [label, metadataFactory, expectedCode] of [
 ]) {
   test(`keeps the reviewed bootstrap on ${label}`, async () => {
     const catalog = new RefreshingOfficialPluginCatalog({
-      policies: OFFICIAL_PLUGIN_POLICIES,
+      policies: [policy],
       now: () => 1_000,
       fetchFn: async () => response(metadataFactory()),
     });
@@ -224,7 +224,7 @@ for (const [label, metadataFactory, expectedCode] of [
 
 test('rejects oversized metadata before parsing it', async () => {
   const catalog = new RefreshingOfficialPluginCatalog({
-    policies: OFFICIAL_PLUGIN_POLICIES,
+    policies: [policy],
     now: () => 1_000,
     fetchFn: async () => response(metadata('0.1.0-alpha.10', alpha10Digest), { 'content-length': '1048576' }),
   });

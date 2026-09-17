@@ -784,7 +784,7 @@ export const profileUpdateProposed = lazy(() =>
   }),
 );
 
-/** Counter: profile update approved (operator → primer written). */
+/** Counter: profile update approved (operator → profile layer written). */
 export const profileUpdateApproved = lazy(() =>
   meter().createCounter('cat_cafe.profile_update.approved', {
     description: 'Profile update proposals approved and written (F231 C3 eval)',
@@ -798,24 +798,24 @@ export const profileUpdateRejected = lazy(() =>
   }),
 );
 
-/** Counter: compiled L0 contained the logical current-persona profile pointer. */
+/** Counter: compiled L0 contained a profile pointer (primer or corpus). */
 export const profilePointerEmitted = lazy(() =>
   meter().createCounter('cat_cafe.profile.pointer_emitted', {
-    description: 'Compiled L0 payloads containing the current relationship profile URI',
+    description: 'Compiled L0 payloads containing a profile pointer (primer or corpus layer)',
   }),
 );
 
-/** Counter: authenticated current-persona pointer resolved to primer content. */
+/** Counter: authenticated profile pointer resolved successfully. */
 export const profilePointerResolved = lazy(() =>
   meter().createCounter('cat_cafe.profile.pointer_resolved', {
-    description: 'Authenticated current relationship profile reads resolved successfully',
+    description: 'Authenticated profile pointer reads resolved successfully',
   }),
 );
 
-/** Counter: authenticated pointer could not resolve current-persona content. */
+/** Counter: authenticated profile pointer could not resolve content. */
 export const profilePointerMissing = lazy(() =>
   meter().createCounter('cat_cafe.profile.pointer_missing', {
-    description: 'Authenticated current relationship profile reads with no resolvable persona content',
+    description: 'Authenticated profile pointer reads with no resolvable content',
   }),
 );
 

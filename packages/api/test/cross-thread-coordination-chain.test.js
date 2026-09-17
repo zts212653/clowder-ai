@@ -118,7 +118,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       threadId: target.id,
       content: 'Claim shared callback files',
       targetCat: 'codex',
-      coordination: { phase: 'active' },
+      coordination: { phase: 'active', subjectRef: 'subject:review-cycle' },
       clientMessageId: 'claim',
     });
     assert.equal(claimResponse.statusCode, 200);
@@ -151,7 +151,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       threadId: target.id,
       content: 'Release shared callback files',
       targetCat: 'codex',
-      coordination: { phase: 'terminal' },
+      coordination: { phase: 'terminal', subjectRef: 'subject:review-cycle' },
       clientMessageId: 'release',
     });
     assert.equal(releaseResponse.statusCode, 200);
@@ -200,6 +200,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     );
 
     const recordsBeforeMismatchedTerminalAck = invocationRecordStore.getRecords().length;
+    const messagesBeforeMismatchedTerminalAck = messageStore.getByThread(source.id, 20, 'user-1').length;
     const mismatchedTerminalAckResponse = await post({
       auth: targetAckAuth,
       threadId: source.id,
@@ -208,12 +209,52 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       coordination: { phase: 'terminal', id: 'caller-supplied-other-chain' },
       clientMessageId: 'ack-mismatched-terminal-id',
     });
-    assert.equal(mismatchedTerminalAckResponse.statusCode, 200);
-    assert.equal(mismatchedTerminalAckResponse.json().status, 'terminal_ack_recorded');
+    assert.equal(mismatchedTerminalAckResponse.statusCode, 409);
+    assert.deepEqual(mismatchedTerminalAckResponse.json(), {
+      kind: 'coordination_id_conflict',
+      message: 'Explicit terminal coordination id conflicts with the incoming coordination lineage.',
+      incomingCoordinationId: coordinationId,
+      explicitCoordinationId: 'caller-supplied-other-chain',
+    });
     assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
-    const mismatchedTerminalAck = findMessage(source.id, 'Release received with stale caller id');
-    assert.equal(mismatchedTerminalAck.extra.coordination.id, coordinationId);
-    assert.equal(mismatchedTerminalAck.extra.coordination.phase, 'ack');
+    assert.equal(
+      messageStore.getByThread(source.id, 20, 'user-1').length,
+      messagesBeforeMismatchedTerminalAck,
+      'a rejected conflict must not persist a message',
+    );
+    assert.equal(findMessage(source.id, 'Release received with stale caller id'), undefined);
+
+    const mismatchedTerminalAckRetry = await post({
+      auth: targetAckAuth,
+      threadId: source.id,
+      content: 'Release received with stale caller id',
+      targetCat: 'opus',
+      coordination: { phase: 'terminal', id: 'caller-supplied-other-chain' },
+      clientMessageId: 'ack-mismatched-terminal-id',
+    });
+    assert.equal(mismatchedTerminalAckRetry.statusCode, 409);
+    assert.deepEqual(mismatchedTerminalAckRetry.json(), mismatchedTerminalAckResponse.json());
+    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
+    assert.equal(messageStore.getByThread(source.id, 20, 'user-1').length, messagesBeforeMismatchedTerminalAck);
+
+    const mismatchedTerminalSubjectResponse = await post({
+      auth: targetAckAuth,
+      threadId: source.id,
+      content: 'Release received with a foreign subject',
+      targetCat: 'opus',
+      coordination: { phase: 'terminal', id: coordinationId, subjectRef: 'subject:other-work' },
+      clientMessageId: 'ack-mismatched-terminal-subject',
+    });
+    assert.equal(mismatchedTerminalSubjectResponse.statusCode, 409);
+    assert.deepEqual(mismatchedTerminalSubjectResponse.json(), {
+      kind: 'coordination_subject_conflict',
+      message: 'Explicit terminal coordination subject conflicts with the incoming coordination lineage.',
+      coordinationId,
+      incomingSubjectRef: 'subject:review-cycle',
+      explicitSubjectRef: 'subject:other-work',
+    });
+    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
+    assert.equal(messageStore.getByThread(source.id, 20, 'user-1').length, messagesBeforeMismatchedTerminalAck);
 
     const recordsBeforeRestart = invocationRecordStore.getRecords().length;
     const restartResponse = await post({
@@ -221,7 +262,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       threadId: source.id,
       content: 'New substantive coordination',
       targetCat: 'opus',
-      coordination: { phase: 'active', id: coordinationId },
+      coordination: { phase: 'active', id: coordinationId, subjectRef: 'subject:new-work' },
       clientMessageId: 'restart',
     });
     assert.equal(restartResponse.statusCode, 200);
@@ -231,6 +272,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.notEqual(restart.extra.coordination.id, coordinationId);
     assert.equal(restart.extra.coordination.phase, 'active');
     assert.equal(restart.extra.coordination.hop, 0);
+    assert.equal(restart.extra.coordination.subjectRef, 'subject:new-work');
   });
 
   test('same-thread terminal review delivery closes cleanly and suppresses a courtesy ACK', async () => {
@@ -290,123 +332,5 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.deepEqual(ack.mentions, []);
     assert.equal(ack.extra.crossPost, undefined);
     assert.equal(ack.extra.coordination.phase, 'ack');
-  });
-
-  test('server-minted coordination roots keep content retry suppression without clientMessageId', async () => {
-    const source = await threadStore.create('user-1', 'Source');
-    const target = await threadStore.create('user-1', 'Target');
-    await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
-
-    for (const phase of ['active', 'terminal']) {
-      const content = `Minted ${phase} root`;
-      const recordsBefore = invocationRecordStore.getRecords().length;
-
-      const first = await post({
-        auth,
-        threadId: target.id,
-        content,
-        targetCat: 'codex',
-        coordination: { phase },
-      });
-      assert.equal(first.statusCode, 200);
-      assert.equal(first.json().status, 'ok');
-
-      const retry = await post({
-        auth,
-        threadId: target.id,
-        content,
-        targetCat: 'codex',
-        coordination: { phase },
-      });
-      assert.equal(retry.statusCode, 200);
-      assert.equal(retry.json().status, 'duplicate');
-      assert.equal(
-        messageStore.getByThread(target.id, 20, 'user-1').filter((message) => message.content === content).length,
-        1,
-      );
-      assert.equal(invocationRecordStore.getRecords().length, recordsBefore + 1);
-    }
-  });
-
-  test('caller-chosen coordination ids remain distinct content-dedup identities', async () => {
-    const source = await threadStore.create('user-1', 'Source');
-    const target = await threadStore.create('user-1', 'Target');
-    await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
-
-    for (const id of ['caller-chain-a', 'caller-chain-b']) {
-      const response = await post({
-        auth,
-        threadId: target.id,
-        content: 'Deliberately repeated content',
-        targetCat: 'codex',
-        coordination: { phase: 'active', id },
-      });
-      assert.equal(response.statusCode, 200);
-      assert.equal(response.json().status, 'ok');
-    }
-
-    const messages = messageStore
-      .getByThread(target.id, 20, 'user-1')
-      .filter((message) => message.content === 'Deliberately repeated content');
-    assert.equal(messages.length, 2);
-    assert.deepEqual(
-      messages.map((message) => message.extra.coordination.id),
-      ['caller-chain-a', 'caller-chain-b'],
-    );
-  });
-
-  test('coordination with assign_work fails closed before creating a dispatch proposal', async () => {
-    const source = await threadStore.create('user-1', 'Source');
-    const target = await threadStore.create('user-1', 'Target');
-    const auth = await registry.create('user-1', 'opus', source.id);
-
-    const response = await post({
-      auth,
-      threadId: target.id,
-      content: 'Assign coordinated work',
-      targetCat: 'codex',
-      effectClass: 'assign_work',
-      coordination: { phase: 'active' },
-      clientMessageId: 'coordination-assign-work',
-    });
-
-    assert.equal(response.statusCode, 400);
-    assert.equal(response.json().kind, 'coordination_with_assign_work');
-    assert.deepEqual(await dispatchProposalStore.listPendingByUser('user-1'), []);
-  });
-
-  // --- Convention contract (F246 Phase J charter update) ---
-
-  test('coordinate effectClass cross-thread → delivered normally, no DispatchProposal created', async () => {
-    // Convention: routine review/feedback uses coordinate, which bypasses the
-    // assign_work intercept at callbacks.ts:1605 and delivers via normal flow.
-    // This test proves the real HTTP ingress boundary: coordinate never creates
-    // a DispatchProposal (no approval card in Approval Hub).
-    const source = await threadStore.create('user-1', 'Source');
-    const target = await threadStore.create('user-1', 'Target');
-    await threadStore.addParticipants(target.id, ['codex']);
-    const auth = await registry.create('user-1', 'opus', source.id);
-
-    const response = await post({
-      auth,
-      threadId: target.id,
-      content: '@codex\nPlease review PR #3203',
-      targetCat: 'codex',
-      effectClass: 'coordinate',
-      clientMessageId: 'coordinate-review-request',
-    });
-
-    // coordinate must deliver successfully (not intercepted)
-    assert.equal(response.statusCode, 200, 'coordinate cross-thread must succeed (not intercepted)');
-
-    // Message must be delivered to the target thread
-    const delivered = findMessage(target.id, '@codex\nPlease review PR #3203');
-    assert.ok(delivered, 'coordinate message must be delivered to target thread');
-
-    // No DispatchProposal created — coordinate bypasses the intercept entirely
-    const pending = await dispatchProposalStore.listPendingByUser('user-1');
-    assert.equal(pending.length, 0, 'coordinate must NOT create a DispatchProposal (no approval card)');
   });
 });

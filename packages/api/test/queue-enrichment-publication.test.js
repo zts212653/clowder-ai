@@ -5,7 +5,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { emitQueueUpdated } = await import('../dist/utils/queue-enrichment.js');
+const { emitQueueUpdated, enrichQueueEntries, projectPublicQueueEntry } = await import(
+  '../dist/utils/queue-enrichment.js'
+);
 
 describe('F220 intake: queue snapshot publication ordering', () => {
   const makeEntry = (overrides = {}) => ({
@@ -45,6 +47,112 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     createdAt: 1,
     updatedAt: 20,
     ...overrides,
+  });
+
+  it('keeps recovery action identity stable across an unchanged serialized Queue snapshot', () => {
+    const beforeRestart = makeEntry({
+      source: 'agent',
+      messageId: null,
+      queuedFailedByCatIds: ['opus'],
+      queuedFailureAtByCatId: { opus: 1234 },
+      queuedFailureReasonByCatId: { opus: 'invocation_failed' },
+    });
+    const afterRestart = structuredClone(beforeRestart);
+
+    assert.deepEqual(
+      projectPublicQueueEntry(afterRestart).recoveryActions,
+      projectPublicQueueEntry(beforeRestart).recoveryActions,
+    );
+    assert.equal(projectPublicQueueEntry(afterRestart).recoveryActions[0]?.kind, 'retry_target');
+  });
+
+  it('does not project Retry when durable receipt truth says the failed target has no carrier', async () => {
+    const entry = makeEntry({
+      queuedFailedByCatIds: ['opus'],
+      queuedFailureAtByCatId: { opus: 1234 },
+    });
+    const messageStore = {
+      getById: async () => ({
+        queueCustody: {
+          version: 1,
+          entryId: entry.id,
+          revision: 1,
+          intent: 'execute',
+          status: 'queued',
+          allTargetCats: ['opus'],
+          pendingTargetCats: ['opus'],
+          notifiedByCatIds: [],
+          seenByCatIds: [],
+          seenInvocationIdByCatId: {},
+          failedByCatIds: ['opus'],
+          handledByCatIds: [],
+          carrierByTargetCatId: { codex: { entryId: 'other-carrier' } },
+          targetAttempts: [
+            {
+              id: 'attempt-1',
+              targetCatId: 'opus',
+              sequence: 1,
+              state: 'failed',
+              createdAt: 1000,
+              updatedAt: 1234,
+              terminalReason: 'invocation_failed',
+            },
+          ],
+          priority: 'normal',
+          createdAt: 1000,
+          updatedAt: 1234,
+        },
+      }),
+    };
+
+    const [projected] = await enrichQueueEntries([entry], messageStore);
+
+    assert.deepEqual(
+      projected.recoveryActions.map((action) => action.kind),
+      ['withdraw'],
+    );
+  });
+
+  it('fails message-backed Retry closed when durable enrichment throws', async () => {
+    const entry = makeEntry({
+      queuedFailedByCatIds: ['opus'],
+      queuedFailureAtByCatId: { opus: 1234 },
+    });
+    const messageStore = {
+      getById: async () => {
+        throw new Error('synthetic message-store failure');
+      },
+    };
+
+    const [projected] = await enrichQueueEntries([entry], messageStore);
+
+    assert.deepEqual(
+      projected.recoveryActions.map((action) => action.kind),
+      ['withdraw'],
+    );
+  });
+
+  it('fails message-backed Retry closed when the referenced message has no custody', async () => {
+    const entry = makeEntry({
+      queuedFailedByCatIds: ['opus'],
+      queuedFailureAtByCatId: { opus: 1234 },
+    });
+    const messageStore = {
+      getById: async (messageId) => ({
+        id: messageId,
+        threadId: entry.threadId,
+        userId: entry.userId,
+        catId: null,
+        content: entry.content,
+      }),
+    };
+
+    const [projected] = await enrichQueueEntries([entry], messageStore);
+
+    assert.deepEqual(
+      projected.recoveryActions.map((action) => action.kind),
+      ['withdraw'],
+    );
   });
 
   it('serializes same-scope snapshots while a different user remains independent', async () => {
@@ -173,7 +281,12 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     const socketManager = {
       emitToUser: (_userId, _event, data) => emitted.push(data),
     };
-    const stalledEntry = makeEntry({ id: 'stalled', messageId: 'msg-stalled' });
+    const stalledEntry = makeEntry({
+      id: 'stalled',
+      messageId: 'msg-stalled',
+      queuedFailedByCatIds: ['opus'],
+      queuedFailureAtByCatId: { opus: 1234 },
+    });
     let stalledSettled = false;
     let followingSettled = false;
 
@@ -194,16 +307,24 @@ describe('F220 intake: queue snapshot publication ordering', () => {
     assert.deepEqual(
       emitted.map((event) => ({ action: event.action, targetStates: event.queue[0]?.targetStates })),
       [
-        { action: 'stalled', targetStates: { opus: 'queued' } },
+        { action: 'stalled', targetStates: { opus: 'failed' } },
         { action: 'following', targetStates: undefined },
       ],
+    );
+    assert.deepEqual(
+      emitted[0].queue[0].recoveryActions.map((action) => action.kind),
+      ['withdraw'],
+      'deadline fallback must never advertise a custody-dependent Retry',
     );
   });
 
   it('keeps timely message enrichment and legacy optional queue fields compatible', async () => {
     const emitted = [];
     const messageStore = {
-      getById: async () => ({
+      getById: async (id) => ({
+        id,
+        userId: 'u1',
+        threadId: 't1',
         contentBlocks: [{ kind: 'text', text: 'preview text' }],
         replyTo: 'msg-parent',
       }),

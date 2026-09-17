@@ -1,6 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { AutoDreamStore } from './AutoDreamStore.js';
+import { ownedSeedSourceRevision } from './private-seed-contract.js';
 import type { ProactiveVisitRecord } from './proactive-relationship-contract.js';
 
 export type ProactiveDeliveryFaultStage = 'before_message_append' | 'after_message_append' | 'after_message_attach';
@@ -43,9 +44,9 @@ export interface ProactiveWakeContext {
   }>;
   ownedSeeds: Array<{
     seedId: string;
-    claim: string;
     sourceKind: 'cue' | 'originated';
     sourceCueId?: string;
+    sourceRevision: `sha256:${string}`;
   }>;
   recentEchoes: Array<{
     echoId: string;
@@ -191,9 +192,9 @@ export class ProactiveRelationshipService {
       })),
       ownedSeeds: ownedSeeds.map((seed) => ({
         seedId: seed.seedId,
-        claim: seed.claim,
         sourceKind: seed.sourceKind,
         ...(seed.sourceCueId ? { sourceCueId: seed.sourceCueId } : {}),
+        sourceRevision: ownedSeedSourceRevision(seed),
       })),
       recentEchoes: recentEchoes.map((echo) => ({
         echoId: echo.echoId,

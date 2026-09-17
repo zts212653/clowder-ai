@@ -521,6 +521,7 @@ describe('resolvePencilBinary', () => {
       return;
     }
     const knownRoots = [
+      join(homedir(), '.antigravity-ide', 'extensions'),
       join(homedir(), '.antigravity', 'extensions'),
       join(homedir(), '.vscode', 'extensions'),
       join(homedir(), '.cursor', 'extensions'),
@@ -557,6 +558,7 @@ describe('resolvePencilBinary', () => {
     await mkdir(join(vscodeInsidersDir, 'highagency.pencildev-1.0.0-universal', 'out'), { recursive: true });
 
     const result = await resolvePencilBinary({
+      antigravityIdeDir: join(antigravityDir, 'missing-ide'),
       antigravityDir,
       cursorDir,
       vscodeInsidersDir,
@@ -592,13 +594,14 @@ describe('resolvePencilCommand', () => {
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_BIN: explicitBin, PENCIL_MCP_APP: 'vscode' },
+      antigravityIdeDir: join(dir, 'ag-ide-empty'),
       antigravityDir,
       vscodeDir: join(dir, 'vscode'),
     });
 
     assert.deepEqual(resolved, {
       command: explicitBin,
-      args: ['--app', 'vscode'],
+      args: ['--app', 'visual_studio_code'],
     });
   });
 
@@ -608,13 +611,63 @@ describe('resolvePencilCommand', () => {
     await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.41-universal', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
+      antigravityIdeDir: join(dir, 'missing-ag-ide'),
       antigravityDir: join(dir, 'missing-ag'),
       vscodeDir,
     });
 
     assert.ok(resolved);
     assert.ok(resolved.command.includes('.vscode/extensions'));
-    assert.deepEqual(resolved.args, ['--app', 'vscode']);
+    assert.deepEqual(resolved.args, ['--app', 'visual_studio_code']);
+  });
+
+  it('discovers Antigravity IDE and emits its live Pencil app identifier', async () => {
+    const antigravityIdeDir = join(dir, '.antigravity-ide', 'extensions');
+    const vscodeDir = join(dir, '.vscode', 'extensions');
+    await mkdir(join(antigravityIdeDir, 'highagency.pencildev-0.6.70-universal', 'out'), { recursive: true });
+    await writeExecutable(join(antigravityIdeDir, 'highagency.pencildev-0.6.70-universal', PENCIL_BINARY_SUFFIX));
+    await mkdir(join(vscodeDir, 'highagency.pencildev-0.6.69', 'out'), { recursive: true });
+    await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.69', PENCIL_BINARY_SUFFIX));
+
+    const resolved = await resolvePencilCommand({
+      antigravityIdeDir,
+      antigravityDir: join(dir, 'legacy-ag-empty'),
+      vscodeDir,
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved);
+    assert.ok(
+      resolved.command.includes('.antigravity-ide/extensions'),
+      `expected Antigravity IDE path, got: ${resolved.command}`,
+    );
+    assert.deepEqual(resolved.args, ['--app', 'antigravity_ide']);
+  });
+
+  it('keeps an explicit canonical host ahead of a newer legacy-family install', async () => {
+    const antigravityIdeDir = join(dir, '.antigravity-ide', 'extensions');
+    const antigravityDir = join(dir, '.antigravity', 'extensions');
+    await mkdir(join(antigravityIdeDir, 'highagency.pencildev-0.6.70-universal', 'out'), { recursive: true });
+    await writeExecutable(join(antigravityIdeDir, 'highagency.pencildev-0.6.70-universal', PENCIL_BINARY_SUFFIX));
+    await mkdir(join(antigravityDir, 'highagency.pencildev-0.6.99-universal', 'out'), { recursive: true });
+    await writeExecutable(join(antigravityDir, 'highagency.pencildev-0.6.99-universal', PENCIL_BINARY_SUFFIX));
+
+    const resolved = await resolvePencilCommand({
+      env: { PENCIL_MCP_APP: 'antigravity_ide' },
+      antigravityIdeDir,
+      antigravityDir,
+      vscodeDir: join(dir, 'vscode-empty'),
+      cursorDir: join(dir, 'cursor-empty'),
+      vscodeInsidersDir: join(dir, 'insiders-empty'),
+    });
+
+    assert.ok(resolved);
+    assert.ok(
+      resolved.command.includes('.antigravity-ide/extensions'),
+      `canonical host must not be replaced by a newer legacy install: ${resolved.command}`,
+    );
+    assert.deepEqual(resolved.args, ['--app', 'antigravity_ide']);
   });
 
   it('prefers Antigravity over VS Code when both have the same version', async () => {
@@ -627,6 +680,7 @@ describe('resolvePencilCommand', () => {
     await writeExecutable(join(vscodeDir, 'highagency.pencildev-0.6.40', PENCIL_BINARY_SUFFIX));
 
     const resolved = await resolvePencilCommand({
+      antigravityIdeDir: join(dir, 'ag-ide-empty'),
       antigravityDir,
       vscodeDir,
       cursorDir: join(dir, 'cursor-empty'),
@@ -649,6 +703,7 @@ describe('resolvePencilCommand', () => {
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'antigravity' },
+      antigravityIdeDir: join(dir, 'ag-ide-empty'),
       antigravityDir,
       vscodeDir,
       cursorDir: join(dir, 'cursor-empty'),
@@ -671,6 +726,7 @@ describe('resolvePencilCommand', () => {
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'vscode-insiders' },
+      antigravityIdeDir: join(dir, 'ag-ide-empty'),
       antigravityDir,
       vscodeDir,
       cursorDir: join(dir, 'cursor-empty'),
@@ -679,7 +735,7 @@ describe('resolvePencilCommand', () => {
 
     assert.ok(resolved);
     assert.ok(resolved.command.includes('vsc'), `expected VS Code path, got: ${resolved.command}`);
-    assert.deepEqual(resolved.args, ['--app', 'vscode']);
+    assert.deepEqual(resolved.args, ['--app', 'visual_studio_code']);
   });
 
   it('PENCIL_MCP_APP falls back to any candidate if preferred app has no installations', async () => {
@@ -689,6 +745,7 @@ describe('resolvePencilCommand', () => {
 
     const resolved = await resolvePencilCommand({
       env: { PENCIL_MCP_APP: 'antigravity' },
+      antigravityIdeDir: join(dir, 'ag-ide-empty'),
       antigravityDir: join(dir, 'ag-empty'),
       vscodeDir,
       cursorDir: join(dir, 'cursor-empty'),
@@ -696,7 +753,7 @@ describe('resolvePencilCommand', () => {
     });
 
     assert.ok(resolved, 'should fall back to VS Code when Antigravity is empty');
-    assert.deepEqual(resolved.args, ['--app', 'vscode']);
+    assert.deepEqual(resolved.args, ['--app', 'visual_studio_code']);
   });
 });
 
@@ -2659,7 +2716,7 @@ describe('generateCliConfigs', () => {
       resolver: 'pencil',
       status: 'resolved',
       command: explicitBin,
-      args: ['--app', 'vscode'],
+      args: ['--app', 'visual_studio_code'],
     });
   });
 

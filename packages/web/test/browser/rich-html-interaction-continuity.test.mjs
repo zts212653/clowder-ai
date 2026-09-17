@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
+import { registerScriptContentRegression } from './html-widget-script-content.cases.mjs';
 import {
   CLI_SIGNATURE,
   createContinuityHarness,
@@ -11,6 +12,7 @@ const { activeWidget, openFixture } = harness;
 
 before(harness.start);
 after(harness.stop);
+registerScriptContentRegression(harness);
 
 test('real ChatContainer keeps the reading viewport stable when HTML disclosure changes height', async () => {
   const page = await openFixture();

@@ -4,12 +4,12 @@ related_features: [F133, F139, F141, F168, F280]
 topics: [github, conflict-detection, review-feedback, pr-signals, automation]
 doc_kind: spec
 created: 2026-03-26
-tips_exempt: "Renewed 2026-08-27 for public-link projection only; the agent-facing tracking policy adds no separate user capability."
+tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; the agent-facing tracking policy adds no separate user capability."
 ---
 
 # F140: GitHub PR Signals — 冲突检测 + Review Feedback 全来源感知
 
-> ## ⛔ 契约冻结（2026-07-29，operator signoff msg `0001785311364054-000054-656d056c`）
+> ## ⛔ 契约冻结（2026-07-29，operator signoff msg `private-source-id`）
 >
 > **本 Feature 的 wake 契约已移交 F280 Unified Wait Contract。**
 > F140 从此不再接受新的 post-completion 补丁——下面那串从 2026-05-07 到 2026-07-20 的

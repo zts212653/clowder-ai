@@ -1,7 +1,8 @@
 import { type EvolutionProgramEventV1, type OwnerTruthRefV1, ownerTruthRefV1Schema } from '@cat-cafe/shared';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 export type EvolutionProgramCommandAction =
+  | { type: 'name'; displayName: string }
   | { type: 'pause'; reasonRef: OwnerTruthRefV1 }
   | { type: 'resume'; resumeRef: OwnerTruthRefV1 }
   | {
@@ -28,7 +29,11 @@ export type EvolutionProgramServiceResult =
   | { outcome: 'appended' | 'duplicate'; projection: EvolutionProgramProjectionV1 }
   | { outcome: 'conflict'; actualSequence: number; projection: EvolutionProgramProjectionV1 };
 
-export type EvolutionProgramServiceErrorCode = 'program_not_found' | 'idempotency_collision' | 'invalid_command';
+export type EvolutionProgramServiceErrorCode =
+  | 'program_not_found'
+  | 'idempotency_collision'
+  | 'invalid_command'
+  | 'owner_contract_unavailable';
 
 export class EvolutionProgramServiceError extends Error {
   constructor(
@@ -53,6 +58,8 @@ export function eventForAction(
   occurredAt: string,
 ): EvolutionProgramEventV1 {
   switch (action.type) {
+    case 'name':
+      return { type: 'program_named', displayName: action.displayName };
     case 'pause':
       return { type: 'program_paused', reasonRef: ownerTruthRefV1Schema.parse(action.reasonRef) };
     case 'resume':

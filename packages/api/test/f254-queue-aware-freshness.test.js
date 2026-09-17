@@ -287,7 +287,7 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
       assert.notEqual(result.reason, 'unseen_available');
     });
 
-    it('does not hold on a typed sibling reply whose trigger was already covered by this child', async () => {
+    it('does not rerun for a typed sibling reply while leaving delivery custody to the projection pipeline', async () => {
       const siblingReply = '0000000002-000001-sibling';
       const cursorStore = makeMockCursorStore(msg1);
       const eventLog = { append: mock.fn(async () => {}) };
@@ -295,7 +295,7 @@ describe('F254 Queue-Aware Freshness Gate', async () => {
         {
           id: siblingReply,
           catId: 'fable5',
-          content: 'M1 result that M2 already carried into the current prompt',
+          content: 'M1 result from the same user wave; projection still owns later delivery',
           threadId,
           extra: { causal: { kind: 'invocation_reply', triggerMessageId: 'msg-m1' } },
         },

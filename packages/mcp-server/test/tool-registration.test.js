@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
+import { useInvocationAuth } from './helpers/invocation-auth.js';
 
 const { CANONICAL_TOOL_REGISTRY } = await import('../dist/server-toolsets.js');
 
@@ -155,7 +156,8 @@ describe('MCP Server Tool Registration', () => {
     );
   });
 
-  test('structured action descriptions expose the canonical subjectRef grammar (F177 production friction)', async () => {
+  test('invocation action descriptions expose the canonical subjectRef grammar (F177 production friction)', async (t) => {
+    useInvocationAuth(t);
     const { createServer } = await import('../dist/index.js');
     const server = createServer();
 
@@ -264,7 +266,6 @@ describe('MCP Server Tool Registration', () => {
     const agentKeyUnsafeTools = [
       'cat_cafe_get_pending_mentions',
       'cat_cafe_ack_mentions',
-      'cat_cafe_get_thread_cats',
       'cat_cafe_feat_index',
       'cat_cafe_list_tasks',
       'cat_cafe_update_task',
@@ -282,6 +283,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_propose_session_handoff',
       'cat_cafe_propose_profile_update',
       'cat_cafe_propose_taste',
+      'cat_cafe_propose_eval_repair',
       'cat_cafe_update_bootcamp_state',
       'cat_cafe_bootcamp_env_check',
       'cat_cafe_update_guide_state',
@@ -303,13 +305,17 @@ describe('MCP Server Tool Registration', () => {
   test('agent-key collab allowlist is the route-principal-backed surface', async () => {
     const { AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
     const expected = [
+      'cat_cafe_advance_evolution_program_change',
       'cat_cafe_backfill_events',
+      'cat_cafe_census_legacy_paw_feel_blockers',
       'cat_cafe_cross_post_message',
       'cat_cafe_get_evolution_program',
       'cat_cafe_get_message',
+      'cat_cafe_get_thread_cats',
       'cat_cafe_get_thread_context',
       'cat_cafe_get_workflow_sop',
       'cat_cafe_link_evolution_program_observation',
+      'cat_cafe_link_paw_feel_repair_outcome',
       'cat_cafe_list_events',
       'cat_cafe_list_labels',
       'cat_cafe_list_paw_feel_inbox',
@@ -319,7 +325,6 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_preview_open',
       'cat_cafe_offer_custody',
       'cat_cafe_preview_scheduled_task',
-      'cat_cafe_propose_eval_repair',
       'cat_cafe_publish_verdict',
       'cat_cafe_record_eval_lifecycle',
       'cat_cafe_read_diary',
@@ -328,6 +333,7 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_read_entrusted_work',
       'cat_cafe_list_diaries',
       'cat_cafe_get_person_memory_proposal_status',
+      'cat_cafe_issue_capability_evolution_measurement',
       'cat_cafe_recall_person_relationship',
       'cat_cafe_drill_person_memory',
       'cat_cafe_register_external_runtime_session',
@@ -344,6 +350,12 @@ describe('MCP Server Tool Registration', () => {
       'cat_cafe_triage_paw_feel',
       'cat_cafe_update_evolution_program',
       'cat_cafe_workspace_navigate',
+      'cat_cafe_inspect_office_document',
+      'cat_cafe_read_artifact_review',
+      'cat_cafe_prepare_artifact_review',
+      'cat_cafe_act_artifact_review',
+      'cat_cafe_respond_artifact_review',
+      'cat_cafe_edit_office_document',
     ];
 
     assert.deepEqual([...AGENT_KEY_TOOLS].sort(), expected.sort());
@@ -365,6 +377,21 @@ describe('MCP Server Tool Registration', () => {
     }
 
     assert.deepEqual(offenders, []);
+  });
+
+  test('eval repair proposal is a canonical callback-only resource entry', async () => {
+    const { CANONICAL_TOOL_REGISTRY, AGENT_KEY_TOOLS } = await import('../dist/server-toolsets.js');
+    const definition = CANONICAL_TOOL_REGISTRY.find((candidate) => candidate.name === 'cat_cafe_propose_eval_repair');
+
+    assert.ok(definition);
+    assert.equal(definition.policy.activeState, 'canonical');
+    assert.deepEqual(definition.policy.runtimeProfiles, ['full']);
+    assert.deepEqual(definition.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'resource-entry',
+      admissionRef: 'file:docs/features/F313-analysis-to-outcome-closure-command.md',
+    });
+    assert.equal(AGENT_KEY_TOOLS.has(definition.name), false);
   });
 
   test('deprecated file tools are not registered', async () => {
@@ -485,6 +512,10 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
     const distIndexUrl = new URL('../dist/index.js', import.meta.url).href;
     const script = `
       process.env.CAT_CAFE_READONLY = 'true';
+      delete process.env.CAT_CAFE_INVOCATION_ID;
+      delete process.env.CAT_CAFE_CALLBACK_TOKEN;
+      delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+      delete process.env.CAT_CAFE_DESKTOP_MODE;
       delete process.env.CAT_CAFE_AGENT_KEY_SECRET;
       delete process.env.CAT_CAFE_AGENT_KEY_FILE;
       process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({
@@ -496,6 +527,7 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
       const names = Object.keys(server._registeredTools);
       if (
         !names.includes('cat_cafe_post_message') ||
+        !names.includes('cat_cafe_get_thread_cats') ||
         !names.includes('cat_cafe_get_thread_context') ||
         !names.includes('cat_cafe_workspace_navigate') ||
         !names.includes('cat_cafe_preview_open') ||
@@ -506,7 +538,6 @@ describe('F061 READONLY_ALLOWED_TOOLS whitelist', () => {
         !names.includes('cat_cafe_register_scheduled_task') ||
         !names.includes('cat_cafe_remove_scheduled_task') ||
         names.includes('cat_cafe_create_rich_block') ||
-        names.includes('cat_cafe_get_thread_cats') ||
         names.includes('cat_cafe_list_tasks') ||
         names.includes('cat_cafe_multi_mention') ||
         names.includes('cat_cafe_hold_ball') ||

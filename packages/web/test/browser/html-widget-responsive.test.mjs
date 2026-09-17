@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { createNextDevTestEnvironment } from './next-dev-test-environment.mjs';
 
 await import('tsx/esm');
 const { ImageExporter } = await import('../../../api/src/services/ImageExporter.ts');
@@ -71,9 +72,10 @@ test(
   async (t) => {
     const port = await findFreePort();
     const output = [];
+    const nextDev = await createNextDevTestEnvironment('html-widget-responsive');
     const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
       cwd: WEB_ROOT,
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'development' },
+      env: nextDev.env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     server.stdout.on('data', (chunk) => output.push(chunk.toString()));
@@ -362,6 +364,7 @@ test(
       await exporter.close();
       if (browser) await browser.close();
       await stopServer(server);
+      await nextDev.cleanup();
     }
   },
 );

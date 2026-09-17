@@ -39,8 +39,10 @@ describe('F284 Workspace entry', () => {
     expect(button?.textContent).toBe('');
     expect(button?.querySelector('[data-testid="workspace-activity-badge"]')).not.toBeNull();
     expect(button?.className).not.toContain('hidden');
+    expect(button?.className).toContain('z-40');
     expect(button?.className).toContain('bg-transparent');
     expect(button?.className).not.toContain('border');
+    expect(button?.dataset.clientInteractive).toBe('true');
   });
 
   it('keeps one Workspace recall control instead of a second status entry in the header', async () => {

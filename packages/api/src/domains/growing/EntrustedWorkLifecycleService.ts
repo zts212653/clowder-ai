@@ -19,6 +19,7 @@ import {
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import type { EntrustedWorkTerminalClosure, ITaskStore } from '../cats/services/stores/ports/TaskStoreContract.js';
+import { containsEntrustedWorkTimeSignal } from './EntrustedWorkSourceSignals.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 
@@ -79,24 +80,35 @@ export class EntrustedWorkLifecycleError extends Error {
 export interface EntrustedWorkLifecycleOptions {
   readonly now?: () => number;
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
+  readonly onChanged?: (ownerUserId: string) => void;
+}
+
+export interface EntrustedWorkAdmissionSourceContext {
+  readonly sourceRef: string;
+  readonly content: string;
 }
 
 export class EntrustedWorkLifecycleService {
   private readonly now: () => number;
   private readonly custodyGrantRegistry: F310CustodyGrantRegistryV1;
+  private readonly onChanged: EntrustedWorkLifecycleOptions['onChanged'];
 
   constructor(
     private readonly tasks: ITaskStore,
     options: EntrustedWorkLifecycleOptions = {},
   ) {
     this.now = options.now ?? Date.now;
+    this.onChanged = options.onChanged;
     const registry = options.custodyGrantRegistry ?? PHASE_B_INITIAL_CUSTODY_GRANT_REGISTRY;
     this.custodyGrantRegistry = Object.fromEntries(
       Object.entries(registry).map(([grantRef, grant]) => [grantRef, registeredCustodyGrantV1Schema.parse(grant)]),
     );
   }
 
-  async admitOrResume(input: EntrustedWorkAdmissionCommandV1): Promise<CustodyAdmissionResultV1> {
+  async admitOrResume(
+    input: EntrustedWorkAdmissionCommandV1,
+    sourceContext?: EntrustedWorkAdmissionSourceContext,
+  ): Promise<CustodyAdmissionResultV1> {
     const command = entrustedWorkAdmissionCommandV1Schema.parse(input);
     if (!command.admission.intendedOutcome) {
       return {
@@ -112,6 +124,26 @@ export class EntrustedWorkLifecycleService {
     }
     if (command.admission.basis === 'authorized_source') {
       this.assertCurrentAuthorization(command.admission);
+    }
+    const canonicalTimeFacts = [command.time?.businessDeadline, command.time?.reviewBy].filter(
+      (fact): fact is NonNullable<typeof fact> => fact != null,
+    );
+    const sourceRequiresCanonicalTime =
+      (command.admission.timeHints?.length ?? 0) > 0 ||
+      (sourceContext !== undefined && containsEntrustedWorkTimeSignal(sourceContext.content));
+    if (sourceRequiresCanonicalTime && canonicalTimeFacts.length === 0) {
+      return {
+        result: 'needs_clarification',
+        clarificationReason:
+          'Source time requires a canonical businessDeadline or reviewBy before Task can claim custody.',
+      };
+    }
+    const canonicalTimeSourceRefs = sourceContext ? [sourceContext.sourceRef] : command.admission.sourceRefs;
+    if (canonicalTimeFacts.some((fact) => !canonicalTimeSourceRefs.includes(fact.sourceRef))) {
+      return {
+        result: 'needs_clarification',
+        clarificationReason: 'Canonical admission time must cite one of the exact admission source refs.',
+      };
     }
 
     const digest = createHash('sha256').update(command.admission.idempotencyKey).digest('hex');
@@ -147,6 +179,7 @@ export class EntrustedWorkLifecycleService {
       },
       entrustedWork,
     });
+    if (result.kind === 'admitted') this.notifyChanged(result.task);
     return custodyAdmissionResultV1Schema.parse({
       result: result.kind,
       subjectRef: `task:work:${result.task.id}`,
@@ -164,6 +197,7 @@ export class EntrustedWorkLifecycleService {
     });
     switch (result.kind) {
       case 'closed':
+        this.notifyChanged(result.task);
         return result.task;
       case 'not_found':
         throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NOT_FOUND', 'Task not found');
@@ -187,16 +221,18 @@ export class EntrustedWorkLifecycleService {
     const hasTimePatch =
       command.time !== undefined &&
       (Object.hasOwn(command.time, 'businessDeadline') || Object.hasOwn(command.time, 'reviewBy'));
-    if (command.artifactRefs === undefined && !hasTimePatch) {
+    if (command.status === undefined && command.artifactRefs === undefined && !hasTimePatch) {
       throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NO_OP', 'Entrusted-work update has no mutation');
     }
     const result = await this.tasks.updateEntrustedWork(command.taskId, {
       expectedRevision: command.expectedRevision,
+      ...(command.status !== undefined ? { status: command.status } : {}),
       ...(command.time !== undefined ? { time: command.time } : {}),
       ...(command.artifactRefs !== undefined ? { artifactRefs: command.artifactRefs } : {}),
     });
     switch (result.kind) {
       case 'updated':
+        this.notifyChanged(result.task);
         return result.task;
       case 'not_found':
         throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NOT_FOUND', 'Task not found');
@@ -217,9 +253,11 @@ export class EntrustedWorkLifecycleService {
     }
   }
 
-  private assertCurrentAuthorization(
-    admission: Extract<CustodyAdmissionRequestV1, { basis: 'authorized_source' }>,
-  ): void {
+  private notifyChanged(task: TaskItem): void {
+    if (task.userId) this.onChanged?.(task.userId);
+  }
+
+  assertCurrentAuthorization(admission: Extract<CustodyAdmissionRequestV1, { basis: 'authorized_source' }>): void {
     const provenance = admission.authorityProvenance;
     const grant = this.custodyGrantRegistry[provenance.grantRef];
     if (!grant) {

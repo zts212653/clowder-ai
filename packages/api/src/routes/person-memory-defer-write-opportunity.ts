@@ -92,18 +92,22 @@ export async function invalidateDeferredWriteOpportunity(
 ): Promise<void> {
   const lineage = receipt.writeOpportunityLineage;
   if (!lineage) return;
+  if (!deps.writeOpportunityTerminalLedger || !deps.writeOpportunityDeliveryStore) {
+    throw new Error('write opportunity durable invalidation authority unavailable');
+  }
   try {
-    await deps.writeOpportunityTerminalLedger?.recordInvalidated({
+    await deps.writeOpportunityTerminalLedger.recordInvalidated({
       ownerUserId,
       dedupeLineage: lineage.dedupeLineage,
       reason,
       recordedAt: Date.now(),
     });
-    await deps.writeOpportunityDeliveryStore?.purgeLineage(ownerUserId, lineage.dedupeLineage);
+    await deps.writeOpportunityDeliveryStore.purgeLineage(ownerUserId, lineage.dedupeLineage);
   } catch (error) {
     request.log.warn(
       { err: error, dedupeLineage: lineage.dedupeLineage, reason },
       'write opportunity lineage invalidation failed; lineage may remain presentable',
     );
+    throw error;
   }
 }

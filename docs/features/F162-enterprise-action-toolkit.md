@@ -5,7 +5,7 @@ related_decisions: [ADR-029]
 topics: [enterprise-action, wecom-cli, lark-cli, cli-integration, showcase]
 doc_kind: spec
 created: 2026-04-14
-tips_exempt: "2026-08-27 public-link projection only; no enterprise-action capability or user action changed."
+tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; no enterprise-action capability or user action changed."
 ---
 
 # F162: Enterprise Action Toolkit — 官方 CLI 驱动的企业工作流

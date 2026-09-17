@@ -10,9 +10,26 @@ export interface ResolvedCrossThreadCoordination {
   coordination?: CrossThreadCoordination;
   /** Terminal ACK is visible/persistent but must not create another invocation. */
   suppressRouting: boolean;
+  /** Invalid explicit/incoming terminal identity; callers must reject before persistence or routing. */
+  conflict?: CrossThreadCoordinationConflict;
   /** Stable request-provenance key for retries whose persisted id is server-minted. */
   contentDedupCoordinationKey?: 'minted-active-root' | 'minted-terminal-root';
 }
+
+export type CrossThreadCoordinationConflict =
+  | {
+      kind: 'coordination_id_conflict';
+      message: string;
+      incomingCoordinationId: string;
+      explicitCoordinationId: string;
+    }
+  | {
+      kind: 'coordination_subject_conflict';
+      message: string;
+      coordinationId: string;
+      incomingSubjectRef: string;
+      explicitSubjectRef: string;
+    };
 
 interface ResolveInput {
   explicit?: CrossThreadCoordinationInput;
@@ -57,14 +74,41 @@ function resolveExplicitActive(input: ResolveInput, mintId: () => string): Resol
 
 function resolveExplicitTerminal(input: ResolveInput, mintId: () => string): ResolvedCrossThreadCoordination {
   const incoming = input.incoming?.coordination;
+  const explicitId = input.explicit?.id;
+  const incomingSubjectRef = normalizedSubjectRef(incoming?.subjectRef);
+  const explicitSubjectRef = normalizedSubjectRef(input.explicit?.subjectRef);
   // Close the lineage that triggered this invocation. A caller-supplied id may
   // seed a standalone terminal relay, but cannot fork a terminal ACK into a new
-  // routable terminal chain.
-  const usesMintedId = !incoming?.id && !input.explicit?.id;
-  const id = incoming?.id ?? input.explicit?.id ?? mintId();
+  // routable terminal chain. Conflicts fail before persistence instead of
+  // silently terminalizing either lineage.
+  if (incoming?.id && explicitId && incoming.id !== explicitId) {
+    return {
+      suppressRouting: true,
+      conflict: {
+        kind: 'coordination_id_conflict',
+        message: 'Explicit terminal coordination id conflicts with the incoming coordination lineage.',
+        incomingCoordinationId: incoming.id,
+        explicitCoordinationId: explicitId,
+      },
+    };
+  }
+  if (incoming?.id && incomingSubjectRef && explicitSubjectRef && incomingSubjectRef !== explicitSubjectRef) {
+    return {
+      suppressRouting: true,
+      conflict: {
+        kind: 'coordination_subject_conflict',
+        message: 'Explicit terminal coordination subject conflicts with the incoming coordination lineage.',
+        coordinationId: incoming.id,
+        incomingSubjectRef,
+        explicitSubjectRef,
+      },
+    };
+  }
+  const usesMintedId = !incoming?.id && !explicitId;
+  const id = incoming?.id ?? explicitId ?? mintId();
   const isAck =
     incoming?.phase === 'terminal' && id === incoming.id && input.targetThreadId === input.incoming?.sourceThreadId;
-  const subjectRef = normalizedSubjectRef(incoming?.subjectRef) ?? normalizedSubjectRef(input.explicit?.subjectRef);
+  const subjectRef = incomingSubjectRef ?? explicitSubjectRef;
   return {
     coordination: {
       id,

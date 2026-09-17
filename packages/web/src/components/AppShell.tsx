@@ -23,7 +23,7 @@ import { ThreadChatRuntimeProvider } from './thread-chat';
 import { FloatingPresentationSurfaceHost } from './workspace/FloatingPresentationSurfaceHost';
 import { ResizeHandle } from './workspace/ResizeHandle';
 
-const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase'];
+const CHROMELESS_ROUTES = ['/story', '/story-export', '/pixel-brawl', '/showcase', '/dev/f277-attention-preview'];
 
 const SIDEBAR_HIDDEN_ROUTES = [
   '/settings',
@@ -38,6 +38,13 @@ const SIDEBAR_HIDDEN_ROUTES = [
 interface AppShellProps {
   children: React.ReactNode;
 }
+
+// Viewport updates must not replace this boundary's children before it has hydrated.
+const activityRail = (
+  <Suspense fallback={<div className="w-12 flex-shrink-0" aria-hidden="true" />}>
+    <ActivityBar />
+  </Suspense>
+);
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname() ?? '/';
@@ -67,7 +74,6 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   const { isOpen, width, close, handleResize, resetWidth } = useSidebarStore();
   const isDesktop = useIsDesktop();
   const rightPanelMode = useChatStore((state) => state.rightPanelMode);
-  const workspaceMode = useChatStore((state) => state.workspaceMode);
   const routeThreadId = getThreadIdFromPathname(livePathname);
   const isChatRoute = livePathname === '/' || livePathname.startsWith('/thread/');
   const isChromeless = CHROMELESS_ROUTES.some((route) => pathname.startsWith(route));
@@ -87,14 +93,12 @@ function AppShellContent({ children, pathname }: AppShellProps & { pathname: str
   }
 
   const showSidebar = isOpen && isDesktop && !SIDEBAR_HIDDEN_ROUTES.some((r) => pathname.startsWith(r));
-  const workspaceVisible = isChatRoute && rightPanelMode === 'workspace' && (isDesktop || workspaceMode !== 'approval');
+  const workspaceVisible = isChatRoute && rightPanelMode === 'workspace';
 
   return (
     <ThreadChatRuntimeProvider routeThreadId={routeThreadId}>
       <div className="console-shell flex h-screen h-dvh overflow-hidden">
-        <Suspense fallback={<div className="w-12 flex-shrink-0" aria-hidden="true" />}>
-          <ActivityBar />
-        </Suspense>
+        {activityRail}
         {/* Callback-auth snapshot provider: mounted at AppShell level (not chat
           layout) so the zustand store is populated on ALL routes — settings,
           memory, mission, etc. The observability panel and per-cat status dots

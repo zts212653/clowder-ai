@@ -11,6 +11,7 @@ source: clowder-ai#645 docs/design/console-design-system.md
 
 > Clowder AI Console 的视觉语言规范。所有前端组件必须遵循本文档。
 > 参考系：macOS System Settings + Linear + Vercel Dashboard
+> **权威指针（2026-09-04，F056 Phase F）**：颜色 token、字体声音、圆角与密度的**设计意图 / 目标值**真相源是仓库根目录 [`DESIGN.md`](../../DESIGN.md)（Anthropic 暖编辑感 + Linear 精密结构）；当前运行时值仍以 `packages/web/src/app/theme-tokens.css` / `console-tokens.css` 为准，直到 F056 AC-F6 parity 守护落地。本文件只保留 Console 的结构判据与空间映射；视觉方向与 DESIGN.md 冲突处以 DESIGN.md 为准。
 
 ## 1. 设计原则
 

@@ -7,8 +7,12 @@
  * 2. 显式 #execute → execute
  * 3. ≥2 猫且无显式 → ideate (并行独立思考)
  * 4. 1 猫且无显式 → execute (串行执行)
- * 额外: #critique → promptTags (改变思维方式，不改路由)
+ * 额外:
+ * - #critique → promptTags (改变思维方式，不改路由)
+ * - 强托付信号 → skill:custody-recognition (只唤醒政策，不拥有 Task/时间真相)
  */
+
+import { containsEntrustedWorkTimeSignal } from '../../../growing/EntrustedWorkSourceSignals.js';
 
 export type Intent = 'ideate' | 'execute';
 
@@ -31,9 +35,48 @@ export const ROUTE_CONTROL_TAGS = [...INTENT_TAGS, ...PROMPT_TAGS] as const;
 
 const INTENT_TAG_SET = new Set<string>(INTENT_TAGS);
 const PROMPT_TAG_SET = new Set<string>(PROMPT_TAGS);
+const CUSTODY_RECOGNITION_SKILL_TAG = 'skill:custody-recognition';
 
 /** Match #tag patterns in message text */
 const TAG_PATTERN = /#(\w+)/gi;
+
+const ZH_STRONG_CUSTODY =
+  /(?:帮我(?:接住|跟进|跟踪|盯(?:住|着)|负责)|这(?:件|个)事(?:情)?(?:就)?你来|交给你(?:来)?|你来(?:负责|跟进|跟踪|推进|处理))/u;
+const ZH_DELEGATION = /(?:帮我|请你|麻烦你|劳烦你|替我)/u;
+const ZH_DURABLE_OUTCOME =
+  /(?:准备|整理|制作|产出|完成|做完|跟进|跟踪|推进|处理|提交|交付|汇总|梳理|演示|展示|跑通|走通|demo|showcase|清单|方案|报告|手册|回来(?:给我|让我)|给我(?:一份|两个|结果))/iu;
+const ZH_IMPLICIT_FUTURE = /(?:别忘了|不要忘了|记得|之后要|回头要|到时候要)/u;
+const ZH_WORK_INTRO = /(?:有(?:个|件|一件)?(?:活(?:儿)?|任务|工作|事情?)|(?:这个|这件)(?:活(?:儿)?|任务|工作|事情?))/u;
+
+const EN_STRONG_CUSTODY =
+  /\b(?:take (?:this|it) (?:over|on)|own (?:this|the work)|you (?:handle|track|follow up on)|leave (?:this|it) (?:with|to) you)\b/i;
+const EN_DELEGATION = /\b(?:could you|can you|please|i need you to|would you)\b/i;
+const EN_DURABLE_OUTCOME =
+  /\b(?:prepare|deliver|finish|complete|follow up|track|draft|compile|put together|demo|showcase|present|send me|come back with)\b/i;
+const EN_IMPLICIT_FUTURE = /\b(?:don't forget|do not forget|remember to|later (?:we|i) need to)\b/i;
+const EN_WORK_INTRO = /\b(?:there(?:'s| is) (?:a )?(?:task|job|piece of work)|(?:a|one) (?:task|job|piece of work))\b/i;
+
+function shouldWakeCustodyRecognition(message: string): boolean {
+  if (ZH_STRONG_CUSTODY.test(message) || EN_STRONG_CUSTODY.test(message)) return true;
+
+  const hasTimeSignal = containsEntrustedWorkTimeSignal(message);
+  const explicitTimeBound =
+    ((ZH_DELEGATION.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||
+      (EN_DELEGATION.test(message) && EN_DURABLE_OUTCOME.test(message))) &&
+    hasTimeSignal;
+  if (explicitTimeBound) return true;
+
+  const introducedTimeBoundWork =
+    ((ZH_WORK_INTRO.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||
+      (EN_WORK_INTRO.test(message) && EN_DURABLE_OUTCOME.test(message))) &&
+    hasTimeSignal;
+  if (introducedTimeBoundWork) return true;
+
+  return (
+    (ZH_IMPLICIT_FUTURE.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||
+    (EN_IMPLICIT_FUTURE.test(message) && EN_DURABLE_OUTCOME.test(message))
+  );
+}
 
 /** Parse intent and prompt tags from a message */
 export function parseIntent(message: string, targetCatCount: number): IntentResult {
@@ -47,6 +90,10 @@ export function parseIntent(message: string, targetCatCount: number): IntentResu
     } else if (PROMPT_TAG_SET.has(tag)) {
       promptTags.push(tag);
     }
+  }
+
+  if (shouldWakeCustodyRecognition(message)) {
+    promptTags.push(CUSTODY_RECOGNITION_SKILL_TAG);
   }
 
   if (explicitIntent) {

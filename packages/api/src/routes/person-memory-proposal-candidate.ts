@@ -173,7 +173,12 @@ export type PriorCandidateValidation =
   | {
       status: 'ok';
       prior: StoredPersonMemoryCandidate | null;
-      deferredClaimRenewal?: { previousClaimId: string; nextClaimId: string; deltaFingerprint: string };
+      deferredClaimRenewal?: {
+        previousClaimId: string;
+        nextClaimId: string;
+        processorInvocationId: string;
+        deltaFingerprint: string;
+      };
     }
   | { status: 'error'; statusCode: 404 | 409; error: string };
 
@@ -229,6 +234,7 @@ function validateExistingCandidate(
   if (prior.deferredReceiptClaimId !== input.deferredReceiptClaimId) {
     const previousClaimId = prior.deferredReceiptClaimId;
     const nextClaimId = input.deferredReceiptClaimId;
+    const processorInvocationId = input.deferredReceiptProcessorInvocationId;
     const deltaFingerprint = prior.deltaFingerprint;
     const renewable =
       prior.state === 'staged' &&
@@ -236,6 +242,7 @@ function validateExistingCandidate(
       prior.deferredReceiptId !== undefined &&
       previousClaimId !== undefined &&
       nextClaimId !== undefined &&
+      processorInvocationId !== undefined &&
       deltaFingerprint !== undefined;
     if (!renewable) {
       return { status: 'error', statusCode: 409, error: 'deferred_receipt_claim_conflict' };
@@ -246,9 +253,13 @@ function validateExistingCandidate(
       deferredClaimRenewal: {
         previousClaimId,
         nextClaimId,
+        processorInvocationId,
         deltaFingerprint,
       },
     };
+  }
+  if (prior.deferredReceiptProcessorInvocationId !== input.deferredReceiptProcessorInvocationId) {
+    return { status: 'error', statusCode: 409, error: 'deferred_receipt_invocation_conflict' };
   }
   return { status: 'ok', prior };
 }

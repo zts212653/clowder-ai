@@ -1,5 +1,6 @@
 ---
 name: browser-preview
+tips_exempt: Managed preview expiry is an internal lifecycle safety boundary; the existing browser-preview skill and status output already expose the operator-visible behavior.
 description: >
   Hub 内嵌浏览器预览 localhost 应用。
   Use when: 写前端代码、跑 dev server、需要看页面效果、调 UI、operator说"看看效果"。
@@ -29,7 +30,7 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 ### 基础流程（端口发现 → 预览）
 1. **启动 dev server**：交互 Terminal 可直接前台跑；要把页面交给operator跨回合查看时，猫的 invocation/`-p` 会话必须用仓库的 managed launcher：
    `pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]`
-   macOS 上它会把目标直接注册为一次性 user LaunchAgent；普通 detached child、`nohup`、`setsid` 或 PTY 都不算独立托管。
+   macOS 上它会把目标直接注册为一次性 user LaunchAgent；普通 detached child、`nohup`、`setsid` 或 PTY 都不算独立托管。托管预览默认 8 小时自动到期（可用 `--lifetime-seconds N` 缩短，最长 24 小时），避免遗留 watcher 持续制造文件事件。
 2. **Hub 自动检测端口** → 弹出 toast 提示"检测到 localhost:xxxx 启动"
 3. **点击 Open Preview** → 自动打开 browser panel 并加载页面
 4. **也可以手动**：切到 workspace 的 Browser tab，输入 `localhost:port` 按 Go
@@ -73,6 +74,8 @@ Step 3: 读返回的 deliveryStatus，再决定怎么报告
 > **admission ≠ visible**：`allowed: true` 只证明服务端受理了请求。报告"已打开"之前必须看到 `deliveryStatus: "applied"`。
 
 > **running ≠ durable**：同一 invocation 内的 `status: "running"` 只证明当前可达。macOS 只有 `origin: "launchd"` 才证明已经交给用户会话级服务管理；“确实跨回合存活”必须由后续 invocation 的 status/HTTP 探针或operator现场画面确认。
+
+> **durable ≠ immortal**：`status --json` 的 `expiresAt` 是硬截止时间。展示提前结束就显式 `stop`；确需延长时，先停掉旧实例再重新 `start`，不要绕过租约另开后台 watcher。
 
 #### 工具参数
 
@@ -121,6 +124,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 | **送达契约** | 认证 + exact-thread：anonymous → 401；invocation 推导 thread；agent-key 必传 threadId 且校验归属。事件只发射一次到 caller 的 user room（tenant scope，无 preview:global/worktree 广播），回执同房间收集 |
 | **多 Tab** | 同时预览多个 localhost 页面，Tab 切换独立状态；同一事件多 tab 各自回执，服务端聚合取最优（applied > blocked > queued，skipped 不参评） |
 | **进程来源** | `preview:process status --json` 返回 `origin`。macOS 的 `launchd` 是跨 invocation 托管；其他平台的 `detached` 只保证 launcher 退出后继续运行，宿主 supervisor 是否回收仍需外部 service manager 证明 |
+| **生命周期** | 每个 managed preview 都必须返回 `expiresAt`；默认 8 小时、最长 24 小时，到期后 launcher 会 TERM→KILL 自己拥有的进程组。长期展示要显式续开，不允许无限 watcher |
 
 ## 什么时候主动用
 
@@ -129,6 +133,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
 - invocation/`-p` 中启动的 dev server → 必须走 `preview:process`，并在报告中同时给出 status 与 origin；不能把 `running/detached` 写成跨回合已存活
+- 跨回合展示 → 同时检查 `expiresAt`；任务结束或不再展示时执行同一 cwd/port 的 `preview:process stop`
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看
 - 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `../.cat-cafe-shared-refs/evidence-output-contract.md`）

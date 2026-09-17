@@ -59,6 +59,15 @@ function ensureBrowserTestArtifacts() {
   console.log('[browser-test] building the Collective Service artifact');
   run('pnpm', ['--filter', '@cat-cafe/collective-service', 'build']);
 
+  // F277 exercises the real Group writer against synthetic owner data.
+  // The canonical build wrapper reuses only a verified prepared API artifact.
+  console.log('[browser-test] preparing the API writer artifact');
+  run('pnpm', ['--filter', '@cat-cafe/api', 'build']);
+
+  // F309 invokes the compiled MCP handlers from an independent authenticated process.
+  console.log('[browser-test] preparing the MCP document tools artifact');
+  run('pnpm', ['--filter', '@cat-cafe/mcp-server', 'build']);
+
   if (webBuild.fresh) {
     console.log(`[browser-test] reusing Web production artifact: ${webBuild.reason}`);
     return;

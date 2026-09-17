@@ -245,7 +245,7 @@ close_gate_report:
 
   cvo_signoff:
     date: 2026-05-19
-    source: "thread event 0001779184326808-000249-989c2493"
+    source: "thread event private-source-id"
     decisions:
       - "Approved deleting/reclassifying legacy AC-B2, AC-C2, and AC-C3, with the condition that the report aligns to current implementation."
       - "Confirmed controlled YOLO timeout boundary after implementation check: the 600s default applies per Antigravity run_command tool execution, not to the whole cascade or a group of tools."

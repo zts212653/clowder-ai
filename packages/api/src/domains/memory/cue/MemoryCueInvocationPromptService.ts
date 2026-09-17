@@ -1,9 +1,12 @@
 import { createHash } from 'node:crypto';
 import type {
+  AcceptedDecisionRequiredOpportunityV1,
   ApprovedTasteInvokedOpportunityV1,
   DeliveryDecisionOpportunityV1,
   JudgmentSurfaceEnteredOpportunityV1,
+  OwnedSeedAvailableOpportunityV1,
   ProfileRevisionAvailableOpportunityV1,
+  ProjectSourceRequiredOpportunityV1,
   RecallOpportunityV1,
   RecallScopeV1,
   RecentEventAvailableOpportunityV1,
@@ -53,12 +56,31 @@ export type MemoryCueOpportunitySeed =
       producer: 'event_memory';
       occurredAt: number;
       payload: RecentEventAvailableOpportunityV1['payload'];
+    }
+  | {
+      kind: 'accepted_decision_required';
+      producer: 'owner_message';
+      occurredAt: number;
+      payload: AcceptedDecisionRequiredOpportunityV1['payload'];
+    }
+  | {
+      kind: 'project_source_required';
+      producer: 'task_context';
+      occurredAt: number;
+      payload: ProjectSourceRequiredOpportunityV1['payload'];
+    }
+  | {
+      kind: 'owned_seed_available';
+      producer: 'present_loop';
+      occurredAt: number;
+      payload: OwnedSeedAvailableOpportunityV1['payload'];
     };
 
 export interface ResolveMemoryCueInvocationPromptInput {
   seeds: readonly MemoryCueOpportunitySeed[];
   serverScope: RecallScopeV1;
   now: number;
+  consumerCatId: string;
 }
 
 export interface MemoryCueInvocationPromptResolution {
@@ -106,6 +128,12 @@ function bindSeed(seed: MemoryCueOpportunitySeed, scope: RecallScopeV1): RecallO
       return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
     case 'recent_event_available':
       return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'accepted_decision_required':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'project_source_required':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
+    case 'owned_seed_available':
+      return { ...base, kind: seed.kind, producer: seed.producer, payload: seed.payload };
   }
 }
 
@@ -136,6 +164,7 @@ export class MemoryCueInvocationPromptService implements MemoryCueInvocationProm
         serverScope: input.serverScope,
         invocationState,
         now: input.now,
+        consumerCatId: input.consumerCatId,
         createDrillHandle: (coordinate) => this.deps.createDrillHandle(coordinate),
       });
       if (resolved.promptSegment) {

@@ -9,6 +9,9 @@
 
 Review-Target-ID: {id}
 Branch: {branch-name}
+Review-Subject-Ref: {pr:owner/repo#N | task:taskId}
+Accepted-Source-Ref: {docs/features/F*.md | threadId#messageId}
+Accepted-Revision: {full Git OID | immutable source message id}
 
 ## What
 {改了什么、核心变更}
@@ -62,6 +65,10 @@ Total findings: {N} ({P1} P1, {P2} P2, {P3} P3)
 ## Next Action
 {希望 reviewer 做什么}
 
+Reviewer 回传 ordinary durable A2A verdict 时，必须原样携带上面的 `Review-Subject-Ref`、
+`Accepted-Source-Ref` 与 `Accepted-Revision`，并同时给出 typed `localReviewVerdict`、exact
+`reviewedHeadSha` 和 replay-safe `clientMessageId`。source 正文不复制到 review artifact。
+
 ## Review Sandbox（必填）
 - Path: `/tmp/cat-cafe-review/{review-target-id}/{reviewer-handle}`
 - Start Command: `pnpm review:start`（或等价命令）
@@ -104,8 +111,8 @@ pnpm --filter @cat-cafe/api test       # X passed, 0 failed
 pnpm --filter @cat-cafe/web test       # X passed, 0 failed
 pnpm -r --if-present run build         # 成功
 
-# Full code gate (multi-file code change 必跑，per opensource-ops Rule 12 + feedback #2347)
-pnpm gate                              # ✓ pre-merge-check.sh 全套
+# Canonical gate entry（机器按 diff/base/receipt 选择 targeted/full；语义风险只能用 --risk 加严）
+pnpm gate                              # 记录实际 route 与补充的 targeted/full evidence
 ```
 
 ### 相关文档

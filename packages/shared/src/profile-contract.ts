@@ -4,8 +4,25 @@
  */
 
 export const CURRENT_RELATIONSHIP_PROFILE_URI = 'cat-cafe-profile://relationship/current' as const;
+/** Phase E: canonical URI for the owner-wide shared corpus. */
+export const CURRENT_CORPUS_PROFILE_URI = 'cat-cafe-profile://corpus/current' as const;
 export const DEFAULT_PROFILE_USER_ID = 'default-user';
 export const USER_CAPSULE_CHAR_LIMIT = 300;
+
+/** Phase E: fixed relative path for the shared corpus file inside profiles/<userId>/. */
+export const PROFILE_CORPUS_RELATIVE_PATH = 'corpus/shared-facts.md' as const;
+
+/** Phase E: returns the fixed corpus relative path (pure function for symmetry with relationshipPrimerRelativePath). */
+export function profileCorpusRelativePath(): string {
+  return PROFILE_CORPUS_RELATIVE_PATH;
+}
+
+/**
+ * Phase E: profileRevisionOf lives in ./profile-revision.ts (server-only, node:crypto).
+ * Extracted because memory-cue.ts → this file is in the barrel's transitive closure,
+ * and collective-client bundles for platform:'browser' which can't resolve node:crypto.
+ * Import from '@cat-cafe/shared/profile-revision' for INV-4 canonical revision function.
+ */
 
 const PROFILE_PATH_SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MAX_PROFILE_USER_ID_LENGTH = 512;

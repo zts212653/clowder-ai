@@ -179,7 +179,8 @@ export const CLASSIFIER_PATTERNS: Array<{ code: CliErrorReasonCode; regex: RegEx
   // CC says "(not your usage limit)", trust the source's explicit negation.
   {
     code: 'server_overloaded',
-    regex: /(temporarily limiting requests|not your usage limit|server is (overloaded|busy)|\b529\b|\bOverloaded\b)/i,
+    regex:
+      /(temporarily limiting requests|not your usage limit|server is (overloaded|busy)|Selected model is at capacity\.|\b529\b|\bOverloaded\b)/i,
   },
   {
     code: 'quota_exceeded',

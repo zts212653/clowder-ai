@@ -43,7 +43,6 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     telemetry: signalObservationTelemetry,
   });
   const dispatchSignalAdapter = new RoutingDispatchSignalAdapter({
-    signalStore,
     automaticSignalService,
     telemetry: signalObservationTelemetry,
   });
@@ -52,7 +51,10 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
   const resolver = new RoutingContextResolver({
     signalStore,
     preferenceStore,
-    profileRevisionSource: new DossierCapabilityProfileRevisionSource({ projectRoot: options.projectRoot }),
+    profileRevisionSource: new DossierCapabilityProfileRevisionSource({
+      projectRoot: options.projectRoot,
+      dossierMode: 'optional',
+    }),
   });
   const readService = new RoutingContextReadService({ catalogSource, resolver });
   const promptProjector = new RoutingContextPromptProjector();

@@ -241,7 +241,9 @@ test('F296 B3b-1 replaces the factory projection after a stale-session generatio
         };
       },
       promptMessageIds: ['msg-stale-route'],
-      onPromptMessagesExposed: async (input) => exposed.push(...input.messageIds),
+      onPromptMessagesExposed: async (input) => {
+        exposed.push(...input.messageIds);
+      },
       userId: 'owner-1',
       ownerAuthProvenance: 'unknown',
       threadId: 'thread-f296',

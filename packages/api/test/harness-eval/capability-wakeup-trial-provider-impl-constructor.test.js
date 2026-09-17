@@ -17,6 +17,7 @@ describe('CapabilityWakeupTrialProviderImpl constructor fail-closed (砚砚 R1 Q
       () =>
         new CapabilityWakeupTrialProviderImpl({
           transcriptReader: {},
+          promptReader: {},
           toolEventLog: {},
           skillLoadEventLog: {},
         }),
@@ -29,10 +30,24 @@ describe('CapabilityWakeupTrialProviderImpl constructor fail-closed (砚砚 R1 Q
       () =>
         new CapabilityWakeupTrialProviderImpl({
           sessionStore: {},
+          promptReader: {},
           toolEventLog: {},
           skillLoadEventLog: {},
         }),
       /missing required port.*transcriptReader/i,
+    );
+  });
+
+  it('throws when promptReader missing', () => {
+    assert.throws(
+      () =>
+        new CapabilityWakeupTrialProviderImpl({
+          sessionStore: {},
+          transcriptReader: {},
+          toolEventLog: {},
+          skillLoadEventLog: {},
+        }),
+      /missing required port.*promptReader/i,
     );
   });
 
@@ -42,6 +57,7 @@ describe('CapabilityWakeupTrialProviderImpl constructor fail-closed (砚砚 R1 Q
         new CapabilityWakeupTrialProviderImpl({
           sessionStore: {},
           transcriptReader: {},
+          promptReader: {},
           skillLoadEventLog: {},
         }),
       /missing required port.*toolEventLog/i,
@@ -54,6 +70,7 @@ describe('CapabilityWakeupTrialProviderImpl constructor fail-closed (砚砚 R1 Q
         new CapabilityWakeupTrialProviderImpl({
           sessionStore: {},
           transcriptReader: {},
+          promptReader: {},
           toolEventLog: {},
         }),
       /missing required port.*skillLoadEventLog/i,

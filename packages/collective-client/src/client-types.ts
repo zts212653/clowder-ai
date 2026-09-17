@@ -1,8 +1,18 @@
-import type { CollectiveEventEnvelope, CollectivePairingIntent, CollectiveTarget } from '@cat-cafe/shared';
+import type {
+  CollectiveEventEnvelope,
+  CollectiveLocation,
+  CollectivePairingIntent,
+  CollectiveParticipant,
+  CollectiveRecipient,
+  CollectiveTarget,
+} from '@cat-cafe/shared';
+
+export type { GitHubAppManifestBeginResult } from './github-app-manifest.js';
 
 export interface CollectiveMeta {
   readonly serviceInstanceId: string;
   readonly bootstrapNeeded: boolean;
+  readonly onboardingComplete: boolean;
   readonly clientBuildId: string;
 }
 
@@ -36,6 +46,7 @@ export interface HumanAuthProviderStatus {
   readonly id: 'github';
   readonly ready: boolean;
   readonly reason?: string;
+  readonly setupSupported?: boolean;
 }
 
 export interface HumanAuthBeginResult {
@@ -43,7 +54,10 @@ export interface HumanAuthBeginResult {
 }
 
 export interface ClientTarget {
-  readonly target: CollectiveTarget;
+  readonly target?: CollectiveTarget;
+  readonly location?: CollectiveLocation;
+  readonly recipient?: CollectiveRecipient;
+  readonly workRequest?: 'entrust';
   readonly replyToEventId?: string;
 }
 
@@ -77,10 +91,17 @@ export interface ClientSnapshot {
   readonly collective?: CollectiveMembership;
   readonly providers: readonly HumanAuthProviderStatus[];
   readonly events: readonly CollectiveEventEnvelope[];
+  readonly participants?: readonly CollectiveParticipant[];
   readonly connection: 'online' | 'offline';
   readonly delivery: DeliveryState;
   readonly notice?: string;
   readonly error?: string;
 }
 
-export type { CollectiveEventEnvelope, CollectiveTarget };
+export type {
+  CollectiveEventEnvelope,
+  CollectiveTarget,
+  CollectiveLocation,
+  CollectiveRecipient,
+  CollectiveParticipant,
+};

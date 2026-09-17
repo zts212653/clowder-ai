@@ -6,7 +6,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { checkCapabilityTipsForRepo } from './check-capability-tips.mjs';
+import { checkCapabilityTipsForRepo, isContributionRelevantFile } from './check-capability-tips.mjs';
 import {
   candidateReferenceStatus,
   isCoveredByPublicExport,
@@ -186,12 +186,34 @@ export function checkCapabilityTipExportCoverage(repoRoot = defaultRepoRoot, opt
   return { ok: errors.length === 0, errors };
 }
 
+function isCanonicalProvenanceOnlyChange(repoRoot, baseRef, filePath) {
+  // Only prose paths already governed by contribution coverage qualify.
+  // Guide YAML and runtime identities do not share this export transform.
+  if (!filePath.endsWith('.md') || !isContributionRelevantFile(filePath)) return false;
+  const baseline = readGitFile(repoRoot, baseRef, filePath);
+  const candidatePath = resolve(repoRoot, filePath);
+  if (baseline === null || !existsSync(candidatePath)) return false;
+  // Match the approved outbound provenance transform, never general whitespace
+  // or wording normalization. Any extra authored byte keeps coverage mandatory.
+  const projected = baseline
+    .replace(/\b[0-9]{16,}-[0-9]{6,}-[a-f0-9]{8}\b/g, 'private-source-id')
+    .replace(/\bthread_(?=[a-z0-9_]*[0-9])[a-z0-9_]{8,}\b/g, '[thread-id]');
+  return projected !== baseline && projected === readFileSync(candidatePath, 'utf8');
+}
+
 export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {}) {
   const packageClosure = checkPublicPackageScriptClosure(repoRoot);
   const tipReferenceRegressions = checkCapabilityTipReferenceRegressions(repoRoot, options);
   const tipExportCoverage = checkCapabilityTipExportCoverage(repoRoot, options);
+  const baseRef = options.baseRef ?? 'HEAD';
+  const provenanceOnlyChanges = [];
+  const changedFiles = (options.changedFiles ?? []).filter((filePath) => {
+    if (!isCanonicalProvenanceOnlyChange(repoRoot, baseRef, filePath)) return true;
+    provenanceOnlyChanges.push(filePath);
+    return false;
+  });
   const capabilityTips = checkCapabilityTipsForRepo(repoRoot, {
-    changedFiles: options.changedFiles ?? [],
+    changedFiles,
     baseRef: options.baseRef ?? 'HEAD',
   });
   const errors = [
@@ -201,7 +223,7 @@ export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {
     ...capabilityTips.errors,
   ];
   const warnings = capabilityTips.warnings ?? [];
-  return { ok: errors.length === 0, errors, warnings };
+  return { ok: errors.length === 0, errors, warnings, provenanceOnlyChanges };
 }
 
 function parseArgs(argv) {

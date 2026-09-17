@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import net from 'node:net';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { probePort, processGroupExists, waitForPort, waitForProcessGroupExit } from './lib/preview-process-runtime.mjs';
 import {
   launchDetached,
   launchWithLaunchd,
@@ -21,10 +21,13 @@ const DEFAULT_RECOVERY_TIMEOUT_MS = 20_000;
 const STOP_TERM_GRACE_MS = 3_000;
 const STOP_KILL_GRACE_MS = 1_000;
 const LAUNCHD_LABEL_PREFIX = 'com.catcafe.preview';
+const DEFAULT_LIFETIME_SECONDS = 8 * 60 * 60;
+const MAX_LIFETIME_SECONDS = 24 * 60 * 60;
+const LEASE_RUNNER_PATH = join(dirname(fileURLToPath(import.meta.url)), 'preview-process-lease-runner.mjs');
 
 function usage() {
   return `Usage:
-  pnpm preview:process start --port PORT --cwd DIR -- COMMAND [ARGS...]
+  pnpm preview:process start --port PORT --cwd DIR [--lifetime-seconds N] -- COMMAND [ARGS...]
   pnpm preview:process status --port PORT --cwd DIR [--json]
   pnpm preview:process stop --port PORT --cwd DIR [--json]`;
 }
@@ -41,7 +44,7 @@ function parseArgs(argv) {
       options.json = true;
       continue;
     }
-    if (arg === '--port' || arg === '--cwd') {
+    if (arg === '--port' || arg === '--cwd' || arg === '--lifetime-seconds') {
       options[arg.slice(2)] = optionArgs[index + 1];
       index += 1;
       continue;
@@ -49,6 +52,15 @@ function parseArgs(argv) {
     throw new Error(`unknown argument: ${arg}`);
   }
   return options;
+}
+
+function resolveLifetimeSeconds(options) {
+  const lifetimeSeconds = Number(options['lifetime-seconds'] ?? DEFAULT_LIFETIME_SECONDS);
+  if (options.action !== 'start') return lifetimeSeconds;
+  if (!Number.isInteger(lifetimeSeconds) || lifetimeSeconds < 1 || lifetimeSeconds > MAX_LIFETIME_SECONDS) {
+    throw new Error(`--lifetime-seconds must be an integer from 1 to ${MAX_LIFETIME_SECONDS}`);
+  }
+  return lifetimeSeconds;
 }
 
 function resolveConfig(options) {
@@ -60,10 +72,13 @@ function resolveConfig(options) {
   }
   if (!options.cwd) throw new Error('--cwd is required');
   const cwd = resolve(options.cwd);
-  if (!existsSync(cwd) || !statSync(cwd).isDirectory()) throw new Error(`cwd is not a directory: ${cwd}`);
+  if (options.action === 'start' && (!existsSync(cwd) || !statSync(cwd).isDirectory())) {
+    throw new Error(`cwd is not a directory: ${cwd}`);
+  }
   if (options.action === 'start' && options.command.length === 0) {
     throw new Error('start requires a command after --');
   }
+  const lifetimeSeconds = resolveLifetimeSeconds(options);
   const stateDir = resolve(
     process.env.CAT_CAFE_PREVIEW_PROCESS_DIR ?? join(homedir(), '.cat-cafe', 'preview-processes'),
   );
@@ -78,6 +93,7 @@ function resolveConfig(options) {
     logPath: join(stateDir, `${id}.log`),
     launchdLabel: `${LAUNCHD_LABEL_PREFIX}.${id}`,
     plistPath: join(stateDir, `${id}.plist`),
+    lifetimeSeconds,
   };
 }
 
@@ -99,54 +115,6 @@ function readRecord(config) {
 
 function ownsManagedProcess(config, record) {
   return record?.origin === 'launchd' ? ownsLaunchdProcess(config, record) : ownsProcess(record);
-}
-
-function processGroupExists(record) {
-  if (process.platform === 'win32') return ownsProcess(record);
-  const processes = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8' });
-  if (processes.status === 0) {
-    return processes.stdout.split('\n').some((line) => {
-      const [processGroupId, state] = line.trim().split(/\s+/, 2);
-      return Number(processGroupId) === record.pid && state && !state.startsWith('Z');
-    });
-  }
-  try {
-    process.kill(-record.pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === 'EPERM';
-  }
-}
-
-function probePort(port, timeoutMs = 250) {
-  return new Promise((resolveProbe) => {
-    const socket = net.createConnection({ host: '127.0.0.1', port });
-    const finish = (reachable) => {
-      socket.destroy();
-      resolveProbe(reachable);
-    };
-    socket.setTimeout(timeoutMs, () => finish(false));
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-  });
-}
-
-async function waitForPort(port, expected, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  do {
-    if ((await probePort(port)) === expected) return true;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  } while (Date.now() < deadline);
-  return false;
-}
-
-async function waitForProcessGroupExit(record, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  do {
-    if (!processGroupExists(record)) return true;
-    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  } while (Date.now() < deadline);
-  return !processGroupExists(record);
 }
 
 function killOwnedGroup(record, signal, ownershipAlreadyProven = false) {
@@ -190,6 +158,7 @@ function reportManagedStatus(config, status, record) {
     pid: record.pid,
     origin: record.origin ?? 'detached',
     logPath: record.logPath,
+    expiresAt: record.expiresAt,
   });
 }
 
@@ -247,7 +216,13 @@ async function start(config) {
   if (await handleExistingStart(config, existing)) return;
   rmSync(config.recordPath, { force: true });
   mkdirSync(config.stateDir, { recursive: true, mode: 0o700 });
-  const processHandle = process.platform === 'darwin' ? await launchWithLaunchd(config) : await launchDetached(config);
+  const expiresAt = new Date(Date.now() + config.lifetimeSeconds * 1_000).toISOString();
+  const launchConfig = {
+    ...config,
+    command: [process.execPath, LEASE_RUNNER_PATH, '--expires-at', expiresAt, '--', ...config.command],
+  };
+  const processHandle =
+    process.platform === 'darwin' ? await launchWithLaunchd(launchConfig) : await launchDetached(launchConfig);
   const record = {
     version: RECORD_VERSION,
     id: config.id,
@@ -256,6 +231,7 @@ async function start(config) {
     command: config.command,
     ...processHandle,
     startedAt: new Date().toISOString(),
+    expiresAt,
     logPath: config.logPath,
   };
   writeRecord(config, record);
@@ -278,6 +254,7 @@ async function status(config) {
             pid: result.record.pid,
             origin: result.record.origin ?? 'detached',
             logPath: result.record.logPath,
+            expiresAt: result.record.expiresAt,
           }
         : {}),
     },

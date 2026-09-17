@@ -5,7 +5,6 @@ import type {
   ActionSuccessorCommitOutcomeResult,
   ActionSuccessorExternalReviewRecoveryStoreResult,
   ActionSuccessorLeaseStore,
-  ActionSuccessorLocalReviewRecoveryStoreResult,
   ActionSuccessorOutputPreflightResult,
 } from './ActionSuccessorLeaseStore.js';
 import {
@@ -13,10 +12,6 @@ import {
   recoverActiveExternalReviewVerdict,
 } from './action-successor-external-review-recovery-state-machine.js';
 import { ActionSuccessorKeys } from './action-successor-keys.js';
-import {
-  type RecoverActiveLocalReviewVerdictInput,
-  recoverActiveLocalReviewVerdict,
-} from './action-successor-local-review-recovery-state-machine.js';
 import { preflightActionSuccessorOutputInRedis } from './action-successor-output-preflight.js';
 import { parseActionSubjectTerminal, parseActionSuccessorLease } from './action-successor-redis-codecs.js';
 import {
@@ -37,6 +32,7 @@ import {
   claimActionSuccessor,
   commitActionCompletionVerdict,
   continueActionSuccessorFreshRevision,
+  isRecoverableActionSuccessorReturn,
   type MarkActionSuccessorReturnDeliveredResult,
   markActionSuccessorReturnDelivered,
   recordActionCompletionCandidate,
@@ -50,7 +46,11 @@ import {
 const MAX_CAS_ATTEMPTS = 20;
 
 function isPendingReturn(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
-  return lease?.returnDeliveryState === 'pending' || lease?.returnDeliveryState === 'overdue';
+  return Boolean(
+    lease &&
+      isRecoverableActionSuccessorReturn(lease) &&
+      (lease.returnDeliveryState === 'pending' || lease.returnDeliveryState === 'overdue'),
+  );
 }
 
 function isPendingDispatch(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
@@ -189,22 +189,6 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
     }
     throw new Error(`action successor commit CAS exhausted: ${leaseId}`);
-  }
-
-  async recoverLocalReviewVerdict(
-    leaseId: string,
-    input: RecoverActiveLocalReviewVerdictInput,
-  ): Promise<ActionSuccessorLocalReviewRecoveryStoreResult> {
-    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
-      const current = await this.require(leaseId);
-      const result = recoverActiveLocalReviewVerdict(current, input);
-      if (result.outcome === 'replayed') return result;
-      if (result.outcome !== 'recovered') return result;
-      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
-      if (committed === 'written') return result;
-      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
-    }
-    throw new Error(`action successor local-review recovery CAS exhausted: ${leaseId}`);
   }
 
   async recoverExternalReviewVerdict(

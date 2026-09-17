@@ -18,12 +18,18 @@ import { setPendingCrossPostScroll } from '@/utils/crosspost-scroll-target';
 import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 import { CatAvatar } from './CatAvatar';
 import { CliDiagnosticsPanel, isKnownReason } from './CliDiagnosticsPanel';
+import { CloudBindingRecoveryCard } from './CloudBindingRecoveryCard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ConnectorBubble } from './ConnectorBubble';
 import { ContentBlocks } from './ContentBlocks';
 import { CopyIdButton } from './CopyIdButton';
 import { CliOutputBlock } from './cli-output/CliOutputBlock';
 import { toCliEvents } from './cli-output/toCliEvents';
+import {
+  hasCloudBindingRecoveryMetadata,
+  isLinkedCloudBindingRecoveryNotice,
+  projectCloudBindingRecovery,
+} from './cloud-binding-recovery';
 import { DirectionPill } from './DirectionPill';
 import { EvidencePanel } from './EvidencePanel';
 import { GovernanceBlockedCard } from './GovernanceBlockedCard';
@@ -41,6 +47,8 @@ import { BriefingCard } from './rich/BriefingCard';
 import type { CardConfirmationEntry } from './rich/CardBlock';
 import { CustodyOfferCard } from './rich/CustodyOfferCard';
 import { RichBlocks } from './rich/RichBlocks';
+import { RoutingPreflightActions } from './routing-context/RoutingPreflightActions';
+import { SubexecutionActivity } from './SubexecutionActivity';
 import { SummaryCard } from './SummaryCard';
 import { SystemNoticeBar } from './SystemNoticeBar';
 import { ThinkingContent } from './ThinkingContent';
@@ -168,6 +176,7 @@ interface ChatMessageProps {
 function needsTimelineProjection(message: ChatMessageType): boolean {
   return Boolean(
     message.extra?.queueReceipt ||
+      hasCloudBindingRecoveryMetadata(message) ||
       message.extra?.turnExecution ||
       message.extra?.auxiliaryTurnExecutions?.length ||
       (message.source?.connector === 'hold-ball' && typeof message.source.meta?.taskId === 'string') ||
@@ -221,6 +230,7 @@ export const ChatMessage = memo(function ChatMessage({
   const isSystem = message.type === 'system';
   const isSummary = message.type === 'summary';
   const isConnector = message.type === 'connector';
+  const cloudBindingRecovery = isUser ? projectCloudBindingRecovery(message, threadMessages) : undefined;
   const projectedSystemContent = message.extra?.systemInfo
     ? ((
         formatVisibleSystemInfo(
@@ -314,6 +324,7 @@ export const ChatMessage = memo(function ChatMessage({
       return candidate.id < message.id;
     });
   const freshnessNotice = getFreshnessNotice(message);
+  const subexecutionEvents = message.metadata?.subexecutionEvents ?? [];
   // Fetch optimization only: the API reuses the canonical parser and decides
   // whether this exact message owns a signal. Never use this sentinel as intake.
   const showPawFeelDisposition =
@@ -514,6 +525,9 @@ export const ChatMessage = memo(function ChatMessage({
               </span>
             )}
             {projectedSystemContent}
+            {message.extra?.systemInfo?.payload.type === 'routing_preflight' && (
+              <RoutingPreflightActions payload={message.extra.systemInfo.payload} />
+            )}
             {freshnessClosureRecordedAt !== undefined && (
               <span className="ml-2 text-xs opacity-75">
                 {isLegacyFreshnessClosure ? '历史责任 · ' : '记录于 '}
@@ -553,6 +567,7 @@ export const ChatMessage = memo(function ChatMessage({
 
   if (isConnector && message.source) {
     if (isConnectorSystemNotice(message)) {
+      if (isLinkedCloudBindingRecoveryNotice(message, threadMessages)) return null;
       return <SystemNoticeBar message={message} />;
     }
     return <ConnectorBubble message={message} threadId={currentThreadId} timelineMessages={threadMessages} />;
@@ -721,6 +736,15 @@ export const ChatMessage = memo(function ChatMessage({
         ) : (
           <CollapsibleMarkdown content={message.content} disclosureKey={bodyDisclosureKey} />
         )}
+        {cloudBindingRecovery && renderThreadId ? (
+          <CloudBindingRecoveryCard
+            threadId={renderThreadId}
+            sourceMessageId={message.id}
+            targetCatId={cloudBindingRecovery.targetCatId}
+            attemptId={cloudBindingRecovery.attemptId}
+            deliveryStatus={cloudBindingRecovery.deliveryStatus}
+          />
+        ) : null}
         {message.extra?.custodyOfferV1 ? (
           <CustodyOfferCard sourceMessageId={message.id} expectedOffer={message.extra.custodyOfferV1} />
         ) : null}
@@ -747,7 +771,8 @@ export const ChatMessage = memo(function ChatMessage({
     catStyle ||
     message.extra?.supplement ||
     message.extra?.turnExecution ||
-    message.extra?.auxiliaryTurnExecutions?.length ? (
+    message.extra?.auxiliaryTurnExecutions?.length ||
+    subexecutionEvents.length ? (
       <div
         className="mb-1 flex flex-col gap-1 min-w-0"
         data-testid="message-header"
@@ -825,6 +850,15 @@ export const ChatMessage = memo(function ChatMessage({
               title="这条消息补充上方关联的原回复"
             >
               对上条回复的补充
+            </span>
+          )}
+          {subexecutionEvents.length > 0 && (
+            <span
+              data-agent-role="root"
+              className="shrink-0 rounded-full border border-conn-purple-ring bg-conn-purple-bg px-1.5 py-0.5 text-micro font-semibold text-conn-purple-text"
+              title="这条普通回复由主 agent 持有；下方子 agent 记录保留各自身份"
+            >
+              主 agent
             </span>
           )}
           {isWhisper && (
@@ -986,6 +1020,7 @@ export const ChatMessage = memo(function ChatMessage({
           confirmations={confirmations}
         />
       )}
+      <SubexecutionActivity events={subexecutionEvents} />
       {freshnessNotice && !message.extra?.supplement && (
         <div
           data-testid="freshness-supplement-status"

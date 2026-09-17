@@ -3,6 +3,7 @@ export type WorkbenchSurfaceType =
   | 'artifact'
   | 'browser'
   | 'code'
+  | 'content-editor'
   | 'evolution-program'
   | 'file'
   | 'review'
@@ -14,6 +15,7 @@ export type WorkbenchRenderer =
   | 'artifact-view'
   | 'browser-preview'
   | 'code-editor'
+  | 'content-editor'
   | 'evolution-program'
   | 'file-preview'
   | 'review-summary'
@@ -23,6 +25,7 @@ export type WorkbenchRenderer =
 export type WorkbenchObjectKind =
   | 'agent-run'
   | 'artifact'
+  | 'content-editor-session'
   | 'evolution-program'
   | 'file'
   | 'preview-session'
@@ -49,10 +52,14 @@ export interface WorkspaceSurfaceDescriptor {
     owner: string;
     key: string;
   };
+  /** Navigation edge captured when this Artifact is opened from one exact entrusted-work item. */
+  returnTargetRef?: { owner: string; key: string };
   capabilities: {
     split: boolean;
     sidecar: boolean;
     pin: boolean;
+    /** Legacy schema-v2 hint. F307 now gives every mounted Workspace tab the same host-owned attention action. */
+    mainAreaAttention?: true;
     closePolicy: 'detach-host';
     restorePolicy: 'descriptor';
   };
@@ -86,6 +93,8 @@ export interface FocusEntitlement {
   kind: 'user' | 'background';
   reason:
     | 'close-button'
+    | 'bulk-close'
+    | 'collapse-split'
     | 'explicit-split'
     | 'open-from-chat'
     | 'owner-background'
@@ -118,6 +127,8 @@ export type WorkbenchAction =
   | ({ type: 'close-sidecar' } & EntitledAction)
   | ({ type: 'promote-sidecar'; destination: 'tab' | 'split' } & EntitledAction)
   | ({ type: 'close-surface'; surfaceId: string } & EntitledAction)
+  | ({ type: 'close-other-surfaces'; preserveSurfaceId: string } & EntitledAction)
+  | ({ type: 'collapse-split' } & EntitledAction)
   | ({ type: 'restore-surface'; surfaceId: string } & EntitledAction)
   | { type: 'dismiss-activity'; activityId: string };
 

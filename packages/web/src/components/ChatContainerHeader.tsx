@@ -133,17 +133,25 @@ export function PanelToggle({
   statusPanelOpen: boolean;
   hasWorkspaceActivity?: boolean;
 }) {
+  // The button is server-rendered before React owns its click handler. Browser
+  // journeys wait on this marker rather than racing cold client hydration.
+  const [clientInteractive, setClientInteractive] = useState(false);
+  useEffect(() => {
+    setClientInteractive(true);
+  }, []);
+
   return (
     <button
       type="button"
       onClick={onToggleStatusPanel}
-      className={`relative ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition-colors ${
+      className={`relative z-40 ml-1 inline-flex h-8 w-8 items-center justify-center rounded-full bg-transparent transition-colors ${
         statusPanelOpen
           ? 'text-cafe-accent'
           : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
       }`}
       aria-label={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
       title={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
+      data-client-interactive={clientInteractive ? 'true' : 'false'}
       data-testid="workspace-panel-toggle"
     >
       <svg

@@ -120,6 +120,7 @@ describe('accounts routes', () => {
           projectPath: projectDir,
           provider: 'anthropic',
           displayName: 'sponsor-route',
+          clientId: 'anthropic',
           authType: 'api_key',
           baseUrl: 'https://api.route.dev',
           apiKey: 'sk-route',
@@ -175,6 +176,7 @@ describe('accounts routes', () => {
         payload: JSON.stringify({
           projectPath: projectDir,
           displayName: 'Aliased Models',
+          clientId: 'kimi',
           authType: 'api_key',
           modelAliases: { 'kimi-code/k3': 'kimi-k3' },
         }),
@@ -319,6 +321,7 @@ describe('accounts routes', () => {
           displayName: 'My Sponsor',
           authType: 'api_key',
           baseUrl: 'https://api.first.example',
+          clientId: 'anthropic',
           apiKey: 'sk-first',
         }),
       });
@@ -334,6 +337,7 @@ describe('accounts routes', () => {
           displayName: 'My Sponsor',
           authType: 'api_key',
           baseUrl: 'https://api.second.example',
+          clientId: 'anthropic',
           apiKey: 'sk-second',
         }),
       });
@@ -375,6 +379,7 @@ describe('accounts routes', () => {
         payload: JSON.stringify({
           projectPath: projectDir,
           displayName: 'Clearable',
+          clientId: 'anthropic',
           authType: 'api_key',
           apiKey: 'sk-to-clear',
         }),

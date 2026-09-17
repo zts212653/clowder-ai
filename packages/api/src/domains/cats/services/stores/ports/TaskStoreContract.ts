@@ -7,6 +7,10 @@ import type {
   TaskKind,
   UpdateTaskInput,
 } from '@cat-cafe/shared';
+import type {
+  TypedWaitRegistration,
+  TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
 
 export const ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED = 'ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED' as const;
 export const ENTRUSTED_WORK_ADMISSION_CONFLICT = 'ENTRUSTED_WORK_ADMISSION_CONFLICT' as const;
@@ -39,6 +43,7 @@ export type CloseEntrustedWorkStoreResult =
 
 export interface UpdateEntrustedWorkStoreInput {
   readonly expectedRevision: number;
+  readonly status?: Exclude<TaskItem['status'], 'done'>;
   readonly time?: {
     readonly businessDeadline?: EntrustedWorkV1['time']['businessDeadline'] | null;
     readonly reviewBy?: EntrustedWorkV1['time']['reviewBy'] | null;
@@ -151,6 +156,10 @@ export function assertEntrustedWorkGenericUpsertAllowed(task: TaskItem): void {
 
 /** Common server-side contract for in-memory and Redis task stores. */
 export interface ITaskStore {
+  /** Private registration and canonical Task read from one aggregate snapshot. */
+  getWaitRegistration(
+    taskId: string,
+  ): TypedWaitRegistrationSnapshot | null | Promise<TypedWaitRegistrationSnapshot | null>;
   create(input: CreateTaskInput): TaskItem | Promise<TaskItem>;
   get(taskId: string): TaskItem | null | Promise<TaskItem | null>;
   update(taskId: string, input: UpdateTaskInput): TaskItem | null | Promise<TaskItem | null>;
@@ -194,6 +203,8 @@ export interface ITaskStore {
 }
 
 export interface ReplaceAutomationStateIfGenerationInput {
+  /** Producer-owned proof installed atomically with a new await generation; never public Task state. */
+  readonly waitRegistration?: TypedWaitRegistration;
   readonly expectedGeneration: number | null;
   readonly expectedUpdatedAt?: number;
   readonly automationState: AutomationState | undefined;

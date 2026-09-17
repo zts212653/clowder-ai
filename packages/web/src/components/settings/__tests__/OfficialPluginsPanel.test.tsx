@@ -86,6 +86,64 @@ describe('OfficialPluginsPanel', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
+  it('installs and enables GenOffice with its own DOCX scope and no Feishu authorization', async () => {
+    const genoffice = {
+      ...plugin(null),
+      catalogId: 'genoffice-docx',
+      packageName: '@clowder-ai/genoffice-docx',
+      pluginId: 'official.genoffice-docx',
+      version: '0.1.0-alpha.0',
+      availableVersion: '0.1.0-alpha.0',
+      effectiveGrants: [],
+    };
+    const installed = {
+      ...genoffice,
+      instance: {
+        pluginInstanceId: 'pi_genoffice',
+        installedVersion: '0.1.0-alpha.0',
+        packageDigest: digest,
+        lifecycleState: 'installed',
+        configReadiness: 'ready',
+        activationState: 'disabled',
+        runtimeState: 'stopped',
+        lifecycleRevision: 2,
+        installedAt: 1,
+        updatedAt: 2,
+      },
+    };
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockApiFetch.mockImplementation(async (url, init) => {
+      if (url === '/api/plugins/official' && !init) return jsonResponse({ plugins: [genoffice] });
+      if (url.endsWith('/install')) return jsonResponse(installed);
+      if (url.endsWith('/enable'))
+        return jsonResponse({
+          ...installed,
+          instance: {
+            ...installed.instance,
+            activationState: 'enabled',
+            runtimeState: 'healthy',
+            lifecycleRevision: 4,
+          },
+        });
+      return jsonResponse({}, 404);
+    });
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+    expect(container.textContent).toContain('GenOffice');
+    expect(container.textContent).not.toContain('飞书');
+    await act(async () => findButtonByAriaLabel(container, '查看 GenOffice 详情')?.click());
+    expect(container.textContent).toContain('DOCX');
+    await act(async () => findButton(container, '安装')?.click());
+    await flushEffects();
+    expect(mockApiFetch.mock.calls.some(([url]) => String(url).endsWith('/enable'))).toBe(false);
+    expect(findButtonByAriaLabel(container, '启用 GenOffice')).toBeDefined();
+    await act(async () => findButtonByAriaLabel(container, '启用 GenOffice')?.click());
+    await flushEffects();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('DOCX'));
+    expect(confirm.mock.calls.flat().join(' ')).not.toMatch(/飞书|lark-cli/);
+    expect(findButtonByAriaLabel(container, '停用 GenOffice')).toBeDefined();
+  });
+
   it('shows immutable package truth and installs without auto-starting', async () => {
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugins/official' && !init) return jsonResponse({ plugins: [plugin(null)] });
@@ -332,6 +390,17 @@ describe('OfficialPluginsPanel', () => {
 
     expect(container.textContent).toContain('检查 Connector 运行错误与本地凭据目录权限');
     expect(container.textContent).not.toContain('飞书账号授权');
+  });
+
+  it('gives Collective its own connected-nodes identity instead of the generic blocks icon', async () => {
+    mockApiFetch.mockResolvedValue(jsonResponse({ plugins: [collectivePlugin(null)] }));
+
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+
+    const card = findButtonByAriaLabel(container, '查看 Collective Connector 详情');
+    expect(card?.querySelector('[data-hub-icon="collective"]')).not.toBeNull();
+    expect(card?.querySelector('[data-hub-icon="blocks"]')).toBeNull();
   });
 
   it('runs user OAuth as an in-card action and unlocks enable after the QR flow completes', async () => {

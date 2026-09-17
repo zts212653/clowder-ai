@@ -191,7 +191,13 @@ function evaluateTextPatternPredicate(
   next: CapabilityInvocationTrace | undefined,
   rule: CapabilityWakeupRule & { predicate: TextPatternThenCapabilityPredicate },
 ): CapabilityWakeupTrial | null {
-  const texts = current.textEvents.map((event) => event.content);
+  // Runtime transcripts contain provider output, not the user prompt. An available
+  // owner-scoped prompt is authoritative, and an explicitly rejected projection blocks
+  // assistant-echo fallback. Only historical/direct traces without prompt provenance
+  // retain the legacy transcript path.
+  const sourceEvents =
+    current.promptEvents.length > 0 ? current.promptEvents : current.promptFallbackAllowed ? current.textEvents : [];
+  const texts = sourceEvents.map((event) => event.content);
   const matched = rule.predicate.patterns.every((pattern) => texts.some((text) => new RegExp(pattern, 'i').test(text)));
   if (!matched) return null;
 

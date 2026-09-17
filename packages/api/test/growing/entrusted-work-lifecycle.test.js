@@ -64,6 +64,23 @@ describe('F310 entrusted-work Task owner lifecycle', () => {
     assert.equal(tasks[0].entrustedWork.revision, 1);
   });
 
+  test('time hints cannot admit a Schedule-invisible Task without canonical source time', async () => {
+    const store = new TaskStore();
+    const lifecycle = new EntrustedWorkLifecycleService(store, { now: () => now });
+    const result = await lifecycle.admitOrResume(
+      admissionCommand({
+        admission: {
+          ...admissionCommand().admission,
+          timeHints: ['下周一下午 3 点前'],
+        },
+      }),
+    );
+
+    assert.equal(result.result, 'needs_clarification');
+    assert.match(result.clarificationReason, /canonical businessDeadline or reviewBy/i);
+    assert.equal(store.listByThread('thread-f310').length, 0);
+  });
+
   test('authorized_source fails closed for missing or stale registration and starts empty', async () => {
     const provenance = {
       grantRef: 'grant:f310:meeting',

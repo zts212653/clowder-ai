@@ -11,7 +11,7 @@ import type { ContextPresentationEnvelope } from '../../cats/services/session/co
 import { formatMemoryCues, renderMemoryCuePointer } from './format-memory-cues.js';
 import type { MemoryCueEventInput } from './MemoryCueEpisodeStore.js';
 import type { CreateMemoryCueDrillHandleInput, MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';
-import { RECALL_RESOLVER_ADMISSION_V3 } from './MemoryCueResolverRegistry.js';
+import { RECALL_RESOLVER_ADMISSION_V5 } from './MemoryCueResolverRegistry.js';
 import {
   admitRecallOpportunity,
   getRecallOpportunityCatalogEntry,
@@ -51,6 +51,7 @@ export interface ResolveMemoryCueInput {
   serverScope: RecallScopeV1;
   invocationState: MemoryCueInvocationState;
   now: number;
+  consumerCatId?: string;
   createDrillHandle(input: CreateMemoryCueDrillHandleInput): string;
 }
 
@@ -92,7 +93,9 @@ export class MemoryCuePlaneService {
 
     const candidates = await this.collectCandidates(opportunity, entry, expiresAt, input);
     const formatted = formatMemoryCues(candidates, { maxTokens: entry.maxPromptTokens });
-    const deliveryReceipts = formatted.cues.map((cue) => this.createDeliveryReceipt(opportunity.occurredAt, cue));
+    const deliveryReceipts = formatted.cues.map((cue) =>
+      this.createDeliveryReceipt(opportunity.occurredAt, cue, input.consumerCatId),
+    );
     return {
       status: 'admitted',
       cues: formatted.cues,
@@ -170,7 +173,7 @@ export class MemoryCuePlaneService {
   ): Promise<CueEnvelopeV1[]> {
     const candidates: CueEnvelopeV1[] = [];
     for (const family of entry.resolverFamilies) {
-      if (RECALL_RESOLVER_ADMISSION_V3[family] !== 'catalog') continue;
+      if (RECALL_RESOLVER_ADMISSION_V5[family] !== 'catalog') continue;
       candidates.push(...(await this.resolveFamily(opportunity, family, expiresAt, input)));
     }
     return candidates.slice(0, entry.maxCues);
@@ -187,6 +190,7 @@ export class MemoryCuePlaneService {
       resolved = await this.registry.get(family).resolve(opportunity, {
         now: input.now,
         expiresAt,
+        ...(input.consumerCatId ? { consumerCatId: input.consumerCatId } : {}),
         createDrillHandle: input.createDrillHandle,
       });
     } catch {
@@ -216,13 +220,18 @@ export class MemoryCuePlaneService {
     );
   }
 
-  private createDeliveryReceipt(opportunityOccurredAt: number, cue: CueEnvelopeV1): MemoryCueDeliveryReceipt {
+  private createDeliveryReceipt(
+    opportunityOccurredAt: number,
+    cue: CueEnvelopeV1,
+    consumerCatId: string | undefined,
+  ): MemoryCueDeliveryReceipt {
     return {
       cueId: cue.cueId,
       event: {
         cueId: cue.cueId,
         opportunityId: cue.opportunityId,
         scope: cue.scope,
+        ...(consumerCatId ? { consumerCatId } : {}),
         resolverFamily: cue.resolverFamily,
         sourceAnchor: cue.source.anchor,
         sourceRevision: cue.source.revision,

@@ -1,8 +1,27 @@
-import { exactAssetVersionRefV1Schema, ownerTruthRefV1Schema } from '@cat-cafe/shared';
+import { ownerTruthRefV1Schema } from '@cat-cafe/shared';
 import { z } from 'zod';
+import {
+  approvalRequestOriginSchema,
+  approvalRequestSnapshotSchema,
+  EvalLifecycleRefSchema,
+  evalRepairOwnerLineageSchema,
+  eventBaseSchema,
+  isoDateTime,
+  nonEmptyString,
+} from './eval-lifecycle-schema-primitives.js';
+import {
+  repairInterventionChangedEventSchema,
+  repairInterventionNoChangeEventSchema,
+  repairMetabolismDecidedEventSchema,
+  repairOutcomeRecordedEventSchema,
+} from './eval-repair-phase-d-schema.js';
 
-const nonEmptyString = z.string().trim().min(1);
-const isoDateTime = z.string().datetime({ offset: true });
+export {
+  type EvalLifecycleActor,
+  EvalLifecycleActorSchema,
+  type EvalLifecycleRef,
+  EvalLifecycleRefSchema,
+} from './eval-lifecycle-schema-primitives.js';
 
 export const EvalVerdictLifecycleStatusSchema = z.enum([
   'open',
@@ -20,41 +39,6 @@ export const EvalVerdictLifecycleStatusSchema = z.enum([
 
 export type EvalVerdictLifecycleStatus = z.infer<typeof EvalVerdictLifecycleStatusSchema>;
 
-const lifecycleRefKindSchema = z.enum([
-  'verdict',
-  'message',
-  'task',
-  'plan',
-  'commit',
-  'pull_request',
-  'reeval',
-  'sla',
-  'other',
-]);
-
-const availableLifecycleRefSchema = z
-  .object({
-    kind: lifecycleRefKindSchema,
-    availability: z.literal('available'),
-    value: nonEmptyString,
-  })
-  .strict();
-
-const unavailableLifecycleRefSchema = z
-  .object({
-    kind: lifecycleRefKindSchema,
-    availability: z.literal('unavailable'),
-    unavailableReason: nonEmptyString,
-  })
-  .strict();
-
-export const EvalLifecycleRefSchema = z.discriminatedUnion('availability', [
-  availableLifecycleRefSchema,
-  unavailableLifecycleRefSchema,
-]);
-
-export type EvalLifecycleRef = z.infer<typeof EvalLifecycleRefSchema>;
-
 const legacyContinuitySchema = z
   .object({
     ownerResponseRefs: z.array(EvalLifecycleRefSchema),
@@ -64,48 +48,7 @@ const legacyContinuitySchema = z
   })
   .strict();
 
-export const EvalLifecycleActorSchema = z
-  .object({
-    kind: z.enum(['cat', 'cvo', 'automation', 'migration']),
-    id: nonEmptyString,
-  })
-  .strict();
-
-export type EvalLifecycleActor = z.infer<typeof EvalLifecycleActorSchema>;
-
-const eventBaseSchema = z
-  .object({
-    eventId: nonEmptyString,
-    caseId: nonEmptyString.optional(),
-    verdictId: nonEmptyString,
-    domainId: nonEmptyString,
-    actor: EvalLifecycleActorSchema,
-    occurredAt: isoDateTime,
-    reason: nonEmptyString,
-    refs: z.array(EvalLifecycleRefSchema).min(1),
-  })
-  .strict();
-
 const plainEvent = <T extends string>(type: T) => eventBaseSchema.extend({ type: z.literal(type) }).strict();
-
-const approvalRequestSnapshotSchema = z
-  .object({
-    ownerRef: ownerTruthRefV1Schema,
-    ownerAuthorizationRef: ownerTruthRefV1Schema,
-    targetVersionRef: exactAssetVersionRefV1Schema,
-    dispatchRef: ownerTruthRefV1Schema,
-  })
-  .strict();
-
-const approvalRequestOriginSchema = z
-  .object({
-    invocationId: nonEmptyString,
-    threadId: nonEmptyString,
-    messageId: nonEmptyString,
-    requesterCatId: nonEmptyString,
-    ownerUserId: nonEmptyString,
-  })
-  .strict();
 
 export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
   plainEvent('verdict_opened'),
@@ -142,6 +85,7 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
       detail: z.record(z.unknown()),
       requestOrigin: approvalRequestOriginSchema,
       requestSnapshot: approvalRequestSnapshotSchema,
+      ownerLineage: evalRepairOwnerLineageSchema.optional(),
       supersedesProposalId: nonEmptyString.optional(),
     })
     .strict(),
@@ -190,6 +134,7 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
       proposalId: nonEmptyString,
       drift: z.enum(['owner', 'authorization', 'target']),
       freshCaseActionRef: nonEmptyString,
+      decisionRef: ownerTruthRefV1Schema,
       requestSnapshot: approvalRequestSnapshotSchema,
       dispatchRejectionRef: ownerTruthRefV1Schema.optional(),
     })
@@ -287,6 +232,10 @@ export const EvalLifecycleEventSchema = z.discriminatedUnion('type', [
     .strict(),
   eventBaseSchema.extend({ type: z.literal('reeval_passed'), assignedEvalCatId: nonEmptyString }).strict(),
   eventBaseSchema.extend({ type: z.literal('reeval_failed'), assignedEvalCatId: nonEmptyString }).strict(),
+  repairInterventionChangedEventSchema,
+  repairInterventionNoChangeEventSchema,
+  repairOutcomeRecordedEventSchema,
+  repairMetabolismDecidedEventSchema,
   plainEvent('cvo_suppressed'),
   eventBaseSchema
     .extend({

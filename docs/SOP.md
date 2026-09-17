@@ -3,7 +3,7 @@ feature_ids: [F042, F083, F303]
 topics: [sop]
 doc_kind: note
 created: 2026-02-26
-updated: 2026-08-23
+updated: 2026-09-05
 ---
 
 # Clowder AI 开发 SOP
@@ -22,36 +22,19 @@ Clowder AI 的开发是**愿景驱动**的。和operator确认了 feature 的愿
 - **没达成愿景 = 没完成**，不交半成品，不半路问"要不要继续"（决策漏斗见 shared-rules §17）
 - 停下来的正当理由：解决不了的阻塞（技术限制/外部依赖）→ 升级operator；方向存疑（坐标系警报、scope 该砍）→ 停手重估。判断力允许停，惰性不允许
 
-### 大 Feature 碰头机制（3+ Phase）
+### 阶段进度与方向校准
 
-大 scope feature 不能等最后才对齐愿景。**每个 Phase merge 后**，主动和operator碰头：
+阶段成果、用户实际得到的变化、剩余差距和下一步要可见；按实际 truth delta 同步。已确认方向内自主推进，发现愿景、范围或体验解释分叉时及时校准，不等整项实现完才展示，也不在每次 Phase merge 后重复索要确认。
 
-```
-Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 继续 Phase N+1
-```
-
-**碰头格式**（轻量，不是报告会）：
-1. **成果展示**：这个 Phase 做了什么（截图 / 关键改动 / demo）
-2. **愿景进度**：离最终愿景还差什么（哪些 AC 打了勾，哪些还没）
-3. **下个 Phase 方向**：下一步计划做什么，有没有发现新问题
-4. **方向确认**："方向对吗？有没有要调整的？"
-
-**注意区别**：
-- 碰头 = **愿景方向确认**（宏观层，operator需要介入）✅
-- "要我继续吗？" = **SOP 流程推进**（细节层，不要问）❌
+具体做法以 `feat-lifecycle` 的 Design Gate /「Phase 进度与方向校准」为准：先完成猫能自决的准备，拿具体稿、推荐和明确待判断点请operator共创；既有确认在仍覆盖的范围内复用。需要 operator 拍板的愿景、权限与不可逆边界照常遵守。
 
 **小 Feature（1-2 Phase）**：不需要碰头，直接做到底 → 愿景守护 → close。
 
 ## Runtime 单实例保护（P0）
 
-`../cat-cafe-runtime` 是咱们的运行态单实例（通常占用 `3003/3004`），默认视为**在线服务**，不是随手重启的实验环境。
-
-硬规则：
-1. 在 runtime 会话里，禁止执行会触发重启的命令：`pnpm start`、`pnpm runtime:start`、`./scripts/start-dev.sh`
-2. 做截图/验收/排查前，先复用现有服务（先查 `curl -sf http://localhost:3004/health`）
-3. 确实要重启，必须先拿到operator明确同意，再显式设置 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行启动命令
-
-说明：`--force` 不是重启授权，不能替代第 3 条。
+运行态单实例、3003/3004、重启授权与未合入验证边界只由 L0 五条铁律和
+[`shared-rules.md` §12](../cat-cafe-skills/refs/shared-rules.md#12-runtime-单实例保护anti-self-term) 维护；
+本 SOP 不复制命令或授权条件。开发流程只需记住：未合入改动在 feature worktree 自测，已合入改动走下方 Alpha 验收；runtime 激活仍需显式授权。
 
 ## Alpha 验收通道
 
@@ -79,12 +62,14 @@ Phase N merge → 碰头（不是"要不要继续"，是"方向对不对"）→ 
 | 风险轴 | 命中信号 | 最低动作 |
 |---|---|---|
 | 行为面 | 用户可见行为、runtime 逻辑、bug 回归 | 可观察 RED + targeted 验证；方向未定才进 Design Gate |
-| 数据 | 生产数据、迁移、持久化语义 | full gate + 独立高风险 review；生产操作另走授权边界 |
-| 安全 | auth、权限、secret、注入、DoS / 资源边界 | full gate + cloud/context-blind 安全扫描；需要家里语义时再叠 local |
-| 契约 | API / MCP schema / 事件格式 / 外部依赖 | 契约测试 + full gate + 对应独立 review |
+| 数据 | 生产数据、迁移、持久化语义 | 持久化 / 迁移验证 + 独立高风险 review；生产操作另走授权边界 |
+| 安全 | auth、权限、secret、注入、DoS / 资源边界 | 相关安全边界测试 + cloud/context-blind 安全扫描；需要家里语义时再叠 local |
+| 契约 | API / MCP schema / 事件格式 / 外部依赖 | 契约及受影响 consumer 测试 + 对应独立 review |
 | 不可逆 | 删除、force push、合第三方 PR、close feat、圣域 | 先拿 operator 授权；机器门禁仍照常 |
 
 **元风险强制升档**：diff 触碰 `merge-gate`、风险 classifier、门禁脚本或 Harness Diet 公约自身时，直接进入 high-assurance，由非作者跨族 reviewer 覆盖最终实质内容（exact HEAD 或 continuityProof）。松绑机制不得静默松绑自己；在这条语义边界机器化前，如实标为 manual 守卫，不能由改门者自判 light。
+
+**审查强度与测试范围分开选择**：`assuranceLevel` 决定独立审查与授权要求，`route` 决定验证范围。高风险窄改可以是 high-assurance + targeted，须说明受影响边界、consumer 与对应测试；风险标签本身不要求全仓测试。纯文档走文档校验（治理文档保留独立治理 review）。共享契约、门禁执行链、相关或无法判定的代码合流 / 旧失败仍由 classifier 要求 full；targeted 无法覆盖跨包风险时必须补全量。每个 full gate 必须说明 targeted 缺少哪项覆盖，不能只写“安全 / 契约 / 高风险”。
 
 ### Architecture / contract delta admission（F303）
 
@@ -200,7 +185,7 @@ pnpm classify:co-creation-docs -- \
 - `docs/ROADMAP.md` 是 main-only 共享状态，不是治理 PR 触发器：与安全 feature docs 同改仍走 direct main；若同批其他文件确需 PR，先把 BACKLOG 的机械登记单独落 main，禁止把它塞进 worktree/PR。
 - 普通 `docs/features/*.md` 内容更新不因目录名自动升级；无重叠且单 commit 可逆时 direct push，真实冲突或高/未知可逆性仍按 classifier 升到 PR。
 - `cat-cafe-skills/**`、`sop-definitions/**`、scripts、CLI、tests、packages 或其他第一方执行面 → regular development，即使文件扩展名是 `.md`。
-- 普通代码 / test 不因文件类型自动 cloud；行为面用 targeted tests + 合适独立源。安全、数据、外部契约或不可逆风险才升 full / cloud。
+- 普通代码 / test 不因文件类型自动 cloud；行为面用 targeted tests + 合适独立源。安全、数据、外部契约或不可逆风险加强对应独立审查 / 授权；full 另按实际影响范围选择。
 
 direct-push 只做：轻量增量校验 → 判断是否出现**需要第二只猫判断的新内容** → targeted commit（Why + 模型签名）→ push `origin main`。机械登记、拼写、operator 已逐字共创或有可回链旧 verdict 的内容可 `skip/reuse`，不为“有 diff”新叫 reviewer。普通文档校验不安装依赖、不构建共享包、不跑 docs-discovery 实现套件；feature 文档只追加 dependency-free feature truth。不建 worktree/PR，不生成 review 归档来证明自己 review 过。
 
@@ -369,71 +354,77 @@ PR-3 是 interim 方案 —— 仍开 per-run PR，只是 label + 猫自决 merg
 1. 先处理 Community Diff Guard / intake ledger，确认社区已合入内容不会被覆盖。
 2. 冻结同一班车的 `source SHA + public target HEAD + reconciliation artifact`；后续新进 `origin/main` 的提交默认排到下一班，不追着移动的 main 重跑。
 3. 对冻结切面反复运行无安装、无真实目标写入的 `--preflight`。它先做导出、安全扫描、导出闭包、capability-tip 增量引用、F251、Public Behavior Change Reporter；红灯只修对应问题并重跑这条便宜车道。
-4. preflight 绿后，才对同一 source SHA 跑**一次**完整 source gate，再对同一切面跑**一次** temp-target `--validate`。
-5. temp-target 完整 public gate 遇到首个硬失败立即终止；不再继续烧 `test:public` / startup acceptance 来收集一串次生红灯。
-6. **只有完整 source gate 与 temp-target public gate 都绿，才允许碰真实 `clowder-ai`**。
+4. preflight 绿后，对同一 source SHA 跑**一次**完整 source gate。
+5. 按 write authorization 二选一：已有真实写授权 → 直接运行 canonical writer，由 writer 内部完成唯一一轮 temp-target public gate 后再写；尚无写授权 → 只跑 durable no-write `validate` / write handoff，等待授权。当前 writer 不消费 validate receipt 来跳过自己的 gate，**不要两条路径连跑**。
+6. temp-target 完整 public gate 遇到首个硬失败立即终止；不再继续烧 `test:public` / startup acceptance 来收集一串次生红灯。**只有 source gate 与当前执行路径的 public gate 都绿，才允许碰真实 `clowder-ai`**。
 7. 本机 README/macOS smoke 不属于 full sync 主路径；它必须是 sync 完成后的独立步骤，且必须显式隔离端口/Redis。
 
-同一组参数贯穿 preflight、validate 与真实同步：
+同一组参数贯穿 preflight 与选中的后续路径；reconciliation / migration notes 都必须存在于冻结 source commit：
 
 ```bash
 SOURCE_SHA=<frozen-cat-cafe-sha>
 EXPECTED_TARGET_HEAD=<frozen-clowder-ai-sha>
 RECONCILIATION_FILE=docs/ops/<date>-full-sync-reconciliation.json
-MIGRATION_NOTES_FILE=/tmp/<date>-full-sync-migration-notes.md
+MIGRATION_NOTES_FILE=docs/ops/<date>-full-sync-migration-notes.md
 
-CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
-  --preflight --yes \
+pnpm sync:train -- launch --no-write --stage preflight \
   --source-sha="$SOURCE_SHA" \
-  --expected-target-head="$EXPECTED_TARGET_HEAD" \
+  --public-head="$EXPECTED_TARGET_HEAD" \
   --reconciliation-file="$RECONCILIATION_FILE" \
-  --migration-notes-file="$MIGRATION_NOTES_FILE"
+  --migration-notes-file="$MIGRATION_NOTES_FILE" \
+  --target-dir="$CLOWDER_AI_DIR"
 
 test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || exit 75
 env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION \
   pnpm gate --no-rebase
 test "$(git rev-parse HEAD)" = "$SOURCE_SHA" || exit 75
 
-CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
-  --validate --yes \
-  --source-sha="$SOURCE_SHA" \
-  --expected-target-head="$EXPECTED_TARGET_HEAD" \
-  --reconciliation-file="$RECONCILIATION_FILE" \
-  --migration-notes-file="$MIGRATION_NOTES_FILE"
-
+# A. 已有真实写授权：让 writer 的内建 temp-target gate 成为唯一 public 长门禁
 CLOWDER_AI_DIR="$CLOWDER_AI_DIR" bash scripts/sync-to-opensource.sh \
   --yes \
   --source-sha="$SOURCE_SHA" \
   --expected-target-head="$EXPECTED_TARGET_HEAD" \
   --reconciliation-file="$RECONCILIATION_FILE" \
   --migration-notes-file="$MIGRATION_NOTES_FILE"
+
+# B. 尚无真实写授权：不要运行 A，只产 durable no-write validate receipt
+pnpm sync:train -- launch --no-write --stage validate \
+  --source-sha="$SOURCE_SHA" \
+  --public-head="$EXPECTED_TARGET_HEAD" \
+  --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE" \
+  --target-dir="$CLOWDER_AI_DIR"
 ```
 
-脚本会在 preflight、validate 与真实写入前 fetch public main，并要求 target HEAD、`origin/main`、`--expected-target-head` 三者完全一致。若 public main 在班车期间前进，只重新冻结 public/reconciliation 切面并先跑便宜 preflight；只有 source SHA、manifest/exporter blob 或实际导出字节变化，才需要重跑 source full gate。`--fast-validate` 只是诊断选项，不能替代 preflight，也不能充当 release evidence。
+脚本会在 preflight、validate 与真实写入前 fetch public main，并要求 target HEAD、`origin/main`、expected public head 三者完全一致。若 public main 在班车期间前进，旧 stage receipt 会给出 typed `start_next_train`；重新冻结 public/reconciliation 切面并先跑便宜 preflight。只要 source SHA、manifest/exporter/wrapper/F251 blobs 与实际导出字节未变，单独的 exact source full-gate 证据不因 target 前进自动作废。`--fast-validate` 只是诊断选项，不能替代 preflight，也不能充当 release evidence；`--skip-validate` 是 operator override，不是性能开关。
 
-一句话：**先用便宜检查收敛冻结切面，再各跑一次昂贵门禁；不要把真实 `clowder-ai` 当第一轮验收场，更不能把 runtime 当验收靶子。**
+一句话：**先用便宜检查收敛冻结切面；source 长门禁只跑一次，public 长门禁由“已授权 writer”或“no-write validate”承载其一。不要重复跑，也不要把 runtime 当验收靶子。**
 
 ### Durable train recovery（F308）
 
-当 source 已包含 `sync:train` 时，维护者改由 receipt facade 启动/恢复同一 immutable cut；默认 state root
+当 source 已包含 `sync:train` 时，维护者用 receipt facade 启动/恢复同一 immutable cut 的
+preflight、validate 与 write-handoff stage；独立 source gate 和真实 writer 仍须从各自前台或
+command-managed execution 取得 terminal。默认 state root
 位于 source Git common directory 下，因此 worktree 或 carrier 重启不会抹掉 terminal truth。
 
 ```bash
-# launch returns a run id. It is no-write for preflight/validate.
+# launch returns a run id. Preflight is always no-write.
 pnpm sync:train -- launch --no-write --stage preflight \
   --source-sha="$SOURCE_SHA" \
   --public-head="$EXPECTED_TARGET_HEAD" \
   --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE" \
   --target-dir="$CLOWDER_AI_DIR"
 
 pnpm sync:train -- status --json
 pnpm sync:train -- resume --run-id=<returned-run-id>
 
-# After the preflight terminal is green, launch the same cut's validate stage.
+# Only when public write is not yet authorized: launch no-write validate.
 pnpm sync:train -- launch --no-write --stage validate \
   --source-sha="$SOURCE_SHA" \
   --public-head="$EXPECTED_TARGET_HEAD" \
   --reconciliation-file="$RECONCILIATION_FILE" \
+  --migration-notes-file="$MIGRATION_NOTES_FILE" \
   --target-dir="$CLOWDER_AI_DIR"
 ```
 
@@ -441,11 +432,14 @@ pnpm sync:train -- launch --no-write --stage validate \
 reconciliation drift invalidates that receipt with a typed `start_next_train` action rather than silently borrowing
 evidence from an old cut. The optional `--stage write --write-handoff` only records a checked handoff for the
 existing authorized writer: it never authorizes or performs a public write itself. Review, merge truth and public
-write disposition remain separate terminals.
+write disposition remain separate terminals. Under the current writer contract, a validate receipt also does not
+skip the writer's internal public gate; if write was already authorized, run the writer path directly after the
+source gate instead of creating a duplicate validate receipt.
 
 ### Release Provenance（三点映射）
 
 公开 release 不要求 `cat-cafe` 和 `clowder-ai` 同 SHA；我们要求的是**可追溯映射**。
+Release 是独立工作流：给当前稳定 public main 发版，不要求新开 home PR、重跑 full sync 或制造新的 source snapshot。
 
 发布有两条一等 provenance lane，必须显式选择真实发生的那一条：
 
@@ -462,8 +456,10 @@ write disposition remain separate terminals.
 ```bash
 bash scripts/publish-release-tag.sh \
   --release-tag=vX.Y.Z \
+  --provenance-lane=source-sync \
   --target-sha <clowder_ai_release_commit_sha> \
   --reconciliation-report=docs/ops/reconciliation-vX.Y.Z.md \
+  --release-notes=release-notes-vX.Y.Z.md \
   --push
 ```
 
@@ -475,6 +471,7 @@ bash scripts/publish-release-tag.sh \
   --provenance-lane=public-main \
   --target-sha=<exact_current_clowder_ai_main_sha> \
   --reconciliation-report=docs/ops/reconciliation-vX.Y.Z.md \
+  --release-notes=release-notes-vX.Y.Z.md \
   --push
 ```
 
@@ -483,6 +480,7 @@ bash scripts/publish-release-tag.sh \
    - `public-main`：`latest sync provenance/source anchor → exact current public main → annotated target release tag` 三点映射；tag ref 可见性必须位于 GitHub 强制的 main read-only 临界区内（或本地裸仓的单一原子 transaction），且 annotation 明示没有新 source snapshot。
    - 两条 lane 的 `reconciliation report` 都必须存在；如果报告把 issue 记为 `closed`，GitHub 上也必须已经是 `CLOSED`。
 7. `public-main` 的持久真相是远端 `main`、annotated tag 与 GitHub Release；本地 tag 只是可重建缓存。若进程在 GitHub main 锁建立后中断，新 checkout 只可接管名称与结构完全一致的 release lock；远端 tag 已存在时先 fetch 并校验其 raw object，再清除遗留锁并继续 Release，tag 尚不存在时则在锁内重新核对 main 后创建。不得合成带新 tagger timestamp 的本地 tag 来判定远端有效性，也不得遗留一个可绕过的 release lock。
+8. release assets 按本次 notes / distribution contract 的承诺验收：承诺 desktop installer 就必须等待并核对对应 assets；明确 source-package / notes-only 的 release 可以是 0 uploaded assets。不能把某次 installer 事故泛化成所有 release 的固定资产清单。
 
 release notes /后续 backport 也必须引用这些锚点，而不是口头约定。
 

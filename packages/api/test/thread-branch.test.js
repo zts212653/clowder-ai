@@ -28,7 +28,7 @@ function createMockThreadStore() {
   const threads = {};
   let seq = 0;
   return {
-    create(userId, title, projectPath) {
+    create(userId, title, projectPath, parentThreadId, proposalAudit, branchAudit) {
       const id = `thread-branch-${++seq}`;
       const thread = {
         id,
@@ -38,6 +38,9 @@ function createMockThreadStore() {
         participants: [],
         lastActiveAt: Date.now(),
         createdAt: Date.now(),
+        ...(parentThreadId ? { parentThreadId } : {}),
+        ...(proposalAudit ?? {}),
+        ...(branchAudit ? { branchAudit } : {}),
       };
       threads[id] = thread;
       return thread;
@@ -168,6 +171,15 @@ describe('POST /api/threads/:id/branch (ADR-008 D4 / S7)', () => {
     assert.ok(body.threadId);
     assert.equal(body.messageCount, 3);
     assert.equal(body.title, '原始对话 (分支)');
+
+    const branchThread = threadStore.get(body.threadId);
+    assert.equal(branchThread.parentThreadId, 'thread-orig');
+    assert.deepEqual(branchThread.branchAudit, {
+      sourceThreadId: 'thread-orig',
+      sourceMessageId: msgs[2].id,
+      branchedAt: branchThread.branchAudit.branchedAt,
+    });
+    assert.equal(typeof branchThread.branchAudit.branchedAt, 'number');
 
     // Verify new thread has copied messages
     const branchMsgs = messageStore.getByThread(body.threadId, 100);

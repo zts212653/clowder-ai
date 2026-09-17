@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { type SeedDecision } from '@cat-cafe/shared';
 import { z } from 'zod';
 
@@ -72,6 +73,26 @@ export interface OwnedSeedRecord {
   retiredAt?: number;
   createdAt: number;
   updatedAt: number;
+}
+
+/** Revision-bound coordinate for Cue Plane transport; the private claim itself never leaves the canonical store. */
+export function ownedSeedSourceRevision(seed: OwnedSeedRecord): `sha256:${string}` {
+  const tuple = [
+    seed.seedId,
+    seed.ownerUserId,
+    seed.catId,
+    seed.sourceKind,
+    seed.sourceCueId ?? null,
+    seed.claim,
+    seed.status,
+    seed.sourceRunId,
+    seed.createdByInvocationId,
+    seed.dormantAt ?? null,
+    seed.retiredAt ?? null,
+    seed.createdAt,
+    seed.updatedAt,
+  ];
+  return `sha256:${createHash('sha256').update(JSON.stringify(tuple)).digest('hex')}`;
 }
 
 export interface PrivateSeedDecisionInput {

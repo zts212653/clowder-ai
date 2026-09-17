@@ -10,6 +10,7 @@ export function OnboardingScene({
   error,
   onBootstrap,
   onAuthenticate,
+  onConfigureProvider,
   onCreateCollective,
 }: {
   readonly phase: ClientPhase;
@@ -18,6 +19,7 @@ export function OnboardingScene({
   readonly error?: string;
   readonly onBootstrap: (displayName: string) => Promise<void>;
   readonly onAuthenticate: () => Promise<void>;
+  readonly onConfigureProvider: () => Promise<void>;
   readonly onCreateCollective: (name: string) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
@@ -58,6 +60,26 @@ export function OnboardingScene({
     const value = String(new FormData(event.currentTarget).get('value') ?? '').trim();
     if (value) await run(() => action(value));
   };
+
+  const canConfigureProvider = shouldConfigureProvider(github, mode, phase);
+
+  if (canConfigureProvider) {
+    return (
+      <div className="entry-wrap">
+        <section className="entry-card">
+          <p className="entry-eyebrow">Human 登录</p>
+          <h2>创建 GitHub 登录应用</h2>
+          <p>在 GitHub 确认一次即可为这个 Service 建立登录能力，不需要复制 Client ID 或 secret。</p>
+          <div className="entry-action">
+            <button type="button" disabled={busy} onClick={() => void run(onConfigureProvider)}>
+              {busy ? '正在打开 GitHub…' : '在 GitHub 中创建'}
+            </button>
+          </div>
+          {localError && <p className="form-error">{localError}</p>}
+        </section>
+      </div>
+    );
+  }
 
   if (phase === 'create-collective') {
     return (
@@ -131,6 +153,18 @@ export function OnboardingScene({
       error={localError ?? error}
       onAuthenticate={() => run(onAuthenticate)}
     />
+  );
+}
+
+function shouldConfigureProvider(
+  github: HumanAuthProviderStatus | undefined,
+  mode: EntryMode,
+  phase: ClientPhase,
+): boolean {
+  return (
+    github?.ready === false &&
+    github.setupSupported === true &&
+    (mode === 'bootstrap' || phase === 'create-collective' || phase === 'bind-identity')
   );
 }
 

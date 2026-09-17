@@ -4,6 +4,7 @@ import { useId } from 'react';
 import { CafeIcon } from './CafeIcons';
 
 export type ReportingModeEditValue = 'none' | 'final-only' | 'state-transitions' | 'blocking-ack';
+export type DeclaredWorkModeEditValue = '' | 'subtask' | 'parallel' | 'investigation' | 'standalone';
 
 interface EditFieldProps {
   label: string;
@@ -69,6 +70,50 @@ export function ReportingModeEdit({
         onChange={(e) => onChange(e.target.value as ReportingModeEditValue)}
       >
         {REPORTING_MODE_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+const DECLARED_WORK_MODE_OPTIONS: Array<{ value: DeclaredWorkModeEditValue; label: string }> = [
+  { value: 'subtask', label: '子任务（持续跟随来源对话）' },
+  { value: 'parallel', label: '并行推进（同组并发）' },
+  { value: 'investigation', label: '调查（一次性查证）' },
+  { value: 'standalone', label: '独立对话（只保留出生来源）' },
+];
+
+const UNKNOWN_DECLARED_WORK_MODE_LABEL = '历史未声明（保持未知，不推断）';
+
+export function formatDeclaredWorkMode(value: DeclaredWorkModeEditValue): string {
+  return DECLARED_WORK_MODE_OPTIONS.find((option) => option.value === value)?.label ?? UNKNOWN_DECLARED_WORK_MODE_LABEL;
+}
+
+export function DeclaredWorkModeEdit({
+  value,
+  onChange,
+}: {
+  value: DeclaredWorkModeEditValue;
+  onChange: (value: DeclaredWorkModeEditValue) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="text-cafe-muted">协作方式:</span>{' '}
+      <select
+        aria-label="协作方式"
+        className="mt-0.5 w-full rounded border border-[var(--console-border-soft)] bg-cafe-surface-canvas p-1 text-xs"
+        value={value}
+        onChange={(event) => onChange(event.target.value as DeclaredWorkModeEditValue)}
+      >
+        {value === '' && (
+          <option value="" disabled>
+            {UNKNOWN_DECLARED_WORK_MODE_LABEL}
+          </option>
+        )}
+        {DECLARED_WORK_MODE_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

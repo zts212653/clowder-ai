@@ -355,9 +355,10 @@ describe('F177-H: Cross-post participant check warning', () => {
     assert.equal(messageStore.size, 0);
   });
 
-  test('agent-key post rejects typed local review settlement before persistence', async () => {
+  test('agent-key reviewer can persist and route a typed local review fact without lease state', async () => {
     const app = await createApp();
     const targetThread = threadStore.create('user-1', 'Target');
+    threadStore._setParticipants(targetThread.id, ['codex']);
 
     const res = await app.inject({
       method: 'POST',
@@ -365,15 +366,28 @@ describe('F177-H: Cross-post participant check warning', () => {
       headers: { 'x-agent-key-secret': 'test-agent-secret' },
       payload: {
         threadId: targetThread.id,
-        content: 'Readable review verdict.',
+        content: '@codex\n\nAPPROVED for the exact reviewed HEAD.',
+        targetCats: ['codex'],
         clientMessageId: 'typed-local-review-agent-key',
-        coordination: { phase: 'terminal' },
         localReviewVerdict: 'approved',
+        reviewedHeadSha: 'a'.repeat(40),
+        reviewSubjectRef: 'pr:zts212653/cat-cafe#4268',
+        acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+        acceptedRevision: 'b'.repeat(40),
       },
     });
 
-    assert.equal(res.statusCode, 400);
-    assert.equal(JSON.parse(res.body).kind, 'local_review_verdict_agent_key_unsupported');
-    assert.equal(messageStore.size, 0);
+    assert.equal(res.statusCode, 200, `response: ${res.body}`);
+    const stored = messageStore.getByThreadIncludingQueued(targetThread.id, 20, 'user-1');
+    assert.equal(stored.length, 1);
+    assert.deepEqual(stored[0].extra.localReviewVerdict, {
+      verdict: 'approved',
+      clientMessageId: 'typed-local-review-agent-key',
+      reviewedHeadSha: 'a'.repeat(40),
+      reviewSubjectRef: 'pr:zts212653/cat-cafe#4268',
+      acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
+      acceptedRevision: 'b'.repeat(40),
+    });
+    assert.deepEqual(stored[0].mentions, ['codex']);
   });
 });

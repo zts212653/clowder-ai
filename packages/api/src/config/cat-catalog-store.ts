@@ -681,7 +681,12 @@ function readTemplateBreedIds(projectRoot: string): Set<string> {
   return ids;
 }
 
-export function readCatCatalogRaw(projectRoot: string): string | null {
+export interface CatCatalogReadOptions {
+  /** Pre-activation inspection must project legacy input without changing it. */
+  persistMigrations?: boolean;
+}
+
+export function readCatCatalogRaw(projectRoot: string, options: CatCatalogReadOptions = {}): string | null {
   const catalogPath = resolveCatCatalogPath(projectRoot);
   if (!existsSync(catalogPath)) return null;
   const raw = readFileSync(catalogPath, 'utf-8');
@@ -693,7 +698,7 @@ export function readCatCatalogRaw(projectRoot: string): string | null {
     const migrated = migrateCatalogVariants(parsed, templateBreedIds);
     if (migrated.dirty) {
       const nextRaw = `${JSON.stringify(migrated.catalog, null, 2)}\n`;
-      writeFileAtomic(catalogPath, nextRaw);
+      if (options.persistMigrations !== false) writeFileAtomic(catalogPath, nextRaw);
       return nextRaw;
     }
   } catch {

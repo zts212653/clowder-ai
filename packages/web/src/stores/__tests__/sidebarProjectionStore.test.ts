@@ -103,6 +103,13 @@ describe('sidebarProjectionStore authority boundary', () => {
     expect(malformed.presence).toEqual({ status: 'working' });
   });
 
+  it('preserves the Memory Operations system-thread kind', () => {
+    const [memoryOperations] = parseSidebarSnapshotRows([{ ...row('thread-memory-ops'), systemKind: 'memory_ops' }]);
+
+    expect(memoryOperations.systemKind).toBe('memory_ops');
+    expect(memoryOperations.isHubThread).toBe(false);
+  });
+
   it('rejects an older HTTP generation after a newer snapshot was applied', () => {
     const store = useSidebarProjectionStore.getState();
 

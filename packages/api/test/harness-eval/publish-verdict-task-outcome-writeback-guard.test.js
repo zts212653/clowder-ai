@@ -94,7 +94,7 @@ function buildPacket(id) {
 function buildMockGitPublisher() {
   return {
     async publishOnIsolatedWorktree(opts) {
-      const iso = join(root, '..', `task-outcome-writeback-guard-iso-${Date.now()}`);
+      const iso = join(root, `task-outcome-writeback-guard-iso-${Date.now()}`);
       mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
       writeFileSync(
         join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),
@@ -185,7 +185,7 @@ describe('task-outcome episode verdict writeback guards', () => {
     let exposedPr = false;
     const gitPublisher = {
       async publishOnIsolatedWorktree(opts) {
-        const iso = join(root, '..', `task-outcome-writeback-stale-pr-iso-${Date.now()}`);
+        const iso = join(root, `task-outcome-writeback-stale-pr-iso-${Date.now()}`);
         mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
         writeFileSync(
           join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-task-outcome.yaml'),

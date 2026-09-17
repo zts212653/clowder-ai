@@ -13,13 +13,71 @@ const GH_BLOB = `https://github.com/${REPO}/blob/${BRANCH}/`;
 const GH_RAW = `https://raw.githubusercontent.com/${REPO}/${BRANCH}/`;
 
 /**
+ * Convert a localized Markdown sibling back to the viewer's canonical route.
+ * The active locale chooses the actual file in doc-locale.mjs, so keeping
+ * navigation canonical also lets a later language switch return to English.
+ */
+export function canonicalDocPath(path) {
+  if (typeof path !== 'string') return path;
+  return path.replace(/\.zh-CN\.md$/i, '.md');
+}
+
+function decodeViewerHash(hash) {
+  if (!hash) return '';
+  try {
+    return `#${decodeURIComponent(hash.slice(1))}`;
+  } catch {
+    return hash;
+  }
+}
+
+function explicitDocLang(resolvedPath, sourcePath) {
+  if (/\.zh-CN\.md$/i.test(resolvedPath)) return 'zh';
+  const canonicalSource = canonicalDocPath(sourcePath);
+  if (canonicalSource !== sourcePath && resolvedPath === canonicalSource) return 'en';
+  return undefined;
+}
+
+/**
+ * Generate the fragment shape used by Markdown hosts for a heading.
+ * Unicode letters are preserved so translated documents have readable ids.
+ */
+export function slugDocHeading(text) {
+  return String(text ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{Letter}\p{Number}\p{Mark}\s_-]/gu, '')
+    .replace(/\s+/g, '-');
+}
+
+/** Add stable, duplicate-safe ids to rendered Markdown headings. */
+export function assignDocHeadingIds(container) {
+  const used = new Set([...container.querySelectorAll('[id]')].map((element) => element.id).filter(Boolean));
+
+  for (const heading of container.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    if (heading.id) continue;
+    const base = slugDocHeading(heading.textContent);
+    if (!base) continue;
+
+    let id = base;
+    let duplicate = 0;
+    while (used.has(id)) {
+      duplicate += 1;
+      id = `${base}-${duplicate}`;
+    }
+    heading.id = id;
+    used.add(id);
+  }
+}
+
+/**
  * Resolve a relative href found inside a rendered markdown document.
  *
  * @param {string} href      — the raw href attribute value
  * @param {string} docPath   — repo-relative path of the document being viewed
  * @param {Set<string>} loadable — set of repo-relative .md paths the viewer can load
  * @returns {{ type: 'skip' } |
- *           { type: 'viewer', path: string, hash: string } |
+ *           { type: 'viewer', path: string, hash: string, lang?: 'en' | 'zh' } |
  *           { type: 'github', url: string }}
  */
 export function resolveDocLink(href, docPath, loadable) {
@@ -28,13 +86,17 @@ export function resolveDocLink(href, docPath, loadable) {
   }
   const parsed = new URL(href, `file:///${docPath}`);
   const resolved = parsed.pathname.replace(/^\//, '');
-  const hash = parsed.hash || '';
+  const encodedHash = parsed.hash || '';
   const search = parsed.search || '';
 
-  if (resolved.endsWith('.md') && loadable.has(resolved)) {
-    return { type: 'viewer', path: resolved, hash };
+  const viewerPath = canonicalDocPath(resolved);
+  if (viewerPath.endsWith('.md') && loadable.has(viewerPath)) {
+    const result = { type: 'viewer', path: viewerPath, hash: decodeViewerHash(encodedHash) };
+    const lang = explicitDocLang(resolved, docPath);
+    if (lang) result.lang = lang;
+    return result;
   }
-  return { type: 'github', url: GH_BLOB + resolved + search + hash };
+  return { type: 'github', url: GH_BLOB + resolved + search + encodedHash };
 }
 
 /**

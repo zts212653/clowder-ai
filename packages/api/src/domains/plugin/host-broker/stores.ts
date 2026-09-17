@@ -9,6 +9,7 @@ import type {
   HostBrokerTransaction,
 } from './ports.js';
 import { cloneHostBrokerSnapshot, emptyHostBrokerSnapshot, parseHostBrokerSnapshot } from './snapshot.js';
+import { emptyStaticFeatureLedger, type StaticFeatureLedger } from './static-feature-ledger.js';
 import type { BrokerCallRecord, BrokerRuntimeLeaseRecord, BrokerSessionRecord, HostBrokerSnapshot } from './types.js';
 import { HOST_BROKER_SCHEMA_VERSION, HostBrokerError } from './types.js';
 
@@ -46,6 +47,13 @@ function fileQueue(path: string): SerialQueue {
 }
 
 class MutableBrokerSnapshot implements HostBrokerTransaction {
+  private featureLedger: StaticFeatureLedger | undefined;
+  readonly staticFeatures = {
+    get: () => structuredClone(this.featureLedger ?? emptyStaticFeatureLedger()),
+    put: (ledger: StaticFeatureLedger) => {
+      this.featureLedger = structuredClone(ledger);
+    },
+  };
   private readonly sessionRecords = new Map<string, BrokerSessionRecord>();
   private readonly runtimeLeaseRecords = new Map<string, BrokerRuntimeLeaseRecord>();
   private readonly callRecords = new Map<string, BrokerCallRecord>();
@@ -71,6 +79,7 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
   };
 
   constructor(snapshot: HostBrokerSnapshot) {
+    this.featureLedger = snapshot.staticFeatures === undefined ? undefined : structuredClone(snapshot.staticFeatures);
     for (const record of snapshot.sessions) this.sessionRecords.set(record.connectionId, structuredClone(record));
     for (const record of snapshot.runtimeLeases) {
       this.runtimeLeaseRecords.set(record.runtimeLeaseId, structuredClone(record));
@@ -84,6 +93,7 @@ class MutableBrokerSnapshot implements HostBrokerTransaction {
       sessions: this.sessions.list(),
       runtimeLeases: this.runtimeLeases.list(),
       calls: this.calls.list(),
+      ...(this.featureLedger === undefined ? {} : { staticFeatures: structuredClone(this.featureLedger) }),
     };
   }
 

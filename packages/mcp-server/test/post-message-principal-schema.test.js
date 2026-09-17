@@ -48,11 +48,14 @@ describe('post_message principal-specific public schema', () => {
       false,
       'invocation callers must not be offered a threadId field that the handler rejects',
     );
-    assert.ok(tool.inputSchema.shape.localReviewVerdict, 'invocation callers must receive typed verdict settlement');
+    assert.ok(tool.inputSchema.shape.localReviewVerdict, 'invocation callers must receive the durable review fact');
     assert.ok(
       tool.inputSchema.shape.reviewedHeadSha,
-      'invocation callers must be able to fence a carrier-free verdict',
+      'invocation callers must be able to bind the review fact to an exact HEAD',
     );
+    assert.ok(tool.inputSchema.shape.reviewSubjectRef);
+    assert.ok(tool.inputSchema.shape.acceptedSourceRef);
+    assert.ok(tool.inputSchema.shape.acceptedRevision);
     assert.throws(
       () => tool.inputSchema.parse({ content: 'same-thread update', threadId: 'thread-current' }),
       /unrecognized key/i,
@@ -78,16 +81,11 @@ describe('post_message principal-specific public schema', () => {
       'server-custodied authorization must not be exposed to agent-key callers',
     );
     assert.ok(tool.inputSchema.shape.agentKeyCatId, 'shared agent-key servers must retain their identity selector');
-    assert.equal(
-      Object.hasOwn(tool.inputSchema.shape, 'localReviewVerdict'),
-      false,
-      'agent-key callers must not be offered invocation-bound local review settlement',
-    );
-    assert.equal(
-      Object.hasOwn(tool.inputSchema.shape, 'reviewedHeadSha'),
-      false,
-      'agent-key callers must not be offered a reviewer-fact field without local review settlement',
-    );
+    assert.ok(tool.inputSchema.shape.localReviewVerdict, 'agent-key reviewers must receive the durable review fact');
+    assert.ok(tool.inputSchema.shape.reviewedHeadSha, 'agent-key reviewers must bind the fact to an exact HEAD');
+    assert.ok(tool.inputSchema.shape.reviewSubjectRef);
+    assert.ok(tool.inputSchema.shape.acceptedSourceRef);
+    assert.ok(tool.inputSchema.shape.acceptedRevision);
     assert.match(tool.description, /agent-key-only registration requires threadId/i);
   });
 
@@ -118,6 +116,9 @@ describe('post_message principal-specific public schema', () => {
     assert.ok(postMessageInputSchema.action.isOptional());
     assert.ok(shapeKeys.includes('localReviewVerdict'), 'canonical shape must retain typed local verdict settlement');
     assert.ok(shapeKeys.includes('reviewedHeadSha'), 'canonical shape must retain the carrier-free exact-HEAD fence');
+    assert.ok(shapeKeys.includes('reviewSubjectRef'));
+    assert.ok(shapeKeys.includes('acceptedSourceRef'));
+    assert.ok(shapeKeys.includes('acceptedRevision'));
     assert.ok(
       shapeKeys.includes('streamDisposition'),
       'canonical shape must retain callback/final persistence semantics',

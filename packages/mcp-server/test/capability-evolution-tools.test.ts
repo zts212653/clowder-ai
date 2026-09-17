@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   capabilityEvolutionTools,
   handleGetEvolutionProgram,
+  handleIssueCapabilityEvolutionMeasurement,
   handleLinkEvolutionProgramObservation,
   handleStartEvolutionProgram,
   handleUpdateEvolutionProgram,
+  issueCapabilityEvolutionMeasurementInputSchema,
   linkEvolutionProgramObservationInputSchema,
   startEvolutionProgramInputSchema,
   updateEvolutionProgramInputSchema,
@@ -46,20 +48,44 @@ describe('F311 MCP chat admission', () => {
     await handleStartEvolutionProgram({
       targetRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
       clientMessageId: 'message-start-video-forge',
+      displayName: '视频生成能力',
     });
 
     assert.deepEqual(Object.keys(startEvolutionProgramInputSchema).sort(), [
       'agentKeyCatId',
       'clientMessageId',
+      'displayName',
       'targetRef',
     ]);
     assert.equal(startEvolutionProgramInputSchema.agentKeyCatId.isOptional(), true);
+    assert.equal(startEvolutionProgramInputSchema.displayName.isOptional(), false);
     assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/evolution-programs');
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
       targetRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
       clientMessageId: 'message-start-video-forge',
+      displayName: '视频生成能力',
     });
     assert.equal(requests[0].init.headers?.['x-invocation-id'], 'inv-f311');
+  });
+
+  it('carries the user goal as readable naming metadata through chat creation and renaming', async () => {
+    const displayName = '改进路演表达';
+    await handleStartEvolutionProgram({
+      targetRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:opaque-target' },
+      clientMessageId: 'message-start-readable',
+      displayName,
+    });
+    assert.equal(JSON.parse(String(requests[0].init.body)).displayName, displayName);
+    assert.equal(startEvolutionProgramInputSchema.displayName.safeParse('bad\nname').success, false);
+    const action = { type: 'name' as const, displayName };
+    assert.equal(updateEvolutionProgramInputSchema.action.safeParse(action).success, true);
+    await handleUpdateEvolutionProgram({
+      programId: 'evolution-program:00000000000000000000000000000001',
+      expectedSequence: 2,
+      clientMessageId: 'message-name',
+      action,
+    });
+    assert.deepEqual(JSON.parse(String(requests[1].init.body)).action, action);
   });
 
   it('reads and updates the same Program endpoints', async () => {
@@ -130,6 +156,35 @@ describe('F311 MCP chat admission', () => {
     assert.equal(JSON.stringify(body).includes('payload'), false);
   });
 
+  it('requests owner-issued measurement from the program id without accepting evidence payloads', async () => {
+    const input = {
+      programId: 'evolution-program:00000000000000000000000000000001',
+      clientMessageId: 'message-issue-measurement',
+    };
+    assert.deepEqual(Object.keys(issueCapabilityEvolutionMeasurementInputSchema).sort(), [
+      'agentKeyCatId',
+      'clientMessageId',
+      'programId',
+    ]);
+    assert.equal(
+      issueCapabilityEvolutionMeasurementInputSchema.clientMessageId.safeParse('source-a\nSource-Message: source-b')
+        .success,
+      false,
+    );
+    assert.equal(issueCapabilityEvolutionMeasurementInputSchema.clientMessageId.safeParse('source-a\n').success, false);
+    assert.equal(issueCapabilityEvolutionMeasurementInputSchema.clientMessageId.safeParse('source-a\r').success, false);
+
+    await handleIssueCapabilityEvolutionMeasurement(input);
+
+    assert.equal(
+      new URL(requests[0].url).pathname,
+      '/api/callbacks/evolution-programs/evolution-program%3A00000000000000000000000000000001/measurement-issuance',
+    );
+    assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
+      clientMessageId: 'message-issue-measurement',
+    });
+  });
+
   it('describes zero-form admission and typed blockers', () => {
     const start = capabilityEvolutionTools.find((tool) => tool.name === 'cat_cafe_start_evolution_program');
     assert.match(start?.description ?? '', /我们来进化 X/);
@@ -148,5 +203,23 @@ describe('F311 MCP chat admission', () => {
       false,
     );
     assert.equal(linkEvolutionProgramObservationInputSchema.sourceBindings.safeParse([]).success, false);
+    const issue = capabilityEvolutionTools.find(
+      (tool) => tool.name === 'cat_cafe_issue_capability_evolution_measurement',
+    );
+    assert.match(issue?.description ?? '', /source-owner manifest/);
+    assert.match(issue?.description ?? '', /may be absent/);
+    assert.match(issue?.description ?? '', /typed insufficient/);
+    assert.match(issue?.description ?? '', /does not advance/i);
+    assert.deepEqual(issue?.policy.standaloneReason, {
+      disposition: 'accepted-boundary',
+      kind: 'authority-boundary',
+      admissionRef: 'file:docs/features/F267-eval-measurement-validity.md',
+    });
+    assert.deepEqual(
+      issue?.operation.kind === 'single'
+        ? issue.operation.boundary.authorizationPaths.map((path) => path.principal)
+        : [],
+      ['eval-cat', 'agent-key-cat'],
+    );
   });
 });

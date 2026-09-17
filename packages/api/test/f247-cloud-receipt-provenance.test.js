@@ -28,7 +28,124 @@ function statusContent(outboundReceipt) {
   });
 }
 
+function needsBindingContent(outboundReceipt) {
+  return JSON.stringify({
+    type: 'cloud_bridge_status',
+    status: 'unavailable',
+    reason: 'needs-binding',
+    message: '这条消息还没有发送',
+    outboundReceipt,
+  });
+}
+
 describe('F247 durable outbound receipt provenance', () => {
+  it('persists a refs-only recovery carrier for an exact direct-user needs-binding source', async () => {
+    const store = new MessageStore();
+    const source = store.append({
+      userId: 'alice',
+      catId: null,
+      threadId: 'thread-owner',
+      content: '@gpt-pro exact source',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+    });
+    const outboundReceipt = receipt(source.id, {
+      sourceSender: { kind: 'user', id: 'alice' },
+      status: 'failed',
+      transport: 'none',
+      hostMessageId: undefined,
+      idempotency: { keyKind: 'source_message_id', disposition: 'not_attempted' },
+    });
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'gpt-pro',
+      expectedSourceMessageId: source.id,
+      expectedDispatchInvocationId: 'inv-cloud',
+      contents: [needsBindingContent(outboundReceipt)],
+    });
+
+    const persisted = (await store.getByThread('thread-owner')).find(
+      (message) => message.source?.connector === 'cloud-bridge-status',
+    );
+    assert.deepEqual(persisted.source.meta.cloudBridgeRecovery, {
+      v: 1,
+      kind: 'needs_binding',
+      sourceMessageId: source.id,
+      targetCatId: 'gpt-pro',
+      dispatchInvocationId: 'inv-cloud',
+    });
+    assert.equal(JSON.stringify(persisted.source.meta.cloudBridgeRecovery).includes('chatgpt.com'), false);
+    assert.equal(JSON.stringify(persisted.source.meta.cloudBridgeRecovery).includes('conversation'), false);
+  });
+
+  it('does not persist an interactive recovery carrier for an exact cat-authored source', async () => {
+    const store = new MessageStore();
+    const source = store.append({
+      userId: 'alice',
+      catId: 'codex-sol',
+      threadId: 'thread-owner',
+      content: '@gpt-pro exact A2A source',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+      extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
+    });
+    const outboundReceipt = receipt(source.id, {
+      status: 'failed',
+      transport: 'none',
+      hostMessageId: undefined,
+      idempotency: { keyKind: 'source_message_id', disposition: 'not_attempted' },
+    });
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'gpt-pro',
+      expectedSourceMessageId: source.id,
+      expectedDispatchInvocationId: 'inv-cloud',
+      contents: [needsBindingContent(outboundReceipt)],
+    });
+
+    const persisted = (await store.getByThread('thread-owner')).find(
+      (message) => message.source?.connector === 'cloud-bridge-status',
+    );
+    assert.equal(persisted.source.meta.cloudBridgeRecovery, undefined);
+  });
+
+  it('does not infer recovery from a generic failed cloud receipt', async () => {
+    const store = new MessageStore();
+    const source = store.append({
+      userId: 'alice',
+      catId: null,
+      threadId: 'thread-owner',
+      content: '@gpt-pro exact source',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+    });
+    const outboundReceipt = receipt(source.id, {
+      sourceSender: { kind: 'user', id: 'alice' },
+      status: 'failed',
+      transport: 'none',
+      hostMessageId: undefined,
+      idempotency: { keyKind: 'source_message_id', disposition: 'not_attempted' },
+    });
+
+    await persistUserFacingSystemInfoNotices({
+      messageStore: store,
+      threadId: 'thread-owner',
+      catId: 'gpt-pro',
+      expectedSourceMessageId: source.id,
+      expectedDispatchInvocationId: 'inv-cloud',
+      contents: [statusContent(outboundReceipt)],
+    });
+
+    const persisted = (await store.getByThread('thread-owner')).find(
+      (message) => message.source?.connector === 'cloud-bridge-status',
+    );
+    assert.equal(persisted.source.meta.cloudBridgeRecovery, undefined);
+  });
+
   it('persists replyTo only when source, sender, dispatch invocation, and target all match server context', async () => {
     const store = new MessageStore();
     const source = store.append({

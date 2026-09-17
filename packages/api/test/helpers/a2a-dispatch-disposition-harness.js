@@ -66,6 +66,8 @@ export async function createA2ADispositionHarness({
   crossPostSourceThreadId,
   deliveryStatus,
   registry,
+  sourceExtra,
+  log,
 } = {}) {
   const eventLog = new MemoryEventLog();
   const projectionStore = new MemoryProjectionStore();
@@ -81,13 +83,18 @@ export async function createA2ADispositionHarness({
     threadId: 'thread-1',
     origin: 'stream',
     ...(deliveryStatus ? { deliveryStatus } : {}),
-    ...(crossPostSourceThreadId
+    ...(crossPostSourceThreadId || sourceExtra
       ? {
           extra: {
-            crossPost: {
-              sourceThreadId: crossPostSourceThreadId,
-              sourceInvocationId: 'source-invocation',
-            },
+            ...(crossPostSourceThreadId
+              ? {
+                  crossPost: {
+                    sourceThreadId: crossPostSourceThreadId,
+                    sourceInvocationId: 'source-invocation',
+                  },
+                }
+              : {}),
+            ...sourceExtra,
           },
         }
       : {}),
@@ -119,6 +126,7 @@ export async function createA2ADispositionHarness({
     ballCustodyEventLog: eventLog,
     ballCustodyProjectionStore: projectionStore,
     ballCustody: fencedIngest,
+    ...(log ? { log } : {}),
     repairProjection: (subjectKey) => projector.rebuild(subjectKey),
     now: () => 2_000,
   });

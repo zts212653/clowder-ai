@@ -12,17 +12,17 @@ import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadSt
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 
 const action = {
-  subjectRef: 'pr:owner/repo#4058',
-  actionFamily: 'review',
-  successorSlot: 'reviewer',
+  subjectRef: 'subject:task:task-4058',
+  actionFamily: 'implement',
+  successorSlot: 'implementer',
   mode: 'single',
-  terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
+  terminalPredicate: { kind: 'task_done' },
 };
 
 function carrierLease(sourceThreadId, targetThreadId) {
   return {
     leaseId: 'lease-review-4058',
-    key: 'user-1|pr:owner/repo#4058|review|reviewer',
+    key: 'user-1|subject:task:task-4058|implement|implementer',
     tenantScope: 'user-1',
     subjectRef: action.subjectRef,
     actionFamily: action.actionFamily,
@@ -59,7 +59,7 @@ function appendCarrier(messageStore, lease, state) {
     threadId: lease.holderThreadId,
     userId: lease.tenantScope,
     catId: lease.predecessorCatId,
-    content: 'Original exact-HEAD review carrier',
+    content: 'Original task implementation carrier',
     mentions: ['codex'],
     origin: 'callback',
     timestamp: 100,
@@ -129,7 +129,7 @@ describe('direct action carrier restart recovery', () => {
     const threadStore = new ThreadStore();
     registry = new InvocationRegistry();
     source = await threadStore.create('user-1', 'Author');
-    target = await threadStore.create('user-1', 'Reviewer');
+    target = await threadStore.create('user-1', 'Implementer');
     auth = await registry.create('user-1', 'opus', source.id);
     lease = carrierLease(source.id, target.id);
     unavailable = [];
@@ -169,7 +169,7 @@ describe('direct action carrier restart recovery', () => {
       headers: { 'x-invocation-id': auth.invocationId, 'x-callback-token': auth.callbackToken },
       payload: {
         threadId: target.id,
-        content: 'Review exact HEAD',
+        content: 'Implement task',
         targetCats: ['codex'],
         clientMessageId,
         action,
@@ -214,7 +214,7 @@ describe('direct action carrier restart recovery', () => {
       threadId: target.id,
       userId: 'user-1',
       catId: 'opus',
-      content: 'Review exact HEAD',
+      content: 'Implement task',
       mentions: ['codex'],
       origin: 'callback',
       timestamp: 130,
