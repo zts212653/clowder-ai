@@ -1423,6 +1423,10 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
+      // Keep the coverage rationale executable rather than a comment: if cliSessionId is
+      // dropped or the render branch drifts, this fails loudly instead of letting the guard
+      // silently go blind to the native-compaction branch again.
+      expect(container.querySelector('[data-testid="compact-native-session-s1"]')).not.toBeNull();
       const html = container.innerHTML;
       // Legacy semantic tokens
       expect(html).not.toContain('border-codex-primary');
