@@ -707,7 +707,12 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       // no model list (Antigravity) then saves a model-less member. Each breed's own model is
       // its client's default; breeds sharing a client add their models to the same entry,
       // which is the per-client granularity `clientDefaults` already has in the normal path.
-      const legacyClientDefaults: Record<string, ClientDefaultsEntry> = {};
+      // Null-prototype: `clientId` is `z.string().min(1)` by #252's deliberate choice, so a
+      // breed may legitimately be keyed `constructor` / `__proto__`. On a plain `{}` the lookup
+      // below would return an inherited value, read `.models` off it and throw — collapsing
+      // this whole response to an empty template list. An own-property check would only turn
+      // that into a silent drop for `__proto__`, whose assignment hits the prototype setter.
+      const legacyClientDefaults: Record<string, ClientDefaultsEntry> = Object.create(null);
       for (const cat of templateCats) {
         const clientId = cat.clientId;
         const model = cat.defaultModel;
