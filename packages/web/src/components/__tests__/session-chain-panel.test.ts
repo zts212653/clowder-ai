@@ -1404,7 +1404,17 @@ describe('F24: SessionChainPanel', () => {
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {
       mockSessionsResponse([
-        { id: 's1', catId: 'codex', seq: 0, status: 'active', messageCount: 1, createdAt: Date.now() },
+        // cliSessionId present so the native-compact action actually renders. Without it
+        // this guard silently skipped that button's classes entirely.
+        {
+          id: 's1',
+          cliSessionId: 'native-1',
+          catId: 'codex',
+          seq: 0,
+          status: 'active',
+          messageCount: 1,
+          createdAt: Date.now(),
+        },
         { id: 's2', catId: 'gemini', seq: 1, status: 'active', messageCount: 1, createdAt: Date.now() },
         { id: 's3', catId: 'opus-45', seq: 2, status: 'active', messageCount: 1, createdAt: Date.now() },
         { id: 's4', catId: 'gpt52', seq: 3, status: 'active', messageCount: 1, createdAt: Date.now() },
