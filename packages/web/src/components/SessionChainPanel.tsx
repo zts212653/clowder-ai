@@ -582,7 +582,7 @@ export function SessionChainPanel({
                           ? '请先停止该 Agent，再压缩原生上下文'
                           : '请求 provider 原生压缩并保留 Clowder AI continuity'
                       }
-                      className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded border border-cafe-subtle px-2 py-0.5 text-micro text-cafe-secondary hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {compactingSessionId === session.id ? '压缩中…' : '原生压缩'}
                     </button>

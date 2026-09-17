@@ -1404,8 +1404,10 @@ describe('F24: SessionChainPanel', () => {
 
     it('does not emit any of the legacy hardcoded color tokens', async () => {
       mockSessionsResponse([
-        // cliSessionId present so the native-compact action actually renders. Without it
-        // this guard silently skipped that button's classes entirely.
+        // cliSessionId makes the native-compaction button render, which widens what this
+        // guard can see. Verified by injection: with a legacy token planted on that button
+        // the assertion stays green without this field and goes red with it, so without it
+        // the button is invisible to every token in this list.
         {
           id: 's1',
           cliSessionId: 'native-1',
@@ -1434,9 +1436,15 @@ describe('F24: SessionChainPanel', () => {
       expect(html).not.toContain('border-[#66BB6A66]');
       expect(html).not.toContain('border-[#7E57C266]');
       expect(html).not.toContain('border-[#B39DDB66]');
-      // Legacy gray fallback class
+      // Legacy gray fallback class. F056 (a283d1577) migrated this panel's own
+      // surfaces from bg-gray-200 to bg-cafe-surface-elevated and mechanically
+      // rewrote the token inside this assertion too, which silently turned a
+      // legacy-fallback guard into a prohibition on the token the same commit had
+      // just adopted (SessionChainPanel.tsx:655 and :696 use it legitimately). The
+      // fixture renders only active sessions, so the sealed button carrying it was
+      // never asserted against and the contradiction stayed dormant.
       expect(html).not.toContain('border-cafe/40');
-      expect(html).not.toContain('bg-cafe-surface-elevated');
+      expect(html).not.toContain('bg-gray-200');
     });
   });
 
