@@ -401,9 +401,31 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     // dependency happening to change.
     const recommendedClient = CLIENT_OPTIONS.find((option) => option.value === t.defaultClient)?.value;
     if (recommendedClient) {
-      if (recommendedClient !== form.clientId) Object.assign(patch, clientSwitchPatch(form, recommendedClient));
+      const templateDefaultModel = resolveClientDefaults(clientDefaults, recommendedClient)?.defaultModel;
+      if (recommendedClient !== form.clientId) {
+        // Client changes: `modelOptions` still describes the client being left, so no
+        // account can speak for the new scope yet. Bind the template default and let the
+        // resolution effect refine it once the new client's account settles.
+        Object.assign(patch, clientSwitchPatch(form, recommendedClient));
+        patch.defaultModel = templateDefaultModel ?? '';
+      } else {
+        // Same client: the (client, account) scope never moves, so the resolution effect
+        // does not re-run and this is the only place left that can honour the account.
+        // Same precedence it uses -- the account's own list first, template default only
+        // when the account has none -- because a template default the account does not
+        // serve fails save validation on an API-key account.
+        patch.defaultModel =
+          resolveScopedDefaultModel({
+            currentModel: form.defaultModel,
+            accountModels: modelOptions,
+            templateDefaultModel,
+            // Picking a template rebinds the member's identity, so whatever sits in the
+            // field is no longer authoritative -- the same invalidation a scope change
+            // performs, which is what rule 3 of the resolver keys off.
+            scopeChanged: true,
+          }) ?? form.defaultModel;
+      }
       patch.clientId = recommendedClient;
-      patch.defaultModel = resolveClientDefaults(clientDefaults, recommendedClient)?.defaultModel ?? '';
     }
     patchForm(patch);
   };

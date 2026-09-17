@@ -261,6 +261,42 @@ describe('#768: template selection binds the recommended client', () => {
     expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
     expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
   });
+
+  it('keeps the account model when the template recommends the client already selected', async () => {
+    // Cross-family review + cloud codex converged here. The ordering test above only
+    // passes because it detours through openai: that moves the (client, account) scope,
+    // so the resolution effect re-runs and repairs the value. With no client change in
+    // between, neither the scope nor `modelOptions` moves, the effect never runs, and
+    // template selection is the only thing that can honour the account.
+    mockTemplatesEndpoint([RAGDOLL], { anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } }, [
+      ANTHROPIC_ACCOUNT,
+    ]);
+    await openEditor();
+
+    await selectAccount('claude');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
+
+    // RAGDOLL recommends anthropic — the client already in the form.
+    await clickTemplate('宪宪');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
+  });
+
+  it('applies the template default when the same-client account lists no models', async () => {
+    // The account-first rule must not strand a model-less member: an account with no
+    // catalog (API-key accounts, Antigravity) still needs the template default.
+    mockTemplatesEndpoint([RAGDOLL], { anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] } }, [
+      { ...ANTHROPIC_ACCOUNT, models: [] },
+    ]);
+    await openEditor();
+
+    await selectAccount('claude');
+    await clickTemplate('宪宪');
+
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-opus-4-7');
+  });
 });
 
 describe('#768: first-run client step surfaces the template recommendation', () => {
