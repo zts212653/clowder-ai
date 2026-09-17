@@ -40,6 +40,25 @@ export async function readPersistOutcome(res: { json: () => Promise<unknown> }):
   return 'unconfirmed';
 }
 
+/**
+ * What a rejected HTTP status actually proves about the write.
+ *
+ * `res.ok === false` is not a synonym for "nothing changed". PATCH /api/config
+ * returns 4xx only for its own contract-level rejections — an unparseable body,
+ * a missing identity header, or a `configStore.set` throw — and all of those
+ * happen before the .env write, so a 4xx does prove the value is untouched.
+ *
+ * A 5xx is the opposite case. Behind the reverse proxy that api-client
+ * supports, a gateway-generated 502/504 can reach the browser after the
+ * upstream PATCH already landed and only its response was lost. 408 is grouped
+ * there too, because an intermediary can emit it for a request it already
+ * forwarded. Any status that cannot be pinned to the application's own
+ * rejection leaves the outcome unknown.
+ */
+export function classifySaveFailure(status: number): SaveState {
+  return status >= 400 && status < 500 && status !== 408 ? 'failed' : 'unconfirmed';
+}
+
 export function BubbleToggle({
   label,
   value,
@@ -69,10 +88,10 @@ export function BubbleToggle({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: configKey, value: next }),
       });
-      // A rejected response is the only case where the server told us the
-      // update did not happen. Everything else — a lost response, a body we
-      // cannot read — leaves the real state unknown.
-      outcome = res.ok ? await readPersistOutcome(res) : 'failed';
+      // A rejected response only proves "not applied" when it is the app's own
+      // contract-level rejection; see classifySaveFailure. Everything else — a
+      // lost response, a gateway error, a body we cannot read — stays unknown.
+      outcome = res.ok ? await readPersistOutcome(res) : classifySaveFailure(res.status);
     } catch {
       outcome = 'unconfirmed';
     }

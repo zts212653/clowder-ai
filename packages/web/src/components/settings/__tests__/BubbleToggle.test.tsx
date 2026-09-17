@@ -24,7 +24,7 @@ vi.mock('@/stores/chatStore', () => ({
 describe('BubbleToggle persistence disclosure', () => {
   let container: HTMLDivElement;
   let root: Root;
-  let onChanged: ReturnType<typeof vi.fn>;
+  let onChanged: ReturnType<typeof vi.fn<() => void>>;
 
   beforeAll(() => {
     (globalThis as Record<string, unknown>).React = React;
@@ -40,7 +40,7 @@ describe('BubbleToggle persistence disclosure', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
-    onChanged = vi.fn();
+    onChanged = vi.fn<() => void>();
     apiFetch.mockReset();
     fetchGlobalBubbleDefaults.mockReset();
   });
@@ -125,8 +125,8 @@ describe('BubbleToggle persistence disclosure', () => {
     expect(container.textContent).not.toContain(BUBBLE_SAVE_FAILED_NOTICE);
   });
 
-  it('reports a rejected update without claiming the value changed', async () => {
-    apiFetch.mockResolvedValue({ ok: false, status: 500, json: () => Promise.resolve({ error: 'boom' }) });
+  it('reports the app’s own 4xx rejection, which is validated before any write', async () => {
+    apiFetch.mockResolvedValue({ ok: false, status: 400, json: () => Promise.resolve({ error: 'boom' }) });
     render();
 
     clickToggle();
@@ -135,6 +135,23 @@ describe('BubbleToggle persistence disclosure', () => {
     expect(container.textContent).toContain(BUBBLE_SAVE_FAILED_NOTICE);
     expect(container.textContent).not.toContain(BUBBLE_UNCONFIRMED_NOTICE);
     expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+  });
+
+  // A gateway 5xx (or a proxy 408) can arrive after the PATCH already landed
+  // upstream, so it proves nothing about the stored value. Only the app's own
+  // 4xx rejection may claim "设置未改变".
+  it.each([500, 502, 503, 504, 408])('treats a %i response as unconfirmed, not "unchanged"', async (status) => {
+    apiFetch.mockResolvedValue({ ok: false, status, json: () => Promise.resolve({ error: 'gateway' }) });
+    render();
+
+    clickToggle();
+    await flush();
+
+    expect(container.textContent).toContain(BUBBLE_UNCONFIRMED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_SAVE_FAILED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+    // The write may have landed, so re-read the server to settle the UI.
+    expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
   it('reports a lost response as unconfirmed instead of asserting 设置未改变', async () => {
