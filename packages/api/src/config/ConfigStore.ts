@@ -132,6 +132,11 @@ class ConfigStoreImpl {
     return this.definitionFor(key)?.snapshotPath;
   }
 
+  /** Resolve the process.env key a config key maps to (used for persistence). */
+  getEnvKey(key: string): string | undefined {
+    return this.definitionFor(key)?.envKey;
+  }
+
   getRiskLevel(key: string): 'standard' | 'high' | undefined {
     return this.definitionFor(key)?.riskLevel;
   }

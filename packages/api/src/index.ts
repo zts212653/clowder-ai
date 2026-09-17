@@ -550,6 +550,22 @@ async function main(): Promise<void> {
   const { logger: customLogger, isDebugMode, LOG_DIR_PATH } = await import('./infrastructure/logger.js');
   let sessionHookAuthenticationReady = (): boolean => false;
 
+  // Reapply Hub-persisted app settings (default cat, bubble defaults, ...) from
+  // the config-root .env. The launcher only sources the install .env, so
+  // without this every Hub setting silently reverts on restart.
+  const { loadProjectEnvIntoProcess } = await import('./config/project-env-loader.js');
+  const projectEnvLoad = loadProjectEnvIntoProcess();
+  if (projectEnvLoad.applied.length > 0 || projectEnvLoad.skipped.length > 0) {
+    customLogger.info(
+      {
+        applied: projectEnvLoad.applied,
+        skipped: projectEnvLoad.skipped,
+        envFile: projectEnvLoad.envFile,
+      },
+      '[api] applied Hub-persisted app settings from config-root .env',
+    );
+  }
+
   // F152: Initialize OpenTelemetry SDK (must be early, before routes)
   const { initTelemetry } = await import('./infrastructure/telemetry/init.js');
   const telemetryHandle = initTelemetry();
