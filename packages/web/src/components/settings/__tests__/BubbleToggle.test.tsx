@@ -3,7 +3,12 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BUBBLE_SAVE_FAILED_NOTICE, BUBBLE_UNSAVED_NOTICE, BubbleToggle } from '../BubbleToggle';
+import {
+  BUBBLE_SAVE_FAILED_NOTICE,
+  BUBBLE_UNCONFIRMED_NOTICE,
+  BUBBLE_UNSAVED_NOTICE,
+  BubbleToggle,
+} from '../BubbleToggle';
 
 const apiFetch = vi.fn();
 const fetchGlobalBubbleDefaults = vi.fn();
@@ -78,7 +83,7 @@ describe('BubbleToggle persistence disclosure', () => {
     expect(container.textContent).not.toContain('未保存');
   });
 
-  it('discloses 本次生效、未保存 when the .env write was skipped or failed', async () => {
+  it('keeps the explicit persisted:false disclosure', async () => {
     apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ persisted: false }) });
     render();
 
@@ -86,18 +91,38 @@ describe('BubbleToggle persistence disclosure', () => {
     await flush();
 
     expect(container.textContent).toContain(BUBBLE_UNSAVED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNCONFIRMED_NOTICE);
     // The hot update really did apply in-process, so the parent is still told.
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a missing persisted flag as unsaved instead of assuming success', async () => {
+  it('treats a missing persisted flag as unconfirmed, not as unsaved', async () => {
     apiFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ config: {} }) });
     render();
 
     clickToggle();
     await flush();
 
-    expect(container.textContent).toContain(BUBBLE_UNSAVED_NOTICE);
+    expect(container.textContent).toContain(BUBBLE_UNCONFIRMED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_SAVE_FAILED_NOTICE);
+    // An unknown outcome is reconciled against the server instead of asserted.
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an unreadable success body as unconfirmed', async () => {
+    apiFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new TypeError('invalid json')),
+    });
+    render();
+
+    clickToggle();
+    await flush();
+
+    expect(container.textContent).toContain(BUBBLE_UNCONFIRMED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_SAVE_FAILED_NOTICE);
   });
 
   it('reports a rejected update without claiming the value changed', async () => {
@@ -108,7 +133,33 @@ describe('BubbleToggle persistence disclosure', () => {
     await flush();
 
     expect(container.textContent).toContain(BUBBLE_SAVE_FAILED_NOTICE);
-    expect(onChanged).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain(BUBBLE_UNCONFIRMED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+  });
+
+  it('reports a lost response as unconfirmed instead of asserting 设置未改变', async () => {
+    apiFetch.mockRejectedValue(new TypeError('Failed to fetch'));
+    render();
+
+    clickToggle();
+    await flush();
+
+    expect(container.textContent).toContain(BUBBLE_UNCONFIRMED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_SAVE_FAILED_NOTICE);
+    expect(container.textContent).not.toContain(BUBBLE_UNSAVED_NOTICE);
+    // The PATCH may have landed; re-read the server so the UI can settle.
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not leak a network error into the confirmed-unsaved wording', async () => {
+    apiFetch.mockRejectedValue(new TypeError('NetworkError when attempting to fetch resource.'));
+    render();
+
+    clickToggle();
+    await flush();
+
+    expect(container.textContent).not.toContain('设置未改变');
+    expect(container.textContent).not.toContain('未保存');
   });
 
   it('clears the notice after a later successful save', async () => {
@@ -123,5 +174,6 @@ describe('BubbleToggle persistence disclosure', () => {
     await flush();
 
     expect(container.textContent).not.toContain('未保存');
+    expect(container.textContent).not.toContain(BUBBLE_UNCONFIRMED_NOTICE);
   });
 });

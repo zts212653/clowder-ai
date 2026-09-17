@@ -16,8 +16,29 @@ type BubbleDefault = 'expanded' | 'collapsed';
  */
 export const BUBBLE_UNSAVED_NOTICE = '本次生效、未保存（重启后会恢复原值）';
 export const BUBBLE_SAVE_FAILED_NOTICE = '更新失败：服务端未接受，设置未改变';
+export const BUBBLE_UNCONFIRMED_NOTICE = '结果未确认，请刷新核实';
 
-type SaveState = 'idle' | 'saved' | 'unsaved' | 'failed';
+type SaveState = 'idle' | 'saved' | 'unsaved' | 'failed' | 'unconfirmed';
+
+/**
+ * Which persistence disclosure the response actually supports.
+ *
+ * Only an explicit `persisted: false` proves the choice did not reach disk, and
+ * only an explicit `persisted: true` proves it did. A success response whose
+ * body is unreadable or omits the flag proves neither, so it must stay
+ * "unconfirmed" rather than borrow the "unsaved" wording.
+ */
+export async function readPersistOutcome(res: { json: () => Promise<unknown> }): Promise<SaveState> {
+  let body: { persisted?: boolean } | null = null;
+  try {
+    body = (await res.json()) as { persisted?: boolean } | null;
+  } catch {
+    body = null;
+  }
+  if (body?.persisted === true) return 'saved';
+  if (body?.persisted === false) return 'unsaved';
+  return 'unconfirmed';
+}
 
 export function BubbleToggle({
   label,
@@ -41,30 +62,27 @@ export function BubbleToggle({
     const next: BubbleDefault = display === 'collapsed' ? 'expanded' : 'collapsed';
     setOptimistic(next);
     setSaveState('idle');
+    let outcome: SaveState = 'unconfirmed';
     try {
       const res = await apiFetch('/api/config', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key: configKey, value: next }),
       });
-      if (!res.ok) {
-        setOptimistic(null);
-        setSaveState('failed');
-        return;
-      }
-      const body = (await res.json().catch(() => null)) as { persisted?: boolean } | null;
-      setOptimistic(null);
-      // An absent `persisted` field must not be read as success: only an
-      // explicit true means the choice survives a restart.
-      setSaveState(body?.persisted === true ? 'saved' : 'unsaved');
-      onChanged();
-      void useChatStore.getState().fetchGlobalBubbleDefaults();
+      // A rejected response is the only case where the server told us the
+      // update did not happen. Everything else — a lost response, a body we
+      // cannot read — leaves the real state unknown.
+      outcome = res.ok ? await readPersistOutcome(res) : 'failed';
     } catch {
-      setOptimistic(null);
-      setSaveState('failed');
-    } finally {
-      pendingRef.current = false;
+      outcome = 'unconfirmed';
     }
+    setOptimistic(null);
+    setSaveState(outcome);
+    // Re-read the server so an unknown outcome can be reconciled instead of
+    // being left to the user's memory; the notice covers the gap either way.
+    onChanged();
+    void useChatStore.getState().fetchGlobalBubbleDefaults();
+    pendingRef.current = false;
   }, [display, configKey, onChanged]);
 
   return (
@@ -83,6 +101,13 @@ export function BubbleToggle({
         <output className="mt-1 block">
           <SettingsStatusStrip tone="error" size="xs" bordered>
             {BUBBLE_SAVE_FAILED_NOTICE}
+          </SettingsStatusStrip>
+        </output>
+      ) : null}
+      {saveState === 'unconfirmed' ? (
+        <output className="mt-1 block">
+          <SettingsStatusStrip tone="warn" size="xs" bordered>
+            {BUBBLE_UNCONFIRMED_NOTICE}
           </SettingsStatusStrip>
         </output>
       ) : null}
