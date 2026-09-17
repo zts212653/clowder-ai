@@ -4,7 +4,7 @@ import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
-import { clientSwitchPatch } from './hub-cat-editor.client-switch';
+import { clientSwitchPatch } from './hub-cat-editor.client-scope';
 import {
   ACP_TRANSPORT_OPTIONS,
   autoSlug,

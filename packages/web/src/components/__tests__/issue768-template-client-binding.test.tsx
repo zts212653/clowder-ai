@@ -60,10 +60,28 @@ const RAGDOLL: TemplateCard = {
   defaultClient: 'anthropic',
 };
 
-function mockTemplatesEndpoint(templates: TemplateCard[], clientDefaults: Record<string, unknown>) {
+const ANTHROPIC_ACCOUNT = {
+  id: 'claude',
+  displayName: 'Claude',
+  name: 'claude',
+  authType: 'oauth',
+  kind: 'builtin',
+  builtin: true,
+  mode: 'subscription',
+  clientId: 'anthropic',
+  models: ['claude-sonnet-4-6'],
+  hasApiKey: false,
+  createdAt: '2026-01-01T00:00:00.000Z',
+};
+
+function mockTemplatesEndpoint(
+  templates: TemplateCard[],
+  clientDefaults: Record<string, unknown>,
+  providers: unknown[] = [],
+) {
   mockApiFetch.mockImplementation((path: string) => {
     if (path === '/api/accounts') {
-      return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers: [] }));
+      return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', activeProfileId: null, providers }));
     }
     if (path === '/api/cat-templates') {
       return Promise.resolve(jsonResponse({ templates, clientDefaults }));
@@ -83,6 +101,16 @@ async function clickTemplate(nickname: string) {
 
 async function selectClient(value: string) {
   const select = queryField<HTMLSelectElement>('select[aria-label="Client"]');
+  await act(async () => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    nativeSetter?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flushEffects();
+}
+
+async function selectAccount(value: string) {
+  const select = queryField<HTMLSelectElement>('select[aria-label="认证信息"]');
   await act(async () => {
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
     nativeSetter?.call(select, value);
@@ -203,6 +231,35 @@ describe('#768: template selection binds the recommended client', () => {
     expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
     expect(document.body.querySelector('select[aria-label="Transport"]')).toBeNull();
     expect(document.body.querySelector('input[aria-label="ACP Command"]')).toBeNull();
+  });
+
+  it('re-resolves the model across account, then client, then template in turn', async () => {
+    // The ordering cross-family review asked for: 先选账号 / 手动切 client / 再选模板.
+    mockTemplatesEndpoint(
+      [RAGDOLL],
+      {
+        anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] },
+        openai: { defaultModel: 'gpt-5.6-sol', models: ['gpt-5.6-sol'] },
+      },
+      [ANTHROPIC_ACCOUNT],
+    );
+    await openEditor();
+
+    // 1. Account first: the account's own list outranks the template default, so the
+    //    saved model is one the account actually serves.
+    await selectAccount('claude');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
+
+    // 2. Manual client switch: the anthropic model must not follow to openai, which
+    //    has no account here and so falls back to its template default.
+    await selectClient('openai');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('gpt-5.6-sol');
+
+    // 3. Template last: it binds anthropic, and the account serving anthropic supplies
+    //    the model instead of the template default — never the stale openai-era value.
+    await clickTemplate('宪宪');
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-sonnet-4-6');
   });
 });
 

@@ -9,7 +9,7 @@ import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
-import { clientSwitchPatch } from './hub-cat-editor.client-switch';
+import { clientSwitchPatch, modelScopeKey, resolveScopedDefaultModel } from './hub-cat-editor.client-scope';
 import {
   autoSlug,
   buildCatPatchPayload,
@@ -76,6 +76,8 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingProfileIdRef = useRef<string | null>(null);
+  /** #768: the (client, account) scope the current defaultModel was resolved for. */
+  const modelScopeRef = useRef<string | null>(null);
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
@@ -118,6 +120,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     setHasUnsavedChanges(false);
     setShowAuthModal(false);
     pendingProfileIdRef.current = null;
+    modelScopeRef.current = null;
   }, [open, cat, draft]);
 
   // Re-fetch profiles when Provider Profiles page creates/saves/deletes an account.
@@ -288,24 +291,28 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     });
   }, [availableProfiles, cat, draft, form.clientId]);
 
-  // Auto-fill first available model only on profile/client change — NOT when
-  // the user clears the field. Previous code had form.defaultModel in deps,
-  // which re-filled immediately after the user cleared the input (#802).
+  // #768: resolve the model for the current (client, account) scope. The field is
+  // filled when empty, and re-resolved when the scope itself changes — so a template
+  // default never outlives the account it was chosen for. Deps intentionally exclude
+  // form.defaultModel: this runs on scope change, not when the user edits the input
+  // (#802 — that regression was re-filling immediately after the user cleared it).
   useEffect(() => {
-    // #768: clients whose accounts expose no model list (Antigravity always, an
-    // account without models otherwise) fall back to the template's clientDefaults
-    // model, so a template-bound client never saves a model-less member.
-    const nextModel = modelOptions[0] ?? resolveClientDefaults(clientDefaults, form.clientId)?.defaultModel ?? '';
-    if (!nextModel) return;
+    const scope = modelScopeKey(form.clientId, form.accountRef);
+    const scopeChanged = modelScopeRef.current !== null && modelScopeRef.current !== scope;
+    modelScopeRef.current = scope;
     setForm((prev) => {
-      // Guard against a value computed for a client the form has since left.
-      if (prev.clientId !== form.clientId || prev.defaultModel.trim().length > 0) return prev;
-      return { ...prev, defaultModel: nextModel };
+      // Guard against a value resolved for a client the form has since left.
+      if (prev.clientId !== form.clientId) return prev;
+      const nextModel = resolveScopedDefaultModel({
+        currentModel: prev.defaultModel,
+        accountModels: modelOptions,
+        templateDefaultModel: resolveClientDefaults(clientDefaults, form.clientId)?.defaultModel,
+        scopeChanged,
+      });
+      return nextModel === null ? prev : { ...prev, defaultModel: nextModel };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
-    // excludes form.defaultModel: auto-fill runs on profile change, not on
-    // user clearing the model input.
-  }, [clientDefaults, form.clientId, modelOptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above.
+  }, [clientDefaults, form.clientId, form.accountRef, modelOptions]);
 
   useEffect(() => {
     if (form.clientId !== 'antigravity') return;
