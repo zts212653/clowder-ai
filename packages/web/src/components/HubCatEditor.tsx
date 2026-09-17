@@ -9,6 +9,7 @@ import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
+import { clientSwitchPatch } from './hub-cat-editor.client-switch';
 import {
   autoSlug,
   buildCatPatchPayload,
@@ -386,10 +387,14 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     // #768: template selection binds the client the template recommends, plus that
     // client's default model from clientDefaults. Only clients this editor can render
     // and save are accepted, so an unknown recommendation leaves the current client be.
-    // The model is applied here rather than left to the auto-fill effect: selecting a
-    // template must not depend on an effect dependency happening to change.
+    // A recommendation that changes the client goes through the same normalization the
+    // Client selector uses, so no client-scoped state (transport, provider, effort,
+    // carrier) survives into the new client. The model is then applied here rather than
+    // left to the auto-fill effect: selecting a template must not depend on an effect
+    // dependency happening to change.
     const recommendedClient = CLIENT_OPTIONS.find((option) => option.value === t.defaultClient)?.value;
     if (recommendedClient) {
+      if (recommendedClient !== form.clientId) Object.assign(patch, clientSwitchPatch(form, recommendedClient));
       patch.clientId = recommendedClient;
       patch.defaultModel = resolveClientDefaults(clientDefaults, recommendedClient)?.defaultModel ?? '';
     }

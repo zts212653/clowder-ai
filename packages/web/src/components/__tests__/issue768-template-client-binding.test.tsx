@@ -81,6 +81,26 @@ async function clickTemplate(nickname: string) {
   await flushEffects();
 }
 
+async function selectClient(value: string) {
+  const select = queryField<HTMLSelectElement>('select[aria-label="Client"]');
+  await act(async () => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    nativeSetter?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flushEffects();
+}
+
+async function selectTransport(value: string) {
+  const select = queryField<HTMLSelectElement>('select[aria-label="Transport"]');
+  await act(async () => {
+    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    nativeSetter?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await flushEffects();
+}
+
 describe('#768: template selection binds the recommended client', () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -149,6 +169,41 @@ describe('#768: template selection binds the recommended client', () => {
     // Persona fields still applied — an unbindable recommendation must not block template use.
     expect(queryField<HTMLInputElement>('input[aria-label="Name"]').value).toBe('布偶猫');
   });
+  it('drops the template model when the user then switches client by hand', async () => {
+    mockTemplatesEndpoint([RAGDOLL], {
+      anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] },
+      openai: { defaultModel: 'gpt-5.6-sol', models: ['gpt-5.6-sol'] },
+    });
+    await openEditor();
+    await clickTemplate('宪宪');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('claude-opus-4-7');
+
+    await selectClient('openai');
+
+    // The model belongs to the client it was picked for. Switching client must
+    // re-derive it, never carry the anthropic model onto an openai member.
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('openai');
+    expect(queryField<HTMLInputElement>('input[aria-label="Model"]').value).toBe('gpt-5.6-sol');
+  });
+
+  it('normalizes hidden transport state when the template switches client', async () => {
+    mockTemplatesEndpoint([RAGDOLL], {
+      anthropic: { defaultModel: 'claude-opus-4-7', models: ['claude-opus-4-7'] },
+      opencode: { defaultModel: 'glm-5.2', models: ['glm-5.2'] },
+    });
+    await openEditor();
+    await selectClient('opencode');
+    await selectTransport('acp');
+    expect(document.body.querySelector('input[aria-label="ACP Command"]')).toBeTruthy();
+
+    await clickTemplate('宪宪');
+
+    // anthropic has no transport selector, so a surviving acpEnabled would be invisible
+    // in the form yet still persisted by buildAcpPatch().
+    expect(queryField<HTMLSelectElement>('select[aria-label="Client"]').value).toBe('anthropic');
+    expect(document.body.querySelector('select[aria-label="Transport"]')).toBeNull();
+    expect(document.body.querySelector('input[aria-label="ACP Command"]')).toBeNull();
+  });
 });
 
 describe('#768: first-run client step surfaces the template recommendation', () => {
@@ -214,6 +269,15 @@ describe('#768: first-run client step surfaces the template recommendation', () 
 
     expect(container.textContent).toContain('antigravity');
     expect(container.textContent).toContain('创建成员后可在成员设置里切换');
+  });
+
+  it('flags the recommendation when the detected client is not installed', async () => {
+    await renderClientStep('opencode', [detected('anthropic', 'Claude'), detected('opencode', 'OpenCode', false)]);
+
+    // Detected-but-uninstalled is not a usable recommendation: say so, and mark which
+    // entry it refers to, instead of silently offering arbitrary installed clients.
+    expect(container.textContent).toContain('创建成员后可在成员设置里切换');
+    expect(container.textContent).toContain('模板推荐');
   });
 
   it('stays quiet when no template recommendation is available', async () => {

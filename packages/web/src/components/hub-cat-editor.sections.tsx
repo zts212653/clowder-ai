@@ -4,6 +4,7 @@ import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import type { ProfileItem } from './hub-accounts.types';
+import { clientSwitchPatch } from './hub-cat-editor.client-switch';
 import {
   ACP_TRANSPORT_OPTIONS,
   autoSlug,
@@ -13,7 +14,6 @@ import {
   defaultAcpStartupArgsForClient,
   getAcpWarning,
   type HubCatEditorFormState,
-  isAcpOnlyClient,
   joinTags,
   normalizeMentionPattern,
   showTransportSelector,
@@ -26,26 +26,6 @@ import { VoiceConfigSection } from './hub-cat-editor-voice';
 import { TagEditor } from './hub-tag-editor';
 
 type FormPatch = Partial<HubCatEditorFormState>;
-
-function acpDefaultsForClientSwitch(
-  form: HubCatEditorFormState,
-  nextClient: HubCatEditorFormState['clientId'],
-): FormPatch {
-  const currentCommand = form.acpCommand.trim();
-  const currentStartupArgs = form.acpStartupArgs.trim();
-  const currentDefaultCommand = defaultAcpCommandForClient(form.clientId);
-  const currentDefaultStartupArgs = defaultAcpStartupArgsForClient(form.clientId);
-  const patch: FormPatch = {};
-
-  if (!currentCommand || currentCommand === currentDefaultCommand) {
-    patch.acpCommand = defaultAcpCommandForClient(nextClient);
-  }
-  if (!currentStartupArgs || currentStartupArgs === currentDefaultStartupArgs) {
-    patch.acpStartupArgs = defaultAcpStartupArgsForClient(nextClient);
-  }
-
-  return patch;
-}
 
 function safeAvatarSrc(value: string): string | null {
   const trimmed = value.trim();
@@ -416,16 +396,8 @@ export function AccountSection({
           options={CLIENT_OPTIONS}
           onChange={(value) => {
             const nextClient = value as HubCatEditorFormState['clientId'];
-            const forceAcp = isAcpOnlyClient(nextClient);
-            const nextAcpEnabled = forceAcp || (showTransportSelector(nextClient) && form.acpEnabled);
-            onChange({
-              clientId: nextClient,
-              provider: '',
-              cliEffort: '',
-              codexCarrier: '',
-              acpEnabled: nextAcpEnabled,
-              ...(nextAcpEnabled ? acpDefaultsForClientSwitch(form, nextClient) : {}),
-            });
+            if (nextClient === form.clientId) return;
+            onChange(clientSwitchPatch(form, nextClient));
           }}
           required
         />

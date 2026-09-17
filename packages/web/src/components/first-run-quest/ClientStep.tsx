@@ -57,17 +57,27 @@ export function ClientStep({ onSelect, recommendedClient }: ClientStepProps) {
     Number(b.provider === recommendedClient) - Number(a.provider === recommendedClient);
   const installed = clients.filter((c) => c.installed).sort(recommendedFirst);
   const notInstalled = clients.filter((c) => !c.installed).sort(recommendedFirst);
-  const recommendationDetectable = !recommendedClient || clients.some((c) => c.provider === recommendedClient);
+  // Detected but not installed is not a usable recommendation — it cannot be bound here,
+  // so it must still raise the notice, and it is labelled in the uninstalled list so the
+  // user can see which CLI to install rather than facing arbitrary installed clients.
+  const recommendedEntry = recommendedClient ? clients.find((c) => c.provider === recommendedClient) : undefined;
+  const recommendationUsable = !recommendedClient || (recommendedEntry?.installed ?? false);
+  const recommendedBadge = (client: DetectedClient) =>
+    client.provider === recommendedClient ? (
+      <span className="ml-2 rounded-md bg-conn-amber-bg px-1.5 py-0.5 text-xs font-semibold text-conn-amber-text">
+        模板推荐
+      </span>
+    ) : null;
 
   return (
     <div>
       <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">选择客户端</h4>
       <p className="mb-4 text-xs text-cafe-muted">猫猫需要一个 CLI 客户端来工作。我们检测到以下已安装的客户端：</p>
 
-      {recommendationDetectable ? null : (
+      {recommendationUsable ? null : (
         <p className="mb-3 text-xs text-conn-amber-text">
-          这个角色模板推荐 {recommendedClient}{' '}
-          客户端，但本机检测不到它；先选一个已安装的客户端，创建成员后可在成员设置里切换。
+          这个角色模板推荐 {recommendedClient} 客户端，但本机{recommendedEntry ? '尚未安装' : '检测不到'}
+          它；先选一个已安装的客户端，创建成员后可在成员设置里切换。
         </p>
       )}
 
@@ -96,11 +106,7 @@ export function ClientStep({ onSelect, recommendedClient }: ClientStepProps) {
               </div>
               <div>
                 <span className="font-semibold text-cafe">{c.label}</span>
-                {c.provider === recommendedClient && (
-                  <span className="ml-2 rounded-md bg-conn-amber-bg px-1.5 py-0.5 text-xs font-semibold text-conn-amber-text">
-                    模板推荐
-                  </span>
-                )}
+                {recommendedBadge(c)}
                 {c.version && <span className="ml-2 text-xs text-cafe-muted">{c.version}</span>}
               </div>
             </button>
@@ -118,6 +124,7 @@ export function ClientStep({ onSelect, recommendedClient }: ClientStepProps) {
                 className="rounded-lg border border-[var(--console-border-soft)] px-2 py-1 text-xs text-cafe-muted"
               >
                 {c.label}
+                {recommendedBadge(c)}
               </span>
             ))}
           </div>
