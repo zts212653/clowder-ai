@@ -1,6 +1,6 @@
 import type { WaitTerminationActor, WaitTerminationReason } from './wait-termination.js';
 
-export const GITHUB_WAIT_PREDICATE_KINDS = [
+export const GITHUB_PR_WAIT_PREDICATE_KINDS = [
   'pr_head_changed',
   'pr_review_result_available',
   'pr_review_decision_changed',
@@ -9,9 +9,28 @@ export const GITHUB_WAIT_PREDICATE_KINDS = [
   'pr_became_conflicting',
   'pr_conversation_comment_added',
   'pr_inline_comment_added',
-  'issue_comment_added',
-  'issue_author_commented',
 ] as const;
+
+export const GITHUB_ISSUE_WAIT_PREDICATE_KINDS = ['issue_comment_added', 'issue_author_commented'] as const;
+
+export const GITHUB_WAIT_PREDICATE_KINDS = [
+  ...GITHUB_PR_WAIT_PREDICATE_KINDS,
+  ...GITHUB_ISSUE_WAIT_PREDICATE_KINDS,
+] as const;
+
+/**
+ * #1392 D1: one registration must be able to name every distinct condition its subject can raise.
+ *
+ * The cap is derived from the catalog rather than written down, because a hand-chosen number silently
+ * becomes wrong the moment a kind is added. A fixed cap of four rejected a combination of five valid,
+ * non-duplicate conditions — `pr_review_decision_changed`, `pr_conversation_comment_added`,
+ * `pr_inline_comment_added`, `pr_ci_terminal`, `pr_became_conflicting` — forcing a caller to drop a
+ * signal they needed or register a second tracker. Deduplication, unknown-kind rejection and required
+ * parameters are unchanged: capacity is the only thing this raises.
+ */
+export const GITHUB_PR_WAIT_PREDICATE_LIMIT = GITHUB_PR_WAIT_PREDICATE_KINDS.length;
+
+export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KINDS.length;
 
 export type GitHubWaitPredicateKind = (typeof GITHUB_WAIT_PREDICATE_KINDS)[number];
 

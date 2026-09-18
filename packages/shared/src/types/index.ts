@@ -658,6 +658,10 @@ export {
 export {
   type AwaitStateV1,
   createWaitContinuationCarrier,
+  GITHUB_ISSUE_WAIT_PREDICATE_KINDS,
+  GITHUB_ISSUE_WAIT_PREDICATE_LIMIT,
+  GITHUB_PR_WAIT_PREDICATE_KINDS,
+  GITHUB_PR_WAIT_PREDICATE_LIMIT,
   GITHUB_WAIT_PREDICATE_KINDS,
   type GitHubCiBaselineBucket,
   type GitHubIssueAwaitStateV1,

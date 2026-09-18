@@ -40,6 +40,8 @@ import {
   entrustedWorkV1Schema,
   executableActionSuccessorMetadataSchema,
   extractFeatureIds,
+  GITHUB_ISSUE_WAIT_PREDICATE_LIMIT,
+  GITHUB_PR_WAIT_PREDICATE_LIMIT,
   isCallbackAuthFailureReason,
   isValidAcceptedSource,
   isValidReviewSubjectRef,
@@ -1993,8 +1995,10 @@ export const registerPrTrackingInputSchema = {
   when: z
     .array(githubWaitPredicateInputSchema)
     .min(1)
-    .max(4)
-    .describe('One to four typed conditions, evaluated as flat any-of against a server-frozen live baseline.'),
+    .max(GITHUB_PR_WAIT_PREDICATE_LIMIT)
+    .describe(
+      `One to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} typed conditions — every distinct PR condition in the catalog, so a caller never has to drop a signal they need. Evaluated as flat any-of against a server-frozen live baseline. Duplicate kinds, unknown kinds and conditions missing their required parameters are still rejected.`,
+    ),
   nextStep: z
     .string()
     .min(1)
@@ -2072,8 +2076,10 @@ export const registerIssueTrackingInputSchema = {
       ]),
     )
     .min(1)
-    .max(4)
-    .describe('One to four typed issue conditions, evaluated as flat any-of against a server-frozen baseline.'),
+    .max(GITHUB_ISSUE_WAIT_PREDICATE_LIMIT)
+    .describe(
+      `One to ${GITHUB_ISSUE_WAIT_PREDICATE_LIMIT} typed issue conditions — every distinct issue condition in the catalog. Evaluated as flat any-of against a server-frozen baseline.`,
+    ),
   nextStep: z
     .string()
     .min(1)

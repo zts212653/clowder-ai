@@ -6,6 +6,7 @@ import type {
   GitHubWaitMatchedDelta,
   GitHubWaitPredicate,
 } from '@cat-cafe/shared';
+import { GITHUB_ISSUE_WAIT_PREDICATE_LIMIT, GITHUB_PR_WAIT_PREDICATE_LIMIT } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 /**
@@ -50,11 +51,11 @@ export const githubIssueWaitPredicateSchema = z.discriminatedUnion('kind', [
 
 export const githubWaitPredicateSchema = z.union([githubPrWaitPredicateSchema, githubIssueWaitPredicateSchema]);
 
-function predicateListSchema<T extends z.ZodTypeAny>(schema: T) {
+function predicateListSchema<T extends z.ZodTypeAny>(schema: T, limit: number) {
   return z
     .array(schema)
     .min(1)
-    .max(4)
+    .max(limit)
     .superRefine((predicates, ctx) => {
       const kinds = new Set<string>();
       for (const [index, predicate] of predicates.entries()) {
@@ -80,8 +81,14 @@ function predicateListSchema<T extends z.ZodTypeAny>(schema: T) {
     });
 }
 
-export const githubWaitPredicatesSchema = predicateListSchema(githubPrWaitPredicateSchema);
-export const githubIssueWaitPredicatesSchema = predicateListSchema(githubIssueWaitPredicateSchema);
+export const githubWaitPredicatesSchema = predicateListSchema(
+  githubPrWaitPredicateSchema,
+  GITHUB_PR_WAIT_PREDICATE_LIMIT,
+);
+export const githubIssueWaitPredicatesSchema = predicateListSchema(
+  githubIssueWaitPredicateSchema,
+  GITHUB_ISSUE_WAIT_PREDICATE_LIMIT,
+);
 
 /**
  * #1392 AC-2: which collector observes the facts each predicate reads. Exhaustive on purpose, so a
