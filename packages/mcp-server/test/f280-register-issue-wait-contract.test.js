@@ -144,4 +144,19 @@ describe('F280 register_issue_tracking public contract', () => {
       Object.assign(process.env, originalEnv);
     }
   });
+  /*
+   * #1392 D1: the issue surface is capped by its own half of the catalog, so both distinct kinds must
+   * be nameable in one registration. Asserted here for the same reason as the PR entry — without it,
+   * a cap regression at the public entry would be invisible to every other suite.
+   */
+  it('accepts every distinct issue condition in the catalog at the public entry', async () => {
+    const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    const parsed = registerIssueTrackingInputSchema.when.safeParse([
+      { kind: 'issue_comment_added', authorLogins: ['zts212653'] },
+      { kind: 'issue_author_commented' },
+    ]);
+
+    assert.equal(parsed.success, true, 'both issue kinds must be registrable together');
+  });
 });

@@ -123,4 +123,60 @@ describe('F280 register_pr_tracking public contract', () => {
       );
     }
   });
+  /*
+   * #1392 D1: the ruling was that API and MCP move together. Until now only the API catalog had a
+   * capacity assertion, so reverting this file alone to a cap of four left every other suite green —
+   * the alignment the maintainer asked for had no regression protection at the public entry.
+   */
+  it('accepts the five-condition baseline a PR author needs at the public entry', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    const parsed = registerPrTrackingInputSchema.when.safeParse([
+      { kind: 'pr_review_decision_changed' },
+      { kind: 'pr_conversation_comment_added', authorLogins: ['zts212653'] },
+      { kind: 'pr_inline_comment_added', authorLogins: ['zts212653'] },
+      { kind: 'pr_ci_terminal' },
+      { kind: 'pr_became_conflicting' },
+    ]);
+
+    assert.equal(parsed.success, true, 'the MCP entry must not reject five distinct supported conditions');
+  });
+
+  it('accepts every distinct PR condition in the catalog at the public entry', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    const parsed = registerPrTrackingInputSchema.when.safeParse([
+      { kind: 'pr_head_changed' },
+      { kind: 'pr_review_result_available' },
+      { kind: 'pr_review_decision_changed' },
+      { kind: 'pr_review_thread_changed', reviewThreadIds: ['RT_kwDO'] },
+      { kind: 'pr_ci_terminal' },
+      { kind: 'pr_became_conflicting' },
+      { kind: 'pr_conversation_comment_added', authorLogins: ['zts212653'] },
+      { kind: 'pr_inline_comment_added', authorLogins: ['zts212653'] },
+    ]);
+
+    assert.equal(parsed.success, true, 'MCP capacity must be derived from the same catalog as the API');
+  });
+
+  /*
+   * Raising capacity must not relax what the entry already refuses. Deduplication is deliberately not
+   * asserted here: it lives in the API schema this call forwards to, so a duplicate is still rejected
+   * end to end, just one hop later. That asymmetry predates this change and is left as found rather
+   * than widened into it.
+   */
+  it('still refuses an unknown kind and a precise wait without its anchor at the public entry', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    assert.equal(
+      registerPrTrackingInputSchema.when.safeParse([{ kind: 'pr_everything_please' }]).success,
+      false,
+      'unknown kinds must stay rejected',
+    );
+    assert.equal(
+      registerPrTrackingInputSchema.when.safeParse([{ kind: 'pr_review_thread_changed' }]).success,
+      false,
+      'broader capacity is not a licence to fabricate a precise wait anchor',
+    );
+  });
 });
