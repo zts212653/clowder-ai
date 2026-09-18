@@ -3,7 +3,6 @@
 
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, net, session, shell, Notification } = require('electron');
 const path = require('node:path');
-const fs = require('node:fs');
 const { resolveProjectRootFromDir } = require('./project-root');
 const ServiceManager = require('./service-manager');
 const {
@@ -18,6 +17,9 @@ const { safeErrorMessage, safeHost } = require('./update-network-diagnostics');
 const { DESKTOP_APP_ID } = require('./app-identity');
 const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
+const { createMainLogger } = require('./main-log');
+const { DEFAULT_FRONTEND_PORT } = require('./port-pair');
+const { confirmStartupWarning } = require('./startup-warning');
 const {
   createDesktopTray,
   createManualUpdateHandler,
@@ -30,11 +32,14 @@ if (process.platform === 'win32') {
 }
 
 const PROJECT_ROOT = resolveProjectRootFromDir(__dirname);
-const FRONTEND_PORT = 3003;
-const API_PORT = 3004;
-const APP_URL = `http://localhost:${FRONTEND_PORT}`;
-const APP_ORIGIN = new URL(APP_URL).origin;
-const API_ORIGIN = new URL(`http://localhost:${API_PORT}`).origin;
+// Resolved at startup by ServiceManager.prepareRuntime(), which also persists the
+// chosen pair. Defaults keep the module loadable and give the pre-resolution
+// helpers something valid to fall back to.
+let FRONTEND_PORT = DEFAULT_FRONTEND_PORT;
+let API_PORT = DEFAULT_FRONTEND_PORT + 1;
+let APP_URL = `http://localhost:${FRONTEND_PORT}`;
+let APP_ORIGIN = new URL(APP_URL).origin;
+let API_ORIGIN = new URL(`http://localhost:${API_PORT}`).origin;
 function createBaseRendererLinkOrigins() {
   return createRendererLinkOrigins({
     appOrigin: APP_ORIGIN,
@@ -48,18 +53,7 @@ const QUIT_FOR_UPDATE_ARG = '--quit-for-update';
 // Single source of truth: service-manager.js resolveUserDataDir() reads
 // electron-builder productName and handles legacy data directory migration.
 const userDataRoot = ServiceManager.USER_DATA_DIR;
-const mainLogDir = path.join(userDataRoot, 'data', 'logs');
-try {
-  fs.mkdirSync(mainLogDir, { recursive: true });
-} catch {}
-const DEBUG_LOG = path.join(mainLogDir, 'main.log');
-
-function dbg(msg) {
-  const line = `[main ${new Date().toISOString()}] ${msg}\n`;
-  try {
-    fs.appendFileSync(DEBUG_LOG, line);
-  } catch {}
-}
+const { dbg } = createMainLogger(userDataRoot);
 
 dbg(`Electron starting. ELECTRON_RUN_AS_NODE=${process.env.ELECTRON_RUN_AS_NODE}`);
 dbg(`process.type=${process.type}, versions.electron=${process.versions.electron}`);
@@ -259,11 +253,18 @@ app.on('ready', async () => {
   });
   installMacApplicationMenu({ app, Menu, onManualUpdate: checkForUpdatesManually, showAbout });
 
-  services = new ServiceManager(PROJECT_ROOT, {
-    frontendPort: FRONTEND_PORT,
-    apiPort: API_PORT,
-    onStatus: sendSplashStatus,
-  });
+  services = new ServiceManager(PROJECT_ROOT, { onStatus: sendSplashStatus });
+  // The renderer, the updater's trusted origin and the link policy all depend on
+  // the ports, so resolve them (and persist the choice) before any of those exist.
+  const runtime = await services.prepareRuntime();
+  FRONTEND_PORT = runtime.frontendPort;
+  API_PORT = runtime.apiPort;
+  APP_URL = `http://localhost:${FRONTEND_PORT}`;
+  APP_ORIGIN = new URL(APP_URL).origin;
+  API_ORIGIN = new URL(`http://localhost:${API_PORT}`).origin;
+  rendererLinkOrigins = createBaseRendererLinkOrigins();
+  dbg(`Resolved ports: web=${FRONTEND_PORT} api=${API_PORT}`);
+
   // F273: Initialize updater — check pending upgrade result BEFORE services
   // (spec §3.2: "main.js 早期、服务启动前检测")
   ({ updater, updatePrompt } = createDesktopUpdateRuntime({
@@ -285,7 +286,7 @@ app.on('ready', async () => {
       if (activeServices) await activeServices.stopAll();
     },
     startServices: async () => {
-      services = new ServiceManager(PROJECT_ROOT, { frontendPort: FRONTEND_PORT, apiPort: API_PORT });
+      services = new ServiceManager(PROJECT_ROOT);
       await services.startAll();
       await refreshRendererLinkOrigins();
     },
@@ -301,6 +302,8 @@ app.on('ready', async () => {
     dbg('startAll() called');
     await services.startAll();
     await refreshRendererLinkOrigins();
+    const warningDeps = { status: services.getRuntimeStatus(), dialog, onQuit: quitApp, log: dbg };
+    if (!(await confirmStartupWarning(warningDeps))) return;
     dbg('startAll() done — creating main window');
     createMainWindow();
   } catch (err) {
