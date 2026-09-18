@@ -45,6 +45,11 @@ export interface HandoffConfig {
   fetchFn?: typeof fetch;
 }
 
+export interface SessionSealerOptions {
+  /** Production defaults to 30s; tests may inject a shorter liveness budget. */
+  finalizeTimeoutMs?: number;
+}
+
 export interface ISessionSealer {
   /**
    * Request seal of a session. Idempotent: returns accepted=false if already sealing/sealed.
@@ -106,6 +111,7 @@ export class SessionSealer implements ISessionSealer {
     private readonly transcriptReader?: TranscriptReader,
     private readonly handoffConfig?: HandoffConfig,
     private readonly summaryStore?: ISummaryStore,
+    private readonly options: SessionSealerOptions = {},
   ) {}
 
   /**
@@ -170,7 +176,10 @@ export class SessionSealer implements ISessionSealer {
 
     let finalizeClean = false;
     try {
-      finalizeClean = await withTimeout(this.doFinalize(record, now), FINALIZE_TIMEOUT_MS);
+      finalizeClean = await withTimeout(
+        this.doFinalize(record, now),
+        this.options.finalizeTimeoutMs ?? FINALIZE_TIMEOUT_MS,
+      );
     } catch (err) {
       // finalizeClean stays false — timeout or unexpected throw.
       getEventAuditLog()

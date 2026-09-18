@@ -192,14 +192,16 @@ describe('SessionSealer', () => {
       const hangingWriter = {
         flush: () => new Promise(() => {}), // never resolves
       };
-      const sealer = new SessionSealer(store, hangingWriter);
+      const sealer = new SessionSealer(store, hangingWriter, undefined, undefined, undefined, undefined, {
+        finalizeTimeoutMs: 10,
+      });
 
       const record = store.create(BASE_INPUT);
       await sealer.requestSeal({ sessionId: record.id, reason: 'threshold' });
 
-      // Monkey-patch timeout for test speed (30s is too long for test)
-      // We test the structural guarantee: finalize always reaches terminal state
+      const startedAt = Date.now();
       await sealer.finalize({ sessionId: record.id });
+      assert.ok(Date.now() - startedAt < 500, 'injected timeout should avoid waiting for the 30s production budget');
 
       const updated = store.get(record.id);
       assert.equal(updated?.status, 'sealed', 'session should reach sealed even if transcript flush hangs');
