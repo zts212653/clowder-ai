@@ -97,7 +97,15 @@ describe('F280 wait state machine', () => {
     );
   });
 
-  it('an expiry noticed in the poll a subject merges keeps both the final state and that poll’s matches', async () => {
+  /*
+   * #1392 D4 (accepted in #1474): a settled terminal fact outranks the clock.
+   *
+   * This case previously asserted the opposite — that a merge noticed at the deadline is reported as
+   * `expired` with the subject state demoted to metadata. The typed `reason` is what the next holder
+   * routes on: `expired` says "re-arm?", a merge says "wrap up", and no metadata field repairs a
+   * wrong verb. The matches observed in that same poll are still carried.
+   */
+  it('a subject terminal noticed at the deadline reports the terminal fact and keeps that poll’s matches', async () => {
     const { transitionWaitState } = await import(MODULE_URL.href);
     const matched = [{ kind: 'pr_conversation_comment_added', delta: 'conversation comment #31 by maintainer' }];
 
@@ -106,9 +114,63 @@ describe('F280 wait state machine', () => {
       { type: 'subject_terminal', generation: 4, at: 500, subjectState: 'merged', matched },
     );
 
-    assert.equal(result.state.waitOutcome?.reason, 'expired');
+    assert.equal(result.state.waitOutcome?.reason, 'subject_terminal');
     assert.deepEqual(result.state.waitOutcome?.matched, matched);
     assert.equal(result.state.waitOutcome?.terminalSubjectState, 'merged');
+  });
+
+  for (const subjectState of ['closed', 'merged']) {
+    for (const [label, at] of [
+      ['at the deadline itself', 500],
+      ['long after the deadline', 9_000_000],
+    ]) {
+      it(`a subject that reached ${subjectState} ${label} is not reported as a timeout`, async () => {
+        const { transitionWaitState } = await import(MODULE_URL.href);
+
+        const result = transitionWaitState(
+          { await: activeAwait({ expiresAt: 500 }) },
+          { type: 'subject_terminal', generation: 4, at, subjectState },
+        );
+
+        assert.equal(result.applied, true);
+        assert.equal(result.state.waitOutcome?.reason, 'subject_terminal');
+        assert.equal(result.state.waitOutcome?.terminalSubjectState, subjectState);
+      });
+    }
+  }
+
+  for (const [label, at] of [
+    ['at the deadline itself', 500],
+    ['long after the deadline', 9_000_000],
+  ]) {
+    it(`an explicit cancel ${label} keeps both its reason and the cat who cancelled`, async () => {
+      const { transitionWaitState } = await import(MODULE_URL.href);
+      const actor = { kind: 'cat', catId: 'opus' };
+
+      const result = transitionWaitState(
+        { await: activeAwait({ expiresAt: 500 }) },
+        { type: 'user_cancel', generation: 4, at, actor },
+      );
+
+      assert.equal(result.state.waitOutcome?.reason, 'user_cancel');
+      assert.deepEqual(
+        result.state.waitOutcome?.actor,
+        actor,
+        'the expiry branch built its outcome without an actor, so a late cancel was attributed to the system',
+      );
+    });
+  }
+
+  it('a generation that already terminalized is never rewritten by a later close', async () => {
+    const { transitionWaitState } = await import(MODULE_URL.href);
+
+    const result = transitionWaitState(
+      { await: undefined, waitOutcome: { v: 1, reason: 'expired', generation: 4 } },
+      { type: 'subject_terminal', generation: 4, at: 9_000_000, subjectState: 'closed' },
+    );
+
+    assert.equal(result.applied, false);
+    assert.equal(result.reason, 'generation_inactive');
   });
 
   /*

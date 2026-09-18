@@ -157,13 +157,30 @@ function consumeMatch(
   };
 }
 
+/**
+ * #1392 D4 (accepted in #1474): the two events carrying a fact the clock must not overwrite.
+ *
+ * A subject that reached its terminal state and an owner who explicitly cancelled are the answers the
+ * wait existed to deliver. Judging the deadline first rewrote both to `expired`, and because the
+ * expiry branch built its outcome without an actor, a cancel also lost its canceller to the
+ * `system` fallback in `terminalize`. Routing both past the guard restores the typed reason and the
+ * operator in one move.
+ *
+ * The boundary is deliberately narrow. Only the still-active generation named by this very transition
+ * is affected — a mismatched or already-terminalized generation is rejected above this point, so no
+ * persisted outcome is ever rewritten. An ordinary late `predicates_matched` still expires and is
+ * still not renewed: relevance observed after the deadline is a guess, while a close, a merge or a
+ * cancel is settled.
+ */
+const TERMINAL_FACT_EVENTS: ReadonlySet<WaitTransitionEvent['type']> = new Set(['subject_terminal', 'user_cancel']);
+
 export function transitionWaitState(current: WaitRuntimeState, event: WaitTransitionEvent): WaitTransitionResult {
   const active = current.await;
   if (!active || active.generation !== event.generation) {
     return { applied: false, reason: 'generation_inactive', state: current };
   }
 
-  if (isAwaitExpired(active, event.at)) {
+  if (!TERMINAL_FACT_EVENTS.has(event.type) && isAwaitExpired(active, event.at)) {
     // #1392 AC-2: a deadline ends tracking, not the poll it is noticed in. What that poll observed may
     // predate the deadline, and nothing polls this wait again, so it is delivered with the expiry.
     const matched = 'matched' in event ? event.matched : undefined;
@@ -171,7 +188,6 @@ export function transitionWaitState(current: WaitRuntimeState, event: WaitTransi
       reason: 'expired',
       at: event.at,
       ...(matched ? { matched } : {}),
-      ...(event.type === 'subject_terminal' ? { subjectState: event.subjectState } : {}),
     });
   }
 
