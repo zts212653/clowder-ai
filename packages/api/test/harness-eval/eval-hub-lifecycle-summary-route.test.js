@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
 import { loadReevalClosureSubjects } from '../../dist/infrastructure/harness-eval/reeval-closure-task-spec.js';
 import { evalHubRoutes } from '../../dist/routes/eval-hub.js';
@@ -15,6 +16,7 @@ async function buildApp(lifecycleEventLog) {
   });
   await app.register(evalHubRoutes, {
     harnessFeedbackRoot,
+    configuredOwnerUserId: 'owner-user',
     ...(lifecycleEventLog ? { lifecycleEventLog } : {}),
   });
   return app;
@@ -32,7 +34,10 @@ async function workspaceNavigatorItem(app) {
 
 async function stableCaseReplay() {
   const emptyEventLog = { read: async () => [] };
-  const subjects = await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog: emptyEventLog });
+  const subjects = await loadReevalClosureSubjects({
+    space: installLifecycleSpace(harnessFeedbackRoot),
+    eventLog: emptyEventLog,
+  });
   const subject = subjects.find(
     (candidate) =>
       'caseRoot' in candidate &&

@@ -67,6 +67,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     const now = Date.now();
 
     const triggerMessage = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: '[定时任务] 发今天的 AI 新闻',
@@ -96,6 +97,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     assert.ok(completed, 'invocation should persist trigger message id');
 
     const hiddenReply = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'opus',
       content: '这是旧的猫回复',
@@ -133,6 +135,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     const now = Date.now();
 
     const triggerMessage = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: '[定时任务] eval:a2a daily run',
@@ -143,6 +146,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     });
 
     const hiddenStreamReply = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'codex',
       content: 'eval:a2a daily eval result from route-serial stream',
@@ -187,6 +191,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
 
     const now = Date.now();
     const triggerMessage = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'system',
       content: '[定时任务] eval:a2a daily run',
@@ -197,6 +202,7 @@ describe('scheduler reply userid backfill', { skip: redisIsolationSkipReason(RED
     });
 
     const hiddenStreamReply = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: 'codex',
       content: 'eval:a2a result persisted under scheduler scope',

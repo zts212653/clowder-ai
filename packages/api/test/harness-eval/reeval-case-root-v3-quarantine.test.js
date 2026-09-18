@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 import { enrichEvalHubLifecycle } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { classifyReevalCaseRoot } from '../../dist/infrastructure/harness-eval/reeval-case-root.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
 import {
@@ -108,6 +109,11 @@ function summary() {
         domainId: 'eval:friction',
         verdict: 'fix',
         harnessUnderEval: { featureId: 'F245', componentId: 'friction-rollup', name: 'Friction rollup' },
+        source: {
+          kind: 'workspace',
+          verdictPath: `docs/harness-feedback/verdicts/${verdictId}.md`,
+          bundleDir: `docs/harness-feedback/bundles/${verdictId}`,
+        },
         evidence: { attributionRefs: ['bundle:attribution'], metricRefs: ['friction.cluster_count'] },
         lifecycle: {
           availability: 'unavailable',
@@ -126,11 +132,11 @@ describe('F313 schema-v3 re-evaluation root quarantine', () => {
     const root = setupV3Root(t);
     const eventLog = new CountingEventLog();
     const cutover = { lifecycleVersion: 1 };
-    const classified = classifyReevalCaseRoot(root, verdictId, undefined, cutover);
+    const classified = classifyReevalCaseRoot(installLifecycleSpace(root), verdictId, undefined, cutover);
     assert.equal(classified.status, 'available');
 
     const subjects = await loadReevalClosureSubjects({
-      harnessFeedbackRoot: root,
+      space: installLifecycleSpace(root),
       eventLog,
       frictionV3Cutover: cutover,
     });
@@ -149,7 +155,7 @@ describe('F313 schema-v3 re-evaluation root quarantine', () => {
     const eventLog = new CountingEventLog();
     let responsibilityCalls = 0;
     let reevaluationCalls = 0;
-    const classified = classifyReevalCaseRoot(root, verdictId);
+    const classified = classifyReevalCaseRoot(installLifecycleSpace(root), verdictId);
     assert.equal(classified.status, 'known-but-quarantined');
     assert.deepEqual(classified.diagnostic.effects, {
       openCase: false,
@@ -159,10 +165,10 @@ describe('F313 schema-v3 re-evaluation root quarantine', () => {
       f167Lease: false,
     });
 
-    assert.deepEqual(await loadReevalClosureSubjects({ harnessFeedbackRoot: root, eventLog }), []);
+    assert.deepEqual(await loadReevalClosureSubjects({ space: installLifecycleSpace(root), eventLog }), []);
     const task = createReevalClosureTaskSpec({
       eventLog,
-      loadSubjects: () => loadReevalClosureSubjects({ harnessFeedbackRoot: root, eventLog }),
+      loadSubjects: () => loadReevalClosureSubjects({ space: installLifecycleSpace(root), eventLog }),
       responsibilityService: {
         async reconcile() {
           responsibilityCalls += 1;
@@ -180,7 +186,7 @@ describe('F313 schema-v3 re-evaluation root quarantine', () => {
     });
     assert.equal((await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 })).run, false);
 
-    const enriched = await enrichEvalHubLifecycle(summary(), { harnessFeedbackRoot: root, eventLog });
+    const enriched = await enrichEvalHubLifecycle(summary(), { space: installLifecycleSpace(root), eventLog });
     assert.equal(
       enriched.items[0].lifecycle.unavailableReason,
       'schema-v3 known but quarantined until Phase C cutover',
@@ -201,6 +207,7 @@ describe('F313 schema-v3 re-evaluation root quarantine', () => {
     const app = Fastify({ logger: false });
     await app.register(evalVerdictLifecycleRoutes, {
       harnessFeedbackRoot: root,
+      configuredOwnerUserId: 'owner-user',
       eventLog,
       callbackRegistry: {
         async verify() {

@@ -5,7 +5,11 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 
-import { MeasurementBundleCensusSchema, refreshMeasurementBundleCensus } from './measurement-bundle-census.js';
+import {
+  assertMeasurementVerdictActionAllowed,
+  MeasurementBundleCensusSchema,
+  refreshMeasurementBundleCensus,
+} from './measurement-bundle-census.js';
 import {
   createPublicMeasurementBundleCensus,
   reconcilePublicMeasurementBundleCensus,
@@ -34,6 +38,30 @@ function nonDerivedMetadata(input: unknown) {
 
 export function readMeasurementBundleCensusFile(repoRoot: string): string {
   return readFileSync(resolve(repoRoot, MEASUREMENT_BUNDLE_CENSUS_REF), 'utf8');
+}
+
+/**
+ * The measurement-policy gate a runtime verdict publication must pass. The census
+ * stays a product-repository input: publishing a verdict reads it and never
+ * rewrites it. Without a census only `keep_observe` may publish.
+ */
+export function assertMeasurementCensusAllowsVerdict(
+  repoRoot: string,
+  domainId: string,
+  verdict: Parameters<typeof assertMeasurementVerdictActionAllowed>[2],
+): void {
+  const path = resolve(repoRoot, MEASUREMENT_BUNDLE_CENSUS_REF);
+  if (!existsSync(path)) {
+    if (verdict === 'keep_observe') return;
+    throw new Error(
+      `measurement_validity_gate: measurement bundle census missing; actionable verdict '${verdict}' requires ${path}`,
+    );
+  }
+  assertMeasurementVerdictActionAllowed(
+    parseCensusDocument(readMeasurementBundleCensusFile(repoRoot)).toJS(),
+    domainId,
+    verdict,
+  );
 }
 
 function writeMeasurementBundleCensusFileAtomically(path: string, source: string): void {

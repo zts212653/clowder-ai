@@ -4,7 +4,7 @@ related_features: [F221, F203, F102, F200, F229, F260, F263, F287, F296, F312]
 topics: [user-profile-capsule, per-user-alignment, l0-layering, relationship-distillation, nurturing-moat]
 doc_kind: spec
 created: 2026-06-11
-tips_exempt: "Renewed 2026-09-07 after Phase E implementation: corpus layer adds owner-wide shared facts via cat-initiated propose_profile_update(targetLayer:'corpus'), approved by operator in Approval Hub. This is internal cat infrastructure — no new user-facing action or surface to advertise."
+tips_exempt: "Renewed 2026-09-18 for F257 S14 delivery: the existing owner capsule, relationship pointer, and corpus pointer now use the prompt-hook pipeline; no new user action or capability surface was added."
 ---
 
 # F231: 启动胶囊 — per-user 画像注入与 L0 分层
@@ -37,12 +37,20 @@ operator experience（2026-06-11）：
 
 **Flow**:
 
-1. **Session start** — L0 system prompt compiled with user-specific primer injected (`USER_CAPSULE` block). Cat wakes up knowing who the user is: their background, preferences, notable interactions, and ongoing context — not just generic rules.
+> Delivery mechanism changed (F257): the L0 compiler that used to emit `{{USER_CAPSULE}}`
+> is retired. The same contract — owner capsule, existence-gated relationship pointer, and
+> the Phase E corpus pointer — is now delivered by the `S14` session-init segment of the
+> prompt-hook pipeline, resolved per session by the route and handed to `buildStaticIdentity`,
+> so the native and non-native carriers receive identical bytes. KD/AC entries below that
+> name the L0 compiler are the historical record of how this was decided, not current behaviour.
+
+
+1. **Session start** — the route resolves the owner's capsule and pointers once, and the `S14` session-init segment renders them into the session prompt. Cat wakes up knowing who the user is: their background, preferences, notable interactions, and ongoing context — not just generic rules.
 2. **Organic interaction** — As sessions proceed, the cat observes operator behavior: stated preferences, corrections, approvals, personal context shared. Signals accumulate across threads.
 3. **Cat proposes update** — When a signal crosses the threshold (repeat correction × 2, explicit "remember this", milestone shared), the cat calls `cat_cafe_propose_profile_update`, which creates a proposal card in the Approval Hub.
 4. **operator reviews in Hub** — In the "待审批" tab, the proposal appears with rationale and the proposed primer delta. operator can approve (writes to primer immediately) or reject (logged, not applied).
 5. **Approval history** — Settled proposals (approved/rejected) appear in the "历史" tab of the Approval Hub (F246 Phase H), so the operator can see which signals shaped the current primer.
-6. **Next session** — Compiled L0 emits the stable current-persona URI; the cat resolves it through the authenticated read tool and naturally reflects the accumulated relationship — same persona, richer recognition.
+6. **Next session** — `S14` emits the stable current-persona URI; the cat resolves it through the authenticated read tool and naturally reflects the accumulated relationship — same persona, richer recognition. There is no compile cache in front of it, so an approved edit is visible on the next invocation.
 
 **User-perceivable outcome**: Cat remembers the user across sessions organically, without manual configuration. The relationship deepens automatically — same IKEA effect as customizing a home.
 

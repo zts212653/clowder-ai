@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
 import {
   createReevalClosureTaskSpec,
@@ -123,7 +124,10 @@ describe('F266 stable case reconciler', () => {
       `schemaVersion: 1\nreviewedThrough: 2026-08-08T01:00:00.000Z\ncases:\n  - domainId: eval:capability-wakeup\n    findingKey: rich-messaging\n    selectors: [{ featureId: F203, componentId: rich-messaging }]\n    freshnessReview:\n      reviewedAt: 2026-08-08T01:00:00.000Z\n      reviewedThroughVerdictId: legacy-week-b\n      disposition: repair\n      evidenceRefs: [source-message:legacy-review]\n`,
     );
 
-    const subjects = await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog: new MemoryEventLog() });
+    const subjects = await loadReevalClosureSubjects({
+      space: installLifecycleSpace(harnessFeedbackRoot),
+      eventLog: new MemoryEventLog(),
+    });
     assert.equal(subjects.length, 1);
     assert.equal(subjects[0].caseRoot.targetOwnerCatId, 'opus-47');
     assert.equal(subjects[0].responsibilityContext.ownerCatId, 'opus-47');
@@ -156,7 +160,7 @@ describe('F266 stable case reconciler', () => {
       `domainId: eval:capability-wakeup\ndisplayName: Wakeup\nsystemThreadId: thread_eval\nevalCat: { catId: gpt52, handle: "@gpt52", model: gpt-5.4 }\nfrequency: weekly\nsourceAdapter: wakeup\nsourceRefsKind: window\nthreadPolicy: { role: working-home, stateSot: registry, allowedContent: [verdict-discussion] }\nlegacyScheduledTaskIds: []\nhandoffTargetResolver: { featureId: F203, ownerCatId: codex-sol, threadLookup: feature-thread }\nsla: { acknowledgeHours: 48, reevalWithinHours: 168 }\nfixtures: []\n`,
     );
     const eventLog = new MemoryEventLog();
-    const subjects = await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog });
+    const subjects = await loadReevalClosureSubjects({ space: installLifecycleSpace(harnessFeedbackRoot), eventLog });
     assert.equal(subjects.length, 1);
     assert.deepEqual(
       subjects[0].caseRoot.cycles.map((cycle) => cycle.verdictId),

@@ -123,8 +123,14 @@ describe('Dual-path validation: AssembleBridge + HookPipeline', () => {
     // S4: Collaboration format (callable mentions)
     assert.ok(output.includes('@codex'), 'Output should include callable mention from S4');
 
-    // Event count: all 22 session-init hooks should produce events
-    assert.equal(result.events.length, 22, `Expected 22 session events, got ${result.events.length}`);
+    // Every registered session-init hook should produce an event. Derive the
+    // count from the catalog so adding a governed segment cannot stale this test.
+    const sessionHookCount = hookRegistry.getStageHooks('session-init').length;
+    assert.equal(
+      result.events.length,
+      sessionHookCount,
+      `Expected ${sessionHookCount} session events, got ${result.events.length}`,
+    );
   });
 
   it('per-turn pipeline output from bridge input contains expected segments', () => {
@@ -182,8 +188,8 @@ describe('Dual-path validation: AssembleBridge + HookPipeline', () => {
       assert.ok(firedIds.includes(id), `${id} should fire`);
     }
 
-    // 24 per-turn hooks → 24 events
-    assert.equal(result.events.length, 24, `Expected 24 per-turn events, got ${result.events.length}`);
+    // 25 per-turn hooks → 25 events (D22 custody-closure checkpoint ships on this branch)
+    assert.equal(result.events.length, 25, `Expected 25 per-turn events, got ${result.events.length}`);
   });
 
   it('combined pipeline output is substantial (AC-P2-14)', () => {

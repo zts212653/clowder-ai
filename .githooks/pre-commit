@@ -287,7 +287,7 @@ if [ -f "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" ]; then
   # Fail-closed: smoke-test ALL subcommand categories we depend on. If any
   # returns non-zero, empty, or garbage output, block the commit.
   # Category 1: --classify-path (classification pipeline)
-  _SMOKE=$(node "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" --classify-path "assets/system-prompts/x" 2>/dev/null) || _SMOKE=""
+  _SMOKE=$(node "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" --classify-path "assets/prompt-hooks/x" 2>/dev/null) || _SMOKE=""
   _SMOKE_CLS=$(echo "$_SMOKE" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.classification)}catch{console.log('BROKEN')}" 2>/dev/null) || _SMOKE_CLS="BROKEN"
   if [ "$_SMOKE_CLS" != "manual-port" ]; then
     echo "" >&2
@@ -327,14 +327,14 @@ if [ -f "$REPO_ROOT/scripts/brand-dictionary-helper.mjs" ]; then
   _MP_MATCH=""
   while IFS= read -r pat; do
     [ -z "$pat" ] && continue
-    if echo "assets/system-prompts/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
+    if echo "assets/prompt-hooks/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
       _MP_MATCH="yes"; break
     fi
   done <<< "$DICT_MP"
   if [ -z "$_MP_MATCH" ]; then
     echo "" >&2
     echo "🚫 BRAND GUARD: dictionary helper broken — fail-closed." >&2
-    echo "   --manual-port-patterns doesn't match known anchor (assets/system-prompts/test.md)." >&2
+    echo "   --manual-port-patterns doesn't match known anchor (assets/prompt-hooks/test.md)." >&2
     exit 1
   fi
   DICT_PATTERNS=$(printf '%s\n%s' "$DICT_BS" "$DICT_MP" | sort -u)

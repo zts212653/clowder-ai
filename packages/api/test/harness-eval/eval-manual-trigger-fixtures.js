@@ -131,6 +131,21 @@ fixtures: []
     }),
   );
 
+  write(
+    'eval-harness-ledger.yaml',
+    yamlFor({
+      domainId: 'eval:harness-ledger',
+      displayName: 'Harness Ledger Eval',
+      threadId: 'thread_eval_harness_ledger',
+      catId: 'gpt52',
+      model: 'gpt-5.4',
+      frequency: 'weekly',
+      sourceAdapter: 'f257-prompt-segments',
+      sourceRefsKind: 'prompt-segments',
+      featureId: 'F257',
+    }),
+  );
+
   return root;
 }
 

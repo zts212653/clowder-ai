@@ -21,6 +21,7 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
 
     const farFuture = Date.now() + 365 * 24 * 60 * 60 * 1000; // +1 year
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'far-future',
@@ -44,9 +45,26 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
     const threadId = `p1a-mono-${Date.now()}`;
 
     // Append with past, normal, and far-future timestamps
-    store.append({ userId: 'u1', catId: null, content: 'past', mentions: [], timestamp: 1000, threadId });
-    store.append({ userId: 'u1', catId: null, content: 'normal', mentions: [], timestamp: Date.now(), threadId });
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'past',
+      mentions: [],
+      timestamp: 1000,
+      threadId,
+    });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'normal',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+    store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'future',
@@ -81,6 +99,7 @@ describe('#1200 P1-A: allocator uses server time, not payload timestamp', () => 
     const threadId = `p1a-deliver-${Date.now()}`;
 
     const q = store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'queued',

@@ -207,6 +207,14 @@ cloud 不再是默认步骤，因此没有“先默认、再申请跳过”：
 
 ### Artifact-only PR merge-gate（F192 Phase H 收尾 PR-3 codified）
 
+> **本分支不适用（F257 参考实现）** — verdict 发布已离开 Git：`cat_cafe_publish_verdict` 写 owner-scoped
+> 不可变 artifact，不再开分支/提交/PR，`scripts/guarded-bin/gh` 会以 `verdict_git_publication_retired`
+> 硬拒 `verdict/auto/` 分支与 `verdict(` 标题。**照下面这段做会被守卫直接挡住**。
+> 下面整段保留为该 gate 的历史口径：在未合入本切片的分支上它仍然有效。
+> capability-evolution measurement issuance 仍会开 PR，但走 `measurement/auto/...` 分支，不匹配本段的
+> `verdict/auto/eval-<domain-slug>/` 条件，因此也不由本段覆盖。
+
+
 > **核心问题**：F192 `cat_cafe_publish_verdict` 会为每次 scheduled eval 自动开 PR 归档 verdict 证据。这种 PR **不是代码 review request**，是 eval evidence artifact。让operator / 通用 reviewer 走 full merge-gate 验收 = 把 operator 当 merge queue + 噪音灾难（PR #2114 实战暴露）。
 >
 > **解法**：满足以下 10 条硬条件 → 任一非作者猫走 artifact-only merge-gate，跳过 full `pnpm gate` + 跳过remote review；cats 自决 squash merge。operator 不在 reviewers / 不需 sign-off。

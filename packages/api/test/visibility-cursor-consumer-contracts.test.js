@@ -122,6 +122,7 @@ describe('#3444 A4 source-to-sink contracts (requires Redis)', () => {
 
   async function appendUserMessage(messageStore, threadId, content, timestamp) {
     return messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: USER_ID,
       catId: null,
       content,

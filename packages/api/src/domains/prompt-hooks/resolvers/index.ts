@@ -1,7 +1,8 @@
 /**
  * Resolver Registry — F237 Phase 2-B
  *
- * Maps hookId → resolver instance. All 46 Tier 1 pipeline hooks.
+ * Maps hookId → resolver instance. One entry per Tier 1 pipeline hook; the count
+ * lives in the manifest census, not in this comment.
  * Resolvers are stateless singletons — safe for concurrent invocations.
  */
 
@@ -31,6 +32,7 @@ import {
   S11Resolver,
   S12Resolver,
   S13Resolver,
+  S14Resolver,
 } from './session-resolvers.js';
 import {
   D1Resolver,
@@ -74,7 +76,7 @@ const RESOLVER_MAP: ReadonlyMap<string, HookResolver> = new Map<string, HookReso
   ['L5', new L5Resolver()],
   ['L6', new L6Resolver()],
   ['L7', new L7Resolver()],
-  // Session-init hooks (S1-S13, B1, C1)
+  // Session-init hooks (S1-S14, B1, C1)
   ['S1', new S1Resolver()],
   ['S2', new S2Resolver()],
   ['S3', new S3Resolver()],
@@ -88,6 +90,7 @@ const RESOLVER_MAP: ReadonlyMap<string, HookResolver> = new Map<string, HookReso
   ['S11', new S11Resolver()],
   ['S12', new S12Resolver()],
   ['S13', new S13Resolver()],
+  ['S14', new S14Resolver()],
   ['B1', new B1Resolver()],
   ['C1', new C1Resolver()],
   // Per-turn hooks (D1-D21, R1-R2, N1)

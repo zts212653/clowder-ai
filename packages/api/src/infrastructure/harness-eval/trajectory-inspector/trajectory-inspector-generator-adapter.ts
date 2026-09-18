@@ -20,7 +20,7 @@ export function createTrajectoryInspectorGeneratorAdapter(
     if (!deps.ownerUserId) throw new Error('trajectory_inspector_owner identity unavailable');
     const selector = sourceRefs as TrajectoryInspectorWindowSelector;
     const episodeBundle = await provider.resolve(selector, { ownerUserId: deps.ownerUserId });
-    const domain = loadDomains(deps.harnessFeedbackRoot).get(packet.domainId);
+    const domain = loadDomains(deps.liveHarnessFeedbackRoot).get(packet.domainId);
     if (!domain) throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
     if (domain.domainId !== 'eval:trajectory-inspector') {
       throw new Error(`trajectory_inspector_adapter_wrong_domain: ${domain.domainId}`);

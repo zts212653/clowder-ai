@@ -9,6 +9,7 @@ import { getEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-d
 import type { EvalReleaseTruthResolver } from '../infrastructure/harness-eval/eval-release-truth-resolver.js';
 import { EvalReleaseTruthError } from '../infrastructure/harness-eval/eval-release-truth-resolver.js';
 import { loadEvalVerdictLifecycleRoot } from '../infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
+import { type EvalLifecycleSpace, lifecycleSpaceOf } from '../infrastructure/harness-eval/lifecycle-space.js';
 import {
   frictionLifecycleV3QuarantineDiagnostic,
   loadReevalCaseRoot,
@@ -27,7 +28,14 @@ import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
 
 export interface EvalVerdictLifecycleRoutesOptions {
   harnessFeedbackRoot: string;
+  /** F257 × F266: the owner whose lifecycle space is the install's (repository history + runtime verdicts). */
+  configuredOwnerUserId: string;
+  /** The install space's canonical log. */
   eventLog?: IReevalClosureEventLog;
+  /** F257: the artifact store whose owner partitions hold runtime verdicts and their lifecycle roots. */
+  artifactStoreRoot?: string;
+  /** F257: opens another owner's canonical log, for the lifecycles of the runtime verdicts that owner published. */
+  ownerEventLog?: (ownerUserId: string) => IReevalClosureEventLog;
   redis?: Redis;
   callbackRegistry?: CallbackAuthRegistry;
   agentKeyRegistry?: AgentKeyAuthRegistry;
@@ -51,6 +59,12 @@ function rejectCallerIdentity(body: Record<string, unknown>, reply: FastifyReply
 
 type LifecycleActor = { kind: 'cat' | 'cvo'; id: string };
 
+/** The authenticated caller: who acts, and whose runtime verdicts the command may reach. */
+interface LifecycleCaller {
+  actor: LifecycleActor;
+  ownerUserId: string;
+}
+
 function requireCommandBody(request: FastifyRequest, reply: FastifyReply): Record<string, unknown> | undefined {
   const body = request.body;
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -65,7 +79,7 @@ function requireCvoActor(
   request: FastifyRequest,
   reply: FastifyReply,
   ownerSessionUserId: string | undefined,
-): LifecycleActor | undefined {
+): LifecycleCaller | undefined {
   if (!ownerSessionUserId) {
     reply.status(403).send({ error: 'owner browser session required for reassignment or suppression' });
     return undefined;
@@ -82,22 +96,25 @@ function requireCvoActor(
     reply.status(ownerError.status).send({ error: ownerError.error });
     return undefined;
   }
-  return { kind: 'cvo', id: ownerSessionUserId };
+  return { actor: { kind: 'cvo', id: ownerSessionUserId }, ownerUserId: ownerSessionUserId };
 }
 
-function requireCatActor(request: FastifyRequest, reply: FastifyReply): LifecycleActor | undefined {
+function requireCatActor(request: FastifyRequest, reply: FastifyReply): LifecycleCaller | undefined {
   if (!request.callbackPrincipal) {
     reply.status(403).send({ error: 'callback or agent-key cat principal required for lifecycle writeback' });
     return undefined;
   }
-  return { kind: 'cat', id: request.callbackPrincipal.catId };
+  return {
+    actor: { kind: 'cat', id: request.callbackPrincipal.catId },
+    ownerUserId: request.callbackPrincipal.userId,
+  };
 }
 
-function requireLifecycleActor(
+function requireLifecycleCaller(
   request: FastifyRequest,
   reply: FastifyReply,
   commandBody: Record<string, unknown>,
-): LifecycleActor | undefined {
+): LifecycleCaller | undefined {
   const ownerSessionUserId = sessionUserId(request);
   if (!request.callbackPrincipal && !ownerSessionUserId) {
     reply.status(401).send({ error: 'callback, agent-key, or owner session authentication required' });
@@ -157,63 +174,103 @@ async function executeLifecycleCommand(
   }
 }
 
+interface LifecycleSpaceLog {
+  space: EvalLifecycleSpace;
+  eventLog: IReevalClosureEventLog;
+}
+
+/**
+ * The space a command acts in: the caller's owner's, and nothing outside it. The
+ * configured owner's space is the install's, so its commands reach the repository's
+ * history and that owner's runtime verdicts alike; any other owner reaches only the
+ * runtime verdicts it published.
+ */
+function resolveLifecycleSpace(
+  opts: EvalVerdictLifecycleRoutesOptions,
+  ownerUserId: string,
+): LifecycleSpaceLog | { status: 404 | 503; error: string } {
+  const space = lifecycleSpaceOf(ownerUserId, opts);
+  if (!space) return { status: 404, error: 'root_not_found' };
+  const eventLog = space.kind === 'install' ? opts.eventLog : opts.ownerEventLog?.(ownerUserId);
+  if (!eventLog) return { status: 503, error: 'canonical lifecycle persistence unavailable' };
+  return { space, eventLog };
+}
+
+function createClosureService(opts: EvalVerdictLifecycleRoutesOptions, { space, eventLog }: LifecycleSpaceLog) {
+  return new ReevalClosureService({
+    eventLog,
+    loadRoot: async (verdictId) => {
+      const resolved = loadEvalVerdictLifecycleRoot(space, verdictId);
+      if (resolved?.artifact.schemaVersion === 3) return undefined;
+      if (!resolved || !opts.redis) return resolved?.projectorRoot;
+      const override = await getEvalCatOverride(opts.redis, resolved.artifact.domainId);
+      return override ? { ...resolved.projectorRoot, assignedEvalCatId: override.catId } : resolved.projectorRoot;
+    },
+    loadBootstrap: async (verdictId) => {
+      if (space.kind === 'install' && verdictId === CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID) {
+        return buildCapabilityWakeupClosureImport().bootstrapEvents;
+      }
+      const resolved = loadEvalVerdictLifecycleRoot(space, verdictId);
+      if (resolved?.artifact.schemaVersion === 3) return undefined;
+      if (!resolved || resolved.artifact.verdict === 'keep_observe') return undefined;
+      return [buildLifecycleOpenedEvent(resolved.artifact)];
+    },
+    ...(opts.now ? { now: opts.now } : {}),
+  });
+}
+
+function createCaseService(opts: EvalVerdictLifecycleRoutesOptions, { space, eventLog }: LifecycleSpaceLog) {
+  if (!opts.releaseTruth) return undefined;
+  return new ReevalCaseService({
+    eventLog,
+    releaseTruth: opts.releaseTruth,
+    loadRoot: async (verdictId) => {
+      const unresolved = loadReevalCaseRoot(space, verdictId);
+      if (!unresolved || !opts.redis) return unresolved?.projectorRoot;
+      const override = await getEvalCatOverride(opts.redis, unresolved.requestedRoot.domainId);
+      return loadReevalCaseRoot(space, verdictId, override?.catId)?.projectorRoot;
+    },
+    ...(opts.now ? { now: opts.now } : {}),
+  });
+}
+
+/** Routes a command to the service for its root's schema, inside the resolved space. */
+function executeInLifecycleSpace(
+  opts: EvalVerdictLifecycleRoutesOptions,
+  lifecycle: LifecycleSpaceLog,
+  actor: LifecycleActor,
+  commandBody: Record<string, unknown>,
+  verdictId: string,
+  reply: FastifyReply,
+) {
+  const resolved = loadEvalVerdictLifecycleRoot(lifecycle.space, verdictId);
+  if (resolved?.artifact.schemaVersion === 3) {
+    return reply.status(409).send(frictionLifecycleV3QuarantineDiagnostic());
+  }
+  if (resolved?.artifact.schemaVersion === 2) {
+    const caseService = createCaseService(opts, lifecycle);
+    if (!caseService) return reply.status(503).send({ error: 'verified release truth unavailable' });
+    return executeLifecycleCommand(caseService, actor, commandBody, verdictId, reply);
+  }
+  return executeLifecycleCommand(createClosureService(opts, lifecycle), actor, commandBody, verdictId, reply);
+}
+
 export const evalVerdictLifecycleRoutes: FastifyPluginAsync<EvalVerdictLifecycleRoutesOptions> = async (app, opts) => {
   if (opts.callbackRegistry) {
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
 
-  const service = opts.eventLog
-    ? new ReevalClosureService({
-        eventLog: opts.eventLog,
-        loadRoot: async (verdictId) => {
-          const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
-          if (resolved?.artifact.schemaVersion === 3) return undefined;
-          if (!resolved || !opts.redis) return resolved?.projectorRoot;
-          const override = await getEvalCatOverride(opts.redis, resolved.artifact.domainId);
-          return override ? { ...resolved.projectorRoot, assignedEvalCatId: override.catId } : resolved.projectorRoot;
-        },
-        loadBootstrap: async (verdictId) => {
-          if (verdictId === CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID) {
-            return buildCapabilityWakeupClosureImport().bootstrapEvents;
-          }
-          const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
-          if (resolved?.artifact.schemaVersion === 3) return undefined;
-          if (!resolved || resolved.artifact.verdict === 'keep_observe') return undefined;
-          return [buildLifecycleOpenedEvent(resolved.artifact)];
-        },
-        ...(opts.now ? { now: opts.now } : {}),
-      })
-    : undefined;
-  const caseService =
-    opts.eventLog && opts.releaseTruth
-      ? new ReevalCaseService({
-          eventLog: opts.eventLog,
-          releaseTruth: opts.releaseTruth,
-          loadRoot: async (verdictId) => {
-            const unresolved = loadReevalCaseRoot(opts.harnessFeedbackRoot, verdictId);
-            if (!unresolved || !opts.redis) return unresolved?.projectorRoot;
-            const override = await getEvalCatOverride(opts.redis, unresolved.requestedRoot.domainId);
-            return loadReevalCaseRoot(opts.harnessFeedbackRoot, verdictId, override?.catId)?.projectorRoot;
-          },
-          ...(opts.now ? { now: opts.now } : {}),
-        })
-      : undefined;
-
   app.post('/api/eval-verdicts/:verdictId/lifecycle-events', async (request, reply) => {
-    if (!service) return reply.status(503).send({ error: 'canonical lifecycle persistence unavailable' });
+    if (!opts.eventLog && !opts.ownerEventLog) {
+      return reply.status(503).send({ error: 'canonical lifecycle persistence unavailable' });
+    }
     const commandBody = requireCommandBody(request, reply);
     if (!commandBody) return;
-    const actor = requireLifecycleActor(request, reply, commandBody);
-    if (!actor) return;
+    const caller = requireLifecycleCaller(request, reply, commandBody);
+    if (!caller) return;
     const { verdictId } = request.params as { verdictId: string };
-    const resolved = loadEvalVerdictLifecycleRoot(opts.harnessFeedbackRoot, verdictId);
-    if (resolved?.artifact.schemaVersion === 3) {
-      return reply.status(409).send(frictionLifecycleV3QuarantineDiagnostic());
-    }
-    if (resolved?.artifact.schemaVersion === 2) {
-      if (!caseService) return reply.status(503).send({ error: 'verified release truth unavailable' });
-      return executeLifecycleCommand(caseService, actor, commandBody, verdictId, reply);
-    }
-    return executeLifecycleCommand(service, actor, commandBody, verdictId, reply);
+    const lifecycle = resolveLifecycleSpace(opts, caller.ownerUserId);
+    if ('error' in lifecycle) return reply.status(lifecycle.status).send({ error: lifecycle.error });
+    return executeInLifecycleSpace(opts, lifecycle, caller.actor, commandBody, verdictId, reply);
   });
 };

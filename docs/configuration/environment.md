@@ -26,7 +26,26 @@
 
 | Variable                 | Default          | Description |
 |--------------------------|------------------|-------------|
-| `DEFAULT_OWNER_USER_ID`  | `default-user`   | Owner identity for privileged operations. Required for sensitive env writes -- requests without a matching identity receive 403 (所有者身份标识，敏感操作需匹配此值) |
+| `DEFAULT_OWNER_USER_ID`  | *(unset)*        | Owner identity for privileged operations. Required for sensitive env writes -- requests without a matching identity receive 403 (所有者身份标识，敏感操作需匹配此值) |
+| `CAT_CAFE_USER_ID`       | `default-user`   | The user whose runtime data this install owns: threads, schedules, published artifacts and F257 lifecycle partitions (本安装运行时数据所属用户) |
+
+One install has one owner, resolved in this order:
+
+1. `DEFAULT_OWNER_USER_ID` when it is set
+2. otherwise `CAT_CAFE_USER_ID`
+3. otherwise `default-user`
+
+Setting only `DEFAULT_OWNER_USER_ID` is supported and is the usual multi-user setup: the
+install's schedulers, publishers, memory index and F257 lifecycle spaces all belong to that
+user. Browser sessions are deliberately narrower: only a bootstrap over **direct loopback** is
+minted as the owner. A remote or proxied bootstrap receives `default-user`, or `unpaired-user`
+when the owner is the default identity, and never the owner identity -- see
+`packages/api/src/infrastructure/session-auth.ts` and its regressions.
+
+Setting **both to different users** is a configuration with no single owner:
+privileged gates would trust one id while the data belongs to the other, so **the server refuses
+to start** with an error naming both values. Set both to the owner, or set only
+`DEFAULT_OWNER_USER_ID`.
 
 ## Workspace
 

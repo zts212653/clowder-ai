@@ -46,6 +46,7 @@ describe('publish-verdict sop sourceRefs validation', () => {
         packet: buildPacket({ domainId: 'eval:sop' }),
         domain: 'eval:sop',
         catId: 'codex',
+        ownerUserId: 'owner-test',
         sourceRefs: {
           kind: 'sop-trace-eval',
           sopDefinitionId: 'development',

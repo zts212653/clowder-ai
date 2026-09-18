@@ -1,36 +1,30 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { parse as parseYaml } from 'yaml';
+import {
+  assertGeneratedArtifactCoordinates,
+  generatedVerdictIds,
+} from '../artifact-store/generated-artifact-coordinates.js';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import { loadDomains } from '../hub/eval-hub-read-model.js';
-import { assertMeasurementVerdictActionAllowed } from '../measurement/measurement-bundle-census.js';
-import {
-  ensureMeasurementBundleCensusFile,
-  refreshMeasurementBundleCensusFile,
-} from '../measurement/measurement-bundle-census-file.js';
+import { assertMeasurementCensusAllowsVerdict } from '../measurement/measurement-bundle-census-file.js';
 import {
   assertCanCrossThreadHandoff,
   parseVerdictHandoffPacket,
   type VerdictHandoffPacket,
 } from '../verdict-handoff.js';
-import { mapPublishVerdictError } from './error-mapping.js';
+import { classifyPublishFailure } from './error-mapping.js';
 import {
   rejectServerOwnedFrictionPacketFields,
   validateFrictionAggregateWrite,
   validateFrictionAnalysisInput,
 } from './friction-findings/friction-analysis-input.js';
-import {
-  generatedArtifactStagePaths,
-  writeGeneratedLifecycleArtifacts,
-} from './friction-findings/generated-lifecycle-artifacts.js';
+import { writeGeneratedLifecycleArtifacts } from './friction-findings/generated-lifecycle-artifacts.js';
 import { validateMetricRefsAgainstGlossary } from './metric-glossary-validation.js';
-import { verdictEvidenceContractSuccessStatuses } from './publication/verdict-commit-status-publisher.js';
-import { computePublishPolicy } from './publish-policy.js';
 import { validateSourceRefsForPublish } from './source-ref-handler-validation.js';
 import type {
+  ArtifactPublisher,
   GeneratedFindingArtifact,
   GeneratedVerdictArtifact,
-  GitPublisher,
   HandlerError,
   PublishedVerdictChildArtifact,
   PublishVerdictDeps,
@@ -41,14 +35,14 @@ import type {
 import { assertNoNewlineInBulletFields, inferSourceRefsKind, isKnownSourceRefsKind } from './validation.js';
 
 export type {
-  GitPublisher,
+  ArtifactPublisher,
+  ArtifactRef,
   HandlerError,
-  PublishOnIsolatedWorktreeOpts,
+  PublishArtifactOpts,
   PublishVerdictDeps,
   PublishVerdictInput,
   PublishVerdictSuccess,
   ResolvedSourceRefs,
-  StageResult,
   VerdictGenerator,
   VerdictSourceRefs,
 } from './types.js';
@@ -61,20 +55,28 @@ const SAFE_VERDICT_ID = /^[a-z0-9][a-z0-9-]*$/;
 /**
  * F192 Phase H — Verdict Publishing Pipeline (砚砚 R0 Path B narrowed).
  * Eval cat calls cat_cafe_publish_verdict MCP → handler validates → generator
- * runs INSIDE isolated worktree (砚砚 R1 P1 #1 + R7 cloud: live tree NEVER touched)
- * → GitPublisher commits + pushes + opens auto-PR. Replaces PR #2091.
+ * writes an immutable bundle through the local ArtifactPublisher. Git/PR writeback
+ * is intentionally not part of the F257 runtime contract.
  */
 
-const defaultGitPublisher: GitPublisher = {
-  async publishOnIsolatedWorktree() {
-    throw new Error('GitPublisher not injected (must wire real isolated-worktree impl at route layer)');
+const defaultArtifactPublisher: ArtifactPublisher = {
+  async publishArtifact() {
+    throw new Error('ArtifactPublisher not injected (must wire real durable publisher at route layer)');
   },
 };
+
+/** A verdict committed to the product repository — its file or its bundle — holds its id. */
+function isCommittedVerdictId(harnessFeedbackRoot: string, verdictId: string): boolean {
+  return (
+    existsSync(resolve(harnessFeedbackRoot, 'verdicts', `${verdictId}.md`)) ||
+    existsSync(resolve(harnessFeedbackRoot, 'bundles', verdictId))
+  );
+}
 
 /**
  * AC-H1: Validate VerdictHandoffPacket schema (server NEVER 造 evidence).
  * AC-H7 partial: input.domain must match packet.domainId.
- * AC-H2: call generator → branch + commit + push + auto-PR → return SHA + URL.
+ * AC-H2 (F257 sunset): call generator → atomically persist artifact → return artifact identity and paths.
  *
  * F192 Phase H 收尾 PR-2 (砚砚 R1 P1): handler is now domain-agnostic.
  *   - Replaced hardcoded `packet.domainId !== 'eval:a2a'` check with
@@ -114,9 +116,9 @@ export async function handlePublishVerdict(
   if (aggregateError) return aggregateError;
 
   // One server-owned clock governs both future-time rejection and generator
-  // provenance. This must run before GitPublisher can create a branch, commit,
-  // remote ref, or PR; packet.createdAt remains the event time and may be old,
-  // but it cannot claim an event later than the publication request itself.
+  // provenance. This must run before the publisher stages anything;
+  // packet.createdAt remains the event time and may be old, but it cannot claim
+  // an event later than the publication request itself.
   const publicationTime = (deps.now?.() ?? new Date()).toISOString();
   if (Date.parse(packet.createdAt) > Date.parse(publicationTime)) {
     return {
@@ -147,6 +149,15 @@ export async function handlePublishVerdict(
       status: 401,
       error: 'unauthenticated',
       detail: 'catId not provided — MCP layer must derive from callback',
+    };
+  }
+  // The artifact store is partitioned by owner; a publication without a
+  // server-trusted owner has no address to publish to.
+  if (typeof input.ownerUserId !== 'string' || input.ownerUserId.trim() === '') {
+    return {
+      status: 401,
+      error: 'unauthenticated',
+      detail: 'owner_user_required: ownerUserId not provided — MCP layer must derive it from the callback principal',
     };
   }
   const domains = loadDomains(deps.harnessFeedbackRoot);
@@ -205,12 +216,10 @@ export async function handlePublishVerdict(
       detail: `packet.phenomenon must be <= ${MAX_PHENOMENON_LEN} chars (got ${packet.phenomenon.length})`,
     };
   }
-  // Idempotency fast-fail: live-tree existsSync catches common dup quickly.
-  // 砚砚 R3 P1 #2 cloud: NOT authoritative — if API checkout is stale vs origin/main,
-  // dup-on-main slips through. Authoritative re-check inside isolated worktree below.
-  const liveVerdictPath = resolve(deps.harnessFeedbackRoot, 'verdicts', `${packet.id}.md`);
-  const liveBundleDir = resolve(deps.harnessFeedbackRoot, 'bundles', packet.id);
-  if (existsSync(liveVerdictPath) || existsSync(liveBundleDir)) {
+  // An id already used by a verdict committed to the product repository is taken:
+  // the Eval Hub merges both sources by id. Ids held by other runtime artifacts are
+  // the publisher's to refuse, atomically within the owner partition.
+  if (isCommittedVerdictId(deps.harnessFeedbackRoot, packet.id)) {
     return {
       status: 409,
       error: 'verdict_already_exists',
@@ -258,38 +267,27 @@ export async function handlePublishVerdict(
     };
   }
 
-  // AC-H2: delegate isolated-worktree lifecycle to GitPublisher.
-  // Generator runs inside the isolated worktree; live harnessFeedbackRoot is never mutated.
-  // Branch uniqueness/race protection is delegated to git worktree add -b.
-  // PR-2: stage callback stays domain-agnostic; adapters resolve their own sources.
-  const gitPublisher = deps.gitPublisher ?? defaultGitPublisher;
+  // F257 / F192 sunset: runtime verdicts are durable artifacts, not product-repo PRs.
+  const artifactPublisher = deps.artifactPublisher ?? defaultArtifactPublisher;
   const generator: VerdictGenerator = deps.generator; // checked above (501 if missing)
-  const domainSlug = packet.domainId.replace(/:/g, '-');
-  const branchName = `verdict/auto/${domainSlug}/${packet.id}`;
 
-  let artifact: GeneratedVerdictArtifact | null = null;
+  let generated: GeneratedVerdictArtifact | null = null;
   let findingArtifacts: GeneratedFindingArtifact[] = [];
   let childArtifacts: PublishedVerdictChildArtifact[] = [];
   try {
-    const { commitSha, prUrl } = await gitPublisher.publishOnIsolatedWorktree({
-      branchName,
-      sourceBase: 'origin/main',
-      async stage(worktreeRoot) {
-        const isolatedHarnessFeedback = `${worktreeRoot}/docs/harness-feedback`;
-        // 砚砚 R3 P1 #2 cloud: AUTHORITATIVE dup check (origin/main truth).
-        const isoVerdictPath = resolve(isolatedHarnessFeedback, 'verdicts', `${packet.id}.md`);
-        const isoBundleDir = resolve(isolatedHarnessFeedback, 'bundles', packet.id);
-        if (existsSync(isoVerdictPath) || existsSync(isoBundleDir)) {
-          throw new Error(
-            `verdict_already_exists_on_main: packet.id '${packet.id}' already exists on origin/main. Pick a different id.`,
-          );
-        }
-        // Freeze reviewed census metadata before the generator receives write access
-        // to the isolated harness root; only publisher-derived fields may change.
-        const cleanCensusSource = ensureMeasurementBundleCensusFile(worktreeRoot, packet.createdAt).source;
-        assertMeasurementVerdictActionAllowed(parseYaml(cleanCensusSource), packet.domainId, packet.verdict);
-        const generatedArtifact = await generator(packet, input.sourceRefs, {
-          harnessFeedbackRoot: isolatedHarnessFeedback,
+    assertMeasurementCensusAllowsVerdict(
+      resolve(deps.harnessFeedbackRoot, '..', '..'),
+      packet.domainId,
+      packet.verdict,
+    );
+
+    const ref = await artifactPublisher.publishArtifact({
+      packet,
+      ownerUserId: input.ownerUserId,
+      sourceRefs: input.sourceRefs,
+      async generate(outputRoot) {
+        const candidate = await generator(packet, input.sourceRefs, {
+          harnessFeedbackRoot: outputRoot,
           liveHarnessFeedbackRoot: deps.harnessFeedbackRoot,
           publicationTime,
           ownerUserId: input.ownerUserId,
@@ -297,14 +295,27 @@ export async function handlePublishVerdict(
           eventMemoryDbPath: deps.eventMemoryDbPath,
           ...(analysisFindings ? { analysisFindings } : {}),
         });
-        childArtifacts = writeGeneratedLifecycleArtifacts(generatedArtifact, packet, isolatedHarnessFeedback);
-
+        // Lifecycle roots are written into the directories the generator names,
+        // so those names must be the output root's own coordinates first.
+        assertGeneratedArtifactCoordinates(outputRoot, packet.id, candidate);
+        // A committed id is taken for every verdict the publication holds, children included.
+        const committed = generatedVerdictIds(packet.id, candidate).find((verdictId) =>
+          isCommittedVerdictId(deps.harnessFeedbackRoot, verdictId),
+        );
+        if (committed) {
+          throw new Error(
+            `verdict_id_taken: verdict id '${committed}' is already held by a verdict committed to the product repository`,
+          );
+        }
+        generated = candidate;
+        childArtifacts = writeGeneratedLifecycleArtifacts(candidate, packet, outputRoot);
+        findingArtifacts = candidate.findingArtifacts ?? [];
         // Stamp invocation-authenticated sourceThreadId into provenance.json.
         // Centralized here (not in 10+ generators) so: (a) new generators get it
         // for free, (b) client can never forge it — it comes from CallbackPrincipal.
         // agent_key principals have no threadId, so the field is omitted gracefully.
         if (input.sourceThreadId) {
-          const provenancePath = join(generatedArtifact.bundleDir, 'provenance.json');
+          const provenancePath = join(candidate.bundleDir, 'provenance.json');
           if (existsSync(provenancePath)) {
             const prov = JSON.parse(readFileSync(provenancePath, 'utf8'));
             prov.sourceThreadId = input.sourceThreadId;
@@ -315,68 +326,24 @@ export async function handlePublishVerdict(
             );
           }
         }
-
-        const refreshedCensusPath = refreshMeasurementBundleCensusFile(
-          worktreeRoot,
-          packet.createdAt,
-          cleanCensusSource,
-        );
-        artifact = generatedArtifact;
-        findingArtifacts = generatedArtifact.findingArtifacts ?? [];
-        // PR-3 (砚砚 R2): read attribution.json from bundle to compute publish policy.
-        // Generator writes attribution.json into bundleDir; if absent or parse fails,
-        // `computePublishPolicy` fail-opens to regular_pr (砚砚 R2 contract).
-        let attribution: unknown;
-        try {
-          const attrPath = resolve(artifact.bundleDir, 'attribution.json');
-          if (existsSync(attrPath)) {
-            attribution = JSON.parse(readFileSync(attrPath, 'utf8'));
-          }
-        } catch {
-          // Fail-open: undefined → computePublishPolicy returns regular_pr
-        }
-        const policy = computePublishPolicy(packet, attribution);
-        const policyFooter =
-          policy.mode === 'evidence_only_interim_pr'
-            ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Interim: keep_observe + no actionable findings. Rollup mechanism deferred to future Phase. See docs/SOP.md § artifact-only-pr-merge-gate for cat merge contract.)`
-            : policy.labels.includes('evidence-only')
-              ? `\n\n---\n**Cat-owned artifact gate — No operator merge needed.**\n(Actionable findings present; eval domain owner cat merges per docs/SOP.md § artifact-only-pr-merge-gate.)`
-              : '';
-        return {
-          // PR-2 R3 P1 (cloud): stage extra paths the generator wrote (cw raw inputs)
-          // so the auto-PR includes all evidence referenced by provenance.json.
-          paths: [...generatedArtifactStagePaths(generatedArtifact), refreshedCensusPath],
-          commitMessage: `verdict(${packet.domainId}): ${packet.id} — ${packet.verdict}\n\n${packet.phenomenon}\n\n[published via cat_cafe_publish_verdict MCP]`,
-          prTitle: `verdict(${packet.domainId}): ${packet.id}`,
-          prBody: `Verdict published via cat_cafe_publish_verdict MCP tool.\n\nVerdict: ${packet.verdict}\nDomain: ${packet.domainId}\nPhenomenon: ${packet.phenomenon}\n\nReviewed by: ${packet.ownerAsk.targetOwnerCatId}\nAction: ${packet.ownerAsk.requestedAction}${input.sourceThreadId ? `\nSource thread: ${input.sourceThreadId}` : ''}${policyFooter}`,
-          labels: policy.labels,
-          statusChecks: verdictEvidenceContractSuccessStatuses(),
-          afterPublish: generatedArtifact.afterPublish,
-        };
+        return candidate;
       },
     });
 
-    // Stage must have produced artifact (proves generator ran in isolated worktree)
-    if (!artifact) {
-      return { status: 500, error: 'internal', detail: 'stage callback did not produce artifact' };
+    if (!generated) {
+      return { status: 500, error: 'internal', detail: 'generate callback did not produce artifact' };
     }
-    // 砚砚 R12 P2 cloud: returned paths are REPO-RELATIVE (resolve under origin/main
-    // post-merge), NOT the generator's absolute paths inside the temp worktree which
-    // is removed in finally — those would be dangling references at response time.
+
     return {
       ok: true,
-      verdictPath: `docs/harness-feedback/verdicts/${packet.id}.md`,
-      bundleDir: `docs/harness-feedback/bundles/${packet.id}`,
-      commitSha,
-      prUrl,
+      verdictPath: ref.verdictPath,
+      bundleDir: ref.bundleDir,
+      artifactId: ref.artifactId,
+      artifactUrl: ref.artifactUrl,
       findingArtifacts,
       childArtifacts,
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const mapped = mapPublishVerdictError(message);
-    if (mapped) return mapped;
-    if (!artifact) return { status: 500, error: 'generator_failed', detail: message };
-    return { status: 500, error: 'git_or_gh_failed', detail: message };
+    return classifyPublishFailure(err instanceof Error ? err.message : String(err), generated !== null);
   }
 }

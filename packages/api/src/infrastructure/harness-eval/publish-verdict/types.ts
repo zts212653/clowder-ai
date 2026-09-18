@@ -15,6 +15,38 @@ import type { FrictionVerdictHandoffPacketV3, VerdictHandoffPacket } from '../ve
  * Extracted from publish-verdict.ts per AGENTS.md 350-line hard limit.
  */
 
+// F257 / F192 sunset: a verdict is runtime evolution output, so it lands as an
+// immutable local artifact outside the product repository — not as a commit and
+// PR against the baseline that ships in the install package.
+
+export interface ArtifactRef {
+  artifactId: string;
+  domainSlug: string;
+  verdictPath: string;
+  bundleDir: string;
+  artifactUrl: string;
+}
+
+export interface PublishArtifactOpts {
+  packet: VerdictHandoffPacket;
+  /**
+   * Server-trusted principal the artifact belongs to. Verdicts are generated from
+   * owner-scoped evidence, so the store partitions by owner and a publication
+   * without one has no address.
+   */
+  ownerUserId: string;
+  sourceRefs: VerdictSourceRefs;
+  generate: (outputRoot: string) => Promise<GeneratedVerdictArtifact>;
+}
+
+export interface ArtifactPublisher {
+  publishArtifact(opts: PublishArtifactOpts): Promise<ArtifactRef>;
+}
+
+// The isolated-worktree Git publisher below is retained for F311's capability-
+// evolution measurement issuer, which still publishes through it. F257 verdict
+// publication no longer does.
+
 export interface StageResult {
   /** Absolute paths under the isolated worktree to `git add`. */
   paths: string[];
@@ -188,7 +220,8 @@ export type VerdictSourceRefs =
   | QcMetricsSelector
   | FreshnessReplaySelector
   | DesignGateEpisodeSourceSelector
-  | TrajectoryInspectorWindowSelector;
+  | TrajectoryInspectorWindowSelector
+  | PromptSegmentsSourceSelector;
 
 /**
  * Resolved evidence source paths (a2a only — for backward-compat helpers in validation.ts).
@@ -249,8 +282,14 @@ export type VerdictGenerator = (
 export interface GeneratorDeps {
   /** ISOLATED worktree's docs/harness-feedback — where generator writes verdict.md + bundle. */
   harnessFeedbackRoot: string;
-  /** LIVE checkout's docs/harness-feedback — a2a needs this to read raw snapshot/attribution YAML
-   *  that are gitignored from origin/main (砚砚 R17 P1 cloud). cw doesn't use it. */
+  /**
+   * LIVE checkout's docs/harness-feedback. Two distinct reads depend on it:
+   * a2a reads raw snapshot/attribution YAML that are gitignored from origin/main
+   * (砚砚 R17 P1 cloud), and EVERY domain-aware generator resolves the eval-domain
+   * registry here — the isolated staging tree has no eval-domains/ at all, so
+   * loadDomains(harnessFeedbackRoot) yields an empty Map and throws unknown_domain
+   * for every publication (砚砚 review, PR #1462).
+   */
   liveHarnessFeedbackRoot: string;
   /** Server-owned clock sampled once per publish request and shared with timestamp validation. */
   publicationTime: string;
@@ -266,8 +305,8 @@ export interface GeneratorDeps {
 
 export interface PublishVerdictDeps {
   harnessFeedbackRoot: string;
-  /** AC-H2 + 砚砚 R1 P1 #1: isolated publish worktree (default throws). */
-  gitPublisher?: GitPublisher;
+  /** F257 / F192 sunset: durable publisher outside the product Git repository. */
+  artifactPublisher?: ArtifactPublisher;
   /** AC-H2: domain-specific generator (default throws — route-layer must inject per-domain). */
   generator?: VerdictGenerator;
   /** 砚砚 R6 P1: Redis client for OQ-20 eval-cat overrides (symmetric with trigger-now). */
@@ -291,12 +330,12 @@ export interface PublishVerdictInput {
   domain: string; // must match packet.domainId
   /** AC-H3: catId derived from callback auth at MCP server layer. */
   catId: string;
-  /** Server-trusted callback principal userId (not user-supplied). */
-  ownerUserId?: string;
+  /** Server-trusted callback principal userId (not user-supplied); the published artifact's owner. */
+  ownerUserId: string;
   /**
    * Invocation-authenticated source thread ID. Derived from CallbackPrincipal.threadId
    * at the route layer — NEVER from client body (prevents forgery). Stamped into
-   * provenance.json and PR body for traceability. Absent for agent_key principals.
+   * provenance.json for traceability. Absent for agent_key principals.
    */
   sourceThreadId?: string;
   /** 砚砚 R1 P1 #2: explicit evidence refs (sanitized YAML basenames OR replayable selector). Tool NEVER fabricates. */
@@ -319,8 +358,10 @@ export interface PublishVerdictSuccess {
   ok: true;
   verdictPath: string;
   bundleDir: string;
-  commitSha: string;
-  prUrl: string;
+  // F257 durable-artifact contract: publish returns an immutable artifact reference,
+  // not a git commit/PR.
+  artifactId: string;
+  artifactUrl: string;
   findingArtifacts: GeneratedFindingArtifact[];
   childArtifacts: PublishedVerdictChildArtifact[];
 }
@@ -329,4 +370,13 @@ export interface HandlerError {
   status: number;
   error: string;
   detail?: string;
+}
+
+/** F257 Harness Ledger snapshot selector. */
+export interface PromptSegmentsSourceSelector {
+  kind: 'prompt-segments';
+  windowStartMs: number;
+  windowEndMs: number;
+  evalRunId: string;
+  guardId?: string;
 }

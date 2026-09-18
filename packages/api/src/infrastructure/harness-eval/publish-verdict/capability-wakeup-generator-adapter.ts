@@ -18,7 +18,8 @@ import type { VerdictGenerator } from './types.js';
  *   2. validateCapabilityWakeupSelector (PR-1a's structural validator —
  *      capability non-empty, no newlines, window edges finite + ordered, etc.)
  *   3. provider.resolve(selector) → ClassifiedCapabilityWakeupTrial[]
- *   4. Load EvalDomainRegistryEntry from registry inside isolated harness root
+ *   4. Load EvalDomainRegistryEntry from the LIVE registry (the isolated staging
+ *      tree has no eval-domains/; only artifact writes go to harnessFeedbackRoot)
  *      (registry is on origin/main, included in isolated worktree)
  *   5. generateCapabilityWakeupLiveVerdict with submittedPacket (砚砚 R8 P1: cat
  *      owns verdict; tool only overrides bundle refs)
@@ -56,7 +57,7 @@ export function createCapabilityWakeupGeneratorAdapter(provider: CapabilityWakeu
       );
     }
 
-    const domains = loadDomains(deps.harnessFeedbackRoot);
+    const domains = loadDomains(deps.liveHarnessFeedbackRoot);
     const domain = domains.get(packet.domainId);
     if (!domain) {
       throw new Error(`unknown_domain: ${packet.domainId} not in registry`);

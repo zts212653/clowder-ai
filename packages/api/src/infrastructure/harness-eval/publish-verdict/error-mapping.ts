@@ -10,6 +10,9 @@ export function mapPublishVerdictError(message: string): HandlerError | null {
   if (message.startsWith('verdict_already_exists_on_main')) {
     return { status: 409, error: 'verdict_already_exists', detail: message };
   }
+  if (message.startsWith('artifact_already_exists') || message.startsWith('verdict_id_taken')) {
+    return { status: 409, error: 'verdict_already_exists', detail: message };
+  }
   if (message.startsWith('verdict_window_already_published')) {
     return { status: 409, error: 'verdict_window_already_published', detail: message };
   }
@@ -44,4 +47,19 @@ export function mapPublishVerdictError(message: string): HandlerError | null {
     return { status: 400, error: 'handoff_incomplete', detail: message };
   }
   return null;
+}
+
+const GENERATED_ARTIFACT_CONTRACT_ERRORS = ['artifact_coordinate_mismatch', 'artifact_not_materialized'];
+
+/**
+ * Classify a failed publication. A generator whose report does not match what it
+ * wrote has failed, even when the publisher is the one that notices.
+ */
+export function classifyPublishFailure(message: string, generatorReturned: boolean): HandlerError {
+  const mapped = mapPublishVerdictError(message);
+  if (mapped) return mapped;
+  if (!generatorReturned || GENERATED_ARTIFACT_CONTRACT_ERRORS.some((prefix) => message.startsWith(prefix))) {
+    return { status: 500, error: 'generator_failed', detail: message };
+  }
+  return { status: 500, error: 'publisher_failed', detail: message };
 }

@@ -47,7 +47,8 @@ import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
 import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
-import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { finalizeTraceEpisode, getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
+import { persistPipelineTraceArtifacts } from '../../../../prompt-hooks/trace-bridge.js';
 // F237: Injection trace (v0 — fire-and-forget observability)
 import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
 import {
@@ -66,6 +67,7 @@ import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
+import { resolveOwnerProfileSnapshot } from '../../profile/owner-profile-snapshot.js';
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
@@ -104,6 +106,7 @@ import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentServi
 import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
+import { signatureLintExtra } from './cat-signature-lint.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
@@ -567,6 +570,12 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+  // F257: per-cat traceTurnId + outputMessageId for finalizeTraceEpisode at completion boundary.
+  const catTraceTurnId = new Map<string, string>();
+  const catOutputMessageId = new Map<string, string>();
+  // R1 P1-2: retained so finalizeTraceEpisode chains after persist (happens-before).
+  // R2 P1-1: carries success state — only finalize when durable summary exists.
+  const catTracePersistPromise = new Map<string, Promise<boolean>>();
   const unavailableCats = new Set<CatId>();
 
   const streams = await Promise.all(
@@ -641,12 +650,21 @@ export async function* routeParallel(
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
       // Staging is injected in invoke-single-cat independently of staticIdentity
       // (Cloud R2 P1 #2237 L1099). See route-serial.ts for the architecture rationale.
+      // S14: resolve the owner profile once, then give the same snapshot to whichever
+      // carrier transports this session, so both deliver identical bytes. The pack-only
+      // path deliberately omits it -- the native carrier already delivered S14 inside
+      // nativeSessionPrompt, and repeating it there would inject the profile twice.
+      const ownerProfile = resolveOwnerProfileSnapshot({ catId });
+      const nativeSessionPrompt = hasNativeL0
+        ? buildStaticIdentity(catId, { mcpAvailable, profile: ownerProfile })
+        : undefined;
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
-        : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
+        : buildStaticIdentity(catId, { mcpAvailable, packBlocks, profile: ownerProfile });
       // F237: drain session trace IMMEDIATELY — before any await that could let
       // another parallel cat overwrite the module-global capture buffer.
-      drainCapturedTraces();
+      // F257: save session pipeline trace for full 46-segment persistence (S+L+B+C).
+      const { session: pipelineSessionTrace } = drainCapturedTraces();
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -726,7 +744,8 @@ export async function* routeParallel(
         .filter(Boolean)
         .join('\n\n');
       // F237: drain turn trace IMMEDIATELY — same race-safety as session drain above.
-      drainCapturedTraces();
+      // F257: save turn pipeline trace for full 46-segment persistence (D+R+N).
+      const { turn: pipelineTurnTrace } = drainCapturedTraces();
 
       // F237 Phase 2: Pipeline trace capture drained above (lines 250, 322) to prevent
       // stale module-global buffer in concurrent Promise.all execution. Persistence is
@@ -811,36 +830,51 @@ export async function* routeParallel(
         }
       }
 
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      // Placed after bootstrapCtx so per-turn trace covers ALL route-level
-      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
+      // F257: injection trace persist — pipeline path (all 46 segments).
+      // F237 v0 legacy path kept as fallback when pipeline traces are unavailable.
+      // R1 P1-2: retain persist promise so finalizeTraceEpisode chains after it.
       // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
       const preTraceSignal = signalForCat?.(catId) ?? signal;
+      // F257: generate traceTurnId before trace persist so finalizeTraceEpisode can reference it.
+      const traceTurnId = crypto.randomUUID();
+      catTraceTurnId.set(catId as string, traceTurnId);
       try {
         const traceStore = getTraceStore();
         if (traceStore && !preTraceSignal?.aborted) {
-          const traceTurnId = crypto.randomUUID();
-          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
-          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-          const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
-          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
-          const summary = buildTraceSummary(collected, traceMeta);
-          const detail = buildTraceDetail(collected, traceMeta);
-          traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
-          });
+          if (pipelineSessionTrace || pipelineTurnTrace) {
+            const persistPromise = persistPipelineTraceArtifacts({
+              traceStore,
+              messageStore: deps.messageStore,
+              ownerUserId: userId,
+              messageAnchorId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
+              sessionResult: pipelineSessionTrace ?? null,
+              turnResult: pipelineTurnTrace ?? null,
+              meta: {
+                turnId: traceTurnId,
+                threadId,
+                catId: catId as string,
+                hasNativeL0,
+                sessionViaNativeCarrier: hasNativeL0,
+              },
+            })
+              .then((result) => {
+                if (result && !result.replayPersisted) {
+                  log.warn(
+                    { err: result.replayError, threadId, catId, replaySnapshotCount: result.replaySnapshotCount },
+                    '[F257] replay snapshot persist failed (degraded)',
+                  );
+                }
+                return result?.summaryPersisted ?? false;
+              })
+              .catch((err) => {
+                log.warn({ err, threadId, catId }, '[F257] pipeline trace persist failed (degraded)');
+                return false as const;
+              });
+            catTracePersistPromise.set(catId as string, persistPromise);
+          }
         }
-        // v0 collectTrace → buildStaticIdentity(annotateSegments: true) re-populates
-        // the module-global capturedSessionTrace without draining. Clear it so the next
-        // invocation (especially native-L0 pack-only) doesn't persist stale session traces.
-        if (deps.injectionTraceStore) drainCapturedTraces();
       } catch {
-        /* F237: trace collection must never break invocation */
+        /* F237/F257: trace collection must never break invocation */
       }
 
       let prompt: string;
@@ -1159,6 +1193,7 @@ export async function* routeParallel(
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
+        ...(nativeSessionPrompt ? { nativeSessionPrompt } : {}),
         // F194 Phase Z2 (砚砚 catch 2026-05-09)：parallel route 必须传 parentInvocationId，
         // 与 route-serial.ts:725 对齐。否则 child registry record 缺 parentInvocationId →
         // helper namespace bridge 失效 → ideate/parallel 场景气泡又裂。
@@ -1980,6 +2015,7 @@ export async function* routeParallel(
             ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+              ...signatureLintExtra(storedContent),
               ...(deliveryBoundary ? { deliveryBoundary } : {}),
               // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
               // (= ownInvId else parent fallback).
@@ -2067,6 +2103,8 @@ export async function* routeParallel(
               storedMsg.id,
             ];
           }
+          // F257: track per-cat output message ID for finalizeTraceEpisode.
+          if (storedMsg) catOutputMessageId.set(msg.catId, storedMsg.id);
           // #80/F254: Delete only after MessageStore or closure truth proves custody.
           if (deps.draftStore && ownInvId && mayDeleteDraft(outputCommitDecision, Boolean(storedMsg))) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2236,6 +2274,8 @@ export async function* routeParallel(
               ];
             }
             turnStoredMessageId = storedNoText?.id;
+            // F257: track per-cat output message ID for finalizeTraceEpisode.
+            if (storedNoText) catOutputMessageId.set(msg.catId, storedNoText.id);
             // #80/F254: retained means DraftStore is still the only recoverable copy.
             if (deps.draftStore && ownInvId && mayDeleteDraft(noTextOutputCommitDecision, Boolean(storedNoText))) {
               deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2487,6 +2527,48 @@ export async function* routeParallel(
       // Re-querying the map here returns undefined → done event yielded without
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
+      // F257: close trace episode + trigger annotation pipeline.
+      // R1 P1-2: chain after catTracePersistPromise — never index terminal without durable summary.
+      if (ownInvId) {
+        const perCatTraceTurnId = catTraceTurnId.get(msg.catId) ?? crypto.randomUUID();
+        const doFinalize = () => {
+          const catSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+          const terminalKind = catHadProviderError.has(msg.catId)
+            ? 'failed'
+            : catSignal?.aborted
+              ? 'cancelled'
+              : 'completed';
+          return finalizeTraceEpisode({
+            traceTurnId: perCatTraceTurnId,
+            invocationId: ownInvId!,
+            ownerUserId: userId,
+            threadId,
+            catId: msg.catId,
+            inputMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
+            outputMessageId: catOutputMessageId.get(msg.catId) ?? null,
+            terminalKind,
+            toolEvents: catToolEvents.get(msg.catId) ?? [],
+          }).catch((err) => {
+            log.warn({ err, threadId, catId: msg.catId, invocationId: ownInvId }, '[F257] finalizeTraceEpisode failed');
+          });
+        };
+        // R2 P1-1: only finalize when durable summary exists — never create an
+        // evaluable terminal without its authority trace.
+        const persistPromise = catTracePersistPromise.get(msg.catId);
+        if (persistPromise) {
+          persistPromise.then((persisted) => {
+            if (persisted) {
+              doFinalize();
+            } else {
+              log.warn(
+                { threadId, catId: msg.catId, invocationId: ownInvId },
+                '[F257] trace persist failed — skipping episode closure (no evaluable terminal without durable summary)',
+              );
+            }
+          });
+        }
+      }
+
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
       yield projectLiveTurnExecution(
         {

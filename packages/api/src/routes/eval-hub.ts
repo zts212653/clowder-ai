@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { Redis } from 'ioredis';
 import { getRoster } from '../config/cat-config-loader.js';
@@ -8,6 +9,12 @@ import {
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { setEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-domain-override.js';
+import type { CycleEvaluationCoordinator } from '../infrastructure/harness-eval/evaluation/CycleEvaluationCoordinator.js';
+import { registerCycleEvaluationCallbackRoutes } from '../infrastructure/harness-eval/evaluation/cycle-evaluation-callbacks.js';
+import type { HarnessUnitDescriber } from '../infrastructure/harness-eval/evaluation/HarnessUnitDescriber.js';
+import type { GuardRejectionEventLog } from '../infrastructure/harness-eval/GuardRejectionEventLog.js';
+import type { CycleGovernanceCoordinator } from '../infrastructure/harness-eval/governance/CycleGovernanceCoordinator.js';
+import { ledgerIdForGuard } from '../infrastructure/harness-eval/guard-ledger-registry.js';
 import { loadDomains } from '../infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { loadEnrichedEvalHubSummary } from '../infrastructure/harness-eval/hub/eval-hub-summary-service.js';
 import {
@@ -16,18 +23,17 @@ import {
   type InvokeTriggerProvider,
 } from '../infrastructure/harness-eval/manual-trigger/index.js';
 import {
-  type GitPublisher,
+  type ArtifactPublisher,
   handlePublishVerdict,
   type VerdictGenerator,
 } from '../infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import type { IReevalClosureEventLog } from '../infrastructure/harness-eval/reeval-closure-event-log.js';
 import type { AgentKeyAuthRegistry, CallbackAuthRegistry } from './callback-auth-prehandler.js';
 import { registerCallbackAuthHook, requireCallbackPrincipal } from './callback-auth-prehandler.js';
-import { registerPublishVerdictRefreshRoute } from './publish-verdict-refresh-route.js';
+import { registerEvalHubArtifactFileRoute } from './eval-hub-artifact-files.js';
 
 export type {
   GenerateNowInput,
-  GenerateNowSuccess,
   HandlerError,
   InvokeTriggerLike,
   InvokeTriggerOutcome,
@@ -52,8 +58,15 @@ export interface EvalHubRoutesOptions {
   invokeTriggerProvider?: InvokeTriggerProvider;
   /** F192 OQ-21: message store for delivering invocation packet on manual trigger. */
   messageStore?: IMessageStore;
-  /** F192 Phase H: GitPublisher impl (real = git worktree + gh; tests inject mock). */
-  gitPublisher?: GitPublisher;
+  /**
+   * F257 / F192 sunset: durable artifact publisher for verdict bundles.
+   * Replaces the deprecated Git worktree publisher.
+   */
+  artifactPublisher?: ArtifactPublisher;
+  /**
+   * Durable artifact store root surfaced alongside legacy in-repo verdicts.
+   */
+  artifactStoreRoot?: string;
   /**
    * F192 Phase H: domain → verdict generator map. Real impl (e.g.
    * `generateA2aLiveVerdict` for eval:a2a) wired here; tests inject mock.
@@ -75,8 +88,20 @@ export interface EvalHubRoutesOptions {
    * publish-verdict — same gap as F178/F223 (post_message, workspace_navigate).
    */
   agentKeyRegistry?: AgentKeyAuthRegistry;
-  /** F266 canonical event reader; absent means artifact-only honest degradation. */
+  /** F257 × F266: the owner whose lifecycle space is the install's (repository history + runtime verdicts). */
+  configuredOwnerUserId: string;
+  /** F266 canonical event reader of the install space; absent means artifact-only honest degradation. */
   lifecycleEventLog?: Pick<IReevalClosureEventLog, 'read'>;
+  /** F257: opens another owner's lifecycle log, for the runtime verdicts that owner published. */
+  ownerLifecycleEventLog?: (ownerUserId: string) => Pick<IReevalClosureEventLog, 'read'>;
+  /** F257 guard-rejection ledger sink for publish-policy rejects. */
+  guardRejectionLog?: GuardRejectionEventLog;
+  /** F257 Objective-cycle assignment, trace read, and structured writeback. */
+  cycleEvaluationCoordinator?: CycleEvaluationCoordinator;
+  /** F257 read-only unit action/version schema. */
+  harnessUnitDescriber?: HarnessUnitDescriber;
+  /** F257 structured governance assignment and writeback. */
+  cycleGovernanceCoordinator?: CycleGovernanceCoordinator;
 }
 
 function requireSession(request: FastifyRequest, reply: FastifyReply): string | null {
@@ -97,6 +122,15 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     // 砚砚 R9 P1: pass agentKeyRegistry so shared-MCP (agent-key) cats can publish.
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
+  if (opts.cycleEvaluationCoordinator && opts.harnessUnitDescriber) {
+    registerCycleEvaluationCallbackRoutes(
+      app,
+      opts.cycleEvaluationCoordinator,
+      opts.harnessUnitDescriber,
+      opts.cycleGovernanceCoordinator,
+    );
+  }
+  registerEvalHubArtifactFileRoute(app, opts.artifactStoreRoot);
 
   app.get('/api/eval-hub/summary', async (request, reply) => {
     const userId = requireSession(request, reply);
@@ -105,11 +139,14 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     try {
       return await loadEnrichedEvalHubSummary({
         harnessFeedbackRoot: opts.harnessFeedbackRoot,
+        artifactStoreRoot: opts.artifactStoreRoot,
         userId,
+        configuredOwnerUserId: opts.configuredOwnerUserId,
         log: request.log,
         ...(opts.redis ? { redis: opts.redis } : {}),
         ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
         ...(opts.lifecycleEventLog ? { lifecycleEventLog: opts.lifecycleEventLog } : {}),
+        ...(opts.ownerLifecycleEventLog ? { ownerLifecycleEventLog: opts.ownerLifecycleEventLog } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -207,6 +244,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         // cloud R5 P2 (PR-2): pass wired publish-verdict domain set so
         // buildEvalCatInvocation omits publish instructions for unwired domains.
         wiredPublishDomains: new Set(Object.keys(opts.verdictGenerators ?? {})),
+        guardRejectionLog: opts.guardRejectionLog,
       },
       { domainId, userId },
     );
@@ -278,7 +316,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
   // 砚砚 R4 P1 + cloud R4 P1: route uses CALLBACK auth (invocationId + callbackToken),
   // NOT browser session — MCP tools don't send session cookies. catId is derived
   // from the server-trusted callback principal, NOT body (which is spoofable).
-  // Generator + GitPublisher injected at bootstrap (real impls), tests pass mocks.
+  // Generator + ArtifactPublisher injected at bootstrap (real impls), tests pass mocks.
   app.post('/api/eval-domains/:domainId/publish-verdict', async (request, reply) => {
     // 砚砚 R4 P1 #1 + R9 P1: requireCallbackPrincipal (NOT requireSession).
     // Accept both invocation principals (per-call MCP) AND agent_key principals
@@ -306,7 +344,7 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: opts.harnessFeedbackRoot,
-        gitPublisher: opts.gitPublisher,
+        artifactPublisher: opts.artifactPublisher,
         generator,
         // 砚砚 R6 P1: pass redis so handler reads OQ-20 override (same instance
         // as handleTriggerNow uses — symmetric wake/publish for override cats).
@@ -332,10 +370,31 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
     );
 
     if ('error' in result) {
+      if (result.status === 403 && opts.guardRejectionLog) {
+        const publishLedgerId = ledgerIdForGuard('publish_verdict_authority');
+        opts.guardRejectionLog
+          .append({
+            eventId: randomUUID(),
+            ledgerId: publishLedgerId,
+            kind: 'publish_policy_reject',
+            threadId: principal.kind === 'invocation' ? principal.threadId : 'unknown',
+            catId: principal.catId as string,
+            guardId: 'publish_verdict_authority',
+            ownerUserId: principal.userId,
+            invocationId: principal.kind === 'invocation' ? principal.invocationId : 'unknown',
+            sourceTool: 'publish_verdict',
+            normalizedReason: String(result.error ?? 'publish_forbidden'),
+            layer: 'api-route',
+            timestamp: Date.now(),
+            correlationConfidence: principal.kind === 'invocation' ? 'exact' : 'window',
+          })
+          .catch(() => {});
+        return reply
+          .status(result.status)
+          .send({ error: result.error, detail: result.detail, ledgerId: publishLedgerId });
+      }
       return reply.status(result.status).send({ error: result.error, detail: result.detail });
     }
     return result;
   });
-
-  registerPublishVerdictRefreshRoute(app, opts);
 };

@@ -125,6 +125,7 @@ const populatedSummary = {
         stateSot: 'registry',
       },
       source: {
+        kind: 'workspace',
         verdictPath: 'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
         bundleDir: 'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict',
       },

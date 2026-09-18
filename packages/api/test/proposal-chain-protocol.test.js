@@ -21,7 +21,18 @@ describe('F128 chain protocol injection', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: [],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -95,7 +106,18 @@ describe('F128 chain protocol injection', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: [],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -180,6 +202,14 @@ describe('F128 chain protocol injection', () => {
           targetCats,
           intent: { intent: 'execute' },
           hasMentions: targetCats.length > 0,
+          // real-router contract: a parser ALWAYS hands over its batch (zero attempts on no @)
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
         };
       },
     };
@@ -256,7 +286,18 @@ describe('F128 chain protocol injection', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: true };
+        return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {

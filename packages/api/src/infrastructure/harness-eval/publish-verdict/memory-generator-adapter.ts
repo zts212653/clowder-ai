@@ -14,7 +14,8 @@ import { validateMemoryRecallSelector } from './validation.js';
  *   2. validateMemoryRecallSelector (structural validator — windowDays in
  *      [1, 90] integer, optional catId/toolName non-empty, no newlines)
  *   3. provider.resolve(selector) → {recallMetrics, libraryHealth}
- *   4. Load EvalDomainRegistryEntry from registry inside isolated harness root
+ *   4. Load EvalDomainRegistryEntry from the LIVE registry (the isolated staging
+ *      tree has no eval-domains/; only artifact writes go to harnessFeedbackRoot)
  *      (registry is on origin/main, included in isolated worktree)
  *   5. generateMemoryLiveVerdict with submittedPacket (cat owns verdict;
  *      generator only overrides bundle refs in evidencePacket)
@@ -50,7 +51,7 @@ export function createMemoryGeneratorAdapter(provider: MemoryMetricsProvider): V
 
     const { recallMetrics, libraryHealth } = await provider.resolve(selector);
 
-    const domains = loadDomains(deps.harnessFeedbackRoot);
+    const domains = loadDomains(deps.liveHarnessFeedbackRoot);
     const domain = domains.get(packet.domainId);
     if (!domain) {
       throw new Error(`unknown_domain: ${packet.domainId} not in registry`);

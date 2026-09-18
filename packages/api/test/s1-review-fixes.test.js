@@ -309,6 +309,13 @@ describe('R2: delete-guard race via POST /api/messages route', () => {
     const mockRouter = {
       async resolveTargetsAndIntent(_msg) {
         return {
+          attemptBatch: {
+            parserMode: 'user',
+            spanBasis: 'lowercased_message',
+            attempts: [],
+            truncated: false,
+            metricEligible: true,
+          },
           targetCats: ['opus'],
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };

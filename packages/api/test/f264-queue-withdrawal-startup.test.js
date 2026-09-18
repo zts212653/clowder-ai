@@ -30,6 +30,7 @@ describe('F264 withdrawn Queue custody startup recovery', () => {
     };
     const store = new MessageStore();
     const message = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       threadId: admitted.entry.threadId,
       userId: admitted.entry.userId,
       catId: null,

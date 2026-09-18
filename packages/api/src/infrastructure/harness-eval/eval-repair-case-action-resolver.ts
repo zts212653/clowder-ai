@@ -1,6 +1,6 @@
 import type { ExactAssetVersionRefV1 } from '@cat-cafe/shared';
 import type { EvalRepairCaseAction } from './eval-repair-approval-contracts.js';
-import { scanLifecycleRootArtifacts } from './publish-verdict/lifecycle-root-artifact.js';
+import { type EvalLifecycleSpace, scanLifecycleSpaceRoots } from './lifecycle-space.js';
 import type { IReevalClosureEventLog } from './reeval-closure-event-log.js';
 import type { EvalLifecycleEvent } from './reeval-closure-schema.js';
 
@@ -8,9 +8,13 @@ type ReadyEvent = Extract<EvalLifecycleEvent, { type: 'case_ready_for_proposal' 
 type SupersededEvent = Extract<EvalLifecycleEvent, { type: 'approval_superseded' }>;
 type ProposedEvent = Extract<EvalLifecycleEvent, { type: 'approval_proposed' }>;
 
+/**
+ * Resolves a case action from one lifecycle space: `eventLog` must be the log of
+ * `space`, so the root a proposal is built from is always the case's own.
+ */
 export class EvalRepairCaseActionResolver {
   constructor(
-    private readonly harnessFeedbackRoot: string,
+    private readonly space: EvalLifecycleSpace,
     private readonly eventLog: IReevalClosureEventLog,
   ) {}
 
@@ -37,7 +41,7 @@ export class EvalRepairCaseActionResolver {
       if (!findingArtifactRef) return null;
       const trigger = ready ?? superseded;
       if (!trigger) continue;
-      const root = scanLifecycleRootArtifacts(this.harnessFeedbackRoot).find(
+      const root = scanLifecycleSpaceRoots(this.space).find(
         (candidate) =>
           candidate.schemaVersion === 3 &&
           candidate.caseId === trigger.caseId &&

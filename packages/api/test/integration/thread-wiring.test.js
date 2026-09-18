@@ -169,6 +169,7 @@ describe('Thread isolation: messages stay in their thread', () => {
 
     // Add messages to each thread
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: 'msg in A',
@@ -177,6 +178,7 @@ describe('Thread isolation: messages stay in their thread', () => {
       threadId: threadA.id,
     });
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: 'msg in B',
@@ -262,6 +264,7 @@ describe('contentBlocks round-trip: store and retrieve', () => {
     ];
 
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: 'look at this',
@@ -493,6 +496,7 @@ describe('Default thread isolation: no cross-thread message leak', () => {
 
     // Store messages in different threads
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: 'lobby msg',
@@ -501,6 +505,7 @@ describe('Default thread isolation: no cross-thread message leak', () => {
       threadId: 'default',
     });
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: 'thread-B msg',

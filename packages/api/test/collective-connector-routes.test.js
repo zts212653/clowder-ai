@@ -24,7 +24,7 @@ const connection = {
 async function harness(active = true, callbackRecordOverrides = {}) {
   const calls = [];
   let hostRoute;
-  const callbackUserId = process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner_1';
+  const callbackUserId = writeHeaders['x-test-session-user'];
   const connector = {
     listConnections: async () => [connection],
     getProjection: async () => connection,

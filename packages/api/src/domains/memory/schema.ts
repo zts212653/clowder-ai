@@ -3,6 +3,7 @@
 
 import type Database from 'better-sqlite3';
 import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
+import { reconcileLadderColumns } from './schema-column-reconcile.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -1443,6 +1444,10 @@ export function applyMigrations(db: Database.Database): void {
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(45, new Date().toISOString());
     })();
   }
+  // Column presence, not the version stamp, is the truth for ALTER-added columns:
+  // one counter is shared by the upstream and fork lineages, so a DB already stamped
+  // at N silently skips the other lineage's block N after a sync.
+  reconcileLadderColumns(db);
 }
 
 /**

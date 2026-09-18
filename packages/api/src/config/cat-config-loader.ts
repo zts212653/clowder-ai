@@ -23,6 +23,8 @@ import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider 
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
+import { assertNoCrossCatPatternConflicts, warnOnNicknameConflicts } from './cat-uniqueness.js';
+import { installOwnerUserId } from './install-owner.js';
 import { resolveProjectTemplatePath } from './project-template-path.js';
 import {
   hasOccupiedMentionAlias,
@@ -533,7 +535,9 @@ function parseCatConfig(raw: string): CatCafeConfig {
   // Zod output has mutable arrays + plain string catId;
   // CatCafeConfig has readonly arrays + branded CatId.
   // The shapes match at runtime after validation.
-  return result.data as unknown as CatCafeConfig;
+  const parsed = result.data as unknown as CatCafeConfig;
+  warnOnNicknameConflicts(toAllCatConfigs(parsed));
+  return parsed;
 }
 
 export function loadResolvedCatConfig(templatePath?: string, options: CatCatalogReadOptions = {}): CatCafeConfig {
@@ -610,7 +614,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // R1 fix: null = "explicitly no caution" (don't inherit breed).
       // undefined (omitted) = inherit from breed. ?? treats null as nullish, so use !== undefined.
       const caution = variant.caution !== undefined ? variant.caution : breed.caution;
-      const nickname = variant.nickname !== undefined ? variant.nickname : breed.nickname;
+      const nickname = variant.nickname !== undefined ? variant.nickname : isDefault ? breed.nickname : undefined;
       // F167 Phase E (KD-20): variant restrictions override breed (no merge);
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
@@ -672,6 +676,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       };
     }
   }
+  assertNoCrossCatPatternConflicts(result);
   return result;
 }
 
@@ -775,7 +780,7 @@ let _catIdToBreedSource: CatCafeConfig | null = null;
  * Gracefully returns true if config file is unreadable (availability over strictness).
  *
  * F32-b: Now resolves variant catIds to their parent breed via index.
- * Design constraint: Clowder AI config is loaded once at startup, no hot-reload.
+ * Design constraint: Cat Café config is loaded once at startup, no hot-reload.
  *
  * @param catId - The cat to check (e.g. 'opus', 'codex', 'opus-45')
  * @param config - Optional config override (for testing)
@@ -925,9 +930,15 @@ export function hasRuntimeDefaultCatOverride(): boolean {
   return _runtimeDefaultCatId !== null && isKnownAvailableDefaultCat(_runtimeDefaultCatId);
 }
 
-/** Unified owner userId: configured env or single-user fallback. */
+/**
+ * Unified owner userId. One install has one owner, so this is the same derivation
+ * the composition root boots from (config/install-owner.ts): the trust anchor when
+ * configured, otherwise the runtime user. Reading only the anchor here used to pin
+ * every scheduler, publisher and agent-key consumer to `default-user` while the
+ * install owned its data under CAT_CAFE_USER_ID.
+ */
 export function getOwnerUserId(env: NodeJS.ProcessEnv = process.env): string {
-  return env.DEFAULT_OWNER_USER_ID?.trim() || 'default-user';
+  return installOwnerUserId(env);
 }
 
 // ── Variant CLI effort accessor ──────────────────────────────────────

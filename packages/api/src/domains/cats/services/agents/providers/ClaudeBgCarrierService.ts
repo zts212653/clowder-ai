@@ -66,7 +66,7 @@ import {
   SUBSCRIPTION_MODE_DENY_KEYS,
 } from './ClaudeAgentService.js';
 import { JobEventConsumer, type JobState } from './JobEventConsumer.js';
-import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { type NativeSessionPromptTestFactory, resolveNativeSessionPrompt } from './native-session-prompt.js';
 import { TranscriptTailer } from './TranscriptTailer.js';
 
 const SHORT_ID_PATTERN = /backgrounded\s*·\s*([a-f0-9]{8})/;
@@ -126,8 +126,8 @@ export interface ClaudeBgCarrierServiceOptions {
    *  so canary布偶猫 sessions still expose Clowder AI MCP tools (cat_cafe_*)
    *  under --bg. Without this, AC-B4 / R5 break when canary flips. */
   mcpServerPath?: string;
-  /** Test seam — replaces the real L0 compiler subprocess (Task 3a). */
-  l0CompilerFn?: typeof compileL0ViaSubprocess;
+  /** Legacy-named test seam; production receives route-owned pipeline bytes. */
+  l0CompilerFn?: NativeSessionPromptTestFactory;
   /** Test seam — command used for both `--bg` dispatch and `stop <shortId>`. */
   claudeCommand?: string;
   /** Test seam — override the durable owner data root. */
@@ -175,14 +175,13 @@ export class ClaudeBgCarrierService implements AgentService {
   /** Windows: cached MCP config file path (created once per instance,
    *  reused across invocations to avoid temp file spam). */
   private mcpConfigFilePath: string | undefined;
-  /** F203 Phase C: compiles per-cat L0 → file for --system-prompt-file. */
-  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
+  private readonly sessionPromptTestFactory: NativeSessionPromptTestFactory | undefined;
 
   constructor(options?: ClaudeBgCarrierServiceOptions) {
     this.catId = options?.catId ?? createCatId('opus');
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.spawnFn = options?.spawnFn ?? spawn;
-    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
+    this.sessionPromptTestFactory = options?.l0CompilerFn;
     this.jobsDir = options?.jobsDir;
     this.pollMs = options?.pollMs ?? 500;
     this.timeoutMs = options?.timeoutMs ?? 30 * 60_000;
@@ -287,24 +286,21 @@ export class ClaudeBgCarrierService implements AgentService {
   }
 
   /**
-   * F203 Phase C: compile per-cat L0 → temp file for `--system-prompt-file`
-   * (compression-immune native system role; replaces the user-message prepend
-   * stripped in Task 2). fail-closed: a missing L0 = a cat with no identity/
-   * 家规, strictly worse than a failed invocation, so compile failure throws
-   * loudly. Per-invocation temp file (not reused), left for OS tmp reclamation
+   * Write the route-owned HookPipeline session prompt for
+   * `--system-prompt-file`. Per-invocation temp file (not reused), left for OS tmp reclamation
    * — deleting it risks racing the daemon which may read it lazily on resume
    * (mirrors the per-instance mcp-config temp-file pattern, also not cleaned).
-   * @returns absolute path to the written L0 file.
+   * @returns absolute path to the written session prompt file.
    */
-  private async compileL0ToTempFile(userId?: string): Promise<string> {
-    const l0Dir = mkdtempSync(join(tmpdir(), 'cat-cafe-l0-'));
-    const l0Path = join(l0Dir, 'system-prompt-l0.md');
+  private async writeSessionPromptToTempFile(options?: AgentServiceOptions): Promise<string> {
+    const promptDir = mkdtempSync(join(tmpdir(), 'cat-cafe-session-prompt-'));
+    const promptPath = join(promptDir, 'system-prompt.md');
     try {
-      await this.l0CompilerFn({ catId: this.catId as string, userId, outPath: l0Path });
+      await resolveNativeSessionPrompt(options, this.catId as string, this.sessionPromptTestFactory, promptPath);
     } catch (err) {
-      throw new CarrierError(`L0 compile failed for ${this.catId as string}: ${(err as Error).message}`, err);
+      throw new CarrierError((err as Error).message, err);
     }
-    return l0Path;
+    return promptPath;
   }
 
   /**
@@ -316,7 +312,7 @@ export class ClaudeBgCarrierService implements AgentService {
    */
   async startJob(prompt: string, options?: AgentServiceOptions): Promise<StartJobResult> {
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
-    const l0Path = await this.compileL0ToTempFile(options?.callbackEnv?.CAT_CAFE_USER_ID);
+    const sessionPromptPath = await this.writeSessionPromptToTempFile(options);
     return new Promise<StartJobResult>((resolve, reject) => {
       // Critical: even with --bg, the child inherits parent env unless we
       // explicitly strip CLAUDE_CODE_ENTRYPOINT. Otherwise transcript entrypoint
@@ -373,8 +369,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // stream content via stdin (set up below).
       const args = useEnvModelOverride ? ['--bg'] : ['--bg', '--model', effectiveModel];
       args.push('--effort', effortLevel);
-      // F203 Phase C: native system role from compiled L0 file (above).
-      args.push('--system-prompt-file', l0Path);
+      args.push('--system-prompt-file', sessionPromptPath);
 
       // F198 Bug #3: resume an existing conversation when the caller hands us a
       // valid-UUID sessionId — the daemon's previous fork id, surfaced via
@@ -492,7 +487,10 @@ export class ClaudeBgCarrierService implements AgentService {
           v: 1,
           message: Object.freeze({ body: prompt }),
           nativeInstructions: Object.freeze([
-            Object.freeze({ body: readFileSync(l0Path, 'utf8'), injectionDecision: 'native_l0_compiled' }),
+            Object.freeze({
+              body: readFileSync(sessionPromptPath, 'utf8'),
+              injectionDecision: 'native_session_pipeline',
+            }),
             ...(options?.systemPrompt
               ? [Object.freeze({ body: options.systemPrompt, injectionDecision: 'route_append_system_prompt' })]
               : []),

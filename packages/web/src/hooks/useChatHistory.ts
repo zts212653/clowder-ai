@@ -9,6 +9,7 @@ import { recordDebugEvent } from '@/debug/invocationEventDebug';
 import { resolveProviderSemanticMessage } from '@/lib/provider-semantic-registry';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
+import { pickSignatureLint } from '@/stores/chat-types';
 import {
   type CatInvocationInfo,
   type ChatMessage as ChatMessageData,
@@ -285,7 +286,7 @@ function pickMessageExtraField<Key extends keyof MessageExtra>(
   return preferred?.[key] ?? fallback?.[key];
 }
 
-function mergeMessageExtra(
+export function mergeMessageExtra(
   preferred: ChatMessageData['extra'],
   fallback: ChatMessageData['extra'],
 ): ChatMessageData['extra'] | undefined {
@@ -306,6 +307,7 @@ function mergeMessageExtra(
     targetCats: pick('targetCats'),
     messageBundle: pick('messageBundle'),
     isExplicitPost: pick('isExplicitPost'),
+    signatureLint: pick('signatureLint'),
     scheduler: pick('scheduler'),
     timeoutDiagnostics: pick('timeoutDiagnostics'),
     // F212 Phase B: diagnostics outlive one live event and must survive hydration.
@@ -1177,6 +1179,7 @@ export function useChatHistory(threadId: string) {
                 queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
                 messageBundle?: NonNullable<ChatMessageData['extra']>['messageBundle'];
                 semanticEvent?: ProviderSemanticEvent;
+                signatureLint?: { signed: boolean };
               };
               timestamp: number;
               summary?: {
@@ -1246,6 +1249,7 @@ export function useChatHistory(threadId: string) {
                     m.extra?.queueReceipt ||
                     m.extra?.messageBundle ||
                     m.extra?.semanticEvent ||
+                    m.extra?.signatureLint ||
                     cliDiag;
                   if (!hasExtraField) return {};
                   return {
@@ -1269,6 +1273,7 @@ export function useChatHistory(threadId: string) {
                       ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
                       ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                       ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
+                      ...pickSignatureLint(m.extra),
                       ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
                     },
                   };

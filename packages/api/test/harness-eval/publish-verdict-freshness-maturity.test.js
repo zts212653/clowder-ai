@@ -100,16 +100,25 @@ function allSources(status = 'complete') {
   };
 }
 
+// F257: publication writes a durable artifact instead of staging a git worktree.
+// `stage(worktreeRoot)` becomes `generate(<root>/docs/harness-feedback)`; the seeding
+// stays because the read model still needs the domain registry as an input.
 function isolatedPublisher(isolatedRoot, onCommitted = () => {}) {
   return {
-    async publishOnIsolatedWorktree(opts) {
+    async publishArtifact({ packet, generate }) {
       rmSync(isolatedRoot, { recursive: true, force: true });
-      mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-      writeFileSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-freshness.yaml'), domainYaml);
+      const outputRoot = join(isolatedRoot, 'docs', 'harness-feedback');
+      mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+      writeFileSync(join(outputRoot, 'eval-domains', 'eval-freshness.yaml'), domainYaml);
       seedCanonicalMeasurementCensusState(isolatedRoot);
-      await opts.stage(isolatedRoot);
+      const generated = await generate(outputRoot);
       onCommitted();
-      return { commitSha: 'freshness-sha', prUrl: 'https://example.test/freshness' };
+      return {
+        artifactId: packet.id,
+        verdictPath: generated.verdictPath,
+        bundleDir: generated.bundleDir,
+        artifactUrl: `artifact://eval-freshness/${packet.id}`,
+      };
     },
   };
 }
@@ -203,7 +212,7 @@ describe('publish_verdict eval:freshness measurement maturity', () => {
       {
         harnessFeedbackRoot,
         generator,
-        gitPublisher: isolatedPublisher(join(root, 'blocked'), () => {
+        artifactPublisher: isolatedPublisher(join(root, 'blocked'), () => {
           committed = true;
         }),
       },
@@ -232,7 +241,7 @@ describe('publish_verdict eval:freshness measurement maturity', () => {
     const generator = createFreshnessGeneratorAdapter(provider);
     const isolatedRoot = join(root, 'ready');
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator, gitPublisher: isolatedPublisher(isolatedRoot) },
+      { harnessFeedbackRoot, generator, artifactPublisher: isolatedPublisher(isolatedRoot) },
       {
         packet: packet('freshness-ready'),
         domain: 'eval:freshness',

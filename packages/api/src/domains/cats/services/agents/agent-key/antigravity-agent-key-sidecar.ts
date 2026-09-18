@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { installOwnerUserId } from '../../../../../config/install-owner.js';
 import type { AgentKeyRegistry } from './AgentKeyRegistry.js';
 import { ensureAgentKeySidecar } from './AgentKeySidecarProvisioner.js';
 
@@ -51,8 +52,11 @@ export async function ensureAntigravityAgentKeySidecar(
   const env = options.env ?? process.env;
   const catId = options.catId ?? 'antigravity';
   const catIds = uniqueCatIds(catId, options.catIds);
-  const userId =
-    options.userId?.trim() || env.CAT_CAFE_AGENT_KEY_USER_ID?.trim() || env.CAT_CAFE_USER_ID?.trim() || 'default-user';
+  // One install, one owner: CAT_CAFE_AGENT_KEY_USER_ID used to outrank it, so a
+  // coherent alice install still issued the key to a legacy agent user. The GPT-Pro
+  // sidecar already ignores that variable; an independent authorization identity
+  // would need its own contract, not the install-owner slot.
+  const userId = options.userId?.trim() || installOwnerUserId(env);
   const filePath = options.filePath ?? env.CAT_CAFE_AGENT_KEY_FILE?.trim() ?? DEFAULT_ANTIGRAVITY_AGENT_KEY_FILE;
 
   const agentKeyIds: Record<string, string> = {};

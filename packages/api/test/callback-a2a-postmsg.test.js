@@ -207,6 +207,38 @@ describe('post_message A2A mention invocation', () => {
     assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
   });
 
+  test('post-message WITHOUT trailing signature persists and broadcasts signed=false', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: 'LGTM, merging now.' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(messageStore.getRecent(10)[0]?.extra?.signatureLint, { signed: false });
+    assert.deepEqual(socketManager.getMessages().at(-1)?.extra?.signatureLint, { signed: false });
+  });
+
+  test('post-message WITH trailing signature persists and broadcasts signed=true', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: '修复完成了，已跑通 gate。\n\n[砚砚/Codex🐾]' },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(messageStore.getRecent(10)[0]?.extra?.signatureLint, { signed: true });
+    assert.deepEqual(socketManager.getMessages().at(-1)?.extra?.signatureLint, { signed: true });
+  });
+
   test('post-message duplicate retry recovers a queued A2A callback before returning duplicate', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const queueProcessor = {

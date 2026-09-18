@@ -150,6 +150,10 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       return { error: '无法从已删除的消息创建分支', code: 'FROM_MESSAGE_DELETED' };
     }
     const messagesToCopy = allMessages.slice(0, cutIndex + 1);
+    // An edit is a fresh authenticated operator observation. Capture one
+    // request-time coordinate before writes so it enters the window where the
+    // edit happened instead of inheriting the source row's historical score.
+    const editTimestamp = Date.now();
 
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
@@ -169,19 +173,36 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
       for (let i = 0; i < messagesToCopy.length; i++) {
         const src = messagesToCopy[i]!;
         const isLast = i === messagesToCopy.length - 1;
-        const content = isLast && editedContent !== undefined ? editedContent : src.content;
+        const isEdited = isLast && editedContent !== undefined;
+        const content = isEdited ? editedContent : src.content;
+
+        // sol R4 P1-2: COPY the trusted source declaration — never rebuild the
+        // author axis from nullable catId (a catId:null system notice/relay
+        // would masquerade as a user utterance and enter magic-word exact).
+        // routed stays false on the copy: no parser ran over this append and
+        // the source's routingFact (if any) belongs to the original message.
+        // A source with no verifiable declaration (legacy) is explicitly
+        // 'unknown' — it exits every exact cohort instead of being guessed.
+        const provenance = isEdited
+          ? { author: 'user' as const, routed: false, observation: 'original' as const }
+          : {
+              author: src.provenance?.author ?? ('unknown' as const),
+              routed: false,
+              observation: 'derived' as const,
+              sourceRef: `message:${src.id}`,
+            };
 
         await messageStore.append({
-          userId: src.userId,
-          catId: src.catId,
+          provenance,
+          userId: isEdited ? userId : src.userId,
+          catId: isEdited ? null : src.catId,
           content,
-          ...(src.contentBlocks && !(isLast && editedContent !== undefined)
-            ? { contentBlocks: src.contentBlocks }
-            : {}),
+          ...(src.contentBlocks && !isEdited ? { contentBlocks: src.contentBlocks } : {}),
           ...(src.metadata ? { metadata: src.metadata } : {}),
           ...(src.origin ? { origin: src.origin } : {}),
+          ...(src.source && !isEdited ? { source: src.source } : {}),
           mentions: [...src.mentions],
-          timestamp: src.timestamp,
+          timestamp: isEdited ? editTimestamp : src.timestamp,
           threadId: newThread.id,
         });
       }

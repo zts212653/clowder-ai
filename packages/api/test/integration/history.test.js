@@ -36,6 +36,7 @@ describe('POST → GET /api/messages roundtrip', () => {
   it('messages stored via append() are returned by GET', async () => {
     // Simulate what AgentRouter does: store user msg + cat reply
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: null,
       content: 'hello @opus',
@@ -43,6 +44,7 @@ describe('POST → GET /api/messages roundtrip', () => {
       timestamp: 1000,
     });
     messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'opus',
       content: 'hello human',
@@ -66,6 +68,7 @@ describe('POST → GET /api/messages roundtrip', () => {
     const loneHighSurrogate = String.fromCharCode(0xd800);
     const loneLowSurrogate = String.fromCharCode(0xdc00);
     const input = {
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'codex',
       content: `before${loneHighSurrogate}after 😀`,
@@ -85,6 +88,7 @@ describe('POST → GET /api/messages roundtrip', () => {
     const loneHighSurrogate = String.fromCharCode(0xd800);
     const loneLowSurrogate = String.fromCharCode(0xdc00);
     const legacy = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'codex',
       content: 'placeholder',
@@ -109,6 +113,7 @@ describe('POST → GET /api/messages roundtrip', () => {
     // Insert 5 messages
     for (let i = 0; i < 5; i++) {
       messageStore.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'default-user',
         catId: null,
         content: `msg ${i}`,
@@ -145,6 +150,7 @@ describe('POST → GET /api/messages roundtrip', () => {
 
   it('response format matches frontend ChatMessage interface', async () => {
     messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'default-user',
       catId: 'codex',
       content: 'review done',

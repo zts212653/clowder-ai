@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
 import { mapPublishVerdictError } from '../../dist/infrastructure/harness-eval/publish-verdict/error-mapping.js';
@@ -108,11 +108,11 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
 
   it('returns 409 verdict_window_already_published when contract runner detects window collision (not 500)', async () => {
     let contractCallCount = 0;
-    const mockGitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    const mockArtifactPublisher = {
+      async publishArtifact({ generate }) {
         const fakeWorktree = mkdtempSync(`${tmpdir()}/phase-h-window-`);
         seedCanonicalMeasurementCensusState(fakeWorktree);
-        await opts.stage(fakeWorktree);
+        await generate(join(fakeWorktree, 'docs', 'harness-feedback'));
         // After stage+commit, contract runner detects window collision.
         // This simulates assertWindowsUnpublished throwing inside the
         // real contractRunner at git-worktree-publisher.ts:215-222.
@@ -127,7 +127,7 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
       {
         harnessFeedbackRoot: root,
         now: () => new Date('2026-06-05T11:00:01.000Z'),
-        gitPublisher: mockGitPublisher,
+        artifactPublisher: mockArtifactPublisher,
         generator: async (packet, _sourceRefs, deps) => {
           const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
           mkdirSync(bundleDir, { recursive: true });
@@ -140,6 +140,9 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
         packet: buildPacket({ id: 'window-dup-test', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
         catId: 'codex',
+        // Every published artifact is owner-scoped in this slice; the owner is a
+        // precondition for reaching the collision mapping this test is about.
+        ownerUserId: 'owner-test',
         sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
       },
     );

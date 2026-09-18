@@ -28,6 +28,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
 
     // Direct message visible at append
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-direct',
@@ -38,6 +39,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
 
     // Timeline-published cat speech: queued but catId is real cat → visible at append
     store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Q-cat-speech',
@@ -61,6 +63,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     const threadId = `r8-p1-1-default-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-direct',
@@ -71,6 +74,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
 
     // Timeline-published cat speech — queued, real cat
     store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Q-cat-speech',
@@ -92,6 +96,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
     const threadId = `r8-p1-1-hidden-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-direct',
@@ -102,6 +107,7 @@ describe('#1269 R8 P1-1: isTimelinePublished in forward scans', () => {
 
     // Hidden queued work: catId=null, not timeline-published
     store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: 'Q-hidden',
@@ -129,6 +135,7 @@ describe('#1269: isTimelinePublished in mention queries', () => {
 
     // Cat speech mentioning 'terra' — queued but timeline-published → visible
     store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Hey @terra check this',
@@ -149,6 +156,7 @@ describe('#1269: isTimelinePublished in mention queries', () => {
 
     // Hidden queued work mentioning 'terra' — not timeline-published
     store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: 'Hidden mention @terra',
@@ -167,6 +175,7 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const threadId = `r8-recent-queued-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: 'Recent @terra',
@@ -185,6 +194,7 @@ describe('#1269: isTimelinePublished in mention queries', () => {
     const threadId = `r8-recent-hidden-${Date.now()}`;
 
     store.append({
+      provenance: { author: 'system', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: 'Hidden recent @terra',
@@ -208,6 +218,7 @@ describe('#1269 R8 P1-2: cancel clears queueCustody (Memory parity)', () => {
 
     // Append with queueCustody already set (simulates initialized custody)
     const q = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'work-to-cancel',

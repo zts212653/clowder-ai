@@ -1,8 +1,8 @@
 /**
  * Layer Resolvers (L1-L7) — F237 Phase 2-B
  *
- * L1-L7 are the "governance layer" hooks from the L0 compiler.
- * They always fire with no dynamic variables — content is pure static template.
+ * L1-L7 are ordinary session-init governance hooks.
+ * They always fire with no dynamic variables — content is a co-located template.
  * Resolver logic: unconditional fire (these are the immutable governance core).
  */
 

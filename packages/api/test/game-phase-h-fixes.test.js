@@ -289,7 +289,17 @@ describe('Phase H P1 Fixes — definition-level regression guards', () => {
       socketManager: { broadcastToRoom() {}, emitToUser() {}, broadcastAgentMessage() {} },
       router: {
         async resolveTargetsAndIntent() {
-          return { targetCats: ['opus'], intent: { intent: 'execute', explicit: false, promptTags: [] } };
+          return {
+            attemptBatch: {
+              parserMode: 'user',
+              spanBasis: 'lowercased_message',
+              attempts: [],
+              truncated: false,
+              metricEligible: true,
+            },
+            targetCats: ['opus'],
+            intent: { intent: 'execute', explicit: false, promptTags: [] },
+          };
         },
         async *routeExecution() {
           yield { type: 'done', catId: 'opus', timestamp: Date.now() };

@@ -130,6 +130,12 @@ export function toRecoveryAppendInput(
   recoveredAt: number,
 ): AppendMessageInput {
   return {
+    provenance: {
+      author: 'cat',
+      routed: false,
+      observation: 'derived',
+      sourceRef: `f254-withheld:${entry.invocationId}`,
+    },
     userId: entry.userId,
     threadId: entry.threadId,
     catId: entry.catId as CatId,

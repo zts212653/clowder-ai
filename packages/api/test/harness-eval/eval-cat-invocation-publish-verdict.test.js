@@ -99,15 +99,23 @@ describe('Phase H AC-H4: eval cat instructions point to publish_verdict MCP tool
     assert.match(packet.instructions, /Use the MCP tool/, 'must redirect to MCP tool');
   });
 
-  it('instructions mention branch + commit + PR shape (so cat understands tool side-effects)', () => {
+  it('instructions state the real publish side-effect (F257: durable artifact, no Git)', () => {
+    // Was: asserted `verdict/auto/{domainSlug}/{verdictId}` + "commit SHA + PR URL".
+    // publish-verdict.ts now writes through the ArtifactPublisher and never creates a
+    // branch, commit or PR, so pinning that prose kept nine domain footers lying to the
+    // cat. Whole-table coverage lives in eval-cat-publication-contract.test.js.
     const packet = buildEvalCatInvocation({
       domain: { ...TEST_DOMAIN_BASE, domainId: 'eval:a2a', sourceAdapter: 'f167-runtime-eval' },
       trendRefs: [],
       verdictRefs: [],
       legacyCleanup: { status: 'not_checked' },
     });
-    assert.match(packet.instructions, /verdict\/auto\/\{domainSlug\}\/\{verdictId\}/, 'branch name pattern');
-    assert.match(packet.instructions, /commit SHA \+ PR URL/, 'response shape');
+    assert.match(packet.instructions, /`artifactId` \+ `artifactUrl`/, 'response shape');
+    assert.match(
+      packet.instructions,
+      /does not create a branch, a commit, or a pull request/,
+      'the cat must be told publishing has no Git side-effect',
+    );
   });
 
   it('instructions reference sourceRefs (砚砚 R1 P1 #2 + R2 P2: tool NEVER 造 evidence + basenames only)', () => {

@@ -6,6 +6,7 @@ import {
 } from '@cat-cafe/shared';
 import { ApprovalProvenanceLinks } from './ApprovalProvenanceLinks';
 import { EntityConflictResolutionPanel } from './EntityConflictResolutionPanel';
+import { HarnessGovernanceDecisionActions } from './HarnessGovernanceDecisionActions';
 import { PersonMemoryClaimSelector } from './PersonMemoryClaimSelector';
 
 export function GenericApprovalDecisionActions({
@@ -17,6 +18,7 @@ export function GenericApprovalDecisionActions({
   onApprove,
   onReject,
   onEntityResolution,
+  onHarnessDecision,
   onBeforeNavigate,
 }: {
   item: ApprovalHubItem;
@@ -27,10 +29,20 @@ export function GenericApprovalDecisionActions({
   onApprove: () => void;
   onReject: () => void;
   onEntityResolution: (resolution: EntityConflictResolutionRequest) => void;
+  onHarnessDecision: (action: 'approve' | 'skip' | 'reject', note?: string) => void;
   onBeforeNavigate: () => void;
 }) {
   const originCardOwnsPendingDecision = approvalProducerMeta(item.sourceFeatureId).decisionSurface === 'origin_card';
   const canDecide = item.resolution === 'open';
+  const isHarnessGovernance = item.sourceFeatureId === 'F257' && item.decisionMode === 'approve-skip-reject';
+  if (canDecide && isHarnessGovernance) {
+    return (
+      <div className="space-y-2">
+        <HarnessGovernanceDecisionActions decidingState={decidingState} onDecide={onHarnessDecision} />
+        <ApprovalProvenanceLinks navigation={item.navigation} onBeforeNavigate={onBeforeNavigate} />
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
       {canDecide && entityConflict && (
@@ -71,7 +83,7 @@ export function GenericApprovalDecisionActions({
           <ApprovalProvenanceLinks navigation={item.navigation} onBeforeNavigate={onBeforeNavigate} />
         </div>
       )}
-      {isPersonMemoryClaimSelect && (
+      {canDecide && isPersonMemoryClaimSelect && (
         <ApprovalProvenanceLinks navigation={item.navigation} onBeforeNavigate={onBeforeNavigate} />
       )}
     </div>

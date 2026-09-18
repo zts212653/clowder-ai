@@ -30,7 +30,7 @@ describe('handlePublishVerdict', () => {
     it('returns 400 invalid_packet when packet missing required fields', async () => {
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: '/tmp/phase-h-test' },
-        { packet: { id: 'incomplete' }, domain: 'eval:a2a', catId: 'codex' },
+        { packet: { id: 'incomplete' }, domain: 'eval:a2a', catId: 'codex', ownerUserId: 'owner-test' },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 400);
@@ -41,7 +41,7 @@ describe('handlePublishVerdict', () => {
       for (const bad of [null, 'str', 42, []]) {
         const result = await handlePublishVerdict(
           { harnessFeedbackRoot: '/tmp/phase-h-test' },
-          { packet: bad, domain: 'eval:a2a', catId: 'codex' },
+          { packet: bad, domain: 'eval:a2a', catId: 'codex', ownerUserId: 'owner-test' },
         );
         assert.ok('error' in result, `${JSON.stringify(bad)} should reject`);
         assert.equal(result.status, 400);
@@ -51,7 +51,12 @@ describe('handlePublishVerdict', () => {
     it('returns 400 when delete_sunset lacks operator accept gate', async () => {
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: '/tmp/phase-h-test' },
-        { packet: buildPacket({ verdict: 'delete_sunset' }), domain: 'eval:a2a', catId: 'codex' },
+        {
+          packet: buildPacket({ verdict: 'delete_sunset' }),
+          domain: 'eval:a2a',
+          catId: 'codex',
+          ownerUserId: 'owner-test',
+        },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 400);
@@ -64,7 +69,12 @@ describe('handlePublishVerdict', () => {
     it('returns 400 domain_mismatch when input.domain ≠ packet.domainId', async () => {
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: '/tmp/phase-h-test' },
-        { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:memory', catId: 'codex' },
+        {
+          packet: buildPacket({ domainId: 'eval:a2a' }),
+          domain: 'eval:memory',
+          catId: 'codex',
+          ownerUserId: 'owner-test',
+        },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 400);
@@ -86,6 +96,7 @@ describe('handlePublishVerdict', () => {
             packet: buildPacket({ domainId: domain }),
             domain,
             catId: 'codex',
+            ownerUserId: 'owner-test',
             sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
           },
         );
@@ -103,6 +114,7 @@ describe('handlePublishVerdict', () => {
           packet: buildPacket({ domainId: 'eval:task-outcome' }),
           domain: 'eval:task-outcome',
           catId: 'opus-47',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -119,6 +131,7 @@ describe('handlePublishVerdict', () => {
           packet: buildPacket({ domainId: 'eval:task-outcome' }),
           domain: 'eval:task-outcome',
           catId: 'opus-47',
+          ownerUserId: 'owner-test',
           sourceRefs: {
             kind: 'task-outcome-snapshot',
             windowStartMs: 1780887600000,
@@ -167,6 +180,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:anchor-first' }),
           domain: 'eval:anchor-first',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: { kind: 'anchor-first-snapshot', anchorId: 'abc-123' },
         },
       );
@@ -184,6 +198,7 @@ fixtures: []
             packet: buildPacket({ domainId: 'eval:task-outcome' }),
             domain: 'eval:task-outcome',
             catId: 'opus-47',
+            ownerUserId: 'owner-test',
             sourceRefs: {
               kind: 'task-outcome-snapshot',
               windowStartMs: 1780887600000,
@@ -205,7 +220,7 @@ fixtures: []
     it('returns 401 unauthenticated when catId not provided', async () => {
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: root },
-        { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: '' },
+        { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: '', ownerUserId: 'owner-test' },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 401);
@@ -216,7 +231,12 @@ fixtures: []
       // eval:a2a registered cat is 'codex'; 'opus-47' is eval:memory's cat
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: root },
-        { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'opus-47' },
+        {
+          packet: buildPacket({ domainId: 'eval:a2a' }),
+          domain: 'eval:a2a',
+          catId: 'opus-47',
+          ownerUserId: 'owner-test',
+        },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 403);
@@ -235,6 +255,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -265,6 +286,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
           catId: 'opus-47',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -291,6 +313,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -313,6 +336,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -330,6 +354,7 @@ fixtures: []
           packet: buildPacket({ domainId: 'eval:a2a' }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: {}, // empty - cat forgot to provide evidence sources
         },
       );
@@ -349,7 +374,13 @@ fixtures: []
           sourceRefs[field] = bad;
           const result = await handlePublishVerdict(
             { harnessFeedbackRoot: root },
-            { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex', sourceRefs },
+            {
+              packet: buildPacket({ domainId: 'eval:a2a' }),
+              domain: 'eval:a2a',
+              catId: 'codex',
+              ownerUserId: 'owner-test',
+              sourceRefs,
+            },
           );
           assert.ok('error' in result, `${field}=${JSON.stringify(bad)} should reject`);
           assert.equal(result.status, 400, `must be 400 not 500`);
@@ -367,7 +398,13 @@ fixtures: []
           sourceRefs[field] = bad;
           const result = await handlePublishVerdict(
             { harnessFeedbackRoot: root },
-            { packet: buildPacket({ domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex', sourceRefs },
+            {
+              packet: buildPacket({ domainId: 'eval:a2a' }),
+              domain: 'eval:a2a',
+              catId: 'codex',
+              ownerUserId: 'owner-test',
+              sourceRefs,
+            },
           );
           assert.ok('error' in result, `${field}='${bad}' should reject`);
           // empty string '' is caught by missing_evidence_refs (presence check) — both are 400
@@ -387,7 +424,12 @@ fixtures: []
       const big = 'a'.repeat(129);
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: root },
-        { packet: buildPacket({ id: big, domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex' },
+        {
+          packet: buildPacket({ id: big, domainId: 'eval:a2a' }),
+          domain: 'eval:a2a',
+          catId: 'codex',
+          ownerUserId: 'owner-test',
+        },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 400);
@@ -399,7 +441,12 @@ fixtures: []
       for (const bad of ['Test-Foo', 'test_foo', '-leading', 'foo.bar', 'foo bar', 'foo/bar']) {
         const result = await handlePublishVerdict(
           { harnessFeedbackRoot: root },
-          { packet: buildPacket({ id: bad, domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex' },
+          {
+            packet: buildPacket({ id: bad, domainId: 'eval:a2a' }),
+            domain: 'eval:a2a',
+            catId: 'codex',
+            ownerUserId: 'owner-test',
+          },
         );
         assert.ok('error' in result, `'${bad}' should be rejected`);
         assert.equal(result.status, 400, `'${bad}' → 400`);
@@ -414,6 +461,7 @@ fixtures: []
           packet: buildPacket({ id: 'ok-id', domainId: 'eval:a2a', phenomenon: 'x'.repeat(2049) }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
         },
       );
       assert.ok('error' in result);
@@ -430,7 +478,12 @@ fixtures: []
 
       const result = await handlePublishVerdict(
         { harnessFeedbackRoot: root },
-        { packet: buildPacket({ id: dupId, domainId: 'eval:a2a' }), domain: 'eval:a2a', catId: 'codex' },
+        {
+          packet: buildPacket({ id: dupId, domainId: 'eval:a2a' }),
+          domain: 'eval:a2a',
+          catId: 'codex',
+          ownerUserId: 'owner-test',
+        },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 409);

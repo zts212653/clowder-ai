@@ -6,6 +6,7 @@ import {
   buildUnavailableApp,
   callbackHeaders,
   command,
+  INSTALL_OWNER_USER_ID,
   openedEvent,
   post,
   verdictId,
@@ -34,7 +35,6 @@ describe('eval verdict lifecycle writeback route', () => {
   });
 
   it('accepts first acknowledge, reassignment, and suppression before the scheduled reconciler runs', async (t) => {
-    const configuredOwner = process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner-user';
     const cases = [
       {
         payload: command('acknowledge', 0),
@@ -48,7 +48,7 @@ describe('eval verdict lifecycle writeback route', () => {
       },
       {
         payload: command('suppress', 0),
-        headers: { 'x-test-session-user': configuredOwner },
+        headers: { 'x-test-session-user': INSTALL_OWNER_USER_ID },
         expectedType: 'cvo_suppressed',
       },
     ];
@@ -140,14 +140,13 @@ describe('eval verdict lifecycle writeback route', () => {
     assert.equal(newOwnerReassigned.statusCode, 200, newOwnerReassigned.body);
     assert.equal(newOwnerReassigned.json().projection.targetOwnerCatId, 'codex-sol');
 
-    const configuredOwner = process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner-user';
     const reassigned = await post(app, command('reassign_owner', 3, { targetOwnerCatId: 'opus-47' }), {
-      'x-test-session-user': configuredOwner,
+      'x-test-session-user': INSTALL_OWNER_USER_ID,
     });
     assert.equal(reassigned.statusCode, 200, reassigned.body);
     assert.equal(reassigned.json().projection.targetOwnerCatId, 'opus-47');
 
-    const suppressed = await post(app, command('suppress', 4), { 'x-test-session-user': configuredOwner });
+    const suppressed = await post(app, command('suppress', 4), { 'x-test-session-user': INSTALL_OWNER_USER_ID });
     assert.equal(suppressed.statusCode, 200, suppressed.body);
     assert.equal(suppressed.json().projection.status, 'suppressed_with_reason');
 
@@ -164,7 +163,7 @@ describe('eval verdict lifecycle writeback route', () => {
   it('returns 503 when canonical persistence is unavailable', async (t) => {
     const app = await buildUnavailableApp(t);
 
-    const response = await post(app, command('acknowledge', 0), { 'x-test-session-user': 'owner-user' });
+    const response = await post(app, command('acknowledge', 0), { 'x-test-session-user': INSTALL_OWNER_USER_ID });
     assert.equal(response.statusCode, 503);
     await app.close();
   });

@@ -102,7 +102,7 @@ Modal showing assembled prompt per cat, labeled "approximate". Selectable by cat
 | Layer | Source | Segment IDs |
 |-------|--------|-------------|
 | Compile-time L0 | `compile-system-prompt-l0.mjs` | L1-L7 |
-| Session-level Builder | `buildStaticIdentity()` | S1-S13 |
+| Session-level Builder | `buildStaticIdentity()` | S1-S14 |
 | Per-turn Builder | `buildInvocationContext()` | D1-D21 |
 | Route assembly | `route-serial.ts` / `route-parallel.ts` | R1-R2 |
 | Invocation mutators | `invoke-single-cat.ts` | M1-M2 |
@@ -192,7 +192,7 @@ Without a hook pipeline, there's no structured trace data, no version identity, 
 ┌─────────────────────────────────────────────────────────────────┐
 │              Runtime Content Pipeline (46 hooks)                │
 │                                                                 │
-│  session-init    S1-S13, B1, C1, L1-L7 (identity + rules)      │
+│  session-init    S1-S14, B1, C1, L1-L7 (identity + rules)      │
 │  per-turn        D1-D21, R1-R2, N1     (context + routing)     │
 │                                                                 │
 │  Each hook: condition → resolve → render                        │
@@ -234,11 +234,17 @@ These segments follow the condition → content → inject pattern and benefit f
 
 | Stage | When | Segments | Source |
 |-------|------|----------|--------|
-| `session-init` | New session / re-injection / registry change | S1-S13, B1, C1, L1-L7 (22 hooks) | `buildStaticIdentity()`, `SessionBootstrap`, `McpPromptInjector`, `compile-system-prompt-l0.mjs` |
+| `session-init` | New session / re-injection / registry change | S1-S14, B1, C1, L1-L7 (23 hooks) | `buildStaticIdentity()`, `SessionBootstrap`, `McpPromptInjector`, `compile-system-prompt-l0.mjs` |
 | `per-turn` | Every invocation, before model call | D1-D21, R1-R2, N1 (24 hooks) | `buildInvocationContext()`, route layer, `route-helpers.ts` |
 
+> **Census moved (F257)**: the S14 owner-profile segment was added at `order: 850` (between
+> S1 and S2), so the S series is S1-S14 and `session-init` carries 23 hooks. Whole-catalog
+> totals are 48 manifests = 47 baseline + D22 (local). Earlier AC rows and phase tables below
+> that quote 46 / 22 / S1-S13 are the record at the time they were written.
+
+
 Why these segments unify:
-- **S1-S13, D1-D21** (34): original `if/push` patterns in `SystemPromptBuilder.ts` — the core use case
+- **S1-S14, D1-D22** (36): original `if/push` patterns in `SystemPromptBuilder.ts` — the core use case
 - **L1-L7** (7): dynamically compiled from `assets/prompt-templates/l*.md` template files at runtime by `compileL0()`. Same template → render → inject pattern as S-segments. Delivery channel = `native-l0` for native providers. The L0 compiler's content source is refactored: instead of independently loading template files, it consumes pipeline-produced output for L1-L7. The delivery mechanism (`--system-prompt-file`, native L0 channel) is preserved unchanged
 - **B1** (1): session bootstrap — condition (new session?) → content. Joins `session-init`
 - **C1** (1): MCP callback — condition (MCP available?) → content. Joins `session-init` _(`.local` overlay migration to override store deferred to PR 3)_
@@ -637,7 +643,7 @@ The hook pipeline produces the **systemPrompt** (from session-init hooks) and **
 
 **Produced vs Delivered — critical trace distinction:**
 
-Session-init hooks (S1-S13) fire inside `buildStaticIdentity()`, which runs on every invocation. But the produced content is only delivered to the model when `injectSystemPrompt` is true (new session, force-reinjection, or registry change). On resumed turns with `canSkipOnResume`, the S-segment content is produced but **not sent**. If the trace only records "S1 fired", it creates false observability — the operator sees "S1 was active this turn" when the model never received it.
+Session-init hooks (S1-S14) fire inside `buildStaticIdentity()`, which runs on every invocation. But the produced content is only delivered to the model when `injectSystemPrompt` is true (new session, force-reinjection, or registry change). On resumed turns with `canSkipOnResume`, the S-segment content is produced but **not sent**. If the trace only records "S1 fired", it creates false observability — the operator sees "S1 was active this turn" when the model never received it.
 
 To fix this, the `InjectionTraceSummary` includes a per-stage **delivery decision** record that is channel-aware:
 

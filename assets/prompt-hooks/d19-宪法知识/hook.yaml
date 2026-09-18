@@ -13,11 +13,16 @@ resolver: D19ConstitutionalResolver
 inputs:
   - constitutionalKnowledge
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: CONSTITUTIONAL_DOCS
+    description: 宪法知识文档块
+    placeholder: ""
 # Override constraints
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: opt-in-view
 governanceTier: immutable
 

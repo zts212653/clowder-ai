@@ -127,6 +127,7 @@ const a2aVerdictItem: EvalHubItem = {
     stateSot: 'registry',
   },
   source: {
+    kind: 'workspace',
     verdictPath: 'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
     bundleDir: 'docs/harness-feedback/bundles/2026-05-23-eval-a2a-live-verdict',
   },
@@ -210,6 +211,7 @@ describe('HubEvalTab', () => {
             stateSot: 'registry',
           },
           source: {
+            kind: 'workspace',
             verdictPath: 'docs/harness-feedback/verdicts/2026-05-24-eval-memory-test.md',
             bundleDir: 'docs/harness-feedback/bundles/2026-05-24-eval-memory-test',
           },

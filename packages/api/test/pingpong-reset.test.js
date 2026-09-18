@@ -31,7 +31,17 @@ function buildDeps(overrides = {}) {
       emitToUser: mock.fn(),
     },
     router: {
-      resolveTargetsAndIntent: mock.fn(async () => ({ targetCats: ['opus'], intent: { intent: 'execute' } })),
+      resolveTargetsAndIntent: mock.fn(async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
+        targetCats: ['opus'],
+        intent: { intent: 'execute' },
+      })),
       routeExecution: mock.fn(async function* () {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       }),

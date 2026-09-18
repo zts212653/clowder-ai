@@ -136,6 +136,7 @@ function appendSevenDayCorpus(messageStore) {
     const ageMs = 5 * MINUTE + Math.floor((index * span) / (SIGNAL_COUNT - 1));
     messages.push(
       messageStore.append({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
         userId: 'user-1',
         catId: 'codex-sol',
         threadId: `thread-${index % 8}`,

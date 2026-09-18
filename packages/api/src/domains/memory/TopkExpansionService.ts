@@ -7,7 +7,7 @@
 //   - Only top-3 hits expanded (budget: §6.4 取舍 A)
 //   - Each expansion type ≤ 3 hints
 //   - Max 5 terms probed per type (query budget — scanner keywords have no upper bound)
-//   - Convention-edge expansion via ConventionGraphAdapter (Phase C: l0-prompt-builder domain)
+//   - Convention-edge expansion via ConventionGraphAdapter (session-hook domain)
 //   - Provenance visible per hint (AC-B2)
 
 import type { ExpansionHintTargetRef } from '@cat-cafe/shared';
@@ -120,7 +120,7 @@ export class TopkExpansionService {
     // ── Source-thread expansion ──────────────────────────────────────
     await this.expandViaSourceThreads(hitsToExpand, seen, hints, maxPerType, funnel.sourceThread);
 
-    // ── Convention-edge expansion (Phase C: F242 extractor + l0-prompt-builder) ──
+    // ── Convention-edge expansion (Phase C: F242 extractor + session hooks) ──
     await this.expandViaConventionEdges(hitsToExpand, seen, hints, maxPerType, funnel.conventionEdge);
 
     funnel.presented = hints.length;

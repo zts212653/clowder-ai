@@ -78,6 +78,22 @@ export function formatRoutingPolicy(
 // Shared session-level field gathering
 // ---------------------------------------------------------------------------
 
+/**
+ * Compose the S14 section from the snapshot the route resolved: the capsule first, then
+ * each pointer line. Returns null when the owner has no layer at all, so S14 skips with
+ * `no_owner_profile` instead of emitting an empty patch.
+ */
+function renderOwnerProfileSection(profile: StaticIdentityOptions['profile']): string | null {
+  if (!profile) return null;
+  // Deliver the snapshot's bytes unchanged: durable evidence binds exactly what the
+  // session received, so trimming here would make "delivered == stored" untrue. Blank
+  // parts are dropped whole rather than rewritten.
+  const parts = [profile.capsuleSection, ...(profile.pointerLines ?? [])].filter(
+    (part): part is string => typeof part === 'string' && part.trim().length > 0,
+  );
+  return parts.length > 0 ? parts.join('\n\n') : null;
+}
+
 function gatherSessionFields(catId: string, mcpAvailable: boolean, packBlocks?: unknown) {
   const config = getConfig(catId);
   if (!config) throw new Error(`[AssembleBridge] Unknown cat: ${catId}`);
@@ -122,6 +138,7 @@ export function assembleForSession(catId: CatId, options?: StaticIdentityOptions
   return {
     catId: catId as string,
     ...session,
+    ownerProfileSection: renderOwnerProfileSection(options?.profile),
     mode: 'independent',
     chainIndex: null,
     chainTotal: null,
@@ -165,6 +182,8 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
   return {
     catId: context.catId as string,
     ...session,
+    ...(context.suppressedHookIds?.length ? { suppressedHookIds: context.suppressedHookIds } : {}),
+    ...(context.hookSuppressionReason ? { hookSuppressionReason: context.hookSuppressionReason } : {}),
     mode: context.mode,
     chainIndex: context.chainIndex ?? null,
     chainTotal: context.chainTotal ?? null,

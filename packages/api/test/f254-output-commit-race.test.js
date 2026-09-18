@@ -5,6 +5,7 @@ const { MessageStore } = await import('../dist/domains/cats/services/stores/port
 
 function userMessage(content, timestamp, extra = {}) {
   return {
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: null,
     content,
@@ -17,6 +18,7 @@ function userMessage(content, timestamp, extra = {}) {
 
 function finalMessage(content, timestamp) {
   return {
+    provenance: { author: 'cat', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: 'codex-sol',
     content,

@@ -136,14 +136,22 @@ const targetResolver = {
 
 function isolatedPublisher(label, captures) {
   return {
-    async publishOnIsolatedWorktree(opts) {
-      const iso = join(root, `f313-friction-${label}`);
+    async publishArtifact({ packet, generate }) {
+      const iso = join(root, '..', `f313-friction-${label}`);
       rmSync(iso, { recursive: true, force: true });
-      mkdirSync(join(iso, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-      writeFileSync(join(iso, 'docs', 'harness-feedback', 'eval-domains', 'eval-friction.yaml'), FRICTION_YAML);
+      const outputRoot = join(iso, 'docs', 'harness-feedback');
+      mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+      writeFileSync(join(outputRoot, 'eval-domains', 'eval-friction.yaml'), FRICTION_YAML);
       seedCanonicalMeasurementCensusState(iso);
-      captures.push({ iso, stage: await opts.stage(iso) });
-      return { commitSha: `${label}-sha`, prUrl: `https://example.test/${label}` };
+      const generated = await generate(outputRoot);
+      captures.push({ iso, generated });
+      return {
+        artifactId: packet.id,
+        domainSlug: packet.domainId.replace(/:/g, '-'),
+        verdictPath: generated.verdictPath,
+        bundleDir: generated.bundleDir,
+        artifactUrl: `artifact://${packet.domainId}/${packet.id}`,
+      };
     },
   };
 }
@@ -154,7 +162,7 @@ async function publish(label, analysisFindings = findings(), resolver = targetRe
   const result = await handlePublishVerdict(
     {
       harnessFeedbackRoot: root,
-      gitPublisher: isolatedPublisher(label, captures),
+      artifactPublisher: isolatedPublisher(label, captures),
       generator,
       now: () => new Date(fixture.capturedAt),
     },
@@ -264,8 +272,8 @@ describe('eval:friction finding breakout publish', () => {
       {
         harnessFeedbackRoot: root,
         generator,
-        gitPublisher: {
-          async publishOnIsolatedWorktree() {
+        artifactPublisher: {
+          async publishArtifact() {
             stageCalls += 1;
           },
         },
@@ -292,8 +300,8 @@ describe('eval:friction finding breakout publish', () => {
       {
         harnessFeedbackRoot: root,
         generator,
-        gitPublisher: {
-          async publishOnIsolatedWorktree() {
+        artifactPublisher: {
+          async publishArtifact() {
             stageCalls += 1;
           },
         },
@@ -320,8 +328,8 @@ describe('eval:friction finding breakout publish', () => {
         {
           harnessFeedbackRoot: root,
           generator,
-          gitPublisher: {
-            async publishOnIsolatedWorktree() {
+          artifactPublisher: {
+            async publishArtifact() {
               stageCalls += 1;
             },
           },

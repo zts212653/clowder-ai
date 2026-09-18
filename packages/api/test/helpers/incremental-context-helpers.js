@@ -4,6 +4,11 @@ export function mockMsg(overrides) {
     threadId: overrides.threadId ?? 'thread-1',
     userId: overrides.userId ?? 'user-1',
     catId: overrides.catId ?? null,
+    provenance: overrides.provenance ?? {
+      author: overrides.catId ? 'cat' : 'user',
+      routed: false,
+      observation: 'original',
+    },
     content: overrides.content ?? 'test message',
     mentions: overrides.mentions ?? [],
     timestamp: ts,

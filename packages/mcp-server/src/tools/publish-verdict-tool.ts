@@ -2,14 +2,10 @@ import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 import { callbackPost } from './callback-tools.js';
-import { errorResult, type ToolResult } from './file-tools.js';
+import type { ToolResult } from './file-tools.js';
 import { freshnessReplaySourceRefsShape } from './publish-verdict-freshness-source-refs.js';
 import { frictionAnalysisFindingsShape } from './publish-verdict-friction-findings.js';
-import {
-  handleRefreshVerdictAction,
-  publishVerdictRefreshActionShape,
-  validatePublishVerdictLifecycleInput,
-} from './publish-verdict-refresh-action.js';
+import { harnessLedgerSourceRefsShape } from './publish-verdict-harness-ledger-source-refs.js';
 import { sopSourceRefsShape } from './publish-verdict-sop-source-refs.js';
 import { trajectoryInspectorSourceRefsShape } from './publish-verdict-trajectory-inspector-source-refs.js';
 
@@ -18,7 +14,10 @@ const defineTool = defineMcpCanonicalFactory('publish-verdict-tool.ts', undefine
   authority: 'eval-callback',
 });
 
-const PUBLISH_VERDICT_FETCH_TIMEOUT_MS = 120_000;
+// Verdict generation can replay a large evidence window and perform a durable
+// local artifact write. Give it one long attempt: retrying a timed-out publish
+// could race the original request and duplicate its afterPublish side effect.
+const PUBLISH_VERDICT_FETCH_TIMEOUT_MS = 180_000;
 
 const verdictPacketShape = z
   .object({
@@ -266,17 +265,17 @@ const sourceRefsShape = z
     freshnessReplaySourceRefsShape,
     designGateSourceRefsShape,
     trajectoryInspectorSourceRefsShape,
+    harnessLedgerSourceRefsShape,
   ])
   .describe(
-    'Discriminated union by `kind` field. a2a kind is the backward-compatible default; replayable selectors are wired for capability wakeup, memory, task outcome, SOP, friction, anchor telemetry, QC metrics, F254 freshness closures, F303 design-gate episodes, and F299 trajectory-inspector windows.',
+    'Discriminated union by `kind` field. a2a kind is the backward-compatible default; replayable selectors are wired for capability wakeup, memory, task outcome, SOP, friction, anchor telemetry, QC metrics, F254 freshness closures, F303 design-gate episodes, F299 trajectory-inspector windows, and F257 Harness Ledger snapshots.',
   );
 
 export const publishVerdictInputSchema = {
   domainId: z.string().min(1).describe('Your assigned registered eval domain. Must match packet.domainId.'),
-  packet: verdictPacketShape.optional(),
-  sourceRefs: sourceRefsShape.optional(),
+  packet: verdictPacketShape,
+  sourceRefs: sourceRefsShape,
   analysisFindings: frictionAnalysisFindingsShape,
-  action: publishVerdictRefreshActionShape.optional(),
   // 砚砚 R4 P1 + cloud R4 P1: catId is NOT a cat-supplied field — server
   // derives it from the trusted callback principal (invocationId → registry).
   // Removed from input schema; agentKeyCatId stays for shared-MCP routing.
@@ -291,15 +290,6 @@ const publishVerdictInputObjectSchema = z.object(publishVerdictInputSchema);
 type PublishVerdictToolInput = z.input<typeof publishVerdictInputObjectSchema>;
 
 export async function handlePublishVerdict(input: PublishVerdictToolInput): Promise<ToolResult> {
-  const lifecycleError = validatePublishVerdictLifecycleInput(input);
-  if (lifecycleError) return errorResult(lifecycleError);
-  if (input.action?.kind === 'refresh_pr') {
-    return handleRefreshVerdictAction({
-      domainId: input.domainId,
-      action: input.action,
-      ...(input.agentKeyCatId ? { agentKeyCatId: input.agentKeyCatId } : {}),
-    });
-  }
   return callbackPost(
     `/api/eval-domains/${encodeURIComponent(input.domainId)}/publish-verdict`,
     {
@@ -321,16 +311,15 @@ export const publishVerdictTools = [
   defineTool({
     name: 'cat_cafe_publish_verdict',
     description:
-      'Publish a converged eval-domain verdict as a structured commit and auto-PR. ' +
+      'Publish a converged eval-domain verdict as an immutable durable artifact. ' +
       'Use when: your analysis has converged for the eval domain assigned to you. ' +
-      'NOT for: manually writing verdict files or running git add/commit/push; this tool owns that publish lifecycle. ' +
-      'For initial publish, pass packet + sourceRefs. For an open auto-verdict PR whose base moved, pass action={kind:"refresh_pr", verdictId, expectedHeadSha}; do not replay packet/writeback. ' +
-      'Output: validates the packet, generates evidence in an isolated worktree, pushes verdict/auto/<domain-slug>/<verdict-id>, opens an auto-PR, and returns { commitSha, prUrl }. ' +
-      'GOTCHA: wired domains include eval:a2a plus replayable capability-wakeup, memory, SOP, task-outcome, friction, anchor-first, freshness, QC, and design-gate generators. Unregistered or runtime-unwired domains return 501. ' +
+      'NOT for: manually writing verdict files or creating verdict pull requests; Git publication was retired by F257. ' +
+      'Input: pass the complete VerdictHandoffPacket and replayable sourceRefs. ' +
+      'Output: validates the packet, generates evidence in an isolated staging directory, atomically publishes it to the Harness artifact store, and returns { artifactId, artifactUrl, verdictPath, bundleDir }. ' +
+      'GOTCHA: wired domains include eval:a2a plus replayable capability-wakeup, memory, SOP, task-outcome, friction, anchor-first, freshness, QC, design-gate, trajectory-inspector, and harness-ledger generators. Unregistered or runtime-unwired domains return 501. ' +
       'GOTCHA: catId must match the registered eval cat for the domain (or its OQ-20 Redis override); 403 not_allowed otherwise. ' +
-      'GOTCHA: every evidencePacket.metricRefs entry must resolve against the selected domain glossary; unknown refs return 400 before any evidence branch or PR is created. ' +
-      'GOTCHA: refresh_pr verifies exact HEAD, auto-verdict provenance, target-only diff scope, and only auto-resolves the derived measurement census conflict; any other conflict fails closed. ' +
-      'GOTCHA: replacement publishes may repeat an exact stored episode verdict, but refresh_pr is preferred when the existing PR only needs a current-base census refresh.',
+      'GOTCHA: every evidencePacket.metricRefs entry must resolve against the selected domain glossary; unknown refs return 400 before any artifact is created. ' +
+      'GOTCHA: artifact IDs are immutable; an existing ID returns 409 and is never overwritten.',
     inputSchema: publishVerdictInputSchema,
     handler: handlePublishVerdict,
     governance: {

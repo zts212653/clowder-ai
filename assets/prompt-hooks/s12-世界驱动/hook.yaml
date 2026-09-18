@@ -13,11 +13,16 @@ resolver: S12WorldDriverResolver
 inputs:
   - worldDriver
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: WORLD_DRIVER_SUMMARY
+    description: 世界驱动摘要
+    placeholder: ""
 # Override constraints
 disableable: true
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: opt-in-view
 governanceTier: human-gated
 

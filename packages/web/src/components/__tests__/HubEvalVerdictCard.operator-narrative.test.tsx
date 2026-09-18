@@ -75,7 +75,7 @@ const item: EvalHubItem = {
     threadId: 'thread-anchor',
     stateSot: 'registry',
   },
-  source: { verdictPath: 'verdict.md', bundleDir: 'bundle' },
+  source: { kind: 'workspace', verdictPath: 'verdict.md', bundleDir: 'bundle' },
 };
 
 describe('HubEvalVerdictCard operator narrative', () => {

@@ -22,8 +22,17 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const baseTs = Date.now() - 10000;
 
     // Simulate legacy messages (direct, no queuing)
-    const l1 = store.append({ userId: 'u1', catId: null, content: 'L1', mentions: [], timestamp: baseTs, threadId });
+    const l1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
+      userId: 'u1',
+      catId: null,
+      content: 'L1',
+      mentions: [],
+      timestamp: baseTs,
+      threadId,
+    });
     const l2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'L2',
@@ -40,6 +49,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
 
     // Append new messages — must have seqs strictly above legacy
     const _n1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'N1',
@@ -66,6 +76,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const threadId = `red11-${Date.now()}`;
 
     const _m1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'A-will-delete',
@@ -74,6 +85,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
       threadId,
     });
     const m2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'B-live',
@@ -92,6 +104,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
 
     // Now append another message — its seq must be > highestSeq
     const m3 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'C-after-delete',
@@ -121,6 +134,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const threadId = `red16-${Date.now()}`;
 
     const m = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'legacy-msg',
@@ -159,7 +173,15 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const msgs = [];
     for (let i = 0; i < 100; i++) {
       msgs.push(
-        store.append({ userId: 'u1', catId: null, content: `m${i}`, mentions: [], timestamp: Date.now(), threadId }),
+        store.append({
+          provenance: { author: 'user', routed: false, observation: 'original' },
+          userId: 'u1',
+          catId: null,
+          content: `m${i}`,
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        }),
       );
     }
 
@@ -183,6 +205,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const threadId = `red20-${Date.now()}`;
 
     const _m1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'will-survive',
@@ -196,6 +219,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
 
     // Append with earlier timestamp (simulates clock rollback)
     const m2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'after-rollback',
@@ -217,6 +241,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     const threadId = `red21-${Date.now()}`;
 
     const _m1 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'msg1',
@@ -232,6 +257,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
 
     // New append — seq must continue above the old hwm
     const _m2 = store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'after-delete',
@@ -278,6 +304,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
 
     for (let i = 0; i < 500; i++) {
       store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'u1',
         catId: null,
         content: `msg-${i}`,
@@ -310,6 +337,7 @@ describe('Cursor Order — Remaining RED tests (§8.8)', () => {
     for (let i = 0; i < 5; i++) {
       msgs.push(
         store.append({
+          provenance: { author: 'user', routed: false, observation: 'original' },
           userId: 'u1',
           catId: null,
           content: `legacy-${i}`,

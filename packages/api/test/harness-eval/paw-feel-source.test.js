@@ -151,6 +151,7 @@ describe('F278 canonical paw-feel source', () => {
     const store = new MessageStore();
     for (let index = 0; index < 5; index += 1) {
       store.append({
+        provenance: { author: 'cat', routed: false, observation: 'original' },
         userId: 'u1',
         catId: 'codex-sol',
         content: `[爪感差: tool${index}+现象${index}]`,

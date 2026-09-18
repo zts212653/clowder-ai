@@ -85,13 +85,7 @@ async function readRuleFile(
   }
 }
 
-/**
- * F203 Phase F — L0 system prompt visibility (read-only viewer in Console
- * 「规则与 SOP」). Returns the L0 template + paths users follow to customize.
- * Read-only by Design Gate (co-creator 2026-05-16 confirm "先做可见";
- * AC-F5 编辑器 DEFER). Per-cat compiled previews moved to the F237 prompt
- * injection preview path; /api/rules must not spawn compilers for unused UI.
- */
+/** Session hook source visibility retained under the existing response key. */
 export interface L0CompiledForCat {
   catId: string;
   displayName: string;
@@ -107,58 +101,29 @@ export interface L0PromptsBlock {
 }
 
 export interface ReadL0PromptsOptions {
-  availableCats?: Array<{ catId: string; displayName: string }>;
-  compileL0?: (opts: { catId: string; cwd: string }) => Promise<string>;
-  includeCompiledByCat?: boolean;
+  /** Retained for API compatibility; per-cat previews live in prompt-injection. */
+  includeCompiledByCat?: false;
 }
 
-const L0_TEMPLATE_RELPATH = 'assets/system-prompts/system-prompt-l0.md';
-const L0_COMPILE_SCRIPT_RELPATH = 'scripts/compile-system-prompt-l0.mjs';
-const L0_VERIFY_COMMAND = 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)';
+const SESSION_HOOKS_RELPATH = 'assets/prompt-hooks/README.md';
+const SESSION_HOOKS_VERIFY_COMMAND = 'pnpm gate + isolated native-carrier invocation';
 
-export async function readL0Prompts(root: string, opts: ReadL0PromptsOptions = {}): Promise<L0PromptsBlock> {
+export async function readL0Prompts(root: string, _opts: ReadL0PromptsOptions = {}): Promise<L0PromptsBlock> {
   const template = await readRuleFile(
     root,
-    L0_TEMPLATE_RELPATH,
-    CONSUMPTION.actualPrompt('Template is compiled per cat and injected into the native system role.', [
-      'compile-system-prompt-l0.mjs',
-      'ClaudeBgCarrierService',
-      'CodexAgentService',
+    SESSION_HOOKS_RELPATH,
+    CONSUMPTION.actualPrompt('Session hooks are assembled once by HookPipeline and delivered by each carrier.', [
+      'HookPipeline',
+      'SystemPromptBuilder',
     ]),
   );
-  let compiledByCat: L0CompiledForCat[] = [];
-  if (opts.includeCompiledByCat) {
-    const compileL0 = opts.compileL0;
-    if (!compileL0) throw new Error('compileL0 is required when includeCompiledByCat=true');
-    const compiledConsumption = CONSUMPTION.actualPrompt('Per-cat compiled L0 actually passed to the model.', [
-      'compile-system-prompt-l0.mjs',
-      'ClaudeBgCarrierService',
-      'CodexAgentService',
-    ]);
-    compiledByCat = await Promise.all(
-      (opts.availableCats ?? []).map(async ({ catId, displayName }) => {
-        try {
-          const compiled = await compileL0({ catId, cwd: root });
-          return { catId, displayName, compiled, error: null, consumption: compiledConsumption };
-        } catch (e) {
-          return {
-            catId,
-            displayName,
-            compiled: '',
-            error: e instanceof Error ? e.message : String(e),
-            consumption: compiledConsumption,
-          };
-        }
-      }),
-    );
-  }
   return {
     template,
-    compiledByCat,
+    compiledByCat: [],
     customization: {
-      templatePath: L0_TEMPLATE_RELPATH,
-      compileScript: L0_COMPILE_SCRIPT_RELPATH,
-      verifyCommand: L0_VERIFY_COMMAND,
+      templatePath: SESSION_HOOKS_RELPATH,
+      compileScript: '',
+      verifyCommand: SESSION_HOOKS_VERIFY_COMMAND,
     },
   };
 }
@@ -208,8 +173,8 @@ export async function readRulesPayload(root: string, opts: ReadL0PromptsOptions 
 const SHARED_RULE_FILES: Array<{ path: string; consumption: PromptConsumptionInfo }> = [
   {
     path: 'cat-cafe-skills/refs/shared-rules.md',
-    consumption: CONSUMPTION.actualPrompt('shared-rules.md → governance L0 compiler → native/fallback prompt paths.', [
-      'compile-system-prompt-l0.mjs',
+    consumption: CONSUMPTION.actualPrompt('shared-rules.md → session hook pipeline → provider prompt transport.', [
+      'HookPipeline',
       'SystemPromptBuilder',
     ]),
   },
@@ -223,21 +188,21 @@ const PROVIDER_GUIDE_FILES: Record<string, { path: string; consumption: PromptCo
   claude: {
     path: 'CLAUDE.md',
     consumption: CONSUMPTION.harnessInjected(
-      'Claude Code reads project CLAUDE.md into model context; not the native L0 source.',
+      'Claude Code reads project CLAUDE.md into model context; it is not the session hook source.',
       ['Claude Code project-doc loader'],
     ),
   },
   codex: {
     path: 'AGENTS.md',
     consumption: CONSUMPTION.harnessInjected(
-      'Codex CLI reads project AGENTS.md into model context; native L0 comes from developer_instructions.',
+      'Codex CLI reads project AGENTS.md into model context; session hooks arrive through developer_instructions.',
       ['Codex CLI project-doc loader'],
     ),
   },
   gemini: {
     path: 'GEMINI.md',
     consumption: CONSUMPTION.harnessInjected(
-      'Gemini project guide is provider-level prompt context; Gemini native L0 migration is not part of F203 #747/#749.',
+      'Gemini project guide is provider-level prompt context; it is separate from the session hook pipeline.',
       ['Gemini CLI project-doc loader'],
     ),
   },

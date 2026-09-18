@@ -275,6 +275,7 @@ describe('schedule mutation principal routing', () => {
     await runner.triggerNow('hold-ball-resume-owner', { manual: true });
     assert.deepEqual(invokeCalls[0][6], {
       sourceCategory: 'scheduled',
+      completionRequirement: 'action-or-routing-exit',
       ownerAuthProvenance: 'strict',
     });
   });

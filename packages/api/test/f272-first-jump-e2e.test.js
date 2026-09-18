@@ -147,6 +147,7 @@ describe('F272 Phase A first-jump acceptance story', () => {
 
     now += 1_000;
     const landyReply = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       threadId: HOME,
       userId: OWNER,
       catId: null,

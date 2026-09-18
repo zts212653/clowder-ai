@@ -55,7 +55,7 @@ const LEGEND_ITEMS: Array<{ kind: PromptConsumptionKind; detail: string }> = [
   },
   {
     kind: 'harness-injected',
-    detail: '由 provider/CLI 项目文档机制注入模型上下文；不是 native L0 真相源。',
+    detail: '由 provider/CLI 项目文档机制注入模型上下文；不是 session hook 真相源。',
   },
   {
     kind: 'reference',
@@ -191,10 +191,7 @@ export function RuleFileCard({
   );
 }
 
-/**
- * F203 Phase F / F237 — L0 system prompt template viewer.
- * Styled as a segment row to be consistent with StageDetailPanels SegmentRow.
- */
+/** Session hook source viewer, kept under the legacy response field. */
 export function L0PromptsSection({
   l0Prompts,
   onPreview,
@@ -210,10 +207,10 @@ export function L0PromptsSection({
       style={{ backgroundColor: 'var(--console-card-bg)', boxShadow: '0 8px 22px rgba(43,33,26,0.04)' }}
     >
       <SettingsText as="h4" variant="sm" tone="default" className="font-semibold">
-        L0 系统提示词模板
+        Session Hook Pipeline
       </SettingsText>
       <SettingsText as="p" variant="xs" tone="muted">
-        下方注入段的真相源模板。编译器按猫替换占位变量（身份、队友名册、工作流触发点）后生成最终系统提示词。
+        每个段的 manifest 与模板共址；同一 HookPipeline 按猫组装，carrier 只负责投递。
       </SettingsText>
       {/* Template row — 层3 抬升, shadow emphasis since 层3/层4 visually close */}
       <button
@@ -223,14 +220,14 @@ export function L0PromptsSection({
           backgroundColor: 'var(--console-elevated-bg)',
           boxShadow: '0 1px 4px rgba(43,33,26,0.08)',
         }}
-        onClick={() => onPreview(l0Prompts.template, 'L0 Template — system-prompt-l0.md')}
+        onClick={() => onPreview(l0Prompts.template, 'Session Hook Pipeline — README.md')}
       >
         <SettingsText as="span" variant="xs" tone="muted" className="mt-0.5 w-8 shrink-0 font-mono">
-          L0
+          Hooks
         </SettingsText>
         <div className="min-w-0 flex-1">
           <SettingsText as="span" variant="sm" tone="default" className="font-medium">
-            L0 Template（含占位变量）
+            Hook 目录与运行路径
           </SettingsText>
           <SettingsText as="p" variant="xs" tone="secondary" className="mt-0.5">
             {l0Prompts.customization.templatePath} · {lineCount} 行

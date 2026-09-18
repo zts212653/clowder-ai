@@ -3,7 +3,7 @@ feature_ids: [F203]
 related_features: [F086, F128, F167, F198, F210, F211, F061]
 topics: [system-prompt, governance, prompt-engineering, compression-immunity, l0-injection]
 doc_kind: spec
-tips_exempt: internal native L0 cache freshness fix; no user-facing capability surface
+tips_exempt: Renewed 2026-09-18 for the F257 prompt-hook migration; native L0 compilation and cache replacement are internal delivery changes with no new user-facing capability surface
 created: 2026-05-15
 updated: 2026-08-01
 ---
@@ -11,6 +11,14 @@ updated: 2026-08-01
 # F203: Native System Prompt L0 — 压缩免疫核心规则注入
 
 > **Status**: done（operator 签字降级 2026-06-19，AC-I8 deferred）| **Owner**: Ragdoll Opus 4.7 | **Priority**: P1
+>
+> **2026-09-17 实现已被取代（F257 参考实现，未合入）** — 在 `reference/f257-layered-on-main-22385b60e`
+> 里，本 feat 的编译器实现被删除：`scripts/compile-system-prompt-l0.mjs`、
+> `packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts`、`l0-profile-cache.ts`。
+> per-cat 会话提示词改由 F237 的 prompt-hook pipeline 统一产出（单一管线，native 与非 native
+> carrier 同字节），owner 画像由 `S14` 段承载。**native system prompt 这条通道本身没有退役**，退役的是
+> 子进程编译器与它的缓存。下文一切"改 `compile-system-prompt-l0.mjs`"的操作指引，在该参考实现里
+> 应改为改对应 hook manifest / resolver；在未合入该切片的分支上仍然有效。
 
 ## Current State Snapshot（2026-06-19）
 

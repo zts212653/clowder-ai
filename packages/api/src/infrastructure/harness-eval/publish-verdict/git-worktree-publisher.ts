@@ -16,7 +16,7 @@ import {
   type VerdictPublishContractInput,
   type VerdictPublishContractRunner,
 } from './publication/verdict-publish-contract-runner.js';
-import type { GitPublisher, PublishOnIsolatedWorktreeOpts } from './publish-verdict.js';
+import type { GitPublisher, PublishOnIsolatedWorktreeOpts } from './types.js';
 
 const exec = promisify(execFile);
 

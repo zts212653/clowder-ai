@@ -3,17 +3,14 @@
  * Extracted from publish-verdict.test.js per AGENTS.md 350-line hard limit.
  */
 
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 
-/**
- * Seed the committed state that a real GitWorktreePublisher checks out from
- * origin/main. Verdict generators may add domain-specific fixtures afterwards,
- * but the F267 census refresh must always start from a complete repository.
- */
+/** Copy the canonical measurement-policy inputs into an isolated test repository. */
 export function seedCanonicalMeasurementCensusState(isolatedRepoRoot) {
   rmSync(resolve(isolatedRepoRoot, 'docs/harness-feedback/bundles'), { recursive: true, force: true });
   for (const relativePath of [
@@ -28,12 +25,7 @@ export function seedCanonicalMeasurementCensusState(isolatedRepoRoot) {
   }
 }
 
-/**
- * Upgrade one seeded census entry to the state required by an actionable
- * publisher-path test. The default fixture intentionally remains fail-closed;
- * callers must opt into this state so old generator tests cannot accidentally
- * prove that an uncertified bundle may publish owner actions.
- */
+/** Opt an isolated test domain into actionable verdicts with complete evidence refs. */
 export function markMeasurementCensusDomainCertifiedUsable(isolatedRepoRoot, domainId) {
   const censusPath = resolve(isolatedRepoRoot, 'docs/harness-feedback/registry/measurement-bundles.yaml');
   const census = parseYaml(readFileSync(censusPath, 'utf8'));
@@ -49,6 +41,49 @@ export function markMeasurementCensusDomainCertifiedUsable(isolatedRepoRoot, dom
     hardBlockReason: null,
   };
   writeFileSync(censusPath, stringifyYaml(census));
+}
+
+/** F257 / F192 sunset: storage-neutral publisher mock for handler tests. */
+export function createMockArtifactPublisher(opts = {}) {
+  return {
+    async publishArtifact({ packet, generate }) {
+      if (opts.failWith) throw new Error(opts.failWith);
+      if (opts.duplicateIds?.has(packet.id)) throw new Error(`artifact_already_exists:${packet.id}`);
+
+      const tmpRoot = mkdtempSync(join(tmpdir(), `mock-artifact-${packet.id}-`));
+      try {
+        const generated = await generate(tmpRoot);
+        const verdictPath = generated.verdictPath.startsWith(tmpRoot)
+          ? generated.verdictPath
+          : resolve(tmpRoot, basename(generated.verdictPath));
+        const bundleDir = generated.bundleDir.startsWith(tmpRoot)
+          ? generated.bundleDir
+          : resolve(tmpRoot, basename(generated.bundleDir));
+        mkdirSync(dirname(verdictPath), { recursive: true });
+        mkdirSync(bundleDir, { recursive: true });
+        if (!existsSync(verdictPath)) writeFileSync(verdictPath, `# Mock verdict for ${packet.id}\n`);
+
+        if (opts.beforePublish) {
+          await opts.beforePublish({ packet, generated, tmpRoot, verdictPath, bundleDir });
+        }
+        if (opts.failAfterGenerate) throw new Error(opts.failAfterGenerate);
+        if (generated.afterPublish) await generated.afterPublish();
+        if (opts.afterPublish) {
+          await opts.afterPublish({ packet, generated, tmpRoot, verdictPath, bundleDir });
+        }
+        return {
+          artifactId: opts.artifactId ?? packet.id,
+          domainSlug: opts.domainSlug ?? packet.domainId.replace(/:/g, '-'),
+          verdictPath,
+          bundleDir,
+          artifactUrl: opts.artifactUrl ?? `artifact://${packet.domainId}/${packet.id}`,
+        };
+      } catch (err) {
+        rmSync(tmpRoot, { recursive: true, force: true });
+        throw err;
+      }
+    },
+  };
 }
 
 /**

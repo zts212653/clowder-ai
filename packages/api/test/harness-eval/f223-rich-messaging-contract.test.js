@@ -30,8 +30,8 @@ describe('F223 Phase B2 rich-messaging surface contract', () => {
     assert.match(classifyTest, /minStructuredSignals/);
   });
 
-  it('keeps visible-in-Chat delivery intent aligned across L0, skill, manifest, MCP, and F192', () => {
-    const l0 = readRepoFile('assets/prompt-templates/l6-capability-wakeup.md');
+  it('keeps visible-in-Chat delivery intent aligned across the session hook, skill, manifest, MCP, and F192', () => {
+    const sessionHook = readRepoFile('assets/prompt-hooks/l6-能力唤醒指南/l6-capability-wakeup.md');
     const skill = readRepoFile('cat-cafe-skills/rich-messaging/SKILL.md');
     const manifest = readRepoFile('cat-cafe-skills/manifest.yaml');
     const callbackTools = readRepoFile('packages/mcp-server/src/tools/callback-tools.ts');
@@ -39,7 +39,7 @@ describe('F223 Phase B2 rich-messaging surface contract', () => {
       'packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts',
     );
 
-    assert.match(l0, /Chat[^\n]*rich-messaging[^\n]*富文本/);
+    assert.match(sessionHook, /Chat[^\n]*rich-messaging[^\n]*富文本/);
     assert.match(skill, /不要求用户说.*富文本/);
     assert.match(skill, /html_widget[\s\S]*media_gallery[\s\S]*browser-preview/);
     assert.match(manifest, /rich-messaging:[\s\S]{0,1600}画个 HTML/);

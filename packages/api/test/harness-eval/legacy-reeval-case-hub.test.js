@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID } from '../../dist/infrastructure/harness-eval/capability-wakeup-closure-import.js';
 import { enrichEvalHubLifecycle } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
 import { loadReevalClosureSubjects } from '../../dist/infrastructure/harness-eval/reeval-closure-task-spec.js';
 
@@ -29,7 +30,7 @@ describe('F266 production legacy case Hub projection', () => {
   it('replaces duplicate v1 cards with stable repair and cadence responsibilities', async () => {
     const now = '2026-08-09T04:20:00.000Z';
     const eventLog = new MemoryEventLog();
-    const subjects = await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog });
+    const subjects = await loadReevalClosureSubjects({ space: installLifecycleSpace(harnessFeedbackRoot), eventLog });
     const workspaceCase = subjects.find(
       (candidate) =>
         'caseRoot' in candidate &&
@@ -63,7 +64,7 @@ describe('F266 production legacy case Hub projection', () => {
     }
     const raw = loadEvalHubSummary({ harnessFeedbackRoot, now: new Date(now) });
     raw.generatedAt = now;
-    const enriched = await enrichEvalHubLifecycle(raw, { harnessFeedbackRoot, eventLog });
+    const enriched = await enrichEvalHubLifecycle(raw, { space: installLifecycleSpace(harnessFeedbackRoot), eventLog });
 
     const workspaceNavigator = enriched.items.find(
       (item) => item.harnessUnderEval.componentId === 'workspace-navigator',

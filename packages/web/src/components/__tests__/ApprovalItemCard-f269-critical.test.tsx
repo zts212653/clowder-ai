@@ -88,6 +88,16 @@ const CASES = [
     expected: ['请在目标线程核验完整证据后再接球，不要只看摘要。'],
   },
   {
+    name: 'F257 harness governance evidence',
+    item: approvalItem('F257', {
+      targetSegmentIds: ['D11'],
+      proposedAction: { mechanism: 'override-disable' },
+      evidence: { summary: '当前窗口记录到 3 个明确反例，评估结论为退役候选。' },
+      baselineTraceHash: `sha256:${'a'.repeat(64)}`,
+    }),
+    expected: ['D11', 'override-disable', '当前窗口记录到 3 个明确反例'],
+  },
+  {
     name: 'F260 registration rationale',
     item: approvalItem('F260', {
       entityId: 'concept:recoverable-overflow',

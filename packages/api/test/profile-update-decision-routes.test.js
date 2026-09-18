@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { anchorApproval } from './approval-hub/helpers.js';
@@ -18,7 +18,6 @@ describe('profile-update decision routes (approve / reject)', () => {
   let app;
   let store;
   let socketEvents;
-  let clearedL0;
   let repository;
 
   const seedPrimer = (content, relationshipKey = 'maine-coon') => {
@@ -95,7 +94,6 @@ describe('profile-update decision routes (approve / reject)', () => {
 
     store = new StoreMod.InMemoryProfileUpdateProposalStore();
     socketEvents = [];
-    clearedL0 = [];
     const socketManager = {
       emitToUser(userId, event, data) {
         socketEvents.push({ userId, event, data });
@@ -107,7 +105,6 @@ describe('profile-update decision routes (approve / reject)', () => {
       lock: new MutexMod.SessionMutex(),
       repository,
       socketManager,
-      clearL0Cache: (catId, userId) => clearedL0.push({ catId, userId }),
     });
     await app.ready();
   });
@@ -126,7 +123,6 @@ describe('profile-update decision routes (approve / reject)', () => {
     assert.equal(body.status, 'approved');
     assert.equal(readFileSync(join(profileDir, 'relationship/maine-coon-primer.md'), 'utf8'), 'NEW');
     assert.ok(socketEvents.some((e) => e.event === 'proposal_updated' && e.data.status === 'approved'));
-    assert.deepEqual(clearedL0, [{ catId: 'codex', userId: 'alice' }]);
   });
 
   it('GET returns current proposal status for owned profile-update cards', async () => {
@@ -200,18 +196,16 @@ describe('profile-update decision routes (approve / reject)', () => {
     assert.equal(store.get(y.proposalId).status, 'pending'); // rolled back
   });
 
-  it('P2: clears L0 cache when a partial primer commit later fails', async () => {
+  it('reports a partial primer commit failure without an obsolete prompt cache side effect', async () => {
     seedPrimer('OLD');
     const p = makeProposal();
     await app.close();
     app = Fastify();
-    clearedL0 = [];
     routeMod.registerProfileUpdateDecisionRoutes(app, {
       store,
       lock: new MutexMod.SessionMutex(),
       repository,
       socketManager: { emitToUser() {} },
-      clearL0Cache: (catId, userId) => clearedL0.push({ catId, userId }),
       approveProfileUpdate: async () => ({
         ok: false,
         reason: 'write_failed',
@@ -228,40 +222,52 @@ describe('profile-update decision routes (approve / reject)', () => {
     const res = await approve('alice', p.proposalId);
 
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(clearedL0, [{ catId: 'codex', userId: 'alice' }]);
   });
 
-  it('P2: clears L0 cache (owner-wide) when a partial corpus commit later fails', async () => {
+  it('P2: a partial corpus commit is visible next session, with no cache to clear', async () => {
     seedPrimer('OLD');
     const p = makeProposal({ targetLayer: 'corpus', targetPath: 'corpus/shared-facts.md' });
     await app.close();
     app = Fastify();
-    const clearedOwners = [];
+    const corpusPath = repository.corpusPath('alice');
     routeMod.registerProfileUpdateDecisionRoutes(app, {
       store,
       lock: new MutexMod.SessionMutex(),
       repository,
       socketManager: { emitToUser() {} },
-      clearL0Cache: () => {},
-      clearL0CacheOwner: (userId) => clearedOwners.push(userId),
-      approveProfileUpdate: async () => ({
-        ok: false,
-        reason: 'write_failed',
-        error: 'provenance failed',
-        proposal: {
-          ...p,
-          targetLayer: 'corpus',
-          status: 'approving',
-          writtenPath: join(profileDir, 'corpus/shared-facts.md'),
-        },
-      }),
+      approveProfileUpdate: async () => {
+        // Partial commit: bytes land on disk even though provenance then fails.
+        mkdirSync(dirname(corpusPath), { recursive: true });
+        writeFileSync(corpusPath, 'NEW 共享事实', 'utf8');
+        return {
+          ok: false,
+          reason: 'write_failed',
+          error: 'provenance failed',
+          proposal: { ...p, targetLayer: 'corpus', status: 'approving', writtenPath: corpusPath },
+        };
+      },
     });
     await app.ready();
 
     const res = await approve('alice', p.proposalId);
-
     assert.equal(res.statusCode, 500);
-    assert.deepEqual(clearedOwners, ['alice'], 'corpus partial commit clears owner-wide cache');
+
+    // Was: asserted clearL0CacheOwner('alice'). That cache retired with the L0 compiler,
+    // and F257 forbids standing up a replacement, so owner-wide freshness is structural
+    // now: the next session re-reads the corpus from disk. Assert the outcome the
+    // invalidation existed to guarantee, not the retired mechanism.
+    const { resolveOwnerProfileSnapshot } = await import(
+      '../dist/domains/cats/services/profile/owner-profile-snapshot.js'
+    );
+    const snapshot = resolveOwnerProfileSnapshot({
+      catId: 'codex',
+      repository,
+      env: { CAT_CAFE_USER_ID: 'alice' },
+    });
+    assert.ok(
+      snapshot?.pointerLines?.some((line) => line.includes('corpus/current')),
+      'a partially committed corpus must be visible to the next session',
+    );
   });
 
   // --- R3 ≥3-轮: index projection lifecycle tests ---

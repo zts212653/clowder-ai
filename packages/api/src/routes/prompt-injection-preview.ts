@@ -15,7 +15,6 @@ import type { FastifyPluginAsync } from 'fastify';
 import { loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { resolveDefaultClaudeMcpServerPath } from '../domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { isKimiNativeL0ChannelAvailable } from '../domains/cats/services/agents/providers/kimi-l0-agent-file.js';
-import { compileL0ViaSubprocess } from '../domains/cats/services/agents/providers/l0-compiler.js';
 import { getTemplateRawContent, stripComments } from '../domains/cats/services/context/prompt-template-loader.js';
 import {
   buildStaticIdentity,
@@ -23,6 +22,7 @@ import {
 } from '../domains/cats/services/context/SystemPromptBuilder.js';
 import { getActivePackBlocks } from '../domains/packs/getActivePackBlocks.js';
 import { PackStore } from '../domains/packs/PackStore.js';
+import { refreshOverrideSnapshot } from '../domains/prompt-hooks/PipelinePromptBuilder.js';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
 
@@ -62,35 +62,25 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
       const mcpServerPath = process.env.CAT_CAFE_MCP_SERVER_PATH || resolveDefaultClaudeMcpServerPath();
       const mcpAvailable = (catConfig?.mcpSupport ?? false) && !!mcpServerPath;
       const packBlocks = await getActivePackBlocks(packStore);
+      const isNativeL0 = isNativeL0Client(catConfig?.clientId ?? '');
 
-      const compiled = buildStaticIdentity(catId as CatId, { mcpAvailable, packBlocks, annotateSegments: true });
+      // F237 PR3: ensure overrides are loaded so preview reflects active overrides
+      await refreshOverrideSnapshot();
+      const compiled = buildStaticIdentity(catId as CatId, {
+        mcpAvailable,
+        ...(isNativeL0 ? {} : { packBlocks }),
+        annotateSegments: true,
+      });
       if (!compiled) {
         reply.status(404);
         return { error: `Cat "${catId}" not found or has no identity config` };
       }
 
-      const isNativeL0 = isNativeL0Client(catConfig?.clientId ?? '');
-
-      // For native-L0: show actual compiled L0 (includes L1-L7, identity, governance, etc.)
-      // For non-native: show S-segment view from buildStaticIdentity
-      let systemPromptContent = compiled;
-      let nativePackContext = '';
-      if (isNativeL0) {
-        try {
-          systemPromptContent = await compileL0ViaSubprocess({ catId, userId });
-          nativePackContext = buildStaticIdentityPackOnly(catId as CatId, { packBlocks });
-        } catch (e) {
-          const nativeL0CompileError = e instanceof Error ? e.message : String(e);
-          reply.status(500);
-          return {
-            error: `Native L0 compilation failed: ${nativeL0CompileError}`,
-            nativeL0CompileError,
-            catId,
-            isNativeL0,
-            clientId: catConfig?.clientId ?? 'unknown',
-          };
-        }
-      }
+      // Both previews use the same hook pipeline. Native carriers transport the
+      // non-pack session prompt through their provider-native channel while pack
+      // blocks remain in the invocation message context.
+      const systemPromptContent = compiled;
+      const nativePackContext = isNativeL0 ? buildStaticIdentityPackOnly(catId as CatId, { packBlocks }) : '';
 
       // D-segments: load real template content with {{VAR}} placeholders visible
       // tpl() returns raw template stripped of HTML comments, or '' if not template-backed

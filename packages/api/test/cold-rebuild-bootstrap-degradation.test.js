@@ -65,13 +65,13 @@ describe('cold-rebuild bootstrap degradation (Session #1, no sealed prior)', () 
     const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
     const warns = captureWarns('route-parallel');
     const codex = createHandshakeService('codex', ['codex answer']);
-    const claude = createHandshakeService('claude', ['claude answer']);
-    const { yielded, deps } = await runRoute(routeParallel, { codex, claude }, 'thread-cold-rebuild-parallel', {
-      targetCats: ['codex', 'claude'],
+    const opus = createHandshakeService('opus', ['opus answer']);
+    const { yielded, deps } = await runRoute(routeParallel, { codex, opus }, 'thread-cold-rebuild-parallel', {
+      targetCats: ['codex', 'opus'],
     });
     for (const [catId, service] of [
       ['codex', codex],
-      ['claude', claude],
+      ['opus', opus],
     ]) {
       assertDegradedInvocations({
         yielded,

@@ -25,6 +25,7 @@ export async function deliverBriefingCard(
 ): Promise<string> {
   const rich: RichMessageExtra = { v: 1, blocks: [card] };
   const msg = await messageStore.append({
+    provenance: { author: 'system', routed: false, observation: 'original' }, // sol R3 P1-1
     threadId,
     userId: BRIEFING_USER_ID,
     catId: null,

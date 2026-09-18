@@ -418,7 +418,7 @@ F231 的定位是**身份会话基座**：猫醒来第一眼就认识主人，�
     └─ 代价分层消化（重要→operator 签字 / 偏好→猫自治）
 ```
 
-注入路径：`compile-system-prompt-l0 → {{USER_CAPSULE}}`（每次 invocation 注入）
+注入路径：`route → resolveOwnerProfileSnapshot → S14 → {{OWNER_PROFILE_SECTION}}`（每次 invocation 注入；F257 起取代 `compile-system-prompt-l0 → {{USER_CAPSULE}}`）
 
 #### F221 — 品味导航（决策边界学习）
 

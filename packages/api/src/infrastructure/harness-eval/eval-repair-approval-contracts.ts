@@ -143,8 +143,8 @@ export type EvalRepairProposeResult =
     };
 
 export type EvalRepairDecisionResult =
-  | { status: 'accepted' | 'rejected' | 'closed_without_decision' }
-  | { status: 'duplicate'; resolution: 'accepted' | 'rejected' | 'closed_without_decision' }
+  | { status: 'accepted' | 'skipped' | 'rejected' | 'closed_without_decision' }
+  | { status: 'duplicate'; resolution: 'accepted' | 'skipped' | 'rejected' | 'closed_without_decision' }
   | {
       status: 'blocked';
       reason: 'approval_lifecycle_unavailable' | 'proposal_not_found' | 'approval_not_anchored';
@@ -152,7 +152,7 @@ export type EvalRepairDecisionResult =
 
 export type EvalRepairMaterializeResult =
   | { status: 'materialized' | 'duplicate'; receipt: CanonicalRepairDispatchReceipt }
-  | { status: 'not_eligible'; resolution: 'open' | 'rejected' | 'closed_without_decision' }
+  | { status: 'not_eligible'; resolution: 'open' | 'skipped' | 'rejected' | 'closed_without_decision' }
   | { status: 'superseded'; freshCaseActionRef: string; drift: 'owner' | 'authorization' | 'target' }
   | {
       status: 'blocked';

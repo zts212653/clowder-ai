@@ -51,7 +51,11 @@ const baseItem: EvalHubItem = {
     threadId: 'thread-a2a',
     stateSot: 'registry',
   },
-  source: { verdictPath: 'docs/harness-feedback/verdicts/a2a.md', bundleDir: 'docs/harness-feedback/bundles/a2a' },
+  source: {
+    kind: 'workspace',
+    verdictPath: 'docs/harness-feedback/verdicts/a2a.md',
+    bundleDir: 'docs/harness-feedback/bundles/a2a',
+  },
 };
 
 function buildSummary(items: EvalHubItem[]): EvalHubSummary {

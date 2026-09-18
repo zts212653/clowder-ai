@@ -71,28 +71,25 @@ describe('merge-gate review provenance contract', () => {
     );
   });
 
-  it('L0 template, compiler overlay, and runtime prompt builder carry the same reflex', () => {
-    const l0 = read('assets/system-prompts/system-prompt-l0.md');
-    const compiler = read('scripts/compile-system-prompt-l0.mjs');
+  it('co-located routing hook and runtime prompt builder carry the same reflex', () => {
+    const routingHook = read('assets/prompt-hooks/l3-传球三选一-路由规则/l3-routing-rules.md');
     const runtimeBuilder = read('packages/api/src/domains/cats/services/context/SystemPromptBuilder.ts');
 
-    assert.ok(l0.includes('merge-gate source provenance 反射'), 'L0 template must name the merge-gate reflex');
     assert.ok(
-      l0.includes('外部 finding 修完后等 PR truth'),
-      'L0 must route completed external findings to PR truth source without ambiguous 修后 wording',
+      routingHook.includes('merge-gate source provenance 反射'),
+      'routing hook must name the merge-gate reflex',
     );
-    assert.ok(!l0.includes('）修后等 PR truth'), 'L0 must not keep ambiguous 修后 wording');
-    assert.ok(l0.includes('不 @ 本地旧 reviewer'), 'L0 must block projection to local reviewer');
+    assert.ok(
+      routingHook.includes('外部 finding 修完后等 PR truth'),
+      'routing hook must route completed external findings to PR truth source without ambiguous wording',
+    );
+    assert.ok(!routingHook.includes('）修后等 PR truth'), 'routing hook must not keep ambiguous wording');
+    assert.ok(routingHook.includes('不 @ 本地旧 reviewer'), 'routing hook must block projection to local reviewer');
 
-    for (const [label, source] of [
-      ['compiler overlay', compiler],
-      ['runtime prompt builder', runtimeBuilder],
-    ]) {
-      assert.ok(source.includes('MERGE_GATE_SOURCE_PROVENANCE_TRIGGER'), `${label} must define shared trigger text`);
-      assert.ok(source.includes('MG provenance override'), `${label} must include source provenance override`);
-      assert.ok(source.includes('外部finding修完后等PR truth'), `${label} must name completed external findings`);
-      assert.ok(source.includes('不@旧reviewer'), `${label} must override generic review ping`);
-    }
+    assert.ok(runtimeBuilder.includes('MERGE_GATE_SOURCE_PROVENANCE_TRIGGER'));
+    assert.ok(runtimeBuilder.includes('MG provenance override'));
+    assert.ok(runtimeBuilder.includes('外部finding修完后等PR truth'));
+    assert.ok(runtimeBuilder.includes('不@旧reviewer'));
   });
 
   it('F167 fixture documents the regression scenario and expected route', () => {

@@ -69,7 +69,7 @@ test(
       model: 'claude-fixture',
       ownerDataDir: dataDir,
       ownerKillGraceMs: 100,
-      l0CompilerFn: async ({ outPath }) => writeFile(outPath, 'fixture-l0'),
+      l0CompilerFn: async () => 'fixture-session-prompt',
     });
     let workerPid;
     try {
@@ -120,7 +120,7 @@ test(
       '  model: "claude-fixture",',
       `  ownerDataDir: ${JSON.stringify(dataDir)},`,
       '  ownerKillGraceMs: 100,',
-      '  l0CompilerFn: async ({ outPath }) => writeFileSync(outPath, "fixture-l0"),',
+      '  l0CompilerFn: async () => "fixture-session-prompt",',
       '});',
       'const result = await service.startJob("owned job", { callbackEnv: {',
       `  CLAUDE_CONFIG_DIR: ${JSON.stringify(registryDirectory)},`,
@@ -344,7 +344,7 @@ test(
       jobsDir: join(dataDir, 'jobs'),
       pollMs: 10,
       ownerKillGraceMs: 1_000,
-      l0CompilerFn: async ({ outPath }) => writeFile(outPath, 'fixture-l0'),
+      l0CompilerFn: async () => 'fixture-session-prompt',
     });
     const controller = new AbortController();
     let workerPid;
@@ -456,7 +456,7 @@ test(
           `  jobsDir: ${JSON.stringify(jobsDirectory)},`,
           '  pollMs: 10,',
           '  ownerKillGraceMs: 100,',
-          '  l0CompilerFn: async ({ outPath }) => writeFileSync(outPath, "fixture-l0"),',
+          '  l0CompilerFn: async () => "fixture-session-prompt",',
           '});',
           'const types = [];',
           'for await (const event of service.invoke("owned job", { accountEnv: {',

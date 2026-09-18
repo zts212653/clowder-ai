@@ -5,15 +5,11 @@
  * existing captures and compatibility tests can be read until the legacy ring
  * expires; new invocations use transcript-owned request-generation evidence.
  *
- * AC-G10 (Phase G native L0 closure / KD-44): when the caller flags an F203
- * native-L0 provider, this bridge asynchronously fetches the compiled L0 via
- * `compileL0ViaSubprocess` and stamps `nativeSystemPrompt` onto the capture
- * before persisting. Fetch failures are recorded in `captureDiagnostics` —
- * the invocation hot path is never blocked or made to fail.
+ * Native providers may include the exact route-owned session prompt in the
+ * capture. The bridge never reassembles or fetches prompt content itself.
  */
 
 import { randomUUID } from 'node:crypto';
-import { compileL0ViaSubprocess } from '../../domains/cats/services/agents/providers/l0-compiler.js';
 import { createModuleLogger } from '../logger.js';
 import { pseudonymizeId } from '../telemetry/hmac.js';
 import {
@@ -48,19 +44,8 @@ export interface CaptureInput {
     forceReinjection: boolean;
     injected: boolean;
   };
-  /**
-   * AC-G10: When true, the provider injects L0 via a native system-role
-   * channel (Claude `--system-prompt-file` / Codex `-c developer_instructions`).
-   * The bridge will best-effort fetch the compiled L0 via the existing
-   * `compileL0ViaSubprocess` cache and stamp it onto `nativeSystemPrompt`.
-   * The caller flags this via `service.injectsL0Natively?.() ?? false`.
-   */
-  nativeL0Provider?: boolean;
-  /**
-   * Test seam — replaces the L0 fetcher (default `compileL0ViaSubprocess`).
-   * Production callers leave this undefined.
-   */
-  nativeL0Fetcher?: (catId: string, userId: string) => Promise<string>;
+  /** Exact session prompt delivered through the provider-native channel. */
+  nativeSessionPrompt?: string;
 }
 
 /** @deprecated F299 request generations are the sole production writer. */
@@ -79,25 +64,11 @@ async function runCapture(input: CaptureInput): Promise<void> {
   let nativeSystemPromptSource: PromptCapture['nativeSystemPromptSource'];
   let nativeSystemTokenEstimate: number | undefined;
 
-  if (input.nativeL0Provider) {
-    const fetcher = input.nativeL0Fetcher ?? defaultFetcher;
-    try {
-      const l0 = await fetcher(input.catId, input.userId);
-      if (l0 && l0.trim().length > 0) {
-        nativeSystemPrompt = l0;
-        nativeSystemPromptSource = 'f203-l0';
-        nativeSystemTokenEstimate = estimateTokens(l0);
-      } else {
-        diagnostics.push('native-l0-empty: fetcher returned empty string');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      diagnostics.push(`native-l0-fetch-failed: ${msg}`);
-      log.warn(
-        { err, catId: input.catId },
-        'AC-G10 native L0 fetch failed (capture continues without nativeSystemPrompt)',
-      );
-    }
+  const routeOwnedSessionPrompt = input.nativeSessionPrompt;
+  if (routeOwnedSessionPrompt?.trim()) {
+    nativeSystemPrompt = routeOwnedSessionPrompt;
+    nativeSystemPromptSource = 'f203-l0';
+    nativeSystemTokenEstimate = estimateTokens(routeOwnedSessionPrompt);
   }
 
   try {
@@ -133,11 +104,6 @@ async function runCapture(input: CaptureInput): Promise<void> {
   } catch (err) {
     log.warn({ err, catId: input.catId }, 'Prompt capture failed (non-fatal)');
   }
-}
-
-/** Default L0 fetcher — module-level so tests can override via input.nativeL0Fetcher. */
-async function defaultFetcher(catId: string, userId: string): Promise<string> {
-  return compileL0ViaSubprocess({ catId, userId });
 }
 
 export function getPromptCaptureStore(): PromptCaptureStore {

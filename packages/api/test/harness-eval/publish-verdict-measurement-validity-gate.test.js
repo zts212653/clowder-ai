@@ -16,10 +16,11 @@ describe('F267 measurement-validity publish gate', () => {
     seedCanonicalMeasurementCensusState(repoRoot);
     const harnessFeedbackRoot = resolve(repoRoot, 'docs/harness-feedback');
     let generatorCalled = false;
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
-        await opts.stage(repoRoot);
-        return { commitSha: 'unreachable', prUrl: 'unreachable' };
+    let publisherCalled = false;
+    const artifactPublisher = {
+      async publishArtifact() {
+        publisherCalled = true;
+        throw new Error('publisher must not run through the F267 validity gate');
       },
     };
 
@@ -27,7 +28,7 @@ describe('F267 measurement-validity publish gate', () => {
       const result = await handlePublishVerdict(
         {
           harnessFeedbackRoot,
-          gitPublisher,
+          artifactPublisher,
           generator: async () => {
             generatorCalled = true;
             throw new Error('generator must not run through the F267 validity gate');
@@ -59,6 +60,7 @@ describe('F267 measurement-validity publish gate', () => {
           }),
           domain: 'eval:a2a',
           catId: 'codex',
+          ownerUserId: 'owner-test',
           sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
         },
       );
@@ -69,5 +71,6 @@ describe('F267 measurement-validity publish gate', () => {
       assert.match(result.detail, /keep_observe_only|certificate|insufficient/i);
     }
     assert.equal(generatorCalled, false);
+    assert.equal(publisherCalled, false);
   });
 });

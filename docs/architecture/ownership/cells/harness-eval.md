@@ -1,8 +1,8 @@
 ---
 cell_id: harness-eval
 title: Harness Eval Control Plane
-summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 duty/issue 双轴、source-exact owner-backed direct-repair、可恢复 blocker poller 与 refs-only legacy census。
-canonical_features: [F192, F266, F267, F278, F313]
+summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts、F278 每条爪感差的 duty/issue 双轴、source-exact owner-backed direct-repair、可恢复 blocker poller 与 refs-only legacy census，以及 F257 Objective/Metric、CycleRecord 与 harness ledger 生命周期。
+canonical_features: [F192, F257, F266, F267, F278, F313]
 code_anchors:
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
   - packages/api/src/infrastructure/harness-eval/cross-thread-coordination-eval.ts
@@ -95,7 +95,10 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-decision-proof-owner-object-spec.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-decision-proof-resolver.ts
   - packages/api/src/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.ts
-  - scripts/check-verdict-publish-contract.mjs
+  - packages/api/src/infrastructure/harness-eval/publish-verdict/local-artifact-publisher.ts
+  - packages/api/src/infrastructure/harness-eval/artifact-store/artifact-store-layout.ts
+  - packages/api/src/infrastructure/harness-eval/artifact-store/verdict-id-reservations.ts
+  - packages/api/src/infrastructure/harness-eval/lifecycle-space.ts
   - scripts/guarded-bin/gh
   - packages/shared/src/types/friction-signal.ts
   - packages/shared/src/types/paw-feel-continuation.ts
@@ -120,6 +123,23 @@ code_anchors:
   - scripts/sop-definitions.mjs
   - scripts/lib/sop-definition-codegen.mjs
   - packages/shared/src/types/sop-definition.generated.ts
+  - packages/api/src/infrastructure/harness-eval/GuardRejectionEventLog.ts
+  - packages/api/src/infrastructure/harness-eval/evaluation/EvaluationIndexer.ts
+  - packages/api/src/infrastructure/harness-eval/evaluation/ObjectiveEvaluationRuntime.ts
+  - packages/api/src/infrastructure/harness-eval/evaluation/evaluation-catalog.ts
+  - packages/api/src/infrastructure/harness-eval/trace-annotation/PendingTraceMarkerStore.ts
+  - packages/api/src/infrastructure/harness-eval/trace-annotation/TraceAnnotationStore.ts
+  - packages/api/src/infrastructure/harness-eval/guard-threshold-escalation.ts
+  - packages/api/src/infrastructure/harness-eval/objective-registry.ts
+  - packages/api/src/routes/callback-docs-routes.ts
+  - packages/mcp-server/src/tools/list-objectives-tool.ts
+  - packages/api/src/infrastructure/harness-eval/publish-verdict/harness-ledger/harness-ledger-generator-adapter.ts
+  - packages/api/src/domains/prompt-hooks/InjectionTraceStore.ts
+  - packages/api/src/routes/prompt-injection-overrides.ts
+  - packages/api/src/routes/segment-lifeline.ts
+  - packages/api/src/routes/segment-lifeline-chain.ts
+  - packages/shared/src/types/segment-lifecycle.ts
+  - packages/web/src/components/settings/SegmentLifelineModal.tsx
 doc_anchors:
   - docs/features/F192-socio-technical-harness-eval.md
   - docs/features/F266-eval-verdict-closure-control-plane.md
@@ -130,20 +150,29 @@ doc_anchors:
   - docs/features/F278-paw-feel-disposition-inbox.md
   - docs/features/F313-analysis-to-outcome-closure-command.md
   - feature-discussions/2026-07-26-f278-paw-feel-disposition-inbox/README.md
+  - docs/harness-feedback/fixtures/f254/
+  - docs/harness-feedback/certificates/
+  - docs/harness-feedback/measurement-results/
+  - docs/harness-feedback/replays/
+  - docs/features/F257-harness-ledger.md
+  - feature-specs/2026-08-04-f257-objective-eval-redesign.md
+  - docs/features/assets/F257/
+  - docs/harness-feedback/objectives/registry.yaml
+  - docs/harness-feedback/eval-domains/eval-harness-ledger.yaml
+  - docs/harness-feedback/
   - docs/harness-feedback/migrations/f266-legacy-reeval-cases.yaml
   - docs/harness-feedback/eval-domains/eval-freshness.yaml
   - docs/harness-feedback/registry/measurement-bundles.yaml
   - docs/harness-feedback/measurement-sources/capability-evolution/owner-inputs/evolution-program-bcc336788a7df9d6075b1efb4c0a7e68-eval-repair-owner-binding-v1.yaml
   - feature-discussions/2026-05-21-f192-phase-e-eval-hub-kickoff/README.md
   - sop-definitions/README.md
-static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, PawFeelIssueProjection, direct-repair-binding, repair_outcome_linked, blocker_reopened, paw-feel-inbox, paw-feel-legacy-blocker-census, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, measurement-issuance, measurement-proof, same-version-replay, prospective_paired_capture]
+static_scan_hints: [harness-eval, VerdictHandoffPacket, lifecycle-root.json, eval:verdict-lifecycle, reeval-closure, reeval-case, legacy_case_migrated, legacy-reeval-case-migration, repairDebtStatus, reevalDebtStatus, eval-case-v1, eval-domain, reeval, harness-fit-digest, Eval Hub, freshness-closure-replay, f254-freshness-replay, FreshnessReplayProvider, evalFreshnessLiveVerdict, no_data, rawArtifactSha256, SopDefinition, sop-definitions, predicate, friction, paw-feel, PawFeelDisposition, paw-feel-inbox, FrictionSignal, measurement-validity, measurement-certificate, measurement-bundle-result, measurement-issuance, measurement-proof, same-version-replay, prospective_paired_capture, harness-ledger, TraceEpisode, TraceAnnotation, EvaluationSnapshot, MetricResult, EvaluationIndexer, semantic-sweep-history, segment-lifeline, ObjectiveRegistry, objective-registry, list_objectives, objectiveId, metricId, PawFeelIssueProjection, direct-repair-binding, repair_outcome_linked, blocker_reopened, paw-feel-legacy-blocker-census]
 cited_by:
   - F192 Phase E-pilot
   - F245 Phase A (paw-feel friction collector) + Phase B (cancel/user-feedback/eval-domain adapters + aggregator + clusterer + rollup input; domain registration + rollup sink land in Phase C)
   - F248 Phase A (Eval Hub human-readability: registry descriptionForHuman + Hub display + state/verdict badge disambiguation)
   - F248 Phase B design (registry-driven metricGlossary / metricGlossaryRef explainability; frontend renders, does not hardcode metric semantics)
   - F248 Phase B2 (structured operator narrative from registry + verdict bundle; machine wording stays drill-down only)
-  - F248 publish target hardening (owner-repo, canonical census, domain/window uniqueness, and automatic/manual transport fences)
   - F167 Phase R (terminal coordination ACK suppression counter + Claim/Release/ACK regression fixture)
   - F254 AC-E9 (server-owned eight-fixture / durable-closure replay selector, normalized evidence bundle, live verdict generator, and explicit no-data verdict)
   - F267 Phase A (frozen canonical cancel join, four-channel opportunity-to-action funnel, and measurement-validity artifact)
@@ -151,6 +180,8 @@ cited_by:
   - F266 Phase B-C (immutable lifecycle root, append-only Redis event log, authenticated owner writeback, idempotent SLA reconciler, and F248 Settings / Workspace projections)
   - F266 production operational acceptance (stable finding/case lineage, durable TaskStore + F167 responsibility, and server-verified main/live/re-evaluation truth)
   - F278 Design Gate (per-signal source-ref disposition ledger, system-thread duty, and Workspace live inbox)
+  - F257 Phase A (invocation tracing + annotation) + Phase C (Objective/Metric evaluation) + Phase D (segment lifeline + governance operations)
+  - F257 #3 (objective registry definition layer + list_objectives discovery; canonical objectiveId source for report_harness_signal)
   - F313 Phase B (one immutable finding/child/root per actionable friction candidate, canonical repair-target resolution, and schema-v3 quarantine before atomic Phase C cutover)
   - F313 Phase C (F266 immutable Approval lineage, owner-backed exact refs, drift supersession, and exactly-once canonical repair custody behind one fail-closed v3 cutover)
   - F313 Phase D (owner-backed changed/no-change receipts, loaded-runtime freshness, typed outcomes, dormant ref-only F311 owner port, plus F278 continuing-responsibility/direct-repair/blocker-recovery integration)
@@ -189,6 +220,19 @@ owner objects, and the owner binding has no authorization, lineage, intervention
 receipt. Consequently Alpha can prove the composition is reachable while every business command remains typed
 fail-closed; production remains wholly dormant until an independently authorized F266 `v1_active` epoch exists.
 
+F257 owns the per-Objective Harness Ledger from closed `TraceEpisode` through the append-only trace pool and
+`ObjectiveTraceIndex` into durable `CycleRecord` windows, evaluation/governance assignments and writeback, operator
+proposal cards, version activation and the segment-lifeline projection. An Objective is a static definition plus unit
+attachments and Metric rules; it has no independent lifecycle state machine.
+
+Evaluation's target object is not "a prompt segment". The general object is a compound AI
+system — prompt, tool, retrieval, workflow, code and rubric are all components, and a
+multi-agent arrangement is this home's experiment environment, not the definition. That
+constrains where `EvaluationUnitRef.unitType` may generalise: today it is the single-member
+literal `'segment'`, and the honest reading of that is "not yet generalised", not "segments
+are the unit". Widening it means giving each component kind its own versionable content,
+its own observation surface and its own governance lever; see F257 KD-24 for what is
+already observed but not yet governable.
 The Phase D continuing-responsibility correction keeps F278's append-only signal ledger as the sole writer and projects
 two orthogonal read truths: `validExit` remains the duty-review receipt, while issue `open|resolved`, age and continuation
 come from the same F278 projection joined to exact Task/F167 and F245/F266 owner refs. A direct fix rereads and
@@ -224,12 +268,15 @@ the sole event-log append.
 - Adding or changing F254 freshness replay selectors, fixture truth, durable closure normalization, derived metrics/samples, or live verdict generation.
 - Adding or changing a decision-bearing measurement bundle, opportunity join, uncertainty/insufficient state, or withdrawal condition.
 - Producing or validating Verdict Handoff Packets.
-- Publishing or refreshing verdict evidence branches and PRs, including manual fallback paths.
+- Publishing immutable verdict bundles into the durable runtime artifact store.
 - Recording owner acknowledgement, action plans, landed fixes, re-evaluation, reasoned operator suppression, or SLA escalation for an actionable verdict.
 - Recording or projecting per-paw-feel `new / seen / route_pending / routed / closed / duplicate / no_action` responsibility.
 - Changing the orthogonal paw-feel issue continuation, source-to-F266 join, direct-repair provider binding/outcome, or blocker-resume contract.
 - Migrating legacy scheduled tasks into unified eval runtime.
 - Deciding whether a harness should `fix`, `build`, `keep_observe`, or `delete_sunset`.
+- Adding a structured rule, MCP marker, or asynchronous semantic classifier that annotates an exact F257 trace episode.
+- Adding or changing Objective/Metric definitions, unit/clause attachments, trigger rules, or code/LLM/replay evaluators.
+- Extending the segment lifeline read model or its governance operations.
 
 ## Extend By
 
@@ -237,6 +284,7 @@ the sole event-log append.
 - Keep raw telemetry ownership in F153; this cell consumes telemetry and produces derived verdicts.
 - Keep domain thread text as working context only; registry, snapshots, verdicts, and closure records are the state source of truth.
 - Keep finding truth immutable in the verdict bundle. Persist only lifecycle identity in `lifecycle-root.json` and authenticated transition deltas in the append-only event log.
+- Publish verdict artifacts atomically outside the product Git checkout; duplicate artifact IDs fail closed and post-publish side-effect failure rolls the exposed artifact back.
 - For friction breakout, preserve F245 under `harnessUnderEval`, resolve feature/component/owner/version only on the server as `repairTarget`, and fail closed to a blocked finding artifact when canonical target truth is unavailable or ambiguous.
 - Treat schema-v3 friction roots as read-only, known-but-quarantined artifacts until the complete Phase C cutover exists. Do not open a legacy/stable case or call proposal, card, Task or F167 custody paths from Phase B readers.
 - For Phase C, require one stable `v1_active` producer epoch snapshot plus all loader/adapter/ingress/route/owner-dispatch bindings before activating schema v3. Re-resolve opaque owner authorization and exact target version before proposal and accepted dispatch; supersede drift and never reuse an old Approval.
@@ -262,6 +310,11 @@ the sole event-log append.
 - Require dry-run evidence before disabling or redirecting legacy scheduled tasks.
 - Reuse `extractPawFeelMarkers`; persist source refs, digest identity and cat-signed disposition only. Keep system-thread notices content-free and let Workspace resolve previews from the canonical source on read.
 - Derive Workspace live and Settings history from the same F278 event log/projection. Their different presentation and retention views must not introduce separate status stores, cache authority or mutation endpoints.
+- Keep raw invocation tracing independent from evaluation. Tracing records what happened from invocation start through terminal closure; it does not choose an Objective, Metric, or verdict.
+- Producers only append the unified `TraceAnnotation` schema. `report_harness_signal` creates a pending marker for the authenticated invocation; terminal resolution binds it to the exact episode. Structured rules append the same shape. Unclassified episodes enter a bounded asynchronous semantic sweep.
+- Keep `EvaluationIndexer` deterministic: validate the annotation coordinates against the registry/manifest, deduplicate by incident key, and project query indexes. It must not perform semantic judgment.
+- Keep `EvaluationScheduler` semantic-free: freeze the **time window and references only (never copy trace bodies)** and trigger evaluators by the three-way anyOf (counterexamples / volume / 7-day cadence). Contract: `docs/features/assets/F257/terminal-contract-v1.md`.
+- Keep Metric calculation replayable: code evaluators consume stored facts, LLM evaluators consume frozen evidence with persisted prompt/model metadata, and every outcome appends a `MetricResult` rather than mutating prior facts.
 - Keep duty `validExit` and issue resolution separate. Only a reasoned terminal no-action or owner-verified outcome may resolve an issue; duplicate rows follow their ultimate canonical signal.
 - For direct paw-feel repair, derive provider selection from the verified source-tool ref before exposing opaque `actionRef`; bind source, route/version, action scope, existing authorization, target, owner and outcome verifier, then revalidate the same binding at outcome.
 - Require every new explicit blocker to carry a server-resolved task/event condition or future bounded recheck. Derive condition/reopen identities server-side, append reopen under expected-sequence CAS, and keep legacy recovery bounded and manually authorized.

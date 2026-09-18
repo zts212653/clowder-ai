@@ -1,14 +1,19 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import type { ActionableFrictionCandidate, ReferenceOnlyFrictionCluster } from '@cat-cafe/shared';
+
+/**
+ * How the raw report can be opened. It follows the verdict's own source: a
+ * repository verdict points at a workspace file, while a runtime artifact's report
+ * is opened through the artifact route with the `friction-report` file key.
+ */
+export type EvalHubFrictionReportSource = { kind: 'workspace'; rawReportPath: string } | { kind: 'artifact' };
 
 export interface EvalHubFrictionProjection {
   projectionStatus: 'available' | 'unavailable';
   actionableCandidates: ActionableFrictionCandidate[];
   referenceOnly: ReferenceOnlyFrictionCluster[];
-  source?: {
-    rawReportPath: string;
-  };
+  source?: EvalHubFrictionReportSource;
 }
 
 interface FrictionRawReportPayload {
@@ -21,7 +26,7 @@ interface FrictionRawReportPayload {
 export function loadEvalHubFrictionProjection(
   domainId: string,
   bundleDir: string,
-  repoRoot: string,
+  reportSource: (rawReportPath: string) => EvalHubFrictionReportSource,
 ): EvalHubFrictionProjection | undefined {
   if (domainId !== 'eval:friction') return undefined;
 
@@ -34,7 +39,7 @@ export function loadEvalHubFrictionProjection(
     };
   }
 
-  const source = { rawReportPath: relative(repoRoot, rawReportPath).replaceAll('\\', '/') };
+  const source = reportSource(rawReportPath);
   try {
     const parsed = JSON.parse(readFileSync(rawReportPath, 'utf8')) as FrictionRawReportPayload;
     const actionableCandidates = Array.isArray(parsed?.report?.actionableCandidates)

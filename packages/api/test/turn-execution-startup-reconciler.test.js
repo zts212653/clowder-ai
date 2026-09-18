@@ -74,6 +74,17 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.ok(admissionOpen < recoveryFailure, 'the recovery error path must leave callback admission closed');
   });
 
+  test('production binds the F257 wake trigger before accepting requests', () => {
+    const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
+    const triggerConstruction = source.indexOf('const invokeTrigger = new ConnectorInvokeTrigger');
+    const triggerBinding = source.indexOf('invokeTriggerHolder.current = invokeTrigger;');
+    const listenBoundary = source.indexOf('address = await listenBeforeTurnExecutionRecovery');
+
+    assert.ok(triggerConstruction >= 0, 'production must construct the shared invoke trigger');
+    assert.ok(triggerBinding > triggerConstruction, 'the F257 holder must bind the constructed trigger');
+    assert.ok(triggerBinding < listenBoundary, 'F257 decisions must not be accepted before wake delivery is ready');
+  });
+
   test('marks only pre-process running children interrupted and reports exact ids', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput('ordinary-old', 99));

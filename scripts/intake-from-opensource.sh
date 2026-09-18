@@ -511,7 +511,7 @@ run_brand_validation() {
   if [ -f "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" ]; then
     # Category 1: --classify-path (classification pipeline)
     local _smoke _smoke_cls
-    _smoke=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "assets/system-prompts/x" 2>/dev/null) || _smoke=""
+    _smoke=$(node "$SOURCE_DIR/scripts/brand-dictionary-helper.mjs" --classify-path "assets/prompt-hooks/x" 2>/dev/null) || _smoke=""
     _smoke_cls=$(echo "$_smoke" | node -e "try{const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8'));console.log(d.classification)}catch{console.log('BROKEN')}" 2>/dev/null) || _smoke_cls="BROKEN"
     if [ "$_smoke_cls" != "manual-port" ]; then
       echo -e "${RED}  ✗ Dictionary helper broken (classify) — Phase 2 fail-closed${NC}"
@@ -566,7 +566,7 @@ run_brand_validation() {
       done
       while IFS= read -r pat; do
         [ -z "$pat" ] && continue
-        if echo "assets/system-prompts/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
+        if echo "assets/prompt-hooks/test.md" | grep -qE "^$(_glob_to_re "$pat")$"; then
           _mp_match="yes"; break
         fi
       done <<< "$mp_raw"

@@ -46,9 +46,6 @@ export function ApprovalProvenanceLinks({
     const { legacyThreadId } = navigation;
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-        <span className="text-micro text-[var(--semantic-warning)]" data-testid="approval-legacy-warning">
-          历史记录未建立可靠锚点，无法精确跳转
-        </span>
         {legacyThreadId && (
           <button
             type="button"

@@ -31,6 +31,7 @@ import {
   waitContinuationCarrierFromStoredMessage,
   waitContinuationCarriersMatch,
 } from '../../domains/ball-custody/wait-continuation-carrier.js';
+import { resolveConnectorRowCustodyOwnership } from '../../domains/cats/services/agents/invocation/connector-row-custody-ownership.js';
 import type { InvocationQueue, QueueEntry } from '../../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../../domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
@@ -703,6 +704,21 @@ export class ConnectorInvokeTrigger {
         } catch (error) {
           if (!result.deduped) invocationQueue.rollbackEnqueue(threadId, userId, persistedEntry.id);
           throw error;
+        }
+      }
+      // `sourceMessage` was read before this row existed. Confirm ownership from the
+      // source as it is now; a row its durable custody does not name is rolled back.
+      if (persistedEntry && !result.deduped) {
+        const ownership = resolveConnectorRowCustodyOwnership(
+          await this.opts.messageStore?.getById(messageId),
+          persistedEntry,
+        );
+        if (ownership === 'unowned') {
+          invocationQueue.rollbackEnqueue(threadId, userId, persistedEntry.id);
+          log.info(
+            { threadId, catId, messageId, queueEntryId: persistedEntry.id },
+            '[ConnectorInvokeTrigger] Source custody admits no new carrier; replay row rolled back',
+          );
         }
       }
     }

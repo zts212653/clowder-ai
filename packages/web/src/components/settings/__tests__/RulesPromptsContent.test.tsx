@@ -1,5 +1,5 @@
 /**
- * F203 Phase F — L0 system prompt visibility (read-only viewer).
+ * Session hook pipeline visibility (read-only viewer).
  *
  * Tests the pure props-driven sub-components extracted from
  * RulesPromptsContent. Async fetch + modal interactions covered by
@@ -26,72 +26,35 @@ afterAll(() => {
 
 const SAMPLE_L0: L0PromptsBlock = {
   template: {
-    path: 'assets/system-prompts/system-prompt-l0.md',
-    content: '# L0 template body',
+    path: 'assets/prompt-hooks/README.md',
+    content: '# Session hook pipeline',
     exists: true,
     consumption: {
       kind: 'actual-prompt',
       label: '实际进 prompt',
-      detail: 'Template is compiled per cat and injected into the native system role.',
-      consumers: ['compile-system-prompt-l0.mjs'],
+      detail: 'Session hooks are assembled once by HookPipeline and delivered by each carrier.',
+      consumers: ['HookPipeline'],
     },
   },
-  compiledByCat: [
-    {
-      catId: 'opus-47',
-      displayName: '布偶猫 Opus 4.7',
-      compiled: 'compiled-for-opus-47',
-      error: null,
-      consumption: {
-        kind: 'actual-prompt',
-        label: '实际进 prompt',
-        detail: 'Per-cat compiled L0 actually passed to the model.',
-        consumers: ['ClaudeBgCarrierService'],
-      },
-    },
-    {
-      catId: 'codex',
-      displayName: '缅因猫 GPT-5.5(codex)',
-      compiled: 'compiled-for-codex',
-      error: null,
-      consumption: {
-        kind: 'actual-prompt',
-        label: '实际进 prompt',
-        detail: 'Per-cat compiled L0 actually passed to the model.',
-        consumers: ['CodexAgentService'],
-      },
-    },
-    {
-      catId: 'broken',
-      displayName: 'Broken Cat',
-      compiled: '',
-      error: 'simulated compile failure',
-      consumption: {
-        kind: 'actual-prompt',
-        label: '实际进 prompt',
-        detail: 'Per-cat compiled L0 actually passed to the model.',
-        consumers: ['compile-system-prompt-l0.mjs'],
-      },
-    },
-  ],
+  compiledByCat: [],
   customization: {
-    templatePath: 'assets/system-prompts/system-prompt-l0.md',
-    compileScript: 'scripts/compile-system-prompt-l0.mjs',
-    verifyCommand: 'pnpm gate + runtime restart (KD-5 git revert 回滚通道)',
+    templatePath: 'assets/prompt-hooks/README.md',
+    compileScript: '',
+    verifyCommand: 'pnpm gate + isolated native-carrier invocation',
   },
 };
 
-describe('L0PromptsSection (F203 Phase F)', () => {
+describe('session hook pipeline section', () => {
   it('renders title, template card, and template path (AC-F2/F3)', () => {
     const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
-    expect(html).toContain('L0 系统提示词');
-    expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
+    expect(html).toContain('Session Hook Pipeline');
+    expect(html).toContain('assets/prompt-hooks/README.md');
     expect(html).toContain('查看');
   });
 
   it('renders template path and line count in the template row', () => {
     const html = renderToStaticMarkup(<L0PromptsSection l0Prompts={SAMPLE_L0} onPreview={() => {}} />);
-    expect(html).toContain('assets/system-prompts/system-prompt-l0.md');
+    expect(html).toContain('assets/prompt-hooks/README.md');
     expect(html).toContain('行');
   });
 });
@@ -115,8 +78,8 @@ describe('Prompt consumption chain UX (#749)', () => {
           consumption: {
             kind: 'actual-prompt',
             label: '实际进 prompt',
-            detail: 'shared-rules.md → governance L0 → native/fallback prompt paths.',
-            consumers: ['compile-system-prompt-l0.mjs', 'SystemPromptBuilder'],
+            detail: 'shared-rules.md → session hook pipeline → provider prompt transport.',
+            consumers: ['HookPipeline', 'SystemPromptBuilder'],
           },
         }}
         onClick={() => {}}
@@ -138,8 +101,8 @@ describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', (
           consumption: {
             kind: 'actual-prompt',
             label: '实际进 prompt',
-            detail: 'Per-cat compiled L0 actually passed to the model.',
-            consumers: ['compile-system-prompt-l0.mjs'],
+            detail: 'Route-owned HookPipeline prompt passed to the carrier.',
+            consumers: ['HookPipeline'],
           },
         }}
         label="Broken"
@@ -166,8 +129,8 @@ describe('RuleFileCard error UX (F203 Phase F 砚砚 plan-review refinement)', (
           consumption: {
             kind: 'actual-prompt',
             label: '实际进 prompt',
-            detail: 'Per-cat compiled L0 actually passed to the model.',
-            consumers: ['compile-system-prompt-l0.mjs'],
+            detail: 'Route-owned HookPipeline prompt passed to the carrier.',
+            consumers: ['HookPipeline'],
           },
         }}
         label="Empty Err"

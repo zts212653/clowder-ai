@@ -74,6 +74,7 @@ const baseItem: EvalHubItem = {
     stateSot: 'registry',
   },
   source: {
+    kind: 'workspace',
     verdictPath: 'docs/harness-feedback/verdicts/a2a.md',
     bundleDir: 'docs/harness-feedback/bundles/a2a',
   },

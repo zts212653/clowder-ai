@@ -18,9 +18,8 @@
  * and disposes it when done. Resume via `sessionId` option reuses transcript.
  * Persistent session form (Phase C) is out of B-min scope.
  *
- * Note: B-min does NOT inject --system-prompt-file (L0 compiler integration
- * deferred to a later phase) to stay minimal and avoid dependency on
- * compileL0ViaSubprocess machinery.
+ * Note: B-min has no provider-native session prompt channel. The route keeps
+ * the full HookPipeline result in the message prepend for this carrier.
  */
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

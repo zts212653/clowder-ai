@@ -119,6 +119,7 @@ const frictionSummary = {
         stateSot: 'registry',
       },
       source: {
+        kind: 'workspace',
         verdictPath: 'docs/harness-feedback/verdicts/2026-06-22-eval-friction-test.md',
         bundleDir: 'docs/harness-feedback/bundles/2026-06-22-eval-friction-test',
       },
@@ -160,6 +161,7 @@ const frictionSummary = {
           },
         ],
         source: {
+          kind: 'workspace',
           rawReportPath: 'docs/harness-feedback/bundles/2026-06-22-eval-friction-test/raw/rollup-report.json',
         },
       },

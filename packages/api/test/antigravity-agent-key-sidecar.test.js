@@ -37,6 +37,41 @@ describe('ensureAntigravityAgentKeySidecar', () => {
     }
   });
 
+  test('issues the sidecar for the install owner instead of legacy agent user variables', async () => {
+    const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
+    const { ensureAntigravityAgentKeySidecar } = await import(
+      '../dist/domains/cats/services/agents/agent-key/antigravity-agent-key-sidecar.js'
+    );
+
+    for (const [label, env, expected] of [
+      // sol's repro: a coherent alice install still issued the key to a legacy user.
+      [
+        'coherent install with a legacy override',
+        {
+          DEFAULT_OWNER_USER_ID: 'configured-owner',
+          CAT_CAFE_USER_ID: 'configured-owner',
+          CAT_CAFE_AGENT_KEY_USER_ID: 'legacy-agent-user',
+        },
+        'configured-owner',
+      ],
+      // The documented configuration: only the trust anchor is set.
+      ['trust anchor only', { DEFAULT_OWNER_USER_ID: 'alice', CAT_CAFE_AGENT_KEY_USER_ID: 'legacy' }, 'alice'],
+      ['runtime user only', { CAT_CAFE_USER_ID: 'bob' }, 'bob'],
+    ]) {
+      const dir = join(tmpdir(), `cat-cafe-agent-key-owner-${Date.now()}-${expected}`);
+      const filePath = join(dir, 'antigravity.secret');
+      try {
+        const registry = new AgentKeyRegistry();
+        await ensureAntigravityAgentKeySidecar(registry, { filePath, env: { ...env } });
+        const verify = await registry.verify((await readFile(filePath, 'utf-8')).trim());
+        assert.equal(verify.ok, true);
+        if (verify.ok) assert.equal(verify.record.userId, expected, label);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('issues separate variant-scoped sidecar keys for Antigravity and AGY-carried cats', async () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ensureAntigravityAgentKeySidecar } = await import(

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { enrichEvalHubLifecycle } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 
 const verdictId = 'f266-recovery-projection';
 const domainId = 'eval:capability-tips';
@@ -88,6 +89,11 @@ async function project(t, events) {
     id: verdictId,
     domainId,
     verdict: 'fix',
+    source: {
+      kind: 'workspace',
+      verdictPath: `docs/harness-feedback/verdicts/${verdictId}.md`,
+      bundleDir: `docs/harness-feedback/bundles/${verdictId}`,
+    },
     evidence: { attributionRefs: [], metricRefs: [] },
     lifecycle: {
       availability: 'unavailable',
@@ -102,7 +108,7 @@ async function project(t, events) {
     items: [item],
   };
   const enriched = await enrichEvalHubLifecycle(summary, {
-    harnessFeedbackRoot,
+    space: installLifecycleSpace(harnessFeedbackRoot),
     eventLog: { read: async () => structuredClone(events) },
   });
   return enriched.items[0].lifecycle;

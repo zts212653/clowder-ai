@@ -21,7 +21,9 @@ export function createFreshnessGeneratorAdapter(provider: FreshnessReplayProvide
     if (replay.measurementMaturity.status !== 'ready') {
       throw new Error(`measurement_validity_gate: ${replay.measurementMaturity.reasons.join(',')}`);
     }
-    const domain = loadDomains(deps.harnessFeedbackRoot).get(packet.domainId);
+    // The eval-domain registry lives only in the live checkout, never in the isolated
+    // output root the generator writes into (see GeneratorDeps.liveHarnessFeedbackRoot).
+    const domain = loadDomains(deps.liveHarnessFeedbackRoot).get(packet.domainId);
     if (!domain) throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
     if (domain.domainId !== 'eval:freshness') {
       throw new Error(`freshness_adapter_wrong_domain: ${domain.domainId}`);

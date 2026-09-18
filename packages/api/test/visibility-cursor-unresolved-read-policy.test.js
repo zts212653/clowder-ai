@@ -72,6 +72,7 @@ describe('#3444 unresolved visibility read-anchor policy', { skip: redisIsolatio
 
   async function appendMessage({ threadId, catId, content, timestamp, mentionsUser = false }) {
     return messageStore.append({
+      provenance: { author: catId === null ? 'user' : 'cat', routed: false, observation: 'original' },
       userId: USER_ID,
       catId,
       content,

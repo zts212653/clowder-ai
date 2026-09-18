@@ -310,7 +310,7 @@ export function runExternalReviewClosureCheck(root = process.cwd()) {
       requestReviewSkill,
       receiveReviewSkill,
       mergeGateSkill: read('cat-cafe-skills/merge-gate/SKILL.md'),
-      ironLaw: read('assets/prompt-templates/l4-iron-laws.md'),
+      ironLaw: read('assets/prompt-hooks/l4-五条铁律/l4-iron-laws.md'),
       // The inbound maintainer playbook is deliberately home-only. Keep checking
       // it in cat-cafe, but do not make the public review contract depend on a
       // file that sync-manifest explicitly excludes from clowder-ai.
