@@ -63,6 +63,7 @@ describe('createGitWorktreePublisher', () => {
     const ghLog = join(fakeBin, 'gh.log');
     const fakeGh = join(fakeBin, 'gh');
     const originalPath = process.env.PATH;
+    const originalLocalCommandFixtures = process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
     const branchName = 'verdict/auto/eval-a2a/status-failure-cleanup';
     writeFileSync(
       fakeGh,
@@ -77,6 +78,7 @@ exit 97
     );
     fs.chmodSync(fakeGh, 0o755);
     process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+    process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = fakeGh;
 
     try {
       const { createGitWorktreePublisher } = await import(
@@ -121,6 +123,8 @@ exit 97
       assert.doesNotMatch(ghCalls, /^pr create /m, 'status failure must stop before PR creation');
     } finally {
       process.env.PATH = originalPath;
+      if (originalLocalCommandFixtures === undefined) delete process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
+      else process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = originalLocalCommandFixtures;
       rmSync(repoRoot, { recursive: true, force: true });
       rmSync(remoteRoot, { recursive: true, force: true });
       rmSync(fakeBin, { recursive: true, force: true });
@@ -325,6 +329,7 @@ exit 97
     const fakeBin = fs.mkdtempSync(join(tmpdir(), 'publish-wt-resolve-bin-'));
     const fakeGh = join(fakeBin, 'gh');
     const originalPath = process.env.PATH;
+    const originalLocalCommandFixtures = process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
     const branchName = 'measurement/auto/capability-evolution/existing-proof';
     const sourceMessageId = 'source-message-existing-proof';
     const artifactRef = 'docs/harness-feedback/certificates/existing-proof.yaml';
@@ -353,6 +358,7 @@ exit 97
       );
       fs.chmodSync(fakeGh, 0o755);
       process.env.PATH = `${fakeBin}:${originalPath ?? ''}`;
+      process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = fakeGh;
 
       const { createGitWorktreePublisher } = await import(
         `../../dist/infrastructure/harness-eval/publish-verdict/git-worktree-publisher.js?t=${Date.now()}-resolve`
@@ -434,6 +440,8 @@ exit 97
       );
     } finally {
       process.env.PATH = originalPath;
+      if (originalLocalCommandFixtures === undefined) delete process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
+      else process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES = originalLocalCommandFixtures;
       rmSync(repoRoot, { recursive: true, force: true });
       rmSync(remoteRoot, { recursive: true, force: true });
       rmSync(fakeBin, { recursive: true, force: true });

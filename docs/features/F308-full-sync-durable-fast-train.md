@@ -4,11 +4,11 @@ related_features: [F116, F153, F251]
 topics: [outbound-sync, release-train, receipts, recovery, ci, test-sharding, provenance]
 doc_kind: spec
 created: 2026-08-27
-description: "把 Clowder AI→开源 target 全量同步从一次性长脚本升级为绑定 exact cut 的持久 receipt、可恢复单飞 gate 与不减覆盖的 public-test 分片。"
+description: "把 source repository→开源 target 全量同步从一次性长脚本升级为绑定 exact cut 的持久 receipt、可恢复单飞 gate 与不减覆盖的 public-test 分片。"
 description_source: human
 description_author: codex-terra
 description_updated_at: 2026-08-27T00:00:00-07:00
-tips_exempt: "维护者 CLI / CI 可靠性能力：F308 receipt recovery、no-write train 与 target CI evidence 不新增 Hub 可发现的终端用户功能；operator status 是命令输出，不是 capability tip surface。"
+tips_exempt: "Renewed 2026-09-19 for the public-test resource-scope correction: the change replaces lexical test classification with a runtime CI isolation guard and adds no Hub-discoverable user action; operator evidence remains CI output rather than a capability-tip surface."
 ---
 
 # F308: Full-Sync Durable Fast Train — Exact Cut、可恢复 Gate 与 CI Critical Path
@@ -29,7 +29,7 @@ head 漂移后正确恢复。F308 只扩展既有外部动作的 audit / dry-run
 ## Why
 
 2026-08-27 的完整同步闭环最终安全完成，但约耗时 28 小时。已核验基线为：public landed
-`1700bf30…61e0`、Clowder AI closure `8660f89c…5ee6`；F251 为 `614 pass / 0 block / 0 override`，35
+`1700bf30…61e0`、source closure `8660f89c…5ee6`；F251 为 `614 pass / 0 block / 0 override`，35
 条 reconciliation 全闭环，随后 6 个社区 PR / 79 files 已被 intake 或 absorbed，16 条 target-owned
 item 仍保留，`.env` 元数据未变。
 
@@ -49,7 +49,7 @@ F308 的终态是：维护者一次启动或恢复一个冻结 cut，就能看�
 | outbound writer | `scripts/sync-to-opensource.sh` 是唯一 export、F251、temp target gate 与 real target write 入口 | 继续由该脚本写入；F308 不另造 rsync writer |
 | community preservation | F251、reconciliation ledger、target-owned backup/restore | 所有 receipt 和 resume 都重新证明这三项；不得用 cache 越过 |
 | public CI workflow | 开源 target 的 `.github/workflows/ci.yml` 是 `sync-manifest.yaml` target-owned | 以独立 target-repo PR 维护；export 不覆盖它 |
-| public-test safety | `packages/api/scripts/run-public-tests.sh` 明确 `--test-concurrency=1` | 按 file classification 拆 stateful serial lane 与证明隔离的 pure shards；绝不全局升 concurrency |
+| public-test safety | `packages/api/scripts/run-public-tests.sh` 明确 `--test-concurrency=1` | 只把具备真实跨 VM 共享资源证据的文件留在 shared serial；其余 target-CI 测试在仅保留 loopback 的 Linux network namespace 与 runtime guard 双重约束下进入统一可分发池，绝不全局升 concurrency |
 
 ## User Journey — Operator
 
@@ -79,7 +79,7 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 | R2 | DAG early failure + typed next action | AC-B1–B2 | [x] |
 | R3 | admission / single-flight / restart recovery | AC-B3–B5 | [x] |
 | R4 | F251, ledger and community preservation remain fail-closed | AC-C1–C4 | [x] |
-| R5 | deterministic 4–6 public-test shards without coverage loss | AC-D1–D6 | [ ] |
+| R5 | deterministic 4–6 distributable public-test shards plus one explicit shared-resource lane, without coverage loss | AC-D1–D6 | [ ] |
 | R6 | launch/resume/status observability and real no-write dogfood | AC-A1, AC-B3–B5, AC-E1 | [x] |
 
 ## Acceptance Criteria
@@ -124,10 +124,20 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 
 - [x] **AC-D1**: Resolver emits deterministic selected-file manifest, per-file timing, failure category and stable
   mapping fingerprint.
-- [x] **AC-D2**: A planner produces 4–6 deterministic, duration-balanced pure-test shards; every selected test
-  appears exactly once, no excluded test is silently reintroduced, and shard mapping is reproducible from the manifest.
-- [x] **AC-D3**: Redis, ports, fs.watch and other stateful classes remain in a serial lane; a test enters a parallel
-  lane only with explicit isolation proof.
+- [x] **AC-D2**: A planner produces 4–6 deterministic distributable shards plus one explicit shared-resource lane;
+  current CI uses six count-balanced distributable shards because it has no measured timing artifact. Every selected
+  test appears exactly once, no excluded test is silently reintroduced, and shard mapping is reproducible from the
+  manifest. Duration balancing remains an operator-side replay capability, not a claim about the CI-produced plan.
+- [x] **AC-D3**: Only tests with explicit evidence for a real cross-VM remote endpoint, shared account or shared quota
+  remain in one globally serial lane. Every other file runs in one count-balanced distributable pool across isolated
+  GitHub VMs; each file still receives a fresh Node process and every VM remains file-serial with
+  `--test-concurrency=1`. Each target-CI distributable command enters a new Linux network namespace with only
+  loopback enabled, then drops root before running tests; the kernel therefore rejects unknown Node/native/shell IP
+  egress without a lexical classifier. The bounded preload guard adds earlier typed failures for recognized `fetch`,
+  WebSocket, HTTP(S), TCP/TLS and child-process paths, including non-loopback Bash `/dev/tcp` and `/dev/udp`
+  redirections. An exact temporary executable can run only when the test explicitly declares it as a local command
+  fixture. Duration balancing exists as an operator-side replay tool but current CI does not supply a measured timing
+  artifact.
 - [x] **AC-D4**: CI shares install/build artifacts only when lockfile, toolchain and workspace inputs match; required
   checks remain required on Linux, Windows, macOS and public contract surfaces.
 - [x] **AC-D5**: PR/main duplicate reuse is accepted only with exact tested-tree provenance, never by branch name or
@@ -135,8 +145,13 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 - [ ] **AC-D6**: Three same-selection target-CI artifacts report p50/p95, critical path and coverage count. The
   original CI p50 ≤10m / p95 ≤12m goal is not yet credible: exact source-runner evidence
   (`docs/ops/2026-08-27-f308-public-test-source-measurements.json`) measured p50 14m18s / p95 14m25s with the
-  serial lane dominant. Until a reviewed per-class isolation audit changes that boundary, the source-runner interim
-  ceiling is p50 ≤15m / p95 ≤16m. Source-runner evidence never substitutes for the required target-CI artifacts.
+  serial lane dominant. The resource-scope split makes the original target measurable again but does not complete it:
+  source-runner evidence and single target runs never substitute for the required three target-CI artifacts. The
+  exact target run `35439924398` measured a 319,657ms nine-lane test critical path. Replaying that run's 2,189
+  per-file timings through the same deterministic count balancer yields a 396,477ms six-lane projection; adding the
+  run's observed 122,343ms slowest-job setup/build overhead projects 518,820ms (8m38.820s). This is design evidence,
+  not target-CI completion evidence; the six-lane target must still run, and a future timing-artifact design must
+  preserve selection and provenance fail-closed behavior.
 
 ### Phase E — Dogfood, review and close
 
@@ -165,7 +180,7 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 | receipt becomes an unsafe cache | tuple + executable + output fingerprint are all mandatory; invalidation is durable and fail-closed |
 | restart conflates different terminals | distinct receipt kinds and transition validation; restart tests cover each boundary |
 | target CI change gets overwritten later | keep workflow target-owned and require its own Clowder PR / F251 preservation proof |
-| pure shard leaks shared state | classifier is deny-by-default; stateful lane remains serial; isolation proof is versioned/tested |
+| shared scope leaks across distributable shards | explicit shared-resource rules are globally serial; every target-CI distributable command runs unprivileged inside a loopback-only Linux network namespace, so unknown Node/native/shell IP egress has no route; the bounded preload guard adds earlier typed failures for recognized paths and requires exact temporary-path declarations for local executable fixtures; shard jobs have read-only repository permission, local-only Git transport, no persisted checkout credentials and no service credentials |
 | fast number loses coverage | exact-once manifest guard, selected count, exclusion registry validation and three-run report |
 | host variance yields false pressure decision | record host capacity and use ratios rather than a fixed-memory threshold |
 
@@ -184,8 +199,10 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 - The target-owned CI patch landed in `clowder-ai` PR #1413 at merge
   `71a9b707847f7ed2cd43a3de42e4ca40ec7520e3`. Exact-head target CI preserved the required `Test (Public)` check,
   Windows and public-contract surfaces; its serial bootstrap passed in 19m36s and the fail-closed aggregate passed.
-  Once the source shard contract arrives, the workflow requires exact-plan/report summary provenance for one serial
-  plus four pure lanes. Three real sharded target-CI artifacts are still required by AC-D6.
+  The workflow now requires exact-plan/report summary provenance for one explicit shared-resource lane and six
+  guarded distributable shards. The distributable workflow additionally enters a loopback-only Linux network
+  namespace and drops root before test execution. Every selected file must appear exactly once, and the evidence job
+  fails above a 600,000ms critical path. Three same-selection target-CI artifacts are still required by AC-D6.
 
 ## Key Decisions
 
@@ -195,4 +212,4 @@ runner minutes；它不把 GitHub queue、人类 review 或外部 intake 等待�
 | KD-2 | Receipts live in a durable local operator-state root, not in Git or target tree | They survive runtime/carrier restart without polluting exported/public content; their path is explicit in every receipt. |
 | KD-3 | `sync-to-opensource.sh` remains the only writer | Receipt orchestration wraps and proves the existing writer instead of creating a second rsync path. |
 | KD-4 | Clowder `ci.yml` stays target-owned | It must be changed by a dedicated target-repo PR, not smuggled through source export. |
-| KD-5 | Sharding starts with deterministic planning + serial stateful lane | The 2026-05 pollution incident proves global concurrency is not a valid optimization. |
+| KD-5 | Sharding follows resource scope, not a blanket “stateful” label | The shared-keyspace incident proves unisolated shared Redis keys are unsafe; it does not prove that runner-local ports, temp files, processes or names must share one global queue. |

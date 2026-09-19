@@ -40,8 +40,14 @@ test(
     const dataDir = await mkdtemp(join(realpathSync(tmpdir()), 'cat-cafe-owner-reaper-data-'));
     const socketDirectory = createCodexSocketDirectory();
     const readyPath = join(dataDir, 'ready.json');
+    const descendantReadyPath = join(dataDir, 'descendant-ready');
     const supervisorPath = fileURLToPath(new URL('../dist/utils/cli-supervisor.js', import.meta.url));
-    const descendantScript = 'process.on("SIGTERM",()=>{});setInterval(()=>{},60000)';
+    const descendantScript = [
+      'const fs = require("node:fs");',
+      'process.on("SIGTERM",()=>{});',
+      `fs.writeFileSync(${JSON.stringify(descendantReadyPath)}, "ready");`,
+      'setInterval(()=>{},60000);',
+    ].join('\n');
     const childScript = [
       'const fs = require("node:fs");',
       'const { spawn } = require("node:child_process");',
@@ -76,6 +82,11 @@ test(
 
       assert.equal(await waitUntil(() => existsSync(readyPath)), true, `owned tree not ready: ${stderr}`);
       ({ leader: leaderPid, descendant: descendantPid } = JSON.parse(await readFile(readyPath, 'utf8')));
+      assert.equal(
+        await waitUntil(() => existsSync(descendantReadyPath)),
+        true,
+        `owned descendant did not install its SIGTERM handler: ${stderr}`,
+      );
       const ownerDir = join(dataDir, 'cli-process-owners');
       assert.equal(
         await waitUntil(() => existsSync(ownerDir) && readdir(ownerDir).then((names) => names.length > 0)),

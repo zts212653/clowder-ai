@@ -22,8 +22,7 @@ function tailAppend(previous, chunk) {
 
 export function filesForPublicTestLane(plan, lane) {
   validatePublicTestShardPlan(plan, plan.selectedFiles);
-  if (lane === 'serial') return [...plan.lanes.serial.files];
-  const shard = plan.pureShards.find((candidate) => candidate.id === lane);
+  const shard = [plan.sharedSerialLane, ...plan.distributableShards].find((candidate) => candidate.id === lane);
   invariant(shard, `unknown public-test shard lane: ${lane}`);
   return [...shard.files];
 }
@@ -39,17 +38,25 @@ export function categorizePublicTestFailure({ exitCode, signal, output = '' }) {
   return 'test_failure';
 }
 
-export async function runNodePublicTestFile({ file, packageRoot, env = process.env }) {
+export async function runNodePublicTestFile({ file, packageRoot, resourceScope, env = process.env }) {
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const outputHash = createHash('sha256');
   let outputTail = '';
   const child = spawn(
     process.execPath,
-    ['--import', resolve(packageRoot, 'test/helpers/setup-cat-registry.js'), '--test', '--test-concurrency=1', file],
+    [
+      '--import',
+      resolve(packageRoot, 'scripts/public-test-external-resource-guard.mjs'),
+      '--import',
+      resolve(packageRoot, 'test/helpers/setup-cat-registry.js'),
+      '--test',
+      '--test-concurrency=1',
+      file,
+    ],
     {
       cwd: packageRoot,
-      env,
+      env: { ...env, CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE: resourceScope },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -102,18 +109,19 @@ export async function runPublicTestLane({ plan, lane, packageRoot, manifest, exe
     );
   }
   const files = filesForPublicTestLane(plan, lane);
+  const resourceScope = lane === plan.sharedSerialLane.id ? 'shared' : 'distributable';
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const results = [];
   for (const file of files) {
-    const result = await executeFile({ file, packageRoot });
+    const result = await executeFile({ file, packageRoot, resourceScope });
     results.push(result);
     if (result.status !== 'passed') break;
   }
   const firstHardFailure = results.find((result) => result.status !== 'passed');
   const finishedAt = new Date().toISOString();
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     kind: 'public_test_shard_run',
     planFingerprint: plan.planFingerprint,
     selectionHash: plan.selectionHash,
@@ -143,7 +151,7 @@ async function main() {
   const options = parsePublicTestCliOptions(normalizePublicTestCliArgv(process.argv.slice(2)));
   if (options.help) {
     process.stdout.write(
-      'Usage: node packages/api/scripts/run-public-test-shard.mjs --plan <path> --lane <serial|pure-N> --report <path>\n',
+      'Usage: node packages/api/scripts/run-public-test-shard.mjs --plan <path> --lane <serial-shared|distributable-N> --report <path>\n',
     );
     return;
   }
