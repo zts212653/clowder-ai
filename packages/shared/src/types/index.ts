@@ -275,6 +275,8 @@ export type {
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
 // F212: CLI error diagnostics (cross-package data contract; classifier/sanitizer impl stays in api)
 export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
+export type { ClientDefaultsEntry } from './client-defaults.js';
+export { resolveClientDefaults } from './client-defaults.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   BUILTIN_ACCOUNT_CLIENT_FOR_ID,

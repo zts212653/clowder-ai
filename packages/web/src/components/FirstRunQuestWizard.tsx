@@ -199,7 +199,9 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           )}
 
           {step === 'template' && <TemplateStep onSelect={handleTemplateSelect} />}
-          {step === 'client' && <ClientStep onSelect={handleClientSelect} />}
+          {step === 'client' && (
+            <ClientStep onSelect={handleClientSelect} recommendedClient={selectedTemplate?.defaultClient} />
+          )}
           {step === 'config' && selectedClient && (
             <ConfigStep
               client={selectedClient.client}
