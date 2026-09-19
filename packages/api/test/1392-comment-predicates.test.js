@@ -277,4 +277,83 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     );
     assert.doesNotMatch(messageStore.getByThread('thread_1')[0].content, new RegExp(SENTINEL));
   });
+  /*
+   * #1392 AC-3/6/7 — clowder-ai#1477, as a real acceptance sample rather than an invented one.
+   *
+   * On 2026-09-18 the author of that PR reported in a conversation comment that the dependency had
+   * been published, and said in the same breath that Core HEAD was still `4ce35561` — no new commit.
+   * A registration watching only `pr_head_changed` is not expired and its collector is healthy, and
+   * it still never wakes, because the thing being waited on was a reply and not a push. That is the
+   * gap this sample pins: capacity alone does not help if the common entry makes the comment
+   * condition easy to leave out.
+   *
+   * What the wake may claim is narrow. It says the named author replied and points at the comment.
+   * Whether the dependency actually shipped is for the woken agent to check — the matcher does not
+   * read prose, and `nextStep` is display-only text, never a condition.
+   */
+  const AUTHOR_RECEIPT = {
+    id: 901,
+    author: 'pr-author',
+    body: 'Dependency published. Core HEAD is still 4ce3556173384a69abd6bdba875ab24238004946.',
+    createdAt: '2026-09-18T16:13:00Z',
+    commentType: 'conversation',
+    sourceRef: 'github:pr-comment:5732805637',
+  };
+
+  it('#1477: the named author replies while HEAD never moves, and the owner is woken anyway', async () => {
+    const { router, messageStore, task } = await tracked([conversation(['pr-author']), { kind: 'pr_head_changed' }]);
+
+    const result = await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), {
+      taskId: task.id,
+    });
+
+    assert.equal(result.kind, 'notified', 'an author receipt must not be absorbed as a cursor move');
+    const delivered = messageStore.getByThread('thread_1');
+    assert.equal(delivered.length, 1);
+    assert.match(
+      delivered[0].content,
+      /conversation comment/i,
+      'the wake names the reply, not a push that never happened',
+    );
+  });
+
+  it('#1477: the wake renews the registration instead of only advancing the comment cursor', async () => {
+    const { router, taskStore, task } = await tracked([conversation(['pr-author']), { kind: 'pr_head_changed' }]);
+
+    await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), { taskId: task.id });
+
+    const after = await taskStore.get(task.id);
+    assert.equal(
+      after.automationState.await?.generation,
+      2,
+      'one reply must not end the tracking the owner registered once',
+    );
+  });
+
+  it('#1477: the wake points at the comment and never repeats what it claimed', async () => {
+    const { router, messageStore, task } = await tracked([conversation(['pr-author'])]);
+
+    await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), { taskId: task.id });
+
+    const content = messageStore.getByThread('thread_1')[0].content;
+    assert.match(content, /901/, 'the owner needs a pointer to go read it');
+    assert.doesNotMatch(
+      content,
+      /Dependency published/,
+      'whether the dependency shipped is the woken agent’s to verify, not the matcher’s to assert',
+    );
+  });
+
+  it('#1477: a comment already present at registration cannot impersonate the reply being waited on', async () => {
+    const { router, messageStore, task } = await tracked([conversation(['pr-author'])]);
+    const history = { ...AUTHOR_RECEIPT, id: 900, createdAt: '2026-09-17T00:00:00Z' };
+
+    await router.route(signal([history], { inline: 50, conversation: 900 }), { taskId: task.id });
+
+    assert.equal(
+      messageStore.getByThread('thread_1').length,
+      0,
+      'the frontier was frozen at registration; history is not news',
+    );
+  });
 });
