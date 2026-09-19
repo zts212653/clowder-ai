@@ -1,12 +1,14 @@
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import type { RecallMessageToComposerDraftCoordinatorResult } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type {
+  IMessageStore,
+  RecallMessageToComposerDraftResult,
+} from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { projectRecallMessage } from './composer-draft-recall-helpers.js';
 import type { DerivedTitleSuppression } from './composer-draft-recall-title.js';
 
-type RecalledResult = Extract<RecallMessageToComposerDraftCoordinatorResult, { kind: 'recalled' }>;
+type RecalledResult = Extract<RecallMessageToComposerDraftResult, { kind: 'recalled' }>;
 
 interface RecallProjectionContext {
   socketManager: SocketManager;

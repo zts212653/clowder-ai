@@ -21,6 +21,17 @@ function createErrorService(catId, errorMsg) {
   };
 }
 
+function createMultipleErrorService(catId, errorMessages) {
+  return {
+    async *invoke() {
+      for (const error of errorMessages) {
+        yield { type: 'error', catId, error, timestamp: Date.now() };
+      }
+      yield { type: 'done', catId, timestamp: Date.now() };
+    },
+  };
+}
+
 /** F212 Phase B (云端 codex P2-8): emit error with structured cliDiagnostics on metadata. */
 function createCliErrorWithDiagnosticsService(catId, errorMsg, cliDiagnostics) {
   return {
@@ -60,6 +71,7 @@ function createMockDeps(services, appendCalls) {
       },
       sessionManager: {
         getOrCreate: async () => ({}),
+        get: async () => null,
         resolveWorkingDirectory: () => '/tmp/test',
       },
       threadStore: null,
@@ -82,6 +94,7 @@ function createMockDeps(services, appendCalls) {
       getRecent: () => [],
       getMentionsFor: () => [],
       getBefore: () => [],
+      getById: async () => null,
       getByThread: () => [],
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],
@@ -90,6 +103,170 @@ function createMockDeps(services, appendCalls) {
 }
 
 describe('route-serial error persistence (F5 reload)', () => {
+  async function lifecycleResponseStoreFor(input) {
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const store = new MessageStore();
+    const response = await store.append({
+      from: { kind: 'agent', catId: input.catId },
+      userId: input.userId,
+      content: '',
+      mentions: [],
+      origin: 'stream',
+      timestamp: input.startedAt,
+      threadId: input.threadId,
+      lifecycle: {
+        kind: 'response',
+        orderKey: `${input.startedAt}:${input.invocationId}`,
+        invocationId: input.invocationId,
+        targetId: input.catId,
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: [],
+        status: 'processing',
+        startedAt: input.startedAt,
+      },
+    });
+    return { store, response };
+  }
+
+  for (const strategy of ['serial', 'parallel']) {
+    it(`${strategy}: persists an owned provider failure in the fixed member response without a system error row`, async () => {
+      const route =
+        strategy === 'serial'
+          ? (await import('../dist/domains/cats/services/agents/routing/route-serial.js')).routeSerial
+          : (await import('../dist/domains/cats/services/agents/routing/route-parallel.js')).routeParallel;
+      const deps = createMockDeps(
+        {
+          gemini: createMultipleErrorService('gemini', [
+            'init_failure: first provider attempt failed',
+            'init_failure: second provider attempt failed',
+          ]),
+        },
+        [],
+      );
+      let lifecycleStore;
+      let responseMessageId;
+      const yielded = [];
+
+      for await (const event of route(deps, ['gemini'], 'hello', 'user1', 'thread1', {
+        onLifecycleInvocationStarted: async (input) => {
+          const admission = await lifecycleResponseStoreFor(input);
+          lifecycleStore = admission.store;
+          deps.messageStore = admission.store;
+          responseMessageId = admission.response.id;
+          return { responseMessageId: admission.response.id, priorFrontierMessageId: null };
+        },
+      })) {
+        yielded.push(event);
+      }
+
+      assert.ok(lifecycleStore, 'lifecycle store must be admitted before provider execution');
+      const messages = lifecycleStore.getByThread('thread1', 100, 'user1');
+      const response = messages.find((message) => message.id === responseMessageId);
+      assert.equal(response?.from?.kind, 'agent');
+      assert.equal(response?.from?.catId, 'gemini');
+      assert.equal(response?.lifecycle?.kind, 'response');
+      assert.equal(response?.lifecycle?.status, 'failed');
+      assert.equal(
+        response?.content,
+        'init_failure: first provider attempt failed\ninit_failure: second provider attempt failed',
+      );
+      assert.equal(
+        messages.some((message) => message.from?.kind === 'system' && message.from.service === 'agent-error'),
+        false,
+      );
+      assert.equal(
+        yielded.some((message) => message.type === 'error'),
+        false,
+        'a response-owned failure must update its canonical response instead of creating a live system error surface',
+      );
+    });
+
+    it(`${strategy}: closes a canceled run on the fixed member response without a silent-completion notice`, async () => {
+      const route =
+        strategy === 'serial'
+          ? (await import('../dist/domains/cats/services/agents/routing/route-serial.js')).routeSerial
+          : (await import('../dist/domains/cats/services/agents/routing/route-parallel.js')).routeParallel;
+      const controller = new AbortController();
+      const deps = createMockDeps(
+        {
+          gemini: {
+            async *invoke() {
+              controller.abort('user_cancel');
+              yield { type: 'done', catId: 'gemini', timestamp: Date.now() };
+            },
+          },
+        },
+        [],
+      );
+      let lifecycleStore;
+      let responseMessageId;
+      const yielded = [];
+
+      for await (const message of route(deps, ['gemini'], 'hello', 'user1', 'thread1', {
+        signal: controller.signal,
+        onLifecycleInvocationStarted: async (input) => {
+          const admission = await lifecycleResponseStoreFor(input);
+          lifecycleStore = admission.store;
+          deps.messageStore = admission.store;
+          responseMessageId = admission.response.id;
+          return { responseMessageId: admission.response.id, priorFrontierMessageId: null };
+        },
+      })) {
+        yielded.push(message);
+      }
+
+      assert.ok(lifecycleStore, 'lifecycle store must be admitted before cancellation');
+      const response = lifecycleStore.getById(responseMessageId);
+      assert.equal(response?.from?.kind, 'agent');
+      assert.equal(response?.lifecycle?.kind, 'response');
+      assert.equal(response?.lifecycle?.status, 'canceled');
+      assert.equal(
+        yielded.some(
+          (message) => message.type === 'system_info' && String(message.content).includes('silent_completion'),
+        ),
+        false,
+      );
+    });
+  }
+
+  it('serial: reports a failed A2A response to the exact predecessor and suppresses recursive report carriers', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ bengal: createErrorService('bengal', 'model unavailable') }, []);
+    const reports = [];
+    const commonOptions = {
+      a2aTriggerMessageId: 'source-from-opus',
+      a2aCallerCatId: 'opus',
+      onLifecycleInvocationStarted: async (input) => {
+        const admission = await lifecycleResponseStoreFor(input);
+        deps.messageStore = admission.store;
+        return { responseMessageId: admission.response.id, priorFrontierMessageId: null };
+      },
+      commitFailedA2AReport: async (input) => {
+        reports.push(input);
+        const current = await deps.messageStore.getById(input.responseMessageId);
+        return { ...current, content: input.message.content, lifecycle: { ...current.lifecycle, ...input.terminal } };
+      },
+    };
+
+    for await (const _ of routeSerial(deps, ['bengal'], 'please handle this', 'user1', 'thread1', commonOptions)) {
+      void _;
+    }
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].reporterCatId, 'bengal');
+    assert.equal(reports[0].predecessorCatId, 'opus');
+    assert.equal(reports[0].terminal.status, 'failed');
+    assert.match(reports[0].message.content, /model unavailable/);
+
+    reports.length = 0;
+    for await (const _ of routeSerial(deps, ['bengal'], 'failure report carrier', 'user1', 'thread1', {
+      ...commonOptions,
+      a2aFailureReport: true,
+    })) {
+      void _;
+    }
+    assert.equal(reports.length, 0, 'a failed report carrier must not recurse back to its reporter');
+  });
+
   it('persists error-only response as system message with Error: prefix', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -104,7 +281,7 @@ describe('route-serial error persistence (F5 reload)', () => {
     }
 
     // Should have one append: the system error message
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'should persist a system error message');
     assert.ok(
       errorAppend.content.startsWith('Error:'),
@@ -113,7 +290,7 @@ describe('route-serial error persistence (F5 reload)', () => {
     assert.ok(errorAppend.content.includes('stream_idle_stall'), 'system error should contain the original error text');
 
     // No cat message with [错误] prefix should exist
-    const catAppend = appendCalls.find((m) => m.catId === 'gemini');
+    const catAppend = appendCalls.find((m) => m.from?.kind === 'agent' && m.from.catId === 'gemini');
     assert.equal(catAppend, undefined, 'error-only should NOT persist as cat message');
   });
 
@@ -137,13 +314,13 @@ describe('route-serial error persistence (F5 reload)', () => {
     }
 
     // Cat message should have the text content WITHOUT [错误] contamination
-    const catAppend = appendCalls.find((m) => m.catId === 'gemini');
+    const catAppend = appendCalls.find((m) => m.from?.kind === 'agent' && m.from.catId === 'gemini');
     assert.ok(catAppend, 'should persist cat text message');
     assert.ok(!catAppend.content.includes('[错误]'), 'cat message should NOT contain [错误] prefix');
     assert.ok(catAppend.content.includes('partial response'), 'cat message should contain the actual response text');
 
     // System error message should also be persisted
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'should persist a separate system error message');
     assert.ok(errorAppend.content.startsWith('Error:'), 'system error should start with Error: prefix');
     assert.ok(errorAppend.content.includes('model_capacity'), 'system error should contain the error code');
@@ -186,7 +363,7 @@ describe('route-serial error persistence (F5 reload)', () => {
       void _;
     }
 
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'should persist a system error message');
     assert.ok(errorAppend.metadata, 'append must include metadata for hydration');
     assert.deepEqual(
@@ -207,7 +384,7 @@ describe('route-serial error persistence (F5 reload)', () => {
       void _;
     }
 
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'should persist a system error message');
     assert.equal(errorAppend.metadata, undefined, 'metadata must be absent when no cliDiagnostics');
   });
@@ -277,13 +454,13 @@ describe('route-serial error persistence (F5 reload)', () => {
 
     assert.equal(projectionCloseCount, 1, 'custody projection still records the failed turn');
     assert.equal(invokeCount, 1, 'provider-error turns must not start a stop-gate child');
-    const catAppend = appendCalls.find((m) => m.catId === 'codex');
+    const catAppend = appendCalls.find((m) => m.from?.kind === 'agent' && m.from.catId === 'codex');
     assert.ok(catAppend, 'partial cat text should still persist');
     assert.ok(
       catAppend.content.includes('Partial answer'),
       'cat message should contain the partial pre-failure content',
     );
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'terminal failure must persist as system error message');
     assert.ok(errorAppend.content.startsWith('Error:'), 'system error should carry Error: prefix for F5 rehydration');
     assert.equal(
@@ -349,15 +526,15 @@ describe('route-serial error persistence (F5 reload)', () => {
       0,
       'cloud R3 P1 fix contract: partial @mention from a failed turn MUST NOT dispatch downstream cats',
     );
-    const catAppend = appendCalls.find((m) => m.catId === 'codex');
+    const catAppend = appendCalls.find((m) => m.from?.kind === 'agent' && m.from.catId === 'codex');
     assert.ok(catAppend?.content.includes('Partial handoff'), 'partial content still persisted');
-    const errorAppend = appendCalls.find((m) => m.userId === 'system' && m.catId === null);
+    const errorAppend = appendCalls.find((m) => m.from?.kind === 'system' && m.from.service === 'agent-error');
     assert.ok(errorAppend, 'terminal failure still surfaces as system error');
   });
 
-  // Structural regression: partial output from a failed provider invocation must
-  // never enqueue a downstream cat.
-  it('F212 cloud R3 P1 structural: A2A enqueue remains gated on provider success', async () => {
+  // Structural regression: only a completed lifecycle response may commit its
+  // durable A2A wake admission.
+  it('F212 cloud R3 P1 structural: lifecycle A2A admission remains gated on provider success', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, resolve } = await import('node:path');
@@ -365,8 +542,8 @@ describe('route-serial error persistence (F5 reload)', () => {
     const source = readFileSync(resolve(here, '../src/domains/cats/services/agents/routing/route-serial.ts'), 'utf8');
 
     const cloudR3P1Match = source.match(
-      /a2aMentions\.length\s*>\s*0\s*&&\s*!hadError[\s\S]{0,200}?worklistEntry\.a2aCount\s*<\s*maxDepth/,
+      /lifecycleResponse\?\.status\s*===\s*'completed'\s*&&\s*a2aMentions\.length\s*>\s*0/,
     );
-    assert.ok(cloudR3P1Match, 'Cloud R3 P1: A2A enqueue MUST be gated on !hadError');
+    assert.ok(cloudR3P1Match, 'Cloud R3 P1: durable A2A admission MUST require a completed response');
   });
 });

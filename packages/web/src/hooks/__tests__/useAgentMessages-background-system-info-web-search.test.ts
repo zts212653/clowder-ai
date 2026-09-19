@@ -813,7 +813,7 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
     const result = consumeBackgroundSystemInfo(msg, undefined, options);
 
     expect(result.consumed).toBe(true);
-    // Must update catStatus so ThinkingIndicator renders amber warning (not raw JSON)
+    // Must update catStatus for structured liveness surfaces (not raw JSON).
     expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith('thread-1', 'opus', 'alive_but_silent');
     // Must set invocation snapshot for the warning UI to display details
     expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith(
@@ -1064,7 +1064,11 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       type: 'system_info',
       catId: 'opus',
       threadId: 'thread-1',
-      content: JSON.stringify({ type: 'warning', message: 'API rate limit approaching' }),
+      content: JSON.stringify({
+        type: 'warning',
+        presentation: 'user_action_required',
+        message: 'API rate limit approaching',
+      }),
       timestamp: Date.now(),
     };
 

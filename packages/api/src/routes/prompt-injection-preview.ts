@@ -135,7 +135,7 @@ export const promptInjectionPreviewRoutes: FastifyPluginAsync = async (app) => {
         '── [D11] Skill 触发（条件：Signal 触发）──',
         tpl('D11'),
         '',
-        '── [D12] 活跃参与者 ──',
+        '── [D12] 最近发言者（不表示执行态）──',
         tpl('D12'),
         '',
         '── [D13] 路由策略（条件：线程有路由策略）──',

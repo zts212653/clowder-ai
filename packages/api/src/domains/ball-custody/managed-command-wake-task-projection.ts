@@ -19,6 +19,7 @@ import type { DurableManagedGateJob } from './durable-managed-gate-job.js';
 
 export type ManagedCommandWakeState =
   | 'command_running'
+  | 'lost'
   | 'condition_met'
   | 'message_written'
   | 'dispatch_pending'
@@ -28,7 +29,8 @@ export type ManagedCommandWakeState =
   | 'escalated'
   | 'consumed';
 
-export type ManagedCommandWakeCarrierTerminalReason = 'withdrawn' | 'canceled' | 'terminal' | 'force_reset';
+export type ManagedCommandWakeCarrierTerminalReason = 'withdrawn' | 'canceled' | 'failed' | 'terminal' | 'force_reset';
+export type ManagedCommandWakeLostReason = 'runtime_restart' | 'spawn_failed' | 'runner_failed';
 
 export interface ManagedCommandTerminalResult {
   readonly exitCode: number | null;
@@ -51,6 +53,9 @@ export interface ManagedCommandWakeProjection {
   /** F167 Phase P: true once the admission-fact visibility message was durably appended. */
   readonly admissionFactAppended?: boolean;
   readonly conditionMetAt?: number;
+  readonly lostAt?: number;
+  readonly lostReason?: ManagedCommandWakeLostReason;
+  readonly lostDetail?: string;
   readonly wakeContent?: string;
   readonly wakeSource?: 'command_completion' | 'fallback_timer';
   readonly result?: ManagedCommandTerminalResult;
@@ -66,13 +71,6 @@ export interface ManagedCommandWakeProjection {
   readonly carrierTerminalReason?: ManagedCommandWakeCarrierTerminalReason;
   readonly consumedAt?: number;
   readonly slaBreachObservedAt?: number;
-  /** Number of exact failed Queue attempts redelivered for a missing invocation-bound disposition. */
-  readonly dispositionRetryCount?: number;
-  /** Idempotency fence for the failed attempt that authorized the latest redelivery. */
-  readonly lastDispositionFailedAttemptId?: string;
-  readonly dispositionEscalationReason?: 'managed_hold_disposition_missing';
-  readonly dispositionEscalatedAttemptId?: string;
-  readonly dispositionEscalatedAt?: number;
 }
 
 export interface ParsedManagedCommandWakeTask {
@@ -91,6 +89,7 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
 function isManagedCommandWakeState(value: unknown): value is ManagedCommandWakeState {
   return (
     value === 'command_running' ||
+    value === 'lost' ||
     value === 'condition_met' ||
     value === 'message_written' ||
     value === 'dispatch_pending' ||

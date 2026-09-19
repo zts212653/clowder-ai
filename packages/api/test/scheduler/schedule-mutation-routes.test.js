@@ -276,6 +276,7 @@ describe('schedule mutation principal routing', () => {
     assert.deepEqual(invokeCalls[0][6], {
       sourceCategory: 'scheduled',
       ownerAuthProvenance: 'strict',
+      priority: 'urgent',
     });
   });
 

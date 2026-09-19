@@ -14,6 +14,7 @@ import {
   writeOpportunityRefV1Schema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
 import { estimateTokens } from '../utils/token-counter.js';
@@ -236,8 +237,7 @@ export async function resolveInteractionSourceEvidence(
     if (
       !message ||
       message.userId !== auth.userId ||
-      message.catId !== null ||
-      message.source !== undefined ||
+      messageFrom(message).kind !== 'user' ||
       message.deletedAt !== undefined ||
       message._tombstone === true ||
       !isDelivered(message) ||
@@ -278,8 +278,7 @@ export async function resolveProposalSourceMessageId(
   if (
     !message ||
     message.userId !== auth.userId ||
-    message.catId !== null ||
-    message.source !== undefined ||
+    messageFrom(message).kind !== 'user' ||
     message.deletedAt !== undefined ||
     message._tombstone === true ||
     !isDelivered(message) ||

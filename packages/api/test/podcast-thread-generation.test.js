@@ -1,58 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-/**
- * F091 Phase 6: Thread-based podcast generation tests.
- *
- * Tests the REAL production function `generateScriptViaThread` with
- * instrumented deps to verify invocation lifecycle correctness.
- */
-
-describe('F091 Phase 6: PodcastRequest + ThreadInvokeDeps contract', () => {
-  it('ThreadInvokeDeps type is exported from podcast-generator', async () => {
-    const mod = await import('../dist/domains/signals/services/podcast-generator.js');
-    assert.ok(mod.generatePodcastScript, 'generatePodcastScript should be exported');
-    assert.ok(mod.generateScriptViaThread, 'generateScriptViaThread should be exported');
-  });
-
-  it('PodcastRouteOptions interface requires DI deps', async () => {
-    const mod = await import('../dist/routes/signal-podcast-routes.js');
-    assert.ok(mod.signalPodcastRoutes, 'signalPodcastRoutes should be exported');
-  });
-});
-
-describe('F091 Phase 6: resolveStudyThread logic', () => {
-  it('AC-P6-1: reuses existing thread from study meta', async () => {
-    const { StudyMetaService } = await import('../dist/domains/signals/services/study-meta-service.js');
-    const svc = new StudyMetaService();
-
-    const testId = `test-resolve-${Date.now()}`;
-    const testPath = '/tmp/test-resolve.md';
-
-    await svc.linkThread(testId, testPath, {
-      threadId: 'thread-existing',
-      linkedBy: 'test-user',
-    });
-
-    const meta = await svc.readMeta(testId, testPath);
-    assert.ok(meta.threads.length > 0, 'should have linked thread');
-    assert.equal(meta.threads[0].threadId, 'thread-existing');
-  });
-
-  it('AC-P6-2: creates new thread when none exists', async () => {
-    const { StudyMetaService } = await import('../dist/domains/signals/services/study-meta-service.js');
-    const svc = new StudyMetaService();
-
-    const testId = `test-no-thread-${Date.now()}`;
-    const testPath = '/tmp/test-no-thread.md';
-
-    const meta = await svc.readMeta(testId, testPath);
-    assert.equal(meta.threads.length, 0, 'no threads for new article');
-  });
-});
-
-// ── Helpers ──
-
 const VALID_PODCAST_JSON = JSON.stringify({
   segments: [
     { speaker: '宪宪', text: '大家好', durationEstimate: 3 },
@@ -60,65 +8,6 @@ const VALID_PODCAST_JSON = JSON.stringify({
   ],
   totalDuration: 5,
 });
-
-/** Build instrumented fake deps that record every call. */
-function buildFakeDeps(callLog, responseText = VALID_PODCAST_JSON) {
-  return {
-    messageStore: {
-      append(msg) {
-        callLog.push({ op: 'append', threadId: msg.threadId, catId: msg.catId });
-        return { id: 'msg-001', ...msg };
-      },
-    },
-    router: {
-      async *routeExecution(_userId, _message, threadId, userMessageId, _targetCats, _intent, options) {
-        callLog.push({
-          op: 'routeExecution',
-          threadId,
-          userMessageId,
-          hasSignal: !!options?.signal,
-          signalAborted: !!options?.signal?.aborted,
-        });
-        yield { type: 'text', content: responseText };
-      },
-    },
-    invocationRecordStore: {
-      create(input) {
-        callLog.push({ op: 'create', threadId: input.threadId });
-        return { outcome: 'created', invocationId: 'inv-001' };
-      },
-      update(id, patch) {
-        callLog.push({ op: 'update', id, ...patch });
-        return {};
-      },
-    },
-    invocationTracker: {
-      acquireExecutionAdmission() {
-        return { release() {} };
-      },
-      start(_threadId, _userId, _cats) {
-        callLog.push({ op: 'tracker.start' });
-        return new AbortController();
-      },
-      startAll() {
-        return new AbortController();
-      },
-      tryStartThreadAll() {
-        return new AbortController();
-      },
-      complete(_threadId, _controller) {
-        callLog.push({ op: 'tracker.complete' });
-      },
-      completeSlot(threadId, catId, controller) {
-        callLog.push({ op: 'tracker.completeSlot', threadId, catId, controller });
-      },
-      trackExternalSlot() {
-        return true;
-      },
-      completeAll() {},
-    },
-  };
-}
 
 function makeRequest(overrides = {}) {
   return {
@@ -128,162 +17,128 @@ function makeRequest(overrides = {}) {
     articleContent: 'Some content.',
     mode: 'essence',
     requestedBy: 'test-user',
+    threadId: 'thread-test',
     ...overrides,
   };
 }
 
-describe('F091 Phase 6: generateScriptViaThread — real production function', () => {
-  it('parks direct podcast admission until a manual session seal releases', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
-    const callLog = [];
-    const deps = buildFakeDeps(callLog);
-    const tracker = new InvocationTracker();
-    deps.invocationTracker = tracker;
-
-    const sealGuard = tracker.guardSessionSeal('thread-seal-race', 'opus');
-    assert.equal(sealGuard.acquired, true);
-
-    const generation = generateScriptViaThread(makeRequest(), 'thread-seal-race', deps);
-    await new Promise((resolve) => setImmediate(resolve));
-
-    try {
-      assert.equal(
-        callLog.some((call) => call.op === 'append'),
-        false,
-        'podcast message must be written into the replacement session after seal release',
-      );
-      assert.equal(
-        callLog.some((call) => call.op === 'routeExecution'),
-        false,
-        'podcast execution must wait instead of routing with the seal-rejected controller',
-      );
-    } finally {
-      sealGuard.release();
-    }
-
-    await generation;
-    const routeCall = callLog.find((call) => call.op === 'routeExecution');
-    assert.ok(routeCall, 'podcast execution should resume after the seal releases');
-    assert.equal(routeCall.signalAborted, false);
-    const nextSealGuard = tracker.guardSessionSeal('thread-seal-race', 'opus');
-    assert.equal(nextSealGuard.acquired, true, 'podcast completion must release tracker and admission ownership');
-    nextSealGuard.release();
-  });
-
-  it('P1-1: backfills userMessageId into invocation record', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const callLog = [];
-    const deps = buildFakeDeps(callLog);
-
-    await generateScriptViaThread(makeRequest(), 'thread-test', deps);
-
-    const backfillCall = callLog.find((c) => c.op === 'update' && c.userMessageId !== undefined);
-    assert.ok(backfillCall, 'must backfill userMessageId into invocation record');
-    assert.equal(backfillCall.userMessageId, 'msg-001');
-
-    // backfill must happen BEFORE 'running' status
-    const backfillIdx = callLog.indexOf(backfillCall);
-    const runningIdx = callLog.findIndex((c) => c.op === 'update' && c.status === 'running');
-    assert.ok(runningIdx > backfillIdx, 'backfill must precede running status update');
-  });
-
-  it('P1-2: passes controller.signal into routeExecution options', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const callLog = [];
-    const deps = buildFakeDeps(callLog);
-
-    await generateScriptViaThread(makeRequest(), 'thread-signal', deps);
-
-    const routeCall = callLog.find((c) => c.op === 'routeExecution');
-    assert.ok(routeCall, 'routeExecution must be called');
-    assert.equal(routeCall.hasSignal, true, 'must pass signal to routeExecution');
-    assert.equal(routeCall.signalAborted, false, 'signal should not be pre-aborted');
-  });
-
-  it('releases a terminal dynamic A2A child with the podcast route controller', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const callLog = [];
-    const deps = buildFakeDeps(callLog);
-    let routeController;
-    deps.router = {
-      async *routeExecution(_userId, _message, threadId, _messageId, _targetCats, _intent, options) {
-        routeController = options.invocationController;
-        assert.equal(options.trackA2ASlot(threadId, 'codex', 'test-user', routeController), true);
-        yield { type: 'text', catId: 'opus', content: VALID_PODCAST_JSON, timestamp: Date.now() };
-        yield { type: 'done', catId: 'codex', isFinal: true, timestamp: Date.now() };
+function buildQueueDeps(callLog, outcome = { status: 'succeeded', responseText: VALID_PODCAST_JSON }) {
+  let completionHook;
+  return {
+    invocationQueue: {
+      async enqueueDurable(input) {
+        callLog.push({ op: 'enqueue', input });
+        return {
+          outcome: 'enqueued',
+          entry: {
+            version: 1,
+            id: 'podcast-entry-1',
+            threadId: input.threadId,
+            owner: { kind: 'user', userId: input.userId },
+            kind: input.kind,
+            from: input.from,
+            target: { kind: 'cat', catId: input.targetCats[0] },
+            payload: { sourceId: input.idempotencyKey, content: input.content },
+            execution: {
+              intent: input.intent,
+              ownerAuthProvenance: input.ownerAuthProvenance,
+              autoExecute: input.autoExecute,
+            },
+            delivery: {},
+            status: 'queued',
+            enqueuedAt: 1,
+            priority: input.priority,
+          },
+        };
       },
-    };
-
-    await generateScriptViaThread(makeRequest(), 'thread-podcast-child', deps);
-
-    const dynamicCompletions = callLog.filter((call) => call.op === 'tracker.completeSlot' && call.catId === 'codex');
-    assert.equal(dynamicCompletions.length, 1);
-    assert.equal(dynamicCompletions[0].threadId, 'thread-podcast-child');
-    assert.equal(dynamicCompletions[0].controller, routeController);
-  });
-
-  it('full lifecycle call sequence is correct', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const callLog = [];
-    const deps = buildFakeDeps(callLog);
-
-    await generateScriptViaThread(makeRequest(), 'thread-seq', deps);
-
-    const ops = callLog.map((c) => c.op);
-    assert.deepEqual(ops, [
-      'append', // ① post message
-      'create', // ② create invocation record
-      'update', // ②b backfill userMessageId
-      'tracker.start', // ③ start tracker
-      'update', // ④a status → running
-      'routeExecution', // ④b invoke cat
-      'update', // ④c status → succeeded
-      'tracker.complete', // ⑤ cleanup
-    ]);
-  });
-
-  it('failure path: tracker cleanup + failed status even when routeExecution throws', async () => {
-    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
-    const callLog = [];
-    const failDeps = buildFakeDeps(callLog);
-
-    // Override router to throw
-    failDeps.router = {
-      async *routeExecution() {
-        callLog.push({ op: 'routeExecution' });
-        throw new Error('LLM unavailable');
+      getEntrySnapshot() {
+        return null;
       },
-    };
+      removeEntrySnapshotIfUnchanged() {
+        return false;
+      },
+    },
+    queueProcessor: {
+      registerEntryCompleteHook(entryId, hook) {
+        callLog.push({ op: 'register', entryId });
+        completionHook = hook;
+      },
+      unregisterEntryCompleteHook(entryId) {
+        callLog.push({ op: 'unregister', entryId });
+        completionHook = undefined;
+      },
+      async requestDrain(threadId) {
+        callLog.push({ op: 'drain', threadId });
+        completionHook?.('podcast-entry-1', outcome.status, outcome.responseText);
+      },
+    },
+  };
+}
 
-    await assert.rejects(() => generateScriptViaThread(makeRequest(), 'thread-fail', failDeps), {
-      message: 'LLM unavailable',
-    });
-
-    // Verify failed status was recorded
-    const failUpdate = callLog.find((c) => c.op === 'update' && c.status === 'failed');
-    assert.ok(failUpdate, 'must update record to failed');
-    assert.equal(failUpdate.error, 'LLM unavailable');
-
-    // Verify tracker was cleaned up
-    const completeCall = callLog.find((c) => c.op === 'tracker.complete');
-    assert.ok(completeCall, 'tracker.complete must be called in finally block');
-
-    // No succeeded
-    const succeedUpdate = callLog.find((c) => c.op === 'update' && c.status === 'succeeded');
-    assert.equal(succeedUpdate, undefined, 'must NOT mark as succeeded on failure');
+describe('F091 / RFC #1356: podcast Queue admission', () => {
+  it('exports the Queue-backed generator and route', async () => {
+    const generator = await import('../dist/domains/signals/services/podcast-generator.js');
+    const routes = await import('../dist/routes/signal-podcast-routes.js');
+    assert.ok(generator.generatePodcastScript);
+    assert.ok(generator.generateScriptViaThread);
+    assert.ok(routes.signalPodcastRoutes);
   });
 
-  it('returns parsed PodcastScript on success', async () => {
+  it('enqueues one private system input with no History source record', async () => {
     const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
     const callLog = [];
-    const deps = buildFakeDeps(callLog, VALID_PODCAST_JSON);
+    const deps = buildQueueDeps(callLog);
 
-    const result = await generateScriptViaThread(makeRequest(), 'thread-result', deps);
+    await generateScriptViaThread(makeRequest(), 'thread-podcast', deps);
 
-    assert.ok(result, 'should return a PodcastScript');
-    assert.ok(Array.isArray(result.segments), 'should have segments array');
+    const admission = callLog.find((call) => call.op === 'enqueue').input;
+    assert.equal(admission.threadId, 'thread-podcast');
+    assert.equal(admission.userId, 'test-user');
+    assert.equal(admission.kind, 'private_input');
+    assert.deepEqual(admission.from, { kind: 'system', service: 'podcast-generator' });
+    assert.equal(admission.messageId, undefined);
+    assert.deepEqual(admission.targetCats, ['opus']);
+    assert.equal(admission.autoExecute, true);
+    assert.deepEqual(
+      callLog.map((call) => call.op),
+      ['enqueue', 'register', 'drain'],
+    );
+  });
+
+  it('registers completion before draining so a fast provider cannot lose the result', async () => {
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const callLog = [];
+    await generateScriptViaThread(makeRequest(), 'thread-order', buildQueueDeps(callLog));
+    assert.ok(callLog.findIndex((call) => call.op === 'register') < callLog.findIndex((call) => call.op === 'drain'));
+  });
+
+  it('returns the parsed completion-hook response', async () => {
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const result = await generateScriptViaThread(makeRequest(), 'thread-result', buildQueueDeps([]));
     assert.equal(result.segments.length, 2);
     assert.equal(result.segments[0].speaker, '宪宪');
+    assert.equal(result.totalDuration, 5);
+  });
+
+  it('propagates terminal Queue failure and releases the one-shot hook', async () => {
+    const { generateScriptViaThread } = await import('../dist/domains/signals/services/podcast-generator.js');
+    const callLog = [];
+    const deps = buildQueueDeps(callLog, { status: 'failed', responseText: '' });
+    await assert.rejects(() => generateScriptViaThread(makeRequest(), 'thread-fail', deps), {
+      message: 'Podcast Queue execution failed',
+    });
+    assert.ok(callLog.some((call) => call.op === 'unregister'));
+  });
+});
+
+describe('F091 Phase 6: study thread metadata', () => {
+  it('reuses an existing thread link', async () => {
+    const { StudyMetaService } = await import('../dist/domains/signals/services/study-meta-service.js');
+    const svc = new StudyMetaService();
+    const testId = `test-resolve-${Date.now()}`;
+    const testPath = '/tmp/test-resolve.md';
+    await svc.linkThread(testId, testPath, { threadId: 'thread-existing', linkedBy: 'test-user' });
+    const meta = await svc.readMeta(testId, testPath);
+    assert.equal(meta.threads[0].threadId, 'thread-existing');
   });
 });

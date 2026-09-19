@@ -11,6 +11,20 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { ReplayChatMessage } from '@/lib/story-player/replay-chat-bridge';
 import { ReplayMessageList } from '../ReplayMessageList';
 
+vi.mock('@/hooks/useCatData', () => ({
+  formatCatName: (cat: { displayName: string }) => cat.displayName,
+  useCatData: () => ({
+    getCatById: (catId: string) =>
+      catId === 'opus'
+        ? {
+            id: 'opus',
+            displayName: '布偶猫',
+            color: { primary: '#9B7EBD', secondary: '#E9E0F4' },
+          }
+        : undefined,
+  }),
+}));
+
 beforeAll(() => {
   (globalThis as { React?: typeof React }).React = React;
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

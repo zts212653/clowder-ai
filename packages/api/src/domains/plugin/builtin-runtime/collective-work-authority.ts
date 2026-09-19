@@ -68,7 +68,7 @@ export class CollectiveWorkAuthority {
     const ownerMessage = await this.options.messageStore.appendIdempotent({
       userId: input.ownerUserId,
       threadId: input.threadId,
-      catId: null,
+      from: { kind: 'user', userId: input.ownerUserId },
       mentions: [],
       timestamp: Date.now(),
       content: input.intendedOutcome,

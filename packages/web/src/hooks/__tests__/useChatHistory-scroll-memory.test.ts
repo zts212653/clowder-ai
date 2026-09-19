@@ -51,7 +51,6 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     hasUserMention: false,
     lastActivity: Date.now(),
     queue: [],
-    queuePaused: false,
     queueFull: false,
     workspaceWorktreeId: null,
     workspaceOpenTabs: [],

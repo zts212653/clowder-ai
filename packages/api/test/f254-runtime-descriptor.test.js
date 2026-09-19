@@ -299,7 +299,7 @@ describe('checkFreshnessForPostMessage with descriptor (AC-C3)', () => {
       getByThreadAfter: async () => [],
     };
     const queueChecker = {
-      getQueuedForThread: () => [{ source: 'user', content: 'new user message', callerCatId: undefined }],
+      getQueuedForThread: () => [{ from: { kind: 'user', userId: 'u1' }, content: 'new user message' }],
     };
 
     const result = await checkFreshnessForPostMessage({

@@ -1023,21 +1023,20 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Freshness retry unavailable' };
     }
     const nextEpoch = closure.retryEpoch + 1;
-    const enqueue = opts.invocationQueue.enqueue({
+    const enqueue = await opts.invocationQueue.enqueueDurable({
+      from: { kind: 'agent', catId: closure.catId },
       threadId: id,
       userId,
+      kind: 'private_input',
       ownerAuthProvenance: 'strict',
       content: `[Freshness Catch Closure ${closure.id}] 显式重试；正文由执行前 closure truth 注入。`,
-      source: 'agent',
       sourceCategory: 'freshness',
       targetCats: [closure.catId],
-      callerCatId: closure.catId,
       autoExecute: true,
       priority: 'normal',
       intent: 'execute',
       idempotencyKey: `freshness-closure:${closure.id}:retry:${nextEpoch}`,
       freshnessClosureId: closure.id,
-      freshnessRequiredFrontierMessageId: closure.requiredFrontierMessageId,
     });
     if (enqueue.outcome === 'full') {
       reply.status(409);
@@ -1059,7 +1058,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       },
       id,
     );
-    void opts.queueProcessor.tryAutoExecute(id);
+    void opts.queueProcessor.requestDrain(id);
     reply.status(202);
     return { closure: projection };
   });

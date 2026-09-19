@@ -62,7 +62,7 @@ export function createContentFreeFreshnessNotice(input: { threadId: string; unse
   return (
     `📬 freshness notice：当前 thread 有 ${input.unseenCount} 条新消息。` +
     `请在自然工具断点调用 cat_cafe_get_thread_context({ threadId: "${input.threadId}", responseMode: "full" }) ` +
-    '无过滤精确读取；本提醒不含消息正文。'
+    '无过滤精确读取未读增量；返回的 contextScope=unread_delta，hasMore=false 只表示这批未读已读完，不表示完整历史已经读完；本提醒不含消息正文。'
   );
 }
 

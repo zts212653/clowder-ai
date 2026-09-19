@@ -5,6 +5,7 @@ import {
   createReevalCaseTaskQueueDelivery,
   ReevalCaseTaskDispatcher,
 } from '../../dist/infrastructure/harness-eval/reeval-case-task-dispatch.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const task = {
   id: 'task-reeval-1',
@@ -165,15 +166,18 @@ describe('F266 durable stable-case task carrier', () => {
       return { accepted: true };
     });
     const messageStore = new MessageStore();
-    const message = await messageStore.append({
-      userId: task.userId,
-      catId: 'gpt52',
-      content: 'execute stable-case task',
-      mentions: ['gpt52'],
-      timestamp: 100,
-      threadId: task.threadId,
-      deliveryStatus: 'queued',
-    });
+    // F117: append requires MessageFrom sender identity
+    const message = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: task.userId,
+        catId: 'gpt52',
+        content: 'execute stable-case task',
+        mentions: ['gpt52'],
+        timestamp: 100,
+        threadId: task.threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     assert.deepEqual(
       await deliver({

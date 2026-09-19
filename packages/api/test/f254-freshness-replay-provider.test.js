@@ -144,7 +144,12 @@ describe('F254 AC-E9 freshness replay provider', () => {
       store: new InMemoryFreshnessClosureStore(),
       fixtureRoot,
       queueLifecycleSource: {
-        async listOwnerQueueCustodyLifecycles() {
+        async listOwnerDurableEntries() {
+          return [];
+        },
+      },
+      messageLifecycleSource: {
+        async listOwnerMessagesInWindow() {
           return [];
         },
       },
@@ -179,44 +184,27 @@ describe('F254 AC-E9 freshness replay provider', () => {
       now: 1_100,
     });
     await store.claimSupplement(offered.supplement.id, { invocationId: 'inv-supplement', now: 1_200 });
-    const queueRecord = {
-      messageId: 'message-queue',
+    const queueEntry = {
+      id: 'entry-queue',
       threadId: 'thread-live',
       userId: 'user-1',
-      custody: {
-        version: 1,
-        entryId: 'entry-queue',
-        revision: 2,
-        ownerUserId: 'user-1',
-        intent: 'respond',
-        status: 'processing',
-        allTargetCats: ['codex-sol'],
-        pendingTargetCats: ['codex-sol'],
-        notifiedByCatIds: ['codex-sol'],
-        seenByCatIds: ['codex-sol'],
-        seenInvocationIdByCatId: { 'codex-sol': 'inv-queue' },
-        bodyExposures: [{ targetCatId: 'codex-sol', invocationId: 'inv-queue', seenAt: 1_250 }],
-        failedByCatIds: [],
-        handledByCatIds: [],
-        priority: 'normal',
-        createdAt: 1_050,
-        updatedAt: 1_250,
-      },
+      targets: ['codex-sol'],
+      enqueuedAt: 1_050,
+      claimedAt: 1_250,
+      processingStartedAt: 1_250,
+      payload: { messageId: 'message-queue' },
     };
     const provider = new FreshnessReplayProviderImpl({
       store,
       fixtureRoot,
       queueLifecycleSource: {
-        async listOwnerQueueCustodyLifecycles() {
-          return [
-            queueRecord,
-            {
-              ...queueRecord,
-              messageId: 'message-other-owner',
-              userId: 'user-2',
-              custody: { ...queueRecord.custody, entryId: 'entry-other-owner', ownerUserId: 'user-2' },
-            },
-          ];
+        async listOwnerDurableEntries(ownerUserId) {
+          return ownerUserId === 'user-1' ? [queueEntry] : [];
+        },
+      },
+      messageLifecycleSource: {
+        async listOwnerMessagesInWindow() {
+          return [];
         },
       },
       attentionEventLog: {
@@ -261,7 +249,12 @@ describe('F254 AC-E9 freshness replay provider', () => {
       store: new InMemoryFreshnessClosureStore(),
       fixtureRoot,
       queueLifecycleSource: {
-        async listOwnerQueueCustodyLifecycles() {
+        async listOwnerDurableEntries() {
+          return [];
+        },
+      },
+      messageLifecycleSource: {
+        async listOwnerMessagesInWindow() {
           return [];
         },
       },

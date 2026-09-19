@@ -132,7 +132,11 @@ function formatA2AFollowupAvailable(
 }
 
 function formatWarning(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
-  if (parsed?.type !== 'warning') return null;
+  if (
+    parsed?.type !== 'warning' ||
+    (parsed.presentation !== 'user_action_required' && parsed.presentation !== 'transient_status')
+  )
+    return null;
 
   const warningText = typeof parsed.message === 'string' ? parsed.message : '';
   return {

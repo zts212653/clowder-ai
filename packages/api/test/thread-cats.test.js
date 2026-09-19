@@ -2,7 +2,7 @@
  * GET /api/threads/:id/cats — thread cat categorization API (F142)
  */
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 function stubThreadStore(threads = new Map(), participants = new Map()) {
@@ -34,13 +34,14 @@ describe('GET /api/threads/:id/cats', () => {
     if (app) await app.close();
   });
 
-  async function setup({ threads, participants, bindings, roster, services, available } = {}) {
+  async function setup({ threads, participants, bindings, roster, services, available, fallbackTargetCatId } = {}) {
     const { threadCatsRoutes } = await import('../dist/routes/thread-cats.js');
     app = Fastify();
     await app.register(threadCatsRoutes, {
       threadStore: stubThreadStore(threads, participants),
       bindingStore: stubBindingStore(bindings),
       ...stubCatDeps({ roster, services, available }),
+      resolveConversationFallbackTarget: async () => fallbackTargetCatId,
     });
     await app.ready();
     return app;
@@ -165,5 +166,23 @@ describe('GET /api/threads/:id/cats', () => {
     const res = await app.inject({ method: 'GET', url: '/api/threads/t-dn/cats' });
     const body = JSON.parse(res.body);
     assert.equal(body.participants[0].displayName, '布偶猫 Opus');
+  });
+
+  it('projects the exact targetless fallback used by Queue admission', async () => {
+    const threads = new Map([['t-fallback', { id: 't-fallback' }]]);
+    await setup({ threads, roster: {}, fallbackTargetCatId: 'codex' });
+
+    const res = await app.inject({ method: 'GET', url: '/api/threads/t-fallback/cats' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).fallbackTargetCatId, 'codex');
+  });
+
+  it('uses null instead of guessing when Queue admission has no fallback', async () => {
+    const threads = new Map([['t-no-fallback', { id: 't-no-fallback' }]]);
+    await setup({ threads, roster: {} });
+
+    const res = await app.inject({ method: 'GET', url: '/api/threads/t-no-fallback/cats' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).fallbackTargetCatId, null);
   });
 });

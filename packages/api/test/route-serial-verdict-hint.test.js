@@ -1,17 +1,11 @@
 /**
- * F167 C2 AC-C7 — route-serial integration: verdict-no-pass hint emission.
+ * F167 C2 AC-C7 — route-serial integration: verdict-without-pass detection
+ * must not manufacture public History rows.
  *
  * Pure detector behavior is covered in `verdict-detect.test.js`. This suite
- * locks the wire-up between route-serial and the detector: when a cat's
- * output contains a review verdict keyword AND has no line-start @mention
- * AND collected tool names include no hold_ball, route-serial appends a
- * connector message with `source.connector === 'verdict-no-pass-hint'`.
- *
- * Scope: verify side effect on messageStore.append. We don't verify chain
- * routing (there IS no next cat — that's the whole point of the warning).
- *
- * Prompt-first, non-blocking. Emission failures inside try/catch must not
- * break routing; that's covered implicitly by the try/catch in route-serial.
+ * Pure detector behavior is covered separately. This suite locks the
+ * presentation boundary: agent-protocol mistakes remain telemetry/prompt
+ * concerns and never become user-visible connector messages.
  */
 
 import assert from 'node:assert/strict';
@@ -177,22 +171,17 @@ async function runRouteWithTool(text, threadId, toolName, toolInput) {
   });
 }
 
-describe('F167 C2 AC-C7: route-serial verdict-no-pass hint emission', () => {
-  test('LGTM with no @mention + no hold_ball → emits verdict-no-pass-hint', async () => {
+describe('F167 C2 AC-C7: verdict-no-pass stays an internal signal', () => {
+  test('LGTM with no @mention + no hold_ball → no public verdict-no-pass-hint', async () => {
     const { appended } = await runRoute('LGTM, all tests pass', 'thread-vh-1');
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(hint, 'must append a message whose source.connector === verdict-no-pass-hint');
-    assert.equal(hint.userId, 'system');
-    assert.equal(hint.catId, null);
-    assert.match(hint.content, /传球|hold_ball/);
-    assert.equal(hint.source.icon, '🏓');
-    assert.equal(hint.source.meta.presentation, 'system_notice');
+    assert.equal(hint, undefined);
   });
 
-  test('Chinese verdict (修改建议) with no @ + no hold_ball → emits hint', async () => {
+  test('Chinese verdict (修改建议) with no @ + no hold_ball → no public hint', async () => {
     const { appended } = await runRoute('修改建议：重命名 foo → bar', 'thread-vh-2');
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(hint, 'Chinese verdict must also trigger the hint');
+    assert.equal(hint, undefined);
   });
 
   test('verdict + line-start @mention → NO hint (ball was passed)', async () => {
@@ -226,14 +215,14 @@ describe('F167 C2 AC-C7: route-serial verdict-no-pass hint emission', () => {
     assert.equal(hint, undefined, 'structured multi_mention.targets must exempt the hint');
   });
 
-  test('verdict + post_message WITHOUT targetCats → hint fires (passive post, not routing)', async () => {
+  test('verdict + post_message WITHOUT targetCats → still no public hint', async () => {
     // Calling post_message without targetCats is just posting to the thread — it doesn't
     // route the ball to any specific cat. Hint should still fire.
     const { appended } = await runRouteWithTool('LGTM, check is done', 'thread-vh-7', 'cat_cafe_post_message', {
       content: 'done',
     });
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(hint, 'post_message without targetCats does not constitute routing → hint fires');
+    assert.equal(hint, undefined);
   });
 
   test('provider-prefixed tool name (mcp__cat-cafe__cat_cafe_post_message) + targetCats → NO hint', async () => {
@@ -277,11 +266,11 @@ describe('F167 C2 AC-C7: route-serial verdict-no-pass hint emission', () => {
     assert.equal(hint, undefined, 'CJK co-creator handle co-creator is also a legitimate exit');
   });
 
-  test('verdict + inline @co-creator (NOT line-start) + no other exit → hint fires (control)', async () => {
+  test('verdict + inline @co-creator (NOT line-start) + no other exit → no public hint', async () => {
     // Negative control: inline (mid-line) co-creator mention doesn't count as
     // line-start exit. Hint should still fire.
     const { appended } = await runRoute('LGTM, ask @co-creator to confirm later please', 'thread-vh-12');
     const hint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(hint, 'inline (mid-line) co-creator mention is not a line-start exit; hint must fire');
+    assert.equal(hint, undefined);
   });
 });

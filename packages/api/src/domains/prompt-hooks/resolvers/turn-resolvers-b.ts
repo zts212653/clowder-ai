@@ -30,7 +30,7 @@ export class D11Resolver implements HookResolver {
 }
 
 // ---------------------------------------------------------------------------
-// D12 — 活跃参与者 (Active Participant)
+// D12 — 最近发言者 (Recent Speaker; not execution state)
 // ---------------------------------------------------------------------------
 
 export class D12Resolver implements HookResolver {
@@ -38,11 +38,13 @@ export class D12Resolver implements HookResolver {
     if (input.activeParticipants.length === 0) {
       return skip('no_active_participants', 'No active participants');
     }
-    const topActive = input.activeParticipants.filter((p) => p.catId !== input.catId).find((p) => p.lastMessageAt > 0);
-    if (!topActive) {
-      return skip('no_qualifying_participant', 'No qualifying active participant (other cat with messages)');
+    const recentSpeaker = input.activeParticipants
+      .filter((participant) => participant.catId !== input.catId)
+      .find((participant) => participant.lastMessageAt > 0);
+    if (!recentSpeaker) {
+      return skip('no_recent_speaker', 'No qualifying recent speaker (other cat with messages)');
     }
-    return { status: 'fired', vars: { ACTIVE_LABEL: topActive.label } };
+    return { status: 'fired', vars: { RECENT_SPEAKER_LABEL: recentSpeaker.label } };
   }
 }
 

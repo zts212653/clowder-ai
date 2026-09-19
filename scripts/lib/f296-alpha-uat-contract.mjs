@@ -99,7 +99,7 @@ export function assertAlphaSnapshot({ expectedRevision, health, readiness, cats,
   if (readiness?.status !== 'ready') throw new UatError('failed', 'alpha_not_ready');
   const canary = cats?.cats?.find((cat) => cat?.id === catId);
   if (!canary || canary.clientId !== 'openai') throw new UatError('failed', 'canary_not_found');
-  if (canary.codexCarrier?.effective !== 'app_server') throw new UatError('failed', 'canary_not_app_server');
+  if (canary.carrier !== 'app_server') throw new UatError('failed', 'canary_not_app_server');
 }
 
 export function boundEnum(value, allowed) {

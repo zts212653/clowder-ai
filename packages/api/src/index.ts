@@ -36,7 +36,6 @@ import {
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
 import { getCatModel } from './config/cat-models.js';
-import { resolveCodexCarrierTruth } from './config/codex-cli.js';
 import { configEventBus } from './config/config-event-bus.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { readMountRules } from './config/mount/mount-rules-store.js';
@@ -65,10 +64,8 @@ import { createDispatchProposalStore } from './domains/approval-hub/stores/facto
 import { createEntityProposalStore } from './domains/approval-hub/stores/factories/EntityProposalStoreFactory.js';
 import { classifyApprovedActionCarrier } from './domains/ball-custody/ActionSuccessorRecoverySweep.js';
 import type { ManagedCommandWakeRecoverySweep } from './domains/ball-custody/ManagedCommandWakeRecoverySweep.js';
-import { createManagedCommandWakeQueueAdapter } from './domains/ball-custody/managed-command-wake-queue-adapter.js';
+import { createManagedCommandWakeCarrierAdapter } from './domains/ball-custody/managed-command-wake-carrier-adapter.js';
 import { RedisWaitTerminationStore } from './domains/ball-custody/RedisWaitTerminationStore.js';
-import { WaitContinuationRetryCommitter } from './domains/ball-custody/WaitContinuationRetryCommitter.js';
-import { WaitContinuationRetryPreflight } from './domains/ball-custody/WaitContinuationRetryPreflight.js';
 import { WaitTerminationService } from './domains/ball-custody/WaitTerminationService.js';
 import { agentSessionMutex } from './domains/cats/services/agents/invocation/AgentSessionMutex.js';
 // F297 Phase B: Sidebar C10 production source — domain-owned composition shared by
@@ -90,12 +87,13 @@ import {
   selectInvocationBackendKind,
 } from './domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from './domains/cats/services/agents/invocation/InvocationTracker.js';
-import { QueuedMessageCustodyCoordinator } from './domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type {
   InvocationRecordStoreLike,
   RouterLike,
 } from './domains/cats/services/agents/invocation/QueueProcessor.js';
 import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueProcessor.js';
+import { InMemoryQueueLedgerStore } from './domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import { RedisQueueLedgerStore } from './domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.js';
 import { reconcileZombies } from './domains/cats/services/agents/invocation/reconcileZombies.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import { SessionMutex } from './domains/cats/services/agents/invocation/SessionMutex.js';
@@ -107,6 +105,7 @@ import {
   listenBeforeTurnExecutionRecovery,
   TurnExecutionStartupReconciler,
 } from './domains/cats/services/agents/invocation/TurnExecutionStartupReconciler.js';
+import { createThreadExecutionSituationSource } from './domains/cats/services/agents/invocation/thread-execution-situation.js';
 import { createZombieTerminalRecovery } from './domains/cats/services/agents/invocation/ZombieTerminalRecovery.js';
 import {
   type AcpPoolRegistry,
@@ -136,6 +135,7 @@ import { reconcileFreshnessSupplementsAtStartup } from './domains/cats/services/
 import {
   AgentRouter,
   AuditEventTypes,
+  ClaudeSdkAgentService,
   CodexAgentService,
   createDraftStore,
   createInvocationRecordStore,
@@ -356,11 +356,18 @@ import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
-import { enqueueA2ATargets } from './routes/callback-a2a-trigger.js';
+import {
+  appendA2ASourceWithLedgerAdmission,
+  emitA2ARoutingPreflightReceipts,
+  enqueueA2ATargets,
+  planA2AFanoutAdmission,
+  preflightA2ATargets,
+} from './routes/callback-a2a-trigger.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
 import {
   cancelManagedWakeIfTaskMatches,
   commitManagedWakeCancellation,
+  isManagedWakeRunnerActive,
   releaseManagedWakeCancellation,
   reserveManagedWakeCancellation,
 } from './routes/callback-hold-ball-routes.js';
@@ -850,13 +857,11 @@ async function main(): Promise<void> {
     );
   }
   await app.register(runtimeInteractionRoutes, { service: runtimeInteractionRuntime.service });
-  // Queue owners are initialized beside MessageStore so action-terminal
-  // convergence can retire their projections at the completion boundary.
-  const invocationQueue = new InvocationQueue();
-  const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator({
-    messageStore,
-    readWaitRegistration: (id) => taskStore.getWaitRegistration(id),
-  });
+
+  const invocationQueue = new InvocationQueue(
+    redis ? new RedisQueueLedgerStore(redis) : new InMemoryQueueLedgerStore(),
+  );
+  await invocationQueue.hydrateFromLedger(messageStore);
   const invocationRecordStore = createInvocationRecordStore(redis);
   const sessionStore = redis ? new SessionStore(redis) : undefined;
   // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
@@ -1011,14 +1016,13 @@ async function main(): Promise<void> {
       actionSubjectTruthResolver,
     );
     const projectionRetirement = new actionProjectionRetirementMod.ActionSuccessorProjectionRetirementService({
-      queueCustodyCoordinator,
       invocationQueue,
       taskStore: {
         getBySubject: (subjectKey) => taskStore.getBySubject(subjectKey),
         replaceAutomationStateIfGeneration: (taskId, input) =>
           taskStore.replaceAutomationStateIfGeneration(taskId, input),
       },
-      publishQueue: ({ threadId, userId, receiptMessageIds }) =>
+      publishQueue: ({ threadId, userId }) =>
         emitQueueUpdated(
           socketManager!,
           userId,
@@ -1026,7 +1030,6 @@ async function main(): Promise<void> {
           invocationQueue.list(threadId, userId),
           messageStore,
           'action_successor_terminal',
-          { receiptMessageIds },
         ),
     });
     const completionService = new actionCompletionMod.ActionSuccessorCompletionService(
@@ -1503,6 +1506,17 @@ async function main(): Promise<void> {
     globalControlStore,
     emissionStore,
     deliver: schedulerDeliver,
+    cancelQueuedDelivery: async (messageId) => {
+      const source = await messageStore.getById(messageId);
+      if (source?.threadId) {
+        const durable = await invocationQueue.getDurableEntriesForMessages(source.threadId, [messageId]);
+        if ((durable.get(messageId) ?? []).some((entry) => entry.status === 'queued' || entry.status === 'claimed')) {
+          return false;
+        }
+      }
+      const canceled = await messageStore.markCanceled(messageId);
+      return canceled?.deliveryStatus === 'canceled';
+    },
     notifyLifecycle: schedulerLifecycleToast,
     fetchContent: schedulerFetchContent,
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
@@ -1969,10 +1983,14 @@ async function main(): Promise<void> {
       let service: AgentService;
 
       // ── F161: Generic ACP transport path (provider-agnostic) ──
-      // Any clientId with an `acp` config section uses AcpAgentService.
-      // This check runs BEFORE the clientId switch — ACP is a transport, not a provider.
-      const acpConfig = getAcpConfig(id, projectRoot);
-      if (acpConfig) {
+      // Carrier selection is resolved once by cat-config-loader. The ACP block
+      // below contains only launch details; its mere presence is not routing truth.
+      const acpConfig = config.carrier === 'acp' ? getAcpConfig(id, projectRoot) : undefined;
+      if (config.carrier === 'acp') {
+        if (!acpConfig) {
+          app.log.warn(`[api] Cat "${id}" selects carrier=acp but has no ACP config. It will not be routable.`);
+          continue;
+        }
         activeAcpProfileIds.add(id);
         const acpService = await createAcpServiceForConfig({
           projectRoot,
@@ -1990,25 +2008,23 @@ async function main(): Promise<void> {
         switch (config.clientId) {
           // ── Provider-specific CLI paths (non-ACP) ──
           case 'anthropic': {
-            // F198 Phase B Step 3 canary: env-gated carrier selection.
-            // CAT_CAFE_CLAUDE_CARRIER=bg_daemon → --bg carrier (subscription
-            // quota, R1 救宪宪). Unset/other → -p (current production default).
-            const { createClaudeAgentServiceForCanary } = await import(
-              './domains/cats/services/agents/providers/claude-carrier-factory.js'
-            );
-            service = createClaudeAgentServiceForCanary(catId);
+            if (config.carrier === 'sdk') {
+              service = new ClaudeSdkAgentService({ catId });
+            } else {
+              const { createClaudeAgentServiceForCanary } = await import(
+                './domains/cats/services/agents/providers/claude-carrier-factory.js'
+              );
+              service = createClaudeAgentServiceForCanary(catId);
+            }
             break;
           }
           case 'openai': {
             activeCodexProfileIds.add(id);
             const appServerHostPool = getOrCreateCodexAppServerPool(codexAppServerPoolRegistry, id);
-            // F254 D2: carrier truth resolved once via the shared helper —
-            // per-cat cli.carrier > CAT_CAFE_CODEX_CARRIER env > exec_json default.
-            // Same helper feeds GET /api/cats so Hub display == runtime behavior.
             service = new CodexAgentService({
               catId,
               appServerHostPool,
-              carrierMode: resolveCodexCarrierTruth(config.cli?.carrier).effective,
+              carrierMode: config.carrier === 'app_server' ? 'app_server' : 'exec_json',
               nativeRealtimeCompanionEnabled,
             });
             break;
@@ -2334,11 +2350,9 @@ async function main(): Promise<void> {
       opts?: { excludeEntryId?: string; parentInvocationId?: string },
     ): Array<{
       entryId?: string;
-      source: string;
+      from: import('@cat-cafe/shared').MessageFrom;
       content: string;
-      callerCatId?: string;
       messageId?: string | null;
-      mergedMessageIds?: string[];
       sourceCategory?: string;
     }>;
   } | null = null;
@@ -2352,8 +2366,8 @@ async function main(): Promise<void> {
       })
     : undefined;
 
-  // F254 Phase C: Freshness state store for carrier tier persistence.
-  // Shared instance — lightweight (just holds a Redis ref, no state).
+  // F254 Phase C/D2: keep provider-native freshness bound to the canonical
+  // Queue projection after the F117 ledger cutover.
   const freshnessStateStore = redis ? new FreshnessInvocationStateStore(redis) : undefined;
   const providerNativeFreshnessFactory = redis
     ? createProviderNativeFreshnessFactory({
@@ -2364,6 +2378,7 @@ async function main(): Promise<void> {
         getQueue: () => invocationQueueRef,
       })
     : undefined;
+
   // F254 Phase D (AC-D4): Freshness event log for stream output audit trail.
   const freshnessEventLog = redis ? new FreshnessAttentionEventLog(redis) : undefined;
   if (freshnessEventLog) {
@@ -2413,34 +2428,7 @@ async function main(): Promise<void> {
   const { TurnCustodyProjectionService } = await import('./domains/ball-custody/TurnCustodyProjectionService.js');
   const turnCustodyProjectionService = new TurnCustodyProjectionService({
     ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
-    ...(ballCustodyProjectionStore ? { ballCustodyProjectionStore } : {}),
-    ...(ballCustodyEventLog ? { ballCustodyEventLog } : {}),
   });
-  let a2aDispatchDispositionService:
-    | import('./domains/ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService
-    | undefined;
-  if (ballCustodyIngest && ballCustodyEventLog && ballCustodyProjectionStore) {
-    const { A2ADispatchDispositionService } = await import('./domains/ball-custody/A2ADispatchDispositionService.js');
-    a2aDispatchDispositionService = new A2ADispatchDispositionService({
-      registry,
-      messageStore,
-      ballCustodyEventLog,
-      ballCustodyProjectionStore,
-      ballCustody: ballCustodyIngest,
-      log: app.log,
-      ...(ballCustodyProjector
-        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
-        : {}),
-    });
-    const { CoordinationTerminalRetirement } = await import('./domains/ball-custody/CoordinationTerminalRetirement.js');
-    const terminalRetirement = new CoordinationTerminalRetirement({
-      messageStore,
-      service: a2aDispatchDispositionService,
-      log: app.log,
-    });
-    app.addHook('onReady', async () => terminalRetirement.start());
-    app.addHook('onClose', async () => terminalRetirement.stop());
-  }
   const proactiveCandidateRegistryResolver = personMemoryStore
     ? new ProactiveCandidateRegistryResolver({
         entityRegistry: new EntityRegistryStore(memoryServices.store.getDb()),
@@ -2493,6 +2481,11 @@ async function main(): Promise<void> {
     autoDreamStore: autoDream.services.store,
   });
   memoryCueDeps.sourceReader = memoryCueRuntime.sourceReader;
+  const threadExecutionSituationSource = createThreadExecutionSituationSource({
+    messageStore,
+    listActiveRuns: (threadId) =>
+      invocationTracker.getActiveSlots(threadId).flatMap((slot) => (slot.activeRun ? [slot.activeRun] : [])),
+  });
   let collectiveContext:
     | import('./domains/plugin/builtin-runtime/collective-current-context.js').CollectiveCurrentContext
     | undefined;
@@ -2501,6 +2494,7 @@ async function main(): Promise<void> {
     agentRegistry,
     registry,
     messageStore,
+    threadExecutionSituationSource,
     taskProgressStore,
     ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
     ...(sessionStore ? { sessionStore } : {}),
@@ -2543,7 +2537,6 @@ async function main(): Promise<void> {
     conciergeTriagePlanStore,
     cloudInvokeBridge,
     cloudReturnGrantStore,
-    ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
     ...(freshnessReinvokeCheck ? { freshnessReinvokeCheck } : {}),
     turnExecutionStore,
     ...(freshnessStateStore ? { freshnessStateStore } : {}),
@@ -2590,25 +2583,31 @@ async function main(): Promise<void> {
       },
     },
   });
-  const queueProcessor = new QueueProcessor({
-    queue: invocationQueue,
-    invocationTracker,
-    invocationRecordStore: invocationRecordStore as unknown as InvocationRecordStoreLike,
-    router: router as unknown as RouterLike,
-    socketManager,
-    messageStore,
-    queueCustodyCoordinator,
-    turnExecutionStore,
-    log: app.log,
-    threadStore:
-      threadStore as unknown as import('./domains/cats/services/agents/invocation/QueueProcessor.js').ThreadStoreLike,
-    sessionContinuationCoordinator,
-    freshnessEventLog,
-    freshnessClosureStore,
-    ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
-    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
-    deliveryCursorStore,
-  });
+  const queueProcessor = new QueueProcessor(
+    {
+      queue: invocationQueue,
+      invocationTracker,
+      invocationRecordStore: invocationRecordStore as unknown as InvocationRecordStoreLike,
+      router: router as unknown as RouterLike,
+      socketManager,
+      messageStore,
+      turnExecutionStore,
+      log: app.log,
+      getPushService: getPushNotificationService,
+      threadStore:
+        threadStore as unknown as import('./domains/cats/services/agents/invocation/QueueProcessor.js').ThreadStoreLike,
+      sessionContinuationCoordinator,
+      freshnessEventLog,
+      freshnessClosureStore,
+      ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
+      deliveryCursorStore,
+    },
+    {
+      callerDispatchProcessStart: {
+        processGenerationId: `api:${PROCESS_START_AT}:${process.pid}`,
+      },
+    },
+  );
   const deliverApprovedActionCarrier = async (
     proposal: import('@cat-cafe/shared').DispatchProposal,
     fence: import('./domains/ball-custody/ActionSuccessorAdmissionService.js').ActionSuccessorFence,
@@ -2620,15 +2619,14 @@ async function main(): Promise<void> {
     if (!actionSocketManager) return { outcome: 'unavailable' };
     const targetCatIds = proposal.targetCats as CatId[];
     const senderCatId = proposal.senderCatId as CatId;
-    const storedMsg = await messageStore.append({
+    const messageInput = {
+      from: { kind: 'agent', catId: senderCatId },
       userId: proposal.ownerUserId,
-      catId: senderCatId,
       content: proposal.content,
       mentions: targetCatIds,
       origin: 'callback',
       timestamp: Date.now(),
       threadId: proposal.targetThreadId,
-      deliveryStatus: 'queued',
       idempotencyKey: `dispatch-action:${proposal.proposalId}:message`,
       extra: {
         isExplicitPost: true as const,
@@ -2639,9 +2637,74 @@ async function main(): Promise<void> {
         targetCats: targetCatIds,
       },
       ...(proposal.replyTo ? { replyTo: proposal.replyTo } : {}),
+    } as const;
+    const existingMessage = await messageStore.getByIdempotencyKey(
+      proposal.ownerUserId,
+      proposal.targetThreadId,
+      messageInput.idempotencyKey,
+    );
+    const existingEntries = existingMessage
+      ? ((await invocationQueue.getDurableEntriesForMessages(existingMessage.threadId, [existingMessage.id])).get(
+          existingMessage.id,
+        ) ?? [])
+      : [];
+    const existingTargets = new Set(existingEntries.flatMap((entry) => entry.targets));
+    const freshTargetCatIds = targetCatIds.filter((catId) => !existingTargets.has(catId));
+    const routingPreflight = await preflightA2ATargets(
+      routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {},
+      {
+        targetCats: freshTargetCatIds,
+        content: proposal.content,
+        userId: proposal.ownerUserId,
+      },
+    );
+    const routingPreflightRejected = routingPreflight.acceptedTargetCats.length !== freshTargetCatIds.length;
+    const planned = planA2AFanoutAdmission(
+      { invocationQueue },
+      {
+        targetCats: routingPreflightRejected ? [] : routingPreflight.acceptedTargetCats,
+        requestedTargetCats: targetCatIds,
+        content: proposal.content,
+        userId: proposal.ownerUserId,
+        ownerAuthProvenance,
+        threadId: proposal.targetThreadId,
+        createdAt: messageInput.timestamp,
+        callerCatId: senderCatId,
+        isCrossThread: proposal.sourceThreadId !== proposal.targetThreadId,
+        actionSuccessorFence: fence,
+      },
+    );
+    const acceptedFresh = new Set(planned.acceptedTargetCats);
+    const admissionPlan = {
+      requestedTargetCats: targetCatIds,
+      acceptedTargetCats: targetCatIds.filter(
+        (catId) => existingTargets.has(catId) || (!routingPreflightRejected && acceptedFresh.has(catId)),
+      ),
+      streakTargetCats: planned.streakTargetCats,
+      ...(planned.stop ? { stop: planned.stop } : {}),
+    };
+    const atomicAdmission = await appendA2ASourceWithLedgerAdmission({ messageStore, invocationQueue }, messageInput, {
+      plan: admissionPlan,
+      ownerAuthProvenance,
+      actionSuccessorFence: fence,
     });
-    const persistedState = classifyApprovedActionCarrier(proposal, storedMsg);
+    const storedMsg = atomicAdmission.message;
+    const classifyPersistedCarrier = async (message: typeof storedMsg) => {
+      const entries =
+        (await invocationQueue.getDurableEntriesForMessages(message.threadId, [message.id])).get(message.id) ?? [];
+      return { state: classifyApprovedActionCarrier(proposal, message, entries, fence), entries };
+    };
+    const persisted = await classifyPersistedCarrier(storedMsg);
+    const persistedState = persisted.state;
     if (persistedState.outcome === 'conflict') {
+      emitA2ARoutingPreflightReceipts(
+        { socketManager: actionSocketManager },
+        {
+          decision: routingPreflight.decision,
+          receiptCatId: senderCatId,
+          threadId: proposal.targetThreadId,
+        },
+      );
       return {
         outcome: 'terminal_failure',
         reason: persistedState.reason,
@@ -2650,7 +2713,7 @@ async function main(): Promise<void> {
     }
     if (
       persistedState.outcome === 'admitted' &&
-      (storedMsg.deliveryStatus === 'delivered' || storedMsg.queueCustody?.status === 'terminal')
+      (storedMsg.deliveryStatus === 'delivered' || persisted.entries.every((entry) => entry.status === 'terminal'))
     ) {
       return { outcome: 'enqueued', deliveredMessageId: storedMsg.id };
     }
@@ -2658,15 +2721,12 @@ async function main(): Promise<void> {
     try {
       enqueueResult = await enqueueA2ATargets(
         {
-          router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-          invocationRecordStore: invocationRecordStore!,
           socketManager: actionSocketManager,
           messageStore,
           ...(invocationTracker ? { invocationTracker } : {}),
           ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
           queueProcessor,
           invocationQueue,
-          ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
           ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
           log: app.log,
         },
@@ -2679,12 +2739,20 @@ async function main(): Promise<void> {
           triggerMessage: storedMsg,
           callerCatId: senderCatId,
           actionSuccessorFence: fence,
+          preplannedAdmission: admissionPlan,
+          ...(routingPreflight.decision ? { routingPreflightDecision: routingPreflight.decision } : {}),
+          ...(atomicAdmission.preAdmittedEntries
+            ? {
+                preAdmittedEntries: atomicAdmission.preAdmittedEntries,
+                preAdmittedReplayed: atomicAdmission.preAdmittedReplayed,
+              }
+            : {}),
         },
       );
     } catch (error) {
       const racedMessage = await messageStore.getById(storedMsg.id);
       if (racedMessage) {
-        const racedState = classifyApprovedActionCarrier(proposal, racedMessage);
+        const racedState = (await classifyPersistedCarrier(racedMessage)).state;
         if (racedState.outcome === 'admitted') {
           return { outcome: 'enqueued', deliveredMessageId: storedMsg.id };
         }
@@ -2702,7 +2770,7 @@ async function main(): Promise<void> {
     if (!targetCatIds.every((catId) => accepted.has(catId))) return { outcome: 'unavailable' };
     const admittedMessage = await messageStore.getById(storedMsg.id);
     if (!admittedMessage) return { outcome: 'unavailable' };
-    const admittedState = classifyApprovedActionCarrier(proposal, admittedMessage);
+    const admittedState = (await classifyPersistedCarrier(admittedMessage)).state;
     if (admittedState.outcome === 'conflict') {
       return {
         outcome: 'terminal_failure',
@@ -2750,15 +2818,15 @@ async function main(): Promise<void> {
           if (recoveryStatus === 'terminal') return { outcome: 'unavailable' as const };
         }
 
-        const result = invocationQueue.enqueue({
+        const result = await invocationQueue.enqueueDurable({
+          from: { kind: 'agent', catId: carrier.callerCatId },
           threadId: carrier.threadId,
           userId: carrier.userId,
+          kind: 'private_input',
           ownerAuthProvenance: 'unknown',
           content: carrier.content,
-          source: 'agent',
           sourceCategory: 'a2a',
           targetCats: [carrier.targetCatId],
-          callerCatId: carrier.callerCatId,
           intent: 'execute',
           autoExecute: true,
           priority: 'urgent',
@@ -2766,7 +2834,7 @@ async function main(): Promise<void> {
           actionSuccessorFence: carrier.fence,
         });
         if (result.outcome !== 'enqueued') return { outcome: 'unavailable' as const };
-        await queueProcessor.tryAutoExecute(carrier.threadId);
+        await queueProcessor.requestDrain(carrier.threadId);
         const admitted = await invocationRecordStore.getByIdempotencyKey(
           carrier.threadId,
           carrier.userId,
@@ -2866,23 +2934,22 @@ async function main(): Promise<void> {
       await reconcileFreshnessClosuresAtStartup({
         closureStore: freshnessClosureStore,
         enqueue: (closure) =>
-          invocationQueue.enqueue({
+          invocationQueue.enqueueDurable({
+            from: { kind: 'agent', catId: closure.catId },
             threadId: closure.threadId,
             userId: closure.userId,
+            kind: 'private_input',
             ownerAuthProvenance: 'unknown',
             content: `[Freshness Catch Closure ${closure.id}] startup recovery`,
-            source: 'agent',
             sourceCategory: 'freshness',
             targetCats: [closure.catId],
-            callerCatId: closure.catId,
             autoExecute: true,
             priority: 'normal',
             intent: 'execute',
-            idempotencyKey: `freshness-closure:${closure.id}`,
+            sourceId: `freshness-closure:${closure.id}`,
             freshnessClosureId: closure.id,
-            freshnessRequiredFrontierMessageId: closure.requiredFrontierMessageId,
           }),
-        executeThread: (threadId) => queueProcessor.tryAutoExecute(threadId),
+        executeThread: (threadId) => queueProcessor.requestDrain(threadId),
         onProjection: (projection) => {
           socketManager?.broadcastAgentMessage(
             {
@@ -2903,8 +2970,13 @@ async function main(): Promise<void> {
       await reconcileFreshnessSupplementsAtStartup({
         closureStore: freshnessClosureStore,
         messageStore,
-        enqueue: (supplement) => invocationQueue.enqueue({ ...supplement, ownerAuthProvenance: 'unknown' }),
-        executeThread: (threadId) => queueProcessor.tryAutoExecute(threadId),
+        enqueue: (supplement) =>
+          invocationQueue.enqueueDurable({
+            ...supplement,
+            sourceId: supplement.idempotencyKey,
+            ownerAuthProvenance: 'unknown',
+          }),
+        executeThread: (threadId) => queueProcessor.requestDrain(threadId),
         onProjection: (projection) => {
           socketManager?.broadcastAgentMessage(
             {
@@ -2968,16 +3040,6 @@ async function main(): Promise<void> {
   }
 
   // Register routes (socketManager injected, no circular import)
-  const retryAuthorityPreflight = new WaitContinuationRetryPreflight({
-    taskStore,
-    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
-  });
-  const retryAuthorityCommitter = new WaitContinuationRetryCommitter({
-    messageStore,
-    taskStore,
-    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
-    ...(redis ? { redis } : {}),
-  });
   const messagesOpts = {
     projectRoot: resolveActiveProjectRoot(),
     registry,
@@ -2995,12 +3057,10 @@ async function main(): Promise<void> {
     invocationQueue,
     ...(freshnessClosureStore ? { freshnessClosureStore } : {}),
     queueProcessor,
-    retryAuthorityPreflight,
-    retryAuthorityCommitter,
     sessionContinuationCoordinator,
     ...(f101GameStore ? { gameStore: f101GameStore } : {}),
     ...(f101SharedDriver ? { autoPlayer: f101SharedDriver } : {}),
-    holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2 },
+    holdBallCancelDeps: { dynamicTaskStore, taskRunner: taskRunnerV2, messageStore, socketManager },
     // F192 Phase G AC-G12 / F227 归一: magic word → Event Memory (single truth
     // source) + a lightweight episode ref for F192's a2 projection.
     onMagicWordDetected: (
@@ -3085,12 +3145,10 @@ async function main(): Promise<void> {
     queueProcessor,
     invocationTracker,
     resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
+    isCatAvailable: (catId) => isCatAvailable(catId),
     agentSessionMutex,
     socketManager,
     messageStore, // F117: for marking queued messages as canceled on withdraw/clear
-    retryAuthorityPreflight,
-    retryAuthorityCommitter,
-    queueCustodyCoordinator,
     invocationRecordStore, // F194 Phase B: canonical liveness read source
     draftStore, // F194 Phase B: canonical liveness read source
     turnExecutionStore, // F194/F254: durable running child closes tracker/draft handoff gaps
@@ -3103,18 +3161,12 @@ async function main(): Promise<void> {
   await app.register(invocationsRoutes, {
     invocationRecordStore,
     turnExecutionStore,
-    messageStore,
-    socketManager,
-    router,
-    invocationTracker,
-    queueProcessor,
   });
   await app.register(messageActionsRoutes, {
     messageStore,
     socketManager,
     threadStore,
     invocationQueue,
-    queueCustodyCoordinator,
     queueProcessor,
     indexBuilder: memoryServices.indexBuilder,
   });
@@ -3129,6 +3181,7 @@ async function main(): Promise<void> {
   }
   await app.register(catsRoutes, {
     resolveContextCapacitySnapshot: (catId) => router.contextCapacitySnapshot(catId),
+    resolveCarrierCapability: (catId) => router.freshnessCarrierCapability(catId),
   });
   await app.register(routingContextRoutes, {
     ...(routingContextRuntime ? { runtime: routingContextRuntime } : {}),
@@ -3212,6 +3265,7 @@ async function main(): Promise<void> {
 
   const { evalHubRoutes } = await import('./routes/eval-hub.js');
   const { evalVerdictLifecycleRoutes } = await import('./routes/eval-verdict-lifecycle.js');
+
   const evalHarnessFeedbackRoot = resolve(repoRoot, 'docs', 'harness-feedback');
   const reevalClosureEventLog = redis
     ? new (await import('./infrastructure/harness-eval/reeval-closure-event-log.js')).RedisReevalClosureEventLog(redis)
@@ -3510,7 +3564,7 @@ async function main(): Promise<void> {
       new FreshnessReplayProviderImpl({
         store: freshnessClosureStore,
         fixtureRoot: resolve(repoRoot, 'docs', 'harness-feedback', 'fixtures', 'f254'),
-        queueLifecycleSource: messageStore,
+        queueLifecycleSource: invocationQueue,
         ...(freshnessEventLog ? { attentionEventLog: freshnessEventLog } : {}),
       }),
     );
@@ -4597,39 +4651,6 @@ async function main(): Promise<void> {
   const waitLifecycleHolder: {
     current?: import('./domains/github-signals/GitHubWaitLifecycleService.js').GitHubWaitLifecycleService;
   } = {};
-  let managedHoldDispositionService:
-    | import('./domains/ball-custody/ManagedHoldDispositionService.js').ManagedHoldDispositionService
-    | undefined;
-  if (ballCustodyIngest && ballCustodyEventLog && ballCustodyProjectionStore) {
-    const [{ ManagedHoldReceiptService }, { ManagedHoldDispositionService }] = await Promise.all([
-      import('./domains/ball-custody/ManagedHoldReceiptService.js'),
-      import('./domains/ball-custody/ManagedHoldDispositionService.js'),
-    ]);
-    const receiptService = new ManagedHoldReceiptService({
-      queue: invocationQueue,
-      messageStore,
-      coordinator: queueCustodyCoordinator,
-      onSettled: ({ threadId, sourceMessageId }) => {
-        socketManager?.broadcastToRoom(`thread:${threadId}`, 'message_receipt_updated', {
-          threadId,
-          messageId: sourceMessageId,
-        });
-      },
-    });
-    managedHoldDispositionService = new ManagedHoldDispositionService({
-      registry,
-      log: app.log,
-      dynamicTaskStore,
-      messageStore,
-      ballCustodyEventLog,
-      ballCustodyProjectionStore,
-      ballCustody: ballCustodyIngest,
-      receiptService,
-      ...(ballCustodyProjector
-        ? { repairProjection: (subjectKey: string) => ballCustodyProjector!.rebuild(subjectKey) }
-        : {}),
-    });
-  }
   const meetingArtifactReaderHolder: import('./routes/callback-meeting-artifact-routes.js').MeetingArtifactReaderHolder =
     {};
   const namedCatContentHolder: import('./routes/callback-content-editor-routes.js').NamedCatContentHolder = {};
@@ -4643,6 +4664,7 @@ async function main(): Promise<void> {
     cloudReturnBindingSigner,
     cloudReturnGrantStore,
     messageStore,
+    threadExecutionSituationSource,
     socketManager,
     callbackAuthNotifier,
     taskStore,
@@ -4704,7 +4726,6 @@ async function main(): Promise<void> {
     invocationQueue,
     ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
     ...(actionSuccessorAdmissionService ? { actionSuccessorAdmissionService } : {}),
-    queueCustodyCoordinator,
     indexBuilder: memoryServices.indexBuilder as
       | { markThreadDirty(threadId: string): void; flushDirtyThreads?(): number | Promise<number> }
       | undefined,
@@ -4730,8 +4751,6 @@ async function main(): Promise<void> {
       threadStore,
       taskStore,
       invocationRecordStore,
-      ...(managedHoldDispositionService ? { managedHoldDispositionService } : {}),
-      ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
       ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
       onHoldBallCancelFeedback: (input) => {
         void import('./domains/cats/services/frustration/FrustrationDetector.js')
@@ -5521,8 +5540,8 @@ async function main(): Promise<void> {
       const targetCatIds = proposal.targetCats as CatId[];
       const senderCatId = proposal.senderCatId as CatId;
       const storedMsg = await messageStore.append({
+        from: { kind: 'agent', catId: senderCatId },
         userId: proposal.ownerUserId,
-        catId: senderCatId,
         content: proposal.content,
         mentions: targetCatIds,
         origin: 'callback',
@@ -5545,15 +5564,12 @@ async function main(): Promise<void> {
         try {
           await enqueueA2ATargets(
             {
-              router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-              invocationRecordStore: invocationRecordStore!,
               socketManager,
               messageStore,
               ...(invocationTracker ? { invocationTracker } : {}),
               ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
               ...(queueProcessor ? { queueProcessor } : {}),
               ...(invocationQueue ? { invocationQueue } : {}),
-              ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
               ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
               log: app.log,
             },
@@ -5645,6 +5661,8 @@ async function main(): Promise<void> {
       getCatDisplayName: (catId: string) => allCatConfigs[catId]?.displayName ?? catId,
       getAllCatIds: () => Object.keys(allCatConfigs),
       isCatAvailable: (catId: string) => isCatAvailable(catId),
+      resolveConversationFallbackTarget: async (threadId: string) =>
+        (await router.resolveConversationTargetsAtAdmission([], threadId))[0],
     });
   }
   await app.register(tasksRoutes, { taskStore, socketManager, waitLifecycleHolder });
@@ -6382,10 +6400,8 @@ async function main(): Promise<void> {
     `[api] F142-B: CommandRegistry loaded (${commandRegistry.getAll().length} commands, ${skillCommandMap.size} skills)`,
   );
 
-  // Commands route needs opus service for task extraction.
+  // Commands route needs the configured opus service for task extraction.
   // Lazy-init: empty catalog (first-run) has no opus entry yet — defer until first use.
-  // 砚砚 Step-3 P2 (2026-05-14): route through canary factory so this path
-  // also honors CAT_CAFE_CLAUDE_CARRIER=bg_daemon when canary flips.
   // 砚砚 Step-3 P1 re-review: invoke() must directly return AsyncIterable
   // (not Promise<AsyncIterable>), otherwise `for await (... of svc.invoke())`
   // crashes at runtime. Use sync generator wrapper that defers async setup
@@ -6397,10 +6413,15 @@ async function main(): Promise<void> {
       // before first yield, then delegates.
       return (async function* opusLazyInvoke() {
         if (!_opusService) {
-          const { createClaudeAgentServiceForCanary } = await import(
-            './domains/cats/services/agents/providers/claude-carrier-factory.js'
-          );
-          _opusService = createClaudeAgentServiceForCanary('opus' as CatId);
+          const opusConfig = catRegistry.tryGet('opus')?.config;
+          if (opusConfig?.carrier === 'sdk') {
+            _opusService = new ClaudeSdkAgentService({ catId: 'opus' as CatId });
+          } else {
+            const { createClaudeAgentServiceForCanary } = await import(
+              './domains/cats/services/agents/providers/claude-carrier-factory.js'
+            );
+            _opusService = createClaudeAgentServiceForCanary('opus' as CatId);
+          }
         }
         yield* _opusService.invoke(prompt, options);
       })();
@@ -6422,9 +6443,7 @@ async function main(): Promise<void> {
   await app.register(signalPodcastRoutes, {
     messageStore,
     threadStore,
-    router,
-    invocationRecordStore,
-    invocationTracker,
+    invocationQueue,
     queueProcessor,
   });
 
@@ -6672,15 +6691,13 @@ async function main(): Promise<void> {
           messageStore,
           socketManager: socketManager ?? undefined,
           invocationQueue,
-          ...(a2aDispatchDispositionService ? { a2aDispatchDispositionService } : {}),
-          resumePrestartRetirement: (entries) => queueProcessor.resumeDurablePrestartRetirement(entries),
           ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
         });
         const startupRecovery = await reconciler.reconcileOrphans();
         registry.markStartupRecoveryComplete();
         for (const scope of startupRecovery.queueResumeScopes) {
           try {
-            await queueProcessor.processNext(scope.threadId, scope.userId);
+            await queueProcessor.requestDrain(scope.threadId);
           } catch (error) {
             app.log.warn(
               { error, threadId: scope.threadId, userId: scope.userId },
@@ -6848,24 +6865,12 @@ async function main(): Promise<void> {
   // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)
   const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const invokeTrigger = new ConnectorInvokeTrigger({
-    router,
     socketManager,
-    invocationRecordStore,
-    invocationTracker,
     invocationQueue,
     queueProcessor,
-    queueCustodyCoordinator,
     messageStore,
-    actionSuccessorLeaseStore,
-    threadMetaLookup: async (threadId) => {
-      const thread = await threadStore.get(threadId);
-      if (!thread) return undefined;
-      return {
-        threadShortId: threadId.slice(0, 15),
-        threadTitle: thread.title ?? undefined,
-        deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
-      };
-    },
+    waitTaskStore: taskStore,
+    ...(actionSuccessorLeaseStore ? { actionSuccessorLeaseStore } : {}),
     log: app.log,
   });
 
@@ -6874,7 +6879,6 @@ async function main(): Promise<void> {
     isKnownCat: (catId) => catRegistry.tryGet(catId) !== undefined,
     messageStore,
     invokeTriggerProvider: { get: () => invokeTrigger },
-    socketManager,
   });
   const { LimbOutboundDeliveryHook } = await import('./domains/limb/LimbOutboundDeliveryHook.js');
   const limbOutboundDelivery = new LimbOutboundDeliveryHook({
@@ -6897,12 +6901,11 @@ async function main(): Promise<void> {
       taskRunner: taskRunnerV2,
       invocationRecordStore,
       getInvokeTrigger: () => invokeTrigger,
-      ...createManagedCommandWakeQueueAdapter({
-        dynamicTaskStore,
+      isCommandRunnerActive: isManagedWakeRunnerActive,
+      ...createManagedCommandWakeCarrierAdapter({
         messageStore,
         invocationRecordStore,
         invocationQueue,
-        queueProcessor,
       }),
     });
     managedCommandWakeRecovery = recovery;
@@ -7388,7 +7391,7 @@ async function main(): Promise<void> {
         reconciliationDedup,
         bindingStore: new RedisConnectorThreadBindingStore(redisClient),
         deliverFn: deliverConnectorMessage,
-        deliveryDeps: { messageStore, socketManager },
+        deliveryDeps: { messageStore },
         fetchOpenPRs,
         fetchOpenIssues,
         // F168 C0.3: repo-level comment poller wiring
@@ -7600,7 +7603,6 @@ async function main(): Promise<void> {
     publishPrereqCache.set(domainId, ok);
     return ok;
   };
-
   const evalScheduleOpts = {
     harnessFeedbackRoot: resolve(repoRoot, 'docs', 'harness-feedback'),
     threadStore,
@@ -7709,15 +7711,12 @@ async function main(): Promise<void> {
             if (!socketManager) return { accepted: false };
             const result = await enqueueA2ATargets(
               {
-                router: router as unknown as import('./routes/callback-a2a-trigger.js').A2ATriggerDeps['router'],
-                invocationRecordStore: invocationRecordStore!,
                 socketManager,
                 messageStore,
                 ...(invocationTracker ? { invocationTracker } : {}),
                 ...(deliveryCursorStore ? { deliveryCursorStore } : {}),
                 queueProcessor,
                 invocationQueue,
-                ...(ballCustodyIngest ? { ballCustody: ballCustodyIngest } : {}),
                 ...(routingContextRuntime ? { routingDispatchPreflight: routingContextRuntime.dispatchPreflight } : {}),
                 log: app.log,
               },
@@ -7733,7 +7732,7 @@ async function main(): Promise<void> {
               },
             );
             const accepted = [...result.enqueued, ...(result.coalesced ?? [])];
-            return { accepted: !result.fallback && accepted.includes(input.targetCatId) };
+            return { accepted: accepted.includes(input.targetCatId) };
           }),
         })
       : undefined;
@@ -7975,8 +7974,6 @@ async function main(): Promise<void> {
 
   function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
     handle.outboundHook.setLimbDelivery(limbOutboundDelivery);
-    invokeTrigger.setOutboundHook(handle.outboundHook);
-    invokeTrigger.setStreamingHook(handle.streamingHook);
     queueProcessor.setOutboundHook(handle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0]);
     queueProcessor.setStreamingHook(handle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0]);
     (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;

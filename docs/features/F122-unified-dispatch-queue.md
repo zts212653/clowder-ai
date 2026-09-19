@@ -4,11 +4,21 @@ related_features: [F108, F117, F027]
 topics: [a2a, queue, dispatch, steer, multi_mention, architecture]
 doc_kind: spec
 created: 2026-03-14
+tips_exempt: 2026-09-03 ADR-043 consolidates existing A2A and Queue dispatch truth without adding a new user action or discoverable capability
 ---
 
 # F122: 执行通道统一 — A2A/multi_mention 入 Dispatch Queue
 
 > **Status**: done | **Owner**: Ragdoll | **Priority**: P1 | **Completed**: 2026-03-18
+
+> ⚠️ **队列内核设计已于 2026-09-02 收敛。** 本文档中关于队列条目状态、per-target 投递簿记与 Steer 预留的描述反映的是收敛前的实现。当前设计真相源：[ADR-043](../decisions/043-queue-durable-single-ledger.md) 与 [F117 Phase D](F117-message-delivery-lifecycle.md)。本文档保留作为演进历史。
+
+> **当前校准（2026-09-09）**：A2A、multi-mention、用户与 connector 均进入同一持久 Queue ledger。
+> 一条 source message 始终只有一条 Queue entry，`targets[]` 只保存 pending recipients；Message 与该 single-source
+> entry 原子 admission，不再做 per-target fan-out、不再 `backfillMessageId`，也不再用 `message.queueCustody`
+> 保存投递状态。multi-mention 必须先创建正文一致、可引用的真实 Agent History source，不能让 Queue payload
+> 挂在另一条 callback response identity 上。实际投递与终局只写 History `dispatchRefs` / response lifecycle；
+> 重放以 exact `sourceRecordId × targetCatId` 幂等跳过。
 
 ## Why
 

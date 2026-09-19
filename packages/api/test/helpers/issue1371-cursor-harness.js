@@ -3,6 +3,7 @@ import { FreshnessOutputCommitCoordinator } from '../../dist/domains/cats/servic
 import { DeliveryCursorStore } from '../../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../../dist/domains/cats/services/stores/ports/ThreadStore.js';
+import { adaptMessageStore } from './message-from-fixtures.js';
 
 export function deferred() {
   let resolve;
@@ -14,7 +15,8 @@ export function deferred() {
 
 export async function cursorHarness(services, messageStore = new MessageStore()) {
   let sequence = 0;
-  const source = await messageStore.append({
+  const canonicalMessageStore = adaptMessageStore(messageStore);
+  const source = await canonicalMessageStore.append({
     userId: 'user-1',
     threadId: 'thread-cursor',
     catId: null,
@@ -26,7 +28,7 @@ export async function cursorHarness(services, messageStore = new MessageStore())
   const deliveryCursorStore = new DeliveryCursorStore();
   const deps = {
     services,
-    messageStore,
+    messageStore: canonicalMessageStore,
     deliveryCursorStore,
     invocationDeps: {
       registry: {
@@ -42,7 +44,7 @@ export async function cursorHarness(services, messageStore = new MessageStore())
       apiUrl: 'http://127.0.0.1:3102',
     },
     freshnessOutputCommitCoordinator: new FreshnessOutputCommitCoordinator({
-      messageStore,
+      messageStore: canonicalMessageStore,
       closureStore: new InMemoryFreshnessClosureStore(),
     }),
     socketManager: { broadcastToRoom() {} },

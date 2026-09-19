@@ -58,8 +58,8 @@ describe('F276 scheduler re-entry carrier', () => {
   function messages(overrides = {}) {
     const source = {
       id: 'owner-message-1',
+      from: { kind: 'user', userId: 'owner-1' },
       userId: 'owner-1',
-      catId: null,
       content: 'meeting attachment',
       mentions: [],
       timestamp: 1,
@@ -77,8 +77,8 @@ describe('F276 scheduler re-entry carrier', () => {
     };
     const trigger = {
       id: 'scheduler-message-1',
+      from: { kind: 'system', service: 'scheduler' },
       userId: 'scheduler',
-      catId: null,
       content: 'daily clerk',
       mentions: [],
       timestamp: 2,
@@ -203,7 +203,7 @@ describe('F276 scheduler re-entry carrier', () => {
   });
 
   it('does not accept an owner-authored or visible scheduler lookalike as authority', async () => {
-    assert.deepEqual(await resolve({ trigger: { userId: 'owner-1' } }), []);
+    assert.deepEqual(await resolve({ trigger: { from: { kind: 'user', userId: 'owner-1' }, userId: 'owner-1' } }), []);
     assert.deepEqual(
       await resolve({
         trigger: {
@@ -269,7 +269,10 @@ describe('F276 scheduler re-entry carrier', () => {
         messageStore: { getById: async () => ({ ...base.source, ...overrides.source }) },
       });
 
-    assert.deepEqual(await resolveRetry({ trigger: { userId: 'owner-1' } }), []);
+    assert.deepEqual(
+      await resolveRetry({ trigger: { from: { kind: 'user', userId: 'owner-1' }, userId: 'owner-1' } }),
+      [],
+    );
     assert.deepEqual(await resolveRetry({ source: { deletedAt: 3 } }), []);
     assert.deepEqual(await resolveRetry({ targetCatId: 'other-cat' }), []);
     assert.deepEqual(

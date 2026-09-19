@@ -10,19 +10,19 @@ import {
 import { reconcileActionSuccessorEnqueue } from '../dist/domains/ball-custody/reconcile-action-successor-enqueue.js';
 
 const terminalPredicate = canonicalizeActionTerminalPredicate({
-  actionFamily: 'implement',
-  subjectRef: 'subject:task:task-4058',
-  predicate: { kind: 'task_done' },
+  actionFamily: 'review',
+  subjectRef: 'pr:owner/repo#4058',
+  predicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
 });
 
 function lease(overrides = {}) {
   return {
     leaseId: 'lease-review-4058',
-    key: 'user-1|subject:task:task-4058|implement|implementer',
+    key: 'user-1|pr:owner/repo#4058|review|reviewer',
     tenantScope: 'user-1',
-    subjectRef: 'subject:task:task-4058',
-    actionFamily: 'implement',
-    successorSlot: 'implementer',
+    subjectRef: 'pr:owner/repo#4058',
+    actionFamily: 'review',
+    successorSlot: 'reviewer',
     mode: 'single',
     holderCatIds: ['opus5'],
     dispatchId: 'cross-post:review-4058-old',
@@ -57,126 +57,55 @@ function request(overrides = {}) {
     evidenceRef: 'callback:new-invocation:review-4058-reentry',
     now: 200,
     action: {
-      subjectRef: 'subject:task:task-4058',
-      actionFamily: 'implement',
-      successorSlot: 'implementer',
+      subjectRef: 'pr:owner/repo#4058',
+      actionFamily: 'review',
+      successorSlot: 'reviewer',
       mode: 'single',
-      terminalPredicate: { kind: 'task_done' },
+      terminalPredicate: { kind: 'review_delivered', headSha: 'a'.repeat(40) },
     },
     ...overrides,
   };
 }
 
-function messageForTarget(targetCatId, state, overrides = {}) {
-  const currentLease = overrides.lease ?? lease({ holderCatIds: [targetCatId] });
+function ledgerEntryForTargets(targets, overrides = {}) {
+  const currentLease = overrides.lease ?? lease({ holderCatIds: targets });
   const fence = overrides.fence ?? buildActionSuccessorFence(currentLease, currentLease.dispatchId);
-  const interrupted = state === 'interrupted';
-  const handled = state === 'handled';
-  const withdrawn = state === 'withdrawn';
-  const failed = state === 'failed';
-  const live = ['queued', 'notified', 'awakened', 'seen', 'steering'].includes(state);
+  const sourceRecordId = overrides.id ?? `message-${targets.join('-')}`;
   return {
-    id: overrides.id ?? `message-${targetCatId}-${state}`,
+    version: 2,
+    id: overrides.id ?? `entry-${targets.join('-')}`,
     threadId: currentLease.holderThreadId,
-    userId: currentLease.tenantScope,
-    catId: currentLease.predecessorCatId,
-    content: 'Implement task',
-    mentions: [targetCatId],
-    timestamp: 100,
-    deliveryStatus: live ? 'queued' : 'delivered',
-    queueCustody: {
-      version: 1,
-      entryId: `entry-${targetCatId}`,
-      revision: 2,
-      intent: 'review',
-      status: live ? 'queued' : 'terminal',
-      allTargetCats: [targetCatId],
-      pendingTargetCats: live ? [targetCatId] : [],
-      notifiedByCatIds: ['notified', 'awakened', 'seen', 'steering'].includes(state) ? [targetCatId] : [],
-      ...(state === 'awakened' || state === 'seen' || state === 'steering'
-        ? { awakenedInvocationIdByCatId: { [targetCatId]: `invocation-${targetCatId}` } }
-        : {}),
-      ...(state === 'awakened' || state === 'seen' || state === 'steering'
-        ? { awakenedAtByCatId: { [targetCatId]: 110 } }
-        : {}),
-      seenByCatIds: state === 'seen' || state === 'steering' ? [targetCatId] : [],
-      seenInvocationIdByCatId:
-        state === 'seen' || state === 'steering' ? { [targetCatId]: `invocation-${targetCatId}` } : {},
-      ...(state === 'steering' ? { steeredInvocationIdByCatId: { [targetCatId]: `invocation-${targetCatId}` } } : {}),
-      failedByCatIds: interrupted || failed ? [targetCatId] : [],
-      ...(withdrawn ? { withdrawnByCatIds: [targetCatId], withdrawnAtByCatId: { [targetCatId]: 120 } } : {}),
-      handledByCatIds: handled ? [targetCatId] : [],
-      carrierByTargetCatId: {
-        [targetCatId]: {
-          entryId: `entry-${targetCatId}`,
-          idempotencyKey: `action:${fence.leaseId}:${fence.generation}:${targetCatId}`,
-          actionSuccessorFence: fence,
-          source: 'agent',
-          sourceCategory: 'a2a',
-          callerCatId: currentLease.predecessorCatId,
-          a2aTriggerMessageId: overrides.id ?? `message-${targetCatId}-${state}`,
-          autoExecute: true,
-          createdAt: 100,
-        },
-      },
-      ...(live ? { carrierStateByTargetCatId: { [targetCatId]: { status: 'queued' } } } : {}),
-      targetAttempts: [
-        {
-          id: `entry-${targetCatId}:${targetCatId}:1`,
-          targetCatId,
-          sequence: 1,
-          state: interrupted ? 'interrupted' : failed ? 'failed' : handled ? 'handled' : live ? 'queued' : 'cancelled',
-          ...(interrupted ? { terminalReason: 'runtime_restart', invocationId: `invocation-${targetCatId}` } : {}),
-          ...(failed ? { terminalReason: 'invocation_failed' } : {}),
-          ...(withdrawn ? { terminalReason: 'source_withdrawn' } : {}),
-          ...(handled ? { invocationId: `invocation-${targetCatId}` } : {}),
-          createdAt: 100,
-          updatedAt: 120,
-        },
-      ],
-      priority: 'normal',
-      createdAt: 100,
-      updatedAt: 120,
+    owner: { kind: 'user', userId: currentLease.tenantScope },
+    kind: 'conversation_input',
+    from: { kind: 'agent', catId: currentLease.predecessorCatId },
+    targets,
+    payload: {
+      sourceRecordId,
+      content: 'Review exact HEAD',
+      messageId: sourceRecordId,
     },
+    execution: { intent: 'review', ownerAuthProvenance: 'strict', autoExecute: true, actionSuccessorFence: fence },
+    delivery: {},
+    status: 'queued',
+    enqueuedAt: 100,
+    priority: 'normal',
+    sourceCategory: 'a2a',
   };
 }
 
 describe('direct action successor carrier recovery', () => {
-  test('keeps safe_wait only when every exact-fence holder has live durable custody', () => {
+  test('keeps safe_wait only when every exact-fence holder remains pending in Queue', () => {
     const current = lease();
-    for (const state of ['queued', 'notified', 'awakened', 'seen', 'steering']) {
-      assert.deepEqual(classifyDirectActionSuccessorCarrier(current, [messageForTarget('opus5', state)]), {
-        disposition: 'live',
-        fence: buildActionSuccessorFence(current, current.dispatchId),
-      });
-    }
+    assert.deepEqual(classifyDirectActionSuccessorCarrier(current, [ledgerEntryForTargets(['opus5'])]), {
+      disposition: 'live',
+      fence: buildActionSuccessorFence(current, current.dispatchId),
+    });
   });
 
   test('recognizes a complete pre-CAS admission as live durable custody', () => {
     const current = lease();
     const fence = buildActionSuccessorFence(current, current.dispatchId);
-    const admission = {
-      id: 'message-admission',
-      threadId: current.holderThreadId,
-      userId: current.tenantScope,
-      catId: current.predecessorCatId,
-      content: 'Implement task',
-      mentions: ['opus5'],
-      timestamp: 100,
-      deliveryStatus: 'queued',
-      queueCustodyAdmission: {
-        version: 1,
-        admissionId: 'admission-review',
-        ownerUserId: current.tenantScope,
-        ownerAuthProvenance: 'strict',
-        intent: 'review',
-        targetCats: ['opus5'],
-        requestedTargetCats: ['opus5'],
-        actionSuccessorFence: fence,
-        priority: 'normal',
-        createdAt: 100,
-      },
-    };
+    const admission = ledgerEntryForTargets(['opus5'], { id: 'message-admission', fence });
 
     assert.deepEqual(classifyDirectActionSuccessorCarrier(current, [admission]), {
       disposition: 'live',
@@ -184,39 +113,19 @@ describe('direct action successor carrier recovery', () => {
     });
   });
 
-  test('recovers only when every exact holder carrier was interrupted by runtime restart', () => {
-    const current = lease();
-    assert.deepEqual(classifyDirectActionSuccessorCarrier(current, [messageForTarget('opus5', 'interrupted')]), {
-      disposition: 'restart_interrupted',
-      fence: buildActionSuccessorFence(current, current.dispatchId),
-    });
-  });
-
-  test('fails closed for missing, terminal, failed, mixed, or wrong-fence custody', () => {
+  test('fails closed for missing, partially delivered, or wrong-fence custody', () => {
     const single = lease();
     assert.equal(classifyDirectActionSuccessorCarrier(single, []).disposition, 'unavailable');
-    for (const state of ['handled', 'withdrawn', 'failed']) {
-      assert.equal(
-        classifyDirectActionSuccessorCarrier(single, [messageForTarget('opus5', state)]).disposition,
-        'unavailable',
-      );
-    }
 
-    const parallel = lease({
-      mode: 'parallel',
-      holderCatIds: ['opus5', 'kimi'],
-      parallelIntent: 'independent implementation',
-    });
+    const parallel = lease({ mode: 'parallel', holderCatIds: ['opus5', 'kimi'], parallelIntent: 'independent review' });
     assert.equal(
-      classifyDirectActionSuccessorCarrier(parallel, [
-        messageForTarget('opus5', 'interrupted', { lease: parallel }),
-        messageForTarget('kimi', 'queued', { lease: parallel }),
-      ]).disposition,
+      classifyDirectActionSuccessorCarrier(parallel, [ledgerEntryForTargets(['kimi'], { lease: parallel })])
+        .disposition,
       'unavailable',
     );
     assert.equal(
       classifyDirectActionSuccessorCarrier(single, [
-        messageForTarget('opus5', 'interrupted', {
+        ledgerEntryForTargets(['opus5'], {
           fence: { ...buildActionSuccessorFence(single, single.dispatchId), generation: 2 },
         }),
       ]).disposition,
@@ -236,7 +145,7 @@ describe('direct action successor carrier recovery', () => {
         request({
           action: {
             ...request().action,
-            subjectRef: 'subject:task:other-task',
+            terminalPredicate: { kind: 'review_delivered', headSha: 'b'.repeat(40) },
           },
         }),
       ),
@@ -248,8 +157,8 @@ describe('direct action successor carrier recovery', () => {
     const decision = await resolveDirectActionSuccessorCarrier({
       lease: lease(),
       admissionInput: request(),
-      messageStore: {
-        async getByThreadAfter() {
+      invocationQueue: {
+        async listAllDurable() {
           throw new Error('store unavailable');
         },
       },

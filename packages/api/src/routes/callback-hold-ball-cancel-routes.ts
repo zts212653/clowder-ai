@@ -30,7 +30,7 @@ import {
   isPendingHoldBallTask,
   readHoldLifecycle,
 } from './hold-ball-cancel.js';
-import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
+import { persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
 
 const log = createModuleLogger('routes/callback-hold-ball-cancel');
 
@@ -389,25 +389,18 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       try {
         const cancelMessage = cancellationVisibilityMessage(catId, cancellationState);
-        const stored = await messageStore.append({
-          userId: 'system',
-          catId: null,
-          content: cancelMessage,
-          mentions: [],
-          timestamp: Date.now(),
-          threadId,
-          source: HOLD_BALL_SOURCE,
-        });
-        socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-          threadId,
-          message: {
-            id: stored.id,
-            type: 'connector',
-            content: stored.content,
-            source: HOLD_BALL_SOURCE,
-            timestamp: stored.timestamp,
+        await persistHoldTerminalVisibility(
+          { messageStore, socketManager },
+          {
+            taskId,
+            threadId,
+            userId: access.owner.userId ?? access.actor.userId,
+            content: cancelMessage,
+            catId,
+            outcome: cancellationState,
+            idempotencySuffix: 'cancel',
           },
-        });
+        );
       } catch (err) {
         log.warn({ taskId, threadId, err }, 'F167 Phase J: failed to post hold cancel visibility message');
       }

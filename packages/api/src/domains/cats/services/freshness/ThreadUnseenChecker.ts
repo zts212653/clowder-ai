@@ -133,9 +133,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
     const senderSet = new Set(nonSelf.map((e) => getQueuedFreshnessSenderLabel(e)));
     const senders = [...senderSet];
     const frontierEntry = nonSelf.at(-1);
-    const correlationMessageIds = [frontierEntry?.messageId ?? '', ...(frontierEntry?.mergedMessageIds ?? [])].filter(
-      (messageId, index, all) => messageId.length > 0 && all.indexOf(messageId) === index,
-    );
+    const correlationMessageIds = frontierEntry?.messageId ? [frontierEntry.messageId] : [];
     const noticeDedupKey = JSON.stringify({
       queueEntryId: frontierEntry?.entryId ?? null,
       messageIds: [...correlationMessageIds].sort(),
@@ -157,9 +155,9 @@ export class ThreadUnseenChecker implements UnseenChecker {
       // syntheticSeq = max(seenSeq+1, Date.now()) ensures the cursor exceeds
       // the current seen cursor (codex R13 HWM fix).
       maxMessageId: cursorFor({ id: '0', visibilitySeq: syntheticSeq }),
-      // Re-checking the same queued entry generates a fresh synthetic cursor.
-      // Coalesce by durable, content-free Queue identity instead; a newly
-      // merged message ID changes this key and permits exactly one new notice.
+      // Re-checking the same queued row generates a fresh synthetic cursor.
+      // Deduplicate by its durable, content-free scalar identity; a new source
+      // arrives as a new row and therefore permits exactly one new notice.
       noticeDedupKey,
       // Receipt truth must use the exact Queue identity, never the synthetic
       // cursor frontier. If the frontier entry lacks identity, keep [] so

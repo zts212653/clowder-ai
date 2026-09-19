@@ -13,6 +13,7 @@
 import type { CliEffortValue } from '../cli-effort.js';
 import type { CodexSpeedValue } from '../codex-speed.js';
 import type { AgyProfileConfig, CatColor, ClientId } from './cat.js';
+import type { CatCarrier } from './cat-carrier.js';
 import type { CatId } from './ids.js';
 import type { VoiceConfig } from './tts.js';
 
@@ -27,13 +28,6 @@ export interface CliConfig {
    * Defaults: 'max' (claude) / 'xhigh' (codex).
    */
   readonly effort?: CliEffortValue;
-  /**
-   * Codex-only carrier override (F254 D2): 'exec_json' (one-shot `codex exec`)
-   * or 'app_server' (pooled app-server host). Absent = follow the process-level
-   * CAT_CAFE_CODEX_CARRIER env. Only meaningful for clientId 'openai'; the cats
-   * API rejects it for other clients.
-   */
-  readonly carrier?: 'exec_json' | 'app_server';
   /** F291: Codex OAuth request tier. Absent inherits the Codex user config. */
   readonly serviceTier?: CodexSpeedValue;
 }
@@ -64,6 +58,8 @@ export interface CatVariant {
   readonly accountRef?: string;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
+  /** Canonical member access mode. Config reads default to `cli`. */
+  readonly carrier?: CatCarrier;
   readonly defaultModel: string;
   readonly mcpSupport: boolean;
   readonly cli: CliConfig;

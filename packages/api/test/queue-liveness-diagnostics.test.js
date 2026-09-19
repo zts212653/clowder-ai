@@ -5,8 +5,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { CONTINUATION_DIAGNOSTIC_MESSAGE, classifyContinuationOutcome, describeContinuationOutcome, mayCommitPause } =
-  await import('../dist/domains/cats/services/agents/invocation/queue-liveness-diagnostics.js');
+const { CONTINUATION_DIAGNOSTIC_MESSAGE, classifyContinuationOutcome, describeContinuationOutcome } = await import(
+  '../dist/domains/cats/services/agents/invocation/queue-liveness-diagnostics.js'
+);
 
 const base = { threadId: 't1', catId: 'opus', deferredForBusySlot: 0, hasDispatchableQueued: true };
 
@@ -48,11 +49,5 @@ describe('queue liveness diagnostics', () => {
   it('classifies a scan by whether any candidate slot was busy', () => {
     assert.equal(classifyContinuationOutcome(0), 'no_dispatchable_candidate');
     assert.equal(classifyContinuationOutcome(3), 'all_candidate_slots_busy');
-  });
-
-  it('refuses to commit a pause once a replacement owner has taken the slot', () => {
-    assert.equal(mayCommitPause({ supersededByReplacement: true, stillHasDispatchableQueued: true }), false);
-    assert.equal(mayCommitPause({ supersededByReplacement: false, stillHasDispatchableQueued: false }), false);
-    assert.equal(mayCommitPause({ supersededByReplacement: false, stillHasDispatchableQueued: true }), true);
   });
 });

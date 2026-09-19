@@ -14,7 +14,7 @@ export interface ProposalRoutesOptions {
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router?: Pick<AgentRouter, 'resolveTargetsAndIntent'>;
-  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
+  invocationQueue?: Pick<InvocationQueue, 'appendAndEnqueueDurable' | 'enqueueExistingMessageDurable'>;
   queueProcessor?: Pick<QueueProcessor, 'processNext'>;
   onProposalReject?: (input: {
     proposalId: string;

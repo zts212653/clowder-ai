@@ -89,6 +89,7 @@ function makeQueueProcessor() {
     releaseSlot: (tid, cid) => actions.push({ op: 'releaseSlot', tid, cid }),
     releaseThread: (tid) => actions.push({ op: 'releaseThread', tid }),
     retireThreadPrestartProcessingGroups: async () => ({ outcome: 'none', retiredCatIds: [] }),
+    hasProcessingSlotReservation: () => false,
     hasActiveExecution: () => false,
     isCatBusy: () => false,
     actions,
@@ -162,7 +163,7 @@ describe('force-reset: does not affect other users processingSlots (P1 scope gua
       headers: { 'x-cat-cafe-user': USER_A },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 200, res.body);
     const body = JSON.parse(res.body);
     assert.equal(body.canceledRecords, 1);
 

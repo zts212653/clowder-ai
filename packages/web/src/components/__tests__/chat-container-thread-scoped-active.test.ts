@@ -125,7 +125,6 @@ vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,
 }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
-vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
 vi.mock('../ProjectSetupCard', () => ({ ProjectSetupCard: () => null }));
 vi.mock('../QueuePanel', () => ({ QueuePanel: () => null }));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
@@ -134,7 +133,6 @@ vi.mock('../SplitPaneView', () => ({
   SplitPaneView: ({ children }: { children?: React.ReactNode }) => children ?? null,
   SplitPaneChatView: ({ children }: { children?: React.ReactNode }) => children ?? null,
 }));
-vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../ThreadExecutionBar', () => ({ ThreadExecutionBar: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../VoteActiveBar', () => ({ VoteActiveBar: () => null }));
@@ -194,7 +192,6 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
         hasUserMention: false,
         lastActivity: 0,
         queue: [],
-        queuePaused: false,
         queueFull: false,
         workspaceWorktreeId: null,
         workspaceOpenTabs: [],
@@ -249,7 +246,6 @@ describe('F173 Phase C Task 2 — ChatContainer.hasActiveInvocation thread-scope
         hasUserMention: false,
         lastActivity: 0,
         queue: [],
-        queuePaused: false,
         queueFull: false,
         workspaceWorktreeId: null,
         workspaceOpenTabs: [],

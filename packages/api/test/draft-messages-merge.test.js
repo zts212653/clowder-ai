@@ -15,6 +15,7 @@ import Fastify from 'fastify';
 import { DraftStore } from '../dist/domains/cats/services/stores/ports/DraftStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 // Minimal mock router that satisfies the type contract
 function makeStubRouter() {
@@ -171,14 +172,16 @@ describe('GET /api/messages — draft merge (#80)', () => {
 
   it('includes active drafts on first page (no cursor)', async () => {
     // Seed a formal message
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Hello',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     // Seed an active draft
     draftStore.upsert({
@@ -210,46 +213,29 @@ describe('GET /api/messages — draft merge (#80)', () => {
     assert.equal(draft.catId, 'opus');
   });
 
-  it('hydrates only exposed recall tombstones and never returns their body', async () => {
-    const custody = (entryId, exposure) => ({
-      version: 1,
-      entryId,
-      revision: 1,
-      intent: 'user_message',
-      status: 'queued',
-      allTargetCats: ['opus'],
-      pendingTargetCats: ['opus'],
-      notifiedByCatIds: [],
-      seenByCatIds: exposure ? ['opus'] : [],
-      seenInvocationIdByCatId: exposure ? { opus: exposure.invocationId } : {},
-      ...(exposure ? { bodyExposures: [exposure] } : {}),
-      failedByCatIds: [],
-      handledByCatIds: [],
-      priority: 'normal',
-      createdAt: 100,
-      updatedAt: 100,
-    });
-    const hidden = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'zero exposure secret',
-      mentions: ['opus'],
-      timestamp: 1_000,
-      threadId: 'thread-1',
-      deliveryStatus: 'queued',
-      queueCustody: custody('entry-hidden'),
-    });
-    const exposure = { targetCatId: 'opus', invocationId: 'child-read', seenAt: 1_500 };
-    const exposed = messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'exposed secret',
-      mentions: ['opus'],
-      timestamp: 1_100,
-      threadId: 'thread-1',
-      deliveryStatus: 'queued',
-      queueCustody: custody('entry-exposed', exposure),
-    });
+  it('never hydrates new pending-message recall tombstones or their body', async () => {
+    const hidden = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'zero exposure secret',
+        mentions: ['opus'],
+        timestamp: 1_000,
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+      }),
+    );
+    const second = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'second pending secret',
+        mentions: ['opus'],
+        timestamp: 1_100,
+        threadId: 'thread-1',
+        deliveryStatus: 'queued',
+      }),
+    );
     assert.equal(
       messageStore.recallMessageToComposerDraft(hidden.id, {
         ownerUserId: 'user-1',
@@ -261,7 +247,7 @@ describe('GET /api/messages — draft merge (#80)', () => {
       'recalled',
     );
     assert.equal(
-      messageStore.recallMessageToComposerDraft(exposed.id, {
+      messageStore.recallMessageToComposerDraft(second.id, {
         ownerUserId: 'user-1',
         threadId: 'thread-1',
         expectedDraftRevision: 1,
@@ -284,25 +270,26 @@ describe('GET /api/messages — draft merge (#80)', () => {
       messages.some((message) => message.id === hidden.id),
       false,
     );
-    const tombstone = messages.find((message) => message.id === exposed.id);
-    assert.ok(tombstone);
-    assert.equal(tombstone.content, '');
-    assert.equal(tombstone.extra.recall.exposure, 'seen');
-    assert.deepEqual(tombstone.extra.recall.exposures, [exposure]);
-    assert.doesNotMatch(JSON.stringify(tombstone), /exposed secret/);
+    assert.equal(
+      messages.some((message) => message.id === second.id),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(messages), /zero exposure secret|second pending secret/);
   });
 
   it('excludes drafts on paginated request (with before cursor)', async () => {
     // Seed messages
     const ts = Date.now();
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'First',
-      mentions: [],
-      timestamp: ts - 1000,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'First',
+        mentions: [],
+        timestamp: ts - 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     // Seed a draft
     draftStore.upsert({
@@ -331,15 +318,17 @@ describe('GET /api/messages — draft merge (#80)', () => {
     const ts = Date.now();
 
     // Formal message with invocationId in extra.stream
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed message',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-completed' } },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Completed message',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+        extra: { stream: { invocationId: 'inv-completed' } },
+      }),
+    );
 
     // Draft with same invocationId (the race window between append and delete)
     draftStore.upsert({
@@ -700,14 +689,16 @@ describe('GET /api/messages — draft merge (#80)', () => {
     });
 
     // Seed a message so user-A gets non-empty response
-    messageStore.append({
-      userId: 'user-A',
-      catId: null,
-      content: 'Hi',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-A',
+        catId: null,
+        content: 'Hi',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: 'thread-1',
+      }),
+    );
 
     const app = await buildApp();
     const res = await app.inject({
@@ -726,27 +717,31 @@ describe('GET /api/messages — draft merge (#80)', () => {
     const ts = Date.now();
 
     // 1. Seed the formal message with invocationId (oldest — will be pushed off page)
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed streaming response',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-offpage' } },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Completed streaming response',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+        extra: { stream: { invocationId: 'inv-offpage' } },
+      }),
+    );
 
     // 2. Seed enough newer messages to push formal off the first page
     //    Using limit=5 via query param, so we need 5 newer messages
     for (let i = 1; i <= 5; i++) {
-      messageStore.append({
-        userId: 'user-1',
-        catId: null,
-        content: `Filler message ${i}`,
-        mentions: [],
-        timestamp: ts + i * 1000,
-        threadId: 'thread-1',
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `Filler message ${i}`,
+          mentions: [],
+          timestamp: ts + i * 1000,
+          threadId: 'thread-1',
+        }),
+      );
     }
 
     // 3. Draft with same invocationId (stale — should be deduped by wider query)
@@ -785,26 +780,30 @@ describe('GET /api/messages — draft merge (#80)', () => {
     const ts = Date.now();
 
     // 1. Seed the formal message (will be the 201st oldest → pushed off a 200-message page)
-    messageStore.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Completed at max-limit edge',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-      extra: { stream: { invocationId: 'inv-maxlimit' } },
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Completed at max-limit edge',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+        extra: { stream: { invocationId: 'inv-maxlimit' } },
+      }),
+    );
 
     // 2. Seed 200 newer messages to push formal off the first page at limit=200
     for (let i = 1; i <= 200; i++) {
-      messageStore.append({
-        userId: 'user-1',
-        catId: null,
-        content: `Filler ${i}`,
-        mentions: [],
-        timestamp: ts + i * 100,
-        threadId: 'thread-1',
-      });
+      messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'user-1',
+          catId: null,
+          content: `Filler ${i}`,
+          mentions: [],
+          timestamp: ts + i * 100,
+          threadId: 'thread-1',
+        }),
+      );
     }
 
     // 3. Stale draft with same invocationId
@@ -836,14 +835,16 @@ describe('GET /api/messages — draft merge (#80)', () => {
     const ts = Date.now();
 
     // Seed a user message so the thread has content
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Do something',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Do something',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+      }),
+    );
 
     // Tool-first draft: no text yet, only tool events
     draftStore.upsert({
@@ -877,14 +878,16 @@ describe('GET /api/messages — draft merge (#80)', () => {
   it('draft response includes origin, extra.stream.invocationId, and thinking (Bug A+B contract)', async () => {
     const ts = Date.now();
 
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Hello',
-      mentions: [],
-      timestamp: ts,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Hello',
+        mentions: [],
+        timestamp: ts,
+        threadId: 'thread-1',
+      }),
+    );
 
     draftStore.upsert({
       userId: 'user-1',
@@ -992,14 +995,16 @@ describe('GET /api/messages — draft merge (#80)', () => {
     });
 
     // Seed a formal message to have a non-empty page
-    messageStore.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'Question',
-      mentions: [],
-      timestamp: now - 1000,
-      threadId: 'thread-1',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'Question',
+        mentions: [],
+        timestamp: now - 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     const app = await buildApp();
     const res = await app.inject({

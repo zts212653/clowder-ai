@@ -1,5 +1,4 @@
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
-import { buildHoldExpiredEvent } from '../../domains/ball-custody/ball-custody-events.js';
 import { holdStaleWakeSuppressedTotal } from '../telemetry/instruments.js';
 import { computeNextCronSlot, countAdditionalDueCronSlots } from './cron-utils.js';
 import type { DynamicTaskDef, DynamicTaskStore } from './DynamicTaskStore.js';
@@ -34,6 +33,8 @@ export interface TaskRunnerV2Options {
   emissionStore?: import('./EmissionStore.js').EmissionStore;
   /** Phase 4 (AC-H1): deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
   /** Phase 4 (AC-H2): fetch web content with browser-automation routing */
   fetchContent?: (url: string, signal?: AbortSignal) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
@@ -52,6 +53,8 @@ export interface TaskRunnerV2Options {
    * invocationTracker/queueProcessor are constructed after the runner.
    */
   isThreadBusy?: (threadId: string) => boolean;
+  /** Testable backoff for retrying an active hold whose once pipeline failed before durable settlement. */
+  retryableHoldFailureDelayMs?: number;
 }
 
 /** Phase 2.5: Compute human-readable subject preview from subjectKind + lastRun (AC-E2) */
@@ -171,6 +174,7 @@ export class TaskRunnerV2 {
   private globalControlStore: TaskRunnerV2Options['globalControlStore'];
   private emissionStore: TaskRunnerV2Options['emissionStore'];
   private deliver: TaskRunnerV2Options['deliver'];
+  private cancelQueuedDelivery: TaskRunnerV2Options['cancelQueuedDelivery'];
   private fetchContent: TaskRunnerV2Options['fetchContent'];
   private invokeTrigger: TaskRunnerV2Options['invokeTrigger'];
   private ballCustody: TaskRunnerV2Options['ballCustody'];
@@ -179,6 +183,7 @@ export class TaskRunnerV2 {
   /** F167 Phase M: busy checker for pre-fire defer (queueProcessor.isThreadBusy() || invocationTracker.has()) */
   private isThreadBusy: TaskRunnerV2Options['isThreadBusy'];
   private managedCommandWakeRecovery?: (taskId: string) => Promise<'missing' | 'pending' | 'recovered'>;
+  private readonly retryableHoldFailureDelayMs: number;
   /** F167 Phase M: per-task consecutive defer counter (reset on fire) */
   private deferCounts = new Map<string, number>();
   /**
@@ -197,12 +202,14 @@ export class TaskRunnerV2 {
     this.globalControlStore = opts.globalControlStore;
     this.emissionStore = opts.emissionStore;
     this.deliver = opts.deliver;
+    this.cancelQueuedDelivery = opts.cancelQueuedDelivery;
     this.fetchContent = opts.fetchContent;
     this.invokeTrigger = opts.invokeTrigger;
     this.ballCustody = opts.ballCustody;
     this.notifyLifecycle = opts.notifyLifecycle;
     this.dynamicTaskStore = opts.dynamicTaskStore;
     this.isThreadBusy = opts.isThreadBusy;
+    this.retryableHoldFailureDelayMs = opts.retryableHoldFailureDelayMs ?? 30_000;
   }
 
   /** Late-bind invokeTrigger (constructed after TaskRunnerV2 in boot sequence) */
@@ -570,12 +577,22 @@ export class TaskRunnerV2 {
           const entries = this.ledger.query(task.id, 1);
           const lastOutcome = entries[0]?.outcome;
           const isGovernanceSkip = lastOutcome === 'SKIP_GLOBAL_PAUSE' || lastOutcome === 'SKIP_TASK_OVERRIDE';
-          if (isGovernanceSkip) {
-            this.logger.info(`[scheduler] ${task.id}: once task governance-skipped, retrying in 30s`);
+          const currentDef = this.dynamicTaskStore?.getById(task.id);
+          const isRetryableHoldFailure =
+            lastOutcome === 'RUN_FAILED' &&
+            !!currentDef &&
+            isHoldBallReminderDef(currentDef) &&
+            currentDef.enabled &&
+            readHoldLifecycleStatus(currentDef) === 'active';
+          if (isGovernanceSkip || isRetryableHoldFailure) {
+            const reason = isGovernanceSkip ? 'governance-skipped' : 'failed before durable wake settlement';
+            this.logger.info(
+              `[scheduler] ${task.id}: once task ${reason}, retrying in ${this.retryableHoldFailureDelayMs}ms`,
+            );
             const retryTimer = setTimeout(() => {
               if (!this.started || !this.tasks.some((t) => t.id === task.id)) return;
               this.scheduleOnceTick(task);
-            }, 30_000);
+            }, this.retryableHoldFailureDelayMs);
             if (typeof retryTimer === 'object' && 'unref' in retryTimer) retryTimer.unref();
             this.timers.set(task.id, retryTimer);
           } else {
@@ -624,12 +641,28 @@ export class TaskRunnerV2 {
       error_summary: null,
     });
 
-    if (def.deliveryThreadId && isHoldBallReminderDef(def)) {
+    if (def.deliveryThreadId && isHoldBallReminderDef(def) && this.deliver) {
       const catId = readHoldBallCatId(def);
       if (catId) {
-        this.ballCustody
-          ?.record(buildHoldExpiredEvent({ threadId: def.deliveryThreadId, catId, fireAt, at: Date.now() }))
-          .catch((err) => this.logger.error(`[scheduler] ${def.id}: failed to record missed hold expiry`, err));
+        const triggerUserId = ((def.params as Record<string, unknown>).triggerUserId as string) || 'default-user';
+        void this.deliver({
+          threadId: def.deliveryThreadId,
+          userId: triggerUserId,
+          content: `等待已结束：原定 ${fireAtIso} 的唤醒因服务未运行而错过，任务已取消。`,
+          idempotencyKey: `hold-ball-missed:${def.id}`,
+          source: {
+            connector: 'hold-ball',
+            label: '持球状态',
+            icon: '🏓',
+            meta: {
+              managedHold: true,
+              phase: 'status',
+              taskId: def.id,
+              threadId: def.deliveryThreadId,
+              catId,
+            },
+          },
+        }).catch((err) => this.logger.error(`[scheduler] ${def.id}: failed to persist missed hold status`, err));
       }
     }
 
@@ -756,6 +789,7 @@ export class TaskRunnerV2 {
       isManualTrigger,
       schedule,
       deliver: this.deliver,
+      cancelQueuedDelivery: this.cancelQueuedDelivery,
       fetchContent: this.fetchContent,
       invokeTrigger: this.invokeTrigger,
       ballCustody: this.ballCustody,

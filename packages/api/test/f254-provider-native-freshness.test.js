@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { getCodexCarrierMode } from '../dist/config/codex-cli.js';
 import { ClaudeAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js';
+import { ClaudeSdkAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeSdkAgentService.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
 import { CodexAppServerClient } from '../dist/domains/cats/services/agents/providers/CodexAppServerClient.js';
 import { ClaudeNativeToolBoundaryClassifier } from '../dist/domains/cats/services/agents/providers/claude-native-tool-boundary.js';
@@ -20,6 +20,7 @@ import { ThreadUnseenChecker } from '../dist/domains/cats/services/freshness/Thr
 import { buildTmuxAgentCarrierPaneCommand } from '../dist/domains/terminal/tmux-agent-carrier-session.js';
 import { buildProviderNativeFreshnessCoverage } from '../dist/infrastructure/harness-eval/freshness/provider-native-freshness-coverage.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
+import { adaptInvocationQueue, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 class AsyncInbox {
   #values = [];
@@ -145,19 +146,22 @@ describe('F254 D2 provider-native freshness truth', () => {
     const { createProviderNativeFreshnessFactory } = await import(
       '../dist/domains/cats/services/freshness/createProviderNativeFreshnessFactory.js'
     );
-    const queue = new InvocationQueue();
-    queue.enqueue({
-      ownerAuthProvenance: 'strict',
-      threadId: 'thread-current-parent',
-      userId: 'user-1',
-      content: 'continue in the active provider turn',
-      source: 'user',
-      targetCats: ['opus'],
-      authorIntentByCatId: {
-        opus: { requested: 'continue_current', boundParentInvocationId: 'parent-active' },
-      },
-      intent: 'execute',
-    });
+    const queue = adaptInvocationQueue(new InvocationQueue());
+    queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'strict',
+        threadId: 'thread-current-parent',
+        userId: 'user-1',
+        content: 'continue in the active provider turn',
+        source: 'user',
+        targetCats: ['opus'],
+        authorIntentByCatId: {
+          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-active' },
+        },
+        intent: 'execute',
+      }),
+    );
     const factory = createProviderNativeFreshnessFactory({
       redis: new FakeRedis(),
       cursorStore: { getSeenCursor: async () => 'seen-cursor' },
@@ -401,17 +405,28 @@ describe('F254 D2 provider-native freshness truth', () => {
     );
   });
 
-  it('correlates a queued-only synthetic frontier with exact Queue message identities', async () => {
+  it('correlates a queued-only synthetic frontier with exact source Queue identities', async () => {
     const queueMessageId = 'queued-message-1';
     const mergedMessageId = 'queued-message-2';
     const queueEntries = [
-      {
+      canonicalTestQueueInput({
         entryId: 'queue-1',
         source: 'user',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        targetCats: ['codex-sol'],
         content: 'exact queued body',
         messageId: queueMessageId,
-        mergedMessageIds: [mergedMessageId],
-      },
+      }),
+      canonicalTestQueueInput({
+        entryId: 'queue-2',
+        source: 'user',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        targetCats: ['codex-sol'],
+        content: 'second exact queued body',
+        messageId: mergedMessageId,
+      }),
     ];
     const unseenChecker = new ThreadUnseenChecker({
       userId: 'user-1',
@@ -453,7 +468,17 @@ describe('F254 D2 provider-native freshness truth', () => {
     );
 
     const laterMergedMessageId = 'queued-message-3';
-    queueEntries[0].mergedMessageIds.push(laterMergedMessageId);
+    queueEntries.push(
+      canonicalTestQueueInput({
+        entryId: 'queue-3',
+        source: 'user',
+        userId: 'user-1',
+        threadId: 'thread-1',
+        targetCats: ['codex-sol'],
+        content: 'third exact queued body',
+        messageId: laterMergedMessageId,
+      }),
+    );
     const newlyEligible = await broker.prepare({
       provider: 'openai_codex',
       carrier: 'codex_app_server',
@@ -461,10 +486,9 @@ describe('F254 D2 provider-native freshness truth', () => {
       toolSurface: 'command_execution',
       turnId: 'turn-queued-new-identity',
     });
-    assert.ok(newlyEligible, 'a newly coalesced durable message must permit one new notice');
-    assert.deepEqual(newlyEligible.correlationMessageIds, [queueMessageId, mergedMessageId, laterMergedMessageId]);
+    assert.ok(newlyEligible, 'a newly queued durable row must permit one new notice');
+    assert.deepEqual(newlyEligible.correlationMessageIds, [laterMergedMessageId]);
     await broker.commitDelivered(newlyEligible, { acceptedTurnId: 'turn-queued-new-identity' });
-    queueEntries[0].mergedMessageIds.reverse();
     assert.equal(
       await broker.prepare({
         provider: 'openai_codex',
@@ -474,7 +498,7 @@ describe('F254 D2 provider-native freshness truth', () => {
         turnId: 'turn-queued-new-identity-duplicate',
       }),
       null,
-      'the newly coalesced identity must also be eligible only once',
+      'the newly queued identity must also be eligible only once',
     );
 
     assert.equal(
@@ -485,7 +509,7 @@ describe('F254 D2 provider-native freshness truth', () => {
         evidenceKind: 'queue_exact_read',
       }),
       0,
-      'a partial read of a coalesced Queue entry must fail closed',
+      'reading a different source Queue entry must not settle either notice',
     );
     assert.equal(
       await eventLog.markProviderNoticesSeen({
@@ -500,21 +524,28 @@ describe('F254 D2 provider-native freshness truth', () => {
       await eventLog.markProviderNoticesHandled({
         invocationId: 'inv-queued',
         catId: 'codex-sol',
-        queueEntryId: 'queue-1',
-        messageIds: [queueMessageId, mergedMessageId, laterMergedMessageId],
+        queueEntryId: 'queue-2',
+        messageIds: [mergedMessageId],
         evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-queued' },
       }),
-      2,
+      1,
+    );
+    assert.equal(
+      await eventLog.markProviderNoticesHandled({
+        invocationId: 'inv-queued',
+        catId: 'codex-sol',
+        queueEntryId: 'queue-3',
+        messageIds: [laterMergedMessageId],
+        evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-queued' },
+      }),
+      1,
     );
 
     const events = await eventLog.queryByInvocation('inv-queued');
     const delivered = events.filter((event) => event.kind === 'provider_notice_delivered');
     assert.deepEqual(
       delivered.map((event) => event.correlationMessageIds),
-      [
-        [queueMessageId, mergedMessageId],
-        [queueMessageId, mergedMessageId, laterMergedMessageId],
-      ],
+      [[mergedMessageId], [laterMergedMessageId]],
     );
     assert.deepEqual(
       events.map((event) => event.kind),
@@ -540,11 +571,14 @@ describe('F254 D2 provider-native freshness truth', () => {
       messageStore: { getByThreadAfter: async () => [] },
       queueChecker: {
         getQueuedForThread: () => [
-          {
+          canonicalTestQueueInput({
             entryId: 'queue-missing-id',
             source: 'user',
+            userId: 'user-1',
+            threadId: 'thread-1',
+            targetCats: ['codex-sol'],
             content: 'queued body without durable identity',
-          },
+          }),
         ],
       },
     });
@@ -658,6 +692,8 @@ describe('F254 D2 provider-native freshness truth', () => {
     assert.match(text, /get_thread_context/);
     assert.match(text, /thread-1/);
     assert.match(text, /responseMode.*full/);
+    assert.match(text, /contextScope=unread_delta/);
+    assert.match(text, /hasMore=false.*不表示.*历史/);
     assert.doesNotMatch(text, /list_recent/);
     assert.doesNotMatch(text, /secret body|operator/);
   });
@@ -1027,12 +1063,6 @@ describe('F254 D2 provider-native freshness truth', () => {
     );
   });
 
-  it('keeps exec_json as default and selects app_server only by explicit opt-in', () => {
-    assert.equal(getCodexCarrierMode({}), 'exec_json');
-    assert.equal(getCodexCarrierMode({ CAT_CAFE_CODEX_CARRIER: 'unknown' }), 'exec_json');
-    assert.equal(getCodexCarrierMode({ CAT_CAFE_CODEX_CARRIER: ' app_server ' }), 'app_server');
-  });
-
   it('reports carrier capability without extrapolating MCP coverage', () => {
     assert.deepEqual(
       new CodexAgentService({ carrierMode: 'exec_json', model: 'gpt-test' }).freshnessCarrierCapability(),
@@ -1054,6 +1084,11 @@ describe('F254 D2 provider-native freshness truth', () => {
       provider: 'anthropic',
       carrier: 'claude_print_sdk',
       deliverySemantics: 'unsupported',
+    });
+    assert.deepEqual(new ClaudeSdkAgentService({ model: 'claude-test' }).freshnessCarrierCapability(), {
+      provider: 'anthropic',
+      carrier: 'claude_agent_sdk',
+      deliverySemantics: 'queued_internal_turn',
     });
     assert.deepEqual(new KimiAgentService({ model: 'kimi-test' }).freshnessCarrierCapability(), {
       provider: 'kimi',

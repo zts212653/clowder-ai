@@ -135,7 +135,10 @@ describe('F139 Phase 4 E2E', () => {
     assert.equal(deliverCalls.length, 1);
     assert.equal(deliverCalls[0].threadId, 'thread-news-123');
     assert.ok(deliverCalls[0].content.includes('搜三天内 Anthropic 新闻'));
-    assert.equal(deliverCalls[0].userId, 'scheduler');
+    // F117 ADR-043 D.4 (sol adjudication R4): stored trigger-message userId is the
+    // verified trigger owner (triggerUserId), not the author 'scheduler'. Scheduler
+    // authorship is expressed via from: system:scheduler in createDeliverFn instead.
+    assert.equal(deliverCalls[0].userId, 'default-user'); // === triggerUserId
     assert.equal(deliverCalls[0].extra?.scheduler?.hiddenTrigger, true);
 
     // 2. invokeTrigger was called with the REAL messageId from deliver
@@ -149,6 +152,53 @@ describe('F139 Phase 4 E2E', () => {
     // Ledger still records RUN_DELIVERED
     const runs = ledger.query('remind-cat-wake', 1);
     assert.equal(runs[0].outcome, 'RUN_DELIVERED');
+  });
+
+  test('hold continuation stays queued and urgent until canonical Queue admission publishes it', async () => {
+    const triggerCalls = [];
+    const runnerWithTrigger = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      globalControlStore,
+      deliver: async (opts) => {
+        deliverCalls.push(opts);
+        return deliverMock(opts);
+      },
+      invokeTrigger: { trigger: (...args) => triggerCalls.push(args) },
+    });
+    const fireAt = Date.now() + 60_000;
+    store.insert({
+      id: 'hold-ball-timer-1',
+      templateId: 'reminder',
+      trigger: { type: 'once', fireAt },
+      params: {
+        message: '等待 CI 完成后复核',
+        targetCatId: 'codex-sol',
+        triggerUserId: 'user-1',
+        holdLifecycle: {
+          mode: 'timer',
+          status: 'active',
+          wakeAt: fireAt,
+          createdBy: 'hold-ball:codex-sol',
+        },
+      },
+      display: { label: 'hold', category: 'system' },
+      deliveryThreadId: 'thread-hold-1',
+      enabled: true,
+      createdBy: 'hold-ball:codex-sol',
+      createdAt: new Date().toISOString(),
+    });
+    runnerWithTrigger.hydrateDynamic(store, templateRegistry);
+
+    await runnerWithTrigger.triggerNow('hold-ball-timer-1', { manual: true });
+
+    assert.equal(deliverCalls.length, 1);
+    assert.equal(deliverCalls[0].deliveryStatus, 'queued');
+    assert.equal(deliverCalls[0].source.connector, 'hold-ball');
+    assert.equal(deliverCalls[0].source.meta.phase, 'wake');
+    assert.equal(triggerCalls.length, 1);
+    assert.equal(triggerCalls[0][6].priority, 'urgent');
+    assert.equal(triggerCalls[0][6].sourceCategory, 'scheduled');
   });
 
   test('AC-H4: builtin task pause via override → trigger skipped', async () => {
@@ -304,7 +354,10 @@ describe('F139 Phase 4 E2E', () => {
     assert.equal(fetchMock.mock.calls.length, 1);
     assert.equal(deliverCalls.length, 1);
     assert.equal(deliverCalls[0].threadId, 'thread-browser');
-    assert.equal(deliverCalls[0].userId, 'scheduler');
+    // F117 ADR-043 D.4 (sol adjudication R4): stored trigger-message userId is the
+    // verified trigger owner (triggerUserId), not the author 'scheduler'. Scheduler
+    // authorship is expressed via from: system:scheduler in createDeliverFn instead.
+    assert.equal(deliverCalls[0].userId, 'default-user'); // === triggerUserId
     assert.ok(deliverCalls[0].content.includes('browser-automation'));
     assert.ok(deliverCalls[0].content.includes('https://x.com/anthropic'));
     assert.ok(deliverCalls[0].content.includes('今天 AI 新闻'));

@@ -21,6 +21,7 @@ function createMockSocketManager() {
   return {
     broadcastAgentMessage() {},
     broadcastToRoom() {},
+    emitToUser() {},
   };
 }
 
@@ -111,14 +112,17 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
   let invocationRecordStore;
   let mockRouter;
   let threadStore;
+  let invocationQueue;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     registry = new InvocationRegistry();
+    invocationQueue = new InvocationQueue();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
     invocationRecordStore = createMockInvocationRecordStore();
@@ -145,6 +149,8 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
       socketManager,
       router: mockRouter,
       invocationRecordStore,
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
       threadStore,
       ...opts,
     });

@@ -274,6 +274,7 @@ function buildRetrySignal(
     catId,
     content: JSON.stringify({
       type: 'warning',
+      presentation: 'transient_status',
       message: `${reason}，正在自动重试（${attempt}/${totalAttempts}），${seconds} 后继续`,
     }),
     metadata,

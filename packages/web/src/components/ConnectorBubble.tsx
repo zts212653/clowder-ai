@@ -21,6 +21,7 @@ import {
 } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
 import { MarkdownContent } from './MarkdownContent';
+import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
 import { RichBlocks } from './rich/RichBlocks';
 
@@ -278,6 +279,7 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
         <span className="text-xs text-cafe-secondary">{source.sender.name || source.sender.id} 说</span>
       )}
       <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+      <MessageActionSlot />
     </div>
   );
 

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
+import { adaptInvocationQueue } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { saveMessageDispositionPreference } = await import('../dist/config/user-preferences-store.js');
@@ -17,6 +18,7 @@ function entry(overrides = {}) {
   return {
     threadId: 'thread-1',
     userId: 'user-1',
+    kind: 'conversation_input',
     ownerAuthProvenance: 'strict',
     content: 'queued body',
     source: 'user',
@@ -30,7 +32,7 @@ describe('F264 author-declared message disposition', () => {
   let queue;
 
   beforeEach(() => {
-    queue = new InvocationQueue();
+    queue = adaptInvocationQueue(new InvocationQueue());
   });
 
   test('missing author intent is fail-closed next-work and never enters a live parent context', () => {
@@ -118,7 +120,7 @@ describe('F264 author-declared message disposition', () => {
     ];
 
     for (const row of cases) {
-      const isolated = new InvocationQueue();
+      const isolated = adaptInvocationQueue(new InvocationQueue());
       isolated.enqueue(row.entry);
       const body = isolated.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a');
       const freshness = isolated.getQueuedFreshnessMessagesForCat('thread-1', 'user-1', 'opus', {
@@ -129,7 +131,7 @@ describe('F264 author-declared message disposition', () => {
     }
   });
 
-  test('an unread continue-current user message closes its parent window but stays eligible for successor work', () => {
+  test('an unread continue-current user message stays durable for successor work', () => {
     const result = queue.enqueue(
       entry({
         authorIntentByCatId: {
@@ -146,9 +148,6 @@ describe('F264 author-declared message disposition', () => {
       'the active parent first owns the opportunity to read',
     );
 
-    queue.fallbackAuthorIntentsForParentAcrossUsers('thread-1', 'opus', 'parent-a', 2_000);
-
-    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a'), []);
     assert.equal(queue.peekNextQueued('thread-1', 'user-1')?.id, result.entry.id);
     assert.equal(queue.hasPendingForCat('thread-1', 'opus', { userId: 'user-1' }), true);
   });
@@ -334,27 +333,6 @@ describe('F264 author-declared message disposition', () => {
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
-  });
-
-  test('terminal parent appends a fallback fact and permanently closes the exposure window', () => {
-    const result = queue.enqueue(
-      entry({
-        authorIntentByCatId: {
-          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-a' },
-        },
-      }),
-    );
-
-    const changed = queue.fallbackAuthorIntentsForParentAcrossUsers('thread-1', 'opus', 'parent-a', 2_000);
-
-    assert.deepEqual(changed, [{ entryId: result.entry.id, userId: 'user-1' }]);
-    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a'), []);
-    assert.deepEqual(queue.getEntrySnapshot('thread-1', 'user-1', result.entry.id).authorIntentByCatId.opus, {
-      requested: 'continue_current',
-      boundParentInvocationId: 'parent-a',
-      fallbackAt: 2_000,
-      fallbackReason: 'parent_terminal_before_exposure',
-    });
   });
 
   test('send schema accepts only the two typed dispositions', () => {

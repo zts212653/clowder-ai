@@ -72,7 +72,12 @@ function matureProvider(store = new InMemoryFreshnessClosureStore()) {
     store,
     fixtureRoot,
     queueLifecycleSource: {
-      async listOwnerQueueCustodyLifecycles() {
+      async listOwnerDurableEntries() {
+        return [];
+      },
+    },
+    messageLifecycleSource: {
+      async listOwnerMessagesInWindow() {
         return [];
       },
     },

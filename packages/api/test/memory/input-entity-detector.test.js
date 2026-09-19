@@ -632,6 +632,55 @@ describe('InputEntityDetector', () => {
         },
       ]);
     });
+
+    it('does not turn a near-verbatim archived thread title into an entity nudge', () => {
+      const repeatedRequest = '@宪宪 出来打个招呼；另外让缅因猫和狸花猫也出来打个招呼的';
+      seedEvidenceDoc(db, {
+        anchor: 'thread-thread-old',
+        title: repeatedRequest,
+        sourcePath: 'threads/thread-old',
+      });
+      seedDocAliases(db, [
+        {
+          alias: repeatedRequest,
+          docAnchor: 'thread-thread-old',
+          source: 'doc-title',
+        },
+      ]);
+
+      assert.deepEqual(detector.detect(`${repeatedRequest} 不要用 multi mention 的`), []);
+    });
+
+    it('still detects a short intentionally named archived thread', () => {
+      seedEvidenceDoc(db, {
+        anchor: 'thread-release-room',
+        title: 'Release Room',
+        sourcePath: 'threads/thread-release-room',
+      });
+      seedDocAliases(db, [
+        {
+          alias: 'Release Room',
+          docAnchor: 'thread-release-room',
+          source: 'doc-title',
+        },
+      ]);
+
+      const [result] = detector.detect('Please check Release Room before shipping');
+      assert.equal(result?.docAnchor, 'thread-release-room');
+    });
+
+    it('still detects a long intentionally named archived thread', () => {
+      const title = 'Canonical A2A Delivery Lifecycle and Runtime Observation Model';
+      seedEvidenceDoc(db, {
+        anchor: 'thread-long-design',
+        title,
+        sourcePath: 'threads/thread-long-design',
+      });
+      seedDocAliases(db, [{ alias: title, docAnchor: 'thread-long-design', source: 'doc-title' }]);
+
+      const [result] = detector.detect(`Please review ${title} before implementation`);
+      assert.equal(result?.docAnchor, 'thread-long-design');
+    });
   });
 
   // ─── F260 post-close regression: @ prefix routing mention filter ───

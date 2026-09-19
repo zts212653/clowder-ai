@@ -7,10 +7,9 @@ import {
   writeOpportunityPresentationRetryCarrierV1Schema,
 } from '@cat-cafe/shared';
 import type { InvocationQueue } from '../cats/services/agents/invocation/InvocationQueue.js';
-import { createInitialQueuedMessageCustody } from '../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import type { QueueProcessor } from '../cats/services/agents/invocation/QueueProcessor.js';
+import { messageFrom } from '../cats/services/stores/message-from.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
-import { projectQueueReceipt } from '../cats/services/stores/ports/queued-message-receipt.js';
 import { buildAsrPersonMemoryDynamicScenes } from './AsrPersonMemorySceneBuilder.js';
 import { createMeetingArtifactDescriptor } from './MeetingArtifactResourceService.js';
 import type { MeetingArtifactDispatcher, MeetingPresentationRetryReceipt } from './MeetingIntakeActionService.js';
@@ -20,8 +19,8 @@ import { parsePrivateThreadHandle } from './ThreadDestinationAuthority.js';
 
 export interface ThreadMeetingArtifactDispatcherOptions {
   readonly threadStore: MeetingThreadStore;
-  readonly messageStore: Pick<IMessageStore, 'append' | 'getByIdempotencyKey'>;
-  readonly invocationQueue: Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
+  readonly messageStore: IMessageStore;
+  readonly invocationQueue: Pick<InvocationQueue, 'appendAndEnqueueDurable'>;
   readonly queueProcessor: Pick<QueueProcessor, 'processNext'>;
   readonly socketManager: {
     emitToUser(userId: string, event: string, data: unknown): void;
@@ -201,117 +200,54 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
       now: queuedAt,
     });
     const idempotencyKey = meetingArtifactCarrierIdempotencyKey(input.intake.intakeId, input.artifact.sourceRevision);
-    const enqueue = this.options.invocationQueue.enqueue({
+    const from = { kind: 'user' as const, userId: input.intake.ownerId };
+    const queueInput = {
+      from,
       threadId: input.threadId,
       userId: input.intake.ownerId,
-      ownerAuthProvenance: 'strict',
+      kind: 'conversation_input' as const,
+      ownerAuthProvenance: 'strict' as const,
       idempotencyKey,
       content: input.content,
-      source: 'connector',
       targetCats: [catId],
       intent: 'execute',
-    });
+    };
+    const enqueue = await this.options.invocationQueue.appendAndEnqueueDurable(
+      this.options.messageStore,
+      {
+        from,
+        userId: input.intake.ownerId,
+        content: input.content,
+        mentions: [catId],
+        timestamp: queuedAt,
+        threadId: input.threadId,
+        idempotencyKey,
+        deliveryStatus: 'queued',
+        source: {
+          ...input.source,
+          meta: { sourceRevision: input.artifact.sourceRevision },
+        },
+        extra: {
+          targetCats: [catId],
+          meetingArtifact: {
+            intakeId: input.intake.intakeId,
+            sourceHandle: input.artifact.sourceHandle,
+            resourceRef: input.artifact.resourceRef,
+            sourceRevision: input.artifact.sourceRevision,
+            byteLength: input.artifact.byteLength,
+            contentType: input.artifact.contentType,
+            trust: input.artifact.trust,
+            instructionPolicy: input.artifact.instructionPolicy,
+          },
+          dynamicSceneEntries,
+        },
+      },
+      queueInput,
+    );
     if (enqueue.outcome === 'full' || !enqueue.entry) {
       throw Object.assign(new Error('meeting destination queue is full'), { code: 'ROUTE_UNAVAILABLE' });
     }
-    let sourceMessageId = enqueue.entry.messageId ?? null;
-    let sourceMessage: Awaited<ReturnType<IMessageStore['append']>> | null = null;
-    if (!enqueue.deduped || !enqueue.entry.messageId) {
-      try {
-        const stored = await this.options.messageStore.append({
-          userId: input.intake.ownerId,
-          catId: null,
-          content: input.content,
-          mentions: [catId],
-          timestamp: queuedAt,
-          threadId: input.threadId,
-          idempotencyKey,
-          deliveryStatus: 'queued',
-          queueCustody: createInitialQueuedMessageCustody(enqueue.entry),
-          source: {
-            ...input.source,
-            meta: { sourceRevision: input.artifact.sourceRevision },
-          },
-          extra: {
-            targetCats: [catId],
-            meetingArtifact: {
-              intakeId: input.intake.intakeId,
-              sourceHandle: input.artifact.sourceHandle,
-              resourceRef: input.artifact.resourceRef,
-              sourceRevision: input.artifact.sourceRevision,
-              byteLength: input.artifact.byteLength,
-              contentType: input.artifact.contentType,
-              trust: input.artifact.trust,
-              instructionPolicy: input.artifact.instructionPolicy,
-            },
-            dynamicSceneEntries,
-          },
-        });
-        sourceMessage = stored;
-        sourceMessageId = stored.id;
-        this.options.invocationQueue.backfillMessageId(
-          input.threadId,
-          input.intake.ownerId,
-          enqueue.entry.id,
-          stored.id,
-        );
-      } catch (error) {
-        this.options.invocationQueue.rollbackEnqueue(input.threadId, input.intake.ownerId, enqueue.entry.id);
-        throw error;
-      }
-    }
-    if (!sourceMessageId) {
-      throw Object.assign(new Error('meeting destination source receipt is unavailable'), {
-        code: 'ROUTE_UNAVAILABLE',
-      });
-    }
-    sourceMessage ??= await this.options.messageStore.getByIdempotencyKey(
-      input.intake.ownerId,
-      input.threadId,
-      idempotencyKey,
-    );
-    if (
-      !sourceMessage ||
-      sourceMessage.id !== sourceMessageId ||
-      sourceMessage.userId !== input.intake.ownerId ||
-      sourceMessage.threadId !== input.threadId ||
-      sourceMessage.catId !== null ||
-      (sourceMessage.deliveryStatus !== 'queued' && sourceMessage.deliveryStatus !== 'delivered') ||
-      !sourceMessage.source
-    ) {
-      throw Object.assign(new Error('meeting destination source receipt failed admission publication'), {
-        code: 'ROUTE_UNAVAILABLE',
-      });
-    }
-    if (sourceMessage.deliveryStatus === 'queued') {
-      const queueReceipt = sourceMessage.queueCustody ? projectQueueReceipt(sourceMessage.queueCustody) : undefined;
-      // Admission publication is synchronous and happens before processNext can emit
-      // spawn_started. The source remains queued (and therefore excluded from prompt
-      // context); this event only installs its durable owner-visible timeline anchor.
-      this.options.socketManager.emitToUser(input.intake.ownerId, 'messages_queued', {
-        threadId: input.threadId,
-        messageIds: [sourceMessage.id],
-        messages: [
-          {
-            id: sourceMessage.id,
-            content: sourceMessage.content,
-            catId: sourceMessage.catId,
-            timestamp: sourceMessage.timestamp,
-            mentions: sourceMessage.mentions,
-            userId: sourceMessage.userId,
-            source: sourceMessage.source,
-            ...(sourceMessage.contentBlocks ? { contentBlocks: sourceMessage.contentBlocks } : {}),
-            extra: {
-              ...(sourceMessage.extra ?? {}),
-              ...(queueReceipt ? { queueReceipt } : {}),
-            },
-            ...(sourceMessage.origin ? { origin: sourceMessage.origin } : {}),
-            ...(sourceMessage.replyTo ? { replyTo: sourceMessage.replyTo } : {}),
-            ...(sourceMessage.mentionsUser ? { mentionsUser: true } : {}),
-          },
-        ],
-      });
-    }
+    const sourceMessageId = enqueue.message.id;
     let started = false;
     try {
       started = (await this.options.queueProcessor.processNext(input.threadId, input.intake.ownerId)).started;
@@ -353,7 +289,7 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     if (
       !source ||
       source.userId !== input.intake.ownerId ||
-      source.catId !== null ||
+      messageFrom(source).kind !== 'user' ||
       source.threadId !== threadId ||
       source.deletedAt !== undefined ||
       source._tombstone ||
@@ -399,15 +335,19 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
     }
 
     const idempotencyKey = `meeting-opportunity-presentation-retry:${input.intake.intakeId}:${input.clientRequestId}`;
-    const existing = await this.options.messageStore.getByIdempotencyKey('scheduler', threadId, idempotencyKey);
+    const existing = await this.options.messageStore.getByIdempotencyKey(
+      input.intake.ownerId,
+      threadId,
+      idempotencyKey,
+    );
     if (existing) {
       const carrier = writeOpportunityPresentationRetryCarrierV1Schema.safeParse(
         existing.extra?.writeOpportunityPresentationRetry,
       );
       if (
         !carrier.success ||
-        existing.userId !== 'scheduler' ||
-        existing.catId !== null ||
+        existing.userId !== input.intake.ownerId ||
+        messageFrom(existing).kind !== 'system' ||
         existing.threadId !== threadId ||
         existing.deletedAt !== undefined ||
         existing._tombstone ||
@@ -437,52 +377,48 @@ export class ThreadMeetingArtifactDispatcher implements MeetingArtifactDispatche
         code: 'ROUTE_UNAVAILABLE',
       });
     }
-    const enqueue = this.options.invocationQueue.enqueue({
+    const from = { kind: 'system' as const, service: 'meeting-write-opportunity' };
+    const queueInput = {
+      from,
       threadId,
       userId: input.intake.ownerId,
-      ownerAuthProvenance: 'strict',
+      kind: 'conversation_input' as const,
+      ownerAuthProvenance: 'strict' as const,
       idempotencyKey,
       content,
-      source: 'connector',
       targetCats: [catId],
       intent: 'execute',
-      sourceCategory: 'scheduled',
-    });
+      sourceCategory: 'scheduled' as const,
+    };
+    const enqueue = await this.options.invocationQueue.appendAndEnqueueDurable(
+      this.options.messageStore,
+      {
+        from,
+        userId: input.intake.ownerId,
+        content,
+        mentions: [catId],
+        timestamp: queuedAt,
+        threadId,
+        idempotencyKey,
+        deliveryStatus: 'queued',
+        source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+        extra: {
+          targetCats: [catId],
+          scheduler: { hiddenTrigger: true },
+          writeOpportunityPresentationRetry: {
+            v: 1,
+            sourceMessageRef: { kind: 'message', threadId, messageId: source.id },
+            sourceOpportunityId: scene.data.opportunity.opportunityId,
+          },
+        },
+      },
+      queueInput,
+    );
     if (enqueue.outcome === 'full' || !enqueue.entry) {
       throw Object.assign(new Error('meeting destination queue is full'), { code: 'ROUTE_UNAVAILABLE' });
     }
 
-    let triggerMessageId = enqueue.entry.messageId;
-    if (!enqueue.deduped || !triggerMessageId) {
-      try {
-        const stored = await this.options.messageStore.append({
-          userId: 'scheduler',
-          catId: null,
-          content,
-          mentions: [catId],
-          timestamp: queuedAt,
-          threadId,
-          idempotencyKey,
-          deliveryStatus: 'queued',
-          queueCustody: createInitialQueuedMessageCustody(enqueue.entry),
-          source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
-          extra: {
-            targetCats: [catId],
-            scheduler: { hiddenTrigger: true },
-            writeOpportunityPresentationRetry: {
-              v: 1,
-              sourceMessageRef: { kind: 'message', threadId, messageId: source.id },
-              sourceOpportunityId: scene.data.opportunity.opportunityId,
-            },
-          },
-        });
-        triggerMessageId = stored.id;
-        this.options.invocationQueue.backfillMessageId(threadId, input.intake.ownerId, enqueue.entry.id, stored.id);
-      } catch (error) {
-        this.options.invocationQueue.rollbackEnqueue(threadId, input.intake.ownerId, enqueue.entry.id);
-        throw error;
-      }
-    }
+    const triggerMessageId = enqueue.message?.id;
     if (!triggerMessageId) {
       throw Object.assign(new Error('meeting presentation retry message was not persisted'), {
         code: 'ROUTE_UNAVAILABLE',

@@ -1,3 +1,4 @@
+import { messageFrom } from '../../cats/services/stores/message-from.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { MemoryCueOpportunitySeed } from './MemoryCueInvocationPromptService.js';
 import {
@@ -15,18 +16,20 @@ export async function readTrustedConnectorMemoryCueSeeds(input: {
 }): Promise<MemoryCueOpportunitySeed[]> {
   if (input.entrySource !== 'connector' || !input.messageId) return [];
   const stored = await Promise.resolve(input.messageStore.getById(input.messageId));
+  const from = stored ? messageFrom(stored) : null;
   if (
     !stored ||
     stored.id !== input.messageId ||
     stored.threadId !== input.expectedThreadId ||
-    stored.catId !== null ||
     stored.deletedAt !== undefined ||
     stored._tombstone
   ) {
     return [];
   }
   if (stored.source?.connector === 'scheduler') {
-    if (stored.userId !== 'scheduler' || stored.extra?.scheduler?.hiddenTrigger !== true) return [];
+    if (stored.userId !== 'scheduler' || from?.kind !== 'system' || stored.extra?.scheduler?.hiddenTrigger !== true) {
+      return [];
+    }
     const seed = catOwnedSeedSeedFromTrustedCarrier(
       stored.extra?.memoryCue?.catOwnedSeed,
       stored.id,
@@ -34,7 +37,14 @@ export async function readTrustedConnectorMemoryCueSeeds(input: {
     );
     return seed ? [seed] : [];
   }
-  if (stored.source?.connector !== 'github-ci' || stored.userId !== input.expectedUserId) return [];
+  if (
+    stored.source?.connector !== 'github-ci' ||
+    stored.userId !== input.expectedUserId ||
+    from?.kind !== 'external' ||
+    from.connectorId !== 'github-ci'
+  ) {
+    return [];
+  }
   const seed = deliveryDecisionSeedFromTrustedCarrier(stored.extra?.memoryCue?.deliveryDecision, stored.id);
   return seed ? [seed] : [];
 }

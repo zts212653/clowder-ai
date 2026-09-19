@@ -125,7 +125,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
       },
     });
     assert.equal(unrelated.kind, 'state_only');
-    assert.equal(messageStore.getByThread('thread_issue').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_issue').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 41);
 
     const matched = await lifecycle.observe({
@@ -155,7 +155,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.match(matched.content, /Issue wait satisfied/);
     assert.match(matched.content, /issue author issue-author commented \(#42\)/);
     assert.doesNotMatch(matched.content, /UNTRUSTED EXTERNAL CONTENT/);
-    assert.deepEqual(messageStore.getByThread('thread_issue')[0].source?.meta?.waitContinuationCarrier, {
+    assert.deepEqual(messageStore.getByThreadIncludingQueued('thread_issue')[0].source?.meta?.waitContinuationCarrier, {
       v: 1,
       waitId: task.id,
       outcomeId: 'wait:issue:owner/repo#17:g2:matched',
@@ -200,7 +200,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.deepEqual(result, { kind: 'state_only', reason: 'subject_terminal_without_active_wait' });
     assert.equal(terminal.status, 'done');
     assert.equal(terminal.automationState.issue.issueState, 'closed');
-    assert.equal(messageStore.getByThread('thread_issue_collector').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_issue_collector').length, 0);
   });
 });
 

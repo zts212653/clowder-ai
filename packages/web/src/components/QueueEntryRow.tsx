@@ -1,22 +1,13 @@
 'use client';
 
-import type { FreshnessCarrierCapability, QueueRecoveryAction, QueueReminderAttempt } from '@cat-cafe/shared';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { useState } from 'react';
 import { LongFormReader } from '@/components/content-overflow';
+import type { ChatMessage } from '@/stores/chat-types';
 import type { QueueEntry } from '@/stores/chatStore';
-import {
-  carrierCapabilityLabel,
-  classifyFreshnessCarrierSupport,
-  type FreshnessCarrierSupport,
-  humanCarrierLabel,
-  type IntentChipTone,
-  intentChip,
-  secondaryTruth,
-} from './message-disposition-presentation';
+import { AvatarImageWithFallback } from './AvatarImageWithFallback';
 import { QueueEntryActions } from './QueueEntryActions';
-import { UNSETTLED_SEEN_LABEL } from './queue-receipt-projection';
+import { RoutingWarningNotice } from './RoutingWarningNotice';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   ci: 'CI',
@@ -29,166 +20,52 @@ const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   freshness: 'Freshness',
 };
 
-const TARGET_STATE_LABEL = {
-  queued: '未读 · 排队中',
-  notified: '已提醒 · 尚未读取',
-  awakened: '已唤醒，但关联回合已结束；尚未读取消息正文',
-  seen: UNSETTLED_SEEN_LABEL,
-  failed: '处理失败 · 已回队列',
-  steering: 'Steer 中',
-  withdrawn: '已停止后续处理 · 历史保留',
-  handled: '已处理',
-} as const;
-
-const REMINDER_STATE_LABEL = {
-  requested: '提醒已请求',
-  delivered: '提醒已送达 · 尚未读取',
-  seen: '提醒后已读取',
-  missed: '提醒未赶上本轮',
-} as const;
-
-const INTENT_TONE_CLASS: Record<IntentChipTone, string> = {
-  accent:
-    'bg-[color-mix(in_oklch,var(--color-cocreator-primary)_15%,transparent)] text-[var(--color-cocreator-primary)]',
-  neutral: 'bg-cafe-surface-sunken text-cafe-muted',
-  amber: 'bg-conn-amber-bg text-conn-amber-text',
-};
-
-function queueTargetStateLabel(entry: QueueEntry, catId: string, state: keyof typeof TARGET_STATE_LABEL): string {
-  if (state !== 'handled') return TARGET_STATE_LABEL[state];
-  const disposition = entry.queueReceipt?.targets.find((target) => target.catId === catId)?.outcome?.disposition;
-  if (disposition === 'responded') return '已由回复明确处理';
-  if (disposition === 'completed_with_turn') return '已随本轮完成';
-  return '已处理 · 无可回溯证据';
+function exactMessageById(messages: readonly ChatMessage[], messageId: string): ChatMessage | undefined {
+  const matches = messages.filter((message) => message.id === messageId);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
-function latestReminderForTarget(entry: QueueEntry, catId: string) {
-  return (entry.queueReceipt?.reminderAttempts ?? []).reduce<QueueReminderAttempt | undefined>(
-    (latest, attempt) =>
-      attempt.targetCatId === catId && (!latest || attempt.requestedAt > latest.requestedAt) ? attempt : latest,
-    undefined,
-  );
+/** Queue UI reads delivery directly from the canonical source refs already present in Chat History. */
+export function readTargetIdsFromHistory(sourceMessageId: string, messages: readonly ChatMessage[]): string[] {
+  const source = exactMessageById(messages, sourceMessageId);
+  const refs = source?.lifecycle?.dispatchRefs ?? [];
+  return refs.flatMap((ref) => {
+    const status = exactMessageById(messages, ref.statusMessageId)?.lifecycle;
+    const targetReadSource =
+      status?.kind === 'response' &&
+      status.targetId === ref.targetId &&
+      status.inputMessageIds.includes(sourceMessageId);
+    return targetReadSource ? [ref.targetId] : [];
+  });
 }
 
-function QueueTargetReceiptRow({
-  entry,
-  catId,
-  state,
-  activeInvocationId,
-  activeCarrierCapability,
-  onRemind,
-  isReminding,
-}: {
-  entry: QueueEntry;
-  catId: string;
-  state: keyof typeof TARGET_STATE_LABEL;
-  activeInvocationId?: string;
-  activeCarrierCapability?: FreshnessCarrierCapability;
-  onRemind: (id: string, targetCatId: string) => void;
-  isReminding: boolean;
-}) {
-  const [detailOpen, setDetailOpen] = useState(false);
-  const reminderAttempts = entry.queueReceipt?.reminderAttempts ?? [];
-  const latestReminder = latestReminderForTarget(entry, catId);
-  const alreadyAttemptedInActiveTurn = activeInvocationId
-    ? reminderAttempts.some((attempt) => attempt.targetCatId === catId && attempt.invocationId === activeInvocationId)
-    : false;
-  const support: FreshnessCarrierSupport = classifyFreshnessCarrierSupport([activeCarrierCapability]);
-  const canRemind =
-    !!activeInvocationId &&
-    support === 'exact' &&
-    (state === 'queued' || state === 'notified') &&
-    !alreadyAttemptedInActiveTurn;
-  const targetReceipt = entry.queueReceipt?.targets.find((target) => target.catId === catId);
-  const authorIntent = entry.source === 'user' ? targetReceipt?.authorIntent : undefined;
-  const chip = entry.source === 'user' ? intentChip(authorIntent) : undefined;
-  const truth = entry.source === 'user' ? secondaryTruth(authorIntent, support) : undefined;
-  const capability = targetReceipt?.authorIntent?.carrierCapability ?? activeCarrierCapability;
-
+function QueueTarget({ catId, label, avatar, read }: { catId: string; label: string; avatar?: string; read: boolean }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-0.5" data-queue-target-row={catId}>
-      <span className="text-xs font-medium text-cafe-secondary whitespace-nowrap">{catId}</span>
-      {chip && (
-        <span
-          className={`text-micro px-1.5 py-px rounded font-medium whitespace-nowrap ${INTENT_TONE_CLASS[chip.tone]}`}
-          data-testid={`intent-chip-${entry.id}-${catId}`}
-        >
-          {chip.text}
-        </span>
-      )}
-      {truth && (
-        <span
-          className="text-micro text-cafe-muted whitespace-nowrap"
-          data-testid={`secondary-truth-${entry.id}-${catId}`}
-        >
-          {truth}
-        </span>
-      )}
-      <span className="text-micro text-cafe-muted whitespace-nowrap">{queueTargetStateLabel(entry, catId, state)}</span>
-      {latestReminder && (
-        <span className="text-micro text-cafe-muted whitespace-nowrap">
-          {REMINDER_STATE_LABEL[latestReminder.state]}
-        </span>
-      )}
-      {canRemind && (
-        <button
-          type="button"
-          data-testid={`remind-${entry.id}-${catId}`}
-          disabled={isReminding}
-          onClick={() => onRemind(entry.id, catId)}
-          className="text-micro rounded-full border border-cafe px-1.5 py-px font-medium text-[var(--color-cocreator-primary)] hover:bg-cafe-surface disabled:cursor-wait disabled:opacity-60 whitespace-nowrap"
-          title="不打断当前工作，在安全断点提醒猫读取这条消息"
-        >
-          {isReminding ? '请求中…' : '提醒'}
-        </button>
-      )}
-      {capability && (
-        <details
-          className="text-micro text-cafe-muted"
-          data-testid={`carrier-detail-${entry.id}-${catId}`}
-          onToggle={(e) => setDetailOpen(e.currentTarget.open)}
-        >
-          <summary
-            className="cursor-pointer select-none inline-block whitespace-nowrap"
-            data-testid={`carrier-toggle-${entry.id}-${catId}`}
-          >
-            接入详情 {detailOpen ? '▾' : '▸'}
-          </summary>
-          <span className="block mt-0.5 text-cafe-muted">
-            {humanCarrierLabel(capability)} · {carrierCapabilityLabel(capability)}
-          </span>
-        </details>
-      )}
-    </div>
+    <span className="inline-flex items-center gap-1 whitespace-nowrap" data-queue-target-row={catId}>
+      <AvatarImageWithFallback src={avatar} alt="" className="h-5 w-5 rounded-full object-cover" />
+      <span className="text-xs font-medium text-cafe-secondary">{label}</span>
+      {read && <span className="text-micro text-cafe-muted">（已读）</span>}
+    </span>
   );
 }
 
 export interface QueueEntryRowProps {
   entry: QueueEntry;
   index: number;
-  isPaused: boolean;
   imageCount: number;
   ownerName: string;
+  ownerAvatar?: string;
+  readTargetIds: readonly string[];
   resolveCatName: (catId: string) => string;
-  onRemove: (action: Extract<QueueRecoveryAction, { kind: 'withdraw' }>) => void;
+  resolveCatAvatar: (catId: string) => string | undefined;
+  onRemove: (id: string) => void;
   onRecallEdit: (id: string) => void;
-  onSteer: (action: Extract<QueueRecoveryAction, { kind: 'steer' }>) => void;
-  onRetry: (action: Extract<QueueRecoveryAction, { kind: 'retry_target' }>) => void;
-  onForceReset: (action: Extract<QueueRecoveryAction, { kind: 'force_reset' }>) => void;
-  onRemind: (id: string, targetCatId: string) => void;
-  activeInvocationIdByCatId: Readonly<Record<string, string>>;
-  activeCarrierCapabilityByCatId: Readonly<Record<string, FreshnessCarrierCapability | undefined>>;
-  remindingTargetKeys: ReadonlySet<string>;
-  retryingAttemptIds: ReadonlySet<string>;
-  resettingActionIds: ReadonlySet<string>;
+  onSteer: (id: string) => void;
 }
 
 export function SortableQueueEntryRow(props: QueueEntryRowProps) {
   const { entry } = props;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: entry.id,
-    disabled: entry.status !== 'queued',
-  });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: entry.id });
   const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 };
 
   return (
@@ -201,47 +78,46 @@ export function SortableQueueEntryRow(props: QueueEntryRowProps) {
 function QueueEntryRow({
   entry,
   index,
-  isPaused,
   imageCount,
   ownerName,
+  ownerAvatar,
+  readTargetIds,
   resolveCatName,
+  resolveCatAvatar,
   onRemove,
   onRecallEdit,
   onSteer,
-  onRetry,
-  onForceReset,
-  onRemind,
-  activeInvocationIdByCatId,
-  activeCarrierCapabilityByCatId,
-  remindingTargetKeys,
-  retryingAttemptIds,
-  resettingActionIds,
   dragHandleProps,
 }: QueueEntryRowProps & { dragHandleProps?: Record<string, unknown> }) {
-  const isAgent = entry.source === 'agent';
-  const canRecallEdit = entry.status === 'queued' && entry.source === 'user' && Boolean(entry.messageId);
+  const isAgent = entry.from.kind === 'agent';
+  const canRecallEdit = entry.from.kind === 'user' && Boolean(entry.messageId);
   const isUrgent = entry.priority === 'urgent';
   const categoryLabel = entry.sourceCategory ? SOURCE_CATEGORY_LABEL[entry.sourceCategory] : null;
-  const withdrawAction = entry.recoveryActions?.find(
-    (action): action is Extract<QueueRecoveryAction, { kind: 'withdraw' }> => action.kind === 'withdraw',
-  );
-  const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
+  const rowToneClass = isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
-  const targetLabel = entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫';
+  const readTargets = new Set(readTargetIds);
+  const targetIds = [...new Set([...entry.targetCats, ...readTargets])];
   const sourceLabel =
-    isAgent && entry.sourceCategory === 'freshness'
-      ? `Freshness → ${targetLabel}`
-      : isAgent
-        ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${targetLabel}`
-        : entry.source === 'connector'
-          ? 'Connector'
-          : ownerName;
+    entry.from.kind === 'agent'
+      ? resolveCatName(entry.from.catId)
+      : entry.from.kind === 'external'
+        ? (entry.from.sender?.name ?? 'Connector')
+        : entry.from.kind === 'plugin'
+          ? 'Plugin'
+          : entry.from.kind === 'system'
+            ? entry.from.service
+            : ownerName;
+  const sourceAvatar =
+    entry.from.kind === 'agent'
+      ? resolveCatAvatar(entry.from.catId)
+      : entry.from.kind === 'user'
+        ? ownerAvatar
+        : undefined;
 
   return (
     <div className={`flex items-start gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
       <button
-        disabled={entry.status !== 'queued'}
-        className="p-0.5 mt-1 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing disabled:cursor-default disabled:opacity-40 shrink-0 touch-none"
+        className="p-0.5 mt-1 text-cafe-muted hover:text-cafe-secondary cursor-grab active:cursor-grabbing shrink-0 touch-none"
         aria-label="Drag to reorder"
         {...dragHandleProps}
       >
@@ -264,31 +140,40 @@ function QueueEntryRow({
           format="markdown"
           density="compact"
         />
-        <div className="flex items-center gap-1 mt-0.5">
-          {isAgent ? (
-            <svg className="w-2.5 h-2.5 text-[var(--color-cocreator-primary)]" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4.5 11.5c-.28 0-.5-.22-.5-.5 0-1.93.76-3.74 2.13-5.1C7.5 4.52 9.31 3.76 11.24 3.76c.28 0 .5.22.5.5s-.22.5-.5.5c-1.66 0-3.22.65-4.4 1.82A6.18 6.18 0 005.02 11c0 .28-.22.5-.5.5zM8.02 20.25a1.25 1.25 0 01-1.18-1.63l1.12-3.36A4.01 4.01 0 014.1 11.5c0-2.2 1.79-3.99 3.99-3.99h7.82c2.2 0 3.99 1.79 3.99 3.99a4.01 4.01 0 01-3.86 3.76l1.12 3.36a1.25 1.25 0 01-1.18 1.63H8.02z" />
-            </svg>
-          ) : isUrgent ? (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-conn-red-text" />
-          ) : (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-cocreator-primary)]" />
-          )}
-          <span
-            className={`text-xs ${isAgent ? 'text-[var(--color-cocreator-primary)] font-medium' : isUrgent ? 'text-conn-red-text' : 'text-cafe-muted'}`}
-          >
-            {sourceLabel}
-          </span>
-          {categoryLabel && (
+        <RoutingWarningNotice warnings={entry.routingWarnings} />
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1" data-testid={`queue-route-${entry.id}`}>
+          <span className="inline-flex items-center gap-1 whitespace-nowrap">
+            <AvatarImageWithFallback src={sourceAvatar} alt="" className="h-5 w-5 rounded-full object-cover" />
             <span
-              className={`text-micro px-1 py-px rounded font-medium ${
-                isUrgent ? 'bg-conn-red-bg text-conn-red-text' : 'text-[var(--color-cocreator-primary)]'
-              }`}
-              style={
-                isUrgent
-                  ? undefined
-                  : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 15%, transparent)' }
-              }
+              className={`text-xs ${isAgent ? 'text-[var(--color-cocreator-primary)] font-medium' : isUrgent ? 'text-conn-red-text' : 'text-cafe-muted'}`}
+            >
+              {sourceLabel}
+            </span>
+          </span>
+          <span className="text-xs text-cafe-muted" aria-hidden="true">
+            →
+          </span>
+          {targetIds.length > 0 ? (
+            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+              {targetIds.map((catId) => {
+                return (
+                  <QueueTarget
+                    key={catId}
+                    catId={catId}
+                    label={resolveCatName(catId)}
+                    avatar={resolveCatAvatar(catId)}
+                    read={readTargets.has(catId)}
+                  />
+                );
+              })}
+            </span>
+          ) : (
+            <span className="text-xs text-cafe-muted">待选择成员</span>
+          )}
+          {categoryLabel && isAgent && (
+            <span
+              className="text-micro rounded px-1 py-px font-medium text-[var(--color-cocreator-primary)]"
+              style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 15%, transparent)' }}
             >
               {categoryLabel}
             </span>
@@ -314,36 +199,10 @@ function QueueEntryRow({
             </span>
           )}
         </div>
-        {entry.targetStates && Object.keys(entry.targetStates).length > 0 && (
-          <div className="mt-1 text-micro">
-            {Object.entries(entry.targetStates).map(([catId, state]) => {
-              const remindKey = `${entry.id}:${catId}`;
-              return (
-                <QueueTargetReceiptRow
-                  key={catId}
-                  entry={entry}
-                  catId={catId}
-                  state={state}
-                  activeInvocationId={activeInvocationIdByCatId[catId]}
-                  activeCarrierCapability={activeCarrierCapabilityByCatId[catId]}
-                  onRemind={onRemind}
-                  isReminding={remindingTargetKeys.has(remindKey)}
-                />
-              );
-            })}
-          </div>
-        )}
       </div>
 
       <div className="flex items-center gap-1 shrink-0 mt-1">
-        <QueueEntryActions
-          entry={entry}
-          retryingAttemptIds={retryingAttemptIds}
-          resettingActionIds={resettingActionIds}
-          onRetry={onRetry}
-          onSteer={onSteer}
-          onForceReset={onForceReset}
-        />
+        <QueueEntryActions entry={entry} onSteer={onSteer} />
         {canRecallEdit && (
           <button
             type="button"
@@ -358,23 +217,21 @@ function QueueEntryRow({
             </svg>
           </button>
         )}
-        {withdrawAction && (
-          <button
-            type="button"
-            onClick={() => onRemove(withdrawAction)}
-            className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors"
-            title="停止后续处理（保留原消息）"
-            aria-label="停止后续处理"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => onRemove(entry.id)}
+          className="p-1 text-cafe-muted hover:text-conn-red-text transition-colors"
+          title="停止后续处理（保留原消息）"
+          aria-label="停止后续处理"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+              clipRule="evenodd"
+            />
+          </svg>
+        </button>
       </div>
     </div>
   );

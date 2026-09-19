@@ -13,6 +13,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -121,14 +122,16 @@ describe('#3444 A4 source-to-sink contracts (requires Redis)', () => {
   });
 
   async function appendUserMessage(messageStore, threadId, content, timestamp) {
-    return messageStore.append({
-      userId: USER_ID,
-      catId: null,
-      content,
-      mentions: [],
-      timestamp,
-      threadId,
-    });
+    return messageStore.append(
+      canonicalTestMessageInput({
+        userId: USER_ID,
+        catId: null,
+        content,
+        mentions: [],
+        timestamp,
+        threadId,
+      }),
+    );
   }
 
   function makeCursorStore(messageStore) {

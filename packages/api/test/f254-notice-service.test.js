@@ -126,6 +126,8 @@ describe('F254 FreshnessNoticeService', () => {
     assert.notEqual(result, null, 'first read-only call should return notice');
     assert.ok(result.noticeId, 'notice should have an ID');
     assert.ok(result.text.includes('2'), 'notice should include unseen count');
+    assert.match(result.text, /contextScope=unread_delta/);
+    assert.match(result.text, /hasMore=false.*不表示.*历史/);
   });
 
   it('returns null when no unseen messages', async () => {

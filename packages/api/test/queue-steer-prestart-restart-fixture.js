@@ -9,6 +9,7 @@ export async function restartHarness(h) {
   const queue = new InvocationQueue();
   const tracker = new InvocationTracker();
   const routedContents = [];
+  const log = { info: mock.fn(), warn: mock.fn(), error: mock.fn() };
   const invocationRecordStore = {
     scanByStatus: mock.fn(async () => []),
     get: mock.fn(async () => null),
@@ -19,17 +20,18 @@ export async function restartHarness(h) {
     queue,
     invocationTracker: tracker,
     invocationRecordStore,
-    queueCustodyCoordinator: h.queueCustodyCoordinator,
     messageStore: h.messageStore,
     socketManager: h.socketManager,
     router: {
+      resolveExplicitTargets: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
+      resolveConversationTargetsAtAdmission: mock.fn(async (requestedCatIds) => [...requestedCatIds]),
       routeExecution: mock.fn(async function* (_userId, content, _threadId, _messageId, targetCats) {
         routedContents.push(content);
         yield { type: 'done', catId: targetCats[0], timestamp: Date.now() };
       }),
       ackCollectedCursors: mock.fn(async () => {}),
     },
-    log: { info: mock.fn(), warn: mock.fn(), error: mock.fn() },
+    log,
   });
   const reconciler = new StartupReconciler({
     invocationRecordStore,
@@ -41,5 +43,5 @@ export async function restartHarness(h) {
     resumeQueue: (threadId, userId) => processor.processNext(threadId, userId),
   });
   await reconciler.reconcileOrphans();
-  return { queue, tracker, processor, reconciler, routedContents, invocationRecordStore };
+  return { queue, tracker, processor, reconciler, routedContents, invocationRecordStore, log };
 }

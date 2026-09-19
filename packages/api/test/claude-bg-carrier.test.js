@@ -89,6 +89,27 @@ test('throws CarrierError when claude --bg exits non-zero', async () => {
   );
 });
 
+test('sanitizes claude --bg stderr before taking its head excerpt', async () => {
+  const token = `sk-${'X'.repeat(40)}`;
+  const fakeSpawn = buildFakeSpawn({
+    exitCode: 1,
+    stderr: `${'A'.repeat(290)}${token}${'B'.repeat(500)}`,
+  });
+  const service = new ClaudeBgCarrierService({
+    l0CompilerFn: fakeL0Compiler,
+    spawnFn: fakeSpawn,
+    model: 'claude-test-model',
+  });
+  await assert.rejects(
+    () => service.startJob('hi'),
+    (error) => {
+      assert.doesNotMatch(error.message, /sk-X+/);
+      assert.match(error.message, /\[TOKEN_RE/);
+      return true;
+    },
+  );
+});
+
 test('throws CarrierError when short id cannot be parsed', async () => {
   const fakeSpawn = buildFakeSpawn({
     stdout: 'Starting background service…\nrandom output line\nno match here\n',

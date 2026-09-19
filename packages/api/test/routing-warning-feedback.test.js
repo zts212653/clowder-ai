@@ -65,6 +65,26 @@ function buildRouter() {
 }
 
 describe('AgentRouter.resolveTargetsAndIntent: routing_warnings for not-found cats', () => {
+  it('keeps an unmentioned conversation targetless when Queue admission owns fallback', async () => {
+    const router = buildRouter();
+    const result = await router.resolveTargetsAndIntent('continue', 'thread-1', { allowFallback: false });
+
+    assert.deepEqual(result.targetCats, []);
+    assert.equal(result.hasMentions, false);
+    assert.deepEqual(result.routing_warnings, []);
+  });
+
+  it('does not substitute the default cat for an invalid explicit mention', async () => {
+    const router = buildRouter();
+    const result = await router.resolveTargetsAndIntent('@ghostcat continue', 'thread-1', {
+      allowFallback: false,
+    });
+
+    assert.deepEqual(result.targetCats, []);
+    assert.equal(result.hasMentions, false);
+    assert.equal(result.routing_warnings[0]?.kind, 'cat_not_found');
+  });
+
   it('returns routing_warnings field (at minimum an empty array)', async () => {
     const router = buildRouter();
     const result = await router.resolveTargetsAndIntent('help me', 'thread-1');

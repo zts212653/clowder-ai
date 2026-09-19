@@ -49,8 +49,6 @@ type StoreState = {
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
   queue: [];
-  queuePaused: boolean;
-  queuePauseReason: null;
   queueFull: boolean;
   queueFullSource: null;
   threads: [];
@@ -93,8 +91,6 @@ const makeStoreState = (): StoreState => ({
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
   queue: [],
-  queuePaused: false,
-  queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
   threads: [],
@@ -229,8 +225,6 @@ vi.mock('../ChatInput', () => ({
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,

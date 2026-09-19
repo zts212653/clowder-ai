@@ -14,7 +14,7 @@ interface StartupRecoveryLogger {
 
 export interface FreshnessClosureStartupReconcilerDeps {
   closureStore: Pick<FreshnessClosureStore, 'listRecoverable' | 'recoverAttempt' | 'blockRecovery'>;
-  enqueue(closure: FreshnessClosureAggregate): EnqueueResult;
+  enqueue(closure: FreshnessClosureAggregate): EnqueueResult | Promise<EnqueueResult>;
   executeThread(threadId: string): void | Promise<void>;
   onProjection?(projection: FreshnessClosureProjection): void | Promise<void>;
   log: StartupRecoveryLogger;
@@ -88,7 +88,7 @@ async function reconcileStartupCandidate(
     evidenceRef: 'startup:recent_running_recovery',
     now,
   });
-  const enqueueResult = deps.enqueue(closure);
+  const enqueueResult = await deps.enqueue(closure);
   if (enqueueResult.outcome === 'full') {
     await blockStartupRecovery(deps, closure, ['startup:queue_full'], now);
     return { recovered: 0, blocked: 1, enqueued: 0 };

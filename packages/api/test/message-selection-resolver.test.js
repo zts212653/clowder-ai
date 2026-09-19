@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 await import('tsx/esm');
 const {
@@ -23,7 +24,7 @@ function makeThread(overrides = {}) {
 }
 
 function makeMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'message-1',
     threadId: 'thread-source',
     userId: 'user-1',
@@ -33,28 +34,7 @@ function makeMessage(overrides = {}) {
     timestamp: 100,
     deliveryStatus: 'delivered',
     ...overrides,
-  };
-}
-
-function makeQueueCustody(ownerUserId = 'user-1') {
-  return {
-    version: 1,
-    entryId: `entry-${ownerUserId}`,
-    revision: 1,
-    ownerUserId,
-    intent: 'managed command wake',
-    status: 'queued',
-    allTargetCats: ['opus5'],
-    pendingTargetCats: ['opus5'],
-    notifiedByCatIds: [],
-    seenByCatIds: [],
-    seenInvocationIdByCatId: {},
-    failedByCatIds: [],
-    handledByCatIds: [],
-    priority: 'normal',
-    createdAt: 100,
-    updatedAt: 100,
-  };
+  });
 }
 
 function createResolver({ thread = makeThread(), messages = [makeMessage()] } = {}) {
@@ -113,8 +93,8 @@ describe('MessageSelectionResolver admission', () => {
     );
     assert.deepEqual(Object.keys(result.carrier.items[0]).sort(), ['kind', 'messageId']);
     assert.deepEqual(Object.keys(result.carrier.items[1]).sort(), ['kind', 'messageId']);
-    assert.deepEqual(result.items[0].author, { kind: 'user', userId: 'user-1' });
-    assert.deepEqual(result.items[1].author, { kind: 'cat', catId: 'codex-sol' });
+    assert.deepEqual(result.items[0].from, { kind: 'user', userId: 'user-1' });
+    assert.deepEqual(result.items[1].from, { kind: 'agent', catId: 'codex-sol' });
   });
 
   it('anchors an exact Quote and stores a domain-separated digest of the full bubble projection', async () => {
@@ -260,16 +240,24 @@ describe('MessageSelectionResolver admission', () => {
   it('resolves a visible scheduler-authored managed-hold receipt while rejecting other system rows', async () => {
     const managedReceipt = makeMessage({
       id: 'managed-receipt',
-      userId: 'scheduler',
+      userId: 'user-1',
       catId: null,
+      from: { kind: 'system', service: 'hold-ball' },
       content: '[定时任务] 持球唤醒（命令完成）',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueueCustody(),
+      deliveryStatus: 'delivered',
+      deliveredAt: 100,
       source: {
         connector: 'hold-ball',
         label: '持球结果',
         icon: '🏓',
-        meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+        meta: {
+          managedHold: true,
+          phase: 'wake',
+          taskId: 'hold-ball-task-1',
+          threadId: 'thread-source',
+          catId: 'opus5',
+          wakeWhen: true,
+        },
       },
     });
     const genericScheduler = makeMessage({
@@ -314,31 +302,36 @@ describe('MessageSelectionResolver admission', () => {
       connector: 'hold-ball',
       label: '持球结果',
       icon: '🏓',
-      meta: { taskId: 'hold-ball-task-1', threadId: 'thread-source', catId: 'opus5', wakeWhen: true },
+      meta: {
+        managedHold: true,
+        phase: 'wake',
+        taskId: 'hold-ball-task-1',
+        threadId: 'thread-source',
+        catId: 'opus5',
+        wakeWhen: true,
+      },
     };
     const hidden = makeMessage({
       id: 'hidden-managed-receipt',
-      userId: 'scheduler',
+      userId: 'user-1',
       catId: null,
-      deliveryStatus: 'queued',
-      queueCustody: makeQueueCustody(),
+      from: { kind: 'system', service: 'hold-ball' },
       extra: { scheduler: { hiddenTrigger: true } },
       source: managedSource,
     });
     const foreignOwner = makeMessage({
       id: 'foreign-managed-receipt',
-      userId: 'scheduler',
+      userId: 'user-owner',
       catId: null,
+      from: { kind: 'system', service: 'hold-ball' },
       content: 'owner-A command result',
-      deliveryStatus: 'queued',
-      queueCustody: makeQueueCustody('user-owner'),
       source: managedSource,
     });
     const ownerlessLegacy = makeMessage({
       id: 'ownerless-managed-receipt',
       userId: 'scheduler',
       catId: null,
-      deliveryStatus: 'queued',
+      from: { kind: 'system', service: 'hold-ball' },
       source: managedSource,
     });
     const { resolver } = createResolver({

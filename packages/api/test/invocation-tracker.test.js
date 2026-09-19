@@ -83,6 +83,141 @@ describe('InvocationTracker catId tracking (slot-aware)', () => {
   });
 });
 
+describe('InvocationTracker lifecycle ActiveRun binding', () => {
+  it('registers a provider dispatcher only for the exact live child and stale release cannot erase a replacement', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    const first = {
+      invocationId: 'child-1',
+      capabilities: { append: true, steer: true },
+      handle: {
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        threadId: 'native-thread-1',
+        turnId: 'native-turn-1',
+      },
+      dispatch: async () => ({ accepted: true, handle: first.handle }),
+    };
+    const releaseFirst = tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', first, 'parent-1');
+    assert.equal(typeof releaseFirst, 'function');
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), first);
+
+    const stale = { ...first, invocationId: 'child-stale' };
+    assert.equal(tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', stale, 'parent-1'), null);
+
+    releaseFirst();
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), undefined);
+    const replacement = { ...first, handle: { ...first.handle } };
+    const releaseReplacement = tracker.bindAgentClientActiveRunDispatcher('thread-1', 'opus', replacement, 'parent-1');
+    assert.equal(typeof releaseReplacement, 'function');
+    releaseFirst();
+    assert.equal(tracker.getAgentClientActiveRunDispatcher('thread-1', 'opus'), replacement);
+  });
+
+  it('mirrors one durable Append only onto the exact live Active Run', () => {
+    const tracker = new InvocationTracker();
+    tracker.start('thread-1', 'codex', 'user-1', ['codex'], 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'codex',
+      invocationId: 'turn-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-old'],
+      inputMessageIds: ['message-old'],
+      privateInputEntryIds: [],
+      startedAt: 1,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    tracker.bindAgentClientActiveRunDispatcher(
+      'thread-1',
+      'codex',
+      {
+        invocationId: 'turn-1',
+        capabilities: { append: true, steer: true },
+        handle: { provider: 'openai_codex', carrier: 'codex_app_server', threadId: 'native-1', turnId: 'turn-1' },
+        dispatch: async () => ({ accepted: true, handle: {} }),
+      },
+      'parent-1',
+    );
+
+    assert.equal(
+      tracker.appendLifecycleActiveRunInputs(
+        'thread-1',
+        'codex',
+        { invocationId: 'turn-stale', responseMessageId: 'response-1' },
+        'entry-new',
+        ['message-new'],
+      ),
+      false,
+    );
+    assert.equal(
+      tracker.appendLifecycleActiveRunInputs(
+        'thread-1',
+        'codex',
+        { invocationId: 'turn-1', responseMessageId: 'response-1' },
+        'entry-new',
+        ['message-new'],
+      ),
+      true,
+    );
+    assert.deepEqual(tracker.getActiveSlots('thread-1')[0].activeRun.inputEntryIds, ['entry-old', 'entry-new']);
+    assert.deepEqual(tracker.getActiveSlots('thread-1')[0].activeRun.inputMessageIds, ['message-old', 'message-new']);
+  });
+
+  it('binds the exact child response only to its current parent-owned slot', () => {
+    const tracker = new InvocationTracker();
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const run = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+
+    assert.equal(tracker.bindLifecycleActiveRun(run, 'parent-1'), true);
+    assert.deepEqual(tracker.getActiveSlots('thread-1'), [{ catId: 'opus', startedAt: run.startedAt, activeRun: run }]);
+    assert.equal(tracker.bindLifecycleActiveRun({ ...run, invocationId: 'child-2' }, 'parent-2'), false);
+    assert.equal(tracker.getActiveSlots('thread-1')[0].activeRun.invocationId, 'child-1');
+  });
+
+  it('removes ActiveRun with the slot and rejects a stale replacement binding', () => {
+    const tracker = new InvocationTracker();
+    const oldBatch = tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-1');
+    const oldRun = {
+      threadId: 'thread-1',
+      targetId: 'opus',
+      invocationId: 'child-1',
+      responseMessageId: 'response-1',
+      inputEntryIds: ['entry-1'],
+      inputMessageIds: ['message-1'],
+      privateInputEntryIds: [],
+      startedAt: 100,
+    };
+    assert.equal(tracker.bindLifecycleActiveRun(oldRun, 'parent-1'), true);
+    tracker.completeAll('thread-1', ['opus'], oldBatch);
+    assert.deepEqual(tracker.getActiveSlots('thread-1'), []);
+
+    tracker.startAll('thread-1', ['opus'], 'owner-1', 'parent-2');
+    assert.equal(tracker.bindLifecycleActiveRun(oldRun, 'parent-1'), false);
+    assert.equal(tracker.getActiveSlots('thread-1')[0].activeRun, undefined);
+  });
+});
+
 describe('InvocationTracker preempt reason', () => {
   test('start aborts previous invocation with reason "preempted"', () => {
     const tracker = new InvocationTracker();

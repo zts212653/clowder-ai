@@ -1,14 +1,9 @@
 import { isDeepStrictEqual } from 'node:util';
 import { createCatId } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
-import type { InvocationQueue } from './InvocationQueue.js';
-import {
-  ensurePersistedCarrierOwnedAndScheduled,
-  type PersistedCarrierDeps,
-  type PersistedCarrierResult,
-} from './PersistedQueueCarrier.js';
-import { carrierEntryId } from './QueuedMessageCustodyCarrierProjection.js';
-import { createInitialQueuedMessageCustody } from './QueuedMessageCustodyCoordinator.js';
+import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import type { OwnedQueueProgress, PersistedCarrierResult } from './PersistedQueueCarrier.js';
+import { queueEntryId } from './queue-ledger/QueueLedger.js';
 
 export interface PersistedQueueDeliveryInput {
   ownerUserId: string;
@@ -23,99 +18,113 @@ export interface PersistedQueueDeliveryPort {
   deliver(input: PersistedQueueDeliveryInput): Promise<PersistedCarrierResult & { message?: StoredMessage }>;
 }
 
-/** Dispatch owns the admission/resumption boundary; producers supply only an authorized immutable envelope. */
+type PersistedQueueDeliveryResult = PersistedCarrierResult & { message?: StoredMessage };
+
+/** Dispatch owns atomic Message + Queue admission; producers supply only an authorized immutable envelope. */
 export class PersistedQueueDelivery implements PersistedQueueDeliveryPort {
   constructor(
     private readonly deps: {
-      messages: Pick<IMessageStore, 'append' | 'getByIdempotencyKey' | 'getById' | 'getByThreadAfter'>;
-      queue: Pick<
-        InvocationQueue,
-        | 'enqueue'
-        | 'backfillMessageId'
-        | 'rollbackEnqueue'
-        | 'getEntrySnapshot'
-        | 'restoreDurableEntry'
-        | 'commitQueueCustodyAdmission'
-      >;
-      progress: PersistedCarrierDeps['progress'];
+      messages: IMessageStore;
+      queue: Pick<InvocationQueue, 'appendAndEnqueueDurable' | 'findAdmittedEntriesForMessages' | 'getDurableEntry'>;
+      progress: (entry: QueueEntry, targetCatId: string) => Promise<OwnedQueueProgress>;
     },
   ) {}
 
   async deliver(input: PersistedQueueDeliveryInput) {
-    let message = await this.deps.messages.getByIdempotencyKey(input.ownerUserId, input.threadId, input.idempotencyKey);
-    if (!message) message = await this.admit(input);
-    if (
-      message.userId !== input.ownerUserId ||
-      message.threadId !== input.threadId ||
-      message.catId !== null ||
-      message.content !== input.content ||
-      message.source?.connector !== input.source.connector ||
-      !isDeepStrictEqual(message.source.meta, input.source.meta) ||
-      !message.mentions.some((cat) => cat === input.targetCatId)
-    ) {
-      return { state: 'conflict' as const, reason: 'Persisted producer envelope does not match', message };
-    }
-    const result = await ensurePersistedCarrierOwnedAndScheduled(
-      {
-        ...this.deps,
-        progress: async (entry, targetCatId) => {
-          // The complete durable group has been verified. Release only this admission's existing queue fence.
-          if (
-            !this.deps.queue.commitQueueCustodyAdmission(
-              entry.threadId,
-              entry.userId,
-              `producer:${input.idempotencyKey}`,
-              [entry.id],
-            )
-          )
-            throw new Error('Producer queue admission fence changed');
-          return this.deps.progress(entry, targetCatId);
-        },
-      },
-      { ...input, sourceMessageId: message.id },
-    );
-    return { ...result, message };
-  }
-
-  private async admit(input: PersistedQueueDeliveryInput): Promise<StoredMessage> {
     const targetCat = createCatId(input.targetCatId);
-    const queued = this.deps.queue.enqueue({
-      threadId: input.threadId,
-      userId: input.ownerUserId,
-      ownerAuthProvenance: 'strict',
-      idempotencyKey: input.idempotencyKey,
-      queueCustodyAdmissionId: `producer:${input.idempotencyKey}`,
-      content: input.content,
-      source: 'connector',
-      targetCats: [targetCat],
-      intent: 'execute',
-    });
-    if (queued.outcome === 'full' || !queued.entry) throw new Error('Producer return queue is full');
-    try {
-      const message = await this.deps.messages.append({
+    const from = {
+      kind: 'external' as const,
+      connectorId: input.source.connector,
+      ...(input.source.label ? { sender: { id: input.source.label, name: input.source.label } } : {}),
+    };
+    const existing = await this.deps.messages.getByIdempotencyKey(
+      input.ownerUserId,
+      input.threadId,
+      input.idempotencyKey,
+    );
+    if (existing) {
+      return this.progressExistingMessage(existing, input);
+    }
+    const admitted = await this.deps.queue.appendAndEnqueueDurable(
+      this.deps.messages,
+      {
         userId: input.ownerUserId,
-        catId: null,
+        threadId: input.threadId,
+        from,
         content: input.content,
         mentions: [targetCat],
-        timestamp: queued.entry.createdAt,
-        threadId: input.threadId,
-        idempotencyKey: input.idempotencyKey,
+        timestamp: Date.now(),
         deliveryStatus: 'queued',
-        queueCustody: createInitialQueuedMessageCustody(queued.entry),
         source: input.source,
         extra: { targetCats: [targetCat] },
-      });
-      const durableEntryId = message.queueCustody && carrierEntryId(message.queueCustody, input.targetCatId);
-      if (durableEntryId !== queued.entry.id) {
-        // append's atomic idempotency check may find an older durable owner after our initial lookup.
-        if (!queued.deduped) this.deps.queue.rollbackEnqueue(input.threadId, input.ownerUserId, queued.entry.id);
-        return message;
-      }
-      this.deps.queue.backfillMessageId(input.threadId, input.ownerUserId, queued.entry.id, message.id);
-      return message;
-    } catch (error) {
-      if (!queued.deduped) this.deps.queue.rollbackEnqueue(input.threadId, input.ownerUserId, queued.entry.id);
-      throw error;
+        idempotencyKey: input.idempotencyKey,
+      },
+      {
+        threadId: input.threadId,
+        userId: input.ownerUserId,
+        sourceId: input.idempotencyKey,
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'strict',
+        idempotencyKey: input.idempotencyKey,
+        content: input.content,
+        from,
+        targetCats: [targetCat],
+        intent: 'execute',
+      },
+    );
+    if (admitted.outcome === 'full') throw new Error('Producer return queue is full');
+    const message = admitted.message;
+    if (!matchesPersistedEnvelope(message, input)) {
+      return { state: 'conflict' as const, reason: 'Persisted producer envelope does not match', message };
     }
+    const entry = admitted.entry;
+    if (!entry) return { state: 'unavailable' as const, reason: 'Queue admission is unavailable', message };
+    if (entry.status === 'claimed' || entry.status === 'processing') {
+      return { state: 'already_processing' as const, entryId: entry.id, message };
+    }
+    return { state: await this.deps.progress(entry, input.targetCatId), entryId: entry.id, message };
   }
+
+  private async progressExistingMessage(
+    existing: StoredMessage,
+    input: PersistedQueueDeliveryInput,
+  ): Promise<PersistedQueueDeliveryResult> {
+    if (!matchesPersistedEnvelope(existing, input)) {
+      return { state: 'conflict', reason: 'Persisted producer envelope does not match', message: existing };
+    }
+    const entryId = queueEntryId(existing.id);
+    const entry = await this.deps.queue.getDurableEntry(input.threadId, entryId);
+    if (entry) {
+      if (entry.status === 'claimed' || entry.status === 'processing') {
+        return { state: 'already_processing', entryId, message: existing };
+      }
+      if (entry.status === 'terminal') return { state: 'terminal_owned', entryId, message: existing };
+      return { state: await this.deps.progress(entry, input.targetCatId), entryId, message: existing };
+    }
+    if (
+      this.deps.queue.findAdmittedEntriesForMessages(
+        input.threadId,
+        [existing.id],
+        input.ownerUserId,
+        input.targetCatId,
+      ).length > 0
+    ) {
+      return { state: 'already_processing', entryId, message: existing };
+    }
+    if (existing.deliveryStatus === 'delivered') {
+      return { state: 'terminal_owned', entryId, message: existing };
+    }
+    return { state: 'conflict', reason: 'Persisted producer Queue carrier is missing', message: existing };
+  }
+}
+
+function matchesPersistedEnvelope(message: StoredMessage, input: PersistedQueueDeliveryInput): boolean {
+  return (
+    message.userId === input.ownerUserId &&
+    message.threadId === input.threadId &&
+    message.content === input.content &&
+    message.source?.connector === input.source.connector &&
+    isDeepStrictEqual(message.source.meta, input.source.meta) &&
+    message.mentions.some((cat) => cat === input.targetCatId)
+  );
 }

@@ -130,9 +130,9 @@ export function toRecoveryAppendInput(
   recoveredAt: number,
 ): AppendMessageInput {
   return {
+    from: { kind: 'agent', catId: entry.catId as CatId },
     userId: entry.userId,
     threadId: entry.threadId,
-    catId: entry.catId as CatId,
     content: entry.content,
     mentions: [],
     timestamp: entry.timestamp,

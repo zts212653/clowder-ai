@@ -1,4 +1,9 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+
+const TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
+process.env.CAT_TEMPLATE_PATH = TEMPLATE_PATH;
 
 function createSequenceService(texts) {
   let callCount = 0;
@@ -77,6 +82,7 @@ function createMockDeps(services, triggerMessage, projection) {
         return projection;
       },
     },
+    getProjectionOpenCount: () => projectionOpenCount,
   };
 }
 
@@ -85,7 +91,7 @@ export async function runTurnCustodyRoute({ output, triggerMessage, wake, projec
   const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');
   const { routeSerial } = await import('../../dist/domains/cats/services/agents/routing/route-serial.js');
   catRegistry.reset();
-  for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig()))) {
+  for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(TEMPLATE_PATH)))) {
     catRegistry.register(id, config);
   }
   try {
@@ -110,6 +116,7 @@ export async function runTurnCustodyRoute({ output, triggerMessage, wake, projec
     )) {
       // Exhaust the real route so its pending Phase T close emits evidence.
     }
+    return { projectionOpenCount: deps.getProjectionOpenCount() };
   } finally {
     catRegistry.reset();
     for (const [id, config] of Object.entries(original)) {

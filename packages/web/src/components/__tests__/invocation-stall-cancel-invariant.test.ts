@@ -130,19 +130,9 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
-      import('../ThinkingIndicator'),
-      import('../ThreadExecutionBar'),
-    ]);
+    const { ThreadExecutionBar } = await import('../ThreadExecutionBar');
     act(() => {
-      root.render(
-        React.createElement(
-          React.Fragment,
-          null,
-          React.createElement(ThinkingIndicator),
-          React.createElement(ThreadExecutionBar),
-        ),
-      );
+      root.render(React.createElement(ThreadExecutionBar));
     });
 
     const cancelButtons = container.querySelectorAll('[aria-label="Stop codex live_invocation inv-1"]');
@@ -168,19 +158,9 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
-      import('../ThinkingIndicator'),
-      import('../ThreadExecutionBar'),
-    ]);
+    const { ThreadExecutionBar } = await import('../ThreadExecutionBar');
     act(() => {
-      root.render(
-        React.createElement(
-          React.Fragment,
-          null,
-          React.createElement(ThinkingIndicator),
-          React.createElement(ThreadExecutionBar),
-        ),
-      );
+      root.render(React.createElement(ThreadExecutionBar));
     });
 
     const cancelBtn = container.querySelector('[aria-label="Stop codex live_invocation inv-1"]') as HTMLButtonElement;

@@ -1,3 +1,4 @@
+import { messageFrom } from '../cats/services/stores/message-from.js';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { BoundAsrPersonMemoryScene } from '../memory/people/AsrPersonMemoryOpportunityPromptService.js';
 
@@ -12,7 +13,7 @@ export function bindAsrPersonMemoryScenesFromQueueMessage(
   if (
     message.userId !== scope.ownerUserId ||
     message.threadId !== scope.threadId ||
-    message.catId !== null ||
+    messageFrom(message).kind !== 'user' ||
     message.deletedAt !== undefined ||
     message._tombstone ||
     message.extra?.meetingArtifact?.trust !== 'untrusted_external' ||

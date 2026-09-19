@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
+import { adaptInvocationQueue, canonicalTestQueueInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   return {
@@ -104,7 +105,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
 
     registry = new InvocationRegistry();
-    invocationQueue = new InvocationQueue();
+    invocationQueue = adaptInvocationQueue(new InvocationQueue());
     messageStore = new MessageStore();
     threadStore = new ThreadStore();
     source = await threadStore.create('user-1', 'Source');
@@ -149,7 +150,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       router: createMockRouter(),
       invocationRecordStore: createMockInvocationRecordStore(),
       invocationQueue,
-      queueProcessor: { async tryAutoExecute() {} },
+      queueProcessor: { async requestDrain() {} },
       actionSuccessorAdmissionService: actionService,
     });
   });
@@ -220,7 +221,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(actionService.calls[0].dispatchId, 'post:review-2915');
     const entries = invocationQueue.list(source.id, 'user-1');
     assert.equal(entries.length, 1);
-    assert.deepEqual(entries[0].actionSuccessorFence, {
+    assert.deepEqual(entries[0].execution.actionSuccessorFence, {
       leaseId: 'lease-review-1',
       generation: 1,
       dispatchId: 'post:review-2915',
@@ -309,7 +310,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
 
     const entries = invocationQueue.list(target.id, 'user-1');
     assert.equal(entries.length, 1);
-    assert.deepEqual(entries[0].actionSuccessorFence, {
+    assert.deepEqual(entries[0].execution.actionSuccessorFence, {
       leaseId: 'lease-review-1',
       generation: 1,
       dispatchId: 'cross-post:review-2868',
@@ -352,7 +353,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       outcome: 'returned',
     });
     const [entry] = invocationQueue.list(target.id, 'user-1');
-    assert.deepEqual(entry.actionSuccessorFence, {
+    assert.deepEqual(entry.execution.actionSuccessorFence, {
       leaseId: 'lease-review-1',
       generation: 2,
       dispatchId: 'cross-post:return-review-2868',
@@ -360,7 +361,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(actionService.unavailable.length, 0);
     assert.deepEqual(actionService.returnedDelivered, [
       {
-        fence: entry.actionSuccessorFence,
+        fence: entry.execution.actionSuccessorFence,
         evidenceRef: 'queue:cross-post:return-review-2868:return_enqueued',
         now: actionService.returnedDelivered[0].now,
       },
@@ -400,7 +401,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(actionService.unavailable.length, 0);
     assert.deepEqual(actionService.returnedDelivered, [
       {
-        fence: entry.actionSuccessorFence,
+        fence: entry.execution.actionSuccessorFence,
         evidenceRef: 'queue:cross-post:return-replay-review-2868:return_enqueued',
         now: actionService.returnedDelivered[0].now,
       },
@@ -409,15 +410,18 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
 
   test('replayed custody return stays pending when queue depth prevents delivery', async () => {
     for (let i = 0; i < 10; i++) {
-      invocationQueue.enqueue({
-        ownerAuthProvenance: 'unknown',
-        threadId: target.id,
-        userId: 'user-1',
-        content: `fill-return-replay-${i}`,
-        source: 'agent',
-        targetCats: [`cat-${i}`],
-        intent: 'execute',
-      });
+      invocationQueue.enqueue(
+        canonicalTestQueueInput({
+          kind: 'private_input',
+          ownerAuthProvenance: 'unknown',
+          threadId: target.id,
+          userId: 'user-1',
+          content: `fill-return-replay-${i}`,
+          source: 'agent',
+          targetCats: [`cat-${i}`],
+          intent: 'execute',
+        }),
+      );
     }
     actionService.admit = async (input) => {
       actionService.calls.push(input);
@@ -496,7 +500,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     const [entry] = invocationQueue.list(target.id, 'user-1');
     assert.deepEqual(actionService.returnedDelivered, [
       {
-        fence: entry.actionSuccessorFence,
+        fence: entry.execution.actionSuccessorFence,
         evidenceRef: 'queue:cross-post:return-same-client-2868:return_enqueued',
         now: actionService.returnedDelivered[0].now,
       },
@@ -529,18 +533,21 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
   });
 
   test('action-scoped work queues behind unrelated same-cat work instead of coalescing into it', async () => {
-    invocationQueue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId: target.id,
-      userId: 'user-1',
-      content: 'Unrelated earlier handoff',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: ['codex'],
-      intent: 'execute',
-      autoExecute: true,
-      callerCatId: 'opus',
-    });
+    invocationQueue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'private_input',
+        ownerAuthProvenance: 'unknown',
+        threadId: target.id,
+        userId: 'user-1',
+        content: 'Unrelated earlier handoff',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: ['codex'],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: 'opus',
+      }),
+    );
 
     const response = await post({
       targetCats: ['codex'],
@@ -557,8 +564,8 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(response.statusCode, 200);
     const entries = invocationQueue.list(target.id, 'user-1');
     assert.equal(entries.length, 2);
-    assert.equal(entries[0].actionSuccessorFence, undefined);
-    assert.equal(entries[1].actionSuccessorFence.leaseId, 'lease-review-1');
+    assert.equal(entries[0].execution.actionSuccessorFence, undefined);
+    assert.equal(entries[1].execution.actionSuccessorFence.leaseId, 'lease-review-1');
   });
 
   test('releases a newly claimed action lease when exact-message dedupe reuses an existing message', async () => {
@@ -587,70 +594,6 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(actionService.unavailable[0].fence.leaseId, 'lease-review-1');
     assert.deepEqual(actionService.unavailable[0].holderCatIds, ['codex']);
     assert.match(actionService.unavailable[0].evidenceRef, /exact_duplicate$/);
-  });
-
-  test('queued duplicate recovery preserves the replayed return fence and confirms delivery', async () => {
-    threadStore.addParticipants(target.id, ['codex']);
-    const first = await post({
-      targetCats: ['codex'],
-      clientMessageId: 'recover-review-2868',
-      action: {
-        subjectRef: 'subject:task:task-2868',
-        actionFamily: 'implement',
-        successorSlot: 'implementer',
-        mode: 'single',
-        terminalPredicate: { kind: 'task_done' },
-      },
-    });
-    assert.equal(first.statusCode, 200);
-    const [storedCarrier] = messageStore.getByThreadIncludingQueued(target.id, 20, 'user-1');
-    assert.equal(storedCarrier.extra.callbackDedup.coordinationKey, 'action-active-root');
-    const [lostEntry] = invocationQueue.list(target.id, 'user-1');
-    assert.ok(lostEntry);
-    invocationQueue.remove(target.id, 'user-1', lostEntry.id);
-
-    actionService.admit = async (input) => {
-      actionService.calls.push(input);
-      return {
-        admit: false,
-        outcome: 'replayed',
-        lease: activeLease(['codex'], { generation: 2, dispatchId: input.dispatchId }),
-      };
-    };
-    auth = await registry.create('user-1', 'opus', source.id);
-    const replay = await post({
-      targetCats: ['codex'],
-      clientMessageId: 'recover-review-2868',
-      action: {
-        subjectRef: 'subject:task:task-2868',
-        actionFamily: 'implement',
-        successorSlot: 'implementer',
-        mode: 'single',
-        terminalPredicate: { kind: 'task_done' },
-        returnToPredecessor: {
-          leaseId: 'lease-review-1',
-          expectedGeneration: 1,
-          groundingEvidenceRef: 'grounding:mismatch',
-        },
-      },
-    });
-
-    assert.equal(replay.statusCode, 200);
-    assert.equal(replay.json().status, 'duplicate');
-    const [recovered] = invocationQueue.list(target.id, 'user-1');
-    assert.deepEqual(recovered.actionSuccessorFence, {
-      leaseId: 'lease-review-1',
-      generation: 2,
-      dispatchId: 'cross-post:recover-review-2868',
-    });
-    assert.equal(actionService.unavailable.length, 0);
-    assert.deepEqual(actionService.returnedDelivered, [
-      {
-        fence: recovered.actionSuccessorFence,
-        evidenceRef: 'queue:cross-post:recover-review-2868:return_enqueued',
-        now: actionService.returnedDelivered[0].now,
-      },
-    ]);
   });
 
   test('action carrier rejects ambiguous identity and preserves explicit parallel intent', async () => {
@@ -682,8 +625,9 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
     assert.equal(parallel.statusCode, 200);
     assert.deepEqual(actionService.calls.at(-1).holderCatIds, ['codex', 'gpt52']);
     const entries = invocationQueue.list(target.id, 'user-1');
-    assert.equal(entries.length, 2);
-    assert.ok(entries.every((entry) => entry.actionSuccessorFence?.leaseId === 'lease-review-1'));
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].targets, ['codex', 'gpt52']);
+    assert.equal(entries[0].execution.actionSuccessorFence?.leaseId, 'lease-review-1');
   });
 
   test('agent-key action fails closed instead of posting or enqueueing an unfenced successor', async () => {
@@ -697,7 +641,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
 
     const agentApp = Fastify();
     const agentRegistry = new InvocationRegistry();
-    const agentQueue = new InvocationQueue();
+    const agentQueue = adaptInvocationQueue(new InvocationQueue());
     const agentMessages = new MessageStore();
     const agentThreads = new ThreadStore();
     const agentThread = await agentThreads.create('user-1', 'Agent-key target');
@@ -716,7 +660,7 @@ describe('F167 Phase S: cross-thread action successor admission', () => {
       router: createMockRouter(),
       invocationRecordStore: createMockInvocationRecordStore(),
       invocationQueue: agentQueue,
-      queueProcessor: { async tryAutoExecute() {} },
+      queueProcessor: { async requestDrain() {} },
       actionSuccessorAdmissionService: agentAdmission,
     });
 

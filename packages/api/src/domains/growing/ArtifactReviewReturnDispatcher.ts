@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import type { PersistedQueueDeliveryPort } from '../cats/services/agents/invocation/PersistedQueueDelivery.js';
-import { projectQueueReceipt } from '../cats/services/stores/ports/queued-message-receipt.js';
 import { ArtifactReviewError } from '../collaborative-content/artifact-review/errors.js';
 import type { ReviewReturnIntent } from '../collaborative-content/artifact-review/return-store.js';
 import type { ArtifactReviewService } from '../collaborative-content/artifact-review/service.js';
@@ -82,10 +81,7 @@ export class ArtifactReviewReturnDispatcher {
           mentions: message.mentions,
           userId: message.userId,
           source: message.source,
-          extra: {
-            ...message.extra,
-            ...(message.queueCustody ? { queueReceipt: projectQueueReceipt(message.queueCustody) } : {}),
-          },
+          extra: message.extra,
         },
       ],
     });

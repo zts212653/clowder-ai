@@ -116,10 +116,10 @@ export class CloudAssistantReturnIngestService {
         : { status: 'rejected', reason: 'grant_not_found' };
     }
     try {
-      const append = await this.deps.messageStore.appendIdempotent({
+      const message = await this.deps.messageStore.append({
+        from: { kind: 'agent', catId: TARGET_CAT_ID },
         threadId: source.threadId,
         userId: source.userId,
-        catId: TARGET_CAT_ID,
         content: input.content,
         mentions: [],
         origin: 'callback',
@@ -128,9 +128,9 @@ export class CloudAssistantReturnIngestService {
         replyTo: source.id,
         idempotencyKey,
       });
-      await this.commitAfterPersistence(claimed, append.message);
-      await this.broadcast(append.message);
-      return { status: append.idempotent ? 'duplicate' : 'persisted', messageId: append.message.id };
+      await this.commitAfterPersistence(claimed, message);
+      await this.broadcast(message);
+      return { status: 'persisted', messageId: message.id };
     } catch (error) {
       await this.deps.grantStore.release(claimed).catch(() => false);
       this.deps.logger.warn(

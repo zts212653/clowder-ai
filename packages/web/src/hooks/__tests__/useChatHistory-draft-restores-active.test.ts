@@ -74,7 +74,6 @@ describe('/queue idle + /messages draft → hasActiveInvocation restored (cancel
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 

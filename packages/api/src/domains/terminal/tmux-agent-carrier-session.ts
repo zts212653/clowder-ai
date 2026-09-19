@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { withCatCliProcessContext } from '../../utils/cli-process-environment.js';
 import { isParseError, parseNDJSON } from '../../utils/ndjson-parser.js';
+import { excerptSanitizedStderr } from '../../utils/sanitize-cli-stderr.js';
 import type {
   AgentCarrierSession,
   AgentCarrierSessionFactory,
@@ -40,6 +41,11 @@ async function readExitCode(path: string): Promise<number | null> {
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return null;
+}
+
+export function buildTmuxAgentCarrierExitError(exitCode: number, stderr: string): Error {
+  const excerpt = excerptSanitizedStderr(stderr, { edge: 'tail', maxLength: 1_000 });
+  return new Error(`Codex app-server exited with code ${exitCode}${excerpt ? `: ${excerpt}` : ''}`);
 }
 
 class TmuxAgentCarrierSession implements AgentCarrierSession {
@@ -91,7 +97,7 @@ class TmuxAgentCarrierSession implements AgentCarrierSession {
       this.context.agentPaneRegistry?.markDone(this.options.invocationId, exitCode);
       if (exitCode !== null && exitCode !== 0 && !this.options.signal?.aborted) {
         const stderr = await readFile(this.context.stderrPath, 'utf8').catch(() => '');
-        throw new Error(`Codex app-server exited with code ${exitCode}${stderr ? `: ${stderr.slice(-1000)}` : ''}`);
+        throw buildTmuxAgentCarrierExitError(exitCode, stderr);
       }
     } catch (error) {
       this.context.agentPaneRegistry?.markCrashed(

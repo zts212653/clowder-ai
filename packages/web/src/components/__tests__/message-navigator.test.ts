@@ -153,30 +153,14 @@ describe('MessageNavigator', () => {
     expect(html).toContain('rounded-full');
   });
 
-  it('does not leak a folded source body through the navigator tooltip projection', () => {
+  it('keeps the canonical source body available in the navigator', () => {
     const source: ChatMessageData = {
       ...makeMsg('m-folded', 'user'),
       content: '这段正文只允许在 canonical child 显示',
-      extra: {
-        queueReceipt: {
-          version: 1,
-          entryId: 'entry-folded',
-          targets: [
-            {
-              catId: 'codex-sol',
-              state: 'handled',
-              invocationId: 'child-folded',
-              seenAt: 10,
-              outcome: {
-                invocationId: 'child-folded',
-                disposition: 'completed_with_turn',
-                evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-folded' },
-                handledAt: 20,
-              },
-            },
-          ],
-          reminderAttempts: [],
-        },
+      lifecycle: {
+        kind: 'input',
+        orderKey: '10:m-folded',
+        dispatchRefs: [{ targetId: 'codex-sol', phase: 'settled', statusMessageId: 'm-terminal', dispatchedAt: 10 }],
       },
     };
     const terminal: ChatMessageData = {
@@ -190,7 +174,7 @@ describe('MessageNavigator', () => {
       },
     };
 
-    expect(messageNavigatorPreviewText(source, [source, terminal])).toBeNull();
+    expect(messageNavigatorPreviewText(source, [source, terminal])).toContain('这段正文只允许');
     expect(messageNavigatorPreviewText(source, [source])).toContain('这段正文只允许');
   });
 });

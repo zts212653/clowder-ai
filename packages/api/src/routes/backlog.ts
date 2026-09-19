@@ -248,8 +248,8 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     let kickoffMessageId = next.kickoffMessageId;
     if (!kickoffMessageId) {
       const kickoffMessage = await messageStore.append({
+        from: { kind: 'system', service: 'backlog-dispatch' },
         userId,
-        catId: null,
         threadId,
         idempotencyKey: `kickoff:${next.id}:${next.dispatchAttemptId}`,
         content: buildKickoffMessage(next, phase),

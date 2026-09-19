@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { formatThreadAsMarkdown, formatThreadAsText } = await import('../dist/routes/export.js');
 
@@ -25,7 +26,7 @@ function makeThread(overrides = {}) {
 
 /** Helper to create a stored message */
 function makeMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'msg-1',
     threadId: 'thread-1',
     userId: 'user-1',
@@ -34,7 +35,7 @@ function makeMessage(overrides = {}) {
     mentions: [],
     timestamp: new Date('2026-02-07T10:30:00').getTime(),
     ...overrides,
-  };
+  });
 }
 
 describe('formatThreadAsMarkdown', () => {
@@ -281,14 +282,18 @@ describe('Export Route (endpoint)', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const thread = makeThread();
     const messageStore = new MessageStore();
-    messageStore.append({
-      ...makeMessage({ catId: 'codex-sol', content: 'published source-cat seed' }),
-      deliveryStatus: 'queued',
-    });
-    messageStore.append({
-      ...makeMessage({ id: 'msg-system', userId: 'system', catId: 'system', content: 'queued internal event' }),
-      deliveryStatus: 'queued',
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        ...makeMessage({ catId: 'codex-sol', content: 'published source-cat seed' }),
+        deliveryStatus: 'queued',
+      }),
+    );
+    messageStore.append(
+      canonicalTestMessageInput({
+        ...makeMessage({ id: 'msg-system', userId: 'system', catId: 'system', content: 'queued internal event' }),
+        deliveryStatus: 'queued',
+      }),
+    );
     const app = await buildApp(mockThreadStore({ 'thread-1': thread }), messageStore);
 
     const res = await app.inject({

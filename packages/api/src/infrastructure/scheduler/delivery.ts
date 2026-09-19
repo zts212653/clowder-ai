@@ -21,18 +21,21 @@ export const SCHEDULER_SOURCE = {
 
 export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Promise<string> {
   return async (opts: DeliverOpts): Promise<string> => {
+    const source = opts.source ?? SCHEDULER_SOURCE;
     const stored = await deps.messageStore.append({
+      from: { kind: 'system', service: source.connector },
       userId: opts.userId,
-      catId: null,
       content: opts.content,
       mentions: [],
       origin: 'callback',
       timestamp: Date.now(),
       threadId: opts.threadId,
-      source: SCHEDULER_SOURCE,
+      source,
+      ...(opts.deliveryStatus ? { deliveryStatus: opts.deliveryStatus } : {}),
       ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
       ...(opts.extra ? { extra: opts.extra } : {}),
     });
+    if (opts.deliveryStatus === 'queued') return stored.id;
     const schedulerExtra = stored.extra?.scheduler ?? opts.extra?.scheduler;
     deps.socketManager.broadcastToRoom(`thread:${opts.threadId}`, 'connector_message', {
       threadId: opts.threadId,
@@ -40,7 +43,7 @@ export function createDeliverFn(deps: DeliveryDeps): (opts: DeliverOpts) => Prom
         id: stored.id,
         type: 'connector',
         content: typeof stored.content === 'string' ? stored.content : opts.content,
-        source: SCHEDULER_SOURCE,
+        source,
         ...(schedulerExtra ? { extra: { scheduler: schedulerExtra } } : {}),
         timestamp: stored.timestamp,
       },

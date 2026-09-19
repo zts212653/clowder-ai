@@ -9,7 +9,7 @@ import WebSocket from 'ws';
 import { MCP_CALLBACK_ENV_KEYS } from '../../../../../config/capabilities/mcp-constants.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
-import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
+import { excerptSanitizedStderr, sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
 
 const SOCKET_READY_TIMEOUT_MS = 10_000;
@@ -192,7 +192,7 @@ class SpawnedCodexAppServerHost implements CodexAppServerHostProcess {
   }
 
   diagnostic(): string {
-    return sanitizeCliStderr(this.stderr.join('').slice(-1_000));
+    return excerptSanitizedStderr(this.stderr.join(''), { edge: 'tail', maxLength: 1_000 });
   }
 }
 

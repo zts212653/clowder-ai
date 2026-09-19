@@ -90,7 +90,7 @@ function deps(store, nowMs, overrides = {}) {
       return () => `token-${++token}`;
     })(),
     deliver: mock.fn(async () => 'message-1'),
-    invokeTrigger: { trigger: mock.fn(async () => 'dispatched') },
+    invokeTrigger: { trigger: mock.fn(async () => 'enqueued') },
     defaultUserId: 'owner-user',
     ...overrides,
   };

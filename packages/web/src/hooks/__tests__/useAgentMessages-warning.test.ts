@@ -114,7 +114,12 @@ describe('useAgentMessages system_info warning', () => {
       captured?.handleAgentMessage({
         type: 'system_info',
         catId: 'gpt52',
-        content: JSON.stringify({ type: 'warning', catId: 'gpt52', message: 'hello' }),
+        content: JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          catId: 'gpt52',
+          message: 'hello',
+        }),
       });
     });
 
@@ -597,6 +602,7 @@ describe('useAgentMessages system_info warning', () => {
         catId: 'antig-opus',
         content: JSON.stringify({
           type: 'warning',
+          presentation: 'transient_status',
           message: '上游模型服务端容量不足，系统将在 20s 后自动重试（1/3）',
         }),
       });

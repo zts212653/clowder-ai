@@ -1,4 +1,4 @@
-import type { FreshnessCarrierCapability, QueueAuthorIntentReceipt, QueueMessageReceipt } from '@cat-cafe/shared';
+import type { FreshnessCarrierCapability, QueueAuthorIntentReceipt } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -37,23 +37,15 @@ function makeIntent(
   return { requested, effective, ...extra };
 }
 
-function makeReceipt(
+function makeAuthorIntents(
   targets: Array<{
     catId: string;
-    state?: QueueMessageReceipt['targets'][number]['state'];
     authorIntent?: QueueAuthorIntentReceipt;
   }>,
-): QueueMessageReceipt {
-  return {
-    version: 1,
-    entryId: 'q1',
-    targets: targets.map((t) => ({
-      catId: t.catId,
-      state: t.state ?? 'queued',
-      authorIntent: t.authorIntent,
-    })),
-    reminderAttempts: [],
-  };
+): Record<string, QueueAuthorIntentReceipt> {
+  return Object.fromEntries(
+    targets.flatMap((target) => (target.authorIntent ? [[target.catId, target.authorIntent] as const] : [])),
+  );
 }
 
 function makeEntry(
@@ -61,9 +53,8 @@ function makeEntry(
   opts: {
     content?: string;
     targetCats?: string[];
-    queueReceipt?: QueueMessageReceipt;
-    targetStates?: Record<string, string>;
-    source?: QueueEntry['source'];
+    authorIntentByTarget?: Record<string, QueueAuthorIntentReceipt>;
+    source?: 'user' | 'agent' | 'connector';
     callerCatId?: string;
     recoveryActions?: QueueEntry['recoveryActions'];
   } = {},
@@ -75,14 +66,17 @@ function makeEntry(
     content: opts.content ?? 'test message',
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: opts.source ?? 'user',
+    from:
+      opts.source === 'agent'
+        ? { kind: 'agent', catId: opts.callerCatId ?? 'test-agent' }
+        : opts.source === 'connector'
+          ? { kind: 'external', connectorId: 'test-connector' }
+          : { kind: 'user', userId: 'u1' },
     targetCats: opts.targetCats ?? ['opus'],
     intent: 'execute',
     status: 'queued',
     createdAt: NOW,
-    targetStates: opts.targetStates as QueueEntry['targetStates'],
-    queueReceipt: opts.queueReceipt,
-    callerCatId: opts.callerCatId,
+    authorIntentByTarget: opts.authorIntentByTarget,
     recoveryActions: opts.recoveryActions,
   };
 }
@@ -90,50 +84,50 @@ function makeEntry(
 describe('F264 Queue UX hierarchy — helper functions', () => {
   it('intentChip: continue_current → accent', () => {
     const chip = intentChip(makeIntent('continue_current', 'continue_current'));
-    expect(chip.text).toBe('接着当前工作');
+    expect(chip.text).toBe('立即发送，引导回复');
     expect(chip.tone).toBe('accent');
   });
 
   it('intentChip: next_work → neutral', () => {
     const chip = intentChip(makeIntent('next_work', 'next_work'));
-    expect(chip.text).toBe('下一件工作');
+    expect(chip.text).toBe('排队等待');
     expect(chip.tone).toBe('neutral');
   });
 
   it('intentChip: fallback continue→next → amber', () => {
     const chip = intentChip(makeIntent('continue_current', 'next_work'));
-    expect(chip.text).toBe('已转下一件工作');
+    expect(chip.text).toBe('已转排队等待');
     expect(chip.tone).toBe('amber');
   });
 
   it('secondaryTruth: undeclared support → fail-closed', () => {
     expect(secondaryTruth(makeIntent('continue_current', 'continue_current'), 'undeclared')).toBe(
-      '能力未声明，按下一件工作处理',
+      '能力未声明，按排队等待处理',
     );
   });
 
   it('secondaryTruth: unsupported support → fail-closed', () => {
     expect(secondaryTruth(makeIntent('continue_current', 'continue_current'), 'unsupported')).toBe(
-      '当前接入不支持本轮读取/提醒',
+      '当前接入不支持引导回复',
     );
   });
 
-  it('secondaryTruth: exact + continue_current → 等待本轮读取', () => {
-    expect(secondaryTruth(makeIntent('continue_current', 'continue_current'), 'exact')).toBe('等待本轮读取');
+  it('secondaryTruth: exact + continue_current → 等待当前回复读取', () => {
+    expect(secondaryTruth(makeIntent('continue_current', 'continue_current'), 'exact')).toBe('等待当前回复读取');
   });
 
-  it('secondaryTruth: exact + fallback → 本轮未读到 with reason', () => {
+  it('secondaryTruth: exact + fallback → 当前回复未读到 with reason', () => {
     const truth = secondaryTruth(
       makeIntent('continue_current', 'next_work', { fallbackReason: 'unsupported_carrier' }),
       'exact',
     );
-    expect(truth).toContain('本轮未读到');
+    expect(truth).toContain('当前回复未读到');
     expect(truth).toContain('接入不支持');
   });
 
   it('humanCarrierLabel: no raw enum on surface', () => {
-    expect(humanCarrierLabel(EXACT_CAP)).toBe('支持本轮读取');
-    expect(humanCarrierLabel(UNSUPPORTED_CAP)).toBe('当前接入不支持本轮读取');
+    expect(humanCarrierLabel(EXACT_CAP)).toBe('支持引导当前回复');
+    expect(humanCarrierLabel(UNSUPPORTED_CAP)).toBe('当前接入不支持引导当前回复');
     expect(humanCarrierLabel(UNDECLARED_CAP)).toBe('能力未声明');
     expect(humanCarrierLabel(undefined)).toBe('能力未声明');
   });
@@ -160,7 +154,6 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     useChatStore.setState({
       messages: [],
       queue: [],
-      queuePaused: false,
       currentThreadId: 'thread-1',
       activeInvocations: {},
       catInvocations: {},
@@ -180,13 +173,12 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     });
   }
 
-  // Claim 1: continue-current vs next-work distinguishable without reading content
-  it('claim 1: continue_current and next_work produce different visible text', () => {
+  // The Queue surface presents the delivery route; transport intent remains internal.
+  it('claim 1: continue_current and next_work share the same concise route surface', () => {
     const continueEntry = makeEntry('q-continue', {
       content: '继续工作消息',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'continue_current', { carrierCapability: EXACT_CAP }),
@@ -196,8 +188,7 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     const nextEntry = makeEntry('q-next', {
       content: '下一件工作消息',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('next_work', 'next_work', { carrierCapability: EXACT_CAP }),
@@ -208,19 +199,20 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     renderQueuePanel();
 
     const text = container.textContent ?? '';
-    expect(text).toContain('接着当前工作');
-    expect(text).toContain('下一件工作');
+    expect(text).not.toContain('立即发送，引导回复');
+    expect(text).not.toContain('排队等待');
+    expect(container.querySelectorAll('[data-queue-target-row="opus"]')).toHaveLength(2);
   });
 
-  it('source contract: legacy user missing intent keeps next-work compatibility', () => {
+  it('source contract: legacy user missing intent still renders its route without an intent chip', () => {
     const legacyUser = makeEntry('q-legacy-user', {
       source: 'user',
-      targetStates: { opus: 'queued' },
     });
     useChatStore.setState({ queue: [legacyUser] });
     renderQueuePanel();
 
-    expect(container.querySelector('[data-testid="intent-chip-q-legacy-user-opus"]')?.textContent).toBe('下一件工作');
+    expect(container.querySelector('[data-testid="intent-chip-q-legacy-user-opus"]')).toBeNull();
+    expect(container.querySelector('[data-testid="queue-route-q-legacy-user"]')).not.toBeNull();
   });
 
   it.each([
@@ -229,14 +221,13 @@ describe('F264 Queue UX hierarchy — component claims', () => {
   ] as const)('source contract: %s custody does not render a human author-intent chip', (source) => {
     const nonHuman = makeEntry(`q-${source}`, {
       source,
-      targetStates: { opus: 'queued' },
     });
     useChatStore.setState({ queue: [nonHuman] });
     renderQueuePanel();
 
     expect(container.querySelector(`[data-testid="intent-chip-q-${source}-opus"]`)).toBeNull();
-    expect(container.textContent).not.toContain('下一件工作');
-    expect(container.textContent).not.toContain('接着当前工作');
+    expect(container.textContent).not.toContain('排队等待');
+    expect(container.textContent).not.toContain('立即发送，引导回复');
   });
 
   // Claim 2: raw provider/carrier/semantics not in visible surface by default
@@ -244,8 +235,7 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     const entry = makeEntry('q-raw', {
       content: 'test raw enum hiding',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'continue_current', { carrierCapability: EXACT_CAP }),
@@ -265,13 +255,12 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     expect(surfaceText).not.toContain('exact_active_turn');
   });
 
-  // Claim 3: requested-current → fallback-next preserves historical intent + real fallback
-  it('claim 3: fallback continue→next shows 已转下一件工作 and 本轮未读到', () => {
+  // Routing fallback diagnostics remain available to telemetry, not the Queue row.
+  it('claim 3: fallback continue→next does not leak transport diagnostics into the route surface', () => {
     const entry = makeEntry('q-fallback', {
       content: 'fallback test',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'next_work', {
@@ -285,17 +274,17 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     renderQueuePanel();
 
     const text = container.textContent ?? '';
-    expect(text).toContain('已转下一件工作');
-    expect(text).toContain('本轮未读到');
+    expect(text).not.toContain('已转排队等待');
+    expect(text).not.toContain('当前回复未读到');
+    expect(container.querySelector('[data-queue-target-row="opus"]')).not.toBeNull();
   });
 
-  // Claim 4: unsupported/undeclared: explicitly fail-closed, no clickable Reminder
-  it('claim 4: undeclared capability shows fail-closed text and no Reminder button', () => {
+  // Unsupported/undeclared carriers do not expose an inapplicable Reminder action.
+  it('claim 4: undeclared capability stays internal and exposes no Reminder button', () => {
     const entry = makeEntry('q-undeclared', {
       content: 'undeclared test',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'continue_current', { carrierCapability: UNDECLARED_CAP }),
@@ -306,17 +295,16 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     renderQueuePanel();
 
     const text = container.textContent ?? '';
-    expect(text).toContain('能力未声明');
+    expect(text).not.toContain('能力未声明');
     const remindBtn = container.querySelector('[data-testid^="remind-"]');
     expect(remindBtn).toBeNull();
   });
 
-  it('claim 4b: unsupported fail-closed text appears exactly once per target row', () => {
+  it('claim 4b: unsupported fail-closed diagnostics stay off the target row', () => {
     const entry = makeEntry('q-unsupported-dup', {
       content: 'unsupported dup test',
       targetCats: ['kimi'],
-      targetStates: { kimi: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'kimi',
           authorIntent: makeIntent('next_work', 'next_work', { carrierCapability: UNSUPPORTED_CAP }),
@@ -343,17 +331,16 @@ describe('F264 Queue UX hierarchy — component claims', () => {
       detail.remove();
     });
     const surfaceText = detailsClone.textContent ?? '';
-    const matches = surfaceText.match(/当前接入不支持本轮/g) ?? [];
-    expect(matches.length).toBe(1);
+    expect(surfaceText).not.toContain('当前接入不支持引导回复');
+    expect(container.querySelector('[data-queue-target-row="kimi"]')).not.toBeNull();
   });
 
-  // Claim 5: exact eligible target shows Reminder
-  it('claim 5: exact eligible target shows Reminder button', () => {
+  // Claim 5: Queue exposes only canonical target/read truth; delivery mode lives in Steer.
+  it('claim 5: exact eligible target has no reminder side-channel', () => {
     const entry = makeEntry('q-exact', {
       content: 'exact reminder test',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'continue_current', { carrierCapability: EXACT_CAP }),
@@ -376,7 +363,7 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     renderQueuePanel();
 
     const remindBtn = container.querySelector('[data-testid^="remind-"]');
-    expect(remindBtn).not.toBeNull();
+    expect(remindBtn).toBeNull();
   });
 
   // Claim 6: two targets generate two independent target rows
@@ -384,8 +371,7 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     const entry = makeEntry('q-multi', {
       content: 'multi target test',
       targetCats: ['opus', 'kimi'],
-      targetStates: { opus: 'queued', kimi: 'queued' },
-      queueReceipt: makeReceipt([
+      authorIntentByTarget: makeAuthorIntents([
         {
           catId: 'opus',
           authorIntent: makeIntent('continue_current', 'continue_current', { carrierCapability: EXACT_CAP }),
@@ -414,10 +400,13 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     });
     renderQueuePanel();
 
+    expect(container.querySelectorAll('[data-queue-target-row]')).toHaveLength(2);
     const text = container.textContent ?? '';
-    expect(text).toContain('接着当前工作');
-    expect(text).toContain('下一件工作');
-    expect(text).toContain('当前接入不支持');
+    expect(text).not.toContain('立即发送，引导回复');
+    expect(text).not.toContain('排队等待');
+    expect(text).not.toContain('当前接入不支持');
+    expect(container.querySelector('[data-testid="remind-q-multi-opus"]')).toBeNull();
+    expect(container.querySelector('[data-testid="remind-q-multi-kimi"]')).toBeNull();
   });
 
   // Claim 7: Steer button still present with correct testid
@@ -425,7 +414,6 @@ describe('F264 Queue UX hierarchy — component claims', () => {
     const entry = makeEntry('q-steer', {
       content: 'steer test',
       targetCats: ['opus'],
-      targetStates: { opus: 'queued' },
       recoveryActions: [
         {
           id: 'queue-steer:q-steer',

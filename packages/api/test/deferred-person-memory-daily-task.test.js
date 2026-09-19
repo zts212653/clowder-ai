@@ -134,7 +134,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
     assert.equal(calls.bound.length, 2);
     assert.ok(calls.bound.every((binding) => binding.processingMessageId === 'daily-trigger-message'));
     assert.equal(calls.delivered[0].threadId, 'thread_memory_operations');
-    assert.equal(calls.delivered[0].userId, 'scheduler');
+    assert.equal(calls.delivered[0].userId, 'owner-1');
     assert.equal(calls.delivered[0].extra.scheduler.hiddenTrigger, true);
     assert.match(calls.delivered[0].content, new RegExp(receipt.receiptId));
     assert.match(calls.delivered[0].content, new RegExp(secondReceipt.receiptId));

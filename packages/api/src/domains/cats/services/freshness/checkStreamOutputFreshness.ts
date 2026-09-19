@@ -56,16 +56,8 @@ function boundQueuedFreshnessEntry(
   throughMessageId: string | null | undefined,
 ): QueuedFreshnessEntry | null {
   if (throughMessageId === undefined) return entry;
-  const boundedIds = [...(entry.messageId ? [entry.messageId] : []), ...(entry.mergedMessageIds ?? [])].filter(
-    (id) => throughMessageId !== null && id <= throughMessageId,
-  );
-  if (!entry.messageId && (entry.mergedMessageIds?.length ?? 0) === 0) return entry;
-  if (boundedIds.length === 0) return null;
-  return {
-    ...entry,
-    messageId: boundedIds[0],
-    mergedMessageIds: boundedIds.slice(1),
-  };
+  if (!entry.messageId) return entry;
+  return throughMessageId !== null && entry.messageId <= throughMessageId ? entry : null;
 }
 
 /**
@@ -290,16 +282,9 @@ export async function checkStreamOutputFreshness(input: CheckStreamFreshnessInpu
       if (nonSelfQueued.length > 0) {
         const queueSenders = [...new Set(nonSelfQueued.map((q) => getQueuedFreshnessSenderLabel(q)))];
         const queuedMessageIds = [
-          ...new Set(
-            nonSelfQueued.flatMap((queued) => [
-              ...(queued.messageId ? [queued.messageId] : []),
-              ...(queued.mergedMessageIds ?? []),
-            ]),
-          ),
+          ...new Set(nonSelfQueued.flatMap((queued) => (queued.messageId ? [queued.messageId] : []))),
         ].sort();
-        const identityMissing = nonSelfQueued.some(
-          (queued) => !queued.messageId && (queued.mergedMessageIds?.length ?? 0) === 0,
-        );
+        const identityMissing = nonSelfQueued.some((queued) => !queued.messageId);
         return emit({
           stale: true,
           unseenCount: nonSelfQueued.length,

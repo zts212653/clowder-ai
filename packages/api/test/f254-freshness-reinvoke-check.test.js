@@ -413,7 +413,11 @@ describe('F254 B3 — createFreshnessReinvokeCheck', () => {
     assert.ok(result.reinvokePrompt.includes('1'), 'prompt should mention notice count');
     assert.ok(result.reinvokePrompt.includes('get_thread_context'), 'prompt should name the thread read surface');
     assert.ok(result.reinvokePrompt.includes('thread-1'), 'prompt should bind the current thread');
-    assert.ok(result.reinvokePrompt.includes('responseMode'), 'prompt should require a full read');
+    assert.ok(
+      result.reinvokePrompt.includes('responseMode'),
+      'prompt should require full bodies for the unread selection',
+    );
+    assert.match(result.reinvokePrompt, /contextScope=unread_delta/);
     assert.ok(!result.reinvokePrompt.includes('list_recent'), 'prompt must not name the project-memory recent surface');
   });
 

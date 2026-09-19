@@ -1,5 +1,9 @@
 import type { DispatchProposal } from '@cat-cafe/shared';
+import type { QueueLedgerEntry } from '../cats/services/agents/invocation/queue-ledger/QueueLedger.js';
+import { messageFrom } from '../cats/services/stores/message-from.js';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { actionSuccessorFencesMatch } from './ActionSuccessorAdmissionContract.js';
+import type { ActionSuccessorFence } from './ActionSuccessorAdmissionService.js';
 import type { ActionSuccessorDispatchFailureReason } from './action-successor-state-machine.js';
 
 export type ApprovedActionCarrierClassification =
@@ -15,12 +19,16 @@ function sameOrderedStrings(actual: readonly string[] | undefined, expected: rea
 export function classifyApprovedActionCarrier(
   proposal: DispatchProposal,
   message: StoredMessage,
+  entries: readonly QueueLedgerEntry[],
+  fence: ActionSuccessorFence,
 ): ApprovedActionCarrierClassification {
   const targetCats = proposal.targetCats;
+  const from = messageFrom(message);
   const sourceMatches =
     message.threadId === proposal.targetThreadId &&
     message.userId === proposal.ownerUserId &&
-    message.catId === proposal.senderCatId &&
+    from.kind === 'agent' &&
+    from.catId === proposal.senderCatId &&
     message.content === proposal.content &&
     message.origin === 'callback' &&
     message.replyTo === proposal.replyTo &&
@@ -31,32 +39,31 @@ export function classifyApprovedActionCarrier(
     sameOrderedStrings(message.extra.targetCats, targetCats);
   if (!sourceMatches) return { outcome: 'conflict', reason: 'carrier_source_conflict' };
 
-  const custody = message.queueCustody;
-  if (!custody) {
+  if (entries.length === 0) {
     return message.deliveryStatus === undefined || message.deliveryStatus === 'queued'
       ? { outcome: 'repairable' }
       : { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
   }
-  const carrierByTargetCatId = custody.carrierByTargetCatId;
-  if (!carrierByTargetCatId) return { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
-  const custodyMatches =
-    (message.deliveryStatus === 'queued' || message.deliveryStatus === 'delivered') &&
-    custody.entryId === `cross-thread:${message.id}` &&
-    custody.intent === 'execute' &&
-    custody.ownerUserId === proposal.ownerUserId &&
-    custody.receiptScope === 'cross_thread_delivery' &&
-    sameOrderedStrings(custody.allTargetCats, targetCats) &&
-    sameOrderedStrings(Object.keys(carrierByTargetCatId), targetCats) &&
-    targetCats.every((catId) => {
-      const binding = carrierByTargetCatId[catId];
-      return (
-        binding?.source === 'agent' &&
-        binding.sourceCategory === 'a2a' &&
-        binding.callerCatId === proposal.senderCatId &&
-        binding.a2aTriggerMessageId === message.id &&
-        binding.autoExecute === true &&
-        binding.entryId.length > 0
-      );
-    });
-  return custodyMatches ? { outcome: 'admitted' } : { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
+  const [entry] = entries;
+  const ledgerMatches =
+    message.deliveryStatus !== 'canceled' &&
+    entries.length === 1 &&
+    Boolean(
+      entry &&
+        sameOrderedStrings(entry.targets, targetCats) &&
+        entry.owner.kind === 'user' &&
+        entry.owner.userId === proposal.ownerUserId &&
+        entry.from.kind === 'agent' &&
+        entry.from.catId === proposal.senderCatId &&
+        entry.kind === 'message_wake' &&
+        entry.payload.messageId === message.id &&
+        entry.payload.sourceRecordId === message.id &&
+        entry.payload.content === proposal.content &&
+        entry.execution.intent === 'execute' &&
+        entry.execution.autoExecute === true &&
+        entry.sourceCategory === 'a2a' &&
+        entry.execution.actionSuccessorFence &&
+        actionSuccessorFencesMatch(entry.execution.actionSuccessorFence, fence),
+    );
+  return ledgerMatches ? { outcome: 'admitted' } : { outcome: 'conflict', reason: 'carrier_receipt_conflict' };
 }

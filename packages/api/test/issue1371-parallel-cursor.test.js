@@ -7,6 +7,7 @@ import { FreshnessOutputCommitCoordinator } from '../dist/domains/cats/services/
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { adaptMessageStore } from './helpers/message-from-fixtures.js';
 
 function deferred() {
   let resolve;
@@ -17,7 +18,7 @@ function deferred() {
 }
 
 test('#1371: a completed parallel target commits its delivery boundary before its sibling finishes', async () => {
-  const messageStore = new MessageStore();
+  const messageStore = adaptMessageStore(new MessageStore());
   const deliveryCursorStore = new DeliveryCursorStore();
   const source = await messageStore.append({
     userId: 'user-1',
@@ -132,7 +133,7 @@ async function appendScenarioReply(messageStore, source, scenario) {
 for (const scenario of [
   { name: 'unanswered', replied: false, expectedBaton: true },
   { name: 'exact own reply', replied: true, expectedBaton: false },
-  { name: 'explicit retry', replied: true, explicitRetry: true, expectedBaton: true },
+  { name: 'explicit retry', replied: true, explicitRetry: true, expectedBaton: false },
   { name: 'other cat reply', replied: true, catId: 'codex', expectedBaton: true },
   { name: 'other tenant reply', replied: true, userId: 'user-2', expectedBaton: true },
   { name: 'other thread reply', replied: true, threadId: 'thread-other', expectedBaton: true },
@@ -148,7 +149,7 @@ for (const scenario of [
   { name: 'wrong child record source', replied: true, wrongRecordSource: true, expectedBaton: true },
 ]) {
   test(`#1371: cold navigation distinguishes ${scenario.name}`, async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const source = await messageStore.append({
       userId: 'user-1',
       threadId: 'thread-restart',
@@ -193,7 +194,14 @@ for (const scenario of [
     assert.equal(
       context.navigationHeader?.includes('old source question') ?? false,
       scenario.expectedBaton,
-      'only the exact answered source may leave navigation; explicit retry and independent sources remain reachable',
+      'answered sources leave navigation, while the explicit current request is carried in the message delta itself',
     );
+    if (scenario.explicitRetry) {
+      assert.equal(
+        context.includesCurrentUserMessage,
+        true,
+        'explicit retry remains present in the exact message delta',
+      );
+    }
   });
 }

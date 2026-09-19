@@ -23,6 +23,8 @@ import {
   catRegistry,
   isStaticConnectorId,
   isValueField,
+  type MessageContent,
+  type MessageFrom,
 } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
@@ -113,13 +115,15 @@ export interface ConnectorGatewayConfig {
 export interface ConnectorGatewayDeps {
   readonly messageStore: {
     append(input: {
+      from: MessageFrom;
       threadId: string;
       userId: string;
-      catId: null;
       content: string;
       source: ConnectorSource;
       mentions: CatId[];
       timestamp: number;
+      deliveryStatus?: 'queued';
+      contentBlocks?: readonly MessageContent[];
     }): Promise<{ id: string }>;
     getById?(id: string): Promise<{ source?: ConnectorSource } | null>;
     getByThreadBefore?(
@@ -189,7 +193,7 @@ export interface ConnectorGatewayDeps {
       message: string,
       messageId: string,
       ...args: unknown[]
-    ): Promise<'dispatched' | 'enqueued' | 'full'>;
+    ): Promise<'enqueued' | 'full'>;
   };
   readonly socketManager?:
     | {
@@ -881,7 +885,6 @@ export async function startConnectorGateway(
         deliveryDeps: {
           messageStore:
             deps.messageStore as import('../../domains/cats/services/stores/ports/MessageStore.js').IMessageStore,
-          socketManager: deps.socketManager,
         },
         // F168 Phase A P1-1b: pass community event services to webhook handler
         eventLog: ghEventLog,

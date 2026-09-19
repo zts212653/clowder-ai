@@ -13,6 +13,11 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
+import {
+  adaptInvocationQueue,
+  canonicalTestMessageInput,
+  canonicalTestQueueInput,
+} from './helpers/message-from-fixtures.js';
 
 // --- Module under test (will be created) ---
 const { checkStreamOutputFreshness } = await import(
@@ -39,12 +44,15 @@ function sortableMsgId(n, suffix = 'msg') {
 
 /** Minimal in-memory message store implementing FreshnessMessageReader */
 function createMockMessageStore(messages = []) {
+  const canonicalMessages = messages.map((message) =>
+    canonicalTestMessageInput({ userId, threadId, content: '', mentions: [], timestamp: 0, ...message }),
+  );
   return {
     getById(id) {
-      return messages.find((m) => m.id === id) ?? null;
+      return canonicalMessages.find((m) => m.id === id) ?? null;
     },
     getByThreadAfter(tid, afterId, limit, _uid) {
-      let filtered = messages.filter((m) => m.threadId === tid);
+      let filtered = canonicalMessages.filter((m) => m.threadId === tid);
       if (afterId) {
         filtered = filtered.filter((m) => m.id > afterId);
       }
@@ -58,9 +66,12 @@ function createMockMessageStore(messages = []) {
 
 /** Minimal mock queue checker */
 function createMockQueueChecker(queuedMessages = []) {
+  const canonicalEntries = queuedMessages.map((entry) =>
+    canonicalTestQueueInput({ threadId, userId, targetCats: [catId], ...entry }),
+  );
   return {
     getQueuedForThread(_tid, _uid) {
-      return queuedMessages;
+      return canonicalEntries;
     },
   };
 }
@@ -621,19 +632,25 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
     assert.deepEqual(result.unseenMessageIds, [msgId2]);
   });
 
-  it('does not report queued stale after same cat has marked the queued entry seen', async () => {
+  it('does not report queued stale after History delivery removes the exact pending target', async () => {
     await cursorStore.ackSeenCursor(userId, catId, threadId, msgId1);
-    const queue = new InvocationQueue();
-    const enqueued = queue.enqueue({
-      ownerAuthProvenance: 'unknown',
-      threadId,
-      userId,
-      content: 'queued msg already read',
-      source: 'user',
-      targetCats: [catId],
-      intent: 'execute',
-    });
-    assert.equal(queue.markQueuedSeen(threadId, userId, enqueued.entry.id, catId), true);
+    const queue = adaptInvocationQueue(new InvocationQueue());
+    const enqueued = queue.enqueue(
+      canonicalTestQueueInput({
+        kind: 'conversation_input',
+        ownerAuthProvenance: 'unknown',
+        threadId,
+        userId,
+        content: 'queued msg already read',
+        source: 'user',
+        targetCats: [catId],
+        intent: 'execute',
+      }),
+    );
+    assert.equal(
+      (await queue.reconcileQueuedMessageTargetsDurable(threadId, userId, enqueued.entry.id, [], [catId], {})).outcome,
+      'updated',
+    );
 
     const messageStore = createMockMessageStore([{ id: msgId1, catId: null, content: 'original', threadId }]);
     const result = await checkStreamOutputFreshness({
@@ -748,7 +765,7 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
       { id: msgId2, catId: 'sonnet', content: 'sonnet stream output', threadId, origin: 'stream' },
     ]);
     // Filter mimics play-mode: exclude other cats' origin:'stream'
-    const messageFilter = (msg) => !(msg.catId && msg.catId !== catId && msg.origin === 'stream');
+    const messageFilter = (msg) => !(msg.from?.kind === 'agent' && msg.from.catId !== catId && msg.origin === 'stream');
     const result = await checkStreamOutputFreshness({
       userId,
       catId,
@@ -768,7 +785,7 @@ describe('F254 Phase D — checkStreamOutputFreshness', () => {
       { id: msgId2, catId: 'sonnet', content: 'sonnet stream', threadId, origin: 'stream' },
       { id: msgId3, catId: null, content: 'real user msg', threadId },
     ]);
-    const messageFilter = (msg) => !(msg.catId && msg.catId !== catId && msg.origin === 'stream');
+    const messageFilter = (msg) => !(msg.from?.kind === 'agent' && msg.from.catId !== catId && msg.origin === 'stream');
     const result = await checkStreamOutputFreshness({
       userId,
       catId,

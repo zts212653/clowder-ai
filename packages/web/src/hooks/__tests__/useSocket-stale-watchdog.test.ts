@@ -85,7 +85,6 @@ const mockStoreState = {
   setThreadMessageUsage: vi.fn(),
   setThreadHasActiveInvocation: vi.fn(),
   setQueue: vi.fn(),
-  setQueuePaused: vi.fn(),
   setQueueFull: vi.fn(),
   setThreadIntentMode: vi.fn(),
   setThreadTargetCats: vi.fn(),

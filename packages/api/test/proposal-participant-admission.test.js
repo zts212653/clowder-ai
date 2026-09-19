@@ -100,7 +100,10 @@ describe('F128 proposal approval — participant admission', () => {
     const approved = await ctx.approve('alice', proposed.json().proposalId);
     const threadId = approved.json().threadId;
     assert.deepEqual(await ctx.threadStore.getParticipants(threadId), ['kimi']);
-    assert.deepEqual(invocationQueue.list(threadId, 'alice')[0].targetCats, ['kimi']);
+    assert.deepEqual(
+      invocationQueue.list(threadId, 'alice').flatMap((entry) => entry.targets),
+      ['kimi'],
+    );
   });
 
   test('#ideate persists every final parallel target with one user-scoped event', async () => {
@@ -140,11 +143,9 @@ describe('F128 proposal approval — participant admission', () => {
 
   test('queue rejection leaves no participant or participant event', async () => {
     const invocationQueue = {
-      enqueue() {
-        return { outcome: 'full' };
+      async appendAndEnqueueDurable() {
+        return { outcome: 'full', entries: [] };
       },
-      backfillMessageId() {},
-      rollbackEnqueue() {},
     };
     const router = {
       async resolveTargetsAndIntent() {

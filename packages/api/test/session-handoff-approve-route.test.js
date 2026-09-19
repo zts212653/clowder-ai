@@ -31,7 +31,7 @@ describe('session-handoff approve/reject route (F225 ②b)', () => {
     assert.equal(deps.sealCalls.length, 1);
     assert.equal(deps.sealCalls[0].reason, 'cat_initiated_handoff', 'sealed with handoff reason');
     assert.equal(deps.enqueueCalls.length, 1);
-    assert.equal(deps.enqueueCalls[0].source, 'agent');
+    assert.deepEqual(deps.enqueueCalls[0].from, { kind: 'agent', catId: 'opus' });
     assert.equal(deps.enqueueCalls[0].ownerAuthProvenance, 'strict');
     assert.equal(deps.enqueueCalls[0].sourceCategory, 'continuation', 'system-pinned continuation');
     assert.equal(deps.enqueueCalls[0].idempotencyKey, p.proposalId, 'idempotency keyed by proposalId (B5)');

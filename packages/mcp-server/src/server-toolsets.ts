@@ -167,7 +167,6 @@ async function maybeFreshnessNotice(toolName: string, isReadOnly: boolean): Prom
     return null;
   }
 
-  // Gate passed — call API to check for unseen messages
   if (!getCallbackConfig()) return null;
 
   try {
@@ -178,16 +177,13 @@ async function maybeFreshnessNotice(toolName: string, isReadOnly: boolean): Prom
     if (result.isError) return null;
 
     const data = JSON.parse((result.content[0] as { text: string }).text);
-    // Advance interval counter after ANY API call, not just successful delivery.
-    // Otherwise quiet threads (no unseen) bypass the interval gate on every call.
-    // (Cloud review R2 P2-R2-2)
     freshnessNoticeState.lastNoticeToolCallNum = freshnessNoticeState.toolCallCount;
     if (data?.notice?.text) {
       freshnessNoticeState.noticeDeliveredCount++;
       return data.notice.text;
     }
   } catch {
-    // Fail-open: notice errors never block tool execution
+    // Fail-open: notice errors never block tool execution.
   }
   return null;
 }
@@ -206,13 +202,11 @@ function projectRegistrationContract(tool: ToolDef, principal: PostMessageRegist
       ? projectAgentKeyCollaborationContract(tool.name, canonicalSchema, tool.description)
       : undefined;
   const schema = agentContract?.inputSchema ?? canonicalSchema;
-  // Callback tools use Zod raw shapes; limb tools use plain JSON Schema.
   let inputSchema =
     typeof schema.type === 'string' && typeof schema.properties === 'object' && schema.properties !== null
       ? jsonSchemaToZod(schema)
       : z.object(schema as z.ZodRawShape);
   if ((isPostMessage && principal === 'invocation') || agentContract) {
-    // Reject unsupported fields before default Zod stripping erases their evidence.
     inputSchema = (inputSchema as z.ZodObject<z.ZodRawShape>).strict();
   }
   return { description: agentContract?.description ?? tool.description, inputSchema };
@@ -252,12 +246,9 @@ function registerTools(server: McpServer, tools: readonly ToolDef[], env: Toolse
           [key: string]: unknown;
         };
 
-        // F254 B1: Piggyback freshness notice on successful read-only tool results
         if (!typed.isError && annotations.readOnlyHint) {
           const noticeText = await maybeFreshnessNotice(tool.name, annotations.readOnlyHint);
-          if (noticeText) {
-            typed.content = [...typed.content, { type: 'text', text: `\n\n${noticeText}` }];
-          }
+          if (noticeText) typed.content = [...typed.content, { type: 'text', text: `\n\n${noticeText}` }];
         }
 
         return typed;

@@ -945,6 +945,7 @@ function makeCapacityWarning(
     catId,
     content: JSON.stringify({
       type: 'warning',
+      presentation: 'transient_status',
       message: `${providerName} 服务端容量不足，正在重试 (${signal.message.slice(0, 100)})`,
     }),
     metadata,

@@ -4,7 +4,7 @@
  * - Behavioral: computeStepSummary on synthetic spans covers
  *   live/restored, missing marker, dual-track tool counts, width derivation,
  *   and the descriptive-only contract (no normative fields synthesized).
- * - Source-level: counter wiring (instruments + dispatch-span + route-serial),
+ * - Source-level: counter wiring (instruments + dispatch-span),
  *   recordAgentLoop wiring (span-helpers + invoke-single-cat), Claude parser
  *   emits agent_loop on message_stop, AgentMessageType extension.
  */
@@ -35,15 +35,6 @@ test('F153 Phase I: dispatch-span.ts increments counter and accepts optional sou
     !src.includes('invocationId'),
     'dispatch-span counter must NOT carry invocationId (metric-allowlist.ts forbids high-cardinality)',
   );
-});
-
-test('F153 Phase I: route-serial.ts increments a2aDispatchCount on in-process dispatch', () => {
-  const src = readFileSync(
-    resolve(__dirname, '../../src/domains/cats/services/agents/routing/route-serial.ts'),
-    'utf8',
-  );
-  assert.ok(src.includes('a2aDispatchCount'), 'Should import a2aDispatchCount');
-  assert.ok(src.includes('a2aDispatchCount.add(1'), 'Should call a2aDispatchCount.add at dispatch span creation');
 });
 
 test('F153 Phase I: span-helpers.ts exports recordAgentLoop, sets agent_loop.count attribute', () => {
@@ -92,16 +83,23 @@ test('F153 Phase I: telemetry routes expose /api/telemetry/step-summary endpoint
 
 test('F153 Phase I (P1-1): callback-a2a-trigger lazy-creates dispatch span only when actually dispatching', () => {
   const src = readFileSync(resolve(__dirname, '../../src/routes/callback-a2a-trigger.ts'), 'utf8');
+  const enqueueSource = src.slice(src.indexOf('export async function enqueueA2ATargets'));
   // Lazy helper must exist
-  assert.ok(src.includes('ensureDispatchTraceContext'), 'Should define ensureDispatchTraceContext lazy helper');
+  assert.ok(
+    enqueueSource.includes('ensureDispatchTraceContext'),
+    'Should define ensureDispatchTraceContext lazy helper',
+  );
   // wrapWithDispatchSpan must NOT be called at function top before guards
   // (look for top-level early creation pattern)
   assert.ok(
-    !/const dispatchTraceContext = opts\.callerTraceContext\s*\?\s*wrapWithDispatchSpan/.test(src),
+    !/const dispatchTraceContext = opts\.callerTraceContext\s*\?\s*wrapWithDispatchSpan/.test(enqueueSource),
     'Must NOT pre-allocate dispatchTraceContext before depth/dedup/streak guards',
   );
   // All three downstream usage points must go through the lazy helper
-  assert.ok(src.includes('callerTraceContext: ensureDispatchTraceContext()'), 'enqueue path must use lazy helper');
+  assert.ok(
+    enqueueSource.includes('callerTraceContext: ensureDispatchTraceContext()'),
+    'enqueue path must use lazy helper',
+  );
 });
 
 test('F153 Phase I (P1-2): step-summary route reads full buffer, not capped at 500', () => {
@@ -116,22 +114,6 @@ test('F153 Phase I (P1-2): step-summary route reads full buffer, not capped at 5
   assert.ok(
     src.includes('traceStore.stats().maxSpans'),
     'step-summary should use traceStore.stats().maxSpans for query limit',
-  );
-});
-
-test('F153 Phase I (round-2 P2): legacy worklist callback success also mints dispatch span/counter', () => {
-  const src = readFileSync(resolve(__dirname, '../../src/routes/callback-a2a-trigger.ts'), 'utf8');
-  // The lazy helper must be invoked in the worklist success branch (enqueued.length > 0)
-  // — otherwise callbacks routed via the legacy F027 worklist path will silently skip the
-  // mention_dispatch span and a2a.dispatch.count counter even when dispatch did happen.
-  const worklistParts = src.split('if (hasWorklist(threadId))');
-  assert.ok(worklistParts[1], 'callback-a2a-trigger should contain the legacy worklist branch');
-  const successParts = worklistParts[1].split('if (enqueued.length > 0)');
-  assert.ok(successParts[1], 'legacy worklist branch should contain the success branch');
-  const successBranch = successParts[1];
-  assert.ok(
-    successBranch.includes('ensureDispatchTraceContext()'),
-    'worklist success branch must call ensureDispatchTraceContext() (lazy side-effects: span + counter)',
   );
 });
 

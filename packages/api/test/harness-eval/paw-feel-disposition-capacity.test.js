@@ -136,8 +136,8 @@ function appendSevenDayCorpus(messageStore) {
     const ageMs = 5 * MINUTE + Math.floor((index * span) / (SIGNAL_COUNT - 1));
     messages.push(
       messageStore.append({
+        from: { kind: 'agent', catId: 'codex-sol' },
         userId: 'user-1',
-        catId: 'codex-sol',
         threadId: `thread-${index % 8}`,
         content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
         mentions: [],

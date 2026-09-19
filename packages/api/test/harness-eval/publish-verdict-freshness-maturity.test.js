@@ -132,33 +132,24 @@ async function providerWithWindowedActivity(coverage) {
     store,
     fixtureRoot,
     queueLifecycleSource: {
-      async listOwnerQueueCustodyLifecycles() {
+      async listOwnerDurableEntries() {
         return [
           {
-            messageId: 'message-queue',
+            id: 'entry-queue',
             threadId: 'thread-live',
             userId: 'user-1',
-            custody: {
-              version: 1,
-              entryId: 'entry-queue',
-              revision: 2,
-              ownerUserId: 'user-1',
-              intent: 'respond',
-              status: 'processing',
-              allTargetCats: ['codex-sol'],
-              pendingTargetCats: ['codex-sol'],
-              notifiedByCatIds: ['codex-sol'],
-              seenByCatIds: ['codex-sol'],
-              seenInvocationIdByCatId: { 'codex-sol': 'inv-queue' },
-              bodyExposures: [{ targetCatId: 'codex-sol', invocationId: 'inv-queue', seenAt: 1_250 }],
-              failedByCatIds: [],
-              handledByCatIds: [],
-              priority: 'normal',
-              createdAt: 1_050,
-              updatedAt: 1_250,
-            },
+            targets: ['codex-sol'],
+            enqueuedAt: 1_050,
+            claimedAt: 1_250,
+            processingStartedAt: 1_250,
+            payload: { messageId: 'message-queue' },
           },
         ];
+      },
+    },
+    messageLifecycleSource: {
+      async listOwnerMessagesInWindow() {
+        return [];
       },
     },
     attentionEventLog: {

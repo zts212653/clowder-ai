@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { buildSessionBootstrap } = await import('../dist/domains/cats/services/session/SessionBootstrap.js');
 const { buildBriefingMessage, formatContextBriefing } = await import(
@@ -215,23 +216,27 @@ const CODEX_EXEC = {
 function seedRouteMessages(messageStore) {
   const baseTs = Date.now() - 40 * 60_000;
   for (let index = 0; index < 30; index += 1) {
-    messageStore.append({
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-b3b4',
+        userId: 'user-1',
+        catId: null,
+        content: `message ${index} about presentation convergence`,
+        mentions: [],
+        timestamp: baseTs + index * 60_000,
+      }),
+    );
+  }
+  return messageStore.append(
+    canonicalTestMessageInput({
       threadId: 'thread-b3b4',
       userId: 'user-1',
       catId: null,
-      content: `message ${index} about presentation convergence`,
-      mentions: [],
-      timestamp: baseTs + index * 60_000,
-    });
-  }
-  return messageStore.append({
-    threadId: 'thread-b3b4',
-    userId: 'user-1',
-    catId: null,
-    content: '@opus continue',
-    mentions: ['opus'],
-    timestamp: baseTs + 31 * 60_000,
-  });
+      content: '@opus continue',
+      mentions: ['opus'],
+      timestamp: baseTs + 31 * 60_000,
+    }),
+  );
 }
 
 function routeThreadStore() {

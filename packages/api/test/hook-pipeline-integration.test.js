@@ -117,6 +117,28 @@ describe('Pipeline Integration (real registry + resolvers + templates)', () => {
     assert.equal(manifests.length, 46, `Expected 46 hooks, got ${manifests.length}`);
   });
 
+  it('D12 manifest and fallback template describe recent speech without implying execution', () => {
+    const hook = registry.getHook('D12');
+    assert.ok(hook, 'D12 should be registered');
+    assert.equal(hook.manifest.name, '最近发言者');
+    assert.equal(hook.manifest.template, 'd12-recent-speaker.md');
+    assert.equal(hook.manifest.resolver, 'D12Resolver');
+    assert.equal(hook.manifest.userExplanation, '最近在此 thread 发过言的成员（不表示正在执行）');
+
+    const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, () => null);
+    const result = pipeline.executeStage(
+      'per-turn',
+      makeRichInput({
+        activeParticipants: [
+          { catId: 'codex', label: '缅因猫(codex)', lastMessageAt: 1000 },
+          { catId: 'opus', label: '布偶猫(opus)', lastMessageAt: 2000 },
+        ],
+      }),
+    );
+    const d12Patch = result.patches.find((patch) => patch.hookId === 'D12');
+    assert.equal(d12Patch?.content, '最近发言：缅因猫(codex)');
+  });
+
   it('session-init stage fires L1-L7 + S1 + S8 + S9 + B1 + C1 (always-fire hooks)', () => {
     const pipeline = new pipelineMod.HookPipeline(registry, resolversMod.RESOLVER_MAP, templateMod.renderSegment);
     const input = makeRichInput();

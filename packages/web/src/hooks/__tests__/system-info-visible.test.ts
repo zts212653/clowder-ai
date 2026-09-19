@@ -79,7 +79,7 @@ describe('formatVisibleSystemInfo — a2a_multi_target_serialized', () => {
 });
 
 describe('formatVisibleSystemInfo — routing_preflight', () => {
-  it('turns warned and rejected receipts into owner-readable copy', () => {
+  it('turns rejected receipts into owner-readable copy', () => {
     const visible = formatVisibleSystemInfo(
       {
         type: 'routing_preflight',
@@ -112,7 +112,7 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     ).toBeNull();
   });
 
-  it('maps degraded routing reason codes to stable copy without exposing internal failure classes', () => {
+  it('keeps warned fail-open diagnostics out of chat', () => {
     const visible = formatVisibleSystemInfo({
       type: 'routing_preflight',
       v: 1,
@@ -159,5 +159,28 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     expect(result?.content).toBe('Astra：近期遇到额度限制。这次仍会按你的选择尝试。');
     expect(result?.content).not.toContain('quota_exhausted');
     expect(result?.content).not.toContain('alternative-');
+  });
+});
+
+describe('formatVisibleSystemInfo — warning presentation', () => {
+  it('keeps unclassified provider diagnostics out of chat', () => {
+    expect(formatVisibleSystemInfo({ type: 'warning', message: 'model metadata missing' })).toBeNull();
+  });
+
+  it('shows only explicitly classified actionable or transient warnings', () => {
+    expect(
+      formatVisibleSystemInfo({
+        type: 'warning',
+        presentation: 'user_action_required',
+        message: '请重新授权',
+      }),
+    ).toEqual({ content: '⚠️ 请重新授权', variant: 'info' });
+    expect(
+      formatVisibleSystemInfo({
+        type: 'warning',
+        presentation: 'transient_status',
+        message: '正在自动重试',
+      }),
+    ).toEqual({ content: '⚠️ 正在自动重试', variant: 'info' });
   });
 });

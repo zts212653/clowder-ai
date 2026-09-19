@@ -73,7 +73,7 @@ function mockThreadStore() {
   };
 }
 
-function mockTrigger(outcome = 'dispatched') {
+function mockTrigger(outcome = 'enqueued') {
   const calls = [];
   return {
     calls,
@@ -195,10 +195,15 @@ describe('ConnectorRouter', () => {
   it('posts message to message store with ConnectorSource', async () => {
     await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
     assert.equal(messageStore.messages.length, 1);
+    assert.equal(messageStore.messages[0].deliveryStatus, 'queued');
     assert.equal(messageStore.messages[0].source.connector, 'feishu');
     assert.equal(messageStore.messages[0].source.label, '飞书');
     assert.equal(typeof messageStore.messages[0].source.icon, 'string');
     assert.equal(messageStore.messages[0].source.icon, '/images/connectors/feishu.png');
+    assert.deepEqual(messageStore.messages[0].from, {
+      kind: 'external',
+      connectorId: 'feishu',
+    });
   });
 
   it('triggers cat invocation', async () => {
@@ -295,29 +300,12 @@ describe('ConnectorRouter', () => {
     assert.ok(thread.projectPath.length > 1, 'projectPath should be a real filesystem path');
   });
 
-  it('broadcasts connector message to websocket', async () => {
-    await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
-    assert.ok(socketManager.broadcasts.length > 0);
-    assert.equal(socketManager.broadcasts[0].event, 'connector_message');
-  });
-
-  it('emits nested message protocol (threadId + message.{id,type,content,source,timestamp})', async () => {
+  it('keeps a triggered connector source out of History until Queue admission exposes it', async () => {
     await router.route('feishu', 'chat-123', 'Hi from IM', 'ext-proto-1');
     const bc = socketManager.broadcasts.find((b) => b.event === 'connector_message');
-    assert.ok(bc, 'should have a connector_message broadcast');
-    const { data } = bc;
-    // Must have nested message — frontend guard: if (!data?.message?.id) return;
-    assert.ok(data.threadId, 'data.threadId must exist');
-    assert.ok(data.message, 'data.message must exist (nested protocol)');
-    assert.ok(data.message.id, 'data.message.id must exist');
-    assert.equal(data.message.type, 'connector');
-    assert.equal(data.message.content, 'Hi from IM');
-    assert.ok(data.message.source, 'data.message.source must exist');
-    assert.equal(data.message.source.connector, 'feishu');
-    assert.equal(typeof data.message.timestamp, 'number');
-    // Must NOT have flat legacy fields
-    assert.equal(data.messageId, undefined, 'legacy messageId must not exist');
-    assert.equal(data.connectorId, undefined, 'legacy connectorId must not exist');
+    assert.equal(bc, undefined, 'producer must not project queued input into History before admission');
+    assert.equal(messageStore.messages[0].deliveryStatus, 'queued');
+    assert.equal(trigger.calls[0].messageId, messageStore.messages[0].id);
   });
 
   describe('command interception', () => {

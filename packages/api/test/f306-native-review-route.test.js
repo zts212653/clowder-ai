@@ -2,6 +2,7 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 async function fixture({ providerError, providerResult } = {}) {
   const [{ nativeThreadReviewRoutes }, { ThreadStore }, { MessageStore }, { SessionChainStore }, { AgentRegistry }] =
@@ -103,8 +104,10 @@ test('native review route persists structured mode, items, and result', async (t
   assert.equal(
     reviewMessages.every(
       (message) =>
+        // F117: sender identity is MessageFrom truth; review receipts persist
+        // from = { kind: 'system', service: 'native-thread-review' }.
         message.userId === 'system' &&
-        message.catId === 'system' &&
+        message.from?.kind === 'system' &&
         message.content.includes('Codex 原生 Review') &&
         message.content.includes('不能作为合入批准'),
     ),
@@ -159,31 +162,34 @@ test('native review route validates target and keeps an unavailable receipt afte
 
 test('a restarted route projects an orphaned durable review as unverifiable without writing a false terminal', async () => {
   const { app, agentRegistry, messageStore, sessionChainStore, thread, threadStore } = await fixture();
-  await messageStore.append({
-    userId: 'system',
-    catId: 'system',
-    threadId: thread.id,
-    content: 'Codex 原生 Review 已启动',
-    mentions: [],
-    timestamp: 100,
-    idempotencyKey: 'native-review:orphaned-review:started',
-    extra: {
-      semanticEvent: {
-        v: 1,
-        id: 'native-review:orphaned-review:started',
-        kind: 'review',
-        reviewId: 'orphaned-review',
-        stage: 'started',
-        summary: 'Codex 原生 Review 已启动',
-        actorCatId: 'codex',
-        occurredAt: 100,
-        target: { kind: 'base_branch', branch: 'origin/main' },
-        targetLabel: '相对 origin/main',
-        delivery: 'detached',
-        provenance: { provider: 'openai_codex', carrier: 'app_server' },
+  // F117: append requires an explicit MessageFrom sender identity.
+  await messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'system',
+      catId: 'system',
+      threadId: thread.id,
+      content: 'Codex 原生 Review 已启动',
+      mentions: [],
+      timestamp: 100,
+      idempotencyKey: 'native-review:orphaned-review:started',
+      extra: {
+        semanticEvent: {
+          v: 1,
+          id: 'native-review:orphaned-review:started',
+          kind: 'review',
+          reviewId: 'orphaned-review',
+          stage: 'started',
+          summary: 'Codex 原生 Review 已启动',
+          actorCatId: 'codex',
+          occurredAt: 100,
+          target: { kind: 'base_branch', branch: 'origin/main' },
+          targetLabel: '相对 origin/main',
+          delivery: 'detached',
+          provenance: { provider: 'openai_codex', carrier: 'app_server' },
+        },
       },
-    },
-  });
+    }),
+  );
   await app.close();
 
   const { nativeThreadReviewRoutes } = await import('../dist/routes/native-thread-review-routes.js');
@@ -360,13 +366,16 @@ test('active review remains discoverable after its durable start leaves the boun
   const reviewId = started.json().review.id;
 
   for (let index = 0; index < 201; index += 1) {
-    await messageStore.append({
-      userId: 'owner-1',
-      threadId: thread.id,
-      content: `active-filler-${index}`,
-      mentions: [],
-      timestamp: 1_000 + index,
-    });
+    // F117: append requires an explicit MessageFrom sender identity.
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'owner-1',
+        threadId: thread.id,
+        content: `active-filler-${index}`,
+        mentions: [],
+        timestamp: 1_000 + index,
+      }),
+    );
   }
 
   const listed = await app.inject({
@@ -447,44 +456,51 @@ test('review listing preserves a completed review after its start rolls beyond 5
     provenance: { provider: 'openai_codex', carrier: 'app_server' },
     ...extra,
   });
-  await messageStore.append({
-    userId: 'system',
-    catId: 'system',
-    threadId: thread.id,
-    content: 'Review started',
-    mentions: [],
-    timestamp: 1,
-    extra: {
-      semanticEvent: semanticEvent('long-review-started', 'started', 1, {
-        target: { kind: 'uncommitted_changes' },
-        delivery: 'inline',
-      }),
-    },
-  });
-  for (let index = 0; index < 501; index += 1) {
-    await messageStore.append({
-      userId: 'owner-1',
+  // F117: append requires an explicit MessageFrom sender identity.
+  await messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'system',
+      catId: 'system',
       threadId: thread.id,
-      content: `filler-${index}`,
+      content: 'Review started',
       mentions: [],
-      timestamp: index + 2,
-    });
-  }
-  await messageStore.append({
-    userId: 'system',
-    catId: 'system',
-    threadId: thread.id,
-    content: 'No findings',
-    mentions: [],
-    timestamp: 503,
-    extra: {
-      semanticEvent: semanticEvent('long-review-result', 'result', 503, {
-        target: { kind: 'uncommitted_changes' },
-        delivery: 'inline',
-        requestedAt: 1,
+      timestamp: 1,
+      extra: {
+        semanticEvent: semanticEvent('long-review-started', 'started', 1, {
+          target: { kind: 'uncommitted_changes' },
+          delivery: 'inline',
+        }),
+      },
+    }),
+  );
+  for (let index = 0; index < 501; index += 1) {
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'owner-1',
+        threadId: thread.id,
+        content: `filler-${index}`,
+        mentions: [],
+        timestamp: index + 2,
       }),
-    },
-  });
+    );
+  }
+  await messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'system',
+      catId: 'system',
+      threadId: thread.id,
+      content: 'No findings',
+      mentions: [],
+      timestamp: 503,
+      extra: {
+        semanticEvent: semanticEvent('long-review-result', 'result', 503, {
+          target: { kind: 'uncommitted_changes' },
+          delivery: 'inline',
+          requestedAt: 1,
+        }),
+      },
+    }),
+  );
 
   const listed = await app.inject({
     method: 'GET',

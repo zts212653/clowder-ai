@@ -22,22 +22,19 @@ describe('F296 oversized rollover Redis projection', { skip: redisIsolationSkipR
   let redis;
   let firstStore;
   let secondStore;
-  let MessageKeys;
   let persistUserFacingSystemInfoNotices;
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'F296 oversized rollover Redis projection');
-    const [{ createRedisClient }, storeModule, keysModule, persistenceModule] = await Promise.all([
+    const [{ createRedisClient }, storeModule, persistenceModule] = await Promise.all([
       import('@cat-cafe/shared/utils'),
       import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
-      import('../dist/domains/cats/services/stores/redis-keys/message-keys.js'),
       import('../dist/domains/cats/services/agents/routing/persist-system-info-warnings.js'),
     ]);
     redis = createRedisClient({ url: REDIS_URL });
     await redis.ping();
     firstStore = new storeModule.RedisMessageStore(redis, { ttlSeconds: 0 });
     secondStore = new storeModule.RedisMessageStore(redis, { ttlSeconds: 0 });
-    MessageKeys = keysModule.MessageKeys;
     persistUserFacingSystemInfoNotices = persistenceModule.persistUserFacingSystemInfoNotices;
   });
 
@@ -51,7 +48,7 @@ describe('F296 oversized rollover Redis projection', { skip: redisIsolationSkipR
     await redis.quit();
   });
 
-  it('deduplicates across store instances and keeps lifecycle messages plus claims at TTL=0', async () => {
+  it('keeps rollover diagnostics out of History across store instances', async () => {
     const pending = lifecycle('pending');
     await Promise.all([
       persistUserFacingSystemInfoNotices({
@@ -77,25 +74,6 @@ describe('F296 oversized rollover Redis projection', { skip: redisIsolationSkipR
     const messages = (await firstStore.getByThread('thread-redis-owner')).filter(
       (message) => message.source?.connector === 'session-rollover-lifecycle',
     );
-    assert.equal(messages.length, 2);
-    assert.deepEqual(
-      messages.map((message) => message.source.meta.sessionRollover.status),
-      ['pending', 'succeeded'],
-    );
-    for (const message of messages) {
-      assert.equal(await redis.ttl(MessageKeys.detail(message.id)), -1);
-    }
-    for (const status of ['pending', 'succeeded']) {
-      assert.equal(
-        await redis.ttl(
-          MessageKeys.idempotency(
-            'system',
-            'thread-redis-owner',
-            `session-rollover:inv-redis-oversized:codex-native-resume:${status}`,
-          ),
-        ),
-        -1,
-      );
-    }
+    assert.equal(messages.length, 0);
   });
 });

@@ -62,7 +62,7 @@ describe('ConflictRouter F280 typed waits', () => {
     });
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /mergeable → conflicting/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
   });
 
   test('conflict remains state-only for a new-HEAD waiter', async () => {
@@ -74,7 +74,7 @@ describe('ConflictRouter F280 typed waits', () => {
       mergeState: 'CONFLICTING',
     });
     assert.equal(result.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.conflict.mergeState, 'CONFLICTING');
   });
 

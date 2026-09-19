@@ -11,12 +11,13 @@ import { CollectiveCurrentContext } from '../dist/domains/plugin/builtin-runtime
 import { CollectiveWorkAuthority } from '../dist/domains/plugin/builtin-runtime/collective-work-authority.js';
 import { CollectiveWorkDispatcher } from '../dist/domains/plugin/builtin-runtime/collective-work-dispatcher.js';
 import { registerCollectiveOwnerParticipationRoutes } from '../dist/routes/collective-owner-participation-routes.js';
+import { adaptMessageStore } from './helpers/message-from-fixtures.js';
 import { readHeaders, writeHeaders } from './plugin-official-routes.fixture.js';
 
 const userId = writeHeaders['x-test-session-user'];
 const base = '/api/plugins/collective-connector/con_aaaaaaaa';
 async function harness(delayThreadWrites = false) {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const tasks = new TaskStore();
   const threads = new ThreadStore();
   let route;

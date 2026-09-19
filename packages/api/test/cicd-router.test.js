@@ -161,13 +161,13 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal(first.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
     assert.match(first.content, /CI pending → pass/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 1);
   });
 
   test('CI pass does not wake a reviewer waiting only for a new HEAD', async () => {
     const { router, messageStore, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
     assert.equal((await router.route(poll())).kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(messageStore.getByThreadIncludingQueued('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
   });
 
@@ -209,7 +209,11 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal(projected.length, 1);
     assert.equal(projected[0].headSha, headSha);
     assert.equal((await taskStore.get(task.id)).automationState.ci.headSha, headSha);
-    assert.equal(messageStore.getByThread('thread_1').length, 1, 'only the original HEAD wake is delivered');
+    assert.equal(
+      messageStore.getByThreadIncludingQueued('thread_1').length,
+      1,
+      'only the original HEAD wake is delivered',
+    );
   });
 
   test('merged PR consumes the wait, marks done, and emits world truth once', async () => {

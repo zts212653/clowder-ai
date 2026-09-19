@@ -29,7 +29,7 @@ for (const [name, route] of [
     assert.equal((await deps.messageStore.getByThread('thread-cursor')).filter((m) => m.catId === 'opus').length, 0);
   });
 
-  for (const failure of ['append', 'error-coded done', 'commit rejected']) {
+  for (const failure of ['output commit', 'error-coded done', 'commit rejected']) {
     test(`#1371: ${name} ${failure} cannot advance a success cursor or leave a proof`, async () => {
       const { deps, source, options } = await cursorHarness({
         opus: {
@@ -45,11 +45,9 @@ for (const [name, route] of [
           },
         },
       });
-      if (failure === 'append') {
-        const append = deps.messageStore.append.bind(deps.messageStore);
-        deps.messageStore.append = (input) => {
-          if (input.catId === 'opus') throw new Error('injected output persistence failure');
-          return append(input);
+      if (failure === 'output commit') {
+        deps.freshnessOutputCommitCoordinator.commit = () => {
+          throw new Error('injected output persistence failure');
         };
       }
       if (failure === 'commit rejected') options.beforeOutputCommit = async () => false;

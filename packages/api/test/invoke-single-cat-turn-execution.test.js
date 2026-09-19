@@ -70,12 +70,14 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
   test('creates running before prompt exposure/provider and terminalizes success', async () => {
     const store = new InMemoryTurnExecutionStore();
     const exposureCalls = [];
+    const lifecycleCalls = [];
     let providerObservedStatus;
     let providerRecoveryAnchor;
     const service = {
       async *invoke(_prompt, options) {
         providerObservedStatus = (await store.get('child-success'))?.status;
         providerRecoveryAnchor = options.recoveryAnchor;
+        assert.equal(lifecycleCalls.length, 1, 'processing response must exist before provider starts');
         assert.equal(exposureCalls.length, 1, 'body exposure must be durable before provider starts');
         yield { type: 'text', catId: 'codex', content: 'ok', timestamp: Date.now() };
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
@@ -96,14 +98,26 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
           freshnessSupplementId: 'supplement-1',
         },
         promptMessageIds: ['msg-queued'],
-        onPromptMessagesExposed: async (input) => {
-          exposureCalls.push(input);
+        onLifecycleInvocationStarted: async (input) => {
+          lifecycleCalls.push(input);
+          return { responseMessageId: 'response-child-success', priorFrontierMessageId: 'message-before-response' };
         },
+        onPromptMessagesExposed: async (input) => exposureCalls.push(input),
         isLastCat: true,
       }),
     );
 
     assert.equal(providerObservedStatus, 'running');
+    assert.deepEqual(lifecycleCalls, [
+      {
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: 'codex',
+        invocationId: 'child-success',
+        parentInvocationId: 'parent-1',
+        startedAt: lifecycleCalls[0].startedAt,
+      },
+    ]);
     assert.deepEqual(providerRecoveryAnchor, {
       threadId: 'thread-1',
       invocationId: 'child-success',
@@ -153,6 +167,8 @@ describe('invokeSingleCat durable child execution lifecycle', () => {
     });
     assert.match(createdBody.effectiveStrategy.revision, /^provider_default:[a-f0-9]{64}$/);
     assert.equal(created.turnInvocationId, 'child-success');
+    assert.equal(created.lifecycleResponseMessageId, 'response-child-success');
+    assert.equal(created.lifecyclePriorFrontierMessageId, 'message-before-response');
     assert.equal(created.turnExecutionStartedAt, createdBody.startedAt);
     assert.deepEqual(created.extra?.turnExecution, {
       invocationId: 'child-success',

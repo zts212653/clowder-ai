@@ -108,7 +108,8 @@ describe('F254 B2: hold_ball reminder', () => {
     assert.ok(result);
     assert.ok(result.text.includes('未读消息'), 'reminder should mention unread messages');
     assert.ok(result.text.includes('get_thread_context'), 'reminder should suggest get_thread_context');
-    assert.match(result.text, /responseMode.*full/, 'reminder should require a full contiguous thread read');
+    assert.match(result.text, /responseMode.*full/, 'reminder should require full bodies for the unread selection');
+    assert.match(result.text, /contextScope=unread_delta/);
     assert.ok(result.text.includes('threadId=thread-001'), 'reminder should identify the source thread');
     assert.ok(result.text.includes('messageId=msg-123'), 'reminder should identify the newest unresolved message');
   });

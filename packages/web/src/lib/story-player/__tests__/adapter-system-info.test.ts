@@ -86,7 +86,12 @@ describe('F252 adapter — system_info thinking events', () => {
     const events = [
       makeEvent(1, 1000, {
         type: 'system_info',
-        content: JSON.stringify({ type: 'warning', catId: 'codex', message: 'Tool output was truncated' }),
+        content: JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          catId: 'codex',
+          message: 'Tool output was truncated',
+        }),
       }),
     ];
     const result = adaptTranscriptEvents(events);

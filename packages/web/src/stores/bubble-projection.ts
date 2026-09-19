@@ -67,6 +67,98 @@ interface GroupKey {
 
 type TurnSegmentByRecord = WeakMap<ChatMessage, number>;
 type StreamSegmentsByBaseKey = Map<string, Map<string, number>>;
+type FailedFrontierFoldOwnerByRecord = Map<ChatMessage, ChatMessage>;
+
+function exactRecordsById(records: readonly ChatMessage[]): Map<string, ChatMessage | null> {
+  const byId = new Map<string, ChatMessage | null>();
+  for (const record of records) {
+    byId.set(record.id, byId.has(record.id) ? null : record);
+  }
+  return byId;
+}
+
+function exactSourceBoundFinalFailure(
+  source: ChatMessage,
+  targetId: string,
+  statusMessageId: string,
+  byId: ReadonlyMap<string, ChatMessage | null>,
+): ChatMessage | undefined {
+  const final = byId.get(statusMessageId);
+  const lifecycle = final?.lifecycle;
+  if (!final || lifecycle?.kind !== 'response' || lifecycle.status !== 'failed') return undefined;
+  if (lifecycle.targetId !== targetId || final.catId !== targetId || final.origin === 'callback') return undefined;
+  if (final.replyTo !== source.id || !lifecycle.inputMessageIds.includes(source.id)) return undefined;
+  return final;
+}
+
+function isMatchingAuxiliaryFailure(
+  candidate: ChatMessage | null | undefined,
+  final: ChatMessage,
+): candidate is ChatMessage {
+  const lifecycle = candidate?.lifecycle;
+  const finalLifecycle = final.lifecycle;
+  if (!candidate || lifecycle?.kind !== 'response' || finalLifecycle?.kind !== 'response') return false;
+  if (lifecycle.status !== 'failed' || lifecycle.reason !== finalLifecycle.reason) return false;
+  if (lifecycle.targetId !== finalLifecycle.targetId || lifecycle.inputMessageIds.length !== 0) return false;
+  return candidate.catId === final.catId && candidate.origin !== 'callback' && candidate.replyTo == null;
+}
+
+function collectFailedFrontier(
+  sourceMessageId: string,
+  final: ChatMessage,
+  byId: ReadonlyMap<string, ChatMessage | null>,
+): ChatMessage[] | undefined {
+  const folded: ChatMessage[] = [];
+  const visited = new Set<string>();
+  let frontierId = final.extra?.freshness?.priorFrontierMessageId;
+  while (frontierId && frontierId !== sourceMessageId && !visited.has(frontierId)) {
+    visited.add(frontierId);
+    const candidate = byId.get(frontierId);
+    if (!isMatchingAuxiliaryFailure(candidate, final)) return undefined;
+    folded.unshift(candidate);
+    frontierId = candidate.extra?.freshness?.priorFrontierMessageId;
+  }
+  return frontierId === sourceMessageId && folded.length > 0 ? folded : undefined;
+}
+
+function addFoldClaims(
+  records: readonly ChatMessage[],
+  owner: ChatMessage,
+  claims: Map<ChatMessage, ChatMessage>,
+  ambiguous: Set<ChatMessage>,
+): void {
+  for (const record of records) {
+    const existing = claims.get(record);
+    if (existing && existing !== owner) ambiguous.add(record);
+    else claims.set(record, owner);
+  }
+}
+
+/**
+ * A provider/liveness retry can publish one failed auxiliary response before
+ * the Queue-owned response starts. The durable frontier chain is exact:
+ * source -> auxiliary failure(s) -> source-bound final failure. Fold only that
+ * closed chain, preserving every attempt body in the final response bubble.
+ */
+function buildFailedFrontierFoldOwners(records: readonly ChatMessage[]): FailedFrontierFoldOwnerByRecord {
+  const byId = exactRecordsById(records);
+  const claims = new Map<ChatMessage, ChatMessage>();
+  const ambiguous = new Set<ChatMessage>();
+
+  for (const source of records) {
+    const refs = source.lifecycle?.dispatchRefs ?? [];
+    for (const ref of refs) {
+      if (ref.phase !== 'settled') continue;
+      const final = exactSourceBoundFinalFailure(source, ref.targetId, ref.statusMessageId, byId);
+      if (!final) continue;
+      const folded = collectFailedFrontier(source.id, final, byId);
+      if (folded) addFoldClaims([...folded, final], final, claims, ambiguous);
+    }
+  }
+
+  for (const record of ambiguous) claims.delete(record);
+  return claims;
+}
 
 function getBaseInvocationKey(msg: ChatMessage): string | null {
   if (msg.type !== 'assistant') return null;
@@ -80,11 +172,20 @@ function bubbleGroupKey(
   msg: ChatMessage,
   streamSegmentsByBaseKey: StreamSegmentsByBaseKey,
   turnSegmentByRecord: TurnSegmentByRecord,
+  failedFrontierFoldOwners: FailedFrontierFoldOwnerByRecord,
 ): GroupKey | null {
   if (msg.type !== 'assistant') return null;
   if (!msg.catId) return null;
   const inv = getBubbleInvocationId(msg as ChatMessage);
   if (!inv) return null;
+  const failedFrontierOwner = failedFrontierFoldOwners.get(msg);
+  if (failedFrontierOwner) {
+    return {
+      catId: msg.catId,
+      invocationId: `failed-frontier:${failedFrontierOwner.id}`,
+      originBucket: 'stream',
+    };
+  }
   const turnSegment = turnSegmentByRecord.get(msg) ?? 0;
   if (msg.origin === 'callback') {
     const baseKey = `${msg.catId}::${inv}`;
@@ -145,13 +246,14 @@ function stripStreamSplitFields(
   return copy;
 }
 
-function projectGroup(records: ChatMessage[]): ChatMessage {
+function projectGroup(records: ChatMessage[], preferredBase?: ChatMessage): ChatMessage {
   const sorted = records.slice().sort(compareRecords);
   const first = sorted[0]!;
 
   const callbackRecord = sorted.find((r) => r.origin === 'callback');
-  const canonicalId = callbackRecord?.id ?? first.id;
-  const origin: ChatMessage['origin'] = callbackRecord ? 'callback' : (first.origin ?? 'stream');
+  const canonicalId = preferredBase?.id ?? callbackRecord?.id ?? first.id;
+  const origin: ChatMessage['origin'] =
+    preferredBase?.origin ?? (callbackRecord ? 'callback' : (first.origin ?? 'stream'));
 
   const contentParts: string[] = [];
   // F194 Phase Z11 follow-up: exact-key callback_final records may still merge
@@ -214,13 +316,13 @@ function projectGroup(records: ChatMessage[]): ChatMessage {
   // replyPreview, visibility, whisperTo, revealedAt, deliveredAt, source, summary,
   // evidence, contentBlocks, etc.) from canonical record. Base = callback record if
   // present else first record by ts asc; then override projection-specific fields.
-  const base = callbackRecord ?? first;
+  const base = preferredBase ?? callbackRecord ?? first;
 
   // F194 R21 rollback compatibility: cached R21 records may contain split fields
   // (`cliStdout` / `speechContent`) that projection no longer owns. If there is no
   // real content in this group, keep stale speech visible by folding it back into
   // stream content. Otherwise never let stale split fields override newer content.
-  const firstStream = sorted.find((r) => r.extra?.stream)?.extra?.stream;
+  const firstStream = preferredBase?.extra?.stream ?? sorted.find((r) => r.extra?.stream)?.extra?.stream;
   const isMergeCase = streamContentParts.length > 0 && callbackContentParts.length > 0;
   const staleR21SpeechContent =
     !isMergeCase &&
@@ -294,22 +396,26 @@ export function projectCanonicalBubbles({ records }: ProjectionInput): Projectio
   const passthrough: ChatMessage[] = [];
   const turnSegmentByRecord = buildTurnSegments(records);
   const streamSegmentsByBaseKey = buildStreamSegmentsByBaseKey(records, turnSegmentByRecord);
+  const failedFrontierFoldOwners = buildFailedFrontierFoldOwners(records);
+  const preferredBaseByGroupKey = new Map<string, ChatMessage>();
 
   for (const r of records) {
-    const k = bubbleGroupKey(r, streamSegmentsByBaseKey, turnSegmentByRecord);
+    const k = bubbleGroupKey(r, streamSegmentsByBaseKey, turnSegmentByRecord, failedFrontierFoldOwners);
     if (!k) {
       passthrough.push(r);
       continue;
     }
     const keyStr = `${k.originBucket}::${k.catId}::${k.invocationId}`;
+    const failedFrontierOwner = failedFrontierFoldOwners.get(r);
+    if (failedFrontierOwner) preferredBaseByGroupKey.set(keyStr, failedFrontierOwner);
     const list = groupedKeys.get(keyStr);
     if (list) list.push(r);
     else groupedKeys.set(keyStr, [r]);
   }
 
   const projected: ChatMessage[] = [];
-  for (const list of groupedKeys.values()) {
-    projected.push(projectGroup(list));
+  for (const [key, list] of groupedKeys) {
+    projected.push(projectGroup(list, preferredBaseByGroupKey.get(key)));
   }
   for (const p of passthrough) {
     projected.push(p as ChatMessage);

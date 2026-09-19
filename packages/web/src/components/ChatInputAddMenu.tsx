@@ -1,8 +1,10 @@
 'use client';
 
-import { type RefObject, useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useRef, useState } from 'react';
+import type { MessageDispositionPreferenceController } from '@/hooks/useMessageDispositionPreference';
 import { AttachIcon } from './icons/AttachIcon';
 import { GameIcon } from './icons/GameIcon';
+import { MessageDispositionSelector, messageDispositionLabel } from './MessageDispositionSelector';
 
 interface ChatInputAddMenuProps {
   onAddContext: () => void;
@@ -10,6 +12,7 @@ interface ChatInputAddMenuProps {
   onWhisperToggle: () => void;
   onGameClick: () => void;
   onClose: () => void;
+  messageDisposition: MessageDispositionPreferenceController;
   triggerRef?: RefObject<HTMLElement | null>;
   disabled?: boolean;
   sendDisabled?: boolean;
@@ -23,6 +26,7 @@ export function ChatInputAddMenu({
   onWhisperToggle,
   onGameClick,
   onClose,
+  messageDisposition,
   triggerRef,
   disabled,
   sendDisabled,
@@ -30,6 +34,7 @@ export function ChatInputAddMenu({
   whisperMode,
 }: ChatInputAddMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const [view, setView] = useState<'root' | 'disposition'>('root');
 
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
@@ -57,7 +62,7 @@ export function ChatInputAddMenu({
       data-testid="composer-add-menu"
       role="menu"
       aria-label="添加内容"
-      className="absolute bottom-full left-4 z-20 mb-2 w-[min(19rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-cafe bg-cafe-surface-elevated shadow-lg"
+      className="absolute bottom-full left-4 z-20 mb-2 w-[min(19rem,calc(100vw-2rem))] overflow-hidden rounded-2xl bg-cafe-surface-canvas p-1.5 shadow-xl"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
@@ -65,62 +70,73 @@ export function ChatInputAddMenu({
         }
       }}
     >
-      <div className="border-b border-cafe-subtle px-3 py-2 text-xs font-medium text-cafe-muted">添加</div>
-      <div className="p-1.5">
-        <AddMenuItem
-          testId="composer-add-context"
-          icon={<ContextIcon />}
-          label="引用 Thread 或文件"
-          description="把家里的已有内容带进这条消息"
-          disabled={unavailable}
-          onClick={() => {
-            onClose();
-            onAddContext();
-          }}
-        />
-        <AddMenuItem
-          testId="composer-upload"
-          icon={<AttachIcon className="h-5 w-5" />}
-          label="上传附件"
-          description="图片、文档或压缩包，最多 5 个"
-          disabled={unavailable || maxImages}
-          onClick={() => {
-            onClose();
-            onAttach();
-          }}
-        />
-      </div>
-      <div className="border-t border-cafe-subtle p-1.5">
-        <AddMenuItem
-          testId="composer-whisper"
-          icon={<WhisperIcon />}
-          label="悄悄话"
-          description={whisperMode ? '已开启；选择猫猫或点此关闭' : '只让选中的猫猫看见'}
-          active={whisperMode}
-          disabled={unavailable}
-          onClick={() => {
-            onClose();
-            onWhisperToggle();
-          }}
-        />
-        <AddMenuItem
-          testId="composer-game"
-          icon={<GameIcon />}
-          label="游戏"
-          description="选择游戏与参与方式"
-          disabled={unavailable}
-          onClick={() => {
-            onClose();
-            onGameClick();
-          }}
-        />
-      </div>
+      {view === 'disposition' ? (
+        <MessageDispositionSelector controller={messageDisposition} onBack={() => setView('root')} />
+      ) : (
+        <div>
+          <AddMenuItem
+            testId="composer-add-context"
+            icon={<ContextIcon />}
+            label="引用 Thread 或文件"
+            description="把家里的已有内容带进这条消息"
+            disabled={unavailable}
+            onClick={() => {
+              onClose();
+              onAddContext();
+            }}
+          />
+          <AddMenuItem
+            testId="composer-upload"
+            icon={<AttachIcon className="h-5 w-5" />}
+            label="上传附件"
+            description="图片、文档或压缩包，最多 5 个"
+            disabled={unavailable || maxImages}
+            onClick={() => {
+              onClose();
+              onAttach();
+            }}
+          />
+          <AddMenuItem
+            testId="message-disposition-trigger"
+            dataDispositionSource={messageDisposition.source}
+            icon={<StrategyIcon />}
+            label="发送策略"
+            description={messageDispositionLabel(messageDisposition.effective)}
+            disabled={disabled}
+            onClick={() => setView('disposition')}
+          />
+          <AddMenuItem
+            testId="composer-whisper"
+            icon={<WhisperIcon />}
+            label="悄悄话"
+            description={whisperMode ? '已开启；选择猫猫或点此关闭' : '只让选中的猫猫看见'}
+            active={whisperMode}
+            disabled={unavailable}
+            onClick={() => {
+              onClose();
+              onWhisperToggle();
+            }}
+          />
+          <AddMenuItem
+            testId="composer-game"
+            icon={<GameIcon />}
+            label="游戏"
+            description="选择游戏与参与方式"
+            disabled={unavailable}
+            onClick={() => {
+              onClose();
+              onGameClick();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 function AddMenuItem({
   testId,
+  dataDispositionSource,
   icon,
   label,
   description,
@@ -129,6 +145,7 @@ function AddMenuItem({
   onClick,
 }: {
   testId: string;
+  dataDispositionSource?: string;
   icon: React.ReactNode;
   label: string;
   description: string;
@@ -141,6 +158,7 @@ function AddMenuItem({
       type="button"
       role="menuitem"
       data-testid={testId}
+      data-disposition-source={dataDispositionSource}
       disabled={disabled}
       onClick={onClick}
       className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-30 ${
@@ -155,6 +173,14 @@ function AddMenuItem({
         <span className="block truncate text-xs text-cafe-muted">{description}</span>
       </span>
     </button>
+  );
+}
+
+function StrategyIcon() {
+  return (
+    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+      <path d="M4 4a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 1a1 1 0 0 0 0 2h6a1 1 0 1 0 0-2h-6ZM4 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4Zm6 1a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2h-6Z" />
+    </svg>
   );
 }
 

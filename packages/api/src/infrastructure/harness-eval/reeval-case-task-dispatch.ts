@@ -143,8 +143,8 @@ export class ReevalCaseTaskDispatcher implements ReevalCaseTaskDispatchPort {
     let message: StoredMessage;
     try {
       message = await this.options.messageStore.append({
+        from: { kind: 'agent', catId: callerCatId },
         userId: task.userId,
-        catId: callerCatId,
         content: carrierContent(input),
         mentions: [task.ownerCatId],
         origin: 'callback',

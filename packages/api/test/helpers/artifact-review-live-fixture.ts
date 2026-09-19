@@ -46,7 +46,7 @@ export async function createLiveReviewFixture(
   function publish(name = `review-input.${extension}`) {
     return messages.append({
       userId: 'operator',
-      catId,
+      from: { kind: 'agent', catId },
       threadId: thread.id,
       mentions: [],
       timestamp: Date.now(),

@@ -1,3 +1,4 @@
+import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import { codexAppServerRecovery } from '../../../../../infrastructure/telemetry/instruments.js';
 import {
   buildCodexActiveWriterDiagnostics,
@@ -35,8 +36,11 @@ export interface CodexAppServerRecoveryEvent {
   type: 'app_server.recovery';
   reason: 'pre_turn_transport' | 'active_writer_retry' | 'model_capacity';
   attempt: number;
-  retryBudget: number;
+  /** null means an ownership wait that remains retryable until explicit cancellation. */
+  retryBudget: number | null;
   delayMs?: number;
+  /** Time since the first ownership conflict in this invocation. */
+  elapsedMs?: number;
   threadId?: string;
   phase?: 'pre_tool' | 'post_tool';
   /** Present only for active_writer_retry; evidence never authorizes a replacement. */
@@ -68,6 +72,7 @@ const DEFAULT_MODEL_CAPACITY_RETRY_DELAYS_MS = [1_000, 3_000, 8_000, 15_000] as 
 const DEFAULT_ACTIVE_WRITER_RETRY_DELAY_MS = 250;
 const MAX_ACTIVE_WRITER_RETRY_DELAY_MS = 5_000;
 const MAX_RECOVERY_STEP_CHARS = 160;
+const log = createModuleLogger('codex-app-server-runner');
 
 function buildModelCapacityRecoveryInstruction(checkpoint: CodexCapacityRecoveryCheckpoint): string {
   const step = checkpoint.nextIncompleteStep()?.step.slice(0, MAX_RECOVERY_STEP_CHARS);
@@ -102,12 +107,15 @@ async function waitForRecoveryDelay(delayMs: number, signal: AbortSignal | undef
 }
 
 /**
- * Owns bounded recovery for Codex app-server.
+ * Owns recovery for Codex app-server.
  *
- * Transport recovery stays fenced before turn/start. The one accepted-turn
- * exception is the provider's exact model-capacity terminal: it may resume the
- * same thread only with exact Clowder AI task coordinates. After tool surface,
- * it additionally requires recorded progress and a fully terminal tool ledger.
+ * Transport recovery stays bounded and fenced before turn/start. Provider
+ * ownership contention is different: an active writer is an internal wait on
+ * the same native thread until that writer releases it or the invocation is
+ * explicitly cancelled. The one accepted-turn recovery exception is the
+ * provider's exact model-capacity terminal: it may resume the same thread only
+ * with exact Clowder AI task coordinates. After tool surface, it additionally
+ * requires recorded progress and a fully terminal tool ledger.
  */
 export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunnerOptions): AsyncGenerator<unknown> {
   const retryBudget = Math.max(0, options.retryBudget ?? 1);
@@ -120,6 +128,7 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   );
   let transportAttempt = 0;
   let activeWriterAttempt = 0;
+  let activeWriterWaitStartedAt: number | undefined;
   let capacityAttempt = 0;
   let recoveryAttempt = 0;
   let currentThread = options.runInput.thread;
@@ -133,6 +142,8 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
   for (;;) {
     let lifecycle: CodexAppServerLifecycleSnapshot | null = null;
     const terminalBuffer: unknown[] = [];
+    const preTurnLifecycleTerminalBuffer: unknown[] = [];
+    const preTurnLifecycleProjectionBuffer: CodexAppServerLifecycleSnapshot[] = [];
     let capacityTerminalObserved = false;
     let pendingCapacityNotice: unknown;
     let successfulTerminalObserved = false;
@@ -149,18 +160,30 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         wire,
         onLifecycle: (snapshot) => {
           lifecycle = snapshot;
-          options.clientDeps?.onLifecycle?.(snapshot);
+          if (isPreTurnLifecycleTerminalSnapshot(snapshot)) {
+            preTurnLifecycleProjectionBuffer.push(snapshot);
+          } else {
+            projectLifecycle(options.clientDeps?.onLifecycle, snapshot);
+          }
         },
       });
       const runInput: CodexAppServerRunInput = {
         ...options.runInput,
         thread: currentThread,
         recoveryAttempt,
+        activeWriterAttempt,
         ...(resumeReplacement ? { resumeReplacement } : { resumeReplacement: undefined }),
         ...(recoveryInstruction ? { recoveryInstruction } : { recoveryInstruction: undefined }),
         ...(imagePaths ? { imagePaths } : { imagePaths: undefined }),
       };
       for await (const event of client.run(runInput)) {
+        if (isPreTurnLifecycleTerminal(event)) {
+          // Ownership conflicts are provider preflight state. Do not project a
+          // discarded probe's failed/closed lifecycle onto the invocation that
+          // is still waiting to resume the same native thread.
+          preTurnLifecycleTerminalBuffer.push(event);
+          continue;
+        }
         checkpoint.observe(event);
         if (isModelCapacityNotice(event)) {
           // The provider can announce an error before retrying it itself or
@@ -189,6 +212,10 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         yield event;
       }
       if (pendingCapacityNotice) yield pendingCapacityNotice;
+      for (const snapshot of preTurnLifecycleProjectionBuffer) {
+        projectLifecycle(options.clientDeps?.onLifecycle, snapshot);
+      }
+      for (const event of preTurnLifecycleTerminalBuffer) yield event;
       for (const event of terminalBuffer) yield event;
       if (capacityAttempt > 0 && successfulTerminalObserved) {
         codexAppServerRecovery.add(1, { status: 'recovered' });
@@ -230,14 +257,17 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
         activeWriterThreadId &&
         isActiveWriterError(error) &&
         !capacityTerminalObserved &&
-        activeWriterAttempt < 1 &&
-        transportAttempt < retryBudget &&
         canRetryBeforeTurn(failedAt, options.runInput.signal)
       ) {
         activeWriterAttempt++;
-        transportAttempt++;
         recoveryAttempt++;
         const detectedAt = Date.now();
+        activeWriterWaitStartedAt ??= detectedAt;
+        const elapsedMs = Math.max(0, detectedAt - activeWriterWaitStartedAt);
+        const retryDelayMs = Math.min(
+          MAX_ACTIVE_WRITER_RETRY_DELAY_MS,
+          activeWriterRetryDelayMs * 2 ** Math.min(activeWriterAttempt - 1, 6),
+        );
         const detection =
           error instanceof CodexActiveWriterRecoveryError
             ? error.detection
@@ -251,17 +281,28 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
                   threadRead: { outcome: 'failed' },
                 }),
               };
+        log.warn(
+          {
+            threadIdPrefix: activeWriterThreadId.slice(0, 8),
+            attempt: activeWriterAttempt,
+            elapsedMs,
+            retryDelayMs,
+            classification: detection.diagnostics.classification,
+          },
+          '[codex-app-server] native thread writer remains busy; waiting on the same session',
+        );
         codexAppServerRecovery.add(1, { status: 'active_writer_retry' });
         yield {
           type: 'app_server.recovery',
           reason: 'active_writer_retry',
-          attempt: transportAttempt,
-          retryBudget,
-          delayMs: activeWriterRetryDelayMs,
+          attempt: activeWriterAttempt,
+          retryBudget: null,
+          delayMs: retryDelayMs,
+          elapsedMs,
           threadId: activeWriterThreadId,
           activeWriter: detection,
         } satisfies CodexAppServerRecoveryEvent;
-        await waitForRecoveryDelay(activeWriterRetryDelayMs, options.runInput.signal);
+        await waitForRecoveryDelay(retryDelayMs, options.runInput.signal);
         continue;
       }
 
@@ -333,6 +374,10 @@ export async function* runCodexAppServerWithRecovery(options: CodexAppServerRunn
       }
 
       if (pendingCapacityNotice) yield pendingCapacityNotice;
+      for (const snapshot of preTurnLifecycleProjectionBuffer) {
+        projectLifecycle(options.clientDeps?.onLifecycle, snapshot);
+      }
+      for (const event of preTurnLifecycleTerminalBuffer) yield event;
       for (const event of terminalBuffer) yield event;
       throw error;
     }
@@ -343,4 +388,33 @@ function isThreadStartedEvent(value: unknown): value is { type: 'thread.started'
   if (!value || typeof value !== 'object') return false;
   const record = value as { type?: unknown; thread_id?: unknown };
   return record.type === 'thread.started' && typeof record.thread_id === 'string';
+}
+
+function isPreTurnLifecycleTerminal(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const event = value as {
+    type?: unknown;
+    lifecycle?: { stage?: unknown; turnAccepted?: unknown };
+  };
+  return event.type === 'app_server.lifecycle' && isPreTurnLifecycleTerminalSnapshot(event.lifecycle);
+}
+
+function isPreTurnLifecycleTerminalSnapshot(
+  lifecycle: { stage?: unknown; turnAccepted?: unknown } | undefined,
+): boolean {
+  return (
+    lifecycle?.turnAccepted === false &&
+    (lifecycle.stage === 'failed' || lifecycle.stage === 'closing' || lifecycle.stage === 'closed')
+  );
+}
+
+function projectLifecycle(
+  onLifecycle: CodexAppServerClientDeps['onLifecycle'] | undefined,
+  snapshot: CodexAppServerLifecycleSnapshot,
+): void {
+  try {
+    onLifecycle?.(snapshot);
+  } catch {
+    // Lifecycle projection is observational; it cannot abort provider work.
+  }
 }

@@ -136,20 +136,29 @@ describe('F293 controlled human recovery journey', () => {
     assert.equal((await h.decide()).targets[0].disposition, 'rejected', 'real failed terminal updates routing truth');
     for (const threadId of ['thread-b', 'thread-c']) {
       const events = await send(threadId);
-      assert.ok(events.some((event) => event.errorCode === 'routing_preflight_rejected'));
+      assert.ok(
+        events.some((event) => {
+          if (event.type !== 'system_info') return false;
+          try {
+            const receipt = JSON.parse(event.content);
+            return receipt.type === 'routing_preflight' && receipt.target?.disposition === 'rejected';
+          } catch {
+            return false;
+          }
+        }),
+      );
     }
     assert.equal(calls, 1, 'automatic retries are blocked before invoking the provider');
     providerFails = false;
-    const attempted = await send('thread-a', true);
-    assert.ok(
-      attempted.some(
-        (event) => event.type === 'system_info' && JSON.parse(event.content).target?.ownerAttempt === true,
-      ),
-    );
+    await send('thread-a', true);
     assert.equal(calls, 2, 'a human attempt reaches the recovered provider');
     assert.equal((await h.decide()).targets[0].disposition, 'allowed');
     assert.equal(calls, 2, 'recovery does not replay either blocked request');
-    assert.equal(messages.filter((message) => message.extra?.systemInfo?.payload.retryInvocationId).length, 3);
+    assert.equal(
+      messages.filter((message) => message.extra?.systemInfo?.payload.retryInvocationId).length,
+      2,
+      'only rejected automatic sends persist retryable receipts; a permitted owner attempt does not add noise',
+    );
     await send('thread-b');
     await send('thread-c');
     assert.equal(calls, 4, 'both other threads can send again through the same resolver');

@@ -278,7 +278,7 @@
     },
     {
       "id": "F047",
-      "name": "Queue Steer（取消当前轮并以同一消息立即重启）",
+      "name": "Queue Steer（逐成员立即引导或中断回复）",
       "status": "done（2026-07-12 语义修订） | **Owner**: Maine Coon/Maine Coon（Codex）",
       "file": "F047-queue-steer.md"
     },
@@ -711,7 +711,7 @@
     {
       "id": "F117",
       "name": "Message Delivery Lifecycle — 消息投递生命周期真相源",
-      "status": "done | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
+      "status": "implementing — PR #1398 已按 2026-09-09 co-creator 验收反馈收敛为单 source Queue Entry + History actual-dispatch lifecycle，并完成 carrier 能力真相与副作用出口去门卫化；待本轮 exact-HEAD review、worktree 体验与 fork soak | **Owner**: Ragdoll + Maine Coon | **Priority**: P1",
       "file": "F117-message-delivery-lifecycle.md"
     },
     {
@@ -1329,7 +1329,7 @@
     {
       "id": "F220",
       "name": "A2A 协作的可观测 · 可靠 · 可恢复",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon (Sol/GPT-5.6-sol；2026-08-04 operator 重分配) | **Priority**: P1 | **Source**: internal",
+      "status": "done | **Owner**: 小太阳·Maine Coon (Sol/GPT-5.6-sol；2026-08-04 operator 重分配) | **Priority**: P1 | **Source**: internal",
       "file": "F220-a2a-collab-reliability.md"
     },
     {
@@ -1515,7 +1515,7 @@
     {
       "id": "F254",
       "name": "Side-Effect Freshness Gate — 副作用出口 freshness 拦截",
-      "status": "in-progress, **D2 live app-server canary lifecycle/parity hardening + E-C complete** (**ADR-042 glass-box publish-then-supplement merged via PR #2906 (`ace5412c0`); durable Queue custody / migration / replayable `eval:freshness` merged via PR #2912 (`07f46f5aa`); D2 default-off provider-native carrier merged via PR #3004 (`680ab702f`); typed causal provenance + durable child lifecycle merged via PR #3036 (`9ae942beb`). The operator has explicitly enabled `CAT_CAFE_CODEX_CARRIER=app_server` in the live runtime canary. PR #3079 (`3b83fb43c`) fixed LF-only JSONL framing plus pump rejection isolation; PR #3082 (`7dd7a4d51`) restored provider-neutral Codex diagnostics; PR #3097 (`54aef5e74`) merged AC-D14 lifecycle parity/no-replay after Terra exact-HEAD review; PR #3285 (`65ef23d17`) merged exact capacity checkpoint continuation after gpt52 exact-HEAD review. Code default remains `exec_json`; broad rollout is still gated by AC-D15~D17 and explicit rollout authorization. 2026-08-04 normal-runtime UAT proves the live app-server path is loaded, but also proves Codex 0.146.0 protocol drift: a completed `collabAgentToolCall/wait` crossed four real boundaries without a notice because the classifier/eval census knows only command/file/MCP/dynamic. F264 owns the separate author-intent visibility and capability-aware UI close gate.**) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "partially superseded — **Phase A HELD + Phase B1 MCP piggyback + Phase B2 hold reminder retired by F117/#1398 on 2026-09-09**; dedicated stream-output/catch-closure/glass-box supplement work remains historical or independently owned as marked below. Live delivery capability now follows each member's canonical `carrier`, not a global Codex environment selector. | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F254-side-effect-freshness-gate.md"
     },
     {

@@ -13,6 +13,27 @@ function activeExecutionResource(projectPath: string): string {
   return `/api/executions/active?projectPath=${encodeURIComponent(projectPath)}`;
 }
 
+async function postLiveExecutionCancel(target: {
+  threadId: string;
+  catId: string;
+  executionId: string;
+}): Promise<Response> {
+  return apiFetch(
+    `/api/threads/${encodeURIComponent(target.threadId)}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ catId: target.catId }),
+    },
+  );
+}
+
+async function requireCancelConvergence(response: Response): Promise<void> {
+  if (response.ok || response.status === 409) return;
+  const detail = (await response.json().catch(() => null)) as { error?: string; code?: string } | null;
+  throw new Error(detail?.error ?? `Cancel failed (${response.status})`);
+}
+
 export async function refreshActiveExecutionProjection(
   anchorThreadId: string,
   projectPath: string,
@@ -43,19 +64,9 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
   try {
     const response =
       target.kind === 'live_invocation'
-        ? await apiFetch(
-            `/api/threads/${encodeURIComponent(target.threadId)}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
-            {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ catId: target.catId }),
-            },
-          )
+        ? await postLiveExecutionCancel(target)
         : await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(target.taskId)}`, { method: 'DELETE' });
-    if (!response.ok && response.status !== 409) {
-      const detail = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(detail?.error ?? `Cancel failed (${response.status})`);
-    }
+    await requireCancelConvergence(response);
     useActiveExecutionStore.getState().settleCancellation(execution);
     const { anchorThreadId, projectPath } = useActiveExecutionStore.getState();
     if (anchorThreadId && projectPath) await refreshActiveExecutionProjection(anchorThreadId, projectPath);
@@ -63,6 +74,27 @@ export async function cancelProjectedExecution(execution: ActiveExecutionProject
     useActiveExecutionStore.getState().releaseCancellation(execution);
     throw error;
   }
+}
+
+/** Stop a legacy socket witness, then refresh and stop the canonical replacement if one appeared. */
+export async function cancelUnverifiedLegacyExecution(target: {
+  threadId: string;
+  catId: string;
+  executionId: string;
+}): Promise<void> {
+  const response = await postLiveExecutionCancel(target);
+  await requireCancelConvergence(response);
+  const projectPath = useActiveExecutionStore.getState().projectPath;
+  if (!projectPath) return;
+  await refreshActiveExecutionProjection(target.threadId, projectPath);
+  const replacement = Object.values(useActiveExecutionStore.getState().executionsByKey).find(
+    (execution) =>
+      execution.threadId === target.threadId &&
+      execution.catId === target.catId &&
+      execution.kind === 'live_invocation' &&
+      execution.cancelability.state === 'cancelable',
+  );
+  if (response.status === 409 && replacement) await cancelProjectedExecution(replacement);
 }
 
 /**

@@ -187,6 +187,42 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.deepEqual(runtimeCat.mentionPatterns, ['@runtime-cat']);
   });
 
+  it('GET /api/cats projects static guide-reply capability per configured member', async () => {
+    const projectRoot = createRuntimeCatalogProject(makeCatalog('runtime-cat', '运行时猫'));
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes, {
+      resolveCarrierCapability: (catId) =>
+        catId === 'runtime-cat'
+          ? {
+              provider: 'openai_codex',
+              carrier: 'codex_app_server',
+              deliverySemantics: 'exact_active_turn',
+            }
+          : {
+              provider: 'anthropic',
+              carrier: 'claude_print_sdk',
+              deliverySemantics: 'unsupported',
+            },
+    });
+
+    try {
+      const res = await app.inject({ method: 'GET', url: '/api/cats' });
+      assert.equal(res.statusCode, 200, res.body);
+      const body = JSON.parse(res.body);
+      const runtimeCat = body.cats.find((cat) => cat.id === 'runtime-cat');
+      assert.equal(runtimeCat.isDefaultResponder, true);
+      assert.deepEqual(runtimeCat.messageDeliveryCapabilities, { guideReply: true });
+      const other = body.cats.find((cat) => cat.id !== 'runtime-cat');
+      if (other) assert.deepEqual(other.messageDeliveryCapabilities, { guideReply: false });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('GET /api/cat-templates returns template cats even when runtime catalog has additional members', async () => {
     const templateConfig = makeVersion2Config('template-cat', '模板猫', {
       family: 'ragdoll',

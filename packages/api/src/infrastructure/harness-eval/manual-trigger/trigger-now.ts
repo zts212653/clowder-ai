@@ -119,8 +119,8 @@ export async function handleTriggerNow(
   ].join('\n');
 
   const stored = await deps.messageStore.append({
+    from: { kind: 'system', service: 'scheduler' },
     userId: 'scheduler',
-    catId: null,
     content,
     mentions: [],
     timestamp: Date.now(),

@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
-import { ThinkingIndicator } from '../ThinkingIndicator';
 import { ThreadExecutionBar } from '../ThreadExecutionBar';
 
 const mocks = vi.hoisted(() => ({
@@ -164,29 +163,5 @@ describe('thread-scoped liveness chrome', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ catId: 'opus' }),
     });
-  });
-
-  it('ThinkingIndicator shows the requested thread spawning cat during A2A handoff windows', () => {
-    seedThreadBExecution();
-    useChatStore.setState({
-      currentThreadId: 'thread-a',
-      targetCats: [],
-      catStatuses: {},
-      threadStates: {
-        'thread-b': {
-          ...DEFAULT_THREAD_STATE,
-          hasActiveInvocation: true,
-          targetCats: ['opus'],
-          catStatuses: { opus: 'spawning' },
-        },
-      },
-    });
-
-    act(() => {
-      root.render(React.createElement(ThinkingIndicator, { threadId: 'thread-b' }));
-    });
-
-    expect(container.textContent).toContain('布偶猫（Opus 4.7）');
-    expect(container.textContent).toContain('Background thread · 实时回合启动中');
   });
 });

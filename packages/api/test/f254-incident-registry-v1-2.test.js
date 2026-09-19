@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { assembleContext } = await import('../dist/domains/cats/services/context/ContextAssembler.js');
 const { InMemoryFreshnessClosureStore } = await import(
@@ -55,14 +56,16 @@ describe('F254 incident registry v1.2', () => {
       now: 120,
     });
 
-    const trigger = await messageStore.append({
-      userId: 'user-1',
-      threadId: 'thread-1',
-      catId: null,
-      content: 'new independent question',
-      mentions: ['fable5'],
-      timestamp: 200,
-    });
+    const trigger = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        threadId: 'thread-1',
+        catId: null,
+        content: 'new independent question',
+        mentions: ['fable5'],
+        timestamp: 200,
+      }),
+    );
     const coordinator = new FreshnessOutputCommitCoordinator({ messageStore, closureStore });
     const decision = await coordinator.commit({
       userId: 'user-1',
@@ -71,7 +74,7 @@ describe('F254 incident registry v1.2', () => {
       invocationId: 'new-parent',
       turnInvocationId: 'new-fable-turn',
       originTriggerMessageId: trigger.id,
-      message: {
+      message: canonicalTestMessageInput({
         userId: 'user-1',
         threadId: 'thread-1',
         catId: 'fable5',
@@ -80,7 +83,7 @@ describe('F254 incident registry v1.2', () => {
         timestamp: 210,
         origin: 'stream',
         extra: { stream: { invocationId: 'new-parent', turnInvocationId: 'new-fable-turn' } },
-      },
+      }),
       evaluateFreshness: async () => ({ freshness: fresh(trigger.id), rawFrontierMessageId: trigger.id }),
     });
 

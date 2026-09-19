@@ -258,9 +258,9 @@ export function buildBriefingMessage(
   const rich: RichMessageExtra = { v: 1, blocks: [card] };
 
   return {
+    from: { kind: 'system', service: 'context-briefing' },
     threadId,
     userId: 'system',
-    catId: null,
     content: navTitle,
     mentions: [],
     timestamp: Date.now(),

@@ -661,7 +661,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
               undefined,
               policy,
             );
-            wakeAccepted = outcome === 'dispatched' || outcome === 'enqueued';
+            wakeAccepted = outcome === 'enqueued';
             if (!wakeAccepted) {
               opts.log.error(
                 { taskId: task.id, subjectKey, threadId: wake.threadId, catId: wake.catId, outcome },

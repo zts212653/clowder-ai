@@ -1,38 +1,50 @@
-import type { ManagedHoldDispositionService } from '../domains/ball-custody/ManagedHoldDispositionService.js';
 import type { TypedWaitSource } from '../domains/ball-custody/TypedWaitRegistration.js';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isOwnerVisibleManagedHoldConnector } from '../domains/cats/services/stores/visibility.js';
 
-/** Start at callback entry: describe() snapshots adopted sources synchronously before its first await. */
+/**
+ * Snapshot the exact lifecycle inputs at callback entry. Later queue adoption
+ * must not retrospectively grant a wait registration authority over a source
+ * that was not part of this callback's initial view.
+ */
 export async function captureTypedWaitSource(
   auth: InvocationRecord,
   deps: {
     readonly messageStore: Pick<IMessageStore, 'getById'>;
-    readonly managedHoldDispositionService?: Partial<Pick<ManagedHoldDispositionService, 'describe'>>;
+    readonly invocationTracker?: Pick<InvocationTracker, 'getActiveSlots'>;
   },
 ): Promise<TypedWaitSource | undefined> {
+  const activeRun = deps.invocationTracker
+    ?.getActiveSlots(auth.threadId)
+    .find((slot) => slot.catId === auth.catId && slot.activeRun?.invocationId === auth.invocationId)?.activeRun;
+  const inputMessageIds = activeRun ? [...activeRun.inputMessageIds] : [];
+
   try {
-    const selectionPromise = deps.managedHoldDispositionService?.describe?.(auth);
-    const selection = await selectionPromise;
-    if (selection?.state === 'ambiguous_multiple_pending') return undefined;
-    const selected = selection?.state === 'single_canonical_pending' ? selection.candidates[0] : undefined;
-    if (selected) {
-      const source = await deps.messageStore.getById(selected.sourceMessageId);
+    const managedHoldSources: Extract<TypedWaitSource, { holdTaskId?: string }>[] = [];
+    for (const sourceMessageId of inputMessageIds) {
+      const source = await deps.messageStore.getById(sourceMessageId);
+      const taskId = source?.source?.meta?.taskId;
       if (
         !source ||
         !isOwnerVisibleManagedHoldConnector(source, auth.userId) ||
         source.source?.meta?.catId !== auth.catId ||
-        source.source.meta.taskId !== selected.taskId
-      )
-        return undefined;
-      return {
-        kind: selected.sourceMessageId === auth.originTriggerMessageId ? 'primary' : 'adopted_hold',
-        sourceMessageId: selected.sourceMessageId,
-        holdTaskId: selected.taskId,
-      };
+        typeof taskId !== 'string' ||
+        taskId.length === 0
+      ) {
+        continue;
+      }
+      managedHoldSources.push({
+        kind: sourceMessageId === auth.originTriggerMessageId ? 'primary' : 'adopted_hold',
+        sourceMessageId,
+        holdTaskId: taskId,
+      });
     }
-    if (!auth.originTriggerMessageId) return undefined;
+    if (managedHoldSources.length > 1) return undefined;
+    if (managedHoldSources[0]) return managedHoldSources[0];
+
+    if (!auth.originTriggerMessageId || !inputMessageIds.includes(auth.originTriggerMessageId)) return undefined;
     const origin = await deps.messageStore.getById(auth.originTriggerMessageId);
     if (
       !origin ||
@@ -41,11 +53,12 @@ export async function captureTypedWaitSource(
       origin.source?.connector === 'hold-ball' ||
       origin.deletedAt !== undefined ||
       origin._tombstone
-    )
+    ) {
       return undefined;
+    }
     return { kind: 'primary', sourceMessageId: origin.id };
   } catch {
-    // Registration remains useful without authority to consume an unresolved source.
+    // The public tracking task remains useful without private continuation authority.
     return undefined;
   }
 }

@@ -112,6 +112,12 @@ export const routingSignalObservationTotal = lazy(() =>
   }),
 );
 
+export const routingSyntaxCorrectionDetected = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.routing_syntax.correction_detected', {
+    description: 'Agent output requiring private line-start routing syntax correction',
+  }),
+);
+
 export const proactiveMemoryScanTotal = lazy(() =>
   meter().createCounter('cat_cafe.proactive_memory.scan', {
     description: 'F282 canonical owner-window scans without owner or subject attributes',
@@ -254,7 +260,7 @@ export const inlineActionFeedbackWriteFailed = lazy(() =>
 
 export const inlineActionHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.inline_action.hint_emitted', {
-    description: 'Inline action hint system message sent to user',
+    description: 'Legacy-named internal inline action correction signal',
   }),
 );
 
@@ -600,13 +606,13 @@ export const routingTerminalReleaseRemedialTotal = lazy(() =>
 
 export const c2VerdictHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.c2.verdict_hint_emitted', {
-    description: 'C2 exit-check verdict-no-pass hint emitted (split from mixed hint_emitted)',
+    description: 'Legacy-named internal C2 verdict-without-pass correction signal',
   }),
 );
 
 export const c2VoidHoldHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.c2.void_hold_hint_emitted', {
-    description: 'C2 exit-check void-hold hint emitted (split from mixed hint_emitted)',
+    description: 'Legacy-named internal C2 void-hold correction signal',
   }),
 );
 
@@ -1070,10 +1076,10 @@ export const freshnessQueuedSeen = lazy(() =>
   }),
 );
 
-/** Queued handled: a seen queued entry closed via same-invocation successful completion evidence. */
+/** Queued handled: an exact active child durably adopted one pending target from its source entry. */
 export const freshnessQueuedHandled = lazy(() =>
   meter().createCounter('cat_cafe.freshness.queued_handled', {
-    description: 'F254 queued handled closures inferred from queued_seen plus successful invocation evidence',
+    description: 'F254 queued handled closures committed by exact active-child full-read adoption',
   }),
 );
 
@@ -1366,5 +1372,6 @@ export function warmupCounters(): void {
   externalCaseUserNudgeRequired.add(0);
   contextProjectionTransitionTotal.add(0);
   contextProjectionLedgerOutcomeTotal.add(0);
+  routingSyntaxCorrectionDetected.add(0);
   routingSignalObservationTotal.add(0);
 }

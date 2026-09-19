@@ -995,6 +995,85 @@ test('#1272: one already-canonical Codex turn is byte-stable after finalization'
   assert.equal(`${body?.content}${done?.content}`, original);
 });
 
+test('#1398: an identity-annotated own signature is normalized instead of duplicated', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const original = ['收到，明白。已直接 @小狸花 打招呼。', '', '[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-gmwmct57]'].join(
+    '\n',
+  );
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(
+    `${body?.content}${done?.content}`,
+    '收到，明白。已直接 @小狸花 打招呼。\n\n[砚砚/gpt-5.3-codex-spark🐾]',
+  );
+});
+
+test('#1398: a display-name signature is normalized to the nickname canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = 'Hello～ 狸花猫在 🐾\n\n[狸花猫/deepseek-chat🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, 'Hello～ 狸花猫在 🐾\n\n[小狸花/deepseek-chat🐾]');
+});
+
+test('#1398 negative control: a display-name signature for another model remains content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = '示例：\n\n[狸花猫/another-model🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, `${original}\n\n[小狸花/deepseek-chat🐾]`);
+});
+
+test('#1398 negative control: a mismatched identity annotation remains user content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const sample = '引用：[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-someone-else]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.3-codex-spark🐾]`);
+});
+
 test('#1272: terminal teammate and legacy signatures remain content beside one canonical signature', () => {
   const state = {
     hadPriorTextTurn: false,
