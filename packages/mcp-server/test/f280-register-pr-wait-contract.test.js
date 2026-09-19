@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const EXPECTED_PUBLIC_KEYS = ['expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
+const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
 
 describe('F280 register_pr_tracking public contract', () => {
   it('exposes only the typed wait inputs', async () => {
@@ -52,6 +52,75 @@ describe('F280 register_pr_tracking public contract', () => {
         if (!(key in originalEnv)) delete process.env[key];
       }
       Object.assign(process.env, originalEnv);
+    }
+  });
+  /*
+   * #1392 AC-2: `expiresAt` is optional. The key stays in the public contract (a caller who wants
+   * a deadline must be able to state it), but omitting it must mean "no time-based termination"
+   * and must not reach the server as an explicit null or a zero.
+   */
+  it('makes expiresAt optional without removing it from the contract', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(registerPrTrackingInputSchema.expiresAt.isOptional(), true);
+  });
+
+  it('does not serialize an omitted expiresAt', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEnv = { ...process.env };
+    let requestBody;
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+    process.env.CAT_CAFE_INVOCATION_ID = 'f280-no-deadline-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'f280-no-deadline-token';
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    try {
+      const { handleRegisterPrTracking } = await import('../dist/tools/callback-tools.js');
+      await handleRegisterPrTracking({
+        repoFullName: 'zts212653/cat-cafe',
+        prNumber: 3300,
+        when: [{ kind: 'pr_head_changed' }],
+        nextStep: 'Continue.',
+      });
+      assert.equal(Object.hasOwn(requestBody, 'expiresAt'), false, 'PR: no deadline was asked for');
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnv)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnv);
+    }
+  });
+  it('offers autoRenew as an optional single-fire opt-out', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(registerPrTrackingInputSchema.autoRenew.isOptional(), true);
+  });
+
+  /*
+   * #1392 AC-3: a PR comment predicate names its audience. The tool must refuse the same shapes the
+   * server refuses — an omitted audience is not "any author", and an empty one matches nobody.
+   */
+  it('requires a named audience on both PR comment predicates', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    for (const kind of ['pr_conversation_comment_added', 'pr_inline_comment_added']) {
+      assert.equal(registerPrTrackingInputSchema.when.safeParse([{ kind }]).success, false, `${kind}: omitted`);
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: [] }]).success,
+        false,
+        `${kind}: empty`,
+      );
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: [' '] }]).success,
+        false,
+        `${kind}: blank login`,
+      );
+      assert.equal(
+        registerPrTrackingInputSchema.when.safeParse([{ kind, authorLogins: ['pr-author'] }]).success,
+        true,
+        `${kind}: named`,
+      );
     }
   });
 });

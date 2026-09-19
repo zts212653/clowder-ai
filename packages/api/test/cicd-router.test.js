@@ -171,7 +171,7 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
   });
 
-  test('completed HEAD wait still advances external-case CI projection without another wake', async () => {
+  test('a renewed HEAD wait still advances external-case CI projection without another wake', async () => {
     const { taskStore, messageStore, task, lifecycle } = await setup([{ kind: 'pr_head_changed' }]);
     const headSha = 'bbb2222';
     const waitResult = await lifecycle.observe({
@@ -186,7 +186,15 @@ describe('CiCdRouter F280 typed waits', () => {
       },
     });
     assert.equal(waitResult.kind, 'notified');
-    assert.equal((await taskStore.get(task.id)).status, 'done');
+    // #1392 AC-1: a notification is not an exit. Only the subject reaching a terminal state, an
+    // explicit deadline, or an explicit cancel ends tracking, so a delivered `head_changed` leaves
+    // the task active with the same subscription re-armed. This used to assert `done`, which
+    // encoded the one-shot wait #1392 replaces.
+    const afterWake = await taskStore.get(task.id);
+    assert.equal(afterWake.status, 'doing', 'a delivered notification renews tracking, it does not end it');
+    assert.equal(afterWake.automationState.await.generation, 2, 'the next generation is installed');
+    assert.deepEqual(afterWake.automationState.await.continuation.when, [{ kind: 'pr_head_changed' }]);
+    assert.equal(afterWake.automationState.waitOutcome.delivery, 'delivered');
 
     const projected = [];
     const router = new CiCdRouter({
@@ -205,7 +213,9 @@ describe('CiCdRouter F280 typed waits', () => {
     const result = await router.route(poll({ headSha }));
 
     assert.equal(result.kind, 'skipped');
-    assert.equal(result.reason, 'no_active_wait');
+    // A wait IS live now — this poll just carries no new HEAD. `no_active_wait` would mean tracking
+    // had ended, which is exactly the difference this test now pins.
+    assert.equal(result.reason, 'predicates_not_matched');
     assert.equal(projected.length, 1);
     assert.equal(projected[0].headSha, headSha);
     assert.equal((await taskStore.get(task.id)).automationState.ci.headSha, headSha);

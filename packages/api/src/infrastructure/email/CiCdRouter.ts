@@ -14,6 +14,7 @@ import type {
   GitHubWaitLifecycleResult,
   GitHubWaitLifecycleService,
 } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import { awaitsReviewCollection } from '../../domains/github-signals/GitHubWaitPredicateCatalog.js';
 import type { CiBucket, CiPollResult, CiRouteResult } from './ci-cd-contract.js';
 import { buildCiMessageContent, buildLifecycleMessageContent } from './ci-message-content.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
@@ -45,8 +46,42 @@ interface TerminalRecoveryContext {
   readonly effects: TerminalEffectReceipt;
 }
 
+interface TerminalObservation {
+  readonly state: TerminalPrState;
+  /** When CI first observed this state, carried across polls. */
+  readonly observedAt: number;
+  /** Whether this poll ends the wait, or leaves that to the review collector's final observation. */
+  readonly closes: boolean;
+}
+
+/**
+ * #1392 AC-2: how long a merge or close observed by CI waits for the review collector's final
+ * observation before CI ends the wait itself. Review polls every minute, so this outlasts several
+ * failed polls, and it bounds the delay when the review schedule is not running at all.
+ */
+export const REVIEW_FINAL_OBSERVATION_GRACE_MS = 5 * 60_000;
+
 function terminalPrState(poll: CiPollResult): TerminalPrState | undefined {
   return poll.prState === 'merged' || poll.prState === 'closed' ? poll.prState : undefined;
+}
+
+/**
+ * #1392 AC-2: a merge ends tracking, and after that no collector polls the task again. CI cannot see
+ * review comments, so while the wait is for something only the review collector observes, CI leaves
+ * the ending to that collector's final observation — for a bounded time, in case it never comes.
+ */
+function observeTerminal(task: TaskItem, poll: CiPollResult, now: number): TerminalObservation | undefined {
+  const state = terminalPrState(poll);
+  if (!state) return undefined;
+  const automation = task.automationState as PrAutomationState | undefined;
+  const observedAt = automation?.ci?.prState === state ? (automation.ci.terminalObservedAt ?? now) : now;
+  const active = automation?.await;
+  const leftToReview =
+    active !== undefined &&
+    automation?.review?.prState !== state &&
+    awaitsReviewCollection(active.continuation.when) &&
+    now - observedAt < REVIEW_FINAL_OBSERVATION_GRACE_MS;
+  return { state, observedAt, closes: !leftToReview };
 }
 
 export function buildDeliveryDecisionCueCarrier(
@@ -169,7 +204,7 @@ function routeFromLifecycle(
     };
   }
   return {
-    kind: result.kind === 'deduped' ? 'deduped' : 'skipped',
+    kind: result.kind === 'deduped' || result.kind === 'unrecorded' ? 'deduped' : 'skipped',
     reason: result.reason,
   };
 }
@@ -188,7 +223,7 @@ export class CiCdRouter {
 
     const settled = settleEmptyCheckRollup(poll, task.automationState?.ci?.rollupObservation, this.now());
     const observedPoll = settled.poll;
-    const terminal = terminalPrState(observedPoll);
+    const terminal = observeTerminal(task, observedPoll, this.now());
     const disabled = await this.skipDisabledCi(task);
     if (disabled) return disabled;
     await this.recordExternalReviewCi(observedPoll, task, sk);
@@ -216,11 +251,12 @@ export class CiCdRouter {
 
     if (terminal) {
       await this.recoverTerminalSideEffects(observedPoll, task.id, sk);
-      if (lifecycle.kind !== 'notified') {
+      // An unrecorded close changed nothing; marking the task done would strand its live wait.
+      if (terminal.closes && lifecycle.kind !== 'notified' && lifecycle.kind !== 'unrecorded') {
         await this.opts.taskStore.update(task.id, { status: 'done' });
       }
     }
-    return routeFromLifecycle(lifecycle, waitBucket, terminal);
+    return routeFromLifecycle(lifecycle, waitBucket, terminal?.closes ? terminal.state : undefined);
   }
 
   private async skipDisabledCi(task: TaskItem): Promise<CiRouteResult | null> {
@@ -250,7 +286,7 @@ export class CiCdRouter {
     task: TaskItem,
     waitBucket: CiBucket,
     fingerprint: string,
-    terminal: TerminalPrState | undefined,
+    terminal: TerminalObservation | undefined,
     deliveryDecision: DeliveryDecisionCueCarrierV1 | null,
     rollupObservation: RollupObservation,
   ): Promise<GitHubWaitLifecycleResult> {
@@ -270,10 +306,10 @@ export class CiCdRouter {
           lastFingerprint: fingerprint,
           lastBucket: waitBucket,
           rollupObservation,
-          ...(terminal ? { prState: terminal } : {}),
+          ...(terminal ? { prState: terminal.state, terminalObservedAt: terminal.observedAt } : {}),
         },
       },
-      ...(terminal ? { subjectState: terminal } : {}),
+      ...(terminal?.closes ? { subjectState: terminal.state } : {}),
       ...(deliveryDecision ? { deliveryExtra: { memoryCue: { deliveryDecision } } } : {}),
     });
   }

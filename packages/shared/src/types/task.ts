@@ -67,8 +67,14 @@ export interface CiAutomationState {
     readonly state: 'empty' | 'present';
     readonly streakStartedAt: number;
   };
-  /** Terminal PR state — persisted by CiCdRouter on lifecycle close (F200 AC-D2.3). */
+  /** Terminal PR state — persisted by CiCdRouter when it observes it (F200 AC-D2.3). */
   readonly prState?: 'merged' | 'closed';
+  /**
+   * #1392 AC-2: when CiCdRouter first observed `prState`. A wait that is for something only the
+   * review collector can see is left for that collector's final observation, for a bounded time
+   * measured from here.
+   */
+  readonly terminalObservedAt?: number;
   /**
    * Durable receipts for PR-terminal world-truth effects. The terminal collector
    * remains schedulable until `completedAt` is present for the current `prState`.
@@ -107,7 +113,10 @@ export interface ReviewAutomationState {
   };
   readonly lastDecisionCursor?: number;
   readonly lastNotifiedAt?: number;
-  /** Terminal PR state observed by ReviewFeedbackTaskSpec before CI lifecycle delivery. */
+  /**
+   * Terminal PR state recorded by the review collector's final observation. Until it is present, CI
+   * does not end a wait that only the review collector can observe (#1392 AC-2).
+   */
   readonly prState?: 'merged' | 'closed';
 }
 

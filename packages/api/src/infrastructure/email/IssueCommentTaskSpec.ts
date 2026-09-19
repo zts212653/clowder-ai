@@ -573,7 +573,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             (signal.newComments.length > 0
               ? Math.max(...signal.newComments.map((comment) => comment.id))
               : (task.automationState?.issue?.lastCommentCursor ?? 0));
-          await opts.waitLifecycle.observe({
+          const observed = await opts.waitLifecycle.observe({
             taskId: task.id,
             facts: {
               issue: {
@@ -595,6 +595,30 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
             ...(signal.issueState === 'closed' ? { subjectState: 'closed' as const } : {}),
           });
           ctx?.signal?.throwIfAborted();
+          // #1392 AC-6: observe() writes the owner's message; it does not start the owner. Returning
+          // here left every tracked issue comment delivered and unanswered. Mirrors the PR-side
+          // task specs: one best-effort wake for the message that was actually delivered.
+          if (observed.kind === 'notified' && opts.invokeTrigger) {
+            const ownerCatId = observed.task.ownerCatId ?? task.ownerCatId;
+            try {
+              await opts.invokeTrigger.trigger(
+                observed.task.threadId,
+                ownerCatId as CatId,
+                task.userId,
+                observed.content,
+                observed.messageId,
+                undefined,
+                {
+                  priority: 'normal',
+                  reason: 'github_wait_satisfied',
+                  sourceCategory: 'issue',
+                  coalesceKey: `${subjectKey}:wait:${ownerCatId || 'unassigned'}`,
+                },
+              );
+            } catch (err) {
+              opts.log.warn({ err, subjectKey }, '[issue-comment] wake after delivery failed (best-effort)');
+            }
+          }
           return;
         }
 

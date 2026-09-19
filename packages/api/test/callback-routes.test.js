@@ -6038,6 +6038,138 @@ describe('Callback Routes', () => {
     assert.equal(found.threadId, 'thread-pr');
   });
 
+  /*
+   * #1392 AC-2: `expiresAt` is optional. Omitted means tracking has no time-based termination;
+   * supplied, it is a real deadline that must be in the future and must come back in the
+   * response, because an invisible deadline is exactly the "silently disconnected" failure the
+   * issue opened with.
+   */
+  test('POST register-pr-tracking accepts an omitted expiresAt as no time-based termination', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const { expiresAt: _omitted, ...payload } = prWaitPayload();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload,
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    const body = JSON.parse(response.body);
+    assert.equal(Object.hasOwn(body.await, 'expiresAt'), false, 'no deadline was asked for, so none is stored');
+    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
+    assert.equal(Object.hasOwn(stored.automationState.await, 'expiresAt'), false);
+  });
+
+  test('POST register-pr-tracking still rejects a supplied expiresAt that is not in the future', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ expiresAt: Date.now() - 1 }),
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.equal(JSON.parse(response.body).error, 'expiresAt must be in the future');
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#99'), null, 'a rejected registration stores nothing');
+  });
+
+  test('POST register-pr-tracking returns a supplied expiresAt so the deadline is visible', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const deadline = Date.now() + 3_600_000;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ expiresAt: deadline }),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(JSON.parse(response.body).await.expiresAt, deadline);
+  });
+
+  /*
+   * #1392 AC-1: renewal is the default; `autoRenew: false` is the explicit single-fire opt-in.
+   * Omitted must not be stored as an explicit `true` — the absence IS the default.
+   */
+  test('POST register-pr-tracking stores autoRenew false as the explicit single-fire opt-in', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ autoRenew: false }),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(JSON.parse(response.body).await.autoRenew, false);
+  });
+
+  test('POST register-pr-tracking leaves autoRenew unset when omitted, which means renew', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload(),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(Object.hasOwn(JSON.parse(response.body).await, 'autoRenew'), false);
+  });
+
+  /*
+   * #1392 AC-3: a PR comment wait names who it is waiting on. An omitted audience is refused at the
+   * real entry rather than stored as an open audience nobody chose; a named one is frozen and comes
+   * back in the response, so the caller can see exactly whose comments will wake it.
+   */
+  test('POST register-pr-tracking refuses a PR comment wait without an audience and stores nothing', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ when: [{ kind: 'pr_conversation_comment_added' }] }),
+    });
+
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(taskStore.getBySubject('pr:zts212653/cat-cafe#99'), null, 'a rejected registration stores nothing');
+  });
+
+  test('POST register-pr-tracking freezes a named PR comment audience and returns it', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-pr');
+    const when = [
+      { kind: 'pr_conversation_comment_added', authorLogins: ['pr-author'] },
+      { kind: 'pr_inline_comment_added', authorLogins: ['pr-author'] },
+    ];
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-pr-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: prWaitPayload({ when }),
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(JSON.parse(response.body).await.continuation.when, when);
+    const stored = taskStore.getBySubject('pr:zts212653/cat-cafe#99');
+    assert.deepEqual(stored.automationState.await.continuation.when, when);
+  });
+
   test('POST register-pr-tracking maps a confirmed GitHub 404 to 422', async () => {
     const { resolveGitHubObjectLookup } = await import('../dist/infrastructure/github/github-object-validator.js');
     const notFound = Object.assign(new Error('gh: Not Found (HTTP 404)'), {
@@ -7350,6 +7482,38 @@ describe('Callback Routes', () => {
     const stored = taskStore.getBySubject('issue:zts212653/cat-cafe#861');
     assert.equal(stored.automationState.issue.lastCommentCursor, 1234);
     assert.equal(stored.automationState.await.baseline.issue.authorLogin, 'issue-author');
+  });
+
+  test('POST register-issue-tracking accepts an omitted expiresAt as no time-based termination', async () => {
+    const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
+    const app = Fastify();
+    await app.register(callbacksRoutes, {
+      registry,
+      messageStore,
+      socketManager,
+      taskStore,
+      threadStore,
+      evidenceStore,
+      reflectionService,
+      markerQueue,
+      fetchIssueWaitBaseline: async () => ({
+        baseline: { capturedAt: 1000, issue: { lastCommentCursor: 1, state: 'open', authorLogin: 'issue-author' } },
+        collectorState: { issue: { lastCommentCursor: 1, lastDeliveredCursor: 1, issueState: 'open' } },
+      }),
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', 'thread-issue');
+    const { expiresAt: _omitted, ...payload } = issueWaitPayload({ issueNumber: 862 });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/register-issue-tracking',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload,
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    const body = JSON.parse(response.body);
+    assert.equal(Object.hasOwn(body.task.automationState.await, 'expiresAt'), false);
   });
 
   test('POST register-issue-tracking re-registers with a fresh baseline and next generation', async () => {

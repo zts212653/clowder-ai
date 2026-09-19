@@ -7,6 +7,8 @@ export const GITHUB_WAIT_PREDICATE_KINDS = [
   'pr_review_thread_changed',
   'pr_ci_terminal',
   'pr_became_conflicting',
+  'pr_conversation_comment_added',
+  'pr_inline_comment_added',
   'issue_comment_added',
   'issue_author_commented',
 ] as const;
@@ -20,7 +22,19 @@ export type GitHubWaitPredicate =
   | { readonly kind: 'pr_review_thread_changed'; readonly reviewThreadIds: readonly string[] }
   | { readonly kind: 'pr_ci_terminal' }
   | { readonly kind: 'pr_became_conflicting' }
-  | { readonly kind: 'issue_comment_added' }
+  /**
+   * #1392 AC-3 / AC-6: a new PR review comment on one surface. The two surfaces keep separate
+   * frontiers — inline and conversation comment ids are not comparable. `authorLogins` is a
+   * required, non-empty positive audience, frozen at registration and compared
+   * case-insensitively. There is no omitted-means-anyone form.
+   */
+  | { readonly kind: 'pr_conversation_comment_added'; readonly authorLogins: readonly string[] }
+  | { readonly kind: 'pr_inline_comment_added'; readonly authorLogins: readonly string[] }
+  /**
+   * #1392 AC-3: optional positive audience, frozen at registration, compared case-insensitively.
+   * Omitted keeps main's any-comment issue wait.
+   */
+  | { readonly kind: 'issue_comment_added'; readonly authorLogins?: readonly string[] }
   | { readonly kind: 'issue_author_commented' };
 
 export type GitHubPrWaitPredicate = Extract<GitHubWaitPredicate, { readonly kind: `pr_${string}` }>;
@@ -99,7 +113,17 @@ export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predic
     readonly when: readonly Predicate[];
     readonly then: string;
   };
-  readonly expiresAt: number;
+  /**
+   * #1392 AC-2: optional absolute deadline. Omitted means no time-based termination. When
+   * supplied it is a loud terminal outcome and is not extended by renewal. Read it only through
+   * `isAwaitExpired` — see that function for why direct comparison is unsafe.
+   */
+  readonly expiresAt?: number;
+  /**
+   * #1392 AC-1: default true — after a match, this generation is consumed and the next one is
+   * installed in the same transition. `false` is the explicit single-fire opt-in.
+   */
+  readonly autoRenew?: boolean;
   readonly createdAt: number;
 }
 
@@ -145,6 +169,12 @@ export interface WaitOutcomeV1 {
   readonly nextStep?: string;
   readonly terminalSubjectState?: 'merged' | 'closed';
   readonly actor?: WaitTerminationActor;
+  /**
+   * #1392 AC-1: whether tracking continues after this outcome. `rearmed` means the next
+   * generation was installed in the same transition; `rearm_failed` means the event is still
+   * delivered but nothing is armed, and the owner must be told so. Absent means the wait ended.
+   */
+  readonly renewal?: 'rearmed' | 'rearm_failed';
 }
 
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
