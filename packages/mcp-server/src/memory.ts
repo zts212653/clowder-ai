@@ -5,13 +5,12 @@
  * 只暴露记忆与回溯工具（evidence/graph/recent/session chain）。
  */
 
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { installShutdownHandlers, startRefreshLoop } from './refresh-loop.js';
 import { SERVER_INSTRUCTIONS } from './server-instructions.js';
 import { registerMemoryToolset } from './server-toolsets.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
 import { initCatCafeDir } from './utils/path-validator.js';
 
 function createBaseServer(name: string): McpServer {
@@ -46,7 +45,7 @@ async function main(): Promise<void> {
   installShutdownHandlers(refreshLoop);
 }
 
-const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+const isEntryPoint = isDirectExecution(import.meta.url);
 if (isEntryPoint) {
   main().catch((err) => {
     console.error('[cat-cafe-memory] Fatal error:', err);
