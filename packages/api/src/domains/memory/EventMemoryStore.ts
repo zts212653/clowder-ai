@@ -65,6 +65,8 @@ export interface IEventMemoryStore {
   appendDeadLetter(record: EventMemoryRecord, ownerUserId: string, errorMessage: string): void;
   /** Read dead-lettered entries (replay / inspection). */
   listDeadLetter(): DeadLetterEntry[];
+  /** Release the sqlite handle (Windows cannot unlink an open file). */
+  close(): void;
   health(): boolean;
 }
 
@@ -147,6 +149,17 @@ export class EventMemoryStore implements IEventMemoryStore {
   private ensureOpen(): InstanceType<typeof Database> {
     if (!this.db) throw new Error('EventMemoryStore not initialized — call initialize() first');
     return this.db;
+  }
+
+  /**
+   * Release the sqlite handle (mirrors SqliteEvidenceStore.close). Windows cannot unlink a file
+   * that still has an open handle, so owners that remove the data dir must close first.
+   */
+  close(): void {
+    if (this.db?.open) {
+      this.db.close();
+    }
+    this.db = undefined;
   }
 
   markEvent(record: EventMemoryRecord, ownerUserId: string): MarkEventResult {

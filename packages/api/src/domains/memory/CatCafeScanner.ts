@@ -26,6 +26,7 @@ import {
 } from './CatCafeScannerParsing.js';
 import type { RepoScanner, ScannedEvidence } from './interfaces.js';
 import { buildMarkdownDocumentPassages } from './MarkdownPassageIndexer.js';
+import { toPosixPath } from './path-utils.js';
 import {
   buildTasteDecisionPassage,
   parseApprovedTasteVignette,
@@ -77,7 +78,7 @@ export class CatCafeScanner implements RepoScanner {
   }
 
   private isExcluded(filePath: string, projectRoot: string): boolean {
-    const rel = relative(projectRoot, filePath);
+    const rel = toPosixPath(relative(projectRoot, filePath));
     if (rel.split(/[\\/]+/).some((segment) => GENERATED_DOC_DIRS.has(segment))) return true;
     if (!this.exclude?.length) return false;
     return this.exclude.some((pattern) => matchGlob(pattern, rel));
@@ -102,7 +103,7 @@ export class CatCafeScanner implements RepoScanner {
     }
 
     const frontmatter = extractFrontmatter(content);
-    const sourcePath = relative(projectRoot, filePath);
+    const sourcePath = toPosixPath(relative(projectRoot, filePath));
     const tasteMaterialization = materializePublicTasteVignette(sourcePath, content);
     if (tasteMaterialization === null) return null;
     const anchor =

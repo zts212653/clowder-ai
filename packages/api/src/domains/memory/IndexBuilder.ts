@@ -16,6 +16,7 @@ import type {
   RebuildResult,
   RepoScanner,
 } from './interfaces.js';
+import { toPosixPath } from './path-utils.js';
 
 // Re-export for backward compatibility — external code imports KIND_DIRS from IndexBuilder
 export { KIND_DIRS } from './CatCafeScanner.js';
@@ -450,9 +451,8 @@ export class IndexBuilder implements IIndexBuilder {
       this.store.getDb().prepare("DELETE FROM edges WHERE provenance = 'content'").run();
     });
 
-    const toPosix = (p: string): string => p.replace(/\\/g, '/');
     const sourcePathKey = (sourcePath: string): string =>
-      toPosix(isAbsolute(sourcePath) ? relative(this.scanRoot, sourcePath) : sourcePath);
+      toPosixPath(isAbsolute(sourcePath) ? relative(this.scanRoot, sourcePath) : sourcePath);
     const pathToAnchor = new Map<string, string>();
     const setAlias = (key: string, anchor: string): void => {
       if (!pathToAnchor.has(key)) pathToAnchor.set(key, anchor);
@@ -662,7 +662,7 @@ export class IndexBuilder implements IIndexBuilder {
     const deletedAnchors: string[] = [];
     for (const filePath of toDelete) {
       // P1-5 fix: use scanRoot (not docsRoot) — source_path stored relative to scanRoot
-      const relPath = relative(this.scanRoot, filePath);
+      const relPath = toPosixPath(relative(this.scanRoot, filePath));
       const db = this.store.getDb();
       const row = db.prepare('SELECT anchor FROM evidence_docs WHERE source_path = ?').get(relPath) as
         | { anchor: string }

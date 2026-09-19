@@ -297,6 +297,7 @@ describe('EventMemoryStore (F227 PR-1)', () => {
       // (threadId, messageId, type). initialize() must dedup, not throw on the UNIQUE index.
       const dir = mkdtempSync(join(tmpdir(), 'evmem-mig-'));
       const dbPath = join(dir, 'legacy.db');
+      let migrated;
       try {
         const raw = new Database(dbPath);
         raw.exec(`
@@ -316,7 +317,7 @@ describe('EventMemoryStore (F227 PR-1)', () => {
         ins.run('evt_legacy_2', 'dup'); // same (thread_a, msg_1, scaffold) — a legacy duplicate
         raw.close();
 
-        const migrated = new EventMemoryStore(dbPath);
+        migrated = new EventMemoryStore(dbPath);
         await migrated.initialize(); // must NOT throw on CREATE UNIQUE INDEX
         assert.equal(migrated.listEvents().length, 1, 'legacy duplicate collapsed to one row');
         // post-migration the owner-scoped guard holds: a first OWNED write is new (legacy
@@ -325,6 +326,8 @@ describe('EventMemoryStore (F227 PR-1)', () => {
         assert.equal(migrated.markEvent(baseRecord(), OWNER).inserted, true);
         assert.equal(migrated.markEvent(baseRecord(), OWNER).inserted, false);
       } finally {
+        // Windows cannot unlink a file that still has an open handle.
+        migrated?.close();
         rmSync(dir, { recursive: true, force: true });
       }
     });
