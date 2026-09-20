@@ -261,14 +261,15 @@ gh pr create --title "feat(xxx): ..." --body "$(cat <<'EOF'
 EOF
 )"
 
-# 3. 只注册当前真正阻塞你的显式等待（F280；不是订阅所有 PR 事件）
-# → 调用 MCP: cat_cafe_register_pr_tracking(
-#      repoFullName, prNumber,
-#      when=[1–4 个 typed predicate],
-#      nextStep="条件满足后的具体动作",
-#      expiresAt=<future unix ms>   # 可选；省略则没有时间到期
-#    )
-# 例：当前下一步是“CI 到终态后继续 merge-gate”：
+# 3. 注册这个 PR 的追踪（F280 + #1392 AC-7）
+# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber)
+#    普通情况这就是全部参数。服务端会装上 PR 自身的状态条件（review decision /
+#    CI 终态 / 冲突 / 新 HEAD）和两个评论面，受众按你在这个 PR 上的角色解析；
+#    返回里的 notification 写明实际装了什么、过滤了什么。
+# 可选：expiresAt=<future unix ms>（省略则没有时间到期）、
+#      goal={kind:'await_reply_from', authorLogins:[...]}（只听点名的人）、
+#      when=[...]（高级精确入口，每种 typed 条件最多一个）
+# 例：只想被 CI 终态与冲突叫醒时才写 when：
 #    when=[{kind:'pr_ci_terminal'}, {kind:'pr_became_conflicting'}]
 # 若注册时 CI 已经终态，live baseline 会吸收历史，不补发；立即 `gh pr checks {PR}` 并继续。
 # 等待目标变化时显式 re-register；新 generation 原子替换旧 generation，不叠加 tracker/hold。

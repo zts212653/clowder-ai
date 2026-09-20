@@ -36,12 +36,15 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 
 ## Tracking registration policy
 
-PR tracking 是显式的 typed wait，不是事件订阅器：注册一次，匹配后默认自动续代，不需要再注册。调用方必须给出：
+PR/issue tracking 注册一次，匹配后默认自动续代，不需要再注册。**普通注册只给对象**：PR 是 `repoFullName + prNumber`，issue 是 `repoFullName + issueNumber`。`when`、`goal`、`nextStep` 全部可选（#1392 AC-7）。
 
-- `when`：1–4 个 flat any-of predicate；只允许 F280 catalog 中的 typed 条件。
-- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。
+省略 `when` 时服务端装上对象自身的状态条件**和两个评论面**，受众按角色解析：PR 作者收除自己以外的全部回复（含 bot）；有可核验依据的 maintainer/reviewer 只收 PR 作者的回复（过滤 bot 与可确定识别的纯召唤命令）；issue 收除自己以外的全部评论。身份或角色无法确定时，评论照常投递并标注「身份/角色未知」，**不静默丢弃、不扩大收件人、也不因此关闭追踪**。注册返回的 `notification` 写明实际装了什么、解析出什么角色、过滤规则是什么。
 
 可选：
+
+- `when`：高级精确入口，flat any-of typed predicate，每种条件最多一个。写在这里的 `pr_conversation_comment_added` / `pr_inline_comment_added` 仍然必须自带 `authorLogins`，且不会被套上角色过滤。
+- `goal`：把两个评论面收窄到你点名的人，是收窄而不是前置条件。
+- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。省略则由服务端确定性生成。
 
 - `expiresAt`：责任失效时间（Unix ms）。**省略则没有时间到期**；写了必须在未来，并会在注册返回中可见。
 
