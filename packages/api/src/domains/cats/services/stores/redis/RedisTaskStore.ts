@@ -49,6 +49,7 @@ import {
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
+import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds } from './RedisTaskCollectionReader.js';
@@ -365,10 +366,23 @@ export class RedisTaskStore implements ITaskStore {
           if (!this.matchesAutomationReplacementExpectation(existing, input)) {
             return null;
           }
-          const updated = this.buildAutomationReplacement(existing, input);
+          const binding = input.trackingRegistration?.managedWorkBinding;
+          if (binding) await session.watch(TaskKeys.managedWorkBinding(taskId));
+          const currentBinding = binding ? await new RedisTaskManagedWorkBindingStore(session).get(taskId) : null;
+          const updated = buildTaskWaitReplacement(existing, input, currentBinding);
           if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
           const pipeline = session.multi();
           pipeline.hset(key, serializeTask(updated));
+          if (updated.threadId !== existing.threadId) {
+            pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
+            pipeline.zadd(TaskKeys.thread(updated.threadId), String(updated.createdAt), taskId);
+          }
+          if (binding && !currentBinding) {
+            pipeline.set(
+              TaskKeys.managedWorkBinding(taskId),
+              JSON.stringify({ workId: binding.workId, attemptId: binding.attemptId }),
+            );
+          }
           if (input.waitRegistration)
             pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
           else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
@@ -560,16 +574,6 @@ export class RedisTaskStore implements ITaskStore {
   ): boolean {
     if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) return false;
     return automationGeneration(existing.automationState) === input.expectedGeneration;
-  }
-
-  private buildAutomationReplacement(existing: TaskItem, input: ReplaceAutomationStateIfGenerationInput): TaskItem {
-    return {
-      ...existing,
-      automationState: input.automationState,
-      ...(input.why !== undefined ? { why: input.why } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      updatedAt: Date.now(),
-    };
   }
 
   /** Tracking tasks (pr_tracking/issue_tracking) with status!=done never expire; others get default TTL. */

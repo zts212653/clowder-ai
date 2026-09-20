@@ -43,6 +43,7 @@ import {
   type UpdateEntrustedWorkStoreResult,
 } from './TaskStoreContract.js';
 import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
+import { buildTaskWaitReplacement } from './TaskWaitReplacement.js';
 
 export type { ITaskStore } from './TaskStoreContract.js';
 export {
@@ -232,15 +233,11 @@ export class TaskStore implements ITaskStore {
     if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) return null;
     if (automationGeneration(existing.automationState) !== input.expectedGeneration) return null;
 
-    const updated: TaskItem = {
-      ...existing,
-      automationState: input.automationState,
-      ...(input.why !== undefined ? { why: input.why } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      updatedAt: Date.now(),
-    };
+    const updated = buildTaskWaitReplacement(existing, input, this.managedWorkRegistration.get(taskId));
+    if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
+    const binding = input.trackingRegistration?.managedWorkBinding;
+    if (binding) this.managedWorkRegistration.bind(taskId, binding);
     if (input.waitRegistration) {
-      assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
       this.waitRegistrations.set(taskId, structuredClone(input.waitRegistration));
     } else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
       this.waitRegistrations.delete(taskId);

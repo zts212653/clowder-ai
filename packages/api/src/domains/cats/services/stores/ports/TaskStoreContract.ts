@@ -203,6 +203,10 @@ export interface ITaskStore {
 }
 
 export interface ReplaceAutomationStateIfGenerationInput {
+  /** Registration metadata changes with the wait CAS, never through an earlier upsert. */
+  readonly trackingRegistration?: Pick<TaskItem, 'threadId' | 'title' | 'ownerCatId' | 'userId' | 'why'> & {
+    readonly managedWorkBinding?: ManagedWorkBinding;
+  };
   /** Producer-owned proof installed atomically with a new await generation; never public Task state. */
   readonly waitRegistration?: TypedWaitRegistration;
   readonly expectedGeneration: number | null;

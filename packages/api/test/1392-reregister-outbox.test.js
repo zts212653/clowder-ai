@@ -12,7 +12,14 @@ const { GitHubWaitLifecycleService } = await import('../dist/domains/github-sign
 
 describe('#1392 explicit registration preserves delivery already owed to the owner', () => {
   for (const subject of ['pr', 'issue']) {
-    for (const mode of ['continuous', 'single-fire', 'expired', 'successor-expired']) {
+    for (const mode of [
+      'continuous',
+      'single-fire',
+      'expired',
+      'successor-expired',
+      'cross-owner',
+      'cross-owner-expired',
+    ]) {
       it(`${subject}: recovers the pending ${mode} outcome after re-registration`, async (t) => {
         const registry = new InvocationRegistry();
         const taskStore = new TaskStore();
@@ -58,11 +65,11 @@ describe('#1392 explicit registration preserves delivery already owed to the own
           resolveGitHubSelfLogin: async () => 'self',
         });
 
-        const register = (extra = {}) =>
+        const register = (extra = {}, credentials = { invocationId, callbackToken }) =>
           app.inject({
             method: 'POST',
             url: `/api/callbacks/register-${subject}-tracking`,
-            headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+            headers: { 'x-invocation-id': credentials.invocationId, 'x-callback-token': credentials.callbackToken },
             payload: {
               repoFullName: 'owner/repo',
               ...(subject === 'pr' ? { prNumber: 7 } : { issueNumber: 7 }),
@@ -99,16 +106,22 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         const pending = structuredClone(before.automationState.waitOutcome);
         assert.equal(pending.delivery, 'pending');
         assert.equal(pending.reason, mode === 'expired' ? 'expired' : 'matched');
-        const renewed = mode === 'continuous' || mode === 'successor-expired';
+        const renewed = mode !== 'single-fire' && mode !== 'expired';
         assert.equal(before.automationState.await?.generation, renewed ? 2 : undefined);
 
         // The delivery backend is still unavailable: registering cannot depend on draining it now.
-        if (mode === 'successor-expired') {
-          t.mock.method(Date, 'now', () => expiresAt + 1);
-          const blocked = await register();
+        const successorExpired = mode === 'successor-expired' || mode === 'cross-owner-expired';
+        if (successorExpired || mode === 'cross-owner') {
+          if (successorExpired) t.mock.method(Date, 'now', () => expiresAt + 1);
+          let credentials = { invocationId, callbackToken };
+          if (mode.startsWith('cross-owner')) {
+            const otherThread = await threadStore.create('user-1', 'other tracking owner');
+            credentials = await registry.create('user-1', 'codex', otherThread.id);
+          }
+          const blocked = await register({}, credentials);
           assert.equal(blocked.statusCode, 409, 'two owed deliveries cannot share one outbox slot');
           assert.match(blocked.json().error, /pending delivery/);
-          assert.deepEqual((await taskStore.get(taskId)).automationState, before.automationState);
+          assert.deepEqual(await taskStore.get(taskId), before, 'a rejected registration must have no task mutation');
           messageStore.append = append;
           await new GitHubWaitLifecycleService(lifecycleOptions).recoverOutcome(taskId);
         }
@@ -117,10 +130,12 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         const installed = (await taskStore.get(taskId)).automationState;
         assert.equal(installed.await.generation, renewed ? 3 : 2);
         assert.equal(installed.await.continuation.then, 'Handle the next observation.');
-        if (mode === 'successor-expired') {
+        if (successorExpired) {
           assert.equal(installed.waitOutcome.generation, 2);
           assert.equal(installed.waitOutcome.reason, 'expired');
           assert.equal(installed.waitOutcome.delivery, 'pending');
+        } else if (mode === 'cross-owner') {
+          assert.equal(installed.waitOutcome.reason, 'superseded');
         } else {
           assert.deepEqual(installed.waitOutcome, pending, 'the new wait must retain the undelivered old result');
         }
@@ -133,18 +148,18 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         messageStore.append = append;
         // Restart the lifecycle consumer: only TaskStore state may carry the owed notification.
         const restarted = new GitHubWaitLifecycleService(lifecycleOptions);
-        assert.equal((await restarted.recoverOutcome(taskId)).kind, 'notified');
+        assert.equal((await restarted.recoverOutcome(taskId)).kind, mode === 'cross-owner' ? 'state_only' : 'notified');
         await restarted.recoverOutcome(taskId);
         const messages = await messageStore.getByThread(thread.id);
-        assert.equal(messages.length, mode === 'successor-expired' ? 2 : 1);
+        assert.equal(messages.length, successorExpired ? 2 : 1);
         assert.deepEqual(messages[0].mentions, ['opus']);
         assert.match(messages[0].content, /Handle the first observation/);
         assert.deepEqual(
           wakes,
-          mode === 'successor-expired' ? [pending.outcomeId, installed.waitOutcome.outcomeId] : [pending.outcomeId],
+          successorExpired ? [pending.outcomeId, installed.waitOutcome.outcomeId] : [pending.outcomeId],
         );
         const recovered = (await taskStore.get(taskId)).automationState;
-        assert.equal(recovered.waitOutcome.delivery, 'delivered');
+        assert.equal(recovered.waitOutcome.delivery, mode === 'cross-owner' ? 'not_applicable' : 'delivered');
         assert.deepEqual(recovered.await, installed.await, 'recovery must preserve the newly registered wait');
       });
     }
