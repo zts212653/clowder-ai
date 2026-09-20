@@ -124,6 +124,21 @@ describe('F280 register_pr_tracking public contract', () => {
     }
   });
   /*
+   * The tool's prose duplicated the cap as a literal and drifted the moment the cap changed, telling
+   * agents they could name at most four conditions while the schema already accepted eight. A stale
+   * description is worse than a missing one: it is followed. So the number is derived, and this asserts
+   * the derivation rather than any particular sentence.
+   */
+  it('the tool description states the real cap instead of a copy that can drift', async () => {
+    const { callbackTools, registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    const description = callbackTools.find((tool) => tool.name === 'cat_cafe_register_pr_tracking')?.description ?? '';
+
+    const cap = registerPrTrackingInputSchema.when._def.innerType._def.maxLength.value;
+    assert.match(description, new RegExp(`up to ${cap} flat`), 'the prose must carry the schema’s own cap');
+    assert.doesNotMatch(description, /1[–-]4/, 'no hand-written cap may survive in the prose');
+  });
+
+  /*
    * #1392 AC-7: the whole point is that a caller can register without naming conditions. If either of
    * these stops being optional at the public entry, the common path silently becomes the advanced one
    * again and every caller is back to hand-picking predicates they cannot verify they got right.
