@@ -76,6 +76,13 @@ export type GitHubNotificationPerspective =
       readonly subjectAuthorLogin: string;
       readonly ground: GitHubReviewerGround;
     }
+  /**
+   * #1392 R4: an issue has one accepted default and no role split, so knowing our own login is the
+   * whole identity requirement. Reporting it through the PR resolver claimed a missing
+   * `subject_author` the issue default never reads, and sent the caller to fix a gap that was not
+   * there while the audience it described was already correct.
+   */
+  | { readonly role: 'issue_participant'; readonly selfLogin: string }
   | { readonly role: 'unresolved'; readonly missing: readonly GitHubTrackingIdentityGap[] };
 
 /**
@@ -83,7 +90,11 @@ export type GitHubNotificationPerspective =
  *
  * This sits beside `authorLogins` rather than replacing it because the two have different
  * provenance, and collapsing them would hide which one you got. `authorLogins` is a list the caller
- * wrote; `audience` is a rule the server derived from GitHub metadata. Exactly one is ever present.
+ * wrote; `audience` is a rule the server derived from GitHub metadata.
+ *
+ * #1392 R2: on the normal entry both are present and both apply — the derived rule first, then the
+ * caller's list as a further narrowing. Only the advanced explicit `when[]` path carries
+ * `authorLogins` alone, where the list is the whole rule by design.
  */
 export type GitHubCommentAudienceV1 =
   /** PR author perspective, and every issue: every comment that is not our own, bots included. */
@@ -154,6 +165,7 @@ export function resolveGitHubNotificationPerspective(
 export function commentAudienceForPerspective(perspective: GitHubNotificationPerspective): GitHubCommentAudienceV1 {
   switch (perspective.role) {
     case 'subject_author':
+    case 'issue_participant':
       return { mode: 'everyone_but_self', selfLogin: perspective.selfLogin };
     case 'maintainer_or_reviewer':
       return { mode: 'subject_author_only', subjectAuthorLogin: perspective.subjectAuthorLogin };
@@ -167,6 +179,20 @@ export function commentAudienceForPerspective(perspective: GitHubNotificationPer
  * and no reviewer ground. Only our own login has to be known, and when it is not, the same
  * unresolved path applies rather than a silent "any comment" that could not say why.
  */
+/**
+ * #1392 R4: the issue counterpart of `resolveGitHubNotificationPerspective`.
+ *
+ * It asks only what the issue default actually reads. Handing an issue identity to the PR resolver
+ * reported `missing: ['subject_author']` for a perspective that was fully resolved, so the answer
+ * contradicted the very filter printed beside it.
+ */
+export function resolveGitHubIssueNotificationPerspective(
+  identity: GitHubTrackingIdentityV1,
+): GitHubNotificationPerspective {
+  const selfLogin = normalizeLogin(identity.selfLogin);
+  return selfLogin ? { role: 'issue_participant', selfLogin } : { role: 'unresolved', missing: ['self'] };
+}
+
 export function issueCommentAudience(identity: GitHubTrackingIdentityV1): GitHubCommentAudienceV1 {
   const selfLogin = normalizeLogin(identity.selfLogin);
   return selfLogin ? { mode: 'everyone_but_self', selfLogin } : { mode: 'unresolved_identity', missing: ['self'] };
@@ -193,8 +219,12 @@ const GITHUB_PR_SUBJECT_STATE_PREDICATES: readonly GitHubPrWaitPredicate[] = [
  * The normal PR entry. Both comment surfaces are always armed — that is the whole point — and the
  * audience comes from the resolved perspective unless the caller narrowed it by naming people.
  *
- * `goal` stays a narrowing, never a precondition. When it is supplied its list is used verbatim, so
- * the advanced allowlist semantics are exactly what they were.
+ * `goal` stays a narrowing, never a precondition — and #1392 R2 is what "narrowing" has to mean:
+ * the derived audience stays armed and the caller's list is applied on top of it. Using the list
+ * verbatim here replaced the rule instead of narrowing it, which re-admitted the two groups the
+ * accepted table excludes: a named passer-by reached a maintainer, and a caller who named
+ * themselves was woken by their own comment. The advanced explicit `when[]` path is untouched;
+ * there the list is the whole rule, as it always was.
  */
 export function expandGitHubPrTrackingGoal(
   perspective: GitHubNotificationPerspective,
@@ -221,12 +251,13 @@ export function expandGitHubPrTrackingGoal(
     };
   }
 
+  const audience = commentAudienceForPerspective(perspective);
   return {
     ok: true,
     when: [
       ...GITHUB_PR_SUBJECT_STATE_PREDICATES,
-      { kind: 'pr_conversation_comment_added', authorLogins },
-      { kind: 'pr_inline_comment_added', authorLogins },
+      { kind: 'pr_conversation_comment_added', audience, authorLogins },
+      { kind: 'pr_inline_comment_added', audience, authorLogins },
     ],
   };
 }
@@ -274,13 +305,18 @@ function describeCommentAudience(predicate: GitHubWaitPredicate): string | undef
       ? `${surface}: only from ${predicate.authorLogins.join(', ')} (audience you named)`
       : `${surface}: from anyone`;
   }
+  // #1392 R2: when the caller also named people, both rules apply, so both have to be stated. Saying
+  // only the derived half would describe a wider audience than the one actually armed.
+  const narrowing = predicate.authorLogins
+    ? `, then narrowed to only ${predicate.authorLogins.join(', ')} (you named them)`
+    : '';
   switch (audience.mode) {
     case 'everyone_but_self':
-      return `${surface}: from anyone except ${audience.selfLogin} (you), bots included`;
+      return `${surface}: from anyone except ${audience.selfLogin} (you), bots included${narrowing}`;
     case 'subject_author_only':
-      return `${surface}: only from ${audience.subjectAuthorLogin} (the subject author); bots and pure summon commands filtered`;
+      return `${surface}: only from ${audience.subjectAuthorLogin} (the subject author); bots and pure summon commands filtered${narrowing}`;
     default:
-      return `${surface}: identity unknown (${audience.missing.join(', ')}) — every comment is delivered and flagged, and normal coverage is NOT established`;
+      return `${surface}: identity unknown (${audience.missing.join(', ')}) — every comment is delivered and flagged, and normal coverage is NOT established${narrowing}`;
   }
 }
 

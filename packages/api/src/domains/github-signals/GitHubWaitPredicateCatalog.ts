@@ -231,14 +231,27 @@ export function isBotComment(comment: GitHubObservedComment): boolean {
 export const GITHUB_SUMMON_HANDLES: readonly string[] = ['codex', 'chatgpt-codex-connector[bot]'];
 
 /**
+ * #1392 R1: the commands we have evidence are actually issued, and nothing else.
+ *
+ * The rule used to accept any trailing bare word, which made `@codex tests pass` — a test-result
+ * receipt — indistinguishable from `@codex review`. Recognition is by vocabulary now, so an
+ * unfamiliar word means "not a command I know" and the comment is delivered. Widening this list is
+ * a deliberate act with evidence behind it, not a side effect of someone writing a short sentence.
+ */
+export const GITHUB_SUMMON_COMMANDS: readonly string[] = ['review'];
+
+/**
  * #1392 AC-7: is this comment *only* a bot summons, with nothing in it for a human?
  *
  * The rule is structural and deliberately narrow. The body must be a single line that opens with a
- * mention of a known summon handle and then contains nothing but bare command words — no
+ * mention of a known summon handle and then contains nothing but known command words — no
  * punctuation, no second line, no prose. `@codex review` is a summons. `@codex review — but note
  * the base moved` is not, and neither is `@maintainer please look`, because the handle is not a
  * summon target. It never reads prose to judge whether a reply was worth having; it only recognises
- * the shape of a command, and when it cannot, the comment is delivered.
+ * a command it knows, and when it cannot, the comment is delivered.
+ *
+ * #1392 R1: "known command" is the load-bearing word. Checking only that the trailing tokens looked
+ * like bare words silently ate `@codex tests pass`, an author telling their reviewer the result.
  */
 export function isPureSummonCommand(body: string | undefined): boolean {
   const text = body?.trim();
@@ -248,7 +261,7 @@ export function isPureSummonCommand(body: string | undefined): boolean {
   const [mention, ...rest] = tokens;
   const handle = mention.slice(1).toLowerCase();
   if (!GITHUB_SUMMON_HANDLES.some((known) => known.toLowerCase() === handle)) return false;
-  return rest.every((token) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(token));
+  return rest.every((token) => GITHUB_SUMMON_COMMANDS.some((command) => command === token.toLowerCase()));
 }
 
 type AudienceVerdict = { readonly wake: false } | { readonly wake: true; readonly identityUnknown: boolean };
@@ -268,12 +281,17 @@ function judgeAudience(
   comment: GitHubObservedComment,
   predicate: { readonly authorLogins?: readonly string[]; readonly audience?: GitHubCommentAudienceV1 },
 ): AudienceVerdict {
-  const { audience } = predicate;
+  const { audience, authorLogins } = predicate;
   if (!audience) {
     // The caller's own allowlist, used verbatim. Absent on the issue surface means main's any-comment wait.
-    if (!predicate.authorLogins) return { wake: true, identityUnknown: false };
-    return inAudience(comment.author, predicate.authorLogins) ? { wake: true, identityUnknown: false } : IGNORE;
+    if (!authorLogins) return { wake: true, identityUnknown: false };
+    return inAudience(comment.author, authorLogins) ? { wake: true, identityUnknown: false } : IGNORE;
   }
+  // #1392 R2: on the normal entry a list the caller named is a further narrowing of the accepted
+  // rule, never a replacement for it. Both have to admit the comment. Returning early here — rather
+  // than inside each arm — is what keeps "narrowing" true of every arm, including the unresolved one:
+  // a list is a rule the caller gave us, so it stays justified even when identity is not.
+  if (authorLogins && !inAudience(comment.author, authorLogins)) return IGNORE;
   switch (audience.mode) {
     case 'everyone_but_self':
       return sameGitHubLogin(comment.author, audience.selfLogin) ? IGNORE : { wake: true, identityUnknown: false };

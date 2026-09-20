@@ -35,6 +35,7 @@ import {
   localReviewVerdictSchema,
   normalizeRichBlock,
   normalizeSopDefinitionId,
+  resolveGitHubIssueNotificationPerspective,
   resolveGitHubNotificationPerspective,
   resolveWorkflowSopSkill,
   reviewSubjectRefSchema,
@@ -6007,7 +6008,10 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // a single accepted default and needs no role split, so only our own login has to be known.
     const issueIdentity = await resolveTrackingSelfLogin(resolveGitHubSelfLogin, log);
     const when = parsed.data.when ?? expandGitHubIssueTracking(issueIdentity);
-    const issuePerspective = resolveGitHubNotificationPerspective(issueIdentity);
+    // #1392 R4: the issue resolver, not the PR one. The PR resolver reports a missing
+    // `subject_author` the issue default never reads, so a fully resolved registration came back
+    // claiming an identity gap while printing the correct filter next to it.
+    const issuePerspective = resolveGitHubIssueNotificationPerspective(issueIdentity);
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };

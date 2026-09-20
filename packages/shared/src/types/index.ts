@@ -692,6 +692,7 @@ export {
   issueCommentAudience,
   parseWaitContinuationCarrier,
   parseWaitOwnerFence,
+  resolveGitHubIssueNotificationPerspective,
   resolveGitHubNotificationPerspective,
   sameGitHubLogin,
   type UnifiedAwaitStateV1,

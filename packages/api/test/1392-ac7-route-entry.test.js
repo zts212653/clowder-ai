@@ -179,19 +179,28 @@ describe('#1392 AC-7: registration routes', () => {
     assert.equal(taskStore.listByKind('pr_tracking').filter((t) => t.subjectKey === 'pr:owner/repo#908').length, 1);
   });
 
-  test('naming who you wait on narrows both comment surfaces to that audience', async () => {
+  /*
+   * #1392 R2: this case used to assert `audience === undefined` — it locked in the defect. Dropping
+   * the derived audience made a named list REPLACE the accepted rule rather than narrow it, so a
+   * named passer-by reached a maintainer and a caller who named themselves heard their own comments.
+   * The armed predicate now carries both, and both apply.
+   */
+  test('naming who you wait on narrows the derived audience without replacing it', async () => {
     const response = await post({
       prNumber: 901,
       goal: { kind: 'await_reply_from', authorLogins: ['pr-author'] },
     });
 
     assert.equal(response.statusCode, 200);
+    let commentSurfaces = 0;
     for (const predicate of body(response).await.continuation.when) {
       if (predicate.kind.endsWith('comment_added')) {
-        assert.deepEqual(predicate.authorLogins, ['pr-author']);
-        assert.equal(predicate.audience, undefined);
+        commentSurfaces += 1;
+        assert.deepEqual(predicate.authorLogins, ['pr-author'], 'the caller’s narrowing is armed');
+        assert.ok(predicate.audience, 'and the derived rule it narrows is still armed beside it');
       }
     }
+    assert.equal(commentSurfaces, 2, 'both comment surfaces');
   });
 
   test('an explicit when[] is still used exactly as given', async () => {

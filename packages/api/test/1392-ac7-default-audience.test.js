@@ -396,3 +396,134 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
     assert.ok(!messageStore.getByThread('thread_1')[0].content.includes(SENTINEL));
   });
 });
+
+/**
+ * #1392 R1/R2/R4: the three defects the maintainer reproduced against `f2f4a9d1a` that live in the
+ * audience layer. They are here, beside the table they violate, rather than in a fourth suite of
+ * their own — each one is a wrong answer to a question this file already asks.
+ *
+ * R1 said the summon filter recognised a command by shape alone, so any short reply built from bare
+ * words was eaten. R2 said an optional caller list REPLACED the derived audience instead of
+ * narrowing it, which re-admitted bystanders and the owner's own comments. R4 said a known issue
+ * identity still reported a missing PR-only role.
+ */
+const {
+  expandGitHubPrTrackingGoal,
+  resolveGitHubNotificationPerspective,
+  resolveGitHubIssueNotificationPerspective,
+  describeGitHubNotificationCoverage,
+} = await import('../../shared/dist/types/github-wait.js');
+
+const matchWhen = (when, ...comments) =>
+  matchGitHubWaitPredicates(when, baseline(), { headSha: HEAD, review: { decisionCursor: 30, comments } });
+
+const asAuthor = resolveGitHubNotificationPerspective({ selfLogin: SELF, subjectAuthorLogin: SELF });
+const asMaintainer = resolveGitHubNotificationPerspective({
+  selfLogin: SELF,
+  subjectAuthorLogin: AUTHOR,
+  reviewerGround: 'review_requested',
+});
+
+const expandOrThrow = (perspective, goal) => {
+  const expansion = expandGitHubPrTrackingGoal(perspective, goal);
+  assert.equal(expansion.ok, true, expansion.error);
+  return expansion.when;
+};
+
+describe('#1392 R1 — a reply is not a summons just because it opens with a mention', () => {
+  /*
+   * The old rule accepted any trailing bare words, so it could not tell `@codex review` from
+   * `@codex tests pass`. A command is recognised by its vocabulary, and when the vocabulary is not
+   * there the comment is delivered: an owner can discard one extra wake, never recover a lost one.
+   */
+  const cases = [
+    { body: '@codex review', summon: true, why: 'the command this repo actually issues' },
+    { body: '@codex', summon: true, why: 'a bare handle carries nothing for a human' },
+    { body: '@codex tests pass', summon: false, why: 'a test-result receipt, in bare words' },
+    { body: '@codex looks good to me', summon: false, why: 'prose that happens to need no punctuation' },
+    { body: '@codex review — but the base moved', summon: false, why: 'a command plus prose' },
+    { body: '@maintainer please look', summon: false, why: 'not a summon handle at all' },
+  ];
+
+  for (const { body, summon, why } of cases) {
+    it(`${JSON.stringify(body)} → ${summon ? 'summons' : 'delivered'} (${why})`, () => {
+      assert.equal(isPureSummonCommand(body), summon);
+    });
+  }
+
+  it('the maintainer hears the author’s "@codex tests pass" instead of it being filtered', () => {
+    assert.equal(matchPr(reviewerAudience, comment({ author: AUTHOR, body: '@codex tests pass' })).length, 1);
+  });
+
+  it('and a real summons is still filtered, so the narrowing did not just give up', () => {
+    assert.equal(matchPr(reviewerAudience, comment({ author: AUTHOR, body: '@codex review' })).length, 0);
+  });
+});
+
+describe('#1392 R2 — a caller’s list narrows the accepted audience, it never replaces it', () => {
+  it('naming a bystander does not make the maintainer hear bystanders', () => {
+    const when = expandOrThrow(asMaintainer, { kind: 'await_reply_from', authorLogins: ['bystander'] });
+
+    assert.equal(matchWhen(when, comment({ author: 'bystander' })).length, 0);
+  });
+
+  it('naming ourselves does not make the author hear their own comment', () => {
+    const when = expandOrThrow(asAuthor, { kind: 'await_reply_from', authorLogins: [SELF] });
+
+    assert.equal(matchWhen(when, comment({ author: SELF })).length, 0);
+  });
+
+  it('still narrows: the named reviewer wakes the author and an unnamed one does not', () => {
+    const when = expandOrThrow(asAuthor, { kind: 'await_reply_from', authorLogins: ['some-reviewer'] });
+
+    assert.equal(matchWhen(when, comment({ author: 'some-reviewer' })).length, 1);
+    assert.equal(matchWhen(when, comment({ author: 'another-reviewer' })).length, 0);
+  });
+
+  it('the maintainer’s narrowing keeps the role rule: the named author, still without their summons', () => {
+    const when = expandOrThrow(asMaintainer, { kind: 'await_reply_from', authorLogins: [AUTHOR] });
+
+    assert.equal(matchWhen(when, comment({ author: AUTHOR })).length, 1);
+    assert.equal(matchWhen(when, comment({ author: AUTHOR, body: '@codex review' })).length, 0);
+  });
+
+  /*
+   * The advanced path is explicitly out of scope for the narrowing: a caller who writes `when[]`
+   * by hand gets their list verbatim, including themselves if they asked for it.
+   */
+  it('an explicit when[] list is still used verbatim, with no role filter smuggled in', () => {
+    const when = [
+      { kind: 'pr_conversation_comment_added', authorLogins: [SELF] },
+      { kind: 'pr_inline_comment_added', authorLogins: [SELF] },
+    ];
+
+    assert.equal(matchWhen(when, comment({ author: SELF })).length, 1);
+  });
+});
+
+describe('#1392 R4 — a known issue identity does not report a missing PR role', () => {
+  it('a resolved self login is a resolved issue perspective', () => {
+    const perspective = resolveGitHubIssueNotificationPerspective({ selfLogin: 'maintainer' });
+
+    assert.notEqual(perspective.role, 'unresolved');
+    assert.equal(perspective.selfLogin, 'maintainer');
+  });
+
+  it('the reported coverage states the rule that is actually applied', () => {
+    const perspective = resolveGitHubIssueNotificationPerspective({ selfLogin: 'maintainer' });
+    const coverage = describeGitHubNotificationCoverage(perspective, [
+      { kind: 'issue_comment_added', audience: { mode: 'everyone_but_self', selfLogin: 'maintainer' } },
+    ]);
+
+    assert.equal(coverage.perspective.role, perspective.role);
+    assert.ok(coverage.commentFilters.some((line) => line.includes('except maintainer')));
+    assert.ok(!JSON.stringify(coverage).includes('subject_author'));
+  });
+
+  it('an unknown self login is still honestly unresolved, naming only what is missing', () => {
+    const perspective = resolveGitHubIssueNotificationPerspective({});
+
+    assert.equal(perspective.role, 'unresolved');
+    assert.deepEqual(perspective.missing, ['self']);
+  });
+});

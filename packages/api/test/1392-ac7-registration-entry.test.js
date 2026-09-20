@@ -150,14 +150,21 @@ describe('#1392 AC-7 registration entry — the PR default', () => {
     }
   });
 
-  it('naming who you wait on narrows both surfaces to exactly that audience', () => {
+  /*
+   * #1392 R2: the second assertion here used to require `audience === undefined`, on the premise
+   * that a derived rule must never shadow a list the caller wrote. The accepted table says the
+   * opposite — a list is a narrowing of the rule, not a replacement for it — and the old premise is
+   * what let a named passer-by reach a maintainer, and a caller who named themselves be woken by
+   * their own comment. Both are armed now, and both have to admit a comment.
+   */
+  it('naming who you wait on narrows the derived audience on both surfaces', () => {
     const expansion = expandGitHubPrTrackingGoal(AUTHOR, { kind: 'await_reply_from', authorLogins: ['pr-author'] });
 
     assert.equal(expansion.ok, true);
     for (const predicate of expansion.when) {
       if (!predicate.kind.endsWith('comment_added')) continue;
-      assert.deepEqual(predicate.authorLogins, ['pr-author'], 'a named audience is used verbatim');
-      assert.equal(predicate.audience, undefined, 'a derived audience must never shadow one the caller wrote');
+      assert.deepEqual(predicate.authorLogins, ['pr-author'], 'the caller’s narrowing is armed');
+      assert.ok(predicate.audience, 'and so is the derived rule it narrows');
     }
   });
 
@@ -254,13 +261,27 @@ describe('#1392 AC-7 — the registration says what it armed', () => {
     }
   });
 
-  it('a caller-named audience is reported as theirs, not as a derived rule', () => {
+  /*
+   * #1392 R2: the reported coverage has to state both halves of what was armed. Printing only the
+   * caller's list would describe a narrower audience than the one in force; printing only the
+   * derived rule would describe a wider one. Either way the owner reads a filter they do not have.
+   */
+  it('a narrowed audience is reported as the rule plus the narrowing, not one of them', () => {
     const expansion = expandGitHubPrTrackingGoal(AUTHOR, { kind: 'await_reply_from', authorLogins: ['zts212653'] });
     const coverage = describeGitHubNotificationCoverage(AUTHOR, expansion.when);
 
     for (const line of coverage.commentFilters) {
-      assert.match(line, /audience you named/);
+      assert.match(line, /except mindfn \(you\)/, 'the derived rule that is still in force');
+      assert.match(line, /narrowed to only zts212653 \(you named them\)/, 'and the narrowing on top of it');
     }
+  });
+
+  it('the advanced explicit path still reports a bare named list as the caller’s own', () => {
+    const coverage = describeGitHubNotificationCoverage(AUTHOR, [
+      { kind: 'pr_conversation_comment_added', authorLogins: ['zts212653'] },
+    ]);
+
+    assert.match(coverage.commentFilters[0], /audience you named/);
   });
 
   it('every audience mode is describable, so a new one cannot ship unexplained', () => {
