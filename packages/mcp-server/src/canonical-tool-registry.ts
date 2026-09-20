@@ -33,6 +33,13 @@ function assertGovernedDefinition(definition: McpToolDefinition): void {
   ) {
     throw new Error(`MCP tool ${candidate.name ?? '<unnamed>'} is missing its governance certificate`);
   }
+  if (
+    candidate.policy.resourceFamily === 'plugin-manager' &&
+    candidate.policy.runtimeProfiles.includes('readonly') &&
+    candidate.effectiveRisk.level !== 'read'
+  ) {
+    throw new Error(`Plugin Manager tool ${candidate.name ?? '<unnamed>'} exposes a write operation in readonly`);
+  }
 }
 
 export function buildCanonicalToolRegistry(sources: CanonicalToolSources): readonly FamilyToolDefinition[] {

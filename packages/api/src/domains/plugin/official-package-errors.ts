@@ -5,6 +5,7 @@ export type OfficialPluginInstallErrorCode =
   | 'PACKAGE_DIGEST_MISMATCH'
   | 'PACKAGE_ID_MISMATCH'
   | 'PACKAGE_VERSION_MISMATCH'
+  | 'PACKAGE_PRESENTATION_MISMATCH'
   | 'UNSUPPORTED_TRANSPORT'
   | 'INVALID_PACKAGE_SCHEMA'
   | 'INVALID_PACKAGE_ARCHIVE'
@@ -13,7 +14,8 @@ export type OfficialPluginInstallErrorCode =
   | 'STALE_REVISION'
   | 'UPDATE_NOT_NEWER'
   | 'UPDATE_REQUIRES_STOPPED'
-  | 'INVENTORY_REJECTED';
+  | 'INVENTORY_REJECTED'
+  | 'QUARANTINE_UNAVAILABLE';
 
 export class OfficialPluginInstallError extends Error {
   constructor(

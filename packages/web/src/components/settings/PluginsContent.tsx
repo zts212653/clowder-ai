@@ -1,6 +1,6 @@
 'use client';
 
-import type { PluginInfo } from '@cat-cafe/shared';
+import { type PluginInfo, resolvePluginDescription } from '@cat-cafe/shared';
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubIcon } from '../hub-icons';
@@ -15,6 +15,10 @@ import {
 import { OfficialPluginsPanel } from './OfficialPluginsPanel';
 import { PersonalChromePluginPanel } from './PersonalChromePluginPanel';
 import { PluginConfigPanel } from './PluginConfigPanel';
+import { PluginManagerContent } from './plugin-manager/PluginManagerContent';
+import { PluginManagerLiveContent } from './plugin-manager/PluginManagerLiveContent';
+import { resolvePluginManagerDesignGate } from './plugin-manager/plugin-manager-design-gate';
+import { PLUGIN_MANAGER_DESIGN_FIXTURES } from './plugin-manager/plugin-manager-fixtures';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
 
@@ -40,7 +44,91 @@ function pluginToggleFailure(data: { status?: string; error?: string }, actionLa
   return undefined;
 }
 
+export { resolvePluginManagerDesignGate } from './plugin-manager/plugin-manager-design-gate';
+
+function RepositoryPluginCard({
+  plugin,
+  expanded,
+  busy,
+  onExpandedChange,
+  onToggle,
+  onUpdated,
+}: {
+  plugin: PluginInfo;
+  expanded: boolean;
+  busy: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onToggle: (plugin: PluginInfo) => void;
+  onUpdated: () => Promise<void>;
+}) {
+  const runtimeEnabled = plugin.status === 'enabled' || plugin.status === 'partial';
+  const showResourceToggle = plugin.resources.length > 0 && (plugin.configured || runtimeEnabled);
+  const description = plugin.description ? resolvePluginDescription(plugin.description, 'zh-CN') : undefined;
+
+  return (
+    <article className={settingsResourceCardClass}>
+      <div className={`${settingsResourceRowClass} w-full`}>
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-3"
+          style={{ textAlign: 'left' }}
+          onClick={() => onExpandedChange(!expanded)}
+        >
+          <div
+            className={settingsResourceAvatarClass}
+            style={{ backgroundColor: plugin.iconBg ?? '#9ca3af', color: 'var(--cafe-surface)' }}
+          >
+            {plugin.icon === 'github' ? (
+              <GitHubIcon className="h-5 w-5" color="var(--cafe-surface)" />
+            ) : plugin.icon && typeof plugin.icon === 'object' ? (
+              // Terminal Manager rewrites package-relative icon paths to a Host-owned URL.
+              // eslint-disable-next-line @next/next/no-img-element
+              // biome-ignore lint/performance/noImgElement: package assets are runtime URLs, not build-time imports.
+              <img src={plugin.icon.src} alt="" className="h-5 w-5 object-contain" />
+            ) : (
+              <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
+              {plugin.name}
+            </SettingsText>
+            {description && (
+              <SettingsText as="p" tone="secondary" className="mt-0.5">
+                {description}
+              </SettingsText>
+            )}
+          </div>
+        </button>
+        <div className={settingsResourceActionGroupClass}>
+          <SettingsBadge tone={plugin.configured ? 'amber' : 'slate'} className="shrink-0 font-medium">
+            {plugin.configured ? '已配置' : '未配置'}
+          </SettingsBadge>
+          {showResourceToggle && (
+            <SettingsResourceToggleSwitch
+              enabled={runtimeEnabled}
+              busy={busy}
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggle(plugin);
+              }}
+            />
+          )}
+        </div>
+      </div>
+
+      {expanded && <PluginConfigPanel plugin={plugin} onUpdated={onUpdated} />}
+    </article>
+  );
+}
+
 export function PluginsContent() {
+  const [designGate, setDesignGate] = useState({
+    resolved: false,
+    enabled: false,
+    live: false,
+    degradedCatalog: false,
+  });
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -86,8 +174,38 @@ export function PluginsContent() {
   );
 
   useEffect(() => {
+    setDesignGate(resolvePluginManagerDesignGate(window.location.search));
+  }, []);
+
+  useEffect(() => {
+    if (!designGate.resolved) return;
+    if (designGate.enabled || designGate.live) {
+      setLoading(false);
+      return;
+    }
     void fetchPlugins();
-  }, [fetchPlugins]);
+  }, [designGate.enabled, designGate.live, designGate.resolved, fetchPlugins]);
+
+  if (!designGate.resolved) {
+    return (
+      <div className="flex flex-col gap-3.5" data-testid="plugins-list">
+        <SettingsText as="p" variant="sm" tone="muted">
+          加载插件中...
+        </SettingsText>
+      </div>
+    );
+  }
+
+  if (designGate.enabled) {
+    return (
+      <PluginManagerContent
+        fixtures={PLUGIN_MANAGER_DESIGN_FIXTURES}
+        catalogStatus={designGate.degradedCatalog ? 'degraded' : 'fresh'}
+      />
+    );
+  }
+
+  if (designGate.live) return <PluginManagerLiveContent />;
 
   if (loading) {
     return (
@@ -136,64 +254,17 @@ export function PluginsContent() {
       {toggleError && (
         <div className="rounded-md bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{toggleError}</div>
       )}
-      {plugins.map((plugin) => {
-        const isExpanded = expandedId === plugin.id;
-        const isRuntimeEnabled = plugin.status === 'enabled' || plugin.status === 'partial';
-        const showResourceToggle = plugin.resources.length > 0 && (plugin.configured || isRuntimeEnabled);
-
-        return (
-          <article key={plugin.id} className={settingsResourceCardClass}>
-            <div className={`${settingsResourceRowClass} w-full`}>
-              <button
-                type="button"
-                className="flex min-w-0 flex-1 items-center gap-3"
-                style={{ textAlign: 'left' }}
-                onClick={() => setExpandedId(isExpanded ? null : plugin.id)}
-              >
-                <div
-                  className={settingsResourceAvatarClass}
-                  style={{ backgroundColor: plugin.iconBg ?? '#9ca3af', color: 'var(--cafe-surface)' }}
-                >
-                  {plugin.icon === 'github' ? (
-                    <GitHubIcon className="h-5 w-5" color="var(--cafe-surface)" />
-                  ) : (
-                    <HubIcon name={plugin.icon ?? 'blocks'} className="h-5 w-5" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <SettingsText as="p" variant="sm" tone="default" className="font-semibold">
-                    {plugin.name}
-                  </SettingsText>
-                  {plugin.description && (
-                    <SettingsText as="p" tone="secondary" className="mt-0.5">
-                      {plugin.description}
-                    </SettingsText>
-                  )}
-                </div>
-              </button>
-              <div className={settingsResourceActionGroupClass}>
-                {/* Config status badge — always visible, purely reflects whether
-                    credentials/config are present. Toggle independently shows on/off. */}
-                <SettingsBadge tone={plugin.configured ? 'amber' : 'slate'} className="shrink-0 font-medium">
-                  {plugin.configured ? '已配置' : '未配置'}
-                </SettingsBadge>
-                {showResourceToggle && (
-                  <SettingsResourceToggleSwitch
-                    enabled={isRuntimeEnabled}
-                    busy={togglingId === plugin.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      void handleToggle(plugin);
-                    }}
-                  />
-                )}
-              </div>
-            </div>
-
-            {isExpanded && <PluginConfigPanel plugin={plugin} onUpdated={fetchPlugins} />}
-          </article>
-        );
-      })}
+      {plugins.map((plugin) => (
+        <RepositoryPluginCard
+          key={plugin.id}
+          plugin={plugin}
+          expanded={expandedId === plugin.id}
+          busy={togglingId === plugin.id}
+          onExpandedChange={(expanded) => setExpandedId(expanded ? plugin.id : null)}
+          onToggle={(candidate) => void handleToggle(candidate)}
+          onUpdated={fetchPlugins}
+        />
+      ))}
     </div>
   );
 }

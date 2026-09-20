@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { after, beforeEach, describe, it } from 'node:test';
 import {
   loadAllPluginConfigs,
   readPluginConfig,
+  readPluginEnvSnapshot,
   resolvePluginEnv,
   writePluginConfig,
 } from '../dist/domains/plugin/plugin-config-store.js';
@@ -163,6 +164,31 @@ describe('plugin-config-store', () => {
     const env = resolvePluginEnv([manifest]);
     assert.equal(env.TOMBSTONE_KEY, undefined, 'null tombstone must suppress env fallback');
     assert.equal(process.env.TOMBSTONE_KEY, 'from-dotenv', 'process.env must not be mutated');
+  });
+
+  it('reads a fresh projection snapshot without replacing the active runtime cache', () => {
+    trackEnv('SNAPSHOT_TEST_KEY');
+    delete process.env.SNAPSHOT_TEST_KEY;
+    const manifest = {
+      id: 'snapshot-test',
+      name: 'Snapshot Test',
+      version: '1.0.0',
+      builtin: false,
+      config: [{ envName: 'SNAPSHOT_TEST_KEY', label: 'Key', sensitive: false, required: true }],
+      resources: [],
+    };
+    writePluginConfig(tmpDir, manifest.id, [{ name: 'SNAPSHOT_TEST_KEY', value: 'active-runtime-value' }]);
+    const configPath = join(tmpDir, '.cat-cafe', 'plugin-config', `${manifest.id}.json`);
+    writeFileSync(configPath, `${JSON.stringify({ SNAPSHOT_TEST_KEY: null })}\n`, 'utf8');
+
+    const projection = readPluginEnvSnapshot(tmpDir, [manifest]);
+
+    assert.equal(projection.SNAPSHOT_TEST_KEY, undefined, 'projection honors the fresh disk tombstone');
+    assert.equal(
+      resolvePluginEnv([manifest]).SNAPSHOT_TEST_KEY,
+      'active-runtime-value',
+      'read-only projection must not replace the live runtime cache',
+    );
   });
 
   it('JSON file has restricted permissions (0o600)', () => {

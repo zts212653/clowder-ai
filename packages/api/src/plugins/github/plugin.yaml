@@ -1,8 +1,12 @@
 id: github
 name: GitHub
 version: 1.0.0
-description: "GitHub PR tracking, CI/CD monitoring, conflict detection, and repository scanning"
+description:
+  default: GitHub PR tracking, CI/CD monitoring, conflict detection, and repository scanning.
+  translations:
+    zh-CN: 跟踪 PR、CI/CD、冲突检测与仓库扫描，让 Agent 和用户看到同一份仓库协作能力。
 icon: github
+iconBg: "#24292e"
 
 docsUrl: "https://cli.github.com/manual/gh_auth_login"
 setupSteps:

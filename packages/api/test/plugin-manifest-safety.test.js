@@ -17,9 +17,10 @@ import {
   rehydrateEnabledPluginLimbs,
   withPersistedLimbNodeId,
 } from '../dist/domains/plugin/PluginResourceActivator.js';
-import { writePluginConfig } from '../dist/domains/plugin/plugin-config-store.js';
+import { resolvePluginEnv, writePluginConfig } from '../dist/domains/plugin/plugin-config-store.js';
 import { BUILTIN_PLUGIN_IDS, parsePluginManifest, validateEnvSafety } from '../dist/domains/plugin/plugin-manifest.js';
 import { registerPluginRoutes } from '../dist/routes/plugin-routes.js';
+import { _clearActiveRootCacheForTest } from '../dist/utils/active-project-root.js';
 
 const require = createRequire(import.meta.url);
 const fsModule = require('node:fs');
@@ -34,6 +35,107 @@ function writeTmpManifest(dir, id, yaml) {
 
 describe('parsePluginManifest security', () => {
   let tmpDir;
+
+  it('parses multilingual descriptions while preserving legacy strings', () => {
+    tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
+    const localizedPath = writeTmpManifest(
+      tmpDir,
+      'localized',
+      [
+        'id: localized',
+        'name: Localized',
+        'version: 1.0.0',
+        'description:',
+        '  default: Describe the plugin for agents and people.',
+        '  translations:',
+        '    zh-CN: 向 Agent 和用户介绍插件能力。',
+      ].join('\n'),
+    );
+    const legacyPath = writeTmpManifest(
+      tmpDir,
+      'legacy',
+      ['id: legacy', 'name: Legacy', 'version: 1.0.0', 'description: Legacy description'].join('\n'),
+    );
+
+    assert.deepEqual(parsePluginManifest(localizedPath).description, {
+      default: 'Describe the plugin for agents and people.',
+      translations: { 'zh-CN': '向 Agent 和用户介绍插件能力。' },
+    });
+    assert.equal(parsePluginManifest(legacyPath).description, 'Legacy description');
+  });
+
+  it('rejects malformed multilingual descriptions', () => {
+    tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
+    const cases = [
+      {
+        lines: ['description:', '  translations:', '    zh-CN: 缺少默认描述'],
+        error: /description\.default/,
+      },
+      {
+        lines: ['description:', '  default: Missing translations'],
+        error: /description\.translations/,
+      },
+      {
+        lines: ['description:', '  default: Default', '  translations: {}'],
+        error: /at least one translation/,
+      },
+      {
+        lines: ['description:', '  default: Default', '  translations:', '    zh-CN: 中文', '  extra: rejected'],
+        error: /unsupported field 'extra'/,
+      },
+      {
+        lines: [`description: ${'x'.repeat(4097)}`],
+        error: /at most 4096/,
+      },
+      {
+        lines: [
+          'description:',
+          '  default: Default',
+          '  translations:',
+          ...Array.from({ length: 33 }, (_, index) => `    aa-${String(index).padStart(2, '0')}: Translation`),
+        ],
+        error: /at most 32 translations/,
+      },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const id = `localized-${index}`;
+      const yamlPath = writeTmpManifest(
+        tmpDir,
+        id,
+        [`id: ${id}`, 'name: Localized', 'version: 1.0.0', ...testCase.lines].join('\n'),
+      );
+      assert.throws(() => parsePluginManifest(yamlPath), testCase.error);
+    }
+  });
+
+  it('accepts package-relative plugin icons and rejects traversal', () => {
+    tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
+    const validPath = writeTmpManifest(
+      tmpDir,
+      'visual',
+      ['id: visual', 'name: Visual', 'version: 1.0.0', 'icon:', '  type: svg', '  src: assets/icon.svg'].join('\n'),
+    );
+    assert.deepEqual(parsePluginManifest(validPath).icon, { type: 'svg', src: 'assets/icon.svg' });
+
+    const invalidIcons = [
+      ['  type: png', '  src: ../outside.png'],
+      ['  type: svg', '  src: ./assets/icon.svg'],
+      ['  type: svg', '  src: assets//icon.svg'],
+      ['  type: svg', '  src: assets/.icon.svg'],
+      ['  type: svg', '  src: assets/icon.SVG'],
+      ['  type: svg', '  src: assets/icon.svg', '  extra: rejected'],
+    ];
+    for (const [index, iconLines] of invalidIcons.entries()) {
+      const id = `bad-visual-${index}`;
+      const invalidPath = writeTmpManifest(
+        tmpDir,
+        id,
+        [`id: ${id}`, 'name: Bad Visual', 'version: 1.0.0', 'icon:', ...iconLines].join('\n'),
+      );
+      assert.throws(() => parsePluginManifest(invalidPath), /Invalid plugin icon/);
+    }
+  });
 
   it('rejects manifest id with path traversal', () => {
     tmpDir = mkdtempSync(join(os.tmpdir(), 'plugin-test-'));
@@ -123,6 +225,13 @@ describe('parsePluginManifest security', () => {
     const results = registry.scan();
     assert.equal(results.length, 1, 'github is a regular scanned plugin');
     assert.equal(results[0].id, 'github');
+  });
+
+  it('keeps the GitHub glyph on its package-owned dark background', () => {
+    const manifest = parsePluginManifest(fileURLToPath(new URL('../src/plugins/github/plugin.yaml', import.meta.url)));
+
+    assert.equal(manifest.icon, 'github');
+    assert.equal(manifest.iconBg, '#24292e');
   });
 
   it('rejects symlinked plugin directories during scan', () => {
@@ -2314,6 +2423,48 @@ describe('plugin routes safety', () => {
       assert.equal(deps.pluginRegistry.scanCount, 1);
     } finally {
       await app.close();
+    }
+  });
+
+  it('serves plugin reads without replacing the active runtime config cache', async () => {
+    const app = Fastify();
+    app.addHook('preHandler', async (request) => {
+      const raw = request.headers['x-test-session-user'];
+      if (typeof raw === 'string' && raw.trim()) request.sessionUserId = raw.trim();
+    });
+    const projectRoot = mkdtempSync(join(os.tmpdir(), 'plugin-route-projection-'));
+    const previousConfigRoot = process.env.CAT_CAFE_CONFIG_ROOT;
+    process.env.CAT_CAFE_CONFIG_ROOT = projectRoot;
+    _clearActiveRootCacheForTest();
+    const deps = createRouteDeps({
+      config: [{ type: 'input', envName: 'ROUTE_CACHE_KEY', label: 'Key', required: true }],
+    });
+    writePluginConfig(projectRoot, deps.manifest.id, [{ name: 'ROUTE_CACHE_KEY', value: 'active-runtime-value' }]);
+    writeFileSync(
+      join(projectRoot, '.cat-cafe', 'plugin-config', `${deps.manifest.id}.json`),
+      `${JSON.stringify({ ROUTE_CACHE_KEY: null })}\n`,
+      'utf8',
+    );
+    registerPluginRoutes(app, {
+      pluginRegistry: deps.pluginRegistry,
+      pluginActivator: deps.pluginActivator,
+      limbRegistry: {},
+      pluginsDir: '/tmp/plugins',
+    });
+    await app.ready();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/plugins',
+        headers: { 'x-test-session-user': 'viewer-user' },
+      });
+      assert.equal(res.statusCode, 200);
+      assert.equal(resolvePluginEnv([deps.manifest]).ROUTE_CACHE_KEY, 'active-runtime-value');
+    } finally {
+      await app.close();
+      if (previousConfigRoot === undefined) delete process.env.CAT_CAFE_CONFIG_ROOT;
+      else process.env.CAT_CAFE_CONFIG_ROOT = previousConfigRoot;
+      _clearActiveRootCacheForTest();
     }
   });
 

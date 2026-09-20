@@ -7,7 +7,9 @@ import type { OfficialPluginCatalogEntry } from './official-catalog.js';
 import { OfficialPluginInstallError } from './official-package-errors.js';
 
 const ARCHIVE_FILENAME = 'package.tgz';
-export const MAX_OFFICIAL_PACKAGE_BYTES = 32 * 1024 * 1024;
+export const MAX_PLUGIN_PACKAGE_BYTES = 32 * 1024 * 1024;
+/** @deprecated Use MAX_PLUGIN_PACKAGE_BYTES for source-neutral admission. */
+export const MAX_OFFICIAL_PACKAGE_BYTES = MAX_PLUGIN_PACKAGE_BYTES;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
 const log = createModuleLogger('plugin/official-package-archive');
 
@@ -32,7 +34,7 @@ function describeDownloadError(error: unknown, depth = 0): Record<string, unknow
   return diagnostic;
 }
 
-function verifyDigest(bytes: Uint8Array, expectedDigest: string): void {
+export function verifyPluginPackageDigest(bytes: Uint8Array, expectedDigest: string): void {
   if (!expectedDigest.startsWith('sha512-')) {
     throw new OfficialPluginInstallError('PACKAGE_DIGEST_MISMATCH', 'official package digest is not canonical');
   }
@@ -48,7 +50,7 @@ function verifyDigest(bytes: Uint8Array, expectedDigest: string): void {
 
 async function readBoundedBody(response: Response, progress: { bytesReceived: number }): Promise<Uint8Array> {
   const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_OFFICIAL_PACKAGE_BYTES) {
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_PLUGIN_PACKAGE_BYTES) {
     throw new OfficialPluginInstallError('PACKAGE_TOO_LARGE', 'official package exceeds the Host size limit');
   }
   if (!response.body) {
@@ -59,7 +61,7 @@ async function readBoundedBody(response: Response, progress: { bytesReceived: nu
   for await (const chunk of response.body) {
     total += chunk.byteLength;
     progress.bytesReceived = total;
-    if (total > MAX_OFFICIAL_PACKAGE_BYTES) {
+    if (total > MAX_PLUGIN_PACKAGE_BYTES) {
       throw new OfficialPluginInstallError('PACKAGE_TOO_LARGE', 'official package exceeds the Host size limit');
     }
     chunks.push(chunk);
@@ -119,17 +121,17 @@ export async function downloadCatalogArchive(entry: OfficialPluginCatalogEntry):
   }
 }
 
-export async function publishOfficialPackageArchive(
+export async function publishPluginPackageArchive(
   packagesRoot: string,
   packageDigest: string,
   bytes: Uint8Array,
 ): Promise<void> {
-  verifyDigest(bytes, packageDigest);
+  verifyPluginPackageDigest(bytes, packageDigest);
   await mkdir(packagesRoot, { recursive: true, mode: 0o700 });
   const targetRoot = resolve(packagesRoot, packageDirectoryName(packageDigest));
   const targetArchive = resolve(targetRoot, ARCHIVE_FILENAME);
   try {
-    verifyDigest(await readFile(targetArchive), packageDigest);
+    verifyPluginPackageDigest(await readFile(targetArchive), packageDigest);
     return;
   } catch (error) {
     if (error instanceof OfficialPluginInstallError) throw error;
@@ -144,9 +146,12 @@ export async function publishOfficialPackageArchive(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error;
-      verifyDigest(await readFile(targetArchive), packageDigest);
+      verifyPluginPackageDigest(await readFile(targetArchive), packageDigest);
     }
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
   }
 }
+
+/** @deprecated Source-neutral callers should use publishPluginPackageArchive. */
+export const publishOfficialPackageArchive = publishPluginPackageArchive;

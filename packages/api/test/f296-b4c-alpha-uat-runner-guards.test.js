@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { describe, test } from 'node:test';
 import { RESUMED_LARGE_CONTENT, runAlphaUat, selectProviderExecution } from '../../../scripts/f296-alpha-uat.mjs';
 import { estimateTokens } from '../dist/utils/token-counter.js';
 
+const revision = 'a'.repeat(40);
 const options = {
   apiUrl: 'http://127.0.0.1:3012',
   redisUrl: 'redis://127.0.0.1:6398',
@@ -11,6 +11,7 @@ const options = {
   userId: 'f296-alpha-uat',
   timeoutMs: 1000,
   pollMs: 100,
+  expectedRevision: revision,
 };
 
 describe('F296 B4c Alpha UAT runner child and session guards', () => {
@@ -18,7 +19,6 @@ describe('F296 B4c Alpha UAT runner child and session guards', () => {
     const originalFetch = globalThis.fetch;
     const calls = [];
     const sessionCookie = `cat_cafe_session=${'0'.repeat(64)}`;
-    const deployedRevision = execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
     t.after(() => {
       globalThis.fetch = originalFetch;
     });
@@ -32,7 +32,7 @@ describe('F296 B4c Alpha UAT runner child and session guards', () => {
           headers: { 'content-type': 'application/json', 'set-cookie': `${sessionCookie}; Path=/; HttpOnly` },
         });
       }
-      if (path === '/health') return Response.json({ deploymentRevision: deployedRevision });
+      if (path === '/health') return Response.json({ deploymentRevision: revision });
       if (path === '/ready') return Response.json({ status: 'ready' });
       if (path === '/api/cats') {
         return Response.json({

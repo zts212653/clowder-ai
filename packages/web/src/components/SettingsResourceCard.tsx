@@ -48,6 +48,7 @@ export function SettingsResourceToggleSwitch({
   disabled,
   ariaLabel,
   ariaPressed,
+  ariaDescribedBy,
 }: {
   enabled: boolean;
   busy?: boolean;
@@ -56,6 +57,7 @@ export function SettingsResourceToggleSwitch({
   disabled?: boolean;
   ariaLabel?: string;
   ariaPressed?: boolean;
+  ariaDescribedBy?: string;
 }) {
   return (
     <button
@@ -64,6 +66,7 @@ export function SettingsResourceToggleSwitch({
       onClick={onClick}
       aria-label={ariaLabel}
       aria-pressed={ariaPressed}
+      aria-describedby={ariaDescribedBy}
       title={title ?? (enabled ? '禁用' : '启用')}
       className={joinClasses(
         'settings-resource-toggle relative inline-flex h-[22px] w-10 shrink-0 rounded-full transition-colors disabled:cursor-default',

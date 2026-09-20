@@ -31,6 +31,7 @@ import {
   meetingArtifactTools,
   pawFeelDispositionTools,
   perspectiveTools,
+  pluginManagementTools,
   publishVerdictTools,
   realtimeCompanionTools,
   recentTools,
@@ -71,6 +72,7 @@ export const CANONICAL_TOOL_SOURCES = {
     ...scheduleTools,
     ...homeStateTools,
     ...shellTools,
+    ...pluginManagementTools,
   ],
   memory: [
     ...callbackMemoryTools,

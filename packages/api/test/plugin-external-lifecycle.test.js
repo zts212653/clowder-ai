@@ -154,7 +154,12 @@ test('a new activation attempt clears a stale runtime diagnostic before startup 
   const failed = (await store.snapshot()).instances[0];
   assert.equal(failed.activationState, 'error');
   assert.equal(failed.runtimeState, 'stopped');
-  assert.equal(failed.lastRuntimeError, undefined);
+  assert.deepEqual(failed.lastRuntimeError, {
+    code: 'UNEXPECTED_RUNTIME_FAILURE',
+    exitCode: null,
+    signal: null,
+    occurredAt: failed.updatedAt,
+  });
 });
 
 test('disable and uninstall stop process authority before their durable terminal state', async () => {
@@ -226,6 +231,36 @@ test('restart recovery preserves enabled owner intent and resumes a fresh runtim
   assert.equal(recovered.runtimeState, 'stopped');
   assert.equal(recovered.lifecycleRevision, 4);
   assert.deepEqual(calls, ['start:pi_official', 'start:pi_official']);
+});
+
+test('restart recovery records a bounded diagnostic when runtime resume fails', async () => {
+  const { store, lifecycle } = await harness({
+    start: async () => {
+      throw new Error('secret-bearing resume failure');
+    },
+  });
+  await lifecycle.prepare('pi_official', 1);
+  await store.transaction((transaction) => {
+    const current = transaction.instances.get('pi_official');
+    transaction.instances.put({
+      ...current,
+      activationState: 'enabled',
+      runtimeState: 'healthy',
+      lifecycleRevision: 4,
+    });
+  });
+
+  assert.deepEqual(await lifecycle.recoverAfterRestart(), { recoveredInstances: 1, resumeRequested: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  const failed = (await store.snapshot()).instances[0];
+  assert.equal(failed.activationState, 'error');
+  assert.equal(failed.runtimeState, 'stopped');
+  assert.deepEqual(failed.lastRuntimeError, {
+    code: 'UNEXPECTED_RUNTIME_FAILURE',
+    exitCode: null,
+    signal: null,
+    occurredAt: failed.updatedAt,
+  });
 });
 
 test('restart recovery does not create activation intent for a dormant configured instance', async () => {

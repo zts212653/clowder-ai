@@ -7,6 +7,15 @@ export type InstanceLifecycleState = 'installed' | 'retired';
 export type ConfigReadiness = 'incomplete' | 'ready';
 export type ActivationState = 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
 export type RuntimeState = 'stopped' | 'starting' | 'handshaking' | 'healthy' | 'degraded' | 'crashed';
+export type PluginPackageProvenance =
+  | {
+      readonly kind: 'catalog';
+      readonly catalogId: string;
+      readonly packageName: string;
+      /** Immutable admission metadata; absent legacy records fail closed while discovery is offline. */
+      readonly ownerAuthRequired?: boolean;
+    }
+  | { readonly kind: 'local-directory' | 'local-archive'; readonly packageName?: string };
 export type PluginRuntimeErrorCode =
   | 'AUTH_EXPIRED'
   | 'EVENT_BUS_CONFLICT'
@@ -34,6 +43,8 @@ export interface PluginPackageRecord {
   readonly manifest: PluginManifest;
   /** Package-local schemas resolved from the exact admitted archive. */
   readonly signalSchemas: SignalSchemaCatalog;
+  /** Admission origin is immutable package metadata, not an inference from current catalog reachability. */
+  readonly provenance?: PluginPackageProvenance;
   readonly packageState: PackageState;
   readonly verifiedAt: number;
   readonly updatedAt: number;
@@ -80,6 +91,7 @@ export interface PackageAdmissionCandidate {
   readonly packagePluginId: string;
   readonly effectiveGrants: readonly string[];
   readonly signalSchemas?: SignalSchemaCatalog;
+  readonly provenance?: PluginPackageProvenance;
 }
 
 export interface UpgradePackageInput extends PackageAdmissionCandidate {

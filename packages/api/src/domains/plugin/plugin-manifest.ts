@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { posix, win32 } from 'node:path';
-import type { PluginHealthCheck, PluginManifest, PluginResourceDef, ValueConfigField } from '@cat-cafe/shared';
+import type {
+  PluginDescription,
+  PluginHealthCheck,
+  PluginIconSpec,
+  PluginManifest,
+  PluginResourceDef,
+  ValueConfigField,
+} from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
 import { getValueFields, parseConfigFields } from '../../infrastructure/config-field-parser.js';
 import { resourceCapId } from './PluginRegistry.js';
@@ -21,6 +28,11 @@ const SYSTEM_ENV_DENYLIST_EXACT = new Set(['NODE_OPTIONS', 'NODE_ENV', 'PATH', '
 
 const SUPPORTED_RESOURCE_TYPES = new Set(['skill', 'mcp', 'limb', 'schedule']);
 const DEFERRED_RESOURCE_TYPES = new Set<string>();
+const PLUGIN_DESCRIPTION_MAX_LENGTH = 4096;
+const PLUGIN_DESCRIPTION_MAX_TRANSLATIONS = 32;
+const PLUGIN_LOCALE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+const PLUGIN_ASSET_PATH_MAX_LENGTH = 256;
+const PLUGIN_ASSET_PATH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 
 export const BUILTIN_PLUGIN_IDS = new Set<string>();
 
@@ -37,6 +49,91 @@ function isSystemEnv(envName: string): boolean {
 
 function isUnsafeResourcePath(path: string): boolean {
   return posix.isAbsolute(path) || win32.isAbsolute(path) || path.split(/[\\/]+/).includes('..');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function assertNoUnsupportedFields(value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string): void {
+  const unsupported = Object.keys(value).find((key) => !allowed.has(key));
+  if (unsupported) {
+    throw new Error(`Invalid plugin ${label}: unsupported field '${unsupported}'`);
+  }
+}
+
+function assertDescriptionText(value: unknown, label: string, yamlPath: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Invalid plugin ${label} in ${yamlPath}: must be a non-empty string`);
+  }
+  if (value.length > PLUGIN_DESCRIPTION_MAX_LENGTH) {
+    throw new Error(
+      `Invalid plugin ${label} in ${yamlPath}: must contain at most ${PLUGIN_DESCRIPTION_MAX_LENGTH} characters`,
+    );
+  }
+}
+
+function parseDescription(value: unknown, yamlPath: string): PluginDescription | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') {
+    assertDescriptionText(value, 'description', yamlPath);
+    return value;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`Invalid plugin description in ${yamlPath}: use a string or { default, translations }`);
+  }
+  assertNoUnsupportedFields(value, new Set(['default', 'translations']), 'description');
+  assertDescriptionText(value.default, 'description.default', yamlPath);
+
+  const rawTranslations = value.translations;
+  if (!isRecord(rawTranslations)) {
+    throw new Error(`Invalid plugin description.translations in ${yamlPath}: must be a locale-to-string map`);
+  }
+  const translationEntries = Object.entries(rawTranslations);
+  if (translationEntries.length === 0) {
+    throw new Error(`Invalid plugin description.translations in ${yamlPath}: must contain at least one translation`);
+  }
+  if (translationEntries.length > PLUGIN_DESCRIPTION_MAX_TRANSLATIONS) {
+    throw new Error(
+      `Invalid plugin description.translations in ${yamlPath}: must contain at most ${PLUGIN_DESCRIPTION_MAX_TRANSLATIONS} translations`,
+    );
+  }
+
+  const translations: Record<string, string> = {};
+  for (const [locale, text] of translationEntries) {
+    if (!PLUGIN_LOCALE_PATTERN.test(locale)) {
+      throw new Error(`Invalid plugin description locale '${locale}' in ${yamlPath}`);
+    }
+    assertDescriptionText(text, `description translation '${locale}'`, yamlPath);
+    translations[locale] = text;
+  }
+  return { default: value.default, translations };
+}
+
+function parseIcon(value: unknown, yamlPath: string): PluginIconSpec | undefined {
+  if (value == null) return undefined;
+  if (typeof value === 'string') {
+    if (value.trim().length === 0) {
+      throw new Error(`Invalid plugin icon in ${yamlPath}: legacy icon names must be non-empty`);
+    }
+    return value;
+  }
+  if (!isRecord(value) || (value.type !== 'svg' && value.type !== 'png') || typeof value.src !== 'string') {
+    throw new Error(`Invalid plugin icon in ${yamlPath}: use a legacy icon name or { type: svg|png, src: path }`);
+  }
+  assertNoUnsupportedFields(value, new Set(['type', 'src']), 'icon');
+  if (value.src.length > PLUGIN_ASSET_PATH_MAX_LENGTH || !PLUGIN_ASSET_PATH_PATTERN.test(value.src)) {
+    throw new Error(
+      `Invalid plugin icon.src '${value.src}' in ${yamlPath}: must be a package-relative asset path of at most ${PLUGIN_ASSET_PATH_MAX_LENGTH} characters`,
+    );
+  }
+  const expectedExtension = value.type === 'svg' ? '.svg' : '.png';
+  if (!value.src.endsWith(expectedExtension)) {
+    throw new Error(
+      `Invalid plugin icon.src '${value.src}' in ${yamlPath}: ${value.type} icons must use ${expectedExtension}`,
+    );
+  }
+  return { type: value.type, src: value.src };
 }
 
 function envClaimKey(envName: string): string {
@@ -241,9 +338,9 @@ export function parsePluginManifest(yamlPath: string): PluginManifest {
     id,
     name,
     version,
-    description: typeof doc['description'] === 'string' ? doc['description'] : undefined,
-    icon: typeof doc['icon'] === 'string' ? doc['icon'] : undefined,
-    iconBg: typeof doc['iconBg'] === 'string' ? doc['iconBg'] : undefined,
+    description: parseDescription(doc.description, yamlPath),
+    icon: parseIcon(doc.icon, yamlPath),
+    iconBg: typeof doc.iconBg === 'string' ? doc.iconBg : undefined,
     builtin: false,
     docsUrl,
     setupSteps: setupSteps && setupSteps.length > 0 ? setupSteps : undefined,

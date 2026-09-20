@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
 import type {
   GrantStore,
   PackageInventoryStore,
@@ -26,7 +27,10 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function transactionFor(snapshot: PluginInventorySnapshot): {
+function transactionFor(
+  snapshot: PluginInventorySnapshot,
+  contract: PackageAdmissionContractRuntime | undefined,
+): {
   readonly transaction: PluginInventoryTransaction;
   readonly snapshot: () => PluginInventorySnapshot;
 } {
@@ -68,12 +72,15 @@ function transactionFor(snapshot: PluginInventorySnapshot): {
   return {
     transaction: { packages, instances, grants },
     snapshot: () =>
-      parsePluginInventorySnapshot({
-        schemaVersion: 1,
-        packages: [...state.packages.values()],
-        instances: [...state.instances.values()],
-        grants: [...state.grants.values()],
-      }),
+      parsePluginInventorySnapshot(
+        {
+          schemaVersion: 1,
+          packages: [...state.packages.values()],
+          instances: [...state.instances.values()],
+          grants: [...state.grants.values()],
+        },
+        contract,
+      ),
   };
 }
 
@@ -120,14 +127,23 @@ export interface InventoryFileOps {
 
 export interface FilePluginInventoryStoreOptions {
   readonly fileOps?: Partial<InventoryFileOps>;
+  readonly contract?: PackageAdmissionContractRuntime;
+}
+
+export interface MemoryPluginInventoryStoreOptions {
+  readonly contract?: PackageAdmissionContractRuntime;
 }
 
 export class MemoryPluginInventoryStore implements PluginInventoryStore {
   private state: PluginInventorySnapshot;
   private readonly queue = new TransactionQueue();
 
-  constructor(initial?: unknown) {
-    this.state = initial === undefined ? emptyPluginInventorySnapshot() : parsePluginInventorySnapshot(initial);
+  constructor(
+    initial?: unknown,
+    private readonly options: MemoryPluginInventoryStoreOptions = {},
+  ) {
+    this.state =
+      initial === undefined ? emptyPluginInventorySnapshot() : parsePluginInventorySnapshot(initial, options.contract);
   }
 
   async snapshot(): Promise<PluginInventorySnapshot> {
@@ -137,7 +153,7 @@ export class MemoryPluginInventoryStore implements PluginInventoryStore {
 
   async transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T> {
     return this.queue.run(async () => {
-      const candidate = transactionFor(this.state);
+      const candidate = transactionFor(this.state, this.options.contract);
       const result = await work(candidate.transaction);
       this.state = candidate.snapshot();
       return result;
@@ -153,11 +169,13 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
   readonly path: string;
   private readonly queue: TransactionQueue;
   private readonly fileOps: InventoryFileOps;
+  private readonly contract: PackageAdmissionContractRuntime | undefined;
 
   constructor(path: string, options: FilePluginInventoryStoreOptions = {}) {
     this.path = resolve(path);
     this.queue = fileQueue(this.path);
     this.fileOps = { readFile, mkdir, writeFile, rename, unlink, ...options.fileOps };
+    this.contract = options.contract;
   }
 
   private async load(): Promise<PluginInventorySnapshot> {
@@ -174,7 +192,7 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
     } catch {
       throw new PluginInventoryError('CORRUPT_SNAPSHOT', `plugin inventory at ${this.path} is not valid JSON`);
     }
-    return parsePluginInventorySnapshot(parsed);
+    return parsePluginInventorySnapshot(parsed, this.contract);
   }
 
   async snapshot(): Promise<PluginInventorySnapshot> {
@@ -184,7 +202,7 @@ export class FilePluginInventoryStore implements PluginInventoryStore {
 
   async transaction<T>(work: (transaction: PluginInventoryTransaction) => Promise<T> | T): Promise<T> {
     return this.queue.run(async () => {
-      const candidate = transactionFor(await this.load());
+      const candidate = transactionFor(await this.load(), this.contract);
       const result = await work(candidate.transaction);
       const next = candidate.snapshot();
       await this.fileOps.mkdir(dirname(this.path), { recursive: true });

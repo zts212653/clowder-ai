@@ -117,12 +117,15 @@ export function loadAllPluginConfigs(projectRoot: string, manifests: PluginManif
   return loaded;
 }
 
-export function resolvePluginEnv(manifests: PluginManifest[]): Record<string, string | undefined> {
+function projectPluginEnv(
+  manifests: PluginManifest[],
+  valuesForManifest: (manifest: PluginManifest) => StoredValues | undefined,
+): Record<string, string | undefined> {
   const result: Record<string, string | undefined> = {};
   for (const manifest of manifests) {
-    const cached = configCache.get(manifest.id);
+    const values = valuesForManifest(manifest);
     for (const field of manifest.config) {
-      const fromStore = cached?.[field.envName];
+      const fromStore = values?.[field.envName];
       if (typeof fromStore === 'string') {
         result[field.envName] = fromStore;
       } else if (fromStore === null) {
@@ -134,4 +137,16 @@ export function resolvePluginEnv(manifests: PluginManifest[]): Record<string, st
     }
   }
   return result;
+}
+
+/** Reads current persisted values for UI projection without replacing the live runtime cache. */
+export function readPluginEnvSnapshot(
+  projectRoot: string,
+  manifests: PluginManifest[],
+): Record<string, string | undefined> {
+  return projectPluginEnv(manifests, (manifest) => readRawConfig(projectRoot, manifest.id));
+}
+
+export function resolvePluginEnv(manifests: PluginManifest[]): Record<string, string | undefined> {
+  return projectPluginEnv(manifests, (manifest) => configCache.get(manifest.id));
 }

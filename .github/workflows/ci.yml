@@ -115,12 +115,16 @@ jobs:
     if: needs.public-test-prepare.outputs.mode == 'sharded'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        lane: [serial, pure-1, pure-2, pure-3, pure-4]
+        lane: [serial-shared, distributable-1, distributable-2, distributable-3, distributable-4, distributable-5, distributable-6]
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -135,12 +139,33 @@ jobs:
         with:
           name: public-test-plan-${{ github.sha }}
           path: ${{ runner.temp }}/public-test
-      - name: Run public-test lane
+      - name: Run shared-resource public-test lane
+        if: matrix.lane == 'serial-shared'
         run: >-
           pnpm --filter @cat-cafe/api run test:public:shard --
           --plan "${{ runner.temp }}/public-test/plan.json"
           --lane "${{ matrix.lane }}"
           --report "${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json"
+        env:
+          DEFAULT_OWNER_USER_ID: default-user
+          GIT_AUTHOR_NAME: CI Runner
+          GIT_AUTHOR_EMAIL: ci@clowder-ai.dev
+          GIT_COMMITTER_NAME: CI Runner
+          GIT_COMMITTER_EMAIL: ci@clowder-ai.dev
+      - name: Run distributable public-test lane without external network
+        if: matrix.lane != 'serial-shared'
+        run: |
+          runner_uid="$(id -u)"
+          runner_gid="$(id -g)"
+          runner_path="$PATH"
+          pnpm_path="$(command -v pnpm)"
+          sudo --preserve-env unshare --net -- \
+            .github/scripts/run-public-test-distributable.sh \
+            "$runner_uid" "$runner_gid" "$runner_path" \
+            "$pnpm_path" --filter @cat-cafe/api run test:public:shard -- \
+            --plan "${{ runner.temp }}/public-test/plan.json" \
+            --lane "${{ matrix.lane }}" \
+            --report "${{ runner.temp }}/public-test/reports/${{ matrix.lane }}.json"
         env:
           DEFAULT_OWNER_USER_ID: default-user
           GIT_AUTHOR_NAME: CI Runner
@@ -184,7 +209,8 @@ jobs:
           node packages/api/scripts/summarize-public-test-shards.mjs \
             --plan "$plan_path" \
             --reports-dir "$RUNNER_TEMP/public-test/reports" \
-            --output "$RUNNER_TEMP/public-test/summary.json"
+            --output "$RUNNER_TEMP/public-test/summary.json" \
+            --max-critical-path-ms 600000
       - name: Upload public-test evidence
         uses: actions/upload-artifact@v4
         with:

@@ -245,12 +245,19 @@ export class ExternalPluginLifecycleService {
       ) {
         return;
       }
+      const now = this.now();
       transaction.instances.put({
         ...current,
         activationState: 'error',
         runtimeState: 'stopped',
+        lastRuntimeError: {
+          code: 'UNEXPECTED_RUNTIME_FAILURE',
+          exitCode: null,
+          signal: null,
+          occurredAt: now,
+        },
         lifecycleRevision: current.lifecycleRevision + 1,
-        updatedAt: this.now(),
+        updatedAt: now,
       });
     });
   }
@@ -279,7 +286,7 @@ export class ExternalPluginLifecycleService {
     instanceId: string,
     expectedRevision: number,
     patch: Partial<PluginInstanceRecord>,
-    options: { readonly clearRuntimeError?: boolean } = {},
+    options: { readonly clearRuntimeError?: boolean; readonly at?: number } = {},
   ): Promise<PluginInstanceRecord> {
     return this.options.store.transaction((transaction) => {
       const current = currentInstance(transaction, instanceId);
@@ -289,7 +296,7 @@ export class ExternalPluginLifecycleService {
         ...(options.clearRuntimeError ? withoutRuntimeError : current),
         ...patch,
         lifecycleRevision: current.lifecycleRevision + 1,
-        updatedAt: this.now(),
+        updatedAt: options.at ?? this.now(),
       };
       transaction.instances.put(next);
       return next;
@@ -307,10 +314,22 @@ export class ExternalPluginLifecycleService {
     try {
       await this.options.supervisor.start(instanceId);
     } catch {
-      await this.advance(instanceId, enabled.lifecycleRevision, {
-        activationState: 'error',
-        runtimeState: 'stopped',
-      });
+      const failedAt = this.now();
+      await this.advance(
+        instanceId,
+        enabled.lifecycleRevision,
+        {
+          activationState: 'error',
+          runtimeState: 'stopped',
+          lastRuntimeError: {
+            code: 'UNEXPECTED_RUNTIME_FAILURE',
+            exitCode: null,
+            signal: null,
+            occurredAt: failedAt,
+          },
+        },
+        { at: failedAt },
+      );
       throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
     }
     return this.readCurrent(instanceId);

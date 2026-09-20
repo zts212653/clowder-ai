@@ -331,7 +331,8 @@ async function createCanaryThread(options, title) {
 export async function runAlphaUat(options) {
   validateCanonicalContract();
   validateAlphaCoordinates(options.apiUrl, options.redisUrl);
-  const expectedRevision = execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
+  const expectedRevision =
+    options.expectedRevision ?? execFileSync('git', ['rev-parse', 'origin/main'], { encoding: 'utf8' }).trim();
   const sessionOptions = await establishSession(options);
   const [health, readiness, cats] = await Promise.all([
     json(sessionOptions, '/health'),
