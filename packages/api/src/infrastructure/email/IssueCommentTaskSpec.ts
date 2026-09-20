@@ -582,6 +582,9 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   id: comment.id,
                   author: comment.author,
                   sourceRef: `github:issue-comment:${comment.id}`,
+                  // #1392 AC-7: the audience is applied at delivery, so it needs what GitHub said
+                  // about the author. The body is not carried here: no accepted issue default reads it.
+                  ...(comment.actorType ? { actorType: comment.actorType } : {}),
                 })),
               },
             },

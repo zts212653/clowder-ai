@@ -151,6 +151,22 @@ describe('F280 register_pr_tracking public contract', () => {
   });
 
   /*
+   * #1392 AC-7: the accepted default is a product decision, and the tool description is where a cat
+   * learns it. A description that still described the old conservative default would send callers
+   * back to hand-writing `goal.authorLogins` to hear anything — the precondition the product owner
+   * explicitly removed.
+   */
+  it('the tool description states the accepted default audience, both perspectives', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const description = callbackTools.find((tool) => tool.name === 'cat_cafe_register_pr_tracking')?.description ?? '';
+
+    assert.match(description, /every reply that is not your own, bots included/, 'the PR author perspective');
+    assert.match(description, /bots and pure summon commands filtered/, 'the maintainer\u002freviewer perspective');
+    assert.match(description, /delivers every comment flagged/, 'and what happens when neither can be proved');
+    assert.doesNotMatch(description, /which is what arms their comments/, 'comments are no longer opt-in');
+  });
+
+  /*
    * #1392 D1: the ruling was that API and MCP move together. Until now only the API catalog had a
    * capacity assertion, so reverting this file alone to a cap of four left every other suite green —
    * the alignment the maintainer asked for had no regression protection at the public entry.

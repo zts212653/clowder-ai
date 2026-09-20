@@ -87,6 +87,53 @@ describe('F280 register_issue_tracking public contract', () => {
       Object.assign(process.env, originalEnv);
     }
   });
+  /*
+   * #1392 AC-7: the issue entry kept a mandatory `when[]` for three rounds after the PR entry dropped
+   * its own, and "AC-7 is in" stayed literally true the whole time. A caller who has to name a
+   * predicate is a caller who can name the wrong one and never find out, which is the failure this
+   * issue opened with — so the contract is asserted here, at the door a cat actually walks through.
+   */
+  it('lets a caller register an issue without naming any condition', async () => {
+    const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    assert.equal(registerIssueTrackingInputSchema.when.isOptional(), true, '`when` must be the advanced path');
+    assert.equal(registerIssueTrackingInputSchema.nextStep.isOptional(), true, 'display-only text cannot gate it');
+  });
+
+  it('does not serialize an omitted when, so the server sees "arm the default"', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalEnv = { ...process.env };
+    let requestBody;
+    process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
+    process.env.CAT_CAFE_INVOCATION_ID = 'ac7-issue-default-invocation';
+    process.env.CAT_CAFE_CALLBACK_TOKEN = 'ac7-issue-default-token';
+    process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
+    globalThis.fetch = async (_url, options) => {
+      requestBody = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
+    };
+    try {
+      const { handleRegisterIssueTracking } = await import('../dist/tools/callback-tools.js');
+      await handleRegisterIssueTracking({ repoFullName: 'zts212653/clowder-ai', issueNumber: 1392 });
+      assert.deepEqual(requestBody, { repoFullName: 'zts212653/clowder-ai', issueNumber: 1392 });
+    } finally {
+      globalThis.fetch = originalFetch;
+      for (const key of Object.keys(process.env)) {
+        if (!(key in originalEnv)) delete process.env[key];
+      }
+      Object.assign(process.env, originalEnv);
+    }
+  });
+
+  it('the tool description tells a cat the normal call, not a predicate menu', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const description =
+      callbackTools.find((tool) => tool.name === 'cat_cafe_register_issue_tracking')?.description ?? '';
+
+    assert.match(description, /omit `when` and `nextStep`/);
+    assert.match(description, /every comment that is not your own/);
+  });
+
   it('offers autoRenew as an optional single-fire opt-out', async () => {
     const { registerIssueTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
     assert.equal(registerIssueTrackingInputSchema.autoRenew.isOptional(), true);

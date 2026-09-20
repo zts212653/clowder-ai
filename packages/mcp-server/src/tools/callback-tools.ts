@@ -1998,7 +1998,7 @@ export const registerPrTrackingInputSchema = {
     .max(GITHUB_PR_WAIT_PREDICATE_LIMIT)
     .optional()
     .describe(
-      `ADVANCED, and usually omit it. One to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} typed conditions for a precise wait. Omitting this is the normal path: the server then arms every condition the PR raises about itself — review decision, CI terminal, conflict and new HEAD. Supply this only when you need something narrower or need a condition with its own anchor, such as pr_review_thread_changed. Duplicate kinds, unknown kinds and conditions missing their required parameters are rejected. At most one of \`when\` or \`goal\`.`,
+      `ADVANCED, and usually omit it. One to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} typed conditions for a precise wait. Omitting this is the normal path: the server then arms every condition the PR raises about itself — review decision, CI terminal, conflict and new HEAD — AND both comment surfaces, with an audience it derives from your role on that PR. As its author you hear every reply that is not your own, bots included; as a reviewer you hear the PR author's replies, with bots and pure summon commands filtered. Supply this only when you need something narrower or need a condition with its own anchor, such as pr_review_thread_changed; a comment predicate you write here still requires its own explicit \`authorLogins\`. Duplicate kinds, unknown kinds and conditions missing their required parameters are rejected. At most one of \`when\` or \`goal\`.`,
     ),
   goal: z
     .object({
@@ -2008,7 +2008,7 @@ export const registerPrTrackingInputSchema = {
     .strict()
     .optional()
     .describe(
-      'Add this when you are waiting on a person, not just on the PR. It arms their conversation comments and their inline review comments on top of the default conditions. Worth knowing why it exists: a registration watching only HEAD stays healthy and unexpired and never wakes when the thing awaited was a reply rather than a push — you cannot poll, so you would never discover the gap. The audience is what you supply here and is never inferred from who opened the PR; an empty one is refused rather than widened to everyone. The full expansion comes back to you in `await.continuation.when`. At most one of `when` or `goal`.',
+      'OPTIONAL narrowing, not a precondition. Comments already wake you by default; add this only to hear from specific people and nobody else. It replaces the derived audience on both comment surfaces with exactly the logins you list. An empty one is refused rather than widened to everyone. What was actually armed, and what will be filtered, comes back to you in `await.continuation.when` and `notification`. At most one of `when` or `goal`.',
     ),
   nextStep: z
     .string()
@@ -2097,8 +2097,9 @@ export const registerIssueTrackingInputSchema = {
     )
     .min(1)
     .max(GITHUB_ISSUE_WAIT_PREDICATE_LIMIT)
+    .optional()
     .describe(
-      `One to ${GITHUB_ISSUE_WAIT_PREDICATE_LIMIT} typed issue conditions — every distinct issue condition in the catalog. Evaluated as flat any-of against a server-frozen baseline.`,
+      `ADVANCED, and usually omit it. One to ${GITHUB_ISSUE_WAIT_PREDICATE_LIMIT} typed issue conditions, evaluated as flat any-of against a server-frozen baseline. Omitting this is the normal path: the server arms every comment on the issue that is not your own.`,
     ),
   nextStep: z
     .string()
@@ -2123,7 +2124,9 @@ export const registerIssueTrackingInputSchema = {
 export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
-  when: Array<{ kind: 'issue_comment_added'; authorLogins?: string[] } | { kind: 'issue_author_commented' }>;
+  when?:
+    | Array<{ kind: 'issue_comment_added'; authorLogins?: string[] } | { kind: 'issue_author_commented' }>
+    | undefined;
   nextStep?: string | undefined;
   expiresAt?: number;
   autoRenew?: boolean;
@@ -2137,7 +2140,9 @@ export async function handleRegisterIssueTracking(input: {
         {
           repoFullName: input.repoFullName,
           issueNumber: input.issueNumber,
-          when: input.when,
+          // #1392 AC-7: forward `when` only when the caller wrote one. Serializing an absent list as
+          // null would turn "arm the normal default" into a schema violation at the route.
+          ...(input.when !== undefined ? { when: input.when } : {}),
           ...(input.nextStep !== undefined ? { nextStep: input.nextStep } : {}),
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
@@ -3902,12 +3907,12 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_register_pr_tracking',
     description:
-      'Register one explicit, bounded PR wait for the current task owner. ' +
-      'Use when: you can name the exact typed GitHub condition that changes your next action, such as a new HEAD, review result, terminal executable CI, anchored review thread change, new conflict, or a new comment from authors you name. ' +
-      'NOT for: generic PR activity, bare @codex review chatter, arbitrary comments, another cat’s responsibility, or a different PR subject. ' +
-      'Output: validates subject/owner, freezes a live GitHub baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
+      'Register continuous tracking of one PR for the current task owner. ' +
+      'Use when: you want to hear about what happens on a PR — its review decision, CI, conflicts, new HEAD, and the replies people leave on it. Naming the subject is the whole call. ' +
+      'NOT for: another cat’s responsibility, or a different PR subject. ' +
+      'Output: validates subject/owner, freezes a live GitHub baseline, atomically installs the next generation, and answers with what was armed and which audience was applied (`notification`). Registration history is baseline, never a wake. ' +
       'GOTCHA: For exact-HEAD external PR review, run the Review Entry Mode Classifier before registration: formal instructions containing a no-comment / do-not-comment-on-GitHub directive fail closed; only explicit advisory_read_only may stay private, and advisory must never claim review-complete. ' +
-      `GOTCHA: omit both \`when\` and \`goal\` for the normal case — the server then arms every condition the PR raises about itself. \`goal\` additionally names who you are waiting on, which is what arms their comments. \`when\` is the advanced path: up to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} flat any-of typed predicates, one per distinct condition in the catalog. \`pr_conversation_comment_added\` and \`pr_inline_comment_added\` require a non-empty \`authorLogins\` naming whose comments may wake you; there is no omitted-means-anyone form. \`nextStep\` is display-only and never parsed. \`expiresAt\` is optional: omit it for no time-based termination; supply it for a visible deadline. It never deletes task history.`,
+      `GOTCHA: \`repoFullName\` + \`prNumber\` is the whole normal call — omit \`when\`, \`goal\` and \`nextStep\`. The server then arms every condition the PR raises about itself AND both comment surfaces, with the audience your role gives you: as the PR author, every reply that is not your own, bots included; as a reviewer with checkable grounds, the PR author's replies with bots and pure summon commands filtered. If it cannot establish identity it delivers every comment flagged rather than filtering on a rule it could not verify — read \`notification.perspective\`. \`goal\` optionally narrows the comment audience to people you name. \`when\` is the advanced path: up to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} flat any-of typed predicates, one per distinct condition in the catalog, where \`pr_conversation_comment_added\` and \`pr_inline_comment_added\` still require a non-empty \`authorLogins\`; there is no omitted-means-anyone form on that path. \`nextStep\` is display-only and never parsed. \`expiresAt\` is optional: omit it for no time-based termination; supply it for a visible deadline. It never deletes task history.`,
     inputSchema: registerPrTrackingInputSchema,
     handler: handleRegisterPrTracking,
     governance: {
@@ -3922,11 +3927,11 @@ export const callbackTools = [
   defineCanonicalTool({
     name: 'cat_cafe_register_issue_tracking',
     description:
-      'Register one explicit, bounded GitHub issue wait for the current task owner. ' +
-      'Use when: you can name the exact typed issue condition that changes your next action: any new comment (optionally only from `authorLogins` you name), or a comment by the exact issue author. ' +
-      'NOT for: generic issue activity, actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. ' +
-      'Output: validates subject/owner, freezes a live issue baseline, and atomically installs the next generation. Registration history is baseline, never a wake. ' +
-      'GOTCHA: `when` is a bounded typed predicate set. `nextStep` is display-only and never parsed. `expiresAt` is optional: omit it for no time-based termination; supply it for a visible deadline. It never deletes task history.',
+      'Register continuous tracking of one GitHub issue for the current task owner. ' +
+      'Use when: you want to hear about new comments on an issue. Naming the subject is the whole call. ' +
+      'NOT for: actor-type guessing, source prose, another cat’s responsibility, or a different issue subject. ' +
+      'Output: validates subject/owner, freezes a live issue baseline, atomically installs the next generation, and answers with what was armed and which audience was applied (`notification`). Registration history is baseline, never a wake. ' +
+      'GOTCHA: `repoFullName` + `issueNumber` is the whole normal call — omit `when` and `nextStep`. The server then wakes you on every comment that is not your own. `when` is the advanced path: a bounded typed predicate set for a narrower wait. `nextStep` is display-only and never parsed. `expiresAt` is optional: omit it for no time-based termination; supply it for a visible deadline. It never deletes task history.',
     inputSchema: registerIssueTrackingInputSchema,
     handler: handleRegisterIssueTracking,
     governance: {

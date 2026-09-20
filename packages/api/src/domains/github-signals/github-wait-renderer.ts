@@ -40,6 +40,24 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
     // body is deliberately absent, so without this pointer the wake would be unactionable.
     lines.push(match.sourceRef ? `- ${match.delta} (${match.sourceRef})` : `- ${match.delta}`);
   }
+  /**
+   * #1392 AC-7: an anomaly travels the normal path, and says so in the normal place.
+   *
+   * When identity or role could not be determined the audience filter was never applied, so this
+   * delivery proves an event happened and proves nothing about coverage. Saying only "wait
+   * satisfied" would let the owner read an unfiltered firehose as a working rule, which is the
+   * mistake this issue exists to stop — the one party who can act is the one who cannot otherwise
+   * notice. Recipients are unchanged: an unknown role never widens who is told.
+   */
+  if (outcome.matched?.some((match) => match.identityUnknown)) {
+    lines.push(
+      '',
+      '⚠ **GitHub identity or role unknown** — the comments above were delivered unfiltered, and the',
+      'accepted author/maintainer audience was never applied. Normal coverage is NOT established: treat',
+      'this as "something happened here", verify who is involved, then decide whether to discuss or',
+      'ignore. Re-register once identity resolves to get the filtered audience back.',
+    );
+  }
   if (outcome.reason === 'subject_terminal' || outcome.terminalSubjectState) {
     lines.push(`- ${kind} state: ${outcome.terminalSubjectState ?? 'closed'}`);
   }

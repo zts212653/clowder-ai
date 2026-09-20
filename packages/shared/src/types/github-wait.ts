@@ -33,7 +33,7 @@ export const GITHUB_PR_WAIT_PREDICATE_LIMIT = GITHUB_PR_WAIT_PREDICATE_KINDS.len
 export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KINDS.length;
 
 /**
- * #1392 AC-7: normal registration names a subject, not a predicate list.
+ * #1392 AC-7: normal registration names a subject; the server decides who may wake you.
  *
  * The gap is concrete. An author reported a published dependency in a conversation comment while HEAD
  * never moved; a registration watching only `pr_head_changed` was healthy, unexpired, and never woke,
@@ -41,22 +41,62 @@ export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KIN
  * ask for the comment condition. It did nothing to stop them leaving it out, and an agent that cannot
  * poll does not discover the omission — it simply never hears anything again.
  *
- * So the common path expands here, from one definition shared by the API and the MCP entry, and the
- * advanced path (`when[]`) stays exactly as it was for callers who need a precise wait.
+ * An earlier build closed half of that: the bare default armed the four conditions a PR raises about
+ * itself and no comment condition at all, because a comment audience had to be named and no default
+ * audience was approved. A registration that succeeds while listening to no comments is the original
+ * silent failure wearing a new hat, and the product owner has since settled the table it was waiting
+ * on (#1392 §4, 2026-09-20). Both perspectives land together here; neither waits for the other.
  *
- * Two deliberate limits:
- *
- * The default covers only conditions that need no audience. Both comment conditions require a positive
- * audience (AC-3), and an open default — receive from everyone but yourself — is a product decision the
- * maintainer has explicitly not signed off. Rather than invent one, the default omits comments and the
- * caller adds them by naming who they are waiting on. That is honest about what a bare registration
- * does and does not cover.
- *
- * The audience is always supplied, never derived from GitHub authorship. Who you are waiting on is a
- * claim about the work, and inferring it from who opened the PR would answer a question nobody asked.
- * An empty audience is refused at registration rather than widened to everyone — silent widening is the
- * failure this issue exists to remove.
+ * Role is resolved once, at registration, from authoritative GitHub metadata, and frozen into the
+ * armed predicate so the caller can read back exactly what was armed and what will be filtered.
  */
+export type GitHubTrackingIdentityGap = 'self' | 'subject_author' | 'reviewer_ground';
+
+/**
+ * What makes the maintainer/reviewer perspective checkable. "Not the author" is deliberately not on
+ * this list: it is an absence, and an absence would let a passer-by inherit a reviewer's narrow
+ * audience and then hear almost nothing. Each of these is a positive fact GitHub states.
+ */
+export type GitHubReviewerGround = 'review_requested' | 'review_submitted' | 'repo_write_access';
+
+/** Authoritative GitHub facts about a tracking subject and about us. Any field may be unresolved. */
+export interface GitHubTrackingIdentityV1 {
+  /** The authenticated GitHub identity every cat posts as. */
+  readonly selfLogin?: string;
+  /** The login that opened the PR or issue. */
+  readonly subjectAuthorLogin?: string;
+  readonly reviewerGround?: GitHubReviewerGround;
+}
+
+export type GitHubNotificationPerspective =
+  | { readonly role: 'subject_author'; readonly selfLogin: string }
+  | {
+      readonly role: 'maintainer_or_reviewer';
+      readonly selfLogin: string;
+      readonly subjectAuthorLogin: string;
+      readonly ground: GitHubReviewerGround;
+    }
+  | { readonly role: 'unresolved'; readonly missing: readonly GitHubTrackingIdentityGap[] };
+
+/**
+ * The server-derived audience of a comment surface, frozen at registration.
+ *
+ * This sits beside `authorLogins` rather than replacing it because the two have different
+ * provenance, and collapsing them would hide which one you got. `authorLogins` is a list the caller
+ * wrote; `audience` is a rule the server derived from GitHub metadata. Exactly one is ever present.
+ */
+export type GitHubCommentAudienceV1 =
+  /** PR author perspective, and every issue: every comment that is not our own, bots included. */
+  | { readonly mode: 'everyone_but_self'; readonly selfLogin: string }
+  /** Maintainer/reviewer perspective: the subject author's own words, bots and pure summons filtered. */
+  | { readonly mode: 'subject_author_only'; readonly subjectAuthorLogin: string }
+  /**
+   * Identity or role could not be determined. Nothing is dropped quietly: every comment matches and
+   * is delivered, flagged, so the owner learns that coverage was never established. Over-delivering
+   * costs a sentence; under-delivering costs an agent that cannot tell silence from nothing happening.
+   */
+  | { readonly mode: 'unresolved_identity'; readonly missing: readonly GitHubTrackingIdentityGap[] };
+
 /**
  * #1392 AC-7: `nextStep` is a note to the owner, not a condition. Requiring it made every caller
  * invent a sentence before they could register, and an invented sentence is worse than a generated
@@ -69,6 +109,69 @@ export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KIN
 export const DEFAULT_GITHUB_TRACKING_NEXT_STEP =
   'Check what changed on this subject, then continue the responsibility you already hold.';
 
+/** GitHub logins are case-insensitive, and a padded login could never equal a real one. */
+function normalizeLogin(value: string | undefined): string | undefined {
+  const login = value?.trim();
+  return login ? login : undefined;
+}
+
+export function sameGitHubLogin(left: string | undefined, right: string | undefined): boolean {
+  const a = normalizeLogin(left);
+  const b = normalizeLogin(right);
+  return a !== undefined && b !== undefined && a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * The accepted table, as one function. Read it as: we can only claim a perspective we can prove.
+ * Missing either login, or holding no reviewer ground while not being the author, is not an error to
+ * return to the caller — it is a state the owner has to be told about on the normal path (AC-7).
+ */
+export function resolveGitHubNotificationPerspective(
+  identity: GitHubTrackingIdentityV1,
+): GitHubNotificationPerspective {
+  const selfLogin = normalizeLogin(identity.selfLogin);
+  const subjectAuthorLogin = normalizeLogin(identity.subjectAuthorLogin);
+  const missing: GitHubTrackingIdentityGap[] = [];
+  if (!selfLogin) missing.push('self');
+  if (!subjectAuthorLogin) missing.push('subject_author');
+  if (selfLogin === undefined || subjectAuthorLogin === undefined) {
+    return { role: 'unresolved', missing };
+  }
+  if (sameGitHubLogin(selfLogin, subjectAuthorLogin)) {
+    return { role: 'subject_author', selfLogin };
+  }
+  if (!identity.reviewerGround) {
+    return { role: 'unresolved', missing: ['reviewer_ground'] };
+  }
+  return {
+    role: 'maintainer_or_reviewer',
+    selfLogin,
+    subjectAuthorLogin,
+    ground: identity.reviewerGround,
+  };
+}
+
+export function commentAudienceForPerspective(perspective: GitHubNotificationPerspective): GitHubCommentAudienceV1 {
+  switch (perspective.role) {
+    case 'subject_author':
+      return { mode: 'everyone_but_self', selfLogin: perspective.selfLogin };
+    case 'maintainer_or_reviewer':
+      return { mode: 'subject_author_only', subjectAuthorLogin: perspective.subjectAuthorLogin };
+    default:
+      return { mode: 'unresolved_identity', missing: perspective.missing };
+  }
+}
+
+/**
+ * An issue has one accepted default — every comment that is not our own — so it needs no role split
+ * and no reviewer ground. Only our own login has to be known, and when it is not, the same
+ * unresolved path applies rather than a silent "any comment" that could not say why.
+ */
+export function issueCommentAudience(identity: GitHubTrackingIdentityV1): GitHubCommentAudienceV1 {
+  const selfLogin = normalizeLogin(identity.selfLogin);
+  return selfLogin ? { mode: 'everyone_but_self', selfLogin } : { mode: 'unresolved_identity', missing: ['self'] };
+}
+
 export type GitHubPrTrackingGoal = {
   readonly kind: 'await_reply_from';
   readonly authorLogins: readonly string[];
@@ -78,7 +181,7 @@ export type GitHubPrTrackingGoalExpansion =
   | { readonly ok: true; readonly when: readonly GitHubPrWaitPredicate[] }
   | { readonly ok: false; readonly error: string };
 
-/** Conditions a PR raises about itself. None of them needs an audience, so all are always safe to arm. */
+/** Conditions a PR raises about itself. None of them needs an audience, so all are always armed. */
 const GITHUB_PR_SUBJECT_STATE_PREDICATES: readonly GitHubPrWaitPredicate[] = [
   { kind: 'pr_review_decision_changed' },
   { kind: 'pr_ci_terminal' },
@@ -86,9 +189,27 @@ const GITHUB_PR_SUBJECT_STATE_PREDICATES: readonly GitHubPrWaitPredicate[] = [
   { kind: 'pr_head_changed' },
 ];
 
-export function expandGitHubPrTrackingGoal(goal?: GitHubPrTrackingGoal): GitHubPrTrackingGoalExpansion {
+/**
+ * The normal PR entry. Both comment surfaces are always armed — that is the whole point — and the
+ * audience comes from the resolved perspective unless the caller narrowed it by naming people.
+ *
+ * `goal` stays a narrowing, never a precondition. When it is supplied its list is used verbatim, so
+ * the advanced allowlist semantics are exactly what they were.
+ */
+export function expandGitHubPrTrackingGoal(
+  perspective: GitHubNotificationPerspective,
+  goal?: GitHubPrTrackingGoal,
+): GitHubPrTrackingGoalExpansion {
   if (!goal) {
-    return { ok: true, when: GITHUB_PR_SUBJECT_STATE_PREDICATES };
+    const audience = commentAudienceForPerspective(perspective);
+    return {
+      ok: true,
+      when: [
+        ...GITHUB_PR_SUBJECT_STATE_PREDICATES,
+        { kind: 'pr_conversation_comment_added', audience },
+        { kind: 'pr_inline_comment_added', audience },
+      ],
+    };
   }
 
   const authorLogins = goal.authorLogins.map((login) => login.trim()).filter((login) => login.length > 0);
@@ -110,6 +231,72 @@ export function expandGitHubPrTrackingGoal(goal?: GitHubPrTrackingGoal): GitHubP
   };
 }
 
+/**
+ * The normal issue entry. One condition, because `issue_author_commented` would fire a second time
+ * on the very same comment the audience already matched, and two deltas for one comment reads as two
+ * events to whoever is woken.
+ */
+export function expandGitHubIssueTracking(identity: GitHubTrackingIdentityV1): readonly GitHubIssueWaitPredicate[] {
+  return [{ kind: 'issue_comment_added', audience: issueCommentAudience(identity) }];
+}
+
+/**
+ * #1392 AC-7: what the registration actually armed, in the registration's own answer.
+ *
+ * A caller who names nothing now gets a policy they did not write, so the policy has to be legible
+ * at the moment it is chosen — otherwise "registered" means the same opaque thing it did before and
+ * the owner is back to not knowing what they will hear. This states the perspective, the conditions
+ * armed, and, in words, what will be filtered out and why.
+ */
+export interface GitHubNotificationCoverageV1 {
+  readonly perspective: GitHubNotificationPerspective;
+  readonly armed: readonly GitHubWaitPredicateKind[];
+  readonly commentFilters: readonly string[];
+}
+
+function describeCommentAudience(predicate: GitHubWaitPredicate): string | undefined {
+  if (
+    predicate.kind !== 'pr_conversation_comment_added' &&
+    predicate.kind !== 'pr_inline_comment_added' &&
+    predicate.kind !== 'issue_comment_added'
+  ) {
+    return undefined;
+  }
+  const surface =
+    predicate.kind === 'pr_inline_comment_added'
+      ? 'inline comments'
+      : predicate.kind === 'pr_conversation_comment_added'
+        ? 'conversation comments'
+        : 'issue comments';
+  const audience = predicate.audience;
+  if (!audience) {
+    return predicate.authorLogins
+      ? `${surface}: only from ${predicate.authorLogins.join(', ')} (audience you named)`
+      : `${surface}: from anyone`;
+  }
+  switch (audience.mode) {
+    case 'everyone_but_self':
+      return `${surface}: from anyone except ${audience.selfLogin} (you), bots included`;
+    case 'subject_author_only':
+      return `${surface}: only from ${audience.subjectAuthorLogin} (the subject author); bots and pure summon commands filtered`;
+    default:
+      return `${surface}: identity unknown (${audience.missing.join(', ')}) — every comment is delivered and flagged, and normal coverage is NOT established`;
+  }
+}
+
+export function describeGitHubNotificationCoverage(
+  perspective: GitHubNotificationPerspective,
+  when: readonly GitHubWaitPredicate[],
+): GitHubNotificationCoverageV1 {
+  return {
+    perspective,
+    armed: when.map((predicate) => predicate.kind),
+    commentFilters: when
+      .map((predicate) => describeCommentAudience(predicate))
+      .filter((line): line is string => line !== undefined),
+  };
+}
+
 export type GitHubWaitPredicateKind = (typeof GITHUB_WAIT_PREDICATE_KINDS)[number];
 
 export type GitHubWaitPredicate =
@@ -120,18 +307,34 @@ export type GitHubWaitPredicate =
   | { readonly kind: 'pr_ci_terminal' }
   | { readonly kind: 'pr_became_conflicting' }
   /**
-   * #1392 AC-3 / AC-6: a new PR review comment on one surface. The two surfaces keep separate
-   * frontiers — inline and conversation comment ids are not comparable. `authorLogins` is a
-   * required, non-empty positive audience, frozen at registration and compared
-   * case-insensitively. There is no omitted-means-anyone form.
+   * #1392 AC-3 / AC-6 / AC-7: a new PR review comment on one surface. The two surfaces keep separate
+   * frontiers — inline and conversation comment ids are not comparable.
+   *
+   * Exactly one of `authorLogins` and `audience` is present, and never neither: an omitted-means-anyone
+   * form is the silent widening this issue exists to remove. `authorLogins` is the caller's own exact
+   * allowlist on the advanced path; `audience` is the role the server resolved on the normal path.
+   * Both are frozen at registration and compared case-insensitively.
    */
-  | { readonly kind: 'pr_conversation_comment_added'; readonly authorLogins: readonly string[] }
-  | { readonly kind: 'pr_inline_comment_added'; readonly authorLogins: readonly string[] }
+  | {
+      readonly kind: 'pr_conversation_comment_added';
+      readonly authorLogins?: readonly string[];
+      readonly audience?: GitHubCommentAudienceV1;
+    }
+  | {
+      readonly kind: 'pr_inline_comment_added';
+      readonly authorLogins?: readonly string[];
+      readonly audience?: GitHubCommentAudienceV1;
+    }
   /**
-   * #1392 AC-3: optional positive audience, frozen at registration, compared case-insensitively.
-   * Omitted keeps main's any-comment issue wait.
+   * #1392 AC-3 / AC-7: `authorLogins` is the caller's optional exact allowlist; `audience` is the
+   * server-resolved default. Both omitted keeps main's any-comment issue wait, which the issue
+   * surface has always had and which is not a widening of anything.
    */
-  | { readonly kind: 'issue_comment_added'; readonly authorLogins?: readonly string[] }
+  | {
+      readonly kind: 'issue_comment_added';
+      readonly authorLogins?: readonly string[];
+      readonly audience?: GitHubCommentAudienceV1;
+    }
   | { readonly kind: 'issue_author_commented' };
 
 export type GitHubPrWaitPredicate = Extract<GitHubWaitPredicate, { readonly kind: `pr_${string}` }>;
@@ -248,6 +451,12 @@ export interface GitHubWaitMatchedDelta {
   readonly kind: GitHubWaitPredicateKind;
   readonly delta: string;
   readonly sourceRef?: string;
+  /**
+   * #1392 AC-7: this delta was matched while the subject's identity or our role on it was unknown,
+   * so it was delivered rather than filtered. It says the event and its source are real and that
+   * normal coverage was never established — not that the rule was applied and passed.
+   */
+  readonly identityUnknown?: true;
 }
 
 export type WaitOutcomeDelivery = 'pending' | 'delivered' | 'not_applicable' | 'legacy_unfenced';

@@ -1,22 +1,28 @@
 import type {
   GitHubCiBaselineBucket,
+  GitHubCommentAudienceV1,
   GitHubIssueWaitPredicate,
   GitHubReviewThreadBaseline,
   GitHubWaitBaseline,
   GitHubWaitMatchedDelta,
   GitHubWaitPredicate,
 } from '@cat-cafe/shared';
-import { GITHUB_ISSUE_WAIT_PREDICATE_LIMIT, GITHUB_PR_WAIT_PREDICATE_LIMIT } from '@cat-cafe/shared';
+import { GITHUB_ISSUE_WAIT_PREDICATE_LIMIT, GITHUB_PR_WAIT_PREDICATE_LIMIT, sameGitHubLogin } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 /**
  * #1392 AC-3: a positive audience, frozen at registration. It must name someone — an empty
  * allowlist matches nobody, which is a dead wait that never fires and never says so.
  *
- * PR comment predicates REQUIRE it (AC-3 as accepted in #1392 comment 5433764333). An omitted
- * audience that quietly meant "any author" would be an open audience nobody chose; the maintainer
- * rejected exactly that shape (#1394 comment 5462922571). `issue_comment_added` keeps it optional,
- * as AC-3 states for issues, which preserves main's any-comment issue wait.
+ * This is the *caller's* schema, and on the advanced `when[]` path PR comment predicates still
+ * REQUIRE it, unchanged (AC-3 as accepted in #1392 comment 5433764333). An omitted audience that
+ * quietly meant "any author" would be an open audience nobody chose; the maintainer rejected
+ * exactly that shape (#1394 comment 5462922571). `issue_comment_added` keeps it optional, as AC-3
+ * states for issues, which preserves main's any-comment issue wait.
+ *
+ * The AC-7 role default is deliberately absent from this schema. A derived `audience` is a claim
+ * about who someone is on GitHub, so only the server may write one; accepting it here would let a
+ * caller assert a perspective the server never verified. `.strict()` rejects the key outright.
  *
  * Logins are trimmed before the emptiness check: `' '` names nobody, and a padded login could
  * never equal a real one, so either would register the same dead wait as an empty list.
@@ -123,6 +129,25 @@ export function canonicalizeGitHubIssueWaitPredicates(input: unknown): readonly 
   return githubIssueWaitPredicatesSchema.parse(input) as readonly GitHubIssueWaitPredicate[];
 }
 
+/**
+ * #1392 AC-7: one observed comment, as collected. `actorType` and `body` are carried because the
+ * accepted maintainer/reviewer default filters bots and pure summon commands, and both of those are
+ * decided here, at delivery — never at collection, which must stay unconditional so cursors advance
+ * over filtered comments and a later policy change loses no history.
+ *
+ * The body reaches the matcher and never reaches the owner's message: a wake states the fact and
+ * points at the source, and copying untrusted prose into a cat's context is a separate hazard.
+ */
+export interface GitHubObservedComment {
+  readonly id: number;
+  readonly author: string;
+  readonly commentType?: 'inline' | 'conversation';
+  readonly sourceRef?: string;
+  readonly body?: string;
+  /** GitHub's own account type for the comment author: `Bot` for an app, `User` for a person. */
+  readonly actorType?: string;
+}
+
 export interface GitHubWaitFacts {
   readonly headSha?: string;
   readonly review?: {
@@ -140,12 +165,7 @@ export interface GitHubWaitFacts {
     readonly resultConversationCommentCursor?: number;
     readonly threads?: readonly GitHubReviewThreadBaseline[];
     /** #1392 AC-6: new review comments this observation collected, on either surface. */
-    readonly comments?: readonly {
-      readonly id: number;
-      readonly author: string;
-      readonly commentType: 'inline' | 'conversation';
-      readonly sourceRef?: string;
-    }[];
+    readonly comments?: readonly GitHubObservedComment[];
   };
   readonly ci?: {
     readonly bucket: GitHubCiBaselineBucket;
@@ -157,11 +177,7 @@ export interface GitHubWaitFacts {
   };
   readonly issue?: {
     readonly state: 'open' | 'closed';
-    readonly comments: readonly {
-      readonly id: number;
-      readonly author: string;
-      readonly sourceRef?: string;
-    }[];
+    readonly comments: readonly GitHubObservedComment[];
   };
 }
 
@@ -192,13 +208,107 @@ function inAudience(author: string, authorLogins: readonly string[]): boolean {
 }
 
 /**
+ * #1392 AC-7: an account GitHub itself calls an app. Both tests are facts GitHub states — the `Bot`
+ * account type it returns on every comment, and the `[bot]` suffix it reserves for app logins — so
+ * nothing here guesses from prose or from a maintained list of vendor names.
+ *
+ * This only ever narrows the maintainer/reviewer default. A PR author still hears from bots, and an
+ * explicit `authorLogins` allowlist that names a bot still wakes on it: the caller said so.
+ */
+export function isBotComment(comment: GitHubObservedComment): boolean {
+  if (comment.actorType?.toLowerCase() === 'bot') return true;
+  return comment.author.trim().toLowerCase().endsWith('[bot]');
+}
+
+/**
+ * #1392 AC-7: handles this deployment can prove are summon targets.
+ *
+ * `codex` is already hardcoded as a review trigger elsewhere in this codebase
+ * (`pr-review-event-wait-coverage.ts`), and `chatgpt-codex-connector[bot]` is the account that
+ * answers it. Nothing else is listed, because filtering on an unverified handle would let
+ * `@maintainer please look` — a person asking a person — be deleted as machine noise.
+ */
+export const GITHUB_SUMMON_HANDLES: readonly string[] = ['codex', 'chatgpt-codex-connector[bot]'];
+
+/**
+ * #1392 AC-7: is this comment *only* a bot summons, with nothing in it for a human?
+ *
+ * The rule is structural and deliberately narrow. The body must be a single line that opens with a
+ * mention of a known summon handle and then contains nothing but bare command words — no
+ * punctuation, no second line, no prose. `@codex review` is a summons. `@codex review — but note
+ * the base moved` is not, and neither is `@maintainer please look`, because the handle is not a
+ * summon target. It never reads prose to judge whether a reply was worth having; it only recognises
+ * the shape of a command, and when it cannot, the comment is delivered.
+ */
+export function isPureSummonCommand(body: string | undefined): boolean {
+  const text = body?.trim();
+  if (!text || !text.startsWith('@') || /[\r\n]/.test(text)) return false;
+  const tokens = text.split(/\s+/);
+  if (tokens.length > 4) return false;
+  const [mention, ...rest] = tokens;
+  const handle = mention.slice(1).toLowerCase();
+  if (!GITHUB_SUMMON_HANDLES.some((known) => known.toLowerCase() === handle)) return false;
+  return rest.every((token) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(token));
+}
+
+type AudienceVerdict = { readonly wake: false } | { readonly wake: true; readonly identityUnknown: boolean };
+
+const IGNORE: AudienceVerdict = { wake: false };
+
+/**
+ * #1392 AC-7: the accepted default table, applied to one comment.
+ *
+ * Which arm runs is fixed at registration, so a single reading of the armed predicate tells the
+ * owner what they will and will not hear. The `unresolved_identity` arm is the one that looks
+ * strange and is the most important: when we could not establish who we are or who opened the
+ * subject, we deliver everything rather than quietly applying a rule we cannot justify. An agent
+ * discards one extra wake in a sentence; it cannot discover a wake it never got.
+ */
+function judgeAudience(
+  comment: GitHubObservedComment,
+  predicate: { readonly authorLogins?: readonly string[]; readonly audience?: GitHubCommentAudienceV1 },
+): AudienceVerdict {
+  const { audience } = predicate;
+  if (!audience) {
+    // The caller's own allowlist, used verbatim. Absent on the issue surface means main's any-comment wait.
+    if (!predicate.authorLogins) return { wake: true, identityUnknown: false };
+    return inAudience(comment.author, predicate.authorLogins) ? { wake: true, identityUnknown: false } : IGNORE;
+  }
+  switch (audience.mode) {
+    case 'everyone_but_self':
+      return sameGitHubLogin(comment.author, audience.selfLogin) ? IGNORE : { wake: true, identityUnknown: false };
+    case 'subject_author_only':
+      if (!sameGitHubLogin(comment.author, audience.subjectAuthorLogin)) return IGNORE;
+      if (isBotComment(comment)) return IGNORE;
+      if (isPureSummonCommand(comment.body)) return IGNORE;
+      return { wake: true, identityUnknown: false };
+    default:
+      return { wake: true, identityUnknown: true };
+  }
+}
+
+function commentDelta(
+  kind: GitHubWaitMatchedDelta['kind'],
+  label: string,
+  comment: GitHubObservedComment,
+  verdict: { readonly identityUnknown: boolean },
+): GitHubWaitMatchedDelta {
+  return {
+    kind,
+    delta: `${label} by ${comment.author}`,
+    ...(comment.sourceRef ? { sourceRef: comment.sourceRef } : {}),
+    ...(verdict.identityUnknown ? { identityUnknown: true as const } : {}),
+  };
+}
+
+/**
  * #1392 AC-3 / AC-6: the one path both PR comment surfaces share. Each surface is compared only
  * against its OWN frontier — inline and conversation ids come from different GitHub sequences, so
  * judging one against the other's cursor would drop real comments as "old".
  */
 function matchNewComments(
   kind: 'pr_conversation_comment_added' | 'pr_inline_comment_added',
-  authorLogins: readonly string[],
+  predicate: { readonly authorLogins?: readonly string[]; readonly audience?: GitHubCommentAudienceV1 },
   baseline: GitHubWaitBaseline,
   current: GitHubWaitFacts,
 ): GitHubWaitMatchedDelta[] {
@@ -206,14 +316,14 @@ function matchNewComments(
   const surface = kind === 'pr_inline_comment_added' ? 'inline' : 'conversation';
   const frontier =
     surface === 'inline' ? baseline.review.inlineCommentCursor : baseline.review.conversationCommentCursor;
-  return (current.review?.comments ?? [])
-    .filter((comment) => comment.commentType === surface && comment.id > frontier)
-    .filter((comment) => inAudience(comment.author, authorLogins))
-    .map((comment) => ({
-      kind,
-      delta: `${surface} comment #${comment.id} by ${comment.author}`,
-      ...(comment.sourceRef ? { sourceRef: comment.sourceRef } : {}),
-    }));
+  const matches: GitHubWaitMatchedDelta[] = [];
+  for (const comment of current.review?.comments ?? []) {
+    if (comment.commentType !== surface || comment.id <= frontier) continue;
+    const verdict = judgeAudience(comment, predicate);
+    if (!verdict.wake) continue;
+    matches.push(commentDelta(kind, `${surface} comment #${comment.id}`, comment, verdict));
+  }
+  return matches;
 }
 
 export function matchGitHubWaitPredicates(
@@ -330,19 +440,15 @@ export function matchGitHubWaitPredicates(
       }
       case 'pr_conversation_comment_added':
       case 'pr_inline_comment_added':
-        matches.push(...matchNewComments(predicate.kind, predicate.authorLogins, baseline, current));
+        matches.push(...matchNewComments(predicate.kind, predicate, baseline, current));
         break;
       case 'issue_comment_added': {
         if (!('issue' in baseline)) break;
         for (const comment of current.issue?.comments ?? []) {
           if (comment.id <= baseline.issue.lastCommentCursor) continue;
-          // Omitted is main's any-comment issue wait (the collector has already dropped the owner's own).
-          if (predicate.authorLogins && !inAudience(comment.author, predicate.authorLogins)) continue;
-          matches.push({
-            kind: predicate.kind,
-            delta: `issue comment #${comment.id} added by ${comment.author}`,
-            ...(comment.sourceRef ? { sourceRef: comment.sourceRef } : {}),
-          });
+          const verdict = judgeAudience(comment, predicate);
+          if (!verdict.wake) continue;
+          matches.push(commentDelta(predicate.kind, `issue comment #${comment.id} added`, comment, verdict));
         }
         break;
       }

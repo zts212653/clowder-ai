@@ -12,6 +12,7 @@ import type {
   GitHubIssueAwaitStateV1,
   GitHubPrAwaitStateV1,
   GitHubPrWaitPredicate,
+  GitHubTrackingIdentityV1,
   IssueWaitAutomationState,
   LocalReviewVerdict,
   PrAutomationState,
@@ -25,6 +26,8 @@ import {
   catRegistry,
   createCatId,
   DEFAULT_GITHUB_TRACKING_NEXT_STEP,
+  describeGitHubNotificationCoverage,
+  expandGitHubIssueTracking,
   expandGitHubPrTrackingGoal,
   isTrackingKind,
   isValidAcceptedSource,
@@ -32,6 +35,7 @@ import {
   localReviewVerdictSchema,
   normalizeRichBlock,
   normalizeSopDefinitionId,
+  resolveGitHubNotificationPerspective,
   resolveWorkflowSopSkill,
   reviewSubjectRefSchema,
 } from '@cat-cafe/shared';
@@ -895,6 +899,17 @@ export interface CallbackRoutesOptions {
   validatePr?: (repoFullName: string, prNumber: number) => Promise<boolean>;
   /** F202 Phase 2 follow-up: validates specific issue exists (number-level validation) */
   validateIssue?: (repoFullName: string, issueNumber: number) => Promise<boolean>;
+  /**
+   * #1392 AC-7: authoritative GitHub identity for a tracking subject, resolved server-side.
+   *
+   * The normal entry no longer asks the caller who they are waiting on, so the server has to know
+   * who *we* are and who opened the subject before it can arm an audience. Every field is optional
+   * because an unresolved one is a state the owner is told about, never an error that closes
+   * tracking (#1392 AC-7).
+   */
+  resolveGitHubPrTrackingIdentity?: (repoFullName: string, prNumber: number) => Promise<GitHubTrackingIdentityV1>;
+  /** #1392 AC-7: the authenticated GitHub login every cat posts as; `undefined` when unresolvable. */
+  resolveGitHubSelfLogin?: () => Promise<string | undefined>;
   /** F280: server-owned baseline and collector frontier for a typed PR wait. */
   fetchPrWaitBaseline?: (
     repoFullName: string,
@@ -1271,6 +1286,45 @@ function deriveCallbackOriginRef(
   };
 }
 
+/**
+ * #1392 AC-7: identity lookup never decides whether tracking exists.
+ *
+ * A missing resolver or a GitHub call that throws both come back as "nothing known", which the
+ * perspective turns into the unresolved arm: the registration still installs, both comment surfaces
+ * are still armed, and every comment is delivered flagged. Turning this into a non-2xx was the
+ * earlier plan and was explicitly corrected — an error left in a return value is a silence to the
+ * one party structurally unable to notice it (#1392 AC-7, issue comment 5747771227).
+ */
+async function resolvePrTrackingIdentity(
+  resolve: ((repoFullName: string, prNumber: number) => Promise<GitHubTrackingIdentityV1>) | undefined,
+  repoFullName: string,
+  prNumber: number,
+  log: FastifyBaseLogger,
+): Promise<GitHubTrackingIdentityV1> {
+  if (!resolve) return {};
+  try {
+    return await resolve(repoFullName, prNumber);
+  } catch (err) {
+    log.warn({ err, repoFullName, prNumber }, '#1392 AC-7: PR tracking identity unresolved; arming the flagged path');
+    return {};
+  }
+}
+
+/** #1392 AC-7: the issue default needs only our own login, and the same failure shape applies. */
+async function resolveTrackingSelfLogin(
+  resolve: (() => Promise<string | undefined>) | undefined,
+  log: FastifyBaseLogger,
+): Promise<GitHubTrackingIdentityV1> {
+  if (!resolve) return {};
+  try {
+    const selfLogin = await resolve();
+    return selfLogin ? { selfLogin } : {};
+  } catch (err) {
+    log.warn({ err }, '#1392 AC-7: GitHub self login unresolved; arming the flagged path');
+    return {};
+  }
+}
+
 export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async (app, opts) => {
   const {
     registry,
@@ -1290,6 +1344,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     validateIssue,
     fetchPrWaitBaseline,
     fetchIssueWaitBaseline,
+    resolveGitHubPrTrackingIdentity,
+    resolveGitHubSelfLogin,
     featIndexProvider,
     queueProcessor,
   } = opts;
@@ -5658,10 +5714,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
     const { repoFullName, prNumber, goal, expiresAt, autoRenew } = parsed.data;
     const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
-    // #1392 AC-7: a caller who names no precise wait gets the expansion, from the one definition the
-    // MCP entry also reads, so the same registration cannot mean two things depending on which door it
-    // came through. The expansion is returned to the caller in `await.continuation.when`.
-    const expansion = parsed.data.when ? undefined : expandGitHubPrTrackingGoal(goal);
+    // #1392 AC-7: role is resolved here, before the conditions are built, because the normal entry
+    // arms both comment surfaces and their audience *is* the role. A lookup that fails is not an
+    // error the caller has to handle: it produces the unresolved perspective, which delivers every
+    // comment flagged rather than quietly applying a rule we could not justify.
+    const perspective = resolveGitHubNotificationPerspective(
+      await resolvePrTrackingIdentity(resolveGitHubPrTrackingIdentity, repoFullName, prNumber, log),
+    );
+    // A caller who names no precise wait gets the expansion, from the one definition the MCP entry
+    // also reads, so the same registration cannot mean two things depending on which door it came
+    // through. The expansion is returned to the caller in `await.continuation.when`.
+    const expansion = parsed.data.when ? undefined : expandGitHubPrTrackingGoal(perspective, goal);
     if (expansion && !expansion.ok) {
       reply.status(400);
       return { error: expansion.error };
@@ -5872,6 +5935,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         threadId: record.threadId,
         task: installed,
         await: awaitState,
+        // #1392 AC-7: the caller named nothing, so the answer says what was armed and what is filtered.
+        notification: describeGitHubNotificationCoverage(perspective, when),
       };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
@@ -5894,7 +5959,12 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .min(1)
         .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
       issueNumber: z.number().int().positive(),
-      when: githubIssueWaitPredicatesSchema,
+      /**
+       * #1392 AC-7: the advanced path, and no longer required. Omit it and the server arms the one
+       * accepted issue default — every comment that is not our own. An issue registration that
+       * succeeded while listening to nothing was the same silent failure as the PR one.
+       */
+      when: githubIssueWaitPredicatesSchema.optional(),
       /** #1392 AC-7: display-only, so it is never a precondition for registering. */
       nextStep: z.string().min(1).max(500).optional(),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
@@ -5931,8 +6001,13 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, issueNumber, when, expiresAt, autoRenew } = parsed.data;
+    const { repoFullName, issueNumber, expiresAt, autoRenew } = parsed.data;
     const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
+    // #1392 AC-7: one identity lookup, one expansion, shared with the PR entry's shape. An issue has
+    // a single accepted default and needs no role split, so only our own login has to be known.
+    const issueIdentity = await resolveTrackingSelfLogin(resolveGitHubSelfLogin, log);
+    const when = parsed.data.when ?? expandGitHubIssueTracking(issueIdentity);
+    const issuePerspective = resolveGitHubNotificationPerspective(issueIdentity);
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };
@@ -6103,7 +6178,14 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         await opts.waitLifecycleHolder?.current?.recordOutcomeEvent(installed, supersededOutcome);
       }
 
-      return { status: 'ok', threadId: record.threadId, task: installed, await: awaitState };
+      return {
+        status: 'ok',
+        threadId: record.threadId,
+        task: installed,
+        await: awaitState,
+        // #1392 AC-7: the same answer the PR entry gives — armed conditions and the audience applied.
+        notification: describeGitHubNotificationCoverage(issuePerspective, when),
+      };
     } catch (error) {
       if (isSubjectOwnershipConflictError(error)) {
         reply.status(409);

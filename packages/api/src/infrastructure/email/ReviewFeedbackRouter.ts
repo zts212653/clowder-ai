@@ -128,6 +128,11 @@ export class ReviewFeedbackRouter {
                   // #1392 AC-7: a wake says who replied, never what they said, so it has to hand the
                   // owner a way to go read it. Same shape the issue surface already emits.
                   sourceRef: `github:pr-comment:${comment.id}`,
+                  // #1392 AC-7: the accepted maintainer/reviewer default filters bots and pure summon
+                  // commands, and both are decided at delivery. The body reaches the matcher and stops
+                  // there — it is never copied into what the owner is sent.
+                  ...(comment.actorType ? { actorType: comment.actorType } : {}),
+                  ...(comment.body ? { body: comment.body } : {}),
                 })),
               }
             : {}),
