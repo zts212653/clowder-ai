@@ -4,6 +4,22 @@ import { describe, test } from 'node:test';
 const { TaskStore } = await import('../../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { createConflictCheckTaskSpec } = await import('../../dist/infrastructure/email/ConflictCheckTaskSpec.js');
 
+/*
+ * #1392 R5: a delivery carries the outcome it delivered, and only a matched conflict may drive the
+ * auto-resolver. These cases model exactly that delivery, so they still exercise the F140 path.
+ */
+const conflictMatchedOutcome = {
+  v: 1,
+  outcomeId: 'wait:pr:owner/repo#7:g1:matched',
+  generation: 1,
+  subjectRef: 'pr:owner/repo#7',
+  ownerFence: { kind: 'containing_task', generation: 1 },
+  reason: 'matched',
+  at: 1000,
+  delivery: 'delivered',
+  matched: [{ kind: 'pr_became_conflicting', delta: 'mergeState MERGEABLE → CONFLICTING' }],
+};
+
 describe('conflict scheduler F280 adapter', () => {
   test('collects merge state for active PR tasks', async () => {
     const taskStore = new TaskStore();
@@ -63,6 +79,7 @@ describe('conflict scheduler F280 adapter', () => {
             catId: 'codex-sol',
             messageId: 'msg-conflict-1',
             content: 'conflict detected',
+            outcome: conflictMatchedOutcome,
           };
         },
       },
@@ -97,6 +114,7 @@ describe('conflict scheduler F280 adapter', () => {
           catId: 'codex-sol',
           messageId: 'msg-conflict-2',
           content: 'conflict detected',
+          outcome: conflictMatchedOutcome,
         }),
       },
       autoExecutor: {

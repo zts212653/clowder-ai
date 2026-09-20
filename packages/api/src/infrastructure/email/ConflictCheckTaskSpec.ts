@@ -9,7 +9,7 @@
  * KD-9: Gate passes ALL mergeState results (including MERGEABLE) so ConflictRouter
  *       can clear fingerprints for re-conflict detection.
  */
-import type { CatId, TaskItem } from '@cat-cafe/shared';
+import type { CatId, TaskItem, WaitOutcomeV1 } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
@@ -38,12 +38,27 @@ interface ConflictWorkItem {
   task: TaskItem;
 }
 
+/**
+ * #1392 R5: did the outcome we are about to act on actually match the conflict condition?
+ *
+ * Reading the typed delta, rather than the outcome's reason text, keeps every other delivery out by
+ * construction instead of by a list of exceptions: an expiry, a HEAD change, a CI verdict, a comment
+ * and a cancel all fail this test without being named. Absent deltas fail it too — auto-resolution
+ * writes to a repository, so it needs proof, not the absence of a denial.
+ */
+function conflictWasMatched(outcome: WaitOutcomeV1 | undefined): boolean {
+  return outcome?.matched?.some((delta) => delta.kind === 'pr_became_conflicting') === true;
+}
+
 async function tryAutoResolveBeforeWake(
   opts: ConflictCheckTaskSpecOptions,
   workItem: ConflictWorkItem,
+  outcome: WaitOutcomeV1 | undefined,
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
   if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
+  // A conflicting repository state is not a mandate: the owner's wait has to be the thing that matched.
+  if (!conflictWasMatched(outcome)) return null;
   try {
     return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
   } catch (error) {
@@ -103,9 +118,10 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         ctx.signal?.throwIfAborted();
         const routeResult = await opts.conflictRouter.route(workItem.signal);
         if (routeResult.kind !== 'notified') return;
+        const conflictDelivery = conflictWasMatched(routeResult.outcome);
 
-        // F140 Phase C: try auto-resolve before waking cat
-        const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
+        // F140 Phase C: try auto-resolve before waking cat — only for a conflict the wait matched.
+        const result = await tryAutoResolveBeforeWake(opts, workItem, routeResult.outcome, ctx.signal);
         if (result?.kind === 'resolved') {
           opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
           return;
@@ -115,11 +131,14 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         }
 
         if (opts.invokeTrigger) {
-          const policy: ConnectorTriggerPolicy = {
-            priority: 'urgent',
-            reason: 'github_pr_conflict',
-            sourceCategory: 'conflict',
-          };
+          /*
+           * #1392 R5: this poller delivers whatever the wait produced, so only a matched conflict may
+           * be labelled and prioritised as one. Anything else — an expiry above all — is an ordinary
+           * wait delivery, and calling it a conflict would misfile it for the owner reading the wake.
+           */
+          const policy: ConnectorTriggerPolicy = conflictDelivery
+            ? { priority: 'urgent', reason: 'github_pr_conflict', sourceCategory: 'conflict' }
+            : { priority: 'normal', reason: 'github_wait_satisfied', sourceCategory: 'scheduled' };
           await opts.invokeTrigger
             .trigger(
               routeResult.threadId,
@@ -131,7 +150,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
               policy,
             )
             .catch((err) => opts.log.warn({ err }, '[conflict-check] trigger failed (best-effort)'));
-          opts.log.info(`[conflict-check] Triggered ${routeResult.catId} for PR conflict`);
+          opts.log.info(`[conflict-check] Triggered ${routeResult.catId} for ${policy.reason}`);
         }
       },
     },

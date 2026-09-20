@@ -26,6 +26,22 @@ function mockTaskStore(tasks) {
   return { listByKind: async () => tasks };
 }
 
+/*
+ * #1392 R5: a delivery carries the outcome it delivered, and only a matched conflict may drive the
+ * auto-resolver. These cases model exactly that delivery, so they still exercise the F140 path.
+ */
+const conflictMatchedOutcome = {
+  v: 1,
+  outcomeId: 'wait:pr:a/b#1:g1:matched',
+  generation: 1,
+  subjectRef: 'pr:a/b#1',
+  ownerFence: { kind: 'containing_task', generation: 1 },
+  reason: 'matched',
+  at: 1000,
+  delivery: 'delivered',
+  matched: [{ kind: 'pr_became_conflicting', delta: 'mergeState MERGEABLE → CONFLICTING' }],
+};
+
 describe('ConflictAutoExecutor', () => {
   it('skips when PR branch is not feat/*', async () => {
     const { ConflictAutoExecutor } = await import('../../dist/infrastructure/email/ConflictAutoExecutor.js');
@@ -135,7 +151,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       autoExecutor: {
@@ -168,7 +191,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       invokeTrigger: {
@@ -200,7 +230,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       invokeTrigger: {
@@ -232,7 +269,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       invokeTrigger: {
@@ -262,7 +306,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'abc123' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       invokeTrigger: { trigger: () => Promise.resolve() },
@@ -284,7 +335,14 @@ describe('ConflictCheckTaskSpec + AutoExecutor integration', () => {
       checkMergeable: async () => ({ mergeState: 'CONFLICTING', headSha: 'sha1' }),
       conflictRouter: {
         async route() {
-          return { kind: 'notified', threadId: 't1', catId: 'opus', messageId: 'm1', content: 'conflict!' };
+          return {
+            kind: 'notified',
+            threadId: 't1',
+            catId: 'opus',
+            messageId: 'm1',
+            content: 'conflict!',
+            outcome: conflictMatchedOutcome,
+          };
         },
       },
       invokeTrigger: {
