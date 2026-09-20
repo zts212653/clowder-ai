@@ -24,6 +24,7 @@ import {
   actionSuccessorMetadataSchema,
   catRegistry,
   createCatId,
+  DEFAULT_GITHUB_TRACKING_NEXT_STEP,
   expandGitHubPrTrackingGoal,
   isTrackingKind,
   isValidAcceptedSource,
@@ -5609,7 +5610,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         })
         .strict()
         .optional(),
-      nextStep: z.string().trim().min(1).max(500),
+      /** #1392 AC-7: display-only, so it is never a precondition for registering. */
+      nextStep: z.string().trim().min(1).max(500).optional(),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
       expiresAt: z.number().int().positive().optional(),
       /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
@@ -5654,7 +5656,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, prNumber, goal, nextStep, expiresAt, autoRenew } = parsed.data;
+    const { repoFullName, prNumber, goal, expiresAt, autoRenew } = parsed.data;
+    const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
     // #1392 AC-7: a caller who names no precise wait gets the expansion, from the one definition the
     // MCP entry also reads, so the same registration cannot mean two things depending on which door it
     // came through. The expansion is returned to the caller in `await.continuation.when`.
@@ -5892,7 +5895,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
       issueNumber: z.number().int().positive(),
       when: githubIssueWaitPredicatesSchema,
-      nextStep: z.string().min(1).max(500),
+      /** #1392 AC-7: display-only, so it is never a precondition for registering. */
+      nextStep: z.string().min(1).max(500).optional(),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
       expiresAt: z.number().int().positive().optional(),
       /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
@@ -5927,7 +5931,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, issueNumber, when, nextStep, expiresAt, autoRenew } = parsed.data;
+    const { repoFullName, issueNumber, when, expiresAt, autoRenew } = parsed.data;
+    const nextStep = parsed.data.nextStep ?? DEFAULT_GITHUB_TRACKING_NEXT_STEP;
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };

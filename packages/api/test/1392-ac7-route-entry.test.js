@@ -52,7 +52,7 @@ describe('#1392 AC-7: POST /api/callbacks/register-pr-tracking', () => {
       method: 'POST',
       url: '/api/callbacks/register-pr-tracking',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
-      payload: { repoFullName: 'owner/repo', nextStep: 'Handle it.', ...payload },
+      payload: { repoFullName: 'owner/repo', ...payload },
     });
   }
 
@@ -60,6 +60,26 @@ describe('#1392 AC-7: POST /api/callbacks/register-pr-tracking', () => {
     JSON.parse(response.body)
       .await.continuation.when.map((predicate) => predicate.kind)
       .sort();
+
+  /*
+   * #1392 AC-7: `nextStep` is a note to the owner, never a condition. Requiring it forced every caller
+   * to invent a sentence before they could register, and an invented sentence invites the next reader
+   * to treat it as policy. The matcher never reads it either way.
+   */
+  test('a registration without a nextStep still gets one, written deterministically', async () => {
+    const response = await post({ prNumber: 910 });
+
+    assert.equal(response.statusCode, 200, 'display-only text must not gate registering');
+    const written = JSON.parse(response.body).await.continuation.then;
+    assert.match(written, /continue the responsibility you already hold/);
+  });
+
+  test('a nextStep that was supplied is kept exactly as given', async () => {
+    const mine = 'Re-read the accepted source before replying.';
+    const response = await post({ prNumber: 911, nextStep: mine });
+
+    assert.equal(JSON.parse(response.body).await.continuation.then, mine);
+  });
 
   test('a registration that names nothing is accepted and arms the PR’s own conditions', async () => {
     const response = await post({ prNumber: 900 });

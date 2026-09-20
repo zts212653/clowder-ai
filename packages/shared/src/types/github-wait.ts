@@ -57,6 +57,18 @@ export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KIN
  * An empty audience is refused at registration rather than widened to everyone — silent widening is the
  * failure this issue exists to remove.
  */
+/**
+ * #1392 AC-7: `nextStep` is a note to the owner, not a condition. Requiring it made every caller
+ * invent a sentence before they could register, and an invented sentence is worse than a generated
+ * one — it tempts a reader into treating it as policy. The matcher never reads this text; it is shown
+ * with the wake and carried into the next generation, nothing more.
+ *
+ * The generated default says the only thing that is always true of a wake: something changed on the
+ * subject you registered, and the responsibility you already held still applies.
+ */
+export const DEFAULT_GITHUB_TRACKING_NEXT_STEP =
+  'Check what changed on this subject, then continue the responsibility you already hold.';
+
 export type GitHubPrTrackingGoal = {
   readonly kind: 'await_reply_from';
   readonly authorLogins: readonly string[];

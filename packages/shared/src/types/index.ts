@@ -658,6 +658,7 @@ export {
 export {
   type AwaitStateV1,
   createWaitContinuationCarrier,
+  DEFAULT_GITHUB_TRACKING_NEXT_STEP,
   expandGitHubPrTrackingGoal,
   GITHUB_ISSUE_WAIT_PREDICATE_KINDS,
   GITHUB_ISSUE_WAIT_PREDICATE_LIMIT,

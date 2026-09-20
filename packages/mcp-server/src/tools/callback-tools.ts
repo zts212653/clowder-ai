@@ -2014,7 +2014,10 @@ export const registerPrTrackingInputSchema = {
     .string()
     .min(1)
     .max(500)
-    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
+    .optional()
+    .describe(
+      'Optional note to yourself, shown with the wake. Omit it and the server writes a deterministic one. Display-only either way: the matcher never reads it, and it decides nothing.',
+    ),
   expiresAt: z
     .number()
     .int()
@@ -2050,7 +2053,7 @@ export async function handleRegisterPrTracking(input: {
       >
     | undefined;
   goal?: { kind: 'await_reply_from'; authorLogins: string[] } | undefined;
-  nextStep: string;
+  nextStep?: string | undefined;
   expiresAt?: number;
   autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
@@ -2069,7 +2072,7 @@ export async function handleRegisterPrTracking(input: {
           // Serializing an absent `when` as null would turn a goal-only call into a contradiction.
           ...(input.when !== undefined ? { when: input.when } : {}),
           ...(input.goal !== undefined ? { goal: input.goal } : {}),
-          nextStep: input.nextStep,
+          ...(input.nextStep !== undefined ? { nextStep: input.nextStep } : {}),
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
@@ -2101,7 +2104,10 @@ export const registerIssueTrackingInputSchema = {
     .string()
     .min(1)
     .max(500)
-    .describe('What to do after a match. Display-only text; never parsed as wake policy.'),
+    .optional()
+    .describe(
+      'Optional note to yourself, shown with the wake. Omit it and the server writes a deterministic one. Display-only either way: the matcher never reads it, and it decides nothing.',
+    ),
   expiresAt: z
     .number()
     .int()
@@ -2118,7 +2124,7 @@ export async function handleRegisterIssueTracking(input: {
   repoFullName: string;
   issueNumber: number;
   when: Array<{ kind: 'issue_comment_added'; authorLogins?: string[] } | { kind: 'issue_author_commented' }>;
-  nextStep: string;
+  nextStep?: string | undefined;
   expiresAt?: number;
   autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
@@ -2132,7 +2138,7 @@ export async function handleRegisterIssueTracking(input: {
           repoFullName: input.repoFullName,
           issueNumber: input.issueNumber,
           when: input.when,
-          nextStep: input.nextStep,
+          ...(input.nextStep !== undefined ? { nextStep: input.nextStep } : {}),
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
@@ -3192,7 +3198,7 @@ export async function handleGuideControl(input: WithAgentKey<{ action: string }>
 
 export async function handleHoldBall(input: {
   reason: string;
-  nextStep: string;
+  nextStep?: string | undefined;
   wakeAfterMs?: number;
   wakeWhen?: { command: string; cwd?: string; timeoutMs?: number };
   agentKeyCatId?: string | undefined;
