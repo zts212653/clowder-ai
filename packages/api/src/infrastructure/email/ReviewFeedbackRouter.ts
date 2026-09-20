@@ -125,6 +125,9 @@ export class ReviewFeedbackRouter {
                   id: comment.id,
                   author: comment.author,
                   commentType: comment.commentType,
+                  // #1392 AC-7: a wake says who replied, never what they said, so it has to hand the
+                  // owner a way to go read it. Same shape the issue surface already emits.
+                  sourceRef: `github:pr-comment:${comment.id}`,
                 })),
               }
             : {}),

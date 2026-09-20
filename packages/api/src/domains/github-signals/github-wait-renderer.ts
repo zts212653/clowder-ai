@@ -36,7 +36,9 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
 
   // A terminal outcome — a final state or a deadline — first lists what its last poll observed.
   for (const match of outcome.matched ?? []) {
-    lines.push(`- ${match.delta}`);
+    // #1392 AC-7: the delta states the fact; the source ref is how the woken owner verifies it. The
+    // body is deliberately absent, so without this pointer the wake would be unactionable.
+    lines.push(match.sourceRef ? `- ${match.delta} (${match.sourceRef})` : `- ${match.delta}`);
   }
   if (outcome.reason === 'subject_terminal' || outcome.terminalSubjectState) {
     lines.push(`- ${kind} state: ${outcome.terminalSubjectState ?? 'closed'}`);

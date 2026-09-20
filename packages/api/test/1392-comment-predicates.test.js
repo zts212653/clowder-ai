@@ -297,7 +297,6 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     body: 'Dependency published. Core HEAD is still 4ce3556173384a69abd6bdba875ab24238004946.',
     createdAt: '2026-09-18T16:13:00Z',
     commentType: 'conversation',
-    sourceRef: 'github:pr-comment:5732805637',
   };
 
   it('#1477: the named author replies while HEAD never moves, and the owner is woken anyway', async () => {
@@ -336,7 +335,11 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), { taskId: task.id });
 
     const content = messageStore.getByThread('thread_1')[0].content;
-    assert.match(content, /901/, 'the owner needs a pointer to go read it');
+    assert.match(
+      content,
+      /github:pr-comment:901/,
+      'the wake must carry the source ref the collector recorded, not merely a number that happens to appear',
+    );
     assert.doesNotMatch(
       content,
       /Dependency published/,
