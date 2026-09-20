@@ -44,7 +44,7 @@ const verdict: EvalHubItem = {
     threadId: 'thread-eval-capability-wakeup',
     stateSot: 'registry',
   },
-  source: { verdictPath: 'verdict.md', bundleDir: 'bundle' },
+  source: { kind: 'workspace', verdictPath: 'verdict.md', bundleDir: 'bundle' },
 };
 
 export function F299PhaseCEvidencePreview() {

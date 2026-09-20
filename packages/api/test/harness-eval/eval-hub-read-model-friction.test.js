@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -179,11 +180,41 @@ describe('Eval Hub read model — F245 friction projections', () => {
     assert.deepEqual(item.friction.actionableCandidates[0].referenceOnlyEvidenceRefs, ['eval-verdict-7#component']);
     assert.equal(item.friction.referenceOnly.length, 1);
     assert.equal(item.friction.referenceOnly[0].clusterId, 'eval-only');
-    assert.equal(
-      item.friction.source.rawReportPath,
-      `docs/harness-feedback/bundles/${verdictId}/raw/rollup-report.json`,
+    assert.deepEqual(
+      item.friction.source,
+      { kind: 'workspace', rawReportPath: `docs/harness-feedback/bundles/${verdictId}/raw/rollup-report.json` },
       'raw report path should stay repo-relative for workspace navigation',
     );
+  });
+
+  it('opens an artifact-store raw report through the artifact, never as a path outside the repository', () => {
+    const harnessFeedbackRoot = setupFrictionHarnessFeedbackRoot();
+    const artifactStoreRoot = mkdtempSync(join(tmpdir(), 'f245-eval-hub-friction-store-'));
+    const ownerKey = createHash('sha256').update('owner-a', 'utf8').digest('hex');
+    const verdictId = '2026-06-23-eval-friction-artifact';
+    const outputRoot = join(
+      artifactStoreRoot,
+      'owners',
+      ownerKey,
+      'eval-friction',
+      verdictId,
+      'docs',
+      'harness-feedback',
+    );
+    mkdirSync(join(outputRoot, 'verdicts'), { recursive: true });
+    writeFrictionVerdict(outputRoot, { verdictId });
+
+    const summary = loadEvalHubSummary({
+      harnessFeedbackRoot,
+      artifactStore: { root: artifactStoreRoot, ownerUserId: 'owner-a' },
+      now: new Date('2026-06-22T15:00:00.000Z'),
+    });
+    const item = summary.items.find((entry) => entry.id === verdictId);
+
+    assert.ok(item, 'artifact-store friction verdict must be present in Hub summary');
+    assert.deepEqual(item.source, { kind: 'artifact', domainSlug: 'eval-friction', artifactId: verdictId, verdictId });
+    assert.equal(item.friction.projectionStatus, 'available');
+    assert.deepEqual(item.friction.source, { kind: 'artifact' });
   });
 
   it('marks friction projection unavailable instead of inventing suggestions when the raw report is absent', () => {

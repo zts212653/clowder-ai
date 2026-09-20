@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { CAPABILITY_WAKEUP_HISTORICAL_VERDICT_ID } from '../../dist/infrastructure/harness-eval/capability-wakeup-closure-import.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { planReevalClosureEvents } from '../../dist/infrastructure/harness-eval/reeval-closure-reconciler.js';
 import {
   createReevalClosureTaskSpec,
@@ -115,7 +116,10 @@ describe('eval verdict lifecycle reconciler', () => {
     t.after(() => rmSync(harnessFeedbackRoot, { recursive: true, force: true }));
     const eventLog = new MemoryEventLog();
 
-    assert.deepEqual(await loadReevalClosureSubjects({ harnessFeedbackRoot, eventLog }), []);
+    assert.deepEqual(
+      await loadReevalClosureSubjects({ space: installLifecycleSpace(harnessFeedbackRoot), eventLog }),
+      [],
+    );
 
     mkdirSync(join(harnessFeedbackRoot, 'verdicts'));
     mkdirSync(join(harnessFeedbackRoot, 'eval-domains'));
@@ -152,7 +156,7 @@ fixtures: []
     );
 
     const subjects = await loadReevalClosureSubjects({
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog,
       resolveAssignedEvalCatId: async () => 'override-eval',
     });

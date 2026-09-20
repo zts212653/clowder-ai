@@ -6,6 +6,14 @@ import { evalVerdictLifecycleRoutes } from '../../dist/routes/eval-verdict-lifec
 
 export const verdictId = 'f266-route-verdict';
 
+/**
+ * The install's one owner. The owner gate reads DEFAULT_OWNER_USER_ID (CI sets it to
+ * default-user), and only the configured owner's callers reach the install's lifecycle
+ * space, so the operator session, the owner cats' invocations, and the route's
+ * configured owner are all this user, as they are in a single-owner install.
+ */
+export const INSTALL_OWNER_USER_ID = process.env.DEFAULT_OWNER_USER_ID?.trim() || 'owner-user';
+
 class MemoryEventLog {
   events = [];
   seen = new Set();
@@ -86,7 +94,7 @@ function invocationRecord(invocationId, catId) {
   return {
     invocationId,
     callbackToken: 'valid-token',
-    userId: 'owner-user',
+    userId: INSTALL_OWNER_USER_ID,
     catId,
     threadId: 'thread_eval_capability_tips',
     clientMessageIds: new Set(),
@@ -118,7 +126,7 @@ export async function buildApp(t) {
         ok: true,
         record: {
           agentKeyId: 'owner-key',
-          userId: 'owner-user',
+          userId: INSTALL_OWNER_USER_ID,
           catId: 'codex-sol',
           scope: 'user-bound',
           secretHash: 'unused',
@@ -135,6 +143,7 @@ export async function buildApp(t) {
   });
   await app.register(evalVerdictLifecycleRoutes, {
     harnessFeedbackRoot,
+    configuredOwnerUserId: INSTALL_OWNER_USER_ID,
     eventLog,
     redis: {
       async get(key) {
@@ -158,7 +167,7 @@ export async function buildApp(t) {
 export async function buildUnavailableApp(t) {
   const app = Fastify({ logger: false });
   const harnessFeedbackRoot = setupHarnessRoot(t);
-  await app.register(evalVerdictLifecycleRoutes, { harnessFeedbackRoot });
+  await app.register(evalVerdictLifecycleRoutes, { harnessFeedbackRoot, configuredOwnerUserId: INSTALL_OWNER_USER_ID });
   return app;
 }
 

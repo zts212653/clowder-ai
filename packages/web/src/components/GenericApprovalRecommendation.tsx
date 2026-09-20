@@ -1,5 +1,6 @@
 import type { ApprovalHubItem } from '@cat-cafe/shared';
 import { CriticalText } from './content-overflow';
+import { F257GovernanceRecommendation } from './F257GovernanceRecommendation';
 
 export function GenericApprovalRecommendation({
   item,
@@ -36,6 +37,7 @@ export function GenericApprovalRecommendation({
           resolveCatName={resolveCatName}
         />
       )}
+      {item.sourceFeatureId === 'F257' && <F257GovernanceRecommendation item={item} />}
       {item.sourceFeatureId === 'F260' && <EntityRecommendation item={item} />}
     </div>
   );

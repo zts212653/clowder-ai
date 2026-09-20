@@ -18,6 +18,11 @@ import type { TaskSpec_P1 } from '../../scheduler/types.js';
 import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
 import { ensureEvalDomainThreads } from '../hub/eval-hub-thread-ensure.js';
 import { inventoryLegacyTasks, type LegacyScheduledTaskLike } from '../legacy-task-cleanup.js';
+import {
+  buildEvidencePrereqSkippedMessage,
+  type EvidencePrereqProbe,
+  evaluateEvidencePrereq,
+} from './eval-domain-evidence-gate.js';
 import { getEvalCatOverride } from './eval-domain-override.js';
 import {
   type EvalDomainRegistryEntry,
@@ -67,6 +72,20 @@ export interface EvalDomainScheduleOpts {
    * checks for a known-post-fix symbol (e.g. `isA2aSourceRefs` for `eval:a2a`).
    */
   publishPrereqProbe?: (domainId: EvalDomainRegistryEntry['domainId']) => boolean | Promise<boolean>;
+  /**
+   * F192 evidence-source prerequisite gate (verdict provenance: PR #19).
+   *
+   * Upstream of `publishPrereqProbe` — answers "can the domain's evidence source
+   * PRODUCE evidence at all?" before the eval cat is invoked. When OTel is
+   * disabled (TELEMETRY_HMAC_SALT unset), `f167-runtime-eval`-backed domains
+   * cannot generate fresh snapshots, so invoking the eval cat burns an LLM
+   * session to re-conclude "telemetry still disabled".
+   *
+   * Runs PER DOMAIN, PER CRON FIRE, BEFORE publishPrereqProbe. Fail-closed:
+   * probe throws → treated as "evidence unavailable" → skip notice posted.
+   * Omit/undefined → backward-compat (no skip).
+   */
+  evidencePrereqProbe?: EvidencePrereqProbe;
 }
 
 /** @deprecated Use EvalDomainScheduleOpts — kept for backward compat. */
@@ -199,6 +218,26 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
             ],
             config.defaultUserId,
           );
+        }
+
+        // F192 evidence-source prerequisite gate (verdict provenance: PR #19).
+        // Runs BEFORE publishPrereqProbe / legacy-gate / override so that a runtime
+        // whose evidence pipeline cannot produce data (e.g. OTel disabled when
+        // TELEMETRY_HMAC_SALT is unset) never invokes the eval cat. Posts a
+        // zero-LLM-cost skip notice to the domain's own system thread instead.
+        // Probe omitted → backward-compat (no skip). Probe throws → fail-closed.
+        if (config.evidencePrereqProbe) {
+          const evidenceResult = await evaluateEvidencePrereq(config.evidencePrereqProbe, domain);
+          if (!evidenceResult.ok) {
+            if (ctx.deliver) {
+              await ctx.deliver({
+                threadId: domain.systemThreadId,
+                content: buildEvidencePrereqSkippedMessage(domain, evidenceResult.reason),
+                userId: 'scheduler',
+              });
+            }
+            return;
+          }
         }
 
         // Direction B (clowder-ai#923 fix): publish-prereq gate.

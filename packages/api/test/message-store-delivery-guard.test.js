@@ -17,6 +17,7 @@ describe('in-memory MessageStore markCanceled guard (PR #1193)', () => {
     const memStore = new MessageStore();
     const base = Date.now();
     const msg = await memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'test',
@@ -37,6 +38,7 @@ describe('in-memory MessageStore markCanceled guard (PR #1193)', () => {
   it('markCanceled on immediate/no-status message is no-op', async () => {
     const memStore = new MessageStore();
     const msg = await memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'immediate',
@@ -53,6 +55,7 @@ describe('in-memory MessageStore markCanceled guard (PR #1193)', () => {
   it('markCanceled on already-canceled message reports applied=false (CAS idempotency parity)', async () => {
     const memStore = new MessageStore();
     const msg = await memStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: 'test',

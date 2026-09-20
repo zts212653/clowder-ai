@@ -29,10 +29,21 @@ export interface EvalHubFrictionProjection {
     actionability: 'reference_only';
     evidenceRefs: string[];
   }>;
-  source?: {
-    rawReportPath: string;
-  };
+  /** Follows the verdict's own source: a workspace file, or the `friction-report` file of its artifact. */
+  source?: { kind: 'workspace'; rawReportPath: string } | { kind: 'artifact' };
 }
+
+/**
+ * Where a verdict's evidence opens. A verdict committed to the repository is a
+ * workspace file; a runtime artifact lives outside every workspace and is read
+ * through the owner-scoped artifact route by coordinates and a file key.
+ */
+export type EvalHubItemSource =
+  | { kind: 'workspace'; verdictPath: string; bundleDir: string }
+  /** A runtime verdict: the artifact that holds it, and its own id inside that artifact. */
+  | { kind: 'artifact'; domainSlug: string; artifactId: string; verdictId: string };
+
+export type EvalEvidenceFileKey = 'verdict' | 'snapshot' | 'attribution' | 'friction-report';
 
 export interface EvalMetricGlossaryEntry {
   label: string;
@@ -182,10 +193,7 @@ export interface EvalHubItem {
     threadId: string;
     stateSot: 'registry';
   };
-  source: {
-    verdictPath: string;
-    bundleDir: string;
-  };
+  source: EvalHubItemSource;
   friction?: EvalHubFrictionProjection;
 }
 

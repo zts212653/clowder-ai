@@ -1,0 +1,77 @@
+---
+domainId: eval:harness-ledger
+displayName: Harness Ledger Eval
+descriptionForHuman: Prompt guard 有没有误拦、漏拦或反复触发——按事件、guard 和独立 episode 审计
+metricGlossary:
+  total_events:
+    label: Guard 拒绝事件数
+    means: 当前评估窗口内记录到的原始 guard rejection 事件总数。
+    goodDirection: neutral
+    category: activation
+    component: harness-ledger
+  episode_count:
+    label: 独立 Guard 事件段数
+    means: 将短时间内同一 guard 的重复事件合并后得到的独立 episode 数，用于避免把一次事故重复计数。
+    goodDirection: lower
+    category: friction
+    component: harness-ledger
+  by_kind:
+    label: 按拒绝类型分布
+    means: 当前窗口内各类 guard rejection 的事件数量，用于区分路由、持球和其他保护层来源。
+    goodDirection: neutral
+    category: context
+    component: harness-ledger
+  by_guard:
+    label: 按 Guard 分布
+    means: 当前窗口内每个 guard 的原始事件数与独立 episode 数，用于定位集中触发点。
+    goodDirection: neutral
+    category: context
+    component: harness-ledger
+  truncated:
+    label: 窗口是否截断
+    means: 查询是否触及硬上限；为 true 时所有计数只能视为下界，不能宣称完整健康。
+    goodDirection: lower
+    category: context
+    component: harness-ledger
+systemThreadId: thread_eval_harness_ledger
+# F257 owner: opus-47 (布偶猫) — same eval cell owner as eval:a2a / eval:friction.
+# Cross-family eval cat: gpt52 (Maine Coon GPT-5.4) — Ragdoll authors the segment
+# harness, Maine Coon evaluates guard rejection patterns.
+evalCat:
+  catId: gpt52
+  handle: "@gpt52"
+  model: gpt-5.4
+# Weekly cadence — guard rejection patterns accumulate slowly; daily would produce
+# low-event-count noise. Adjustable after Phase A bootstrap establishes baseline.
+frequency: weekly
+triggerPolicy:
+  mode: threshold_or_time
+  maxDetectionDelayHours: 168
+  cooldownHours: 168
+  eventSource: guard-rejection-episodes
+  threshold:
+    counter: episodeCount
+    crossingAt: 3
+sourceAdapter: f257-prompt-segments
+sourceRefsKind: prompt-segments
+threadPolicy:
+  role: working-home
+  stateSot: registry
+  allowedContent:
+    - longitudinal-analysis
+    - verdict-discussion
+    - handoff-drafts
+legacyScheduledTaskIds: []
+handoffTargetResolver:
+  featureId: F257
+  ownerCatId: opus-47
+  threadLookup: feature-thread
+sla:
+  acknowledgeHours: 48
+  reevalWithinHours: 168
+# Phase A Line B: producers wired (hold_ball 429 + block_pingpong emits).
+# Eval engine wiring: generator adapter → publish_verdict pipeline green.
+# KD-17 snapshot-first: eval cat data access resolved — trigger produces
+# normalized guard-rejection snapshot before invocation; generator reads
+# same stored snapshot by evalRunId (single source, zero drift).
+# Re-enabled after PR #24 review rounds (codex P1 #3 → Fable KD-17 ruling).

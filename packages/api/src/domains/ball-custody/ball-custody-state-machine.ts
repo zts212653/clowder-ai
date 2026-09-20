@@ -32,6 +32,7 @@ export const ALL_BALL_EVENT_KINDS: BallCustodyEvent['kind'][] = [
   'ball.handed',
   'ball.handed_cvo',
   'ball.void_pass',
+  'ball.void_ack',
   'ball.held',
   'ball.hold_expired',
   'invocation.started',
@@ -128,6 +129,7 @@ type DynamicRule = {
 const STATIC_TABLE: Partial<Record<BallCustodyEvent['kind'], StaticRule>> = {
   'ball.handed': { from: '*', to: 'active' }, // 任意（含 resolved=reopen）→ active
   'ball.void_pass': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
+  'ball.void_ack': { from: set('new', 'active', 'blocked', 'parked'), to: 'void' },
   // A fresh structured hold is a new custody acquisition on the thread subject.
   // It must reopen a prior terminal disposition just as a new A2A handoff does.
   'ball.held': { from: set('new', 'active', 'resolved'), to: 'active' }, // heldUntil 由 projector 设

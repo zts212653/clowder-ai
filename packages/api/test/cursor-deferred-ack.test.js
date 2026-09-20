@@ -33,6 +33,13 @@ function createTrackingRouter(options = {}) {
       yield { type: 'done', catId: 'opus', timestamp: Date.now() };
     },
     resolveTargetsAndIntent: async () => ({
+      attemptBatch: {
+        parserMode: 'user',
+        spanBasis: 'lowercased_message',
+        attempts: [],
+        truncated: false,
+        metricEligible: true,
+      },
       targetCats: ['opus'],
       intent: { intent: 'execute', explicit: false, promptTags: [] },
     }),
@@ -52,6 +59,7 @@ async function setupScenario(router, status = 'failed') {
   const socketManager = createMockSocketManager();
 
   const storedMsg = messageStore.append({
+    provenance: { author: 'user', routed: false, observation: 'original' },
     userId: 'user-1',
     catId: null,
     content: '@布偶猫 cursor test',
@@ -143,6 +151,13 @@ describe('ADR-008 S3: cursor deferred ack', () => {
         yield { type: 'done', catId: 'opus', timestamp: Date.now() };
       },
       resolveTargetsAndIntent: async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
         targetCats: ['opus'],
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       }),

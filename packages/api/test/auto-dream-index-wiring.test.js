@@ -14,7 +14,9 @@ describe('F255 production bootstrap wiring', () => {
   });
 
   it('binds every private memory surface to one normalized startup owner', () => {
-    assert.match(source, /const privateUserId = \(process\.env\.CAT_CAFE_USER_ID \?\? 'default-user'\)\.trim\(\);/);
+    // One canonical derivation: resolveInstallOwnerUserId also refuses to boot when
+    // DEFAULT_OWNER_USER_ID names a different user (test/install-owner-identity.test.js).
+    assert.match(source, /const privateUserId = resolveInstallOwnerUserId\(\);/);
     assert.match(source, /await app\.register\(sessionRoute, \{ ownerUserId: privateUserId \}\);/);
     assert.match(source, /privateUserId,\n\s+\/\/ Phase E-2/);
     assert.match(source, /messageStore\.getByThread\(threadId, limit \?\? 2000, privateUserId\)/);

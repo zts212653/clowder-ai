@@ -3,7 +3,7 @@ feature_ids: [F274]
 related_features: [F203, F236, F262]
 topics: [harness, kimi, native-l0, system-prompt, hooks, permission]
 doc_kind: spec
-tips_exempt: harness-internal L0 injection channel — no user/cat workflow surface for a capability tip
+tips_exempt: Renewed 2026-09-18 for the F257 single-pipeline migration; Kimi's native carrier receives the same session prompt through internal plumbing, with no new user or cat workflow surface
 created: 2026-07-25
 description: "Kimi CLI 在家里的 harness 能力差距盘点（对照 claude/codex），并把 L0 身份注入迁到 kimi-code 原生 --agent-file 系统提示词通道。"
 description_source: model
@@ -57,7 +57,10 @@ Kimi 猫的 L0（身份/家规/名册）一直走 `buildKimiPrompt` 塞进 user 
 `KimiAgentService` 在新 kimi-code（无 `kimi-cli` 二进制）下：
 
 1. `injectsL0Natively()` 返回 true → 路由层改传 pack-only `systemPrompt`；
-2. 复用 F203 `compileL0ViaSubprocess` 编译 per-cat L0，写成临时 agent 定义文件（frontmatter `name: cat-cafe-l0-<catId>` + body `${base_prompt}` + L0 + pack-only systemPrompt），以 `--agent-file` 传入，并强制 `KIMI_CODE_EXPERIMENTAL_FLAG=1` 选 v2 engine；
+2. 复用 F203 的 per-cat L0 编译产出，写成临时 agent 定义文件（frontmatter `name: cat-cafe-l0-<catId>` + body `${base_prompt}` + L0 + pack-only systemPrompt），以 `--agent-file` 传入，并强制 `KIMI_CODE_EXPERIMENTAL_FLAG=1` 选 v2 engine；
+   > F257 参考实现（`reference/f257-layered-on-main-22385b60e`，未合入）里 `compileL0ViaSubprocess`
+   > 已随 L0 子进程编译器一起删除，这一步改由 prompt-hook pipeline 的 session prompt 产出喂入；
+   > `KimiAgentService` 已在该切片内同步迁移，agent 文件的写法与指纹逻辑不变。
 3. fail-closed：L0 编译失败 → error + done，不 spawn（对齐 Codex `developer_instructions` 语义），且不泄漏 temp 目录；
 4. user cliConfigArgs 剥离 `--agent-file` / `--agent`（对齐 Claude `RESERVED_SYSTEM_PROMPT_FLAGS` / Codex `RESERVED_SYSTEM_CONFIG_KEYS`）；
 5. legacy `kimi-cli` 路径完全不变（`<system_instructions>` 包裹）；

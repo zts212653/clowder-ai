@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { parseMentions } from '../dist/infrastructure/connectors/mention-parser.js';
 
+// P1-4: @宪宪/@砚砚 removed from breeds → patterns aligned with cat-template.json
 const allPatterns = new Map([
-  ['opus', ['@opus', '@布偶猫', '@布偶', '@宪宪']],
-  ['codex', ['@codex', '@缅因猫', '@缅因', '@砚砚']],
+  ['opus', ['@opus', '@布偶猫', '@布偶', '@ragdoll']],
+  ['codex', ['@codex', '@缅因猫', '@缅因', '@maine']],
   ['gemini', ['@gemini', '@暹罗猫', '@暹罗', '@烁烁']],
 ]);
 
@@ -19,8 +20,9 @@ describe('parseMentions', () => {
     assert.equal(result.targetCatId, 'codex');
   });
 
-  it('returns matched catId for @砚砚 (nickname)', () => {
-    const result = parseMentions('@砚砚 你看看这个', allPatterns, 'opus');
+  // P1-4: @砚砚 removed → use @maine (still valid codex alias)
+  it('returns matched catId for @maine (alias)', () => {
+    const result = parseMentions('@maine 你看看这个', allPatterns, 'opus');
     assert.equal(result.targetCatId, 'codex');
   });
 
@@ -76,7 +78,7 @@ describe('parseMentions', () => {
   });
 
   it('matches @mention followed by Chinese full-width exclamation', () => {
-    const result = parseMentions('@砚砚！快来', allPatterns, 'opus');
+    const result = parseMentions('@缅因猫！快来', allPatterns, 'opus');
     assert.equal(result.targetCatId, 'codex');
   });
 

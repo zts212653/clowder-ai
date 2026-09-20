@@ -3066,7 +3066,16 @@ describe('ConnectorInvokeTrigger', () => {
           getById: async (messageId) => (messageId === legacySource.id ? legacySource : null),
         },
         queueCustodyCoordinator: {
-          async transferEntryCustody() {},
+          async transferEntryCustody(replacement, proof) {
+            assert.equal(proof.previousEntryId, 'legacy-entry');
+            assert.equal(proof.replacementEntryId, replacement.id);
+            legacySource.queueCustody = {
+              ...legacySource.queueCustody,
+              entryId: replacement.id,
+              revision: legacySource.queueCustody.revision + 1,
+            };
+            return true;
+          },
         },
       });
 

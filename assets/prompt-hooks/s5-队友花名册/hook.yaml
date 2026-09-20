@@ -13,11 +13,16 @@ resolver: S5TeammateRosterResolver
 inputs:
   - teamStrengths
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: ROSTER_CONTENT
+    description: 队友名册内容
+    placeholder: ""
 # Override constraints
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: visible-by-default
 governanceTier: immutable
 

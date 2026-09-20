@@ -4,7 +4,7 @@
  * Verifies that PipelinePromptBuilder produces the same structural output
  * as the legacy SystemPromptBuilder by asserting on:
  * - Specific segment content from known hooks (identity, mentions, governance)
- * - Correct hook event counts matching the 46-hook manifest catalog
+ * - Correct hook event counts matching the 47-hook manifest catalog
  * - S-prefix scope filtering (L/B/C hooks executed but not in output)
  * - D-prefix scope filtering (R/N hooks executed but not in output)
  * - Trace capture drains correctly (no stale buffer)
@@ -84,9 +84,12 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
     assert.ok(!output.includes('── [B1]'), 'B1 marker excluded from S-scoped output');
   });
 
-  it('session trace produces exactly 22 session-init events', () => {
+  it('session trace produces one event per registered session-init hook', () => {
     const { trace } = ppb.buildStaticIdentityViaHookPipelineWithTrace('opus', { mcpAvailable: true });
-    assert.equal(trace.events.length, 22, `Expected 22 session-init events, got ${trace.events.length}`);
+    // Derived, not hardcoded: every session-init hook must be traced (fired or skipped),
+    // so adding a governed segment updates this instead of silently drifting.
+    const expected = ppb.getOrCreateRegistry().getStageHooks('session-init').length;
+    assert.equal(trace.events.length, expected, `Expected ${expected} session-init events, got ${trace.events.length}`);
   });
 
   // -- Per-turn scope filtering ----------------------------------------------
@@ -142,7 +145,7 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
     }
   });
 
-  it('per-turn trace produces exactly 24 per-turn events', () => {
+  it('per-turn trace produces exactly 25 per-turn events', () => {
     const { trace } = ppb.buildInvocationContextViaHookPipelineWithTrace({
       catId: 'opus',
       mode: 'serial',
@@ -152,7 +155,7 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
       mcpAvailable: true,
       a2aEnabled: true,
     });
-    assert.equal(trace.events.length, 24, `Expected 24 per-turn events, got ${trace.events.length}`);
+    assert.equal(trace.events.length, 25, `Expected 25 per-turn events, got ${trace.events.length}`);
   });
 
   // -- Trace capture (AC-P2-8) -----------------------------------------------
@@ -163,10 +166,11 @@ describe('Pipeline equivalence regression (AC-P2-14)', () => {
     const first = ppb.drainCapturedTraces();
     assert.ok(first.session, 'Session trace should be captured');
     assert.ok(first.session.events.length > 0, 'Session events captured');
-    // All captured events should be S-prefix (scope filtering)
-    for (const ev of first.session.events) {
-      assert.ok(/^S\d/.test(ev.hookId), `Captured session event ${ev.hookId} should be S-prefix`);
-    }
+    // #839: captured trace now includes ALL session-init hooks (L+S+B+C),
+    // not just S-prefix — full pipeline observability for the harness.
+    const prefixes = new Set(first.session.events.map((ev) => ev.hookId[0]));
+    assert.ok(prefixes.has('S'), 'Session trace should include S-prefix hooks');
+    assert.ok(prefixes.has('L'), 'Session trace should include L-prefix hooks (full pipeline)');
     // Second drain returns null (buffer cleared)
     const second = ppb.drainCapturedTraces();
     assert.equal(second.session, null, 'Buffer cleared after drain');

@@ -25,8 +25,8 @@ export type RoutingDecision =
   | { action: 'enqueue_worklist'; cat: CatId } // 执行层：worklist.push + updateStreakOnPush + span
   | { action: 'defer_queue'; cat: CatId } // 执行层：deferA2AEnqueue（排到非-agent 之后）
   | { action: 'mark_replyto'; cat: CatId } // pendingTail 命中且非原始 target：只设 a2aFrom/triggerMsg，不 push
-  | { action: 'skip'; cat: CatId; reason: 'depth' | 'dedup_active' | 'aborted' | 'queue_pending' }
-  | { action: 'block_pingpong'; cat: CatId; pairCount: number }; // 执行层：yield a2a_pingpong_terminated
+  | { action: 'skip'; cat: CatId; reason: 'depth' | 'dedup_active' | 'aborted' }
+  | { action: 'block_pingpong'; cat: CatId; pairCount: number; reason: 'pingpong_streak' }; // 执行层：yield a2a_pingpong_terminated
 
 /** 决策所需的只读上下文快照（不 mutate）。 */
 export interface RoutingContext {
@@ -103,7 +103,7 @@ function resolveInlineCat(cat: CatId, ctx: RoutingContext, depth: number): Routi
   }
   // Ping-pong breaker (read-only预判; execution layer does the real updateStreakOnPush mutate).
   const streak = ctx.peekStreak(cat);
-  if (streak.wouldBlock) return { action: 'block_pingpong', cat, pairCount: streak.count };
+  if (streak.wouldBlock) return { action: 'block_pingpong', cat, pairCount: streak.count, reason: 'pingpong_streak' };
   // Queue occupancy is not proof that this source intent is a duplicate. The
   // execution layer must give the new handoff durable Queue custody and leave
   // the current owner running; silently skipping here caused clowder-ai#1335.

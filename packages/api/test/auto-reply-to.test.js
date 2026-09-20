@@ -63,6 +63,7 @@ describe('auto-replyTo for A2A invocations', () => {
   test('auto-fills replyTo from trigger message when cat does not pass replyTo', async () => {
     // 1. Simulate the trigger message (cat A @mentions cat B)
     const triggerMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: '请帮忙看一下\n@codex',
@@ -131,6 +132,7 @@ describe('auto-replyTo for A2A invocations', () => {
   test('explicit replyTo takes precedence over auto-fill', async () => {
     // Trigger message
     const triggerMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: '请看一下\n@codex',
@@ -141,6 +143,7 @@ describe('auto-replyTo for A2A invocations', () => {
 
     // A different message the cat wants to reply to explicitly
     const otherMsg = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       content: '用户的另一条消息',
@@ -219,6 +222,7 @@ describe('auto-replyTo for A2A invocations', () => {
   test('P3-2: no auto-fill when parentInvocationRecord threadId mismatches', async () => {
     // Trigger message exists in thread-1
     const triggerMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: '请看\n@codex',
@@ -271,6 +275,7 @@ describe('auto-replyTo for A2A invocations', () => {
   test('no auto-fill when trigger message is in different thread', async () => {
     // Trigger message in thread-1
     const triggerMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: '请看\n@codex',

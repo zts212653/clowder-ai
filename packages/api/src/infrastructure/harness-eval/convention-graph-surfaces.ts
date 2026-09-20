@@ -10,8 +10,8 @@ export const CONVENTION_GRAPH_SURFACES = [
     globs: ['cat-cafe-skills/*/SKILL.md'],
   },
   {
-    domainId: 'l0-prompt-builder',
-    globs: ['scripts/compile-system-prompt-l0.mjs'],
+    domainId: 'session-hook-pipeline',
+    globs: ['assets/prompt-hooks/**'],
   },
 ] as const;
 

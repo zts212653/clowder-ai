@@ -127,6 +127,7 @@ describe('Cross-Cat Context (暗号测试)', () => {
     // Seed 25 messages directly into messageStore
     for (let i = 0; i < 25; i++) {
       await messageStore.append({
+        provenance: { author: i % 2 === 0 ? 'user' : 'cat', routed: false, observation: 'original' },
         userId: 'user-1',
         catId: i % 2 === 0 ? null : 'opus',
         content: `history-msg-${i}`,

@@ -859,7 +859,9 @@ describe('cat-catalog-store', () => {
     assert.equal(before.opus.nickname, '宪宪');
     assert.equal(before['opus-sonnet'].name, '布偶猫');
     assert.equal(before['opus-sonnet'].displayName, '布偶猫');
-    assert.equal(before['opus-sonnet'].nickname, '宪宪');
+    // F257 #1 (dev-628ea4d1): nickname is per-cat — non-default variants no longer
+    // inherit the breed-level nickname (that inheritance was the collision root cause)
+    assert.equal(before['opus-sonnet'].nickname, undefined);
 
     await updateRuntimeCat(projectRoot, 'opus', {
       name: '默认布偶名',
@@ -873,7 +875,9 @@ describe('cat-catalog-store', () => {
     assert.equal(after.opus.nickname, '默认布偶昵称');
     assert.equal(after['opus-sonnet'].name, '布偶猫');
     assert.equal(after['opus-sonnet'].displayName, '布偶猫');
-    assert.equal(after['opus-sonnet'].nickname, '宪宪');
+    // scoped-update intent unchanged: the default variant's new nickname must NOT
+    // leak onto the sibling variant (undefined before, still undefined after)
+    assert.equal(after['opus-sonnet'].nickname, undefined);
 
     const catalog = readRuntimeCatCatalog(projectRoot);
     const breed = catalog.breeds.find((item) => item.id === 'ragdoll');
@@ -1482,7 +1486,9 @@ describe('cat-catalog-store', () => {
         mcpSupport: false,
         cli: { command: 'codex', outputFormat: 'json' },
       });
-    }, /mention alias "@opus" is already used by cat "opus"/i);
+      // F257 #1: the cross-cat pattern check in toAllCatConfigs now fires first
+      // (fail-closed at the expansion choke point) and names BOTH holders.
+    }, /mention pattern "@opus" is shared by cats \[opus, spark-lite\]/i);
 
     const afterRaw = readFileSync(catalogPath, 'utf-8');
     assert.equal(afterRaw, beforeRaw, 'failed create must not mutate runtime catalog');

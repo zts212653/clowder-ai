@@ -636,6 +636,18 @@ export const c2VoidHoldChecked = lazy(() =>
   }),
 );
 
+export const c2AckLivenessChecked = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.ack_liveness_checked', {
+    description: 'C2 ack-liveness evaluations performed (denominator for ack_liveness_hint ratio)',
+  }),
+);
+
+export const c2AckLivenessHintEmitted = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.c2.ack_liveness_hint_emitted', {
+    description: 'C2 ack-liveness hint emitted after an A2A turn ended without a routing exit or durable trigger',
+  }),
+);
+
 export const antigravityStreamErrorBuffered = lazy(() =>
   meter().createCounter('cat_cafe.antigravity.stream_error.buffered_total', {
     description: 'Buffered Antigravity stream_error after partial text while waiting for a recovery tail',
@@ -798,10 +810,13 @@ export const profileUpdateRejected = lazy(() =>
   }),
 );
 
-/** Counter: compiled L0 contained a profile pointer (primer or corpus). */
+/** Counter: a resolved session owner profile carried a pointer (primer or corpus). */
 export const profilePointerEmitted = lazy(() =>
   meter().createCounter('cat_cafe.profile.pointer_emitted', {
-    description: 'Compiled L0 payloads containing a profile pointer (primer or corpus layer)',
+    // F257: the L0 compiler that used to emit this is retired; the S14 owner-profile
+    // snapshot resolved per session is the producer now. Same metric, same per-layer
+    // attribute, so the series stays continuous across the cutover.
+    description: 'Session owner-profile snapshots carrying a profile pointer (primer or corpus layer)',
   }),
 );
 
@@ -1312,6 +1327,8 @@ export function warmupCounters(): void {
   c2VerdictWithoutPassCount.add(0);
   c2ExitChecked.add(0);
   c2VoidHoldChecked.add(0);
+  c2AckLivenessChecked.add(0);
+  c2AckLivenessHintEmitted.add(0);
   // F231 AC-C3: profile update pipeline counters
   profileUpdateProposed.add(0);
   profileUpdateApproved.add(0);

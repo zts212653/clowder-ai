@@ -106,7 +106,7 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.domainId, 'eval:friction');
     assert.equal(entry.sourceAdapter, 'f245-friction-rollup');
     assert.equal(entry.sourceRefsKind, 'friction-rollup-snapshot');
-    assert.equal(entry.frequency, 'every-3d'); // F245 PR2: 本家 3-day cadence
+    assert.equal(entry.frequency, 'every-3d'); // F245 PR2: home-instance 3-day cadence
     assert.equal(entry.threadPolicy.role, 'working-home');
     assert.equal(entry.handoffTargetResolver.featureId, 'F245');
   });

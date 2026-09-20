@@ -5,14 +5,13 @@
  * manifest. Renders staging content as a system-prompt prepend for each cat
  * invocation. Tracks double conservation invariants:
  *
- *   L0 tokens ≤ HARD_CAP_L0 (6000, enforced by compile-system-prompt-l0.test.mjs)
+ *   session hook tokens ≤ HARD_CAP_L0 (6000, enforced by hook-pipeline tests)
  *   AND
  *   staging tokens ≤ HARD_CAP_STAGING (2000, enforced by this module's guard test)
  *
  * Critical (per 砚砚 R1 P2 in PR #2221): staging content goes into the runtime
- * user-message systemPrompt path (SystemPromptBuilder), NOT compiled into the
- * native L0 (compile-system-prompt-l0.mjs). It does NOT count against the
- * 6,000-token L0 cap.
+ * per-invocation user-message path, not the session HookPipeline output. It
+ * does not count against the 6,000-token session-hook cap.
  *
  * Demote/promote workflow (ADR-038) is manual review-driven in v1 (no automation
  * yet — see OQ #3).

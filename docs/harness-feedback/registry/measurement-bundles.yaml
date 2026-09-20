@@ -270,6 +270,36 @@ entries:
       actionGate: keep_observe_only
       hardBlockReason: This public instance has not certified measurement validity for
         eval:friction.
+  - domainId: eval:harness-ledger
+    classification: active_decision_bearing
+    enabled: true
+    decisionConsumer:
+      featureId: F257
+      ownerCatId: opus-47
+      allowedActions:
+        - keep_observe
+        - fix
+        - build
+        - delete_sunset
+    sourceSelector:
+      adapter: f257-prompt-segments
+      kind: prompt-segments
+    committedVerdictArtifactCount: 0
+    functionalEquivalents:
+      - f257-prompt-segments/prompt-segments public registry contract
+    evidence:
+      domainInstructions: true
+      publishInstructions: true
+    validityMigration:
+      riskRank: 12
+      batch: null
+      status: unmigrated
+      certificateRef: null
+      resultRef: null
+      replayRef: null
+      actionGate: keep_observe_only
+      hardBlockReason: This public instance has not certified measurement validity for
+        eval:harness-ledger.
   - domainId: eval:memory
     classification: active_decision_bearing
     enabled: true

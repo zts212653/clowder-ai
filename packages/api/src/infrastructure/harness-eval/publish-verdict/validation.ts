@@ -11,6 +11,7 @@ import type {
   AnchorTelemetrySourceSelector,
   HandlerError,
   MemoryRecallSourceSelector,
+  PromptSegmentsSourceSelector,
   VerdictSourceRefs,
 } from './types.js';
 
@@ -62,6 +63,37 @@ export function isFreshnessReplaySourceRefs(refs: VerdictSourceRefs | undefined)
   return refs.kind === 'freshness-closure-replay';
 }
 
+/** F257 Harness Ledger: the prompt-segments selector this fork's generator publishes from. */
+export function isPromptSegmentsSourceRefs(refs: VerdictSourceRefs | undefined): refs is PromptSegmentsSourceSelector {
+  if (!refs) return false;
+  if (!('kind' in refs)) return false;
+  return refs.kind === 'prompt-segments';
+}
+
+export function validatePromptSegmentsSelector(selector: PromptSegmentsSourceSelector): string | null {
+  if (selector.kind !== 'prompt-segments') {
+    return `expected kind='prompt-segments', got '${(selector as { kind?: string }).kind ?? '(omitted)'}'`;
+  }
+  if (typeof selector.windowStartMs !== 'number' || !Number.isFinite(selector.windowStartMs)) {
+    return 'windowStartMs must be a finite number';
+  }
+  if (typeof selector.windowEndMs !== 'number' || !Number.isFinite(selector.windowEndMs)) {
+    return 'windowEndMs must be a finite number';
+  }
+  if (selector.windowEndMs <= selector.windowStartMs) {
+    return 'windowEndMs must be greater than windowStartMs';
+  }
+  if (!selector.evalRunId || typeof selector.evalRunId !== 'string') {
+    return 'evalRunId is required (KD-17 snapshot-first)';
+  }
+  if (!/^hlr-\d+-[a-f0-9]{8}$/.test(selector.evalRunId)) {
+    return 'evalRunId must match generator format: hlr-<timestamp>-<hex8> (path traversal rejected)';
+  }
+  const guardIdError = validateOptionalIdField(selector.guardId, 'guardId');
+  if (guardIdError) return guardIdError;
+  return null;
+}
+
 export function isDesignGateSourceRefs(refs: VerdictSourceRefs | undefined): refs is DesignGateEpisodeSourceSelector {
   if (!refs) return false;
   if (!('kind' in refs)) return false;
@@ -107,6 +139,7 @@ export const KNOWN_SOURCE_REFS_KINDS = [
   'friction-rollup-snapshot',
   'freshness-closure-replay',
   'design-gate-episode-source-map',
+  'prompt-segments',
   'trajectory-inspector-window',
 ] as const;
 

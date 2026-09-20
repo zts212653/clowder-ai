@@ -366,7 +366,9 @@ describe('routeParallel collaboration continuity', () => {
 
     const prompts = [];
     const service = {
-      l0CompilerFn: async ({ catId: compiledCatId }) => `# Test L0 for ${compiledCatId}`,
+      injectsL0Natively() {
+        return true;
+      },
       contextCapability() {
         return {
           provider: 'opencode',

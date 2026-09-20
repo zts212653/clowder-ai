@@ -76,14 +76,16 @@ class RecordingDiscoveryService {
 }
 
 function append(store, ageMs, content = '[爪感差: tool+phenomenon]', overrides = {}) {
+  const catId = overrides.catId === undefined ? 'codex-sol' : overrides.catId;
   return store.append({
     userId: 'user-1',
-    catId: 'codex-sol',
+    catId,
     threadId: 'thread-source',
     content,
     mentions: [],
     timestamp: NOW_MS - ageMs,
     ...overrides,
+    provenance: { author: catId === null ? 'user' : 'cat', routed: false, observation: 'original' },
   });
 }
 

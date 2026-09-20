@@ -126,6 +126,7 @@ async function buildApp(t) {
   const eventLog = new MemoryEventLog();
   await app.register(evalVerdictLifecycleRoutes, {
     harnessFeedbackRoot: setupRoot(t),
+    configuredOwnerUserId: 'owner-user',
     eventLog,
     callbackRegistry: {
       async verify(invocationId, token) {

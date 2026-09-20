@@ -60,6 +60,7 @@ describe('Commands Routes', () => {
   it('POST /api/commands/extract-tasks creates tasks', async () => {
     // Add some messages first
     await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       content: 'TODO: write tests',
       userId: 'test-user',
       threadId: ownThreadId,
@@ -110,6 +111,7 @@ describe('Commands Routes', () => {
 
   it('uses X-Cat-Cafe-User header over legacy payload userId', async () => {
     await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       content: 'TODO: header identity should win',
       userId: 'test-user',
       threadId: ownThreadId,
@@ -145,6 +147,7 @@ describe('Commands Routes', () => {
 
   it('returns 403 when accessing another user thread', async () => {
     await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       content: 'TODO: should not be visible',
       userId: 'other-user',
       threadId: otherThreadId,

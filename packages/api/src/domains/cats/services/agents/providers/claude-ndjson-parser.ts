@@ -7,6 +7,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, TokenUsage } from '../../types.js';
 import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
+import { bridgeClaudeToolResults } from './claude-tool-result-bridge.js';
 
 /**
  * Transform a raw Claude CLI NDJSON event into AgentMessage(s).
@@ -303,6 +304,9 @@ export function transformClaudeEvent(
       timestamp: Date.now(),
     };
   }
+
+  const toolResults = bridgeClaudeToolResults(e, catId);
+  if (toolResults) return toolResults;
 
   // #1272: result is the invocation terminal boundary. Clear any IDs that had
   // partial text but no later text-bearing assistant envelope so state cannot

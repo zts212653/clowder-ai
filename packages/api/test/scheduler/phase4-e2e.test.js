@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, describe, mock, test } from 'node:test';
 import Database from 'better-sqlite3';
+import { assertProvenanceConsistent } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { applyMigrations } from '../../dist/domains/memory/schema.js';
 import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTaskStore.js';
 import { createDeliverFn } from '../../dist/infrastructure/scheduler/delivery.js';
@@ -31,9 +32,15 @@ describe('F139 Phase 4 E2E', () => {
     store = new DynamicTaskStore(db);
     deliverCalls = [];
 
-    // Mock messageStore + socketManager for delivery
+    // Mock messageStore + socketManager for delivery. The mock MUST execute
+    // the real write-boundary contract (sol P1 regression 2026-07-23: a
+    // provenance-blind mock self-certified while every runtime delivery
+    // failed with `append requires provenance`).
     const mockMessageStore = {
-      append: mock.fn((msg) => ({ id: `msg-${Date.now()}`, threadId: msg.threadId })),
+      append: mock.fn((msg) => {
+        assertProvenanceConsistent(msg);
+        return { id: `msg-${Date.now()}`, threadId: msg.threadId };
+      }),
     };
     const mockSocketManager = {
       broadcastToRoom: mock.fn(),

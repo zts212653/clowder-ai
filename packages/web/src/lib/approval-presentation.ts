@@ -48,6 +48,7 @@ export interface ApprovalLifecyclePresentation {
 /** The only Hub vocabulary for both active and history renderers. */
 export function approvalLifecyclePresentation(item: ApprovalLifecycleProjection): ApprovalLifecyclePresentation {
   if (item.resolution === 'open') return { label: '待决定', tone: 'muted' };
+  if (item.resolution === 'skipped') return { label: '已跳过', tone: 'muted' };
   if (item.resolution === 'rejected') return { label: '已拒绝', tone: 'critical' };
   if (item.resolution === 'closed_without_decision') return { label: '未决定已关闭', tone: 'muted' };
   switch (item.materialization.state) {

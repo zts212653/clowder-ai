@@ -62,7 +62,7 @@ function summaryWithUnavailableLifecycle() {
           threadId: 'thread_eval_capability_tips',
           stateSot: 'registry',
         },
-        source: { verdictPath: 'docs/verdict.md', bundleDir: 'docs/bundle' },
+        source: { kind: 'workspace', verdictPath: 'docs/verdict.md', bundleDir: 'docs/bundle' },
       },
     ],
   };

@@ -29,6 +29,7 @@ function seedMessages(store) {
   for (let i = 0; i < 5; i++) {
     msgs.push(
       store.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId: 'user-1',
         catId: null,
         content: `message ${i}`,
@@ -531,6 +532,7 @@ describe('Authorization: DELETE /api/messages/:id', () => {
     const socketManager = createMockSocketManager();
     // Add a message from a different user
     const catMsg = messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'cat-opus',
       catId: 'opus',
       content: 'cat reply',

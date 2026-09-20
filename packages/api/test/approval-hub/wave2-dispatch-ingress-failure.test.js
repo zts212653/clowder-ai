@@ -69,6 +69,7 @@ describe('P1-1/P1-4: F193 dispatch proposal ingress failure', () => {
     await threadStore.addParticipants(source.id, ['opus']);
     await threadStore.addParticipants(target.id, ['sonnet']);
     const origin = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       content: 'Dispatch origin',

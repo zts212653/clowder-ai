@@ -33,9 +33,9 @@ export interface CapabilityWakeupLiveVerdictArtifact {
   /**
    * F192 Phase H 收尾 PR-2 R3 P1 (cloud): replayed raw inputs (`trials.json` + `summary.json`)
    * live OUTSIDE `bundleDir` at `<repoRoot>/generated/capability-wakeup/<verdictId>/`.
-   * `provenance.json` (inside bundleDir) references them by relative path + sha256, so
-   * publisher MUST stage this directory or the auto-PR omits the referenced raw inputs
-   * → reviewers/main can't audit/replay. Adapter forwards via extraStagedPaths.
+   * `provenance.json` (inside bundleDir) references them by relative path + sha256.
+   * The publisher persists the entire artifact staging root, including these raw
+   * inputs, so the artifact remains independently auditable and replayable.
    */
   rawInputDir: string;
   packet: VerdictHandoffPacket;

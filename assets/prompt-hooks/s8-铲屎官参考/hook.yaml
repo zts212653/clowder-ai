@@ -13,11 +13,19 @@ resolver: S8CoCreatorRefResolver
 inputs:
   - coCreatorReference
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: CC_NAME
+    description: co-creator 显示名
+    placeholder: ""
+  - name: CC_HANDLES
+    description: co-creator 句柄列表
+    placeholder: ""
 # Override constraints
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: visible-by-default
 governanceTier: immutable
 

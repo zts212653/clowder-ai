@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
@@ -14,9 +14,9 @@ describe('brand-dictionary-helper', () => {
   // ── Path classification (F238 Phase C core) ──
 
   describe('classifyPath — F238 six-directory flips', () => {
-    it('classifies assets/system-prompts/** as manual-port', async () => {
+    it('classifies assets/prompt-hooks/** as manual-port', async () => {
       const { classifyPath } = await import(HELPER_PATH);
-      const result = classifyPath('assets/system-prompts/system-prompt-l0.md');
+      const result = classifyPath('assets/prompt-hooks/l3-routing/hook.yaml');
       assert.equal(result.classification, 'manual-port');
     });
 
@@ -89,9 +89,9 @@ describe('brand-dictionary-helper', () => {
   });
 
   describe('classifyPath — risk levels from dictionary', () => {
-    it('returns P0 risk for system-prompts', async () => {
+    it('returns P0 risk for prompt hooks', async () => {
       const { classifyPath } = await import(HELPER_PATH);
-      const result = classifyPath('assets/system-prompts/system-prompt-l0.md');
+      const result = classifyPath('assets/prompt-hooks/l3-routing/hook.yaml');
       assert.equal(result.risk, 'P0');
     });
 
@@ -183,7 +183,7 @@ describe('brand-dictionary-helper', () => {
 
         const output = execFileSync(
           'node',
-          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/prompt-hooks/foo.md'],
           { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
         );
         const result = JSON.parse(output.trim());
@@ -202,13 +202,13 @@ describe('brand-dictionary-helper', () => {
         copyFileSync(HELPER_PATH, join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'));
 
         const dictionary = readFileSync(resolve(process.cwd(), 'assets/brand-dictionary.yaml'), 'utf-8')
-          .replace('pattern: "assets/system-prompts/**"', 'pattern: "assets/system-prompts/**" # P0 anchor')
+          .replace('pattern: "assets/prompt-hooks/**"', 'pattern: "assets/prompt-hooks/**" # P0 anchor')
           .replace('- "Clowder AI"', '- "Clowder AI" # accented product variant');
         writeFileSync(join(sandbox, 'assets', 'brand-dictionary.yaml'), dictionary);
 
         const classifyOutput = execFileSync(
           'node',
-          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/prompt-hooks/foo.md'],
           { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
         );
         const classifyResult = JSON.parse(classifyOutput.trim());
@@ -246,7 +246,7 @@ describe('brand-dictionary-helper', () => {
 
         const classifyOutput = execFileSync(
           'node',
-          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/system-prompts/foo.md'],
+          [join(sandbox, 'scripts', 'brand-dictionary-helper.mjs'), '--classify-path', 'assets/prompt-hooks/foo.md'],
           { encoding: 'utf-8', cwd: sandbox, env: { ...process.env, NODE_PATH: '' } },
         );
         const classifyResult = JSON.parse(classifyOutput.trim());
@@ -271,7 +271,7 @@ describe('brand-dictionary-helper', () => {
     });
 
     it('outputs JSON classification for a manual-port path', () => {
-      const output = execFileSync('node', [HELPER_PATH, '--classify-path', 'assets/system-prompts/foo.md'], {
+      const output = execFileSync('node', [HELPER_PATH, '--classify-path', 'assets/prompt-hooks/foo.md'], {
         encoding: 'utf-8',
         cwd: process.cwd(),
       });
@@ -299,7 +299,7 @@ describe('brand-dictionary-helper', () => {
       const lines = output.trim().split('\n');
       assert.ok(lines.length >= 6, `Expected >= 6 patterns, got ${lines.length}`);
       // All 6 F238 flips must be present
-      assert.ok(lines.some((l) => l.includes('assets/system-prompts')));
+      assert.ok(lines.some((l) => l.includes('assets/prompt-hooks')));
       assert.ok(lines.some((l) => l.includes('assets/prompt-templates')));
       assert.ok(lines.some((l) => l.includes('sop-definitions')));
       assert.ok(lines.some((l) => l.includes('desktop')));
@@ -308,8 +308,8 @@ describe('brand-dictionary-helper', () => {
     });
   });
 
-  describe('GitHub workflow live PR metadata', () => {
-    const workflow = readFileSync(WORKFLOW_PATH, 'utf-8');
+  describe('GitHub workflow live PR metadata', { skip: !existsSync(WORKFLOW_PATH) }, () => {
+    const workflow = existsSync(WORKFLOW_PATH) ? readFileSync(WORKFLOW_PATH, 'utf-8') : '';
 
     it('resolves the current PR title from GitHub instead of the rerun event snapshot', () => {
       assert.match(workflow, /gh api[^\n]+pulls\/\$\{\{ github\.event\.pull_request\.number \}\}/);

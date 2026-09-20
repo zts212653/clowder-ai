@@ -82,6 +82,7 @@ describe('staged recovery origin preservation', () => {
     await threadStore.addParticipants(source.id, ['opus']);
     await threadStore.addParticipants(target.id, ['sonnet']);
     const originA = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       threadId: source.id,
@@ -90,6 +91,7 @@ describe('staged recovery origin preservation', () => {
       timestamp: Date.now() - 2000,
     });
     const originB = await messageStore.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: 'opus',
       threadId: source.id,

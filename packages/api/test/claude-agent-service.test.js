@@ -337,7 +337,7 @@ test('#840 R2: long main prompt is delivered via stdin, not as argv element (-p 
   assert.equal(capturedCliOpts.stdinInput, longPrompt, 'stdinInput equals the full prompt');
 });
 
-test('F203 AC-C5: -p carrier reports L0 compile failure without spawning claude and removes temp dir', async () => {
+test('F257: -p carrier reports session prompt preparation failure without spawning claude and removes temp dir', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const failingCompiler = async ({ outPath }) => {
@@ -356,13 +356,11 @@ test('F203 AC-C5: -p carrier reports L0 compile failure without spawning claude 
   const msgs = await collect(service.invoke('hi'));
 
   assert.equal(spawnFn.mock.calls.length, 0, 'claude must not spawn when L0 compile fails');
-  assert.equal(msgs.length, 2);
-  assert.equal(msgs[0].type, 'error');
-  assert.match(msgs[0].error, /L0 compile failed.*opus-47.*compiler exploded/);
-  assert.equal(msgs[1].type, 'done');
+  assert.equal(msgs.map(({ type }) => type).join(','), 'error,done');
+  assert.match(msgs[0].error, /compiler exploded/);
   assert.ok(failingCompiler.outPath);
-  assert.equal(existsSync(failingCompiler.outPath), false, 'partial L0 file is removed after compile failure');
-  assert.equal(existsSync(dirname(failingCompiler.outPath)), false, 'L0 temp dir is removed after compile failure');
+  assert.equal(existsSync(failingCompiler.outPath), false, 'partial prompt file is removed after preparation failure');
+  assert.ok(!existsSync(dirname(failingCompiler.outPath)), 'prompt temp dir removed on preparation failure');
 });
 
 test('F203 AC-C5: -p carrier removes compiled L0 temp dir after CLI failure', async () => {

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { projectLifecyclePresentation } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-debt.js';
 import { enrichEvalHubLifecycle } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 import { projectReevalCase } from '../../dist/infrastructure/harness-eval/reeval-case.js';
 
 const caseId = `eval-case-v1-${'e'.repeat(64)}`;
@@ -146,6 +147,11 @@ describe('F266 lifecycle debt invariants', () => {
           domainId,
           verdict: 'keep_observe',
           harnessUnderEval: activeRoot.harnessUnderEval,
+          source: {
+            kind: 'workspace',
+            verdictPath: `docs/harness-feedback/verdicts/${monitorVerdictId}.md`,
+            bundleDir: `docs/harness-feedback/bundles/${monitorVerdictId}`,
+          },
           evidence: { attributionRefs: ['attribution:monitor'], metricRefs: ['metric:monitor'] },
           lifecycle: {
             availability: 'unavailable',
@@ -158,7 +164,7 @@ describe('F266 lifecycle debt invariants', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async () => monitorFailureEvents() },
     });
 

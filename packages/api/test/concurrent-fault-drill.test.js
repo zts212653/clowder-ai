@@ -79,6 +79,7 @@ describe('Concurrent fault drills - in-memory stores', () => {
     const baseTs = Date.now();
 
     const base = messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId,
       catId: null,
       content: 'base',
@@ -90,6 +91,7 @@ describe('Concurrent fault drills - in-memory stores', () => {
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       return messageStore.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId,
         catId: null,
         content: 'new-after-ack',
@@ -249,6 +251,7 @@ describe('Concurrent fault drills - Redis stores', { skip: redisIsolationSkipRea
     const baseTs = Date.now();
 
     const base = await messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId,
       catId: null,
       content: 'base',
@@ -260,6 +263,7 @@ describe('Concurrent fault drills - Redis stores', { skip: redisIsolationSkipRea
     const appendPromise = Promise.resolve().then(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
       return messageStore.append({
+        provenance: { author: 'user', routed: false, observation: 'original' },
         userId,
         catId: null,
         content: 'new-after-ack',

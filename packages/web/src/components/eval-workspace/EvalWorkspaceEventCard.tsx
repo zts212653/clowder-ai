@@ -2,6 +2,8 @@
 
 import { useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { EvalEvidenceReaderView, useEvalEvidenceReader } from '../eval-evidence/EvalEvidenceReader';
+import { verdictEvidenceTarget } from '../eval-evidence/eval-evidence-targets';
 import {
   escalationLabel,
   formatDiagnosisTarget,
@@ -66,6 +68,7 @@ export function EvalWorkspaceEventCard({
     },
     [currentThreadId, event.id],
   );
+  const evidence = useEvalEvidenceReader(openWorkspaceFile);
 
   return (
     <article className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={event.id} tabIndex={-1}>
@@ -124,13 +127,14 @@ export function EvalWorkspaceEventCard({
         <a href={SETTINGS_EVAL_HUB_HREF} className={navClassName}>
           查看台账
         </a>
-        <NavButton onClick={() => openWorkspaceFile(event.source.verdictPath)}>结论文件</NavButton>
-        <NavButton onClick={() => openWorkspaceFile(`${event.source.bundleDir}/snapshot.json`)}>快照包</NavButton>
-        <NavButton onClick={() => openWorkspaceFile(`${event.source.bundleDir}/attribution.json`)}>归因包</NavButton>
+        <NavButton onClick={() => evidence.open(verdictEvidenceTarget(event.source, 'verdict'))}>结论文件</NavButton>
+        <NavButton onClick={() => evidence.open(verdictEvidenceTarget(event.source, 'snapshot'))}>快照包</NavButton>
+        <NavButton onClick={() => evidence.open(verdictEvidenceTarget(event.source, 'attribution'))}>归因包</NavButton>
         <a href={`/thread/${encodeURIComponent(event.systemThreadId)}`} className={navClassName}>
           工作线程
         </a>
       </div>
+      <EvalEvidenceReaderView reader={evidence.reader} onClose={evidence.close} />
     </article>
   );
 }

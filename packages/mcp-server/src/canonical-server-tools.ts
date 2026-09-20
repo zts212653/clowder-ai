@@ -28,6 +28,7 @@ import {
   hubActionTools,
   libraryLifecycleTools,
   limbTools,
+  listObjectivesTools,
   meetingArtifactTools,
   pawFeelDispositionTools,
   perspectiveTools,
@@ -35,6 +36,7 @@ import {
   publishVerdictTools,
   realtimeCompanionTools,
   recentTools,
+  reportHarnessSignalTools,
   richBlockRulesTools,
   runtimeInteractionTools,
   scheduleTools,
@@ -43,6 +45,7 @@ import {
   signalStudyTools,
   signalsTools,
   skillConsumptionTools,
+  unitEvaluationTools,
 } from './tools/index.js';
 
 export const CANONICAL_TOOL_SOURCES = {
@@ -72,6 +75,9 @@ export const CANONICAL_TOOL_SOURCES = {
     ...scheduleTools,
     ...homeStateTools,
     ...shellTools,
+    ...unitEvaluationTools,
+    ...listObjectivesTools,
+    ...reportHarnessSignalTools,
     ...pluginManagementTools,
   ],
   memory: [

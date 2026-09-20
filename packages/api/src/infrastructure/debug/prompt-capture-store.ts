@@ -51,8 +51,8 @@ export interface PromptCapture {
     /**
      * Whether the message-system prompt was injected this turn. Note: this
      * field describes the `systemPrompt` (pack/message-system) path only. It
-     * is NOT the truth source for whether a native L0 was sent — F203
-     * providers always inject L0 via native channel regardless of this flag.
+     * is NOT the truth source for whether a native session prompt was sent —
+     * F203 providers use their native channel regardless of this flag.
      * See `nativeSystemPrompt` for native channel truth.
      */
     injected: boolean;
@@ -63,25 +63,18 @@ export interface PromptCapture {
    * Approximate token count for the message-channel content
    * (`effectivePrompt`). Backward-compatible field — pre-AC-G10 captures
    * carry only this estimate, which sometimes under-counted F203 providers
-   * because the native L0 was not visible.
+   * because the native session prompt was not visible.
    */
   tokenEstimate: number;
 
   // ── AC-G10 (Phase G native L0 closure / KD-44) ────────────────────
   /**
-   * The compiled L0 system prompt delivered via the provider's native
-   * system-role channel — Claude `--system-prompt-file <l0Path>` or Codex
-   * `-c developer_instructions=<l0_toml>`. Absent for providers that do not
-   * inject L0 natively (Gemini, CatAgent etc.). Captured best-effort:
-   * if the L0 compile lookup fails at capture time, this field stays
-   * `undefined` and a `captureDiagnostics` entry records the reason — the
-   * invocation hot path is never blocked.
+   * The route-owned HookPipeline session prompt delivered via the provider's
+   * native system-role channel. Absent for providers without that channel.
    */
   nativeSystemPrompt?: string;
   /**
-   * Source tag for `nativeSystemPrompt`. Only one source today (`f203-l0`
-   * via `compileL0ViaSubprocess`); future native-injection sources can
-   * declare themselves here without breaking Hub UI rendering.
+   * Source tag retained for stored-capture compatibility.
    */
   nativeSystemPromptSource?: 'f203-l0';
   /** Approximate token count for `nativeSystemPrompt` (when present). */
@@ -94,8 +87,7 @@ export interface PromptCapture {
    */
   totalTokenEstimate?: number;
   /**
-   * Best-effort diagnostic notes from the capture pipeline (e.g. native L0
-   * fetch failure). Never thrown — always recorded for Hub debug surface.
+   * Best-effort diagnostic notes from the capture pipeline. Never thrown.
    * Absent / empty when capture ran cleanly.
    */
   captureDiagnostics?: readonly string[];

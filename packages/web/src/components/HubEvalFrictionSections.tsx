@@ -5,10 +5,11 @@ import type { EvalHubFrictionProjection } from './HubEvalTypes';
 
 export function HubEvalFrictionSections({
   friction,
-  openWorkspaceFile,
+  onOpenRawReport,
 }: {
   friction: EvalHubFrictionProjection | undefined;
-  openWorkspaceFile: (path: string) => void;
+  /** Present when the raw report can be opened; the card decides whether that is a workspace file or an artifact. */
+  onOpenRawReport?: () => void;
 }) {
   if (!friction || friction.projectionStatus !== 'available') {
     return (
@@ -23,9 +24,7 @@ export function HubEvalFrictionSections({
     <div className="mt-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-medium text-cafe-muted">Friction Rollup 视图</div>
-        {friction.source?.rawReportPath && (
-          <JumpButton onClick={() => openWorkspaceFile(friction.source?.rawReportPath ?? '')}>原始报告</JumpButton>
-        )}
+        {onOpenRawReport && <JumpButton onClick={onOpenRawReport}>原始报告</JumpButton>}
       </div>
 
       {!hasAnyProjection && (

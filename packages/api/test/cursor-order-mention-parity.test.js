@@ -83,6 +83,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // C: direct mention — visible immediately
     const c = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: '@opus direct mention',
@@ -93,6 +94,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // Q: queued real-cat speech mention — timeline-published at append
     const q = await store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: '@opus cat speech mention',
@@ -104,6 +106,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // H: hidden scheduler work — NOT timeline-published until delivery
     const h = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: '@opus hidden scheduler work',
@@ -141,6 +144,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // C: direct mention
     const c = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: '@opus direct',
@@ -151,6 +155,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // Q: queued real-cat speech (timeline-published)
     await store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: '@opus cat speech',
@@ -182,6 +187,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // C: direct mention
     await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'u1',
       catId: null,
       content: '@opus direct recent',
@@ -192,6 +198,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // Q: queued real-cat speech
     await store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: '@opus cat speech recent',
@@ -203,6 +210,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // H: hidden scheduler work
     const h = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: '@opus hidden recent',
@@ -240,6 +248,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // Q: queued real-cat speech — timeline-published
     await store.append({
+      provenance: { author: 'cat', routed: false, observation: 'original' },
       userId: 'u1',
       catId: 'opus',
       content: '@terra legacy cat speech',
@@ -251,6 +260,7 @@ describe('#1269 R12: Redis mention publication boundary parity', () => {
 
     // H: hidden scheduler work
     const h = await store.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'scheduler',
       catId: null,
       content: '@terra legacy hidden',

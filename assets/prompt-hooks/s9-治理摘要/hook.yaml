@@ -13,11 +13,16 @@ resolver: S9GovernanceDigestResolver
 inputs:
   - governanceDigest
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: GOVERNANCE_DIGEST
+    description: 治理摘要块
+    placeholder: ""
 # Override constraints
 disableable: false
 
 # Classification (Phase 1 3-axis)
-safetyTier: readonly
+safetyTier: editable
 transparencyTier: opt-in-view
 governanceTier: immutable
 

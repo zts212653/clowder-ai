@@ -10,6 +10,7 @@ import {
   isFreshnessReplaySourceRefs,
   isFrictionSourceRefs,
   isMemorySourceRefs,
+  isPromptSegmentsSourceRefs,
   isQcMetricsSourceRefs,
   isSopSourceRefs,
   isTaskOutcomeSourceRefs,
@@ -18,6 +19,7 @@ import {
   validateFreshnessReplaySelector,
   validateFrictionRollupSelector,
   validateMemoryRecallSelector,
+  validatePromptSegmentsSelector,
   validateQcMetricsSelector,
   validateSopTraceSelector,
   validateSourceRefsFormat,
@@ -57,6 +59,7 @@ export function validateSourceRefsForPublish(sourceRefs: VerdictSourceRefs): Han
 
 function validateCanonicalEpisodeSelector(sourceRefs: VerdictSourceRefs): HandlerError | null | undefined {
   if (isDesignGateSourceRefs(sourceRefs)) return selectorError(validateDesignGateEpisodeSelector(sourceRefs));
+  if (isPromptSegmentsSourceRefs(sourceRefs)) return selectorError(validatePromptSegmentsSelector(sourceRefs));
   if (isTrajectoryInspectorSourceRefs(sourceRefs)) {
     return selectorError(validateTrajectoryInspectorWindowSelector(sourceRefs));
   }

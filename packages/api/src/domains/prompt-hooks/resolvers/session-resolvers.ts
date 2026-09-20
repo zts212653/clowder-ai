@@ -160,6 +160,25 @@ export class S9Resolver implements HookResolver {
 }
 
 // ---------------------------------------------------------------------------
+// S14 — 主人画像与关系指针 (F231 owner profile)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pass through the exact profile section the route resolved. This resolver must stay
+ * pure: reading files, env or re-deriving the owner here would let a session deliver
+ * bytes that no route bound as evidence, and would make the same prompt depend on
+ * whichever process rendered it.
+ */
+export class S14Resolver implements HookResolver {
+  resolve(input: AssemblerInput): ResolveResult {
+    if (!input.ownerProfileSection) {
+      return skip('no_owner_profile', 'Owner has no profile layer');
+    }
+    return { status: 'fired', vars: { OWNER_PROFILE_SECTION: input.ownerProfileSection } };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // S10 — Pack Guardrails (护栏)
 // ---------------------------------------------------------------------------
 

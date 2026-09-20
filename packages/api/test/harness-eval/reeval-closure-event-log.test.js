@@ -128,6 +128,27 @@ describe('eval verdict lifecycle event log (Redis)', { skip: redisIsolationSkipR
     assert.deepEqual(await eventLog.listSubjectIds(), [caseId]);
   });
 
+  it('gives each owner an independent lifecycle for the same verdict and event ids', async () => {
+    const ownerA = new RedisReevalClosureEventLog(redis, { kind: 'owner', ownerUserId: 'owner-a' });
+    const ownerB = new RedisReevalClosureEventLog(redis, { kind: 'owner', ownerUserId: 'owner-b' });
+    const opened = makeEvent();
+
+    assert.deepEqual(await ownerA.append(opened, 0), { outcome: 'appended', sequence: 0 });
+    assert.deepEqual(
+      await ownerB.append(opened, 0),
+      { outcome: 'appended', sequence: 0 },
+      'not a duplicate of owner-a',
+    );
+    assert.deepEqual(await eventLog.read(opened.verdictId), [], 'the repository lifecycle is untouched');
+    assert.deepEqual(await eventLog.listSubjectIds(), []);
+
+    const acknowledged = makeEvent({ type: 'owner_acknowledged', actor: { kind: 'cat', id: 'codex' } });
+    assert.equal((await ownerA.append(acknowledged, 1)).outcome, 'appended');
+    assert.equal((await ownerA.read(opened.verdictId)).length, 2);
+    assert.equal((await ownerB.read(opened.verdictId)).length, 1);
+    assert.deepEqual(await ownerB.listSubjectIds(), [opened.verdictId]);
+  });
+
   it('supports tail reads and never assigns TTL to canonical keys', async () => {
     const opened = makeEvent();
     const acknowledged = makeEvent({

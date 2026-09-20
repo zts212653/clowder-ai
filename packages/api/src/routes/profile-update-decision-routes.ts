@@ -16,14 +16,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
-import {
-  clearL0Cache as defaultClearL0Cache,
-  clearL0CacheOwner as defaultClearL0CacheOwner,
-} from '../domains/cats/services/agents/providers/l0-compiler.js';
-import {
-  type ApproveProfileUpdateResult,
-  approveProfileUpdate as defaultApproveProfileUpdate,
-} from '../domains/cats/services/profile/approveProfileUpdate.js';
+import { approveProfileUpdate as defaultApproveProfileUpdate } from '../domains/cats/services/profile/approveProfileUpdate.js';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
 import type { IProfileUpdateProposalStore } from '../domains/cats/services/stores/ports/ProfileUpdateProposalStore.js';
 import { profileUpdateApproved, profileUpdateRejected } from '../infrastructure/telemetry/instruments.js';
@@ -38,8 +31,6 @@ export interface ProfileUpdateDecisionDeps {
   lock: SessionMutex;
   repository: FileProfileRepository;
   socketManager: Pick<SocketManager, 'emitToUser'>;
-  clearL0Cache?: (catId?: string, userId?: string) => void;
-  clearL0CacheOwner?: (userId: string) => void;
   refreshProfileCollectionIndex?: (userId: string) => Promise<{ status: string; error?: string }>;
   approveProfileUpdate?: typeof defaultApproveProfileUpdate;
 }
@@ -85,23 +76,9 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     lock,
     repository,
     socketManager,
-    clearL0Cache = defaultClearL0Cache,
-    clearL0CacheOwner = defaultClearL0CacheOwner,
     refreshProfileCollectionIndex,
     approveProfileUpdate = defaultApproveProfileUpdate,
   } = deps;
-
-  const clearCommittedProfileCache = (result: ApproveProfileUpdateResult): void => {
-    // If anything was written to disk, cache is stale — regardless of result.ok.
-    // Partial commits (write OK, checkpoint/provenance failed) must still invalidate.
-    if (!result.proposal?.writtenPath) return;
-    if (result.proposal.targetLayer === 'corpus') {
-      // Corpus is owner-wide: all cats sharing this owner must see the updated pointer.
-      clearL0CacheOwner(result.proposal.createdBy);
-    } else {
-      clearL0Cache(result.proposal.sourceCatId, result.proposal.createdBy);
-    }
-  };
 
   app.get('/api/profile-updates/:proposalId', async (request, reply) => {
     const proposalId = resolveProfileUpdateId(request, reply);
@@ -121,7 +98,6 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     await requireAnchoredPublication(store, proposal.proposalId);
 
     const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, repository });
-    clearCommittedProfileCache(result);
     if (result.ok) {
       // F231 AC-C3 eval counter (KD-10)
       profileUpdateApproved.add(1, { 'agent.id': result.proposal.sourceCatId, 'target.layer': result.targetLayer });

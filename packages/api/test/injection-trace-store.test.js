@@ -5,12 +5,44 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-// ── FakeRedis with sorted set support ──
+// ── FakeRedis with sorted set + pipeline support ──
+
+class FakePipeline {
+  constructor(redis) {
+    this.redis = redis;
+    this.ops = [];
+  }
+
+  set(key, value) {
+    this.ops.push(async () => this.redis.set(key, value));
+    return this;
+  }
+
+  del(key) {
+    this.ops.push(async () => this.redis.del(key));
+    return this;
+  }
+
+  sadd(key, ...members) {
+    this.ops.push(async () => this.redis.sadd(key, ...members));
+    return this;
+  }
+
+  async exec() {
+    const results = [];
+    for (const op of this.ops) {
+      results.push([null, await op()]);
+    }
+    return results;
+  }
+}
 
 class FakeRedis {
   constructor() {
     this.kv = new Map();
     this.sorted = new Map(); // key → Map<member, score>
+    this.sets = new Map();
+    this.hashes = new Map();
     this.ttls = new Map();
   }
 
@@ -26,10 +58,21 @@ class FakeRedis {
     return this.kv.get(key) ?? null;
   }
 
+  async exists(key) {
+    if (this.kv.has(key)) return 1;
+    if (this.sorted.has(key)) return 1;
+    if (this.sets?.has(key)) return 1;
+    if (this.hashes.has(key)) return 1;
+    return 0;
+  }
+
   async del(key) {
-    const existed = this.kv.has(key) ? 1 : 0;
+    const existed = this.kv.has(key) || this.sorted.has(key) || this.sets?.has(key) || this.hashes.has(key) ? 1 : 0;
     this.kv.delete(key);
     this.ttls.delete(key);
+    this.sorted.delete(key);
+    this.sets?.delete(key);
+    this.hashes.delete(key);
     return existed;
   }
 
@@ -51,10 +94,137 @@ class FakeRedis {
     return entries.slice(start, stop + 1).map(([member]) => member);
   }
 
+  async zrangebyscore(key, min, max) {
+    const set = this.sorted.get(key);
+    if (!set) return [];
+    return [...set.entries()]
+      .filter(([, score]) => score >= min && score <= max)
+      .sort((a, b) => a[1] - b[1])
+      .map(([member]) => member);
+  }
+
   async zrem(key, member) {
     const set = this.sorted.get(key);
     if (!set) return 0;
     return set.delete(member) ? 1 : 0;
+  }
+
+  multi() {
+    return new FakePipeline(this);
+  }
+
+  // F257 Phase D: prefix-aware SCAN for backfillRegistry.
+  // ioredis scan returns [cursor, keys]; MATCH pattern is applied against raw keys.
+  async scan(cursor, ...args) {
+    const options = Object.fromEntries(
+      Array.from({ length: Math.floor(args.length / 2) }, (_, i) => [args[i * 2], args[i * 2 + 1]]),
+    );
+    const pattern = options.MATCH ? new RegExp(options.MATCH.replace(/\*/g, '.*')) : null;
+    const count = options.COUNT ? Number(options.COUNT) : 10;
+
+    const allKeys = [...new Set([...this.kv.keys(), ...this.sorted.keys(), ...(this.sets?.keys() ?? [])])];
+    const matched = pattern ? allKeys.filter((k) => pattern.test(k)) : allKeys;
+    const start = Number(cursor) || 0;
+    const next = Math.min(start + count, matched.length);
+    return [String(next), matched.slice(start, next)];
+  }
+
+  // F257 Phase D: SADD/SMEMBERS for thread registry (persist() now calls sadd).
+  async sadd(key, ...members) {
+    if (!this.sets) {
+      this.sets = new Map();
+    }
+    const s = this.sets;
+    const existing = s.get(key) ?? new Set();
+    let added = 0;
+    for (const m of members) {
+      if (!existing.has(m)) {
+        existing.add(m);
+        added++;
+      }
+    }
+    s.set(key, existing);
+    return added;
+  }
+
+  async smembers(key) {
+    const s = this.sets?.get(key);
+    return s ? [...s] : [];
+  }
+
+  // F257 R4: hash + Lua support for durable replay snapshots.
+  async hset(key, fields) {
+    const h = this.hashes.get(key) ?? new Map();
+    for (const [field, value] of Object.entries(fields)) {
+      h.set(field, value);
+    }
+    this.hashes.set(key, h);
+    return 1;
+  }
+
+  async hget(key, field) {
+    return this.hashes.get(key)?.get(field) ?? null;
+  }
+
+  async hgetall(key) {
+    const h = this.hashes.get(key);
+    if (!h) return [];
+    const out = [];
+    for (const [k, v] of h) {
+      out.push(k, v);
+    }
+    return out;
+  }
+
+  async hdel(key, field) {
+    const h = this.hashes.get(key);
+    if (!h) return 0;
+    return h.delete(field) ? 1 : 0;
+  }
+
+  #runPersistScript(keys, argv) {
+    const summaryKey = keys[0];
+    const hashKey = keys[1];
+    const count = Number(argv[0]);
+    if (this.kv.has(summaryKey) === false) return 0;
+    const h = this.hashes.get(hashKey) ?? new Map();
+    for (let i = 0; i < count; i++) {
+      const segmentId = argv[1 + i];
+      const json = argv[1 + count + i];
+      h.set(segmentId, json);
+    }
+    this.hashes.set(hashKey, h);
+    return 1;
+  }
+
+  #runDeleteScript(keys, argv) {
+    const indexKey = keys[2];
+    const turnId = argv[0];
+    let removed = 0;
+    if (this.sorted.get(indexKey)?.delete(turnId)) removed = 1;
+    for (const k of keys) {
+      if (
+        k !== indexKey &&
+        (this.kv.delete(k) || this.sets?.delete(k) || this.sorted.delete(k) || this.hashes.delete(k))
+      ) {
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  async eval(script, numKeys, ...args) {
+    const keys = args.slice(0, numKeys);
+    const argv = args.slice(numKeys);
+
+    if (script.includes("redis.call('EXISTS'") && script.includes("redis.call('HSET'")) {
+      return this.#runPersistScript(keys, argv);
+    }
+    if (script.includes("redis.call('ZREM'") && script.includes("redis.call('DEL'")) {
+      return this.#runDeleteScript(keys, argv);
+    }
+
+    throw new Error(`FakeRedis.eval: unsupported script`);
   }
 }
 
@@ -274,6 +444,230 @@ describe('InjectionTraceStore', () => {
     assert.equal(await store.getDetail('th1', 't1'), null);
     const { total } = await store.listTurnIds('th1');
     assert.equal(total, 0);
+  });
+
+  test('deleteTurn does not remove sibling turns from thread index', async () => {
+    const { InjectionTraceStore } = await import('../dist/domains/prompt-hooks/InjectionTraceStore.js');
+    const redis = new FakeRedis();
+    const store = new InjectionTraceStore(redis);
+
+    const base = {
+      sessionId: 's1',
+      threadId: 'th1',
+      catId: 'c1',
+      segments: [],
+      delivery: [],
+      totalCharCount: 0,
+      totalTokenEstimate: 0,
+      totalSegmentsObserved: 0,
+      totalSegmentsAbsent: 0,
+      durationMs: 0,
+    };
+    const baseDetail = {
+      threadId: 'th1',
+      catId: 'c1',
+      sessionContentHash: null,
+      turnContentHash: null,
+      sessionCharCount: 0,
+      sessionTokenEstimate: 0,
+      turnCharCount: 0,
+      turnTokenEstimate: 0,
+      segments: [],
+    };
+
+    await store.persist(
+      { ...base, turnId: 'turn-a', timestamp: 1000 },
+      { ...baseDetail, turnId: 'turn-a', timestamp: 1000 },
+    );
+    await store.persist(
+      { ...base, turnId: 'turn-b', timestamp: 2000 },
+      { ...baseDetail, turnId: 'turn-b', timestamp: 2000 },
+    );
+
+    await store.deleteTurn('th1', 'turn-a');
+
+    assert.equal(await store.getSummary('th1', 'turn-a'), null);
+    assert.equal(await store.getDetail('th1', 'turn-a'), null);
+
+    const { turnIds, total } = await store.listTurnIds('th1');
+    assert.equal(total, 1);
+    assert.deepEqual(turnIds, ['turn-b']);
+
+    const remainingSummary = await store.getSummary('th1', 'turn-b');
+    assert.ok(remainingSummary);
+    assert.equal(remainingSummary.turnId, 'turn-b');
+
+    const window = await store.queryWindow('th1', 1500, 2500);
+    assert.equal(window.length, 1);
+    assert.equal(window[0].turnId, 'turn-b');
+  });
+
+  test('queryWindow returns summaries within time range', async () => {
+    const { InjectionTraceStore } = await import('../dist/domains/prompt-hooks/InjectionTraceStore.js');
+    const redis = new FakeRedis();
+    const store = new InjectionTraceStore(redis);
+
+    const base = {
+      sessionId: 's1',
+      threadId: 'th1',
+      catId: 'ragdoll',
+      segments: [
+        {
+          segmentId: 'S1',
+          stage: 'session-init',
+          status: 'observed',
+          contentHash: 'a',
+          charCount: 10,
+          tokenEstimate: 3,
+        },
+      ],
+      delivery: [],
+      totalCharCount: 10,
+      totalTokenEstimate: 3,
+      totalSegmentsObserved: 1,
+      totalSegmentsAbsent: 0,
+      durationMs: 0,
+    };
+    const baseDetail = {
+      threadId: 'th1',
+      catId: 'ragdoll',
+      sessionContentHash: 'a',
+      turnContentHash: null,
+      sessionCharCount: 10,
+      sessionTokenEstimate: 3,
+      turnCharCount: 0,
+      turnTokenEstimate: 0,
+      segments: base.segments,
+    };
+
+    // Three turns: ts=1000 (before), ts=2000 (in window), ts=3000 (in window), ts=5000 (after)
+    await store.persist(
+      { ...base, turnId: 'before', timestamp: 1000 },
+      { ...baseDetail, turnId: 'before', timestamp: 1000 },
+    );
+    await store.persist(
+      { ...base, turnId: 'in-1', timestamp: 2000 },
+      { ...baseDetail, turnId: 'in-1', timestamp: 2000 },
+    );
+    await store.persist(
+      { ...base, turnId: 'in-2', timestamp: 3000 },
+      { ...baseDetail, turnId: 'in-2', timestamp: 3000 },
+    );
+    await store.persist(
+      { ...base, turnId: 'after', timestamp: 5000 },
+      { ...baseDetail, turnId: 'after', timestamp: 5000 },
+    );
+
+    // Query window [1500, 4000] — should include in-1 (2000) and in-2 (3000), exclude before (1000) and after (5000)
+    const results = await store.queryWindow('th1', 1500, 4000);
+    assert.equal(results.length, 2);
+    assert.equal(results[0].turnId, 'in-1');
+    assert.equal(results[1].turnId, 'in-2');
+  });
+
+  test('queryWindow returns empty for no matches', async () => {
+    const { InjectionTraceStore } = await import('../dist/domains/prompt-hooks/InjectionTraceStore.js');
+    const redis = new FakeRedis();
+    const store = new InjectionTraceStore(redis);
+
+    const base = {
+      sessionId: 's1',
+      threadId: 'th1',
+      catId: 'ragdoll',
+      segments: [],
+      delivery: [],
+      totalCharCount: 0,
+      totalTokenEstimate: 0,
+      totalSegmentsObserved: 0,
+      totalSegmentsAbsent: 0,
+      durationMs: 0,
+    };
+    const baseDetail = {
+      threadId: 'th1',
+      catId: 'ragdoll',
+      sessionContentHash: null,
+      turnContentHash: null,
+      sessionCharCount: 0,
+      sessionTokenEstimate: 0,
+      turnCharCount: 0,
+      turnTokenEstimate: 0,
+      segments: [],
+    };
+
+    await store.persist({ ...base, turnId: 't1', timestamp: 1000 }, { ...baseDetail, turnId: 't1', timestamp: 1000 });
+
+    // Window entirely before or after existing data
+    const before = await store.queryWindow('th1', 0, 500);
+    assert.equal(before.length, 0);
+    const after = await store.queryWindow('th1', 2000, 3000);
+    assert.equal(after.length, 0);
+  });
+
+  test('queryWindow boundary: start-inclusive, end-exclusive [start, end)', async () => {
+    const { InjectionTraceStore } = await import('../dist/domains/prompt-hooks/InjectionTraceStore.js');
+    const redis = new FakeRedis();
+    const store = new InjectionTraceStore(redis);
+
+    const base = {
+      sessionId: 's1',
+      threadId: 'th1',
+      catId: 'ragdoll',
+      segments: [],
+      delivery: [],
+      totalCharCount: 0,
+      totalTokenEstimate: 0,
+      totalSegmentsObserved: 0,
+      totalSegmentsAbsent: 0,
+      durationMs: 0,
+    };
+    const baseDetail = {
+      threadId: 'th1',
+      catId: 'ragdoll',
+      sessionContentHash: null,
+      turnContentHash: null,
+      sessionCharCount: 0,
+      sessionTokenEstimate: 0,
+      turnCharCount: 0,
+      turnTokenEstimate: 0,
+      segments: [],
+    };
+
+    await store.persist(
+      { ...base, turnId: 'at-start', timestamp: 1000 },
+      { ...baseDetail, turnId: 'at-start', timestamp: 1000 },
+    );
+    await store.persist(
+      { ...base, turnId: 'at-end', timestamp: 2000 },
+      { ...baseDetail, turnId: 'at-end', timestamp: 2000 },
+    );
+
+    // [1000, 2000): includes start boundary (1000), excludes end boundary (2000)
+    // Matches GuardRejectionEventLog.queryWindow contract.
+    const results = await store.queryWindow('th1', 1000, 2000);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].turnId, 'at-start');
+
+    // Start-inclusive: exact start boundary included
+    const startExact = await store.queryWindow('th1', 1000, 1001);
+    assert.equal(startExact.length, 1);
+    assert.equal(startExact[0].turnId, 'at-start');
+
+    // End-exclusive: [1000, 1000) is empty range
+    const emptyRange = await store.queryWindow('th1', 1000, 1000);
+    assert.equal(emptyRange.length, 0);
+
+    // End-inclusive requires end+1: [1000, 2001) includes both
+    const bothInclusive = await store.queryWindow('th1', 1000, 2001);
+    assert.equal(bothInclusive.length, 2);
+  });
+
+  test('queryWindow returns empty for unknown threadId', async () => {
+    const { InjectionTraceStore } = await import('../dist/domains/prompt-hooks/InjectionTraceStore.js');
+    const redis = new FakeRedis();
+    const store = new InjectionTraceStore(redis);
+
+    const results = await store.queryWindow('nonexistent', 0, 999999);
+    assert.equal(results.length, 0);
   });
 
   test('getSummary returns null for missing key', async () => {

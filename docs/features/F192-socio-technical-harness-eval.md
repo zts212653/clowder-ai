@@ -4,7 +4,7 @@ related_features: [F167, F153, F086, F188, F200, F245, F266, F267, F275, F299]
 topics: [harness-engineering, eval, socio-technical, observability, cat-user-feedback]
 doc_kind: spec
 created: 2026-05-07
-tips_exempt: Dual-trigger dispatch, F299 bounded transcript repair and handoff truth, and generic-permission sunset are harness-internal control-plane changes with no new user-visible capability
+tips_exempt: Renewed 2026-09-18 for F257 owner-scoped artifact publication; the publish transport and closure wiring are harness-internal control-plane changes with no new user action or capability surface
 user_journey_exempt: "Internal harness eval infrastructure — all surfaces are developer/cat-facing, no end-user journey"
 ---
 
@@ -56,10 +56,12 @@ F192 现在已经不是“某个 feature 结束后写一篇 feedback”的文档
    - handler 做 domain/kind/ownership/selector 校验
    - per-domain generator adapter 解析 source window / evidence inputs
    - generator 写 `verdict.md + bundle/{snapshot,attribution,provenance}`
-   - `GitPublisher` 在 isolated worktree 里 commit / push / open PR
+   - `ArtifactPublisher` 把 bundle 写成 owner-scoped 不可变 artifact（`CAT_CAFE_DATA_DIR/harness-feedback/artifacts`），返回 `artifactId` + `artifactUrl`
+   - F257 sunset：verdict 发布**不再** commit / push / open PR——verdict 是 runtime 演化产物，不进随安装包分发的 baseline 仓库。
+     （capability-evolution measurement issuance 仍走 isolated-worktree `GitPublisher`，那条线的归属是 F311，不在本次 sunset 范围内。）
 
 5. **Hub / closure layer**
-   - Eval Hub 只消费已提交的 live verdict artifacts
+   - Eval Hub 只消费已发布的 live verdict artifacts（durable artifact store，不是 Git 提交）
    - owner 处理 handoff 之后，不靠一句“修了”自闭环
    - closure 只能来自：
    - 后续 eval 复验通过

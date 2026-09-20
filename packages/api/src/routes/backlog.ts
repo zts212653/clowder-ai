@@ -248,6 +248,7 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
     let kickoffMessageId = next.kickoffMessageId;
     if (!kickoffMessageId) {
       const kickoffMessage = await messageStore.append({
+        provenance: { author: 'system', routed: false, observation: 'original' }, // sol R3 P1-1
         userId,
         catId: null,
         threadId,

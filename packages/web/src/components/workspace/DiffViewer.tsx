@@ -137,7 +137,15 @@ const prefixMap: Record<DiffLine['type'], string> = {
 
 /* ── Components ──────────────────────────────────────── */
 
-function UnifiedView({ hunks }: { hunks: DiffHunk[] }) {
+/**
+ * Long prose segments (F257 governance content) must stay readable at the
+ * dialog's own width; code diffs keep their exact columns and scroll instead.
+ */
+function lineWrapClass(wrapLines?: boolean): string {
+  return wrapLines ? 'whitespace-pre-wrap break-words' : 'whitespace-pre overflow-x-auto';
+}
+
+function UnifiedView({ hunks, wrapLines }: { hunks: DiffHunk[]; wrapLines?: boolean }) {
   return (
     <table className="w-full text-xs font-mono border-collapse">
       <tbody>
@@ -150,7 +158,7 @@ function UnifiedView({ hunks }: { hunks: DiffHunk[] }) {
               <td className={`w-10 text-right px-1.5 select-none console-divider-r ${gutterStyles[line.type]}`}>
                 {line.newLine ?? ''}
               </td>
-              <td className="px-2 whitespace-pre overflow-x-auto">
+              <td data-diff-line className={`px-2 ${lineWrapClass(wrapLines)}`}>
                 <span className="select-none text-cafe-secondary mr-1">{prefixMap[line.type]}</span>
                 {line.content}
               </td>
@@ -162,11 +170,37 @@ function UnifiedView({ hunks }: { hunks: DiffHunk[] }) {
   );
 }
 
-function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
+function SideBySideView({
+  hunks,
+  wrapLines,
+  headers,
+}: {
+  hunks: DiffHunk[];
+  wrapLines?: boolean;
+  headers?: { before: string; after: string };
+}) {
   const pairs = useMemo(() => hunks.flatMap((h) => pairLines(h.lines)), [hunks]);
 
+  // sol @ ccd01dabf (P2-A): fixed layout is part of the wrap/header opt-in.
+  // Callers that opt into neither keep the auto-layout + outer horizontal
+  // scroll contract that code diffs rely on.
+  const layout = wrapLines || headers ? 'table-fixed ' : '';
   return (
-    <table className="w-full text-xs font-mono border-collapse">
+    <table className={`w-full ${layout}text-xs font-mono border-collapse`}>
+      {headers && (
+        <thead>
+          <tr className="bg-[var(--ws-editor-bg)] text-cafe-muted">
+            <th className="w-8" aria-hidden />
+            <th data-testid="diff-split-header-before" scope="col" className="px-2 py-1 text-left font-semibold">
+              {headers.before}
+            </th>
+            <th className="w-8" aria-hidden />
+            <th data-testid="diff-split-header-after" scope="col" className="px-2 py-1 text-left font-semibold">
+              {headers.after}
+            </th>
+          </tr>
+        </thead>
+      )}
       <tbody>
         {pairs.map((pair, i) => (
           <tr key={i}>
@@ -177,7 +211,8 @@ function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
               {pair.left?.oldLine ?? ''}
             </td>
             <td
-              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.left ? lineStyles[pair.left.type] : 'bg-cafe-surface-sunken/50'}`}
+              data-diff-line
+              className={`w-1/2 px-2 ${lineWrapClass(wrapLines)} ${pair.left ? lineStyles[pair.left.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.left?.content ?? ''}
             </td>
@@ -188,7 +223,8 @@ function SideBySideView({ hunks }: { hunks: DiffHunk[] }) {
               {pair.right?.newLine ?? ''}
             </td>
             <td
-              className={`w-1/2 px-2 whitespace-pre overflow-x-auto ${pair.right ? lineStyles[pair.right.type] : 'bg-cafe-surface-sunken/50'}`}
+              data-diff-line
+              className={`w-1/2 px-2 ${lineWrapClass(wrapLines)} ${pair.right ? lineStyles[pair.right.type] : 'bg-cafe-surface-sunken/50'}`}
             >
               {pair.right?.content ?? ''}
             </td>
@@ -208,10 +244,30 @@ interface DiffViewerProps {
   filePath?: string;
   /** Compact mode for rich blocks (no file header, no mode toggle) */
   compact?: boolean;
+  /** Initial presentation mode for callers that already know the comparison task. */
+  initialMode?: 'unified' | 'split';
+  /** Wrap long lines instead of scrolling horizontally (prose, not code). */
+  wrapLines?: boolean;
+  /** Column headings rendered inside the split table so they stay aligned. */
+  splitHeaders?: { before: string; after: string };
+  /**
+   * Suppress every file-level affordance. Some comparisons (F257 runtime
+   * override / version-store changes) touch no file at all, so a path bar or a
+   * "1 file changed" counter would assert something untrue.
+   */
+  hideFileMeta?: boolean;
 }
 
-export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
-  const [mode, setMode] = useState<'unified' | 'split'>('unified');
+export function DiffViewer({
+  diff,
+  filePath,
+  compact,
+  initialMode = 'unified',
+  wrapLines,
+  splitHeaders,
+  hideFileMeta,
+}: DiffViewerProps) {
+  const [mode, setMode] = useState<'unified' | 'split'>(initialMode);
   const files = useMemo(() => parseUnifiedDiff(diff), [diff]);
 
   const filtered = filePath ? files.filter((f) => f.path === filePath) : files;
@@ -231,6 +287,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           <button
             type="button"
             onClick={() => setMode('unified')}
+            aria-pressed={mode === 'unified'}
             className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'unified'
                 ? 'bg-cafe-accent/80 text-[var(--cafe-surface)]'
@@ -242,6 +299,7 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           <button
             type="button"
             onClick={() => setMode('split')}
+            aria-pressed={mode === 'split'}
             className={`px-2 py-0.5 rounded text-micro font-medium transition-colors ${
               mode === 'split'
                 ? 'bg-cafe-accent/80 text-[var(--cafe-surface)]'
@@ -250,20 +308,26 @@ export function DiffViewer({ diff, filePath, compact }: DiffViewerProps) {
           >
             Side-by-side
           </button>
-          <span className="ml-auto text-micro text-cafe-secondary">
-            {filtered.length} file{filtered.length !== 1 ? 's' : ''} changed
-          </span>
+          {!hideFileMeta && (
+            <span className="ml-auto text-micro text-cafe-secondary">
+              {filtered.length} file{filtered.length !== 1 ? 's' : ''} changed
+            </span>
+          )}
         </div>
       )}
       {filtered.map((file) => (
         <div key={file.path} className="rounded border border-[var(--console-border-soft)] overflow-hidden">
-          {!compact && (
+          {!compact && !hideFileMeta && (
             <div className="bg-[var(--ws-editor-bg)] px-3 py-1.5 text-xs font-mono text-cafe-muted console-divider-b truncate">
               {file.path}
             </div>
           )}
-          <div className="overflow-x-auto bg-[var(--ws-editor-deep)]">
-            {mode === 'unified' ? <UnifiedView hunks={file.hunks} /> : <SideBySideView hunks={file.hunks} />}
+          <div className={`${wrapLines ? '' : 'overflow-x-auto'} bg-[var(--ws-editor-deep)]`}>
+            {mode === 'unified' ? (
+              <UnifiedView hunks={file.hunks} wrapLines={wrapLines} />
+            ) : (
+              <SideBySideView hunks={file.hunks} wrapLines={wrapLines} headers={splitHeaders} />
+            )}
           </div>
         </div>
       ))}

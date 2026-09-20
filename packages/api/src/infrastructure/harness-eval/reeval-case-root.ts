@@ -1,5 +1,5 @@
 import { loadDomains } from './hub/eval-hub-read-model.js';
-import { loadLifecycleRootsWithLegacyCases } from './legacy-reeval-case-migration.js';
+import { type EvalLifecycleSpace, loadLifecycleSpaceRoots } from './lifecycle-space.js';
 import type { LifecycleRootArtifact } from './publish-verdict/lifecycle-root-artifact.js';
 import type { ReevalCaseRoot } from './reeval-case.js';
 import { compareReevalCycles } from './reeval-case-cycle-order.js';
@@ -54,12 +54,12 @@ export function frictionLifecycleV3QuarantineDiagnostic(): FrictionLifecycleV3Qu
 }
 
 export function classifyReevalCaseRoot(
-  harnessFeedbackRoot: string,
+  space: EvalLifecycleSpace,
   verdictId: string,
   assignedEvalCatIdOverride?: string,
   frictionV3Cutover?: { lifecycleVersion: 1 },
 ): ReevalCaseRootClassification {
-  const artifacts = loadLifecycleRootsWithLegacyCases(harnessFeedbackRoot);
+  const artifacts = loadLifecycleSpaceRoots(space);
   const quarantined = artifacts.find(
     (artifact): artifact is LifecycleRootV3 => artifact.schemaVersion === 3 && artifact.verdictId === verdictId,
   );
@@ -93,7 +93,7 @@ export function classifyReevalCaseRoot(
     }
   }
 
-  const domain = loadDomains(harnessFeedbackRoot).get(requested.domainId);
+  const domain = loadDomains(space.harnessFeedbackRoot).get(requested.domainId);
   if (!domain)
     throw new Error(`lifecycle case ${requested.caseId} references unregistered domain ${requested.domainId}`);
   return {
@@ -115,16 +115,11 @@ export function classifyReevalCaseRoot(
 }
 
 export function loadReevalCaseRoot(
-  harnessFeedbackRoot: string,
+  space: EvalLifecycleSpace,
   verdictId: string,
   assignedEvalCatIdOverride?: string,
   frictionV3Cutover?: { lifecycleVersion: 1 },
 ): ResolvedReevalCaseRoot | undefined {
-  const classification = classifyReevalCaseRoot(
-    harnessFeedbackRoot,
-    verdictId,
-    assignedEvalCatIdOverride,
-    frictionV3Cutover,
-  );
+  const classification = classifyReevalCaseRoot(space, verdictId, assignedEvalCatIdOverride, frictionV3Cutover);
   return classification.status === 'available' ? classification.value : undefined;
 }

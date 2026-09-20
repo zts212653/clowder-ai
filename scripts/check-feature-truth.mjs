@@ -391,7 +391,7 @@ function checkChangedAllAcceptanceCriteriaStatus(repoRoot, generatedFeatures, er
     if (!status) continue;
     if (isDoneStatus(status.rawStatus)) continue;
 
-    const criteria = [...content.matchAll(/^- \[([ xX])\]\s+AC-[A-Z0-9.]+:/gm)];
+    const criteria = [...content.matchAll(/^- \[([ xX])\]\s+AC-[A-Za-z0-9.-]+:/gm)];
     if (criteria.length === 0) continue;
 
     if (criteria.every((criterion) => criterion[1].toLowerCase() === 'x')) {

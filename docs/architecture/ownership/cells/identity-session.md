@@ -49,8 +49,6 @@ code_anchors:
   - packages/api/src/domains/cats/services/profile/ProfileRepository.ts
   - packages/api/src/domains/cats/services/profile/profile-migration-plan.ts
   - packages/api/src/domains/cats/services/profile/profile-migration.ts
-  - packages/api/src/domains/cats/services/agents/providers/l0-compiler.ts
-  - packages/api/src/domains/cats/services/agents/providers/l0-profile-cache.ts
   - packages/api/src/routes/callback-read-profile-routes.ts
   - packages/api/src/scripts/migrate-f231-profile.ts
 doc_anchors:

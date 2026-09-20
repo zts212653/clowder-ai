@@ -62,7 +62,7 @@ import {
   lookupKimiL0Fingerprint,
   recordKimiL0Fingerprint,
 } from './kimi-l0-session-fingerprint.js';
-import { compileL0ViaSubprocess } from './l0-compiler.js';
+import { type NativeSessionPromptTestFactory, resolveNativeSessionPrompt } from './native-session-prompt.js';
 
 const log = createModuleLogger('kimi-agent');
 
@@ -93,8 +93,7 @@ interface KimiAgentServiceOptions {
   mcpServerPath?: string;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
-  /** F203 Phase J: L0 compile seam for the native --agent-file channel (test injection). */
-  l0CompilerFn?: typeof compileL0ViaSubprocess;
+  l0CompilerFn?: NativeSessionPromptTestFactory;
 }
 
 export class KimiAgentService implements AgentService {
@@ -104,7 +103,7 @@ export class KimiAgentService implements AgentService {
   private readonly mcpServerPath: string | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
-  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
+  private readonly sessionPromptTestFactory: NativeSessionPromptTestFactory | undefined;
 
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
@@ -113,7 +112,7 @@ export class KimiAgentService implements AgentService {
     this.mcpServerPath =
       options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
-    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
+    this.sessionPromptTestFactory = options?.l0CompilerFn;
   }
 
   /**
@@ -208,11 +207,12 @@ export class KimiAgentService implements AgentService {
     let rejectedResumeSessionId: string | undefined;
     if (!isLegacy) {
       try {
-        const l0 = await this.l0CompilerFn({
-          catId: this.catId as string,
-          userId: options?.callbackEnv?.CAT_CAFE_USER_ID,
-        });
-        l0Fingerprint = computeKimiL0Fingerprint(l0);
+        const sessionPrompt = await resolveNativeSessionPrompt(
+          options,
+          this.catId as string,
+          this.sessionPromptTestFactory,
+        );
+        l0Fingerprint = computeKimiL0Fingerprint(sessionPrompt);
         let freshStartReason: 'stale' | 'unverifiable' | undefined;
         if (options?.sessionId) {
           const stored = lookupKimiL0Fingerprint(kimiShareDir, this.catId as string, options.sessionId);
@@ -250,7 +250,7 @@ export class KimiAgentService implements AgentService {
           l0AgentFilePath = writeKimiL0AgentFile(
             buildKimiL0AgentFileContent({
               catId: this.catId as string,
-              l0,
+              l0: sessionPrompt,
               packSystemPrompt: freshStartReason
                 ? (options?.resumeFallbackSystemPrompt ?? options?.systemPrompt)
                 : options?.systemPrompt,
@@ -269,7 +269,7 @@ export class KimiAgentService implements AgentService {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: `L0 compile failed for ${this.catId as string}: ${message}`,
+          error: message,
           metadata,
           timestamp: Date.now(),
         };

@@ -20,12 +20,14 @@ import type {
   PromptPatch,
   RegisteredHook,
   ResolveResult,
+  SegmentContentSourceKind,
   TraceEvent,
   TraceEventDisabled,
   TraceEventFired,
   TraceEventSkipped,
 } from '@cat-cafe/shared';
 import type { HookRegistry } from './HookRegistry.js';
+import { matchesHookCondition } from './hook-condition-policy.js';
 
 // ---------------------------------------------------------------------------
 // Pipeline result
@@ -98,25 +100,84 @@ export class HookPipeline {
   }
 
   /**
-   * Render content for a fired hook: CONTENT passthrough → template → fallback.
-   * Returns null if no template found (caller emits template_missing trace).
+   * Render content for a fired hook:
+   *   1. Content override from HookOverrideStore (PR3) — highest priority
+   *   2. CONTENT var passthrough from resolver
+   *   3. Template rendering → fallback template
+   * Returns null if no content source found (caller emits template_missing trace).
    */
-  private renderContent(hook: RegisteredHook, templateId: string, vars: Record<string, string>): string | null {
+  private renderContent(
+    hook: RegisteredHook,
+    templateId: string,
+    vars: Record<string, string>,
+  ): { content: string; sourceKind: SegmentContentSourceKind; sourceRef: string } | null {
+    // PR3: content override takes precedence over all other sources
+    const contentOverride = this.registry.getContentOverride(hook.manifest.id);
+    if (contentOverride !== undefined) {
+      return { content: contentOverride, sourceKind: 'override', sourceRef: hook.manifest.id };
+    }
+
     // Resolver-produced content passthrough: when the resolver provides a CONTENT
     // var, it signals that the final rendered content is already assembled
     // (e.g., S6 breed-specific workflow triggers, S13 pre-rendered MCP tools
     // section). Skip template rendering — the template file may be a data source
     // (YAML) or expect vars that only the legacy path provides.
-    if (vars.CONTENT) return vars.CONTENT;
-    return this.renderer(templateId, vars) ?? this.renderFromTemplatePath(hook, vars);
+    if (vars.CONTENT) {
+      return { content: vars.CONTENT, sourceKind: 'content-var', sourceRef: `${hook.manifest.id}:CONTENT` };
+    }
+
+    const rendered = this.renderer(templateId, vars);
+    if (rendered) return { content: rendered, sourceKind: 'template', sourceRef: templateId };
+
+    const fallback = this.renderFromTemplatePath(hook, vars);
+    if (fallback) return { content: fallback, sourceKind: 'file-fallback', sourceRef: hook.templatePath };
+
+    return null;
+  }
+
+  /**
+   * Decide the gates that precede any resolver work, in priority order.
+   *
+   * A hook that is turned off stays `disabled` even when the route also shadows
+   * it — "was never going to run" is the more precise fact. A route-owned exact
+   * contract then shadows a conflicting generic hook for this turn only, and is
+   * recorded as `skipped` rather than filtered out of the rendered text: the
+   * evaluation ledger must not claim a segment fired when it never reached the
+   * model.
+   *
+   * Returns the terminal trace event, or null when the hook may proceed.
+   */
+  private rejectBeforeResolve(hookId: string, stage: HookStage, ts: number, input: AssemblerInput): TraceEvent | null {
+    if (!this.registry.isEnabled(hookId)) {
+      return {
+        hookId,
+        stage,
+        timestamp: ts,
+        status: 'disabled',
+        disabledBy: this.registry.getDisabledBySource(hookId),
+      } as TraceEventDisabled;
+    }
+    if (input.suppressedHookIds?.includes(hookId)) {
+      return {
+        hookId,
+        stage,
+        timestamp: ts,
+        status: 'skipped',
+        reasonCode: 'route_suppressed',
+        reason: input.hookSuppressionReason ?? 'shadowed by a route-owned exact contract',
+      } as TraceEventSkipped;
+    }
+    return null;
   }
 
   /**
    * Execute all hooks for a stage in manifest order.
-   * Each hook: enabled check → resolve → render → patch + trace.
+   * Each hook: pre-resolve gates → resolve → governed condition → render → patch + trace.
    *
-   * Uses manifest baseline for enabled/version. Runtime overrides
-   * (HookOverrideStore) will be added in a separate PR.
+   * The pre-resolve gates (see rejectBeforeResolve) cover registry.isEnabled(),
+   * which resolves override snapshot → manifest baseline, and route-owned
+   * shadowing. Content overrides from HookOverrideStore take precedence over
+   * template rendering.
    */
   executeStage(stage: HookStage, input: AssemblerInput): PipelineResult {
     const hooks = this.registry.getStageHooks(stage);
@@ -127,15 +188,10 @@ export class HookPipeline {
       const hookId = hook.manifest.id;
       const ts = Date.now();
 
-      // 1. Enabled check — manifest baseline
-      if (!hook.manifest.enabled) {
-        events.push({
-          hookId,
-          stage,
-          timestamp: ts,
-          status: 'disabled',
-          disabledBy: 'manifest',
-        } as TraceEventDisabled);
+      // 1. Gates that need no resolver work: turned off, or shadowed by the route.
+      const preResolveRejection = this.rejectBeforeResolve(hookId, stage, ts, input);
+      if (preResolveRejection) {
+        events.push(preResolveRejection);
         continue;
       }
 
@@ -155,10 +211,26 @@ export class HookPipeline {
         continue;
       }
 
-      // 3. Resolve template variant + render content
+      // 3. A governed condition is an extra AND gate. Running it after the
+      // built-in resolver preserves the canonical resolver reason when both
+      // gates are false and never broadens the hook's injection surface.
+      const condition = this.registry.getConditionOverride(hookId);
+      if (condition && !matchesHookCondition(condition, input)) {
+        events.push({
+          hookId,
+          stage,
+          timestamp: ts,
+          status: 'skipped',
+          reasonCode: 'condition_override_not_matched',
+          reason: `Governed condition '${condition.conditionRef}' did not match`,
+        } as TraceEventSkipped);
+        continue;
+      }
+
+      // 4. Resolve template variant + render content
       const templateId = result.vars.TEMPLATE_VARIANT ?? hookId;
-      const content = this.renderContent(hook, templateId, result.vars);
-      if (!content) {
+      const rendered = this.renderContent(hook, templateId, result.vars);
+      if (!rendered) {
         events.push({
           hookId,
           stage,
@@ -170,16 +242,21 @@ export class HookPipeline {
         continue;
       }
 
-      // 4. Produce patch + trace (manifest version)
-      patches.push({ hookId, content, order: hook.manifest.order });
+      // 5. Produce patch + trace (override version → manifest version)
+      patches.push({ hookId, content: rendered.content, order: hook.manifest.order });
       events.push({
         hookId,
         stage,
         timestamp: ts,
         status: 'fired',
-        version: hook.manifest.version,
-        contentHash: hashContent(content),
-        tokenEstimate: estimateTokens(content),
+        version: this.registry.getActiveVersion(hookId),
+        contentHash: hashContent(rendered.content),
+        tokenEstimate: estimateTokens(rendered.content),
+        // F257 Console 判据④：persist event-time rendered content + source provenance for replay.
+        content: rendered.content,
+        contentSourceKind: rendered.sourceKind,
+        templateRef: rendered.sourceRef,
+        templateVars: result.vars,
       } as TraceEventFired);
     }
 

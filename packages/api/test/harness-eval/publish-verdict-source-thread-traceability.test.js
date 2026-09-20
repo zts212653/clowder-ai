@@ -18,11 +18,15 @@ import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verd
  * Contract:
  *   1. Initial publish stamps invocation-authenticated sourceThreadId into
  *      provenance.json — server-side only, not client-spoofable.
- *   2. PR body includes thread coordinate for human traceability.
- *   3. Refresh does not rewrite provenance.json (census-only), so the original
- *      sourceThreadId survives.
+ *   2. Omitted when the principal has no thread (agent_key), never fabricated.
  *
- * TDD: written RED before fix in publish-verdict.ts.
+ * F257 note: this suite arrived with the upstream sync and was written against the
+ * Git publisher. Publication now writes an immutable bundle through the
+ * ArtifactPublisher, so the third case ("PR body includes thread coordinate") asserts
+ * a surface that no longer exists and is not carried forward — there is no PR body to
+ * put a coordinate in. The traceability need it served is met by provenance.json,
+ * which cases 1-2 cover. Publication is also owner-scoped in this slice, so every
+ * publish supplies an ownerUserId; that is a precondition here, not the subject.
  */
 
 function seedLiveEvidence(liveRoot, snapName, attrName) {
@@ -76,16 +80,22 @@ describe('F192 verdict provenance sourceThreadId traceability', () => {
   it('initial publish stamps invocation-authenticated sourceThreadId into provenance.json', async () => {
     seedLiveEvidence(root, 'snap-t1.yaml', 'attr-t1.yaml');
     const isolatedWorktree = makeEmptyIsolatedWorktree();
-    let capturedStageResult;
 
     const result = await handlePublishVerdict(
       {
         harnessFeedbackRoot: root,
         now: () => new Date('2026-09-06T10:00:00.000Z'),
-        gitPublisher: {
-          async publishOnIsolatedWorktree(opts) {
-            capturedStageResult = await opts.stage(isolatedWorktree);
-            return { commitSha: 'abc123', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9999' };
+        artifactPublisher: {
+          async publishArtifact({ packet, generate }) {
+            const outputRoot = join(isolatedWorktree, 'docs', 'harness-feedback');
+            mkdirSync(outputRoot, { recursive: true });
+            const generated = await generate(outputRoot);
+            return {
+              artifactId: packet.id,
+              verdictPath: generated.verdictPath,
+              bundleDir: generated.bundleDir,
+              artifactUrl: `artifact://eval-a2a/${packet.id}`,
+            };
           },
         },
         generator: createProvenanceWritingGenerator(),
@@ -94,6 +104,7 @@ describe('F192 verdict provenance sourceThreadId traceability', () => {
         packet: buildPacket({ id: 'vhp-thread-trace-001', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
         catId: 'codex',
+        ownerUserId: 'owner-trace',
         sourceThreadId: 'thread_eval_anchor_first',
         sourceRefs: { snapshotName: 'snap-t1.yaml', attributionName: 'attr-t1.yaml' },
       },
@@ -119,39 +130,6 @@ describe('F192 verdict provenance sourceThreadId traceability', () => {
     rmSync(isolatedWorktree, { recursive: true, force: true });
   });
 
-  it('PR body includes source thread coordinate', async () => {
-    seedLiveEvidence(root, 'snap-t2.yaml', 'attr-t2.yaml');
-    const isolatedWorktree = makeEmptyIsolatedWorktree();
-    let capturedPrBody;
-
-    await handlePublishVerdict(
-      {
-        harnessFeedbackRoot: root,
-        now: () => new Date('2026-09-06T10:00:01.000Z'),
-        gitPublisher: {
-          async publishOnIsolatedWorktree(opts) {
-            const stageResult = await opts.stage(isolatedWorktree);
-            capturedPrBody = stageResult.prBody;
-            return { commitSha: 'def456', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9998' };
-          },
-        },
-        generator: createProvenanceWritingGenerator(),
-      },
-      {
-        packet: buildPacket({ id: 'vhp-thread-trace-002', domainId: 'eval:a2a' }),
-        domain: 'eval:a2a',
-        catId: 'codex',
-        sourceThreadId: 'thread_eval_anchor_first',
-        sourceRefs: { snapshotName: 'snap-t2.yaml', attributionName: 'attr-t2.yaml' },
-      },
-    );
-
-    assert.ok(capturedPrBody, 'stage must produce prBody');
-    assert.match(capturedPrBody, /thread_eval_anchor_first/, 'PR body must include the source thread coordinate');
-
-    rmSync(isolatedWorktree, { recursive: true, force: true });
-  });
-
   it('omits sourceThreadId from provenance when not provided (agent_key principal)', async () => {
     seedLiveEvidence(root, 'snap-t3.yaml', 'attr-t3.yaml');
     const isolatedWorktree = makeEmptyIsolatedWorktree();
@@ -160,10 +138,17 @@ describe('F192 verdict provenance sourceThreadId traceability', () => {
       {
         harnessFeedbackRoot: root,
         now: () => new Date('2026-09-06T10:00:02.000Z'),
-        gitPublisher: {
-          async publishOnIsolatedWorktree(opts) {
-            await opts.stage(isolatedWorktree);
-            return { commitSha: 'ghi789', prUrl: 'https://github.com/zts212653/clowder-ai/pull/9997' };
+        artifactPublisher: {
+          async publishArtifact({ packet, generate }) {
+            const outputRoot = join(isolatedWorktree, 'docs', 'harness-feedback');
+            mkdirSync(outputRoot, { recursive: true });
+            const generated = await generate(outputRoot);
+            return {
+              artifactId: packet.id,
+              verdictPath: generated.verdictPath,
+              bundleDir: generated.bundleDir,
+              artifactUrl: `artifact://eval-a2a/${packet.id}`,
+            };
           },
         },
         generator: createProvenanceWritingGenerator(),
@@ -172,6 +157,8 @@ describe('F192 verdict provenance sourceThreadId traceability', () => {
         packet: buildPacket({ id: 'vhp-thread-trace-003', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
         catId: 'codex',
+        // An artifact always has an owner; only the thread coordinate is absent here.
+        ownerUserId: 'owner-trace',
         // No sourceThreadId — agent_key principal doesn't have one
         sourceRefs: { snapshotName: 'snap-t3.yaml', attributionName: 'attr-t3.yaml' },
       },

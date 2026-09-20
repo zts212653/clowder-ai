@@ -175,7 +175,7 @@ Bootcamp 不是 You 自己的冷启动（他是 co-creator，从 Day 0 就在）
 
 #### 真实案例：典型 Clowder AI session bootstrap（以Ragdoll @opus 为例）
 
-这个 session 开始时，`compile-system-prompt-l0` 注入了：
+这个 session 开始时，`S14` 段注入了（F257 起；此前由 `compile-system-prompt-l0` 承担）：
 - **我是谁**：Ragdoll/Ragdoll，@opus，model=claude-opus-4-6
 - **主人是谁**：operator/You，operator（F231 user capsule）
 - **队友**：猫名册（运行时 catalog，非静态）
@@ -184,7 +184,7 @@ Bootcamp 不是 You 自己的冷启动（他是 co-creator，从 Day 0 就在）
 
 > 注意：不同 runtime 模式（interactive-cli / `-p` / bg-cron）的注入面不完全相同；上面是完整 interactive session 的典型情况。
 
-**涉及 feature**：F231 user profile capsule、F052 identity、`compile-system-prompt-l0`
+**涉及 feature**：F231 user profile capsule、F052 identity、F237 prompt-hook pipeline（`S14`）
 
 ---
 

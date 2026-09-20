@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
-
 import { InMemoryFreshnessClosureStore } from '../../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import { FreshnessReplayProviderImpl } from '../../dist/infrastructure/harness-eval/freshness/freshness-replay-provider.js';
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
@@ -128,25 +127,39 @@ describe('publish_verdict eval:freshness', () => {
     const provider = matureProvider(store);
     const generator = createFreshnessGeneratorAdapter(provider);
     let isolatedRoot;
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    const artifactPublisher = {
+      async publishArtifact({ packet, generate }) {
         isolatedRoot = join(root, 'isolated');
         rmSync(isolatedRoot, { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-freshness.yaml'),
-          domainYaml,
-        );
+        const outputRoot = join(isolatedRoot, 'docs', 'harness-feedback');
+        mkdirSync(join(outputRoot, 'eval-domains'), { recursive: true });
+        // The Eval Hub read model resolves every verdict against the domain registry.
+        // Upstream's git publisher got that for free (an isolated worktree is a repo
+        // checkout); a durable artifact root is a bare directory, so the registry is
+        // supplied here as what it is — an input to the read model, not generator output.
+        writeFileSync(join(outputRoot, 'eval-domains', 'eval-freshness.yaml'), domainYaml);
         seedCanonicalMeasurementCensusState(isolatedRoot);
-        rmSync(join(isolatedRoot, 'docs', 'harness-feedback', 'verdicts'), { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'verdicts'), { recursive: true });
-        await opts.stage(isolatedRoot);
-        return { commitSha: 'freshness-sha', prUrl: 'https://example.test/pr/1' };
+        // Census seeding also plants sample verdicts whose bundles are not in this root;
+        // the read model resolves every verdict it finds, so clear them (as upstream's
+        // publisher fixture does) and let this test's own verdict be the only subject.
+        rmSync(join(outputRoot, 'verdicts'), { recursive: true, force: true });
+        mkdirSync(join(outputRoot, 'verdicts'), { recursive: true });
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId: packet.id,
+          domainSlug: 'eval-freshness',
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl: `artifact://eval-freshness/${packet.id}`,
+        };
       },
     };
 
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator, gitPublisher },
+      { harnessFeedbackRoot, generator, artifactPublisher },
+      // The live closure fixture below is owned by user-1 and upstream's replay is
+      // owner-scoped, so the publishing owner must be that same owner to see it.
       { packet: freshnessPacket(), domain: 'eval:freshness', catId: 'gpt52', ownerUserId: 'user-1', sourceRefs },
     );
 
@@ -196,6 +209,7 @@ describe('publish_verdict eval:freshness', () => {
         packet: freshnessPacket({ id: 'vhp-freshness-bad-selector' }),
         domain: 'eval:freshness',
         catId: 'gpt52',
+        ownerUserId: 'owner-test',
         sourceRefs: { ...sourceRefs, windowEndMs: sourceRefs.windowStartMs },
       },
     );
@@ -212,6 +226,7 @@ describe('publish_verdict eval:freshness', () => {
         packet: freshnessPacket({ id: 'vhp-freshness-fixture-subset' }),
         domain: 'eval:freshness',
         catId: 'gpt52',
+        ownerUserId: 'owner-test',
         sourceRefs: { ...sourceRefs, fixtureIds: ['original-double-message-dogfood'] },
       },
     );
@@ -223,26 +238,29 @@ describe('publish_verdict eval:freshness', () => {
   it('publishes an empty replay window as no-data with healthy=false', async () => {
     const generator = createFreshnessGeneratorAdapter(matureProvider());
     const isolatedRoot = join(root, 'isolated-no-data');
-    const gitPublisher = {
-      async publishOnIsolatedWorktree(opts) {
+    const artifactPublisher = {
+      async publishArtifact({ packet, generate }) {
         rmSync(isolatedRoot, { recursive: true, force: true });
-        mkdirSync(join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains'), { recursive: true });
-        writeFileSync(
-          join(isolatedRoot, 'docs', 'harness-feedback', 'eval-domains', 'eval-freshness.yaml'),
-          domainYaml,
-        );
-        seedCanonicalMeasurementCensusState(isolatedRoot);
-        await opts.stage(isolatedRoot);
-        return { commitSha: 'freshness-no-data-sha', prUrl: 'https://example.test/pr/2' };
+        const outputRoot = join(isolatedRoot, 'docs', 'harness-feedback');
+        mkdirSync(outputRoot, { recursive: true });
+        const generated = await generate(outputRoot);
+        await generated.afterPublish?.();
+        return {
+          artifactId: packet.id,
+          domainSlug: 'eval-freshness',
+          verdictPath: generated.verdictPath,
+          bundleDir: generated.bundleDir,
+          artifactUrl: `artifact://eval-freshness/${packet.id}`,
+        };
       },
     };
     const result = await handlePublishVerdict(
-      { harnessFeedbackRoot, generator, gitPublisher },
+      { harnessFeedbackRoot, generator, artifactPublisher },
       {
         packet: freshnessPacket({ id: 'vhp-freshness-no-data' }),
         domain: 'eval:freshness',
         catId: 'gpt52',
-        ownerUserId: 'user-1',
+        ownerUserId: 'owner-test',
         sourceRefs: { kind: 'freshness-closure-replay', windowStartMs: 3_000, windowEndMs: 4_000 },
       },
     );
@@ -271,6 +289,7 @@ describe('publish_verdict eval:freshness', () => {
         }),
         domain: 'eval:freshness',
         catId: 'gpt52',
+        ownerUserId: 'owner-test',
         sourceRefs,
       },
     );

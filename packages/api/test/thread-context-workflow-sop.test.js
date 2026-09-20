@@ -126,6 +126,7 @@ describe('GET thread-context with workflowSop', () => {
 
     // Add a message so we have content
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       threadId: thread.id,
@@ -312,6 +313,7 @@ describe('GET thread-context with workflowSop', () => {
     });
 
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       threadId: thread.id,
@@ -340,6 +342,7 @@ describe('GET thread-context with workflowSop', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       threadId: thread.id,
@@ -375,6 +378,7 @@ describe('GET thread-context with workflowSop', () => {
 
     // Add a message so thread-context has content
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-2',
       catId: null,
       threadId: otherThread.id,
@@ -404,6 +408,7 @@ describe('GET thread-context with workflowSop', () => {
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
 
     messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'user-1',
       catId: null,
       threadId: thread.id,

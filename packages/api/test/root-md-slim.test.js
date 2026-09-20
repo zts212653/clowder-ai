@@ -1,7 +1,7 @@
 /**
  * F203 Phase D — root md 瘦身守护测试。
  *
- * L0 (assets/system-prompts/system-prompt-l0.md) 在 Phase C 接通 native
+ * Session-init hooks 在 Phase C 接通 native
  * system role 后，CLAUDE.md / AGENTS.md 不再需要重复 identity/家规/SOP表/
  * 记忆详述/代码规范/文档表（L0 覆盖 OR ADR-030 §10.3 可从代码/文档重建）。
  * 本测试守护：(a) 行数 ≤ 65；(b) keep-anchor（harness-specific、L0 不含）

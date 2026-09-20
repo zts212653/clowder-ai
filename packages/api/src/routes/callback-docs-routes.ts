@@ -12,6 +12,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FastifyPluginAsync } from 'fastify';
 import { RICH_BLOCK_RULES } from '../domains/cats/services/context/rich-block-rules.js';
+import { loadObjectiveRegistry } from '../infrastructure/harness-eval/objective-registry.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,15 +28,49 @@ function refsPath(fileName: string): string {
   return resolve(__dirname, '..', '..', '..', '..', 'cat-cafe-skills', 'refs', fileName);
 }
 
+/** F257 #3: resolve the objective registry YAML (docs/harness-feedback/objectives/). */
+function objectiveRegistryPath(): string {
+  return resolve(__dirname, '..', '..', '..', '..', 'docs', 'harness-feedback', 'objectives', 'registry.yaml');
+}
+
+export interface CallbackDocsRoutesOptions {
+  /** Test seam: override the objective registry path (defaults to the shipped location). */
+  objectiveRegistryPath?: string;
+}
+
 /**
  * Register documentation endpoints (fallback for Skills system).
  * No auth required — these return static reference text.
  */
-export const registerCallbackDocsRoutes: FastifyPluginAsync = async (app) => {
+export const registerCallbackDocsRoutes: FastifyPluginAsync<CallbackDocsRoutesOptions> = async (app, opts) => {
+  const registryPath = opts.objectiveRegistryPath ?? objectiveRegistryPath();
   // Rich block usage rules
   app.get('/api/callbacks/rich-block-rules', async (_request, reply) => {
     reply.header('cache-control', 'public, max-age=3600');
     return { rules: RICH_BLOCK_RULES };
+  });
+
+  // F257 #3: objective registry — read-only discovery for report_harness_signal
+  // objectiveId (so cats stop doing archaeology). Definition layer (id/statement).
+  // Fail-closed (2a R1 P1-2): an unreadable/malformed/invalid catalog returns 503,
+  // never a cacheable empty list that would masquerade as "no objectives".
+  app.get('/api/callbacks/objectives', async (request, reply) => {
+    const result = await loadObjectiveRegistry(registryPath);
+    if (!result.ok) {
+      // 2a R2 P2-1: this endpoint is UNAUTHENTICATED. The loader's reason contains the
+      // registry path + fs errno — log it server-side, but return a stable, path-free 503
+      // so a caller (and the MCP tool that forwards response.text()) never learns the
+      // install path / layout. The MCP tool still only needs to recognize the 503.
+      request.log.error({ reason: result.error }, '[F257] objective registry unavailable');
+      reply.code(503);
+      return { error: 'Objective registry unavailable' };
+    }
+    reply.header('cache-control', 'public, max-age=3600');
+    return {
+      registryVersion: result.registry.registryVersion,
+      objectives: result.registry.objectives,
+      evaluationModels: result.registry.evaluationModels,
+    };
   });
 
   // MCP callback instructions — reads refs file (SOT moved from skill to refs/)

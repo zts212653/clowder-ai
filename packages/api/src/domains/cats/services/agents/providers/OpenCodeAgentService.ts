@@ -28,7 +28,6 @@ import { CliRawArchive } from '../../session/CliRawArchive.js';
 import type {
   AgentMessage,
   AgentServiceOptions,
-  L0InjectableAgentService,
   MessageMetadata,
   PreparedProviderRequestV1,
   ToolExecutionPolicy,
@@ -98,8 +97,6 @@ interface OpenCodeAgentServiceOptions {
   spawnFn?: SpawnFn;
   /** #780: Raw NDJSON archive sink (default: CliRawArchive to disk) */
   rawArchive?: RawArchiveSink;
-  /** F203 Phase I: test seam — replaces the real L0 compiler subprocess (like Claude/Codex services). */
-  l0CompilerFn?: (options: { catId: string; userId?: string; dataDir?: string; outPath?: string }) => Promise<string>;
   /** Test seam for the `opencode run --help` auto-approval capability probe. */
   autoApproveProbeFn?: OpenCodeAutoApproveProbeFn;
   /** Test seam for OpenCode's local SQLite state used to recover silent completions. */
@@ -225,7 +222,7 @@ export function summarizeOpenCodeEnvForDebug(env: Record<string, string | null> 
 /** F203 Phase I: env var signaling that OPENCODE_CONFIG is instructions-only (no custom provider). */
 export const OC_INSTRUCTIONS_ONLY_ENV = 'CAT_CAFE_OC_INSTRUCTIONS_ONLY';
 
-export class OpenCodeAgentService implements L0InjectableAgentService {
+export class OpenCodeAgentService {
   readonly catId: CatId;
   private readonly model: string;
   private readonly apiKey: string | undefined;
@@ -233,8 +230,6 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
   private readonly spawnFn: SpawnFn | undefined;
   /** #780: Raw NDJSON archive for post-mortem diagnostics */
   private readonly rawArchive: RawArchiveSink;
-  /** F203 Phase I: injectable L0 compiler (test seam, like Claude/Codex services). */
-  readonly l0CompilerFn: import('../../types.js').L0CompilerFn | undefined;
   private readonly autoApproveProbeFn: OpenCodeAutoApproveProbeFn | undefined;
   private readonly opencodeDbPath: string | undefined;
   private readonly opencodeManagedConfigPaths: readonly string[] | undefined;
@@ -248,21 +243,21 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
     this.baseUrl = options?.baseUrl;
     this.spawnFn = options?.spawnFn;
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
-    this.l0CompilerFn = options?.l0CompilerFn;
     this.autoApproveProbeFn = options?.autoApproveProbeFn;
     this.opencodeDbPath = options?.opencodeDbPath;
     this.opencodeManagedConfigPaths = options?.opencodeManagedConfigPaths;
   }
 
   /**
-   * F203 Phase I — OpenCode injects L0 via runtime config `instructions` array.
+   * OpenCode transports the route-owned HookPipeline output via the runtime
+   * config `instructions` array.
    * OpenCode loads instructions files every turn into `role: "system"` messages,
    * making them compression-immune (S8 spike: sst/opencode@v1.15.13).
    *
    * IMPORTANT: When this returns true, the route layer switches to pack-only
    * static identity (no full prepend). The caller (invoke-single-cat) MUST ensure
    * every OpenCode invocation path generates a runtime config with `instructions`
-   * containing the compiled L0 file. See AC-I3/I4 guards.
+   * containing the exact route-owned prompt file.
    */
   injectsL0Natively(): boolean {
     return true;

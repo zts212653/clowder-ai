@@ -584,8 +584,8 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
   test('when opus48 炸毛, opus-4.6 is invoked as relay and user sees no malformed error', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 
-    // opus48 = the cat that炸毛; opus = the 46 relay
-    const opus48CatId = 'opus48';
+    // A catalogued non-relay Ragdoll is the cat that炸毛; opus is the 46 relay.
+    const opus48CatId = 'opus-47';
     const relay46Service = createRelay46Service('opus');
     const deps = createMalformedRelayDeps({
       [opus48CatId]: createMalformedOpusService(opus48CatId),
@@ -633,7 +633,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
     // P2 fix: if worklist already contains opus (e.g. user routed to [opus48, opus]),
     // the relay push must be skipped — opus must be invoked exactly ONCE.
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const opus48CatId = 'opus48';
+    const opus48CatId = 'opus-47';
     const relay46Service = createRelay46Service('opus');
     const deps = createMalformedRelayDeps({
       [opus48CatId]: createMalformedOpusService(opus48CatId),
@@ -669,7 +669,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
 
     // First slot: normal opus service (runs first, index=0)
     const normalOpusService = createRelay46Service('opus'); // produces normal relay output
-    const opus48CatId = 'opus48';
+    const opus48CatId = 'opus-47';
     const deps = createMalformedRelayDeps({
       opus: normalOpusService, // opus runs FIRST as worklist[0]
       [opus48CatId]: createMalformedOpusService(opus48CatId), // opus-48 炸毛 as worklist[1]
@@ -700,7 +700,7 @@ describe('F215 AC-C3: route-serial malformed relay pushes opus-4.6 to worklist',
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
 
     // Only opus48 service, no opus service
-    const opus48CatId = 'opus48';
+    const opus48CatId = 'opus-47';
     const deps = createMalformedRelayDeps({
       [opus48CatId]: createMalformedOpusService(opus48CatId),
       // intentionally no 'opus' service

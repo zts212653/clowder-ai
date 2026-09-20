@@ -17,7 +17,8 @@ import { validateFrictionRollupSelector } from './validation.js';
  *   2. validateFrictionRollupSelector (window finite + ordered, topN/tokenCap
  *      positive int)
  *   3. provider.resolve(selector) → frozen FrictionMeasurementCapture (live 4-channel rollup + validity evidence)
- *   4. Load EvalDomainRegistryEntry from registry inside isolated harness root
+ *   4. Load EvalDomainRegistryEntry from the LIVE registry (the isolated staging
+ *      tree has no eval-domains/; only artifact writes go to harnessFeedbackRoot)
  *   5. generateFrictionLiveVerdict with submittedPacket (Decision 3: cat owns the
  *      verdict; generator only overrides bundle refs in evidencePacket)
  *
@@ -49,7 +50,7 @@ export function createFrictionGeneratorAdapter(
 
     const measurementCapture = await provider.resolve(selector);
 
-    const domains = loadDomains(deps.harnessFeedbackRoot);
+    const domains = loadDomains(deps.liveHarnessFeedbackRoot);
     const domain = domains.get(packet.domainId);
     if (!domain) {
       throw new Error(`unknown_domain: ${packet.domainId} not in registry`);

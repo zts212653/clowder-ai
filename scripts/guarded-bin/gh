@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const args = process.argv.slice(2);
 const ownDir = dirname(fileURLToPath(import.meta.url));
+const CENSUS_PATH = 'docs/harness-feedback/registry/measurement-bundles.yaml';
 
 const VALUE_OPTION_ALIASES = Object.freeze({
   repository: Object.freeze(['--repo', '-R']),
@@ -79,33 +80,67 @@ function gitOutput(gitArgs) {
   return result.status === 0 ? result.stdout.trim() : '';
 }
 
-function candidateTouchesVerdictArtifacts() {
+function candidateBaseRef() {
   const baseBranch = optionValue('base') ?? 'main';
   const remoteBase = `refs/remotes/origin/${baseBranch}`;
-  const baseRef = gitOutput(['rev-parse', '--verify', remoteBase]) ? remoteBase : baseBranch;
-  const paths = gitOutput(['diff', '--name-only', `${baseRef}...HEAD`]);
-  return paths.split('\n').some(
-    (path) =>
-      path.startsWith('docs/harness-feedback/bundles/') ||
-      path.startsWith('docs/harness-feedback/verdicts/') ||
-      path === 'docs/harness-feedback/registry/measurement-bundles.yaml',
-  );
+  return gitOutput(['rev-parse', '--verify', remoteBase]) ? remoteBase : baseBranch;
 }
 
-function isVerdictPrCreate() {
-  const command = commandArgs();
-  if (command[0] !== 'pr' || !['create', 'new'].includes(command[1])) return false;
-  const title = optionValue('title') ?? '';
-  const head = optionValue('head') ?? '';
-  const branch = gitOutput(['branch', '--show-current']);
-  const commitSubject = gitOutput(['log', '-1', '--pretty=%s']);
-  return (
-    title.startsWith('verdict(') ||
-    head.includes('verdict/auto/') ||
-    branch.startsWith('verdict/auto/') ||
-    commitSubject.startsWith('verdict(') ||
-    candidateTouchesVerdictArtifacts()
+function candidateChangedPaths() {
+  const paths = gitOutput(['diff', '--name-only', `${candidateBaseRef()}...HEAD`]);
+  return paths ? paths.split('\n') : [];
+}
+
+function parseCensusEntries(content) {
+  const matches = [...content.matchAll(/^  - domainId:\s*([^\s#]+)\s*$/gm)];
+  if (matches.length === 0) return undefined;
+  const entries = new Map();
+  for (const [index, match] of matches.entries()) {
+    const domainId = match[1];
+    if (entries.has(domainId)) return undefined;
+    entries.set(domainId, content.slice(match.index, matches[index + 1]?.index ?? content.length));
+  }
+  return { prefix: content.slice(0, matches[0].index), entries };
+}
+
+function hasExactlyOne(block, pattern) {
+  return [...block.matchAll(pattern)].length === 1;
+}
+
+function isSafeBootstrapEntry(block) {
+  return [
+    /^    committedVerdictArtifactCount:\s*0\s*$/gm,
+    /^    validityMigration:\s*$/gm,
+    /^      status:\s*unmigrated\s*$/gm,
+    /^      certificateRef:\s*null\s*$/gm,
+    /^      resultRef:\s*null\s*$/gm,
+    /^      replayRef:\s*null\s*$/gm,
+    /^      actionGate:\s*keep_observe_only\s*$/gm,
+  ].every((pattern) => hasExactlyOne(block, pattern));
+}
+
+function isCensusBootstrapOnly() {
+  const baseRef = candidateBaseRef();
+  const diff = spawnSync(
+    'git',
+    ['diff', '--unified=0', '--no-color', `${baseRef}...HEAD`, '--', CENSUS_PATH],
+    { encoding: 'utf8' },
   );
+  if (diff.status !== 0 || !diff.stdout) return false;
+  if (diff.stdout.split('\n').some((line) => line.startsWith('-') && !line.startsWith('---'))) return false;
+
+  const base = spawnSync('git', ['show', `${baseRef}:${CENSUS_PATH}`], { encoding: 'utf8' });
+  const head = spawnSync('git', ['show', `HEAD:${CENSUS_PATH}`], { encoding: 'utf8' });
+  if (base.status !== 0 || head.status !== 0) return false;
+  const baseCensus = parseCensusEntries(base.stdout);
+  const headCensus = parseCensusEntries(head.stdout);
+  if (!baseCensus || !headCensus || baseCensus.prefix !== headCensus.prefix) return false;
+
+  for (const [domainId, block] of baseCensus.entries) {
+    if (headCensus.entries.get(domainId) !== block) return false;
+  }
+  const addedEntries = [...headCensus.entries].filter(([domainId]) => !baseCensus.entries.has(domainId));
+  return addedEntries.length > 0 && addedEntries.every(([, block]) => isSafeBootstrapEntry(block));
 }
 
 function fail(code, detail) {
@@ -113,50 +148,35 @@ function fail(code, detail) {
   process.exit(1);
 }
 
-if (isVerdictPrCreate()) {
-  const expectedRepo =
-    process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
-    process.env.CAT_CAFE_REPO_FULL_NAME ??
-    'zts212653/cat-cafe';
-  const explicitRepos = optionValues('repository');
-  if (explicitRepos.length === 0) {
-    fail('verdict_publish_missing_repo_scope', `verdict PR creation requires --repo ${expectedRepo}`);
-  }
-  const wrongRepo = explicitRepos.find((repo) => repo.toLowerCase() !== expectedRepo.toLowerCase());
-  if (wrongRepo) {
+const command = commandArgs();
+if (command[0] === 'pr' && ['create', 'new'].includes(command[1])) {
+  const title = optionValue('title') ?? '';
+  const head = optionValue('head') ?? '';
+  const branch = gitOutput(['branch', '--show-current']);
+  const commitSubject = gitOutput(['log', '-1', '--pretty=%s']);
+  const changedPaths = candidateChangedPaths();
+  const touchesRetiredArtifacts = changedPaths.some(
+    (path) =>
+      path.startsWith('docs/harness-feedback/bundles/') ||
+      path.startsWith('docs/harness-feedback/verdicts/'),
+  );
+  if (
+    title.startsWith('verdict(') ||
+    head.includes('verdict/auto/') ||
+    branch.startsWith('verdict/auto/') ||
+    commitSubject.startsWith('verdict(') ||
+    touchesRetiredArtifacts
+  ) {
     fail(
-      'verdict_publish_wrong_repository',
-      `gh --repo resolves to ${wrongRepo}; expected ${expectedRepo}`,
+      'verdict_git_publication_retired',
+      'runtime verdict evidence is durable artifact-store data; publish through cat_cafe_publish_verdict',
     );
   }
-
-  const guardRoot = process.env.CAT_CAFE_VERDICT_GH_GUARD_ROOT;
-  if (!guardRoot) {
-    fail('verdict_publish_guard_unavailable', 'CAT_CAFE_VERDICT_GH_GUARD_ROOT is not configured');
-  }
-  const repoRoot = gitOutput(['rev-parse', '--show-toplevel']);
-  if (!repoRoot) fail('verdict_publish_guard_unavailable', 'current directory is not a git repository');
-  const baseBranch = optionValue('base') ?? 'main';
-  const guard = spawnSync(
-    process.execPath,
-    [
-      resolve(guardRoot, 'scripts/check-verdict-publish-contract.mjs'),
-      '--repo-root',
-      repoRoot,
-      '--expected-repo',
-      expectedRepo,
-      '--remote',
-      'origin',
-      '--fresh-base-branch',
-      baseBranch,
-      '--source-ref',
-      'HEAD',
-    ],
-    { encoding: 'utf8' },
-  );
-  if (guard.status !== 0) {
-    process.stderr.write(guard.stderr || 'verdict_publish_guard_failed\n');
-    process.exit(guard.status ?? 1);
+  if (changedPaths.includes(CENSUS_PATH) && !isCensusBootstrapOnly()) {
+    fail(
+      'verdict_census_bootstrap_only',
+      'Git census changes may only append new fail-closed domains with zero artifacts, unmigrated status, null evidence refs, and keep_observe_only',
+    );
   }
 }
 

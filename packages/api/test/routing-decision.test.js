@@ -99,7 +99,7 @@ describe('resolveRoutingDecisions — inline_mention', () => {
       { type: 'inline_mention', cats: ['codex'], content: 'hi', callerCatId: 'opus' },
       ctx({ peekStreak: () => ({ wouldBlock: true, count: 4 }) }),
     );
-    assert.deepEqual(out, [{ action: 'block_pingpong', cat: 'codex', pairCount: 4 }]);
+    assert.deepEqual(out, [{ action: 'block_pingpong', cat: 'codex', pairCount: 4, reason: 'pingpong_streak' }]);
   });
 
   test('multi-cat: per-target decisions in order', async () => {

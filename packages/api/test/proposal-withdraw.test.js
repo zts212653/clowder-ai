@@ -87,6 +87,7 @@ describe('F128 requester withdraw', () => {
     const { source, proposalId } = await proposed(ctx);
     ctx.socketEvents.length = 0;
     const origin = await ctx.messageStore.append({
+      provenance: { author: 'user', routed: false, observation: 'original' },
       userId: 'alice',
       catId: null,
       content: `Withdraw thread proposal ${proposalId}`,

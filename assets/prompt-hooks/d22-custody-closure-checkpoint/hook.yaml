@@ -1,0 +1,14 @@
+id: D22
+name: Custody closure terminal checkpoint
+stage: per-turn
+order: 2500
+version: 1
+enabled: true
+template: d22-custody-closure-checkpoint.md
+inputs: []
+variables: []
+disableable: true
+safetyTier: editable
+transparencyTier: visible-by-default
+governanceTier: auto-evolve
+userExplanation: 在回合结束前列明可验证的持球出口，避免把状态描述或失败当作交接。

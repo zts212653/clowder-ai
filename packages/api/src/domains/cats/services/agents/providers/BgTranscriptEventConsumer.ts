@@ -84,6 +84,18 @@ export function transcriptEntriesToAgentMessages(
       if (result == null) continue;
       if (Array.isArray(result)) out.push(...result);
       else out.push(result);
+      continue;
+    }
+
+    // LI-005: user entries contain tool_result content blocks (MCP execution
+    // results). Feed through transformClaudeEvent which bridges them to tool_result
+    // AgentMessages with toolResultStatus — needed for durable trigger classification.
+    // Same shape as -p NDJSON `user` events (content[].type === 'tool_result').
+    if (entry.type === 'user') {
+      const result = transformClaudeEvent(entry, catId, state);
+      if (result == null) continue;
+      if (Array.isArray(result)) out.push(...result);
+      else out.push(result);
     }
 
     // Skip everything else (produce no user-facing AgentMessage):

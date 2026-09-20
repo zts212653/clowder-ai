@@ -13,6 +13,12 @@ resolver: S13McpToolsResolver
 inputs:
   - mcpDocs
 
+# Variable metadata (canonical source for Console editor)
+variables:
+  - name: RICH_BLOCK_SHORT
+    description: 富消息块短标签示例
+    placeholder: "<rich>"
+
 # Override constraints
 disableable: true
 

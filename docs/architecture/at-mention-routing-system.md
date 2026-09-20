@@ -375,7 +375,7 @@ Clowder AI 是一个多智能体系统，多个由 LLM 驱动的"Clowder AI"在�
 **数据存放位置：**
 - 胶囊：`private/profile/operator-capsule.md`（300 字符画像，operator 签名）
 - 底片：`private/profile/relationship/{catId}-primer.md`（每猫轨迹）
-- 注入：`compile-system-prompt-l0.mjs` → `resolveUserCapsule()` → `{{USER_CAPSULE}}`
+- 注入：route 解析 owner profile snapshot → `S14` session-init 段 → `{{OWNER_PROFILE_SECTION}}`（F257 起；旧路径 `compile-system-prompt-l0.mjs` → `{{USER_CAPSULE}}` 已退役）
 - 更新工具：`cat_cafe_propose_profile_update` MCP 工具 → `RedisProfileUpdateProposalStore`
 
 ---

@@ -43,6 +43,11 @@ describe('ProactiveMemoryCandidateDetector', () => {
       threadId,
       timestamp,
       ...overrides,
+      provenance: {
+        author: overrides.source === undefined ? 'user' : 'external_user',
+        routed: false,
+        observation: 'original',
+      },
     });
   }
 

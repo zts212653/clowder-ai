@@ -66,6 +66,7 @@ describe('A2A routing message persistence (#648)', () => {
     it('persists a2a_handoff as system message with correct shape', () => {
       const store = new MessageStore();
       const result = store.append({
+        provenance: { author: 'system', routed: false, observation: 'original' },
         userId: 'system',
         catId: null,
         content: '布偶猫 → 缅因猫',
@@ -95,6 +96,7 @@ describe('A2A routing message persistence (#648)', () => {
     it('stored messageId can be attached to broadcast payload', () => {
       const store = new MessageStore();
       const result = store.append({
+        provenance: { author: 'system', routed: false, observation: 'original' },
         userId: 'system',
         catId: null,
         content: '布偶猫 → 缅因猫',
@@ -143,6 +145,13 @@ function buildDeps(overrides = {}) {
     },
     router: {
       resolveTargetsAndIntent: mock.fn(async () => ({
+        attemptBatch: {
+          parserMode: 'user',
+          spanBasis: 'lowercased_message',
+          attempts: [],
+          truncated: false,
+          metricEligible: true,
+        },
         targetCats: ['opus'],
         intent: { intent: 'execute' },
       })),

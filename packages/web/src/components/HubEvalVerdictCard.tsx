@@ -4,6 +4,8 @@ import { metricRefKeyCandidates } from '@cat-cafe/shared';
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { EvalEvidenceReaderView, useEvalEvidenceReader } from './eval-evidence/EvalEvidenceReader';
+import { frictionReportTarget, verdictEvidenceTarget } from './eval-evidence/eval-evidence-targets';
 import { currentEvalDueAt } from './eval-lifecycle-display';
 import { HubEvalFrictionSections } from './HubEvalFrictionSections';
 import { HubEvalLifecycleSummary } from './HubEvalLifecycleSummary';
@@ -91,6 +93,8 @@ export function HubEvalVerdictCard({
     },
     [currentThreadId, item.id, pathname, router],
   );
+  const evidence = useEvalEvidenceReader(openWorkspaceFile);
+  const rawReport = frictionReportTarget(item.source, item.friction);
 
   return (
     <section className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={item.id} tabIndex={-1}>
@@ -147,15 +151,20 @@ export function HubEvalVerdictCard({
       </details>
 
       {item.domainId === 'eval:friction' && (
-        <HubEvalFrictionSections friction={item.friction} openWorkspaceFile={openWorkspaceFile} />
+        <HubEvalFrictionSections
+          friction={item.friction}
+          {...(rawReport ? { onOpenRawReport: () => evidence.open(rawReport) } : {})}
+        />
       )}
 
       <div className="mt-4 space-y-2">
         <div className="text-xs font-medium text-cafe-muted">快捷导航</div>
         <div className="flex flex-wrap gap-2">
-          <JumpButton onClick={() => openWorkspaceFile(item.source.verdictPath)}>结论文件</JumpButton>
-          <JumpButton onClick={() => openWorkspaceFile(`${item.source.bundleDir}/snapshot.json`)}>快照包</JumpButton>
-          <JumpButton onClick={() => openWorkspaceFile(`${item.source.bundleDir}/attribution.json`)}>归因包</JumpButton>
+          <JumpButton onClick={() => evidence.open(verdictEvidenceTarget(item.source, 'verdict'))}>结论文件</JumpButton>
+          <JumpButton onClick={() => evidence.open(verdictEvidenceTarget(item.source, 'snapshot'))}>快照包</JumpButton>
+          <JumpButton onClick={() => evidence.open(verdictEvidenceTarget(item.source, 'attribution'))}>
+            归因包
+          </JumpButton>
           <a
             href={`/thread/${encodeURIComponent(item.systemWorkspace.threadId)}`}
             className="rounded-md border border-cafe px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:text-cafe"
@@ -177,6 +186,7 @@ export function HubEvalVerdictCard({
             </a>
           )}
         </div>
+        <EvalEvidenceReaderView reader={evidence.reader} onClose={evidence.close} />
       </div>
     </section>
   );

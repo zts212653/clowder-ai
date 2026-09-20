@@ -9,7 +9,7 @@ import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/pub
  * F192 Phase H 收尾 PR-2 R9 P1 (cloud): split from publish-verdict-capability-wakeup.test.js
  * to keep both files under AGENTS.md 350-line hard limit.
  *
- * Covers handler-level strict validation BEFORE isolated worktree creation:
+ * Covers handler-level strict validation BEFORE artifact staging begins:
  * - cloud R8 P2: sourceRefs.kind ↔ packet.domainId cross-check (mismatch → 400)
  * - 砚砚 R1 PR-2 review P2: PR-2 wired window selectors; AC-F8 later allows omitted sessionIds
  *   for unbiased window scan while trial-ids stays rejected until durable trial store exists.
@@ -111,6 +111,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
         packet: buildPacket({ id: 'vhp-cw-wrong-kind' }),
         domain: 'eval:capability-wakeup',
         catId: 'opus-47',
+        ownerUserId: 'owner-test',
         sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
       },
     );
@@ -127,6 +128,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
         packet: buildPacket({ id: 'vhp-a2a-wrong-kind', domainId: 'eval:a2a' }),
         domain: 'eval:a2a',
         catId: 'codex',
+        ownerUserId: 'owner-test',
         sourceRefs: {
           kind: 'capability-wakeup-trial-window',
           capability: 'rich-messaging',
@@ -150,6 +152,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
         packet: buildPacket({ id: 'vhp-cw-trial-ids-rejected' }),
         domain: 'eval:capability-wakeup',
         catId: 'opus-47',
+        ownerUserId: 'owner-test',
         sourceRefs: { kind: 'capability-wakeup-trial-ids', trialIds: ['t1', 't2'] },
       },
     );
@@ -167,6 +170,7 @@ describe('handlePublishVerdict strict validation (PR-2 R5/R8)', () => {
         packet: buildPacket({ id: 'vhp-cw-no-sessions' }),
         domain: 'eval:capability-wakeup',
         catId: 'opus-47',
+        ownerUserId: 'owner-test',
         sourceRefs: {
           kind: 'capability-wakeup-trial-window',
           capability: 'rich-messaging',

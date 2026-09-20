@@ -53,6 +53,14 @@ const MERGE_GATE_SOURCE_PROVENANCE_TRIGGER = '- MG provenance override：外部f
  * Context for a single cat invocation
  */
 export interface InvocationContext {
+  /**
+   * Hooks this route has shadowed for the exact turn because it already owns a
+   * narrower terminal contract (F167 structured hold / dispatch). See
+   * AssemblerInput.suppressedHookIds.
+   */
+  suppressedHookIds?: readonly string[];
+  /** Why those hooks were shadowed; carried into the skip trace. */
+  hookSuppressionReason?: string;
   /** Which cat is being invoked */
   catId: CatId;
   /** independent = sole responder, serial = part of a chain, parallel = concurrent ideation */
@@ -450,6 +458,20 @@ export function buildTeammateRoster(currentCatId: CatId): string | null {
  * MCP section is included here (not in invocationContext) because it's
  * session-level — injected once on new session, skipped on --resume.
  */
+/**
+ * S14: the owner profile a route resolved for this session. The route renders it once
+ * (capsule section plus available pointer lines) so every carrier delivers the same
+ * bytes and durable evidence can bind exactly what was delivered.
+ */
+export interface OwnerProfileSnapshot {
+  /** Owner the profile belongs to; never rendered into the prompt. */
+  userId: string;
+  /** `renderUserCapsuleSection` output, when the owner has a capsule. */
+  capsuleSection?: string;
+  /** Logical pointer lines (relationship primer, corpus), already formatted. */
+  pointerLines?: readonly string[];
+}
+
 export interface StaticIdentityOptions {
   /**
    * Whether native MCP tools are available (Claude with --mcp-config).
@@ -467,6 +489,8 @@ export interface StaticIdentityOptions {
    *   Identity (core) > Pack Masks > Governance L0 > Pack Guardrails > Pack Defaults > Workflows
    */
   packBlocks?: CompiledPackBlocks | null;
+  /** F231 owner profile resolved by the route; see OwnerProfileSnapshot. */
+  profile?: OwnerProfileSnapshot | null;
   /**
    * F237: When true, insert `── [SN] Name ──` markers before each segment.
    * Used by compiled-preview to show which segment generated which content.
@@ -487,14 +511,10 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
 }
 
 /**
- * F203 Phase C (Task 2): the pack-only slice of the static identity.
- *
- * After L0 (non-pack identity / A2A / roster / workflow triggers / operator ref /
- * governance digest / MCP) moves to the compression-immune native system role
- * (`--system-prompt-file` for Claude, `-c developer_instructions` for Codex —
- * Task 3/4), the user-message `systemPrompt` must carry ONLY the F129 pack
- * blocks: per-invocation dynamic + external-project-specific, so they must
- * never be baked into the cached native prompt nor duplicated there.
+ * Pack-only slice for native carriers. The canonical non-pack session prompt
+ * comes from the same HookPipeline as every other provider and rides the native
+ * system/developer channel; per-invocation pack content remains a message layer
+ * so a resumed provider session is not silently bound to stale project context.
  *
  * Returns '' for an unknown cat or when there are no pack blocks — the route
  * layer's `...(x ? { systemPrompt: x } : {})` then omits the prepend entirely.

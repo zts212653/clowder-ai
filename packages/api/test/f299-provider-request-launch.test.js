@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { ClaudeAgentService } from '../dist/domains/cats/services/agents/providers/ClaudeAgentService.js';
 import { CodexAgentService } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
@@ -29,9 +28,7 @@ test('F299 Claude awaits the recorder and launches from the exact prepared bytes
   const service = new ClaudeAgentService({
     catId: 'opus-47',
     model: 'claude-test',
-    l0CompilerFn: async ({ outPath }) => {
-      writeFileSync(outPath, 'CLAUDE-L0', 'utf8');
-    },
+    l0CompilerFn: async () => 'CLAUDE-L0',
   });
 
   await collect(
@@ -116,9 +113,7 @@ test('F299 recorder rejection prevents provider launch', async () => {
   const service = new ClaudeAgentService({
     catId: 'opus-47',
     model: 'claude-test',
-    l0CompilerFn: async ({ outPath }) => {
-      writeFileSync(outPath, 'CLAUDE-L0', 'utf8');
-    },
+    l0CompilerFn: async () => 'CLAUDE-L0',
   });
 
   const output = await collect(

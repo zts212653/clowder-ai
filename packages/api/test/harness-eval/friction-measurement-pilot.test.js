@@ -146,7 +146,17 @@ test('reconciles per-ID cancel recall against the real TaskOutcomeEpisodeStore r
   const store = new TaskOutcomeEpisodeStore(':memory:');
   const episode = store.createEpisode({ trigger: 'user_ask', threadId: 'thread-f267', participants: ['codex-sol'] });
   store.appendSignal(episode.episodeId, { category: 'a2', record: { type: 'permission_cancel' } });
-  store.appendSignal(episode.episodeId, { category: 'a2', record: { type: 'magic_word_ref' } });
+  store.appendSignal(episode.episodeId, {
+    category: 'a2',
+    record: {
+      type: 'magic_word_ref',
+      eventId: 'evt-f267-unrelated',
+      word: '脚手架',
+      timestamp: new Date().toISOString(),
+      threadId: 'thread-f267',
+      catId: 'codex-sol',
+    },
+  });
   store.appendSignal(episode.episodeId, { category: 'proxy', record: { type: 'cancel_burst', value: 3 } });
   const capturedAtMs = Date.now() + 1_000;
   const capture = await captureFrictionMeasurementPilot(

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 import { enrichEvalHubLifecycle } from '../../dist/infrastructure/harness-eval/hub/eval-hub-lifecycle-projection.js';
+import { installLifecycleSpace } from '../../dist/infrastructure/harness-eval/lifecycle-space.js';
 
 const caseId = `eval-case-v1-${'a'.repeat(64)}`;
 const verdictIds = ['capability-wakeup-2026-08-01-rich-messaging', 'capability-wakeup-2026-08-08-rich-messaging'];
@@ -77,7 +78,7 @@ function item(id, verdict = 'fix') {
       closureStatus: 'unavailable',
       stale: true,
     },
-    source: { verdictPath: `verdicts/${id}.md`, bundleDir: `bundles/${id}` },
+    source: { kind: 'workspace', verdictPath: `verdicts/${id}.md`, bundleDir: `bundles/${id}` },
   };
 }
 
@@ -117,7 +118,7 @@ describe('F266 Eval Hub stable case lineage', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
     });
 
@@ -174,7 +175,7 @@ describe('F266 Eval Hub stable case lineage', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
     });
 
@@ -212,7 +213,7 @@ describe('F266 Eval Hub stable case lineage', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
     });
 
@@ -272,7 +273,7 @@ describe('F266 Eval Hub stable case lineage', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
     });
 
@@ -334,7 +335,7 @@ describe('F266 Eval Hub stable case lineage', () => {
     };
 
     const enriched = await enrichEvalHubLifecycle(summary, {
-      harnessFeedbackRoot,
+      space: installLifecycleSpace(harnessFeedbackRoot),
       eventLog: { read: async (subjectId) => (subjectId === caseId ? structuredClone(events) : []) },
     });
 

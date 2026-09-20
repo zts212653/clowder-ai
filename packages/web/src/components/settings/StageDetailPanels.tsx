@@ -8,6 +8,7 @@
  * CarrierInfoPanel, and badge maps.
  */
 
+import type { SegmentEnablementMatrix } from '@cat-cafe/shared';
 import type React from 'react';
 import { useMemo, useState } from 'react';
 import {
@@ -19,6 +20,8 @@ import {
 } from './lifecycle-stages';
 import { SettingsBadge, SettingsText } from './primitives';
 import { SegmentEditorModal } from './SegmentEditorModal';
+import { SegmentFormatModal } from './SegmentFormatModal';
+import { SegmentLifelineModal } from './SegmentLifelineModal';
 
 // ── Types (shared with InjectionManifestContent) ─────────────
 
@@ -40,45 +43,9 @@ export interface ManifestSegment {
   disableable: boolean;
   consumer: string;
   relatedFeature: string | null;
+  enablementMatrix?: SegmentEnablementMatrix;
   _knownIssue?: string;
   _status?: string;
-}
-
-// ── Non-template source type labels ───────────────────────────
-
-const SOURCE_TYPE_LABELS: Record<string, string> = {
-  'config-driven': '配置驱动 — 从 cat-config.json 等配置文件生成',
-  'rule-generated': '规则生成 — 从 shared-rules.md 确定性提取',
-  hook: '钩子 — 由 harness 在特定条件下触发注入',
-};
-
-// ── Badge maps ─────────────────────────────────────────────────
-
-/**
- * Tag-based editability + governance badges.
- * Primary tag: 只读 (readonly, red) or 可编辑 (editable, emerald).
- * Secondary tags for editable segments reflect governance tier:
- *   人工审批(开发中) = human-gated auto-evolve (amber)
- *   自动迭代(开发中) = fully automatic evolve (blue)
- * No secondary tag = manual edit only, no auto harness.
- */
-type TagTone = 'red' | 'emerald' | 'amber' | 'blue';
-interface SegmentTag {
-  label: string;
-  tone: TagTone;
-}
-function resolveSegmentTags(safetyTier: string, governanceTier: string, allowLocalOverride: boolean): SegmentTag[] {
-  // Effective editability: both governance policy AND implementation must agree
-  if (safetyTier === 'readonly' || !allowLocalOverride) {
-    return [{ label: '只读', tone: 'red' }];
-  }
-  const tags: SegmentTag[] = [{ label: '可编辑', tone: 'emerald' }];
-  if (governanceTier === 'human-gated') {
-    tags.push({ label: '人工审批(开发中)', tone: 'amber' });
-  } else if (governanceTier === 'auto-evolve') {
-    tags.push({ label: '自动迭代(开发中)', tone: 'blue' });
-  }
-  return tags;
 }
 
 // ── Carrier position badge ───────────────────────────────────
@@ -223,97 +190,76 @@ function SubStageGroup({ subStage, segments }: { subStage: SubStage; segments: M
 
 function SegmentRow({ segment: s }: { segment: ManifestSegment }) {
   const [editorOpen, setEditorOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
-  const tags = resolveSegmentTags(s.safetyTier, s.governanceTier, s.allowLocalOverride);
-  // Hooks are viewable only when source points to a file (not a directory)
-  const isViewable = s.sourceType === 'template' || (s.sourceType === 'hook' && !!s.source && !s.source.endsWith('/'));
+  const [formatOpen, setFormatOpen] = useState(false);
+  const [lifelineOpen, setLifelineOpen] = useState(false);
+  const supportsLifecycle = s.sourceType === 'template';
 
   const handleCardClick = () => {
-    if (isViewable) setEditorOpen(true);
-    else setInfoOpen((v) => !v);
+    if (supportsLifecycle) setEditorOpen(true);
+    else setFormatOpen(true);
   };
 
   return (
     <div>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: card click is supplementary to the text button */}
       <div
         className="flex items-start gap-3 rounded-lg px-3 py-2 cursor-pointer transition-colors hover:brightness-95"
         style={{
           backgroundColor: 'var(--console-elevated-bg)',
           boxShadow: '0 1px 4px rgba(43,33,26,0.08)',
         }}
-        onClick={handleCardClick}
       >
-        <SettingsText as="span" variant="xs" tone="muted" className="mt-0.5 w-8 shrink-0 font-mono">
-          {s.id}
-        </SettingsText>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <SettingsText as="span" variant="sm" tone="default" className="font-medium">
-              {s.name}
-            </SettingsText>
-            {tags.map((tag) => (
-              <SettingsBadge key={tag.label} tone={tag.tone} size="xxs">
-                {tag.label}
-              </SettingsBadge>
-            ))}
-            {s._knownIssue && (
-              <SettingsBadge tone="amber" size="xxs">
-                已知问题
-              </SettingsBadge>
-            )}
-            <span className="ml-auto text-xs opacity-50">
-              {isViewable ? (s.allowLocalOverride ? '编辑' : '查看') : infoOpen ? '收起' : '详情'}
-            </span>
-          </div>
-          <SettingsText as="p" variant="xs" tone="secondary" className="mt-0.5">
-            {s.userExplanation}
-          </SettingsText>
-          <div className="mt-1 flex flex-wrap gap-3">
-            <SettingsText as="span" variant="xs" tone="muted">
-              {s.sourceType}
-            </SettingsText>
-            {s.relatedFeature && (
-              <SettingsText as="span" variant="xs" tone="muted">
-                {s.relatedFeature}
-              </SettingsText>
-            )}
-          </div>
-        </div>
-      </div>
-      {/* Non-viewable inline info panel (config-driven / rule-generated) */}
-      {!isViewable && infoOpen && (
-        <div
-          className="ml-11 mt-1 space-y-1.5 rounded-lg px-3 py-2"
-          style={{ backgroundColor: 'var(--console-card-soft-bg)' }}
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-start gap-3 border-none bg-transparent p-0 text-left"
+          onClick={handleCardClick}
         >
-          <SegmentInfoRow label="来源类型" value={SOURCE_TYPE_LABELS[s.sourceType] ?? s.sourceType} />
-          <SegmentInfoRow label="来源" value={s.source} />
-          <SegmentInfoRow label="触发条件" value={s.trigger} />
-          <SegmentInfoRow label="用途" value={s.purpose} />
-        </div>
+          <SettingsText as="span" variant="xs" tone="muted" className="mt-0.5 w-8 shrink-0 font-mono">
+            {s.id}
+          </SettingsText>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <SettingsText as="span" variant="sm" tone="default" className="font-medium">
+                {s.name}
+              </SettingsText>
+              {s._knownIssue && (
+                <SettingsBadge tone="amber" size="xxs">
+                  已知问题
+                </SettingsBadge>
+              )}
+              <span className="ml-auto text-xs opacity-50">{supportsLifecycle ? '编辑' : '详情'}</span>
+            </div>
+            <SettingsText as="p" variant="xs" tone="secondary" className="mt-0.5">
+              {s.userExplanation}
+            </SettingsText>
+            <div className="mt-1 flex flex-wrap gap-3">
+              <SettingsText as="span" variant="xs" tone="muted">
+                {s.sourceType}
+              </SettingsText>
+              {s.relatedFeature && (
+                <SettingsText as="span" variant="xs" tone="muted">
+                  {s.relatedFeature}
+                </SettingsText>
+              )}
+            </div>
+          </div>
+        </button>
+        {supportsLifecycle && (
+          <button
+            type="button"
+            className="cursor-pointer border-none bg-transparent p-0 opacity-50 hover:opacity-80"
+            onClick={() => setLifelineOpen(true)}
+            aria-label={`查看 ${s.id} 评估与回放`}
+            title="查看评估与回放"
+          >
+            📊
+          </button>
+        )}
+      </div>
+      {editorOpen && <SegmentEditorModal segmentId={s.id} segmentName={s.name} onClose={() => setEditorOpen(false)} />}
+      {formatOpen && <SegmentFormatModal segment={s} onClose={() => setFormatOpen(false)} />}
+      {lifelineOpen && (
+        <SegmentLifelineModal segmentId={s.id} segmentName={s.name} onClose={() => setLifelineOpen(false)} />
       )}
-      {editorOpen && (
-        <SegmentEditorModal
-          segmentId={s.id}
-          segmentName={s.name}
-          allowLocalOverride={s.allowLocalOverride}
-          onClose={() => setEditorOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-function SegmentInfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-2 text-xs">
-      <SettingsText as="span" variant="xs" tone="muted" className="w-16 shrink-0">
-        {label}
-      </SettingsText>
-      <SettingsText as="span" variant="xs" tone="secondary">
-        {value}
-      </SettingsText>
     </div>
   );
 }

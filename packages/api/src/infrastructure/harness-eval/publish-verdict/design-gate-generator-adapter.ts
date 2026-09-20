@@ -15,7 +15,7 @@ export function createDesignGateGeneratorAdapter(provider: DesignGateEpisodeSour
     const validationError = validateDesignGateEpisodeSelector(selector);
     if (validationError) throw new Error(`invalid_source_ref: ${validationError}`);
     const episodeBundle = await provider.resolve(selector);
-    const domain = loadDomains(deps.harnessFeedbackRoot).get(packet.domainId);
+    const domain = loadDomains(deps.liveHarnessFeedbackRoot).get(packet.domainId);
     if (!domain) throw new Error(`unknown_domain: ${packet.domainId} not in registry`);
     if (domain.domainId !== 'eval:design-gate') throw new Error(`design_gate_adapter_wrong_domain: ${domain.domainId}`);
     const artifact = generateDesignGateLiveVerdict({

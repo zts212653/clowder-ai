@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
+import { lifecycleSpaceOf } from '../lifecycle-space.js';
 import type { IReevalClosureEventLog } from '../reeval-closure-event-log.js';
 import { enrichEvalHubLifecycle } from './eval-hub-lifecycle-projection.js';
 import { loadEvalHubSummary } from './eval-hub-read-model.js';
@@ -9,10 +10,16 @@ import { ensureEvalDomainThreads } from './eval-hub-thread-ensure.js';
 
 export interface LoadEnrichedEvalHubSummaryOptions {
   harnessFeedbackRoot: string;
+  artifactStoreRoot?: string;
   userId: string;
+  /** The owner whose lifecycle space is the install's. */
+  configuredOwnerUserId: string;
   redis?: Redis;
   threadStore?: IThreadStore;
+  /** The install space's lifecycle log. */
   lifecycleEventLog?: Pick<IReevalClosureEventLog, 'read'>;
+  /** Opens another owner's lifecycle log; the summary only ever opens the requesting user's. */
+  ownerLifecycleEventLog?: (ownerUserId: string) => Pick<IReevalClosureEventLog, 'read'>;
   log: { warn(...args: unknown[]): void };
 }
 
@@ -45,12 +52,23 @@ async function ensureEvalThreadsBestEffort(summary: EvalHubSummary, options: Loa
 }
 
 export async function loadEnrichedEvalHubSummary(options: LoadEnrichedEvalHubSummaryOptions): Promise<EvalHubSummary> {
-  const summary = loadEvalHubSummary({ harnessFeedbackRoot: options.harnessFeedbackRoot });
+  // Runtime artifacts are read only from the requesting user's own partition, and
+  // lifecycles only from the requesting user's own space.
+  const summary = loadEvalHubSummary({
+    harnessFeedbackRoot: options.harnessFeedbackRoot,
+    ...(options.artifactStoreRoot
+      ? { artifactStore: { root: options.artifactStoreRoot, ownerUserId: options.userId } }
+      : {}),
+  });
   await applyEvalCatOverrides(summary, options.redis);
   await ensureEvalThreadsBestEffort(summary, options);
+  const space = lifecycleSpaceOf(options.userId, options);
+  if (!space) return summary;
+  const eventLog =
+    space.kind === 'install' ? options.lifecycleEventLog : options.ownerLifecycleEventLog?.(options.userId);
   return enrichEvalHubLifecycle(summary, {
-    harnessFeedbackRoot: options.harnessFeedbackRoot,
-    ...(options.lifecycleEventLog ? { eventLog: options.lifecycleEventLog } : {}),
+    space,
+    ...(eventLog ? { eventLog } : {}),
     assignedEvalCatIds: new Map(summary.domains.map((domain) => [domain.domainId, domain.evalCatId])),
   });
 }

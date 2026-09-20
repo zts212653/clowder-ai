@@ -87,7 +87,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
 
     // 自定 deps，spy registry.create 第 4 参数
     const services = {
-      qwen: createMockService('qwen', 'qwen reply'),
+      opus: createMockService('opus', 'opus reply'),
       kimi: createMockService('kimi', 'kimi reply'),
     };
     let invocationSeq = 0;
@@ -158,7 +158,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
       },
     };
 
-    for await (const _msg of routeParallel(deps, ['qwen', 'kimi'], 'parallel hello', 'user1', 'thread1', {
+    for await (const _msg of routeParallel(deps, ['opus', 'kimi'], 'parallel hello', 'user1', 'thread1', {
       parentInvocationId: outerParentInvocationId,
       ownerAuthProvenance: 'strict',
     })) {
@@ -187,7 +187,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
     const turnExecutionStore = new InMemoryTurnExecutionStore();
     const deps = createMockDeps(
       {
-        qwen: createMockService('qwen', 'qwen reply'),
+        opus: createMockService('opus', 'opus reply'),
         kimi: createMockService('kimi', 'kimi reply'),
       },
       appendCalls,
@@ -195,7 +195,7 @@ describe('F194 Phase Z2: route-parallel must propagate parentInvocationId to inv
     );
 
     const yielded = [];
-    for await (const message of routeParallel(deps, ['qwen', 'kimi'], 'parallel hello', 'user1', 'thread1', {
+    for await (const message of routeParallel(deps, ['opus', 'kimi'], 'parallel hello', 'user1', 'thread1', {
       parentInvocationId: outerParentInvocationId,
     })) {
       yielded.push(message);

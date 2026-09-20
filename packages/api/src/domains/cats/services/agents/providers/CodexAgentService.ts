@@ -151,12 +151,12 @@ import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery
 import { COLLECTIVE_CODEX_POLICY_ARGS, COLLECTIVE_MCP_ENV_KEYS } from './collective-cli-policy.js';
 import { prepareCollectiveCodexHome } from './collective-codex-home.js';
 import { createDirectAgentCarrierSession } from './DirectAgentCarrierSession.js';
-import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
   createMcpSchemaDeliveryLaunchConfig,
   resolveMcpSchemaDeliveryDiscoverySurface,
   resolveMcpSchemaDeliveryForProviderLaunch,
 } from './mcp-schema-delivery-capability.js';
+import { type NativeSessionPromptTestFactory, resolveNativeSessionPrompt } from './native-session-prompt.js';
 import {
   bindSessionCredentialFile,
   type PreparedCredentialEnv,
@@ -356,8 +356,8 @@ interface CodexAgentServiceOptions {
   model?: string;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
-  /** Test seam — replaces the real L0 compiler subprocess (Task 3a). */
-  l0CompilerFn?: typeof compileL0ViaSubprocess;
+  /** Legacy-named test seam; production receives route-owned pipeline bytes. */
+  l0CompilerFn?: NativeSessionPromptTestFactory;
   /** Inject audit log sink (for testing) */
   auditLog?: AuditLogSink;
   /** Inject raw archive sink (for testing) */
@@ -1154,14 +1154,13 @@ export class CodexAgentService implements AgentService {
   private readonly carrierMode: CodexCarrierMode;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
+  private readonly sessionPromptTestFactory: NativeSessionPromptTestFactory | undefined;
   private readonly nativeRealtimeCompanionEnabled: boolean;
-  /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
-  private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
   constructor(options?: CodexAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('codex');
     this.spawnFn = options?.spawnFn;
-    this.l0CompilerFn = options?.l0CompilerFn ?? compileL0ViaSubprocess;
+    this.sessionPromptTestFactory = options?.l0CompilerFn;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.auditLog = options?.auditLog ?? getEventAuditLog();
     this.rawArchive = options?.rawArchive ?? new CliRawArchive();
@@ -1396,27 +1395,23 @@ export class CodexAgentService implements AgentService {
     };
   }
 
-  /**
-   * F203 Phase C: compile per-cat L0 → `-c developer_instructions=` argv
-   * (S4-verified, 砚砚 62b9255e2 — enters the OpenAI `developer` role,
-   * additive, NOT replacing Codex's base instructions; per-invocation argv,
-   * NOT ~/.codex/config.toml which would race @codex/@gpt52/@spark).
-   * fail-closed: on compile failure return an error descriptor (caller yields
-   * error + done + return, mirroring the CLI-not-found path) — a missing L0
-   * = a cat with no identity/家规, strictly worse than a failed invocation.
-   */
-  private async compileDeveloperInstructions(
+  /** Transport the route-owned session hooks through the native developer role. */
+  private async prepareDeveloperInstructions(
     cliModel: string,
-    userId?: string,
+    options?: AgentServiceOptions,
   ): Promise<{ value: string } | { error: string; metadata: MessageMetadata }> {
     try {
-      const compiledL0 = await this.l0CompilerFn({ catId: this.catId as string, userId });
-      const separator = compiledL0.endsWith('\n') ? '\n' : '\n\n';
-      const providerInstructions = `${compiledL0}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
+      const sessionPrompt = await resolveNativeSessionPrompt(
+        options,
+        this.catId as string,
+        this.sessionPromptTestFactory,
+      );
+      const separator = sessionPrompt.endsWith('\n') ? '\n' : '\n\n';
+      const providerInstructions = `${sessionPrompt}${separator}${CODEX_SIGNATURE_BOUNDARY_INSTRUCTION}`;
       return { value: providerInstructions };
     } catch (err) {
       return {
-        error: `L0 compile failed for ${this.catId as string}: ${(err as Error).message}`,
+        error: (err as Error).message,
         metadata: { provider: 'openai', model: cliModel },
       };
     }
@@ -1655,20 +1650,26 @@ export class CodexAgentService implements AgentService {
         ? ['--config', `model=${toTomlString(cliModel)}`]
         : ['--model', cliModel];
 
-    // F203 Phase C: compile per-cat L0 → OpenAI `developer` role args.
+    // Collective participation supplies its own prompt; every other invocation
+    // resolves session identity through the single hook pipeline (L0 retired).
     // fail-closed (generator contract, mirrors the CLI-not-found path below).
-    const l0Result = participation
+    const sessionPromptResult = participation
       ? { value: options!.systemPrompt! }
-      : await this.compileDeveloperInstructions(cliModel, options?.callbackEnv?.CAT_CAFE_USER_ID);
-    if ('error' in l0Result) {
+      : await this.prepareDeveloperInstructions(cliModel, options);
+    if ('error' in sessionPromptResult) {
       yield {
         type: 'error' as const,
         catId: this.catId,
-        error: l0Result.error,
-        metadata: l0Result.metadata,
+        error: sessionPromptResult.error,
+        metadata: sessionPromptResult.metadata,
         timestamp: Date.now(),
       };
-      yield { type: 'done' as const, catId: this.catId, metadata: l0Result.metadata, timestamp: Date.now() };
+      yield {
+        type: 'done' as const,
+        catId: this.catId,
+        metadata: sessionPromptResult.metadata,
+        timestamp: Date.now(),
+      };
       return;
     }
     let nativeEffectGuardArgs: string[];
@@ -1693,8 +1694,8 @@ export class CodexAgentService implements AgentService {
       ? 'interactive'
       : this.approvalSurface;
     const developerInstructions = participation
-      ? l0Result.value
-      : appendCatCafeGithubWriteRouting(l0Result.value, invocationApprovalSurface);
+      ? sessionPromptResult.value
+      : appendCatCafeGithubWriteRouting(sessionPromptResult.value, invocationApprovalSurface);
     const explicitIdeate = options?.routeIntent?.intent === 'ideate' && options.routeIntent.explicit;
     const collaborationModeKind: 'plan' | 'default' | null = explicitIdeate
       ? 'plan'
@@ -1985,7 +1986,7 @@ export class CodexAgentService implements AgentService {
           nativeInstructions: Object.freeze([
             Object.freeze({
               body: developerInstructions,
-              injectionDecision: 'native_l0_compiled_with_signature_boundary',
+              injectionDecision: 'native_session_pipeline_with_signature_boundary',
             }),
           ]),
           runtime: Object.freeze({
