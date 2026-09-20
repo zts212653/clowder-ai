@@ -5896,13 +5896,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
       const supersededOutcome =
         superseded?.applied === true ? (superseded.state as PrAutomationState).waitOutcome : undefined;
+      // A new wait does not revoke a result already owed to its owner. Preserve the outbox
+      // in the same CAS, including after a single-fire wait has consumed its active generation.
+      const pendingOutcome = previousState?.waitOutcome?.delivery === 'pending' ? previousState.waitOutcome : undefined;
+      if (pendingOutcome && supersededOutcome?.delivery === 'pending') {
+        // A passed deadline produced a second deliverable result; one slot cannot retain both.
+        reply.status(409);
+        return { error: 'PR wait has a pending delivery — retry registration after recovery' };
+      }
+      const retainedOutcome = pendingOutcome ?? supersededOutcome;
       const replacement: PrAutomationState = {
         ...(previousState?.review ? { review: previousState.review } : {}),
         ...(previousState?.ci ? { ci: previousState.ci } : {}),
         ...(previousState?.conflict ? { conflict: previousState.conflict } : {}),
         ...snapshot.collectorState,
         await: awaitState,
-        ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
+        ...(retainedOutcome ? { waitOutcome: retainedOutcome } : {}),
       };
       const waitSource = await waitSourcePromise;
       if (!(await registry.isLatest(record.invocationId))) {
@@ -6150,10 +6159,17 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         : undefined;
       const supersededOutcome =
         superseded?.applied === true ? (superseded.state as IssueWaitAutomationState).waitOutcome : undefined;
+      // Match the PR path: explicit registration must not erase the previous delivery outbox.
+      const pendingOutcome = previousState?.waitOutcome?.delivery === 'pending' ? previousState.waitOutcome : undefined;
+      if (pendingOutcome && supersededOutcome?.delivery === 'pending') {
+        reply.status(409);
+        return { error: 'Issue wait has a pending delivery — retry registration after recovery' };
+      }
+      const retainedOutcome = pendingOutcome ?? supersededOutcome;
       const replacement: IssueWaitAutomationState = {
         ...snapshot.collectorState,
         await: awaitState,
-        ...(supersededOutcome ? { waitOutcome: supersededOutcome } : {}),
+        ...(retainedOutcome ? { waitOutcome: retainedOutcome } : {}),
       };
       const waitSource = await waitSourcePromise;
       if (!(await registry.isLatest(record.invocationId))) {
