@@ -3203,7 +3203,7 @@ export async function handleGuideControl(input: WithAgentKey<{ action: string }>
 
 export async function handleHoldBall(input: {
   reason: string;
-  nextStep?: string | undefined;
+  nextStep: string;
   wakeAfterMs?: number;
   wakeWhen?: { command: string; cwd?: string; timeoutMs?: number };
   agentKeyCatId?: string | undefined;
