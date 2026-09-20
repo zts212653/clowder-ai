@@ -222,4 +222,20 @@ describe('F280 register_pr_tracking public contract', () => {
       'broader capacity is not a licence to fabricate a precise wait anchor',
     );
   });
+
+  /*
+   * #1392 R2 follow-up: an agent builds its wait from this description, so a description that still
+   * promised replacement would have a reviewer name a third party, be told exactly that login wakes
+   * them, and get an audience — author-only, further narrowed to the named login — that matches
+   * nobody. The dead combination has to be stated here, where the wait is written.
+   */
+  it('the goal description states narrowing, and names the audience that matches nobody', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+    const description = registerPrTrackingInputSchema.goal.description ?? '';
+
+    assert.match(description, /narrows the audience/i, 'the list narrows the role-derived rule');
+    assert.match(description, /both rules apply/i, 'and both rules have to admit a comment');
+    assert.match(description, /matches nobody/i, 'the dead combination must be named, not implied');
+    assert.doesNotMatch(description, /replaces the derived audience/i, 'the replacement promise is gone');
+  });
 });

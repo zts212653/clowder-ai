@@ -307,8 +307,24 @@ function describeCommentAudience(predicate: GitHubWaitPredicate): string | undef
   }
   // #1392 R2: when the caller also named people, both rules apply, so both have to be stated. Saying
   // only the derived half would describe a wider audience than the one actually armed.
-  const narrowing = predicate.authorLogins
-    ? `, then narrowed to only ${predicate.authorLogins.join(', ')} (you named them)`
+  const named = predicate.authorLogins;
+  /*
+   * #1392 R2 follow-up: narrowing can produce a pair nothing satisfies — the derived rule and the
+   * caller's list share no login. Stating the two rules side by side is true and still leaves the
+   * caller expecting a wake that cannot arrive, so a dead pair is named as dead. Only a combination
+   * that is provably empty says so: an unresolved identity is unknown, not empty.
+   */
+  const matchesNobody =
+    named !== undefined &&
+    (audience.mode === 'everyone_but_self'
+      ? named.every((login) => sameGitHubLogin(login, audience.selfLogin))
+      : audience.mode === 'subject_author_only'
+        ? !named.some((login) => sameGitHubLogin(login, audience.subjectAuthorLogin))
+        : false);
+  const narrowing = named
+    ? `, then narrowed to only ${named.join(', ')} (you named them)${
+        matchesNobody ? ' — no comment can match both, so nothing will wake you' : ''
+      }`
     : '';
   switch (audience.mode) {
     case 'everyone_but_self':
@@ -346,10 +362,14 @@ export type GitHubWaitPredicate =
    * #1392 AC-3 / AC-6 / AC-7: a new PR review comment on one surface. The two surfaces keep separate
    * frontiers — inline and conversation comment ids are not comparable.
    *
-   * Exactly one of `authorLogins` and `audience` is present, and never neither: an omitted-means-anyone
+   * At least one of `authorLogins` and `audience` is present, and never neither: an omitted-means-anyone
    * form is the silent widening this issue exists to remove. `authorLogins` is the caller's own exact
-   * allowlist on the advanced path; `audience` is the role the server resolved on the normal path.
-   * Both are frozen at registration and compared case-insensitively.
+   * allowlist; `audience` is the role the server resolved on the normal path.
+   *
+   * #1392 R2: the normal entry carries BOTH, and both have to admit a comment — the caller's list narrows
+   * the derived rule instead of replacing it, so a list the rule already excludes matches nobody. Only the
+   * advanced explicit `when[]` path carries `authorLogins` alone, used verbatim. Both are frozen at
+   * registration and compared case-insensitively.
    */
   | {
       readonly kind: 'pr_conversation_comment_added';

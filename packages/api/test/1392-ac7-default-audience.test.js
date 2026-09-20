@@ -499,6 +499,32 @@ describe('#1392 R2 — a caller’s list narrows the accepted audience, it never
 
     assert.equal(matchWhen(when, comment({ author: SELF })).length, 1);
   });
+
+  /*
+   * Narrowing can produce a combination nothing satisfies: the reviewer rule admits only the PR
+   * author, and the caller named someone else. Stating the two rules separately would be true and
+   * still leave the caller waiting for a wake that cannot arrive, so the receipt names it dead.
+   */
+  it('the receipt calls a dead narrowing dead instead of reporting two live rules', () => {
+    const when = expandOrThrow(asMaintainer, { kind: 'await_reply_from', authorLogins: ['bystander'] });
+    const coverage = describeGitHubNotificationCoverage(asMaintainer, when);
+
+    assert.ok(coverage.commentFilters.length > 0, 'the comment surfaces must still be described');
+    assert.ok(
+      coverage.commentFilters.every((line) => line.includes('no comment can match both, so nothing will wake you')),
+      `every surface must report the dead narrowing: ${JSON.stringify(coverage.commentFilters)}`,
+    );
+  });
+
+  it('a narrowing that can still fire is never reported as dead', () => {
+    const when = expandOrThrow(asAuthor, { kind: 'await_reply_from', authorLogins: ['some-reviewer'] });
+    const coverage = describeGitHubNotificationCoverage(asAuthor, when);
+
+    assert.ok(
+      coverage.commentFilters.every((line) => !line.includes('nothing will wake you')),
+      `a live narrowing must not be called dead: ${JSON.stringify(coverage.commentFilters)}`,
+    );
+  });
 });
 
 describe('#1392 R4 — a known issue identity does not report a missing PR role', () => {
