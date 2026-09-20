@@ -140,6 +140,32 @@ describe('#1392 R5 — a delivery is not a verdict', () => {
     assert.deepEqual(resolves, ['owner/repo#7'], 'the condition the caller armed is the one that may act');
   });
 
+  /*
+   * The deadline branch deliberately keeps the last poll's deltas so the owner still sees the facts
+   * the wait ended on. That record is a report, not a renewed mandate: the wait's authority ended
+   * with it, so a conflict observed only after the deadline may be told, never acted on.
+   */
+  it('an expired wait that saw the conflict reports the fact and still does not act on it', async () => {
+    const { poll, resolves, wakes, contents } = await tracked({
+      when: [{ kind: 'pr_became_conflicting' }],
+      expiresAt: DEADLINE,
+      now: DEADLINE + 1,
+      autoResolve: { kind: 'resolved', branch: 'feature', method: 'rebase' },
+    });
+
+    await poll();
+
+    assert.deepEqual(resolves, [], 'an ended wait does not authorise a rebase, whatever its last poll saw');
+    assert.deepEqual(
+      wakes.map((wake) => wake.reason),
+      ['github_wait_satisfied'],
+      'the owner hears the expiry, and it is not filed as a conflict wake',
+    );
+    const message = contents().join('\n');
+    assert.match(message, /conflicting/i, 'the fact the wait ended on is still delivered, not deleted');
+    assert.match(message, /deadline passed/i, 'and it is delivered as an expiry');
+  });
+
   it('a conflict the caller armed still wakes its owner when auto-resolution escalates', async () => {
     const { poll, resolves, wakes } = await tracked({
       when: [{ kind: 'pr_became_conflicting' }],

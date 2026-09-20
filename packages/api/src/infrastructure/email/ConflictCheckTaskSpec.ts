@@ -39,15 +39,24 @@ interface ConflictWorkItem {
 }
 
 /**
- * #1392 R5: did the outcome we are about to act on actually match the conflict condition?
+ * #1392 R5: may this outcome authorise a repository write?
  *
- * Reading the typed delta, rather than the outcome's reason text, keeps every other delivery out by
- * construction instead of by a list of exceptions: an expiry, a HEAD change, a CI verdict, a comment
- * and a cancel all fail this test without being named. Absent deltas fail it too — auto-resolution
- * writes to a repository, so it needs proof, not the absence of a denial.
+ * Two independent facts have to hold, and neither implies the other.
+ *
+ * The reason must positively be `matched`. An expired wait keeps its last poll's deltas so the owner
+ * still sees the facts it ended on — that record is a report, not a renewed mandate, because the
+ * wait's authority ended with the wait. A conflict seen only after the deadline may be told; it may
+ * not be acted on, and the delta is never dropped to make that true.
+ *
+ * And the conflict must be inside that match. A delivery about HEAD, CI, a comment or a cancel is
+ * not a conflict just because the repository happens to be conflicting right now.
+ *
+ * Both are machine-checked enum fields rather than parsed prose, and both are positive tests: an
+ * absent outcome fails them, because writing to a repository needs proof, not the absence of denial.
  */
 function conflictWasMatched(outcome: WaitOutcomeV1 | undefined): boolean {
-  return outcome?.matched?.some((delta) => delta.kind === 'pr_became_conflicting') === true;
+  if (outcome?.reason !== 'matched') return false;
+  return outcome.matched?.some((delta) => delta.kind === 'pr_became_conflicting') === true;
 }
 
 async function tryAutoResolveBeforeWake(
@@ -57,7 +66,7 @@ async function tryAutoResolveBeforeWake(
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
   if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
-  // A conflicting repository state is not a mandate: the owner's wait has to be the thing that matched.
+  // A conflicting repository state is not a mandate: a live wait of the owner's has to be what matched.
   if (!conflictWasMatched(outcome)) return null;
   try {
     return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
