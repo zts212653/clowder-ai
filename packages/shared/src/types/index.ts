@@ -658,6 +658,7 @@ export {
 export {
   type AwaitStateV1,
   createWaitContinuationCarrier,
+  expandGitHubPrTrackingGoal,
   GITHUB_ISSUE_WAIT_PREDICATE_KINDS,
   GITHUB_ISSUE_WAIT_PREDICATE_LIMIT,
   GITHUB_PR_WAIT_PREDICATE_KINDS,
@@ -668,6 +669,8 @@ export {
   type GitHubIssueWaitBaseline,
   type GitHubIssueWaitPredicate,
   type GitHubPrAwaitStateV1,
+  type GitHubPrTrackingGoal,
+  type GitHubPrTrackingGoalExpansion,
   type GitHubPrWaitBaseline,
   type GitHubPrWaitPredicate,
   type GitHubReviewThreadBaseline,

@@ -1996,8 +1996,19 @@ export const registerPrTrackingInputSchema = {
     .array(githubWaitPredicateInputSchema)
     .min(1)
     .max(GITHUB_PR_WAIT_PREDICATE_LIMIT)
+    .optional()
     .describe(
-      `One to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} typed conditions — every distinct PR condition in the catalog, so a caller never has to drop a signal they need. Evaluated as flat any-of against a server-frozen live baseline. Duplicate kinds, unknown kinds and conditions missing their required parameters are still rejected.`,
+      `ADVANCED, and usually omit it. One to ${GITHUB_PR_WAIT_PREDICATE_LIMIT} typed conditions for a precise wait. Omitting this is the normal path: the server then arms every condition the PR raises about itself — review decision, CI terminal, conflict and new HEAD. Supply this only when you need something narrower or need a condition with its own anchor, such as pr_review_thread_changed. Duplicate kinds, unknown kinds and conditions missing their required parameters are rejected. At most one of \`when\` or \`goal\`.`,
+    ),
+  goal: z
+    .object({
+      kind: z.literal('await_reply_from'),
+      authorLogins: z.array(z.string().trim().min(1)).min(1).max(20),
+    })
+    .strict()
+    .optional()
+    .describe(
+      'Add this when you are waiting on a person, not just on the PR. It arms their conversation comments and their inline review comments on top of the default conditions. Worth knowing why it exists: a registration watching only HEAD stays healthy and unexpired and never wakes when the thing awaited was a reply rather than a push — you cannot poll, so you would never discover the gap. The audience is what you supply here and is never inferred from who opened the PR; an empty one is refused rather than widened to everyone. The full expansion comes back to you in `await.continuation.when`. At most one of `when` or `goal`.',
     ),
   nextStep: z
     .string()
@@ -2026,16 +2037,19 @@ export const registerPrTrackingInputSchema = {
 export async function handleRegisterPrTracking(input: {
   repoFullName: string;
   prNumber: number;
-  when: Array<
-    | { kind: 'pr_head_changed' }
-    | { kind: 'pr_review_result_available'; triggerCommentId?: number }
-    | { kind: 'pr_review_decision_changed' }
-    | { kind: 'pr_review_thread_changed'; reviewThreadIds: string[] }
-    | { kind: 'pr_ci_terminal' }
-    | { kind: 'pr_became_conflicting' }
-    | { kind: 'pr_conversation_comment_added'; authorLogins: string[] }
-    | { kind: 'pr_inline_comment_added'; authorLogins: string[] }
-  >;
+  when:
+    | Array<
+        | { kind: 'pr_head_changed' }
+        | { kind: 'pr_review_result_available'; triggerCommentId?: number }
+        | { kind: 'pr_review_decision_changed' }
+        | { kind: 'pr_review_thread_changed'; reviewThreadIds: string[] }
+        | { kind: 'pr_ci_terminal' }
+        | { kind: 'pr_became_conflicting' }
+        | { kind: 'pr_conversation_comment_added'; authorLogins: string[] }
+        | { kind: 'pr_inline_comment_added'; authorLogins: string[] }
+      >
+    | undefined;
+  goal?: { kind: 'await_reply_from'; authorLogins: string[] } | undefined;
   nextStep: string;
   expiresAt?: number;
   autoRenew?: boolean;
@@ -2051,7 +2065,10 @@ export async function handleRegisterPrTracking(input: {
         {
           repoFullName: input.repoFullName,
           prNumber: input.prNumber,
-          when: input.when,
+          // #1392 AC-7: forward whichever the caller supplied and let the route enforce "exactly one".
+          // Serializing an absent `when` as null would turn a goal-only call into a contradiction.
+          ...(input.when !== undefined ? { when: input.when } : {}),
+          ...(input.goal !== undefined ? { goal: input.goal } : {}),
           nextStep: input.nextStep,
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),

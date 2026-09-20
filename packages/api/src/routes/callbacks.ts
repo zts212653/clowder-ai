@@ -24,6 +24,7 @@ import {
   actionSuccessorMetadataSchema,
   catRegistry,
   createCatId,
+  expandGitHubPrTrackingGoal,
   isTrackingKind,
   isValidAcceptedSource,
   isValidReviewSubjectRef,
@@ -5594,14 +5595,36 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
         .min(1)
         .regex(/^[^/]+\/[^/]+$/, 'Must be owner/repo format'),
       prNumber: z.number().int().positive(),
-      when: githubWaitPredicatesSchema,
+      /**
+       * #1392 AC-7: normal registration supplies neither. `when` is the advanced path, unchanged, for a
+       * caller who needs a precise wait. `goal` names who is being waited on so the server can arm the
+       * comment conditions with a real audience. Both together would let a caller state a goal and then
+       * quietly contradict it, which is the class of silent mismatch this issue exists to remove.
+       */
+      when: githubWaitPredicatesSchema.optional(),
+      goal: z
+        .object({
+          kind: z.literal('await_reply_from'),
+          authorLogins: z.array(z.string().trim().min(1)).min(1).max(20),
+        })
+        .strict()
+        .optional(),
       nextStep: z.string().trim().min(1).max(500),
       /** #1392 AC-2: optional. Omitted = no time-based termination; supplied = a real, visible deadline. */
       expiresAt: z.number().int().positive().optional(),
       /** #1392 AC-1: renewal is the default; `false` is the explicit single-fire opt-in. */
       autoRenew: z.boolean().optional(),
     })
-    .strict();
+    .strict()
+    .superRefine((value, ctx) => {
+      if (value.when && value.goal) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['goal'],
+          message: 'provide at most one of `when` (a precise wait) or `goal` (who you are waiting on)',
+        });
+      }
+    });
 
   app.post('/api/callbacks/register-pr-tracking', async (request, reply) => {
     // #320: Unified model — write to TaskStore instead of PrTrackingStore
@@ -5631,7 +5654,20 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
       return deletedThreadGuard.body;
     }
 
-    const { repoFullName, prNumber, when, nextStep, expiresAt, autoRenew } = parsed.data;
+    const { repoFullName, prNumber, goal, nextStep, expiresAt, autoRenew } = parsed.data;
+    // #1392 AC-7: a caller who names no precise wait gets the expansion, from the one definition the
+    // MCP entry also reads, so the same registration cannot mean two things depending on which door it
+    // came through. The expansion is returned to the caller in `await.continuation.when`.
+    const expansion = parsed.data.when ? undefined : expandGitHubPrTrackingGoal(goal);
+    if (expansion && !expansion.ok) {
+      reply.status(400);
+      return { error: expansion.error };
+    }
+    const when = parsed.data.when ?? (expansion?.ok ? expansion.when : undefined);
+    if (!when) {
+      reply.status(400);
+      return { error: 'could not resolve any wait conditions for this registration' };
+    }
     if (expiresAt !== undefined && expiresAt <= Date.now()) {
       reply.status(400);
       return { error: 'expiresAt must be in the future' };

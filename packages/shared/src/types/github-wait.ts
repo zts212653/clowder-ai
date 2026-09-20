@@ -32,6 +32,72 @@ export const GITHUB_PR_WAIT_PREDICATE_LIMIT = GITHUB_PR_WAIT_PREDICATE_KINDS.len
 
 export const GITHUB_ISSUE_WAIT_PREDICATE_LIMIT = GITHUB_ISSUE_WAIT_PREDICATE_KINDS.length;
 
+/**
+ * #1392 AC-7: normal registration names a subject, not a predicate list.
+ *
+ * The gap is concrete. An author reported a published dependency in a conversation comment while HEAD
+ * never moved; a registration watching only `pr_head_changed` was healthy, unexpired, and never woke,
+ * because what was awaited was a reply and not a push. Raising the condition cap gave callers room to
+ * ask for the comment condition. It did nothing to stop them leaving it out, and an agent that cannot
+ * poll does not discover the omission — it simply never hears anything again.
+ *
+ * So the common path expands here, from one definition shared by the API and the MCP entry, and the
+ * advanced path (`when[]`) stays exactly as it was for callers who need a precise wait.
+ *
+ * Two deliberate limits:
+ *
+ * The default covers only conditions that need no audience. Both comment conditions require a positive
+ * audience (AC-3), and an open default — receive from everyone but yourself — is a product decision the
+ * maintainer has explicitly not signed off. Rather than invent one, the default omits comments and the
+ * caller adds them by naming who they are waiting on. That is honest about what a bare registration
+ * does and does not cover.
+ *
+ * The audience is always supplied, never derived from GitHub authorship. Who you are waiting on is a
+ * claim about the work, and inferring it from who opened the PR would answer a question nobody asked.
+ * An empty audience is refused at registration rather than widened to everyone — silent widening is the
+ * failure this issue exists to remove.
+ */
+export type GitHubPrTrackingGoal = {
+  readonly kind: 'await_reply_from';
+  readonly authorLogins: readonly string[];
+};
+
+export type GitHubPrTrackingGoalExpansion =
+  | { readonly ok: true; readonly when: readonly GitHubPrWaitPredicate[] }
+  | { readonly ok: false; readonly error: string };
+
+/** Conditions a PR raises about itself. None of them needs an audience, so all are always safe to arm. */
+const GITHUB_PR_SUBJECT_STATE_PREDICATES: readonly GitHubPrWaitPredicate[] = [
+  { kind: 'pr_review_decision_changed' },
+  { kind: 'pr_ci_terminal' },
+  { kind: 'pr_became_conflicting' },
+  { kind: 'pr_head_changed' },
+];
+
+export function expandGitHubPrTrackingGoal(goal?: GitHubPrTrackingGoal): GitHubPrTrackingGoalExpansion {
+  if (!goal) {
+    return { ok: true, when: GITHUB_PR_SUBJECT_STATE_PREDICATES };
+  }
+
+  const authorLogins = goal.authorLogins.map((login) => login.trim()).filter((login) => login.length > 0);
+  if (authorLogins.length === 0) {
+    return {
+      ok: false,
+      error:
+        'goal.authorLogins must name at least one login — a registration with nobody to wait on is not widened to everyone',
+    };
+  }
+
+  return {
+    ok: true,
+    when: [
+      ...GITHUB_PR_SUBJECT_STATE_PREDICATES,
+      { kind: 'pr_conversation_comment_added', authorLogins },
+      { kind: 'pr_inline_comment_added', authorLogins },
+    ],
+  };
+}
+
 export type GitHubWaitPredicateKind = (typeof GITHUB_WAIT_PREDICATE_KINDS)[number];
 
 export type GitHubWaitPredicate =

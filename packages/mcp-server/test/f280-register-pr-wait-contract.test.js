@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'nextStep', 'prNumber', 'repoFullName', 'when'];
+const EXPECTED_PUBLIC_KEYS = ['autoRenew', 'expiresAt', 'goal', 'nextStep', 'prNumber', 'repoFullName', 'when'];
 
 describe('F280 register_pr_tracking public contract', () => {
   it('exposes only the typed wait inputs', async () => {
@@ -123,6 +123,18 @@ describe('F280 register_pr_tracking public contract', () => {
       );
     }
   });
+  /*
+   * #1392 AC-7: the whole point is that a caller can register without naming conditions. If either of
+   * these stops being optional at the public entry, the common path silently becomes the advanced one
+   * again and every caller is back to hand-picking predicates they cannot verify they got right.
+   */
+  it('lets a caller register without naming any condition', async () => {
+    const { registerPrTrackingInputSchema } = await import('../dist/tools/callback-tools.js');
+
+    assert.equal(registerPrTrackingInputSchema.when.isOptional(), true, '`when` must be the advanced path');
+    assert.equal(registerPrTrackingInputSchema.goal.isOptional(), true, 'naming who you wait on is additive');
+  });
+
   /*
    * #1392 D1: the ruling was that API and MCP move together. Until now only the API catalog had a
    * capacity assertion, so reverting this file alone to a cap of four left every other suite green —
