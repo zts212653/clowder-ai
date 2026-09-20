@@ -285,6 +285,24 @@ export interface GitHubNotificationCoverageV1 {
   readonly commentFilters: readonly string[];
 }
 
+/**
+ * #1392 R2 follow-up: can any comment satisfy the derived rule AND the list the caller named?
+ *
+ * Narrowing can produce a pair nothing satisfies, and stating the two rules side by side is true
+ * while still leaving the owner waiting for a wake that cannot arrive. Only a provably empty pair
+ * answers no here: an unresolved identity is unknown, not empty.
+ */
+function narrowingMatchesNobody(audience: GitHubCommentAudienceV1, named: readonly string[]): boolean {
+  switch (audience.mode) {
+    case 'everyone_but_self':
+      return named.every((login) => sameGitHubLogin(login, audience.selfLogin));
+    case 'subject_author_only':
+      return !named.some((login) => sameGitHubLogin(login, audience.subjectAuthorLogin));
+    default:
+      return false;
+  }
+}
+
 function describeCommentAudience(predicate: GitHubWaitPredicate): string | undefined {
   if (
     predicate.kind !== 'pr_conversation_comment_added' &&
@@ -308,22 +326,9 @@ function describeCommentAudience(predicate: GitHubWaitPredicate): string | undef
   // #1392 R2: when the caller also named people, both rules apply, so both have to be stated. Saying
   // only the derived half would describe a wider audience than the one actually armed.
   const named = predicate.authorLogins;
-  /*
-   * #1392 R2 follow-up: narrowing can produce a pair nothing satisfies — the derived rule and the
-   * caller's list share no login. Stating the two rules side by side is true and still leaves the
-   * caller expecting a wake that cannot arrive, so a dead pair is named as dead. Only a combination
-   * that is provably empty says so: an unresolved identity is unknown, not empty.
-   */
-  const matchesNobody =
-    named !== undefined &&
-    (audience.mode === 'everyone_but_self'
-      ? named.every((login) => sameGitHubLogin(login, audience.selfLogin))
-      : audience.mode === 'subject_author_only'
-        ? !named.some((login) => sameGitHubLogin(login, audience.subjectAuthorLogin))
-        : false);
   const narrowing = named
     ? `, then narrowed to only ${named.join(', ')} (you named them)${
-        matchesNobody ? ' — no comment can match both, so nothing will wake you' : ''
+        narrowingMatchesNobody(audience, named) ? ' — no comment can match both, so nothing will wake you' : ''
       }`
     : '';
   switch (audience.mode) {
