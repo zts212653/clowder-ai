@@ -15,8 +15,9 @@ import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = resolve(new URL('.', import.meta.url).pathname, '..');
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = resolve(ROOT, 'site/tailwind.css');
 const CHECK = process.argv.includes('--check');
 

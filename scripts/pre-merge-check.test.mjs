@@ -36,9 +36,18 @@ function writeExecutable(filePath, source) {
   chmodSync(filePath, 0o755);
 }
 
+function shellQuote(value) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
+
+function writeNodeExecutable(filePath, source) {
+  const sourcePath = `${filePath}.cjs`;
+  writeFileSync(sourcePath, source, 'utf8');
+  writeExecutable(filePath, `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(sourcePath)} "$@"\n`);
+}
+
 function createGitStub(logPath, stubRoot = repoRoot) {
-  return `#!${process.execPath}
-const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
+  return `const { appendFileSync, existsSync, readFileSync, writeFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 const rebaseStatePath = ${JSON.stringify(`${logPath}.rebase-state`)};
 const rebaseCount = () => (existsSync(rebaseStatePath) ? Number(readFileSync(rebaseStatePath, 'utf8')) : 0);
@@ -116,8 +125,7 @@ process.exit(1);
 }
 
 function createPnpmStub(logPath) {
-  return `#!${process.execPath}
-const { appendFileSync } = require('node:fs');
+  return `const { appendFileSync } = require('node:fs');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, \`pnpm \${args.join(' ')}\\n\`);
 appendFileSync(
@@ -174,8 +182,7 @@ process.exit(0);
 }
 
 function createNodeStub(logPath) {
-  return `#!${process.execPath}
-const { appendFileSync, mkdirSync } = require('node:fs');
+  return `const { appendFileSync, mkdirSync } = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 appendFileSync(${JSON.stringify(logPath)}, 'node ' + args.join(' ') + '\\n');
@@ -271,9 +278,9 @@ function runGate(bash, args = [], extraEnv = {}, options = {}) {
     writeFileSync(logPath, '', 'utf8');
     writeFileSync(pressurePath, JSON.stringify({ pressure: 'normal' }), 'utf8');
     mkdirSync(binDir, { recursive: true });
-    writeExecutable(path.join(binDir, 'git'), createGitStub(logPath, effectiveRoot));
-    writeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
-    writeExecutable(path.join(binDir, 'node'), createNodeStub(logPath));
+    writeNodeExecutable(path.join(binDir, 'git'), createGitStub(logPath, effectiveRoot));
+    writeNodeExecutable(path.join(binDir, 'pnpm'), createPnpmStub(logPath));
+    writeNodeExecutable(path.join(binDir, 'node'), createNodeStub(logPath));
 
     const gateEnv = {
       ...process.env,

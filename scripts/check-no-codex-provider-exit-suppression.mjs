@@ -24,9 +24,9 @@
  *   → exit 0 = clean, exit 1 = regression detected
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { detectSuppressShapeInProviders } from './check-no-codex-provider-exit-suppression/ast-ownership.mjs';
 import { scanLiteralViolations } from './check-no-codex-provider-exit-suppression/literal-guard.mjs';
 
@@ -109,4 +109,4 @@ function main() {
   process.exit(1);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main();

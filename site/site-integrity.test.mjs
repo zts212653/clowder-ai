@@ -14,6 +14,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { assignDocHeadingIds, resolveDocLink, resolveImageSrc } from './lib/doc-links.mjs';
 import { fetchLocalizedMarkdown, localizedDocCandidates } from './lib/doc-locale.mjs';
@@ -24,7 +25,7 @@ const { JSDOM } = require('jsdom');
 const createDOMPurify = require('dompurify');
 const { marked } = require('marked');
 
-const SITE = resolve(dirname(new URL(import.meta.url).pathname));
+const SITE = resolve(dirname(fileURLToPath(import.meta.url)));
 const ROOT = resolve(SITE, '..');
 const IS_HOME_SOURCE = existsSync(resolve(ROOT, 'sync-manifest.yaml'));
 

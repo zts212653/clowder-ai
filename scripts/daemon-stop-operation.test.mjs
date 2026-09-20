@@ -6,6 +6,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { probeRecordedApiPort } from './lib/daemon-health-probe.mjs';
 import { daemonStatePaths, writeDaemonState } from './lib/daemon-state.mjs';
 import {
@@ -304,7 +305,7 @@ describe('StopOperationRecord: the script entry point goes through the record', 
     const result = spawnSync(
       process.execPath,
       [
-        new URL('./daemon-state.mjs', import.meta.url).pathname,
+        fileURLToPath(new URL('./daemon-state.mjs', import.meta.url)),
         'stop',
         '--project-root',
         projectRoot,
