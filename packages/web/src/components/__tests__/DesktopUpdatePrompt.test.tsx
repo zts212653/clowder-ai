@@ -50,6 +50,7 @@ describe('DesktopUpdatePrompt', () => {
       sendUpdatePromptAction: sendAction,
       getUpdateSettings: vi.fn(async () => ({ autoCheck: true })),
       setUpdateAutoCheck: vi.fn(async (enabled) => ({ autoCheck: enabled })),
+      openWorkspaceHtml: vi.fn(async () => ({ ok: true as const })),
     };
   });
 

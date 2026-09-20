@@ -21,6 +21,7 @@ function loadBridge({ readyResult = null } = {}) {
     }
     if (channel === 'desktop-update:settings:get') return { autoCheck: true };
     if (channel === 'desktop-update:settings:set-auto-check') return { autoCheck: payload };
+    if (channel === 'desktop-workspace:open-html') return { ok: true };
     throw new Error(`Unexpected invoke channel: ${channel}`);
   };
   const contextBridge = {
@@ -38,7 +39,7 @@ function loadBridge({ readyResult = null } = {}) {
   return { bridge: exposed.desktopBridge, ipcRenderer, sent, invoked, source };
 }
 
-describe('desktop preload update bridge', () => {
+describe('desktop preload bridge', () => {
   test('returns the pending prompt from the trusted readiness invoke', async () => {
     const pending = { kind: 'up-to-date', version: '0.12.0' };
     const { bridge, invoked, source } = loadBridge({ readyResult: pending });
@@ -113,5 +114,18 @@ describe('desktop preload update bridge', () => {
       ['desktop-update:settings:set-auto-check', false],
     ]);
     assert.throws(() => bridge.setUpdateAutoCheck('false'), /invalid/i);
+  });
+
+  test('opens only a typed Workspace HTML target without accepting an absolute path or URL', async () => {
+    const { bridge, invoked } = loadBridge();
+    const target = { worktreeId: 'ac-claw', path: '抓包分析/hybrid-report-dogfood/index.html' };
+
+    assert.deepEqual(await bridge.openWorkspaceHtml(target), { ok: true });
+    assert.deepEqual(JSON.parse(JSON.stringify(invoked)), [['desktop-workspace:open-html', target]]);
+    assert.throws(() => bridge.openWorkspaceHtml({ worktreeId: 'ac-claw', path: 'README.md' }), /invalid/i);
+    assert.throws(
+      () => bridge.openWorkspaceHtml({ worktreeId: 'ac-claw', path: 'site/index.html', url: 'file:///tmp/x' }),
+      /invalid/i,
+    );
   });
 });

@@ -131,4 +131,24 @@ describe('workspace absolute-document resolution', () => {
       await rm(externalRoot, { recursive: true, force: true });
     }
   });
+
+  it('rejects an HTML symlink that escapes its registered worktree', async () => {
+    const registeredRoot = join(tmpdir(), `html-document-symlink-${Date.now()}`);
+    const externalRoot = join(tmpdir(), `html-document-external-${Date.now()}`);
+    await mkdir(registeredRoot, { recursive: true });
+    await mkdir(externalRoot, { recursive: true });
+    await writeFile(join(externalRoot, 'outside.html'), '<h1>Outside</h1>\n');
+    await symlink(join(externalRoot, 'outside.html'), join(registeredRoot, 'linked.html'));
+    mod.registerWorktrees([{ id: 'html-document-symlink', root: registeredRoot, branch: 'test', head: 'symlink' }]);
+
+    try {
+      await assert.rejects(
+        () => mod.resolveWorkspaceDocumentHref(join(registeredRoot, 'linked.html')),
+        (error) => error.code === 'TRAVERSAL',
+      );
+    } finally {
+      await rm(registeredRoot, { recursive: true, force: true });
+      await rm(externalRoot, { recursive: true, force: true });
+    }
+  });
 });

@@ -53,6 +53,7 @@ interface DesktopBridge {
   setUpdateAutoCheck(enabled: boolean): Promise<DesktopUpdateSettings>;
   updatePromptReady(): Promise<DesktopUpdatePromptPayload | null>;
   sendUpdatePromptAction(action: DesktopUpdatePromptAction, version: string): void;
+  openWorkspaceHtml(target: { worktreeId: string; path: string }): Promise<{ ok: true }>;
 }
 
 interface Window {

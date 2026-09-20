@@ -81,6 +81,38 @@ describe('POST /api/workspace/navigate authentication boundary', () => {
     });
     assert.equal(documentRes.statusCode, 401);
     assert.match(JSON.parse(documentRes.body).error, /authentication required/i);
+
+    const openableRes = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-openable-file',
+      remoteAddress: '203.0.113.10',
+      headers: { 'x-cat-cafe-user': 'default-user' },
+      payload: { worktreeId: 'auth-test-wt', path: 'site/index.html' },
+    });
+    assert.equal(openableRes.statusCode, 401);
+    assert.match(JSON.parse(openableRes.body).error, /authentication required/i);
+    await app.close();
+  });
+
+  it('rejects browser-originated requests to the desktop-openable path resolver', async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      request.sessionUserId = 'default-user';
+    });
+    await app.register(workspaceRoutes);
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-openable-file',
+      headers: {
+        origin: 'http://localhost:3003',
+      },
+      payload: { worktreeId: 'auth-test-wt', path: 'site/index.html' },
+    });
+
+    assert.equal(res.statusCode, 401);
+    assert.match(JSON.parse(res.body).error, /authentication required/i);
     await app.close();
   });
 

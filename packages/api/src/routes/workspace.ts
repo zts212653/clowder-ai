@@ -12,6 +12,7 @@
  * POST /api/workspace/reveal         — open file in system file manager (Finder/Explorer)
  * POST /api/workspace/navigate       — F131: cat-initiated workspace panel navigation
  * POST /api/workspace/resolve-document-link — F063: absolute local link → typed target
+ * POST /api/workspace/resolve-openable-file — F063: desktop-only HTML target → canonical path
  *
  * Edit routes: see workspace-edit.ts
  */
@@ -19,7 +20,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { CallbackPrincipal } from '@cat-cafe/shared';
@@ -471,6 +472,53 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
     const result = await resolveDocumentLinkRouteResult(href);
     reply.status(result.statusCode);
     return result.body;
+  });
+
+  app.post<{
+    Body: { worktreeId?: unknown; path?: unknown };
+  }>('/api/workspace/resolve-openable-file', async (request, reply) => {
+    // This route returns an absolute host path. It belongs exclusively to the
+    // Electron main process, never to browser/session callers.
+    if (request.headers.origin || !resolveDirectLocalAuthorizationUserId(request)) {
+      reply.status(401);
+      return { error: 'Authentication required' };
+    }
+    const { worktreeId, path: filePath } = request.body ?? {};
+    if (
+      typeof worktreeId !== 'string' ||
+      worktreeId.trim().length === 0 ||
+      typeof filePath !== 'string' ||
+      filePath.trim().length === 0
+    ) {
+      reply.status(400);
+      return { error: 'worktreeId and path required' };
+    }
+    if (isAbsoluteFilesystemPath(filePath) || !/^\.(?:html?)$/i.test(extname(filePath))) {
+      reply.status(400);
+      return { error: 'Only relative HTML Workspace paths can be opened' };
+    }
+
+    try {
+      const root = await getWorktreeRoot(worktreeId);
+      const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
+      const fileStat = await stat(resolved);
+      if (!fileStat.isFile()) {
+        reply.status(404);
+        return { error: 'HTML file not found' };
+      }
+      return { absolutePath: await realpath(resolved) };
+    } catch (error) {
+      if (error instanceof WorkspaceSecurityError) {
+        reply.status(error.code === 'NOT_FOUND' ? 404 : 403);
+        return { error: error.message };
+      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.status(404);
+        return { error: 'HTML file not found' };
+      }
+      reply.status(500);
+      return { error: 'Internal error' };
+    }
   });
 
   // GET /api/workspace/file?worktreeId=&path=

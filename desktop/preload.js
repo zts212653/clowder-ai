@@ -1,7 +1,18 @@
-// preload.js — Exposes narrow, context-isolated splash and update IPC bridges.
+// preload.js — Exposes narrow, context-isolated desktop IPC bridges.
 const { contextBridge, ipcRenderer } = require('electron');
 
 const UPDATE_ACTIONS = new Set(['download', 'install', 'later', 'skip', 'open-release', 'dismiss']);
+const WORKSPACE_OPEN_HTML_CHANNEL = 'desktop-workspace:open-html';
+
+function isWorkspaceHtmlTarget(target) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return false;
+  if (Object.keys(target).length !== 2) return false;
+  if (typeof target.worktreeId !== 'string' || !/^[a-zA-Z0-9_-]{1,256}$/.test(target.worktreeId)) return false;
+  if (typeof target.path !== 'string' || target.path.length === 0 || target.path.length > 4096) return false;
+  if (target.path.includes('\\') || target.path.startsWith('/') || /^[a-z]:/i.test(target.path)) return false;
+  const segments = target.path.split('/');
+  return segments.every((segment) => segment && segment !== '.' && segment !== '..') && /\.html?$/i.test(target.path);
+}
 
 contextBridge.exposeInMainWorld('desktopBridge', {
   onStatus: (callback) => {
@@ -30,5 +41,12 @@ contextBridge.exposeInMainWorld('desktopBridge', {
       throw new TypeError('Invalid desktop update action');
     }
     ipcRenderer.send('desktop-update:action', { action, version });
+  },
+  openWorkspaceHtml: (target) => {
+    if (!isWorkspaceHtmlTarget(target)) throw new TypeError('Invalid Workspace HTML target');
+    return ipcRenderer.invoke(WORKSPACE_OPEN_HTML_CHANNEL, {
+      worktreeId: target.worktreeId,
+      path: target.path,
+    });
   },
 });

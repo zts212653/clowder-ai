@@ -19,7 +19,7 @@ export interface WorkspaceAbsolutePathTarget {
   kind: 'file' | 'directory';
 }
 
-const MARKDOWN_DOCUMENT_HREF_RE = /^(.*\.mdx?)(?::([1-9]\d*))?$/i;
+const LOCAL_DOCUMENT_HREF_RE = /^(.*\.(?:mdx?|html?))(?::([1-9]\d*))?$/i;
 
 function containsPath(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
@@ -88,12 +88,12 @@ export async function resolveWorkspaceAbsolutePath(
   };
 }
 
-/** Resolve a fragment-free native Markdown path, including an optional `:line`, to a typed target. */
+/** Resolve a fragment-free native Markdown or HTML path to a typed Workspace target. */
 export async function resolveWorkspaceDocumentHref(href: string, repoRoot?: string): Promise<WorkspaceDocumentTarget> {
-  const match = href.match(MARKDOWN_DOCUMENT_HREF_RE);
+  const match = href.match(LOCAL_DOCUMENT_HREF_RE);
   const candidate = match?.[1];
   if (!candidate) {
-    throw new WorkspaceSecurityError('Document link must be an absolute local Markdown path', 'NOT_FOUND');
+    throw new WorkspaceSecurityError('Document link must be an absolute local Markdown or HTML path', 'NOT_FOUND');
   }
   const target = await resolveWorkspaceAbsolutePath(candidate, repoRoot);
   if (target.kind !== 'file') {
@@ -102,6 +102,6 @@ export async function resolveWorkspaceDocumentHref(href: string, repoRoot?: stri
   return {
     worktreeId: target.worktreeId,
     path: target.path,
-    line: match[2] ? Number.parseInt(match[2], 10) : null,
+    line: /\.mdx?$/i.test(candidate) && match[2] ? Number.parseInt(match[2], 10) : null,
   };
 }

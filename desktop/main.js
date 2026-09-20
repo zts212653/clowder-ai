@@ -17,6 +17,7 @@ const { isExpectedOrigin } = require('./update-prompt-controller');
 const { safeErrorMessage, safeHost } = require('./update-network-diagnostics');
 const { DESKTOP_APP_ID } = require('./app-identity');
 const { createDesktopUpdateRuntime } = require('./desktop-update-runtime');
+const { WorkspaceFileOpenController } = require('./workspace-file-open-controller');
 const { ensureValidMacInstallLocation } = require('./mac-install-location');
 const {
   createDesktopTray,
@@ -70,6 +71,7 @@ let tray = null;
 let services = null;
 let updater = null;
 let updatePrompt = null;
+let workspaceFileOpen = null;
 let isQuitting = false;
 let quitPromise = null;
 const checkForUpdatesManually = createManualUpdateHandler({
@@ -192,6 +194,8 @@ async function quitApp() {
     updater?.stopSchedule();
     updatePrompt?.dispose();
     updatePrompt = null;
+    workspaceFileOpen?.dispose();
+    workspaceFileOpen = null;
     quitPromise = (async () => {
       if (services) {
         const activeServices = services;
@@ -294,6 +298,15 @@ app.on('ready', async () => {
     platform: process.platform,
     arch: process.arch,
   }));
+  workspaceFileOpen = new WorkspaceFileOpenController({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    fetch: (...args) => net.fetch(...args),
+    openPath: (absolutePath) => shell.openPath(absolutePath),
+    dbg,
+    trustedOrigin: APP_ORIGIN,
+    apiOrigin: API_ORIGIN,
+  });
   const upgradeResult = await updater.checkPendingUpgrade();
   if (upgradeResult === 'quitting') return; // P1-2: installer launched — skip startAll
 
@@ -323,6 +336,8 @@ app.on('before-quit', (e) => {
   updater?.stopSchedule();
   updatePrompt?.dispose();
   updatePrompt = null;
+  workspaceFileOpen?.dispose();
+  workspaceFileOpen = null;
   // Electron does NOT await async event handlers. Without blocking here,
   // the app exits before stopAll() finishes → orphaned node/redis processes.
   // Prevent default, run cleanup, then quit when done.

@@ -31,13 +31,13 @@ import { MermaidDiagram } from './MermaidDiagram';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 const BARE_MARKDOWN_LINE_HREF_RE = /^[^/:\\?#]+\.mdx?:\d+$/i;
-const WINDOWS_MARKDOWN_HREF_RE = /^[a-z]:[\\/].*\.mdx?(?::\d+)?$/i;
+const WINDOWS_LOCAL_DOCUMENT_HREF_RE = /^[a-z]:[\\/].*\.(?:mdx?|html?)(?::\d+)?$/i;
 
 /** Preserve safe file-like forms that react-markdown mistakes for custom URI schemes. */
 export function transformChatMarkdownUrl(url: string): string {
   const transformed = defaultUrlTransform(url);
   if (transformed) return transformed;
-  if (BARE_MARKDOWN_LINE_HREF_RE.test(url) || WINDOWS_MARKDOWN_HREF_RE.test(url)) return url;
+  if (BARE_MARKDOWN_LINE_HREF_RE.test(url) || WINDOWS_LOCAL_DOCUMENT_HREF_RE.test(url)) return url;
   return transformed;
 }
 

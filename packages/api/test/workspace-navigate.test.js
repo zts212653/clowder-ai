@@ -70,6 +70,63 @@ describe('POST /api/workspace/navigate (F131)', () => {
     });
   });
 
+  it('resolves an absolute HTML entry point to a typed Workspace target', async () => {
+    const href = resolve(repoRoot, 'site/index.html');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-document-link',
+      headers: NAVIGATE_HEADERS,
+      payload: { href },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), {
+      worktreeId: canonicalWorktreeId,
+      path: 'site/index.html',
+      line: null,
+    });
+  });
+
+  it('resolves only a registered HTML file to a canonical desktop-openable path', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-openable-file',
+      headers: NAVIGATE_HEADERS,
+      payload: { worktreeId: 'test-wt', path: 'site/index.html' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), {
+      absolutePath: resolve(repoRoot, 'site/index.html'),
+    });
+
+    const markdownRes = await app.inject({
+      method: 'POST',
+      url: '/api/workspace/resolve-openable-file',
+      headers: NAVIGATE_HEADERS,
+      payload: { worktreeId: 'test-wt', path: 'README.md' },
+    });
+    assert.equal(markdownRes.statusCode, 400);
+    assert.match(JSON.parse(markdownRes.body).error, /HTML/i);
+  });
+
+  it('keeps traversal, denylisted, and missing HTML targets behind the Workspace boundary', async () => {
+    for (const [path, expectedStatus] of [
+      ['../site/index.html', 403],
+      ['.env.html', 403],
+      ['site/missing.html', 404],
+    ]) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/resolve-openable-file',
+        headers: NAVIGATE_HEADERS,
+        payload: { worktreeId: 'test-wt', path },
+      });
+      assert.equal(res.statusCode, expectedStatus, path);
+      assert.equal('absolutePath' in JSON.parse(res.body), false, path);
+    }
+  });
+
   it('rejects document links outside registered worktrees', async () => {
     const res = await app.inject({
       method: 'POST',

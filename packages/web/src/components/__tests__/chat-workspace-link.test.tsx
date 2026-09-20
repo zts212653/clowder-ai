@@ -44,6 +44,19 @@ describe('resolveChatWorkspaceDocumentHref', () => {
     });
   });
 
+  it('resolves project-local HTML entry points as typed Workspace targets', () => {
+    expect(
+      resolveChatWorkspaceDocumentHref('/work/cat-cafe/reports/Hybrid%20Dogfood/index.html', '/work/cat-cafe'),
+    ).toEqual({
+      path: 'reports/Hybrid Dogfood/index.html',
+      line: null,
+    });
+    expect(resolveChatWorkspaceDocumentHref('reports/index.htm', '/work/cat-cafe')).toEqual({
+      path: 'reports/index.htm',
+      line: null,
+    });
+  });
+
   it('rejects external URLs, paths outside the project, and parent traversal', () => {
     expect(resolveChatWorkspaceDocumentHref('https://example.com/guide.md', '/work/cat-cafe')).toBeNull();
     expect(resolveChatWorkspaceDocumentHref('javascript:guide.md', '/work/cat-cafe')).toBeNull();
@@ -58,6 +71,12 @@ describe('transformChatMarkdownUrl', () => {
     expect(transformChatMarkdownUrl('C:\\work\\cat-cafe\\README.md:7')).toBe('C:\\work\\cat-cafe\\README.md:7');
     expect(transformChatMarkdownUrl('javascript:guide.md')).toBe('');
     expect(transformChatMarkdownUrl('file:///tmp/guide.md')).toBe('');
+  });
+
+  it('preserves a Windows HTML entry point through the Markdown URL transform', () => {
+    expect(transformChatMarkdownUrl('C:\\work\\cat-cafe\\reports\\index.html')).toBe(
+      'C:\\work\\cat-cafe\\reports\\index.html',
+    );
   });
 });
 
@@ -97,6 +116,7 @@ describe('MarkdownContent chat document navigation', () => {
       workspaceOpenTabs: [],
       rightPanelMode: 'status',
     });
+    Reflect.deleteProperty(window, 'desktopBridge');
   });
 
   function renderContent(content: string) {
@@ -131,7 +151,7 @@ describe('MarkdownContent chat document navigation', () => {
     const action = container.querySelector('button');
     await act(async () => {
       action?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     const state = useChatStore.getState();
@@ -221,6 +241,83 @@ describe('MarkdownContent chat document navigation', () => {
       body: JSON.stringify({
         href: '/home/user/cat-cafe-guide/docs/My Guide.md:12',
       }),
+    });
+  });
+
+  it('opens an absolute local HTML entry point through the typed desktop bridge', async () => {
+    const openWorkspaceHtml = vi.fn().mockResolvedValue({ ok: true });
+    Object.defineProperty(window, 'desktopBridge', {
+      configurable: true,
+      value: { openWorkspaceHtml },
+    });
+    apiFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          worktreeId: 'ac-claw',
+          path: '抓包分析/hybrid-report-dogfood/index.html',
+          line: null,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    renderContent('[打开试用入口](</Users/josephnatsu/代码/AC Claw/抓包分析/hybrid-report-dogfood/index.html>)');
+
+    expect(container.querySelector('a')).toBeNull();
+    const action = container.querySelector('button');
+    expect(action).toBeTruthy();
+    await act(async () => {
+      action?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/workspace/resolve-document-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        href: '/Users/josephnatsu/代码/AC Claw/抓包分析/hybrid-report-dogfood/index.html',
+      }),
+    });
+    expect(openWorkspaceHtml).toHaveBeenCalledWith({
+      worktreeId: 'ac-claw',
+      path: '抓包分析/hybrid-report-dogfood/index.html',
+    });
+    expect(useChatStore.getState().workspaceOpenFilePath).toBeNull();
+  });
+
+  it('server-resolves a relative HTML target when Workspace has not selected a worktree yet', async () => {
+    const openWorkspaceHtml = vi.fn().mockResolvedValue({ ok: true });
+    Object.defineProperty(window, 'desktopBridge', {
+      configurable: true,
+      value: { openWorkspaceHtml },
+    });
+    useChatStore.setState({ workspaceWorktreeId: null });
+    apiFetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          worktreeId: 'cat-cafe',
+          path: 'reports/index.html',
+          line: null,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    renderContent('[Report](reports/index.html)');
+
+    const action = container.querySelector('button');
+    expect(action).toBeTruthy();
+    await act(async () => {
+      action?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/workspace/resolve-document-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ href: '/home/user/cat-cafe/reports/index.html' }),
+    });
+    expect(openWorkspaceHtml).toHaveBeenCalledWith({
+      worktreeId: 'cat-cafe',
+      path: 'reports/index.html',
     });
   });
 

@@ -31,6 +31,7 @@ describe('DesktopUpdateSettingsPanel', () => {
       sendUpdatePromptAction: () => {},
       getUpdateSettings,
       setUpdateAutoCheck,
+      openWorkspaceHtml: vi.fn(async () => ({ ok: true as const })),
     };
   });
 
