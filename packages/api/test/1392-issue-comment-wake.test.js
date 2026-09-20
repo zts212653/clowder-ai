@@ -13,10 +13,13 @@ const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/T
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { createIssueCommentTaskSpec } = await import('../dist/infrastructure/email/IssueCommentTaskSpec.js');
+const { createSetupNoiseFilter } = await import('../dist/infrastructure/email/setup-noise-filter.js');
 
 const log = { info() {}, warn() {}, error() {} };
 
-async function trackedIssue(issueState = 'open') {
+const ANY_UPDATE = { id: 101, author: 'someone', body: 'any update?', createdAt: '2026-09-15T00:00:00Z' };
+
+async function trackedIssue(issueState = 'open', comments = [ANY_UPDATE]) {
   const taskStore = new TaskStore();
   const messageStore = new MessageStore();
   const task = await taskStore.create({
@@ -49,10 +52,14 @@ async function trackedIssue(issueState = 'open') {
     log,
   });
   const triggered = [];
+  // Wired exactly as production does (index.ts): the real F140 setup-noise filter, not a stub that
+  // fakes the verdict. Only GitHub I/O is in memory.
+  const setupNoiseFilter = createSetupNoiseFilter(['chatgpt-codex-connector[bot]']);
   const spec = createIssueCommentTaskSpec({
     taskStore,
+    isNoiseComment: (c) => setupNoiseFilter({ ...c, commentType: 'conversation' }),
     issueCommentRouter: { route: async () => ({ kind: 'skipped', reason: 'lifecycle owns delivery' }) },
-    fetchComments: async () => [{ id: 101, author: 'someone', body: 'any update?', createdAt: '2026-09-15T00:00:00Z' }],
+    fetchComments: async () => comments,
     fetchIssueState: async () => issueState,
     fetchIssueMetadata: async () => ({ state: issueState, authorLogin: 'author' }),
     invokeTrigger: {
@@ -99,5 +106,51 @@ describe('#1392 AC-6 — a tracked issue comment starts the owner, not just writ
     assert.match(delivered[0].content, /issue comment #101 added by someone/, 'the final comment is not dropped');
     assert.match(delivered[0].content, /closed/);
     assert.equal((await taskStore.get(task.id)).status, 'done', 'and tracking still ends');
+  });
+});
+
+/**
+ * #1392 R3: the community projection filter decided whether the typed wait could see a comment.
+ *
+ * The collector classified this comment as `exact_setup_noise` — a judgement that belongs to the
+ * community email policy — and then dropped it before the wait matcher existed in the call, while
+ * still advancing the cursor past it. The accepted issue default is "every comment that is not your
+ * own", so the owner was promised this comment and could never receive it: the next poll starts
+ * above it. The two policies are separate questions and this drives the real gate to prove it.
+ */
+const SETUP_NOISE = {
+  id: 101,
+  author: 'chatgpt-codex-connector[bot]',
+  body: 'To use Codex here, create an environment for this repo.',
+  createdAt: '2026-09-15T00:00:00Z',
+  actorType: 'Bot',
+};
+
+describe('#1392 R3 — the community delivery policy does not decide what the wait observes', () => {
+  it('admits a comment the community policy would silence, and wakes the owner for it', async () => {
+    const { spec, messageStore, triggered } = await trackedIssue('open', [SETUP_NOISE]);
+
+    const gate = await spec.admission.gate();
+
+    assert.equal(gate.run, true, 'the gate dropped it before the matcher could judge the audience');
+    for (const item of gate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
+
+    assert.equal(
+      messageStore.getByThread('thread_issue').length,
+      1,
+      'the accepted issue default is every non-self comment',
+    );
+    assert.equal(triggered.length, 1, 'and the owner is started, not just written to');
+  });
+
+  it('never advances the wait frontier past a comment the matcher never saw', async () => {
+    const { spec, taskStore, task } = await trackedIssue('open', [SETUP_NOISE]);
+
+    const gate = await spec.admission.gate();
+    for (const item of gate.workItems ?? []) await spec.run.execute(item.signal, item.subjectKey, {});
+
+    const after = await taskStore.get(task.id);
+    const frontier = after.automationState?.await?.baseline?.issue?.lastCommentCursor ?? 100;
+    assert.ok(frontier >= SETUP_NOISE.id, `the wait frontier must cover the observed comment, got ${frontier}`);
   });
 });

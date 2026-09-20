@@ -32,6 +32,14 @@ export interface IssueCommentSignal {
   repoFullName: string;
   issueNumber: number;
   newComments: IssueComment[];
+  /**
+   * #1392 R3: this poll's comments as the typed wait must see them — unfiltered by the community
+   * delivery policy. `newComments` answers "what should the community path notify about"; this
+   * answers "what facts may the wait matcher judge". They were one list, so a comment the community
+   * classifier silenced was never offered to the accepted issue audience while the cursor advanced
+   * past it, and the owner could not receive it on any later poll.
+   */
+  readonly waitFactComments?: IssueComment[];
   readonly deliveredCursor?: number;
   readonly retryWake?: IssuePendingWake;
   readonly commitRoutedWake?: (wake: IssuePendingWake) => Promise<void>;
@@ -369,16 +377,21 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                 processedComments.length > 0
                   ? Math.max(...processedComments.map((comment) => comment.id))
                   : deliveryCursor;
+              // #1392 R3: everything successfully collected this poll, community verdict aside.
+              const waitFactComments = opts.waitLifecycle
+                ? processedComments.filter((comment) => comment.id > deliveryCursor)
+                : [];
 
               if (issueState === 'closed') {
                 // Issue closed: deliver final pending batch (if any), then mark done
-                if (pendingDelivery.length > 0) {
+                if (pendingDelivery.length > 0 || waitFactComments.length > 0) {
                   workItems.push({
                     signal: {
                       task,
                       repoFullName,
                       issueNumber,
                       newComments: pendingDelivery,
+                      waitFactComments,
                       issueState,
                       deliveredCursor: processedDeliveryBoundary,
                       commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake),
@@ -423,7 +436,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                 continue;
               }
 
-              if (pendingDelivery.length === 0) {
+              if (pendingDelivery.length === 0 && waitFactComments.length === 0) {
                 // All fetched comments were echoes. Advance the delivery cursor past them
                 // without updating lastNotifiedAt to prevent permanent polling churn —
                 // without this, min(collectionCursor, deliveryCursor) = deliveryCursor keeps
@@ -446,6 +459,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   repoFullName,
                   issueNumber,
                   newComments: pendingDelivery,
+                  waitFactComments,
                   issueState,
                   deliveredCursor: processedDeliveryBoundary,
                   commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake),
@@ -471,15 +485,19 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
 
               const maxCommentId =
                 allNewComments.length > 0 ? Math.max(...allNewComments.map((c) => c.id)) : commentCursor;
+              // #1392 R3: the legacy path has the same split to make.
+              const waitFactComments = opts.waitLifecycle ? allNewComments : [];
 
-              // All new items were echo → advance cursor without notification
-              if (newComments.length === 0 && allNewComments.length > 0) {
+              // All new items were echo → advance cursor without notification.
+              // #1392 R3: only when no typed wait is watching. With one, the matcher has not judged
+              // these comments yet; advancing here is exactly what made them unreachable forever.
+              if (newComments.length === 0 && allNewComments.length > 0 && !opts.waitLifecycle) {
                 await advanceCursor(task.id, issueKey, maxCommentId);
               }
 
               // AC-D4: Issue closed → deliver pending comments first, then auto-close
               if (issueState === 'closed') {
-                if (newComments.length > 0) {
+                if (newComments.length > 0 || waitFactComments.length > 0) {
                   // Deliver final comments; only a durable accepted wake marks the task done.
                   workItems.push({
                     signal: {
@@ -487,6 +505,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                       repoFullName,
                       issueNumber,
                       newComments,
+                      waitFactComments,
                       issueState,
                       deliveredCursor: maxCommentId,
                       commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake, true),
@@ -518,7 +537,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                 continue;
               }
 
-              if (newComments.length === 0) continue;
+              if (newComments.length === 0 && waitFactComments.length === 0) continue;
 
               workItems.push({
                 signal: {
@@ -526,6 +545,7 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
                   repoFullName,
                   issueNumber,
                   newComments,
+                  waitFactComments,
                   issueState,
                   deliveredCursor: maxCommentId,
                   commitRoutedWake: (wake) => persistRoutedWake(task.id, issueKey, wake, true),
@@ -568,17 +588,19 @@ export function createIssueCommentTaskSpec(opts: IssueCommentTaskSpecOptions): T
         }
 
         if (opts.waitLifecycle) {
+          // #1392 R3: judge the raw facts, not the community-filtered subset.
+          const observedComments = signal.waitFactComments ?? signal.newComments;
           const deliveredCursor =
             signal.deliveredCursor ??
-            (signal.newComments.length > 0
-              ? Math.max(...signal.newComments.map((comment) => comment.id))
+            (observedComments.length > 0
+              ? Math.max(...observedComments.map((comment) => comment.id))
               : (task.automationState?.issue?.lastCommentCursor ?? 0));
           const observed = await opts.waitLifecycle.observe({
             taskId: task.id,
             facts: {
               issue: {
                 state: signal.issueState ?? 'open',
-                comments: signal.newComments.map((comment) => ({
+                comments: observedComments.map((comment) => ({
                   id: comment.id,
                   author: comment.author,
                   sourceRef: `github:issue-comment:${comment.id}`,
