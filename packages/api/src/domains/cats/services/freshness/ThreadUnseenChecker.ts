@@ -8,13 +8,14 @@
  * Content-free: returns only count + sender names + maxMessageId.
  * Does NOT return message content (privacy invariant, AC-B6).
  *
- * This is the bridge between FreshnessNoticeService (domain logic)
+ * This is the bridge between the provider-native notice broker (domain logic)
  * and the actual data stores (DeliveryCursorStore + MessageStore).
  */
 
 import type { CatId } from '@cat-cafe/shared';
 import { cursorFor, parseCursor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
+import { isFreshnessSelfSourceMessage, isFreshnessSelfSourceQueueEntry } from './FreshnessSourcePolicy.js';
 import {
   type FreshnessMessageReader,
   getFreshnessSenderLabel,
@@ -22,9 +23,31 @@ import {
   isExpectedA2AReplyForCat,
   isFreshnessRoutableMessage,
   type QueuedMessageChecker,
-} from './checkFreshnessForPostMessage.js';
-import type { UnseenChecker, UnseenResult } from './FreshnessNoticeService.js';
-import { isFreshnessSelfSourceMessage, isFreshnessSelfSourceQueueEntry } from './FreshnessSourcePolicy.js';
+} from './freshness-unseen-source.js';
+
+export interface UnseenResult {
+  count: number;
+  senders: string[];
+  maxMessageId: string;
+  /**
+   * Stable, content-free identity for coalescing repeated notice attempts when
+   * maxMessageId is only a synthetic sortable cursor. Undefined preserves the
+   * legacy ordered-frontier coalescing path. This key is never receipt proof.
+   */
+  noticeDedupKey?: string;
+  /**
+   * Exact durable message identities represented by maxMessageId when the
+   * frontier itself is synthetic (for example, a queued-only fallback).
+   * Undefined preserves the legacy invariant that maxMessageId is exact.
+   * An explicit empty list means correlation identity is unavailable and
+   * receipt projection must fail closed.
+   */
+  correlationMessageIds?: string[];
+}
+
+export interface UnseenChecker {
+  checkUnseen(params: { threadId: string; catId: CatId }): Promise<UnseenResult | null>;
+}
 
 // Raised from 20 to 50 to reduce false-negative edge case where the first
 // batch contains only filtered messages (deleted/briefing/play-hidden).
@@ -133,9 +156,7 @@ export class ThreadUnseenChecker implements UnseenChecker {
     const senderSet = new Set(nonSelf.map((e) => getQueuedFreshnessSenderLabel(e)));
     const senders = [...senderSet];
     const frontierEntry = nonSelf.at(-1);
-    const correlationMessageIds = [frontierEntry?.messageId ?? '', ...(frontierEntry?.mergedMessageIds ?? [])].filter(
-      (messageId, index, all) => messageId.length > 0 && all.indexOf(messageId) === index,
-    );
+    const correlationMessageIds = frontierEntry?.messageId ? [frontierEntry.messageId] : [];
     const noticeDedupKey = JSON.stringify({
       queueEntryId: frontierEntry?.entryId ?? null,
       messageIds: [...correlationMessageIds].sort(),
@@ -157,9 +178,9 @@ export class ThreadUnseenChecker implements UnseenChecker {
       // syntheticSeq = max(seenSeq+1, Date.now()) ensures the cursor exceeds
       // the current seen cursor (codex R13 HWM fix).
       maxMessageId: cursorFor({ id: '0', visibilitySeq: syntheticSeq }),
-      // Re-checking the same queued entry generates a fresh synthetic cursor.
-      // Coalesce by durable, content-free Queue identity instead; a newly
-      // merged message ID changes this key and permits exactly one new notice.
+      // Re-checking the same queued row generates a fresh synthetic cursor.
+      // Deduplicate by its durable, content-free scalar identity; a new source
+      // arrives as a new row and therefore permits exactly one new notice.
       noticeDedupKey,
       // Receipt truth must use the exact Queue identity, never the synthetic
       // cursor frontier. If the frontier entry lacks identity, keep [] so

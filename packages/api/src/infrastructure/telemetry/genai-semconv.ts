@@ -45,8 +45,6 @@ export const ACTION_SUCCESSOR_MODE = 'action_successor.mode';
 // --- F174 Phase D1: callback auth failure attributes ---
 export const CALLBACK_TOOL = 'callback.tool';
 export const CALLBACK_REASON = 'callback.reason';
-/** Bounded F254 relevance suppressions; values come from FreshnessRelevanceReason. */
-export const FRESHNESS_RELEVANCE_REASON = 'freshness.relevance_reason';
 
 // --- F236 Track-1: anchor-first telemetry attributes ---
 /**
@@ -93,7 +91,6 @@ export const TARGET_LAYER = 'target.layer';
 // --- Route aggregate attributes (set at route completion) ---
 export const ROUTE_TOTAL_CATS_INVOKED = 'route.total_cats_invoked';
 export const ROUTE_TOTAL_TOKENS = 'route.total_tokens';
-export const ROUTE_HAS_A2A_HANDOFF = 'route.has_a2a_handoff';
 
 /**
  * F153: Caller trace context for cross-route A2A propagation.

@@ -32,7 +32,7 @@ export function computeSillyStats(messages: MessageLike[], catNames: Record<stri
 
   for (const msg of messages) {
     // Only count user messages (catId === null) that scold mentioned cats
-    if (msg.catId !== null) continue;
+    if (msg.from ? msg.from.kind !== 'user' : msg.catId !== null) continue;
     if (!isAngry(msg.content)) continue;
     for (const catId of msg.mentions) {
       scoldCount.set(catId, (scoldCount.get(catId) ?? 0) + 1);

@@ -1,14 +1,12 @@
 /**
- * F167 Phase H AC-H3/H5 — route-serial integration: routing-syntax-hint emission.
+ * F167 Phase H AC-H3/H5 — route-serial integration: routing syntax correction.
  *
  * Pure detector coverage is in `final-routing-slot.test.js`. This suite locks
  * the wire-up between route-serial and the validator:
- *   - Inline @ in final routing slot + no legitimate exit → appends
- *     `source.connector === 'routing-syntax-hint'` system message
- *   - Legitimate exit (line-start @ / hold_ball / MCP targetCats) → no emit
- *   - Structural exemptions (fenced code, blockquote, URL) → no emit
- *   - AC-H5: when Phase H hits AND verdict-no-pass would also hit, only
- *     routing-syntax-hint emits (root-cause wins; AC-C7 suppressed)
+ *   - Inline @ in final routing slot + no legitimate exit stays internal
+ *   - Legitimate exit (line-start @ / hold_ball / MCP targetCats) needs no correction
+ *   - Structural exemptions (fenced code, blockquote, URL) need no correction
+ *   - AC-H5: protocol correction never appends a public History hint
  */
 
 import assert from 'node:assert/strict';
@@ -167,18 +165,16 @@ async function runRouteWithTool(text, threadId, toolName, toolInput) {
   });
 }
 
-describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => {
-  test('inline @ in final slot + no legitimate exit → emits routing-syntax-hint', async () => {
+describe('F167 Phase H AC-H3: routing syntax stays an internal correction signal', () => {
+  test('exports a dedicated internal correction counter', async () => {
+    const { routingSyntaxCorrectionDetected } = await import('../dist/infrastructure/telemetry/instruments.js');
+    assert.equal(typeof routingSyntaxCorrectionDetected.add, 'function');
+  });
+
+  test('inline @ in final slot + no legitimate exit → no public routing-syntax-hint', async () => {
     const { appended } = await runRoute('我让 @codex 看了下', 'thread-ph-1');
     const hint = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
-    assert.ok(hint, 'must append routing-syntax-hint when slot has inline @ with no exit');
-    assert.equal(hint.userId, 'system');
-    assert.equal(hint.catId, null);
-    assert.match(hint.content, /@codex/);
-    assert.match(hint.content, /行中|行首/);
-    assert.equal(hint.source.icon, '⚠️');
-    assert.equal(hint.source.meta.presentation, 'system_notice');
-    assert.equal(hint.source.meta.noticeTone, 'warning');
+    assert.equal(hint, undefined, 'agent-format correction must not append a public History message');
   });
 
   test('legitimate line-start @ exit → NO routing-syntax-hint', async () => {
@@ -217,21 +213,20 @@ describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => 
   });
 });
 
-describe('F167 Phase H AC-H5: AC-C7 verdict-no-pass suppression when Phase H hits', () => {
-  test('inline @ + LGTM (verdict) in slot → only routing-syntax-hint, NOT verdict-no-pass-hint', async () => {
+describe('F167 Phase H AC-H5: liveness diagnostics stay out of public History', () => {
+  test('inline @ + LGTM (verdict) in slot → no public correction hints', async () => {
     const { appended } = await runRoute('LGTM, 我让 @codex 看了下', 'thread-ph-7');
     const phaseH = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     const verdictHint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(phaseH, 'Phase H hint must emit (root cause)');
-    assert.equal(verdictHint, undefined, 'AC-H5: verdict-no-pass-hint must be suppressed when Phase H hits');
+    assert.equal(phaseH, undefined);
+    assert.equal(verdictHint, undefined);
   });
 
-  test('verdict LGTM without inline @ → verdict-no-pass-hint still emits (Phase H not hit)', async () => {
-    // Control case: Phase H does NOT fire (no inline @ in slot). AC-C7 should still fire.
+  test('verdict LGTM without inline @ → detector does not add a public verdict hint', async () => {
     const { appended } = await runRoute('LGTM, all tests pass', 'thread-ph-8');
     const phaseH = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     const verdictHint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
     assert.equal(phaseH, undefined, 'Phase H does not fire without inline @ in slot');
-    assert.ok(verdictHint, 'AC-C7 still fires on verdict-only output when Phase H did not hit');
+    assert.equal(verdictHint, undefined, 'protocol diagnostics must remain internal');
   });
 });

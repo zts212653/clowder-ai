@@ -1,5 +1,6 @@
 'use client';
 
+import type { CapabilityTipContext, LifecycleActiveRun } from '@cat-cafe/shared';
 import type { ReactNode, Ref } from 'react';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
@@ -7,13 +8,14 @@ import { useChatHistory } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useConnectionStatus } from '@/hooks/useConnectionStatus';
 import { useSendMessage } from '@/hooks/useSendMessage';
-import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
+import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
+import { getStreamingTipContexts, selectLifecycleTipMessageId } from '../capability-tip-placement';
 import { buildChatTimelineProjectionKey } from '../chat-timeline-projection-key';
 import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
@@ -23,13 +25,11 @@ import { MessageSelectionToolbar } from '../MessageSelectionToolbar';
 import { messageMountPolicy } from '../message-mount-policy';
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-selection';
 import { QueuePanel } from '../QueuePanel';
-import { collectExactLiveInvocationIds } from '../queue-receipt-projection';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
 import { ScrollToBottomButton } from '../ScrollToBottomButton';
 import { ThreadExecutionBar } from '../ThreadExecutionBar';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
-import { ThreadChatPendingMembers } from './ThreadChatPendingMembers';
 import { useThreadChatRuntime } from './ThreadChatRuntimeProvider';
 import { useThreadChatSelection } from './useThreadChatSelection';
 
@@ -74,12 +74,19 @@ export function ThreadChatSurface({
   onComposerFocusChange,
   onActivity,
 }: ThreadChatSurfaceProps) {
-  const messages = useThreadMessages(threadId);
   const liveness = useThreadLiveness(threadId);
-  const { hasActive: hasActiveInvocation, activeInvocations, catInvocations } = liveness;
+  const { hasActive: hasActiveInvocation, catStatuses, catInvocations, intentMode } = liveness;
   const { socketConnected } = useThreadChatRuntime([threadId]);
-  const { handleScroll, jumpToLatest, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } =
-    useChatHistory(threadId);
+  const {
+    messages,
+    handleScroll,
+    handleReadingIntent,
+    jumpToLatest,
+    scrollContainerRef,
+    messagesEndRef,
+    isLoadingHistory,
+    hasMore,
+  } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
   const { getCatById, refresh: refreshCats } = useCatData();
@@ -91,9 +98,17 @@ export function ThreadChatSurface({
   const uiThinkingExpandedByDefault = useChatStore((state) => state.uiThinkingExpandedByDefault);
   const isOfflineSnapshot = useChatStore((state) => state.isOfflineSnapshot);
 
-  const activeInvocationIds = useMemo(
-    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
+  const lifecycleActiveRuns = useMemo<readonly LifecycleActiveRun[]>(
+    () => Object.values(catInvocations).flatMap((invocation) => (invocation.activeRun ? [invocation.activeRun] : [])),
+    [catInvocations],
+  );
+  const capabilityTipContexts = useMemo<readonly CapabilityTipContext[]>(
+    () => getStreamingTipContexts(intentMode),
+    [intentMode],
+  );
+  const lifecycleTipMessageId = useMemo(
+    () => selectLifecycleTipMessageId(messages, catStatuses, catInvocations),
+    [messages, catStatuses, catInvocations],
   );
   const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
   const timelineProjectionKey = useMemo(() => buildChatTimelineProjectionKey(messages), [messages]);
@@ -145,7 +160,12 @@ export function ThreadChatSurface({
         <main
           ref={scrollContainerRef}
           onScroll={handleScroll}
-          className={compact ? 'h-full overflow-y-auto px-3 py-3' : 'h-full overflow-y-auto p-4'}
+          onClickCapture={handleReadingIntent}
+          className={
+            compact
+              ? 'h-full overflow-y-auto px-3 py-3 [overflow-anchor:none]'
+              : 'h-full overflow-y-auto p-4 [overflow-anchor:none]'
+          }
           aria-label="对话内容"
           data-guide-id="bootcamp.preview-result"
           data-bootcamp-host="chat-messages"
@@ -179,7 +199,7 @@ export function ThreadChatSurface({
                     message={message}
                     threadId={threadId}
                     timelineMessages={timelineProjectionMessages}
-                    activeInvocationIds={message.extra?.queueReceipt ? activeInvocationIds : undefined}
+                    activeRuns={message.lifecycle?.dispatchRefs?.length ? lifecycleActiveRuns : undefined}
                     getCatById={getCatById}
                     onEditCat={handleEditCat}
                     onEditCoCreator={handleEditCoCreator}
@@ -195,10 +215,11 @@ export function ThreadChatSurface({
                     backgroundMountDelayMs={mountPolicy.backgroundMountDelayMs}
                     sendContext={interactiveSendContext}
                     confirmations={messageConfirmations?.get(message.id)}
+                    showCapabilityTip={message.id === lifecycleTipMessageId}
+                    capabilityTipContexts={capabilityTipContexts}
                   />
                 );
               })}
-          <ThreadChatPendingMembers threadId={threadId} messages={messages} liveness={liveness} />
           <div ref={messagesEndRef} />
         </main>
         <ScrollToBottomButton
@@ -230,17 +251,8 @@ export function ThreadChatSurface({
             <ChatInput
               key={threadId}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
-                handleSend(
-                  content,
-                  images,
-                  undefined,
-                  whisper,
-                  deliveryMode,
-                  replyToId,
-                  messageDisposition,
-                  contextAttachments,
-                )
+              onSend={(content, images, whisper, replyToId, contextAttachments, explicitTargetCats) =>
+                handleSend(content, images, undefined, whisper, replyToId, contextAttachments, explicitTargetCats)
               }
               disabled={connectionStatus.isReadonly}
               hasActiveInvocation={hasActiveInvocation}

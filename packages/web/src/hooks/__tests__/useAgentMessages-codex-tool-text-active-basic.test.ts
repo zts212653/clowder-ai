@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { deriveBubbleId } from '@/debug/bubbleIdentity';
 import { getActiveBubble } from '@/hooks/thread-runtime-ledger';
 import { getThreadRuntimeLedger } from '@/hooks/thread-runtime-singleton';
+import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
 import { flatCodexStreamBubbles, installActiveHarness } from './useAgentMessages-codex-tool-text-convergence.helpers';
 
@@ -159,6 +160,41 @@ describe('Codex active path — tool work-log + text converge', () => {
     expect(streamBubbles).toHaveLength(1);
     expect(streamBubbles[0]!.content).toContain('先看一下');
     expect(streamBubbles[0]!.content).toContain('结论是这样的');
+  });
+
+  it('moves a processing bubble behind later messages when a tool event proves new activity', () => {
+    const parent = 'parent-live-order';
+    const turn = 'turn-live-order';
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      useChatStore.setState({ catInvocations: { codex: { invocationId: parent, turnInvocationId: turn } } });
+      harness.render();
+      harness.send(tool(parent, 1_000, turn));
+      const liveBubble = flatCodexStreamBubbles()[0];
+      expect(liveBubble).toBeDefined();
+      if (!liveBubble) throw new Error('expected live Codex bubble');
+      const bubbleId = liveBubble.id;
+
+      useChatStore.getState().addMessage({
+        id: 'user-after-first-tool',
+        type: 'user',
+        content: 'new context',
+        timestamp: 2_000,
+      });
+      expect(selectThreadMessages(useChatStore.getState(), THREAD).at(-1)?.id).toBe('user-after-first-tool');
+
+      vi.setSystemTime(3_000);
+      harness.send(tool(parent, 3_000, turn));
+
+      expect(selectThreadMessages(useChatStore.getState(), THREAD).at(-1)).toMatchObject({
+        id: bubbleId,
+        timestamp: 3_000,
+        timelineOrderAt: 3_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('[race] tool_use before turn id resolvable + later text(turn) converge to ONE bubble', () => {

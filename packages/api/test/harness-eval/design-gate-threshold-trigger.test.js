@@ -74,7 +74,7 @@ function setup(value, overrides = {}) {
   return {
     store,
     deliver: mock.fn(async () => 'message-design-gate'),
-    invokeTrigger: { trigger: mock.fn(async () => 'dispatched') },
+    invokeTrigger: { trigger: mock.fn(async () => 'enqueued') },
     input: {
       provider: { resolveLatestTransition: async () => value },
       domain,
@@ -116,7 +116,7 @@ describe('F303 design-gate threshold trigger', () => {
     assert.equal(first.outcome, 'dispatched');
     assert.equal(replay.outcome, 'deduped');
     assert.equal(state.deliver.mock.callCount(), 1);
-    assert.equal(state.invokeTrigger.trigger.mock.callCount(), 1);
+    assert.equal(state.deliver.mock.callCount(), 1);
     assert.match(state.deliver.mock.calls[0].arguments[0].content, /Trigger channel: threshold_event/);
   });
 

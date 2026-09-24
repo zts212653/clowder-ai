@@ -9,12 +9,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import {
-  type CatId,
-  type FreshnessClosureStatus,
-  parseWaitContinuationCarrier,
-  type WaitContinuationCarrierV1,
-} from '@cat-cafe/shared';
+import { type CatId, parseWaitContinuationCarrier, type WaitContinuationCarrierV1 } from '@cat-cafe/shared';
 import { isValidTransition } from './invocation-state-machine.js';
 
 /** InvocationRecord lifecycle statuses */
@@ -102,10 +97,6 @@ export interface InvocationRecord {
   /** F128: Epoch ms when usageByCat was first recorded. Stable for daily bucketing
    *  (unlike updatedAt which any subsequent update can shift). */
   usageRecordedAt?: number;
-  /** F254 Phase E: typed custody proof for a catch-closure successor. */
-  freshnessClosureId?: string;
-  freshnessInputFrontierMessageId?: string;
-  freshnessClosureStatus?: FreshnessClosureStatus;
   /** F167 S.1-b: server-written carrier classification recovered by holder callbacks. */
   actionLeaseCarrier: InvocationActionLeaseCarrier;
   /** #1291 Gate 4: exact wait generation/outcome that authorized this continuation. */
@@ -155,9 +146,6 @@ export interface UpdateInvocationInput {
    *  updatedAt fallback. Never `invocation.createdAt` (would mis-bucket
    *  cross-midnight runs onto the start day instead of the finish day). */
   usageRecordedAt?: number;
-  freshnessClosureId?: string;
-  freshnessInputFrontierMessageId?: string;
-  freshnessClosureStatus?: FreshnessClosureStatus;
 }
 
 /**
@@ -327,11 +315,6 @@ export class InvocationRecordStore implements IInvocationRecordStore {
     } else if (input.executionStartedAt !== undefined) {
       record.executionStartedAt = input.executionStartedAt;
     }
-    if (input.freshnessClosureId !== undefined) record.freshnessClosureId = input.freshnessClosureId;
-    if (input.freshnessInputFrontierMessageId !== undefined) {
-      record.freshnessInputFrontierMessageId = input.freshnessInputFrontierMessageId;
-    }
-    if (input.freshnessClosureStatus !== undefined) record.freshnessClosureStatus = input.freshnessClosureStatus;
     if (input.usageByCat !== undefined) {
       record.usageByCat = input.usageByCat;
       // F128: stamp usageRecordedAt only on first write (stable for daily bucketing).

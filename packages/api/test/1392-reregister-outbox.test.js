@@ -9,6 +9,7 @@ const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
 const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 
 describe('#1392 explicit registration preserves delivery already owed to the owner', () => {
   for (const subject of ['pr', 'issue']) {
@@ -29,9 +30,10 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         const thread = await threadStore.create('user-1', 'outbox re-registration');
         const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
         const wakes = [];
+        const connector = connectorDeliveryHarness({ messageStore });
         const lifecycleOptions = {
           taskStore,
-          deliveryDeps: { messageStore },
+          deliveryDeps: connector.deliveryDeps,
           eventLog,
           log: { info() {}, warn() {}, error() {} },
           wakeOwner: (delivered) => wakes.push(delivered.outcome.outcomeId),
@@ -85,8 +87,11 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         });
         assert.equal(first.statusCode, 200, first.body);
         const taskId = first.json().task.id;
-        const append = messageStore.append.bind(messageStore);
-        messageStore.append = () => {
+        // RFC §5.2: the durable boundary is atomic Message+Queue admission, not a bare store
+        // append. Inject the outage at that exact seam so this still proves the product fact:
+        // a failed delivery must not settle the outbox.
+        const append = messageStore.appendWithQueueLedgerAdmission.bind(messageStore);
+        messageStore.appendWithQueueLedgerAdmission = () => {
           throw new Error('delivery temporarily offline');
         };
         liveHead = 'after';
@@ -104,7 +109,11 @@ describe('#1392 explicit registration preserves delivery already owed to the own
         );
         const before = await taskStore.get(taskId);
         const pending = structuredClone(before.automationState.waitOutcome);
+        // The claim is taken before the send, so a delivery that throws leaves the outcome claimed.
+        // `delivery` deliberately stays `pending` so an older binary would still deliver it; the
+        // claim rides on its own field. The recovery below is what proves it is still drainable.
         assert.equal(pending.delivery, 'pending');
+        assert.equal(typeof pending.publishClaimedAt, 'number', 'and it carries the publish claim');
         assert.equal(pending.reason, mode === 'expired' ? 'expired' : 'matched');
         const renewed = mode !== 'single-fire' && mode !== 'expired';
         assert.equal(before.automationState.await?.generation, renewed ? 2 : undefined);
@@ -122,7 +131,7 @@ describe('#1392 explicit registration preserves delivery already owed to the own
           assert.equal(blocked.statusCode, 409, 'two owed deliveries cannot share one outbox slot');
           assert.match(blocked.json().error, /pending delivery/);
           assert.deepEqual(await taskStore.get(taskId), before, 'a rejected registration must have no task mutation');
-          messageStore.append = append;
+          messageStore.appendWithQueueLedgerAdmission = append;
           await new GitHubWaitLifecycleService(lifecycleOptions).recoverOutcome(taskId);
         }
         const second = await register({ nextStep: 'Handle the next observation.' });
@@ -145,12 +154,14 @@ describe('#1392 explicit registration preserves delivery already owed to the own
           );
         }
 
-        messageStore.append = append;
+        messageStore.appendWithQueueLedgerAdmission = append;
         // Restart the lifecycle consumer: only TaskStore state may carry the owed notification.
         const restarted = new GitHubWaitLifecycleService(lifecycleOptions);
         assert.equal((await restarted.recoverOutcome(taskId)).kind, mode === 'cross-owner' ? 'state_only' : 'notified');
         await restarted.recoverOutcome(taskId);
-        const messages = await messageStore.getByThread(thread.id);
+        // RFC §5.2: the owed notification is durable at Queue commit. A queued source is not yet a
+        // History member, so observe the same boundary production settles on.
+        const messages = connector.deliveries(thread.id, 'user-1');
         assert.equal(messages.length, successorExpired ? 2 : 1);
         assert.deepEqual(messages[0].mentions, ['opus']);
         assert.match(messages[0].content, /Handle the first observation/);

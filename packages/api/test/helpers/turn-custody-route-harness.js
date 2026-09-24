@@ -1,4 +1,9 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+
+const TEMPLATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../cat-template.json');
+process.env.CAT_TEMPLATE_PATH = TEMPLATE_PATH;
 
 function createSequenceService(texts) {
   let callCount = 0;
@@ -21,6 +26,7 @@ function createSequenceService(texts) {
 function createMockDeps(services, triggerMessage, projection) {
   let sequence = 0;
   let projectionOpenCount = 0;
+  const appendedMessages = [];
   return {
     services,
     invocationDeps: {
@@ -37,19 +43,22 @@ function createMockDeps(services, triggerMessage, projection) {
       apiUrl: 'http://127.0.0.1:3004',
     },
     messageStore: {
-      append: async (message) => ({
-        id: `stored-${++sequence}`,
-        userId: message.userId ?? '',
-        catId: message.catId ?? null,
-        content: message.content ?? '',
-        mentions: message.mentions ?? [],
-        timestamp: message.timestamp ?? 0,
-        source: message.source,
-        origin: message.origin,
-        mentionsUser: message.mentionsUser,
-        toolEvents: message.toolEvents,
-        extra: message.extra,
-      }),
+      append: async (message) => {
+        appendedMessages.push(message);
+        return {
+          id: `stored-${++sequence}`,
+          userId: message.userId ?? '',
+          catId: message.catId ?? null,
+          content: message.content ?? '',
+          mentions: message.mentions ?? [],
+          timestamp: message.timestamp ?? 0,
+          source: message.source,
+          origin: message.origin,
+          mentionsUser: message.mentionsUser,
+          toolEvents: message.toolEvents,
+          extra: message.extra,
+        };
+      },
       getById: async (messageId) => (messageId === triggerMessage.id ? triggerMessage : null),
       getRecent: async () => [],
       getMentionsFor: async () => [],
@@ -77,6 +86,8 @@ function createMockDeps(services, triggerMessage, projection) {
         return projection;
       },
     },
+    getProjectionOpenCount: () => projectionOpenCount,
+    getAppendedMessages: () => appendedMessages,
   };
 }
 
@@ -85,7 +96,7 @@ export async function runTurnCustodyRoute({ output, triggerMessage, wake, projec
   const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');
   const { routeSerial } = await import('../../dist/domains/cats/services/agents/routing/route-serial.js');
   catRegistry.reset();
-  for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig()))) {
+  for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(TEMPLATE_PATH)))) {
     catRegistry.register(id, config);
   }
   try {
@@ -110,6 +121,10 @@ export async function runTurnCustodyRoute({ output, triggerMessage, wake, projec
     )) {
       // Exhaust the real route so its pending Phase T close emits evidence.
     }
+    return {
+      projectionOpenCount: deps.getProjectionOpenCount(),
+      appendedMessages: deps.getAppendedMessages(),
+    };
   } finally {
     catRegistry.reset();
     for (const [id, config] of Object.entries(original)) {

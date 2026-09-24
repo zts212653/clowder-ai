@@ -56,12 +56,18 @@ function makeTaskStore({ persisted = {} } = {}) {
   };
 }
 
-function makeIssueCommentRouter({ failRoute = false } = {}) {
+function makeIssueCommentRouter({ failRoute = false, failFirst = 0 } = {}) {
   const calls = [];
+  let remainingFailures = failFirst;
   return {
     calls,
     async route(signal, tracking) {
       calls.push({ signal, tracking });
+      // RFC §5.2: a route that cannot admit the envelope is the only "undelivered" shape there is.
+      if (remainingFailures > 0) {
+        remainingFailures -= 1;
+        return { kind: 'skipped', reason: 'queue admission unavailable' };
+      }
       if (failRoute) return { kind: 'skipped', reason: 'route failed (stub)' };
       return {
         kind: 'notified',
@@ -248,7 +254,9 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     );
   });
 
-  it('route success without an accepted wake advances cursors but not lastNotifiedAt', async () => {
+  // RFC §5.2: routing IS admission, so there is no "routed but not woken" state to observe. The
+  // invariant that replaces it is stronger: the cursor and the notification settle in ONE patch.
+  it('a confirmed route settles the delivery cursor and lastNotifiedAt in one patch', async () => {
     assert.ok(createIssueCommentTaskSpec);
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
@@ -267,10 +275,14 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
     // Find the commit patch (value=400), not the one-time seed patch (value=0 for unseeded task).
     const deliveryPatch = taskStore.patches.find((p) => p.patch.issue?.lastDeliveredCursor === 400);
     assert.ok(deliveryPatch, 'lastDeliveredCursor must advance to 400 on route success');
+    assert.ok(
+      typeof deliveryPatch.patch.issue.lastNotifiedAt === 'number',
+      'an admitted envelope is the wake, so the notification settles with the cursor',
+    );
     assert.strictEqual(
-      deliveryPatch.patch.issue.lastNotifiedAt,
-      undefined,
-      'routing a message is not sufficient evidence that the owner was woken',
+      deliveryPatch.patch.issue.pendingWake,
+      null,
+      'and no pending-wake ledger is left behind for a later acknowledgement',
     );
   });
 
@@ -285,7 +297,7 @@ describe('IssueCommentTaskSpec: with eventLog — dual-cursor', () => {
       taskStore,
       router,
       comments,
-      extra: { eventLog, invokeTrigger: { trigger: async () => 'dispatched' } },
+      extra: { eventLog, invokeTrigger: { trigger: async () => 'enqueued' } },
     });
 
     const gate = await runGate(spec);
@@ -1158,25 +1170,23 @@ describe('IssueCommentTaskSpec: one-time delivery cursor seed before collection 
 });
 
 describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => {
-  it('persists a failed wake and retries the same routed message without routing a duplicate', async () => {
+  /*
+   * PR #1181 asked: a wake that could not be delivered must not be lost, and must not be delivered
+   * twice. Under the unified lifecycle the Queue answers both without a pending-wake ledger — a
+   * non-admitted route leaves the cursor untouched, so the next poll re-observes the same batch,
+   * and that batch's frontier is its idempotency key, so admission converges on one message.
+   */
+  it('a non-admitted route holds the cursor and the next poll re-admits the same batch once', async () => {
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
-    const router = makeIssueCommentRouter();
+    const router = makeIssueCommentRouter({ failFirst: 1 });
     const eventLog = makeEventLog();
-    const outcomes = ['full', 'dispatched'];
-    const triggerCalls = [];
     const spec = createIssueCommentTaskSpec({
       taskStore,
       issueCommentRouter: router,
       fetchComments: async (_repo, _issue, since) =>
         since < 100 ? [{ id: 100, author: 'maintainer', body: 'please retry', createdAt: '2026-07-19T13:50:00Z' }] : [],
       fetchIssueState: async () => 'open',
-      invokeTrigger: {
-        async trigger(...args) {
-          triggerCalls.push(args);
-          return outcomes.shift();
-        },
-      },
       eventLog,
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });
@@ -1184,47 +1194,49 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
     const first = await runGate(spec);
     await runExecute(spec, first);
     const afterFailure = taskStore.tasks.get('task-1');
-    assert.equal(afterFailure.automationState.issue.lastDeliveredCursor, 100, 'message was routed once');
-    assert.equal(afterFailure.automationState.issue.lastNotifiedAt, undefined, 'failed wake is not a notification');
-    assert.equal(afterFailure.automationState.issue.pendingWake.messageId, 'msg-1');
+    assert.notEqual(
+      afterFailure.automationState.issue.lastDeliveredCursor,
+      100,
+      'a non-admitted envelope must not advance the delivery cursor',
+    );
+    assert.equal(afterFailure.automationState.issue.lastNotifiedAt, undefined, 'and it is not a notification');
 
     const second = await runGate(spec);
-    assert.equal(second.run, true, 'pending wake must be retryable without new GitHub comments');
+    assert.equal(second.run, true, 'the held cursor means the same batch is offered again');
     await runExecute(spec, second);
 
-    assert.equal(router.calls.length, 1, 'retry must reuse the persisted routed message');
-    assert.equal(triggerCalls.length, 2);
-    assert.equal(triggerCalls[0][4], 'msg-1');
-    assert.equal(triggerCalls[1][4], 'msg-1');
+    assert.equal(router.calls.length, 2, 'the batch is re-observed rather than replayed from a ledger');
+    const [firstCall, secondCall] = router.calls;
+    assert.deepEqual(
+      firstCall.signal.newComments.map((c) => c.id),
+      secondCall.signal.newComments.map((c) => c.id),
+      'the same batch frontier means the same idempotency key, so admission cannot duplicate it',
+    );
     const afterSuccess = taskStore.tasks.get('task-1');
-    assert.equal(afterSuccess.automationState.issue.pendingWake, null);
+    assert.equal(afterSuccess.automationState.issue.lastDeliveredCursor, 100);
     assert.equal(typeof afterSuccess.automationState.issue.lastNotifiedAt, 'number');
   });
 
-  it('closed final batch clears its pending wake, then completes after a refreshed gate', async () => {
+  // The contract is unchanged: a closed issue's final batch must reach the owner before tracking
+  // completes. What is gone is the extra poll the pending-wake ledger used to insert.
+  it('a closed issue delivers its final batch first, then completes on a refreshed gate', async () => {
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
     const router = makeIssueCommentRouter();
-    const outcomes = ['full', 'enqueued'];
     const spec = createIssueCommentTaskSpec({
       taskStore,
       issueCommentRouter: router,
       fetchComments: async (_repo, _issue, since) =>
         since < 100 ? [{ id: 100, author: 'maintainer', body: 'closing note', createdAt: '2026-07-19T13:50:00Z' }] : [],
       fetchIssueState: async () => 'closed',
-      invokeTrigger: { trigger: async () => outcomes.shift() },
       eventLog: makeEventLog(),
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });
 
     await runExecute(spec, await runGate(spec));
-    assert.equal(taskStore.tasks.get('task-1').status, 'active', 'failed final wake must not close tracking');
-
-    await runExecute(spec, await runGate(spec));
-    const afterAcceptedRetry = taskStore.tasks.get('task-1');
-    assert.equal(afterAcceptedRetry.status, 'active', 'accepted wake still requires a refreshed closure check');
-    assert.equal(afterAcceptedRetry.automationState.issue.pendingWake, null);
-    assert.equal(typeof afterAcceptedRetry.automationState.issue.lastNotifiedAt, 'number');
+    const afterFinalBatch = taskStore.tasks.get('task-1');
+    assert.equal(afterFinalBatch.status, 'active', 'the final batch must be delivered before tracking closes');
+    assert.equal(typeof afterFinalBatch.automationState.issue.lastNotifiedAt, 'number');
 
     await runGate(spec);
     const completed = taskStore.tasks.get('task-1');
@@ -1232,12 +1244,13 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
     assert.equal(completed.automationState.issue.issueState, 'closed');
   });
 
-  it('accepted final wake stays active until a later gate refetches comments and proves closure', async () => {
+  // Contract kept: a comment that arrives while an earlier attempt was unadmitted must still be
+  // routed, never swallowed by closure. Without the ledger it is simply collected by the next gate.
+  it('a comment arriving during an unadmitted attempt is still routed before closure', async () => {
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
-    const router = makeIssueCommentRouter();
+    const router = makeIssueCommentRouter({ failFirst: 1 });
     const comments = [{ id: 100, author: 'maintainer', body: 'closing note' }];
-    const outcomes = ['full', 'dispatched'];
     let fetchCalls = 0;
     const spec = createIssueCommentTaskSpec({
       taskStore,
@@ -1247,36 +1260,35 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
         return comments.filter((comment) => comment.id > since);
       },
       fetchIssueState: async () => 'closed',
-      invokeTrigger: { trigger: async () => outcomes.shift() },
       eventLog: makeEventLog(),
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });
 
     await runExecute(spec, await runGate(spec));
-    comments.push({ id: 101, author: 'maintainer', body: 'arrived while wake was pending' });
+    comments.push({ id: 101, author: 'maintainer', body: 'arrived while the first attempt was unadmitted' });
 
-    await runExecute(spec, await runGate(spec));
-    const afterAcceptedRetry = taskStore.tasks.get('task-1');
-    assert.equal(afterAcceptedRetry.status, 'active', 'an accepted stale wake must not close tracking');
-    assert.equal(afterAcceptedRetry.automationState.issue.pendingWake, null);
-    assert.equal(fetchCalls, 1, 'the retry gate reuses the persisted wake before collecting new activity');
-
-    const refetched = await runGate(spec);
-    assert.equal(fetchCalls, 2, 'the gate after acknowledgement must refetch issue activity');
-    assert.equal(refetched.run, true);
+    const second = await runGate(spec);
+    assert.equal(fetchCalls, 2, 'the held cursor makes the next gate collect fresh activity');
+    assert.equal(second.run, true);
     assert.deepEqual(
-      refetched.workItems[0].signal.newComments.map((comment) => comment.id),
-      [101],
-      'the comment that arrived during the pending wake must be routed',
+      second.workItems[0].signal.newComments.map((comment) => comment.id),
+      [100, 101],
+      'the comment that arrived during the unadmitted attempt is routed together with it',
+    );
+    await runExecute(spec, second);
+    assert.equal(
+      taskStore.tasks.get('task-1').status,
+      'active',
+      'closure still waits until a refreshed gate proves there is nothing left to deliver',
     );
   });
 
-  it('accepted final wake rechecks a reopened issue instead of applying its stale close decision', async () => {
+  // Contract kept: a reopened issue must be re-checked, never closed by a decision taken earlier.
+  it('a reopened issue is rechecked instead of closed by a stale decision', async () => {
     const taskStore = makeTaskStore();
     taskStore.addTask(makeTask());
     let issueState = 'closed';
     let stateFetches = 0;
-    const outcomes = ['full', 'dispatched'];
     const spec = createIssueCommentTaskSpec({
       taskStore,
       issueCommentRouter: makeIssueCommentRouter(),
@@ -1286,21 +1298,18 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
         stateFetches += 1;
         return issueState;
       },
-      invokeTrigger: { trigger: async () => outcomes.shift() },
       eventLog: makeEventLog(),
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });
 
     await runExecute(spec, await runGate(spec));
-    issueState = 'open';
-    await runExecute(spec, await runGate(spec));
+    assert.equal(taskStore.tasks.get('task-1').status, 'active', 'the final batch is delivered first');
 
-    const afterAcceptedRetry = taskStore.tasks.get('task-1');
-    assert.equal(afterAcceptedRetry.status, 'active');
+    issueState = 'open';
     const rechecked = await runGate(spec);
-    assert.equal(rechecked.run, false);
-    assert.equal(stateFetches, 2, 'the gate after acknowledgement must refetch the reopened state');
-    assert.equal(taskStore.tasks.get('task-1').status, 'active');
+    assert.equal(rechecked.run, false, 'a reopened issue with nothing new produces no work');
+    assert.equal(stateFetches, 2, 'the later gate refetches state rather than reusing the close decision');
+    assert.equal(taskStore.tasks.get('task-1').status, 'active', 'and the stale close decision is not applied');
   });
 
   it('closed mixed batch advances delivery through a trailing echo before terminal completion', async () => {
@@ -1317,7 +1326,7 @@ describe('PR #1181 maintainer regressions: durable issue wake lifecycle', () => 
       fetchComments: async (_repo, _issue, since) => comments.filter((comment) => comment.id > since),
       fetchIssueState: async () => 'closed',
       isEchoComment: (comment) => comment.author === 'self',
-      invokeTrigger: { trigger: async () => 'dispatched' },
+      invokeTrigger: { trigger: async () => 'enqueued' },
       eventLog: makeEventLog(),
       log: { info: () => {}, error: () => {}, warn: () => {} },
     });

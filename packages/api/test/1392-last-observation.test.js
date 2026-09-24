@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { CiCdRouter, REVIEW_FINAL_OBSERVATION_GRACE_MS } = await import('../dist/infrastructure/email/CiCdRouter.js');
 const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
@@ -38,7 +38,7 @@ function prAwait(generation, when, conversationCursor) {
 /** The production PR chain: one task, one lifecycle, and the real CI and review collectors around it. */
 async function chain({ automationState, clock = { now: 1_000_000 }, github }) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const harness = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'pr_tracking',
     subjectKey: SUBJECT,
@@ -53,7 +53,7 @@ async function chain({ automationState, clock = { now: 1_000_000 }, github }) {
   const outboxWakes = [];
   const lifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     log,
     wakeOwner: (delivered) => {
       outboxWakes.push(delivered.outcome.outcomeId);
@@ -61,12 +61,12 @@ async function chain({ automationState, clock = { now: 1_000_000 }, github }) {
   });
   const ci = new CiCdRouter({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     waitLifecycle: lifecycle,
     log,
     now: () => clock.now,
   });
-  const wakes = [];
+  const wakes = harness.wakes;
   const spec = createReviewFeedbackTaskSpec({
     taskStore,
     fetchPrMetadata: async () => ({ headSha: HEAD, prState: github.prState }),
@@ -75,8 +75,11 @@ async function chain({ automationState, clock = { now: 1_000_000 }, github }) {
       return github.comments.filter((c) => c.id > cursors[c.commentType]);
     },
     fetchReviews: async () => [],
-    reviewFeedbackRouter: new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log }),
-    invokeTrigger: { trigger: async (...args) => wakes.push({ messageId: args[4], reason: args[6].reason }) },
+    reviewFeedbackRouter: new ReviewFeedbackRouter({
+      deliveryDeps: harness.deliveryDeps,
+      waitLifecycle: lifecycle,
+      log,
+    }),
     log,
   });
   const reviewPoll = async () => {
@@ -95,7 +98,7 @@ async function chain({ automationState, clock = { now: 1_000_000 }, github }) {
       aggregateBucket: 'pass',
       checks: [{ name: 'tests', bucket: 'pass' }],
     });
-  const contents = () => messageStore.getByThread('thread_1').map((message) => message.content);
+  const contents = () => harness.contents('thread_1');
   return { taskStore, task, ciPoll, reviewPoll, wakes, contents, clock, outboxWakes };
 }
 
@@ -132,10 +135,8 @@ describe('#1392 the last observation before a PR ends is not skipped', () => {
     assert.match(contents()[0], /conversation comment #31 by maintainer/, 'the final comment is not lost');
     assert.match(contents()[0], /merged/);
     assert.equal((await taskStore.get(task.id)).status, 'done', 'and the merge still ends tracking');
-    assert.deepEqual(
-      wakes.map((wake) => wake.reason),
-      ['github_pr_merged'],
-    );
+    assert.equal(wakes.length, 1, 'Queue drain owes exactly one owner wake for that admission');
+    assert.match(wakes[0].content, /merged/, 'and the wake is the merge observation that was admitted');
   });
 
   it('a wait CI can fully observe still ends on the CI poll that sees the merge', async () => {
@@ -230,7 +231,8 @@ describe('#1392 the review cursor never passes an observation the wait did not r
     assert.equal(contents().length, 1, 'N itself was flushed from the outbox');
     assert.match(contents()[0], /#31/);
     assert.deepEqual(outboxWakes, [pendingN.outcomeId], 'and its owner is woken by whoever flushed it');
-    assert.equal(wakes.length, 0, 'the collector never wakes for a message that is not its poll’s result');
+    assert.equal(wakes.length, 1, 'only the flushed outcome was admitted, so only it is owed a wake');
+    assert.match(wakes[0].content, /#31/, 'the collector never wakes for its own unrecorded observation');
 
     await reviewPoll();
 
@@ -238,6 +240,7 @@ describe('#1392 the review cursor never passes an observation the wait did not r
     assert.equal(contents().length, 2);
     assert.match(contents()[1], /conversation comment #32 by maintainer/, '#32 is delayed one poll, not lost');
     assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 32);
-    assert.equal(wakes.length, 1, 'the collector wakes for its own observation, once it is recorded');
+    assert.equal(wakes.length, 2, 'the collector wakes for its own observation, once it is recorded');
+    assert.match(wakes[1].content, /#32/, 'and that wake is its own observation, not a replay of N');
   });
 });

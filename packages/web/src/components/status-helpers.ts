@@ -42,8 +42,8 @@ export function collectSnapshotActiveCats(
  * Legacy compatibility: when slot data is not provided, keep previous targetCats behavior.
  *
  * F194 Phase Z5 AC-Z15: ideate mode 下保留 targetCats UNION（不只看 slots），
- * 让 ParallelStatusBar 全程显示本轮所有 targetCats 卡片。slot 移除（猫完成清 slot）
- * 不应让卡片消失——co-creator alpha catch 2026-05-10 04:51："并发 at 47 和 55
+ * 让状态面板全程显示本轮所有 targetCats。slot 移除（猫完成清 slot）不应让成员
+ * 消失——co-creator alpha catch 2026-05-10 04:51："并发 at 47 和 55
  * 但是观点采样面板只显示 47"。
  */
 export function deriveActiveCats({

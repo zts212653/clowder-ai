@@ -19,6 +19,7 @@ const ragdollVariants: CatData[] = [
     breedId: 'ragdoll',
     breedDisplayName: '布偶猫', // ← breed-level name
     clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-sonnet-4-5-20250929',
     avatar: '/avatars/opus.png',
     mentionPatterns: ['@opus-custom'],
@@ -34,6 +35,7 @@ const ragdollVariants: CatData[] = [
     breedId: 'ragdoll',
     breedDisplayName: '布偶猫',
     clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-sonnet-4-5-20250929',
     avatar: '/avatars/opus.png',
     mentionPatterns: ['@opus'],

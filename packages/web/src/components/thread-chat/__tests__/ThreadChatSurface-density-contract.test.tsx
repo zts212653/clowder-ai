@@ -24,7 +24,9 @@ vi.mock('@/hooks/useThreadScopedSelectors', () => ({
 
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages,
     handleScroll: vi.fn(),
+    handleReadingIntent: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: null },
     isLoadingHistory: false,
@@ -145,6 +147,8 @@ describe('ThreadChatSurface density contract', () => {
     expect(compact.querySelector('[data-thread-chat-message-id="a1"]')?.getAttribute('data-confirmation-count')).toBe(
       '1',
     );
+    expect(full.querySelector('[data-chat-container]')?.className).toContain('[overflow-anchor:none]');
+    expect(compact.querySelector('[data-chat-container]')?.className).toContain('[overflow-anchor:none]');
   });
 
   it('routes an interactive rich action only through the surface that rendered it', async () => {

@@ -203,7 +203,6 @@ export function createEvalDomainNDaySpec(opts: EvalDomainScheduleOpts): TaskSpec
           triggerReason: `N-day eval: ${invocation.domainId}`,
           store: opts.triggerStore,
           deliver: ctx.deliver,
-          invokeTrigger: ctx.invokeTrigger,
           defaultUserId: opts.defaultUserId,
         });
 

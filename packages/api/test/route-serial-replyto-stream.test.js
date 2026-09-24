@@ -59,45 +59,7 @@ function createMockDeps(services, appendCalls, initialMessages = []) {
   };
 }
 
-function withClaimedA2ASlot(options = {}) {
-  return {
-    invocationController: new AbortController(),
-    trackA2ASlot: () => true,
-    completeA2ASlots: () => {},
-    ...options,
-  };
-}
-
 describe('routeSerial replyTo on stream messages', () => {
-  it('attaches replyTo + replyPreview to CLI A2A stream responses', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const appendCalls = [];
-    const deps = createMockDeps(
-      {
-        opus: createMockService('opus', '我先看一下\n@缅因猫 帮忙复核'),
-        codex: createMockService('codex', '收到，我来复核'),
-      },
-      appendCalls,
-    );
-
-    const yielded = [];
-    for await (const msg of routeSerial(deps, ['opus'], 'check this', 'user1', 'thread1', withClaimedA2ASlot())) {
-      yielded.push(msg);
-    }
-
-    assert.equal(appendCalls.length, 2, 'should persist both opus and codex stream messages');
-    assert.equal(appendCalls[0].replyTo, undefined, 'originating cat should not reply to anything');
-    assert.equal(appendCalls[1].replyTo, 'msg-1', 'A2A stream reply should persist replyTo to trigger message');
-
-    const codexText = yielded.find((msg) => msg.type === 'text' && msg.catId === 'codex');
-    assert.ok(codexText, 'should yield codex stream text');
-    assert.equal(codexText.replyTo, 'msg-1', 'stream text should carry replyTo for live ReplyPill rendering');
-    assert.deepEqual(codexText.replyPreview, {
-      senderCatId: 'opus',
-      content: '我先看一下\n@缅因猫 帮忙复核',
-    });
-  });
-
   it('attaches replyTo and persists trigger provenance for queue-dispatched initial target', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
@@ -182,41 +144,5 @@ describe('routeSerial replyTo on stream messages', () => {
     const codexText = yielded.find((msg) => msg.type === 'text' && msg.catId === 'codex');
     assert.ok(codexText, 'should yield codex stream text');
     assert.equal(codexText.replyTo, undefined, 'live stream must not carry a bogus user-message replyTo');
-  });
-
-  it('passes explicit trigger id into deferred queue dispatch when fairness gate defers text-scan A2A', async () => {
-    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
-    const appendCalls = [];
-    const deferred = [];
-    const deps = createMockDeps(
-      {
-        opus: createMockService('opus', '我先看一下\n@缅因猫 帮忙复核'),
-      },
-      appendCalls,
-    );
-
-    const yielded = [];
-    for await (const msg of routeSerial(
-      deps,
-      ['opus'],
-      'check this',
-      'user1',
-      'thread1',
-      withClaimedA2ASlot({
-        queueHasQueuedMessages: () => true,
-        deferA2AEnqueue: (entry) => deferred.push(entry),
-      }),
-    )) {
-      yielded.push(msg);
-    }
-
-    assert.ok(yielded.find((msg) => msg.type === 'text' && msg.catId === 'opus'));
-    assert.equal(deferred.length, 1, 'should enqueue deferred A2A target instead of extending worklist');
-    assert.equal(deferred[0].targetCats[0], 'codex');
-    assert.equal(
-      deferred[0].a2aTriggerMessageId,
-      'msg-1',
-      'deferred queue entry should keep the stored trigger message id',
-    );
   });
 });

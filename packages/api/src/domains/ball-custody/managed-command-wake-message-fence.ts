@@ -1,5 +1,9 @@
 import { parseWaitOwnerFence } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../infrastructure/logger.js';
+import {
+  type ManagedCommandWakeActionLeaseAdmission,
+  resolveManagedCommandWakeActionLeaseAdmission,
+} from './managed-command-wake-action-lease-admission.js';
 import type {
   ManagedCommandWakeDynamicTaskStore,
   ManagedCommandWakeProjection,
@@ -11,7 +15,6 @@ import { parseManagedCommandWakeTask } from './managed-command-wake-lifecycle.js
 const log = createModuleLogger('ball-custody/managed-command-wake-message-fence');
 const COMPLETION_MESSAGE_KEY_PREFIX = 'hold-ball-completion:';
 const MESSAGE_CLAIM_STALE_MS = 30_000;
-type StoredWakeMessage = Awaited<ReturnType<ManagedCommandWakeRecoveryDeps['messageStore']['append']>>;
 
 function readManagedCommandWakeActionLeaseRef(
   parsed: ParsedManagedCommandWakeTask,
@@ -79,7 +82,9 @@ function commitManagedCommandWakeMessageVisibility(
     if (
       updateCommand(store, latest, {
         ...selected,
-        state: 'message_written',
+        // Message and Queue row committed in one transaction, so there is no `message_written`
+        // stage left to be in: the wake is durable the moment this returns.
+        state: 'enqueued',
         messageId,
         messageWrittenAt: latest.command.messageWrittenAt ?? now,
       })
@@ -118,74 +123,54 @@ function releaseManagedCommandWakeMessageContentClaim(
   }
 }
 
+/**
+ * `lease_rejected` is permanent, `retry` is not. The distinction matters because the lease is now
+ * checked before the write: a stale generation leaves nothing to cancel, so the task has to be
+ * retired on this signal rather than by reconciling a message that was never created.
+ */
+export type ManagedCommandWakePublishResult = 'published' | 'retry' | 'lease_rejected';
+
 export async function publishManagedCommandWakeMessage(
-  deps: Pick<ManagedCommandWakeRecoveryDeps, 'dynamicTaskStore' | 'messageStore' | 'socketManager'>,
+  deps: Pick<
+    ManagedCommandWakeRecoveryDeps,
+    'dynamicTaskStore' | 'messageStore' | 'admitWake' | 'actionSuccessorLeaseStore'
+  >,
   parsed: ParsedManagedCommandWakeTask,
   now: () => number,
-): Promise<boolean> {
-  if (!parsed.command.wakeContent) return false;
+): Promise<ManagedCommandWakePublishResult> {
+  if (!parsed.command.wakeContent) return 'retry';
   const claimed = claimManagedCommandWakeMessageContent(deps.dynamicTaskStore, parsed, now());
-  if (!claimed?.command.wakeContent) return false;
+  if (!claimed?.command.wakeContent) return 'retry';
   const triggerContent = `[定时任务] ${claimed.command.wakeContent}`;
   const idempotencyKey = `${COMPLETION_MESSAGE_KEY_PREFIX}${claimed.task.id}`;
   const actionLeaseRef = readManagedCommandWakeActionLeaseRef(claimed);
+  const source = {
+    connector: 'hold-ball',
+    label: '持球通知',
+    icon: '🏓',
+    meta: {
+      managedHold: true,
+      phase: 'wake',
+      cancelable: false,
+      taskId: claimed.task.id,
+      threadId: claimed.threadId,
+      catId: claimed.catId,
+      wakeWhen: true,
+      ...(actionLeaseRef ? { actionLeaseRef } : {}),
+    },
+  } as const;
 
+  // The lease is verified against the envelope BEFORE anything is written. It used to be checked
+  // inside the trigger, i.e. after the message was already durable, which is the only reason a
+  // rejected generation ever needed `markCanceled` to undo a message that should not have existed.
+  let admission: ManagedCommandWakeActionLeaseAdmission;
   try {
-    const existing = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
-    const stored =
-      existing ??
-      (await deps.messageStore.append({
-        userId: 'scheduler',
-        catId: null,
-        content: triggerContent,
-        mentions: [],
-        timestamp: now(),
-        threadId: claimed.threadId,
-        deliveryStatus: 'queued',
-        idempotencyKey,
-        source: {
-          connector: 'hold-ball',
-          label: '持球通知',
-          icon: '🏓',
-          meta: {
-            taskId: claimed.task.id,
-            threadId: claimed.threadId,
-            catId: claimed.catId,
-            wakeWhen: true,
-            ...(actionLeaseRef ? { actionLeaseRef } : {}),
-          },
-        },
-      }));
-
-    if (!existing) broadcastStoredMessage(deps.socketManager, claimed.threadId, stored);
-    return commitManagedCommandWakeMessageVisibility(
-      deps.dynamicTaskStore,
-      claimed.task.id,
-      claimed.command.messageClaimGeneration,
-      stored.id,
-      now(),
+    admission = await resolveManagedCommandWakeActionLeaseAdmission(
+      { threadId: claimed.threadId, source },
+      { threadId: claimed.threadId, catId: claimed.catId, tenantScope: claimed.userId },
+      deps.actionSuccessorLeaseStore,
     );
   } catch (err) {
-    let committedAfterError: StoredWakeMessage | null;
-    try {
-      committedAfterError = await deps.messageStore.getByIdempotencyKey('scheduler', claimed.threadId, idempotencyKey);
-    } catch (lookupErr) {
-      log.warn(
-        { err: lookupErr, taskId: claimed.task.id, threadId: claimed.threadId },
-        'managed-command message outcome is uncertain; retaining the durable content claim for recovery',
-      );
-      return false;
-    }
-    if (committedAfterError) {
-      broadcastStoredMessage(deps.socketManager, claimed.threadId, committedAfterError);
-      return commitManagedCommandWakeMessageVisibility(
-        deps.dynamicTaskStore,
-        claimed.task.id,
-        claimed.command.messageClaimGeneration,
-        committedAfterError.id,
-        now(),
-      );
-    }
     releaseManagedCommandWakeMessageContentClaim(
       deps.dynamicTaskStore,
       claimed.task.id,
@@ -193,25 +178,63 @@ export async function publishManagedCommandWakeMessage(
     );
     log.warn(
       { err, taskId: claimed.task.id, threadId: claimed.threadId },
-      'managed-command completion persisted but thread delivery is pending',
+      'managed-command wake refused: action lease generation no longer matches; nothing was written',
     );
-    return false;
+    return 'lease_rejected';
   }
-}
 
-function broadcastStoredMessage(
-  socketManager: ManagedCommandWakeRecoveryDeps['socketManager'],
-  threadId: string,
-  stored: StoredWakeMessage,
-): void {
-  socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-    threadId,
-    message: {
-      id: stored.id,
-      type: 'connector',
-      content: stored.content,
-      source: stored.source,
-      timestamp: stored.timestamp,
-    },
-  });
+  try {
+    const admitted = await deps.admitWake({
+      message: {
+        from: { kind: 'system', service: 'managed-command-wake' },
+        userId: claimed.userId,
+        content: triggerContent,
+        mentions: [],
+        timestamp: now(),
+        threadId: claimed.threadId,
+        deliveryStatus: 'queued',
+        idempotencyKey,
+        source,
+      },
+      threadId: claimed.threadId,
+      userId: claimed.userId,
+      catId: claimed.catId,
+      content: triggerContent,
+      // A managed hold's owner is waiting on this exact wake, so it is urgent and files as
+      // scheduled work. Stated here by the producer rather than hardcoded at the admission site.
+      priority: 'urgent',
+      sourceCategory: 'scheduled',
+      ...(admission.actionSuccessorFence ? { actionSuccessorFence: admission.actionSuccessorFence } : {}),
+    });
+    if (!admitted.messageId) {
+      releaseManagedCommandWakeMessageContentClaim(
+        deps.dynamicTaskStore,
+        claimed.task.id,
+        claimed.command.messageClaimGeneration,
+      );
+      return 'retry';
+    }
+    return commitManagedCommandWakeMessageVisibility(
+      deps.dynamicTaskStore,
+      claimed.task.id,
+      claimed.command.messageClaimGeneration,
+      admitted.messageId,
+      now(),
+    )
+      ? 'published'
+      : 'retry';
+  } catch (err) {
+    // One transaction: it either committed both halves or neither. There is no appended message to
+    // reconcile afterwards, so the claim is simply released and the next sweep retries.
+    releaseManagedCommandWakeMessageContentClaim(
+      deps.dynamicTaskStore,
+      claimed.task.id,
+      claimed.command.messageClaimGeneration,
+    );
+    log.warn(
+      { err, taskId: claimed.task.id, threadId: claimed.threadId },
+      'managed-command wake admission failed; nothing was written and the wake stays retryable',
+    );
+    return 'retry';
+  }
 }

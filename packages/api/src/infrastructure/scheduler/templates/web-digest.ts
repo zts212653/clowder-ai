@@ -41,31 +41,22 @@ export const webDigestTemplate: TaskTemplate = {
           const tid = subjectKey.startsWith('thread-') ? subjectKey.slice(7) : subjectKey;
           const result = await ctx.fetchContent(url);
           if (result.method === 'browser') {
-            if (!ctx.invokeTrigger) {
-              throw new Error('invokeTrigger not available for browser-required digest');
-            }
             const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
             const topicLine = topic ? `\n重点关注：${topic}` : '';
             const triggerContent =
               `${SCHEDULER_TRIGGER_PREFIX} 请使用 browser-automation 抓取并汇总网页内容\n` +
               `URL: ${url}${topicLine}\n` +
               `要求：使用真实浏览器处理 JS 重站点，输出今天/当前值得关注的摘要，附标题、简述、来源链接与明确日期。`;
-            const messageId = await ctx.deliver({
+            // RFC §5.2: one envelope, one admission. Queue drain owes the wake.
+            await ctx.deliver({
               threadId: tid,
               content: triggerContent,
-              userId: 'scheduler',
+              userId: triggerUserId,
+              targetCatId: catId,
+              idempotencyKey: `web-digest:${tid}:${url}`,
+              suggestedSkill: 'browser-automation',
+              sourceCategory: 'scheduled',
             });
-            try {
-              void Promise.resolve(
-                ctx.invokeTrigger.trigger(tid, catId, triggerUserId, triggerContent, messageId, undefined, {
-                  reason: 'scheduled_web_digest_browser_fetch',
-                  sourceCategory: 'scheduled',
-                  suggestedSkill: 'browser-automation',
-                }),
-              ).catch(() => {});
-            } catch {
-              // Best-effort: sync trigger throw should not fail the web digest
-            }
             return;
           }
           const header = result.title || url;

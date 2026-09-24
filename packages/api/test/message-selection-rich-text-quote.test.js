@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 await import('tsx/esm');
 const { MessageSelectionResolver, digestMessageBundleQuoteProjection, projectMessageBundleQuoteSourceV2 } =
@@ -30,7 +31,7 @@ function makeThread(overrides = {}) {
 }
 
 function makeMessage(overrides = {}) {
-  return {
+  return canonicalTestMessageInput({
     id: 'message-1',
     threadId: 'thread-source',
     userId: 'user-1',
@@ -40,7 +41,7 @@ function makeMessage(overrides = {}) {
     timestamp: 100,
     deliveryStatus: 'delivered',
     ...overrides,
-  };
+  });
 }
 
 function createResolver(messages = [makeMessage()], thread = makeThread()) {

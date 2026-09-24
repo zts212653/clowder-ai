@@ -20,7 +20,7 @@ function HookProbe({ threadId }: { threadId: string }) {
   capturedHook = useChatHistory(threadId);
   return React.createElement(
     'div',
-    { ref: capturedHook.scrollContainerRef },
+    { ref: capturedHook.scrollContainerRef, onClickCapture: capturedHook.handleReadingIntent },
     React.createElement('div', { ref: capturedHook.messagesEndRef }),
   );
 }
@@ -51,7 +51,6 @@ function makeThreadState(messages: ChatMessage[]): ThreadState {
     hasUserMention: false,
     lastActivity: Date.now(),
     queue: [],
-    queuePaused: false,
     queueFull: false,
     workspaceWorktreeId: null,
     workspaceOpenTabs: [],
@@ -625,6 +624,67 @@ describe('useChatHistory scroll memory (#27)', () => {
     expect(scrollTop.get()).toBe(500);
   });
 
+  it('re-pins the bottom when an existing processing message moves in presentation order', async () => {
+    const threadId = 'thread-reorder-bottom';
+    const messages = [makeMsg('early', 1_000), makeMsg('moving', 3_000)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const scrollHeight = defineMutableNumberProp(scrollEl, 'scrollHeight', 1_000);
+    cancelInitialRestoreWithWheel(scrollEl, 1);
+    act(() => capturedHook?.handleScroll());
+
+    scrollHeight.set(1_200);
+    act(() => {
+      useChatStore.getState().patchMessage('moving', { timelineOrderAt: 500 });
+    });
+
+    expect(scrollTop.get()).toBe(600);
+  });
+
+  it('keeps the viewed message at the same viewport offset when presentation order changes', async () => {
+    const threadId = 'thread-reorder-message-anchor';
+    const messages = [makeMsg('viewed', 1_000), makeMsg('other', 2_000)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 200);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1_200);
+    scrollEl.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    let viewedContentTop = 250;
+    appendMessageBoundary(scrollEl, 'viewed', () => ({
+      top: 100 + viewedContentTop - scrollTop.get(),
+      bottom: 280 + viewedContentTop - scrollTop.get(),
+    }));
+    cancelInitialRestoreWithWheel(scrollEl, -1);
+    act(() => capturedHook?.handleScroll());
+
+    viewedContentTop = 450;
+    act(() => {
+      useChatStore.getState().patchMessage('viewed', { timelineOrderAt: 3_000 });
+    });
+
+    expect(scrollTop.get()).toBe(400);
+    expect(100 + viewedContentTop - scrollTop.get()).toBe(150);
+  });
+
   it('leaves bottom follow after repeated small user scroll-up inputs', async () => {
     const threadId = 'thread-small-user-scrolls';
     const messages = [makeMsg('m1', 1), makeMsg('m2', 2)];
@@ -861,6 +921,74 @@ describe('useChatHistory scroll memory (#27)', () => {
       flushAnimationFrames();
     });
     expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deliberately expanded card in view instead of re-pinning bottom', async () => {
+    const threadId = 'thread-reading-disclosure';
+    const messages = [makeMsg('reading', 1)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 400);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    const scrollHeight = defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    scrollEl.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    const boundary = appendMessageBoundary(scrollEl, 'reading', () => ({ top: 200, bottom: 680 }));
+    const button = document.createElement('button');
+    button.dataset.readingDisclosure = '';
+    button.getBoundingClientRect = () => ({ top: 300, bottom: 340 }) as DOMRect;
+    boundary.firstElementChild?.append(button);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => scrollTop.set(600));
+    cancelInitialRestoreWithWheel(scrollEl, 1);
+    act(() => capturedHook?.handleScroll());
+
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    scrollHeight.set(1200);
+    act(() => {
+      window.dispatchEvent(new Event(CHAT_LAYOUT_CHANGED_EVENT));
+      flushAnimationFrames();
+    });
+
+    expect(scrollTop.get()).toBe(400);
+    expect(endEl.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it('uses the viewed anchor once when a newly admitted card inserts above it', async () => {
+    const threadId = 'thread-admitted-above-reader';
+    const messages = [makeMsg('viewed', 10), makeMsg('tail', 20)];
+    useChatStore.setState({
+      currentThreadId: threadId,
+      messages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadId]: makeThreadState(messages) },
+    });
+    await act(async () => root.render(React.createElement(HookHost, { threadId })));
+    const scrollEl = capturedHook!.scrollContainerRef.current!;
+    const scrollTop = defineMutableNumberProp(scrollEl, 'scrollTop', 300);
+    defineMutableNumberProp(scrollEl, 'clientHeight', 600);
+    defineMutableNumberProp(scrollEl, 'scrollHeight', 1000);
+    scrollEl.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    let contentTop = 500;
+    appendMessageBoundary(scrollEl, 'viewed', () => ({
+      top: contentTop - scrollTop.get(),
+      bottom: contentTop + 300 - scrollTop.get(),
+    }));
+    cancelInitialRestoreWithWheel(scrollEl, -1);
+    act(() => capturedHook?.handleScroll());
+
+    contentTop += 150;
+    act(() => useChatStore.setState({ messages: [makeMsg('new', 5), ...messages] }));
+    expect(scrollTop.get()).toBe(450);
+    expect(contentTop - scrollTop.get()).toBe(200);
   });
 
   it('does not hijack scroll on layout-change events when the user is reading above the bottom', async () => {

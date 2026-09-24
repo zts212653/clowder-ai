@@ -65,15 +65,6 @@ export interface RepoScanTaskSpecOptions {
   threadStore?: Pick<InboxThreadStore, 'get' | 'updateThreadKind'>;
   deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   deliveryDeps: ConnectorDeliveryDeps;
-  invokeTrigger: {
-    trigger(
-      threadId: string,
-      catId: CatId,
-      userId: string,
-      message: string,
-      messageId: string,
-    ): void | Promise<unknown>;
-  };
   fetchOpenPRs: (repo: string) => Promise<GhPrItem[]>;
   fetchOpenIssues: (repo: string) => Promise<GhIssueItem[]>;
   log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
@@ -295,6 +286,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
           catId: opts.inboxCatId,
           content,
           source,
+          idempotencyKey: `github-repo-event:${signal.deliveryId}`,
         });
 
         // Delivery, its dedup marker, event projection, and wake are one bounded
@@ -331,19 +323,7 @@ export function createRepoScanTaskSpec(opts: RepoScanTaskSpecOptions): TaskSpec_
           }
         }
 
-        try {
-          await Promise.resolve(
-            opts.invokeTrigger.trigger(
-              binding.threadId,
-              opts.inboxCatId as CatId,
-              opts.defaultUserId,
-              content,
-              delivered.messageId,
-            ),
-          );
-        } catch {
-          opts.log.warn(`[repo-scan] trigger failed for ${signal.repoFullName}#${signal.number}`);
-        }
+        // Reconciliation delivery is admitted to the Queue above; drain owes the inbox wake.
       },
     },
     state: { runLedger: 'sqlite' },

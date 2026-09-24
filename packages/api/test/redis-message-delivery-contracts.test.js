@@ -9,13 +9,13 @@
  * reads + writes inside Redis's single-threaded Lua executor.
  *
  * The regression suite was observed RED against pre-intake Clowder AI main.
- * Supplementary coverage: CAS idempotency, Lua receipts, TTL, custody publication,
+ * Supplementary coverage: CAS idempotency, Lua receipts, TTL, delivery publication,
  * and legacy/repaired reassignment ordering.
  */
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { makeQueuedMessageCustody as makeCustody } from './helpers/queued-message-custody.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -71,15 +71,17 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
 
   // ── Helper: create a queued message for testing ──
   const createQueued = (userId, threadId, ts) =>
-    store.append({
-      userId,
-      catId: null,
-      content: `queued-msg-${ts}`,
-      mentions: [],
-      timestamp: ts,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: `queued-msg-${ts}`,
+        mentions: [],
+        timestamp: ts,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
   // ── Helper: assert hash/zset consistency invariant ──
   const assertConsistency = async (msgId, label) => {
@@ -106,14 +108,16 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     const base = Date.now();
     const threadId = 'thread-dlv-imm-9';
     // Create a message WITHOUT deliveryStatus (= immediate/legacy)
-    const msg = await store.append({
-      userId: 'userA',
-      catId: null,
-      content: 'immediate msg',
-      mentions: [],
-      timestamp: base,
-      threadId,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        userId: 'userA',
+        catId: null,
+        content: 'immediate msg',
+        mentions: [],
+        timestamp: base,
+        threadId,
+      }),
+    );
 
     const result = await store.markCanceled(msg.id);
     assert.equal(result?.deliveryTransitioned, false, 'CAS no-op must report applied=false');
@@ -200,15 +204,17 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
 
     // Create a store WITH ttlSeconds to exercise the EXPIRE branch
     const ttlStore = new RedisMessageStore(redis, { ttlSeconds: 60 });
-    const msg = await ttlStore.append({
-      userId: 'userA',
-      catId: null,
-      content: 'ttl-test-msg',
-      mentions: [],
-      timestamp: base,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const msg = await ttlStore.append(
+      canonicalTestMessageInput({
+        userId: 'userA',
+        catId: null,
+        content: 'ttl-test-msg',
+        mentions: [],
+        timestamp: base,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
     await ttlStore.markDelivered(msg.id, base + 100);
 
     // Reassign to userF — EXPIRE should fire inside Lua
@@ -225,49 +231,44 @@ describe('Redis delivery transition contracts (PR #1193)', { skip: redisIsolatio
     assert.equal(oldScore, null, 'old user must not have entry');
   });
 
-  // 14. Terminal custody is completed execution history, not an active delivery fence.
-  it('markDelivered publishes a queued message whose custody is already terminal', async () => {
+  // 14. A queued row without atomic conversation admission is first published at delivery.
+  it('markDelivered publishes unadmitted queued work at its delivery coordinate', async () => {
     const base = Date.now();
-    const terminalCustody = makeCustody({
-      status: 'terminal',
-      pendingTargetCats: [],
-      failedByCatIds: ['opus', 'codex'],
-      updatedAt: base,
-    });
-    const msg = await store.append({
-      userId: 'userA',
-      catId: null,
-      content: 'terminal custody is publishable',
-      mentions: ['opus', 'codex'],
-      timestamp: base,
-      threadId: 'thread-dlv-terminal-custody-14',
-      deliveryStatus: 'queued',
-      queueCustody: terminalCustody,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        userId: 'userA',
+        catId: null,
+        content: 'private queued work becomes publishable',
+        mentions: ['opus', 'codex'],
+        timestamp: base,
+        threadId: 'thread-dlv-terminal-custody-14',
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const result = await store.markDelivered(msg.id, base + 100);
 
-    assert.equal(result?.deliveryTransitioned, true, 'terminal custody must not block the delivery transition');
+    assert.equal(result?.deliveryTransitioned, true, 'Queue state must not block the delivery transition');
     assert.equal(result?.deliveryStatus, 'delivered');
     assert.equal(result?.deliveredAt, base + 100);
-    assert.equal(result?.timelineOrderAt, base, 'custody-backed receipt must retain its authored timeline position');
-    assert.deepEqual(result?.queueCustody, terminalCustody, 'terminal custody history must remain attached');
+    assert.equal(result?.timelineOrderAt, base + 100, 'private queued work enters the timeline at delivery');
+    assert.equal(result?.queueCustody, undefined, 'History must not mirror Queue ledger state');
     assert.equal(
       await redis.zscore(MessageKeys.thread(msg.threadId), msg.id),
-      String(base),
-      'thread receipt order must remain at author time',
+      String(base + 100),
+      'thread receipt order must use delivery time',
     );
     assert.equal(
       await redis.zscore(MessageKeys.TIMELINE, msg.id),
-      String(base),
-      'global receipt order must remain at author time',
+      String(base + 100),
+      'global receipt order must use delivery time',
     );
     assert.equal(
       await redis.zscore(MessageKeys.user(msg.userId), msg.id),
-      String(base),
-      'owner receipt order must remain at author time',
+      String(base + 100),
+      'owner receipt order must use delivery time',
     );
-    await assertConsistency(msg.id, 'terminal-custody-delivery');
+    await assertConsistency(msg.id, 'queue-independent-delivery');
   });
 
   // 15. Legacy/repaired rows may have a canonical zset score without a hash projection.

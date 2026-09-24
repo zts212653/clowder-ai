@@ -5,6 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('replyTo threading', () => {
   // ── StoredMessage persistence ──
@@ -13,24 +14,28 @@ describe('replyTo threading', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
 
-    const parent = store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Original message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const parent = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Original message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
-    const reply = store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'Reply to original',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-1',
-      replyTo: parent.id,
-    });
+    const reply = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'Reply to original',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-1',
+        replyTo: parent.id,
+      }),
+    );
 
     assert.equal(reply.replyTo, parent.id);
     const fetched = store.getById(reply.id);
@@ -41,13 +46,15 @@ describe('replyTo threading', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
 
-    const msg = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'No reply',
-      mentions: [],
-      timestamp: 1000,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'No reply',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
 
     assert.equal(msg.replyTo, undefined);
   });
@@ -56,24 +63,28 @@ describe('replyTo threading', () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const store = new MessageStore();
 
-    const parent = store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Parent',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const parent = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Parent',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
-    store.append({
-      userId: 'user-1',
-      catId: 'codex',
-      content: 'Child',
-      mentions: [],
-      timestamp: 2000,
-      threadId: 'thread-1',
-      replyTo: parent.id,
-    });
+    store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'codex',
+        content: 'Child',
+        mentions: [],
+        timestamp: 2000,
+        threadId: 'thread-1',
+        replyTo: parent.id,
+      }),
+    );
 
     const messages = store.getByThread('thread-1');
     const child = messages.find((m) => m.content === 'Child');
@@ -88,14 +99,16 @@ describe('replyTo threading', () => {
     );
     const store = new MessageStore();
 
-    const parent = store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: '这是一条很长的消息，需要被截断到八十个字符以内来显示预览内容，确保在引用气泡中不会太长影响阅读体验',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const parent = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: '这是一条很长的消息，需要被截断到八十个字符以内来显示预览内容，确保在引用气泡中不会太长影响阅读体验',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     const preview = await hydrateReplyPreview(store, parent.id);
     assert.ok(preview);
@@ -110,14 +123,16 @@ describe('replyTo threading', () => {
     );
     const store = new MessageStore();
 
-    const parent = store.append({
-      userId: 'user-1',
-      catId: 'opus',
-      content: 'Will be deleted',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const parent = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: 'opus',
+        content: 'Will be deleted',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     store.softDelete(parent.id, 'user-1');
 
@@ -143,14 +158,16 @@ describe('replyTo threading', () => {
     );
     const store = new MessageStore();
 
-    const parent = store.append({
-      userId: 'user-1',
-      catId: null,
-      content: 'User message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: 'thread-1',
-    });
+    const parent = store.append(
+      canonicalTestMessageInput({
+        userId: 'user-1',
+        catId: null,
+        content: 'User message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: 'thread-1',
+      }),
+    );
 
     const preview = await hydrateReplyPreview(store, parent.id);
     assert.ok(preview);

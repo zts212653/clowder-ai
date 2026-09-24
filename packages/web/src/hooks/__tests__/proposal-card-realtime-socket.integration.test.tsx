@@ -43,6 +43,7 @@ describe('F128 proposal card realtime socket journey', () => {
   let messageStore: import('../../../../api/src/domains/cats/services/stores/ports/MessageStore').MessageStore;
   let ingress: import('../../../../api/src/domains/approval-hub/ApprovalIngress').ApprovalIngress;
   let useSocket: typeof import('../useSocket').useSocket;
+  let useThreadMessages: typeof import('../useThreadScopedSelectors').useThreadMessages;
   let mergeReplaceHydrationMessages: typeof import('../useChatHistory').mergeReplaceHydrationMessages;
   let useChatStore: typeof import('@/stores/chatStore').useChatStore;
   let RichBlocks: typeof import('@/components/rich/RichBlocks').RichBlocks;
@@ -104,6 +105,7 @@ describe('F128 proposal card realtime socket journey', () => {
     vi.stubEnv('NEXT_PUBLIC_API_URL', `http://127.0.0.1:${port}`);
 
     ({ useSocket } = await import('../useSocket'));
+    ({ useThreadMessages } = await import('../useThreadScopedSelectors'));
     ({ mergeReplaceHydrationMessages } = await import('../useChatHistory'));
     ({ useChatStore } = await import('@/stores/chatStore'));
     ({ RichBlocks } = await import('@/components/rich/RichBlocks'));
@@ -143,7 +145,7 @@ describe('F128 proposal card realtime socket journey', () => {
   }
 
   function Journey({ activeThreadId }: { activeThreadId: string }) {
-    const messages = useChatStore((state) => state.messages);
+    const messages = useThreadMessages(activeThreadId);
     const { socketConnected } = useSocket({ onMessage: () => {} }, activeThreadId, [activeThreadId]);
     useEffect(() => {
       if (!socketConnected) return;
@@ -166,8 +168,8 @@ describe('F128 proposal card realtime socket journey', () => {
 
   async function publishProposal(): Promise<string> {
     const origin = messageStore.append({
+      from: { kind: 'user', userId: 'default-user' },
       userId: 'default-user',
-      catId: null,
       content: '请开一个新 thread',
       mentions: [],
       timestamp: Date.now() - 500,

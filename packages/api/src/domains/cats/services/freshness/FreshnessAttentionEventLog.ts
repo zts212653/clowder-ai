@@ -20,7 +20,6 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type {
   FreshnessAttentionEvent,
   FreshnessAttentionEventWindow,
-  NoticeAttachedEvent,
   ProviderNoticeDeliveredEvent,
   ProviderNoticeEventBase,
   ProviderNoticeHandledEvent,
@@ -302,35 +301,6 @@ export class FreshnessAttentionEventLog {
       marked++;
     }
     return marked;
-  }
-
-  /**
-   * Get unresolved notices for an invocation.
-   * A notice is "unresolved" if it has been attached but NOT explicitly acked.
-   *
-   * `notice_deferred` does NOT resolve a notice — it means the cat was warned
-   * at hold_ball time but chose to exit without reading. B3 should still
-   * consider re-invoking for deferred notices (the cat never read the messages).
-   * Only `notice_implicit_acked` (seenCursor caught up) truly resolves.
-   *
-   * This is the key projection for B3 (re-invoke trigger decision).
-   */
-  async getUnresolvedNotices(invocationId: string): Promise<NoticeAttachedEvent[]> {
-    const events = await this.queryByInvocation(invocationId);
-
-    // Only notice_implicit_acked resolves a notice.
-    // notice_deferred = "cat was warned but didn't read" — NOT resolved.
-    const resolvedIds = new Set<string>();
-    for (const e of events) {
-      if (e.kind === 'notice_implicit_acked') {
-        for (const id of e.noticeIds) {
-          resolvedIds.add(id);
-        }
-      }
-    }
-
-    // Return notices that haven't been resolved
-    return events.filter((e): e is NoticeAttachedEvent => e.kind === 'notice_attached' && !resolvedIds.has(e.noticeId));
   }
 }
 

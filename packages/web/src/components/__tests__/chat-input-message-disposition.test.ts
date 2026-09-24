@@ -1,27 +1,34 @@
-import type { ActiveExecutionProjection, MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
+import type { MessageDispositionPreferenceSnapshot } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
-import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExecutionStore';
+import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn() }),
-}));
-vi.mock('@/components/icons/SendIcon', () => ({
-  SendIcon: () => React.createElement('span', null, 'send'),
-}));
-vi.mock('@/components/icons/LoadingIcon', () => ({
-  LoadingIcon: () => React.createElement('span', null, 'loading'),
-}));
-vi.mock('@/components/icons/AttachIcon', () => ({
-  AttachIcon: () => React.createElement('span', null, 'attach'),
-}));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('@/components/icons/SendIcon', () => ({ SendIcon: () => React.createElement('span', null, 'send') }));
+vi.mock('@/components/icons/LoadingIcon', () => ({ LoadingIcon: () => React.createElement('span', null, 'loading') }));
+vi.mock('@/components/icons/AttachIcon', () => ({ AttachIcon: () => React.createElement('span', null, 'attach') }));
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/components/AttachmentPreview', () => ({ AttachmentPreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (file: File) => Promise.resolve(file) }));
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ cats: [], isLoading: false }) }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({
+    cats: [
+      {
+        id: 'opus',
+        displayName: '布偶猫',
+        mentionPatterns: ['@布偶猫', '@opus'],
+        roleDescription: 'reviewer',
+        avatar: '/opus.png',
+        roster: { available: true },
+        isDefaultResponder: true,
+      },
+    ],
+    isLoading: false,
+  }),
+}));
 
 const mockApiFetch = vi.fn((path: string, init?: RequestInit) => globalThis.fetch(path, init));
 vi.mock('@/utils/api-client', () => ({
@@ -35,7 +42,6 @@ const productSnapshot: MessageDispositionPreferenceSnapshot = {
   thread: null,
   effective: 'next_work',
   source: 'product',
-  onboardingSeen: false,
 };
 
 function dispositionSnapshot(
@@ -45,38 +51,13 @@ function dispositionSnapshot(
 }
 
 function jsonResponse(body: object) {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 }
 
 function setTextarea(textarea: HTMLTextAreaElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
   setter?.call(textarea, value);
   textarea.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function seedCanonicalExecution(threadId: string): void {
-  const execution: ActiveExecutionProjection = {
-    executionId: 'inv-active',
-    threadId,
-    threadTitle: 'Test thread',
-    catId: 'opus',
-    kind: 'live_invocation',
-    startedAt: Date.now(),
-    cancelability: {
-      state: 'cancelable',
-      target: { kind: 'live_invocation', threadId, catId: 'opus', executionId: 'inv-active' },
-    },
-  };
-  useActiveExecutionStore.setState({
-    anchorThreadId: threadId,
-    projectPath: '/project/cafe',
-    executionsByKey: { [activeExecutionKey(execution)]: execution },
-    hydration: 'ready',
-    hydrationError: null,
-  });
 }
 
 describe('F264 author message disposition selector', () => {
@@ -98,35 +79,15 @@ describe('F264 author message disposition selector', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     mockApiFetch.mockClear();
-    useChatStore.setState({
-      targetCats: ['opus'],
-      activeInvocations: {
-        'inv-active': { catId: 'opus', mode: 'execute', startedAt: Date.now() },
-      },
-      catInvocations: {
-        opus: {
-          invocationId: 'inv-active',
-          freshnessCarrierCapability: {
-            provider: 'openai_codex',
-            carrier: 'codex_app_server',
-            deliverySemantics: 'exact_active_turn',
-          },
-        },
-      },
-    });
+    useChatStore.setState({ targetCats: ['opus'], activeInvocations: {}, catInvocations: {} });
     useActiveExecutionStore.getState().reset();
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       const snapshot =
         body?.scope === 'thread'
           ? { ...productSnapshot, thread: body.disposition, effective: body.disposition, source: 'thread' }
-          : body?.scope === 'onboarding'
-            ? { ...productSnapshot, onboardingSeen: true }
-            : productSnapshot;
-      return new Response(JSON.stringify(snapshot), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+          : productSnapshot;
+      return jsonResponse(snapshot);
     });
   });
 
@@ -135,28 +96,6 @@ describe('F264 author message disposition selector', () => {
     container.remove();
     vi.restoreAllMocks();
   });
-
-  async function chooseContinueCurrent() {
-    const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
-    await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-    });
-    act(() => {
-      (container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement).click();
-    });
-    return trigger;
-  }
-
-  async function typeAndSend(value: string) {
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
-    act(() => setTextarea(textarea, value));
-    await act(async () => {
-      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-  }
 
   async function renderThreadInput(props: React.ComponentProps<typeof ChatInput>) {
     await act(async () => {
@@ -170,82 +109,88 @@ describe('F264 author message disposition selector', () => {
     });
   }
 
-  it('appears only for live work and consumes a one-shot override after successful admission', async () => {
+  async function openDisposition() {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click();
+      await Promise.resolve();
+    });
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
+    expect(trigger).not.toBeNull();
+    await act(async () => {
+      trigger?.click();
+      await Promise.resolve();
+    });
+    expect(container.querySelector('[data-testid="message-disposition-panel"]')).not.toBeNull();
+  }
+
+  async function chooseContinueCurrent() {
+    await openDisposition();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  async function typeAndSend(value: string) {
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
+    act(() => setTextarea(textarea, value));
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  it('persists the Thread strategy while idle and lets server admission resolve it', async () => {
     const onSend = vi.fn(async () => true);
     await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: false });
-    expect(container.querySelector('[data-testid="message-disposition-trigger"]')).toBeNull();
+    await chooseContinueCurrent();
 
-    await renderThreadInput({ threadId: 'thread-1', onSend, hasActiveInvocation: true });
-    const trigger = await chooseContinueCurrent();
-    expect(trigger.textContent).toContain('接着当前工作');
-    await typeAndSend('顺手看一下问题 B');
-
-    expect(onSend).toHaveBeenCalledWith(
-      '顺手看一下问题 B',
-      undefined,
-      undefined,
-      'queue',
-      undefined,
-      'continue_current',
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '引导当前回复',
     );
-    expect(trigger.textContent).toContain('下一件工作');
+    await typeAndSend('顺手看一下问题 B');
+    expect(onSend).toHaveBeenCalledWith('顺手看一下问题 B', undefined, undefined, undefined);
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '引导当前回复',
+    );
   });
 
-  it('retains a one-shot override when admission fails', async () => {
+  it('retains the persistent Thread strategy when admission fails', async () => {
     const onSend = vi.fn(async () => false);
-    await renderThreadInput({ threadId: 'thread-2', onSend, hasActiveInvocation: true });
-    const trigger = await chooseContinueCurrent();
+    await renderThreadInput({ threadId: 'thread-2', onSend, hasActiveInvocation: false });
+    await chooseContinueCurrent();
     await typeAndSend('网络失败也别吃掉我的选择');
 
-    expect(onSend).toHaveBeenCalledWith(
-      '网络失败也别吃掉我的选择',
-      undefined,
-      undefined,
-      'queue',
-      undefined,
-      'continue_current',
+    expect(onSend).toHaveBeenCalledWith('网络失败也别吃掉我的选择', undefined, undefined, undefined);
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '引导当前回复',
     );
-    expect(trigger.textContent).toContain('接着当前工作');
   });
 
-  it('confirms that draft Steer stops the target reply before sending', async () => {
+  it('uses one normal Send button during active work and lets Queue apply the selected strategy', async () => {
     const onSend = vi.fn(async () => true);
-    seedCanonicalExecution('thread-3');
-    await renderThreadInput({ threadId: 'thread-3', onSend, hasActiveInvocation: true });
-    const trigger = await chooseContinueCurrent();
-    const textarea = container.querySelector('textarea') as HTMLTextAreaElement;
-    act(() => setTextarea(textarea, '现在就换轨'));
+    await renderThreadInput({ threadId: 'thread-active', onSend, hasActiveInvocation: true });
+    await chooseContinueCurrent();
+
+    act(() => setTextarea(container.querySelector('textarea') as HTMLTextAreaElement, '继续补充约束'));
+    expect(container.querySelectorAll('button[aria-label="Send message"]')).toHaveLength(1);
+    expect(container.querySelector('button[aria-label="Stop generation"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Steer 发送选项"]')).toBeNull();
     await act(async () => {
-      (container.querySelector('[aria-label="强制停止并发送此消息"]') as HTMLButtonElement).click();
+      container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
-
-    expect(onSend).not.toHaveBeenCalled();
-    expect(container.textContent).toContain('停止目标当前回复');
-    expect(container.textContent).toContain('立即发送当前输入的消息');
-    expect(container.textContent).toContain('这不是“追加到当前回复”');
-
-    await act(async () => {
-      (container.querySelector('[data-testid="steer-confirm"]') as HTMLButtonElement).click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(onSend).toHaveBeenCalledWith('现在就换轨', undefined, undefined, 'force', undefined, undefined);
-    expect(trigger.textContent).toContain('接着当前工作');
+    expect(onSend).toHaveBeenCalledWith('继续补充约束', undefined, undefined, undefined);
   });
 
-  it('can persist the choice for this thread instead of changing every send', async () => {
-    await renderThreadInput({ threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: true });
-    const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
+  it('can persist the choice for this thread', async () => {
+    await renderThreadInput({ threadId: 'thread-4', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
     await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-    });
-    act(() => (container.querySelector('[data-disposition-scope="thread"]') as HTMLButtonElement).click());
-    await act(async () => {
-      (container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement).click();
+      container.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -259,38 +204,24 @@ describe('F264 author message disposition selector', () => {
       threadId: 'thread-4',
       disposition: 'continue_current',
     });
-    expect(trigger.textContent).toContain('接着当前工作');
-
-    await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-    });
-    act(() => (container.querySelector('[data-disposition-scope="thread"]') as HTMLButtonElement).click());
-    expect(container.querySelector('[data-testid="message-disposition-scope-state"]')?.textContent).toContain(
-      '本作用域已显式覆盖',
-    );
-    expect(container.querySelector('[data-disposition-option="continue_current"]')?.getAttribute('aria-pressed')).toBe(
-      'true',
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')?.textContent).toContain(
+      '引导当前回复',
     );
   });
 
-  it('shows contextual onboarding only on the first meaningful open', async () => {
-    await renderThreadInput({ threadId: 'thread-5', onSend: vi.fn(), hasActiveInvocation: true });
-    const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
+  it('offers only persistent scopes without inheritance controls or redundant explanatory copy', async () => {
+    await renderThreadInput({ threadId: 'thread-simple', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
 
-    await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(container.querySelector('[data-testid="message-disposition-onboarding"]')).not.toBeNull();
-
-    act(() => trigger.click());
-    act(() => trigger.click());
+    expect(container.querySelector('[data-disposition-scope="once"]')).toBeNull();
+    expect(container.querySelector('[data-disposition-scope="thread"]')).not.toBeNull();
+    expect(container.querySelector('[data-disposition-scope="global"]')).not.toBeNull();
+    expect(container.textContent).not.toContain('恢复继承');
+    expect(container.textContent).not.toContain('消息入队后按目标的实时状态执行');
     expect(container.querySelector('[data-testid="message-disposition-onboarding"]')).toBeNull();
   });
 
-  it('fails closed without presenting an unsupported carrier as busy', async () => {
+  it('keeps strategy independent of the current carrier capability', async () => {
     useChatStore.setState({
       catInvocations: {
         opus: {
@@ -299,66 +230,42 @@ describe('F264 author message disposition selector', () => {
             provider: 'anthropic',
             carrier: 'claude_print_sdk',
             deliverySemantics: 'unsupported',
+            activeInvocationGuidance: 'unsupported',
           },
         },
       },
     });
     await renderThreadInput({ threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true });
-    const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
-    expect(trigger.textContent).toContain('下一件工作');
-    await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-    });
-    const continueOption = container.querySelector('[data-disposition-option="continue_current"]') as HTMLButtonElement;
-    const nextWorkOption = container.querySelector('[data-disposition-option="next_work"]') as HTMLButtonElement;
-    expect(continueOption.disabled).toBe(true);
-    expect(continueOption.className).toContain('disabled:cursor-not-allowed');
-    expect(continueOption.className).not.toContain('disabled:cursor-wait');
-    expect(nextWorkOption.disabled).toBe(false);
-    expect(container.textContent).toContain('当前接入不支持本轮读取');
+    await openDisposition();
 
-    act(() => {
-      useChatStore.setState({
-        catInvocations: { opus: { invocationId: 'inv-active' } },
-      });
-    });
-    await renderThreadInput({ threadId: 'thread-6', onSend: vi.fn(), hasActiveInvocation: true });
-    expect(container.textContent).toContain('能力未声明');
+    expect(container.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.disabled).toBe(
+      false,
+    );
+    expect(container.textContent).not.toContain('当前接入不支持');
+    expect(container.textContent).not.toContain('能力未声明');
   });
 
-  it('shows inherited effective values as inherited instead of scope-local overrides', async () => {
+  it('shows the inherited effective value as the selected strategy without explanatory copy', async () => {
     vi.mocked(globalThis.fetch).mockImplementation(async () =>
       jsonResponse(
         dispositionSnapshot({
           global: 'continue_current',
           effective: 'continue_current',
           source: 'global',
-          onboardingSeen: true,
         }),
       ),
     );
+    await renderThreadInput({ threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
 
-    await renderThreadInput({ threadId: 'thread-inherited', onSend: vi.fn(), hasActiveInvocation: true });
-
-    const trigger = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
-    await act(async () => {
-      trigger.click();
-      await Promise.resolve();
-    });
-
-    const scopeState = container.querySelector('[data-testid="message-disposition-scope-state"]');
-    expect(scopeState?.textContent).toContain('继承当前有效值');
-    expect(scopeState?.textContent).toContain('全局默认');
-    expect(container.querySelector('[data-disposition-option="continue_current"]')?.getAttribute('aria-pressed')).toBe(
-      'false',
-    );
-    expect(container.querySelector('[data-disposition-option="next_work"]')?.getAttribute('aria-pressed')).toBe(
-      'false',
-    );
+    expect(container.querySelector('[data-testid="message-disposition-scope-state"]')).toBeNull();
+    const selected = container.querySelector('[data-disposition-option="continue_current"]');
+    expect(selected?.getAttribute('aria-pressed')).toBe('true');
+    expect(selected?.className).toContain('bg-cafe-surface-sunken');
+    expect(container.querySelector('[aria-label="偏好作用域"]')?.className).toContain('bg-cafe-surface');
   });
 
-  it('resets one-shot and Thread A state before Thread B preference hydration completes', async () => {
+  it('resets Thread A presentation before Thread B hydration completes', async () => {
     let resolveThreadB: ((response: Response) => void) | undefined;
     vi.mocked(globalThis.fetch).mockImplementation((input) => {
       const path = String(input);
@@ -369,7 +276,6 @@ describe('F264 author message disposition selector', () => {
               thread: 'continue_current',
               effective: 'continue_current',
               source: 'thread',
-              onboardingSeen: true,
             }),
           ),
         );
@@ -382,23 +288,24 @@ describe('F264 author message disposition selector', () => {
       return Promise.resolve(jsonResponse(productSnapshot));
     });
 
-    await renderThreadInput({ threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: true });
-
-    const triggerA = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
+    await renderThreadInput({ threadId: 'thread-a', onSend: vi.fn(), hasActiveInvocation: false });
+    await openDisposition();
     await act(async () => {
-      triggerA.click();
+      container.querySelector<HTMLButtonElement>('[data-disposition-option="next_work"]')?.click();
+      await Promise.resolve();
       await Promise.resolve();
     });
-    act(() => (container.querySelector('[data-disposition-option="next_work"]') as HTMLButtonElement).click());
-    expect(triggerA.textContent).toContain('仅这一次');
 
-    await renderThreadInput({ threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: true });
-
-    const triggerB = container.querySelector('[data-testid="message-disposition-trigger"]') as HTMLButtonElement;
-    expect(triggerB.textContent).toContain('下一件工作');
-    expect(triggerB.textContent).toContain('产品默认');
-    expect(triggerB.textContent).not.toContain('仅这一次');
-    expect(triggerB.textContent).not.toContain('本 Thread');
+    await renderThreadInput({ threadId: 'thread-b', onSend: vi.fn(), hasActiveInvocation: false });
+    await act(async () => {
+      if (!container.querySelector('[data-testid="message-disposition-trigger"]')) {
+        container.querySelector<HTMLButtonElement>('button[aria-label="添加"]')?.click();
+      }
+      await Promise.resolve();
+    });
+    const triggerB = container.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]');
+    expect(triggerB?.textContent).toContain('排队等待');
+    expect(triggerB?.getAttribute('data-disposition-source')).toBe('product');
 
     await act(async () => {
       resolveThreadB?.(
@@ -407,14 +314,12 @@ describe('F264 author message disposition selector', () => {
             global: 'continue_current',
             effective: 'continue_current',
             source: 'global',
-            onboardingSeen: true,
           }),
         ),
       );
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(triggerB.textContent).toContain('全局默认');
-    expect(triggerB.textContent).not.toContain('本 Thread');
+    expect(triggerB?.getAttribute('data-disposition-source')).toBe('global');
   });
 });

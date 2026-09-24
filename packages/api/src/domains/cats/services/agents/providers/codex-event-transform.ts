@@ -36,8 +36,13 @@ const MAX_BASE64_LENGTH = 5 * 1024 * 1024;
  */
 export interface CodexStreamState {
   hadPriorTextTurn: boolean;
-  /** Cat nickname/display name used to distinguish this cat's signature from quoted teammate signatures. */
+  streamedAgentMessageItemIds?: Set<string>;
+  agentMessageItemOrder?: string[];
+  agentMessageTextByItemId?: Map<string, string>;
+  /** Preferred cat identity used for the runtime-canonical signature. */
   signatureIdentity?: string;
+  /** Other configured identities that the provider may use for the same cat. */
+  signatureIdentityAliases?: readonly string[];
   /** Runtime-derived signature appended once after the provider stream ends normally. */
   canonicalSignature?: string;
   /** Latest provider-authored own signature, used only when runtime config cannot provide one. */
@@ -58,12 +63,23 @@ const MARKDOWN_LEADING_CONTAINER_RE = /^[ \t]{0,3}(?:(?:(?:[-+*]|\d{1,9}[.)])[ \
 const FENCE_RUN_RE = /(`{3,}|~{3,})/u;
 
 const PAW_SIGNATURE_RE = /^\[([^[\]/\n]+)\/([^[\]\n]+)🐾\]$/u;
-const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾\])`?[ \t]*$/u;
+const TRAILING_PAW_SIGNATURE_RE = /`?(\[([^[\]/\n]+)\/([^[\]\n]+)🐾(?:@([^[\]\n]+))?\])`?[ \t]*$/u;
 
 function isOwnSignatureIdentity(candidate: string, expected: string): boolean {
   const normalizedCandidate = candidate.trim();
   const normalizedExpected = expected.trim();
   return normalizedCandidate === normalizedExpected || normalizedCandidate.endsWith(`·${normalizedExpected}`);
+}
+
+function isConfiguredOwnSignatureIdentity(
+  candidate: string,
+  expectedIdentity: string,
+  expectedIdentityAliases: readonly string[],
+): boolean {
+  return (
+    isOwnSignatureIdentity(candidate, expectedIdentity) ||
+    expectedIdentityAliases.some((alias) => isOwnSignatureIdentity(candidate, alias))
+  );
 }
 
 function normalizeSignatureModel(model: string): string {
@@ -77,10 +93,13 @@ function normalizeSignatureModel(model: string): string {
 function isCanonicalOwnSignature(
   candidateIdentity: string,
   candidateModel: string,
+  candidateCatId: string | undefined,
   expectedIdentity: string,
+  expectedIdentityAliases: readonly string[],
   canonicalSignature: string | undefined,
+  expectedCatId: CatId,
 ): boolean {
-  if (!isOwnSignatureIdentity(candidateIdentity, expectedIdentity)) return false;
+  if (!isConfiguredOwnSignatureIdentity(candidateIdentity, expectedIdentity, expectedIdentityAliases)) return false;
   if (!canonicalSignature) return false;
 
   const canonical = PAW_SIGNATURE_RE.exec(canonicalSignature.trim());
@@ -89,7 +108,12 @@ function isCanonicalOwnSignature(
   if (!canonicalIdentity || !canonicalModel || !isOwnSignatureIdentity(canonicalIdentity, expectedIdentity)) {
     return false;
   }
-  return normalizeSignatureModel(candidateModel) === normalizeSignatureModel(canonicalModel);
+  const normalizedCandidateModel = normalizeSignatureModel(candidateModel);
+  const normalizedCanonicalModel = normalizeSignatureModel(canonicalModel);
+  if (normalizedCandidateModel === normalizedCanonicalModel) {
+    return candidateCatId === undefined || candidateCatId.trim() === expectedCatId;
+  }
+  return candidateCatId?.trim() === expectedCatId && normalizedCandidateModel.endsWith(normalizedCanonicalModel);
 }
 
 interface MarkdownFence {
@@ -171,17 +195,28 @@ function isMarkdownSignatureSampleContext(text: string, candidateIndex: number):
 function stripOwnTrailingTurnSignature(
   text: string,
   signatureIdentity: string | undefined,
+  signatureIdentityAliases: readonly string[] | undefined,
   canonicalSignature: string | undefined,
+  catId: CatId,
 ): StrippedTurnSignature {
   if (!signatureIdentity) return { content: text };
   const match = TRAILING_PAW_SIGNATURE_RE.exec(text);
   if (!match || match.index === undefined) return { content: text };
   const candidateIdentity = match[2];
   const candidateModel = match[3];
+  const candidateCatId = match[4];
   if (
     !candidateIdentity ||
     !candidateModel ||
-    !isCanonicalOwnSignature(candidateIdentity, candidateModel, signatureIdentity, canonicalSignature)
+    !isCanonicalOwnSignature(
+      candidateIdentity,
+      candidateModel,
+      candidateCatId,
+      signatureIdentity,
+      signatureIdentityAliases ?? [],
+      canonicalSignature,
+      catId,
+    )
   ) {
     return { content: text };
   }
@@ -278,7 +313,8 @@ export function transformCodexEvent(
       e.type === 'turn.started' ||
       e.type === 'item.started' ||
       e.type === 'item.updated' ||
-      e.type === 'item.completed'
+      e.type === 'item.completed' ||
+      e.type === 'item.agent_message.delta'
     ) {
       delete state.lastTurnTerminal;
     }
@@ -483,6 +519,28 @@ export function transformCodexEvent(
     return null;
   }
 
+  if (e.type === 'item.agent_message.delta') {
+    if (typeof e.item_id !== 'string' || typeof e.delta !== 'string' || e.delta.length === 0) return null;
+    const firstChunk = !state?.streamedAgentMessageItemIds?.has(e.item_id);
+    const hadPriorTextTurn = state?.hadPriorTextTurn === true;
+    if (state) {
+      state.streamedAgentMessageItemIds ??= new Set();
+      state.agentMessageItemOrder ??= [];
+      state.agentMessageTextByItemId ??= new Map();
+      if (!state.agentMessageTextByItemId.has(e.item_id)) state.agentMessageItemOrder.push(e.item_id);
+      state.agentMessageTextByItemId.set(e.item_id, `${state.agentMessageTextByItemId.get(e.item_id) ?? ''}${e.delta}`);
+      state.streamedAgentMessageItemIds.add(e.item_id);
+      state.hadPriorTextTurn = true;
+    }
+    return {
+      type: 'text',
+      catId,
+      content: `${firstChunk && hadPriorTextTurn ? '\n\n' : ''}${e.delta}`,
+      textMode: 'append',
+      timestamp: Date.now(),
+    };
+  }
+
   if (e.type !== 'item.completed') return null;
 
   const item = e.item as Record<string, unknown> | undefined;
@@ -515,8 +573,33 @@ export function transformCodexEvent(
   }
 
   if (item?.type === 'agent_message' && typeof item.text === 'string' && item.text.trim().length > 0) {
-    const stripped = stripOwnTrailingTurnSignature(item.text, state?.signatureIdentity, state?.canonicalSignature);
+    const stripped = stripOwnTrailingTurnSignature(
+      item.text,
+      state?.signatureIdentity,
+      state?.signatureIdentityAliases,
+      state?.canonicalSignature,
+      catId,
+    );
     if (state && stripped.signature) state.observedSignature = stripped.signature;
+    const itemId = typeof item.id === 'string' ? item.id : undefined;
+    if (state && itemId) {
+      state.agentMessageItemOrder ??= [];
+      state.agentMessageTextByItemId ??= new Map();
+      if (!state.agentMessageTextByItemId.has(itemId)) state.agentMessageItemOrder.push(itemId);
+      state.agentMessageTextByItemId.set(itemId, stripped.content);
+      if (state.streamedAgentMessageItemIds?.has(itemId)) {
+        return {
+          type: 'text',
+          catId,
+          content: state.agentMessageItemOrder
+            .map((candidateId) => state.agentMessageTextByItemId?.get(candidateId) ?? '')
+            .filter(Boolean)
+            .join('\n\n'),
+          textMode: 'replace',
+          timestamp: Date.now(),
+        };
+      }
+    }
     if (stripped.content.trim().length === 0) return null;
     const prefix = state?.hadPriorTextTurn ? '\n\n' : '';
     if (state) state.hadPriorTextTurn = true;

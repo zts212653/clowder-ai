@@ -35,6 +35,8 @@ interface ResolveInput {
   explicit?: CrossThreadCoordinationInput;
   incoming?: IncomingCrossThreadCoordination;
   targetThreadId: string;
+  /** Any authored routing credential is an instruction, never courtesy prose. */
+  hasExplicitRoutingIntent?: boolean;
   mintId?: () => string;
 }
 
@@ -135,6 +137,27 @@ export function resolveCrossThreadCoordination(input: ResolveInput): ResolvedCro
 
   if (input.explicit?.phase === 'active') {
     return resolveExplicitActive(input, mintId);
+  }
+
+  // Routing intent wins over a stale terminal label. A terminal recipient can
+  // send unaddressed courtesy prose as an ACK, but line-start mentions and
+  // structured targetCats both name new work. Mint a fresh active generation
+  // rather than inheriting or re-closing the already terminal lineage.
+  if (
+    input.hasExplicitRoutingIntent &&
+    incomingCoordination?.phase === 'terminal' &&
+    input.targetThreadId === input.incoming?.sourceThreadId
+  ) {
+    return resolveExplicitActive(
+      {
+        ...input,
+        explicit: {
+          phase: 'active',
+          ...(input.explicit?.subjectRef ? { subjectRef: input.explicit.subjectRef } : {}),
+        },
+      },
+      mintId,
+    );
   }
 
   if (input.explicit?.phase === 'terminal') {

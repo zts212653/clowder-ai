@@ -2,13 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ConflictRouter } = await import('../dist/infrastructure/email/ConflictRouter.js');
 
 async function setup(when) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const harness = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'pr_tracking',
     subjectKey: 'pr:owner/repo#7',
@@ -38,35 +38,64 @@ async function setup(when) {
   });
   const waitLifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     now: () => 500,
     log: { info() {}, warn() {}, error() {} },
   });
   const router = new ConflictRouter({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     waitLifecycle,
     log: { info() {}, warn() {}, error() {} },
   });
-  return { router, messageStore, taskStore, task };
+  return { router, harness, taskStore, task };
 }
 
 describe('ConflictRouter F280 typed waits', () => {
-  test('conflict wakes only a waiter that declared the conflict predicate', async () => {
-    const { router, messageStore } = await setup([{ kind: 'pr_became_conflicting' }]);
+  test('conflict terminalizes for a declared waiter, and announces only when asked', async () => {
+    const { router, harness, task } = await setup([{ kind: 'pr_became_conflicting' }]);
     const result = await router.route({
       repoFullName: 'owner/repo',
       prNumber: 7,
       headSha: 'aaa1111',
       mergeState: 'CONFLICTING',
     });
-    assert.equal(result.kind, 'notified');
-    assert.match(result.content, /mergeable → conflicting/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+
+    // Phase C AC-C1 needs the authorization without the announcement: the outcome is durable here,
+    // so an auto-resolver may act on it, and nothing has been said to the owner yet.
+    assert.equal(result.kind, 'matched_pending');
+    assert.equal(result.taskId, task.id);
+    assert.equal(result.outcome.reason, 'matched');
+    assert.equal(harness.deliveries('thread_1').length, 0, 'nothing is announced before it is asked for');
+
+    const published = await router.publish(result.taskId, result.outcome);
+    assert.equal(published.kind, 'notified');
+    assert.match(published.content, /mergeable → conflicting/);
+    assert.equal(harness.deliveries('thread_1').length, 1, 'and then exactly once');
+  });
+
+  test('a repaired conflict is settled without ever announcing it', async () => {
+    const { router, harness, task } = await setup([{ kind: 'pr_became_conflicting' }]);
+    const result = await router.route({
+      repoFullName: 'owner/repo',
+      prNumber: 7,
+      headSha: 'aaa1111',
+      mergeState: 'CONFLICTING',
+    });
+    assert.equal(result.kind, 'matched_pending');
+
+    assert.equal(await router.settleWithoutWake(result.taskId, result.outcome, 'auto-resolved:rebase'), true);
+    assert.equal(harness.deliveries('thread_1').length, 0, 'a repaired conflict never reaches the owner');
+
+    // The outbox is settled, so a later flush cannot resurrect it as a late wake.
+    const late = await router.publish(result.taskId, result.outcome);
+    assert.notEqual(late.kind, 'notified');
+    assert.equal(harness.deliveries('thread_1').length, 0, 'and it stays settled');
+    assert.ok(task.id);
   });
 
   test('conflict remains state-only for a new-HEAD waiter', async () => {
-    const { router, messageStore, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
+    const { router, harness, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
     const result = await router.route({
       repoFullName: 'owner/repo',
       prNumber: 7,
@@ -74,7 +103,7 @@ describe('ConflictRouter F280 typed waits', () => {
       mergeState: 'CONFLICTING',
     });
     assert.equal(result.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(harness.deliveries('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.conflict.mergeState, 'CONFLICTING');
   });
 

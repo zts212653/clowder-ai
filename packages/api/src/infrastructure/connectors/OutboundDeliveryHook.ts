@@ -106,7 +106,7 @@ export class OutboundDeliveryHook {
 
   /**
    * Return the set of connectorIds bound to a thread.
-   * Used by ConnectorInvokeTrigger to detect single-token adapters (e.g. weixin)
+   * Used by the delivery path to detect single-token adapters (e.g. weixin)
    * that require multi-turn content to be merged before delivery.
    */
   async getConnectorIds(threadId: string): Promise<string[]> {

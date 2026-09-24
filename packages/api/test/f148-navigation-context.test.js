@@ -306,6 +306,71 @@ describe('summarizeActiveTasks', () => {
 });
 
 describe('formatNavigationHeader', () => {
+  it('renders exact other-member lifecycle state with its source handoff', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      currentCatId: 'codex',
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: true,
+        activeRuns: [
+          {
+            phase: 'processing',
+            targetId: 'kimi',
+            invocationId: 'inv-kimi',
+            responseMessageId: 'response-kimi',
+            startedAt: 200,
+            sources: [{ messageId: 'source-opus', from: { kind: 'agent', catId: 'opus' } }],
+          },
+        ],
+      },
+    });
+
+    assert.match(header, /成员运行态（生命周期真相）/);
+    assert.match(header, /\(kimi\).*来源 source-opus ← 布偶猫.*response=response-kimi.*invocation=inv-kimi/);
+  });
+
+  it('states that no other member is running only when the exact projection is complete', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      currentCatId: 'codex',
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: true,
+        activeRuns: [
+          {
+            phase: 'processing',
+            targetId: 'codex',
+            invocationId: 'self-invocation',
+            responseMessageId: 'self-response',
+            startedAt: 100,
+            sources: [{ messageId: 'source-user', from: { kind: 'user', userId: 'owner' } }],
+          },
+        ],
+      },
+    });
+
+    assert.match(header, /成员运行态: 当前无其他成员执行/);
+    assert.doesNotMatch(header, /self-invocation/);
+  });
+
+  it('does not infer execution from recent speech when the lifecycle join is incomplete', () => {
+    const header = formatNavigationHeader({
+      baton: null,
+      tasks: [],
+      executionSituation: {
+        kind: 'thread_execution_situation.v1',
+        complete: false,
+        activeRuns: [],
+      },
+    });
+
+    assert.match(header, /当前无法完整验证（不按最近发言推断）/);
+    assert.doesNotMatch(header, /当前无其他成员执行/);
+  });
+
   it('formats baton with @ message excerpt', () => {
     const header = formatNavigationHeader({
       baton: {

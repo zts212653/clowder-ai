@@ -1074,7 +1074,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('POST and PATCH /api/cats handle cli.carrier as an openai-only override', async () => {
+  it('POST and PATCH /api/cats persist canonical carrier and enforce the client matrix', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -1108,11 +1108,13 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           ...baseBody,
           catId: 'runtime-codex-carrier',
           mentionPatterns: ['@runtime-codex-carrier'],
-          cli: { command: 'codex', outputFormat: 'json', carrier: 'app_server' },
+          carrier: 'app_server',
+          cli: { command: 'codex', outputFormat: 'json' },
         }),
       });
       assert.equal(createRes.statusCode, 201, createRes.body);
-      assert.equal(JSON.parse(createRes.body).cat.cli?.carrier, 'app_server');
+      assert.equal(JSON.parse(createRes.body).cat.carrier, 'app_server');
+      assert.equal(JSON.parse(createRes.body).cat.cli?.carrier, undefined);
 
       const invalidEnumRes = await app.inject({
         method: 'POST',
@@ -1122,7 +1124,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           ...baseBody,
           catId: 'runtime-codex-carrier-invalid',
           mentionPatterns: ['@runtime-codex-carrier-invalid'],
-          cli: { command: 'codex', outputFormat: 'json', carrier: 'carrier_pigeon' },
+          carrier: 'carrier_pigeon',
         }),
       });
       assert.equal(invalidEnumRes.statusCode, 400);
@@ -1138,36 +1140,54 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           defaultModel: 'kimi-k2.5',
           catId: 'runtime-kimi-carrier',
           mentionPatterns: ['@runtime-kimi-carrier'],
-          cli: { command: 'kimi', outputFormat: 'stream-json', carrier: 'app_server' },
+          carrier: 'app_server',
+          cli: { command: 'kimi', outputFormat: 'stream-json' },
         }),
       });
       assert.equal(kimiCreateRes.statusCode, 400);
       assert.match(JSON.parse(kimiCreateRes.body).error, /carrier/i);
 
+      const openCodeServerCreateRes = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify({
+          ...baseBody,
+          clientId: 'opencode',
+          accountRef: 'opencode',
+          defaultModel: 'anthropic/claude-test',
+          catId: 'runtime-opencode-server-carrier',
+          mentionPatterns: ['@runtime-opencode-server-carrier'],
+          carrier: 'server',
+          cli: { command: 'opencode', outputFormat: 'json' },
+        }),
+      });
+      assert.equal(openCodeServerCreateRes.statusCode, 400);
+
       const patchRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ cli: { carrier: 'exec_json' } }),
+        body: JSON.stringify({ carrier: 'cli' }),
       });
       assert.equal(patchRes.statusCode, 200, patchRes.body);
-      assert.equal(JSON.parse(patchRes.body).cat.cli?.carrier, 'exec_json');
+      assert.equal(JSON.parse(patchRes.body).cat.carrier, 'cli');
 
       const clearRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ cli: { carrier: null } }),
+        body: JSON.stringify({ carrier: 'app_server' }),
       });
       assert.equal(clearRes.statusCode, 200, clearRes.body);
-      assert.equal(JSON.parse(clearRes.body).cat.cli?.carrier, undefined);
+      assert.equal(JSON.parse(clearRes.body).cat.carrier, 'app_server');
 
       // Carrier is model-independent: a model switch must preserve the override.
       const modelSwitchRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-codex-carrier',
         headers,
-        body: JSON.stringify({ cli: { carrier: 'app_server' } }),
+        body: JSON.stringify({ carrier: 'app_server' }),
       });
       assert.equal(modelSwitchRes.statusCode, 200, modelSwitchRes.body);
       const modelChangeRes = await app.inject({
@@ -1177,7 +1197,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         body: JSON.stringify({ defaultModel: 'gpt-5.5' }),
       });
       assert.equal(modelChangeRes.statusCode, 200, modelChangeRes.body);
-      assert.equal(JSON.parse(modelChangeRes.body).cat.cli?.carrier, 'app_server');
+      assert.equal(JSON.parse(modelChangeRes.body).cat.carrier, 'app_server');
     } finally {
       await app.close();
     }
@@ -1321,7 +1341,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
-  it('GET /api/cats exposes effective codexCarrier truth (per-cat > env > default)', async () => {
+  it('GET /api/cats exposes the canonical member carrier and ignores the retired global selector', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
     const savedCarrier = process.env.CAT_CAFE_CODEX_CARRIER;
@@ -1357,32 +1377,31 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         }),
       });
       assert.equal(createRes.statusCode, 201, createRes.body);
-      assert.deepEqual(JSON.parse(createRes.body).cat.codexCarrier, { effective: 'exec_json', source: 'default' });
+      assert.equal(JSON.parse(createRes.body).cat.carrier, 'cli');
 
-      // Env applies when no per-cat override exists.
+      // The retired global selector must not change per-member routing truth.
       process.env.CAT_CAFE_CODEX_CARRIER = 'app_server';
       const envRes = await app.inject({ method: 'GET', url: '/api/cats', headers });
       assert.equal(envRes.statusCode, 200, envRes.body);
       const envCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'runtime-carrier-truth');
-      assert.deepEqual(envCat.codexCarrier, { effective: 'app_server', source: 'env' });
+      assert.equal(envCat.carrier, 'cli');
 
-      // Per-cat override beats env — including an explicit exec_json override.
+      // The canonical top-level carrier is the only writable selector.
       const patchRes = await app.inject({
         method: 'PATCH',
         url: '/api/cats/runtime-carrier-truth',
         headers,
-        body: JSON.stringify({ cli: { carrier: 'exec_json' } }),
+        body: JSON.stringify({ carrier: 'app_server' }),
       });
       assert.equal(patchRes.statusCode, 200, patchRes.body);
-      assert.deepEqual(JSON.parse(patchRes.body).cat.codexCarrier, { effective: 'exec_json', source: 'per-cat' });
+      assert.equal(JSON.parse(patchRes.body).cat.carrier, 'app_server');
 
-      // Non-openai cats never carry the field (opus is the anthropic template cat).
+      // Every member carries one explicit access mode, regardless of provider.
       const claudeCat = JSON.parse(envRes.body).cats.find((cat) => cat.id === 'opus');
       assert.equal(claudeCat.clientId, 'anthropic');
-      assert.equal(claudeCat.codexCarrier, undefined);
+      assert.equal(claudeCat.carrier, 'cli');
 
-      // openai + generic ACP (env=app_server): the assembly checks getAcpConfig
-      // first, so AcpAgentService runs and the Codex carrier never applies.
+      // ACP is its own explicit client/carrier; OpenAI does not silently become ACP.
       const acpRes = await app.inject({
         method: 'POST',
         url: '/api/cats',
@@ -1395,18 +1414,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
           color: { primary: '#16a34a', secondary: '#bbf7d0' },
           mentionPatterns: ['@runtime-carrier-acp'],
           roleDescription: '审查',
-          clientId: 'openai',
+          clientId: 'acp',
           accountRef: 'codex',
           defaultModel: 'gpt-5.4',
-          cli: { effort: 'xhigh', carrier: 'exec_json' },
-          cliConfigArgs: ['--config stale=true'],
           acp: { command: 'codex', startupArgs: ['acp'] },
         }),
       });
       assert.equal(acpRes.statusCode, 201, acpRes.body);
       const acpCat = JSON.parse(acpRes.body).cat;
-      assert.equal(acpCat.adapterMode, 'acp');
-      assert.equal(acpCat.codexCarrier, undefined, 'ACP cats bypass the Codex carrier entirely');
+      assert.equal(acpCat.carrier, 'acp');
       assert.equal(acpCat.cli?.effort, undefined, 'ACP create must not persist CLI effort');
       assert.equal(acpCat.cli?.carrier, undefined, 'ACP create must not persist a CLI carrier override');
       assert.deepEqual(acpCat.cliConfigArgs ?? [], [], 'ACP create must not persist extra CLI arguments');
@@ -1416,18 +1432,15 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         url: '/api/cats/runtime-carrier-truth',
         headers,
         body: JSON.stringify({
-          acp: { command: 'codex', startupArgs: ['acp'] },
-          cli: { effort: 'xhigh', carrier: 'app_server' },
-          cliConfigArgs: ['--config stale=true'],
+          carrier: 'cli',
         }),
       });
       assert.equal(switchToAcpRes.statusCode, 200, switchToAcpRes.body);
       const switchedToAcp = JSON.parse(switchToAcpRes.body).cat;
-      assert.equal(switchedToAcp.cli?.effort, undefined, 'ACP patch must clear CLI effort');
-      assert.equal(switchedToAcp.cli?.carrier, undefined, 'ACP patch must clear CLI carrier override');
-      assert.deepEqual(switchedToAcp.cliConfigArgs ?? [], [], 'ACP patch must clear extra CLI arguments');
+      assert.equal(switchedToAcp.carrier, 'cli');
 
-      // Cloud-only (F247 KD-17): cli removed → no local dispatch → no carrier truth.
+      // Cloud-only members still expose their configured access mode even though
+      // the cloud provider bypasses local dispatch.
       const cloudRes = await app.inject({
         method: 'POST',
         url: '/api/cats',
@@ -1450,7 +1463,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       assert.equal(cloudRes.statusCode, 201, cloudRes.body);
       const cloudCat = JSON.parse(cloudRes.body).cat;
       assert.equal(cloudCat.cli, undefined);
-      assert.equal(cloudCat.codexCarrier, undefined, 'cloud-only cats never reach the Codex carrier');
+      assert.equal(cloudCat.carrier, 'cli');
     } finally {
       if (savedCarrier === undefined) {
         delete process.env.CAT_CAFE_CODEX_CARRIER;
@@ -3372,7 +3385,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
 
     assert.equal(createRes.statusCode, 201, `Expected 201 but got ${createRes.statusCode}: ${createRes.body}`);
     const body = JSON.parse(createRes.body);
-    assert.equal(body.cat.adapterMode, 'acp', 'generic ACP member should have adapterMode=acp');
+    assert.equal(body.cat.carrier, 'acp', 'generic ACP member should have carrier=acp');
     assert.equal(
       body.cat.mcpSupport,
       true,
@@ -3622,7 +3635,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     });
     assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
     const switchBody = JSON.parse(switchRes.body);
-    assert.equal(switchBody.cat.adapterMode, 'cli', 'after switch should be cli mode');
+    assert.equal(switchBody.cat.carrier, 'cli', 'after switch should be cli mode');
   });
 
   it('PATCH /api/cats/:id gates httpstream ACP transport behind explicit experimental opt-in', async () => {
@@ -3736,7 +3749,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(switchRes.statusCode, 200, `client switch failed: ${switchRes.body}`);
     const switchBody = JSON.parse(switchRes.body);
     assert.equal(switchBody.cat.clientId, 'openai');
-    assert.equal(switchBody.cat.adapterMode, 'cli', 'after switch should be cli mode');
+    assert.equal(switchBody.cat.carrier, 'cli', 'after switch should be cli mode');
     assert.equal(switchBody.cat.acp, undefined, 'response must not expose stale ACP config');
 
     const listRes = await app.inject({ method: 'GET', url: '/api/cats' });
@@ -3744,7 +3757,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const listBody = JSON.parse(listRes.body);
     const listed = listBody.cats.find((cat) => cat.id === 'acp-switch');
     assert.equal(listed.clientId, 'openai');
-    assert.equal(listed.adapterMode, 'cli', 'listed cat should be cli mode after switch');
+    assert.equal(listed.carrier, 'cli', 'listed cat should be cli mode after switch');
     assert.equal(listed.acp, undefined, 'catalog must not retain stale ACP config');
   });
 

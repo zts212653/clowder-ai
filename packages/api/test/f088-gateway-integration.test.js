@@ -92,10 +92,35 @@ function buildTestHarness() {
     log,
   });
 
+  // RFC §5.1/§5.2: admission to the Queue IS the wake, so the durable-admission component is the
+  // seam a connector input crosses — there is no second trigger call to observe.
+  const persistedQueueDelivery = {
+    async deliver(input) {
+      const msg = {
+        id: `msg-${messageStore.messages.length + 1}`,
+        ...input,
+        userId: input.ownerUserId,
+        mentions: [input.targetCatId],
+        deliveryStatus: 'queued',
+        from: { kind: 'external', connectorId: input.source.connector },
+      };
+      messageStore.messages.push(msg);
+      triggerCalls.push({
+        threadId: input.threadId,
+        catId: input.targetCatId,
+        userId: input.ownerUserId,
+        message: input.content,
+        messageId: msg.id,
+      });
+      return { state: 'started', entryId: `entry-${messageStore.messages.length}`, message: msg };
+    },
+  };
+
   const router = new ConnectorRouter({
     bindingStore,
     dedup,
     messageStore,
+    persistedQueueDelivery,
     threadStore,
     invokeTrigger,
     socketManager,

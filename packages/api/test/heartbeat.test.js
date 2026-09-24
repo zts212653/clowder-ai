@@ -35,10 +35,13 @@ describe('Heartbeat emission', () => {
     globalThis.clearInterval = originalClearInterval;
   });
 
-  it('messages.ts sets up 30s heartbeat interval', async () => {
+  it('QueueProcessor sets up a 30s heartbeat interval for canonical execution', async () => {
     // Read the source to verify the constant
     const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../src/routes/messages.ts', import.meta.url), 'utf8');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
 
     // Verify HEARTBEAT_INTERVAL_MS is defined as 30000
     assert.ok(
@@ -50,15 +53,28 @@ describe('Heartbeat emission', () => {
     assert.ok(source.includes("'heartbeat'"), 'Should broadcast heartbeat event');
   });
 
-  it('heartbeat interval is cleared in finally block', async () => {
+  it('canonical execution clears its heartbeat interval in finally', async () => {
     const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../src/routes/messages.ts', import.meta.url), 'utf8');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
 
     // Verify clearInterval is called in finally
     assert.ok(source.includes('clearInterval(heartbeatInterval)'), 'Should clear heartbeat interval in finally block');
 
     // Verify finally block exists
     assert.ok(source.includes('} finally {'), 'Should have finally block');
+  });
+
+  it('canonical heartbeat does not keep an abandoned test or shutdown process alive', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.ok(source.includes('heartbeatInterval.unref()'), 'Heartbeat timer should not own process liveness');
   });
 });
 

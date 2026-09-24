@@ -1,13 +1,17 @@
 'use client';
 
-import { type ConnectorIconSpec, getConnectorDefinition } from '@cat-cafe/shared';
-import { useCallback, useEffect, useState } from 'react';
+import {
+  type ConnectorIconSpec,
+  decideHoldCancelEntry,
+  getConnectorDefinition,
+  readHoldCardCancelability,
+} from '@cat-cafe/shared';
 import { tintedLight } from '@/lib/color-utils';
 import { connectorThemeToken } from '@/lib/connector-theme-token';
-import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
-import { ExecutionCancelButton } from './ExecutionCancelButton';
+import { compareMessageTimelineOrder } from '@/stores/message-timeline';
+import { API_URL } from '@/utils/api-client';
+import { HoldBallCancelButton } from './HoldBallCancelButton';
 import {
   AuthKeyIcon,
   ConnectorImage,
@@ -21,6 +25,7 @@ import {
 } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
 import { MarkdownContent } from './MarkdownContent';
+import { MessageActionSlot } from './MessageActionSlot';
 import { MessageBubble } from './MessageBubble';
 import { RichBlocks } from './rich/RichBlocks';
 
@@ -88,131 +93,29 @@ function ConnectorIcon({ iconSpec, fallbackIcon }: { iconSpec?: ConnectorIconSpe
   return <span>{fallbackIcon}</span>;
 }
 
-type HoldTerminalStatus = 'retired_by_event' | 'fired' | 'escalated' | 'ended' | null;
-
-function projectHoldTerminalStatus(body: { status?: unknown; cancelable?: unknown } | null): HoldTerminalStatus {
-  if (body?.cancelable !== false) return null;
-  if (body.status === 'retired_by_event') return 'retired_by_event';
-  if (body.status === 'fired') return 'fired';
-  if (body.status === 'escalated') return 'escalated';
-  return 'ended';
-}
-
-function HoldBallCancelButton({ taskId, threadId, catId }: { taskId: string; threadId?: string; catId?: string }) {
-  const [state, setState] = useState<'idle' | 'loading' | 'done'>('idle');
-  const [terminalStatus, setTerminalStatus] = useState<HoldTerminalStatus>(null);
-  const managedExecution = useActiveExecutionStore((store) => store.executionsByKey[`managed_command:${taskId}`]);
-
-  useEffect(() => {
-    if (managedExecution) return;
-    let cancelled = false;
-    void apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}/status`)
-      .then(async (res) => {
-        if (cancelled) return;
-        if (res.status === 404) {
-          setTerminalStatus('ended');
-          return;
-        }
-        if (!res.ok) return;
-        const body = (await res.json().catch(() => null)) as { status?: unknown; cancelable?: unknown } | null;
-        setTerminalStatus(projectHoldTerminalStatus(body));
-      })
-      .catch(() => {
-        // Status is a read-side affordance. Keep the existing cancel controls if it fails.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [managedExecution, taskId]);
-
-  const handleCancel = useCallback(
-    async (withFeedback = false) => {
-      setState('loading');
-      try {
-        const feedbackQuery = withFeedback ? '?withFeedback=1' : '';
-        const res = await apiFetch(`/api/callbacks/hold-ball/${encodeURIComponent(taskId)}${feedbackQuery}`, {
-          method: 'DELETE',
-        });
-        if (res.ok || (res.status === 404 && !withFeedback)) {
-          setState('done');
-          return;
-        }
-        if (res.status === 404 && withFeedback && threadId) {
-          const fallbackRes = await apiFetch('/api/callbacks/hold-ball/feedback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              threadId,
-              taskId,
-              ...(catId ? { catId } : {}),
-            }),
-          });
-          setState(fallbackRes.ok ? 'done' : 'idle');
-          return;
-        }
-        setState('idle');
-      } catch {
-        setState('idle');
-      }
-    },
-    [catId, taskId, threadId],
-  );
-
-  if (terminalStatus === 'retired_by_event') {
-    return <span className="text-xs text-cafe-muted">已被事件唤醒</span>;
-  }
-  if (terminalStatus === 'fired') return <span className="text-xs text-cafe-muted">已完成</span>;
-  if (terminalStatus === 'escalated') return <span className="text-xs text-cafe-muted">已升级处理</span>;
-  if (terminalStatus === 'ended') return <span className="text-xs text-cafe-muted">已结束</span>;
-  if (state === 'done') return <span className="text-xs text-cafe-muted">已取消</span>;
-  if (managedExecution) {
-    return (
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-cafe-secondary">托管命令运行中</span>
-        <ExecutionCancelButton execution={managedExecution} label="取消命令" />
-      </div>
-    );
-  }
-  return (
-    <div className="flex items-center gap-2">
-      <button
-        type="button"
-        onClick={() => void handleCancel(false)}
-        disabled={state === 'loading'}
-        className="text-xs px-2 py-0.5 rounded bg-cafe-surface hover:bg-cafe-hover border border-cafe-border disabled:opacity-50 transition-colors"
-      >
-        {state === 'loading' ? '取消中…' : '取消持球'}
-      </button>
-      <button
-        type="button"
-        onClick={() => void handleCancel(true)}
-        disabled={state === 'loading'}
-        className="text-xs px-2 py-0.5 rounded bg-cafe-surface text-cafe-accent hover:bg-cafe-accent/10 border border-cafe-accent/40 disabled:opacity-50 transition-colors"
-        title="取消持球并提交问题反馈"
-      >
-        取消并反馈
-      </button>
-    </div>
-  );
-}
-
-function getHoldStatusRefreshKey(
+/**
+ * Every card of one hold carries the same `taskId`. Collected once so the
+ * refresh key and the cancel-entry owner read the same set instead of each
+ * re-deriving it and drifting apart.
+ */
+function collectHoldCards(
   message: ChatMessageType,
   timelineMessages: readonly ChatMessageType[] | undefined,
-): string {
+): ChatMessageType[] {
   const source = message.source;
-  if (source?.connector !== 'hold-ball') return '';
-  const taskId = source.meta?.taskId;
-  const related =
-    typeof taskId === 'string'
-      ? (timelineMessages ?? []).filter(
-          (candidate) => candidate.source?.connector === 'hold-ball' && candidate.source.meta?.taskId === taskId,
-        )
-      : [];
-  const latest =
-    [...related, message]
-      .sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
-      .at(-1) ?? message;
+  const taskId = source?.meta?.taskId;
+  if (source?.connector !== 'hold-ball' || typeof taskId !== 'string') return [];
+  const byId = new Map<string, ChatMessageType>(
+    (timelineMessages ?? [])
+      .filter((candidate) => candidate.source?.connector === 'hold-ball' && candidate.source.meta?.taskId === taskId)
+      .map((card) => [card.id, card]),
+  );
+  byId.set(message.id, message);
+  return [...byId.values()].sort(compareMessageTimelineOrder);
+}
+
+function getHoldStatusRefreshKey(cards: readonly ChatMessageType[], message: ChatMessageType): string {
+  const latest = cards.at(-1) ?? message;
   return `${latest.id}:${latest.timestamp}:${latest.content}:${JSON.stringify(latest.source?.meta ?? {})}`;
 }
 
@@ -240,7 +143,16 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
   const rawUrl = source.url;
   const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
-  const holdStatusRefreshKey = getHoldStatusRefreshKey(message, timelineMessages);
+  const holdCards = collectHoldCards(message, timelineMessages);
+  const holdStatusRefreshKey = getHoldStatusRefreshKey(holdCards, message);
+  const holdCancelEntry = decideHoldCancelEntry(
+    message.id,
+    holdCards.map((card) => ({
+      id: card.id,
+      timestamp: card.timestamp,
+      cancelability: readHoldCardCancelability(card.source?.meta),
+    })),
+  );
 
   const avatar = (
     <div
@@ -278,6 +190,7 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
         <span className="text-xs text-cafe-secondary">{source.sender.name || source.sender.id} 说</span>
       )}
       <span className="text-xs text-cafe-muted">{formatTime(message.timestamp)}</span>
+      <MessageActionSlot />
     </div>
   );
 
@@ -294,14 +207,13 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
       {hasBlocks ? renderContentBlocks(message.contentBlocks!) : <MarkdownContent content={message.content} />}
       {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}
       {source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
-        <div className="mt-2 pt-2 border-t border-cafe-border">
-          <HoldBallCancelButton
-            key={holdStatusRefreshKey}
-            taskId={source.meta.taskId}
-            threadId={threadId}
-            catId={sourceCatId}
-          />
-        </div>
+        <HoldBallCancelButton
+          key={holdStatusRefreshKey}
+          taskId={source.meta.taskId}
+          threadId={threadId}
+          catId={sourceCatId}
+          cancelEntry={holdCancelEntry}
+        />
       )}
     </MessageBubble>
   );

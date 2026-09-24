@@ -28,23 +28,35 @@ describe('buildChatTimelineProjectionKey', () => {
     expect(buildChatTimelineProjectionKey([after])).toBe(buildChatTimelineProjectionKey([before]));
   });
 
-  it('changes when terminal or receipt topology changes', () => {
+  it('does not invalidate historical rows for a live activity-clock tick, but does for an order round', () => {
+    const first = message();
+    const second = message({ id: 'assistant-2', timestamp: 2 });
+    const tick = { ...first, timestamp: 3, timelineOrderAt: 3, content: 'next chunk' };
+    expect(buildChatTimelineProjectionKey([tick, second])).toBe(buildChatTimelineProjectionKey([first, second]));
+    expect(buildChatTimelineProjectionKey([second, tick])).not.toBe(buildChatTimelineProjectionKey([first, second]));
+  });
+
+  it('changes when terminal or delivery topology changes', () => {
     const streaming = message();
     const terminal = message({ isStreaming: false });
-    const receipt = message({
+    const delivered = message({
       type: 'user',
       catId: undefined,
-      extra: {
-        queueReceipt: {
-          version: 1,
-          entryId: 'entry-1',
-          targets: [],
-          reminderAttempts: [],
-        },
+      lifecycle: {
+        kind: 'input',
+        orderKey: '2:delivered-source',
+        dispatchRefs: [
+          {
+            targetId: 'codex-sol',
+            statusMessageId: 'response-1',
+            dispatchedAt: 2,
+            phase: 'dispatched',
+          },
+        ],
       },
     });
 
     expect(buildChatTimelineProjectionKey([terminal])).not.toBe(buildChatTimelineProjectionKey([streaming]));
-    expect(buildChatTimelineProjectionKey([receipt])).not.toBe(buildChatTimelineProjectionKey([streaming]));
+    expect(buildChatTimelineProjectionKey([delivered])).not.toBe(buildChatTimelineProjectionKey([streaming]));
   });
 });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import Database from 'better-sqlite3';
 import '../helpers/setup-cat-registry.js';
+import { adaptMessageStore } from '../helpers/message-from-fixtures.js';
 
 const { MessageStore, deriveGrowingSourceMessageRevision } = await import(
   '../../dist/domains/cats/services/stores/ports/MessageStore.js'
@@ -25,7 +26,7 @@ function fixture(t) {
   const db = new Database(':memory:');
   databases.push(db);
   const cohorts = new CustodyOpportunityCohortStore(db);
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const tasks = new TaskStore();
   const deps = { cohorts, messages, tasks, policyVersion: 'frozen-policy-v1', now: () => now };
   const runtime = new CustodyOpportunityRuntime(deps);
@@ -83,7 +84,7 @@ function fixture(t) {
 }
 
 test('source-owned recognition time is recorded once and preserved by offer replay', async () => {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const source = messages.append({
     userId: 'owner',
     threadId: 'thread',

@@ -152,11 +152,10 @@ describe('Task 7b — RepoScan emits community events', () => {
         },
       },
       projector: { apply: async (event) => applied.push(event.kind) },
-      invokeTrigger: {
-        trigger: async () => {
-          triggered.push('wake');
-          return 'dispatched';
-        },
+      // RFC §5.2: the scan's wake is the envelope reaching the Queue, not a second trigger call.
+      deliverFn: async () => {
+        triggered.push('wake');
+        return { messageId: 'msg-1', content: 'x', admitted: true };
       },
     });
     const gateResult = await spec.admission.gate({});
@@ -167,7 +166,7 @@ describe('Task 7b — RepoScan emits community events', () => {
       .catch(() => {});
 
     assert.deepEqual(applied, ['pr.opened']);
-    assert.deepEqual(triggered, ['wake']);
+    assert.deepEqual(triggered, ['wake'], 'admission is the wake owed by this scan');
   });
 
   it('scan discovers an issue → appends issue.opened event with scan sourceEventId', async () => {

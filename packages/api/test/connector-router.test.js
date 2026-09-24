@@ -18,9 +18,9 @@ function noopLog() {
   };
 }
 
-function mockMessageStore() {
+function mockMessageStore(opts = {}) {
   const messages = [];
-  return {
+  const store = {
     messages,
     async append(input) {
       const msg = { id: `msg-${messages.length + 1}`, ...input };
@@ -28,6 +28,42 @@ function mockMessageStore() {
       return msg;
     },
   };
+  // RFC §5.1: the router hands an envelope to the one durable-admission component. The recorded
+  // shape keeps the same observable facts a queued source carried before it was split in two.
+  // Queued inputs are tracked separately from History-only writes (command exchanges), because
+  // RFC §5.3 keeps a message that needs no member action out of the Queue by design.
+  store.admitted = [];
+  store.delivery = {
+    async deliver(input) {
+      const msg = {
+        id: `msg-${messages.length + 1}`,
+        ...input,
+        userId: input.ownerUserId,
+        mentions: [input.targetCatId],
+        deliveryStatus: 'queued',
+        // Mirrors PersistedQueueDelivery: `from` is derived from the envelope's source — including
+        // the actor. Dropping `source.sender` here made this mock blind to a canonical-identity
+        // regression (#1398 P1); it now carries the same person production does.
+        from: {
+          kind: 'external',
+          connectorId: input.source.connector,
+          ...(input.source.sender ? { sender: input.source.sender } : {}),
+        },
+      };
+      messages.push(msg);
+      const state = opts.admitState ?? 'started';
+      // `unavailable` is the new shape of "no invocation will run" (previously a 'full' trigger).
+      if (state !== 'unavailable' && state !== 'conflict') store.admitted.push(msg);
+      return { state, entryId: `entry-${messages.length}`, message: msg };
+    },
+  };
+  return store;
+}
+
+/** Both host seams a connector router needs, backed by one recorded timeline. */
+function mockConnectorStores() {
+  const store = mockMessageStore();
+  return { messageStore: store, persistedQueueDelivery: store.delivery };
 }
 
 function mockThreadStore() {
@@ -73,7 +109,7 @@ function mockThreadStore() {
   };
 }
 
-function mockTrigger(outcome = 'dispatched') {
+function mockTrigger(outcome = 'enqueued') {
   const calls = [];
   return {
     calls,
@@ -149,6 +185,7 @@ describe('ConnectorRouter', () => {
       bindingStore,
       dedup,
       messageStore,
+      persistedQueueDelivery: messageStore.delivery,
       threadStore,
       invokeTrigger: trigger,
       socketManager,
@@ -195,17 +232,22 @@ describe('ConnectorRouter', () => {
   it('posts message to message store with ConnectorSource', async () => {
     await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
     assert.equal(messageStore.messages.length, 1);
+    assert.equal(messageStore.messages[0].deliveryStatus, 'queued');
     assert.equal(messageStore.messages[0].source.connector, 'feishu');
     assert.equal(messageStore.messages[0].source.label, '飞书');
     assert.equal(typeof messageStore.messages[0].source.icon, 'string');
     assert.equal(messageStore.messages[0].source.icon, '/images/connectors/feishu.png');
+    assert.deepEqual(messageStore.messages[0].from, {
+      kind: 'external',
+      connectorId: 'feishu',
+    });
   });
 
   it('triggers cat invocation', async () => {
     await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
-    assert.equal(trigger.calls.length, 1);
-    assert.equal(trigger.calls[0].catId, 'opus');
-    assert.ok(trigger.calls[0].threadId);
+    assert.equal(messageStore.messages.length, 1, 'one admitted envelope, which is the wake');
+    assert.equal(messageStore.messages[0].targetCatId, 'opus');
+    assert.ok(messageStore.messages[0].threadId);
   });
 
   it('routes to last-active cat when no @mention is present', async () => {
@@ -218,8 +260,8 @@ describe('ConnectorRouter', () => {
 
     await router.route('feishu', 'chat-last-active', '继续', 'ext-last-active-1');
 
-    assert.equal(trigger.calls.length, 1);
-    assert.equal(trigger.calls[0].catId, 'codex');
+    assert.equal(messageStore.messages.length, 1, 'one admitted envelope, which is the wake');
+    assert.equal(messageStore.messages[0].targetCatId, 'codex');
     assert.deepEqual(messageStore.messages[0].mentions, ['codex']);
   });
 
@@ -230,8 +272,8 @@ describe('ConnectorRouter', () => {
 
     await router.route('feishu', 'chat-mention-priority', '@opus 请看', 'ext-mention-priority-1');
 
-    assert.equal(trigger.calls.length, 1);
-    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.equal(messageStore.messages.length, 1, 'one admitted envelope, which is the wake');
+    assert.equal(messageStore.messages[0].targetCatId, 'opus');
     assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
   });
 
@@ -242,8 +284,8 @@ describe('ConnectorRouter', () => {
 
     await router.route('feishu', 'chat-default-fallback', '没人被@', 'ext-default-fallback-1');
 
-    assert.equal(trigger.calls.length, 1);
-    assert.equal(trigger.calls[0].catId, 'opus');
+    assert.equal(messageStore.messages.length, 1, 'one admitted envelope, which is the wake');
+    assert.equal(messageStore.messages[0].targetCatId, 'opus');
     assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
   });
 
@@ -253,6 +295,7 @@ describe('ConnectorRouter', () => {
       bindingStore,
       dedup,
       messageStore,
+      persistedQueueDelivery: messageStore.delivery,
       threadStore,
       invokeTrigger: trigger,
       socketManager,
@@ -268,8 +311,8 @@ describe('ConnectorRouter', () => {
     currentDefault = 'codex';
     await dynamicRouter.route('feishu', 'chat-dynamic-default', 'second', 'ext-dynamic-2');
 
-    assert.equal(trigger.calls[0].catId, 'opus');
-    assert.equal(trigger.calls[1].catId, 'codex');
+    assert.equal(messageStore.messages[0].targetCatId, 'opus');
+    assert.equal(messageStore.messages[1].targetCatId, 'codex');
     assert.deepEqual(messageStore.messages[0].mentions, ['opus']);
     assert.deepEqual(messageStore.messages[1].mentions, ['codex']);
   });
@@ -295,29 +338,12 @@ describe('ConnectorRouter', () => {
     assert.ok(thread.projectPath.length > 1, 'projectPath should be a real filesystem path');
   });
 
-  it('broadcasts connector message to websocket', async () => {
-    await router.route('feishu', 'chat-123', 'Hello', 'ext-1');
-    assert.ok(socketManager.broadcasts.length > 0);
-    assert.equal(socketManager.broadcasts[0].event, 'connector_message');
-  });
-
-  it('emits nested message protocol (threadId + message.{id,type,content,source,timestamp})', async () => {
+  it('keeps a triggered connector source out of History until Queue admission exposes it', async () => {
     await router.route('feishu', 'chat-123', 'Hi from IM', 'ext-proto-1');
     const bc = socketManager.broadcasts.find((b) => b.event === 'connector_message');
-    assert.ok(bc, 'should have a connector_message broadcast');
-    const { data } = bc;
-    // Must have nested message — frontend guard: if (!data?.message?.id) return;
-    assert.ok(data.threadId, 'data.threadId must exist');
-    assert.ok(data.message, 'data.message must exist (nested protocol)');
-    assert.ok(data.message.id, 'data.message.id must exist');
-    assert.equal(data.message.type, 'connector');
-    assert.equal(data.message.content, 'Hi from IM');
-    assert.ok(data.message.source, 'data.message.source must exist');
-    assert.equal(data.message.source.connector, 'feishu');
-    assert.equal(typeof data.message.timestamp, 'number');
-    // Must NOT have flat legacy fields
-    assert.equal(data.messageId, undefined, 'legacy messageId must not exist');
-    assert.equal(data.connectorId, undefined, 'legacy connectorId must not exist');
+    assert.equal(bc, undefined, 'producer must not project queued input into History before admission');
+    assert.equal(messageStore.messages[0].deliveryStatus, 'queued');
+    assert.ok(messageStore.messages[0].id, 'the queued source keeps a durable identity for admission');
   });
 
   describe('command interception', () => {
@@ -358,6 +384,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup,
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -384,7 +411,7 @@ describe('ConnectorRouter', () => {
       assert.equal(batchDoneCalls[0].externalChatId, 'chat-123');
       assert.equal(batchDoneCalls[0].chainDone, true);
       // invokeTrigger should NOT have been called
-      assert.equal(cmdTrigger.calls.length, 0);
+      assert.equal(messageStore.admitted.length, 0, 'a handled command is not a routed input');
       // Message should NOT be stored
       assert.equal(messageStore.messages.length, 0);
     });
@@ -392,8 +419,8 @@ describe('ConnectorRouter', () => {
     it('routes unknown /command as normal message', async () => {
       const result = await commandRouter.route('feishu', 'chat-123', '/unknown foo', 'ext-cmd-2');
       assert.equal(result.kind, 'routed');
-      // invokeTrigger should have been called (normal routing)
-      assert.equal(cmdTrigger.calls.length, 1);
+      // Normal routing means the input was admitted as an ordinary envelope.
+      assert.equal(messageStore.admitted.length, 1);
       // No command response sent
       assert.equal(adapterSendCalls.length, 0);
     });
@@ -403,7 +430,7 @@ describe('ConnectorRouter', () => {
       assert.equal(result.kind, 'command');
       assert.equal(adapterSendCalls.length, 1);
       assert.ok(adapterSendCalls[0].content.includes('Thread created'));
-      assert.equal(cmdTrigger.calls.length, 0);
+      assert.equal(messageStore.admitted.length, 0, 'a handled command is not a routed input');
     });
 
     it('command exchange broadcasts nested protocol (not legacy flat fields)', async () => {
@@ -453,6 +480,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -495,6 +523,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -530,6 +559,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager: ctxSocket,
@@ -560,6 +590,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore: fwdStore,
+        persistedQueueDelivery: fwdStore.delivery,
         threadStore,
         invokeTrigger: fwdTrigger,
         socketManager: fwdSocket,
@@ -584,10 +615,10 @@ describe('ConnectorRouter', () => {
       const fwdMsg = fwdStore.messages.find((m) => m.content === 'hi there');
       assert.ok(fwdMsg, 'forwarded message should be stored');
       assert.equal(fwdMsg.threadId, 'thread-target-1');
-      // Cat invocation should be triggered for the target thread
-      assert.equal(fwdTrigger.calls.length, 1);
-      assert.equal(fwdTrigger.calls[0].threadId, 'thread-target-1');
-      assert.equal(fwdTrigger.calls[0].message, 'hi there');
+      // Admission to the target thread's Queue is the invocation: Queue drain owes the wake.
+      assert.equal(fwdStore.admitted.length, 1);
+      assert.equal(fwdStore.admitted[0].threadId, 'thread-target-1');
+      assert.equal(fwdStore.admitted[0].content, 'hi there');
       // F151: forward path must NOT close the A2A task (delivery pipeline will)
       assert.equal(batchDoneCalls.length, 0, 'forward path should not call onDeliveryBatchDone');
     });
@@ -595,11 +626,12 @@ describe('ConnectorRouter', () => {
     it('/thread forward closes task when target queue is full', async () => {
       const fullTrigger = mockTrigger('full');
       const fullSocket = mockSocketManager();
-      const fullStore = mockMessageStore();
+      const fullStore = mockMessageStore({ admitState: 'unavailable' });
       const fullRouter = new ConnectorRouter({
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore: fullStore,
+        persistedQueueDelivery: fullStore.delivery,
         threadStore,
         invokeTrigger: fullTrigger,
         socketManager: fullSocket,
@@ -629,6 +661,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: mockTrigger(),
         socketManager,
@@ -657,6 +690,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -680,6 +714,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -711,6 +746,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -734,6 +770,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -758,6 +795,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -786,6 +824,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -824,7 +863,7 @@ describe('ConnectorRouter', () => {
       assert.equal(result.kind, 'command');
       assert.equal(adapterSendCalls.length, 1);
       assert.equal(adapterSendCalls[0].content, 'You are here');
-      assert.equal(cmdTrigger.calls.length, 0);
+      assert.equal(messageStore.admitted.length, 0, 'a handled command is not a routed input');
     });
 
     // F134 regression: group Hub title includes chatName to distinguish multiple groups
@@ -834,6 +873,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: cmdTrigger,
         socketManager,
@@ -960,6 +1000,7 @@ describe('ConnectorRouter', () => {
         bindingStore,
         dedup: new InboundMessageDedup(),
         messageStore,
+        persistedQueueDelivery: messageStore.delivery,
         threadStore,
         invokeTrigger: permTrigger,
         socketManager,
@@ -1018,7 +1059,7 @@ describe('ConnectorRouter', () => {
         'group',
       );
       assert.equal(result.kind, 'routed');
-      assert.equal(permTrigger.calls.length, 1);
+      assert.equal(messageStore.admitted.length, 1, 'a whitelisted group message is admitted like any input');
     });
 
     it('AC-D3: blocks /command from non-admin in group', async () => {

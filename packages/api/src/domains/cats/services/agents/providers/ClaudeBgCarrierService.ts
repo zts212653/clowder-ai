@@ -44,6 +44,7 @@ import { CAT_CLI_PROCESS_CONTEXT, CLI_PROCESS_CONTEXT_ENV } from '../../../../..
 import { CLI_PROCESS_OWNER_ENV } from '../../../../../utils/cli-process-ownership.js';
 import { resolveCliCommandOrBare } from '../../../../../utils/cli-resolve.js';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type {
   AgentMessage,
   AgentService,
@@ -564,7 +565,8 @@ export class ClaudeBgCarrierService implements AgentService {
           if (code !== 0) {
             // A dispatcher may have persisted a job before exiting nonzero. No
             // short id means no safe stop target, so retain the pending record.
-            return finish(new CarrierError(`claude --bg exited code=${code}: ${stderr.slice(0, 300)}`));
+            const excerpt = excerptSanitizedStderr(stderr, { edge: 'head', maxLength: 300 });
+            return finish(new CarrierError(`claude --bg exited code=${code}: ${excerpt}`));
           }
           const match = SHORT_ID_PATTERN.exec(stdout);
           if (!match) {

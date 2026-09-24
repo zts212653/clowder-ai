@@ -83,7 +83,6 @@ describe('F173 Phase C — selectThreadMessages', () => {
           hasUserMention: false,
           lastActivity: 0,
           queue: [],
-          queuePaused: false,
           queueFull: false,
           workspaceWorktreeId: null,
           workspaceOpenTabs: [],
@@ -98,6 +97,68 @@ describe('F173 Phase C — selectThreadMessages', () => {
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe('b1');
     expect(result).toBe(otherMessages);
+  });
+
+  it('derives one ordered presentation view for active and background threads', () => {
+    const activeMessages = [
+      {
+        id: 'response-active',
+        type: 'assistant' as const,
+        catId: 'sol',
+        content: 'done',
+        timestamp: 1_000,
+        lifecycle: { kind: 'response' as const, status: 'completed' as const, completedAt: 4_000 },
+      },
+      { id: 'user-active', type: 'user' as const, content: 'later', timestamp: 2_000 },
+    ];
+    const backgroundMessages = [
+      {
+        id: 'response-bg',
+        type: 'assistant' as const,
+        catId: 'opus',
+        content: 'done',
+        timestamp: 1_000,
+        lifecycle: { kind: 'response' as const, status: 'completed' as const, completedAt: 4_000 },
+      },
+      { id: 'user-bg', type: 'user' as const, content: 'later', timestamp: 2_000 },
+    ];
+    const state = makeState({
+      currentThreadId: 'thread-a',
+      messages: activeMessages as ChatState['messages'],
+      threadStates: {
+        'thread-b': {
+          messages: backgroundMessages as ChatState['messages'],
+          isLoading: false,
+          isLoadingHistory: false,
+          hasMore: true,
+          hasActiveInvocation: false,
+          activeInvocations: {},
+          intentMode: null,
+          targetCats: [],
+          catStatuses: {},
+          catStatusDetails: {},
+          catInvocations: {},
+          currentGame: null,
+          unreadCount: 0,
+          hasUserMention: false,
+          lastActivity: 0,
+          queue: [],
+          queueFull: false,
+          workspaceWorktreeId: null,
+          workspaceOpenTabs: [],
+          workspaceOpenFilePath: null,
+          workspaceOpenFileLine: null,
+        },
+      },
+    });
+
+    expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
+      'user-active',
+      'response-active',
+    ]);
+    expect(selectThreadMessages(state, 'thread-b').map((message) => message.id)).toEqual(['user-bg', 'response-bg']);
+    expect(state.messages).toBe(activeMessages);
+    expect(state.threadStates['thread-b']?.messages).toBe(backgroundMessages);
   });
 
   it('returns empty array when threadId has no entry', () => {
@@ -155,7 +216,6 @@ describe('F173 Phase C — selectThreadLiveness', () => {
           hasUserMention: false,
           lastActivity: 0,
           queue: [],
-          queuePaused: false,
           queueFull: false,
           workspaceWorktreeId: null,
           workspaceOpenTabs: [],
@@ -211,7 +271,6 @@ describe('F173 Phase C — selectThreadLiveness', () => {
           hasUserMention: false,
           lastActivity: 0,
           queue: [],
-          queuePaused: false,
           queueFull: false,
           workspaceWorktreeId: null,
           workspaceOpenTabs: [],

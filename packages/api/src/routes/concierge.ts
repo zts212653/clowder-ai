@@ -491,7 +491,6 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
           content: relayContent,
           threadId: targetThreadId,
           mentions: targetCats,
-          deliveryMode: 'immediate',
           idempotencyKey: clientMessageId,
         },
         headers: {
@@ -554,7 +553,6 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
           content: relayContent,
           threadId: receipt.targetThreadId,
           mentions: receipt.targetCats,
-          deliveryMode: 'immediate',
           idempotencyKey: receipt.clientMessageId,
         },
         headers: {

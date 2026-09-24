@@ -21,7 +21,8 @@ describe('createDeliverFn', () => {
     const appendArg = messageStore.append.mock.calls[0].arguments[0];
     assert.equal(appendArg.threadId, 'th-1');
     assert.equal(appendArg.content, 'Hello reminder');
-    assert.equal(appendArg.catId, null);
+    assert.deepEqual(appendArg.from, { kind: 'system', service: 'scheduler' });
+    assert.equal(appendArg.catId, undefined);
     assert.equal(appendArg.origin, 'callback');
     assert.equal(appendArg.source.connector, 'scheduler');
     assert.equal(appendArg.source.label, '定时任务');

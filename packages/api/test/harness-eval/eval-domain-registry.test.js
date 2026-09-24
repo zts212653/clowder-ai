@@ -130,12 +130,14 @@ describe('Eval Domain Registry v0', () => {
     assert.equal(entry.metricGlossary?.['freshness.queued_seen']?.source, 'derived:freshness-windowed-replay.queue');
     assert.equal(entry.metricGlossary?.['freshness.queued_handled']?.source, 'derived:freshness-windowed-replay.queue');
     assert.equal(
-      entry.metricGlossary?.['freshness.supplement_terminal']?.source,
-      'derived:freshness-windowed-replay.supplement',
+      entry.metricGlossary?.['freshness.supplement_terminal'],
+      undefined,
+      'the supplement plane is retired and must not keep a metric certificate',
     );
     assert.equal(
-      entry.metricGlossary?.['freshness.notice_acked']?.source,
-      'derived:freshness-windowed-replay.attention',
+      entry.metricGlossary?.['freshness.notice_acked'],
+      undefined,
+      'the MCP notice plane is retired and must not keep a metric certificate',
     );
     assert.equal(
       entry.metricGlossary?.['freshness.provider_notice_missed']?.source,

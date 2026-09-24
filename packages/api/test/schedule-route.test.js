@@ -616,9 +616,12 @@ describe('Schedule Routes', () => {
 
     it('reminder registered with targetCatId=gpt52 wakes gpt52 not opus', async () => {
       // Register with explicit targetCatId
-      const triggerCalls = [];
-      const mockDeliver = async () => 'msg-e2e';
-      const mockInvokeTrigger = { trigger: (...args) => triggerCalls.push(args) };
+      // The envelope names the member; admission is the wake, so deliver is the seam to observe.
+      const delivered = [];
+      const mockDeliver = async (input) => {
+        delivered.push(input);
+        return 'msg-e2e';
+      };
 
       // Re-create runner with deliver + invokeTrigger so execute can run
       const { TaskRunnerV2 } = await import('../dist/infrastructure/scheduler/TaskRunnerV2.js');
@@ -626,7 +629,6 @@ describe('Schedule Routes', () => {
         logger: silentLogger,
         ledger,
         deliver: mockDeliver,
-        invokeTrigger: mockInvokeTrigger,
       });
 
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
@@ -640,23 +642,23 @@ describe('Schedule Routes', () => {
 
       await runnerWithDeps.triggerNow('e2e-cat-routing');
 
-      // Verify invokeTrigger was called with gpt52
-      assert.equal(triggerCalls.length, 1, 'invokeTrigger should be called once');
-      assert.equal(triggerCalls[0][1], 'gpt52', 'should wake gpt52, not opus');
+      assert.equal(delivered.length, 1, 'one envelope, one admission');
+      assert.equal(delivered[0].targetCatId, 'gpt52', 'should wake gpt52, not opus');
       runnerWithDeps.stop();
     });
 
     it('reminder without targetCatId falls back to opus (backwards compat)', async () => {
-      const triggerCalls = [];
-      const mockDeliver = async () => 'msg-e2e-2';
-      const mockInvokeTrigger = { trigger: (...args) => triggerCalls.push(args) };
+      const delivered = [];
+      const mockDeliver = async (input) => {
+        delivered.push(input);
+        return 'msg-e2e-2';
+      };
 
       const { TaskRunnerV2 } = await import('../dist/infrastructure/scheduler/TaskRunnerV2.js');
       const runnerNoCat = new TaskRunnerV2({
         logger: silentLogger,
         ledger,
         deliver: mockDeliver,
-        invokeTrigger: mockInvokeTrigger,
       });
 
       const { templateRegistry } = await import('../dist/infrastructure/scheduler/templates/registry.js');
@@ -670,8 +672,8 @@ describe('Schedule Routes', () => {
 
       await runnerNoCat.triggerNow('e2e-fallback');
 
-      assert.equal(triggerCalls.length, 1);
-      assert.equal(triggerCalls[0][1], 'opus', 'should fall back to opus when no targetCatId');
+      assert.equal(delivered.length, 1, 'one envelope, one admission');
+      assert.equal(delivered[0].targetCatId, 'opus', 'should fall back to opus when no targetCatId');
       runnerNoCat.stop();
     });
 

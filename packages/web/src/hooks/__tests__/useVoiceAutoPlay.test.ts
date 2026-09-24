@@ -135,6 +135,35 @@ describe('findUnplayedAudioBlock logic (via store contracts)', () => {
     expect(useVoiceSessionStore.getState().hasPlayed('audio-block-1')).toBe(true);
     // The hook's findUnplayedAudioBlock checks hasPlayed → would skip this block
   });
+
+  it('tracks newly appeared audio by block id instead of message array position', () => {
+    const messages = [
+      {
+        type: 'assistant',
+        extra: { rich: { blocks: [{ kind: 'audio', id: 'audio-new', text: 'hello' }] } },
+      },
+      {
+        type: 'assistant',
+        extra: { rich: { blocks: [{ kind: 'audio', id: 'audio-existing', text: 'old' }] } },
+      },
+    ];
+
+    expect(__testing__.collectAudioBlockIds(messages)).toEqual(new Set(['audio-new', 'audio-existing']));
+    expect(__testing__.findUnplayedAudioBlock(messages, new Set(['audio-new']))?.id).toBe('audio-new');
+  });
+
+  it('deduplicates repeated audio block ids across messages', () => {
+    const messages = [
+      { type: 'assistant', extra: { rich: { blocks: [{ kind: 'audio', id: 'audio-dup', text: 'first' }] } } },
+      { type: 'assistant', extra: { rich: { blocks: [{ kind: 'audio', id: 'audio-dup', text: 'second' }] } } },
+    ];
+
+    expect(__testing__.collectAudioBlockIds(messages)).toEqual(new Set(['audio-dup']));
+    useVoiceSessionStore.getState().start('t1', 'opus', true);
+    expect(__testing__.findUnplayedAudioBlock(messages, new Set(['audio-dup']))?.id).toBe('audio-dup');
+    useVoiceSessionStore.getState().markPlayed('audio-dup');
+    expect(__testing__.findUnplayedAudioBlock(messages, new Set(['audio-dup']))).toBeNull();
+  });
 });
 
 describe('session staleness detection', () => {

@@ -29,7 +29,7 @@ function makeTask() {
   };
 }
 
-function makeHarness(triggerOutcomes = ['enqueued']) {
+function makeHarness(triggerOutcomes = ['enqueued'], leaseStore) {
   let now = 10_000;
   const task = makeTask();
   const tasks = new Map([[task.id, task]]);
@@ -86,14 +86,22 @@ function makeHarness(triggerOutcomes = ['enqueued']) {
     socketManager: { broadcastToRoom() {} },
     taskRunner: { unregister() {} },
     invocationRecordStore: { getByIdempotencyKey: () => null },
-    getInvokeTrigger: () => ({
-      async trigger(...args) {
-        triggerCalls.push(args);
-        const outcome = outcomes.shift() ?? 'enqueued';
-        if (outcome instanceof Error) throw outcome;
-        return outcome;
-      },
-    }),
+    // F117 Phase I: one transaction commits the Message and its Queue row, so the harness observes
+    // that admission rather than a separate trigger. An Error in `outcomes` models a refusal.
+    async admitWake(input) {
+      triggerCalls.push(input);
+      const outcome = outcomes.shift() ?? 'enqueued';
+      if (outcome instanceof Error) throw outcome;
+      if (outcome !== 'enqueued' && outcome !== 'dispatched') return {};
+      const existing = messages.get(input.message.idempotencyKey);
+      if (existing) return { messageId: existing.id };
+      const stored = { ...input.message, id: `message-${messages.size + 1}` };
+      messages.set(input.message.idempotencyKey, stored);
+      return { messageId: stored.id };
+    },
+    // The lease is verified against the envelope before anything is written. A harness that wants a
+    // stale generation supplies a store whose lease no longer matches.
+    ...(leaseStore ? { actionSuccessorLeaseStore: leaseStore } : {}),
     now: () => now,
     dispatchedCarrierGraceMs: 1_000,
   };
@@ -121,13 +129,20 @@ async function loadRuntime() {
 }
 
 describe('F167 managed-command terminal reinvocation exactly-once', () => {
-  test('a permanently stale managed-review generation is canceled once and never redispatched', async () => {
-    const { ManagedCommandWakeRecoverySweep, ManagedCommandWakeActionLeaseAdmissionError } = await loadRuntime();
-    const h = makeHarness([
-      new ManagedCommandWakeActionLeaseAdmissionError(
-        'Managed-command action lease generation no longer matches canonical truth',
-      ),
-    ]);
+  test('a permanently stale managed-review generation is refused before any write, and retires', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadRuntime();
+    // The canonical lease has moved on: generation 3 is live, the wake still carries 2.
+    const h = makeHarness(['enqueued'], {
+      get: async () => ({
+        leaseId: 'lease-review-stale',
+        generation: 3,
+        status: 'active',
+        tenantScope: 'user-1',
+        holderThreadId: 'thread-1',
+        holderCatIds: ['codex-sol'],
+        dispatchId: 'dispatch-1',
+      }),
+    });
     h.task.params.holdLifecycle.await = {
       v: 1,
       generation: 1,
@@ -153,19 +168,33 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     h.setNow(14_000);
     assert.deepEqual(await sweep.runOnce(), { scanned: 0, recovered: 0, pending: 0 });
 
-    assert.equal(h.triggerCalls.length, 1, 'the rejected admission must not dispatch a second time');
-    assert.equal(h.cancelCalls.length, 1, 'the queued source receipt must be terminalized exactly once');
-    assert.equal([...h.messages.values()][0].deliveryStatus, 'canceled');
-    assert.equal([...h.messages.values()][0].queueCustody, undefined, 'no Queue carrier may survive admission');
-    assert.equal(h.deps.invocationRecordStore.getByIdempotencyKey(), null, 'no Invocation carrier may exist');
+    // This case used to assert that a message was appended and then cancelled exactly once. The
+    // lease is now checked before the write, so the stronger statement holds: there was never a
+    // message to cancel, and `markCanceled` — which existed only to undo one — is never called.
+    assert.equal(h.triggerCalls.length, 0, 'a refused generation must not reach admission at all');
+    assert.equal(h.messages.size, 0, 'and nothing may be persisted for it');
+    assert.equal(h.cancelCalls.length, 0, 'so there is nothing to retract');
     const command = h.tasks.get(h.task.id).params.holdLifecycle.managedCommand;
-    assert.equal(command.state, 'consumed');
+    assert.equal(command.state, 'consumed', 'the stale wake is retired rather than retried forever');
     assert.equal(command.carrierTerminalReason, 'canceled');
   });
 
   test('managed review wake persists the exact action-successor generation for terminal settlement', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadRuntime();
-    const h = makeHarness();
+    // The lease is now verified before the write, so the canonical store has to agree with the
+    // generation the envelope claims — otherwise the wake is correctly refused.
+    const h = makeHarness(['enqueued'], {
+      get: async () => ({
+        leaseId: 'lease-review-1',
+        generation: 3,
+        status: 'active',
+        tenantScope: 'user-1',
+        holderThreadId: 'thread-1',
+        holderCatIds: ['codex-sol'],
+        dispatchId: 'dispatch-review-1',
+        terminalPredicate: { kind: 'task_done' },
+      }),
+    });
     h.task.params.holdLifecycle.await = {
       v: 1,
       generation: 1,
@@ -234,14 +263,14 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     const { ManagedCommandWakeRecoverySweep } = await loadRuntime();
     const h = makeHarness();
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
-    const append = h.deps.messageStore.append;
-    let failFirstAppend = true;
-    h.deps.messageStore.append = async (...args) => {
-      if (failFirstAppend) {
-        failFirstAppend = false;
+    const admit = h.deps.admitWake;
+    let failFirstAdmit = true;
+    h.deps.admitWake = async (...args) => {
+      if (failFirstAdmit) {
+        failFirstAdmit = false;
         throw new Error('message plane unavailable before completion');
       }
-      return append(...args);
+      return admit(...args);
     };
 
     assert.equal(await sweep.recordFallbackDue(h.task.id), 'pending');
@@ -266,53 +295,56 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     assert.equal(h.triggerCalls.length, 1);
   });
 
-  test('an in-flight fallback append cannot diverge from the shared receipt and dispatch payload', async () => {
+  test('an in-flight admission cannot diverge from the shared receipt and dispatch payload', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadRuntime();
     const h = makeHarness();
     const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
-    const append = h.deps.messageStore.append;
-    let firstAppend = true;
-    let appendCalls = 0;
-    let releaseFirstAppend;
-    let markFirstAppendDone;
-    const firstAppendDone = new Promise((resolve) => {
-      markFirstAppendDone = resolve;
+    // The write is the admission now, not a bare append, so that is what this gates. The property
+    // is unchanged: one durable content claim fences the losing publisher before anything is written.
+    const admit = h.deps.admitWake;
+    let firstAdmit = true;
+    let admitCalls = 0;
+    let releaseFirstAdmit;
+    let markFirstAdmitDone;
+    const firstAdmitDone = new Promise((resolve) => {
+      markFirstAdmitDone = resolve;
     });
-    const firstAppendStarted = new Promise((resolve) => {
-      h.deps.messageStore.append = async (...args) => {
-        appendCalls += 1;
-        if (firstAppend) {
-          firstAppend = false;
+    const firstAdmitStarted = new Promise((resolve) => {
+      h.deps.admitWake = async (...args) => {
+        admitCalls += 1;
+        if (firstAdmit) {
+          firstAdmit = false;
           resolve();
           await new Promise((release) => {
-            releaseFirstAppend = release;
+            releaseFirstAdmit = release;
           });
           try {
-            return await append(...args);
+            return await admit(...args);
           } finally {
-            markFirstAppendDone();
+            markFirstAdmitDone();
           }
         }
-        await firstAppendDone;
-        return append(...args);
+        await firstAdmitDone;
+        return admit(...args);
       };
     });
 
     const fallback = sweep.recordFallbackDue(h.task.id);
-    await firstAppendStarted;
+    await firstAdmitStarted;
     const completion = sweep.recordCompletion({
       taskId: h.task.id,
       wakeContent: 'real command completed during fallback append',
       result: { exitCode: 0, timedOut: false, durationMs: 11_000, tailOutput: 'serialized output' },
     });
     await new Promise((resolve) => setImmediate(resolve));
-    releaseFirstAppend();
+    releaseFirstAdmit();
     await Promise.all([fallback, completion]);
 
     const command = h.tasks.get(h.task.id).params.holdLifecycle.managedCommand;
     const storedContent = [...h.messages.values()][0].content;
-    const dispatchedContent = h.triggerCalls[0][3];
-    assert.equal(storedContent, dispatchedContent, 'one receipt must select the same source and dispatch content');
+    // Source and dispatch content are now the same envelope by construction — there is no second
+    // payload to drift from the one that was persisted.
+    assert.equal(storedContent, h.triggerCalls[0].content, 'one envelope is both the receipt and the dispatch');
     assert.deepEqual(command.result, {
       exitCode: 0,
       timedOut: false,
@@ -321,7 +353,7 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     });
     assert.equal(h.messages.size, 1);
     assert.equal(h.triggerCalls.length, 1);
-    assert.equal(appendCalls, 1, 'the durable content claim must fence the losing publisher before append');
+    assert.equal(admitCalls, 1, 'the durable content claim must fence the losing publisher before admission');
   });
 
   test('recovery steals an expired message-content claim without duplicating visibility', async () => {
@@ -353,7 +385,7 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     assert.equal(command.messageClaimedAt, undefined);
     assert.equal(h.messages.size, 1);
     assert.equal(h.triggerCalls.length, 1);
-    assert.equal([...h.messages.values()][0].content, h.triggerCalls[0][3]);
+    assert.equal([...h.messages.values()][0].content, h.triggerCalls[0].content);
   });
 
   test('an append that commits before throwing preserves its selected content and dispatches once', async () => {
@@ -372,7 +404,7 @@ describe('F167 managed-command terminal reinvocation exactly-once', () => {
     assert.equal(command.state, 'enqueued');
     assert.equal(h.messages.size, 1);
     assert.equal(h.triggerCalls.length, 1);
-    assert.equal([...h.messages.values()][0].content, h.triggerCalls[0][3]);
+    assert.equal([...h.messages.values()][0].content, h.triggerCalls[0].content);
   });
 
   test('late completion enriches an already visible fallback without redispatching it', async () => {

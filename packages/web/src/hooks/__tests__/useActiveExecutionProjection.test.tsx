@@ -138,7 +138,7 @@ describe('F295 canonical execution hydration', () => {
     });
   });
 
-  it('keeps one project resource identity across a slow same-project navigation and rejects the late generation', async () => {
+  it('switches exact thread resource identity and rejects the late generation', async () => {
     let resolveThreadA!: (response: Response) => void;
     let resolveThreadB!: (response: Response) => void;
     mocks.apiFetch

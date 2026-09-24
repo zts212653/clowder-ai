@@ -51,6 +51,7 @@ describe('F167 Phase R: callback ingress boundaries', () => {
   let messageStore;
   let threadStore;
   let invocationRecordStore;
+  let invocationQueue;
   let dispatchProposalStore;
   let app;
 
@@ -60,6 +61,7 @@ describe('F167 Phase R: callback ingress boundaries', () => {
     );
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { InMemoryDispatchProposalStore } = await import(
       '../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'
     );
@@ -69,6 +71,7 @@ describe('F167 Phase R: callback ingress boundaries', () => {
     messageStore = new MessageStore();
     threadStore = new ThreadStore();
     invocationRecordStore = createMockInvocationRecordStore();
+    invocationQueue = new InvocationQueue();
     dispatchProposalStore = new InMemoryDispatchProposalStore();
     app = Fastify();
     await app.register(callbacksRoutes, {
@@ -79,6 +82,8 @@ describe('F167 Phase R: callback ingress boundaries', () => {
       router: createMockRouter(),
       invocationRecordStore,
       dispatchProposalStore,
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
     });
   });
 
@@ -114,6 +119,7 @@ describe('F167 Phase R: callback ingress boundaries', () => {
     for (const phase of ['active', 'terminal']) {
       const content = `Minted ${phase} root`;
       const recordsBefore = invocationRecordStore.getRecords().length;
+      const queuedBefore = invocationQueue.list(target.id, 'user-1').length;
 
       const first = await post({
         auth,
@@ -138,7 +144,12 @@ describe('F167 Phase R: callback ingress boundaries', () => {
         messageStore.getByThread(target.id, 20, 'user-1').filter((message) => message.content === content).length,
         1,
       );
-      assert.equal(invocationRecordStore.getRecords().length, recordsBefore + 1);
+      assert.equal(
+        invocationRecordStore.getRecords().length,
+        recordsBefore,
+        'durable admission does not manufacture an invocation before the Queue drain owns it',
+      );
+      assert.equal(invocationQueue.list(target.id, 'user-1').length, queuedBefore + 1);
     }
   });
 

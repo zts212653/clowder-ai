@@ -64,9 +64,23 @@ describe('isUserFacingSystemInfoContent', () => {
     );
     assert.ok(
       isUserFacingSystemInfoContent(
-        JSON.stringify({ type: 'warning', message: 'current opencode/CodeAgent adapter did not return token usage' }),
+        JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          message: 'current opencode/CodeAgent adapter did not return token usage',
+        }),
       ),
       'warning system_info must be treated as user-facing so it persists and prevents silent_completion duplicates',
+    );
+  });
+
+  it('does not treat an unclassified provider diagnostic as user-facing', async () => {
+    const { isUserFacingSystemInfoContent } = await import(
+      '../dist/domains/cats/services/agents/routing/route-helpers.js'
+    );
+    assert.equal(
+      isUserFacingSystemInfoContent(JSON.stringify({ type: 'warning', message: 'model metadata missing' })),
+      false,
     );
   });
 

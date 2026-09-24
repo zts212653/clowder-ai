@@ -102,7 +102,7 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(gate.workItems.length, 1);
   });
 
-  test('only router-confirmed typed outcome invokes with the unified reason', async () => {
+  test('only a router-confirmed typed outcome admits the wake', async () => {
     const taskStore = new TaskStore();
     await createTracked(taskStore);
     const calls = [];
@@ -110,13 +110,16 @@ describe('review scheduler F280 adapter', () => {
       options(
         taskStore,
         {
-          route: async () => ({
-            kind: 'notified',
-            threadId: 'thread_1',
-            catId: 'codex-sol',
-            messageId: 'msg_1',
-            content: 'compact wait',
-          }),
+          route: async (...args) => {
+            calls.push(args);
+            return {
+              kind: 'notified',
+              threadId: 'thread_1',
+              catId: 'codex-sol',
+              messageId: 'msg_1',
+              content: 'compact wait',
+            };
+          },
         },
         {
           fetchReviews: async () => [
@@ -129,16 +132,16 @@ describe('review scheduler F280 adapter', () => {
               commitId: 'aaa',
             },
           ],
-          invokeTrigger: { trigger: async (...args) => calls.push(args) },
         },
       ),
     );
     const gate = await spec.admission.gate();
     assert.equal(gate.run, true);
     await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    // One route == one admission == one wake. The old trigger `reason`/`suggestedSkill` policy was
+    // never read by production; the observable fact is the confirmed typed outcome itself.
     assert.equal(calls.length, 1);
-    assert.equal(calls[0][6].reason, 'github_wait_satisfied');
-    assert.equal(calls[0][6].suggestedSkill, undefined);
+    assert.equal(calls[0][0].headSha, 'aaa');
   });
 
   test('plain @codex review advances the source frontier without forcing invocation', async () => {
@@ -191,7 +194,6 @@ describe('review scheduler F280 adapter', () => {
         },
         {
           fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'merged' }),
-          invokeTrigger: { trigger: async (...args) => triggerCalls.push(args) },
         },
       ),
     );
@@ -201,9 +203,9 @@ describe('review scheduler F280 adapter', () => {
     assert.equal(gate.workItems.length, 1);
     assert.equal(gate.workItems[0].signal.subjectState, 'merged');
     await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+    // The route IS the admission, so one confirmed terminal observation is one owner wake.
     assert.equal(routerCalls.length, 1);
-    assert.equal(triggerCalls.length, 1);
-    assert.equal(triggerCalls[0][6].reason, 'github_pr_merged');
+    assert.equal(routerCalls[0].subjectState, 'merged');
   });
 
   test('a comment posted in the poll where the PR merges is collected with the terminal truth', async () => {
@@ -297,13 +299,16 @@ describe('review scheduler F280 adapter', () => {
       options(
         taskStore,
         {
-          route: async () => ({
-            kind: 'notified',
-            threadId: 'thread_1',
-            catId: 'codex-sol',
-            messageId: 'msg_1',
-            content: 'warn-open',
-          }),
+          route: async (...args) => {
+            calls.push(args);
+            return {
+              kind: 'notified',
+              threadId: 'thread_1',
+              catId: 'codex-sol',
+              messageId: 'msg_1',
+              content: 'warn-open',
+            };
+          },
         },
         {
           fetchPrMetadata: async () => ({ headSha: 'aaa', prState: 'open', authorLogin: 'pr-author' }),
@@ -311,7 +316,6 @@ describe('review scheduler F280 adapter', () => {
             if (sinceId === undefined) throw new Error('history unavailable');
             return [fresh];
           },
-          invokeTrigger: { trigger: async (...args) => calls.push(args) },
         },
       ),
     );

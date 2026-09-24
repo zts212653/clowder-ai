@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import type { ThreadState } from '@/stores/chat-types';
 import type { ChatMessage } from '@/stores/chatStore';
+import { getOrderedMessageTimeline } from '@/stores/message-timeline';
 import { CatAvatar } from './CatAvatar';
 import { getCatStatusType } from './ThreadCatStatus';
 
@@ -44,7 +45,10 @@ export function SplitPaneCell({
   onDoubleClick,
 }: SplitPaneCellProps) {
   const catStatus = getCatStatusType(threadState.catStatuses);
-  const recentMessages = useMemo(() => threadState.messages.slice(-VISIBLE_MESSAGES), [threadState.messages]);
+  const recentMessages = useMemo(
+    () => getOrderedMessageTimeline(threadState.messages).slice(-VISIBLE_MESSAGES),
+    [threadState.messages],
+  );
 
   const statusColor =
     catStatus === 'error'

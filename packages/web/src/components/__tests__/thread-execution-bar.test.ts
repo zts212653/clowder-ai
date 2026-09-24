@@ -27,6 +27,7 @@ vi.mock('@/utils/api-client', () => ({
                 color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
                 mentionPatterns: ['@opus'],
                 clientId: 'anthropic',
+                carrier: 'cli',
                 defaultModel: 'claude-opus-4-6',
                 avatar: '🐱',
                 roleDescription: 'test',
@@ -38,6 +39,7 @@ vi.mock('@/utils/api-client', () => ({
                 color: { primary: '#4CAF50', secondary: '#C8E6C9' },
                 mentionPatterns: ['@codex'],
                 clientId: 'openai',
+                carrier: 'cli',
                 defaultModel: 'gpt-5.3-codex',
                 avatar: '🐱',
                 roleDescription: 'test',
@@ -93,7 +95,29 @@ function managedGateExecution(): ActiveExecutionProjection {
 }
 
 function seedExecutions(executions: ActiveExecutionProjection[], anchorThreadId = 'thread-1'): void {
-  useChatStore.setState({ currentThreadId: anchorThreadId });
+  useChatStore.setState({
+    currentThreadId: anchorThreadId,
+    catInvocations: Object.fromEntries(
+      executions
+        .filter((execution) => execution.kind === 'live_invocation')
+        .map((execution) => [
+          execution.catId,
+          {
+            invocationId: execution.executionId,
+            activeRun: {
+              threadId: execution.threadId,
+              targetId: execution.catId,
+              invocationId: execution.executionId,
+              responseMessageId: `response-${execution.executionId}`,
+              inputEntryIds: [],
+              inputMessageIds: [],
+              privateInputEntryIds: [],
+              startedAt: execution.startedAt,
+            },
+          },
+        ]),
+    ),
+  });
   useActiveExecutionStore.setState({
     anchorThreadId,
     projectPath: '/project/cafe',
@@ -123,6 +147,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
                     color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
                     mentionPatterns: ['@opus'],
                     clientId: 'anthropic',
+                    carrier: 'cli',
                     defaultModel: 'claude-opus-4-6',
                     avatar: '🐱',
                     roleDescription: 'test',
@@ -134,6 +159,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
                     color: { primary: '#4CAF50', secondary: '#C8E6C9' },
                     mentionPatterns: ['@codex'],
                     clientId: 'openai',
+                    carrier: 'cli',
                     defaultModel: 'gpt-5.3-codex',
                     avatar: '🐱',
                     roleDescription: 'test',
@@ -164,6 +190,20 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
   });
 
   it('renders nothing when no active invocations', () => {
+    act(() => root.render(React.createElement(ThreadExecutionBar)));
+    expect(container.textContent).toBe('');
+  });
+
+  it('does not present a pre-admission tracker reservation as an executing response', () => {
+    useActiveExecutionStore.setState({
+      anchorThreadId: 'thread-1',
+      projectPath: '/project/cafe',
+      executionsByKey: {
+        reservation: liveExecution({ executionId: 'pre-admission', catId: 'opus' }),
+      },
+      hydration: 'ready',
+      hydrationError: null,
+    });
     act(() => root.render(React.createElement(ThreadExecutionBar)));
     expect(container.textContent).toBe('');
   });
@@ -222,15 +262,16 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     expect(text).toContain('缅因猫');
   });
 
-  it('names a managed full gate without exposing the raw shell command', async () => {
+  it('keeps managed work compact without exposing activity or thread detail', async () => {
     seedExecutions([managedGateExecution()]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.textContent).toContain('全量门禁 · Gate thread');
+    expect(container.textContent).not.toContain('全量门禁');
+    expect(container.textContent).not.toContain('Gate thread');
     expect(container.textContent).not.toContain('pnpm gate');
   });
 
-  it('falls back to the generic managed label for a newer API activity value', async () => {
+  it('does not expose newer managed activity values in the compact bar', async () => {
     seedExecutions([
       {
         ...managedGateExecution(),
@@ -239,7 +280,8 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     ]);
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.textContent).toContain('托管命令 · Gate thread');
+    expect(container.textContent).not.toContain('future_activity');
+    expect(container.textContent).not.toContain('Gate thread');
   });
 
   it('keeps exact member controls without adding a second whole-thread Stop', async () => {
@@ -301,6 +343,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     useChatStore.setState({
       catInvocations: {
         codex: {
+          ...useChatStore.getState().catInvocations.codex,
           invocationId: 'inv-1',
           appServerLifecycle: {
             stage: 'active',
@@ -315,8 +358,8 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     });
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.textContent).toContain('运行回合');
-    expect(container.textContent).toMatch(/活动 [45] 秒前/);
+    expect(container.textContent).not.toContain('运行回合');
+    expect(container.textContent).not.toContain('活动');
   });
 
   it('marks a silent active app-server turn as visible warning without auto-canceling it', async () => {
@@ -325,6 +368,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     useChatStore.setState({
       catInvocations: {
         codex: {
+          ...useChatStore.getState().catInvocations.codex,
           invocationId: 'inv-1',
           appServerLifecycle: {
             stage: 'active',
@@ -339,8 +383,8 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     });
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));
 
-    expect(container.querySelector('[data-app-server-stalled="true"]')).not.toBeNull();
-    expect(container.textContent).toContain('可能在等待模型');
+    expect(container.querySelector('[data-app-server-stalled="true"]')).toBeNull();
+    expect(container.textContent).not.toContain('可能在等待模型');
     expect(container.querySelector('[aria-label="Stop codex live_invocation inv-1"]')).not.toBeNull();
   });
 });

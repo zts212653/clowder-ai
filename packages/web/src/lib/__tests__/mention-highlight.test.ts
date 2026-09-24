@@ -55,8 +55,31 @@ describe('mention highlight cache', () => {
   });
 
   it('includes cats without roster field (seed cats default to available)', async () => {
-    const { refreshMentionData, getMentionToCat } = await import('@/lib/mention-highlight');
-    refreshMentionData([makeCat({ id: 'seed-cat', mentionPatterns: ['@seed'], roster: null as never })]);
+    const {
+      getDisplayMentionRe,
+      getDisplayMentionToCat,
+      getMentionLabel,
+      getMentionRe,
+      getMentionToCat,
+      isCanonicalOnlyMentionAlias,
+      refreshMentionData,
+    } = await import('@/lib/mention-highlight');
+    refreshMentionData([
+      makeCat({
+        id: 'seed-cat',
+        displayName: '种子猫',
+        variantLabel: 'seed',
+        mentionPatterns: ['@seed'],
+        roster: null as never,
+      }),
+    ]);
     expect(getMentionToCat().seed).toBe('seed-cat');
+    expect(getMentionToCat()['seed-cat']).toBeUndefined();
+    expect(getDisplayMentionToCat()['seed-cat']).toBe('seed-cat');
+    expect(isCanonicalOnlyMentionAlias('seed-cat')).toBe(true);
+    expect(isCanonicalOnlyMentionAlias('seed')).toBe(false);
+    expect(getMentionLabel()['seed-cat']).toBe('种子猫（seed）');
+    expect(getMentionRe().exec('@seed-cat')).toBeNull();
+    expect(getDisplayMentionRe().exec('@seed-cat')).not.toBeNull();
   });
 });

@@ -76,7 +76,7 @@ export function assertCoveredMessageIds(messageIds: readonly string[]): void {
   }
 }
 
-const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard', 'freshness_supplement']);
+const EXECUTION_KINDS = new Set<TurnExecutionKind>(['ordinary', 'routing_guard']);
 const TERMINAL_STATUSES = new Set<TurnExecutionTerminalStatus>(['succeeded', 'failed', 'canceled', 'interrupted']);
 
 function assertNonEmpty(value: string, field: string): void {
@@ -98,9 +98,6 @@ export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput):
   }
   assertTimestamp(input.startedAt, 'startedAt');
   if (input.causal?.triggerMessageId !== undefined) assertNonEmpty(input.causal.triggerMessageId, 'triggerMessageId');
-  if (input.causal?.freshnessSupplementId !== undefined) {
-    assertNonEmpty(input.causal.freshnessSupplementId, 'freshnessSupplementId');
-  }
   if (input.causal?.routingGuardReason !== undefined && input.causal.routingGuardReason !== 'missing_routing_exit') {
     throw new Error(`invalid routingGuardReason: ${String(input.causal.routingGuardReason)}`);
   }
@@ -154,7 +151,6 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
 function canonicalCausalRefs(causal: TurnExecutionCausalRefs | undefined): TurnExecutionCausalRefs {
   return {
     ...(causal?.triggerMessageId !== undefined ? { triggerMessageId: causal.triggerMessageId } : {}),
-    ...(causal?.freshnessSupplementId !== undefined ? { freshnessSupplementId: causal.freshnessSupplementId } : {}),
     ...(causal?.routingGuardReason !== undefined ? { routingGuardReason: causal.routingGuardReason } : {}),
     ...(causal?.coveredMessageIds !== undefined ? { coveredMessageIds: [...causal.coveredMessageIds].sort() } : {}),
   };

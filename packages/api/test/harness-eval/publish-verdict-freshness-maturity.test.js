@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { InMemoryFreshnessClosureStore } from '../../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import { generateFreshnessLiveVerdict } from '../../dist/infrastructure/harness-eval/freshness/eval-freshness-live-verdict.js';
 import { FreshnessReplayProviderImpl } from '../../dist/infrastructure/harness-eval/freshness/freshness-replay-provider.js';
 import { createFreshnessGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js';
@@ -72,19 +71,7 @@ function signalReplay(replay, selector, maturity) {
         legacyUntimedCount: 0,
         lifecycles: [],
       },
-      supplements: {
-        offeredCount: 1,
-        claimedCount: 1,
-        terminalCount: 0,
-        committedCount: 0,
-        declinedCount: 0,
-        failedCount: 0,
-        unresolvedAtWindowEndCount: 1,
-        budgetExhaustedCount: 0,
-        legacyUntimedCount: 0,
-        lifecycles: [],
-      },
-      attention: { eventCount: 2, counts: { held_decision: 1, notice_attached: 1 } },
+      attention: { eventCount: 2, counts: { provider_notice_delivered: 1, provider_notice_seen: 1 } },
       observedActivityCount: 6,
     },
     measurementMaturity: maturity,
@@ -93,9 +80,7 @@ function signalReplay(replay, selector, maturity) {
 
 function allSources(status = 'complete') {
   return {
-    legacy_closures: { status },
     queue_custody: { status },
-    freshness_supplements: { status },
     attention_events: { status },
   };
 }
@@ -115,50 +100,27 @@ function isolatedPublisher(isolatedRoot, onCommitted = () => {}) {
 }
 
 async function providerWithWindowedActivity(coverage) {
-  const store = new InMemoryFreshnessClosureStore();
-  const offered = await store.offerSupplement({
-    lineageId: 'message-original',
-    originalMessageId: 'message-original',
-    userId: 'user-1',
-    threadId: 'thread-live',
-    catId: 'codex-sol',
-    requiredMessageIds: ['message-update'],
-    requiredFrontierMessageId: 'message-update',
-    replayUnsafeToolNames: [],
-    now: 1_100,
-  });
-  await store.claimSupplement(offered.supplement.id, { invocationId: 'inv-supplement', now: 1_200 });
   return new FreshnessReplayProviderImpl({
-    store,
     fixtureRoot,
     queueLifecycleSource: {
-      async listOwnerQueueCustodyLifecycles() {
+      async listOwnerDurableEntries() {
         return [
           {
-            messageId: 'message-queue',
+            id: 'entry-queue',
             threadId: 'thread-live',
             userId: 'user-1',
-            custody: {
-              version: 1,
-              entryId: 'entry-queue',
-              revision: 2,
-              ownerUserId: 'user-1',
-              intent: 'respond',
-              status: 'processing',
-              allTargetCats: ['codex-sol'],
-              pendingTargetCats: ['codex-sol'],
-              notifiedByCatIds: ['codex-sol'],
-              seenByCatIds: ['codex-sol'],
-              seenInvocationIdByCatId: { 'codex-sol': 'inv-queue' },
-              bodyExposures: [{ targetCatId: 'codex-sol', invocationId: 'inv-queue', seenAt: 1_250 }],
-              failedByCatIds: [],
-              handledByCatIds: [],
-              priority: 'normal',
-              createdAt: 1_050,
-              updatedAt: 1_250,
-            },
+            targets: ['codex-sol'],
+            enqueuedAt: 1_050,
+            claimedAt: 1_250,
+            processingStartedAt: 1_250,
+            payload: { messageId: 'message-queue' },
           },
         ];
+      },
+    },
+    messageLifecycleSource: {
+      async listOwnerMessagesInWindow() {
+        return [];
       },
     },
     attentionEventLog: {
@@ -166,14 +128,18 @@ async function providerWithWindowedActivity(coverage) {
         return {
           events: [
             {
-              kind: 'held_decision',
+              kind: 'provider_protocol_item_observed',
               threadId: 'thread-live',
               catId: 'codex-sol',
               invocationId: 'inv-queue',
               timestamp: 1_300,
-              toolName: 'cat_cafe_post_message',
-              unseenCount: 1,
-              reason: 'queued_messages_pending',
+              provider: 'codex',
+              carrier: 'codex_app_server',
+              deliverySemantics: 'active_turn_injection',
+              toolSurface: 'mcp_tool_call',
+              itemType: 'tool_call',
+              status: 'completed',
+              classification: 'safe_boundary',
             },
           ],
           coverage,
@@ -190,7 +156,7 @@ before(() => {
 after(() => rmSync(root, { recursive: true, force: true }));
 
 describe('publish_verdict eval:freshness measurement maturity', () => {
-  it('refuses Queue and Supplement activity when attention window coverage is incomplete', async () => {
+  it('refuses Queue activity when attention window coverage is incomplete', async () => {
     const provider = await providerWithWindowedActivity({
       status: 'incomplete',
       reason: 'window_starts_before_coverage',
@@ -248,21 +214,15 @@ describe('publish_verdict eval:freshness measurement maturity', () => {
     const attribution = JSON.parse(readFileSync(join(bundle, 'attribution.json'), 'utf8'));
     const signalComponent = snapshot.components.find((item) => item.id === 'freshness-windowed-signal-plane');
     assert.equal(snapshot.measurementMaturity.status, 'ready');
-    assert.deepEqual(Object.keys(snapshot.measurementMaturity.sources).sort(), [
-      'attention_events',
-      'freshness_supplements',
-      'legacy_closures',
-      'queue_custody',
-    ]);
+    assert.deepEqual(Object.keys(snapshot.measurementMaturity.sources).sort(), ['attention_events', 'queue_custody']);
     assert.equal(signalComponent.activationCounts.queued_seen, 1);
-    assert.equal(signalComponent.activationCounts.supplement_offered, 1);
     assert.equal(signalComponent.frictionCounts.queue_seen_unhandled, 1);
     assert.equal(attribution.noFindingRecord.reason, 'no_legacy_closure_samples');
     assert.match(attribution.noFindingRecord.evidence, /owner-scoped lifecycle\/signal observations resolved/);
   });
 
-  it('writes Queue, Supplement, gate, notice, and reinvoke signals into the verdict trend packet', async () => {
-    const base = new FreshnessReplayProviderImpl({ store: new InMemoryFreshnessClosureStore(), fixtureRoot });
+  it('writes Queue, gate, notice, and reinvoke signals into the verdict trend packet', async () => {
+    const base = new FreshnessReplayProviderImpl({ fixtureRoot });
     const replay = signalReplay(await base.resolve(sourceRefs), sourceRefs, {
       status: 'ready',
       sources: allSources(),
@@ -279,12 +239,10 @@ describe('publish_verdict eval:freshness measurement maturity', () => {
 
     assert.equal(artifact.packet.dailyTrend.current.queued_seen, 1);
     assert.equal(artifact.packet.dailyTrend.current.queue_seen_unhandled_at_window_end, 1);
-    assert.equal(artifact.packet.dailyTrend.current.supplement_offered, 1);
-    assert.equal(artifact.packet.dailyTrend.current.gate_held, 1);
-    assert.equal(artifact.packet.dailyTrend.current.notice_attached, 1);
-    assert.equal(artifact.packet.dailyTrend.current.reinvoke_skipped, 0);
+    assert.equal(artifact.packet.dailyTrend.current.provider_notice_delivered, 1);
+    assert.equal(artifact.packet.dailyTrend.current.provider_notice_seen, 1);
+    assert.equal(artifact.packet.dailyTrend.current.provider_notice_missed, 0);
     assert.ok(artifact.packet.evidencePacket.metricRefs.includes('metric:freshness.queued_seen'));
-    assert.ok(artifact.packet.evidencePacket.metricRefs.includes('metric:freshness.supplement_offered'));
     assert.ok(artifact.packet.evidencePacket.metricRefs.includes('metric:freshness.provider_notice_missed'));
   });
 });

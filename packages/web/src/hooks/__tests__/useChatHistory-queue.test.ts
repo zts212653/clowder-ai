@@ -78,7 +78,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
   });
 
@@ -99,7 +98,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
         content: 'queued msg',
         messageId: 'm1',
         mergedMessageIds: [],
-        source: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         targetCats: ['opus'],
         intent: 'execute',
         status: 'queued',
@@ -132,45 +131,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(state.queue[0].id).toBe('q1');
   });
 
-  it('sets queuePaused when API reports paused=true', async () => {
-    const queueEntries = [
-      {
-        id: 'q2',
-        threadId: 'thread-q',
-        userId: 'u1',
-        content: 'paused msg',
-        messageId: null,
-        mergedMessageIds: [],
-        source: 'user',
-        targetCats: ['opus'],
-        intent: 'execute',
-        status: 'queued',
-        createdAt: Date.now(),
-      },
-    ];
-
-    apiFetchMock.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(
-          new Response(JSON.stringify({ queue: queueEntries, paused: true, pauseReason: 'failed' }), { status: 200 }),
-        );
-      }
-      return Promise.resolve(
-        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
-      );
-    });
-
-    await act(async () => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
-    });
-
-    const state = useChatStore.getState();
-    expect(state.queue).toHaveLength(1);
-    expect(state.queuePaused).toBe(true);
-    expect(state.queuePauseReason).toBe('failed');
-  });
-
-  it('clears stale queue+paused when server returns empty (Cloud R1 P1)', async () => {
+  it('clears a stale queue when server returns empty (Cloud R1 P1)', async () => {
     // Pre-populate store with stale queue data (simulates previous session)
     useChatStore.setState({
       queue: [
@@ -181,20 +142,18 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
           content: 'stale entry',
           messageId: null,
           mergedMessageIds: [],
-          source: 'user' as const,
+          from: { kind: 'user' as const, userId: 'u1' },
           targetCats: ['opus'],
           intent: 'execute',
           status: 'queued' as const,
           createdAt: Date.now(),
         },
       ],
-      queuePaused: true,
-      queuePauseReason: 'failed',
     });
 
     apiFetchMock.mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
+        return Promise.resolve(new Response(JSON.stringify({ queue: [] }), { status: 200 }));
       }
       return Promise.resolve(
         new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
@@ -208,79 +167,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     const state = useChatStore.getState();
     // Stale data must be cleared
     expect(state.queue).toHaveLength(0);
-    expect(state.queuePaused).toBe(false);
-  });
-
-  it('F264: preserves a terminal per-target receipt from cold history after the active queue is gone', async () => {
-    const queueReceipt = {
-      version: 1 as const,
-      entryId: 'receipt-terminal-1',
-      targets: [
-        {
-          catId: 'gemini',
-          state: 'handled' as const,
-          outcome: {
-            invocationId: 'inv-responded',
-            disposition: 'responded' as const,
-            evidenceRef: { kind: 'invocation_lineage' as const, invocationId: 'inv-responded' },
-            handledAt: 1700000000100,
-          },
-        },
-        { catId: 'codex', state: 'failed' as const },
-      ],
-      reminderAttempts: [
-        {
-          id: 'reminder-missed-1',
-          targetCatId: 'codex',
-          invocationId: 'inv-failed',
-          state: 'missed' as const,
-          requestedAt: 1700000000010,
-          deliveredAt: 1700000000020,
-          missedAt: 1700000000030,
-          missedReason: 'delivered_not_read' as const,
-        },
-      ],
-    };
-
-    apiFetchMock.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(new Response(JSON.stringify({ queue: [], paused: false }), { status: 200 }));
-      }
-      if (typeof url === 'string' && url.includes('/api/messages')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              messages: [
-                {
-                  id: 'msg-terminal-receipt',
-                  type: 'user',
-                  catId: null,
-                  content: '本轮结束后回执仍应留在原消息上。',
-                  extra: { queueReceipt },
-                  timestamp: 1700000000000,
-                },
-              ],
-              hasMore: false,
-              tasks: [],
-            }),
-            { status: 200 },
-          ),
-        );
-      }
-      return Promise.resolve(
-        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
-      );
-    });
-
-    await act(async () => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(useChatStore.getState().messages[0]?.extra?.queueReceipt).toEqual(queueReceipt);
   });
 
   it('F177/F254: preserves typed child execution identity across cold history hydration', async () => {
@@ -368,6 +254,136 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(value).toMatchObject({ catId: 'opus', mode: 'execute' });
   });
 
+  it('reconciles empty History when queue hydration discovers an active invocation', async () => {
+    vi.useFakeTimers();
+    let messageRequestCount = 0;
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/api/messages')) {
+        messageRequestCount += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              messages:
+                messageRequestCount === 1
+                  ? []
+                  : [
+                      {
+                        id: 'm-delivered-after-route-transition',
+                        type: 'user',
+                        content: 'first message in a new thread',
+                        timestamp: 1700000000000,
+                      },
+                    ],
+              hasMore: false,
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              queue: [],
+              paused: false,
+              activeInvocations: [{ catId: 'opus', startedAt: Date.now() }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (typeof url === 'string' && url.includes('/api/tasks')) {
+        return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(messageRequestCount).toBe(2);
+    expect(useChatStore.getState().messages).toEqual([
+      expect.objectContaining({ id: 'm-delivered-after-route-transition' }),
+    ]);
+    vi.useRealTimers();
+  });
+
+  it('does not request catch-up when slower initial History already contains messages', async () => {
+    vi.useFakeTimers();
+    let messageRequestCount = 0;
+    apiFetchMock.mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('/api/messages')) {
+        messageRequestCount += 1;
+        return new Promise<Response>((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                new Response(
+                  JSON.stringify({
+                    messages: [
+                      {
+                        id: 'm-already-hydrated',
+                        type: 'user',
+                        content: 'initial History is authoritative',
+                        timestamp: 1700000000000,
+                      },
+                    ],
+                    hasMore: false,
+                  }),
+                  { status: 200 },
+                ),
+              ),
+            100,
+          );
+        });
+      }
+      if (typeof url === 'string' && url.includes('/queue')) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              queue: [],
+              paused: false,
+              activeInvocations: [{ catId: 'opus', startedAt: Date.now() }],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (typeof url === 'string' && url.includes('/task-progress')) {
+        return Promise.resolve(new Response(JSON.stringify({ taskProgress: {} }), { status: 200 }));
+      }
+      if (typeof url === 'string' && url.includes('/api/tasks')) {
+        return Promise.resolve(new Response(JSON.stringify({ tasks: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HookHost, { threadId: 'thread-q' }));
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(700);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(messageRequestCount).toBe(1);
+    expect(useChatStore.getState().messages).toEqual([expect.objectContaining({ id: 'm-already-hydrated' })]);
+    vi.useRealTimers();
+  });
+
   it('F264: hydrates parent control and child turn identities from canonical queue liveness', async () => {
     apiFetchMock.mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('/queue')) {
@@ -405,72 +421,6 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       invocationId: 'parent-opus',
       turnInvocationId: 'child-opus',
     });
-  });
-
-  it('reconnect hydration keeps a seen exact child out of QueuePanel actions', async () => {
-    apiFetchMock.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/queue')) {
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              queue: [
-                {
-                  id: 'q-reconnect-seen',
-                  threadId: 'thread-q',
-                  userId: 'u1',
-                  content: 'the exact child already read this',
-                  messageId: 'm-reconnect-seen',
-                  mergedMessageIds: [],
-                  source: 'agent',
-                  sourceCategory: 'a2a',
-                  autoExecute: true,
-                  callerCatId: 'codex',
-                  targetCats: ['opus'],
-                  targetStates: { opus: 'seen' },
-                  queueReceipt: {
-                    version: 1,
-                    entryId: 'q-reconnect-seen',
-                    targets: [{ catId: 'opus', state: 'seen', invocationId: 'child-opus', seenAt: 1700000000000 }],
-                    reminderAttempts: [],
-                  },
-                  intent: 'execute',
-                  status: 'queued',
-                  createdAt: 1700000000000,
-                },
-              ],
-              paused: false,
-              activeInvocations: [
-                {
-                  catId: 'opus',
-                  startedAt: Date.now(),
-                  executionId: 'parent-opus',
-                  turnInvocationId: 'child-opus',
-                },
-              ],
-            }),
-            { status: 200 },
-          ),
-        );
-      }
-      return Promise.resolve(
-        new Response(JSON.stringify({ messages: [], hasMore: false, tasks: [] }), { status: 200 }),
-      );
-    });
-
-    await act(async () => {
-      root.render(React.createElement(QueueHydrationPanelHost, { threadId: 'thread-q' }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(useChatStore.getState().activeInvocations).toHaveProperty('parent-opus');
-    expect(useChatStore.getState().catInvocations.opus).toMatchObject({
-      invocationId: 'parent-opus',
-      turnInvocationId: 'child-opus',
-    });
-    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
-    expect(container.querySelector('[data-testid="steer-q-reconnect-seen"]')).toBeNull();
   });
 
   it('F264: parent-only hydration clears a previous child turn identity', async () => {
@@ -663,7 +613,7 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
     expect(apiFetchMock.mock.calls.filter(([url]) => url === '/api/invocations/parent-empty-queue')).toHaveLength(1);
   });
 
-  it('F264: same-parent authoritative hydration clears the old child and exposes its receipt as unsettled', async () => {
+  it('F264: same-parent authoritative hydration clears the old child without projecting Queue receipts', async () => {
     useChatStore.setState({
       catInvocations: {
         opus: {
@@ -685,22 +635,8 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
                   content: 'same parent must not certify an old child',
                   messageId: 'm-same-parent',
                   mergedMessageIds: [],
-                  source: 'user',
+                  from: { kind: 'user', userId: 'test-user' },
                   targetCats: ['opus'],
-                  targetStates: { opus: 'seen' },
-                  queueReceipt: {
-                    version: 1,
-                    entryId: 'q-same-parent',
-                    targets: [
-                      {
-                        catId: 'opus',
-                        state: 'seen',
-                        invocationId: 'child-opus-old',
-                        seenAt: 1700000000000,
-                      },
-                    ],
-                    reminderAttempts: [],
-                  },
                   intent: 'execute',
                   status: 'queued',
                   createdAt: 1700000000000,
@@ -735,9 +671,10 @@ describe('useChatHistory queue hydration (F39 Bug 1)', () => {
       invocationId: 'parent-opus',
       turnInvocationId: undefined,
     });
-    expect(container.textContent).toContain('已读，但关联回合已结束；尚未确认处理完成');
+    expect(container.textContent).toContain('same parent must not certify an old child');
+    expect(container.textContent).not.toContain('未投递 · 排队中');
     expect(container.textContent).not.toContain('当前轮处理中');
-    expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
   });
 
   it('F108B P1-2: replaces stale slots — no ghost cats in ThreadExecutionBar', async () => {

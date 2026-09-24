@@ -1,4 +1,4 @@
-import type { MessageBundleCarrierV1, MessageBundleItemV1, RichBlock } from '@cat-cafe/shared';
+import type { MessageBundleCarrierV1, MessageBundleItemV1, MessageFrom, RichBlock } from '@cat-cafe/shared';
 import type { StoredMessage } from '../stores/ports/MessageStore.js';
 import type { Thread } from '../stores/ports/ThreadStore.js';
 
@@ -16,14 +16,12 @@ export type MessageSelectionInvalidReason =
 
 export type MessageSelectionTombstoneReason = 'source_unavailable' | 'source_changed';
 
-export type MessageSelectionAuthor = { kind: 'user'; userId: string } | { kind: 'cat'; catId: string };
-
 export interface ResolvedMessageSelectionItem {
   status: 'available';
   kind: 'message' | 'quote' | 'cli_quote' | 'rich_block';
   messageId: string;
   sourceThreadId: string;
-  author: MessageSelectionAuthor;
+  from: MessageFrom;
   timestamp: number;
   readableContent: string;
   comment?: string;

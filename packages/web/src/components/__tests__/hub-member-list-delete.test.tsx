@@ -9,6 +9,7 @@ function makeCat(overrides: Partial<CatData> & { id: string; clientId: string })
     displayName: overrides.id,
     color: { primary: '#000', secondary: '#111' },
     mentionPatterns: [],
+    carrier: 'cli',
     defaultModel: 'test-model',
     avatar: '',
     roleDescription: '',

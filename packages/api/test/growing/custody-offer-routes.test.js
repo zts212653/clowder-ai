@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import Fastify from 'fastify';
 import '../helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 const { InvocationRegistry } = await import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
 const { MessageStore, deriveGrowingSourceMessageRevision } = await import(
@@ -11,16 +12,19 @@ const { TaskStore } = await import('../../dist/domains/cats/services/stores/port
 const { registerCustodyOfferRoutes } = await import('../../dist/routes/custody-offer-routes.js');
 
 function appendSource(store, overrides = {}) {
-  return store.append({
-    userId: 'owner-1',
-    catId: null,
-    content: 'Please prepare a reviewable presentation next week.',
-    contentBlocks: [{ type: 'text', text: 'Please prepare a reviewable presentation next week.' }],
-    mentions: ['codex-sol'],
-    timestamp: 1_788_190_000_000,
-    threadId: 'thread-f310',
-    ...overrides,
-  });
+  // F117: append requires MessageFrom sender identity
+  return store.append(
+    canonicalTestMessageInput({
+      userId: 'owner-1',
+      catId: null,
+      content: 'Please prepare a reviewable presentation next week.',
+      contentBlocks: [{ type: 'text', text: 'Please prepare a reviewable presentation next week.' }],
+      mentions: ['codex-sol'],
+      timestamp: 1_788_190_000_000,
+      threadId: 'thread-f310',
+      ...overrides,
+    }),
+  );
 }
 
 async function harness() {

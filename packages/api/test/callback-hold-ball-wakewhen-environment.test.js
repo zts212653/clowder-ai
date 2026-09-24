@@ -80,6 +80,13 @@ test('wakeWhen persists primary output when daemon PATH omits bundled rg', async
         return { id: `invocation-${key}`, userMessageId: key.slice('connector-'.length), status: 'running' };
       },
     },
+    // F117 Phase I: the wake Message and its Queue row commit together, so this stands in for the
+    // admission composition injects. It persists the same envelope the route used to append.
+    async admitManagedWake(input) {
+      const stored = { id: `message-${messages.length}`, ...input.message };
+      messages.push(stored);
+      return { messageId: stored.id };
+    },
   };
 
   const app = Fastify();

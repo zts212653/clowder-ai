@@ -19,7 +19,7 @@ export type ParsedMultipart =
       contentBlocks: MessageContent[];
       visibility?: string;
       whisperTo?: string[];
-      deliveryMode?: 'immediate' | 'queue' | 'force';
+      mentions?: string[];
       messageDisposition?: 'continue_current' | 'next_work';
       /** #699: ID of message being replied to (quote). */
       replyTo?: string;
@@ -62,6 +62,9 @@ export async function parseMultipart(
   // F35: Normalize whisperTo — single value becomes array for Zod validation
   if (fields.whisperTo !== undefined && !Array.isArray(fields.whisperTo)) {
     fields.whisperTo = [fields.whisperTo];
+  }
+  if (fields.mentions !== undefined && !Array.isArray(fields.mentions)) {
+    fields.mentions = [fields.mentions];
   }
 
   // F294 v1 deliberately admits Bundle carriers only through JSON. Detect the
@@ -109,7 +112,7 @@ export async function parseMultipart(
     ...(idempotencyKey ? { idempotencyKey } : {}),
     ...(parseResult.data.visibility ? { visibility: parseResult.data.visibility } : {}),
     ...(parseResult.data.whisperTo ? { whisperTo: parseResult.data.whisperTo as string[] } : {}),
-    ...(parseResult.data.deliveryMode ? { deliveryMode: parseResult.data.deliveryMode } : {}),
+    ...(parseResult.data.mentions ? { mentions: parseResult.data.mentions as string[] } : {}),
     ...(parseResult.data.messageDisposition ? { messageDisposition: parseResult.data.messageDisposition } : {}),
     ...(parseResult.data.replyTo ? { replyTo: parseResult.data.replyTo } : {}),
     contentBlocks: buildMessageContentBlocks(content, contextAttachments, uploadedContent),

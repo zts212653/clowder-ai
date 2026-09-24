@@ -147,9 +147,9 @@ export class SendService {
       }
 
       const stored = await this.deps.messageStore.append({
+        from: { kind: 'plugin', instanceId: ctx.pluginInstanceId },
         threadId: handle.threadId,
         userId: handle.userId,
-        catId: null,
         content: renderElementsText(draft.payload.elements),
         mentions: [], // v0: plugin sends never trigger @-routing (wake power is K-3a scope)
         timestamp: Date.now(),

@@ -112,6 +112,12 @@ export const routingSignalObservationTotal = lazy(() =>
   }),
 );
 
+export const routingSyntaxCorrectionDetected = lazy(() =>
+  meter().createCounter('cat_cafe.a2a.routing_syntax.correction_detected', {
+    description: 'Agent output requiring private line-start routing syntax correction',
+  }),
+);
+
 export const proactiveMemoryScanTotal = lazy(() =>
   meter().createCounter('cat_cafe.proactive_memory.scan', {
     description: 'F282 canonical owner-window scans without owner or subject attributes',
@@ -254,7 +260,7 @@ export const inlineActionFeedbackWriteFailed = lazy(() =>
 
 export const inlineActionHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.inline_action.hint_emitted', {
-    description: 'Inline action hint system message sent to user',
+    description: 'Legacy-named internal inline action correction signal',
   }),
 );
 
@@ -600,13 +606,13 @@ export const routingTerminalReleaseRemedialTotal = lazy(() =>
 
 export const c2VerdictHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.c2.verdict_hint_emitted', {
-    description: 'C2 exit-check verdict-no-pass hint emitted (split from mixed hint_emitted)',
+    description: 'Legacy-named internal C2 verdict-without-pass correction signal',
   }),
 );
 
 export const c2VoidHoldHintEmitted = lazy(() =>
   meter().createCounter('cat_cafe.a2a.c2.void_hold_hint_emitted', {
-    description: 'C2 exit-check void-hold hint emitted (split from mixed hint_emitted)',
+    description: 'Legacy-named internal C2 void-hold correction signal',
   }),
 );
 
@@ -1000,66 +1006,10 @@ export const visibilityCursorDeferredBoundaryRejected = lazy(() =>
   }),
 );
 
-/** Gate held: post_message/cross_post blocked because thread has unseen messages. */
-export const freshnessGateHeld = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.gate_held', {
-    description: 'F254 freshness gate held decisions (unseen messages blocked side-effect)',
-  }),
-);
-
-/** Gate forward: post_message/cross_post allowed (no unseen, or acknowledged). */
-export const freshnessGateForward = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.gate_forward', {
-    description: 'F254 freshness gate forward decisions (side-effect allowed)',
-  }),
-);
-
-/** Typed relevance exclusions that prevented false freshness work. */
-export const freshnessRelevanceSuppressed = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.relevance_suppressed', {
-    description: 'F254 messages excluded from freshness work by a bounded typed relevance reason',
-  }),
-);
-
-/** Notice attached: content-free "you have unseen messages" notice delivered to cat. */
-export const freshnessNoticeAttached = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.notice_attached', {
-    description: 'F254 content-free freshness notice attached to read-only tool response',
-  }),
-);
-
 /** Provider-native safe-boundary notice lifecycle, split by provider/carrier/surface. */
 export const freshnessProviderNotice = lazy(() =>
   meter().createCounter('cat_cafe.freshness.provider_notice', {
     description: 'F254 D2 provider-native freshness opportunity, delivery, and miss outcomes',
-  }),
-);
-
-/** Notice acked: cat advanced seenCursor past notice (implicitly read the messages). */
-export const freshnessNoticeAcked = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.notice_acked', {
-    description: 'F254 freshness notice implicitly acked (seenCursor caught up)',
-  }),
-);
-
-/** Notice deferred: cat held_ball despite unresolved notices (chose to exit without reading). */
-export const freshnessNoticeDeferred = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.notice_deferred', {
-    description: 'F254 freshness notice deferred at hold_ball (cat exited without reading)',
-  }),
-);
-
-/** Re-invoke triggered: invocation ended with unresolved high-priority notices → re-invoke queued. */
-export const freshnessReinvokeTriggered = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.reinvoke_triggered', {
-    description: 'F254 freshness re-invoke triggered (unresolved notices → new invocation)',
-  }),
-);
-
-/** Re-invoke skipped: invocation ended but re-invoke not needed (cursor caught up, quota, etc). */
-export const freshnessReinvokeSkipped = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.reinvoke_skipped', {
-    description: 'F254 freshness re-invoke skipped (cursor caught up / quota / already handled)',
   }),
 );
 
@@ -1070,10 +1020,10 @@ export const freshnessQueuedSeen = lazy(() =>
   }),
 );
 
-/** Queued handled: a seen queued entry closed via same-invocation successful completion evidence. */
+/** Queued handled: an exact active child durably adopted one pending target from its source entry. */
 export const freshnessQueuedHandled = lazy(() =>
   meter().createCounter('cat_cafe.freshness.queued_handled', {
-    description: 'F254 queued handled closures inferred from queued_seen plus successful invocation evidence',
+    description: 'F254 queued handled closures committed by exact active-child full-read adoption',
   }),
 );
 
@@ -1102,13 +1052,6 @@ export const freshnessSuccessorPreflightCanceled = lazy(() =>
 export const freshnessClosureStage = lazy(() =>
   meter().createCounter('cat_cafe.freshness.closure_stage', {
     description: 'F254 v1.2 formal commit and retry-preflight custody stages',
-  }),
-);
-
-/** ADR-042 publish-then-supplement lifecycle events. */
-export const freshnessGlassBoxTransition = lazy(() =>
-  meter().createCounter('cat_cafe.freshness.glass_box_transition', {
-    description: 'F254 ADR-042 published-with-unseen and supplement lifecycle transitions',
   }),
 );
 
@@ -1340,14 +1283,6 @@ export function warmupCounters(): void {
   codexAppServerLeaseActive.add(0);
   codexAppServerHostEviction.add(0);
   codexAppServerHostMigration.add(0);
-  freshnessGateHeld.add(0);
-  freshnessGateForward.add(0);
-  freshnessRelevanceSuppressed.add(0);
-  freshnessNoticeAttached.add(0);
-  freshnessNoticeAcked.add(0);
-  freshnessNoticeDeferred.add(0);
-  freshnessReinvokeTriggered.add(0);
-  freshnessReinvokeSkipped.add(0);
   freshnessQueuedSeen.add(0);
   freshnessQueuedHandled.add(0);
 
@@ -1366,5 +1301,6 @@ export function warmupCounters(): void {
   externalCaseUserNudgeRequired.add(0);
   contextProjectionTransitionTotal.add(0);
   contextProjectionLedgerOutcomeTotal.add(0);
+  routingSyntaxCorrectionDetected.add(0);
   routingSignalObservationTotal.add(0);
 }

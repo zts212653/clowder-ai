@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { MemoryCloudReturnGrantStore } from '../dist/domains/cats/services/cloud-bridge/cloud-return-grant.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('F247 atomic append-winner recovery', () => {
   it('routes only from the persisted message when the pre-read misses an idempotency winner', async () => {
@@ -20,14 +21,17 @@ describe('F247 atomic append-winner recovery', () => {
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 append winner recovery');
-    const source = store.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      threadId: thread.id,
-      content: '@gpt-pro persist routing for this source',
-      mentions: ['gpt-pro'],
-      timestamp: 2_000,
-    });
+    // F117: append requires MessageFrom sender identity
+    const source = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        threadId: thread.id,
+        content: '@gpt-pro persist routing for this source',
+        mentions: ['gpt-pro'],
+        timestamp: 2_000,
+      }),
+    );
     const scope = {
       threadId: thread.id,
       userId: 'alice',
@@ -37,19 +41,21 @@ describe('F247 atomic append-winner recovery', () => {
     const idempotencyKey = `f247-cloud-return:${createHash('sha256')
       .update(JSON.stringify({ v: 1, ...scope }))
       .digest('hex')}`;
-    const persisted = store.append({
-      userId: 'alice',
-      catId: 'gpt-pro',
-      threadId: thread.id,
-      content: 'append winner persisted return',
-      mentions: ['codex'],
-      origin: 'callback',
-      timestamp: 2_100,
-      extra: { isExplicitPost: true, targetCats: ['codex'] },
-      replyTo: source.id,
-      deliveryStatus: 'queued',
-      idempotencyKey,
-    });
+    // F117: append requires MessageFrom sender identity
+    const persisted = store.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'gpt-pro',
+        threadId: thread.id,
+        content: 'append winner persisted return',
+        mentions: ['codex'],
+        origin: 'callback',
+        timestamp: 2_100,
+        extra: { isExplicitPost: true, targetCats: ['codex'] },
+        replyTo: source.id,
+        idempotencyKey,
+      }),
+    );
     const getByIdempotencyKey = store.getByIdempotencyKey.bind(store);
     let lookupCount = 0;
     store.getByIdempotencyKey = (...args) => {
@@ -75,7 +81,7 @@ describe('F247 atomic append-winner recovery', () => {
       invocationQueue,
       queueProcessor: {
         async onInvocationComplete() {},
-        async tryAutoExecute() {},
+        async requestDrain() {},
         registerEntryCompleteHook() {},
         unregisterEntryCompleteHook() {},
       },
@@ -106,9 +112,10 @@ describe('F247 atomic append-winner recovery', () => {
     assert.equal(retry.json().messageId, persisted.id);
     const entries = invocationQueue.list(thread.id, 'alice');
     assert.equal(entries.length, 1);
-    assert.equal(entries[0].messageId, persisted.id);
-    assert.deepEqual(entries[0].targetCats, ['codex']);
-    assert.equal(entries[0].content, persisted.content);
+    assert.equal(entries[0].payload.messageId, persisted.id);
+    assert.deepEqual(entries[0].from, { kind: 'agent', catId: 'gpt-pro' });
+    assert.deepEqual(entries[0].targets, ['codex']);
+    assert.equal(entries[0].payload.content, persisted.content);
     assert.equal(broadcasts.length, 0);
     await app.close();
   });

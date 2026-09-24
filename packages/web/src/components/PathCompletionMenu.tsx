@@ -20,7 +20,7 @@ export function PathCompletionMenu({ entries, selectedIdx, onSelectIdx, onSelect
   return (
     <div
       data-testid="path-completion-menu"
-      className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-cafe overflow-hidden w-80 z-10 max-h-64 flex flex-col"
+      className="absolute bottom-full left-4 mb-2 bg-cafe-surface-canvas rounded-xl shadow-lg border border-cafe overflow-hidden w-80 z-10 max-h-64 flex flex-col"
     >
       <div className="overflow-y-auto flex-1">
         {entries.map((entry, i) => (

@@ -113,7 +113,7 @@ async function createFixture(t) {
     dispatchProposalStore,
     invocationRecordStore,
     router: createMockRouter(),
-    queueProcessor: { async tryAutoExecute() {} },
+    queueProcessor: { async requestDrain() {} },
     socketManager: {
       broadcastAgentMessage(...args) {
         broadcasts.push(args);

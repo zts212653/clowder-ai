@@ -136,8 +136,8 @@ export async function appendReviewEvent(
   const projection = projectProviderSemanticEvent(event);
   if (projection.status !== 'projected') throw new Error('invalid_review_semantic_event');
   const stored = await options.messageStore.append({
+    from: { kind: 'system', service: 'native-thread-review' },
     userId: 'system',
-    catId: 'system' as CatId,
     threadId: access.thread.id,
     content: projection.content,
     mentions: [],

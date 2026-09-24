@@ -15,6 +15,8 @@ export * from './avatar-limits.js';
 export * from './capability-tip-telemetry.js';
 // Export capability tips contract (F244 waiting-state Knowledge Feed projection)
 export * from './capability-tips.js';
+// Human-facing runtime member identity shared by API notifications and Web surfaces.
+export * from './cat-display-name.js';
 // Export shared CLI effort helpers
 export * from './cli-effort.js';
 export * from './cli-tool-label.js';

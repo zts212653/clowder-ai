@@ -249,47 +249,4 @@ describe('F212 Phase B — cold hydration restores cliDiagnostics (云端 codex 
     const hydrated = useChatStore.getState().messages[0].extra as { recovery?: typeof recovery } | undefined;
     expect(hydrated?.recovery).toEqual(recovery);
   });
-
-  it('preserves the durable F254 supplement projection on cold hydration', async () => {
-    const freshnessSupplement = {
-      type: 'freshness_supplement' as const,
-      supplementId: 'f254-supplement:msg-original:1',
-      lineageId: 'msg-original',
-      originalMessageId: 'msg-original',
-      threadId: 'thread-cli-diag',
-      catId: 'codex-sol',
-      seq: 1 as const,
-      status: 'declined' as const,
-      requiredCount: 1,
-      terminalReason: 'checked_no_supplement_needed',
-      updatedAt: 1700000005000,
-    };
-    apiFetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        messages: [
-          {
-            id: 'msg-original',
-            type: 'assistant',
-            catId: 'codex-sol',
-            content: '原回复持续可见。',
-            extra: { freshnessSupplement },
-            timestamp: 1700000000000,
-          },
-        ],
-        tasks: [],
-        hasMore: false,
-      }),
-    } as Response);
-
-    await act(async () => {
-      root.render(React.createElement(HookHost, { threadId: 'thread-cli-diag' }));
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(useChatStore.getState().messages[0].extra?.freshnessSupplement).toEqual(freshnessSupplement);
-  });
 });

@@ -14,19 +14,12 @@ export function AdoptedHoldPreview() {
       messageId: 'preview-wake',
       mergedMessageIds: [],
       content: '[定时任务] 持球唤醒：检查已通过，通知尚未结算',
-      source: 'connector',
+      from: { kind: 'system', service: 'scheduler' },
       sourceCategory: 'scheduled',
       targetCats: ['codex-astra'],
       intent: 'execute',
       status: 'queued',
       createdAt: Date.now(),
-      targetStates: { 'codex-astra': 'failed' },
-      queueReceipt: {
-        version: 1,
-        entryId: 'adopted-hold-preview',
-        reminderAttempts: [],
-        targets: [{ catId: 'codex-astra', state: 'failed', invocationId: 'finished-child', seenAt: Date.now() - 1000 }],
-      },
       recoveryActions: [
         {
           id: 'queue-withdraw:adopted-hold-preview',
@@ -47,13 +40,9 @@ export function AdoptedHoldPreview() {
           ...failed,
           id: 'routine-scheduler',
           content: '[定时任务] routine internal control',
-          targetStates: { 'codex-astra': 'queued' },
-          queueReceipt: undefined,
           recoveryActions: [],
         },
       ],
-      queuePaused: true,
-      queuePauseReason: 'failed',
     });
     setReady(true);
   }, []);
@@ -61,8 +50,8 @@ export function AdoptedHoldPreview() {
     <main className="min-h-screen bg-cafe-surface-canvas p-4 text-cafe sm:p-8" data-ready={ready}>
       <section className="mx-auto max-w-3xl space-y-5">
         <header>
-          <h1 className="text-xl font-semibold">通知结算与队列恢复</h1>
-          <p className="mt-2 text-sm text-cafe-secondary">开发预览 · 模拟回执，操作由浏览器测试拦截，不调用模型。</p>
+          <h1 className="text-xl font-semibold">Queue pending-target 恢复</h1>
+          <p className="mt-2 text-sm text-cafe-secondary">开发预览 · 模拟待投递 source entry，不调用模型。</p>
         </header>
         <QueuePanel threadId="issue1371-preview" />
       </section>

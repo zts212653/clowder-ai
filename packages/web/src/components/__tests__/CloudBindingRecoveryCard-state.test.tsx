@@ -39,7 +39,6 @@ it('lets an owner connect when an old message cannot retry, without resending or
       if (init?.method === 'PATCH') bound = true;
       return json({ bindings: bound ? { 'gpt-pro': url } : {} });
     }
-    if (String(path).endsWith('/retry-authority')) return json({ code: 'QUEUE_MESSAGE_NOT_FOUND' }, 404);
     throw new Error(`unexpected request ${String(path)}`);
   });
   await act(async () => {
@@ -74,9 +73,8 @@ it('renders a verified sent receipt as the result, with no connection chooser or
   expect(container.querySelector('[data-recovery-primary]')).toBeNull();
 });
 
-it('lets the current retry authority replace a stale sending projection', async () => {
+it('retries only the immutable attempt carried by the recovery notice', async () => {
   mockFetch.mockImplementation(async (path) => {
-    if (path.endsWith('/retry-authority')) return json({ attemptId: 'attempt-current' });
     if (path.endsWith('/cloud-bindings')) return json({ bindings: { 'gpt-pro': url } });
     if (path.endsWith('/personal-chrome'))
       return json({
@@ -104,7 +102,7 @@ it('lets the current retry authority replace a stale sending projection', async 
     primary?.click();
   });
   expect(mockFetch).toHaveBeenCalledWith(
-    '/api/messages/source-7/queue-targets/gpt-pro/retry',
-    expect.objectContaining({ body: JSON.stringify({ attemptId: 'attempt-current' }) }),
+    '/api/messages/source-7/delivery-targets/gpt-pro/retry',
+    expect.objectContaining({ body: JSON.stringify({ attemptId: 'attempt-stale' }) }),
   );
 });

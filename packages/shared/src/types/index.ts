@@ -43,13 +43,8 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
-// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
-export {
-  A2A_INLINE_MENTION_MODE,
-  type A2ARoutingMode,
-  type A2ARoutingProjection,
-  isRoutingProjectionStartingNow,
-} from './a2a-routing-mode.js';
+// Structured routing mode and admitted parallel fan-out projection.
+export type { A2ARoutingMode, A2ARoutingProjection } from './a2a-routing-mode.js';
 // F167 Phase S: action-scoped A2A successor single-flight contract
 export {
   ACTION_SUBJECT_REF_DESCRIPTION,
@@ -271,10 +266,17 @@ export type {
   Roster,
   RosterEntry,
 } from './cat-breed.js';
+export {
+  CAT_CARRIERS,
+  type CatCarrier,
+  catClientSupportsCarrier,
+  getCatCarrierOptions,
+} from './cat-carrier.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
+export { CatAlternativeSchema, CatRoutingErrorSchema } from './cat-routing.js';
 // F212: CLI error diagnostics (cross-package data contract; classifier/sanitizer impl stays in api)
-export type { CliActiveWriterRecoveryState, CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
+export type { CliDiagnostics, CliErrorReasonCode } from './cli-diagnostics.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   BUILTIN_ACCOUNT_CLIENT_FOR_ID,
@@ -292,11 +294,13 @@ export type {
   CloudBridgeOutboundStatus,
   CloudBridgeOutboundTransport,
   CloudBridgeRecoveryV1,
+  CloudBridgeRetryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export {
   isCloudBridgeFailureDiagnosticV1,
   isCloudBridgeOutboundReceiptV1,
   isCloudBridgeRecoveryV1,
+  isCloudBridgeRetryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export * from './collective.js';
 // Command types (F142 Phase B — slash command framework)
@@ -440,6 +444,7 @@ export type {
 export {
   getAllConnectorDefinitions,
   getConnectorDefinition,
+  isManagedHoldConnectorSource,
   isSelectableManagedHoldConnectorSource,
   isStaticConnectorId,
   registerConnectorDefinition,
@@ -578,23 +583,8 @@ export type {
   TrajectoryProvenance,
 } from './feat-trajectory.js';
 export { makeGitRefEntryId } from './feat-trajectory.js';
-// F254 Phase E: persistent catch-closure responsibility and output-commit decisions
-export type {
-  ClosureDraftBody,
-  FreshnessClosureAggregate,
-  FreshnessClosureAttempt,
-  FreshnessClosureBlockedReason,
-  FreshnessClosureDisposition,
-  FreshnessClosureProjection,
-  FreshnessClosureStatus,
-  FreshnessSupplementAggregate,
-  FreshnessSupplementFailureReason,
-  FreshnessSupplementProjection,
-  FreshnessSupplementStatus,
-  LegacyClosureMigrationOutcomeCounts,
-  OutputCommitDecision,
-  PublishedFreshnessAnnotation,
-} from './freshness-closure.js';
+// Output-commit truth for an answer turn
+export type { OutputCommitDecision, PublishedFreshnessAnnotation } from './freshness-closure.js';
 // F245: Friction Signal Eval types
 export type {
   ActionableFrictionCandidate,
@@ -733,6 +723,8 @@ export {
   custodyOpportunityEpisodeInputV1Schema,
   custodyOpportunityEpisodeV1Schema,
 } from './growing-opportunity.js';
+export type { HoldCancelEntry, HoldCardCancelability, HoldCardRef } from './hold-card-cancelability.js';
+export { decideHoldCancelEntry, readHoldCardCancelability } from './hold-card-cancelability.js';
 // F281 Phase A: server-bound human disposition feedback and exact-subject eligibility contract
 export {
   buildHumanDispositionEnvelope,
@@ -1029,6 +1021,36 @@ export {
   createCatMessage,
   createUserMessage,
 } from './message.js';
+// #1354 / RFC #1356: canonical Queue → History → Active Run lifecycle contract.
+export type {
+  LifecycleActiveRun,
+  LifecycleAppendAction,
+  LifecycleAppendCapability,
+  LifecycleAppendExpectedRun,
+  LifecycleDeliveryFailureReason,
+  LifecycleDeliveryFailureResult,
+  LifecycleDispatchRef,
+  LifecycleInlinePayload,
+  LifecycleInputCapabilities,
+  LifecycleMessageFrom,
+  LifecycleMessageMetadata,
+  LifecycleMessageRefPayload,
+  LifecycleQueueEntry,
+  LifecycleQueuePriority,
+  LifecycleQueueSnapshot,
+  LifecycleResponseBubble,
+  LifecycleStoredMessageMetadata,
+  MessageFrom,
+  ReorderVisibleLifecycleEntriesCommand,
+  StructuredOwnerAdmissionBinding,
+  TimelineMessageKind,
+} from './message-lifecycle.js';
+export {
+  hasExactLifecycleProcessingDispatch,
+  isLifecycleStoredMessageMetadata,
+  isMessageFrom,
+  timelineMessageKind,
+} from './message-lifecycle.js';
 // Mount Rules types (F228 Skill 挂载规则解耦)
 export type {
   CustomMountPointRule,
@@ -1378,8 +1400,8 @@ export {
   type ProviderSubexecutionStage,
   type ProviderWarningSemanticEvent,
 } from './provider-semantic-event.js';
-// F264: durable per-target queued-message receipt and manual reminder truth
 export type {
+  ActiveInvocationGuidanceCapability,
   FreshnessCarrier,
   FreshnessCarrierCapability,
   FreshnessCarrierDeliverySemantics,
@@ -1391,15 +1413,8 @@ export type {
   QueueHandledDisposition,
   QueueLineageEvidenceRef,
   QueueManagedHoldContinuationWitness,
-  QueueMessageReceipt,
-  QueueMessageReceiptProjection,
-  QueueReceiptTarget,
-  QueueReceiptTargetState,
   QueueRecoveryAction,
   QueueRecoveryRequest,
-  QueueReminderAttempt,
-  QueueReminderAttemptState,
-  QueueReminderMissedReason,
   QueueSourceResponseConsumptionWitness,
   QueueTargetAttempt,
   QueueTargetAttemptState,
@@ -1409,6 +1424,15 @@ export type {
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
   QueueTurnExecutionEvidenceRef,
+} from './queue-receipt.js';
+// F264: queued-message delivery intent and recovery actions
+export {
+  ACTIVE_INVOCATION_GUIDANCE_CAPABILITIES,
+  FRESHNESS_CARRIER_DELIVERY_SEMANTICS,
+  FRESHNESS_CARRIER_PROVIDERS,
+  FRESHNESS_CARRIERS,
+  parseFreshnessCarrierCapability,
+  supportsActiveInvocationGuidance,
 } from './queue-receipt.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {

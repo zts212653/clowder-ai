@@ -4,6 +4,52 @@ import { projectCanonicalBubbles } from '../bubble-projection';
 import type { ChatMessage } from '../chat-types';
 
 describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
+  it('keeps terminal response bubbles on the shared presentation timeline after projection', () => {
+    const records: ChatMessage[] = [
+      {
+        id: 'response-started-first-completed-last',
+        type: 'assistant',
+        catId: 'sol',
+        content: 'long-running response',
+        origin: 'stream',
+        timestamp: 1_000,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '1000:invocation-sol',
+          invocationId: 'invocation-sol',
+          targetId: 'sol',
+          inputEntryIds: ['entry-initial', 'entry-supplement'],
+          inputMessageIds: ['user-initial', 'user-supplement'],
+          status: 'completed',
+          startedAt: 1_000,
+          completedAt: 4_000,
+        },
+      },
+      {
+        id: 'user-supplement',
+        type: 'user',
+        content: 'supplement',
+        timestamp: 2_000,
+        deliveredAt: 2_000,
+        timelineOrderAt: 2_000,
+      },
+      {
+        id: 'callback-input',
+        type: 'assistant',
+        catId: 'opus',
+        content: 'review callback',
+        origin: 'callback',
+        timestamp: 3_000,
+      },
+    ];
+
+    expect(projectCanonicalBubbles({ records }).messages.map((message) => message.id)).toEqual([
+      'user-supplement',
+      'callback-input',
+      'response-started-first-completed-last',
+    ]);
+  });
+
   it('AC-Z20/Z11 alpha replay: stream records merge, callback post_message remains its own bubble', () => {
     // Source: thread_moyfjyjc0662weit opus invocation 2fe279aa
     // 2 stream + 1 callback, 3 distinct content segments, all sharing invocationId.
@@ -122,6 +168,117 @@ describe('F194 Phase Z8 — projectCanonicalBubbles (AC-Z20)', () => {
     const { messages } = projectCanonicalBubbles({ records });
     expect(messages).toHaveLength(2);
     expect(messages.map((m) => m.content).sort()).toEqual(['turn 1', 'turn 2']);
+  });
+
+  it('folds an exact failed frontier chain into the final source-bound response bubble', () => {
+    const source: ChatMessage = {
+      id: 'source-1',
+      type: 'user',
+      content: '@狸花猫 test',
+      timestamp: 100,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '100:source-1',
+        dispatchRefs: [{ targetId: 'tabby', phase: 'settled', statusMessageId: 'final-failure', dispatchedAt: 1_000 }],
+      },
+    };
+    const auxiliaryFailure: ChatMessage = {
+      id: 'aux-failure',
+      type: 'assistant',
+      catId: 'tabby',
+      content: 'Error: first attempt',
+      timestamp: 110,
+      origin: 'stream',
+      extra: {
+        stream: { turnInvocationId: 'attempt-1' },
+        freshness: { priorFrontierMessageId: source.id },
+      },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '110:attempt-1',
+        invocationId: 'attempt-1',
+        targetId: 'tabby',
+        inputEntryIds: ['aux-entry'],
+        inputMessageIds: [],
+        startedAt: 110,
+        status: 'failed',
+        completedAt: 115,
+        reason: 'PROVIDER_EXECUTION_FAILED',
+      },
+    };
+    const finalFailure: ChatMessage = {
+      id: 'final-failure',
+      type: 'assistant',
+      catId: 'tabby',
+      replyTo: source.id,
+      content: 'Error: final attempt',
+      timestamp: 120,
+      origin: 'stream',
+      extra: {
+        stream: { turnInvocationId: 'attempt-2' },
+        freshness: { priorFrontierMessageId: auxiliaryFailure.id },
+      },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '120:attempt-2',
+        invocationId: 'attempt-2',
+        targetId: 'tabby',
+        inputEntryIds: ['source-entry'],
+        inputMessageIds: [source.id],
+        startedAt: 120,
+        status: 'failed',
+        completedAt: 125,
+        reason: 'PROVIDER_EXECUTION_FAILED',
+      },
+    };
+
+    const { messages } = projectCanonicalBubbles({ records: [source, auxiliaryFailure, finalFailure] });
+
+    expect(messages).toHaveLength(2);
+    expect(messages[1]).toMatchObject({
+      id: finalFailure.id,
+      replyTo: source.id,
+      content: 'Error: first attempt\n\nError: final attempt',
+      lifecycle: finalFailure.lifecycle,
+      projectionSourceMessageIds: [auxiliaryFailure.id, finalFailure.id],
+    });
+  });
+
+  it('does not fold a prior failed response without the exact final source/ref/frontier chain', () => {
+    const source: ChatMessage = { id: 'source-1', type: 'user', content: 'test', timestamp: 100 };
+    const first: ChatMessage = {
+      id: 'failure-1',
+      type: 'assistant',
+      catId: 'tabby',
+      content: 'Error: unrelated',
+      timestamp: 110,
+      extra: { stream: { turnInvocationId: 'attempt-1' } },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '110:attempt-1',
+        invocationId: 'attempt-1',
+        targetId: 'tabby',
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: [],
+        startedAt: 110,
+        status: 'failed',
+        completedAt: 111,
+      },
+    };
+    const second: ChatMessage = {
+      ...first,
+      id: 'failure-2',
+      timestamp: 120,
+      content: 'Error: final',
+      extra: { stream: { turnInvocationId: 'attempt-2' } },
+      lifecycle: {
+        ...first.lifecycle!,
+        orderKey: '120:attempt-2',
+        invocationId: 'attempt-2',
+      } as ChatMessage['lifecycle'],
+    };
+
+    expect(projectCanonicalBubbles({ records: [source, first, second] }).messages).toHaveLength(3);
   });
 
   it('does not merge legacy parent-key stream records across a user turn', () => {

@@ -28,6 +28,7 @@ const USER_ID = 'user-1';
 const UNDECLARED_FRESHNESS_CARRIER_CAPABILITY = {
   provider: 'other',
   carrier: 'other',
+  activeInvocationGuidance: 'undeclared',
   deliverySemantics: 'undeclared',
 };
 

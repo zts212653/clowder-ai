@@ -10,7 +10,7 @@
 
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { ChatMessage, MessageContent, ToolEvent } from '@/stores/chat-types';
-import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
+import { getMessageTimelineOrderTime, getOrderedMessageTimeline } from '@/stores/message-timeline';
 import { mergeSessionEvents } from './merge-session-events';
 import type { RawTranscriptEvent } from './types';
 
@@ -175,7 +175,9 @@ function appendAssistantSupplementEvents(
 export function chatMessagesToTranscriptEvents(messages: ChatMessage[], threadId: string): RawTranscriptEvent[] {
   const events: RawTranscriptEvent[] = [];
   const streamOriginMessageIds = collectStreamOriginMessageIds(messages);
-  const projectedMessages = projectCanonicalBubbles({ records: messages.map(normalizeProjectionTimestamp) }).messages;
+  const projectedMessages = getOrderedMessageTimeline(
+    projectCanonicalBubbles({ records: messages.map(normalizeProjectionTimestamp) }).messages,
+  );
 
   for (const message of projectedMessages) {
     if (!isReplayableMessage(message)) continue;

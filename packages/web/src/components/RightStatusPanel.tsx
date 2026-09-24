@@ -363,8 +363,7 @@ export function RightStatusPanel({
 }: RightStatusPanelProps) {
   // F26: Split into active (working now) vs history (appeared before)
   // review-#784 P2 + AC-Z15: pass intentMode so deriveActiveCats preserves the
-  // full targetCats union during ideate rounds (matches ParallelStatusBar /
-  // Responsive status-host behavior; without this, finished-cat slots get demoted
+  // full targetCats union during ideate rounds. Without this, finished-cat slots get demoted
   // to history while the round is still running).
   const { activeCats, historyCats } = useMemo(() => {
     const snapshotCats = collectSnapshotActiveCats(catInvocations);

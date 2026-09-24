@@ -4,18 +4,19 @@
  * Goal:
  * - Simulate persistence outage during message processing.
  * - Verify invocation is marked failed with explicit user-facing signal.
- * - Verify recovery path succeeds after retry.
+ * - Verify the failed attempt remains terminal when persistence fails.
  */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
+import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
-import { invocationsRoutes } from '../dist/routes/invocations.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
 
 function createMockSocketManager() {
@@ -55,7 +56,14 @@ function createFaultDrillRouter(modeRef) {
         intent: { intent: 'execute', explicit: false, promptTags: [] },
       };
     },
+    async resolveExplicitTargets(targetCats) {
+      return [...targetCats];
+    },
+    async resolveConversationTargetsAtAdmission(targetCats) {
+      return targetCats.length > 0 ? [...targetCats] : ['opus'];
+    },
     async *routeExecution(_userId, _content, _threadId, _userMessageId, _targets, _intent, opts = {}) {
+      modeRef.invocationId = opts.parentInvocationId;
       if (modeRef.failPersistence) {
         if (opts.persistenceContext) {
           opts.persistenceContext.failed = true;
@@ -86,9 +94,19 @@ async function setupScenario() {
   const threadStore = new ThreadStore();
   const invocationRecordStore = new InvocationRecordStore();
   const invocationTracker = new InvocationTracker();
+  const invocationQueue = new InvocationQueue();
   const socketManager = createMockSocketManager();
   const modeRef = { failPersistence: true };
   const router = createFaultDrillRouter(modeRef);
+  const queueProcessor = new QueueProcessor({
+    queue: invocationQueue,
+    invocationTracker,
+    invocationRecordStore,
+    socketManager,
+    messageStore,
+    router,
+    log: { info() {}, warn() {}, error() {} },
+  });
   const threadId = threadStore.create('user-1', 'fault drill thread').id;
 
   const app = Fastify();
@@ -100,13 +118,8 @@ async function setupScenario() {
     threadStore,
     invocationTracker,
     invocationRecordStore,
-  });
-  await app.register(invocationsRoutes, {
-    invocationRecordStore,
-    messageStore,
-    socketManager,
-    router,
-    invocationTracker,
+    invocationQueue,
+    queueProcessor,
   });
   await app.ready();
 
@@ -122,7 +135,7 @@ async function setupScenario() {
 
 describe('Persistence fault drills', () => {
   it('marks invocation failed and emits explicit error when persistence fails mid-flight', async () => {
-    const { app, threadId, socketManager, invocationRecordStore, router } = await setupScenario();
+    const { app, modeRef, threadId, socketManager, invocationRecordStore, router } = await setupScenario();
 
     const res = await app.inject({
       method: 'POST',
@@ -134,15 +147,18 @@ describe('Persistence fault drills', () => {
       },
     });
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 202);
     const body = res.json();
-    assert.equal(body.status, 'processing');
-    assert.ok(body.invocationId);
+    assert.equal(body.status, 'queued');
+    assert.ok(body.entryId);
 
-    const failedReady = await waitFor(() => invocationRecordStore.get(body.invocationId)?.status === 'failed');
+    const failedReady = await waitFor(() =>
+      Boolean(modeRef.invocationId && invocationRecordStore.get(modeRef.invocationId)?.status === 'failed'),
+    );
     assert.equal(failedReady, true, 'invocation should become failed within wait window');
 
-    const record = invocationRecordStore.get(body.invocationId);
+    const record = invocationRecordStore.get(modeRef.invocationId);
+    assert.ok(record);
     assert.equal(record.status, 'failed');
     assert.ok(
       String(record.error).includes('Message delivered but persistence failed'),
@@ -154,41 +170,6 @@ describe('Persistence fault drills', () => {
       .find((e) => e.type === 'agent' && e.msg?.type === 'error' && String(e.msg?.error).includes('未能保存'));
     assert.ok(failureSignal, 'should emit explicit user-facing persistence warning');
     assert.equal(router.getAckCalls().length, 0, 'cursor ack must be deferred on failure');
-
-    await app.close();
-  });
-
-  it('supports recovery: failed invocation can retry to succeeded after persistence recovers', async () => {
-    const { app, threadId, modeRef, router, invocationRecordStore } = await setupScenario();
-
-    const createRes = await app.inject({
-      method: 'POST',
-      url: '/api/messages',
-      headers: { 'x-cat-cafe-user': 'user-1' },
-      payload: {
-        content: '@布偶猫 retry drill',
-        threadId,
-      },
-    });
-
-    const { invocationId } = createRes.json();
-    const firstFailedReady = await waitFor(() => invocationRecordStore.get(invocationId)?.status === 'failed');
-    assert.equal(firstFailedReady, true, 'initial invocation should fail before retry');
-    assert.equal(invocationRecordStore.get(invocationId).status, 'failed');
-
-    // Simulate Redis/API recovery before retry.
-    modeRef.failPersistence = false;
-
-    const retryRes = await app.inject({
-      method: 'POST',
-      url: `/api/invocations/${invocationId}/retry`,
-    });
-    assert.equal(retryRes.statusCode, 202);
-
-    const retrySucceeded = await waitFor(() => invocationRecordStore.get(invocationId)?.status === 'succeeded');
-    assert.equal(retrySucceeded, true, 'retry should eventually become succeeded');
-    assert.equal(invocationRecordStore.get(invocationId).status, 'succeeded');
-    assert.equal(router.getAckCalls().length, 1, 'cursor ack should occur after recovered retry');
 
     await app.close();
   });

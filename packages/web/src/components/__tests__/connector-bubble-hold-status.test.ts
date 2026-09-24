@@ -114,7 +114,10 @@ describe('ConnectorBubble hold status lifecycle', () => {
     const terminalReceipt = holdMessage({
       id: 'm-hold-terminal-receipt',
       content: 'managed hold completed',
-      timestamp: initial.timestamp + 1,
+      // Storage time is deliberately older: hold-card freshness must follow the
+      // shared presentation clock rather than reintroducing a raw-time sort.
+      timestamp: initial.timestamp - 1,
+      deliveredAt: initial.timestamp + 1,
     });
     act(() => {
       root.render(

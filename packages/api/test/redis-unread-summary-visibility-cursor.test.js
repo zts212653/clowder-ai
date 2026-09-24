@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupClientKeyspace,
@@ -14,8 +15,6 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
   let RedisMessageStore;
   let RedisThreadReadStateStore;
   let createRedisClient;
-  let createFreshnessClosure;
-  let scanFreshnessClosurePreflight;
   let threadsRoutes;
   let ThreadStore;
   let redis;
@@ -24,23 +23,14 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
 
   before(async () => {
     assertRedisIsolationOrThrow(REDIS_URL, 'Redis unread summary visibility cursor contract');
-    [
-      { RedisMessageStore },
-      { RedisThreadReadStateStore },
-      { createRedisClient },
-      { createFreshnessClosure },
-      { scanFreshnessClosurePreflight },
-      { threadsRoutes },
-      { ThreadStore },
-    ] = await Promise.all([
-      import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
-      import('../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'),
-      import('@cat-cafe/shared/utils'),
-      import('../dist/domains/cats/services/freshness/closure/FreshnessClosureStateMachine.js'),
-      import('../dist/domains/cats/services/freshness/closure/FreshnessClosurePreflight.js'),
-      import('../dist/routes/threads.js'),
-      import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
-    ]);
+    [{ RedisMessageStore }, { RedisThreadReadStateStore }, { createRedisClient }, { threadsRoutes }, { ThreadStore }] =
+      await Promise.all([
+        import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js'),
+        import('../dist/domains/cats/services/stores/redis/RedisThreadReadStateStore.js'),
+        import('@cat-cafe/shared/utils'),
+        import('../dist/routes/threads.js'),
+        import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
+      ]);
     redis = createRedisClient({ url: REDIS_URL, keyPrefix: KEY_PREFIX });
     await redis.ping();
   });
@@ -59,23 +49,27 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
 
   async function appendVisibilityInversion(threadId, userId) {
     const baseTs = Date.now() - 10_000;
-    const c = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'C: visible first with the later raw id',
-      mentions: [],
-      timestamp: baseTs + 200,
-      threadId,
-    });
-    const q = await messageStore.append({
-      userId,
-      catId: 'codex',
-      content: 'Q: visible second with the earlier raw id',
-      mentions: [],
-      timestamp: baseTs + 100,
-      threadId,
-      deliveryStatus: 'queued',
-    });
+    const c = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'C: visible first with the later raw id',
+        mentions: [],
+        timestamp: baseTs + 200,
+        threadId,
+      }),
+    );
+    const q = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'codex',
+        content: 'Q: visible second with the earlier raw id',
+        mentions: [],
+        timestamp: baseTs + 100,
+        threadId,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     assert.ok(q.id < c.id, 'fixture must invert raw-id order relative to visibility order');
     const latest = await messageStore.getLatestVisibleCursor(threadId);
@@ -84,55 +78,28 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
   }
 
   async function appendTerminalManagedHold(threadId, { ownerUserId, hiddenTrigger = false, suffix, timestamp }) {
-    const custody = {
-      version: 1,
-      entryId: `entry-${suffix}`,
-      revision: 1,
-      ownerUserId,
-      intent: 'managed command wake',
-      status: 'queued',
-      allTargetCats: ['opus5'],
-      pendingTargetCats: ['opus5'],
-      notifiedByCatIds: [],
-      seenByCatIds: [],
-      seenInvocationIdByCatId: {},
-      failedByCatIds: [],
-      handledByCatIds: [],
-      priority: 'normal',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    const message = await messageStore.append({
-      userId: 'scheduler',
-      catId: null,
-      content: `managed command ${suffix}`,
-      mentions: [],
-      timestamp,
-      threadId,
-      deliveryStatus: 'queued',
-      queueCustody: custody,
-      ...(hiddenTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
-      source: {
-        connector: 'hold-ball',
-        label: '持球结果',
-        icon: '🏓',
-        meta: { taskId: `task-${suffix}`, threadId, catId: 'opus5', wakeWhen: true },
-      },
-    });
-    const transitioned = await messageStore.transitionQueueCustody(message.id, {
-      expectedRevision: 1,
-      next: {
-        ...custody,
-        revision: 2,
-        status: 'terminal',
-        pendingTargetCats: [],
-        failedByCatIds: ['opus5'],
-        updatedAt: timestamp + 1,
-      },
-      deliveredAt: timestamp + 1,
-    });
-    assert.equal(transitioned.kind, 'updated');
-    return transitioned.message;
+    const message = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: ownerUserId,
+        catId: null,
+        from: { kind: 'system', service: 'hold-ball' },
+        content: `managed command ${suffix}`,
+        mentions: [],
+        timestamp,
+        threadId,
+        deliveryStatus: 'queued',
+        ...(hiddenTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
+        source: {
+          connector: 'hold-ball',
+          label: '持球结果',
+          icon: '🏓',
+          meta: { taskId: `task-${suffix}`, threadId, catId: 'opus5', wakeWhen: true },
+        },
+      }),
+    );
+    const transitioned = await messageStore.markDelivered(message.id, timestamp + 1);
+    assert.equal(transitioned?.deliveryTransitioned, true);
+    return transitioned;
   }
 
   async function createInvalidAnchorFixture(kind, suffix) {
@@ -140,14 +107,16 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     const threadStore = new ThreadStore();
     const thread = threadStore.create(userId, `managed-hold anchor ${suffix}`);
     const base = Date.now() - 20_000;
-    const primary = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: `valid primary ${suffix}`,
-      mentions: [],
-      timestamp: base,
-      threadId: thread.id,
-    });
+    const primary = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: `valid primary ${suffix}`,
+        mentions: [],
+        timestamp: base,
+        threadId: thread.id,
+      }),
+    );
     const incoming = await appendTerminalManagedHold(thread.id, {
       ownerUserId: userId,
       suffix: `${suffix}-incoming`,
@@ -172,14 +141,16 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     const threadStore = new ThreadStore();
     const thread = threadStore.create(userId, `managed-hold valid anchor ${suffix}`);
     const base = Date.now() - 20_000;
-    const primary = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: `valid legacy primary ${suffix}`,
-      mentions: [],
-      timestamp: base,
-      threadId: thread.id,
-    });
+    const primary = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: `valid legacy primary ${suffix}`,
+        mentions: [],
+        timestamp: base,
+        threadId: thread.id,
+      }),
+    );
     const incoming = await appendTerminalManagedHold(thread.id, {
       ownerUserId: userId,
       suffix: `${suffix}-incoming`,
@@ -263,52 +234,20 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     assert.ok(latest?.cursor.startsWith('v2:'), 'fixture must expose a canonical v2 cursor');
     assert.equal(await readStateStore.ack(userId, threadId, latest.cursor), true);
 
-    await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'D: genuinely unread after the v2 cursor',
-      mentions: [],
-      timestamp: baseTs + 300,
-      threadId,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'D: genuinely unread after the v2 cursor',
+        mentions: [],
+        timestamp: baseTs + 300,
+        threadId,
+      }),
+    );
 
     assert.deepEqual(await readStateStore.getUnreadSummaries(userId, [threadId], messageStore), [
       { threadId, unreadCount: 1, hasUserMention: false },
     ]);
-  });
-
-  it('includes a late-visible message when the raw closure frontier is unchanged', async () => {
-    const userId = 'user-closure';
-    const threadId = 'thread-closure-visibility-inversion';
-    const origin = await messageStore.append({
-      userId,
-      catId: null,
-      content: 'origin request',
-      mentions: ['codex-sol'],
-      timestamp: Date.now() - 20_000,
-      threadId,
-    });
-    const { c, q } = await appendVisibilityInversion(threadId, userId);
-    const closure = createFreshnessClosure({
-      id: 'closure-redis-visibility-inversion',
-      userId,
-      threadId,
-      catId: 'codex-sol',
-      invocationId: 'invocation-redis-visibility-inversion',
-      turnInvocationId: 'invocation-redis-visibility-inversion',
-      originTriggerMessageId: origin.id,
-      draftContent: 'answer before Q became visible',
-      requiredMessageIds: [c.id],
-      requiredFrontierMessageId: c.id,
-      observedRawFrontierMessageId: c.id,
-      now: Date.now(),
-    });
-
-    const result = await scanFreshnessClosurePreflight({ closure, messageStore });
-
-    assert.equal(result.kind, 'ready');
-    assert.deepEqual(result.requiredMessageIds, [q.id, c.id]);
-    assert.equal(result.observedRawFrontierMessageId, c.id);
   });
 
   // #1304 reopened: rollout-gated primary cursors can be pruned, but the
@@ -317,22 +256,26 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     const userId = 'user-stale-cursor';
     const threadId = 'thread-stale-cursor';
 
-    const msg = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'message that will be pruned',
-      mentions: [],
-      timestamp: Date.now() - 5_000,
-      threadId,
-    });
-    await messageStore.append({
-      userId,
-      catId: 'codex',
-      content: 'later message still visible',
-      mentions: [],
-      timestamp: Date.now() - 1_000,
-      threadId,
-    });
+    const msg = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'message that will be pruned',
+        mentions: [],
+        timestamp: Date.now() - 5_000,
+        threadId,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'codex',
+        content: 'later message still visible',
+        mentions: [],
+        timestamp: Date.now() - 1_000,
+        threadId,
+      }),
+    );
 
     // Persist the rollout-gated v1 primary plus its durable v2 anchor.
     const canonicalCursor = await messageStore.canonicalizeCursor(msg.id, threadId);
@@ -356,28 +299,32 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
   it('advances from a pruned primary by comparing against its durable anchor', async () => {
     const userId = 'user-pruned-primary-advance';
     const threadId = 'thread-pruned-primary-advance';
-    const first = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'first read message',
-      mentions: [],
-      timestamp: Date.now() - 2_000,
-      threadId,
-    });
+    const first = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'first read message',
+        mentions: [],
+        timestamp: Date.now() - 2_000,
+        threadId,
+      }),
+    );
     const firstCursor = await messageStore.canonicalizeCursor(first.id, threadId);
     assert.equal(await readStateStore.ack(userId, threadId, first.id, firstCursor), true);
 
     await redis.del(`msg:${first.id}`);
     await redis.zrem(`msg:visibility:${threadId}`, first.id);
 
-    const later = await messageStore.append({
-      userId,
-      catId: 'codex-sol',
-      content: 'later visible message',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const later = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'codex-sol',
+        content: 'later visible message',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
     const laterCursor = await messageStore.canonicalizeCursor(later.id, threadId);
 
     assert.equal(await readStateStore.ack(userId, threadId, later.id, laterCursor), true);
@@ -390,14 +337,16 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
     const userId = 'user-read-latest-repair';
     const threadStore = new ThreadStore();
     const thread = threadStore.create(userId, 'Reopened #1304 integration');
-    const latest = await messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'latest message the user opens',
-      mentions: [],
-      timestamp: Date.now() - 1_000,
-      threadId: thread.id,
-    });
+    const latest = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'latest message the user opens',
+        mentions: [],
+        timestamp: Date.now() - 1_000,
+        threadId: thread.id,
+      }),
+    );
     assert.equal(await readStateStore.ack(userId, thread.id, '0000000000000001-pruned-legacy'), true);
 
     const app = Fastify();
@@ -417,14 +366,16 @@ describe('Redis unread summary visibility cursor contract', { skip: redisIsolati
       assert.equal(repaired.lastReadMessageId, latest.id);
       assert.ok(repaired.lastReadVisibilityCursor?.startsWith('v2:'));
 
-      await messageStore.append({
-        userId,
-        catId: 'codex-sol',
-        content: 'genuinely new unread message',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId: thread.id,
-      });
+      await messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: 'codex-sol',
+          content: 'genuinely new unread message',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId: thread.id,
+        }),
+      );
       assert.deepEqual(await readStateStore.getUnreadSummaries(userId, [thread.id], messageStore), [
         { threadId: thread.id, unreadCount: 1, hasUserMention: false },
       ]);

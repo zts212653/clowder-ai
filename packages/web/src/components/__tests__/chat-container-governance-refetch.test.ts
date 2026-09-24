@@ -49,8 +49,6 @@ type StoreState = {
   uiThinkingExpandedByDefault: boolean;
   workspaceWorktreeId: string | null;
   queue: [];
-  queuePaused: boolean;
-  queuePauseReason: null;
   queueFull: boolean;
   queueFullSource: null;
   threads: {
@@ -124,8 +122,6 @@ const makeStoreState = (): StoreState => ({
   uiThinkingExpandedByDefault: false,
   workspaceWorktreeId: null,
   queue: [],
-  queuePaused: false,
-  queuePauseReason: null,
   queueFull: false,
   queueFullSource: null,
   threads: [
@@ -214,6 +210,8 @@ vi.mock('@/hooks/useAgentMessages', () => ({
 
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages: storeState.messages,
+    handleReadingIntent: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: document.createElement('div') },
@@ -269,8 +267,6 @@ vi.mock('../ChatInput', () => ({ ChatInput: () => React.createElement('div', { '
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,

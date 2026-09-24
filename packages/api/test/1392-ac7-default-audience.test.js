@@ -229,11 +229,11 @@ describe('#1392 AC-7 — the advanced path keeps its exact allowlist', () => {
 describe('#1392 AC-7 — the real chain filters at delivery, never at collection', () => {
   async function tracked(when) {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
     const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
     const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const harness = connectorDeliveryHarness();
     const log = { info() {}, warn() {}, error() {} };
     const task = await taskStore.create({
       kind: 'pr_tracking',
@@ -260,12 +260,12 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
     });
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       now: () => 500,
       log,
     });
-    const router = new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log });
-    return { router, messageStore, taskStore, task };
+    const router = new ReviewFeedbackRouter({ deliveryDeps: harness.deliveryDeps, waitLifecycle: lifecycle, log });
+    return { router, harness, taskStore, task };
   }
 
   const signal = (newComments, cursors) => ({
@@ -289,12 +289,12 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
   });
 
   it('end to end: a reply the author did not write wakes them', async () => {
-    const { router, messageStore, task } = await tracked(surfaces(authorAudience));
+    const { router, harness, task } = await tracked(surfaces(authorAudience));
 
     const result = await router.route(signal([collected({})], { inline: 50, conversation: 901 }), { taskId: task.id });
 
     assert.equal(result.kind, 'notified');
-    const [delivered] = messageStore.getByThread('thread_1');
+    const [delivered] = harness.deliveries('thread_1');
     assert.match(delivered.content, /conversation comment #901/, 'the wake names the surface and the comment');
     assert.match(delivered.content, new RegExp(`by ${AUTHOR}`), 'and who wrote it');
     assert.match(delivered.content, /github:pr-comment:901/, 'and how to go read it');
@@ -307,14 +307,14 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
    * re-judged on every poll.
    */
   it('end to end: our own comment wakes nobody and is not replayed next poll', async () => {
-    const { router, messageStore, taskStore, task } = await tracked(surfaces(authorAudience));
+    const { router, harness, taskStore, task } = await tracked(surfaces(authorAudience));
 
     const first = await router.route(signal([collected({ author: SELF })], { inline: 50, conversation: 901 }), {
       taskId: task.id,
     });
 
     assert.notEqual(first.kind, 'notified', 'we are never woken for what we did ourselves');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(harness.deliveries('thread_1').length, 0);
     assert.equal(
       taskStore.get(task.id).automationState.review.lastConversationCommentCursor,
       901,
@@ -326,38 +326,38 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
     });
 
     assert.equal(next.kind, 'notified', 'filtering one comment must not leave the wait unable to fire again');
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
   });
 
   it('end to end: a bot summons from the PR author reaches no maintainer, but moves the frontier', async () => {
-    const { router, messageStore, taskStore, task } = await tracked(surfaces(reviewerAudience));
+    const { router, harness, taskStore, task } = await tracked(surfaces(reviewerAudience));
 
     await router.route(signal([collected({ body: '@codex review' })], { inline: 50, conversation: 901 }), {
       taskId: task.id,
     });
 
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(harness.deliveries('thread_1').length, 0);
     assert.equal(taskStore.get(task.id).automationState.review.lastConversationCommentCursor, 901);
   });
 
   it('end to end: an unknown identity wakes the owner and states that coverage is not established', async () => {
-    const { router, messageStore, task } = await tracked(surfaces(unknownAudience));
+    const { router, harness, task } = await tracked(surfaces(unknownAudience));
 
     const result = await router.route(signal([collected({})], { inline: 50, conversation: 901 }), { taskId: task.id });
 
     assert.equal(result.kind, 'notified', 'an anomaly travels the normal notification path');
-    const [delivered] = messageStore.getByThread('thread_1');
+    const [delivered] = harness.deliveries('thread_1');
     assert.match(delivered.content, /identity or role unknown/i);
     assert.match(delivered.content, /coverage is NOT established/);
     assert.match(delivered.content, /github:pr-comment:901/, 'the source already acquired is kept');
   });
 
   it('end to end: a resolved audience says nothing about unknown identity', async () => {
-    const { router, messageStore, task } = await tracked(surfaces(authorAudience));
+    const { router, harness, task } = await tracked(surfaces(authorAudience));
 
     await router.route(signal([collected({})], { inline: 50, conversation: 901 }), { taskId: task.id });
 
-    assert.doesNotMatch(messageStore.getByThread('thread_1')[0].content, /identity or role unknown/i);
+    assert.doesNotMatch(harness.deliveries('thread_1')[0].content, /identity or role unknown/i);
   });
 
   /*
@@ -386,14 +386,14 @@ describe('#1392 AC-7 — the real chain filters at delivery, never at collection
    */
   it('end to end: the comment body reaches the matcher and never the owner’s message', async () => {
     const SENTINEL = 'UNTRUSTED_BODY__1392_ac7';
-    const { router, messageStore, task } = await tracked(surfaces(authorAudience));
+    const { router, harness, task } = await tracked(surfaces(authorAudience));
 
     await router.route(signal([collected({ body: SENTINEL })], { inline: 50, conversation: 901 }), {
       taskId: task.id,
     });
 
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
-    assert.ok(!messageStore.getByThread('thread_1')[0].content.includes(SENTINEL));
+    assert.equal(harness.deliveries('thread_1').length, 1);
+    assert.ok(!harness.deliveries('thread_1')[0].content.includes(SENTINEL));
   });
 });
 

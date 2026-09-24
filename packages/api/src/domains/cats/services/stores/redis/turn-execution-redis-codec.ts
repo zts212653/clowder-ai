@@ -79,7 +79,7 @@ function hasValidLifecycle(record: TurnExecutionRecord): boolean {
 export function hydrateTurnExecution(data: RedisTurnExecutionHash): TurnExecutionRecord | null {
   if (!hasIdentityFields(data)) return null;
   try {
-    if (!['ordinary', 'routing_guard', 'freshness_supplement'].includes(data.executionKind)) return null;
+    if (!['ordinary', 'routing_guard'].includes(data.executionKind)) return null;
     if (!['running', 'succeeded', 'failed', 'canceled', 'interrupted'].includes(data.status)) return null;
     const legacyCausal = parseCausal(data.causal);
     const legacyRecord: TurnExecutionRecord = {

@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import type { OwnedQueueProgress } from '../../../domains/cats/services/agents/invocation/PersistedQueueCarrier.js';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import type { EvalDomainId } from '../domain/eval-domain-registry.js';
 import { buildEvalCatInvocation } from '../eval-cat-invocation.js';
@@ -10,27 +12,44 @@ export interface TriggerNowInput {
   userId: string;
 }
 
+/**
+ * The Queue's own lifecycle verdict for this admission, passed through rather than collapsed.
+ * Only the Queue can answer the caller's real question — "will the eval cat actually run for
+ * this packet?" — so folding every state into one `'dispatched'` would report a busy, paused or
+ * already-terminal row as a successful wake.
+ */
+export type TriggerNowAdmissionState = OwnedQueueProgress;
+
 export interface TriggerNowSuccess {
   ok: true;
   domainId: string;
   threadId: string;
   messageId: string;
   evalCatId: string;
-  invocationTriggered: true;
+  /** Exact Queue lifecycle state for this admission — never collapsed into a single value. */
+  admissionState: TriggerNowAdmissionState;
   /**
-   * Outcome of `ConnectorInvokeTrigger.trigger()`. Only `'dispatched'` or
-   * `'enqueued'` reach success — `'full'` is converted to 503 (cloud codex R2 P2).
+   * Whether this admission leaves a run in flight or pending. Derived from `admissionState`,
+   * never asserted independently:
+   *  - `false` for `terminal_owned` — the row is already terminal, so no wake follows this call.
+   *  - `false` for `owned_deferred_suppressed` — admitted, but auto-resume is off, so it will not
+   *    run until the cat is resumed.
+   * Both would otherwise be reported to the operator as a successful trigger that never runs.
    */
-  triggerOutcome: 'dispatched' | 'enqueued';
+  invocationTriggered: boolean;
+}
+
+/** `terminal_owned` has no wake left to await; `owned_deferred_suppressed` waits on the operator. */
+function leavesRunPending(state: TriggerNowAdmissionState): boolean {
+  return state !== 'terminal_owned' && state !== 'owned_deferred_suppressed';
 }
 
 /**
  * F192 OQ-21: Manual eval trigger — true wake via late-bound invokeTrigger.
  *
  * Replaces abandoned PR #2091 (4.6's approach taught eval cats `git push origin
- * main` — violates §5 rule #2). New approach re-uses scheduler's invocation
- * pipeline (buildEvalCatInvocation + messageStore.append + invokeTrigger.trigger),
- * triggered manually via API.
+ * main` — violates §5 rule #2). The packet and the eval cat's wake cross one
+ * atomic Message+Queue admission, so a refused admission publishes nothing.
  *
  * Late-binding: invokeTrigger is created after eval-hub routes register (index.ts
  * ~line 2600); the provider pattern returns null until wired.
@@ -45,21 +64,12 @@ export async function handleTriggerNow(
     return { status: 400, error: `Domain '${input.domainId}' not registered in eval-domains/` };
   }
 
-  const trigger = deps.invokeTriggerProvider?.get();
-  if (!trigger) {
+  const delivery = deps.invokeTriggerProvider?.get();
+  if (!delivery) {
     return {
       status: 503,
-      error: 'invokeTrigger not ready',
-      detail:
-        'Server still initializing — manual eval trigger unavailable until invokeTrigger is constructed (index.ts ~line 2600)',
-    };
-  }
-
-  if (!deps.messageStore) {
-    return {
-      status: 503,
-      error: 'messageStore not available',
-      detail: 'Manual trigger requires messageStore to deliver invocation packet',
+      error: 'delivery not ready',
+      detail: 'Server still initializing — manual eval trigger unavailable until Queue admission is wired',
     };
   }
 
@@ -118,34 +128,38 @@ export async function handleTriggerNow(
     '```',
   ].join('\n');
 
-  const stored = await deps.messageStore.append({
-    userId: 'scheduler',
-    catId: null,
-    content,
-    mentions: [],
-    timestamp: Date.now(),
-    threadId: invocation.targetThreadId,
-  });
-  const messageId = typeof stored === 'string' ? stored : stored.id;
-
-  // 真 wake — call late-bound invokeTrigger (砚砚 R0 P1: NOT just messageStore.append).
-  // Cloud codex R2 P2: capture TriggerOutcome — 'full' = queue at capacity,
-  // invocation silently dropped; surface as 503.
-  const outcome = await trigger.trigger(
-    invocation.targetThreadId,
-    invocation.evalCat.catId,
-    input.userId,
-    `Manual eval trigger: ${input.domainId}`,
-    messageId,
-  );
-
-  if (outcome === 'full') {
-    return {
-      status: 503,
-      error: 'invocation_queue_full',
-      detail: `Eval thread ${invocation.targetThreadId} invocation queue is at capacity — the cat is busy with backlog. The message was delivered but the wake-up was NOT scheduled. Retry after the queue drains (typically a few seconds).`,
-    };
+  // One admission: the packet becomes a thread message and the eval cat's wake in the same
+  // transaction. There is no window where the packet is visible but nobody was woken for it.
+  //
+  // Every *refusal* lands on the same 503, because under one atomic admission they all mean the
+  // same thing to the caller: nothing was admitted, so nothing was published and nobody was woken.
+  // `deliver()` refuses two different ways — `conflict`/`unavailable` by return value, and a
+  // `ROUTE_QUEUE_FULL` throw at capacity — and letting the throw escape surfaced back-pressure as
+  // a 500. Only that typed refusal is converted: an unexpected fault still propagates, because
+  // reporting a real bug as "retry once the queue drains" would hide it behind an endless retry.
+  let admitted: Awaited<ReturnType<typeof delivery.deliver>>;
+  try {
+    admitted = await delivery.deliver({
+      ownerUserId: input.userId,
+      threadId: invocation.targetThreadId,
+      targetCatId: invocation.evalCat.catId,
+      // Each accepted manual trigger is its own occurrence by design — the operator asking twice
+      // means two runs. A wall-clock stamp is not an identity: two clicks inside the same
+      // millisecond would collide onto one key and silently drop the second run.
+      idempotencyKey: `manual-eval-trigger:${input.domainId}:${randomUUID()}`,
+      content,
+      source: { connector: 'scheduler', label: '定时任务', icon: 'scheduler' },
+      from: { kind: 'system', service: 'scheduler' },
+      sourceCategory: 'scheduled',
+    });
+  } catch (err) {
+    if (!isQueueFullRefusal(err)) throw err;
+    return queueUnavailable(invocation.targetThreadId);
   }
+  if (admitted.state === 'conflict' || admitted.state === 'unavailable') {
+    return queueUnavailable(invocation.targetThreadId);
+  }
+  const messageId = admitted.message?.id ?? '';
 
   return {
     ok: true,
@@ -153,7 +167,20 @@ export async function handleTriggerNow(
     threadId: invocation.targetThreadId,
     messageId,
     evalCatId: invocation.evalCat.catId,
-    invocationTriggered: true,
-    triggerOutcome: outcome,
+    admissionState: admitted.state,
+    invocationTriggered: leavesRunPending(admitted.state),
+  };
+}
+
+/** The Queue's typed at-capacity refusal, as thrown by `PersistedQueueDelivery.deliver()`. */
+function isQueueFullRefusal(err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'ROUTE_QUEUE_FULL';
+}
+
+function queueUnavailable(threadId: string): HandlerError {
+  return {
+    status: 503,
+    error: 'invocation_queue_unavailable',
+    detail: `Eval thread ${threadId} could not admit the manual trigger, so no wake was scheduled. Nothing was published either — retry once the queue drains.`,
   };
 }

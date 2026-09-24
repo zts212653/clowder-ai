@@ -21,6 +21,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
+import { canonicalTestMessageInput } from './message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -100,15 +101,17 @@ function createTestContext(store, storeType, redis) {
    * @param {string} [opts.idempotencyKey]
    */
   async function appendDirect(opts) {
-    const msg = await store.append({
-      userId: opts.userId ?? userId,
-      catId: opts.catId ?? null,
-      content: opts.content,
-      mentions: opts.mentions ?? [],
-      timestamp: opts.timestamp,
-      threadId,
-      idempotencyKey: opts.idempotencyKey,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        userId: opts.userId ?? userId,
+        catId: opts.catId ?? null,
+        content: opts.content,
+        mentions: opts.mentions ?? [],
+        timestamp: opts.timestamp,
+        threadId,
+        idempotencyKey: opts.idempotencyKey,
+      }),
+    );
     return msg;
   }
 
@@ -120,18 +123,20 @@ function createTestContext(store, storeType, redis) {
    * Pass catId: 'opus' explicitly when testing timeline-published cat speech.
    */
   async function appendQueued(opts) {
-    const msg = await store.append({
-      userId: opts.userId ?? userId,
-      catId: opts.catId ?? null,
-      content: opts.content,
-      mentions: opts.mentions ?? [],
-      timestamp: opts.timestamp,
-      threadId,
-      deliveryStatus: 'queued',
-      idempotencyKey: opts.idempotencyKey,
-      origin: opts.origin,
-      extra: opts.extra,
-    });
+    const msg = await store.append(
+      canonicalTestMessageInput({
+        userId: opts.userId ?? userId,
+        catId: opts.catId ?? null,
+        content: opts.content,
+        mentions: opts.mentions ?? [],
+        timestamp: opts.timestamp,
+        threadId,
+        deliveryStatus: 'queued',
+        idempotencyKey: opts.idempotencyKey,
+        origin: opts.origin,
+        extra: opts.extra,
+      }),
+    );
     return msg;
   }
 
@@ -205,14 +210,16 @@ function createTestContext(store, storeType, redis) {
     }
     // Memory store: append normally with the timestamp
     const timestamp = typeof score === 'number' && Number.isFinite(score) && score > 0 ? Math.floor(score) : Date.now();
-    const msg = store.append({
-      userId,
-      catId: null,
-      content: content ?? `legacy-${id}`,
-      mentions: mentions ?? [],
-      timestamp,
-      threadId,
-    });
+    const msg = store.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: content ?? `legacy-${id}`,
+        mentions: mentions ?? [],
+        timestamp,
+        threadId,
+      }),
+    );
     return msg;
   }
 

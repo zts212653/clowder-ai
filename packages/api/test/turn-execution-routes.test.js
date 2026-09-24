@@ -45,11 +45,11 @@ describe('turn execution glass-box route', () => {
     const store = new InMemoryTurnExecutionStore();
     const ordinary = child('child-ordinary', 'ordinary', 100);
     const guard = child('child-guard', 'routing_guard', 200);
-    const supplement = child('child-supplement', 'freshness_supplement', 300);
-    for (const input of [supplement, guard, ordinary]) store.createRunning(input);
+    const guardRetry = child('child-guard-retry', 'routing_guard', 300);
+    for (const input of [guardRetry, guard, ordinary]) store.createRunning(input);
     store.transitionTerminal(ordinary.invocationId, { status: 'succeeded', endedAt: 150 });
     store.transitionTerminal(guard.invocationId, { status: 'failed', endedAt: 250, terminalReason: 'provider_error' });
-    store.transitionTerminal(supplement.invocationId, {
+    store.transitionTerminal(guardRetry.invocationId, {
       status: 'canceled',
       endedAt: 350,
       terminalReason: 'user_cancel',
@@ -79,8 +79,8 @@ describe('turn execution glass-box route', () => {
           terminalReason: 'provider_error',
         },
         {
-          invocationId: 'child-supplement',
-          executionKind: 'freshness_supplement',
+          invocationId: 'child-guard-retry',
+          executionKind: 'routing_guard',
           status: 'canceled',
           terminalReason: 'user_cancel',
         },

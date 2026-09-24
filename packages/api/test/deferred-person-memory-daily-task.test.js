@@ -134,16 +134,15 @@ describe('F276 deferred person-memory daily clerk task', () => {
     assert.equal(calls.bound.length, 2);
     assert.ok(calls.bound.every((binding) => binding.processingMessageId === 'daily-trigger-message'));
     assert.equal(calls.delivered[0].threadId, 'thread_memory_operations');
-    assert.equal(calls.delivered[0].userId, 'scheduler');
-    assert.equal(calls.delivered[0].extra.scheduler.hiddenTrigger, true);
+    assert.equal(calls.delivered[0].userId, 'owner-1');
+    assert.equal(calls.delivered[0].targetCatId, 'codex-sol', 'the envelope names the clerk');
     assert.match(calls.delivered[0].content, new RegExp(receipt.receiptId));
     assert.match(calls.delivered[0].content, new RegExp(secondReceipt.receiptId));
     assert.match(calls.delivered[0].content, /thread_history#message_fact/);
     assert.equal(calls.delivered[0].content.includes('private transcript body'), false);
-    assert.equal(calls.triggered.length, 1);
-    assert.equal(calls.triggered[0][0], 'thread_memory_operations');
-    assert.equal(calls.triggered[0][1], 'codex-sol');
-    assert.equal(calls.triggered[0][2], 'owner-1');
+    assert.equal(calls.delivered[0].sourceCategory, 'scheduled');
+    assert.ok(calls.delivered[0].idempotencyKey, 'and carries a stable admission identity');
+    assert.equal(calls.delivered[0].userId, 'owner-1', 'the envelope owner is the tenant, not the author');
     assert.deepEqual(calls.released, []);
   });
 
@@ -219,8 +218,7 @@ describe('F276 deferred person-memory daily clerk task', () => {
     await assert.rejects(
       spec.run.execute(admission.workItems[0].signal, admission.workItems[0].subjectKey, {
         assignedCatId: 'codex-terra',
-        deliver: async () => 'message-daily',
-        invokeTrigger: { trigger: async () => Promise.reject(new Error('invoke failed')) },
+        deliver: async () => Promise.reject(new Error('invoke failed')),
       }),
       /invoke failed/,
     );

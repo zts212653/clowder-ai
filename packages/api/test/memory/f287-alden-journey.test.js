@@ -265,7 +265,10 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
       const memoryCuePromptService = {
         async resolve(input) {
           calls.push(input);
-          const seed = input.seeds[0];
+          // F117: seeds arrive caller-supplied via options.memoryCueOpportunitySeeds
+          // (queue-owned ingress) plus route-detected subject_seen seeds; pin the
+          // mock to the typed Entity seed regardless of array order.
+          const seed = input.seeds.find((candidate) => candidate.kind === 'subject_seen') ?? input.seeds[0];
           return admitCue
             ? {
                 promptSegment: `<memory-cue v="1" cue-id="cue-alden" why-now="subject seen">\nTitle: ${seed.payload.matchedAlias}\nSource: ${seed.payload.entityId}\nDrill: person_memory handle-alden\n</memory-cue>`,
@@ -348,9 +351,21 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
         },
       };
       const deps = createRouteDeps(capturing, evidenceDb, memoryCuePromptService);
+      // F117 new contract: route assembly no longer detects explicit approved Taste
+      // triggers from message text (route-helpers explicitApprovedTasteCueSeeds was
+      // removed in e43cb4ee3); caller-supplied ingress seeds arrive via
+      // options.memoryCueOpportunitySeeds, mirroring QueueProcessor's trusted-connector path.
       const options = {
         currentUserMessageId: 'message-current',
         frustrationAutoIssueEligible: true,
+        memoryCueOpportunitySeeds: [
+          {
+            kind: 'approved_taste_invoked',
+            producer: 'owner_message',
+            occurredAt: 1_788_000_000_000,
+            payload: { triggerKey: 'ELI5', sourceMessageId: 'message-current' },
+          },
+        ],
       };
       for await (const _event of strategy(
         deps,
@@ -377,25 +392,26 @@ describe('F287 D1 Alden golden journey', { concurrency: false }, () => {
     for (const result of [serial, parallel]) {
       assert.equal(result.calls.length, 1, 'one resolver call per actual cat invocation');
       assert.equal(result.calls[0].seeds.length, 2, 'one Entity seed and one explicit approved Taste seed');
-      assert.match(result.calls[0].seeds[0].payload.sourceRevision, /^sha256:[a-f0-9]{64}$/);
+      // Caller-supplied seeds precede route-detected subject_seen seeds (route-serial.ts assembly order).
       assert.deepEqual(result.calls[0].seeds[0], {
+        kind: 'approved_taste_invoked',
+        producer: 'owner_message',
+        occurredAt: 1_788_000_000_000,
+        payload: {
+          triggerKey: 'ELI5',
+          sourceMessageId: 'message-current',
+        },
+      });
+      assert.match(result.calls[0].seeds[1].payload.sourceRevision, /^sha256:[0-9a-f]{64}$/);
+      assert.deepEqual(result.calls[0].seeds[1], {
         kind: 'subject_seen',
         producer: 'entity_nudge',
-        occurredAt: result.calls[0].seeds[0].occurredAt,
+        occurredAt: result.calls[0].seeds[1].occurredAt,
         payload: {
           entityId: 'person:alden',
           matchedAlias: 'Alden',
           sourceMessageId: 'message-current',
-          sourceRevision: result.calls[0].seeds[0].payload.sourceRevision,
-        },
-      });
-      assert.deepEqual(result.calls[0].seeds[1], {
-        kind: 'approved_taste_invoked',
-        producer: 'owner_message',
-        occurredAt: result.calls[0].seeds[1].occurredAt,
-        payload: {
-          triggerKey: 'ELI5',
-          sourceMessageId: 'message-current',
+          sourceRevision: result.calls[0].seeds[1].payload.sourceRevision,
         },
       });
       assert.deepEqual(result.calls[0].serverScope, {

@@ -18,6 +18,7 @@ const cat = {
   color: { primary: '#8b5cf6', secondary: '#7c3aed' },
   mentionPatterns: ['@宪宪'],
   clientId: 'claude',
+  carrier: 'cli',
   defaultModel: 'claude-fable-5',
   roleDescription: '',
   personality: '',

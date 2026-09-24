@@ -81,7 +81,6 @@ export {
 export type {
   MessageSelectionAdmissionResult,
   MessageSelectionAuth,
-  MessageSelectionAuthor,
   MessageSelectionInvalidReason,
   MessageSelectionProjectedItem,
   MessageSelectionReadResult,

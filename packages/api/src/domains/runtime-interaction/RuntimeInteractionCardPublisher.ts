@@ -25,8 +25,8 @@ export class MessageRuntimeInteractionCardPublisher implements RuntimeInteractio
     if (!stored) {
       try {
         stored = await this.deps.messageStore.append({
+          from: { kind: 'agent', catId: request.owner.catId as CatId },
           userId: request.owner.userId,
-          catId: request.owner.catId as CatId,
           content: cardContent(request),
           mentions: [],
           timestamp: request.createdAt,

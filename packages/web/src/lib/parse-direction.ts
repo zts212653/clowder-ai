@@ -16,8 +16,46 @@ interface MessageLike {
   content: string;
   visibility?: 'public' | 'whisper';
   whisperTo?: string[];
-  extra?: { crossPost?: { sourceThreadId: string }; targetCats?: string[] };
+  extra?: { crossPost?: { sourceThreadId: string }; targetCats?: string[]; isExplicitPost?: boolean };
   source?: { connector?: string; meta?: { targets?: string[]; initiator?: string } };
+}
+
+const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
+
+/**
+ * Match the server's actionable A2A grammar: only line-start mentions route.
+ * This intentionally does not treat prose such as "ask @opus" as a visible
+ * dispatch target.
+ */
+export function parseContentDirectionTargets(content: string, getMentionData: () => MentionData): string[] {
+  const { toCat, re } = getMentionData();
+  const found = new Set<string>();
+  const stripped = content.replace(/```[\s\S]*?```/g, '');
+
+  for (const rawLine of stripped.split(/\r?\n/)) {
+    const normalized = rawLine.trimStart().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
+    if (!normalized.startsWith('@')) continue;
+
+    re.lastIndex = 0;
+    for (let match = re.exec(normalized); match !== null; match = re.exec(normalized)) {
+      const alias = match[1].toLowerCase();
+      const catId = toCat[alias];
+      if (catId && catId !== '__co-creator__') found.add(catId);
+    }
+  }
+
+  return [...found];
+}
+
+/**
+ * Structured post_message targets are routing facts even when the authored
+ * body does not contain an @ line. Project only the otherwise-invisible part;
+ * body mentions already explain themselves and must not be duplicated.
+ */
+export function parseImplicitStructuredTargets(message: MessageLike, getMentionData: () => MentionData): string[] {
+  if (!message.extra?.targetCats?.length) return [];
+  const visibleTargets = new Set(parseContentDirectionTargets(message.content, getMentionData));
+  return [...new Set(message.extra.targetCats)].filter((catId) => !visibleTargets.has(catId));
 }
 
 interface MentionData {

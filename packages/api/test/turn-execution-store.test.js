@@ -57,7 +57,7 @@ describe('InMemoryTurnExecutionStore', () => {
   test('causal field insertion order does not turn an idempotent create into an identity conflict', async () => {
     const store = new InMemoryTurnExecutionStore();
     const input = runningInput({
-      executionKind: 'freshness_supplement',
+      executionKind: 'routing_guard',
       causal: { triggerMessageId: 'msg-1', freshnessSupplementId: 'supplement-1' },
     });
     assert.equal((await store.createRunning(input)).outcome, 'created');

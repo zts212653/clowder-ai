@@ -423,6 +423,7 @@ export function CliOutputBlock({
       <button
         type="button"
         onClick={handleToggle}
+        data-reading-disclosure
         className="w-full flex items-center gap-2 text-xs font-mono transition-colors"
         style={{ padding: '8px 12px', color: 'var(--cat-msg-inset-text)', backgroundColor: 'var(--cat-msg-inset)' }}
       >

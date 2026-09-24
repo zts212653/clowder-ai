@@ -41,7 +41,7 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
     await spec.run.execute(a2aItem.signal, a2aItem.subjectKey, ctx);
 
     // Without probe: trigger fires + deliver fires normal invocation message
-    assert.equal(triggerMock.mock.callCount(), 1, 'trigger must fire when no probe is configured');
+    assert.equal(deliverMock.mock.callCount(), 1, 'admission must happen when no probe is configured');
     assert.equal(deliverMock.mock.callCount(), 1);
     const content = deliverMock.mock.calls[0].arguments[0].content;
     assert.ok(!content.includes('SKIPPED'), 'normal invocation message must not be the SKIPPED variant');
@@ -69,7 +69,12 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
     await spec.run.execute(a2aItem.signal, a2aItem.subjectKey, ctx);
 
     // SKIPPED path: deliver fires once with blocked message; trigger does NOT fire (no LLM call).
-    assert.equal(triggerMock.mock.callCount(), 0, 'trigger must NOT fire when prereq is missing');
+    assert.equal(deliverMock.mock.callCount(), 1, 'the skip notice is still posted');
+    assert.equal(
+      deliverMock.mock.calls[0].arguments[0].targetCatId,
+      undefined,
+      'RFC §5.3: a notice no member must act on is History-only — it names no member and is never queued',
+    );
     assert.equal(deliverMock.mock.callCount(), 1);
     const call = deliverMock.mock.calls[0].arguments[0];
     assert.equal(call.threadId, 'thread_eval_a2a', 'blocked message must stay in system thread');
@@ -106,7 +111,7 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
 
     await spec.run.execute(a2aItem.signal, a2aItem.subjectKey, ctx);
 
-    assert.equal(triggerMock.mock.callCount(), 1, 'trigger fires when probe says prereqs are met');
+    assert.equal(deliverMock.mock.callCount(), 1, 'trigger fires when probe says prereqs are met');
     assert.equal(deliverMock.mock.callCount(), 1);
     const content = deliverMock.mock.calls[0].arguments[0].content;
     assert.ok(!content.includes('SKIPPED'), 'happy-path message must not be SKIPPED variant');
@@ -136,7 +141,11 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
     // Probe throwing must not propagate out of execute() — fail-closed = skip, not crash.
     await spec.run.execute(a2aItem.signal, a2aItem.subjectKey, ctx);
 
-    assert.equal(triggerMock.mock.callCount(), 0, 'fail-closed: trigger never fires when probe throws');
+    assert.equal(
+      deliverMock.mock.calls[0].arguments[0].targetCatId,
+      undefined,
+      'fail-closed: a probe failure posts a notice but never names a member to wake',
+    );
     assert.equal(deliverMock.mock.callCount(), 1, 'fail-closed: SKIPPED message still posted to system thread');
     const content = deliverMock.mock.calls[0].arguments[0].content;
     assert.ok(content.includes('SKIPPED'), 'fail-closed path uses the SKIPPED message');
@@ -163,7 +172,11 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
 
     await spec.run.execute(a2aItem.signal, a2aItem.subjectKey, ctx);
 
-    assert.equal(triggerMock.mock.callCount(), 0, 'async false → trigger must still be skipped');
+    assert.equal(
+      deliverMock.mock.calls[0].arguments[0].targetCatId,
+      undefined,
+      'async false → the notice names no member, so nothing is queued and nobody is woken',
+    );
     assert.equal(deliverMock.mock.callCount(), 1);
     assert.ok(deliverMock.mock.calls[0].arguments[0].content.includes('SKIPPED'));
   });
@@ -194,7 +207,11 @@ describe('eval-domain-daily — Direction B publish-prereq gate (clowder-ai#923)
 
       await spec.run.execute(item.signal, item.subjectKey, ctx);
 
-      assert.equal(triggerMock.mock.callCount(), 0, `${item.subjectKey}: trigger must not fire`);
+      assert.equal(
+        deliverMock.mock.calls[0].arguments[0].targetCatId,
+        undefined,
+        `${item.subjectKey}: the notice names no member, so nothing is queued`,
+      );
       assert.equal(deliverMock.mock.callCount(), 1, `${item.subjectKey}: exactly one deliver call`);
       const deliverArg = deliverMock.mock.calls[0].arguments[0];
       assert.equal(

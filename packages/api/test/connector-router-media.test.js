@@ -23,6 +23,14 @@ function makeMockDeps(overrides = {}) {
         return { id: `msg-${messages.length}` };
       },
     },
+    // RFC §5.1: the router hands an envelope to the one durable-admission component.
+    persistedQueueDelivery: {
+      async deliver(input) {
+        messages.push({ ...input, mentions: [input.targetCatId], deliveryStatus: 'queued' });
+        const id = `msg-${messages.length}`;
+        return { state: 'started', entryId: `entry-${messages.length}`, message: { id, ...input } };
+      },
+    },
     threadStore: {
       create: async () => ({ id: 'T1' }),
       get: async () => ({ id: 'T1', title: 'Test' }),
@@ -143,7 +151,7 @@ describe('ConnectorRouter media handling', () => {
     assert.equal(deps._messages[0].content, '[图片]');
   });
 
-  it('P1-1: image attachment passes contentBlocks with ImageContent to trigger', async () => {
+  it('P1-1: image attachment carries contentBlocks with ImageContent in its envelope', async () => {
     const { ConnectorRouter } = await import('../dist/infrastructure/connectors/ConnectorRouter.js');
 
     const mediaDownload = mock.fn(async () => ({
@@ -156,10 +164,10 @@ describe('ConnectorRouter media handling', () => {
     const router = new ConnectorRouter(deps);
     await router.route('feishu', 'chat1', '[图片]', 'msg1', [{ type: 'image', platformKey: 'img_key_456' }]);
 
-    // trigger should be called with contentBlocks as 6th arg
-    const triggerCall = deps.invokeTrigger.trigger.mock.calls[0];
-    assert.ok(triggerCall, 'trigger should have been called');
-    const contentBlocks = triggerCall.arguments[5];
+    // RFC §5.1: media parts belong to the same envelope as the text, not to a second wake call.
+    const envelope = deps._messages[0];
+    assert.ok(envelope, 'the input should have been admitted');
+    const contentBlocks = envelope.contentBlocks;
     assert.ok(Array.isArray(contentBlocks), 'contentBlocks should be an array');
     assert.ok(contentBlocks.length > 0, 'contentBlocks should not be empty');
     assert.equal(contentBlocks[0].type, 'image');
@@ -183,8 +191,7 @@ describe('ConnectorRouter media handling', () => {
     const router = new ConnectorRouter(deps);
     await router.route('feishu', 'chat1', '[语音]', 'msg1', [{ type: 'audio', platformKey: 'key', duration: 2 }]);
 
-    const triggerCall = deps.invokeTrigger.trigger.mock.calls[0];
-    const contentBlocks = triggerCall.arguments[5];
+    const contentBlocks = deps._messages[0]?.contentBlocks;
     // Voice = STT text, no image blocks expected
     if (contentBlocks) {
       const imageBlocks = contentBlocks.filter((b) => b.type === 'image');

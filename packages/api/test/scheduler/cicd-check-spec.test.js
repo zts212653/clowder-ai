@@ -213,14 +213,17 @@ describe('CI scheduler F280 adapter', () => {
     const spec = createCiCdCheckTaskSpec({
       taskStore,
       cicdRouter: {
-        route: async () => ({
-          kind: 'notified',
-          threadId: 'thread_1',
-          catId: 'codex-sol',
-          messageId: 'msg_1',
-          bucket: 'pass',
-          content: 'compact wait',
-        }),
+        route: async (...args) => {
+          calls.push(args);
+          return {
+            kind: 'notified',
+            threadId: 'thread_1',
+            catId: 'codex-sol',
+            messageId: 'msg_1',
+            bucket: 'pass',
+            content: 'compact wait',
+          };
+        },
       },
       fetchPrStatus: async () => ({
         repoFullName: 'owner/repo',
@@ -230,11 +233,11 @@ describe('CI scheduler F280 adapter', () => {
         aggregateBucket: 'pass',
         checks: [],
       }),
-      invokeTrigger: { trigger: async (...args) => calls.push(args) },
       log: { info() {}, warn() {}, error() {} },
     });
     await spec.run.execute({ task, repoFullName: 'owner/repo', prNumber: 7 }, task.subjectKey, {});
+    // Routing IS admission: one confirmed route is one owner wake. The old trigger `reason`
+    // policy was never read by production, so the observable fact is the route itself.
     assert.equal(calls.length, 1);
-    assert.equal(calls[0][6].reason, 'github_wait_satisfied');
   });
 });

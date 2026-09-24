@@ -65,13 +65,27 @@ export class IssueCommentRouter {
       url: `https://github.com/${signal.repoFullName}/issues/${signal.issueNumber}`,
     };
 
+    // The batch frontier is the input's identity: re-observing the same comments is the same input,
+    // not a second one, so a replayed poll is idempotent at Queue admission instead of duplicating.
+    const frontier = signal.newComments.reduce((max, comment) => (comment.id > max ? comment.id : max), 0);
     const result = await deliverConnectorMessage(this.opts.deliveryDeps, {
       threadId: tracking.threadId,
       userId: tracking.userId,
       catId: tracking.catId,
       content,
       source,
+      idempotencyKey: `issue-comment:${signal.repoFullName}#${signal.issueNumber}:${frontier}`,
     });
+
+    // Fail closed on the durable boundary: without Queue admission nothing will ever start the
+    // owner, so the caller must keep its cursor and re-observe instead of reporting a delivery.
+    if (!result.admitted) {
+      this.opts.log.warn(
+        `[IssueCommentRouter] ${signal.repoFullName}#${signal.issueNumber} → ${tracking.catId}: ` +
+          'queue admission unavailable; cursor held for the next poll',
+      );
+      return { kind: 'skipped', reason: 'queue admission unavailable' };
+    }
 
     this.opts.log.info(
       `[IssueCommentRouter] ${signal.repoFullName}#${signal.issueNumber} → ${tracking.catId} ` +

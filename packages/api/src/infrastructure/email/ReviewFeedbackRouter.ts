@@ -101,8 +101,12 @@ export class ReviewFeedbackRouter {
     const latestDecision = [...signal.newDecisions].sort((left, right) => left.id - right.id).at(-1);
     const resultDecision = signal.resultDecision ?? latestDecision?.state;
     const resultReviewer = signal.resultReviewer ?? latestDecision?.author;
+    // RFC §5.1: urgency is part of the envelope this observation produces, decided from the facts
+    // the router already holds — not re-derived by a second wake call further down the chain.
+    const changesRequested = signal.newDecisions.some((decision) => decision.state === 'CHANGES_REQUESTED');
     const result = await this.opts.waitLifecycle.observe({
       taskId: tracking.taskId,
+      deliveryPriority: changesRequested ? 'urgent' : 'normal',
       facts: {
         headSha: signal.headSha,
         review: {

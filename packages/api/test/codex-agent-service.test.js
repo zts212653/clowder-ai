@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, mock, test } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
@@ -16,6 +16,7 @@ const {
   CodexAgentService: ProductionCodexAgentService,
   buildCodexReasoningArgs,
   isGitRepositoryPath,
+  resolveCodexApiKeyIsolationRoot,
 } = await import('../dist/domains/cats/services/agents/providers/CodexAgentService.js');
 const { _resetCachedConfig } = await import('../dist/config/cat-config-loader.js');
 
@@ -2583,6 +2584,23 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(args.includes('model="qwen-plus"'), 'model must be passed as-is via --config');
     assert.ok(args.includes('model_provider="custom"'), 'must set model_provider=custom');
     assert.ok(!args.includes('model_provider="openai_https"'), 'custom provider must not force OpenAI OAuth provider');
+    const spawnOptions = spawnFn.mock.calls[0].arguments[2];
+    assert.equal(
+      dirname(spawnOptions.env.HOME),
+      resolveCodexApiKeyIsolationRoot(),
+      'API-key invocation must launch from an owner cache home that Codex accepts',
+    );
+  });
+
+  test('API-key isolation lives under user cache rather than the OS temporary directory', () => {
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/Users/example', XDG_CACHE_HOME: '/Users/example/.cache' }, 'darwin'),
+      '/Users/example/Library/Caches/clowder-ai/codex-api-key-homes',
+    );
+    assert.equal(
+      resolveCodexApiKeyIsolationRoot({ HOME: '/home/example', XDG_CACHE_HOME: '/var/cache/example' }, 'linux'),
+      '/var/cache/example/clowder-ai/codex-api-key-homes',
+    );
   });
 
   test('custom provider: multi-segment model slug preserved as-is', async () => {
@@ -2749,6 +2767,56 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
       textMsgs.map((msg) => msg.content),
       ['第一段。', '\n\n第二段。', '\n\n[砚砚/gpt-5.6-sol🐾]'],
     );
+  });
+
+  test('#1398: service treats the configured display name as a canonical signature alias', async () => {
+    const savedConfigs = catRegistry.getAllConfigs();
+    const catId = 'cat-signature-alias-test';
+    catRegistry.reset();
+    catRegistry.register(catId, {
+      id: catId,
+      name: 'dragon-li',
+      displayName: '狸花猫',
+      nickname: '小狸花',
+      avatar: '',
+      color: 'brown',
+      mentionPatterns: ['@小狸花'],
+      clientId: 'openai',
+      defaultModel: 'deepseek-chat',
+      mcpSupport: true,
+      roleDescription: 'test',
+      personality: 'test',
+    });
+
+    try {
+      const proc = createMockProcess();
+      const service = new CodexAgentService({
+        catId,
+        l0CompilerFn: fakeL0Compiler,
+        spawnFn: createMockSpawnFn(proc),
+        model: 'deepseek-chat',
+        carrierMode: 'exec_json',
+      });
+      const promise = collect(service.invoke('Hello'));
+      emitCodexEvents(proc, [
+        { type: 'thread.started', thread_id: 'thread-signature-alias' },
+        {
+          type: 'item.completed',
+          item: { id: 'msg-1', type: 'agent_message', text: 'Hello～ 狸花猫在 🐾\n\n[狸花猫/deepseek-chat🐾]' },
+        },
+        { type: 'turn.completed', usage: { input_tokens: 10, output_tokens: 20 } },
+      ]);
+
+      const messages = await promise;
+      const text = messages
+        .filter((message) => message.type === 'text')
+        .map((message) => message.content)
+        .join('');
+      assert.equal(text, 'Hello～ 狸花猫在 🐾\n\n[小狸花/deepseek-chat🐾]');
+    } finally {
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(savedConfigs)) catRegistry.register(id, config);
+    }
   });
 
   test('#1272: multiple completed turns keep the canonical signature at the real stream end', async () => {

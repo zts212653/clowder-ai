@@ -1,12 +1,11 @@
 import type { CatId } from './ids.js';
 
-export type TurnExecutionKind = 'ordinary' | 'routing_guard' | 'freshness_supplement';
+export type TurnExecutionKind = 'ordinary' | 'routing_guard';
 export type TurnExecutionStatus = 'running' | 'succeeded' | 'failed' | 'canceled' | 'interrupted';
 export type TurnExecutionTerminalStatus = Exclude<TurnExecutionStatus, 'running'>;
 
 export interface TurnExecutionCausalRefs {
   triggerMessageId?: string;
-  freshnessSupplementId?: string;
   routingGuardReason?: 'missing_routing_exit';
   /** Exact persisted message bodies present in this child's prompt. */
   coveredMessageIds?: string[];

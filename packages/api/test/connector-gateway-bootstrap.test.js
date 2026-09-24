@@ -36,6 +36,12 @@ const baseDeps = {
       return { id: 'msg-1', ...input };
     },
   },
+  // RFC §5.1: connector inputs cross one seam — durable Message + Queue admission.
+  persistedQueueDelivery: {
+    async deliver(input) {
+      return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
+    },
+  },
   threadStore: {
     create(userId, title) {
       return { id: 'thread-1', createdBy: userId, title };
@@ -118,9 +124,11 @@ describe('ConnectorGateway Bootstrap', () => {
     const triggerCalls = [];
     const deps = {
       ...baseDeps,
-      invokeTrigger: {
-        trigger(...args) {
-          triggerCalls.push(args);
+      // Admission to the Queue is the invocation; index 3 stays the message content.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, 'msg-1']);
+          return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
         },
       },
     };
@@ -459,9 +467,11 @@ describe('ConnectorGateway Bootstrap', () => {
     const triggerCalls = [];
     const deps = {
       ...baseDeps,
-      invokeTrigger: {
-        trigger(...args) {
-          triggerCalls.push(args);
+      // Admission to the Queue is the invocation; index 3 stays the message content.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, 'msg-1']);
+          return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
         },
       },
     };
@@ -500,9 +510,11 @@ describe('ConnectorGateway Bootstrap', () => {
     const triggerCalls = [];
     const deps = {
       ...baseDeps,
-      invokeTrigger: {
-        trigger(...args) {
-          triggerCalls.push(args);
+      // Admission to the Queue is the invocation; index 3 stays the message content.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, 'msg-1']);
+          return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
         },
       },
     };
@@ -549,9 +561,11 @@ describe('ConnectorGateway Bootstrap', () => {
     const triggerCalls = [];
     const deps = {
       ...baseDeps,
-      invokeTrigger: {
-        trigger(...args) {
-          triggerCalls.push(args);
+      // Admission to the Queue is the invocation; index 3 stays the message content.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, 'msg-1']);
+          return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
         },
       },
     };
@@ -597,9 +611,11 @@ describe('ConnectorGateway Bootstrap', () => {
     const triggerCalls = [];
     const deps = {
       ...baseDeps,
-      invokeTrigger: {
-        trigger(...args) {
-          triggerCalls.push(args);
+      // Admission to the Queue is the invocation; index 3 stays the message content.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, 'msg-1']);
+          return { state: 'started', entryId: 'entry-1', message: { id: 'msg-1', ...input } };
         },
       },
     };

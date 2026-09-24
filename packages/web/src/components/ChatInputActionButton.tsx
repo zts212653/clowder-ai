@@ -1,40 +1,25 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import { useVoiceInput } from '@/hooks/useVoiceInput';
 import { ExpandableProse } from './content-overflow';
 import { LoadingIcon } from './icons/LoadingIcon';
 import { MicIcon } from './icons/MicIcon';
 import { SendIcon } from './icons/SendIcon';
 import { StopRecordingIcon } from './icons/StopRecordingIcon';
-import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 
 interface ChatInputActionButtonProps {
   onTranscript: (text: string) => void;
   onSend: () => void;
   /** F39: Queue-mode send (content will be queued behind running invocation) */
   onQueueSend?: () => void;
-  /** F39: Force-mode send (cancel running + execute immediately) */
-  onForceSend?: () => void;
   onStop?: () => void;
   stopState?: 'available' | 'pending' | 'unavailable' | 'hidden';
   disabled?: boolean;
   sendDisabled?: boolean;
   /** Whether the thread has an active invocation (broader than disabled/isLoading) */
   hasActiveInvocation?: boolean;
-  /** Stable key derived from active execution IDs; changes when the execution set changes. */
-  activeExecutionKey?: string;
   hasText: boolean;
-}
-
-/** Queue send icon — arrow into a stack/list */
-function QueueSendIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 20 20" fill="currentColor">
-      <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h7a1 1 0 110 2H4a1 1 0 01-1-1z" />
-      <path d="M15 11l3 3-3 3z" fillRule="evenodd" clipRule="evenodd" />
-    </svg>
-  );
 }
 
 /** Renders the action button states:
@@ -51,43 +36,14 @@ export function ChatInputActionButton({
   onTranscript,
   onSend,
   onQueueSend,
-  onForceSend,
   onStop,
   stopState,
   disabled,
   sendDisabled,
   hasActiveInvocation,
-  activeExecutionKey,
   hasText,
 }: ChatInputActionButtonProps) {
   const voice = useVoiceInput();
-  const [confirmSteer, setConfirmSteer] = useState(false);
-  // Captures the execution identity when the steer modal opens.
-  // If the active execution set changes (A ends → B starts), the key
-  // will differ and we dismiss/reject the stale confirmation.
-  const steerBoundKeyRef = useRef<string | undefined>(undefined);
-
-  // P1 fix: auto-dismiss steer confirmation when the target invocation ends
-  // OR when the execution identity changes (A→B same-render transition).
-  // Fail closed: undefined key = unverifiable identity → dismiss.
-  useEffect(() => {
-    if (!hasActiveInvocation) {
-      setConfirmSteer(false);
-      return;
-    }
-    if (confirmSteer) {
-      // Bound key is undefined (legacy/unhydrated path) — we cannot verify
-      // identity, so dismiss the modal rather than risk a stale confirm.
-      if (steerBoundKeyRef.current === undefined) {
-        setConfirmSteer(false);
-        return;
-      }
-      // Same-render A→B: hasActiveInvocation stays true but the key changes.
-      if (activeExecutionKey !== steerBoundKeyRef.current) {
-        setConfirmSteer(false);
-      }
-    }
-  }, [hasActiveInvocation, activeExecutionKey, confirmSteer]);
 
   const isSendDisabled = Boolean(disabled || sendDisabled);
   const resolvedStopState = stopState ?? (onStop ? 'available' : 'hidden');
@@ -198,39 +154,17 @@ export function ChatInputActionButton({
           <LoadingIcon className="w-5 h-5" />
         </button>
       ) : isQueueMode && onQueueSend ? (
-        /* F39: Queue send — cat is running, user typed, queue the message */
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onQueueSend}
-            disabled={isSendDisabled}
-            className="p-3 rounded-xl bg-[var(--color-cocreator-primary)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            aria-label="排队发送"
-            title="排队发送 — 猫猫忙完后处理"
-          >
-            <QueueSendIcon className="w-5 h-5" />
-          </button>
-          {onForceSend && activeExecutionKey !== undefined && (
-            <button
-              type="button"
-              onClick={() => {
-                steerBoundKeyRef.current = activeExecutionKey;
-                setConfirmSteer(true);
-              }}
-              disabled={isSendDisabled}
-              className="p-2 rounded-lg text-xs text-conn-red-text hover:bg-conn-red-bg disabled:opacity-40 transition-colors"
-              aria-label="强制停止并发送此消息"
-              title="强制停止并发送此消息"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.381z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </button>
-          )}
-        </div>
+        /* Every authored message takes the same send path. Queue admission
+           applies the strategy selected from the + menu after the click. */
+        <button
+          onClick={onQueueSend}
+          disabled={isSendDisabled}
+          className="p-3 rounded-xl bg-cafe-accent text-[var(--cafe-surface)] hover:bg-cafe-interactive disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title="发送消息"
+          aria-label="Send message"
+        >
+          <SendIcon className="w-5 h-5" />
+        </button>
       ) : hasText ? (
         <button
           onClick={onSend}
@@ -241,7 +175,7 @@ export function ChatInputActionButton({
         >
           <SendIcon className="w-5 h-5" />
         </button>
-      ) : (
+      ) : hasActiveInvocation ? null : (
         <button
           onClick={voice.startRecording}
           disabled={disabled}
@@ -251,20 +185,6 @@ export function ChatInputActionButton({
         >
           <MicIcon className="w-5 h-5" />
         </button>
-      )}
-      {confirmSteer && (
-        <SteerQueuedEntryModal
-          source="draft"
-          onCancel={() => setConfirmSteer(false)}
-          onConfirm={() => {
-            setConfirmSteer(false);
-            // Guard: only force-send if the execution identity that prompted
-            // confirmation is still current. Catches same-render A→B where
-            // hasActiveInvocation stays true but the execution set changed.
-            const keyMatch = activeExecutionKey !== undefined && activeExecutionKey === steerBoundKeyRef.current;
-            if (hasActiveInvocation && keyMatch) onForceSend?.();
-          }}
-        />
       )}
     </>
   );

@@ -132,5 +132,14 @@ describe('post_message principal-specific public schema', () => {
     assert.match(definition.description, /same-thread structured single successor/i);
     assert.match(definition.description, /streamDisposition="replace_final"/i);
     assert.match(definition.description, /multi_mention.*parallel/i);
+    assert.match(definition.description, /courtesy ACK only when it has no explicit routing credential/i);
+    assert.match(definition.description, /line-start @mentions and structured targetCats always start a new active/i);
+
+    const crossDefinition = callbackTools.find((tool) => tool.name === 'cat_cafe_cross_post_message');
+    assert.ok(crossDefinition);
+    assert.match(
+      crossDefinition.description,
+      /line-start @mention or structured targetCats after terminal always starts a new active routing generation/i,
+    );
   });
 });

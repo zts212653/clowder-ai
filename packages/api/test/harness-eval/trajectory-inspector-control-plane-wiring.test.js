@@ -88,8 +88,9 @@ describe('eval:trajectory-inspector F192/F266 control-plane wiring', () => {
     assert.match(delivered[0].content, /Window: weekly:/);
     assert.match(delivered[0].content, /Dedupe key: eval-domain-trigger:eval:trajectory-inspector:/);
     assert.match(delivered[0].content, /trajectory-inspector-window/);
-    assert.equal(triggered.length, 1);
-    assert.equal(triggered[0][1], 'codex-sol');
+    // Admission is the wake: the envelope names the eval cat and carries its exact input.
+    assert.equal(delivered[0].targetCatId, 'codex-sol');
+    assert.ok(delivered[0].privateContent, 'the eval cat receives its own payload, not thread text');
   });
 
   it('attaches a later trusted verdict to the same generic case and records the re-eval continuation', () => {

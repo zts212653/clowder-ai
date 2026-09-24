@@ -3,9 +3,14 @@ import type {
   ActiveInvocationFreshnessController,
   PreparedFreshnessNotice,
 } from '../../freshness/FreshnessNoticeBroker.js';
-import type { CodexNativeResumeReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
+import {
+  CodexActiveWriterRecoveryError,
+  type CodexNativeResumeReplacementProvenance,
+} from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type {
   AgentCarrierSession,
+  AgentClientActiveRunDispatchRegistration,
+  AgentClientActiveRunHandle,
   PreparedProviderRequestV1,
   ProviderCompactionObservation,
   ProviderContinuityEvidence,
@@ -117,6 +122,8 @@ export interface CodexAppServerRunInput {
   interruptGraceMs?: number;
   /** Zero-based transport recovery attempt, projected with lifecycle events. */
   recoveryAttempt?: number;
+  /** Zero-based ownership retry count; only the first conflict may retire a stale affinity host. */
+  activeWriterAttempt?: number;
   /** Internal fence: a dead resume carrier is being replaced by this fresh start. */
   resumeReplacement?: CodexNativeResumeReplacementProvenance;
   /**
@@ -135,6 +142,8 @@ export interface CodexAppServerRunInput {
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
   /** F306: one provider-neutral interaction surface bound to this exact invocation. */
   runtimeInteraction?: Omit<CodexRuntimeInteractionContext, 'signal'>;
+  /** #1354: lifecycle-owned registration for this exact accepted provider turn. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
 }
 
 export interface CodexAppServerClientDeps {
@@ -215,6 +224,8 @@ export class CodexAppServerClient {
     let latestUsage: JsonObject | null = null;
     let activeThreadId: string | null = null;
     let activeTurnId: string | null = null;
+    let activeRunDispatchOpen = false;
+    let releaseActiveRunDispatch: (() => void) | undefined;
     let transportDisposition: 'release' | 'evict' = 'release';
     const timeoutMs = Math.max(0, input.timeoutMs ?? 0);
     const interruptGraceMs = Math.max(0, input.interruptGraceMs ?? DEFAULT_INTERRUPT_GRACE_MS);
@@ -249,7 +260,10 @@ export class CodexAppServerClient {
         startParams: buildCodexAppServerThreadParams(input),
         requireExactResume: Boolean(recoveryInstruction),
         ...(input.resumeReplacement ? { resumeReplacement: input.resumeReplacement } : {}),
-        localLiveLease: this.deps.wire.reusedSessionHost === true,
+        // A reused affinity host reaches this point only after its local lease
+        // was released. A writer conflict here is therefore provider-side stale
+        // ownership, not this process concurrently writing the same turn.
+        localLiveLease: false,
         request: (method, params) => this.request(method, params),
         now: this.deps.now ?? Date.now,
       });
@@ -351,6 +365,50 @@ export class CodexAppServerClient {
         this.lifecycle.transition('turn_accepted', { threadId, turnId: activeTurnId, turnAccepted: true }),
       );
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
+      if (input.activeRunDispatch) {
+        const invocationId = input.activeRunDispatch.invocationId;
+        const handle: AgentClientActiveRunHandle = {
+          provider: 'openai_codex',
+          carrier: 'codex_app_server',
+          threadId,
+          turnId: activeTurnId,
+        };
+        activeRunDispatchOpen = true;
+        const release = input.activeRunDispatch.register({
+          invocationId,
+          capabilities: { append: true, steer: true },
+          handle,
+          dispatch: async (dispatchInput, options) => {
+            if (options.expectedInvocationId !== invocationId) {
+              return { accepted: false, reason: 'active_run_mismatch' };
+            }
+            if (!activeRunDispatchOpen || activeThreadId !== threadId || activeTurnId !== handle.turnId) {
+              return { accepted: false, reason: 'active_run_closed' };
+            }
+            const text = dispatchInput.text.trim();
+            const imagePaths = dispatchInput.imagePaths?.filter((path) => path.length > 0) ?? [];
+            if (!text && imagePaths.length === 0) return { accepted: false, reason: 'invalid_input' };
+            try {
+              const result = asCodexAppServerRecord(
+                await this.request('turn/steer', {
+                  threadId,
+                  expectedTurnId: handle.turnId,
+                  input: [
+                    ...(text ? [{ type: 'text', text: dispatchInput.text }] : []),
+                    ...imagePaths.map((path) => ({ type: 'localImage', path })),
+                  ],
+                }),
+              );
+              return result?.turnId === handle.turnId
+                ? { accepted: true, handle }
+                : { accepted: false, reason: 'active_run_mismatch' };
+            } catch {
+              return { accepted: false, reason: 'provider_rejected' };
+            }
+          },
+        });
+        if (typeof release === 'function') releaseActiveRunDispatch = release;
+      }
       if (input.signal?.aborted) {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
@@ -430,6 +488,7 @@ export class CodexAppServerClient {
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
         if (mapped) yield mapped;
         if (isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+          activeRunDispatchOpen = false;
           runtimeInteraction?.close('provider_cancelled');
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);
@@ -464,6 +523,13 @@ export class CodexAppServerClient {
     } catch (error) {
       runtimeInteraction?.close('transport_lost');
       const failure = error instanceof Error ? error : new Error(String(error));
+      if (
+        error instanceof CodexActiveWriterRecoveryError &&
+        input.activeWriterAttempt === 0 &&
+        this.deps.wire.reusedSessionHost === true
+      ) {
+        transportDisposition = 'evict';
+      }
       if (activeNotice && this.deps.freshnessController) {
         try {
           await this.deps.freshnessController.markMissed(activeNotice, 'transport_failed');
@@ -475,6 +541,8 @@ export class CodexAppServerClient {
       if (failed) yield this.lifecycle.event(failed);
       throw failure;
     } finally {
+      activeRunDispatchOpen = false;
+      releaseActiveRunDispatch?.();
       runtimeInteraction?.close('provider_cancelled');
       const { closing, closed } = await closeCodexAppServerTransport(
         this.deps.wire,

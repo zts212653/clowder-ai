@@ -8,8 +8,8 @@
  * Tests createEvalDomainNDaySpec execute():
  *  - Successful deliver → Redis last-dispatch key written
  *  - No ctx.deliver → Redis NOT written
- *  - invokeTrigger throws → Redis NOT written (gpt52 R1 P1)
- *  - invokeTrigger returns 'full' → Redis NOT written (cloud R3 P1)
+ *  - admission throws → Redis NOT written (gpt52 R1 P1)
+ *  - admission refused → Redis NOT written (cloud R3 P1)
  */
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
@@ -55,12 +55,10 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
       storedMs >= beforeMs && storedMs <= afterMs,
       `stored timestamp ${storedMs} must be within [${beforeMs}, ${afterMs}]`,
     );
-    const triggerArgs = triggerMock.mock.calls[0].arguments;
-    assert.equal(triggerArgs[5], undefined);
-    assert.deepEqual(triggerArgs[6], {
-      sourceCategory: 'scheduled',
-      reason: 'N-day eval: eval:friction',
-    });
+    const envelope = deliverMock.mock.calls[0].arguments[0];
+    assert.ok(envelope.privateContent, 'the eval cat receives its exact input as a private payload');
+    assert.equal(envelope.sourceCategory, 'scheduled');
+    assert.match(envelope.privateContent, /N-day eval: eval:friction/);
   });
 
   it('execute does NOT update Redis when deliver is not called (no ctx.deliver)', async () => {
@@ -80,7 +78,7 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
     assert.equal(storedVal, undefined, 'Redis must NOT be written when deliver was not called');
   });
 
-  it('execute does NOT update Redis when invokeTrigger throws (gpt52 R1 P1)', async () => {
+  it('execute does NOT update Redis when admission throws (gpt52 R1 P1)', async () => {
     // gpt52 R1 P1: trigger failure must NOT trip the N-day gate.
     // If trigger throws, eval cat was never notified — domain must be retried on next probe.
     const root = makeTempRoot(FIXTURE_FRICTION_3D_YAML);
@@ -91,23 +89,17 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
     const item = gateResult.workItems.find((w) => w.subjectKey === 'eval:friction');
     assert.ok(item);
 
-    const deliverMock = mock.fn(async () => 'msg_nday_002');
-    const ctx = {
-      assignedCatId: null,
-      deliver: deliverMock,
-      invokeTrigger: {
-        trigger: mock.fn(() => Promise.reject(new Error('trigger transient failure'))),
-      },
-    };
+    const deliverMock = mock.fn(() => Promise.reject(new Error('admission transient failure')));
+    const ctx = { assignedCatId: null, deliver: deliverMock };
 
     await spec.run.execute(item.signal, item.subjectKey, ctx);
 
-    assert.equal(deliverMock.mock.calls.length, 1, 'deliver was still called (message in thread)');
+    assert.equal(deliverMock.mock.calls.length, 1, 'admission was attempted');
     const storedVal = redis._store.get('eval-nday-last-dispatch:eval:friction');
-    assert.equal(storedVal, undefined, 'Redis must NOT be written when trigger failed');
+    assert.equal(storedVal, undefined, 'Redis must NOT be written when admission failed');
   });
 
-  it('execute does NOT update Redis when invokeTrigger returns full (cloud R3 P1)', async () => {
+  it('execute does NOT update Redis when admission is refused (cloud R3 P1)', async () => {
     // Cloud R3 P1: trigger returning 'full' (queue at capacity, invocation dropped) must NOT
     // trip the N-day gate. The eval cat was never notified — domain must retry on next probe
     // rather than being silently suppressed for a full N-day window.
@@ -119,19 +111,14 @@ describe('createEvalDomainNDaySpec — execute (Redis last-dispatch update)', ()
     const item = gateResult.workItems.find((w) => w.subjectKey === 'eval:friction');
     assert.ok(item);
 
-    const deliverMock = mock.fn(async () => 'msg_nday_003');
-    const ctx = {
-      assignedCatId: null,
-      deliver: deliverMock,
-      invokeTrigger: {
-        trigger: mock.fn(async () => 'full'), // queue at capacity
-      },
-    };
+    // A refused admission means the eval cat was never notified; the N-day window must not close.
+    const deliverMock = mock.fn(() => Promise.reject(new Error('queue admission did not happen')));
+    const ctx = { assignedCatId: null, deliver: deliverMock };
 
     await spec.run.execute(item.signal, item.subjectKey, ctx);
 
-    assert.equal(deliverMock.mock.calls.length, 1, 'deliver was still called (message in thread)');
+    assert.equal(deliverMock.mock.calls.length, 1, 'admission was attempted');
     const storedVal = redis._store.get('eval-nday-last-dispatch:eval:friction');
-    assert.equal(storedVal, undefined, 'Redis must NOT be written when trigger returned full');
+    assert.equal(storedVal, undefined, 'Redis must NOT be written when admission was refused');
   });
 });

@@ -1,5 +1,47 @@
 import { describe, expect, it } from 'vitest';
-import { getStreamingTipContexts, isStreamingTipSuppressed } from '../capability-tip-placement';
+import type { CatInvocationInfo, CatStatusType, ChatMessage } from '@/stores/chat-types';
+import {
+  getStreamingTipContexts,
+  isStreamingTipSuppressed,
+  selectLifecycleTipMessageId,
+} from '../capability-tip-placement';
+
+function processingResponse(id: string, targetId: string, invocationId: string): ChatMessage {
+  return {
+    id,
+    type: 'assistant',
+    catId: targetId,
+    content: '',
+    timestamp: 1,
+    lifecycle: {
+      kind: 'response',
+      orderKey: `1:${invocationId}`,
+      invocationId,
+      targetId,
+      inputEntryIds: [`entry:${targetId}`],
+      inputMessageIds: ['source-1'],
+      status: 'processing',
+      startedAt: 1,
+    },
+  };
+}
+
+function invocationFor(message: ChatMessage): CatInvocationInfo {
+  const lifecycle = message.lifecycle;
+  if (lifecycle?.kind !== 'response') throw new Error('Expected response lifecycle');
+  return {
+    activeRun: {
+      threadId: 'thread-1',
+      targetId: lifecycle.targetId,
+      invocationId: lifecycle.invocationId,
+      responseMessageId: message.id,
+      inputEntryIds: lifecycle.inputEntryIds,
+      inputMessageIds: lifecycle.inputMessageIds,
+      privateInputEntryIds: [],
+      startedAt: lifecycle.startedAt,
+    },
+  };
+}
 
 describe('F244 capability tip placement', () => {
   it('uses review contexts for ideate mode', () => {
@@ -31,5 +73,28 @@ describe('F244 capability tip placement', () => {
     };
 
     expect(isStreamingTipSuppressed('streaming', lifecycle, now)).toBe(true);
+  });
+
+  it('assigns the one tip surface to an exact healthy processing response', () => {
+    const stale = processingResponse('response-stale', 'opus', 'turn-stale');
+    const exact = processingResponse('response-exact', 'sol', 'turn-exact');
+    const later = processingResponse('response-later', 'kimi', 'turn-later');
+    const catInvocations: Record<string, CatInvocationInfo> = {
+      opus: invocationFor(processingResponse('other-response', 'opus', 'other-turn')),
+      sol: invocationFor(exact),
+      kimi: invocationFor(later),
+    };
+
+    expect(selectLifecycleTipMessageId([stale, exact, later], {}, catInvocations)).toBe('response-exact');
+    expect(
+      selectLifecycleTipMessageId(
+        [exact, later],
+        { sol: 'suspected_stall', kimi: 'streaming' } satisfies Record<string, CatStatusType>,
+        catInvocations,
+      ),
+    ).toBe('response-later');
+    expect(selectLifecycleTipMessageId([{ ...exact, content: 'streamed' }, later], {}, catInvocations)).toBe(
+      'response-later',
+    );
   });
 });

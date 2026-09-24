@@ -1,11 +1,18 @@
 'use client';
 
-import type { CliDiagnostics, ProviderSemanticEvent, ReplyPreview, SchedulerMessageExtra } from '@cat-cafe/shared';
-import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
+import {
+  type CliDiagnostics,
+  type ProviderSemanticEvent,
+  type ReplyPreview,
+  type SchedulerMessageExtra,
+  timelineMessageKind,
+} from '@cat-cafe/shared';
+import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useThreadChatHistoryAdmission } from '@/components/thread-chat/ThreadChatRuntimeProvider';
 import { getBubbleInvocationId, shouldForceReplaceHydrationForCachedMessages } from '@/debug/bubbleIdentity';
 import { recordDebugEvent } from '@/debug/invocationEventDebug';
+import { selectThreadMessagesRaw } from '@/hooks/useThreadScopedSelectors';
 import { resolveProviderSemanticMessage } from '@/lib/provider-semantic-registry';
 import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { QueueEntry, TaskProgressItem } from '@/stores/chat-types';
@@ -16,7 +23,11 @@ import {
   hydrateThreadWorkspaceState,
   useChatStore,
 } from '@/stores/chatStore';
-import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
+import {
+  findEarliestMessageByCursor,
+  getMessageTimelineCursorTime,
+  getMessageTimelineOrderTime,
+} from '@/stores/message-timeline';
 import type { TaskItem } from '@/stores/taskStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { crossesUserTurnBoundary } from '@/stores/turn-boundary';
@@ -36,11 +47,14 @@ import {
 } from '@/utils/offline-store';
 import {
   captureMessageScrollAnchor,
+  captureMessageScrollAnchorForElement,
   captureMessageScrollAnchorForMessage,
   MESSAGE_VIEWPORT_MOUNTED_EVENT,
   type MessageScrollAnchor,
   restoreMessageScrollAnchor,
+  restoreTimelineScrollAnchor,
   scrollToMessage,
+  type TimelineScrollAnchor,
 } from '@/utils/scrollToMessage';
 import {
   peekPendingTeleport,
@@ -50,6 +64,7 @@ import {
 } from '@/utils/teleport';
 import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
+import { useViewportMessageTimeline } from './useViewportMessageTimeline';
 
 type SavedScrollState =
   | { top: number; anchor: 'bottom' }
@@ -299,6 +314,7 @@ function mergeMessageExtra(
   const fields: RequiredMessageExtraFields = {
     custodyOfferV1: pick('custodyOfferV1'),
     semanticEvent: pick('semanticEvent'),
+    routingWarnings: pick('routingWarnings'),
     crossPost: pick('crossPost'),
     stream: pick('stream'),
     turnExecution: pick('turnExecution'),
@@ -311,11 +327,8 @@ function mergeMessageExtra(
     // F212 Phase B: diagnostics outlive one live event and must survive hydration.
     cliDiagnostics: pick('cliDiagnostics'),
     governanceBlocked: pick('governanceBlocked'),
-    freshnessClosure: pick('freshnessClosure'),
     freshness: pick('freshness'),
-    supplement: pick('supplement'),
-    freshnessSupplement: pick('freshnessSupplement'),
-    queueReceipt: pick('queueReceipt'),
+    cloudBridgeRetry: pick('cloudBridgeRetry'),
     recall: pick('recall'),
     coordination: pick('coordination'),
     localReviewVerdict: pick('localReviewVerdict'),
@@ -670,13 +683,6 @@ export function mergeReplaceHydrationMessages(
   currentMsgs: ChatMessageData[],
   currentCatInvocations: Record<string, CatInvocationInfo>,
 ): ReplaceHydrationMergeResult {
-  if (currentMsgs.length === 0) {
-    return {
-      messages: historyMsgs,
-      stats: { preservedLocalCount: 0, reconciledToHistoryCount: 0, replacedHistoryCount: 0 },
-    };
-  }
-
   // 单一索引: id ∪ (catId:invocationId) streamKey 都进同一个 Map。
   // matchKind 区分 lookup 命中是 id 还是 streamKey（决定 merge action）。
   // 当一个 invocation 在 history 里有多条 bubble（如 stream + 后续 callback），
@@ -825,12 +831,7 @@ export function mergeReplaceHydrationMessages(
   }
 
   return {
-    messages: mergedMsgs.sort((a, b) => {
-      const ta = getMessageTimelineOrderTime(a);
-      const tb = getMessageTimelineOrderTime(b);
-      if (ta !== tb) return ta - tb;
-      return a.id.localeCompare(b.id);
-    }),
+    messages: mergedMsgs,
     stats: {
       preservedLocalCount,
       reconciledToHistoryCount,
@@ -851,7 +852,8 @@ export function useChatHistory(threadId: string) {
   historyConsumerIdRef.current ??= Symbol('thread-chat-history-consumer');
   const historyConsumerId = historyConsumerIdRef.current;
   const {
-    messages,
+    messages: rawMessages,
+    currentThreadId: storeCurrentThreadId,
     isLoadingHistory,
     hasMore,
     replaceThreadMessages,
@@ -861,11 +863,11 @@ export function useChatHistory(threadId: string) {
     replaceThreadTargetCats,
     updateThreadCatStatus,
     setQueue,
-    setQueuePaused,
     isOfflineSnapshot,
   } = useChatStore(
     useShallow((s) => ({
-      messages: s.messages,
+      messages: selectThreadMessagesRaw(s, threadId),
+      currentThreadId: s.currentThreadId,
       isLoadingHistory: s.isLoadingHistory,
       hasMore: s.hasMore,
       replaceThreadMessages: s.replaceThreadMessages,
@@ -875,7 +877,6 @@ export function useChatHistory(threadId: string) {
       replaceThreadTargetCats: s.replaceThreadTargetCats,
       updateThreadCatStatus: s.updateThreadCatStatus,
       setQueue: s.setQueue,
-      setQueuePaused: s.setQueuePaused,
       isOfflineSnapshot: s.isOfflineSnapshot,
     })),
   );
@@ -883,6 +884,17 @@ export function useChatHistory(threadId: string) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const messages = useViewportMessageTimeline(threadId, rawMessages, () => {
+    if (useChatStore.getState().currentThreadId !== threadId) return;
+    const el = scrollContainerRef.current;
+    const saved = scrollPositionsByThread.get(threadId);
+    if (!el || saved?.anchor !== 'offset' || saved.messageAnchor) return;
+    scrollPositionsByThread.set(threadId, {
+      ...saved,
+      top: el.scrollTop,
+      messageAnchor: captureMessageScrollAnchor(el) ?? saved.messageAnchor,
+    });
+  });
 
   // Scroll state for prepend handling
   const prevFirstIdRef = useRef<string | null>(null);
@@ -892,6 +904,8 @@ export function useChatHistory(threadId: string) {
   const restoreFrameKindRef = useRef<RestoreFrameKind | null>(null);
   const userScrollUpRef = useRef(false);
   const userScrollIntentRef = useRef(false);
+  const previousTimelineIdsRef = useRef<string[]>([]);
+  const previousTimelineThreadRef = useRef(threadId);
 
   // Track loading guard per-thread to prevent double-fetch
   const loadingRef = useRef(false);
@@ -1138,8 +1152,10 @@ export function useChatHistory(threadId: string) {
             (m: {
               id: string;
               type: string;
+              from?: import('@cat-cafe/shared').MessageFrom;
               catId?: string;
               content: string;
+              lifecycle?: import('@cat-cafe/shared').LifecycleStoredMessageMetadata;
               contentBlocks?: unknown[];
               toolEvents?: unknown[];
               metadata?: {
@@ -1172,9 +1188,6 @@ export function useChatHistory(threadId: string) {
                 cliDiagnostics?: CliDiagnostics;
                 recovery?: NonNullable<ChatMessageData['extra']>['recovery'];
                 freshness?: NonNullable<ChatMessageData['extra']>['freshness'];
-                supplement?: NonNullable<ChatMessageData['extra']>['supplement'];
-                freshnessSupplement?: NonNullable<ChatMessageData['extra']>['freshnessSupplement'];
-                queueReceipt?: NonNullable<ChatMessageData['extra']>['queueReceipt'];
                 messageBundle?: NonNullable<ChatMessageData['extra']>['messageBundle'];
                 semanticEvent?: ProviderSemanticEvent;
               };
@@ -1199,21 +1212,26 @@ export function useChatHistory(threadId: string) {
             }) =>
               ({
                 id: m.id,
-                type: (m.type === 'system'
-                  ? 'system'
-                  : m.summary
-                    ? 'summary'
-                    : m.source
-                      ? 'connector'
-                      : m.catId
-                        ? 'assistant'
-                        : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+                // Shared rule when the envelope names its sender; the chain below only covers an
+                // absent `from` (legacy rows and summaries), which the shared rule leaves undecided.
+                type: (timelineMessageKind(m.from, Boolean(m.source)) ??
+                  (m.type === 'system'
+                    ? 'system'
+                    : m.summary
+                      ? 'summary'
+                      : m.source
+                        ? 'connector'
+                        : m.catId
+                          ? 'assistant'
+                          : 'user')) as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+                ...(m.from ? { from: m.from } : {}),
                 catId: m.catId,
                 content: (() => {
                   if (!m.extra?.semanticEvent) return m.content;
                   const semantic = resolveProviderSemanticMessage(m.extra.semanticEvent);
                   return semantic.action === 'replace' ? semantic.projection.content : m.content;
                 })(),
+                ...(m.lifecycle ? { lifecycle: m.lifecycle } : {}),
                 ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
                 ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
                 ...(m.metadata ? { metadata: m.metadata } : {}),
@@ -1241,9 +1259,6 @@ export function useChatHistory(threadId: string) {
                     m.extra?.targetCats ||
                     m.extra?.recovery ||
                     m.extra?.freshness ||
-                    m.extra?.supplement ||
-                    m.extra?.freshnessSupplement ||
-                    m.extra?.queueReceipt ||
                     m.extra?.messageBundle ||
                     m.extra?.semanticEvent ||
                     cliDiag;
@@ -1264,9 +1279,6 @@ export function useChatHistory(threadId: string) {
                       ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
                       ...(m.extra?.recovery ? { recovery: m.extra.recovery } : {}),
                       ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
-                      ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
-                      ...(m.extra?.freshnessSupplement ? { freshnessSupplement: m.extra.freshnessSupplement } : {}),
-                      ...(m.extra?.queueReceipt ? { queueReceipt: m.extra.queueReceipt } : {}),
                       ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
                       ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
                       ...(cliDiag ? { cliDiagnostics: cliDiag } : {}),
@@ -1519,13 +1531,10 @@ export function useChatHistory(threadId: string) {
       if (threadIdRef.current !== fetchForThread) return false;
       const data = (await res.json()) as {
         queue: QueueEntry[];
-        paused: boolean;
-        pauseReason?: 'canceled' | 'failed';
         activeInvocations?: QueueActiveInvocationSlot[];
       };
       // Always sync server state — clears stale local data when server queue is empty
       setQueue(fetchForThread, data.queue);
-      setQueuePaused(fetchForThread, data.paused, data.pauseReason);
       // Issue #83: Reconcile processing state from server-side InvocationTracker.
       // Uses thread-scoped APIs so it works correctly for both active and background threads,
       // and always overwrites stale snapshots restored by setCurrentThread().
@@ -1587,7 +1596,7 @@ export function useChatHistory(threadId: string) {
       return false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId, setQueue, setQueuePaused, updateThreadCatStatus]);
+  }, [threadId, setQueue, updateThreadCatStatus]);
 
   // Restore per-thread tasks before paint so revisiting a thread does not show
   // an empty secondary panel while revalidation is still in flight.
@@ -1771,7 +1780,25 @@ export function useChatHistory(threadId: string) {
       let outcome: 'succeeded' | 'failed' = 'failed';
       try {
         const [secondaryReady, historyReady] = await Promise.all([hydrateSecondaryPanels(), bootstrap()]);
-        if (secondaryReady && historyReady) outcome = 'succeeded';
+        if (secondaryReady && historyReady) {
+          // A freshly-created thread can complete its first History request before
+          // Queue moves from queued -> processing. If the route transition also
+          // misses the one-shot queue_updated event, the durable HTTP hydration is
+          // the only remaining proof that delivery has started. Decide only after
+          // both initial requests settle: checking inside fetchQueue would mistake
+          // a still-pending History request for an empty authoritative timeline and
+          // issue an unnecessary second fetch on every active thread open.
+          const store = useChatStore.getState();
+          const hydratedThread = store.getThreadState(threadId);
+          if (
+            !isStaleThreadRequest(controller, threadId) &&
+            hydratedThread.hasActiveInvocation &&
+            hydratedThread.messages.length === 0
+          ) {
+            store.requestStreamCatchUp(threadId);
+          }
+          outcome = 'succeeded';
+        }
       } finally {
         historyAdmission.completeBootstrap(threadId, historyConsumerId, registrationGeneration, outcome);
       }
@@ -1897,7 +1924,40 @@ export function useChatHistory(threadId: string) {
     }
   }, [isLoadingHistory]);
 
+  const timelineMessageIds = useMemo(() => messages.map((message) => message.id), [messages]);
+
+  // The same messages can change presentation order or rendered height while
+  // streaming. Reapply the user's saved anchor before paint; browser-native
+  // anchoring is disabled on the container so these two systems cannot fight.
+  useLayoutEffect(() => {
+    if (previousTimelineThreadRef.current !== threadId) {
+      previousTimelineThreadRef.current = threadId;
+      previousTimelineIdsRef.current = timelineMessageIds;
+      return;
+    }
+    const previousIds = previousTimelineIdsRef.current;
+    previousTimelineIdsRef.current = timelineMessageIds;
+    if (previousIds.length === 0) return;
+
+    const el = scrollContainerRef.current;
+    const saved = scrollPositionsByThread.get(threadId);
+    if (!el || !saved || useChatStore.getState().currentThreadId !== threadId) return;
+
+    const anchor: TimelineScrollAnchor | undefined =
+      saved.anchor === 'bottom'
+        ? { kind: 'bottom' }
+        : saved.messageAnchor
+          ? { kind: 'message', messageAnchor: saved.messageAnchor }
+          : undefined;
+    if (!anchor || !restoreTimelineScrollAnchor(el, anchor)) return;
+    // Admission, prepend, and reorder all use this one correction. Do not
+    // apply the older height-delta prepend correction on top of it.
+    scrollSnapshotRef.current = null;
+    scrollPositionsByThread.set(threadId, { ...saved, top: el.scrollTop });
+  }, [threadId, timelineMessageIds]);
+
   // Scroll adjustment after messages change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: store sync must retry initial restore even when the scoped message reference is unchanged.
   useEffect(() => {
     const el = scrollContainerRef.current;
 
@@ -1952,7 +2012,7 @@ export function useChatHistory(threadId: string) {
         }
       }
     }
-  }, [messages, scheduleRestore, threadId]);
+  }, [messages, scheduleRestore, storeCurrentThreadId, threadId]);
 
   // F052 + 砚砚 R1 P1: resolve a pending cross-post scroll across BOTH the tentative IDB-snapshot
   // phase and the authoritative fresh-API phase. Kept independent of the scroll-restore effect
@@ -1998,8 +2058,8 @@ export function useChatHistory(threadId: string) {
         isLoading: isLoadingHistory,
       })
     ) {
-      const oldest = messages.find((m) => !m.id.startsWith('draft-'));
-      if (oldest) void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
+      const oldest = findEarliestMessageByCursor(messages.filter((message) => !message.id.startsWith('draft-')));
+      if (oldest) void fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`);
     }
   }, [messages, threadId, isOfflineSnapshot, hasMore, isLoadingHistory, scheduleScrollToMessage, fetchHistory]);
 
@@ -2143,15 +2203,33 @@ export function useChatHistory(threadId: string) {
     if (!hasMore || isLoadingHistory) return;
     if (el.scrollTop < 80 && messages.length > 0) {
       // #80 cloud R8 P2: skip draft rows — their synthetic IDs break cursor semantics
-      const oldest = messages.find((m) => !m.id.startsWith('draft-'));
+      const oldest = findEarliestMessageByCursor(messages.filter((message) => !message.id.startsWith('draft-')));
       if (oldest) {
-        void fetchHistory(`${getMessageTimelineOrderTime(oldest)}:${oldest.id}`);
+        void fetchHistory(`${getMessageTimelineCursorTime(oldest)}:${oldest.id}`);
       }
     }
   }, [hasMore, isLoadingHistory, messages, fetchHistory]);
 
+  const handleReadingIntent = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const disclosure = target.closest<HTMLElement>('[data-reading-disclosure]');
+      const el = scrollContainerRef.current;
+      if (!disclosure || !el || !el.contains(disclosure)) return;
+      if (useChatStore.getState().currentThreadId !== threadIdRef.current) return;
+      const messageAnchor = captureMessageScrollAnchorForElement(el, disclosure);
+      if (!messageAnchor) return;
+      cancelPendingRestore();
+      scrollPositionsByThread.set(threadIdRef.current, { top: el.scrollTop, anchor: 'offset', messageAnchor });
+    },
+    [cancelPendingRestore],
+  );
+
   return {
+    messages,
     handleScroll,
+    handleReadingIntent,
     jumpToLatest,
     scrollContainerRef,
     messagesEndRef,

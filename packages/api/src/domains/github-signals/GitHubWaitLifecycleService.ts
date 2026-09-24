@@ -15,10 +15,13 @@ import type {
 import { deliverConnectorMessage } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
 import {
+  claimWaitOutcomeForPublish,
   isAwaitExpired,
   markWaitOutcomeDelivered,
   markWaitOutcomeLegacyUnfenced,
+  markWaitOutcomeSuppressed,
   transitionWaitState,
+  type WaitRuntimeState,
   type WaitTransitionEvent,
 } from '../ball-custody/wait-state-machine.js';
 import { automationGeneration } from '../cats/services/stores/ports/TaskAutomationState.js';
@@ -47,8 +50,21 @@ export interface GitHubWaitObservation {
   readonly at?: number;
   /** Source-owned, typed metadata for the connector message created by this observation. */
   readonly deliveryExtra?: ConnectorDeliveryInput['extra'];
+  /** RFC §5.1: urgency travels in the producer envelope, not in a second wake call. */
+  readonly deliveryPriority?: 'urgent' | 'normal';
   /** Action-time review-history observation; projected only through the existing outcome nextStep. */
   readonly reviewLoopBrake?: GitHubReviewLoopBrake;
+  /**
+   * Terminalize and persist the outcome, but do not publish it yet.
+   *
+   * The matched outcome is the authorization to act on a subject (#1392 R5), and it is durable the
+   * moment it is written with `delivery: 'pending'` — publishing is a separate step. A caller that
+   * may resolve the matched condition itself needs the authorization without the announcement, so
+   * it can decide whether the owner ever has to be disturbed. Nothing is lost if that caller dies:
+   * the outcome stays in the delivery outbox and the next observation flushes it, which is why the
+   * safe default of this deferral is still "the owner gets told".
+   */
+  readonly deferDelivery?: boolean;
 }
 
 export interface GitHubWaitNotified {
@@ -57,6 +73,13 @@ export interface GitHubWaitNotified {
   readonly outcome: WaitOutcomeV1;
   readonly messageId: string;
   readonly content: string;
+}
+
+/** A terminalized outcome held in the delivery outbox because its caller asked to decide first. */
+export interface GitHubWaitPendingDelivery {
+  readonly kind: 'pending_delivery';
+  readonly task: TaskItem;
+  readonly outcome: WaitOutcomeV1;
 }
 
 export type GitHubWaitLifecycleResult =
@@ -68,7 +91,7 @@ export type GitHubWaitLifecycleResult =
        * collector state, not its match. Its source must collect it again — a cursor moved past it loses it.
        */
       readonly kind: 'unrecorded';
-      readonly reason: 'generation_changed_concurrently';
+      readonly reason: 'generation_changed_concurrently' | 'queue_admission_unavailable';
     };
 
 /**
@@ -147,6 +170,8 @@ function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTermination
 
 function pendingOutcome(task: TaskItem): WaitOutcomeV1 | null {
   const outcome = task.automationState?.waitOutcome;
+  // A claimed-but-unsent outcome is still `pending`, so a claim whose process died is picked up
+  // again here. Re-publishing is keyed on outcomeId and converges on the same row, never a second wake.
   return outcome?.delivery === 'pending' ? outcome : null;
 }
 
@@ -159,6 +184,24 @@ interface OutboxLog {
   readonly ids: Set<string>;
 }
 
+/**
+ * #1392 R5 labelling, applied where the admission happens.
+ *
+ * A matched `pr_became_conflicting` is the one wait outcome that is urgent and files as a conflict;
+ * everything else — an expiry above all — is an ordinary wait delivery, and calling it a conflict
+ * would misfile it for the owner reading the wake. Both facts live on the outcome, so the label is
+ * derived here rather than guessed by a producer that cannot yet know what matched: `route` learns
+ * the outcome only after this call has already delivered it.
+ */
+function conflictDeliveryLabel(outcome: WaitOutcomeV1): {
+  priority?: 'urgent';
+  sourceCategory?: 'conflict';
+} {
+  if (outcome.reason !== 'matched') return {};
+  if (!outcome.matched?.some((delta) => delta.kind === 'pr_became_conflicting')) return {};
+  return { priority: 'urgent', sourceCategory: 'conflict' };
+}
+
 export class GitHubWaitLifecycleService {
   private readonly now: () => number;
 
@@ -166,7 +209,16 @@ export class GitHubWaitLifecycleService {
     this.now = opts.now ?? Date.now;
   }
 
-  async observe(input: GitHubWaitObservation): Promise<GitHubWaitLifecycleResult> {
+  /**
+   * Only a caller that asks to defer can be handed an unannounced outcome, and the overloads say
+   * so: every other router keeps the result type it already exhausts, instead of acquiring a
+   * `pending_delivery` branch it would have to write dead code for.
+   */
+  async observe(
+    input: GitHubWaitObservation & { deferDelivery: true },
+  ): Promise<GitHubWaitLifecycleResult | GitHubWaitPendingDelivery>;
+  async observe(input: GitHubWaitObservation): Promise<GitHubWaitLifecycleResult>;
+  async observe(input: GitHubWaitObservation): Promise<GitHubWaitLifecycleResult | GitHubWaitPendingDelivery> {
     const outbox: OutboxLog = { ids: new Set() };
     let lostRaces = 0;
     while (lostRaces < MAX_WRITE_ATTEMPTS) {
@@ -205,7 +257,9 @@ export class GitHubWaitLifecycleService {
     if (!pending || outbox.ids.has(pending.outcomeId)) return 'empty';
     const raced = outbox.ids.size > 0;
     outbox.ids.add(pending.outcomeId);
-    await this.wakeForFlushedOutcome(await this.publishPending(task, pending, input.deliveryExtra));
+    await this.wakeForFlushedOutcome(
+      await this.publishPending(task, pending, input.deliveryExtra, input.deliveryPriority),
+    );
     return raced ? 'raced' : 'drained';
   }
 
@@ -225,7 +279,7 @@ export class GitHubWaitLifecycleService {
   private async evaluate(
     task: TaskItem,
     input: GitHubWaitObservation,
-  ): Promise<GitHubWaitLifecycleResult | typeof LOST_RACE> {
+  ): Promise<GitHubWaitLifecycleResult | GitHubWaitPendingDelivery | typeof LOST_RACE> {
     const state = task.automationState;
     const active = state?.await;
     const collectorState = mergeCollectorState(task.kind, state, input.collectorPatch);
@@ -319,7 +373,54 @@ export class GitHubWaitLifecycleService {
     if (outcome.delivery !== 'pending') {
       return { kind: 'state_only', reason: outcome.reason };
     }
-    return this.publishPending(installed, outcome, input.deliveryExtra);
+    if (input.deferDelivery) return { kind: 'pending_delivery', task: installed, outcome };
+    return this.publishPending(installed, outcome, input.deliveryExtra, input.deliveryPriority);
+  }
+
+  /**
+   * Publish an outcome a caller deferred. Re-reads the task so the decision is made against
+   * current truth: if the outbox was already flushed — by a later observation, or by a concurrent
+   * poll — this is a no-op rather than a second wake for the same outcome.
+   */
+  async publishDeferred(
+    taskId: string,
+    outcomeId: string,
+    deliveryExtra?: ConnectorDeliveryInput['extra'],
+    deliveryPriority?: 'urgent' | 'normal',
+  ): Promise<GitHubWaitLifecycleResult> {
+    const task = await this.opts.taskStore.get(taskId);
+    if (!isGitHubWaitTask(task)) return { kind: 'not_tracked', reason: 'task_missing' };
+    const outcome = task.automationState?.waitOutcome;
+    if (!outcome || outcome.outcomeId !== outcomeId) {
+      return { kind: 'deduped', reason: 'outcome_replaced' };
+    }
+    if (outcome.delivery !== 'pending') {
+      return { kind: 'deduped', reason: outcome.delivery === 'suppressed' ? 'suppressed' : 'already_delivered' };
+    }
+    return this.publishPending(task, outcome, deliveryExtra, deliveryPriority);
+  }
+
+  /**
+   * Settle a deferred outcome without waking anyone, because the condition it reported was
+   * resolved by the same caller that deferred it. The owner's wait ended and the fact is recorded;
+   * there is simply nothing left to tell them about.
+   *
+   * It is the identical compare-and-set the publish path uses, minus the message — so a concurrent
+   * flush and this call cannot both win, and whichever loses leaves the outcome exactly once
+   * settled. Returns false when the outbox moved on, which means the owner was already told.
+   */
+  async settleDeferredWithoutWake(taskId: string, outcomeId: string, reason: string): Promise<boolean> {
+    const task = await this.opts.taskStore.get(taskId);
+    if (!isGitHubWaitTask(task)) return false;
+    // `pending → suppressed`, and only from `pending`: losing to a publisher's claim means a send is
+    // already under way, and this must not be able to record that send as something that never was.
+    const settled = await this.transitionOutbox(task, outcomeId, (state) =>
+      markWaitOutcomeSuppressed(state, outcomeId),
+    );
+    if (settled) {
+      this.opts.log.info({ taskId, outcomeId, reason }, '[F280] wait outcome suppressed; the owner was not woken');
+    }
+    return settled;
   }
 
   async cancel(
@@ -401,9 +502,20 @@ export class GitHubWaitLifecycleService {
     task: TaskItem,
     outcome: WaitOutcomeV1,
     deliveryExtra?: ConnectorDeliveryInput['extra'],
+    deliveryPriority?: 'urgent' | 'normal',
   ): Promise<GitHubWaitLifecycleResult> {
     if (!parseWaitOwnerFence(outcome.ownerFence)) {
       return this.quarantineLegacyUnfencedOutcome(task, outcome);
+    }
+    // Win the right to send BEFORE sending. This is the whole linearization point: a publisher that
+    // had merely read `pending` could otherwise still deliver after a suppressor had already won,
+    // and one outcome would produce two successful side effects. Losing here means somebody else
+    // decided this outcome's fate — either it was suppressed, or it is already delivered.
+    const claimed = await this.transitionOutbox(task, outcome.outcomeId, (state) =>
+      claimWaitOutcomeForPublish(state, outcome.outcomeId),
+    );
+    if (!claimed) {
+      return { kind: 'deduped', reason: 'outcome_claimed_elsewhere' };
     }
     const content = renderGitHubWaitOutcome(outcome);
     const waitContinuationCarrier = createWaitContinuationCarrier(task.id, outcome);
@@ -423,27 +535,67 @@ export class GitHubWaitLifecycleService {
         meta: { waitContinuationCarrier },
       },
       ...(deliveryExtra ? { extra: deliveryExtra } : {}),
+      ...(deliveryPriority ? { priority: deliveryPriority } : {}),
+      // Derived last so a matched conflict is urgent even when the producer stated nothing, and
+      // filed as `conflict` on the Queue row rather than inheriting the generic scheduled category.
+      ...conflictDeliveryLabel(outcome),
     });
 
-    const current = await this.opts.taskStore.get(task.id);
-    if (current?.automationState?.waitOutcome?.outcomeId === outcome.outcomeId) {
-      const marked = markWaitOutcomeDelivered(current.automationState ?? {}, outcome.outcomeId);
-      await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
-        // After a renewal the store is already at N+1 while this outcome is N. Fencing on the
-        // outcome's own generation would fail every time, leave it `pending`, and re-deliver it on
-        // every poll. The fence is the store's current generation; the outcomeId check above is
-        // what ties this write to this outcome.
-        expectedGeneration: automationGeneration(current.automationState) ?? outcome.generation,
-        expectedUpdatedAt: current.updatedAt,
-        automationState: marked as AutomationState,
-        status: current.automationState?.await ? 'doing' : 'done',
-      });
+    // RFC §5.2: "Queue commit 自身就是外部输入的持久边界." The outbox may only be settled once the
+    // envelope is durably in the Queue. Settling on a bare append would strand the wake: the source
+    // would be neither a History member nor queued work, while no poll would ever re-deliver it.
+    if (!result.admitted) {
+      // The claim stays on the outcome. `publishing` is still drained by `pendingOutcome`, so the
+      // next observation retries this exact identity instead of leaving it stranded.
+      this.opts.log.warn(
+        { taskId: task.id, outcomeId: outcome.outcomeId },
+        '[F280] wait outcome stays undelivered: Queue admission did not happen',
+      );
+      return { kind: 'unrecorded', reason: 'queue_admission_unavailable' };
     }
+
+    await this.transitionOutbox(task, outcome.outcomeId, (state) => markWaitOutcomeDelivered(state, outcome.outcomeId));
     this.opts.log.info(
       { taskId: task.id, outcomeId: outcome.outcomeId },
       '[F280] delivered compact GitHub wait outcome',
     );
     return { kind: 'notified', task, outcome, messageId: result.messageId, content };
+  }
+
+  /**
+   * Mark this exact outcome delivered, fenced on the store's CURRENT generation.
+   *
+   * After a renewal the store is already at N+1 while this outcome is N. Fencing on the outcome's
+   * own generation would fail every time, leave it `pending`, and re-deliver it on every poll. The
+   * fence is the store's current generation; the outcomeId equality is what ties the write to this
+   * outcome. Shared by the publish path and the suppress path so the two can never disagree about
+   * what settling means.
+   */
+  /**
+   * One compare-and-set for every outbox transition, re-reading first so the decision is made
+   * against current truth and the write is fenced on the store's CURRENT generation.
+   *
+   * After a renewal the store is already at N+1 while this outcome is N. Fencing on the outcome's
+   * own generation would fail every time and leave it undelivered forever; the outcomeId equality
+   * inside each transition is what ties the write to this outcome. `transition` returns null when
+   * the move is not legal from the state it actually found, which is how a race reports its loser.
+   */
+  private async transitionOutbox(
+    task: TaskItem,
+    outcomeId: string,
+    transition: (state: WaitRuntimeState) => WaitRuntimeState | null,
+  ): Promise<boolean> {
+    const current = await this.opts.taskStore.get(task.id);
+    if (current?.automationState?.waitOutcome?.outcomeId !== outcomeId) return false;
+    const next = transition((current.automationState ?? {}) as WaitRuntimeState);
+    if (!next) return false;
+    const installed = await this.opts.taskStore.replaceAutomationStateIfGeneration(task.id, {
+      expectedGeneration: automationGeneration(current.automationState) ?? 0,
+      expectedUpdatedAt: current.updatedAt,
+      automationState: next as AutomationState,
+      status: current.automationState?.await ? 'doing' : 'done',
+    });
+    return Boolean(installed);
   }
 
   private async quarantineLegacyUnfencedOutcome(

@@ -261,7 +261,6 @@ function createEvalDomainSpec(config: EvalDomainSpecConfig): TaskSpec_P1<EvalDom
           triggerReason,
           store: config.triggerStore,
           deliver: ctx.deliver,
-          invokeTrigger: ctx.invokeTrigger,
           defaultUserId: config.defaultUserId,
         });
       },

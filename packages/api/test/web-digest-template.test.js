@@ -86,21 +86,20 @@ describe('webDigestTemplate', () => {
     assert.equal(deliverMock.mock.calls.length, 1);
     const delivered = deliverMock.mock.calls[0].arguments[0];
     assert.equal(delivered.threadId, 'th-2');
-    assert.equal(delivered.userId, 'scheduler');
+    assert.equal(delivered.userId, 'default-user');
     assert.ok(delivered.content.includes('browser-automation'));
     assert.ok(delivered.content.includes('https://x.com/user'));
     assert.ok(delivered.content.includes('AI'));
 
-    assert.equal(triggerCalls.length, 1);
-    assert.equal(triggerCalls[0][0], 'th-2');
-    assert.equal(triggerCalls[0][1], 'gpt52');
-    assert.equal(triggerCalls[0][2], 'default-user');
-    assert.ok(triggerCalls[0][3].includes('browser-automation'));
-    assert.equal(triggerCalls[0][4], 'msg-2');
-    assert.equal(triggerCalls[0][6]?.suggestedSkill, 'browser-automation');
+    // Admission is the wake: the envelope names the member and carries the skill hint.
+    assert.equal(delivered.targetCatId, 'gpt52');
+    assert.equal(delivered.suggestedSkill, 'browser-automation');
+    assert.equal(delivered.sourceCategory, 'scheduled');
   });
 
-  it('execute throws for needs-browser when invokeTrigger is not available', async () => {
+  // There is no separate trigger seam left to be missing: the browser-required digest is delivered
+  // as one envelope whose admission wakes the member.
+  it('delivers the browser-required digest without needing a separate trigger seam', async () => {
     const deliverMock = mock.fn(async () => 'msg-2');
     const fetchMock = mock.fn(async () => ({
       text: '',
@@ -114,16 +113,13 @@ describe('webDigestTemplate', () => {
       params: { url: 'https://x.com/user', topic: '' },
       deliveryThreadId: 'th-2',
     });
-    await assert.rejects(
-      () =>
-        spec.run.execute(null, 'thread-th-2', {
-          assignedCatId: 'opus',
-          deliver: deliverMock,
-          fetchContent: fetchMock,
-        }),
-      /invokeTrigger not available for browser-required digest/,
-    );
-    assert.equal(deliverMock.mock.calls.length, 0);
+    await spec.run.execute(null, 'thread-th-2', {
+      assignedCatId: 'opus',
+      deliver: deliverMock,
+      fetchContent: fetchMock,
+    });
+    assert.equal(deliverMock.mock.calls.length, 1);
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'opus');
   });
 
   it('execute throws when deliver is not available', async () => {

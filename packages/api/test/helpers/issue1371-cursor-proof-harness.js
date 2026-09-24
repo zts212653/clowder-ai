@@ -1,9 +1,11 @@
 import { assembleIncrementalContext } from '../../dist/domains/cats/services/agents/routing/route-helpers.js';
 import { cursorFor } from '../../dist/domains/cats/services/stores/cursor.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { adaptMessageStore } from './message-from-fixtures.js';
 
 export async function proofFixture(store = new MessageStore(), mutate = (proof) => proof) {
-  const source = await store.append({
+  const canonicalMessageStore = adaptMessageStore(store);
+  const source = await canonicalMessageStore.append({
     userId: 'user-1',
     threadId: 'thread-proof',
     catId: null,
@@ -11,7 +13,9 @@ export async function proofFixture(store = new MessageStore(), mutate = (proof) 
     mentions: ['opus'],
     timestamp: Date.now(),
   });
-  const boundary = cursorFor((await store.getByThreadAfter('thread-proof', undefined, undefined, 'user-1'))[0]);
+  const boundary = cursorFor(
+    (await canonicalMessageStore.getByThreadAfter('thread-proof', undefined, undefined, 'user-1'))[0],
+  );
   const proof = mutate({
     v: 1,
     cursor: boundary,
@@ -21,7 +25,7 @@ export async function proofFixture(store = new MessageStore(), mutate = (proof) 
     turnInvocationId: 'child-opus',
     sourceMessageId: source.id,
   });
-  const reply = await store.append({
+  const reply = await canonicalMessageStore.append({
     userId: 'user-1',
     threadId: 'thread-proof',
     catId: 'opus',
@@ -35,7 +39,7 @@ export async function proofFixture(store = new MessageStore(), mutate = (proof) 
       deliveryBoundary: proof,
     },
   });
-  return { store, source, reply, proof, boundary };
+  return { store: canonicalMessageStore, source, reply, proof, boundary };
 }
 
 export async function coldContext(store, cursors, explicit) {

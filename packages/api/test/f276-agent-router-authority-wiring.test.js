@@ -135,18 +135,33 @@ describe('F276/F292 AgentRouter authority wiring', () => {
   });
 
   it('forwards queue-owned memory carriers through routeExecution', () => {
-    const source = readFileSync(
+    const routerSource = readFileSync(
       new URL('../src/domains/cats/services/agents/routing/AgentRouter.ts', import.meta.url),
       'utf8',
     );
+    const helpersSource = readFileSync(
+      new URL('../src/domains/cats/services/agents/routing/route-helpers.ts', import.meta.url),
+      'utf8',
+    );
 
+    // F117 new contract: routeExecution no longer hand-forwards each carrier key;
+    // RouteExecutionOptions is derived from RouteOptions (route-helpers.ts) and the
+    // whole options object crosses the boundary via the strategyInputOptions spread.
     assert.ok(
-      source.includes('memoryCueOpportunitySeeds: options?.memoryCueOpportunitySeeds'),
-      'memory cue seeds must survive routeExecution option assembly',
+      helpersSource.includes('RouteExecutionOptions = Omit<') && helpersSource.includes('RouteOptions,'),
+      'RouteExecutionOptions must stay derived from RouteOptions so carrier keys cannot be dropped silently',
     );
     assert.ok(
-      source.includes('asrPersonMemoryScenes: options?.asrPersonMemoryScenes'),
-      'ASR person-memory scenes must survive routeExecution option assembly',
+      /interface RouteOptions \{[\s\S]*memoryCueOpportunitySeeds\?:/.test(helpersSource),
+      'RouteOptions must declare memoryCueOpportunitySeeds',
+    );
+    assert.ok(
+      /interface RouteOptions \{[\s\S]*asrPersonMemoryScenes\?:/.test(helpersSource),
+      'RouteOptions must declare asrPersonMemoryScenes',
+    );
+    assert.ok(
+      routerSource.includes('...strategyInputOptions'),
+      'routeExecution must forward the full options object (including memory carriers) into routeOptions',
     );
   });
 });

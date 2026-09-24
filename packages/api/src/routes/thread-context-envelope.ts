@@ -37,6 +37,9 @@ export interface ThreadContextEnvelopeCandidate<TProjection extends Record<strin
 
 interface ThreadContextEnvelopeBase {
   readonly threadId: string;
+  /** Machine-readable scope: full controls body shape, not whether this is complete history. */
+  readonly contextScope: 'unread_delta' | 'recent_history';
+  readonly situation?: unknown;
   readonly scanCapped?: boolean;
   readonly workflowSop?: Record<string, unknown>;
 }
@@ -109,9 +112,11 @@ function buildPayload<TProjection extends Record<string, unknown>>(
 ) {
   return {
     threadId: base.threadId,
+    contextScope: base.contextScope,
     messages,
     hasMore,
     ...(nextCursor ? { nextCursor } : {}),
+    ...(base.situation ? { situation: base.situation } : {}),
     ...(base.scanCapped === undefined ? {} : { scanCapped: base.scanCapped }),
     ...(base.workflowSop ? { workflowSop: base.workflowSop } : {}),
   };

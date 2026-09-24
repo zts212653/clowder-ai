@@ -16,6 +16,7 @@ const DENSITY_CAT: CatData = {
   color: { primary: '#6b8f34', secondary: '#c8d8b5' },
   mentionPatterns: ['codex-sol'],
   clientId: 'openai',
+  carrier: 'cli',
   defaultModel: 'gpt-5.6-sol',
   avatar: '/avatars/codex.png',
   roleDescription: '小太阳型攻坚猫',

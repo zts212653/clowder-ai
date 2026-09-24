@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDirection } from '../parse-direction';
+import { parseContentDirectionTargets, parseDirection, parseImplicitStructuredTargets } from '../parse-direction';
 
 // Minimal mock: alias (lowercase, no @) → catId
 const mockToCat: Record<string, string> = {
@@ -167,5 +167,32 @@ describe('parseDirection', () => {
     const msg2 = { origin: 'callback' as const, content: '@co-creator @codex' };
     const result = parseDirection(msg2, getOwnerMocks);
     expect(result?.targets).toEqual(['codex']);
+  });
+});
+
+describe('post_message structured target projection', () => {
+  it('matches only actionable line-start mentions', () => {
+    expect(parseContentDirectionTargets('ask @opus in prose\n- @codex\n> @gpt52', getMocks)).toEqual([
+      'codex',
+      'gpt52',
+    ]);
+  });
+
+  it('projects only structured targets not already visible in the body', () => {
+    const msg = {
+      origin: 'callback' as const,
+      content: '@opus\n@codex\n@gpt52',
+      extra: { isExplicitPost: true, targetCats: ['gpt52', 'new-cat', 'new-cat'] },
+    };
+    expect(parseImplicitStructuredTargets(msg, getMocks)).toEqual(['new-cat']);
+  });
+
+  it('projects structured targets even when callback settlement omits the standalone-post marker', () => {
+    const msg = {
+      origin: 'callback' as const,
+      content: 'ordinary callback',
+      extra: { targetCats: ['opus'] },
+    };
+    expect(parseImplicitStructuredTargets(msg, getMocks)).toEqual(['opus']);
   });
 });

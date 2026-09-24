@@ -2,11 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-[data-lineage-focus="true"] {
-  outline: 2px solid var(--color-cocreator-primary);
-  outline-offset: 3px;
+[data-message-jump-focus="true"] {
+  position: relative;
+}
+
+[data-message-jump-focus="true"]::after {
+  position: absolute;
+  z-index: 20;
+  inset: -3px;
+  border: 2px solid var(--color-cocreator-primary);
+  border-left: 0;
   border-radius: 0.75rem;
-  transition: outline-color 160ms ease;
+  pointer-events: none;
+  content: "";
 }
 
 /* Design tokens live in theme-tokens.css (imported via layout.tsx) */

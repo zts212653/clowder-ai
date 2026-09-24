@@ -8,9 +8,9 @@ import { safeParseExtra } from '../dist/domains/cats/services/stores/redis/redis
 const receipt = { v: 1, sourceRef: 'message:source-A', catId: 'codex-astra', ownerAuthProvenance: 'strict' };
 const trigger = { v: 1, taskId: 'work', observedRevision: 1 };
 const input = {
+  from: { kind: 'user', userId: 'owner' },
   userId: 'owner',
   threadId: 'private',
-  catId: null,
   content: 'Owner receipt',
   mentions: [],
   timestamp: 1,
@@ -29,13 +29,43 @@ test('generic Message mutations cannot forge or replace persisted owner admissio
   await store.updateExtra(plain.id, { collectiveOwnerAdmissionV1: receipt, collectiveWorkInvocationV1: trigger });
   assert.equal(store.getById(plain.id).extra?.collectiveOwnerAdmissionV1, undefined);
   assert.equal(store.getById(plain.id).extra?.collectiveWorkInvocationV1, undefined);
-  for (const extra of [{ collectiveOwnerAdmissionV1: receipt }, { collectiveWorkInvocationV1: trigger }]) {
-    assert.throws(() => store.append({ ...input, catId: 'codex-astra', extra }), /Host-owned/);
+  assert.throws(
+    () =>
+      store.append({
+        ...input,
+        from: { kind: 'agent', catId: 'codex-astra' },
+        extra: { collectiveOwnerAdmissionV1: receipt },
+      }),
+    /Host-owned/,
+  );
+  assert.throws(
+    () =>
+      store.append({
+        ...input,
+        from: { kind: 'external', connectorId: 'collective' },
+        source: { connector: 'collective', label: 'external' },
+        extra: { collectiveOwnerAdmissionV1: receipt },
+      }),
+    /Host-owned/,
+  );
+  for (const from of [
+    { kind: 'user', userId: 'owner' },
+    { kind: 'agent', catId: 'codex-astra' },
+    { kind: 'system', service: 'other' },
+  ]) {
     assert.throws(
-      () => store.append({ ...input, source: { connector: 'collective', label: 'external' }, extra }),
-      /Host-owned/,
+      () => store.append({ ...input, from, extra: { collectiveWorkInvocationV1: trigger } }),
+      /canonical system producer/,
     );
   }
+  assert.ok(
+    store.append({
+      ...input,
+      timestamp: 3,
+      from: { kind: 'system', service: 'collective-work' },
+      extra: { collectiveWorkInvocationV1: trigger },
+    }),
+  );
   const redis = new RedisMessageStore({
     options: {},
     eval() {
@@ -43,7 +73,11 @@ test('generic Message mutations cannot forge or replace persisted owner admissio
     },
   });
   await assert.rejects(
-    redis.append({ ...input, catId: 'codex-astra', extra: { collectiveOwnerAdmissionV1: receipt } }),
+    redis.append({
+      ...input,
+      from: { kind: 'agent', catId: 'codex-astra' },
+      extra: { collectiveOwnerAdmissionV1: receipt },
+    }),
     /Host-owned/,
   );
 });

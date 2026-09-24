@@ -1,9 +1,9 @@
 /**
  * F167 Phase R — cross-thread coordination identity + terminal ACK guard.
  *
- * Regression lineage: Claim -> active reply -> terminal Release -> ACK.
- * The ACK is persisted for visibility but must not enqueue an ACK-of-ACK
- * invocation. A genuinely new active collaboration remains routable.
+ * Regression lineage: Claim -> active reply -> terminal Release. Cross-thread
+ * posts remain fail-closed without routing credentials; either text or
+ * structured targets after terminal start genuinely new active work.
  */
 
 import assert from 'node:assert/strict';
@@ -15,6 +15,7 @@ function createMockSocketManager() {
   return {
     broadcastAgentMessage() {},
     broadcastToRoom() {},
+    emitToUser() {},
   };
 }
 
@@ -64,6 +65,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const { InMemoryDispatchProposalStore } = await import(
       '../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'
     );
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
 
     registry = new InvocationRegistry();
@@ -71,6 +73,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     threadStore = new ThreadStore();
     invocationRecordStore = createMockInvocationRecordStore();
     dispatchProposalStore = new InMemoryDispatchProposalStore();
+    const invocationQueue = new InvocationQueue();
     app = Fastify();
     await app.register(callbacksRoutes, {
       registry,
@@ -80,6 +83,8 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       router: createMockRouter(),
       invocationRecordStore,
       dispatchProposalStore,
+      invocationQueue,
+      queueProcessor: { requestDrain() {} },
     });
   });
 
@@ -94,7 +99,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       payload: {
         threadId,
         content,
-        targetCats: [targetCat],
+        ...(targetCat ? { targetCats: [targetCat] } : {}),
         clientMessageId,
         ...(effectClass ? { effectClass } : {}),
         ...(coordination ? { coordination } : {}),
@@ -106,7 +111,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     return messageStore.getByThread(threadId, 20, 'user-1').find((message) => message.content === content);
   }
 
-  test('Claim -> Release -> ACK closes without ACK-of-ACK spawn, while explicit new active work remains routable', async () => {
+  test('Claim -> Release closes while every explicit routing form starts fresh active work', async () => {
     const source = await threadStore.create('user-1', 'Source');
     const target = await threadStore.create('user-1', 'Target');
     await threadStore.addParticipants(source.id, ['opus']);
@@ -161,100 +166,59 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     assert.equal(release.extra.coordination.hop, 2);
 
     const targetAckAuth = await registry.create('user-1', 'codex', target.id, undefined, release.id);
-    const recordsBeforeAck = invocationRecordStore.getRecords().length;
-    const ackResponse = await post({
+    const messagesBeforeUnroutedPost = messageStore.getByThread(source.id, 20, 'user-1').length;
+    const unroutedResponse = await post({
       auth: targetAckAuth,
       threadId: source.id,
-      content: '@opus\nRelease received',
-      targetCat: 'opus',
+      content: 'Release received',
       clientMessageId: 'ack',
     });
-    assert.equal(ackResponse.statusCode, 200);
-    const ackBody = ackResponse.json();
-    assert.equal(ackBody.status, 'terminal_ack_recorded');
-    assert.deepEqual(
-      ackBody.routing_warnings.find((warning) => warning.kind === 'suppressed_by_terminal_ack'),
-      { kind: 'suppressed_by_terminal_ack', droppedMentions: ['opus'] },
-    );
-    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeAck, 'ACK must not enqueue ACK-of-ACK');
-    const ack = findMessage(source.id, '@opus\nRelease received');
-    assert.deepEqual(ack.mentions, []);
-    assert.equal(ack.extra.coordination.id, coordinationId);
-    assert.equal(ack.extra.coordination.phase, 'ack');
-    assert.equal(ack.extra.coordination.hop, 3);
-
-    const ackRetry = await post({
-      auth: targetAckAuth,
-      threadId: source.id,
-      content: '@opus\nRelease received',
-      targetCat: 'opus',
-    });
-    assert.equal(ackRetry.statusCode, 200);
-    assert.equal(ackRetry.json().status, 'duplicate');
-    assert.equal(
-      messageStore
-        .getByThread(source.id, 20, 'user-1')
-        .filter((message) => message.content === '@opus\nRelease received').length,
-      1,
-      'terminal ACK retry must not append a second record when only an informational suppression warning exists',
-    );
-
-    const recordsBeforeMismatchedTerminalAck = invocationRecordStore.getRecords().length;
-    const messagesBeforeMismatchedTerminalAck = messageStore.getByThread(source.id, 20, 'user-1').length;
-    const mismatchedTerminalAckResponse = await post({
-      auth: targetAckAuth,
-      threadId: source.id,
-      content: 'Release received with stale caller id',
-      targetCat: 'opus',
-      coordination: { phase: 'terminal', id: 'caller-supplied-other-chain' },
-      clientMessageId: 'ack-mismatched-terminal-id',
-    });
-    assert.equal(mismatchedTerminalAckResponse.statusCode, 409);
-    assert.deepEqual(mismatchedTerminalAckResponse.json(), {
-      kind: 'coordination_id_conflict',
-      message: 'Explicit terminal coordination id conflicts with the incoming coordination lineage.',
-      incomingCoordinationId: coordinationId,
-      explicitCoordinationId: 'caller-supplied-other-chain',
-    });
-    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
+    assert.equal(unroutedResponse.statusCode, 400);
+    assert.equal(unroutedResponse.json().kind, 'cross_post_no_routing');
     assert.equal(
       messageStore.getByThread(source.id, 20, 'user-1').length,
-      messagesBeforeMismatchedTerminalAck,
-      'a rejected conflict must not persist a message',
+      messagesBeforeUnroutedPost,
+      'an unrouted cross-thread courtesy message must fail before persistence',
     );
-    assert.equal(findMessage(source.id, 'Release received with stale caller id'), undefined);
 
-    const mismatchedTerminalAckRetry = await post({
+    const structuredTargetResponse = await post({
       auth: targetAckAuth,
       threadId: source.id,
-      content: 'Release received with stale caller id',
+      content: 'New structured work discovered after release',
       targetCat: 'opus',
-      coordination: { phase: 'terminal', id: 'caller-supplied-other-chain' },
-      clientMessageId: 'ack-mismatched-terminal-id',
+      clientMessageId: 'new-structured-work-after-release',
     });
-    assert.equal(mismatchedTerminalAckRetry.statusCode, 409);
-    assert.deepEqual(mismatchedTerminalAckRetry.json(), mismatchedTerminalAckResponse.json());
-    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
-    assert.equal(messageStore.getByThread(source.id, 20, 'user-1').length, messagesBeforeMismatchedTerminalAck);
+    assert.equal(structuredTargetResponse.statusCode, 200);
+    assert.equal(structuredTargetResponse.json().status, 'ok');
+    assert.deepEqual(
+      structuredTargetResponse.json().routed,
+      ['opus'],
+      'structured targetCats after terminal must enqueue a new active hop',
+    );
+    const structuredTarget = findMessage(source.id, 'New structured work discovered after release');
+    assert.deepEqual(structuredTarget.mentions, ['opus']);
+    assert.equal(structuredTarget.extra.coordination.phase, 'active');
+    assert.notEqual(structuredTarget.extra.coordination.id, coordinationId);
 
-    const mismatchedTerminalSubjectResponse = await post({
+    const explicitMentionResponse = await post({
       auth: targetAckAuth,
       threadId: source.id,
-      content: 'Release received with a foreign subject',
+      content: '@opus\nNew work discovered after release',
       targetCat: 'opus',
-      coordination: { phase: 'terminal', id: coordinationId, subjectRef: 'subject:other-work' },
-      clientMessageId: 'ack-mismatched-terminal-subject',
+      coordination: { phase: 'terminal', id: coordinationId },
+      clientMessageId: 'new-work-after-release',
     });
-    assert.equal(mismatchedTerminalSubjectResponse.statusCode, 409);
-    assert.deepEqual(mismatchedTerminalSubjectResponse.json(), {
-      kind: 'coordination_subject_conflict',
-      message: 'Explicit terminal coordination subject conflicts with the incoming coordination lineage.',
-      coordinationId,
-      incomingSubjectRef: 'subject:review-cycle',
-      explicitSubjectRef: 'subject:other-work',
-    });
-    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeMismatchedTerminalAck);
-    assert.equal(messageStore.getByThread(source.id, 20, 'user-1').length, messagesBeforeMismatchedTerminalAck);
+    assert.equal(explicitMentionResponse.statusCode, 200);
+    assert.equal(explicitMentionResponse.json().status, 'ok');
+    assert.deepEqual(
+      explicitMentionResponse.json().routed,
+      ['opus'],
+      'an explicit line-start mention after terminal must enqueue a new active hop',
+    );
+    const explicitMention = findMessage(source.id, '@opus\nNew work discovered after release');
+    assert.deepEqual(explicitMention.mentions, ['opus']);
+    assert.equal(explicitMention.extra.coordination.phase, 'active');
+    assert.notEqual(explicitMention.extra.coordination.id, coordinationId);
 
     const recordsBeforeRestart = invocationRecordStore.getRecords().length;
     const restartResponse = await post({
@@ -267,7 +231,11 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     });
     assert.equal(restartResponse.statusCode, 200);
     assert.equal(restartResponse.json().status, 'ok');
-    assert.equal(invocationRecordStore.getRecords().length, recordsBeforeRestart + 1);
+    assert.equal(
+      invocationRecordStore.getRecords().length,
+      recordsBeforeRestart,
+      'callback admission must not mint an InvocationRecord before QueueProcessor reserves the carrier',
+    );
     const restart = findMessage(source.id, 'New substantive coordination');
     assert.notEqual(restart.extra.coordination.id, coordinationId);
     assert.equal(restart.extra.coordination.phase, 'active');
@@ -317,8 +285,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
     const ackResponse = await post({
       auth: ackAuth,
       threadId: thread.id,
-      content: '@codex\n收到，无 open items。',
-      targetCat: 'codex',
+      content: '收到，无 open items。',
       clientMessageId: 'same-thread-review-ack',
     });
     assert.equal(ackResponse.statusCode, 200);
@@ -328,7 +295,7 @@ describe('F167 Phase R: cross-thread coordination chain', () => {
       recordsBeforeAck,
       'terminal ACK must not wake the reviewer',
     );
-    const ack = findMessage(thread.id, '@codex\n收到，无 open items。');
+    const ack = findMessage(thread.id, '收到，无 open items。');
     assert.deepEqual(ack.mentions, []);
     assert.equal(ack.extra.crossPost, undefined);
     assert.equal(ack.extra.coordination.phase, 'ack');

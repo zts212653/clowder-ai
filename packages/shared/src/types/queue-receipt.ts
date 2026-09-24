@@ -1,23 +1,13 @@
-export type QueueReceiptTargetState =
-  | 'queued'
-  | 'notified'
-  | 'awakened'
-  | 'seen'
-  | 'failed'
-  | 'interrupted'
-  | 'steering'
-  | 'withdrawn'
-  | 'handled';
-
-export type QueueHandledDisposition = 'responded' | 'completed_with_turn' | 'managed_hold_disposition';
+export type QueueHandledDisposition = 'responded' | 'completed_with_turn';
 
 export type MessageWorkDisposition = 'continue_current' | 'next_work';
 
 /** Exact provider + concrete transport truth used by composer, Queue and receipts. */
-export type FreshnessCarrierProvider = 'openai_codex' | 'anthropic' | 'kimi' | 'other';
+export type FreshnessCarrierProvider = 'openai_codex' | 'anthropic' | 'opencode' | 'kimi' | 'other';
 export type FreshnessCarrier =
   | 'codex_app_server'
   | 'codex_exec_json'
+  | 'claude_agent_sdk'
   | 'claude_print_sdk'
   | 'claude_stream_json'
   | 'kimi_stream_json'
@@ -29,11 +19,80 @@ export type FreshnessCarrierDeliverySemantics =
   | 'mcp_result_piggyback'
   | 'unsupported'
   | 'undeclared';
+export type ActiveInvocationGuidanceCapability = 'supported' | 'unsupported' | 'undeclared';
 
 export interface FreshnessCarrierCapability {
   provider: FreshnessCarrierProvider;
   carrier: FreshnessCarrier;
   deliverySemantics: FreshnessCarrierDeliverySemantics;
+  /** Whether this concrete adapter can append input to its current invocation without interrupting it. */
+  activeInvocationGuidance: ActiveInvocationGuidanceCapability;
+}
+
+export const FRESHNESS_CARRIER_PROVIDERS = [
+  'openai_codex',
+  'anthropic',
+  'opencode',
+  'kimi',
+  'other',
+] as const satisfies readonly FreshnessCarrierProvider[];
+
+export const FRESHNESS_CARRIERS = [
+  'codex_app_server',
+  'codex_exec_json',
+  'claude_agent_sdk',
+  'claude_print_sdk',
+  'claude_stream_json',
+  'kimi_stream_json',
+  'mcp_result_piggyback',
+  'other',
+] as const satisfies readonly FreshnessCarrier[];
+
+export const FRESHNESS_CARRIER_DELIVERY_SEMANTICS = [
+  'exact_active_turn',
+  'queued_internal_turn',
+  'mcp_result_piggyback',
+  'unsupported',
+  'undeclared',
+] as const satisfies readonly FreshnessCarrierDeliverySemantics[];
+export const ACTIVE_INVOCATION_GUIDANCE_CAPABILITIES = [
+  'supported',
+  'unsupported',
+  'undeclared',
+] as const satisfies readonly ActiveInvocationGuidanceCapability[];
+
+const FRESHNESS_CARRIER_PROVIDER_SET = new Set<string>(FRESHNESS_CARRIER_PROVIDERS);
+const FRESHNESS_CARRIER_SET = new Set<string>(FRESHNESS_CARRIERS);
+const FRESHNESS_CARRIER_DELIVERY_SEMANTICS_SET = new Set<string>(FRESHNESS_CARRIER_DELIVERY_SEMANTICS);
+const ACTIVE_INVOCATION_GUIDANCE_CAPABILITY_SET = new Set<string>(ACTIVE_INVOCATION_GUIDANCE_CAPABILITIES);
+
+/** Runtime parser shared by API and Web so new carrier literals cannot silently become undeclared. */
+export function parseFreshnessCarrierCapability(value: unknown): FreshnessCarrierCapability | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.provider !== 'string' ||
+    typeof candidate.carrier !== 'string' ||
+    typeof candidate.deliverySemantics !== 'string' ||
+    typeof candidate.activeInvocationGuidance !== 'string' ||
+    !FRESHNESS_CARRIER_PROVIDER_SET.has(candidate.provider) ||
+    !FRESHNESS_CARRIER_SET.has(candidate.carrier) ||
+    !FRESHNESS_CARRIER_DELIVERY_SEMANTICS_SET.has(candidate.deliverySemantics) ||
+    !ACTIVE_INVOCATION_GUIDANCE_CAPABILITY_SET.has(candidate.activeInvocationGuidance)
+  ) {
+    return undefined;
+  }
+  return candidate as unknown as FreshnessCarrierCapability;
+}
+
+/**
+ * Product capability for adding input to the member's current invocation.
+ * Freshness precision is a separate fact: exact-active-turn and queued-internal-turn
+ * carriers can both guide the same invocation, while only the former proves that
+ * the currently visible provider turn consumed the input.
+ */
+export function supportsActiveInvocationGuidance(capability: FreshnessCarrierCapability | undefined): boolean {
+  return capability?.activeInvocationGuidance === 'supported';
 }
 
 export type QueueAuthorIntentFallbackReason =
@@ -45,7 +104,9 @@ export type QueueAuthorIntentFallbackReason =
 
 /**
  * Immutable author request plus an append-only fail-closed fallback fact.
- * `continue_current` is only an exposure permission; it is never read/handled proof.
+ * `continue_current` requests non-interrupting guidance of the member's current
+ * invocation. It is still only delivery permission: neither the request nor
+ * provider/local acceptance is proof that the currently visible turn read it.
  */
 export interface QueueAuthorIntent {
   requested: MessageWorkDisposition;
@@ -123,21 +184,6 @@ export interface QueueTargetOutcome {
   consumption?: QueueTerminalConsumptionWitness;
 }
 
-export type QueueReminderAttemptState = 'requested' | 'delivered' | 'seen' | 'missed';
-export type QueueReminderMissedReason = 'invocation_ended_before_delivery' | 'delivered_not_read' | 'source_withdrawn';
-
-export interface QueueReminderAttempt {
-  id: string;
-  targetCatId: string;
-  invocationId: string;
-  state: QueueReminderAttemptState;
-  requestedAt: number;
-  deliveredAt?: number;
-  seenAt?: number;
-  missedAt?: number;
-  missedReason?: QueueReminderMissedReason;
-}
-
 /**
  * One immutable delivery attempt for one target of an authored Queue message.
  * A retry always appends a new attempt; it never rewrites the failed one or
@@ -153,6 +199,9 @@ export type QueueTargetAttemptState =
   | 'handled';
 export type QueueTargetAttemptTerminalReason =
   | 'invocation_failed'
+  | 'control_plane_unavailable'
+  | 'execution_owner_lost'
+  | 'prestart_timeout'
   | 'runtime_restart'
   | 'invocation_cancelled'
   | 'source_withdrawn';
@@ -167,40 +216,13 @@ export interface QueueTargetAttempt {
   invocationId?: string;
   /** Exact prompt-body exposure time when this attempt reached a reply. */
   seenAt?: number;
+  /**
+   * Durable provider acknowledgement that this source entered an already-active
+   * invocation through the client's generic append capability. Mere exposure,
+   * batching, or matching invocation ids must never populate this field.
+   */
+  activeAppendAcceptedAt?: number;
   terminalReason?: QueueTargetAttemptTerminalReason;
-}
-
-export interface QueueReceiptTarget {
-  catId: string;
-  state: QueueReceiptTargetState;
-  authorIntent?: QueueAuthorIntentReceipt;
-  invocationId?: string;
-  /** Exact time the durable child invocation was created for this target. */
-  awakenedAt?: number;
-  /** Exact time this target's child invocation first received the persisted message body. */
-  seenAt?: number;
-  /** Exact time the author removed this target from actionable Queue custody. */
-  withdrawnAt?: number;
-  outcome?: QueueTargetOutcome;
-  /** Append-only target-local delivery history. Missing only on legacy receipts. */
-  attempts?: QueueTargetAttempt[];
-  /** False when no durable retry is possible or the fenced business action is already terminal. */
-  retryable?: boolean;
-}
-
-export interface QueueMessageReceipt {
-  version: 1;
-  entryId: string;
-  /** The message started this invocation; it is not a work-period receipt surface. */
-  scope?: 'primary_trigger' | 'cross_thread_delivery';
-  targets: QueueReceiptTarget[];
-  reminderAttempts: QueueReminderAttempt[];
-}
-
-/** Message-bound receipt delta for live Queue publication after its actionable row disappears. */
-export interface QueueMessageReceiptProjection {
-  messageId: string;
-  queueReceipt: QueueMessageReceipt;
 }
 
 /** One server-projected Queue escape hatch, including its exact executable request. */

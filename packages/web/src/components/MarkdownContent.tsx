@@ -23,7 +23,13 @@ import { unified } from 'unified';
 import 'katex/dist/katex.min.css';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import { createListenSentenceRemarkPlugin, type ListenSentence } from '@/lib/listen-mode/markdown-sentences';
-import { getMentionColor, getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
+import {
+  getDisplayMentionRe,
+  getDisplayMentionToCat,
+  getMentionColor,
+  getMentionLabel,
+  isCanonicalOnlyMentionAlias,
+} from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatWorkspaceLink } from './ChatWorkspaceLink';
 import { ListenSentenceSpan } from './listen-mode/ListenSentenceSpan';
@@ -131,14 +137,16 @@ function highlightMentions(text: string): ReactNode[] {
   let lastIdx = 0;
   let m: RegExpExecArray | null;
 
-  const re = getMentionRe();
-  const toCat = getMentionToCat();
+  const re = getDisplayMentionRe();
+  const toCat = getDisplayMentionToCat();
   const colorMap = getMentionColor();
+  const labelMap = getMentionLabel();
 
   re.lastIndex = 0;
   while ((m = re.exec(text)) !== null) {
     if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
-    const catId = toCat[m[1].toLowerCase()] ?? 'opus';
+    const alias = m[1].toLowerCase();
+    const catId = toCat[alias] ?? 'opus';
     const catColor = colorMap[catId] ?? UNKNOWN_CAT_COLOR.primary;
     const r = Number.parseInt(catColor.slice(1, 3), 16);
     const g = Number.parseInt(catColor.slice(3, 5), 16);
@@ -149,7 +157,8 @@ function highlightMentions(text: string): ReactNode[] {
       borderRadius: 4,
       padding: '1px 5px',
     };
-    parts.push(<Mention key={`m${m.index}`} catId={catId} text={m[0]} style={style} />);
+    const displayText = isCanonicalOnlyMentionAlias(alias) ? `@${labelMap[catId] ?? catId}` : m[0];
+    parts.push(<Mention key={`m${m.index}`} catId={catId} text={displayText} style={style} />);
     lastIdx = re.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));

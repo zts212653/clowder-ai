@@ -32,12 +32,11 @@ interface PresentLoopExecutionInput {
 
 function requireExecutionPorts(context: ExecuteContext) {
   if (!context.deliver) throw new Error('deliver not available');
-  if (!context.invokeTrigger) throw new Error('invokeTrigger not available');
-  return { deliver: context.deliver, invokeTrigger: context.invokeTrigger };
+  return { deliver: context.deliver };
 }
 
 async function executePresentLoop(input: PresentLoopExecutionInput): Promise<void> {
-  const { deliver, invokeTrigger } = requireExecutionPorts(input.context);
+  const { deliver } = requireExecutionPorts(input.context);
   const threadId = input.subjectKey.replace(/^thread-/, '');
   const schedule = input.context.schedule ?? fallbackTiming(input.trigger);
   const started = await input.service.beginScheduledRun({
@@ -65,28 +64,22 @@ async function executePresentLoop(input: PresentLoopExecutionInput): Promise<voi
       }
     : undefined;
   try {
+    // RFC §5.4: the thread shows the short trigger line; the run's continuity/proactive context is
+    // the target's exact input and never a public History member. One Queue, one drain, two
+    // visibilities — not two reliability mechanisms.
     const messageId = await deliver({
       threadId,
       content: persistedContent,
-      userId: 'scheduler',
+      userId: input.ownerUserId,
+      targetCatId: input.targetCatId,
+      privateContent: invocationContent,
+      sourceCategory: 'scheduled',
+      idempotencyKey: `present-loop:${started.run.runId}`,
       extra: {
         scheduler: { hiddenTrigger: true },
         ...(catOwnedSeed ? { memoryCue: { catOwnedSeed } } : {}),
       },
     });
-    const outcome = await invokeTrigger.trigger(
-      threadId,
-      input.targetCatId,
-      input.ownerUserId,
-      invocationContent,
-      messageId,
-      undefined,
-      {
-        sourceCategory: 'scheduled',
-        reason: 'f255_present_loop',
-      },
-    );
-    if (outcome === 'full') throw new Error('present loop invocation queue is full');
   } catch (error) {
     await input.service.failWake(input.ownerUserId, started.run.runId, error);
     throw error;

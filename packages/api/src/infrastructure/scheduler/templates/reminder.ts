@@ -1,5 +1,4 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import { buildHoldExpiredEvent } from '../../../domains/ball-custody/ball-custody-events.js';
 import type { ScheduleRunTiming, TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
@@ -29,6 +28,18 @@ function isManagedCommandWake(params: Record<string, unknown>): boolean {
   );
 }
 
+function isManagedHoldWake(instanceId: string, params: Record<string, unknown>): boolean {
+  const lifecycle = params.holdLifecycle;
+  return Boolean(
+    instanceId.startsWith('hold-ball-') &&
+      typeof lifecycle === 'object' &&
+      lifecycle !== null &&
+      !Array.isArray(lifecycle) &&
+      ((lifecycle as Record<string, unknown>).mode === 'timer' ||
+        (lifecycle as Record<string, unknown>).mode === 'wake_when'),
+  );
+}
+
 /** Reminder template — fires on schedule, wakes a cat to handle the reminder in-thread */
 export const reminderTemplate: TaskTemplate = {
   templateId: 'reminder',
@@ -48,6 +59,7 @@ export const reminderTemplate: TaskTemplate = {
     const ownerAuthProvenance = instanceId.startsWith('hold-ball-') ? p.ownerAuthProvenance : undefined;
     const threadId = p.deliveryThreadId;
     const managedCommandWake = instanceId.startsWith('hold-ball-') && isManagedCommandWake(p.params);
+    const managedHoldWake = isManagedHoldWake(instanceId, p.params);
     // F167 Phase M (codex P1): pre-fire defer activation is hold_ball-specific.
     // Gate on the `hold-ball-` instanceId prefix — callback-hold-ball-routes mints those
     // ids, while public /api/schedule/tasks only mints `dyn-*` (schedule.ts:417), so a
@@ -81,32 +93,53 @@ export const reminderTemplate: TaskTemplate = {
           const catId = targetCatId ?? ctx.assignedCatId ?? 'opus';
           const content = `${SCHEDULER_TRIGGER_PREFIX} ${formatScheduleTiming(ctx.schedule)}${message}`;
 
-          if (instanceId.startsWith('hold-ball-') && p.trigger.type === 'once' && threadId) {
-            ctx.ballCustody
-              ?.record(buildHoldExpiredEvent({ threadId: tid, catId, fireAt: p.trigger.fireAt, at: Date.now() }))
-              .catch(() => {});
-          }
-
-          // Store trigger message first → real messageId for InvocationRecord + retry
-          const messageId = await ctx.deliver({
-            threadId: tid,
-            content,
-            userId: 'scheduler',
-            ...(ctx.invokeTrigger ? { extra: { scheduler: { hiddenTrigger: true } } } : {}),
-          });
-
-          // Wake a cat to act on the trigger message
-          if (ctx.invokeTrigger) {
-            try {
-              void Promise.resolve(
-                ctx.invokeTrigger.trigger(tid, catId, triggerUserId, content, messageId, undefined, {
-                  sourceCategory: 'scheduled',
-                  ...(ownerAuthProvenance ? { ownerAuthProvenance } : {}),
-                }),
-              ).catch(() => {});
-            } catch {
-              // Best-effort: sync trigger throw should not fail the reminder
-            }
+          // RFC §5.2: a scheduled wake is one `conversation_input` envelope. Naming the member makes
+          // delivery a single atomic Message + Queue admission, so there is no unadmitted source to
+          // compensate for and no second trigger that could be refused.
+          const holdSource = {
+            connector: 'hold-ball',
+            label: '持球唤醒',
+            icon: '🏓',
+            meta: { managedHold: true, phase: 'wake', cancelable: false, taskId: instanceId, threadId: tid, catId },
+          } as const;
+          try {
+            await ctx.deliver({
+              threadId: tid,
+              content,
+              // F117 ADR-043 D.4: stored userId is the verified trigger owner (tenant), not the
+              // author — scheduler authorship is expressed via from: system:scheduler.
+              userId: triggerUserId,
+              targetCatId: catId,
+              sourceCategory: 'scheduled',
+              idempotencyKey: managedHoldWake ? `hold-ball-wake:${instanceId}` : `scheduler-wake:${instanceId}`,
+              ...(managedHoldWake ? { priority: 'urgent' as const, source: holdSource } : {}),
+              ...(ownerAuthProvenance ? { ownerAuthProvenance } : {}),
+              ...(managedHoldWake ? {} : { extra: { scheduler: { hiddenTrigger: true } } }),
+            });
+          } catch (err) {
+            if (!managedHoldWake) throw err;
+            // A managed hold still owes the user a visible end-of-wait fact when its wake cannot be
+            // admitted. Nothing partial exists to roll back — the admission either happened or not.
+            const detail = err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500);
+            await ctx.deliver({
+              threadId: tid,
+              userId: triggerUserId,
+              content: `等待已结束：唤醒入队失败（${detail}）`,
+              idempotencyKey: `hold-ball-wake-failed:${instanceId}`,
+              source: {
+                connector: 'hold-ball',
+                label: '持球状态',
+                icon: '🏓',
+                meta: {
+                  managedHold: true,
+                  phase: 'status',
+                  cancelable: false,
+                  taskId: instanceId,
+                  threadId: tid,
+                  catId,
+                },
+              },
+            });
           }
         },
       },

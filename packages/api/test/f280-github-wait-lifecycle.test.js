@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { WaitLifecycleRecoverySweep } = await import('../dist/domains/ball-custody/WaitLifecycleRecoverySweep.js');
@@ -49,7 +49,7 @@ function activeState(when = [{ kind: 'pr_head_changed' }]) {
 
 async function harness(when) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const connector = connectorDeliveryHarness();
   const eventLog = new MemoryWaitLifecycleEventLog();
   const task = await taskStore.create({
     kind: 'pr_tracking',
@@ -64,17 +64,17 @@ async function harness(when) {
   });
   const lifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: connector.deliveryDeps,
     eventLog,
     now: () => 500,
     log: { info() {}, warn() {}, error() {} },
   });
-  return { taskStore, messageStore, eventLog, task, lifecycle };
+  return { taskStore, connector, eventLog, task, lifecycle };
 }
 
 describe('F280 GitHub wait lifecycle integration', () => {
   it('absorbs registration history and unrelated source activity without a message', async () => {
-    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { lifecycle, connector, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
     const sentinel = 'OLD_BODY_f280_history_must_not_wake';
     const result = await lifecycle.observe({
       taskId: task.id,
@@ -86,7 +86,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     });
 
     assert.equal(result.kind, 'state_only');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(connector.deliveries('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.await.generation, 3);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 99);
   });
@@ -98,7 +98,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
    * the collector patch. Nothing woke anyone, which is why it would have stayed invisible.
    */
   it('a wait with no expiresAt keeps a quiet poll state-only and still records collector progress', async () => {
-    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { lifecycle, connector, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
     const current = (await taskStore.get(task.id)).automationState;
     const { expiresAt: _omitted, ...noDeadline } = current.await;
     await taskStore.replaceAutomationStateIfGeneration(task.id, {
@@ -114,7 +114,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     });
 
     assert.equal(result.kind, 'state_only', 'a quiet poll is not a dedup, deadline or no deadline');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(connector.deliveries('thread_1').length, 0);
     const after = (await taskStore.get(task.id)).automationState;
     assert.equal(after.await.generation, 3, 'still the same live generation');
     assert.equal(after.review.lastDecisionCursor, 99, 'the collector patch must still land');
@@ -126,7 +126,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
    * "easy to forget, breaks the notification chain" failure #1392 opened with.
    */
   it('follows two consecutive HEAD updates without re-registration', async () => {
-    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { lifecycle, connector, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
 
     const first = await lifecycle.observe({ taskId: task.id, facts: { headSha: 'bbbb2222' } });
     assert.equal(first.kind, 'notified');
@@ -145,17 +145,17 @@ describe('F280 GitHub wait lifecycle integration', () => {
     const second = await lifecycle.observe({ taskId: task.id, facts: { headSha: 'cccc3333' } });
     assert.equal(second.kind, 'notified', 'the second update is heard without registering again');
     assert.equal((await taskStore.get(task.id)).automationState.await.generation, 5);
-    assert.equal(messageStore.getByThread('thread_1').length, 2);
+    assert.equal(connector.deliveries('thread_1').length, 2);
   });
 
   it('does not deliver the same update twice across a renewal', async () => {
-    const { lifecycle, messageStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { lifecycle, connector, task } = await harness([{ kind: 'pr_head_changed' }]);
 
     await lifecycle.observe({ taskId: task.id, facts: { headSha: 'bbbb2222' } });
     const replay = await lifecycle.observe({ taskId: task.id, facts: { headSha: 'bbbb2222' } });
 
     assert.notEqual(replay.kind, 'notified', 'N+1 starts at the HEAD N reported, so the same HEAD is history');
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(connector.deliveries('thread_1').length, 1);
   });
 
   /*
@@ -167,7 +167,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
    */
   it('re-delivering a pending outcome does not swallow the observation that belongs to N+1', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const task = await taskStore.create({
       kind: 'issue_tracking',
       subjectKey: 'issue:owner/repo#9',
@@ -191,18 +191,11 @@ describe('F280 GitHub wait lifecycle integration', () => {
         },
       },
     });
-    const append = messageStore.append.bind(messageStore);
-    let failures = 1;
-    messageStore.append = (message) => {
-      if (failures > 0) {
-        failures -= 1;
-        throw new Error('message store unavailable');
-      }
-      return append(message);
-    };
+    // The durable boundary is Queue admission, so that is where the failure is injected.
+    connector.failNextDeliveries(1);
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       now: () => 500,
       log: { info() {}, warn() {}, error() {} },
     });
@@ -213,7 +206,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
         collectorPatch: { issue: { lastCommentCursor: id } },
       });
 
-    await assert.rejects(poll(101), /message store unavailable/);
+    await assert.rejects(poll(101), /queue admission unavailable/);
     const stranded = (await taskStore.get(task.id)).automationState;
     assert.equal(stranded.waitOutcome.delivery, 'pending', 'N is installed but undelivered');
     assert.equal(stranded.await.generation, 4, 'and N+1 is already live beside it');
@@ -221,7 +214,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     // The collector cursor already passed #101, so this poll carries only #102.
     const second = await poll(102);
 
-    const contents = messageStore.getByThread('thread_issue').map((message) => message.content);
+    const contents = connector.deliveries('thread_issue').map((message) => message.content);
     assert.equal(contents.length, 2, 'N is re-delivered and N+1 reports its own comment');
     assert.ok(contents.some((content) => /issue comment #101 added by someone/.test(content)));
     assert.ok(
@@ -241,7 +234,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
    */
   async function strandedIssueWait() {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const task = await taskStore.create({
       kind: 'issue_tracking',
       subjectKey: 'issue:owner/repo#9',
@@ -290,7 +283,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     const outboxWakes = [];
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       now: () => 500,
       log: { info() {}, warn() {}, error() {} },
       wakeOwner: (delivered) => {
@@ -303,7 +296,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
         facts: { issue: { state: 'open', comments: [{ id, author: 'someone' }] } },
         collectorPatch: { issue: { lastCommentCursor: id, lastDeliveredCursor: id } },
       });
-    const contents = () => messageStore.getByThread('thread_issue').map((message) => message.content);
+    const contents = () => connector.deliveries('thread_issue').map((message) => message.content);
     return { taskStore, task, races, poll, contents, outboxWakes };
   }
 
@@ -351,12 +344,12 @@ describe('F280 GitHub wait lifecycle integration', () => {
     { name: 'a late review of the old HEAD stays absorbed', newDecisions: [], reported: false },
   ]) {
     it(`same poll as a push: ${name}`, async () => {
-      const { lifecycle, messageStore, taskStore, task } = await harness([
+      const { lifecycle, connector, taskStore, task } = await harness([
         { kind: 'pr_head_changed' },
         { kind: 'pr_review_decision_changed' },
       ]);
       const log = { info() {}, warn() {}, error() {} };
-      const router = new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log });
+      const router = new ReviewFeedbackRouter({ deliveryDeps: connector.deliveryDeps, waitLifecycle: lifecycle, log });
       const review = (commitId) => ({
         id: 41,
         author: 'reviewer',
@@ -390,7 +383,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
       const next = await poll([]);
       assert.notEqual(next.kind, 'notified', 'N+1 never replays what N reported or absorbed');
-      assert.equal(messageStore.getByThread('thread_1').length, 1);
+      assert.equal(connector.deliveries('thread_1').length, 1);
     });
   }
 
@@ -400,7 +393,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
    * the continuation from the renewal plan and "pause once" silently becomes "pause forever".
    */
   it('pauses one delivery on the review-loop brake without pausing every later generation', async () => {
-    const { lifecycle, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { connector, lifecycle, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
 
     const braked = await lifecycle.observe({
       taskId: task.id,
@@ -417,7 +410,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
   });
 
   it('a merged PR ends tracking instead of renewing it', async () => {
-    const { lifecycle, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { connector, lifecycle, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
 
     await lifecycle.observe({ taskId: task.id, facts: { headSha: 'aaaa1111' }, subjectState: 'merged' });
 
@@ -436,7 +429,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
     { name: 'an expired deadline', observation: { at: 10_000 }, reason: 'expired' },
   ]) {
     it(`${name} still reports what its final poll matched`, async () => {
-      const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+      const { lifecycle, connector, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
 
       const result = await lifecycle.observe({ taskId: task.id, facts: { headSha: 'bbbb2222' }, ...observation });
 
@@ -444,7 +437,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
       assert.equal(result.outcome.reason, reason, 'tracking still ends, for the same reason');
       assert.match(result.content, /HEAD aaaa111 → bbbb222/, 'the final poll’s match is not dropped');
       assert.equal((await taskStore.get(task.id)).status, 'done');
-      assert.equal(messageStore.getByThread('thread_1').length, 1);
+      assert.equal(connector.deliveries('thread_1').length, 1);
     });
   }
 
@@ -453,11 +446,11 @@ describe('F280 GitHub wait lifecycle integration', () => {
    * miss, and after this delivery the task is done — nothing will ever report it later.
    */
   it('a merged PR still reports the awaited comment that arrived in the same poll', async () => {
-    const { lifecycle, messageStore, taskStore, task } = await harness([
+    const { lifecycle, connector, taskStore, task } = await harness([
       { kind: 'pr_conversation_comment_added', authorLogins: ['maintainer'] },
     ]);
     const log = { info() {}, warn() {}, error() {} };
-    const router = new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log });
+    const router = new ReviewFeedbackRouter({ deliveryDeps: connector.deliveryDeps, waitLifecycle: lifecycle, log });
 
     const result = await router.route(
       {
@@ -489,16 +482,16 @@ describe('F280 GitHub wait lifecycle integration', () => {
   });
 
   it('keeps CI failure and mindfn COMMENTED state-only, then wakes once for the awaited new HEAD', async () => {
-    const { lifecycle, messageStore, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
+    const { lifecycle, connector, taskStore, task } = await harness([{ kind: 'pr_head_changed' }]);
     const log = { info() {}, warn() {}, error() {} };
     const ci = new CiCdRouter({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       waitLifecycle: lifecycle,
       log,
     });
     const review = new ReviewFeedbackRouter({
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       waitLifecycle: lifecycle,
       log,
     });
@@ -536,7 +529,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
       { taskId: task.id },
     );
     assert.equal(commented.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(connector.deliveries('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastDecisionCursor, 99);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'fail');
 
@@ -556,11 +549,11 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal(newHead.kind, 'notified');
     assert.match(newHead.content, /HEAD aaaa111 → bbbb222/);
     assert.doesNotMatch(newHead.content, /mindfn|UNTRUSTED_REVIEW_BODY/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(connector.deliveries('thread_1').length, 1);
   });
 
   it('consumes a generation once and publishes only compact baseline delta plus next step', async () => {
-    const { lifecycle, messageStore, eventLog, taskStore, task } = await harness();
+    const { lifecycle, connector, eventLog, taskStore, task } = await harness();
     const first = await lifecycle.observe({
       taskId: task.id,
       facts: { headSha: 'bbbb2222' },
@@ -572,7 +565,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
     assert.equal(first.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
-    const messages = messageStore.getByThread('thread_1');
+    const messages = connector.deliveries('thread_1');
     assert.equal(messages.length, 1);
     assert.match(messages[0].content, /HEAD aaaa111 → bbbb222/);
     assert.match(messages[0].content, /Next: Re-lock the exact HEAD/);
@@ -591,7 +584,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
   });
 
   it('projects the fourth-review brake through the existing outcome without adding round state', async () => {
-    const { lifecycle, taskStore, task } = await harness([{ kind: 'pr_review_decision_changed' }]);
+    const { connector, lifecycle, taskStore, task } = await harness([{ kind: 'pr_review_decision_changed' }]);
     const result = await lifecycle.observe({
       taskId: task.id,
       facts: {
@@ -619,7 +612,7 @@ describe('F280 GitHub wait lifecycle integration', () => {
   });
 
   it('a bot-authored CI terminal fact wakes only an explicit CI waiter', async () => {
-    const { lifecycle, task } = await harness([{ kind: 'pr_ci_terminal' }]);
+    const { connector, lifecycle, task } = await harness([{ kind: 'pr_ci_terminal' }]);
     const result = await lifecycle.observe({
       taskId: task.id,
       facts: {
@@ -653,11 +646,11 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
   it('recovery replays silent terminal events and pending owner wakes idempotently', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const eventLog = new MemoryWaitLifecycleEventLog();
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       eventLog,
       log: { info() {}, warn() {}, error() {} },
     });
@@ -717,18 +710,18 @@ describe('F280 GitHub wait lifecycle integration', () => {
     assert.equal((await eventLog.read(silent.id)).length, 1);
     assert.equal((await eventLog.read(silent.id))[0].reason, 'superseded');
     assert.equal((await eventLog.read(pending.id)).length, 1);
-    assert.equal(messageStore.getByThread('thread_silent').length, 0);
-    assert.equal(messageStore.getByThread('thread_pending').length, 1);
+    assert.equal(connector.deliveries('thread_silent').length, 0);
+    assert.equal(connector.deliveries('thread_pending').length, 1);
     assert.equal((await taskStore.get(pending.id)).automationState.waitOutcome.delivery, 'delivered');
   });
 
   it('quarantines a legacy unfenced pending outcome and continues recovering a later fenced outcome', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const warnings = [];
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       log: {
         info() {},
         warn(...args) {
@@ -790,9 +783,9 @@ describe('F280 GitHub wait lifecycle integration', () => {
 
     assert.deepEqual(await sweep.run(), { recovered: 2 });
 
-    assert.equal(messageStore.getByThread(legacy.threadId).length, 0);
+    assert.equal(connector.deliveries(legacy.threadId).length, 0);
     assert.equal((await taskStore.get(legacy.id)).automationState.waitOutcome.delivery, 'legacy_unfenced');
-    assert.equal(messageStore.getByThread(current.threadId).length, 1);
+    assert.equal(connector.deliveries(current.threadId).length, 1);
     assert.equal((await taskStore.get(current.id)).automationState.waitOutcome.delivery, 'delivered');
     assert.ok(warnings.some((args) => args.some((value) => String(value).includes(legacy.id))));
   });

@@ -31,7 +31,7 @@ export async function routingPreflightNotice(
   try {
     const stored = await deps.messageStore.append({
       userId: 'system',
-      catId: null,
+      from: { kind: 'system', service: 'routing-preflight' },
       threadId,
       timestamp,
       content,

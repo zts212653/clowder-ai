@@ -139,26 +139,6 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
     assert.deepEqual(parsed?.stream, input.stream);
   });
 
-  it('ADR-042: round-trip preserves supplement reply provenance as a separate field', async () => {
-    const { serializeExtra, safeParseExtra } = await import(
-      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
-    );
-    const input = {
-      freshness: { kind: 'fresh', priorFrontierMessageId: 'msg-frontier' },
-      supplement: {
-        lineageId: 'msg-original',
-        supplementId: 'f254-supplement:msg-original:1',
-        seq: 1,
-        originalMessageId: 'msg-original',
-      },
-    };
-
-    const parsed = safeParseExtra(serializeExtra(input));
-
-    assert.deepEqual(parsed?.freshness, input.freshness);
-    assert.deepEqual(parsed?.supplement, input.supplement);
-  });
-
   it('F254: round-trip preserves typed invocation-reply causal provenance', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
@@ -235,25 +215,6 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
     );
 
     assert.deepEqual(parsed?.auxiliaryTurnExecutions, [guard]);
-  });
-
-  it('ADR-042: round-trip preserves a visible supplement-offer failure on the original', async () => {
-    const { serializeExtra, safeParseExtra } = await import(
-      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
-    );
-    const input = {
-      freshness: {
-        kind: 'published_with_unseen',
-        priorFrontierMessageId: 'msg-frontier',
-        generatedWithUnseen: ['msg-update'],
-        lineageId: 'msg-original',
-        supplementFailureReason: 'infrastructure',
-      },
-    };
-
-    const parsed = safeParseExtra(serializeExtra(input));
-
-    assert.deepEqual(parsed?.freshness, input.freshness);
   });
 
   it('F167 Phase R: round-trip preserves cross-thread coordination projection', async () => {
@@ -397,5 +358,35 @@ describe('F194 Phase Z9 hotfix — safeParseExtra preserves turnInvocationId', (
 
     assert.equal(parsed?.isExplicitPost, true);
     assert.equal(parsed?.memoryCue, undefined);
+  });
+});
+
+describe('routing warning persistence', () => {
+  it('round-trips typed inline routing warnings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const input = {
+      routingWarnings: [
+        { kind: 'cat_not_found', mention: '@missing', alternatives: [] },
+        { kind: 'target_not_in_thread', catId: 'cat-away', threadId: 'thread-1' },
+      ],
+    };
+
+    assert.deepEqual(safeParseExtra(serializeExtra(input))?.routingWarnings, input.routingWarnings);
+  });
+
+  it('drops the entire routing warning carrier when one entry is malformed', async () => {
+    const { safeParseExtra } = await import('../dist/domains/cats/services/stores/redis/redis-message-parsers.js');
+    const parsed = safeParseExtra(
+      JSON.stringify({
+        routingWarnings: [
+          { kind: 'cat_not_found', mention: '@missing', alternatives: [] },
+          { kind: 'target_not_in_thread', catId: '', threadId: 'thread-1' },
+        ],
+      }),
+    );
+
+    assert.equal(parsed?.routingWarnings, undefined);
   });
 });

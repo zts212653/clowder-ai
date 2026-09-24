@@ -4,12 +4,12 @@ related_features: [F216, F175, F153, F118, F194, F215, F224]
 topics: [a2a, observability, liveness, invocation, queue, interrupt, recovery, ux]
 doc_kind: spec
 created: 2026-06-02
-tips_exempt: automatic zombie-ownership and queue-publication hardening; no new user action or standalone capability surface
+tips_exempt: 2026-09-03 KD-9 renews automatic zombie-ownership and Stop reconciliation hardening while deleting the separate force-reset UI; no new user action or standalone capability surface
 ---
 
 # F220: A2A 协作的可观测 · 可靠 · 可恢复
 
-> **Status**: in-progress | **Owner**: 小太阳·Maine Coon (Sol/GPT-5.6-sol；2026-08-04 operator 重分配) | **Priority**: P1 | **Source**: internal
+> **Status**: done | **Owner**: 小太阳·Maine Coon (Sol/GPT-5.6-sol；2026-08-04 operator 重分配) | **Priority**: P1 | **Source**: internal
 >
 > **Thread legend**：`[thread-id]` = 驱动/owner thread（Layer 1 现场调查 + 落地，Ragdoll Opus-4.8）｜`[thread-id]` = 立项 thread（平行 opus-48：立项 + 设计沉淀 + 交接，已收工）。
 
@@ -26,7 +26,7 @@ Why（一句话）: A2A 触发与卡死恢复都落在既有 invocation/queue/tr
 2. **可观测**：目标猫"启动中/排队中"占位及时出现在主聊天 chrome（复用 F118 D2 `spawn_started`）——用户看得见"猫在路上"，不是空等一片
 3. 猫正常跑完 → 回复出现；若在排队，用户看到队列占位而非"消失"
 4. **可靠**：即使上一棒猫被判僵尸清理，它残留的 stale `processing` 队列条目也被一并收敛（clowder-ai#972）——用户后发的消息不会卡在一具"尸体"后面永远不跑
-5. **可恢复**：若猫真卡死（补一刀仍不进 running），thread 出现情境化 force-reset 逃生口（带确认弹窗，**只清运行态、绝不动消息/历史/记忆**，LL-048）；用户点确认 → thread 解放
+5. **可恢复**：若猫真卡死，用户仍只点同一个「停止」；服务端自动从精确取消升级为就地对账（只清运行态、绝不动消息/历史/记忆，LL-048）→ thread 解放。进程快照不可用时服务端有界重试后按 dispatch terminal 把该执行终局为 failed 并沿 F117 Phase C 失败传播回溯上游（猫来源 A2A 报回、origin 来源可见失败终态）；没有任何确认弹窗（2026-09-03 KD-9 取代原「force-reset 逃生口」，现行真相为 ADR-043 D9）
 6. 全程用户对"谁在跑 / 卡没卡 / 能不能自救"有一致、可信的感知——猫间协作**看得见、信得过、能恢复**
 
 ---
@@ -53,7 +53,7 @@ operator要"**信得过的猫间协作**"。但今天 A2A（猫@猫）协作在�
 - ✅ `POST /api/threads/:id/force-reset` 端点**已存在**（2026-05-29 bug-report 加的）：cancelAll + 清 slot/record + 广播 done，user-scoped。
 - 🔧 **Layer 1 缺口（Phase 1 implementation in `feat/f220-a2a-liveness-signal`）**：组件能渲染 spawning，但现代 InvocationQueue 路径缺少与 direct `/api/messages` 对等的 `spawn_started`。QueueProcessor 开始 processing 后只发 `queue_updated`，`intent_mode` 又按 #768 延迟到 CLI 第一条事件；CLI 冷启动/首事件延迟期间，主聊天 chrome 拿不到"目标猫正在启动"信号。修复：`QueueProcessor.executeEntry` 在 `startAll` + running record 后、`intent_mode` 前广播既有 `spawn_started`。
 - ⚠️ **Layer 2**：has()=false 占用 slot 的真 hang（dead-Redis create 等病态）；#2053 已证 steer 无法 sound force-recover，只能靠 75min sweep / force-reset。
-- ⚠️ **Layer 3**：force-reset 端点有，**前端无 UI 入口**——用户卡死时没有可点的逃生口。
+- ⚠️ **Layer 3**：force-reset 端点有，**前端无 UI 入口**——用户卡死时没有可点的逃生口。→ Phase 3 曾接入常驻/升级入口；**2026-09-03 KD-9 退役**：入口与「运行状态待确认」横幅删除，端点只作为 Stop 阶梯最后一级的 thread 级对账。
 
 ## What
 
@@ -99,6 +99,8 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 收敛顺序固定为：`InvocationRecord CAS failed` → 精确移除 stale queue row / rollback owned siblings → owner-guarded slot release → snapshot 进入 `emitQueueUpdated` 的 `(socket,thread,user)` publication tail → predecessor settled → **在 enrichment deadline 内按调用顺序发布 enriched 或 frozen raw removal snapshot** → dispatch replacement；所有其他 queue publisher 也必须进入同一 tail，queue mutation、record/slot 收敛与其他 scope 不等待 enrichment，任何单次 enrichment stall 不能无限保留 tail，TaskProgress cleanup 与后续 zombie 的关键收敛解耦并行执行，但自身必须按 invocation owner 原子删除。
 
 ### Phase 3 — 可恢复：force-reset 逃生口 UI（Layer 3）
+
+> **2026-09-03 退役（KD-9）**：逃生口不再是用户概念——「停止」是唯一动作，服务端阶梯自动对账（ADR-043 D9）。本节与下方设计稿保留为历史记录。
 把已有的 `force-reset` 端点接到一个**情境化、带确认弹窗**的 UI 入口。**设计稿见下方 §设计稿（operator 2026-06-02 已审过概念 + 确认要弹窗确认）**。
 
 ## Acceptance Criteria
@@ -115,10 +117,11 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - [x] AC-2.2: 修复按 seam 收敛——F194 PR #2928 的 tracker/slot recovery + F220 PR #2917 的 queue-row convergence + PR #3047 的 serial-child parent liveness + clowder-ai#1150 的 owner-CAS/publication fence 均已合入；`/active-pane` no-op 已删除；pre-start slot↔row TTL slice 已由 PR #3415（`e76dec000`）合入。
 
 **Phase 3（可恢复）✅ code+test done @ main 4e80ec889（PR #2065 squash）；runtime 截图验收 → operator quickpath**
-- [x] AC-3.1: 卡死/有活跃调用时 thread 出现情境化 force-reset 入口（非常驻）。→ `ThreadExecutionBar` 内 `ForceResetEntry`，有猫在跑才显示，`suspected_stall`/`alive_but_silent` 时上浮升级（`data-escalated`）。测试 4 绿。
-- [x] AC-3.2: 点击弹**确认弹窗**（做什么/保留什么/何时用），确认才执行。→ `ForceResetDialog`（取消默认 focus / 强制重置危险红）。测试 4 绿。
-- [x] AC-3.3: 确认 → force-reset → thread 解放；消息/历史**不丢**（LL-048 只清运行态）。→ `apiFetch POST force-reset` + toast「已重置」。复核（截图前后 + 消息条数不变）→ operator quickpath runtime 验。
+- [x] AC-3.1: 卡死/有活跃调用时 thread 出现情境化 force-reset 入口（非常驻）。→ `ThreadExecutionBar` 内 `ForceResetEntry`，有猫在跑才显示，`suspected_stall`/`alive_but_silent` 时上浮升级（`data-escalated`）。测试 4 绿。→ **superseded 2026-09-03（KD-9）**：入口删除，卡死时用户仍只点「停止」。
+- [x] AC-3.2: 点击弹**确认弹窗**（做什么/保留什么/何时用），确认才执行。→ `ForceResetDialog`（取消默认 focus / 强制重置危险红）。测试 4 绿。→ **superseded 2026-09-03（KD-9）**：弹窗退役；进程快照不可用时按 failed 终局并沿失败传播回溯上游，不弹任何确认。
+- [x] AC-3.3: 确认 → force-reset → thread 解放；消息/历史**不丢**（LL-048 只清运行态）。→ `apiFetch POST force-reset` + toast「已重置」。复核（截图前后 + 消息条数不变）→ operator quickpath runtime 验。（端点保留为 Stop 阶梯最后一级的 thread 级对账；LL-048 边界不变）
 - [x] AC-3.4: force-reset 对 record-present hung 和 **recordless canonical Queue owner** 都能清。后者从 user/thread-scoped `processingSlots` 发现 exact Queue group，在首个终态 await 前安装 replacement barrier，完成 durable row/custody terminalization 后才释放；迟到 cleanup 无法删除 replacement owner。真实 route + QueueProcessor 回归并验证 `queue_updated` 发布。2026-08-19 新 runtime（revision `1d1e774d4`，包含 PR #3782 merge `e240a8183`）live acceptance：exact cancel 后 Queue/active 归零，180 秒 foreground tree 与其 exact app-server host 消失，无关 host 存活；同 thread 后继在新 host 完成 exact token，未续跑旧指令；随后 Queue-backed 120 秒 invocation 经 force-reset 再次收敛至 queue=0、active=0、无 marker/host 残留。
+- [x] AC-3.5: **逃生口退役 + Stop 阶梯（KD-9 / ADR-043 D9）**：删除 `ThreadExecutionBar` 常驻与 `suspected_stall` 触发的 force-reset 入口、「运行状态待确认」横幅与 `ForceResetDialog`；exact Stop 无活候选时服务端就地对账返回 `reconciled`，进程快照不可用时按 failed 终局；`/force-reset` 仅作内部 reconciler。→ PR #1398（F117 Phase E，AC-E7）代码与自动化验收完成，进入跨族复审 / worktree 体验。
 
 ## Dependencies
 - force-reset 端点（`queue.ts`，已存在）。
@@ -139,8 +142,9 @@ bug 链：opus parent 结束本轮 → tracker 没了/无 fresh draft → 过 gr
 - KD-5（2026-06-17 Ragdoll opus-48，接 Maine Coon routing #972）：Phase 2 答案按 **F220↔F224 轴接缝**切两层——**2a 局部修**（active-pane canonical-liveness SoT / reconcileZombies→queue 收敛 / slot↔queue 一致 / 回归）= F220 已祝福方向内、可逆 → **自决实现，不上 operator**；**2b 架构 seam**（serial-continuation-child ↔ parent/queue liveness 桥接，牵动"统一 liveness SoT"+ 轴边界重画）= 架构级 → 出 Decision Packet 交 **operator 拍板拆 feat**。遵 KD-3：2b 不在根因报告+repro 前动手大改。**#972 是"两轴不共享根因"假设的反例**（轴在此 failure mode 交互）——若 2b operator 决定重画边界，序言断言需同步修订。
 - KD-7（2026-08-04 小太阳·Maine Coon，operator 接管后 closure audit）：KD-5 的 Decision Packet 前提已被 2026-07-18 PR #3047 的后续事实消解。child lifecycle 继续由既有 `TurnExecutionStore` 持有，F194 canonical read 只消费它；没有新增 store、extension point 或 ownership cell。结论是 **不拆新 feat、不改 `/active-pane`、不再向 operator提交过期的架构 A/B 题**，直接按已合入证据同步 truth。
 - KD-8（2026-08-18 小太阳·Maine Coon）：#1371 live acceptance 暴露的两个 residual 按确定契约分治。Queue reset 复用既有 pre-start exact-group retirement barrier，不新造 slot 恢复机制；Codex 取消一旦被 lease 观察就永久污染 exact host，cooperative close 和 timeout 都只能走 host eviction 与既有 supervisor owner-token/PID-start-identity 收敛。裸 `@target` 仍是 composer 语法，literal 日志/示例用反引号或代码块，不修 runtime parser。
+- KD-9（2026-09-03 co-creator，#1398 worktree 验收）：**force-reset 逃生口退役为用户概念**。用户只有在运行/未运行两态和一个动作「停止」（单只/全部）；停止的成功判据是投影进入未运行。服务端阶梯：exact 活取消 → 无活候选则就地对账（pre-start 退回 / running 记录置 canceled / 孤儿锁与槽位释放 / 终态广播）返回 `reconciled`，永不对自有执行 409；进程快照不完整时服务端有界重试后按 dispatch terminal 将该 exact child 终局为 failed 并沿 F117 Phase C 失败传播回溯上游（猫来源 A2A 报回、origin 来源可见失败终态；重做只来自新的用户意图），没有任何确认弹窗；有活性见证的 sibling 保持运行且 parent 不被提前终局；read-repair 与 pre-start timeout 使用真实失败原因。不做平台兼容分支，Windows 子进程不可观测同样走这条 fail 分支收敛。「运行状态待确认」横幅与基于 `suspected_stall` 上浮的入口删除。根因定性：Phase 2 报告（#972）的「多 liveness SoT 无收敛点」是设计缺陷，F194 / TurnExecution / ADR-043 已关闭进程内分叉，剩余基础设施故障归 reconciler（启动 / 读取 read-repair / 停止三处复用）。现行真相：ADR-043 D9。
 
-## 设计稿（Phase 3 — force-reset 逃生口 UI，operator 2026-06-02 已审概念）
+## 设计稿（Phase 3 — force-reset 逃生口 UI，operator 2026-06-02 已审概念；**2026-09-03 KD-9 退役，仅存档**）
 
 **它 reset 什么**：reset 这个 thread 的**执行状态**——取消你在这个 thread 里所有在跑的猫调用 + 清掉卡住的"正在回复中"/"队列繁忙"状态 → thread 重新能用。**不删消息/历史/thread，不碰别人的调用，不碰记忆数据**。只擦"谁在跑"的临时态。
 

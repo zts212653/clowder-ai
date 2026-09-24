@@ -101,6 +101,7 @@ export function ThinkingContent({
     <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: 'var(--cat-msg-inset)', borderRadius: 10 }}>
       <button
         type="button"
+        data-reading-disclosure
         onClick={() => {
           userInteracted.current = true;
           setExpanded((v) => !v);

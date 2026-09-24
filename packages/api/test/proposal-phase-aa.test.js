@@ -23,7 +23,11 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -55,7 +59,7 @@ describe('F128 Phase AA — seed message source attribution', () => {
 
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.ok(entries.length > 0, 'message was enqueued');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
 
     // AC-AA4: the seed message author should be the proposing cat, not the approver
     assert.equal(
@@ -70,7 +74,11 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const invocationQueue = new InvocationQueue();
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -100,7 +108,7 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const body = JSON.parse(res.body);
 
     const entries = invocationQueue.list(body.threadId, 'alice');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
 
     // AC-AA5: crossPost metadata for frontend pill + jump-to-source
     assert.ok(stored.extra?.crossPost, 'AC-AA5: seed message must have extra.crossPost');

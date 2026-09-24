@@ -3,7 +3,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { resolveSender } from '@/lib/resolve-sender';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import { focusLineageMessage } from '@/utils/focusLineageMessage';
 
 interface ReplyPreviewBarProps {
   replyToMessage: { id: string; content: string; senderCatId: string | null };
@@ -24,7 +24,7 @@ export function ReplyPreviewBar({ replyToMessage, cats, onClear }: ReplyPreviewB
   const sender = resolveSender(senderCatId, getCatById, coCreator);
 
   const handleClick = () => {
-    scrollToMessage(replyToId);
+    focusLineageMessage(replyToId);
   };
 
   return (

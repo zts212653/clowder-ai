@@ -20,6 +20,7 @@ import { useShallow } from 'zustand/react/shallow';
 import type { CatInvocationInfo, CatStatusType, ChatMessage } from '@/stores/chat-types';
 import { type ChatState, useChatStore } from '@/stores/chatStore';
 import { projectTerminalActiveInvocationSlots } from '@/stores/invocation-liveness';
+import { getOrderedMessageTimeline } from '@/stores/message-timeline';
 
 /** Inert defaults returned when threadId is null or has no entry. Frozen so
  *  callers can't accidentally mutate a shared singleton. */
@@ -33,7 +34,7 @@ const EMPTY_CAT_INVOCATIONS: Readonly<Record<string, CatInvocationInfo>> = Objec
 export interface ThreadLiveness {
   hasActive: boolean;
   catStatuses: Record<string, CatStatusType>;
-  /** F210 H3: per-cat agy 进度文案（折叠单行 "AGY working · N steps · latest"），ThinkingIndicator 显示。 */
+  /** F210 H3: per-cat agy progress retained for structured execution diagnostics. */
   catStatusDetails: Record<string, string>;
   activeInvocations: Record<string, { catId: string; mode: string; startedAt?: number }>;
   catInvocations: Record<string, CatInvocationInfo>;
@@ -77,10 +78,15 @@ function projectTerminalLiveness(liveness: ThreadLiveness): ThreadLiveness {
   };
 }
 
-/** Pure selector — returns the messages array for a thread, preferring the
- *  flat slice when threadId is current (to keep reference equality with the
- *  source-of-truth and avoid cross-thread dup). */
+/** Pure selector — derives the one canonical presentation-ordered view for a
+ *  thread. Active and background sources share the same memoized projection;
+ *  writers keep storage/insertion shape and never own display order. */
 export function selectThreadMessages(state: ChatState, threadId: string | null): ChatMessage[] {
+  return getOrderedMessageTimeline(selectThreadMessagesRaw(state, threadId));
+}
+
+/** Unsorted immutable store snapshot for a viewport that owns its display-order round. */
+export function selectThreadMessagesRaw(state: ChatState, threadId: string | null): ChatMessage[] {
   if (!threadId) return EMPTY_MESSAGES as ChatMessage[];
   if (threadId === state.currentThreadId || !state.currentThreadId) {
     return state.messages ?? (EMPTY_MESSAGES as ChatMessage[]);

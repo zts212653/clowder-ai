@@ -2,7 +2,7 @@ import { readFileSync, watch } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
-import type { ExecuteContext, ScheduleInvokeTrigger } from '../../scheduler/types.js';
+import type { ExecuteContext } from '../../scheduler/types.js';
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import { type EvalDomainRegistryEntry, parseEvalDomainRegistryFile } from '../domain/eval-domain-registry.js';
 import {
@@ -19,7 +19,6 @@ interface ObserveDesignGateThresholdTriggerInput {
   domain: EvalDomainRegistryEntry;
   store: IEvalDomainTriggerStore;
   deliver?: ExecuteContext['deliver'];
-  invokeTrigger?: ScheduleInvokeTrigger;
   defaultUserId?: string;
   wiredPublishDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>;
   threadStore?: IThreadStore;
@@ -185,7 +184,6 @@ export async function observeDesignGateThresholdTrigger(
     triggerReason: `Threshold eval: ${input.domain.domainId} ${transition.previousEligibleEpisodes}→${transition.currentEligibleEpisodes}`,
     store: input.store,
     deliver: input.deliver,
-    invokeTrigger: input.invokeTrigger,
     defaultUserId: input.defaultUserId,
     nowMs: input.nowMs,
   });

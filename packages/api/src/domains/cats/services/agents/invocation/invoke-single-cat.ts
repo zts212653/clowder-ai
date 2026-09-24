@@ -1163,11 +1163,6 @@ export interface InvocationDeps {
     import('../../cloud-bridge/cloud-return-grant.js').CloudReturnGrantStore,
     'issue'
   >;
-  /** Server-owned exact A2A terminal producer used by the cloud transport. */
-  readonly a2aDispatchDispositionService?: Pick<
-    import('../../../../ball-custody/A2ADispatchDispositionService.js').A2ADispatchDispositionService,
-    'complete'
-  >;
   /**
    * F254 Phase B3/B4: Optional freshness re-invoke callback.
    * Called after invocation terminal event to decide if a re-invoke is needed
@@ -1194,19 +1189,6 @@ export interface InvocationDeps {
   }) => Promise<import('../../freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController | null>;
   /** F306: canonical cross-provider request/response surface. */
   readonly runtimeInteractionPort?: import('../../../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
-  readonly freshnessReinvokeCheck?: (params: {
-    invocationId: string;
-    threadId: string;
-    catId: import('@cat-cafe/shared').CatId;
-    userId: string;
-  }) => Promise<{
-    shouldReinvoke: boolean;
-    reason: string;
-    skipReason?: string;
-    noticeIds: string[];
-    senders: string[];
-    reinvokePrompt?: string;
-  } | null>;
   /** F287: invocation-bound Cue resolver; receives only server-owned typed seeds. */
   readonly memoryCuePromptService?: MemoryCueInvocationPromptResolver;
   /** F312: lane-owned standing predicate for an unconsumed canonical Profile revision. */
@@ -1318,9 +1300,25 @@ export interface InvocationParams {
     invocationId: string;
     messageIds: readonly string[];
     seenAt: number;
-  }) => Promise<
-    readonly import('../../../../ball-custody/TurnCustodyProjectionService.js').TurnCustodyWakeProvenance[] | void
-  >;
+  }) => Promise<void>;
+  /** Create the exact child's durable processing response before provider startup. */
+  readonly onLifecycleInvocationStarted?: (input: {
+    threadId: string;
+    userId: string;
+    catId: CatId;
+    invocationId: string;
+    parentInvocationId: string;
+    startedAt: number;
+  }) => Promise<{
+    responseMessageId: string;
+    priorFrontierMessageId: string | null;
+    activeRun: import('@cat-cafe/shared').LifecycleActiveRun;
+  }>;
+  /** Bind the exact live provider adapter after provider turn acceptance. */
+  readonly onAgentClientActiveRunReady?: (input: {
+    catId: CatId;
+    dispatcher: import('../../types.js').AgentClientActiveRunDispatcher;
+  }) => (() => void) | undefined;
   /** Scope-free seeds are bound only after this child invocation id exists. */
   readonly memoryCueOpportunitySeeds?: readonly MemoryCueOpportunitySeed[];
   /** F276 trial: source-only ASR scenes bound to their exact owner trigger message. */
@@ -1396,6 +1394,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     provider: 'other' as const,
     carrier: 'other' as const,
     deliverySemantics: 'undeclared' as const,
+    activeInvocationGuidance: 'undeclared' as const,
   };
   let invocationCapacitySnapshot = params.capacitySnapshot;
 
@@ -2046,6 +2045,17 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ownsTurnExecution = true;
     }
 
+    const lifecycleAdmission = params.onLifecycleInvocationStarted
+      ? await params.onLifecycleInvocationStarted({
+          threadId,
+          userId,
+          catId,
+          invocationId,
+          parentInvocationId: executionParentInvocationId,
+          startedAt: executionStartedAt,
+        })
+      : undefined;
+
     // F22 R2 P1-1 + durable child truth: expose the exact child identity only
     // after its running record exists. Keeping this yield inside the outer try
     // guarantees iterator.return() reaches the lifecycle terminalizer.
@@ -2054,6 +2064,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       catId,
       turnInvocationId: invocationId,
       turnExecutionStartedAt: executionStartedAt,
+      ...(lifecycleAdmission ? { lifecycleResponseMessageId: lifecycleAdmission.responseMessageId } : {}),
+      ...(lifecycleAdmission ? { activeRun: lifecycleAdmission.activeRun } : {}),
+      ...(lifecycleAdmission ? { lifecyclePriorFrontierMessageId: lifecycleAdmission.priorFrontierMessageId } : {}),
       extra: {
         turnExecution: {
           invocationId,
@@ -2194,22 +2207,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             hasMentioningCatId: Boolean(cloudCalledBy),
           },
           'F247 cloud transport unavailable before dispatch',
-        );
-      }
-
-      if (params.a2aTriggerMessageId) {
-        if (!deps.a2aDispatchDispositionService) {
-          throw new Error('a2a_dispatch_disposition_service_unavailable');
-        }
-        await deps.a2aDispatchDispositionService.complete(
-          {
-            invocationId,
-            catId,
-            threadId,
-            a2aTriggerMessageId: params.a2aTriggerMessageId,
-            originTriggerMessageId: sourceMessageId,
-          },
-          'completed',
         );
       }
 
@@ -3782,6 +3779,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               }),
           }
         : {}),
+      ...(params.onAgentClientActiveRunReady
+        ? {
+            activeRunDispatch: {
+              invocationId,
+              register: (dispatcher) => params.onAgentClientActiveRunReady!({ catId, dispatcher }),
+            },
+          }
+        : {}),
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       ...(isResume && !injectSystemPrompt && params.systemPrompt
@@ -5074,32 +5079,6 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               spanId: sc.spanId,
               ...(parentSid ? { parentSpanId: parentSid } : {}),
             };
-          }
-          // F254 B3/B4: Check for freshness re-invoke after terminal event.
-          // Fail-open: errors here never block the done signal.
-          if (deps.freshnessReinvokeCheck && !hadError && !signal?.aborted) {
-            try {
-              const decision = await deps.freshnessReinvokeCheck({
-                invocationId,
-                threadId,
-                catId,
-                userId: params.userId,
-              });
-              if (decision) {
-                // Attach decision to done metadata for routing layer.
-                // Initialize metadata if missing (some provider paths emit done without it).
-                if (!out.metadata) {
-                  (out as unknown as Record<string, unknown>).metadata = {};
-                }
-                (out.metadata as unknown as Record<string, unknown>).freshnessReinvoke = decision;
-                log.info(
-                  { catId, threadId, invocationId, shouldReinvoke: decision.shouldReinvoke, reason: decision.reason },
-                  '[F254-B3] freshness re-invoke decision',
-                );
-              }
-            } catch (err) {
-              log.warn({ catId, threadId, invocationId, err }, '[F254-B3] freshness re-invoke check failed, fail-open');
-            }
           }
           // A consumer may stop as soon as it receives the terminal `done`.
           // Record success before yielding that boundary so iterator.return()

@@ -6,74 +6,12 @@ import type {
   QueueHandledDisposition,
   QueueTargetOutcomeEvidenceRef,
 } from '@cat-cafe/shared';
-import type { FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
 
 interface FreshnessEventBase {
   threadId: string;
   catId: CatId;
   invocationId: string;
   timestamp: number;
-}
-
-interface HeldDecisionEvent extends FreshnessEventBase {
-  kind: 'held_decision';
-  toolName: string;
-  unseenCount: number;
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-interface ForwardDecisionEvent extends FreshnessEventBase {
-  kind: 'forward_decision';
-  toolName: string;
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-export interface NoticeAttachedEvent extends FreshnessEventBase {
-  kind: 'notice_attached';
-  toolName: string;
-  unseenSenders: string[];
-  noticeId: string;
-  maxMessageId: string;
-  /** New events carry the v2 cursor; legacy events may omit it. */
-  maxCursor?: string;
-}
-
-interface NoticeImplicitAckedEvent extends FreshnessEventBase {
-  kind: 'notice_implicit_acked';
-  noticeIds: string[];
-  ackedVia: 'seenCursor_advance';
-}
-
-interface NoticeDeferredEvent extends FreshnessEventBase {
-  kind: 'notice_deferred';
-  noticeIds: string[];
-}
-
-interface ReinvokeTriggeredEvent extends FreshnessEventBase {
-  kind: 'reinvoke_triggered';
-  triggeredInvocationId: string;
-  sourceNoticeIds: string[];
-}
-
-interface ReinvokeSkippedEvent extends FreshnessEventBase {
-  kind: 'reinvoke_skipped';
-  reason: 'quota_exhausted' | 'already_handled' | 'low_priority' | 'cursor_caught_up' | 'newer_invocation';
-}
-
-interface StreamStaleDetectedEvent extends FreshnessEventBase {
-  kind: 'stream_stale_detected';
-  unseenCount: number;
-  unseenSenders: string[];
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-interface StreamFreshEvent extends FreshnessEventBase {
-  kind: 'stream_fresh';
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
 }
 
 interface QueuedHandledEvent extends FreshnessEventBase {
@@ -172,15 +110,6 @@ export interface ProviderProtocolItemObservedEvent extends FreshnessEventBase {
 }
 
 export type FreshnessAttentionEvent =
-  | HeldDecisionEvent
-  | ForwardDecisionEvent
-  | NoticeAttachedEvent
-  | NoticeImplicitAckedEvent
-  | NoticeDeferredEvent
-  | ReinvokeTriggeredEvent
-  | ReinvokeSkippedEvent
-  | StreamStaleDetectedEvent
-  | StreamFreshEvent
   | QueuedHandledEvent
   | ProviderNoticeOpportunityEvent
   | ProviderNoticePreparedEvent

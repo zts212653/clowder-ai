@@ -15,10 +15,6 @@ export {
   type ConflictSignal,
 } from './ConflictRouter.js';
 export {
-  ConnectorInvokeTrigger,
-  type ConnectorInvokeTriggerOptions,
-} from './ConnectorInvokeTrigger.js';
-export {
   computeAggregateBucket,
   fetchPrCiStatus,
   normalizeBucket,

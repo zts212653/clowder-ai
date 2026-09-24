@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { createIssueCommentTaskSpec } = await import('../dist/infrastructure/email/IssueCommentTaskSpec.js');
 const { createSetupNoiseFilter } = await import('../dist/infrastructure/email/setup-noise-filter.js');
@@ -21,7 +21,7 @@ const ANY_UPDATE = { id: 101, author: 'someone', body: 'any update?', createdAt:
 
 async function trackedIssue(issueState = 'open', comments = [ANY_UPDATE]) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const harness = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'issue_tracking',
     subjectKey: 'issue:owner/repo#861',
@@ -47,11 +47,12 @@ async function trackedIssue(issueState = 'open', comments = [ANY_UPDATE]) {
   });
   const waitLifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     now: () => 500,
     log,
   });
-  const triggered = [];
+  // RFC §5.2: admission to the Queue is the wake; there is no separate trigger to inject.
+  const triggered = harness.wakes;
   // Wired exactly as production does (index.ts): the real F140 setup-noise filter, not a stub that
   // fakes the verdict. Only GitHub I/O is in memory.
   const setupNoiseFilter = createSetupNoiseFilter(['chatgpt-codex-connector[bot]']);
@@ -62,27 +63,21 @@ async function trackedIssue(issueState = 'open', comments = [ANY_UPDATE]) {
     fetchComments: async () => comments,
     fetchIssueState: async () => issueState,
     fetchIssueMetadata: async () => ({ state: issueState, authorLogin: 'author' }),
-    invokeTrigger: {
-      trigger: async (threadId, catId, userId, content, messageId, _extra, policy) => {
-        triggered.push({ threadId, catId, userId, messageId, policy });
-        return 'dispatched';
-      },
-    },
     waitLifecycle,
     log,
   });
-  return { spec, messageStore, taskStore, triggered, task };
+  return { spec, harness, taskStore, triggered, task };
 }
 
 describe('#1392 AC-6 — a tracked issue comment starts the owner, not just writes a message', () => {
   it('invokes the owner after the lifecycle delivers the comment', async () => {
-    const { spec, messageStore, triggered } = await trackedIssue();
+    const { spec, harness, triggered } = await trackedIssue();
 
     const gate = await spec.admission.gate();
     assert.equal(gate.run, true, 'the new comment must be admitted');
     for (const item of gate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
 
-    const delivered = messageStore.getByThread('thread_issue');
+    const delivered = harness.deliveries('thread_issue');
     assert.equal(delivered.length, 1, 'the lifecycle writes the message');
     assert.equal(triggered.length, 1, 'and the owner is actually started — this was skipped');
     assert.equal(triggered[0].messageId, delivered[0].id, 'the wake points at the message it delivered');
@@ -96,12 +91,12 @@ describe('#1392 AC-6 — a tracked issue comment starts the owner, not just writ
    * last comment — and the task was done, so nothing would ever report it.
    */
   it('a comment that lands in the same poll the issue closes is delivered with the close', async () => {
-    const { spec, messageStore, taskStore, task } = await trackedIssue('closed');
+    const { spec, harness, taskStore, task } = await trackedIssue('closed');
 
     const gate = await spec.admission.gate();
     for (const item of gate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
 
-    const delivered = messageStore.getByThread('thread_issue');
+    const delivered = harness.deliveries('thread_issue');
     assert.equal(delivered.length, 1);
     assert.match(delivered[0].content, /issue comment #101 added by someone/, 'the final comment is not dropped');
     assert.match(delivered[0].content, /closed/);
@@ -128,18 +123,14 @@ const SETUP_NOISE = {
 
 describe('#1392 R3 — the community delivery policy does not decide what the wait observes', () => {
   it('admits a comment the community policy would silence, and wakes the owner for it', async () => {
-    const { spec, messageStore, triggered } = await trackedIssue('open', [SETUP_NOISE]);
+    const { spec, harness, triggered } = await trackedIssue('open', [SETUP_NOISE]);
 
     const gate = await spec.admission.gate();
 
     assert.equal(gate.run, true, 'the gate dropped it before the matcher could judge the audience');
     for (const item of gate.workItems) await spec.run.execute(item.signal, item.subjectKey, {});
 
-    assert.equal(
-      messageStore.getByThread('thread_issue').length,
-      1,
-      'the accepted issue default is every non-self comment',
-    );
+    assert.equal(harness.deliveries('thread_issue').length, 1, 'the accepted issue default is every non-self comment');
     assert.equal(triggered.length, 1, 'and the owner is started, not just written to');
   });
 

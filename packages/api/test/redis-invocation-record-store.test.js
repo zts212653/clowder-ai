@@ -304,27 +304,6 @@ describe('RedisInvocationRecordStore', { skip: redisIsolationSkipReason(REDIS_UR
     assert.equal(after.userMessageId, 'msg-456');
   });
 
-  it('F254 Phase E persists typed closure custody fields', async () => {
-    const { invocationId } = await store.create({
-      threadId: 'thread-f254',
-      userId: 'user-f254',
-      targetCats: ['opus'],
-      intent: 'execute',
-      idempotencyKey: 'f254-custody',
-      actionLeaseCarrier: { kind: 'none' },
-    });
-    await store.update(invocationId, {
-      freshnessClosureId: 'closure-1',
-      freshnessInputFrontierMessageId: 'msg-frontier',
-      freshnessClosureStatus: 'running',
-    });
-
-    const record = await store.get(invocationId);
-    assert.equal(record.freshnessClosureId, 'closure-1');
-    assert.equal(record.freshnessInputFrontierMessageId, 'msg-frontier');
-    assert.equal(record.freshnessClosureStatus, 'running');
-  });
-
   it('persists and hydrates a durable connector execution-start receipt', async () => {
     const { invocationId } = await store.create({
       threadId: 'thread-connector-start',

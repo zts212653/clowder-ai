@@ -127,7 +127,12 @@ export class KimiAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
-    return { provider: 'kimi', carrier: 'kimi_stream_json', deliverySemantics: 'unsupported' };
+    return {
+      provider: 'kimi',
+      carrier: 'kimi_stream_json',
+      deliverySemantics: 'unsupported',
+      activeInvocationGuidance: 'unsupported',
+    };
   }
 
   contextCapability(): import('../../types.js').AgentContextCapability {

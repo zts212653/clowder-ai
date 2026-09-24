@@ -15,10 +15,11 @@
  * F088 Multi-Platform Chat Gateway
  */
 
-import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent } from '@cat-cafe/shared';
+import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent, MessageFrom } from '@cat-cafe/shared';
 import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
+import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import type { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
 import { type CardAction, ConnectorMessageFormatter, DEFAULT_QUICK_ACTIONS } from './ConnectorMessageFormatter.js';
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
@@ -58,17 +59,21 @@ export type RouteResult =
   | { kind: 'command'; threadId?: string; messageId?: string };
 
 export interface ConnectorRouterOptions {
+  /** RFC §5.1: the one component that turns a producer envelope into durable Queue work. */
+  readonly persistedQueueDelivery: import('../../domains/cats/services/agents/invocation/PersistedQueueDelivery.js').PersistedQueueDeliveryPort;
   readonly bindingStore: IConnectorThreadBindingStore;
   readonly dedup: InboundMessageDedup;
   readonly messageStore: {
     append(input: {
+      from: MessageFrom;
       threadId: string;
       userId: string;
-      catId: null;
       content: string;
       source: ConnectorSource;
       mentions: CatId[];
       timestamp: number;
+      deliveryStatus?: 'queued';
+      contentBlocks?: readonly MessageContent[];
     }): Promise<{ id: string }>;
   };
   readonly threadStore: {
@@ -109,18 +114,6 @@ export interface ConnectorRouterOptions {
     ):
       | Array<{ catId: string; lastMessageAt: number; messageCount: number }>
       | Promise<Array<{ catId: string; lastMessageAt: number; messageCount: number }>>;
-  };
-  readonly invokeTrigger: {
-    trigger(
-      threadId: string,
-      catId: CatId,
-      userId: string,
-      message: string,
-      messageId: string,
-      contentBlocks?: readonly MessageContent[],
-      policy?: unknown,
-      sender?: { id: string; name?: string },
-    ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
   readonly socketManager?:
     | {
@@ -191,7 +184,7 @@ export class ConnectorRouter {
     chatType?: 'p2p' | 'group',
     chatName?: string,
   ): Promise<RouteResult> {
-    const { bindingStore, dedup, messageStore, threadStore, invokeTrigger, socketManager, log } = this.opts;
+    const { bindingStore, dedup, messageStore, threadStore, socketManager, log } = this.opts;
 
     // 1. Dedup check
     if (dedup.isDuplicate(connectorId, externalChatId, externalMessageId)) {
@@ -305,42 +298,29 @@ export class ConnectorRouter {
           };
           const mentionPatterns = this.getMentionPatterns();
           const { targetCatId } = parseMentions(fwdText, mentionPatterns, this.getDefaultCatId());
-          const fwdTimestamp = Date.now();
-          const fwdStored = await messageStore.append({
-            threadId: fwdThreadId,
-            userId: this.opts.defaultUserId,
-            catId: null,
-            content: fwdText,
-            source: fwdSource,
-            mentions: [targetCatId],
-            timestamp: fwdTimestamp,
-          });
-          emitConnectorMessage(socketManager, fwdThreadId, {
-            id: fwdStored.id,
-            content: fwdText,
-            source: fwdSource,
-            timestamp: fwdTimestamp,
-          });
-          const triggerOutcome = await invokeTrigger.trigger(
-            fwdThreadId,
-            targetCatId,
-            this.opts.defaultUserId,
-            fwdText,
-            fwdStored.id,
+          const fwdStored = await deliverConnectorMessage(
+            { delivery: this.opts.persistedQueueDelivery },
+            {
+              threadId: fwdThreadId,
+              userId: this.opts.defaultUserId,
+              catId: targetCatId,
+              content: fwdText,
+              source: fwdSource,
+              idempotencyKey: `im:${connectorId}:${externalChatId}:${externalMessageId}:thread`,
+            },
           );
           log.info(
-            { connectorId, threadId: fwdThreadId, triggerOutcome },
+            { connectorId, threadId: fwdThreadId, admitted: fwdStored.admitted },
             '[ConnectorRouter] /thread message forwarded',
           );
 
-          // F151 P1: If the target queue was full, no invocation will run and no
-          // notifyDeliveryBatchDone signal will come — close the task here to
-          // prevent it from staying open until TASK_TIMEOUT_MS.
-          if (triggerOutcome === 'full' && adapter?.onDeliveryBatchDone) {
+          // F151 P1: without Queue admission no invocation will run and no notifyDeliveryBatchDone
+          // signal will come — close the task here instead of waiting for TASK_TIMEOUT_MS.
+          if (!fwdStored.admitted && adapter?.onDeliveryBatchDone) {
             await adapter.onDeliveryBatchDone(externalChatId, true);
           }
 
-          return { kind: 'routed', threadId: fwdThreadId, messageId: fwdStored.id };
+          return { kind: 'routed', threadId: fwdThreadId, messageId: fwdStored.messageId };
         }
 
         // F154: /ask one-shot routing — forward to current thread with explicit targetCatId.
@@ -358,37 +338,27 @@ export class ConnectorRouter {
               ...(sender ? { sender } : {}),
             };
             const askCatId = cmdResult.targetCatId as CatId;
-            const askTimestamp = Date.now();
-            const askStored = await messageStore.append({
-              threadId: askThreadId,
-              userId: this.opts.defaultUserId,
-              catId: null,
-              content: askText,
-              source: askSource,
-              mentions: [askCatId],
-              timestamp: askTimestamp,
-            });
-            emitConnectorMessage(socketManager, askThreadId, {
-              id: askStored.id,
-              content: askText,
-              source: askSource,
-              timestamp: askTimestamp,
-            });
-            const triggerOutcome = await invokeTrigger.trigger(
-              askThreadId,
-              askCatId,
-              this.opts.defaultUserId,
-              askText,
-              askStored.id,
+            const askStored = await deliverConnectorMessage(
+              { delivery: this.opts.persistedQueueDelivery },
+              {
+                threadId: askThreadId,
+                userId: this.opts.defaultUserId,
+                catId: askCatId,
+                content: askText,
+                source: askSource,
+                idempotencyKey: `im:${connectorId}:${externalChatId}:${externalMessageId}:ask`,
+              },
             );
             log.info(
-              { connectorId, threadId: askThreadId, catId: askCatId, triggerOutcome },
+              { connectorId, threadId: askThreadId, catId: askCatId, admitted: askStored.admitted },
               '[ConnectorRouter] /ask message forwarded to current thread',
             );
-            if (triggerOutcome === 'full' && adapter?.onDeliveryBatchDone) {
+            // Not admitted means no invocation will run, so the delivery batch must close here
+            // rather than wait for a notifyDeliveryBatchDone that can never arrive.
+            if (!askStored.admitted && adapter?.onDeliveryBatchDone) {
               await adapter.onDeliveryBatchDone(externalChatId, true);
             }
-            return { kind: 'routed', threadId: askThreadId, messageId: askStored.id };
+            return { kind: 'routed', threadId: askThreadId, messageId: askStored.messageId };
           }
         }
 
@@ -462,36 +432,19 @@ export class ConnectorRouter {
       }
     }
 
-    const storedTimestamp = Date.now();
-    const stored = await messageStore.append({
-      threadId: binding.threadId,
-      userId: this.opts.defaultUserId,
-      catId: null,
-      content: resolvedText,
-      source,
-      mentions: [targetCatId],
-      timestamp: storedTimestamp,
-      ...(contentBlocks ? { contentBlocks } : {}),
-    });
-
-    // 4. Broadcast to WebSocket
-    emitConnectorMessage(socketManager, binding.threadId, {
-      id: stored.id,
-      content: resolvedText,
-      source,
-      timestamp: storedTimestamp,
-    });
-
-    // 5. Trigger cat invocation (use parsed targetCatId)
-    await invokeTrigger.trigger(
-      binding.threadId,
-      targetCatId,
-      this.opts.defaultUserId,
-      resolvedText,
-      stored.id,
-      contentBlocks,
-      undefined,
-      sender,
+    // 4. RFC §5.1/§5.2: an IM input is the same `conversation_input` envelope a user send builds.
+    // One atomic Message + Queue admission makes it durable; Queue drain owes the owner wake.
+    const stored = await deliverConnectorMessage(
+      { delivery: this.opts.persistedQueueDelivery },
+      {
+        threadId: binding.threadId,
+        userId: this.opts.defaultUserId,
+        catId: targetCatId,
+        content: resolvedText,
+        source,
+        idempotencyKey: `im:${connectorId}:${externalChatId}:${externalMessageId}`,
+        ...(contentBlocks ? { contentBlocks } : {}),
+      },
     );
 
     log.info(
@@ -499,7 +452,7 @@ export class ConnectorRouter {
         connectorId,
         externalChatId,
         threadId: binding.threadId,
-        messageId: stored.id,
+        messageId: stored.messageId,
       },
       '[ConnectorRouter] Message routed',
     );
@@ -507,7 +460,7 @@ export class ConnectorRouter {
     return {
       kind: 'routed',
       threadId: binding.threadId,
-      messageId: stored.id,
+      messageId: stored.messageId,
     };
   }
 
@@ -620,9 +573,9 @@ export class ConnectorRouter {
 
     // Store inbound command
     const cmdMsg = await messageStore.append({
+      from: { kind: 'external', connectorId },
       threadId,
       userId: this.opts.defaultUserId,
-      catId: null,
       content: commandText,
       source: { connector: connectorId, label: def?.displayName ?? connectorId, icon: connectorSourceIcon(def) },
       mentions: [],
@@ -631,9 +584,9 @@ export class ConnectorRouter {
 
     // Store outbound system response
     const resMsg = await messageStore.append({
+      from: { kind: 'system', service: 'connector-command' },
       threadId,
       userId: this.opts.defaultUserId,
-      catId: null,
       content: responseText,
       source: { connector: 'system-command', label: 'Clowder AI', icon: 'settings' },
       mentions: [],

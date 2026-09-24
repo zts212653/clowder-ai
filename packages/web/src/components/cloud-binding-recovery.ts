@@ -1,7 +1,6 @@
-import { isCloudBridgeOutboundReceiptV1, isCloudBridgeRecoveryV1 } from '@cat-cafe/shared';
+import { isCloudBridgeOutboundReceiptV1, isCloudBridgeRecoveryV1, isCloudBridgeRetryV1 } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
 import type { RecoveryDeliveryStatus } from './cloud-binding-recovery-operations';
-import { latestRetryableQueueAttempt } from './queue-retry-action';
 
 export interface CloudBindingRecoveryProjection {
   targetCatId: string;
@@ -14,52 +13,67 @@ function recoveryFromNotice(message: ChatMessage) {
   return isCloudBridgeRecoveryV1(recovery) ? recovery : undefined;
 }
 
+function latestRecoveryForSource(sourceId: string, timelineMessages: readonly ChatMessage[]) {
+  for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
+    const candidate = timelineMessages[index];
+    if (!candidate || candidate.type !== 'connector' || candidate.replyTo !== sourceId) continue;
+    const parsed = recoveryFromNotice(candidate);
+    if (parsed?.sourceMessageId === sourceId) return parsed;
+  }
+  return undefined;
+}
+
+function deliveryStatusForRecovery(
+  sourceId: string,
+  recovery: NonNullable<ReturnType<typeof recoveryFromNotice>>,
+  timelineMessages: readonly ChatMessage[],
+): RecoveryDeliveryStatus | undefined {
+  for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
+    const notice = timelineMessages[index];
+    const receipt = notice?.source?.meta?.cloudBridgeOutboundReceipt;
+    if (notice?.type !== 'connector' || notice.replyTo !== sourceId || !isCloudBridgeOutboundReceiptV1(receipt)) {
+      continue;
+    }
+    if (
+      receipt.sourceMessageId !== sourceId ||
+      receipt.targetCatId !== recovery.targetCatId ||
+      receipt.dispatchInvocationId !== recovery.dispatchInvocationId
+    ) {
+      continue;
+    }
+    if (receipt.status === 'sent' && receipt.transport === 'host' && receipt.hostMessageId) return 'sent';
+    return receipt.status === 'unknown' ? 'unknown' : undefined;
+  }
+  return undefined;
+}
+
 export function projectCloudBindingRecovery(
   source: ChatMessage,
   timelineMessages: readonly ChatMessage[],
 ): CloudBindingRecoveryProjection | undefined {
   if (source.type !== 'user' || source.catId) return undefined;
 
-  let recovery: ReturnType<typeof recoveryFromNotice>;
-  for (let index = timelineMessages.length - 1; index >= 0; index -= 1) {
-    const candidate = timelineMessages[index];
-    if (!candidate || candidate.type !== 'connector' || candidate.replyTo !== source.id) continue;
-    const parsed = recoveryFromNotice(candidate);
-    if (!parsed || parsed.sourceMessageId !== source.id) continue;
-    recovery = parsed;
-    break;
-  }
+  const recovery = latestRecoveryForSource(source.id, timelineMessages);
   if (!recovery) return undefined;
 
-  const target = source.extra?.queueReceipt?.targets.find((candidate) => candidate.catId === recovery?.targetCatId);
-  const latestAttempt = target?.attempts?.at(-1);
-  for (let index = timelineMessages.length - 1; index >= 0; index--) {
-    const notice = timelineMessages[index];
-    const receipt = notice?.source?.meta?.cloudBridgeOutboundReceipt;
-    if (notice?.type !== 'connector' || notice.replyTo !== source.id || !isCloudBridgeOutboundReceiptV1(receipt))
-      continue;
-    if (receipt.sourceMessageId !== source.id || receipt.targetCatId !== recovery.targetCatId) continue;
-    if (
-      latestAttempt &&
-      (!latestAttempt.invocationId ||
-        notice.timestamp < latestAttempt.createdAt ||
-        receipt.dispatchInvocationId !== latestAttempt.invocationId)
-    )
-      continue;
-    if (receipt.status === 'sent' && receipt.transport === 'host' && receipt.hostMessageId)
-      return { targetCatId: recovery.targetCatId, deliveryStatus: 'sent' };
-    if (receipt.status === 'unknown') return { targetCatId: recovery.targetCatId, deliveryStatus: 'unknown' };
-    break;
-  }
-  if (!target) return { targetCatId: recovery.targetCatId };
-  const attempt = latestRetryableQueueAttempt(target);
-  if (!attempt)
-    return {
-      targetCatId: recovery.targetCatId,
-      deliveryStatus:
-        latestAttempt && ['queued', 'starting', 'appended'].includes(latestAttempt.state) ? 'sending' : 'unknown',
-    };
-  return { targetCatId: recovery.targetCatId, attemptId: attempt.id };
+  const alreadyRetried = timelineMessages.some((candidate) => {
+    const retry = candidate.extra?.cloudBridgeRetry;
+    return (
+      candidate.type === 'user' &&
+      isCloudBridgeRetryV1(retry) &&
+      retry.sourceMessageId === source.id &&
+      retry.targetCatId === recovery?.targetCatId &&
+      retry.priorDispatchInvocationId === recovery.dispatchInvocationId
+    );
+  });
+  if (alreadyRetried) return undefined;
+
+  const deliveryStatus = deliveryStatusForRecovery(source.id, recovery, timelineMessages);
+  return {
+    targetCatId: recovery.targetCatId,
+    attemptId: recovery.dispatchInvocationId,
+    ...(deliveryStatus ? { deliveryStatus } : {}),
+  };
 }
 
 export function isLinkedCloudBindingRecoveryNotice(

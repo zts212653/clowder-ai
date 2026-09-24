@@ -388,17 +388,18 @@ describe('RepoScanTaskSpec', () => {
       );
     });
 
-    it('triggers cat after delivery', async () => {
-      const { opts, triggerCalls } = createOpts();
+    // Admission IS the wake: the reconciliation envelope reaching the Queue is what starts the cat.
+    it('admits the reconciliation envelope that starts the cat', async () => {
+      const { opts, deliveredMessages } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
       const gateResult = await spec.admission.gate(gateCtx());
       const workItem = gateResult.workItems[0];
 
       await spec.run.execute(workItem.signal, workItem.subjectKey, { assignedCatId: null });
 
-      assert.equal(triggerCalls.length, 1);
-      assert.equal(triggerCalls[0][0], 'thread-inbox-1'); // threadId
-      assert.equal(triggerCalls[0][1], 'cat-maine-coon'); // catId
+      assert.equal(deliveredMessages.length, 1);
+      assert.equal(deliveredMessages[0].threadId, 'thread-inbox-1');
+      assert.equal(deliveredMessages[0].catId, 'cat-maine-coon');
     });
 
     it('skips delivery if no inbox thread exists for repo', async () => {

@@ -126,7 +126,7 @@ describe('ChatInput context picker', () => {
         .querySelector<HTMLTextAreaElement>('textarea')
         ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
-    expect(onSendMock).toHaveBeenCalledWith('', undefined, undefined, undefined, undefined, undefined, [
+    expect(onSendMock).toHaveBeenCalledWith('', undefined, undefined, undefined, [
       expect.objectContaining({ kind: 'thread', threadId: 'thread_other', title: '另一个 Thread' }),
     ]);
   });

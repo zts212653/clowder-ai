@@ -1,8 +1,9 @@
 'use client';
 
+import type { ContextAttachment } from '@cat-cafe/shared';
 import { useCallback, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { type UploadStatus, useSendMessage } from '@/hooks/useSendMessage';
+import { type UploadStatus, useSendMessage, type WhisperOptions } from '@/hooks/useSendMessage';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import { ChatInput } from './ChatInput';
 import { PawIcon } from './icons/PawIcon';
@@ -11,7 +12,15 @@ import { SplitPaneCell, SplitPanePlaceholder } from './SplitPaneCell';
 
 interface SplitPaneViewProps {
   isReadonly?: boolean;
-  onSend: ReturnType<typeof useSendMessage>['handleSend'];
+  onSend: (
+    content: string,
+    images?: File[],
+    overrideThreadId?: string,
+    whisper?: WhisperOptions,
+    replyToId?: string,
+    contextAttachments?: ContextAttachment[],
+    explicitTargetCats?: string[],
+  ) => void | boolean | Promise<void | boolean>;
   uploadStatus?: UploadStatus;
   uploadError?: string | null;
   /** Switch from split to single mode, focusing the given thread */
@@ -151,26 +160,25 @@ export function SplitPaneView({
             <ChatInput
               key={splitPaneTargetId ?? 'no-target'}
               threadId={splitPaneTargetId ?? undefined}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
+              onSend={(content, images, whisper, replyToId, contextAttachments, explicitTargetCats) =>
                 contextAttachments?.length
                   ? onSend(
                       content,
                       images,
                       splitPaneTargetId ?? undefined,
                       whisper,
-                      deliveryMode,
                       replyToId,
-                      messageDisposition,
                       contextAttachments,
+                      explicitTargetCats,
                     )
                   : onSend(
                       content,
                       images,
                       splitPaneTargetId ?? undefined,
                       whisper,
-                      deliveryMode,
                       replyToId,
-                      messageDisposition,
+                      undefined,
+                      explicitTargetCats,
                     )
               }
               disabled={!splitPaneTargetId || isReadonly}

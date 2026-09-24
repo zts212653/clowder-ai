@@ -1,18 +1,18 @@
 /**
- * F233 PR3 — hold_ball source events.
+ * F117 Phase G — managed hold no longer mutates ordinary Ball custody.
  *
- * Existing hold_ball scheduling tests are already large; this file only pins
- * ball-custody side effects at the two true source points:
- *  - successful callback commit -> ball.held
- *  - reminder fire -> ball.hold_expired
+ * Action-successor custody keeps its explicit Ball event log, while managed
+ * hold state is owned by the persistent Message/Task lifecycle. These tests
+ * pin the two former integration points so the retired parallel projection
+ * cannot be reintroduced accidentally.
  */
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import Fastify from 'fastify';
 
-describe('F233 PR3: hold_ball ball-custody events', () => {
-  test('POST /api/callbacks/hold-ball records ball.held only after scheduler commit', async () => {
+describe('F117 Phase G: managed hold stays out of ordinary Ball custody', () => {
+  test('POST /api/callbacks/hold-ball persists lifecycle state without recording ball.held', async () => {
     const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -125,11 +125,7 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].kind, 'ball.held');
-    assert.equal(events[0].sourceEventId, `hold:${thread.id}:codex:${insertedTasks[0].trigger.fireAt}`);
-    assert.equal(events[0].subjectKey, `ball:thread:${thread.id}`);
-    assert.deepEqual(events[0].payload, { catId: 'codex', fireAt: insertedTasks[0].trigger.fireAt });
+    assert.deepEqual(events, []);
     const awaitState = insertedTasks[0].params.holdLifecycle.await;
     assert.ok(awaitState, 'timer hold must persist the unified wait shape');
     assert.deepEqual(insertedTasks[0].params.holdLifecycle, {
@@ -167,7 +163,7 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     });
   });
 
-  test('hold-ball reminder fire records ball.hold_expired at execution point', async () => {
+  test('hold-ball reminder fire queues its wake without recording ball.hold_expired', async () => {
     const { reminderTemplate } = await import('../dist/infrastructure/scheduler/templates/reminder.js');
     const fireAt = Date.now() - 1;
     const events = [];
@@ -196,10 +192,6 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
     });
 
     assert.equal(delivered.length, 1);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].kind, 'ball.hold_expired');
-    assert.equal(events[0].sourceEventId, `holdexp:thr-expired:codex:${fireAt}`);
-    assert.equal(events[0].subjectKey, 'ball:thread:thr-expired');
-    assert.deepEqual(events[0].payload, { catId: 'codex', fireAt });
+    assert.deepEqual(events, []);
   });
 });

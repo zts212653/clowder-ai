@@ -82,7 +82,7 @@ describe('MessageActions identity source', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
-  it('uses current user identity instead of hardcoded default-user for direct branch', async () => {
+  it('uses current user identity instead of hardcoded default-user for the unified branch action', async () => {
     const { MessageActions } = await import('@/components/MessageActions');
 
     await act(async () => {
@@ -103,29 +103,21 @@ describe('MessageActions identity source', () => {
       );
     });
 
-    const moreButton = container.querySelector('button[aria-label="更多消息操作"]') as HTMLButtonElement | null;
-    expect(moreButton).not.toBeNull();
-    await act(async () => {
-      moreButton?.click();
-    });
-    const branchButton = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find((button) =>
-      button.textContent?.includes('从这里分支'),
-    );
-    expect(branchButton).toBeDefined();
-
+    const branchButton = container.querySelector('button[title="创建分支"]') as HTMLButtonElement | null;
+    expect(branchButton).not.toBeNull();
     await act(async () => {
       branchButton?.click();
     });
 
-    const directDialogProps = confirmDialogSpy.mock.calls
-      .map(([props]) => props as { title?: string; open?: boolean; onConfirm?: () => Promise<void> | void })
-      .find((props) => props.title === '从这里分支' && props.open === true);
-
-    expect(directDialogProps).toBeTruthy();
-    expect(directDialogProps?.onConfirm).toBeTypeOf('function');
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+    expect(textarea?.value).toBe('hello');
+    const confirmBranch = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '创建分支',
+    );
+    expect(confirmBranch).toBeTruthy();
 
     await act(async () => {
-      await directDialogProps?.onConfirm?.();
+      confirmBranch?.click();
     });
 
     expect(apiFetchMock).toHaveBeenCalledTimes(1);

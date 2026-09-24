@@ -6,7 +6,7 @@
  * KD-10: Cursor commits only after delivery success; trigger is best-effort.
  *
  * Gate: list pr_tracking tasks → fetch comments + reviews → filter by cursor → workItems.
- * Execute: ReviewFeedbackRouter → commitCursor (only once the observation is recorded) → ConnectorInvokeTrigger.
+ * Execute: ReviewFeedbackRouter → commitCursor (only once the observation is recorded). The router admits atomically; there is no second dispatch.
  */
 import type { CatId, CommunityEvent, GitHubReviewThreadBaseline, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
@@ -33,7 +33,6 @@ import {
 } from '../../domains/github-signals/github-wait-renderer.js';
 import type { DistillationCheckpoint } from '../distillation/DistillationCheckpoint.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
-import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './ConnectorInvokeTrigger.js';
 import type {
   PrFeedbackComment,
   PrReviewDecision,
@@ -104,7 +103,6 @@ export interface ReviewFeedbackTaskSpecOptions {
    * ownership back to the original registration thread.
    */
   readonly threadStore?: Pick<IThreadStore, 'get'>;
-  readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly log: {
     info: (...args: unknown[]) => void;
     error: (...args: unknown[]) => void;
@@ -965,36 +963,9 @@ export function createReviewFeedbackTaskSpec(opts: ReviewFeedbackTaskSpecOptions
 
         if (signal.reviewLoopBrake?.kind === 'pause_once') return;
 
-        if (opts.invokeTrigger) {
-          const hasChangesRequested = signal.newDecisions.some((d) => d.state === 'CHANGES_REQUESTED');
-          const policy: ConnectorTriggerPolicy = {
-            priority: hasChangesRequested ? 'urgent' : 'normal',
-            reason:
-              signal.subjectState === 'merged'
-                ? 'github_pr_merged'
-                : signal.subjectState === 'closed'
-                  ? 'github_pr_closed'
-                  : 'github_wait_satisfied',
-            sourceCategory: 'review',
-            coalesceKey: `${subjectKey}:wait:${routeResult.catId || 'unassigned'}`,
-          };
-          try {
-            await opts.invokeTrigger.trigger(
-              routeResult.threadId,
-              routeResult.catId as CatId,
-              repairedTask.userId ?? '',
-              routeResult.content,
-              routeResult.messageId,
-              undefined,
-              policy,
-            );
-          } catch (err) {
-            opts.log.warn(
-              { err },
-              `[review-feedback] trigger failed for ${signal.repoFullName}#${signal.prNumber} (best-effort)`,
-            );
-          }
-        }
+        // RFC §5.2: the observation above admitted this input to the Queue in one transaction and
+        // carried its own urgency. Queue drain owes the owner wake, so no second trigger exists to
+        // swallow an error or settle an outbox before the input was durable.
 
         // F208 AC-E2: distillation checkpoint on review-complete (best-effort, all approvals)
         if (opts.distillationCheckpoint) {

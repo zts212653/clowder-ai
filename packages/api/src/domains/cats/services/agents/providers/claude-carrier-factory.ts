@@ -187,6 +187,7 @@ export class FallbackCarrierWrapper implements AgentService {
         provider: 'anthropic',
         carrier: 'other',
         deliverySemantics: 'unsupported',
+        activeInvocationGuidance: 'unsupported',
       }
     );
   }

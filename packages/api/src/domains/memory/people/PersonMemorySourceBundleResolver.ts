@@ -7,6 +7,7 @@ import {
   personMemoryResolvedSourceBundleSchema,
   type ResolvedPersonMemorySource,
 } from '@cat-cafe/shared';
+import { messageFrom } from '../../cats/services/stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDelivered } from '../../cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../../cats/services/stores/visibility.js';
@@ -78,8 +79,7 @@ export function eligibleOwnerMessage(
   return Boolean(
     message &&
       message.userId === auth.ownerUserId &&
-      message.catId === null &&
-      message.source === undefined &&
+      messageFrom(message).kind === 'user' &&
       message.deletedAt === undefined &&
       message._tombstone !== true &&
       isDelivered(message) &&

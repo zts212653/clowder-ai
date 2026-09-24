@@ -5,6 +5,7 @@ import { peekPlaybackManager } from '@/services/playbackRuntime';
 import type { RichAudioBlock } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { useListenModeStore } from '@/stores/listenModeStore';
+import { getOrderedMessageTimeline } from '@/stores/message-timeline';
 import { useVoiceSessionStore } from '@/stores/voiceSessionStore';
 import { apiFetch } from '@/utils/api-client';
 import { base64ToBlob, streamTts } from '@/utils/tts-stream';
@@ -225,6 +226,7 @@ function findUnplayedAudioBlock(
     type: string;
     extra?: { rich?: { blocks: Array<{ kind: string; id: string }> }; stream?: { invocationId?: string } };
   }>,
+  candidateIds?: ReadonlySet<string>,
 ): RichAudioBlock | null {
   for (let i = 0; i < newMessages.length; i++) {
     const msg = newMessages[i];
@@ -246,12 +248,28 @@ function findUnplayedAudioBlock(
 
     const audioBlocks = blocks.filter((b): b is RichAudioBlock => b.kind === 'audio');
     for (const block of audioBlocks) {
-      if (!useVoiceSessionStore.getState().hasPlayed(block.id)) {
+      if ((!candidateIds || candidateIds.has(block.id)) && !useVoiceSessionStore.getState().hasPlayed(block.id)) {
         return block;
       }
     }
   }
   return null;
+}
+
+function collectAudioBlockIds(
+  messages: ReadonlyArray<{
+    type: string;
+    extra?: { rich?: { blocks: Array<{ kind: string; id: string }> } };
+  }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const message of messages) {
+    if (message.type !== 'assistant') continue;
+    for (const block of message.extra?.rich?.blocks ?? []) {
+      if (block.kind === 'audio') ids.add(block.id);
+    }
+  }
+  return ids;
 }
 
 function markAudioBlocksHandled(
@@ -302,7 +320,7 @@ function registerAutoplayStop(): void {
       // Advance to next unplayed audio block instead of just stopping
       const { session } = useVoiceSessionStore.getState();
       if (session?.voiceMode) {
-        const allMessages = useChatStore.getState().messages;
+        const allMessages = getOrderedMessageTimeline(useChatStore.getState().messages);
         const next = findUnplayedAudioBlock(allMessages);
         if (next) {
           playBlock(next, session.sessionId);
@@ -335,20 +353,22 @@ export const __testing__ = {
   registerAutoplayStop,
   cleanupAutoplay,
   isListenModeActive,
+  collectAudioBlockIds,
+  findUnplayedAudioBlock,
 };
 
 export function useVoiceAutoPlay(): void {
-  const messages = useChatStore((s) => s.messages);
+  const messages = useChatStore((s) => getOrderedMessageTimeline(s.messages));
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const session = useVoiceSessionStore((s) => s.session);
   const listenModeActive = useListenModeStore((s) => s.session !== null);
-  const prevMessageCountRef = useRef(messages.length);
+  const prevAudioBlockIdsRef = useRef(collectAudioBlockIds(messages));
   const prevSessionIdRef = useRef<string | null>(null);
   const prevThreadIdRef = useRef<string>(currentThreadId);
 
   useEffect(() => {
     if (!session?.voiceMode) {
-      prevMessageCountRef.current = messages.length;
+      prevAudioBlockIdsRef.current = collectAudioBlockIds(messages);
       prevSessionIdRef.current = null;
       prevThreadIdRef.current = currentThreadId;
       return;
@@ -358,19 +378,19 @@ export function useVoiceAutoPlay(): void {
       cleanupAutoplay();
       useVoiceSessionStore.getState().setPlaybackState('idle');
       markAudioBlocksHandled(messages);
-      prevMessageCountRef.current = messages.length;
+      prevAudioBlockIdsRef.current = collectAudioBlockIds(messages);
       prevSessionIdRef.current = session.sessionId;
       prevThreadIdRef.current = currentThreadId;
       return;
     }
 
     if (session.liveStreamActive) {
-      prevMessageCountRef.current = messages.length;
+      prevAudioBlockIdsRef.current = collectAudioBlockIds(messages);
       return;
     }
 
     if (currentThreadId !== session.boundThreadId) {
-      prevMessageCountRef.current = 0;
+      prevAudioBlockIdsRef.current = new Set();
       prevThreadIdRef.current = currentThreadId;
       return;
     }
@@ -379,7 +399,7 @@ export function useVoiceAutoPlay(): void {
     prevThreadIdRef.current = currentThreadId;
 
     if (threadChanged) {
-      prevMessageCountRef.current = messages.length;
+      prevAudioBlockIdsRef.current = collectAudioBlockIds(messages);
       return;
     }
 
@@ -388,17 +408,18 @@ export function useVoiceAutoPlay(): void {
 
     if (isNewSession) {
       const block = findUnplayedAudioBlock(messages);
-      prevMessageCountRef.current = messages.length;
+      prevAudioBlockIdsRef.current = collectAudioBlockIds(messages);
       if (block) playBlock(block, session.sessionId);
       return;
     }
 
-    const prevCount = prevMessageCountRef.current;
-    prevMessageCountRef.current = messages.length;
+    const previousIds = prevAudioBlockIdsRef.current;
+    const currentIds = collectAudioBlockIds(messages);
+    prevAudioBlockIdsRef.current = currentIds;
+    const newIds = new Set([...currentIds].filter((id) => !previousIds.has(id)));
+    if (newIds.size === 0) return;
 
-    if (messages.length <= prevCount) return;
-
-    const block = findUnplayedAudioBlock(messages.slice(prevCount));
+    const block = findUnplayedAudioBlock(messages, newIds);
     if (block) playBlock(block, session.sessionId);
   }, [messages, session, currentThreadId, listenModeActive]);
 

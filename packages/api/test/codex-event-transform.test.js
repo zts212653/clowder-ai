@@ -34,6 +34,67 @@ test('item.completed agent_message → text', () => {
   assert.equal(msg?.content, 'Hello');
 });
 
+test('app-server agentMessage deltas stream into the response and completed item is not duplicated', () => {
+  const state = { hadPriorTextTurn: false };
+  const first = mapCodexAppServerNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'th-1', turnId: 'turn-1', itemId: 'item-1', delta: 'Hel' },
+  });
+  const second = mapCodexAppServerNotification({
+    method: 'item/agentMessage/delta',
+    params: { threadId: 'th-1', turnId: 'turn-1', itemId: 'item-1', delta: 'lo' },
+  });
+  assert.deepEqual(first, {
+    type: 'item.agent_message.delta',
+    item_id: 'item-1',
+    delta: 'Hel',
+    thread_id: 'th-1',
+    turn_id: 'turn-1',
+  });
+  assert.equal(transformCodexEvent(first, CAT, state)?.content, 'Hel');
+  assert.equal(transformCodexEvent(second, CAT, state)?.content, 'lo');
+  const completed = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-1', type: 'agent_message', text: 'Hello' } },
+    CAT,
+    state,
+  );
+  assert.equal(completed?.type, 'text');
+  assert.equal(completed?.content, 'Hello');
+  assert.equal(completed?.textMode, 'replace');
+});
+
+test('one invocation keeps multi-turn streamed text inside one response replacement boundary', () => {
+  const state = { hadPriorTextTurn: false };
+
+  assert.equal(
+    transformCodexEvent({ type: 'item.agent_message.delta', item_id: 'item-1', delta: 'turn one' }, CAT, state)
+      ?.content,
+    'turn one',
+  );
+  const firstCompleted = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-1', type: 'agent_message', text: 'turn one done' } },
+    CAT,
+    state,
+  );
+  assert.equal(firstCompleted?.content, 'turn one done');
+  assert.equal(firstCompleted?.textMode, 'replace');
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, CAT, state);
+
+  const secondDelta = transformCodexEvent(
+    { type: 'item.agent_message.delta', item_id: 'item-2', delta: 'turn two' },
+    CAT,
+    state,
+  );
+  assert.equal(secondDelta?.content, '\n\nturn two');
+  const secondCompleted = transformCodexEvent(
+    { type: 'item.completed', item: { id: 'item-2', type: 'agent_message', text: 'turn two done' } },
+    CAT,
+    state,
+  );
+  assert.equal(secondCompleted?.content, 'turn one done\n\nturn two done');
+  assert.equal(secondCompleted?.textMode, 'replace');
+});
+
 test('item.started command_execution → tool_use', () => {
   const msg = transformCodexEvent(
     { type: 'item.started', item: { type: 'command_execution', command: 'ls -la' } },
@@ -993,6 +1054,85 @@ test('#1272: one already-canonical Codex turn is byte-stable after finalization'
   const done = completeAndFinalize(state);
 
   assert.equal(`${body?.content}${done?.content}`, original);
+});
+
+test('#1398: an identity-annotated own signature is normalized instead of duplicated', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const original = ['收到，明白。已直接 @小狸花 打招呼。', '', '[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-gmwmct57]'].join(
+    '\n',
+  );
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(
+    `${body?.content}${done?.content}`,
+    '收到，明白。已直接 @小狸花 打招呼。\n\n[砚砚/gpt-5.3-codex-spark🐾]',
+  );
+});
+
+test('#1398: a display-name signature is normalized to the nickname canonical signature', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = 'Hello～ 狸花猫在 🐾\n\n[狸花猫/deepseek-chat🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, 'Hello～ 狸花猫在 🐾\n\n[小狸花/deepseek-chat🐾]');
+});
+
+test('#1398 negative control: a display-name signature for another model remains content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '小狸花',
+    signatureIdentityAliases: ['狸花猫'],
+    canonicalSignature: '[小狸花/deepseek-chat🐾]',
+  };
+  const original = '示例：\n\n[狸花猫/another-model🐾]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: original } },
+    'cat-83srpa6h',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-83srpa6h', state);
+  const done = finalizeCodexStream(state, 'cat-83srpa6h');
+
+  assert.equal(`${body?.content}${done?.content}`, `${original}\n\n[小狸花/deepseek-chat🐾]`);
+});
+
+test('#1398 negative control: a mismatched identity annotation remains user content', () => {
+  const state = {
+    hadPriorTextTurn: false,
+    signatureIdentity: '砚砚',
+    canonicalSignature: '[砚砚/gpt-5.3-codex-spark🐾]',
+  };
+  const sample = '引用：[砚砚/缅因猫 gpt-5.3-codex-spark🐾@cat-someone-else]';
+  const body = transformCodexEvent(
+    { type: 'item.completed', item: { type: 'agent_message', text: sample } },
+    'cat-gmwmct57',
+    state,
+  );
+  transformCodexEvent({ type: 'turn.completed', usage: {} }, 'cat-gmwmct57', state);
+  const done = finalizeCodexStream(state, 'cat-gmwmct57');
+
+  assert.equal(`${body?.content}${done?.content}`, `${sample}\n\n[砚砚/gpt-5.3-codex-spark🐾]`);
 });
 
 test('#1272: terminal teammate and legacy signatures remain content beside one canonical signature', () => {

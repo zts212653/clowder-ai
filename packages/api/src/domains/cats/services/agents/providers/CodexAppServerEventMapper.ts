@@ -59,6 +59,17 @@ const mapCodexAppServerItemNotification: CodexAppServerNotificationMapper = (met
     : null;
 };
 
+const mapCodexAppServerAgentMessageDelta: CodexAppServerNotificationMapper = (_method, params) => {
+  if (typeof params?.itemId !== 'string' || typeof params.delta !== 'string') return null;
+  return {
+    type: 'item.agent_message.delta',
+    item_id: params.itemId,
+    delta: params.delta,
+    ...(typeof params.threadId === 'string' ? { thread_id: params.threadId } : {}),
+    ...(typeof params.turnId === 'string' ? { turn_id: params.turnId } : {}),
+  };
+};
+
 const CODEX_GOAL_STATUSES = new Set(['active', 'paused', 'blocked', 'usageLimited', 'budgetLimited', 'complete']);
 
 const mapCodexAppServerGoalUpdated: CodexAppServerNotificationMapper = (_method, params) => {
@@ -96,6 +107,7 @@ const CODEX_APP_SERVER_NOTIFICATION_MAPPERS: Readonly<Record<string, CodexAppSer
   Object.assign(Object.create(null) as Record<string, CodexAppServerNotificationMapper>, {
     'item/started': mapCodexAppServerItemNotification,
     'item/completed': mapCodexAppServerItemNotification,
+    'item/agentMessage/delta': mapCodexAppServerAgentMessageDelta,
     'turn/started': (_method, params) => {
       const turn = asCodexAppServerRecord(params?.turn);
       return {

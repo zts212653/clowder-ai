@@ -83,7 +83,7 @@ describe('RedisTurnExecutionStore', { skip: redisIsolationSkipReason(REDIS_URL) 
 
   test('atomic create canonicalizes causal field order', async () => {
     const input = runningInput({
-      executionKind: 'freshness_supplement',
+      executionKind: 'routing_guard',
       causal: { triggerMessageId: 'redis-msg-1', freshnessSupplementId: 'redis-supplement-1' },
     });
     assert.equal((await store.createRunning(input)).outcome, 'created');

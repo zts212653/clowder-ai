@@ -1,4 +1,9 @@
-import type { SchedulerLifecycleEvent, SchedulerMessageExtra, SchedulerToastPayload } from '@cat-cafe/shared';
+import type {
+  ConnectorSource,
+  SchedulerLifecycleEvent,
+  SchedulerMessageExtra,
+  SchedulerToastPayload,
+} from '@cat-cafe/shared';
 import type { IBallCustodyIngest } from '../../domains/ball-custody/BallCustodyIngest.js';
 import type { OwnerAuthProvenance } from '../../domains/cats/services/owner-auth-provenance.js';
 
@@ -79,6 +84,18 @@ export interface TaskDisplayMeta {
 }
 
 /** Phase 4: options for delivering a message to a thread */
+export interface PrivateDeliverOpts {
+  threadId: string;
+  userId: string;
+  targetCatId: string;
+  /** The exact input the target receives; never projected into the thread. */
+  content: string;
+  idempotencyKey: string;
+  priority?: 'urgent' | 'normal';
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
+  ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+}
+
 export interface DeliverOpts {
   threadId: string;
   content: string;
@@ -86,6 +103,24 @@ export interface DeliverOpts {
   /** Stable producer identity for retrying one exact persisted scheduler item. */
   idempotencyKey?: string;
   extra?: SchedulerMessageExtra;
+  /** Queued sources remain off the timeline until Queue admission marks them delivered. */
+  deliveryStatus?: 'queued';
+  /**
+   * RFC §5.1/§5.2: when a scheduled input needs a member to act, it names that member here and the
+   * delivery becomes ONE atomic Message + Queue admission — never an append followed by a bind.
+   */
+  targetCatId?: string;
+  /**
+   * RFC §5.1/§5.4 `private_input`: the exact payload the target receives when it differs from what
+   * the thread should show. The public `content` stays a History-only message; this never is.
+   */
+  privateContent?: string;
+  priority?: 'urgent' | 'normal';
+  suggestedSkill?: string;
+  sourceCategory?: 'ci' | 'review' | 'conflict' | 'scheduled' | 'a2a' | 'issue';
+  ownerAuthProvenance?: import('../../domains/cats/services/owner-auth-provenance.js').OwnerAuthProvenance;
+  /** Optional canonical source identity for scheduler-backed continuation producers. */
+  source?: ConnectorSource;
 }
 
 /** Phase 4: result of fetching web content */
@@ -114,21 +149,6 @@ export interface ScheduleLifecycleNotice {
 
 export type ScheduleLifecycleNotifier = (notice: ScheduleLifecycleNotice) => void;
 
-export type ScheduleInvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
-
-/** Async cat invocation trigger — callers may detach it, but resolution means durable wake acceptance. */
-export interface ScheduleInvokeTrigger {
-  trigger(
-    threadId: string,
-    catId: string,
-    userId: string,
-    message: string,
-    messageId: string,
-    contentBlocks?: readonly unknown[],
-    policy?: ScheduleTriggerPolicy,
-  ): Promise<ScheduleInvokeTriggerOutcome>;
-}
-
 /** Phase 1b+2: context passed to execute — carries actor resolution + context spec */
 export interface ExecuteContext {
   /** Aborted when this work item's scheduler timeout fires. */
@@ -141,10 +161,16 @@ export interface ExecuteContext {
   schedule?: ScheduleRunTiming;
   /** Phase 4: deliver message to a thread */
   deliver?: (opts: DeliverOpts) => Promise<string>;
+  /**
+   * RFC §5.1/§5.4 `private_input`: admit a target-only payload when the public notice already
+   * exists (or must not exist at all). Same Queue, same drain, no second History member.
+   */
+  deliverPrivate?: (opts: PrivateDeliverOpts) => Promise<void>;
+  /** Cancel a scheduler-owned queued message that failed before Queue admission. */
+  cancelQueuedDelivery?: (messageId: string) => Promise<boolean>;
   /** Phase 4: fetch web content with browser-automation routing */
   fetchContent?: (url: string) => Promise<FetchResult>;
   /** Phase 4b: invoke a cat to handle a scheduled task (fire-and-forget) */
-  invokeTrigger?: ScheduleInvokeTrigger;
   /** F233 PR3: optional ball-custody event sink for scheduler-originated events. */
   ballCustody?: IBallCustodyIngest;
   /** F167: hand a due managed-command fallback to its durable recovery receipt. */

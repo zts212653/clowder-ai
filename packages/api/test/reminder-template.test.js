@@ -44,7 +44,7 @@ describe('reminderTemplate', () => {
     assert.equal(arg.content, `${SCHEDULER_TRIGGER_PREFIX} 喝水提醒`);
     assert.equal(arg.threadId, 'th-abc');
     assert.equal(arg.catId, undefined);
-    assert.equal(arg.extra.scheduler.hiddenTrigger, true);
+    assert.equal(arg.targetCatId, 'opus', 'a scheduled wake names its member in the envelope');
   });
 
   it('adds late cron timing to the scheduler trigger prompt', async () => {
@@ -88,7 +88,7 @@ describe('reminderTemplate', () => {
       assignedCatId: null,
       deliver: deliverMock,
     });
-    assert.equal(deliverMock.mock.calls[0].arguments[0].catId, undefined);
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'opus', 'falls back to the default member');
   });
 
   it('keeps trigger visible when invokeTrigger is unavailable', async () => {
@@ -102,7 +102,7 @@ describe('reminderTemplate', () => {
       assignedCatId: 'opus',
       deliver: deliverMock,
     });
-    assert.equal(deliverMock.mock.calls[0].arguments[0].extra, undefined);
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'opus');
   });
 
   it('execute throws when deliver is not available', async () => {
@@ -131,8 +131,8 @@ describe('reminderTemplate', () => {
       invokeTrigger: triggerMock,
     });
     // invokeTrigger should be called with gpt52, not opus
-    assert.equal(triggerMock.trigger.mock.calls.length, 1);
-    assert.equal(triggerMock.trigger.mock.calls[0].arguments[1], 'gpt52');
+    assert.equal(deliverMock.mock.calls.length, 1, 'one envelope, one admission');
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'gpt52');
   });
 
   it('execute falls back to assignedCatId when no targetCatId', async () => {
@@ -148,7 +148,7 @@ describe('reminderTemplate', () => {
       deliver: deliverMock,
       invokeTrigger: triggerMock,
     });
-    assert.equal(triggerMock.trigger.mock.calls[0].arguments[1], 'sonnet');
+    assert.equal(deliverMock.mock.calls[0].arguments[0].targetCatId, 'sonnet');
   });
 
   it('preserves private owner authentication provenance when a hold timer wakes its cat', async () => {
@@ -171,13 +171,14 @@ describe('reminderTemplate', () => {
       invokeTrigger: triggerMock,
     });
 
-    assert.deepEqual(triggerMock.trigger.mock.calls[0].arguments[6], {
-      sourceCategory: 'scheduled',
-      ownerAuthProvenance: 'strict',
-    });
+    const managedEnvelope = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(managedEnvelope.sourceCategory, 'scheduled');
+    assert.equal(managedEnvelope.priority, 'urgent');
+    assert.equal(managedEnvelope.ownerAuthProvenance, 'strict');
   });
 
   it('does not grant a private owner provenance carrier to an ordinary reminder', async () => {
+    const deliverMock = mock.fn(async () => 'message-ordinary');
     const triggerMock = { trigger: mock.fn(async () => 'enqueued') };
     const spec = reminderTemplate.createSpec('reminder-user-visible', {
       trigger: { type: 'once', fireAt: Date.now() + 60_000 },
@@ -188,13 +189,17 @@ describe('reminderTemplate', () => {
 
     await spec.run.execute('ordinary reminder', 'thread-thread-owner', {
       assignedCatId: null,
-      deliver: async () => 'message-ordinary',
+      deliver: deliverMock,
       invokeTrigger: triggerMock,
     });
 
-    assert.deepEqual(triggerMock.trigger.mock.calls[0].arguments[6], {
-      sourceCategory: 'scheduled',
-    });
+    const ordinaryEnvelope = deliverMock.mock.calls[0].arguments[0];
+    assert.equal(ordinaryEnvelope.sourceCategory, 'scheduled');
+    assert.equal(
+      ordinaryEnvelope.ownerAuthProvenance,
+      undefined,
+      'an ordinary reminder must not carry a private owner provenance carrier',
+    );
   });
 
   it('uses default message when param is empty', async () => {
@@ -260,5 +265,47 @@ describe('reminderTemplate firePolicy activation guard (F167 Phase M — codex P
       deliveryThreadId: 'th-nodefer',
     });
     assert.equal(spec.firePolicy, undefined);
+  });
+});
+
+describe('reminderTemplate managed-hold terminal visibility', () => {
+  // Contract kept: a managed hold still owes the user a visible end-of-wait fact when its wake
+  // cannot be admitted. What is gone is the cancellation — one atomic admission leaves no
+  // half-written source to roll back.
+  it('persists one visible status when the urgent hold wake cannot be admitted', async () => {
+    const delivered = [];
+    const taskId = 'hold-ball-1748000000-trigger-failure';
+    const spec = reminderTemplate.createSpec(taskId, {
+      trigger: { type: 'once', fireAt: 9_999_999_999_000 },
+      params: {
+        message: 'continue after wait',
+        targetCatId: 'codex',
+        triggerUserId: 'user-1',
+        holdLifecycle: { mode: 'timer', status: 'active' },
+      },
+      deliveryThreadId: 'thread-1',
+    });
+
+    await spec.run.execute('continue after wait', 'thread-thread-1', {
+      assignedCatId: 'codex',
+      deliver: async (input) => {
+        delivered.push(input);
+        if (delivered.length === 1) throw new Error('queue admission rejected');
+        return 'status-message-1';
+      },
+    });
+
+    assert.equal(delivered.length, 2);
+    assert.equal(delivered[0].targetCatId, 'codex', 'the wake envelope names its member');
+    assert.equal(delivered[0].idempotencyKey, `hold-ball-wake:${taskId}`);
+    assert.equal(delivered[1].idempotencyKey, `hold-ball-wake-failed:${taskId}`);
+    assert.equal(delivered[1].source.meta.phase, 'status');
+    // Both cards this run emits are terminal: the wake itself ends the wait, and
+    // a failed wake admission ends it too. Neither phase (`wake`, `status`) can
+    // carry that, so each card states its own cancelability for the consumer.
+    assert.equal(delivered[0].source.meta.cancelable, false);
+    assert.equal(delivered[1].source.meta.cancelable, false);
+    assert.match(delivered[1].content, /唤醒入队失败/);
+    assert.match(delivered[1].content, /queue admission rejected/);
   });
 });

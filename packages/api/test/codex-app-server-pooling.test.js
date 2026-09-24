@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import {
+  buildCodexActiveWriterWaitSignal,
   CodexAgentService,
   codexConfigObjectFromArgs,
 } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
@@ -91,8 +92,8 @@ class PoolWire {
 }
 
 class ActiveWriterWire extends PoolWire {
-  constructor(threadId) {
-    super(threadId);
+  constructor(threadId, reusedSessionHost = false) {
+    super(threadId, reusedSessionHost);
     this.previousThreadId = threadId;
   }
 
@@ -231,6 +232,39 @@ function callbackEnv(invocationId, callbackToken) {
   };
 }
 
+test('active-writer ownership wait becomes a transient non-History status only after 10 seconds', () => {
+  const event = {
+    type: 'app_server.recovery',
+    reason: 'active_writer_retry',
+    attempt: 7,
+    retryBudget: null,
+    elapsedMs: 10_000,
+    threadId: 'native-old',
+  };
+  assert.equal(
+    buildCodexActiveWriterWaitSignal({
+      catId: 'codex',
+      metadata: { provider: 'openai', model: 'gpt-5.6-sol' },
+      event: { ...event, elapsedMs: 9_999 },
+    }),
+    null,
+  );
+  const signal = buildCodexActiveWriterWaitSignal({
+    catId: 'codex',
+    metadata: { provider: 'openai', model: 'gpt-5.6-sol' },
+    event,
+    timestamp: 123,
+  });
+  assert.equal(signal.type, 'provider_signal');
+  assert.equal(signal.timestamp, 123);
+  assert.deepEqual(JSON.parse(signal.content), {
+    type: 'warning',
+    presentation: 'transient_status',
+    message: '正在等待该成员的原生会话释放，可点 Stop 取消',
+  });
+  assert.equal(signal.metadata.diagnostics.appServerRecovery.elapsedMs, 10_000);
+});
+
 async function drain(iterable) {
   const values = [];
   for await (const value of iterable) values.push(value);
@@ -344,10 +378,11 @@ test('CodexAgentService hides a recovered model-capacity failure from the Clowde
   assert.equal(retryTurn.params.additionalContext?.['cat-cafe.capacity-recovery']?.kind, 'application');
 });
 
-test('CodexAgentService exposes active-writer refusal without minting a replacement session', async () => {
-  const first = new ActiveWriterWire('native-old');
+test('CodexAgentService waits out active-writer ownership without a public failure or replacement session', async () => {
+  const first = new ActiveWriterWire('native-old', true);
   const second = new ActiveWriterWire('native-old');
-  const wires = [first, second];
+  const third = new PoolWire('native-old');
+  const wires = [first, second, third];
   let factoryCalls = 0;
   const service = new CodexAgentService({
     carrierMode: 'app_server',
@@ -364,40 +399,27 @@ test('CodexAgentService exposes active-writer refusal without minting a replacem
     }),
   );
 
-  assert.equal(factoryCalls, 2, 'one failed resume may receive only one bounded same-session retry');
-  assert.equal(
-    output.some((message) => message.type === 'session_init'),
-    false,
-  );
+  assert.equal(factoryCalls, 3, 'the same native session remains pending until its writer releases');
   assert.equal(
     output.filter((message) => message.type === 'session_init' && message.sessionReplacement).length,
     0,
     'active-writer refusal must not mint replacement provenance or a new native session',
   );
   assert.equal(
-    output.some(
-      (message) =>
-        message.type === 'error' &&
-        message.error.includes('拒绝自动替换或封存当前会话') &&
-        message.error.includes('请稍后重试'),
-    ),
-    true,
+    output.some((message) => message.type === 'error'),
+    false,
+    'writer ownership is transient scheduling state, not a public task failure',
   );
   assert.equal(
     output.filter((message) => message.metadata?.diagnostics?.appServerRecovery?.reason === 'active_writer_retry')
       .length,
-    1,
-    'the bounded retry must preserve diagnostics without claiming a replacement',
+    2,
+    'each internal wait attempt remains observable without claiming a replacement',
   );
-  const terminalError = output.find((message) => message.type === 'error');
-  assert.equal(terminalError.metadata?.cliDiagnostics?.reasonCode, 'active_writer_recovery');
-  assert.equal(terminalError.metadata?.cliDiagnostics?.activeWriterRecovery?.state, 'owner_busy');
-  assert.equal(terminalError.metadata?.cliDiagnostics?.publicSummary, '原生会话仍绑定原 writer host');
-  assert.match(terminalError.metadata?.cliDiagnostics?.publicHint, /原 Session 已保留/);
-  assert.doesNotMatch(
-    JSON.stringify(terminalError.metadata?.cliDiagnostics),
-    /thread native-old already has an active writer/,
-    'typed diagnostics must not expose raw upstream active-writer text',
+  assert.equal(
+    output.some((message) => message.metadata?.diagnostics?.appServerLifecycle?.failureReason),
+    false,
+    'discarded ownership probes must not project a failed lifecycle into the active invocation',
   );
 });
 

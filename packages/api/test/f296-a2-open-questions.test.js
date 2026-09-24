@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { assembleIncrementalContext: assembleRaw } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
@@ -22,14 +23,14 @@ const CLOSED_QUESTION = '要不要把 delivery cursor 拆成两个 store？(PR #
 const OPEN_LOOKING_QUESTION = '谁来接 Phase C 的 provider handshake？';
 
 function mockMsg(overrides) {
-  return {
+  return canonicalTestMessageInput({
     threadId: 'thread-1',
     userId: 'user-1',
     catId: null,
     content: overrides.content ?? 'test message',
     mentions: [],
     timestamp: overrides.timestamp ?? Date.now(),
-  };
+  });
 }
 
 function seedMessages(messageStore, count) {

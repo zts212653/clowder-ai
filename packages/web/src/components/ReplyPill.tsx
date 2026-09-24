@@ -3,7 +3,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { resolveSender } from '@/lib/resolve-sender';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import { focusLineageMessage } from '@/utils/focusLineageMessage';
 
 interface ReplyPillProps {
   replyPreview: { senderCatId: string | null; content: string; deleted?: true };
@@ -24,7 +24,7 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
   const previewText = deleted ? '消息已删除' : content;
 
   const handleClick = () => {
-    scrollToMessage(replyToId);
+    focusLineageMessage(replyToId);
   };
 
   return (

@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import type { AgentCarrierSession, AgentCarrierSessionFactory, AgentCarrierSessionOptions } from '../../types.js';
 
 function normalizeEnv(input: Record<string, string | null> | undefined, workingDirectory: string): NodeJS.ProcessEnv {
@@ -50,7 +51,7 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
     }
     const exit = await this.waitForExit();
     if (exit.code !== 0 && !this.options.signal?.aborted) {
-      const excerpt = this.stderr.join('').trim().slice(-1000);
+      const excerpt = excerptSanitizedStderr(this.stderr.join(''), { edge: 'tail', maxLength: 1_000 });
       throw new Error(`Codex app-server exited with code ${String(exit.code)}${excerpt ? `: ${excerpt}` : ''}`);
     }
   }

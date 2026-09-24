@@ -1,5 +1,4 @@
 import type { Redis } from 'ioredis';
-import type { IMessageStore } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 
 /**
@@ -11,35 +10,24 @@ import type { IThreadStore } from '../../../domains/cats/services/stores/ports/T
  */
 
 /**
- * Matches the `TriggerOutcome` return type of `ConnectorInvokeTrigger.trigger()`:
- *  - `'dispatched'` — durable execution-start receipt exists; remaining work continues in background
- *  - `'enqueued'`  — thread busy, queued; processor will pick up when slot frees
- *  - `'full'`      — thread queue at capacity, **invocation dropped, not retried**
+ * RFC §5.1/§5.4: a manual eval trigger publishes a visible packet and hands the eval cat its own
+ * exact input. Both cross the one component that owns durable admission — not an append followed
+ * by a bind, which could leave the packet in the thread with nobody woken for it.
  */
-export type InvokeTriggerOutcome = 'dispatched' | 'enqueued' | 'full';
-
-export interface InvokeTriggerLike {
-  trigger(
-    threadId: string,
-    catId: string,
-    userId: string,
-    reason: string,
-    messageId: string,
-  ): InvokeTriggerOutcome | Promise<InvokeTriggerOutcome>;
-}
+export type EvalDeliveryLike =
+  import('../../../domains/cats/services/agents/invocation/PersistedQueueDelivery.js').PersistedQueueDeliveryPort;
 
 /**
  * Late-bound provider — eval-hub routes register before invokeTrigger is
  * constructed in index.ts. Provider returns null until index.ts wires it.
  */
 export interface InvokeTriggerProvider {
-  get(): InvokeTriggerLike | null;
+  get(): EvalDeliveryLike | null;
 }
 
 export interface ManualTriggerDeps {
   harnessFeedbackRoot: string;
   invokeTriggerProvider?: InvokeTriggerProvider;
-  messageStore?: Pick<IMessageStore, 'append'>;
   threadStore?: IThreadStore;
   redis?: Redis;
   /**

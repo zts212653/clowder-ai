@@ -42,7 +42,7 @@ const USER_ENTRY: QueueEntry = {
   content: '帮我看看这个 PR',
   messageId: 'm1',
   mergedMessageIds: [],
-  source: 'user',
+  from: { kind: 'user', userId: 'test-user' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
@@ -56,13 +56,12 @@ const AGENT_ENTRY: QueueEntry = {
   content: '[Multi-Mention from codex] 帮我确认 API 设计',
   messageId: 'm2',
   mergedMessageIds: [],
-  source: 'agent',
+  from: { kind: 'agent', catId: 'codex' },
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
   createdAt: NOW + 1,
   autoExecute: true,
-  callerCatId: 'codex',
 };
 
 const FRESHNESS_ENTRY: QueueEntry = {
@@ -72,14 +71,13 @@ const FRESHNESS_ENTRY: QueueEntry = {
   content: '你上一轮的回复生成时有来自 GitHub Review 的 1 条新消息尚未被你看到。',
   messageId: null,
   mergedMessageIds: [],
-  source: 'agent',
+  from: { kind: 'agent', catId: 'opus' },
   sourceCategory: 'freshness',
   targetCats: ['opus'],
   intent: 'execute',
   status: 'queued',
   createdAt: NOW + 2,
   autoExecute: true,
-  callerCatId: 'opus',
 };
 
 describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
@@ -106,8 +104,10 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
 
     const text = container.textContent ?? '';
-    // Agent entry should show handoff format
-    expect(text).toContain('缅因猫（sol） → 布偶猫（Fable）');
+    const route = container.querySelector('[data-testid="queue-route-q-agent"]');
+    expect(route?.textContent).toContain('缅因猫（sol）');
+    expect(route?.textContent).toContain('→');
+    expect(route?.textContent).toContain('布偶猫（Fable）');
     expect(text).not.toContain('codex → opus');
     // User entry should show configured co-creator name
     expect(text).toContain('始皇帝');
@@ -127,8 +127,9 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
 
     const text = container.textContent ?? '';
     expect(text).toContain('Freshness');
-    expect(text).toContain('Freshness → 布偶猫（Fable）');
-    expect(text).not.toContain('布偶猫（Fable） → 布偶猫（Fable）');
+    const route = container.querySelector('[data-testid="queue-route-q-freshness"]');
+    expect(route?.textContent).toContain('布偶猫（Fable）');
+    expect(route?.textContent).toContain('→');
   });
 
   it('agent entry has purple background class', () => {
@@ -139,13 +140,13 @@ describe('QueuePanel agent entry rendering (F122B AC-B7)', () => {
     expect(agentRow).not.toBeNull();
   });
 
-  it('user entry does NOT have agent background or "自动" tag', () => {
+  it('user entry uses the same sender-to-target route without agent decoration', () => {
     useChatStore.setState({ queue: [USER_ENTRY] });
     act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
 
     const text = container.textContent ?? '';
     expect(text).not.toContain('自动');
-    expect(text).not.toContain('→');
+    expect(container.querySelector('[data-testid="queue-route-q-user"]')?.textContent).toContain('→');
     const agentRow = container.querySelector('.bg-\\[var\\(--color-cocreator-surface\\)\\]');
     expect(agentRow).toBeNull();
   });

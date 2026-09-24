@@ -7,6 +7,7 @@ import {
   connectCodexAppServerHost,
   createCodexSocketDirectory,
   removeCodexSocketDirectory,
+  spawnCodexAppServerHost,
 } from '../dist/domains/cats/services/agents/providers/CodexUnixWebSocketSession.js';
 
 async function withClosingUnixWebSocket(reason, run) {
@@ -57,4 +58,29 @@ test('unix websocket sanitizes provider terminal diagnostics before exposing the
       (error) => error?.message === 'Bearer [TOKEN_REDACTED]',
     );
   });
+});
+
+test('unix host sanitizes stderr before taking its tail diagnostic', async () => {
+  const directory = createCodexSocketDirectory();
+  const socketPath = join(directory, 'missing.sock');
+  const token = `sk-${'X'.repeat(40)}`;
+  const stderr = `${'A'.repeat(1_100)}${token}${'B'.repeat(980)}`;
+  try {
+    await assert.rejects(
+      () =>
+        spawnCodexAppServerHost({
+          command: process.execPath,
+          args: ['--input-type=module', '-e', `process.stderr.write(${JSON.stringify(stderr)}); process.exit(1);`],
+          socketDirectory: directory,
+          socketPath,
+        }),
+      (error) => {
+        assert.doesNotMatch(error.message, /X{8,}/);
+        assert.match(error.message, /\[TOKEN_REDACTED\]/);
+        return true;
+      },
+    );
+  } finally {
+    await removeCodexSocketDirectory(directory);
+  }
 });

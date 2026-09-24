@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
 const { IssueWaitMigrationService } = await import('../dist/domains/ball-custody/IssueWaitMigrationService.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
@@ -91,7 +91,7 @@ describe('F280 Phase C issue predicate contract', () => {
 describe('F280 Phase C issue wait lifecycle', () => {
   it('keeps unrelated issue comments state-only, then consumes once for the explicit predicate', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const harness = connectorDeliveryHarness();
     const eventLog = new MemoryWaitLifecycleEventLog();
     const task = await taskStore.create({
       kind: 'issue_tracking',
@@ -106,7 +106,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     });
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       eventLog,
       now: () => 500,
       log: { info() {}, warn() {}, error() {} },
@@ -125,7 +125,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
       },
     });
     assert.equal(unrelated.kind, 'state_only');
-    assert.equal(messageStore.getByThread('thread_issue').length, 0);
+    assert.equal(harness.deliveries('thread_issue').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.issue.lastCommentCursor, 41);
 
     const matched = await lifecycle.observe({
@@ -155,7 +155,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.match(matched.content, /Issue wait satisfied/);
     assert.match(matched.content, /issue author issue-author commented \(#42\)/);
     assert.doesNotMatch(matched.content, /UNTRUSTED EXTERNAL CONTENT/);
-    assert.deepEqual(messageStore.getByThread('thread_issue')[0].source?.meta?.waitContinuationCarrier, {
+    assert.deepEqual(harness.deliveries('thread_issue')[0].source?.meta?.waitContinuationCarrier, {
       v: 1,
       waitId: task.id,
       outcomeId: 'wait:issue:owner/repo#17:g2:matched',
@@ -166,7 +166,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
 
   it('stops a collector-only issue task when the GitHub subject becomes terminal', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const harness = connectorDeliveryHarness();
     const task = await taskStore.create({
       kind: 'issue_tracking',
       subjectKey: 'issue:owner/repo#19',
@@ -182,7 +182,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     });
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       now: () => 500,
       log: { info() {}, warn() {}, error() {} },
     });
@@ -200,7 +200,7 @@ describe('F280 Phase C issue wait lifecycle', () => {
     assert.deepEqual(result, { kind: 'state_only', reason: 'subject_terminal_without_active_wait' });
     assert.equal(terminal.status, 'done');
     assert.equal(terminal.automationState.issue.issueState, 'closed');
-    assert.equal(messageStore.getByThread('thread_issue_collector').length, 0);
+    assert.equal(harness.deliveries('thread_issue_collector').length, 0);
   });
 });
 

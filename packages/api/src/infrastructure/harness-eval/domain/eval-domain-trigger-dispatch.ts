@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { ExecuteContext, ScheduleInvokeTrigger } from '../../scheduler/types.js';
+import type { ExecuteContext } from '../../scheduler/types.js';
 import type { EvalCatInvocationPacket } from '../eval-cat-invocation.js';
 import type { EvalDomainRegistryEntry } from './eval-domain-registry.js';
 import type {
@@ -55,7 +55,6 @@ interface DispatchInput {
   triggerReason: string;
   store?: IEvalDomainTriggerStore;
   deliver?: ExecuteContext['deliver'];
-  invokeTrigger?: ScheduleInvokeTrigger;
   defaultUserId?: string;
   nowMs?: number;
   tokenFactory?: () => string;
@@ -206,8 +205,7 @@ class EvalDomainTriggerDispatchRun {
 
   private async deliverAndWake(): Promise<EvalDomainTriggerDispatchResult> {
     try {
-      const messageId = await this.deliverMessage();
-      const wakeOutcome = await this.wakeCat(messageId);
+      const { messageId, wakeOutcome } = await this.deliverMessage();
       if (wakeOutcome !== 'dispatched') {
         await this.releaseClaims();
         return this.outcome(wakeOutcome);
@@ -222,40 +220,33 @@ class EvalDomainTriggerDispatchRun {
     }
   }
 
-  private async deliverMessage(): Promise<string> {
+  /**
+   * RFC §5.4: the thread shows the eval invocation notice; `triggerReason` is the eval cat's exact
+   * input and never a public History member. One admission covers both — the wake is the admission.
+   */
+  private async deliverMessage(): Promise<{
+    messageId: string;
+    wakeOutcome: 'dispatched' | 'trigger_full' | 'trigger_failed';
+  }> {
     if (!this.input.deliver) throw new Error('scheduled eval delivery is unavailable');
-    const messageId = await this.input.deliver({
-      threadId: this.input.invocation.targetThreadId,
-      content: buildScheduledEvalInvocationMessage(this.input.invocation, {
-        channel: this.input.channel,
-        windowKey: this.window.windowKey,
-        dedupeKey: this.dedupeKey,
-      }),
-      userId: 'scheduler',
-      idempotencyKey: this.dedupeKey,
-    });
-    if (!messageId) throw new Error('scheduled eval delivery returned no message id');
-    return messageId;
-  }
-
-  private async wakeCat(messageId: string): Promise<'dispatched' | 'trigger_full' | 'trigger_failed'> {
-    if (!this.input.invokeTrigger) return 'dispatched';
     try {
-      const outcome = await this.input.invokeTrigger.trigger(
-        this.input.invocation.targetThreadId,
-        this.input.invocation.evalCat.catId,
-        this.input.defaultUserId ?? 'default-user',
-        this.input.triggerReason,
-        messageId,
-        undefined,
-        {
-          sourceCategory: this.input.channel === 'time' ? 'scheduled' : 'eval-threshold',
-          reason: this.input.triggerReason,
-        },
-      );
-      return outcome === 'full' ? 'trigger_full' : 'dispatched';
+      const messageId = await this.input.deliver({
+        threadId: this.input.invocation.targetThreadId,
+        content: buildScheduledEvalInvocationMessage(this.input.invocation, {
+          channel: this.input.channel,
+          windowKey: this.window.windowKey,
+          dedupeKey: this.dedupeKey,
+        }),
+        userId: this.input.defaultUserId ?? 'default-user',
+        targetCatId: this.input.invocation.evalCat.catId,
+        privateContent: this.input.triggerReason,
+        sourceCategory: 'scheduled',
+        idempotencyKey: this.dedupeKey,
+      });
+      if (!messageId) throw new Error('scheduled eval delivery returned no message id');
+      return { messageId, wakeOutcome: 'dispatched' };
     } catch {
-      return 'trigger_failed';
+      return { messageId: '', wakeOutcome: 'trigger_failed' };
     }
   }
 
