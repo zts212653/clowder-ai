@@ -87,14 +87,15 @@ describe('Ralph Loop + Context Management (AC-11)', () => {
       makeStepFinish(2003, 12000),
       // Cycle 3 (Ralph auto-continues)
       makeStepStart(3000),
-      makeText(3001, 'Step 3: Running tests to verify...'),
-      makeToolUse(3002, 'bash', { command: 'npm test' }),
+      makeToolUse(3001, 'bash', { command: 'npm test' }),
+      makeText(3002, 'The auth changes are implemented and the tests passed.'),
       makeStepFinish(3003, 16000),
     ];
 
     const promise = collect(service.invoke('Fix the auth module'));
     emitOpenCodeEvents(proc, events);
     const messages = await promise;
+    assert.strictEqual(spawnFn.mock.callCount(), 1, 'a completed multi-step answer needs no finalizer');
 
     // Should have exactly 1 session_init (from first step_start, deduped)
     const sessionInits = messages.filter((m) => m.type === 'session_init');
@@ -103,6 +104,7 @@ describe('Ralph Loop + Context Management (AC-11)', () => {
     // Should have 3 text messages (one per cycle)
     const textMsgs = messages.filter((m) => m.type === 'text');
     assert.strictEqual(textMsgs.length, 3, `expected 3 text messages, got ${textMsgs.length}`);
+    assert.strictEqual(textMsgs.at(-1)?.content, 'The auth changes are implemented and the tests passed.');
 
     // Should have 3 tool_use messages (one per cycle)
     const toolUses = messages.filter((m) => m.type === 'tool_use');

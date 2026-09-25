@@ -519,7 +519,7 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
         const result = transformOpenCodeEvent(event, this.catId);
         if (result !== null) {
           let terminateAfterYield = false;
-          if (result.type === 'text') {
+          if (result.type === 'text' && result.content?.trim()) {
             textEventCount++;
             lastTextEventIndex = eventCount;
           }
@@ -638,12 +638,9 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
           };
         }
       }
-      if (
-        textEventCount > 0 &&
-        lastToolEventIndex > lastTextEventIndex &&
-        !(lastStepFinishReason === 'stop' && (stepStartCount > 1 || delegateTaskEmitted)) &&
-        !errorAlreadyYielded
-      ) {
+      // Step count, delegation and reason=stop describe execution, not delivery.
+      // A multi-step run still needs final text after its last tool.
+      if (textEventCount > 0 && lastToolEventIndex > lastTextEventIndex && !errorAlreadyYielded) {
         log.warn(
           {
             catId: this.catId,
@@ -901,14 +898,17 @@ export class OpenCodeAgentService implements L0InjectableAgentService {
       }
     }
 
-    if (!finalizerPoisoned && finalizerTextBuffer.length > 0) {
+    // Keep whitespace chunks for formatting, but do not accept whitespace alone
+    // as a recovered answer (which would replace the prelude with a blank bubble).
+    const hasFinalizerText = finalizerTextBuffer.some((message) => message.content?.trim());
+    if (!finalizerPoisoned && hasFinalizerText) {
       for (const finalizerText of finalizerTextBuffer) {
         yield finalizerText;
       }
       return;
     }
 
-    if (finalizerTextBuffer.length === 0 || finalizerPoisoned) {
+    if (!hasFinalizerText || finalizerPoisoned) {
       log.warn(
         {
           catId: this.catId,

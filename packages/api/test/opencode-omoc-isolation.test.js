@@ -83,6 +83,13 @@ describe('OMOC Sisyphus Isolation (AC-9)', () => {
       OMOC_DELEGATE_LIBRARIAN,
       OMOC_BASH_TOOL,
       OMOC_DELEGATE_FRONTEND,
+      {
+        ...OMOC_SISYPHUS_TEXT,
+        part: {
+          ...OMOC_SISYPHUS_TEXT.part,
+          text: 'The auth middleware was analyzed and the login form was implemented.',
+        },
+      },
       OMOC_STEP_FINISH,
     ]);
     const messages = await promise;

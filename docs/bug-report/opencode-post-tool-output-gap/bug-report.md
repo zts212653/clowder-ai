@@ -136,3 +136,49 @@ Results:
 - Target SQLite recovery test passed.
 - Target post-tool finalizer test passed.
 - Full `opencode-agent-service.test.js` passed: 41/41.
+
+## Follow-up: terminal-answer invariant (2026-09-15)
+
+The installed adapter and upstream `c0cf29f0a` still exempted a post-tool gap
+when `step_finish.reason === 'stop'` and either multiple steps or any
+`delegate-task` had occurred. Those facts describe execution, not delivery.
+The OMOC isolation fixture reinforced this mistake: its only text promised
+to delegate work, yet it asserted that no finalizer should run.
+
+A deterministic regression now drives the actual provider adapter through:
+
+```text
+step_start -> prelude -> tool -> step_finish(tool-calls)
+-> step_start -> prelude -> tool -> step_finish(stop) -> exit(0)
+```
+
+Before the fix, no recovery was spawned and the user received only the
+prelude. Delegation, earlier delegation followed by another tool, and
+whitespace after the last tool could conceal the same missing answer.
+Separately, a whitespace-only finalizer could replace the prelude with a
+blank response.
+
+The repair removes the step/delegation exemption and counts only
+non-whitespace text as delivery evidence. Whitespace chunks are preserved
+for streaming/formatting; a finalizer containing only whitespace takes the
+existing explicit diagnostic path. A valid OMOC fixture now includes an
+actual answer after its last tool.
+
+Validation: `opencode-terminal-answer.test.js` changed from 5 failures and
+1 passing control to 6 passing tests, then added a passing chunk-formatting
+regression. The seven focused test files (provider, recovery, event
+transformer, OMOC isolation/context, terminal answers and text aggregation)
+pass 95/95 tests. The fixtures use mocked CLI processes
+and isolated test state; they do not replay live sessions or contact a model.
+
+```bash
+bash packages/api/scripts/with-test-home.sh node \
+  --import ./packages/api/test/helpers/setup-cat-registry.js \
+  --test --test-timeout=20000 packages/api/test/opencode-terminal-answer.test.js
+```
+
+Boundaries: this guarantees a missing post-tool answer enters bounded
+recovery or produces an explicit diagnostic. It does not establish that
+unfinished research is complete, grant tools to the finalizer, settle A2A
+custody, or classify legitimate pure-tool turns as silent failures. Matching
+a particular production incident still requires its own event sequence.
