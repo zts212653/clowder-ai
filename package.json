@@ -73,7 +73,7 @@
     "check:biome-review-worktrees": "node --test scripts/biome-review-worktrees-ignore.test.mjs",
     "check:video-new": "node --test test/scripts/video-new-project.test.mjs",
     "check:scripts-ascii-only": "node scripts/check-scripts-ascii-only.mjs",
-    "check:whisper-dispatch": "node --test scripts/services/whisper-dispatch.test.mjs && python3 -m unittest scripts/services/test_whisper_worker.py",
+    "check:whisper-dispatch": "node --test scripts/services/whisper-dispatch.test.mjs && python3 -m unittest scripts/services/test_whisper_cuda.py scripts/services/test_whisper_worker.py",
     "check:tts-runtime": "python3 -m unittest scripts/services/test_tts_runtime.py",
     "check:guides": "node scripts/gen-guide-catalog.mjs",
     "check:biome-version": "node scripts/check-biome-version.mjs",

@@ -281,15 +281,35 @@ def _try_faster_whisper() -> bool:
         fw_name = model_path
         device = "cpu"
         compute_type = "int8"
+        cuda_available = False
         try:
-            import torch
-            if torch.cuda.is_available():
-                device = "cuda"
-                compute_type = "float16"
-        except ImportError:
+            import ctranslate2
+
+            cuda_available = ctranslate2.get_cuda_device_count() > 0
+        except Exception:
             pass
+        if not cuda_available:
+            try:
+                import torch
+
+                cuda_available = torch.cuda.is_available()
+            except ImportError:
+                pass
+            except Exception:
+                log.warning("Optional torch CUDA probe failed, using CPU", exc_info=True)
+        if cuda_available:
+            device = "cuda"
+            compute_type = "float16"
         log.info("Loading faster-whisper: model=%s device=%s", fw_name, device)
-        _fw_model = WhisperModel(fw_name, device=device, compute_type=compute_type)
+        try:
+            _fw_model = WhisperModel(fw_name, device=device, compute_type=compute_type)
+        except Exception:
+            if device == "cpu":
+                raise
+            log.warning("CUDA faster-whisper load failed, falling back to CPU", exc_info=True)
+            device = "cpu"
+            compute_type = "int8"
+            _fw_model = WhisperModel(fw_name, device=device, compute_type=compute_type)
         _backend = "faster-whisper"
         model_loaded = True
         log.info("Model loaded via faster-whisper (device: %s)", device)

@@ -120,12 +120,17 @@ describe('whisper-dispatch — static guard (script content)', () => {
     },
   );
 
-  test('canonical whisper dispatch check runs the Python worker regressions', () => {
+  test('canonical whisper dispatch check runs the Python worker and CUDA regressions', () => {
     const packageJson = JSON.parse(readFileSync(join(SERVICES_DIR, '../../package.json'), 'utf8'));
     assert.match(
       packageJson.scripts['check:whisper-dispatch'],
-      /python3 -m unittest scripts\/services\/test_whisper_worker\.py/,
+      /python3 -m unittest(?: [^&]+)? scripts\/services\/test_whisper_worker\.py/,
       'check:whisper-dispatch must execute the dedicated-worker behavioral suite',
+    );
+    assert.match(
+      packageJson.scripts['check:whisper-dispatch'],
+      /python3 -m unittest(?: [^&]+)? scripts\/services\/test_whisper_cuda\.py/,
+      'check:whisper-dispatch must execute the CUDA fallback behavioral suite',
     );
   });
 
