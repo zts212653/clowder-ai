@@ -89,6 +89,8 @@ describe('F296 Claude project hook carrier readiness', () => {
     const ready = projectRoot();
     writeSettings(ready);
     writeAuthenticatedHook(ready);
-    assert.equal(isClaudeProjectHookCarrierReady(ready), true);
+    // Windows does not expose executable bits even after chmod(0755).
+    // Its supported carrier is covered by portable-compaction-hooks.test.js.
+    assert.equal(isClaudeProjectHookCarrierReady(ready), process.platform !== 'win32');
   });
 });
