@@ -1,0 +1,143 @@
+{
+  "verdictId": "2026-08-15-eval-friction-c1-mixed-actionable-singletons",
+  "selector": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1786503600000,
+    "windowEndMs": 1786762800000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "window": {
+    "sinceMs": 1786503600000,
+    "untilMs": 1786762800000
+  },
+  "signalCount": 2,
+  "clusterCount": 2,
+  "degraded": true,
+  "droppedChannels": [],
+  "report": {
+    "window": {
+      "sinceMs": 1786503600000,
+      "untilMs": 1786762800000
+    },
+    "generatedAt": "2026-08-15T03:09:02.052Z",
+    "topClusters": [
+      {
+        "clusterId": "c03def938f44",
+        "representative": "a2a_timeout: opus",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msrrjlhao784v88j",
+            "rawRef": "fi_msrrjlhao784v88j",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "high"
+      },
+      {
+        "clusterId": "cd494b7db6bf",
+        "representative": "text_frustration: 还是不行",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msrr7ie3g99v4y4b",
+            "rawRef": "fi_msrr7ie3g99v4y4b",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "medium"
+      }
+    ],
+    "actionableCandidates": [
+      {
+        "clusterId": "c03def938f44",
+        "representative": "a2a_timeout: opus",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msrrjlhao784v88j",
+            "rawRef": "fi_msrrjlhao784v88j",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "high",
+        "actionability": "actionable_candidate",
+        "followupDraft": {
+          "clusterId": "c03def938f44",
+          "title": "Investigate friction cluster: a2a_timeout: opus",
+          "summary": "a2a_timeout: opus",
+          "evidenceRefs": [
+            "fi_msrrjlhao784v88j"
+          ],
+          "reportingMode": "final-only"
+        },
+        "referenceOnlyEvidenceRefs": []
+      },
+      {
+        "clusterId": "cd494b7db6bf",
+        "representative": "text_frustration: 还是不行",
+        "channels": [
+          "user-feedback"
+        ],
+        "count": 1,
+        "members": [
+          {
+            "signalId": "user-feedback:fi_msrr7ie3g99v4y4b",
+            "rawRef": "fi_msrr7ie3g99v4y4b",
+            "channel": "user-feedback"
+          }
+        ],
+        "method": "rule",
+        "sensorForms": [
+          "reason"
+        ],
+        "severity": "medium",
+        "actionability": "actionable_candidate",
+        "followupDraft": {
+          "clusterId": "cd494b7db6bf",
+          "title": "Investigate friction cluster: text_frustration: 还是不行",
+          "summary": "text_frustration: 还是不行",
+          "evidenceRefs": [
+            "fi_msrr7ie3g99v4y4b"
+          ],
+          "reportingMode": "final-only"
+        },
+        "referenceOnlyEvidenceRefs": []
+      }
+    ],
+    "referenceOnly": [],
+    "tailSummary": {
+      "clusterCount": 0,
+      "signalCount": 0,
+      "byChannel": {}
+    },
+    "degraded": true,
+    "droppedChannels": [],
+    "tokenBudget": {
+      "cap": 4000,
+      "estimated": 501
+    }
+  }
+}
