@@ -28,6 +28,7 @@ const VALID_ENV_KEY = /^[A-Z_][A-Za-z0-9_]*$/;
  */
 export const OPENROUTER_COMPAT_ENV_ALIAS_CLIENTS = ['openai', 'google'] as const;
 const OPENROUTER_API_KEY_TEMPLATE = '${api_key}';
+export const ATLAS_CLOUD_BASE_URL = 'https://api.atlascloud.ai/v1';
 
 /**
  * Built-in env mappings for known clients/providers.
@@ -44,6 +45,15 @@ export const BUILTIN_ENV_MAPS: Record<string, Record<string, string>> = {
     OPENROUTER_API_KEY: OPENROUTER_API_KEY_TEMPLATE,
     OPENAI_BASE_URL: '${base_url}',
     OPENAI_API_BASE: '${base_url}', // Legacy alias for older SDKs
+  },
+  atlascloud: {
+    OPENAI_API_KEY: '${api_key}',
+    OPENAI_BASE_URL: '${base_url}',
+    OPENAI_API_BASE: '${base_url}', // Legacy alias for older SDKs
+    ATLASCLOUD_API_KEY: '${api_key}',
+    ATLAS_CLOUD_API_KEY: '${api_key}',
+    ATLASCLOUD_BASE_URL: '${base_url}',
+    ATLAS_CLOUD_BASE_URL: '${base_url}',
   },
   google: {
     GEMINI_API_KEY: '${api_key}',
@@ -67,6 +77,15 @@ export interface EnvMapAccount {
   apiKey?: string;
   baseUrl?: string;
   baseModel?: string;
+}
+
+export function isAtlasCloudBaseUrl(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'api.atlascloud.ai';
+  } catch {
+    return false;
+  }
 }
 
 /**
