@@ -117,7 +117,7 @@ if (isVerdictPrCreate()) {
   const expectedRepo =
     process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
     process.env.CAT_CAFE_REPO_FULL_NAME ??
-    'zts212653/cat-cafe';
+    'zts212653/clowder-ai';
   const explicitRepos = optionValues('repository');
   if (explicitRepos.length === 0) {
     fail('verdict_publish_missing_repo_scope', `verdict PR creation requires --repo ${expectedRepo}`);
