@@ -53,7 +53,7 @@ describe('F167 Phase T route shadow telemetry', () => {
     const messageId = 'raw-message-agree-block';
     await runTurnCustodyRoute({
       output: ['ordinary answer without an outlet', '@co-creator'],
-      triggerMessage: turnCustodyTriggerMessage(messageId, threadId, 'investigate'),
+      triggerMessage: turnCustodyTriggerMessage(messageId, threadId),
       wake: { kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'review' },
       projection: {
         state: 'unknown_legacy',
@@ -85,7 +85,7 @@ describe('F167 Phase T route shadow telemetry', () => {
         transitionObserved: 'false',
         projectionReason: 'dispatch_handoff_missing',
         sourceCategory: 'review',
-        sourceSemantic: 'cross_thread_investigate',
+        sourceSemantic: 'not_recorded',
       },
     );
   });

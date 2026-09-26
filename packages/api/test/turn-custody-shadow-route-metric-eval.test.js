@@ -35,11 +35,11 @@ after(async () => {
 const liveCohorts = [
   {
     count: 2,
-    state: 'covered_active',
+    state: 'covered_empty',
     reason: 'not_applicable',
     sourceCategory: 'a2a',
     sourceSemantic: 'cross_thread_investigate',
-    wakeProvenance: 'structured:dispatch',
+    wakeProvenance: 'non_obligation:cross_thread_investigate',
     checkpoint: 'route_settled',
   },
   {
@@ -135,6 +135,7 @@ const holdouts = [
     sourceSemantic: 'not_recorded',
     wakeProvenance: 'action_successor',
     checkpoint: 'route_settled',
+    shouldBlock: true,
     expected: 'unjustified',
   },
   {
@@ -151,6 +152,9 @@ const holdouts = [
 ];
 
 function wakeFor(input, index) {
+  if (input.wakeProvenance === 'non_obligation:cross_thread_investigate') {
+    return { kind: 'non_obligation', source: 'cross_thread_investigate' };
+  }
   if (input.wakeProvenance === 'action_successor') {
     return { kind: 'action_successor', leaseId: `lease-${index}`, generation: 1, holderCatId: 'codex' };
   }
@@ -179,7 +183,7 @@ async function runCase(input, index) {
     wake: wakeFor(input, index),
     projection: {
       state: input.state,
-      shouldBlock: true,
+      shouldBlock: input.shouldBlock ?? input.state !== 'covered_empty',
       transitionObserved: input.transitionObserved ?? false,
       evidenceRefs: input.reason === 'not_applicable' ? [] : [`unknown:${input.reason}`],
     },
@@ -204,8 +208,8 @@ describe('F167 Phase T route-to-eval metric binding', () => {
       liveCohorts.reduce((total, cohort) => total + cohort.count, 0),
       36,
     );
-    assert.equal(component.activationCounts['turn_custody.new_only_block_total'], 39);
-    assert.equal(component.activationCounts['turn_custody.new_only_justified_total'], 36);
+    assert.equal(component.activationCounts['turn_custody.new_only_block_total'], 37);
+    assert.equal(component.activationCounts['turn_custody.new_only_justified_total'], 34);
     assert.equal(component.frictionCounts['turn_custody.new_only_unjustified_total'], 2);
     assert.equal(component.frictionCounts['turn_custody.new_only_unexplained_total'], 1);
     assert.equal(component.frictionCounts['turn_custody.new_only_classification_gap_total'], 0);

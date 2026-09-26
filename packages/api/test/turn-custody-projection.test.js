@@ -75,9 +75,14 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     }
   });
 
-  test('machine-proven FYI and coordination clean-stops are covered_empty', async () => {
+  test('machine-proven FYI, coordinate, investigate, and coordination clean-stops are covered_empty', async () => {
     const { service } = harness();
-    for (const source of ['cross_thread_fyi', 'cross_thread_coordinate', 'coordination_terminal']) {
+    for (const source of [
+      'cross_thread_fyi',
+      'cross_thread_coordinate',
+      'cross_thread_investigate',
+      'coordination_terminal',
+    ]) {
       const opened = await service.open({ kind: 'non_obligation', source });
       assert.deepEqual(opened, {
         state: 'covered_empty',
