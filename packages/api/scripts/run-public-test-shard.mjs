@@ -87,7 +87,14 @@ export async function runNodePublicTestFile({ file, packageRoot, resourceScope, 
   };
 }
 
-export async function runPublicTestLane({ plan, lane, packageRoot, manifest, executeFile = runNodePublicTestFile }) {
+export async function runPublicTestLane({
+  plan,
+  lane,
+  packageRoot,
+  manifest,
+  executeFile = runNodePublicTestFile,
+  resolveProvenance = currentPublicTestProvenance,
+}) {
   validatePublicTestShardPlan(plan, manifest.selectedFiles);
   invariant(
     plan.selectionHash === manifest.selectionHash,
@@ -97,7 +104,7 @@ export async function runPublicTestLane({ plan, lane, packageRoot, manifest, exe
     plan.exclusionRegistryHash === manifest.exclusionRegistryHash,
     'plan does not match the current exclusion registry',
   );
-  const provenance = currentPublicTestProvenance(packageRoot);
+  const provenance = resolveProvenance(packageRoot);
   invariant(
     samePublicTestProvenance(plan.plannerProvenance, provenance),
     'plan provenance does not match the current workspace, lockfile, toolchain, or runner',

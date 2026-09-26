@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
-import { currentPublicTestProvenance } from '../scripts/public-test-provenance.mjs';
 import { publicTestSelectionHash } from '../scripts/resolve-public-test-files.mjs';
 import {
   categorizePublicTestFailure,
@@ -17,7 +16,15 @@ const manifest = {
   selectionHash: publicTestSelectionHash(selectedFiles),
   exclusionRegistryHash: 'e'.repeat(64),
 };
-const plannerProvenance = currentPublicTestProvenance(process.cwd());
+const plannerProvenance = {
+  workspaceTree: 'a'.repeat(40),
+  lockfileHash: 'b'.repeat(64),
+  nodeVersion: process.version,
+  pnpmVersion: '10.0.0',
+  platform: process.platform,
+  arch: process.arch,
+};
+const resolveProvenance = () => plannerProvenance;
 const plan = {
   schemaVersion: 2,
   selectedFiles,
@@ -79,6 +86,7 @@ describe('F308 public-test shard runner', () => {
       lane: 'distributable-1',
       packageRoot: process.cwd(),
       manifest,
+      resolveProvenance,
       executeFile: async ({ file, resourceScope }) => {
         calls.push(file);
         assert.equal(resourceScope, 'distributable');
@@ -121,6 +129,7 @@ describe('F308 public-test shard runner', () => {
       lane: 'distributable-1',
       packageRoot: process.cwd(),
       manifest,
+      resolveProvenance,
       executeFile: async ({ file }) => {
         calls.push(file);
         return {
@@ -152,6 +161,7 @@ describe('F308 public-test shard runner', () => {
         lane: 'distributable-1',
         packageRoot: process.cwd(),
         manifest: { ...manifest, exclusionRegistryHash: 'd'.repeat(64) },
+        resolveProvenance,
       }),
       /exclusion registry/,
     );
