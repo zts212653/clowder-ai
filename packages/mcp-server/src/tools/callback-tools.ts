@@ -1996,6 +1996,40 @@ export const registerPrTrackingInputSchema = {
     ),
 };
 
+// Registering tracking reads a live GitHub baseline (several paginated reads) and installs the next
+// wait generation, so it is not idempotent. A replay reruns all of it against the same slow GitHub:
+// it either loses the generation race or registers again with a later baseline, which absorbs
+// whatever arrived in between. Either way the caller hears "timed out" although a registration
+// landed. So, as with publish_verdict, the original POST is never replayed. Its one attempt stays
+// under the shortest host deadline for a tool call (Antigravity's McpToolExecutor defaults to 60 s),
+// so the caller always gets this handler's answer, note included, and never the host's timeout.
+const TRACKING_REGISTRATION_TRANSPORT: CallbackTransportOptions = {
+  retryDelaysMs: [],
+  fetchTimeoutMs: 50_000,
+};
+
+/**
+ * Failures that leave the registration's outcome unknown. A request that failed in transport may
+ * have been processed anyway, and an HTTP 5xx proves nothing about the write: the route may have
+ * failed after its CAS, or a gateway in front of CAT_CAFE_API_URL may have answered after the
+ * upstream committed. A 4xx refuses before the write (a 408 is a request the server never fully
+ * received), so it keeps its plain text and any F174 hint.
+ */
+const UNKNOWN_REGISTRATION_OUTCOME = /^(?:Callback request failed:|Callback failed \(5\d\d\))/;
+
+/**
+ * Say that such a failure may still have registered, rather than let the caller read it as
+ * "nothing happened" and register again.
+ */
+function withUnknownRegistrationOutcome(result: ToolResult): ToolResult {
+  const block = result.content[0];
+  if (!result.isError || block?.type !== 'text' || !UNKNOWN_REGISTRATION_OUTCOME.test(block.text)) return result;
+  const note =
+    'The registration may still have been applied. Check cat_cafe_list_tasks for this subject ' +
+    '(its await generation and baseline capture time) before registering again.';
+  return { ...result, content: [{ type: 'text', text: `${block.text}\n\n${note}` }] };
+}
+
 export async function handleRegisterPrTracking(input: {
   repoFullName: string;
   prNumber: number;
@@ -2019,7 +2053,7 @@ export async function handleRegisterPrTracking(input: {
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. PR tracking is one-shot
   // registration, no useful local fallback. Surface `[degrade]` hint.
-  return withDegradation({
+  const result = await withDegradation({
     toolName: 'register_pr_tracking',
     primary: () =>
       callbackPost(
@@ -2035,10 +2069,11 @@ export async function handleRegisterPrTracking(input: {
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
-        agentKeyOptions(input),
+        { ...agentKeyOptions(input), ...TRACKING_REGISTRATION_TRANSPORT },
       ),
     policy: { kind: 'none' },
   });
+  return withUnknownRegistrationOutcome(result);
 }
 
 // F202 Phase 2D (AC-D3): Register issue tracking
@@ -2091,7 +2126,7 @@ export async function handleRegisterIssueTracking(input: {
   autoRenew?: boolean;
   agentKeyCatId?: string | undefined;
 }): Promise<ToolResult> {
-  return withDegradation({
+  const result = await withDegradation({
     toolName: 'register_issue_tracking',
     primary: () =>
       callbackPost(
@@ -2106,10 +2141,11 @@ export async function handleRegisterIssueTracking(input: {
           ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
           ...(input.autoRenew !== undefined ? { autoRenew: input.autoRenew } : {}),
         },
-        agentKeyOptions(input),
+        { ...agentKeyOptions(input), ...TRACKING_REGISTRATION_TRANSPORT },
       ),
     policy: { kind: 'none' },
   });
+  return withUnknownRegistrationOutcome(result);
 }
 
 // F202 Phase 2C (AC-C3): Unregister tracking task by subjectKey
