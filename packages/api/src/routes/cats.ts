@@ -9,6 +9,7 @@ import {
   type CatConfig,
   type CatId,
   type CliConfig,
+  type ClientDefaultsEntry,
   type ClientId,
   catRegistry,
   getCliEffortOptionsForProvider,
@@ -690,8 +691,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           roleDescription: string;
           personality: string;
           teamStrengths?: string;
+          defaultClient?: string;
         }[];
-        clientDefaults?: Record<string, { defaultModel: string; models: string[] }>;
+        clientDefaults?: Record<string, ClientDefaultsEntry>;
       };
       if (raw.roleTemplates && raw.roleTemplates.length > 0) {
         return { templates: raw.roleTemplates, clientDefaults: raw.clientDefaults ?? {} };
@@ -700,6 +702,28 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       const templateConfig = loadCatConfig(templatePath);
       const allCats = Object.values(toAllCatConfigs(templateConfig));
       const templateCats = allCats.filter((c) => c.isDefaultVariant);
+      // #768 P2: a legacy project has no `clientDefaults` either, so projecting the client
+      // binding alone leaves `defaultModel` with no source -- a client whose accounts expose
+      // no model list (Antigravity) then saves a model-less member. Each breed's own model is
+      // its client's default; breeds sharing a client add their models to the same entry,
+      // which is the per-client granularity `clientDefaults` already has in the normal path.
+      // Null-prototype: `clientId` is `z.string().min(1)` by #252's deliberate choice, so a
+      // breed may legitimately be keyed `constructor` / `__proto__`. On a plain `{}` the lookup
+      // below would return an inherited value, read `.models` off it and throw — collapsing
+      // this whole response to an empty template list. An own-property check would only turn
+      // that into a silent drop for `__proto__`, whose assignment hits the prototype setter.
+      const legacyClientDefaults: Record<string, ClientDefaultsEntry> = Object.create(null);
+      for (const cat of templateCats) {
+        const clientId = cat.clientId;
+        const model = cat.defaultModel;
+        if (!clientId || !model) continue;
+        const entry = legacyClientDefaults[clientId];
+        if (!entry) {
+          legacyClientDefaults[clientId] = { defaultModel: model, models: [model] };
+        } else if (!entry.models.includes(model)) {
+          legacyClientDefaults[clientId] = { defaultModel: entry.defaultModel, models: [...entry.models, model] };
+        }
+      }
       return {
         templates: templateCats.map((cat) => ({
           id: cat.breedId ?? cat.id,
@@ -710,8 +734,11 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
           roleDescription: cat.roleDescription,
           personality: cat.personality,
           teamStrengths: cat.teamStrengths,
+          // #768 P2: legacy projects have no roleTemplates, so project the breed's own
+          // client binding — otherwise the picker cannot tell which client fits the role.
+          defaultClient: cat.clientId,
         })),
-        clientDefaults: {},
+        clientDefaults: legacyClientDefaults,
       };
     } catch (err) {
       app.log.warn({ err }, 'Failed to load cat templates');
