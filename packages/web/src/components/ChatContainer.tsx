@@ -36,10 +36,12 @@ import { hydrateEvolutionFromCurrentUrl } from './capability-evolution/evolution
 import { useConciergeConfirmations } from './concierge/useConciergeConfirmations';
 import { FirstRunQuestWizard } from './FirstRunQuestWizard';
 import { BootcampGuideOverlay } from './first-run-quest/BootcampGuideOverlay';
+import { restoreJourneyState } from './first-run-quest/onboarding-journey';
 import { QuestBanner } from './first-run-quest/QuestBanner';
 import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState';
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
+import { useFirstRealMessageSync } from './first-run-quest/useFirstRealMessageSync';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { GameIcon } from './icons/GameIcon';
@@ -192,6 +194,8 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
   const [showFirstRunQuestPrompt, setShowFirstRunQuestPrompt] = useState(false);
   const [showQuestWizard, setShowQuestWizard] = useState(false);
+  const [showOnboardingHint, setShowOnboardingHint] = useState(false);
+  const [onboardingSyncError, setOnboardingSyncError] = useState(false);
   // F106: fetch bootcamp count independently of sidebar lifecycle
   // refreshKey increments only on modal close → avoids duplicate fetch on open
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -201,6 +205,35 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     setBootcampRefreshKey((k) => k + 1);
   }, []);
   const [bootcampCount, setBootcampCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/threads/${encodeURIComponent(threadId)}`)
+      .then(async (res) =>
+        res.ok ? ((await res.json()) as { bootcampState?: { journeyId?: string; completedAt?: number } }) : null,
+      )
+      .then((thread) => {
+        if (cancelled) return;
+        try {
+          const journey = restoreJourneyState(localStorage.getItem('cat-cafe:onboarding-journey'));
+          setShowOnboardingHint(
+            Boolean(
+              thread?.bootcampState?.journeyId &&
+                thread.bootcampState.completedAt === undefined &&
+                journey?.threadId === threadId &&
+                journey.stage === 'ready' &&
+                journey.completedAt === undefined,
+            ),
+          );
+        } catch {
+          setShowOnboardingHint(false);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId]);
+
   useEffect(() => {
     let cancelled = false;
     apiFetch('/api/bootcamp/threads')
@@ -488,6 +521,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         const local = useChatStore.getState().threads.find((t) => t.id === threadId);
         if (thread.bootcampState || local?.bootcampState) {
           syncLocalBootcampState(threadId, thread.bootcampState);
+          if (thread.bootcampState?.completedAt !== undefined) setShowOnboardingHint(false);
         }
         const localQuest = (local as Record<string, unknown> | undefined)?.firstRunQuestState;
         if (thread.firstRunQuestState || localQuest) {
@@ -518,6 +552,11 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   // ── Bootcamp add-teammate: trigger guide engine when user interacts with input ──
   // Subscribe reactively so the effect re-runs when guide exits (session cleared).
   const activeGuideFlowId = useGuideStore((s) => s.session?.flow.id ?? null);
+  useEffect(() => {
+    if (!showOnboardingHint || showQuestWizard || activeGuideFlowId) return;
+    if (useGuideStore.getState().completedGuides.has(`${threadId}::first-run-entry`)) return;
+    useGuideStore.getState().reduceServerEvent({ action: 'start', guideId: 'first-run-entry', threadId });
+  }, [activeGuideFlowId, showOnboardingHint, showQuestWizard, threadId]);
   useEffect(() => {
     if (currentBootcampPhase !== 'phase-7.5-add-teammate') return;
     // Guide already running — don't re-register
@@ -793,9 +832,18 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
       }
       void invalidateSidebarProjection();
       navigateToThread(questThreadId);
+      setShowOnboardingHint(true);
     },
     [navigateToThread, setThreads],
   );
+
+  const { handleRealOnboardingMessage, requestRetry: requestFirstRealMessageRetry } = useFirstRealMessageSync({
+    threadId,
+    currentBootcampState,
+    onboardingSyncError,
+    setOnboardingSyncError,
+    setShowOnboardingHint,
+  });
 
   const handleSearchKnowledge = useCallback(() => {
     const fromParam = threadId ? `?from=${encodeURIComponent(threadId)}` : '';
@@ -870,22 +918,41 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
           density="full"
           messageConfirmations={messageConfirmations}
           acceptUnscopedInteractiveSend
+          onRealMessageSent={() => handleRealOnboardingMessage(threadId)}
           footerRef={attachBottomChromeRef}
           timelineLead={
-            showAgentHookNotice ? (
-              <div className="mb-3 flex justify-center text-left">
-                <div className="max-w-[85%] w-full">
-                  <AgentHookHealthNotice
-                    health={agentHookHealth.health}
-                    error={agentHookHealth.error}
-                    syncing={agentHookHealth.syncing}
-                    synced={agentHookHealth.synced}
-                    syncAttempted={agentHookHealth.syncAttempted}
-                    onSync={agentHookHealth.sync}
-                  />
+            <>
+              {showOnboardingHint && (
+                <div className="mb-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg px-3 py-2 text-sm text-conn-amber-text">
+                  团队已创建。发送第一条消息后，首启旅程就完成了。成员和账号已固定在设置中。
+                  {onboardingSyncError && (
+                    <button
+                      type="button"
+                      className="ml-2 underline"
+                      onClick={() => {
+                        requestFirstRealMessageRetry();
+                      }}
+                    >
+                      重试同步
+                    </button>
+                  )}
                 </div>
-              </div>
-            ) : undefined
+              )}
+              {showAgentHookNotice ? (
+                <div className="mb-3 flex justify-center text-left">
+                  <div className="max-w-[85%] w-full">
+                    <AgentHookHealthNotice
+                      health={agentHookHealth.health}
+                      error={agentHookHealth.error}
+                      syncing={agentHookHealth.syncing}
+                      synced={agentHookHealth.synced}
+                      syncAttempted={agentHookHealth.syncAttempted}
+                      onSync={agentHookHealth.sync}
+                    />
+                  </div>
+                </div>
+              ) : undefined}
+            </>
           }
           emptyState={
             <div className="text-center mt-20">

@@ -49,6 +49,25 @@ describe('usePinnedSections', () => {
     expect(state.isPinned('accounts')).toBe(false);
   });
 
+  it('starts a new installation with members and accounts pinned', () => {
+    const state = renderHook();
+
+    expect(state.pinned).toEqual(['members', 'accounts']);
+    expect(state.isPinned('members')).toBe(true);
+    expect(state.isPinned('accounts')).toBe(true);
+  });
+
+  it('persists an intentional unpin across remounts', () => {
+    const state = renderHook();
+    React.act(() => state.unpin('members'));
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null')).toEqual(['accounts']);
+
+    React.act(() => root.unmount());
+    root = createRoot(container);
+    const remounted = renderHook();
+    expect(remounted.pinned).toEqual(['accounts']);
+  });
+
   it('ignores string localStorage payloads', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify('accounts'));
 

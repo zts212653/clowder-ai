@@ -56,6 +56,7 @@ export interface ThreadChatSurfaceProps {
   acceptUnscopedInteractiveSend?: boolean;
   onComposerFocusChange?: (focused: boolean) => void;
   onActivity?: (activity: ThreadChatActivity) => void;
+  onRealMessageSent?: () => void;
 }
 
 export function ThreadChatSurface({
@@ -73,6 +74,7 @@ export function ThreadChatSurface({
   acceptUnscopedInteractiveSend = false,
   onComposerFocusChange,
   onActivity,
+  onRealMessageSent,
 }: ThreadChatSurfaceProps) {
   const messages = useThreadMessages(threadId);
   const liveness = useThreadLiveness(threadId);
@@ -126,7 +128,9 @@ export function ThreadChatSurface({
         !detail.sendContext &&
         (!detail.targetThreadId || detail.targetThreadId === threadId);
       if ((!ownsContext && !ownsUnscoped) || !detail.text) return;
-      handleSend(detail.text);
+      void handleSend(detail.text).then((sent) => {
+        if (sent) onRealMessageSent?.();
+      });
     };
     window.addEventListener('cat-cafe:interactive-send', handleInteractiveSend);
     return () => window.removeEventListener('cat-cafe:interactive-send', handleInteractiveSend);
@@ -230,8 +234,16 @@ export function ThreadChatSurface({
             <ChatInput
               key={threadId}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
-                handleSend(
+              onSend={async (
+                content,
+                images,
+                whisper,
+                deliveryMode,
+                replyToId,
+                messageDisposition,
+                contextAttachments,
+              ) => {
+                const sent = await handleSend(
                   content,
                   images,
                   undefined,
@@ -240,8 +252,10 @@ export function ThreadChatSurface({
                   replyToId,
                   messageDisposition,
                   contextAttachments,
-                )
-              }
+                );
+                if (sent) onRealMessageSent?.();
+                return sent;
+              }}
               disabled={connectionStatus.isReadonly}
               hasActiveInvocation={hasActiveInvocation}
               uploadStatus={uploadStatus}

@@ -99,6 +99,15 @@ const CLI_OK_PATTERNS = [
   /model.*(not|unsupported|unavailable)/i,
 ];
 
+/** URLs can contain credentials and error-like words; never use them as connectivity evidence. */
+function isRestrictedCliResponse(output: string): boolean {
+  const withoutUrls = output.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>]+/gi, '');
+  const normalized = withoutUrls.trim();
+  if (/^Error:\s*Exceeded USD budget\b/i.test(normalized)) return true;
+  if (STDOUT_ERROR_PATTERNS.some((re) => re.test(normalized))) return false;
+  return CLI_OK_PATTERNS.some((re) => re.test(normalized));
+}
+
 /** Stdout patterns that indicate failure despite exit code 0. */
 const STDOUT_ERROR_PATTERNS = [/^error/i, /exception/i, /frozen/i, /unauthorized/i];
 
@@ -180,18 +189,18 @@ async function execProbe(
     const { stdout } = await execFn(cmd, execOpts);
     const trimmed = stdout.trim();
     if (!trimmed) return { ok: false, message: `${client} CLI 无响应` };
-    if (CLI_OK_PATTERNS.some((re) => re.test(trimmed))) {
+    if (isRestrictedCliResponse(trimmed)) {
       return { ok: true, message: `${client} CLI 连接正常（受限响应）` };
     }
     if (STDOUT_ERROR_PATTERNS.some((re) => re.test(trimmed))) {
-      return { ok: false, message: `${client} CLI 异常: ${trimmed.slice(0, 80)}` };
+      return { ok: false, message: `${client} CLI 返回错误，请检查客户端配置后重试` };
     }
     return { ok: true, message: `${client} CLI 连接正常` };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     const stderr = (err as { stderr?: string }).stderr ?? '';
     /* Budget / rate-limit errors in catch path prove the CLI reached the API. */
-    if (CLI_OK_PATTERNS.some((re) => re.test(msg) || re.test(stderr))) {
+    if (isRestrictedCliResponse(msg) || isRestrictedCliResponse(stderr)) {
       return { ok: true, message: `${client} CLI 连接正常（受限响应）` };
     }
     /* Process killed by timeout → code is null. */
@@ -199,9 +208,9 @@ async function execProbe(
       return { ok: false, message: `${client} CLI 响应超时` };
     }
     if (/authentication|login|OAuth/i.test(msg + stderr)) {
-      return { ok: false, message: '需要先完成 OAuth 登录，请在终端运行一次 CLI' };
+      return { ok: false, message: '需要先完成 CLI 认证（OAuth 或 URL + Key 配置），请检查 CLI 配置后重试' };
     }
-    return { ok: false, message: `${client} CLI 调用失败: ${msg.slice(0, 100)}` };
+    return { ok: false, message: `${client} CLI 调用失败，请检查客户端配置后重试` };
   }
 }
 
@@ -271,14 +280,14 @@ function spawnProbe(
       stderr += chunk;
     });
 
-    child.on('error', (err) => {
-      settle({ ok: false, message: `${client} CLI 启动失败: ${err.message.slice(0, 100)}` });
+    child.on('error', () => {
+      settle({ ok: false, message: `${client} CLI 启动失败，请检查客户端安装后重试` });
     });
 
     child.on('close', (code) => {
       const combined = stdout + stderr;
 
-      if (CLI_OK_PATTERNS.some((re) => re.test(combined))) {
+      if (isRestrictedCliResponse(combined)) {
         settle({ ok: true, message: `${client} CLI 连接正常（受限响应）` });
         return;
       }
@@ -290,7 +299,7 @@ function spawnProbe(
           return;
         }
         if (STDOUT_ERROR_PATTERNS.some((re) => re.test(trimmed))) {
-          settle({ ok: false, message: `${client} CLI 异常: ${trimmed.slice(0, 80)}` });
+          settle({ ok: false, message: `${client} CLI 返回错误，请检查客户端配置后重试` });
           return;
         }
         settle({ ok: true, message: `${client} CLI 连接正常` });
@@ -298,7 +307,7 @@ function spawnProbe(
       }
 
       if (/authentication|login|OAuth/i.test(combined)) {
-        settle({ ok: false, message: '需要先完成 OAuth 登录，请在终端运行一次 CLI' });
+        settle({ ok: false, message: '需要先完成 CLI 认证（OAuth 或 URL + Key 配置），请检查 CLI 配置后重试' });
         return;
       }
       settle({ ok: false, message: `${client} CLI 调用失败 (exit ${code})` });

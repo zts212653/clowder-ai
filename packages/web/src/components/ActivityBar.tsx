@@ -161,6 +161,7 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
         return (
           <button
             key={sec.id}
+            data-guide-id={`rail.${sec.id}`}
             type="button"
             onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
             className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${

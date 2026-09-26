@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
@@ -71,6 +71,73 @@ describe('First-Run Quest Routes', () => {
       assert.ok(typeof c.cli === 'string');
       assert.ok(typeof c.installed === 'boolean');
       assert.ok(typeof c.hasApiKey === 'boolean');
+    }
+  });
+
+  test('GET /api/first-run/available-clients projects login state without credential values', async () => {
+    const codexHome = await mkdtemp(join(homedir(), '.cat-cafe-first-run-auth-'));
+    const previousCodexHome = process.env.CODEX_HOME;
+    const marker = 'fixture-secret-must-never-leave-api';
+    try {
+      await writeFile(
+        join(codexHome, 'auth.json'),
+        JSON.stringify({
+          tokens: { access_token: marker, refresh_token: marker },
+        }),
+      );
+      process.env.CODEX_HOME = codexHome;
+      const app = await createApp();
+      try {
+        const res = await app.inject({ method: 'GET', url: '/api/first-run/available-clients', headers: AUTH_HEADERS });
+        assert.equal(res.statusCode, 200);
+        const codex = res.json().clients.find((client) => client.client === 'codex');
+        assert.equal(codex.authenticated, true);
+        assert.equal(codex.hasApiKey, false);
+        assert.equal(res.body.includes(marker), false);
+      } finally {
+        await app.close();
+      }
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      await rm(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  test('GET /api/first-run/available-clients recognizes the active Codex config provider without projecting its bearer', async () => {
+    const codexHome = await mkdtemp(join(homedir(), '.cat-cafe-first-run-config-'));
+    const previousCodexHome = process.env.CODEX_HOME;
+    const marker = 'config-bearer-must-never-leave-api';
+    try {
+      await writeFile(
+        join(codexHome, 'config.toml'),
+        [
+          'model_provider = "custom"',
+          '[model_providers.unrelated]',
+          'base_url = "https://unrelated.invalid/v1"',
+          'experimental_bearer_token = "unrelated-secret"',
+          '[model_providers.custom]',
+          'base_url = "https://example.invalid/v1"',
+          `experimental_bearer_token = "${marker}"`,
+          '',
+        ].join('\n'),
+      );
+      process.env.CODEX_HOME = codexHome;
+      const app = await createApp();
+      try {
+        const res = await app.inject({ method: 'GET', url: '/api/first-run/available-clients', headers: AUTH_HEADERS });
+        assert.equal(res.statusCode, 200);
+        const codex = res.json().clients.find((client) => client.client === 'codex');
+        assert.equal(codex.authenticated, true);
+        assert.equal(codex.hasApiKey, false);
+        assert.equal(res.body.includes(marker), false);
+      } finally {
+        await app.close();
+      }
+    } finally {
+      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = previousCodexHome;
+      await rm(codexHome, { recursive: true, force: true });
     }
   });
 
@@ -508,6 +575,34 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(result.message.includes('OAuth'));
   });
 
+  test('claude: never returns CLI error text containing a URL credential', async () => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const secret = 'fixture-secret-credential';
+    const url = `https://user:${secret}@invalid.example/v1`;
+    const results = [
+      await tryCliProbe('claude', { execFn: createMockExec({ stdout: `Error: ${url}` }) }),
+      await tryCliProbe('claude', { execFn: createMockExec({ stderr: `Request to ${url} failed`, reject: true }) }),
+      await tryCliProbe('opencode', { spawnFn: createMockSpawn({ stdout: `Error: ${url}` }) }),
+      await tryCliProbe('codex', { spawnFn: createMockSpawn({ stderr: `Request to ${url} failed`, exitCode: 1 }) }),
+      await tryCliProbe('codex', { spawnFn: createMockSpawn({ stdout: `Error: ${url} exceeded budget` }) }),
+    ];
+    for (const result of results) {
+      assert.equal(result?.ok, false);
+      assert.ok(!JSON.stringify(result).includes(secret));
+      assert.ok(!JSON.stringify(result).includes(url));
+    }
+  });
+
+  test('a credential URL containing a success keyword does not turn a failed probe green', async () => {
+    const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
+    const url = 'https://user:fixture-rate-limit-secret@invalid.example/v1';
+    const result = await tryCliProbe('codex', {
+      spawnFn: createMockSpawn({ stderr: `Request to ${url} failed`, exitCode: 1 }),
+    });
+    assert.equal(result?.ok, false);
+    assert.ok(!JSON.stringify(result).includes(url));
+  });
+
   test('claude: includes --model in exec command string', async () => {
     const { tryCliProbe } = await import('../dist/routes/first-run-quest.js');
     const mock = createMockExec({ stdout: 'pong' });
@@ -531,7 +626,7 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(opts.env, 'env should be passed to exec');
     assert.equal(opts.env.ANTHROPIC_API_KEY, 'sk-test');
     assert.equal(opts.env.ANTHROPIC_BASE_URL, 'https://proxy.test');
-    assert.equal(opts.env.PATH, process.env.PATH, 'should merge with process.env');
+    assert.equal(opts.env.PATH ?? opts.env.Path, process.env.PATH, 'should merge with process.env');
   });
 
   test('claude: timeout reports exec timeout (code null)', async () => {
@@ -553,7 +648,7 @@ describe('tryCliProbe (unit)', () => {
     });
     assert.ok(result);
     assert.equal(result.ok, false);
-    assert.ok(result.message.includes('异常'));
+    assert.ok(result.message.includes('错误'));
   });
 
   test('rejects model names with unsafe characters', async () => {
@@ -584,7 +679,7 @@ describe('tryCliProbe (unit)', () => {
     const { opts } = mock.captured();
     assert.ok(opts.env, 'env should be passed to spawn');
     assert.equal(opts.env.OPENAI_API_KEY, 'sk-test');
-    assert.equal(opts.env.PATH, process.env.PATH);
+    assert.equal(opts.env.PATH ?? opts.env.Path, process.env.PATH);
   });
 
   test('codex: uses process.env when no custom env vars provided', async () => {
@@ -593,7 +688,7 @@ describe('tryCliProbe (unit)', () => {
     await tryCliProbe('codex', { spawnFn: mock });
     const { opts } = mock.captured();
     assert.ok(opts.env, 'env should be present (process.env spread)');
-    assert.equal(opts.env.PATH, process.env.PATH, 'should include process.env');
+    assert.equal(opts.env.PATH ?? opts.env.Path, process.env.PATH, 'should include process.env');
   });
 
   test('kimi: probe args are correct', async () => {
@@ -603,7 +698,13 @@ describe('tryCliProbe (unit)', () => {
     assert.ok(result);
     assert.equal(result.ok, true);
     const { args } = mock.captured();
-    assert.ok(args.includes('--print'), 'should use --print flag');
-    assert.ok(args.includes('--prompt'), 'should use --prompt flag');
+    assert.ok(
+      args.some((arg) => arg.includes('--print')),
+      'should use --print flag',
+    );
+    assert.ok(
+      args.some((arg) => arg.includes('--prompt')),
+      'should use --prompt flag',
+    );
   });
 });

@@ -2947,6 +2947,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // Standard env vars (OPENAI_API_KEY, etc.) already set by resolveEnvMap above
       if (resolvedAccount?.authType === 'api_key') {
         callbackEnv.CODEX_AUTH_MODE = 'api_key';
+      } else if (resolvedAccount?.syntheticNative && effectiveAccountRef) {
+        // The CLI owns this fresh-install identity. Preserve its active config.toml provider.
+        callbackEnv.CODEX_AUTH_MODE = 'auto';
       } else if (effectiveAccountRef) {
         callbackEnv.CODEX_AUTH_MODE = 'oauth';
       }

@@ -36,6 +36,8 @@ export interface OrchestrationFlow {
   id: string;
   name: string;
   description?: string;
+  /** Informational reminders never capture focus or block interaction. */
+  nonBlocking?: boolean;
   steps: OrchestrationStep[];
 }
 

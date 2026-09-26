@@ -600,6 +600,7 @@ export interface BootcampStateV1 {
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
 }
 
