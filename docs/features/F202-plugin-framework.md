@@ -10,9 +10,9 @@ tips_exempt: "The historical Phase 1 and K-2 acceptance records are retained bel
 
 # F202: Terminal Plugin Manager and Host-governed Plugin Framework
 
-> **Status**: in-progress (Train B direction accepted in
-> [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478); formal review and
-> published-package integration pending) | **Owner**: Clowder AI maintainers | **Priority**: P1
+> **Status**: in-progress (Train B merged in
+> [clowder-ai#1477](https://github.com/zts212653/clowder-ai/pull/1477); Train C1/C2 remain
+> separate follow-ups) | **Owner**: Clowder AI maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
@@ -161,15 +161,16 @@ The accepted Train B direction does not approve the aggregate migration or commi
 The detailed state census, invariants, Design Gate and TDD sequence live in
 `feature-specs/2026-09-01-f202-terminal-plugin-manager.md`.
 
-### Train B direction and implementation checkpoint (updated 2026-09-18)
+### Train B terminal acceptance and merge record (updated 2026-09-19)
 
 Maintainers accepted the bounded Train B direction in
 [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478): one Host-owned Manager and one
 real `video-analysis` package loop, with existing production defaults unchanged. Train C1 and C2 remain
-separate follow-ups. This accepts the review scope; it does not prove package publication, final
-integration acceptance, or merge readiness.
+separate follow-ups. The exact alpha.1 package was published and digest-matched, maintainers completed the
+real package and Settings journeys, and [clowder-ai#1477](https://github.com/zts212653/clowder-ai/pull/1477)
+merged as `9ab0eaf287381efcb209781463f38cc5f23870ea`.
 
-The feature worktree now contains the shared closed projection contract, one
+The merged Train B implementation contains the shared closed projection contract, one
 `PluginManagerService`, safe local directory/archive admission, the six canonical management operations
 through REST and Agent, two Host-supervised contribution discovery/invocation operations, a revision-fenced
 typed configuration contribution, bounded multipart upload,
@@ -178,7 +179,7 @@ Broker, supervisor, official installer and owner-auth port. Focused tests exerci
 revision fences, local path non-persistence, auth fail-closed recovery, uninstall failure, and the full
 install → config/auth → enable → Host restart → disable → uninstall journey.
 
-This is an implementation checkpoint, not a Train B completion or merge claim:
+This is the terminal Train B record; Train C1/C2 delivery and production-default cutover remain separate:
 
 - Co-creator approved the Settings list/detail direction on 2026-09-01 and authorized formal wiring to
   continue; the exact wording and architecture evidence are recorded in
@@ -190,8 +191,8 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   `plugin_list_tools` → `plugin_call` path and the same live contribution authority used by Manager status.
   This historical UI-direction feedback is not evidence that the complete personal hands-on journey was
   accepted. Per #1478, a new personal co-creator signoff is not a prerequisite for formal review;
-  maintainers own the still-pending reproducible end-to-end acceptance against the published exact package
-  and final integration before approval/merge.
+  maintainers completed the reproducible end-to-end acceptance against the published exact package and
+  formally approved exact Core HEAD `4ce3556173384a69abd6bdba875ab24238004946` before merge.
 - Plugins Train B merged as `clowder-ai-plugins` commit
   `73d77f7efddb7a0b53829e9d88ebab51e03bdb32`. Contract beta.13, SDK beta.9 and
   `video-analysis` alpha.0 are public with the independently sealed integrities. The Core feature worktree
@@ -199,8 +200,9 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   separate and fail-closed. The catalog may contain later packages, but this Train B Host admission scope
   projects only `dev.clowder.video-analysis`; absent Host policy means an entry is not exposed or installable.
   The companion [clowder-ai-plugins#50](https://github.com/zts212653/clowder-ai-plugins/pull/50)
-  carries the reviewed `video-analysis@0.1.0-alpha.1` package/catalog generation, but that exact version must
-  still be published and publicly consumable before this Core PR may merge.
+  merged as `ae7e459499f4e2c3fa54aace73aa8c18bd4cc264`; its reviewed
+  `video-analysis@0.1.0-alpha.1` package/catalog generation is publicly consumable with SHA-1
+  `e4e79a7426e9ad3c3e477f03af9cf2e2daabc488` and the reviewed SHA-512 integrity.
 - Core production composition now owns fail-closed builtin dependency materialization: dependency-bearing
   packages must carry a publisher-owned lockfile-v3 `npm-shrinkwrap.json`, every locked package stays on the canonical
   npm registry with canonical sha512 integrity, and the Host runs script-free `npm ci`. It also owns the
@@ -210,8 +212,8 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   install → Host config/secret binding → enable → supervisor-held real `video_analysis` call → Host
   restart/resume → real call → disable → uninstall; the final instance was retired and the secret never
   entered inventory. The current `plugin_list_tools` → `plugin_call` indirection is covered at the
-  composition/restart boundary and remains part of the pending maintainer-owned final integration
-  acceptance.
+  composition/restart boundary. Maintainer acceptance repeated this journey against the public alpha.1
+  artifact and also completed the real Settings install/configure/enable/restart/disable/uninstall path.
   `pluginManagerLive=1`
   consumes that composition in the feature checkout. Per the Train B/Train C boundary, production Settings
   still keeps the existing panels as its default until the aggregate Train C1 cutover preserves specialized
@@ -229,12 +231,12 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   Contribution discovery and invocation expose only live tool schemas/results and never read the README.
   The published video alpha.0 package does not include that README, so the Manager reports the omission
   honestly. The alpha.1 follow-up in clowder-ai-plugins#50 includes the package-owned guide, but its public
-  npm availability and the digest-matched final Manager journey remain pending. Maintainers must record the
-  reproducible install → configure → enable → invoke → restart → disable → uninstall result before final
-  approval/merge.
+  npm availability and digest-matched final Manager journey are now verified. The maintainer review records
+  the reproducible install → configure → enable → invoke → restart → disable → uninstall result and the
+  corresponding Settings journey before approval and merge.
 
 External publication provenance: `[primary | npm registry + clowder-ai-plugins#50 exact artifact |
-checked 2026-09-18 | alpha.0 public; alpha.1 npm lookup 404; final Train B integration pending | high
+checked 2026-09-19 | alpha.1 public; SHA-1/SHA-512 matched; final Train B integration accepted | high
 confidence]`.
 
 ## What
@@ -375,6 +377,7 @@ The external-package K-2 path currently covers:
 | 2026-08-05 | K-2A Host inventory merged via cat-cafe#3422 (`a6b38ac53`); package/install/grant truth landed with runtime dormant. |
 | 2026-08-10 | K-2B production-transport state machine merged via cat-cafe#3555 (`f7fe82303`): contract-native handshake, durable call ledger, restart normalization, builtin loopback, and typed F292 `events.publish`; external runtime activation remains dormant. |
 | 2026-08-11 | K-2D implemented on cat-cafe#3558: immutable package verification, supervised stdio transport, closed bootstrap environment, and current-main project persistence composition; startup remains dormant with no activation route. |
+| 2026-09-19 | Train B merged upstream via clowder-ai#1477 (`9ab0eaf287381efcb209781463f38cc5f23870ea`) after exact-head approval, full CI, public alpha.1 digest verification, and maintainer Agent/Host plus Settings lifecycle acceptance. Production defaults remain unchanged; Train C1/C2 stay separate. |
 
 ## Current Maintainer Position
 
@@ -384,10 +387,16 @@ Phase 2 is accepted as the correct home for schedule resources and the existing 
 
 Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
 
-K-2A through K-2D are accepted as the Host-owned external-package foundation. The Host now has a
-supervised stdio process boundary and a production composition object, but startup only performs
-fail-closed persistence recovery. No package is installed or started by that wiring, no activation
-route exists, and real plugin co-run remains separately gated. Core must continue importing the
-exact public contract rather than growing a private wire registry.
+Historical K-2D checkpoint: K-2A through K-2D established the Host-owned external-package foundation,
+including the supervised stdio process boundary, production composition, and fail-closed persistence
+recovery. At that checkpoint no activation route or real package co-run had landed.
+
+Current Train B position: explicit owner operations can install, configure, enable, disable, and uninstall
+a plugin through the Host-owned Manager. Maintainers completed the digest-matched published alpha.1 package
+journey and formally accepted its real co-run and restart recovery before #1477 merged. Production defaults
+and existing specialized Settings entries remain unchanged; their aggregate cutover belongs to Train C1,
+while public hooks, UI contributions, and managed services remain Train C2. This acceptance does not claim
+that the co-creator personally completed the full experience journey. Core must continue importing the exact
+public contract rather than growing a private wire registry.
 
 [小太阳·Maine Coon/GPT-5.6 Sol🐾]
