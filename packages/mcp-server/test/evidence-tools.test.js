@@ -602,7 +602,7 @@ describe('MCP Evidence Tools', () => {
     assert.ok(text.includes('frontmatter-alias'), 'should show expansion provenance');
     assert.ok(text.includes('retrievalScore: 0.95'), 'should label retrieval score explicitly');
     assert.ok(text.includes('edgeStrength: heuristic'), 'should label expansion edge strength explicitly');
-    assert.match(text, /^\[matchType:direct\] Redis production Redis (sacred)$/m);
+    assert.match(text, /^\[matchType:direct\] Redis production Redis \(sacred\)$/m);
     const sidecar = JSON.parse(text.match(/<recall-meta>(.+)<\/recall-meta>/)?.[1] ?? '{}');
     assert.equal(sidecar.previewItems?.[0]?.matchType, 'direct');
     assert.equal(sidecar.previewItems?.[0]?.matchRank, undefined);
