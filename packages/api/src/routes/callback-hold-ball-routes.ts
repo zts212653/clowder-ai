@@ -11,6 +11,11 @@
  * (in-memory Map) — best-effort only. API restart or multi-instance deployments
  * will reset the counter. Durable enforcement would require sharing state with the
  * reminder scheduler; that is intentionally deferred.
+ *
+ * #1471 (2026-09-16): the window counts TIMER holds (wakeAfterMs) only. A
+ * managed command (wakeWhen) is self-grounded — the command's completion is the
+ * wake signal — so it neither consumes nor is blocked by a window slot. KD-23
+ * single-slot replacement still applies to both modes.
  */
 
 import type { SchedulerAwaitStateV1, WaitOwnerFence } from '@cat-cafe/shared';
@@ -705,8 +710,11 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       return guardResult.blockedResponse;
     }
 
+    // #1471: the rolling window guards TIMER holds — a cat stalling on timers
+    // instead of passing. A managed command (wakeWhen) is self-grounded with its
+    // own completion signal, so it is admitted regardless of the timer window.
     const currentCount = getHoldCount(threadId, catIdStr);
-    if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+    if (!wakeWhen && currentCount >= MAX_HOLDS_PER_WINDOW) {
       const holdKey = `${threadId}:${catIdStr}`;
       const holdEntry = holdCounts.get(holdKey);
       const rejectNow = Date.now();
@@ -979,7 +987,9 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       }
     }
 
-    const newCount = incrementHoldCount(threadId, catIdStr);
+    // #1471: only timer holds tick the window; a command hold reports the
+    // current timer count so holdsInWindow stays truthful without consuming a slot.
+    const newCount = wakeWhen ? getHoldCount(threadId, catIdStr) : incrementHoldCount(threadId, catIdStr);
 
     // ── Visibility message — F280 cancellation window ──
     // Post BEFORE launch to preserve F280 pre-launch cancellation fence (lines 834–837):
