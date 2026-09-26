@@ -45,6 +45,17 @@ describe('F284 Workspace entry', () => {
     expect(button?.dataset.clientInteractive).toBe('true');
   });
 
+  it('projects pending approvals onto the stable Workspace entry', async () => {
+    await act(async () => {
+      root.render(<PanelToggle onToggleStatusPanel={vi.fn()} statusPanelOpen={false} approvalCount={7} />);
+    });
+
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="workspace-panel-toggle"]');
+    expect(button?.getAttribute('aria-label')).toBe('打开 Workspace，7 项待审批');
+    expect(button?.querySelector('[data-testid="workspace-approval-count"]')?.textContent).toBe('7');
+    expect(button?.querySelector('[data-testid="workspace-activity-badge"]')).toBeNull();
+  });
+
   it('keeps one Workspace recall control instead of a second status entry in the header', async () => {
     await act(async () => {
       root.render(

@@ -46,7 +46,7 @@ vi.mock('@/components/settings/settings-nav-config', () => ({
 
 import { ActivityBar } from '@/components/ActivityBar';
 
-describe('F258 Visible Cafe ActivityBar entry', () => {
+describe('ActivityBar incomplete-product visibility', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -63,31 +63,20 @@ describe('F258 Visible Cafe ActivityBar entry', () => {
     container.remove();
   });
 
-  it('exposes a user-visible cat planet button that opens /starry', () => {
+  it('does not expose the incomplete cat planet entry', () => {
     React.act(() => {
       root.render(React.createElement(ActivityBar));
     });
 
-    const button = container.querySelector('button[aria-label="猫猫星球"]') as HTMLButtonElement | null;
-    expect(button).toBeTruthy();
-    expect(button?.title).toBe('猫猫星球');
-    expect(button?.getAttribute('data-guide-id')).toBe('nav.starry');
-
-    React.act(() => {
-      button?.click();
-    });
-
-    expect(navigation.push).toHaveBeenCalledWith('/starry?from=thread-abc');
+    expect(container.querySelector('button[aria-label="猫猫星球"]')).toBeNull();
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 
-  it('marks the cat planet button active while /starry is open', () => {
-    navigation.pathname = '/starry';
-
+  it('does not expose the incomplete Collective entry', () => {
     React.act(() => {
       root.render(React.createElement(ActivityBar));
     });
 
-    const button = container.querySelector('button[aria-label="猫猫星球"]');
-    expect(button?.getAttribute('aria-current')).toBe('page');
+    expect(container.querySelector('button[aria-label="Collective"]')).toBeNull();
   });
 });

@@ -46,7 +46,7 @@ describe('SettingsNav search filtering', () => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(14);
+    expect(buttons).toHaveLength(17);
     expect(container.textContent).toContain('协作与规则');
   });
 
@@ -56,7 +56,7 @@ describe('SettingsNav search filtering', () => {
     });
 
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(14);
+    expect(buttons).toHaveLength(17);
     for (const button of buttons) {
       expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
     }

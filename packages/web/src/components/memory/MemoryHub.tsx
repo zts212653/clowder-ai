@@ -15,15 +15,75 @@ interface MemoryHubProps {
   readonly activeTab?: MemoryTab;
   readonly initialQuery?: string;
   readonly initialReferrerThread?: string | null;
+  readonly variant?: 'page' | 'settings';
 }
 
 const MEMORY_SEMANTIC_SERVICE_FEATURES = ['memory-semantic-search'] as const;
 
-export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThread = null }: MemoryHubProps) {
+export function MemoryHub({
+  activeTab = 'feed',
+  initialQuery,
+  initialReferrerThread = null,
+  variant = 'page',
+}: MemoryHubProps) {
   const [indexRefreshToken, setIndexRefreshToken] = useState(0);
   const handleServiceStateChange = useCallback(() => {
     setIndexRefreshToken((token) => token + 1);
   }, []);
+
+  const body = (
+    <>
+      <div>
+        <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
+      </div>
+      {activeTab === 'feed' && (
+        <div data-testid="memory-tab-feed">
+          <KnowledgeFeed />
+        </div>
+      )}
+      {activeTab === 'search' && (
+        <div data-testid="memory-tab-search">
+          <EvidenceSearch initialQuery={initialQuery} />
+        </div>
+      )}
+      {activeTab === 'status' && (
+        <div className="space-y-4" data-testid="memory-tab-status">
+          <ServiceStatusPanel
+            filterFeatures={MEMORY_SEMANTIC_SERVICE_FEATURES}
+            title="语义搜索服务"
+            anchorId="embedding-service-controls"
+            onStateChange={handleServiceStateChange}
+          />
+          <IndexStatus refreshToken={indexRefreshToken} />
+        </div>
+      )}
+      {activeTab === 'health' && (
+        <div className="space-y-4" data-testid="memory-tab-health">
+          <MemoryFlagPanel />
+          <HealthReport />
+          <ToolUsageMetricsPanel />
+        </div>
+      )}
+      {activeTab === 'catalog' && (
+        <div data-testid="memory-tab-catalog">
+          <CollectionCatalog />
+        </div>
+      )}
+      {activeTab === 'graph' && (
+        <div data-testid="memory-tab-graph">
+          <CollectionGraph />
+        </div>
+      )}
+    </>
+  );
+
+  if (variant === 'settings') {
+    return (
+      <div className="flex min-h-0 flex-col gap-[18px]" data-testid="memory-settings-body">
+        {body}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col bg-[var(--console-panel-bg)]" data-testid="memory-hub">
@@ -38,47 +98,7 @@ export function MemoryHub({ activeTab = 'feed', initialQuery, initialReferrerThr
               <p className="mt-1 text-compact text-cafe-secondary">查看知识涌现、检索证据和索引健康状态</p>
             </div>
           </header>
-          <div>
-            <MemoryNav active={activeTab} initialReferrerThread={initialReferrerThread} />
-          </div>
-          {activeTab === 'feed' && (
-            <div data-testid="memory-tab-feed">
-              <KnowledgeFeed />
-            </div>
-          )}
-          {activeTab === 'search' && (
-            <div data-testid="memory-tab-search">
-              <EvidenceSearch initialQuery={initialQuery} />
-            </div>
-          )}
-          {activeTab === 'status' && (
-            <div className="space-y-4" data-testid="memory-tab-status">
-              <ServiceStatusPanel
-                filterFeatures={MEMORY_SEMANTIC_SERVICE_FEATURES}
-                title="语义搜索服务"
-                anchorId="embedding-service-controls"
-                onStateChange={handleServiceStateChange}
-              />
-              <IndexStatus refreshToken={indexRefreshToken} />
-            </div>
-          )}
-          {activeTab === 'health' && (
-            <div className="space-y-4" data-testid="memory-tab-health">
-              <MemoryFlagPanel />
-              <HealthReport />
-              <ToolUsageMetricsPanel />
-            </div>
-          )}
-          {activeTab === 'catalog' && (
-            <div data-testid="memory-tab-catalog">
-              <CollectionCatalog />
-            </div>
-          )}
-          {activeTab === 'graph' && (
-            <div data-testid="memory-tab-graph">
-              <CollectionGraph />
-            </div>
-          )}
+          {body}
         </div>
       </main>
     </div>

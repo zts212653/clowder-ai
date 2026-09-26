@@ -618,25 +618,6 @@
     "owner": "codex"
   },
   {
-    "id": "feature-f258-visible-cafe",
-    "kind": "feature",
-    "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "F258: 看得见的猫咖 Visible Café" },
-    "structureSource": {
-      "path": "docs/features/F258-visible-cafe.md",
-      "anchor": "Primary Journey: 把家放在次屏上，看一晚"
-    },
-    "bodySource": { "path": "docs/features/F258-visible-cafe.md", "anchor": "Entry" },
-    "contexts": ["thinking", "concierge_idle"],
-    "audience": ["cvo"],
-    "body": "想看看猫猫在各自星球里做什么？点左侧主导航的「猫猫星球」；半透明打盹表示数据断流，不是猫不在了。",
-    "action": {
-      "type": "open_source",
-      "label": "打开 F258",
-      "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "User Journey" }
-    },
-    "owner": "codex-sol"
-  },
-  {
     "id": "feature-f265-wechat-visible-reader",
     "kind": "feature",
     "sourceRef": {
@@ -743,7 +724,7 @@
     "bodySource": { "path": "docs/features/F246-approval-hub.md", "anchor": "统一审批中心底座" },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
-    "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
+    "body": "有提案等你拍板？从 Workspace 启动器打开「审批」——待审项一目了然。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -794,25 +775,6 @@
       "type": "open_concierge_draft",
       "label": "了解更多",
       "draftPrompt": "请介绍审批中心拒绝提案时可选的结构化原因、其他详情和跳过方式。"
-    },
-    "owner": "codex-sol"
-  },
-  {
-    "id": "feature-f255-present-loop",
-    "kind": "feature",
-    "sourceRef": { "path": "docs/features/F255-auto-dream.md", "anchor": "Phase A.1：猫猫星球“生活与作息”配置面" },
-    "structureSource": {
-      "path": "docs/features/F255-auto-dream.md",
-      "anchor": "产品配置面：猫的家，不是 Schedule Panel"
-    },
-    "bodySource": { "path": "docs/features/F255-auto-dream.md", "anchor": "配置旅程" },
-    "contexts": ["thinking", "concierge_open"],
-    "audience": ["cvo"],
-    "body": "想给一只猫一段不用交作业的私人时间？去猫猫星球 `/starry` 点它，打开「生活与作息」；还能在同一个房间翻它愿意留下的日记。",
-    "action": {
-      "type": "open_concierge_draft",
-      "label": "帮我预览",
-      "draftPrompt": "请先帮我预览一只猫的私人时间作息和成本，等我确认后再写入；不要创建通用 Schedule 任务。"
     },
     "owner": "codex-sol"
   },
@@ -1802,49 +1764,6 @@
       "draftPrompt": "请用 ELI5 解释这个概念，并按已批准的表达偏好生成可视化 HTML 富文本。"
     },
     "owner": "codex-sol"
-  },
-  {
-    "id": "feature-f290-collective",
-    "kind": "feature",
-    "sourceRef": {
-      "path": "docs/features/F290-ai-native-collective.md",
-      "anchor": "Collective Entry and Host Contract"
-    },
-    "structureSource": {
-      "path": "packages/web/src/components/collective/CollectiveLaunchSurface.tsx",
-      "anchor": "CollectiveLaunchSurface"
-    },
-    "bodySource": {
-      "path": "docs/features/F290-ai-native-collective.md",
-      "anchor": "本轮产品旅程"
-    },
-    "contexts": ["thinking", "feature_dev", "concierge_open"],
-    "audience": ["cvo", "developer"],
-    "body": "需要跨真人、跨 Café 协作？用 Human 身份进入 Collective，配对后在 Café 的“带猫加入”里选择猫和公开频道。成员可以请求它回应；持续私人执行由猫的主人另行授权。浏览器直达与 Café 内入口打开同一个世界。",
-    "action": {
-      "type": "open_capability_surface",
-      "label": "进入 Collective",
-      "surfaceId": "collective"
-    },
-    "owner": "codex-sol"
-  },
-  {
-    "id": "workflow-collective-result-return",
-    "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/collective-participation/SKILL.md", "anchor": "恢复与真实状态" },
-    "structureSource": {
-      "path": "packages/web/src/components/collective/CollectiveWorkRequests.tsx",
-      "anchor": "CollectiveWorkRequests"
-    },
-    "bodySource": {
-      "path": "cat-cafe-skills/collective-participation/SKILL.md",
-      "anchor": "丢了响应或换了 invocation"
-    },
-    "contexts": ["long_running", "concierge_open"],
-    "audience": ["all"],
-    "body": "Collective 私人工作中断后，在“带猫加入 → 收到的请求与私人工作”中继续原工作。猫会恢复原来源再回流，不需要重新发起一份委托；回复送达与工作完成会分别记录。",
-    "action": { "type": "open_capability_surface", "label": "查看 Collective 工作", "surfaceId": "collective" },
-    "owner": "codex-astra"
   },
   {
     "id": "capability-self-evolution",

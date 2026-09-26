@@ -5,7 +5,7 @@ topics: [console, settings, app-shell, community, inbound-pr, frontend, service-
 doc_kind: spec
 created: 2026-05-07
 community_pr: clowder-ai#645, clowder-ai#662, clowder-ai#669, clowder-ai#674, clowder-ai#1083
-tips_exempt: Retiring the unused generic permission dependency leaves the existing Settings and Approval Hub workflows unchanged and adds no new user action or discovery surface
+tips_exempt: "Renewed 2026-09-20 for Activity Rail convergence: Memory, Mission Hub, and Signals are first-class secondary sections in Settings, while adding a proactive tip would recreate the navigation noise this phase removes."
 ---
 
 # F190: Console Settings/AppShell Skeleton — 社区 Console 重构的可控切片
@@ -632,9 +632,53 @@ Header 和 Sidebar 松紧不同**是设计意图**（spacious vs default），�
 - ChatContainerHeader.tsx 是 F183/F184/F194 红区文件，D-1/D-2/D-3 修改前必须获得 operator override 确认
 - ChatContainer/AppShell ownership 涉及 F183/F184/F194 红区，D-7 必须小刀修改 + focused smoke，不得整文件覆盖
 - 不开新 Feature，以 F190 follow-up PR 形式修复
-- 所有入口去重必须确保 ActivityBar 对应入口仍在且可用
+- ActivityBar 只承担核心入口与用户主动固定的 Settings shortcut；非核心目的地必须有 Settings 或 Workspace
+  替代入口，不再要求每项能力都占一个 rail button（2026-09-18 入口收敛裁决）。
 - IM connector 修复必须保留家里 owner-gated secret write / redaction / hot reload 语义；恢复 source UX，不回退安全边界
 - Signal 修复必须保留家里 stats/batch/timeline/tier filter，只补开源缺口
+
+## Phase H: Activity Rail 入口收敛（2026-09-18）
+
+> Source: `thread_mu5cf8fpujtesgzn#0001789638449393-000639-09e31777` +
+> `thread_mu5cf8fpujtesgzn#0001789700666600-000982-df932f7e` +
+> `thread_mu5cf8fpujtesgzn#0001789870249927-002117-9835e459` +
+> `thread_mu5cf8fpujtesgzn#0001789872870155-002278-addb1787`（operator）。
+
+Activity Rail 是高频全局骨架，不是功能清单。默认常驻只保留 **对话 / 主题 / 设置**；只有用户从 Settings
+主动固定的分区可以排在对话之后。正在进行的演示浮窗允许出现临时召回控制，但不属于默认入口。
+
+- 源码版与安装包首次启动都通过现有持久化 pin 机制播种一次 `members` 与 `accounts`，不把两项写死为不可取消的常驻入口。
+- 播种 receipt 按默认项分别记录：容量不足时尚未播种的项可在以后补入；用户对默认项的任何显式取消都会记账，后续不得复活。
+- 常驻对话与 pinned Settings shortcut 共用 rail 的 `gap-1.5`，中间不放 divider 或额外 margin。
+- Collective 与猫猫星球在能力未完整前不暴露产品入口；route 保留供开发与既有 deep link 使用。
+- Approval / Needs Me 归 Workspace launcher，猫猫球显示状态归 Settings；它们不再占默认 rail button。
+
+### Supersede ledger（仅记录本轮 UI 入口迁移）
+
+以下旧条目描述的是历史入口位置，其业务能力与原 feature ownership 不变；本轮只由 F190 改写全局导航投影：
+
+- F058 AC-H1：Mission Hub 的左侧 rail 图标被 Settings → Mission Hub 二级项取代。
+- F102 KD-48：Memory 的完整页面能力保留，但物理入口从 rail 迁到 Settings → 记忆二级项；Workspace
+  Recall Feed 仍是副入口。
+- F229 AC-A6 / BUG-UX-11：隐藏猫猫球后的恢复入口从 Activity Rail 迁到 Settings → 猫猫球。
+- F246 C1 / AC-C2 / AC-D3：Approval 仍是 Workspace 顶层目的地并保持全局 projection；rail bell 被
+  常驻 Workspace 入口与 launcher 审批卡片上的待审批计数取代。
+- F258 AC-A7：`/starry` route 保留，但在能力完整前不再由全局 rail 主动暴露。
+
+### Phase H Acceptance Criteria
+
+- [x] 默认 web rail 只渲染对话、主题、设置。
+- [x] 源码版与安装包首次启动都固定成员与运行时、账户与密钥；取消后重新挂载不恢复。
+- [x] pinned shortcut 紧邻对话且无分隔线。
+- [x] Collective 与猫猫星球不出现在 Activity Rail。
+- [x] 记忆、Mission Hub、信号分别作为 Settings 二级项可达；不增加聚合“功能入口”中间层。
+- [x] Settings 二级项依 operator 指定顺序排列：记忆 / Mission Hub / 信号 / 成员与运行时 / 能力画像来源 /
+  账户与密钥 / IM 对接 / Skill 管理 / MCP 管理 / 插件集成 / 能力市场 / 语音管理 / 协作与规则 /
+  运维监控 / 猫猫球 / 通知 / 系统配置。
+- [x] 三个二级项复用业务正文但不嵌套整页壳：统一由 SettingsPageHeader 提供标题，并由 Settings shell 保持单一纵向滚动。
+- [x] 系统配置位于 Settings 二级导航的最后一项。
+- [x] 常驻 Workspace 入口与 launcher 审批卡片显示全局待审批计数。
+- [x] Approval projection 继续全局同步；猫猫球 Settings 文案不再引用已移除的 rail 入口。
 
 ## Review Gate
 

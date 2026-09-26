@@ -5,24 +5,12 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useChatStore } from '@/stores/chatStore';
-import { AttentionRailButtons } from './attention/AttentionRailButtons';
-import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
-import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
 import { ThemeMenu } from './ThemeMenu';
 import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
-
-const NAV_ITEMS = [
-  { id: 'home', path: '/', label: '对话', match: (p: string) => p === '/' || p.startsWith('/thread/') },
-  { id: 'starry', path: '/starry', label: '猫猫星球', match: (p: string) => p.startsWith('/starry') },
-  { id: 'memory', path: '/memory', label: '记忆', match: (p: string) => p.startsWith('/memory') },
-  { id: 'collective', path: '/collective', label: 'Collective', match: (p: string) => p.startsWith('/collective') },
-  { id: 'mission', path: '/mission-hub', label: 'Mission Hub', match: (p: string) => p.startsWith('/mission') },
-  { id: 'signals', path: '/signals', label: '信号', match: (p: string) => p.startsWith('/signals') },
-] as const;
 
 function ChatIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
@@ -33,59 +21,6 @@ function ChatIcon({ className = 'w-5 h-5' }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-    </svg>
-  );
-}
-
-function MissionIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>Mission Hub</title>
-      <path
-        d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path d="M15 3v4a1 1 0 0 0 1 1h4" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M9 13h6" strokeLinecap="round" />
-      <path d="M9 17h3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CollectiveIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>Collective</title>
-      <circle cx="7" cy="8" r="3" />
-      <circle cx="17" cy="8" r="3" />
-      <circle cx="12" cy="17" r="3" />
-      <path d="m9.5 10 1.2 4M14.5 10l-1.2 4M10 8h4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SignalIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>信号</title>
-      <path
-        d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <line x1="4" y1="22" x2="4" y2="15" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PlanetIcon({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
-      <title>猫猫星球</title>
-      <circle cx="12" cy="12" r="4.5" />
-      <path d="M3.4 14.7c1.8 2.2 6.6 1.7 10.8-.5 4.2-2.1 7.1-5.1 6.4-6.7-.5-1.1-2.7-1.2-5.5-.4" strokeLinecap="round" />
-      <path d="m18.7 3.6.4 1.1 1.1.4-1.1.4-.4 1.1-.4-1.1-1.1-.4 1.1-.4.4-1.1Z" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -103,16 +38,6 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
     </svg>
   );
 }
-
-const ICON_MAP: Record<string, ({ className }: { className?: string }) => JSX.Element> = {
-  home: ChatIcon,
-  starry: PlanetIcon,
-  signals: SignalIcon,
-  memory: MemoryIcon,
-  collective: CollectiveIcon,
-  mission: MissionIcon,
-  settings: SettingsIcon,
-};
 
 interface ActivityBarProps {
   className?: string;
@@ -153,30 +78,25 @@ function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (
 
   if (pinnedSections.length === 0) return null;
 
-  return (
-    <>
-      <div className="my-1 h-px w-6 bg-[var(--console-border-soft)] opacity-50" />
-      {pinnedSections.map((sec) => {
-        const active = isStandalone && activeSection === sec.id;
-        return (
-          <button
-            key={sec.id}
-            type="button"
-            onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
-              active
-                ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
-                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
-            }`}
-            title={sec.label}
-            aria-current={active ? 'page' : undefined}
-          >
-            <HubIcon name={sec.icon} className="h-[18px] w-[18px]" />
-          </button>
-        );
-      })}
-    </>
-  );
+  return pinnedSections.map((sec) => {
+    const active = isStandalone && activeSection === sec.id;
+    return (
+      <button
+        key={sec.id}
+        type="button"
+        onClick={() => onNav(`/settings?s=${sec.id}&standalone=1`)}
+        className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
+          active
+            ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+            : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
+        }`}
+        title={sec.label}
+        aria-current={active ? 'page' : undefined}
+      >
+        <HubIcon name={sec.icon} className="h-[18px] w-[18px]" />
+      </button>
+    );
+  });
 }
 
 function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: string) => void }) {
@@ -248,8 +168,10 @@ export function ActivityBar({ className }: ActivityBarProps) {
   const router = useRouter();
   const { pinned } = usePinnedSections();
   const [tunerOpen, setTunerOpen] = useState(false);
+  const conversationActive = pathname === '/' || pathname.startsWith('/thread/');
 
-  // F246: Approval Hub — fetch pending on mount + subscribe to proposal events
+  // Approval remains a Workspace destination; keep its global projection fresh
+  // without reserving a permanent rail button.
   useApprovalHubSync();
 
   const handleNav = useCallback(
@@ -264,38 +186,27 @@ export function ActivityBar({ className }: ActivityBarProps) {
       className={`flex w-[52px] flex-shrink-0 flex-col items-center gap-1.5 py-2.5 px-[6px] bg-[var(--console-rail-bg)] ${className ?? ''}`}
       aria-label="主导航"
     >
-      {NAV_ITEMS.map((item) => {
-        const Icon = ICON_MAP[item.id];
-        const active = item.match(pathname);
-        return (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => handleNav(item.path)}
-            className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
-              active
-                ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
-                : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
-            }`}
-            title={item.label}
-            aria-label={item.label}
-            aria-current={active ? 'page' : undefined}
-            data-guide-id={`nav.${item.id}`}
-          >
-            <Icon className="h-5 w-5" />
-          </button>
-        );
-      })}
+      <button
+        type="button"
+        onClick={() => handleNav('/')}
+        className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
+          conversationActive
+            ? 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
+            : 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
+        }`}
+        title="对话"
+        aria-label="对话"
+        aria-current={conversationActive ? 'page' : undefined}
+        data-guide-id="nav.home"
+      >
+        <ChatIcon className="h-5 w-5" />
+      </button>
 
       <Suspense>
         <PinnedSections pinned={pinned} onNav={handleNav} />
       </Suspense>
 
       <div className="mt-auto flex flex-col items-center gap-1.5">
-        {/* F246 remains the approval bell; F310 Needs Me is a sibling Workspace destination. */}
-        <AttentionRailButtons />
-        {/* F229: concierge re-entry —唤回入口，muted 时是唯一入口 (INV-3) */}
-        <ConciergeRailToggle />
         <PresentationRailToggle />
         <ThemeMenu onEditTheme={() => setTunerOpen(true)} />
         <Suspense

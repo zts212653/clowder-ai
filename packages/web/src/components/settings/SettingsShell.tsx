@@ -12,6 +12,7 @@ function SettingsShellInner() {
   const searchParams = useSearchParams();
   const activeSection = searchParams.get('s') ?? (searchParams.get('ops') ? 'ops' : DEFAULT_SECTION);
   const initialEditCatId = searchParams.get('cat') ?? undefined;
+  const initialReferrerThread = searchParams.get('from');
   const standalone = searchParams.get('standalone') === '1';
   const fixedPluginManagerLayout =
     activeSection === 'plugins' && usesFixedPluginManagerLayout(`?${searchParams.toString()}`);
@@ -32,7 +33,11 @@ function SettingsShellInner() {
           className={`m-3 flex min-h-0 flex-1 flex-col rounded-[18px] bg-[var(--console-shell-bg)] px-5 py-6 shadow-[var(--console-shadow-soft)] md:px-9 md:py-8 ${fixedPluginManagerLayout ? 'overflow-hidden' : 'overflow-y-auto'}`}
         >
           <div className={fixedPluginManagerLayout ? 'flex min-h-0 flex-1 flex-col gap-5' : 'space-y-5'}>
-            <SettingsContent section={activeSection} initialEditCatId={initialEditCatId} />
+            <SettingsContent
+              section={activeSection}
+              initialEditCatId={initialEditCatId}
+              initialReferrerThread={initialReferrerThread}
+            />
           </div>
         </div>
       </div>
@@ -60,7 +65,11 @@ function SettingsShellInner() {
         <div
           className={`${fixedPluginManagerLayout ? 'flex h-full min-h-0 flex-col gap-5' : 'space-y-5'} px-5 py-5 md:px-8 md:py-7`}
         >
-          <SettingsContent section={activeSection} initialEditCatId={initialEditCatId} />
+          <SettingsContent
+            section={activeSection}
+            initialEditCatId={initialEditCatId}
+            initialReferrerThread={initialReferrerThread}
+          />
         </div>
       </div>
     </div>

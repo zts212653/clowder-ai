@@ -14,6 +14,7 @@ interface ChatContainerHeaderProps {
   statusPanelOpen: boolean;
   onToggleStatusPanel: () => void;
   hasWorkspaceActivity?: boolean;
+  approvalCount?: number;
 }
 
 export function ChatContainerHeader({
@@ -28,6 +29,7 @@ export function ChatContainerHeader({
   statusPanelOpen,
   onToggleStatusPanel,
   hasWorkspaceActivity = false,
+  approvalCount = 0,
 }: ChatContainerHeaderProps) {
   return (
     <header className="safe-area-top">
@@ -65,6 +67,7 @@ export function ChatContainerHeader({
           onToggleStatusPanel={onToggleStatusPanel}
           statusPanelOpen={statusPanelOpen}
           hasWorkspaceActivity={hasWorkspaceActivity}
+          approvalCount={approvalCount}
         />
       </div>
     </header>
@@ -128,10 +131,12 @@ export function PanelToggle({
   onToggleStatusPanel,
   statusPanelOpen,
   hasWorkspaceActivity = false,
+  approvalCount = 0,
 }: {
   onToggleStatusPanel: () => void;
   statusPanelOpen: boolean;
   hasWorkspaceActivity?: boolean;
+  approvalCount?: number;
 }) {
   // The button is server-rendered before React owns its click handler. Browser
   // journeys wait on this marker rather than racing cold client hydration.
@@ -139,6 +144,9 @@ export function PanelToggle({
   useEffect(() => {
     setClientInteractive(true);
   }, []);
+
+  const workspaceLabel = statusPanelOpen ? '收起 Workspace' : '打开 Workspace';
+  const accessibleLabel = approvalCount > 0 ? `${workspaceLabel}，${approvalCount} 项待审批` : workspaceLabel;
 
   return (
     <button
@@ -149,8 +157,8 @@ export function PanelToggle({
           ? 'text-cafe-accent'
           : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
       }`}
-      aria-label={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
-      title={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
+      aria-label={accessibleLabel}
+      title={accessibleLabel}
       data-client-interactive={clientInteractive ? 'true' : 'false'}
       data-testid="workspace-panel-toggle"
     >
@@ -167,13 +175,21 @@ export function PanelToggle({
         <path d="M4 2.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5Z" />
         <path d="M10.5 2.5v11M7.5 6 5.5 8l2 2" />
       </svg>
-      {hasWorkspaceActivity && (
+      {approvalCount > 0 ? (
+        <span
+          className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--semantic-warning)] px-1 text-micro font-bold text-[var(--cafe-accent-foreground)]"
+          aria-hidden="true"
+          data-testid="workspace-approval-count"
+        >
+          {approvalCount > 99 ? '99+' : approvalCount}
+        </span>
+      ) : hasWorkspaceActivity ? (
         <span
           className="absolute right-1 top-1 h-2 w-2 rounded-full border-2 border-[var(--console-card-bg)] bg-[var(--semantic-success)]"
           aria-hidden="true"
           data-testid="workspace-activity-badge"
         />
-      )}
+      ) : null}
     </button>
   );
 }

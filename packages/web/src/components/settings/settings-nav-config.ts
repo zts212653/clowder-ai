@@ -8,6 +8,27 @@ export interface SettingsSection {
 
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
+    id: 'memory',
+    label: '记忆',
+    icon: 'brain',
+    color: 'var(--cafe-accent)',
+    description: '查看知识动态、检索证据、索引状态与记忆健康度。',
+  },
+  {
+    id: 'mission-hub',
+    label: 'Mission Hub',
+    icon: 'target',
+    color: 'var(--cafe-accent)',
+    description: '查看 Feature、依赖关系与任务推进状态。',
+  },
+  {
+    id: 'signals',
+    label: '信号',
+    icon: 'megaphone',
+    color: 'var(--cafe-accent)',
+    description: '查看订阅来源、文章和研究时间线。',
+  },
+  {
     id: 'members',
     label: '成员与运行时',
     icon: 'users',
@@ -64,25 +85,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '搜索和安装 MCP、Skill、插件等能力包。',
   },
   {
-    id: 'concierge',
-    label: '猫猫球',
-    icon: 'cat',
-    color: 'var(--cafe-accent)',
-    description: '猫猫球的形象、人设、值班猫和主动性策略。',
-  },
-  {
     id: 'voice',
     label: '语音管理',
     icon: 'mic',
     color: 'var(--color-gemini-primary)',
     description: '语音输入输出、术语表和 TTS 服务状态。',
-  },
-  {
-    id: 'system',
-    label: '系统配置',
-    icon: 'settings',
-    color: 'var(--color-gemini-primary)',
-    description: '环境选项、默认行为和运行时总开关。',
   },
   {
     id: 'rules',
@@ -92,6 +99,20 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '会话生命周期、注入体系、协作规则与模型指南。',
   },
   {
+    id: 'ops',
+    label: '运维监控',
+    icon: 'activity',
+    color: 'var(--color-gemini-primary)',
+    description: '服务健康、命令工具和运行态观测。',
+  },
+  {
+    id: 'concierge',
+    label: '猫猫球',
+    icon: 'cat',
+    color: 'var(--cafe-accent)',
+    description: '猫猫球的形象、人设、值班猫和主动性策略。',
+  },
+  {
     id: 'notify',
     label: '通知',
     icon: 'bell',
@@ -99,11 +120,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     description: '推送订阅、提醒策略与设备联动。',
   },
   {
-    id: 'ops',
-    label: '运维监控',
-    icon: 'activity',
+    id: 'system',
+    label: '系统配置',
+    icon: 'settings',
     color: 'var(--color-gemini-primary)',
-    description: '服务健康、命令工具和运行态观测。',
+    description: '环境选项、默认行为和运行时总开关。',
   },
 ];
 

@@ -173,7 +173,7 @@ export function ConciergeSettingsContent() {
             <ToggleSwitch checked={state.enabled} disabled={saving} onChange={(v) => updateConfig({ enabled: v })} />
           </SettingsField>
 
-          <SettingsField label="隐藏猫猫球" hint="隐藏后可从左侧猫图标重新显示，不影响对话历史。" inline>
+          <SettingsField label="隐藏猫猫球" hint="隐藏后可随时回到这里重新显示，不影响对话历史。" inline>
             <ToggleSwitch checked={state.muted} disabled={saving} onChange={(v) => updateConfig({ muted: v })} />
           </SettingsField>
         </div>

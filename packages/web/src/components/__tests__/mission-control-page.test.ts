@@ -78,6 +78,24 @@ describe('MissionControlPage', () => {
     expect(container.querySelector('[data-testid="mission-content-surface"]')).not.toBeNull();
   });
 
+  it('renders the Settings body without h-screen, nested scrolling, or a duplicate heading', async () => {
+    await act(async () => {
+      root.render(React.createElement(MissionControlPage, { variant: 'settings' }));
+    });
+    await flush(act);
+
+    const body = container.querySelector('[data-testid="mission-settings-body"]');
+    const surface = container.querySelector('[data-testid="mission-content-surface"]');
+    const main = container.querySelector('main');
+
+    expect(body).not.toBeNull();
+    expect(body?.className).not.toContain('h-screen');
+    expect(main?.className).not.toContain('overflow-y-auto');
+    expect(surface?.className).not.toContain('rounded-[18px]');
+    expect(surface?.className).not.toContain('shadow-[var(--console-shadow-soft)]');
+    expect(container.querySelector('h1')).toBeNull();
+  });
+
   it('does not render the thread sidebar inside mission hub layout', async () => {
     await act(async () => {
       root.render(React.createElement(MissionControlPage));

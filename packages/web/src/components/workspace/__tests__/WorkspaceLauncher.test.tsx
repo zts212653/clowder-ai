@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   setRightPanelOpen: vi.fn(),
   apiFetch: vi.fn(),
   openInvocationTrajectory: vi.fn(),
+  approvalCount: 0,
 }));
 
 vi.mock('../../ChatVoiceFeatureControls', () => ({
@@ -39,6 +40,10 @@ vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
 }));
 
+vi.mock('@/stores/approvalHubStore', () => ({
+  useApprovalHubStore: (selector: (state: { count: number }) => unknown) => selector({ count: mocks.approvalCount }),
+}));
+
 vi.mock('../trajectory/trajectory-navigation', () => ({
   openInvocationTrajectory: (...args: unknown[]) => mocks.openInvocationTrajectory(...args),
 }));
@@ -67,6 +72,7 @@ describe('F284 WorkspaceLauncher', () => {
     mocks.setRightPanelOpen.mockReset();
     mocks.apiFetch.mockReset();
     mocks.openInvocationTrajectory.mockReset();
+    mocks.approvalCount = 0;
     mocks.apiFetch.mockResolvedValue({ ok: true, json: async () => ({ invocations: [] }) });
     window.history.replaceState({}, '', '/thread/thread-launcher');
     container = document.createElement('div');
@@ -202,6 +208,14 @@ describe('F284 WorkspaceLauncher', () => {
       needsMe?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('needs-me');
+  });
+
+  it('shows the global pending count on the Approval destination', async () => {
+    mocks.approvalCount = 7;
+    await renderLauncher();
+
+    const approval = container.querySelector('[data-testid="workspace-launcher-approval"]');
+    expect(approval?.querySelector('[data-testid="workspace-launcher-approval-count"]')?.textContent).toBe('7');
   });
 
   it('opens status and session diagnostics from the Launcher instead of permanent header chrome', async () => {
