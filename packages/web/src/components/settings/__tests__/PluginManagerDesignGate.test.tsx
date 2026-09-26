@@ -98,7 +98,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
 
     expect(container.querySelectorAll('[data-plugin-id]')).toHaveLength(2);
     expect(container.textContent).toContain('视频分析');
-    expect(container.textContent).toContain('本地视频生成');
+    expect(container.textContent).toContain('Video Generation');
   });
 
   it('expresses installed state only through toggle and uninstall actions', async () => {
@@ -390,7 +390,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
       tools: [
         {
           contributionId: 'video-analysis-toolset',
-          name: 'video_analysis',
+          name: 'video_analysis_execute',
           description: '分析远程视频并返回结构化结果。',
         },
       ],
@@ -401,7 +401,7 @@ describe('F202 terminal Plugin Manager Design Gate', () => {
     const detail = container.querySelector('[data-testid="plugin-manager-detail"]');
     const capabilityRow = detail?.querySelector('[data-contribution-kind="mcp"] li');
     expect(detail?.textContent).toContain('MCP');
-    expect(capabilityRow?.textContent).toBe('video_analysis — 分析远程视频并返回结构化结果。');
+    expect(capabilityRow?.textContent).toBe('video_analysis_execute — 分析远程视频并返回结构化结果。');
     expect(capabilityRow?.querySelectorAll('p')).toHaveLength(1);
     expect(detail?.textContent?.match(/Analyze video/g) ?? []).toHaveLength(0);
     expect(detail?.textContent).not.toContain('插件未提供用途说明。');

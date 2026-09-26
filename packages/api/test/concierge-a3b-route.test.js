@@ -12,10 +12,24 @@
 
 import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
 import { beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 
 const USER_HEADER = { 'x-cat-cafe-user': 'test-user', 'content-type': 'application/json' };
+
+async function routeSourceFiles(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = join(root, entry.name);
+      if (entry.isDirectory()) return routeSourceFiles(path);
+      return entry.isFile() ? [path] : [];
+    }),
+  );
+  return files.flat();
+}
 
 // Shared test fixture builder
 async function buildApp() {
@@ -627,11 +641,8 @@ describe('Architecture: R4 relay key write locality', () => {
   it('relay store create is only called in concierge relay route', async () => {
     // grep-based architecture test: conciergeRelayStore.create should only
     // appear in the relay route file (not in other domains)
-    const fs = await import('node:fs/promises');
-    const path = await import('node:path');
-
-    const routeFile = path.resolve(import.meta.dirname, '../src/routes/concierge.ts');
-    const routeContent = await fs.readFile(routeFile, 'utf-8');
+    const routeFile = resolve(import.meta.dirname, '../src/routes/concierge.ts');
+    const routeContent = await readFile(routeFile, 'utf-8');
 
     // Verify the relay store write exists in the route
     assert.ok(
@@ -640,14 +651,15 @@ describe('Architecture: R4 relay key write locality', () => {
     );
 
     // Verify no other route file writes to relay store
-    const routesDir = path.resolve(import.meta.dirname, '../src/routes');
-    const routeFiles = await fs.readdir(routesDir);
+    const routesDir = resolve(import.meta.dirname, '../src/routes');
+    const routeFiles = await routeSourceFiles(routesDir);
     for (const file of routeFiles) {
-      if (file === 'concierge.ts') continue; // skip the legitimate writer
-      const content = await fs.readFile(path.join(routesDir, file), 'utf-8');
+      if (file === routeFile) continue; // skip the legitimate writer
+      const content = await readFile(file, 'utf-8');
+      const routePath = relative(routesDir, file);
       assert.ok(
         !content.includes('conciergeRelayStore.create(') && !content.includes('RelayStore.create('),
-        `R4 violation: ${file} should not write relay records`,
+        `R4 violation: ${routePath} should not write relay records`,
       );
     }
   });

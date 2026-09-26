@@ -75,7 +75,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -127,7 +127,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -161,7 +161,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'custom-im',
+          target: { kind: 'connector', id: 'custom-im' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -192,7 +192,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'wecom-bot',
+          target: { kind: 'connector', id: 'wecom-bot' },
           pendingConfigValues: {
             WECOM_BOT_ID: 'bot-id-from-form',
             WECOM_BOT_SECRET: 'secret-from-form',
@@ -226,6 +226,155 @@ describe('ActionRenderer', () => {
     });
   });
 
+  it.each([
+    'status',
+    'polling',
+  ])('uses live status for expiring authorization and keeps revoke reachable with %s rendering', async (statusRender) => {
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    let armedUntil = 0;
+    mockApiFetch.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.endsWith('/arm')) {
+        armedUntil = Date.now() + 2000;
+      } else if (path.endsWith('/disarm')) {
+        armedUntil = 0;
+      } else if (!path.endsWith('/status')) {
+        return jsonResponse({ ok: false, label: 'unexpected action' }, 500);
+      }
+      const armed = armedUntil > Date.now();
+      return jsonResponse({
+        ok: true,
+        render: 'status',
+        label: armed ? 'Authorized' : 'Not authorized',
+        data: {
+          armed,
+          remainingMs: armed ? armedUntil - Date.now() : 0,
+          ...(armed ? { expiresAt: new Date(armedUntil).toISOString() } : {}),
+        },
+      });
+    });
+    const operation = {
+      name: 'authorization',
+      label: 'Authorization',
+      currentAction: 'disarm',
+      actions: [
+        { id: 'arm', label: 'Authorize', render: 'button', next: 'disarm' },
+        { id: 'status', label: 'Status', render: statusRender },
+        { id: 'disarm', label: 'Revoke', render: 'button', next: 'arm' },
+      ],
+    };
+    await act(async () => {
+      root.render(React.createElement(ActionRenderer, { target: { kind: 'plugin', id: 'reader' }, operation }));
+    });
+    await flushEffects();
+    expect(container.textContent).toContain('Not authorized');
+    expect(container.querySelector('[data-testid="reader-action-arm"]')).not.toBeNull();
+
+    await act(async () => {
+      queryButton(container, 'Authorize').click();
+      await Promise.resolve();
+    });
+    await flushEffects();
+    expect(container.textContent).toContain('Authorized');
+    expect(container.querySelector('[data-testid="reader-disconnect"]')).not.toBeNull();
+
+    await act(async () => {
+      queryButton(container, 'Revoke').click();
+      await Promise.resolve();
+    });
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/reader/actions/authorization/disarm', { method: 'POST' });
+    expect(container.textContent).toContain('Not authorized');
+
+    await act(async () => {
+      queryButton(container, 'Authorize').click();
+      await Promise.resolve();
+    });
+    await flushEffects();
+    expect(container.textContent).toContain('Authorized');
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+      await Promise.resolve();
+    });
+    await flushEffects();
+    expect(container.textContent).toContain('Not authorized');
+    expect(container.querySelector('[data-testid="reader-disconnect"]')).toBeNull();
+    expect(mockApiFetch.mock.calls.filter(([url]) => String(url).endsWith('/status')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('keeps QR connection flows on the sequenced renderer', async () => {
+    await act(async () => {
+      root.render(
+        React.createElement(ActionRenderer, {
+          target: { kind: 'connector', id: 'feishu' },
+          operation: {
+            name: 'qr_login',
+            label: 'QR login',
+            currentAction: 'generate',
+            actions: [
+              { id: 'generate', label: 'Generate QR', render: 'button', next: 'status' },
+              { id: 'status', label: 'Waiting for scan', render: 'polling' },
+              { id: 'disconnect', label: 'Disconnect', render: 'button', next: 'generate' },
+            ],
+          },
+        }),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="feishu-authorization-status"]')).toBeNull();
+    expect(container.querySelector('[data-testid="feishu-action-generate"]')).not.toBeNull();
+    expect(mockApiFetch).not.toHaveBeenCalled();
+  });
+
+  it('recognizes a live authorization cycle without reserved action names', async () => {
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    let armed = false;
+    mockApiFetch.mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.endsWith('/authorize')) armed = true;
+      if (path.endsWith('/withdraw')) armed = false;
+      return jsonResponse({
+        ok: true,
+        render: 'status',
+        label: armed ? 'Authorized' : 'Not authorized',
+        data: {
+          armed,
+          remainingMs: armed ? 60000 : 0,
+          ...(armed ? { expiresAt: new Date(Date.now() + 60000).toISOString() } : {}),
+        },
+      });
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(ActionRenderer, {
+          target: { kind: 'plugin', id: 'cycle' },
+          operation: {
+            name: 'consent',
+            label: 'Consent',
+            currentAction: 'withdraw',
+            actions: [
+              { id: 'authorize', label: 'Authorize', render: 'button', next: 'withdraw' },
+              { id: 'inspect', label: 'Inspect', render: 'status' },
+              { id: 'withdraw', label: 'Withdraw', render: 'button', next: 'authorize' },
+            ],
+          },
+        }),
+      );
+    });
+    await flushEffects();
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/cycle/actions/consent/inspect', { method: 'POST' });
+    expect(container.textContent).toContain('Not authorized');
+
+    await act(async () => {
+      queryButton(container, 'Authorize').click();
+      await Promise.resolve();
+    });
+    await flushEffects();
+    expect(queryButton(container, 'Withdraw')).not.toBeNull();
+  });
+
   it('syncs action phase when refreshed connector status becomes unconfigured', async () => {
     const operation = {
       name: 'connect',
@@ -239,7 +388,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'feishu',
+          target: { kind: 'connector', id: 'feishu' },
           configured: true,
           operation,
         }),
@@ -252,7 +401,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'feishu',
+          target: { kind: 'connector', id: 'feishu' },
           configured: false,
           operation: { ...operation, currentAction: 'start' },
         }),
@@ -268,7 +417,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'feishu',
+          target: { kind: 'connector', id: 'feishu' },
           configured: false,
           operation: {
             name: 'connect',
@@ -294,7 +443,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'custom-im',
+          target: { kind: 'connector', id: 'custom-im' },
           operation: {
             name: 'setup',
             label: 'Setup',
@@ -332,7 +481,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'feishu',
+          target: { kind: 'connector', id: 'feishu' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -387,7 +536,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -444,7 +593,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -521,7 +670,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -593,7 +742,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'weixin',
+          target: { kind: 'connector', id: 'weixin' },
           operation: {
             name: 'connect',
             label: 'Connect',
@@ -647,7 +796,7 @@ describe('ActionRenderer', () => {
     await act(async () => {
       root.render(
         React.createElement(ActionRenderer, {
-          connectorId: 'feishu',
+          target: { kind: 'connector', id: 'feishu' },
           configured: true,
           operation: {
             name: 'connect',

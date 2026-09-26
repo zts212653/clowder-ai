@@ -1,5 +1,7 @@
 import {
   type ExternalPluginLifecycleServiceOptions,
+  PLUGIN_OWNER_DISABLED_REASON,
+  PLUGIN_OWNER_UNINSTALLED_REASON,
   PluginLifecycleError,
   type PluginMaintenanceInput,
   type PluginMaintenanceResult,
@@ -88,7 +90,7 @@ export class ExternalPluginLifecycleService {
       assertRevision(current, expectedRevision);
       this.assertState(current, ['enabled'], undefined, 'disable');
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, 'owner_disabled');
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_DISABLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
         activationState: 'disabled',
         runtimeState: 'stopped',
@@ -119,7 +121,7 @@ export class ExternalPluginLifecycleService {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, 'owner_uninstalled');
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
         lifecycleState: 'retired',
         activationState: 'disabled',

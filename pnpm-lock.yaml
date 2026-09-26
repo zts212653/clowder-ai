@@ -51,8 +51,8 @@ importers:
         specifier: 0.1.0-alpha.9
         version: 0.1.0-alpha.9
       '@clowder-ai/plugin-contract':
-        specifier: 0.1.0-beta.15
-        version: 0.1.0-beta.15
+        specifier: file:vendor/clowder-ai-plugin-contract-0.1.0-beta.22.tgz
+        version: file:packages/api/vendor/clowder-ai-plugin-contract-0.1.0-beta.22.tgz
       '@clowder-ai/plugin-sdk':
         specifier: 0.1.0-beta.10
         version: 0.1.0-beta.10
@@ -1165,8 +1165,9 @@ packages:
     resolution: {integrity: sha512-LvgAAlwlqTaQjhmbTP/b/IoDIwovGuGvROnXqbv2qoKhrQzvLWNpxIXpmsCARvj2HiB9a2Ko4L4OkmBGTtKBLw==}
     engines: {node: '>=20.0.0'}
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.15':
-    resolution: {integrity: sha512-i6M6d6bEhL97gVsop2V5hG0lGMrmOVc2/0+7PAHxLhFCg2zIZ0LCd8HDJRYrD3E7QpcezgRzUiWbzRTMnTGdYA==}
+  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.1.0-beta.22.tgz':
+    resolution: {integrity: sha512-INpQESOX4UHcZAWZyBN6P424QQ+va0aWxtix8qMD1LoiIBXd6g1iFopkhI8oqcUizbnhGwdn6jjPLctS80iIWQ==, tarball: file:packages/api/vendor/clowder-ai-plugin-contract-0.1.0-beta.22.tgz}
+    version: 0.1.0-beta.22
     engines: {node: '>=20.0.0'}
 
   '@clowder-ai/plugin-sdk@0.1.0-beta.10':
@@ -7613,7 +7614,7 @@ snapshots:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)
 
-  '@clowder-ai/plugin-contract@0.1.0-beta.15':
+  '@clowder-ai/plugin-contract@file:packages/api/vendor/clowder-ai-plugin-contract-0.1.0-beta.22.tgz':
     dependencies:
       ajv: 8.17.1
       ajv-formats: 3.0.1(ajv@8.17.1)

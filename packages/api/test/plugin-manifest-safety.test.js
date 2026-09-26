@@ -12,11 +12,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import { LimbRegistry } from '../dist/domains/limb/LimbRegistry.js';
 import { PluginRegistry, resourceCapId } from '../dist/domains/plugin/PluginRegistry.js';
-import {
-  PluginResourceActivator,
-  rehydrateEnabledPluginLimbs,
-  withPersistedLimbNodeId,
-} from '../dist/domains/plugin/PluginResourceActivator.js';
+import { PluginResourceActivator, withPersistedLimbNodeId } from '../dist/domains/plugin/PluginResourceActivator.js';
 import { resolvePluginEnv, writePluginConfig } from '../dist/domains/plugin/plugin-config-store.js';
 import { BUILTIN_PLUGIN_IDS, parsePluginManifest, validateEnvSafety } from '../dist/domains/plugin/plugin-manifest.js';
 import { registerPluginRoutes } from '../dist/routes/plugin-routes.js';
@@ -340,73 +336,6 @@ describe('parsePluginManifest security', () => {
     };
 
     assert.equal(registry.deriveStatus(manifest, capabilities, {}), 'partial');
-  });
-
-  it('requires the bundled video-analysis API key before reporting configured', () => {
-    const registry = new PluginRegistry('/tmp/nonexistent-plugins');
-    const manifest = parsePluginManifest(
-      fileURLToPath(new URL('../src/plugins/video-analysis/plugin.yaml', import.meta.url)),
-    );
-    const env = {
-      VIDEO_ANALYSIS_PROVIDER: 'gemini',
-      VIDEO_ANALYSIS_AUTH_TYPE: 'query-param',
-    };
-
-    assert.equal(registry.deriveStatus(manifest, null, env), 'not_configured');
-  });
-
-  it('requires the credentials selected by the bundled video-gen auth type', () => {
-    const registry = new PluginRegistry('/tmp/nonexistent-plugins');
-    const manifest = parsePluginManifest(
-      fileURLToPath(new URL('../src/plugins/video-gen/plugin.yaml', import.meta.url)),
-    );
-    const enabledCapabilities = {
-      version: 1,
-      capabilities: [
-        {
-          id: resourceCapId(manifest.id, manifest.resources[0]),
-          type: 'mcp',
-          enabled: true,
-          source: 'cat-cafe',
-          pluginId: manifest.id,
-        },
-      ],
-    };
-
-    for (const env of [
-      { VIDEO_GEN_PROVIDER: 'zhipu', VIDEO_GEN_AUTH_TYPE: 'apikey' },
-      { VIDEO_GEN_PROVIDER: 'kling', VIDEO_GEN_AUTH_TYPE: 'jwt-hs256' },
-      { VIDEO_GEN_PROVIDER: 'jimeng', VIDEO_GEN_AUTH_TYPE: 'hmac-sha256-v4' },
-    ]) {
-      assert.equal(registry.deriveStatus(manifest, null, env), 'not_configured');
-      assert.equal(registry.deriveStatus(manifest, enabledCapabilities, env), 'partial');
-      assert.equal(registry.getPluginInfo(manifest, enabledCapabilities, env).configured, false);
-    }
-
-    assert.equal(
-      registry.deriveStatus(manifest, null, {
-        VIDEO_GEN_PROVIDER: 'zhipu',
-        VIDEO_GEN_AUTH_TYPE: 'apikey',
-        VIDEO_GEN_API_KEY: 'api-key',
-      }),
-      'configured',
-    );
-    for (const env of [
-      {
-        VIDEO_GEN_PROVIDER: 'kling',
-        VIDEO_GEN_AUTH_TYPE: 'jwt-hs256',
-        VIDEO_GEN_ACCESS_KEY: 'access-key',
-        VIDEO_GEN_SECRET_KEY: 'secret-key',
-      },
-      {
-        VIDEO_GEN_PROVIDER: 'jimeng',
-        VIDEO_GEN_AUTH_TYPE: 'hmac-sha256-v4',
-        VIDEO_GEN_ACCESS_KEY: 'access-key',
-        VIDEO_GEN_SECRET_KEY: 'secret-key',
-      },
-    ]) {
-      assert.equal(registry.deriveStatus(manifest, null, env), 'configured');
-    }
   });
 
   it('does not treat stale plugin capability entries as declared resources', () => {
@@ -2257,74 +2186,6 @@ describe('PluginResourceActivator limb activation safety', () => {
 });
 
 describe('PluginResourceActivator limb startup safety', () => {
-  it('normalizes Windows-style limb paths during startup rehydration', async () => {
-    const root = mkdtempSync(join(os.tmpdir(), 'plugin-rehydrate-root-'));
-    const pluginsDir = join(root, 'plugins');
-    const expectedYamlPath = join(pluginsDir, 'test-plugin', 'limbs', 'node.yaml');
-    mkdirSync(join(pluginsDir, 'test-plugin', 'limbs'), { recursive: true });
-    writeFileSync(expectedYamlPath, 'nodeId: yaml-node\n');
-    const seenYamlPaths = [];
-    const registeredNodes = [];
-
-    await rehydrateEnabledPluginLimbs({
-      capabilities: {
-        version: 1,
-        capabilities: [
-          {
-            id: 'plugin:test-plugin:limbs\\node.yaml',
-            type: 'limb',
-            enabled: true,
-            source: 'cat-cafe',
-            pluginId: 'test-plugin',
-            limbNodeId: 'persisted-node',
-          },
-        ],
-      },
-      pluginRegistry: {
-        getManifest(pluginId) {
-          return pluginId === 'test-plugin'
-            ? {
-                id: 'test-plugin',
-                name: 'Test Plugin',
-                version: '1.0.0',
-                builtin: false,
-                config: [],
-                resources: [{ type: 'limb', path: 'limbs\\node.yaml' }],
-              }
-            : undefined;
-        },
-      },
-      pluginsDir,
-      limbAdapterRegistry: new Map([
-        [
-          'test-plugin',
-          async (yamlPath) => {
-            seenYamlPaths.push(yamlPath);
-            return {
-              nodeId: 'yaml-node',
-              displayName: 'YAML Node',
-              platform: 'test',
-              capabilities: [],
-              register: async () => {},
-              invoke: async () => ({ ok: true }),
-              healthCheck: async () => 'online',
-              deregister: async () => {},
-            };
-          },
-        ],
-      ]),
-      limbRegistry: {
-        async register(node) {
-          registeredNodes.push(node);
-        },
-      },
-      log: { info: () => {}, warn: () => {} },
-    });
-
-    assert.deepEqual(seenYamlPaths, [expectedYamlPath]);
-    assert.equal(registeredNodes[0].nodeId, 'persisted-node');
-  });
-
   it('registers rehydrated limb nodes under the persisted node id without cloning class instances', async () => {
     class ClassBasedLimbNode {
       #status = 'online';

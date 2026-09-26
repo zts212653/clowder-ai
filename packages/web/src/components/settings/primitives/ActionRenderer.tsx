@@ -16,14 +16,18 @@ import { type PlatformOperationStatus } from '../../HubConfigIcons';
 import { ActionPanelBody, type ActionPhase, ConnectedBanner, type ResultState } from './ActionRendererParts';
 import {
   type ActionApiResult,
+  type ActionRendererTarget,
+  actionRequest,
   classifyPollResult,
   deriveActionState,
+  operationResetRequest,
   phaseForAction,
   toResultState,
 } from './ActionRendererState';
+import { LiveStatusActionRenderer } from './LiveStatusActionRenderer';
 
 export interface ActionRendererProps {
-  connectorId: string;
+  target: ActionRendererTarget;
   /** Operation definition + state from the status API. */
   operation: PlatformOperationStatus;
   /** Platform-level configured state; used when legacy config exists before operation state. */
@@ -38,8 +42,36 @@ export interface ActionRendererProps {
 
 // ── Main component ──
 
-export function ActionRenderer({
-  connectorId,
+export function ActionRenderer(props: ActionRendererProps) {
+  const actions = props.operation.actions;
+  const firstAction = actions[0];
+  const revokeAction = actions.find(
+    (action) => action.render === 'button' && action.next === firstAction?.id && firstAction.next === action.id,
+  );
+  const statusAction = actions.find((action) => action.render === 'status' || action.render === 'polling');
+  if (firstAction?.render === 'button' && statusAction && revokeAction) {
+    return (
+      <LiveStatusActionRenderer
+        {...props}
+        armAction={firstAction}
+        statusAction={statusAction}
+        revokeAction={revokeAction}
+      />
+    );
+  }
+  return <SequencedActionRenderer {...props} />;
+}
+
+function buttonActionFailure(result: ActionApiResult): string | null {
+  const data = result.data;
+  const failedStatus = data !== null && typeof data === 'object' && 'status' in data && data.status === 'error';
+  if (result.advance !== false && !failedStatus) return null;
+  const message = data !== null && typeof data === 'object' && 'message' in data ? data.message : undefined;
+  return typeof message === 'string' && message.length > 0 ? message : (result.label ?? 'Action failed');
+}
+
+function SequencedActionRenderer({
+  target,
   operation,
   configured,
   pendingConfigValues,
@@ -87,13 +119,8 @@ export function ActionRenderer({
   const executeAction = useCallback(
     async (actionId: string): Promise<ActionApiResult | null> => {
       try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/actions/${encodeURIComponent(operation.name)}/${encodeURIComponent(actionId)}`;
-        const requestInit: RequestInit = { method: 'POST' };
-        if (pendingConfigValues && Object.keys(pendingConfigValues).length > 0) {
-          requestInit.headers = { 'content-type': 'application/json' };
-          requestInit.body = JSON.stringify({ values: pendingConfigValues });
-        }
-        const res = await apiFetch(url, requestInit);
+        const request = actionRequest(target, operation.name, actionId, pendingConfigValues);
+        const res = await apiFetch(request.url, request.init);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           return { ok: false, label: (err as { error?: string }).error ?? 'Request failed' };
@@ -103,24 +130,20 @@ export function ActionRenderer({
         return null;
       }
     },
-    [connectorId, operation.name, pendingConfigValues],
+    [operation.name, pendingConfigValues, target],
   );
 
   const resetOperation = useCallback(
     async (currentAction: string): Promise<boolean> => {
       try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/operations/${encodeURIComponent(operation.name)}/reset`;
-        const res = await apiFetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ currentAction }),
-        });
+        const request = operationResetRequest(target, operation.name, currentAction);
+        const res = await apiFetch(request.url, request.init);
         return res.ok;
       } catch {
         return false;
       }
     },
-    [connectorId, operation.name],
+    [operation.name, target],
   );
 
   /** Transition to the next action's phase after a successful result. */
@@ -240,6 +263,12 @@ export function ActionRenderer({
         setErrorMsg(result?.label ?? 'Network error');
         return;
       }
+      const failure = buttonActionFailure(result);
+      if (failure !== null) {
+        setPhase('error');
+        setErrorMsg(failure);
+        return;
+      }
       setLastResult(toResultState(result));
 
       // If next action is polling, start polling loop
@@ -278,7 +307,7 @@ export function ActionRenderer({
   if (phase === 'connected' || phase === 'disconnecting') {
     return (
       <ConnectedBanner
-        connectorId={connectorId}
+        connectorId={target.id}
         label={lastResult?.label ?? 'Connected'}
         disconnectLabel={disconnectAction?.label}
         disconnecting={phase === 'disconnecting'}
@@ -291,7 +320,7 @@ export function ActionRenderer({
 
   return (
     <ActionPanelBody
-      connectorId={connectorId}
+      connectorId={target.id}
       phase={phase}
       currentAction={currentAction}
       lastResult={lastResult}

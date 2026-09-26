@@ -467,7 +467,11 @@ describe('Callback Routes', () => {
     assert.deepEqual(stored?.extra?.causal, {
       kind: 'invocation_reply',
       triggerMessageId: trigger.id,
+      triggerThreadId: threadId,
     });
+    assert.equal(stored?.replyTo, undefined, 'Hub direct reply relation remains unchanged');
+    const { projectEnvelope } = await import('../dist/domains/messaging/envelope.js');
+    assert.equal(projectEnvelope(stored)?.replyTo, trigger.id, 'plugin projection carries the verified trigger');
     assert.deepEqual(stored?.extra?.turnExecution, {
       invocationId,
       parentInvocationId,
@@ -2188,6 +2192,41 @@ describe('Callback Routes', () => {
     // Message without contentBlocks should not have the field
     assert.equal(body.messages[1].contentBlocks, undefined);
     assert.equal(body.messages[1].imagePaths, undefined);
+  });
+
+  test('private HMR image reaches cat imagePaths through trusted resolver, never imageUrls', async () => {
+    const hmrId = `hmr_${'A'.repeat(32)}`;
+    const calls = [];
+    const app = await createApp({
+      resolveTrustedImagePath: async (id) => {
+        calls.push(id);
+        return id === hmrId ? '/private/verified-image.png' : undefined;
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const stored = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'private image',
+      contentBlocks: [{ type: 'image', url: `hmr:${hmrId}` }],
+      mentions: [],
+      timestamp: 1,
+    });
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const context = await app.inject({ method: 'GET', url: '/api/callbacks/thread-context', headers });
+    assert.equal(context.statusCode, 200, context.body);
+    const projected = JSON.parse(context.body).messages[0];
+    assert.deepEqual(projected.imagePaths, ['/private/verified-image.png']);
+    assert.equal(projected.imageUrls, undefined);
+    const drill = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${stored.id}&mode=full`,
+      headers,
+    });
+    assert.equal(drill.statusCode, 200, drill.body);
+    assert.deepEqual(JSON.parse(drill.body).message.imagePaths, ['/private/verified-image.png']);
+    assert.equal(JSON.parse(drill.body).message.imageUrls, undefined);
+    assert.deepEqual(calls, [hmrId, hmrId]);
   });
 
   // ---- F-Swarm-6: Cross-thread context read ----

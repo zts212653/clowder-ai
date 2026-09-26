@@ -6,6 +6,7 @@ import type {
   SnapshotCaptureCandidate,
   SnapshotCaptureCommit,
   SnapshotCaptureStart,
+  SnapshotPageLease,
   SnapshotViewRecord,
   SubscriptionRecord,
 } from './ports.js';
@@ -208,7 +209,12 @@ export class MemoryCursorStore implements CursorStore {
     subscriptionId: string,
     snapshotId: string,
     expected: { readonly offset: number; readonly tokenId?: string },
-    next: { readonly offset: number; readonly tokenId?: string; readonly traversalComplete: boolean },
+    next: {
+      readonly offset: number;
+      readonly tokenId?: string;
+      readonly traversalComplete: boolean;
+      readonly lease: SnapshotPageLease;
+    },
   ): Promise<boolean> {
     const key = MemoryCursorStore.key(pluginInstanceId, subscriptionId);
     const record = this.subs.get(key);
@@ -232,6 +238,37 @@ export class MemoryCursorStore implements CursorStore {
         nextOffset: next.offset,
         nextPageTokenId: next.tokenId,
         traversalComplete: next.traversalComplete,
+        activePageLease: next.lease,
+      },
+    });
+    return true;
+  }
+
+  async rotateSnapshotPageLease(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    expectedSessionId: string,
+    next: { readonly lease: SnapshotPageLease; readonly nextPageTokenId?: string },
+  ): Promise<boolean> {
+    const key = MemoryCursorStore.key(pluginInstanceId, subscriptionId);
+    const record = this.subs.get(key);
+    const snapshot = record?.snapshotView;
+    if (
+      !record ||
+      record.revokedAt !== undefined ||
+      !snapshot ||
+      snapshot.snapshotId !== snapshotId ||
+      snapshot.activePageLease?.sessionId !== expectedSessionId ||
+      snapshot.lastPageOffset !== next.lease.pageOffset
+    )
+      return false;
+    this.subs.set(key, {
+      ...record,
+      snapshotView: {
+        ...snapshot,
+        activePageLease: next.lease,
+        nextPageTokenId: next.nextPageTokenId,
       },
     });
     return true;
@@ -242,6 +279,8 @@ export class MemoryCursorStore implements CursorStore {
     subscriptionId: string,
     snapshotId: string,
     headSequence: number,
+    sessionId?: string,
+    now = Date.now(),
   ): Promise<'applied' | 'replayed' | 'rejected'> {
     const key = MemoryCursorStore.key(pluginInstanceId, subscriptionId);
     const record = this.subs.get(key);
@@ -255,7 +294,10 @@ export class MemoryCursorStore implements CursorStore {
     if (
       record.snapshotView?.snapshotId !== snapshotId ||
       record.snapshotView.headSequence !== headSequence ||
-      !record.snapshotView.traversalComplete
+      !record.snapshotView.traversalComplete ||
+      (sessionId !== undefined &&
+        (record.snapshotView.activePageLease?.sessionId !== sessionId ||
+          record.snapshotView.activePageLease.expiresAt <= now))
     ) {
       return 'rejected';
     }

@@ -5,6 +5,7 @@ import {
   validateMessagingRowResult,
 } from '@clowder-ai/plugin-contract';
 import type { MessagingService } from '../../messaging/messaging-service.js';
+import type { PluginMediaReadService } from '../host-surface/plugin-media-host.js';
 import type { BrokerCallContext, BrokerCallError, BrokerMethodHandler, BrokerValidationResult } from './types.js';
 import { HostBrokerError } from './types.js';
 
@@ -14,10 +15,15 @@ type MessagingPluginMethod =
   | 'messaging.subscribe'
   | 'messaging.read'
   | 'messaging.ack'
-  | 'messaging.snapshot';
+  | 'messaging.snapshot'
+  | 'media.read';
 
 export interface MessagingBrokerHandlerOptions {
-  readonly messaging: Pick<MessagingService, 'send' | 'appendElements' | 'subscribe' | 'read' | 'ack' | 'snapshotPage'>;
+  readonly messaging?: Pick<
+    MessagingService,
+    'send' | 'appendElements' | 'subscribe' | 'read' | 'ack' | 'snapshotPage'
+  >;
+  readonly media?: Pick<PluginMediaReadService, 'read'>;
 }
 
 function directHandler<Method extends MessagingPluginMethod>(
@@ -48,19 +54,24 @@ function directHandler<Method extends MessagingPluginMethod>(
 }
 
 export function createMessagingBrokerHandlers(options: MessagingBrokerHandlerOptions): readonly BrokerMethodHandler[] {
-  const { messaging } = options;
+  const { messaging, media } = options;
   const ctx = (context: BrokerCallContext) => ({ pluginInstanceId: context.pluginInstanceId });
   return [
-    directHandler('messaging.send', (context, input) => messaging.send(ctx(context), input)),
-    directHandler('messaging.appendElements', (context, input) => messaging.appendElements(ctx(context), input)),
-    directHandler('messaging.subscribe', (context, input) => messaging.subscribe(ctx(context), input.handle)),
-    directHandler('messaging.read', (context, input) =>
-      messaging.read(ctx(context), input.subscriptionId, { limit: input.limit }),
-    ),
-    directHandler('messaging.ack', async (context, input) => {
-      await messaging.ack(ctx(context), input.subscriptionId, input.ackToken);
-      return null;
-    }),
-    directHandler('messaging.snapshot', (context, input) => messaging.snapshotPage(ctx(context), input)),
+    ...(messaging === undefined
+      ? []
+      : [
+          directHandler('messaging.send', (context, input) => messaging.send(ctx(context), input)),
+          directHandler('messaging.appendElements', (context, input) => messaging.appendElements(ctx(context), input)),
+          directHandler('messaging.subscribe', (context, input) => messaging.subscribe(ctx(context), input.handle)),
+          directHandler('messaging.read', (context, input) =>
+            messaging.read(ctx(context), input.subscriptionId, { limit: input.limit }),
+          ),
+          directHandler('messaging.ack', async (context, input) => {
+            await messaging.ack(ctx(context), input.subscriptionId, input.ackToken);
+            return null;
+          }),
+          directHandler('messaging.snapshot', (context, input) => messaging.snapshotPage(ctx(context), input)),
+        ]),
+    ...(media === undefined ? [] : [directHandler('media.read', (context, input) => media.read(context, input))]),
   ];
 }

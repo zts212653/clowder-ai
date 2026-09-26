@@ -14,12 +14,8 @@
 
 import { randomUUID } from 'node:crypto';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { MessageOutputEvent } from '@clowder-ai/plugin-contract';
-import type { MessageOutputEventInput } from '../contract/host-types.js';
 import type {
-  AppendLease,
-  EventLogAppendResult,
-  EventLogStore,
+  AddressHandleRecord,
   HandleRecord,
   HandleStore,
   LedgerClaimResult,
@@ -137,6 +133,13 @@ redis.call('SET', KEYS[1], ARGV[1])
 return {ARGV[2], '1'}
 `;
 
+const ADDRESS_HANDLE_GET_OR_CREATE_LUA = `
+local existing = redis.call('GET', KEYS[1])
+if existing then return {existing, '0'} end
+redis.call('SET', KEYS[1], ARGV[1])
+return {ARGV[1], '1'}
+`;
+
 export class RedisHandleStore implements HandleStore {
   private readonly redis: RedisClient;
 
@@ -151,6 +154,19 @@ export class RedisHandleStore implements HandleStore {
   async get(handleId: string): Promise<HandleRecord | null> {
     const raw = await this.redis.get(MessagingKeys.handle(handleId));
     return raw ? (JSON.parse(raw) as HandleRecord) : null;
+  }
+
+  async getOrCreateAddressHandle(
+    record: AddressHandleRecord,
+  ): Promise<{ record: AddressHandleRecord; created: boolean }> {
+    const encoded = JSON.stringify(record);
+    const result = (await this.redis.eval(
+      ADDRESS_HANDLE_GET_OR_CREATE_LUA,
+      1,
+      MessagingKeys.handle(record.handleId),
+      encoded,
+    )) as [string, string];
+    return { record: JSON.parse(result[0]) as AddressHandleRecord, created: result[1] === '1' };
   }
 
   async getOrCreateMessageHandle(
@@ -225,106 +241,6 @@ export class RedisHandleStore implements HandleStore {
   }
 }
 
-// ── Event log ──
-
-const EVENT_APPEND_LUA = `
-if ARGV[4] ~= '' and redis.call('GET', KEYS[4]) ~= ARGV[4] then
-  return {'', 0, 1}
-end
-local existing = redis.call('HGET', KEYS[2], ARGV[1])
-if existing then return {existing, 1, 0} end
-local seq = redis.call('INCR', KEYS[3])
-redis.call('ZADD', KEYS[1], seq, ARGV[1] .. '|' .. ARGV[2])
-redis.call('HSET', KEYS[2], ARGV[1], seq)
-local retention = tonumber(ARGV[3])
-local count = redis.call('ZCARD', KEYS[1])
-if count > retention then
-  local removed = redis.call('ZRANGE', KEYS[1], 0, count - retention - 1)
-  redis.call('ZREMRANGEBYRANK', KEYS[1], 0, count - retention - 1)
-  for _, member in ipairs(removed) do
-    local sep = string.find(member, '|', 1, true)
-    if sep then redis.call('HDEL', KEYS[2], string.sub(member, 1, sep - 1)) end
-  end
-end
-return {tostring(seq), 0, 0}
-`;
-
-export class RedisEventLogStore implements EventLogStore {
-  private readonly redis: RedisClient;
-
-  constructor(redis: RedisClient) {
-    this.redis = redis;
-  }
-
-  async append(
-    threadId: string,
-    eventKey: string,
-    event: MessageOutputEventInput,
-    retentionCount: number,
-    lease?: AppendLease,
-  ): Promise<EventLogAppendResult> {
-    const messageId = event.type === 'message.publish' ? event.envelope.messageId : event.messageId;
-    if (lease !== undefined && lease.messageId !== messageId) {
-      return { deduped: false, fencedOut: true };
-    }
-    // Encoded eventKey is the member prefix AND dedupe hash field — '|' inside
-    // caller keys can never split the member incorrectly.
-    const encodedKey = encodeURIComponent(eventKey);
-    const result = (await this.redis.eval(
-      EVENT_APPEND_LUA,
-      4,
-      MessagingKeys.events(threadId),
-      MessagingKeys.eventDedupe(threadId),
-      MessagingKeys.eventSeq(threadId),
-      MessagingKeys.appendLock(lease?.messageId ?? '__unfenced__'),
-      encodedKey,
-      JSON.stringify(event),
-      String(retentionCount),
-      lease?.token ?? '',
-    )) as [string, number, number];
-    if (result[2] === 1) return { deduped: false, fencedOut: true };
-    return { sequence: Number(result[0]), deduped: result[1] === 1, fencedOut: false };
-  }
-
-  private static parseMember(member: string, score: string): MessageOutputEvent {
-    const sep = member.indexOf('|');
-    const json = sep >= 0 ? member.slice(sep + 1) : member;
-    const event = JSON.parse(json) as MessageOutputEventInput;
-    return { ...event, sequence: Number(score) } as MessageOutputEvent;
-  }
-
-  async readAfter(threadId: string, afterSequence: number, limit: number): Promise<MessageOutputEvent[]> {
-    const raw = (await this.redis.zrangebyscore(
-      MessagingKeys.events(threadId),
-      `(${afterSequence}`,
-      '+inf',
-      'WITHSCORES',
-      'LIMIT',
-      0,
-      limit,
-    )) as string[];
-    const events: MessageOutputEvent[] = [];
-    for (let i = 0; i + 1 < raw.length; i += 2) {
-      const member = raw[i];
-      const score = raw[i + 1];
-      if (member !== undefined && score !== undefined) {
-        events.push(RedisEventLogStore.parseMember(member, score));
-      }
-    }
-    return events;
-  }
-
-  async minSequence(threadId: string): Promise<number | null> {
-    const raw = (await this.redis.zrange(MessagingKeys.events(threadId), 0, 0, 'WITHSCORES')) as string[];
-    const score = raw[1];
-    return score !== undefined ? Number(score) : null;
-  }
-
-  async headSequence(threadId: string): Promise<number> {
-    const raw = await this.redis.get(MessagingKeys.eventSeq(threadId));
-    return raw ? Number(raw) : 0;
-  }
-}
-
 export { RedisAppendLock } from './redis-append-lock.js';
 export { RedisCursorStore } from './redis-cursor.js';
+export { RedisEventLogStore } from './redis-event-log.js';

@@ -1,13 +1,21 @@
 /** Bounded, restart-safe frozen snapshot capture under the plugin event fence. */
 
 import { randomUUID } from 'node:crypto';
+import type { MessageElement } from '@clowder-ai/plugin-contract';
 import { validateMessagingRowResult } from '@clowder-ai/plugin-contract';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import { isInternalNonQuotableParent } from '../cats/services/stores/visibility.js';
 import type { PluginCallContext, SnapshotResult } from './contract/host-types.js';
 import { MessagingError, SnapshotUnavailableHostError } from './contract/host-types.js';
 import { projectEnvelope, readPluginMessageExtra } from './envelope.js';
-import type { CursorStore, EventLogStore, SnapshotViewRecord, SubscriptionRecord } from './stores/ports.js';
+import type { OutboundMediaStore } from './outbound-media/store.js';
+import type {
+  CursorStore,
+  EventLogStore,
+  HostPublicationTracker,
+  SnapshotViewRecord,
+  SubscriptionRecord,
+} from './stores/ports.js';
 
 export const SNAPSHOT_MAX_ATTEMPTS = 3;
 export const SNAPSHOT_SOURCE_PAGE_SIZE = 16;
@@ -22,6 +30,10 @@ interface SnapshotCaptureDeps {
   readonly events: EventLogStore;
   readonly cursors: CursorStore;
   readonly messageStore: IMessageStore;
+  /** Host store-write → publish spans; a thread inside one cannot be snapshotted consistently. */
+  readonly publications?: Pick<HostPublicationTracker, 'isBusy'>;
+  /** Deferred Host media messages (W2-5b): their state and final media elements. */
+  readonly outboundMedia?: Pick<OutboundMediaStore, 'get'>;
 }
 
 type SnapshotEnvelope = SnapshotResult['envelopes'][number];
@@ -35,8 +47,12 @@ function isSnapshotVisible(msg: StoredMessage): boolean {
   return true;
 }
 
+/**
+ * Every visible, live message is a candidate — package messages and Host (cat / user) messages
+ * alike (W2-5b-0). Admitting only package messages meant a subscriber catching up by snapshot never
+ * saw a cat's reply, and once media publication is deferred, never the final media message either.
+ */
 function isSnapshotCandidate(msg: StoredMessage): boolean {
-  if (msg.extra?.pluginMessage === undefined) return false;
   if (msg.deletedAt !== undefined || msg._tombstone) return false;
   return isSnapshotVisible(msg);
 }
@@ -49,8 +65,47 @@ function isContractSnapshotEnvelope(envelope: SnapshotEnvelope): boolean {
   }).valid;
 }
 
+/**
+ * A Host message projects the same envelope its publish event carried. One the contract rejects is
+ * a Host projection bug; it is left out and reported rather than failing every subscriber's
+ * catch-up, which is what throwing here would do.
+ */
+function projectHostSnapshotEnvelope(
+  msg: StoredMessage,
+  hostMedia: readonly MessageElement[] | undefined,
+): SnapshotEnvelope | null {
+  const envelope = projectEnvelope(msg, hostMedia === undefined ? {} : { hostMedia });
+  if (!envelope) return null;
+  if (isContractSnapshotEnvelope(envelope)) return envelope;
+  console.warn('[F202 W2-5b-0] host message left out of snapshot: envelope violates contract', {
+    messageId: msg.id,
+    threadId: msg.threadId,
+  });
+  return null;
+}
+
 export class SnapshotCaptureCoordinator {
   constructor(private readonly deps: SnapshotCaptureDeps) {}
+
+  /**
+   * A deferred Host media message (W2-5b) is in the snapshot only once published, with the media
+   * elements its event carried. Pending: its event is still to come, so it is left for the stream.
+   * Publishing: its event may already be past the head — a race, retried like one.
+   */
+  private async deferredHostMedia(
+    msg: StoredMessage,
+  ): Promise<readonly MessageElement[] | undefined | 'pending' | 'race'> {
+    if (msg.extra?.mediaPublication !== 'deferred') return undefined;
+    const row = await this.deps.outboundMedia?.get(msg.id);
+    if (!row || row.state === 'pending') return 'pending';
+    if (row.state === 'publishing') return 'race';
+    return row.elements ?? [];
+  }
+
+  /** A Host message may be stored with its event still to come; that is a race, as for events. */
+  private insidePublicationSpan(threadId: string): boolean {
+    return this.deps.publications?.isBusy(threadId) ?? false;
+  }
 
   async captureView(ctx: PluginCallContext, sub: SubscriptionRecord): Promise<SnapshotViewRecord> {
     for (let attempt = 0; attempt < SNAPSHOT_MAX_ATTEMPTS; attempt += 1) {
@@ -81,7 +136,7 @@ export class SnapshotCaptureCoordinator {
           if (!appended) throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
         });
         const headAfter = await this.deps.events.headSequence(sub.threadId);
-        if (!captured || headBefore !== headAfter) {
+        if (!captured || headBefore !== headAfter || this.insidePublicationSpan(sub.threadId)) {
           await this.deps.cursors.abortSnapshotCapture(ctx.pluginInstanceId, sub.subscriptionId, snapshotId);
           continue;
         }
@@ -113,7 +168,7 @@ export class SnapshotCaptureCoordinator {
       const headBefore = await this.deps.events.headSequence(sub.threadId);
       const captured = await this.scanAtHead(sub, headBefore);
       const headAfter = await this.deps.events.headSequence(sub.threadId);
-      if (!captured || headBefore !== headAfter) continue;
+      if (!captured || headBefore !== headAfter || this.insidePublicationSpan(sub.threadId)) continue;
       return { items: captured.items, headSequence: headBefore };
     }
     throw new MessagingError('RETRYABLE_INFLIGHT', 'snapshot raced an output mutation — retry later');
@@ -155,18 +210,27 @@ export class SnapshotCaptureCoordinator {
 
       for (const msg of messages) {
         if (!isSnapshotCandidate(msg)) continue;
-        const plugin = readPluginMessageExtra(msg);
-        if (!plugin) throw new MessagingError('VALIDATION', 'persisted plugin message violates beta.11');
-        if (
-          plugin.outputRevision !== plugin.revision ||
-          plugin.outputSequence === undefined ||
-          plugin.outputSequence > headSequence
-        ) {
-          return null;
-        }
-        const envelope = projectEnvelope(msg);
-        if (!envelope || !isContractSnapshotEnvelope(envelope)) {
-          throw new MessagingError('VALIDATION', 'persisted plugin envelope violates beta.11');
+        let envelope: SnapshotEnvelope | null;
+        if (msg.extra?.pluginMessage !== undefined) {
+          const plugin = readPluginMessageExtra(msg);
+          if (!plugin) throw new MessagingError('VALIDATION', 'persisted plugin message violates beta.11');
+          if (
+            plugin.outputRevision !== plugin.revision ||
+            plugin.outputSequence === undefined ||
+            plugin.outputSequence > headSequence
+          ) {
+            return null;
+          }
+          envelope = projectEnvelope(msg);
+          if (!envelope || !isContractSnapshotEnvelope(envelope)) {
+            throw new MessagingError('VALIDATION', 'persisted plugin envelope violates beta.11');
+          }
+        } else {
+          const hostMedia = await this.deferredHostMedia(msg);
+          if (hostMedia === 'race') return null;
+          if (hostMedia === 'pending') continue;
+          envelope = projectHostSnapshotEnvelope(msg, hostMedia);
+          if (!envelope) continue;
         }
         const itemBytes = Buffer.byteLength(JSON.stringify(envelope), 'utf8');
         if (itemBytes > SNAPSHOT_PERSIST_CHUNK_MAX_BYTES) {

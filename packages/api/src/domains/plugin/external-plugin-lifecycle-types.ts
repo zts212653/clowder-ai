@@ -45,6 +45,15 @@ export interface PluginRuntimeLifecyclePort {
   stop(pluginInstanceId: string, reason?: string): Promise<void>;
 }
 
+export const PLUGIN_OWNER_DISABLED_REASON = 'owner_disabled';
+export const PLUGIN_OWNER_UNINSTALLED_REASON = 'owner_uninstalled';
+
+const PLUGIN_OWNER_REMOVAL_REASONS = new Set<string>([PLUGIN_OWNER_DISABLED_REASON, PLUGIN_OWNER_UNINSTALLED_REASON]);
+
+export function removesPluginOwnedResources(reason: string): boolean {
+  return PLUGIN_OWNER_REMOVAL_REASONS.has(reason);
+}
+
 export interface ExternalPluginLifecycleServiceOptions {
   readonly store: PluginInventoryStore;
   readonly supervisor: PluginRuntimeLifecyclePort;

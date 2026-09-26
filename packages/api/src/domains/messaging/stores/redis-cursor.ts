@@ -7,6 +7,7 @@ import type {
   SnapshotCaptureCandidate,
   SnapshotCaptureCommit,
   SnapshotCaptureStart,
+  SnapshotPageLease,
   SnapshotViewRecord,
   SubscriptionRecord,
 } from './ports.js';
@@ -18,6 +19,7 @@ import {
   SNAPSHOT_CAPTURE_BEGIN_LUA,
   SNAPSHOT_CAPTURE_COMMIT_LUA,
   SNAPSHOT_PAGE_CONSUME_LUA,
+  SNAPSHOT_PAGE_LEASE_ROTATE_LUA,
   SNAPSHOT_PAGE_READ_LUA,
 } from './redis-snapshot-capture-lua.js';
 import { type StoredSnapshotState, snapshotCompletion, snapshotView } from './redis-snapshot-state.js';
@@ -320,6 +322,8 @@ export class RedisCursorStore implements CursorStore {
     subscriptionId: string,
     snapshotId: string,
     headSequence: number,
+    sessionId?: string,
+    now = Date.now(),
   ): Promise<'applied' | 'replayed' | 'rejected'> {
     const completion: StoredSnapshotState = { status: 'completed', snapshotId, headSequence };
     const result = (await this.redis.eval(
@@ -332,6 +336,8 @@ export class RedisCursorStore implements CursorStore {
       snapshotId,
       String(headSequence),
       JSON.stringify(completion),
+      sessionId ?? '',
+      String(now),
     )) as number;
     return result === 1 ? 'applied' : result === 0 ? 'replayed' : 'rejected';
   }
@@ -341,7 +347,12 @@ export class RedisCursorStore implements CursorStore {
     subscriptionId: string,
     snapshotId: string,
     expected: { readonly offset: number; readonly tokenId?: string },
-    next: { readonly offset: number; readonly tokenId?: string; readonly traversalComplete: boolean },
+    next: {
+      readonly offset: number;
+      readonly tokenId?: string;
+      readonly traversalComplete: boolean;
+      readonly lease: SnapshotPageLease;
+    },
   ): Promise<boolean> {
     const result = (await this.redis.eval(
       SNAPSHOT_PAGE_CONSUME_LUA,
@@ -354,6 +365,27 @@ export class RedisCursorStore implements CursorStore {
       String(next.offset),
       next.tokenId ?? '',
       next.traversalComplete ? '1' : '0',
+      JSON.stringify(next.lease),
+    )) as number;
+    return result === 1;
+  }
+
+  async rotateSnapshotPageLease(
+    pluginInstanceId: string,
+    subscriptionId: string,
+    snapshotId: string,
+    expectedSessionId: string,
+    next: { readonly lease: SnapshotPageLease; readonly nextPageTokenId?: string },
+  ): Promise<boolean> {
+    const result = (await this.redis.eval(
+      SNAPSHOT_PAGE_LEASE_ROTATE_LUA,
+      2,
+      MessagingKeys.subscription(pluginInstanceId, subscriptionId),
+      MessagingKeys.subscriptionSnapshot(pluginInstanceId, subscriptionId),
+      snapshotId,
+      expectedSessionId,
+      JSON.stringify(next.lease),
+      next.nextPageTokenId ?? '',
     )) as number;
     return result === 1;
   }

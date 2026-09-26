@@ -177,6 +177,28 @@ describe('Plugin messaging Redis stores', { skip: redisIsolationSkipReason(REDIS
   });
 
   describe('RedisHandleStore + RedisCursorStore (§4c cascade)', () => {
+    it('address handle create-or-get never overwrites a revoked record', async () => {
+      const store = new RedisHandleStore(redis);
+      const handleId = nextId('ih_handle');
+      const candidate = {
+        handleId,
+        kind: 'thread_handle',
+        pluginInstanceId: 'inst-a',
+        threadId: 'thread-1',
+        userId: 'user-1',
+        scope: { canSend: true, canSubscribe: true },
+        issuedAt: 1,
+      };
+
+      assert.equal((await store.getOrCreateAddressHandle(candidate)).created, true);
+      await store.revoke(handleId, 42);
+      const repeated = await store.getOrCreateAddressHandle({ ...candidate, issuedAt: 2 });
+
+      assert.equal(repeated.created, false);
+      assert.equal(repeated.record.revokedAt, 42);
+      assert.equal(repeated.record.issuedAt, 1);
+    });
+
     it('handle roundtrip + idempotent revoke', async () => {
       const store = new RedisHandleStore(redis);
       const handleId = nextId('th_handle');

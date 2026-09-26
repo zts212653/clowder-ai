@@ -86,7 +86,7 @@ import {
 import type { QueuedMessageCustodyCoordinator } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
-import { extractImagePaths, extractImageUrls } from '../domains/cats/services/agents/providers/image-paths.js';
+import { extractImageUrls, extractTrustedImagePaths } from '../domains/cats/services/agents/providers/image-paths.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
@@ -205,7 +205,6 @@ import { registerCallbackGameRoutes } from './callback-game-routes.js';
 import { resolveGitHubValidation } from './callback-github-validation.js';
 import { registerCallbackGuideRoutes } from './callback-guide-routes.js';
 import { type HoldBallRouteDeps, registerCallbackHoldBallRoutes } from './callback-hold-ball-routes.js';
-import { registerCallbackLarkActionRoutes } from './callback-lark-action-routes.js';
 import { registerCallbackLimbRoutes } from './callback-limb-routes.js';
 import {
   type MeetingArtifactReaderHolder,
@@ -247,7 +246,6 @@ import {
 import { registerCallbackTaskRoutes } from './callback-task-routes.js';
 import { registerCallbackThreadCatsRoutes } from './callback-thread-cats-routes.js';
 import { captureTypedWaitSource } from './callback-typed-wait-source.js';
-import { registerCallbackWeComActionRoutes } from './callback-wecom-action-routes.js';
 import { registerCallbackWithdrawThreadProposalRoutes } from './callback-withdraw-thread-proposal-routes.js';
 import { registerCallbackWorkflowSopRoutes } from './callback-workflow-sop-routes.js';
 import { resolveCrossThreadCoordination } from './cross-thread-coordination.js';
@@ -822,6 +820,8 @@ async function recoverQueuedDuplicateCallbackMessage(input: {
 }
 
 export interface CallbackRoutesOptions {
+  /** Host-only resolver for private HMR image bytes in cat invocation context. */
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   registry: InvocationRegistry;
   agentKeyRegistry?: import('../domains/cats/services/agents/agent-key/AgentKeyRegistry.js').AgentKeyRegistry;
   /** F247: verifies opaque exact-source capabilities on cloud agent-key returns. */
@@ -3308,17 +3308,22 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId. When first-in-chain
     // (invocationId === effectiveInvId), still stamp explicitly so frontend bubble
     // identity never falls back to parent (which would collapse multi-turn same-cat).
+    const causalTriggerMessageId =
+      record.originTriggerMessageId ?? record.a2aTriggerMessageId ?? turnExecution?.causal?.triggerMessageId;
+    const causalTriggerMessage = causalTriggerMessageId ? await messageStore.getById(causalTriggerMessageId) : null;
+    const causalTriggerThreadId = causalTriggerMessage?.threadId === effectiveThreadId ? effectiveThreadId : undefined;
     const persistedExtra = {
       ...(extra ?? {}),
       stream: {
         invocationId: effectiveInvId,
         turnInvocationId: invocationId ?? effectiveInvId,
       },
-      ...(turnExecution?.causal?.triggerMessageId
+      ...(causalTriggerMessageId
         ? {
             causal: {
               kind: 'invocation_reply' as const,
-              triggerMessageId: turnExecution.causal.triggerMessageId,
+              triggerMessageId: causalTriggerMessageId,
+              ...(causalTriggerThreadId ? { triggerThreadId: causalTriggerThreadId } : {}),
             },
           }
         : {}),
@@ -4409,76 +4414,78 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             } => entry.fact !== null,
           )
       : null;
-    const publishedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = filtered.map((item) => {
-      const imagePaths = extractImagePaths(item.contentBlocks, uploadDir);
-      const imageUrls = extractImageUrls(item.contentBlocks);
-      const queuedProjection =
-        item.deliveryStatus === 'queued' && item.queueCustody
-          ? { deliveryStatus: 'queued' as const, queueEntryId: item.queueCustody.entryId }
+    const publishedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = await Promise.all(
+      filtered.map(async (item) => {
+        const imagePaths = await extractTrustedImagePaths(item.contentBlocks, uploadDir, opts.resolveTrustedImagePath);
+        const imageUrls = extractImageUrls(item.contentBlocks);
+        const queuedProjection =
+          item.deliveryStatus === 'queued' && item.queueCustody
+            ? { deliveryStatus: 'queued' as const, queueEntryId: item.queueCustody.entryId }
+            : {};
+        const anchored = anchorThreadMessage(item, {
+          effectiveThreadId,
+          speaker: getSenderName(item.catId),
+          keywordTerms,
+          agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
+          imagePaths,
+          imageUrls,
+        });
+        const localReviewFact = readDurableLocalReviewFact(item);
+        const localReviewProjection = localReviewFact
+          ? {
+              localReviewFact,
+              localReviewLoopBrakeOnArrival: classifyLocalReviewLoopBrake(
+                durableLocalReviewHistory
+                  ?.filter(({ message }) => compareChronological(message, item) <= 0)
+                  .map(({ fact }) => fact) ?? null,
+                [item.id],
+                localReviewFact.reviewSubjectRef,
+                item.mentions.length === 1 && item.mentions[0] ? item.mentions[0] : principalCatId,
+              ),
+            }
           : {};
-      const anchored = anchorThreadMessage(item, {
-        effectiveThreadId,
-        speaker: getSenderName(item.catId),
-        keywordTerms,
-        agentKeyCatId: principal.kind === 'agent_key' ? principal.catId : undefined,
-        imagePaths,
-        imageUrls,
-      });
-      const localReviewFact = readDurableLocalReviewFact(item);
-      const localReviewProjection = localReviewFact
-        ? {
-            localReviewFact,
-            localReviewLoopBrakeOnArrival: classifyLocalReviewLoopBrake(
-              durableLocalReviewHistory
-                ?.filter(({ message }) => compareChronological(message, item) <= 0)
-                .map(({ fact }) => fact) ?? null,
-              [item.id],
-              localReviewFact.reviewSubjectRef,
-              item.mentions.length === 1 && item.mentions[0] ? item.mentions[0] : principalCatId,
-            ),
-          }
-        : {};
-      const anchorProjection: Record<string, unknown> = {
-        ...anchored,
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      const fullProjection: Record<string, unknown> = {
-        id: item.id,
-        threadId: effectiveThreadId,
-        timestamp: item.timestamp,
-        speaker: getSenderName(item.catId),
-        content: item.content,
-        contentLength: item.content.length,
-        truncated: false,
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(imagePaths.length > 0 ? { imagePaths } : {}),
-        ...(imageUrls.length > 0 ? { imageUrls } : {}),
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      const oversizedProjection: Record<string, unknown> = {
-        id: item.id,
-        threadId: effectiveThreadId,
-        timestamp: item.timestamp,
-        speaker: getSenderName(item.catId),
-        contentLength: item.content.length,
-        truncated: true,
-        oversized: true,
-        drillDown: anchored.drillDown,
-        ...queuedProjection,
-        ...localReviewProjection,
-        ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
-      };
-      return {
-        id: item.id,
-        projection: isFullMode ? fullProjection : anchorProjection,
-        oversizedProjection: isFullMode ? oversizedProjection : anchorProjection,
-        originalChars: item.content.length,
-        source: 'published',
-      };
-    });
+        const anchorProjection: Record<string, unknown> = {
+          ...anchored,
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        const fullProjection: Record<string, unknown> = {
+          id: item.id,
+          threadId: effectiveThreadId,
+          timestamp: item.timestamp,
+          speaker: getSenderName(item.catId),
+          content: item.content,
+          contentLength: item.content.length,
+          truncated: false,
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(imagePaths.length > 0 ? { imagePaths } : {}),
+          ...(imageUrls.length > 0 ? { imageUrls } : {}),
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        const oversizedProjection: Record<string, unknown> = {
+          id: item.id,
+          threadId: effectiveThreadId,
+          timestamp: item.timestamp,
+          speaker: getSenderName(item.catId),
+          contentLength: item.content.length,
+          truncated: true,
+          oversized: true,
+          drillDown: anchored.drillDown,
+          ...queuedProjection,
+          ...localReviewProjection,
+          ...(keywordTerms.length > 0 ? { relevanceScore: getKeywordScore(item) } : {}),
+        };
+        return {
+          id: item.id,
+          projection: isFullMode ? fullProjection : anchorProjection,
+          oversizedProjection: isFullMode ? oversizedProjection : anchorProjection,
+          originalChars: item.content.length,
+          source: 'published',
+        };
+      }),
+    );
     const queuedCandidates: ThreadContextEnvelopeCandidate<Record<string, unknown>>[] = queuedFullMessages.map(
       (message) => {
         const anchored = anchorThreadMessage(
@@ -5142,14 +5149,18 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F236 AC-B1: bounded drill terminal. Default preview truncates content (keeps the `content`
     // field name for consumer continuity + adds contentLength/truncated); mode=full returns the
     // complete content + contentBlocks. Image hints stay in both modes.
-    const projectMsg = (
+    const projectMsg = async (
       m: typeof message,
       queuedEntry?: typeof queuedDrillEntry,
       queuedContentBlocks?: typeof message.contentBlocks,
     ) => {
       const projectedContent = queuedEntry?.content ?? m.content;
       const projectedContentBlocks = queuedEntry ? queuedContentBlocks : m.contentBlocks;
-      const imagePaths = extractImagePaths(projectedContentBlocks, uploadDir);
+      const imagePaths = await extractTrustedImagePaths(
+        projectedContentBlocks,
+        uploadDir,
+        opts.resolveTrustedImagePath,
+      );
       const imageUrls = extractImageUrls(projectedContentBlocks);
       const { preview, truncated } = isFullDrill
         ? { preview: projectedContent, truncated: false }
@@ -5201,11 +5212,11 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     };
 
     const result: {
-      message: ReturnType<typeof projectMsg>;
-      context?: ReturnType<typeof projectMsg>[];
+      message: Awaited<ReturnType<typeof projectMsg>>;
+      context?: Awaited<ReturnType<typeof projectMsg>>[];
       managedHoldDisposition?: unknown;
     } = {
-      message: projectMsg(message, queuedDrillEntry, queuedDrillContentBlocks),
+      message: await projectMsg(message, queuedDrillEntry, queuedDrillContentBlocks),
       ...(managedHoldDisposition === undefined ? {} : { managedHoldDisposition }),
     };
 
@@ -5245,7 +5256,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
           return true;
         })
         .sort((a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id));
-      result.context = contextMsgs.map((contextMessage) => projectMsg(contextMessage));
+      result.context = await Promise.all(contextMsgs.map((contextMessage) => projectMsg(contextMessage)));
     }
 
     const contextMessages = Array.isArray(result.context) ? result.context : [];
@@ -7033,12 +7044,6 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
 
   // F088 Phase J2: Document generation callback routes
   registerCallbackDocumentRoutes(app, { registry, socketManager, threadStore });
-
-  // F162: WeChat Work enterprise action callback routes
-  registerCallbackWeComActionRoutes(app, { registry });
-
-  // F162 Phase B: Lark/Feishu enterprise action callback routes
-  registerCallbackLarkActionRoutes(app, { registry });
 
   // F101: Game action callback for non-Claude cats (OpenCode/Codex/Gemini)
   registerCallbackGameRoutes(app);

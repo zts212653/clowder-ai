@@ -3701,6 +3701,32 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     );
   });
 
+  test('Host-verified HMR image path reaches the local CLI without a public upload URL', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn });
+    const hmrId = `hmr_${'x'.repeat(32)}`;
+    const seen = [];
+    const promise = collect(
+      service.invoke('describe private image', {
+        contentBlocks: [{ type: 'image', url: `hmr:${hmrId}` }],
+        resolveTrustedImagePath: async (id) => {
+          seen.push(id);
+          return '/private/media/verified-image';
+        },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'hmr-image-thread' }]);
+    await promise;
+    assert.deepEqual(seen, [hmrId]);
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.equal(args[args.indexOf('--image') + 1], '/private/media/verified-image');
+    assert.equal(
+      args.some((arg) => String(arg).includes('/uploads/')),
+      false,
+    );
+  });
+
   test('fresh exec with --image inserts "--" before prompt to avoid varargs swallowing prompt', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);

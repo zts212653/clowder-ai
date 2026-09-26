@@ -37,6 +37,7 @@ describe('F202 terminal Plugin Manager contract', () => {
     expectTypeOf<PluginManagerInstallRequest>().toMatchTypeOf<
       | { source: { kind: 'catalog'; catalogId: string }; expectedVersion: string; expectedDigest: string }
       | { source: { kind: 'local-directory' | 'local-archive'; path: string } }
+      | { source: { kind: 'git'; url: string } }
     >();
     expectTypeOf<PluginManagerSetEnabledRequest>().toEqualTypeOf<{
       enabled: boolean;
@@ -54,7 +55,7 @@ describe('F202 terminal Plugin Manager contract', () => {
   it('projects typed configuration contributions without leaking secret values', () => {
     expectTypeOf<PluginManagerDetail['configFields'][number]['key']>().toEqualTypeOf<string>();
     expectTypeOf<PluginManagerDetail['configFields'][number]['kind']>().toEqualTypeOf<
-      'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list'
+      'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list' | 'operation'
     >();
     expectTypeOf<PluginManagerDetail['configFields'][number]['currentValue']>().toEqualTypeOf<string | null>();
   });
@@ -64,6 +65,15 @@ describe('F202 terminal Plugin Manager contract', () => {
       kind: 'legacy';
       packageName: string | null;
       trust: 'unknown';
+    }>();
+  });
+
+  it('keeps owner dependency closure provenance visible without changing trust', () => {
+    expectTypeOf<Extract<PluginManagerPackageSource, { kind: 'local-directory' | 'local-archive' }>>().toEqualTypeOf<{
+      kind: 'local-directory' | 'local-archive';
+      packageName: string | null;
+      trust: 'local-trusted';
+      dependencyClosure?: 'shipped' | 'materialized';
     }>();
   });
 
@@ -99,6 +109,7 @@ describe('F202 terminal Plugin Manager contract', () => {
       | 'service'
       | 'ui'
       | 'content-editor-provider'
+      | 'media-source'
     >();
     expectTypeOf<PluginManagerDetail['capabilities'][number]['active']>().toEqualTypeOf<boolean>();
   });

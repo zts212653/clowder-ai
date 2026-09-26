@@ -38,7 +38,10 @@ export const TextContentSchema = z.object({
 });
 
 const MessageAssetUrlSchema = z.union([
-  z.string().url(),
+  z
+    .string()
+    .url()
+    .refine((value) => !/^hmr:/i.test(value) && !/^[a-z][a-z0-9+.-]*:hmr_/i.test(value), 'Expected an absolute URL'),
   z
     .string()
     .max(4096)
@@ -53,7 +56,10 @@ const MessageAssetUrlSchema = z.union([
  */
 export const ImageContentSchema = z.object({
   type: z.literal('image'),
-  url: MessageAssetUrlSchema,
+  url: z.union([
+    MessageAssetUrlSchema,
+    z.string().regex(/^hmr:hmr_[A-Za-z0-9_-]{32}$/, 'Expected an opaque Host media reference'),
+  ]),
   alt: z.string().optional(),
 });
 

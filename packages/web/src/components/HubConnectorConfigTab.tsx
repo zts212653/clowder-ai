@@ -317,7 +317,7 @@ export function HubConnectorConfigTab({ refreshKey }: { refreshKey?: number }) {
                         {platform.operations.map((op) => (
                           <ActionRenderer
                             key={op.name}
-                            connectorId={platform.id}
+                            target={{ kind: 'connector', id: platform.id }}
                             operation={op}
                             configured={platform.configured}
                             pendingConfigValues={fieldValues}

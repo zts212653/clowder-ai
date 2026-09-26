@@ -12,9 +12,10 @@
  * - Persist lastResult for frontend rendering
  */
 
-import { isOperationField, type OperationConfigField, type OperationState } from '@cat-cafe/shared';
+import { isOperationField, type OperationConfigField } from '@cat-cafe/shared';
 import { configEventBus, createChangeSetId } from '../../config/config-event-bus.js';
 import { AuditEventTypes, type EventAuditLog } from '../../domains/cats/services/orchestration/EventAuditLog.js';
+import { transitionOperationState } from '../../domains/plugin/operations/operation-state-machine.js';
 import { readOperationState, writeConnectorConfig, writeOperationState } from './im-connector-config-store.js';
 import type {
   HandleActionContext,
@@ -60,34 +61,6 @@ interface ExecuteActionError {
 }
 
 export type ExecuteActionResult = ExecuteActionSuccess | ExecuteActionError;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function buildPersistedLastResult(
-  result: HandleActionResult,
-  previousLastResult: OperationState['lastResult'],
-): OperationState['lastResult'] {
-  const nextLastResult = {
-    render: result.render,
-    data: result.data,
-    ...(result.label ? { label: result.label } : {}),
-  };
-
-  if (result.advance === false && result.render === 'polling' && previousLastResult?.render === 'img') {
-    return {
-      render: previousLastResult.render,
-      data:
-        isRecord(previousLastResult.data) && isRecord(result.data)
-          ? { ...previousLastResult.data, ...result.data }
-          : previousLastResult.data,
-      ...(result.label ? { label: result.label } : previousLastResult.label ? { label: previousLastResult.label } : {}),
-    };
-  }
-
-  return nextLastResult;
-}
 
 // ── Implementation ──────────────────────────────────────────────────
 
@@ -147,38 +120,32 @@ export async function executeConnectorAction(input: ExecuteActionInput): Promise
   }
 
   // 6. Persist state — advance only when plugin signals completion (default: true)
-  const shouldAdvance = result.advance !== false;
-  const lastResult = buildPersistedLastResult(result, operationState?.lastResult);
-
-  if (shouldAdvance) {
-    const nextAction = actionDef.next ?? actionId;
-    writeOperationState(projectRoot, connectorId, operationName, {
-      currentAction: nextAction,
-      lastResult,
-    });
-  } else {
-    // Still persist lastResult for frontend rendering, but keep current action
-    writeOperationState(
-      projectRoot,
-      connectorId,
-      operationName,
-      {
-        currentAction: actionId,
-        lastResult,
-      },
-      { preserveUpdatedAt: true },
-    );
-  }
+  const transition = transitionOperationState({
+    actions: operation.actions,
+    actionId,
+    currentState: operationState,
+    targetKeys: operation.target,
+    result,
+    now: Date.now(),
+    enforceTimeout: false,
+  });
+  writeOperationState(
+    projectRoot,
+    connectorId,
+    operationName,
+    {
+      currentAction: transition.state.currentAction,
+      ...(transition.state.lastResult === undefined ? {} : { lastResult: transition.state.lastResult }),
+    },
+    { preserveUpdatedAt: transition.preserveUpdatedAt },
+  );
 
   // 7. Backfill target fields only on advance (AC-A19)
   let backfilledKeys: string[] | undefined;
-  if (shouldAdvance && result.targetValues && operation.target && operation.target.length > 0) {
+  if (Object.keys(transition.targetValues).length > 0) {
     const updates: { name: string; value: string | null }[] = [];
-    for (const envName of operation.target) {
-      const value = result.targetValues[envName];
-      if (value !== undefined) {
-        updates.push({ name: envName, value });
-      }
+    for (const [envName, value] of Object.entries(transition.targetValues)) {
+      updates.push({ name: envName, value });
     }
     if (updates.length > 0) {
       const { changedKeys } = writeConnectorConfig(projectRoot, connectorId, updates);

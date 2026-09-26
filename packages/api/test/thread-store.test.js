@@ -7,6 +7,26 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('ThreadStore', () => {
+  test('persists and clears generic plugin ownership for a thread', async () => {
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+
+    const store = new ThreadStore();
+    const thread = store.create('user-1', 'Plugin-owned thread');
+    const ownership = { v: 1, pluginInstanceId: 'pi_telegram' };
+
+    store.updatePluginOwnership(thread.id, ownership);
+    assert.deepEqual(store.get(thread.id)?.pluginOwnership, ownership);
+
+    store.updatePluginOwnership(thread.id, null);
+    assert.equal(store.get(thread.id)?.pluginOwnership, undefined);
+
+    assert.throws(
+      () => store.updatePluginOwnership(thread.id, { v: 1, pluginInstanceId: '  ' }),
+      /invalid plugin thread ownership/,
+    );
+    assert.equal(store.get(thread.id)?.pluginOwnership, undefined);
+  });
+
   test('create() returns a thread with generated id', async () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
 

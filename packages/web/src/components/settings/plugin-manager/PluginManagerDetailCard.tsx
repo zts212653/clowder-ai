@@ -18,6 +18,12 @@ function SectionHeading({ children }: { children: string }) {
   );
 }
 
+function dependencyClosureLabel(plugin: PluginManagerDesignFixture): string | undefined {
+  if (plugin.dependencyClosure === 'shipped') return '本机自带依赖 · 仅限本机开发';
+  if (plugin.dependencyClosure === 'materialized') return '安装时解析依赖';
+  return undefined;
+}
+
 const contributionKindLabel: Record<string, string> = {
   mcp: 'MCP',
   schedule: 'Scheduler',
@@ -152,6 +158,7 @@ export function PluginManagerDetailCard({
   locale,
   busy = false,
   onSaveConfig,
+  onOperationChange,
   configurationValidationRequest = 0,
   configurationSaved = false,
 }: {
@@ -159,6 +166,7 @@ export function PluginManagerDetailCard({
   locale: string;
   busy?: boolean;
   onSaveConfig?: (updates: readonly { key: string; value: string | null }[]) => void;
+  onOperationChange?: () => void;
   configurationValidationRequest?: number;
   configurationSaved?: boolean;
 }) {
@@ -166,6 +174,7 @@ export function PluginManagerDetailCard({
   const description = resolvePluginDescription(plugin.description, locale);
   const capabilityItems = capabilityDocItems(plugin);
   const capabilityGroups = groupCapabilityDocs(capabilityItems);
+  const closureLabel = dependencyClosureLabel(plugin);
 
   return (
     <article data-testid="plugin-manager-detail" className={settingsResourceCardClass}>
@@ -181,6 +190,11 @@ export function PluginManagerDetailCard({
               <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5 break-all">
                 {plugin.installedVersion ?? plugin.availableVersion} · {plugin.packageName} · {plugin.publisher}
               </SettingsText>
+              {closureLabel === undefined ? null : (
+                <SettingsText as="p" variant="xs" tone="muted" className="mt-0.5">
+                  {closureLabel}
+                </SettingsText>
+              )}
             </div>
           </div>
         </section>
@@ -205,6 +219,7 @@ export function PluginManagerDetailCard({
           plugin={plugin}
           busy={busy}
           onSaveConfig={onSaveConfig}
+          onOperationChange={onOperationChange}
           validationRequest={configurationValidationRequest}
           saved={configurationSaved}
         />

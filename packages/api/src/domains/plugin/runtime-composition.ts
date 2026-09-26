@@ -1,21 +1,54 @@
 import { dirname, resolve } from 'node:path';
-import type { PluginIconSpec, PluginManagerDetail } from '@cat-cafe/shared';
+import type { CapabilitiesConfig, PluginIconSpec, PluginManagerDetail } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import type { DeliveryPresentationContext } from '@clowder-ai/plugin-contract';
 import { type Capability, type PluginManifest, validateManifest } from '@clowder-ai/plugin-contract';
+import { fileBasedMcpIO, type McpConfigIO } from '../../config/capabilities/capability-mcp-service.js';
+import type { IConnectorThreadBindingStore } from '../../infrastructure/connectors/ConnectorThreadBindingStore.js';
+import { WhisperSttProvider } from '../../infrastructure/connectors/media/WhisperSttProvider.js';
+import { createModuleLogger } from '../../infrastructure/logger.js';
 import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
-import { createMessagingDomain, type MessagingService } from '../messaging/messaging-service.js';
+import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
+import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
+import type { LimbRegistry } from '../limb/LimbRegistry.js';
+import { MessagingLedger } from '../messaging/ledger.js';
+import {
+  buildDeliveryPresentation,
+  createLifecycleDelivery,
+  type LifecycleDelivery,
+  type LifecycleDeliveryDeps,
+} from '../messaging/lifecycle-delivery.js';
+import { FileMediaEntitlementPort, MediaEntitlementLedger } from '../messaging/media-entitlements.js';
+import { FileMessagingMediaLedger } from '../messaging/media-ledger.js';
+import { PendingMediaPublication } from '../messaging/media-pending-publication.js';
+import { createHostMediaPostProcessor } from '../messaging/media-post-processing.js';
+import { MediaReferenceAuthority } from '../messaging/media-reference-authority.js';
+import { FileMediaStagingStore, mediaSourceMatchesIngress } from '../messaging/media-staging.js';
+import {
+  createMessagingDomain,
+  ingressWakeDeps,
+  type MessagingDomainDeps,
+  type MessagingService,
+} from '../messaging/messaging-service.js';
+import { FileOutboundMediaStore } from '../messaging/outbound-media/store.js';
+import { createMessagingStores } from '../messaging/stores/factory.js';
+import type { MessagingStores } from '../messaging/stores/ports.js';
+import { createSubscriptionDelivery, type SubscriptionDelivery } from '../messaging/subscription-delivery.js';
 import type { MeetingIntakeStore } from '../signal-intake/MeetingIntakeStore.js';
 import type { SignalRouteStore } from '../signal-intake/SignalRouteStore.js';
+import { BundledPluginRuntimeCarrier } from './builtin-runtime/bundled-runtime-carrier.js';
 import {
   CollectiveConnectorBuiltinRuntime,
   type CollectiveConnectorBuiltinRuntimeOptions,
 } from './builtin-runtime/collective-connector-runtime.js';
-import { HybridPluginRuntimeSupervisor } from './builtin-runtime/hybrid-supervisor.js';
-import { staticEditorContributions } from './content-editor-runtime/admission.js';
+import { ModulePluginRuntime } from './builtin-runtime/module-plugin-runtime.js';
+import { StaticPluginRuntime } from './builtin-runtime/static-plugin-runtime.js';
+import { PluginRuntimeCarrierRouter } from './carrier/runtime-carrier.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentMaterializerPluginRuntime } from './content-materializer-runtime/runtime.js';
+import type { DeclaredScheduleTaskRunner } from './declared/declared-runtime-contributions.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
-import type { PluginRuntimeLifecyclePort } from './external-plugin-lifecycle-types.js';
+import { PLUGIN_OWNER_UNINSTALLED_REASON } from './external-plugin-lifecycle-types.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
 import { ExternalPluginRuntimeSupervisor } from './external-runtime/supervisor.js';
 import type { ExternalPluginProcessAdapter, VerifiedPluginPackageLocator } from './external-runtime/types.js';
@@ -27,10 +60,13 @@ import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { FilePluginInventoryStore } from './host-inventory/stores.js';
 import type { PluginInventorySnapshot } from './host-inventory/types.js';
+import { PluginMediaReadService } from './host-surface/plugin-media-host.js';
+import { RedisPluginPrivateStorage } from './host-surface/plugin-private-storage.js';
 import {
-  BuiltinPluginContributionSupervisor,
-  type BuiltinPluginContributionSupervisorOptions,
-} from './manager/builtin-contribution-supervisor.js';
+  type BuiltinPluginPackageMaterializer,
+  FilesystemBuiltinPluginPackageMaterializer,
+} from './manager/builtin-package-materializer.js';
+import { GitPluginPackageAdmission } from './manager/git-package-admission.js';
 import { LocalPluginPackageAdmission } from './manager/local-package-admission.js';
 import { CompositePluginManagerCompatibilityPort } from './manager/plugin-manager-compatibility.js';
 import { HostPluginConfigurationService } from './manager/plugin-manager-configuration.js';
@@ -39,10 +75,13 @@ import {
   FilePluginPackageQuarantineStore,
   PluginPackageQuarantineManagerAdapter,
 } from './manager/plugin-package-quarantine.js';
+import type { PluginRuntimeConfigurationPort } from './manifest-configuration-projection.js';
+import { HostMediaSourceImporter } from './media-source-importer.js';
 import { type OfficialPluginCatalogEntry, officialPluginPresentationMatches } from './official-catalog.js';
 import type { OfficialPluginCatalogProvider } from './official-catalog-provider.js';
 import { OfficialPluginPackageInstaller } from './official-package-installer.js';
 import type { OfficialPluginAuthPort, OfficialPluginAuthStatus } from './official-plugin-auth.js';
+import { readPluginConfig } from './plugin-config-store.js';
 import {
   type PluginManagerCatalogCandidate,
   pluginManagerCapabilitiesFromManifest,
@@ -70,12 +109,50 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly routes: SignalRouteStore;
   readonly intakes: MeetingIntakeStore;
   readonly messageStore: IMessageStore;
+  readonly lifecyclePresentation?: LifecycleDeliveryDeps['presentation'];
+  /** Trigger message id of an invocation, for a v2 subscription's `started.replyTo` (P1.3). */
+  readonly lifecycleTriggerMessageId?: LifecycleDeliveryDeps['triggerMessageId'];
+  readonly deliveryPresentation?: (
+    threadId: string,
+    actor: { kind: 'cat' | 'user' | 'plugin' | 'device' | 'system'; id: string },
+  ) => Promise<DeliveryPresentationContext>;
+  readonly taskStore?: ITaskStore;
   readonly redis?: RedisClient;
+  /** The Host-wide messaging stores shared with the one publishing MessageStore wrapper. */
+  readonly messagingStores?: MessagingStores;
+  readonly onMessagePublished?: (threadId: string) => void;
   readonly processes?: ExternalPluginProcessAdapter;
   readonly packages?: VerifiedPluginPackageLocator;
+  /** Injectable so dependency-bearing builtin packages can be tested without network installs. */
+  readonly builtinPackages?: BuiltinPluginPackageMaterializer;
   readonly contract?: PackageAdmissionContractRuntime;
   readonly now?: () => number;
   readonly editorParentOrigin?: string;
+  /**
+   * F202 C1 gap C: where the stdio runtime reads an instance's stored configuration. Defaults to
+   * the Host's own plugin-config store under `projectRoot`, which is where
+   * `HostPluginConfigurationService.configure` writes — so an instance that earned readiness
+   * through the real authority is projectable without extra wiring.
+   */
+  readonly configuration?: PluginRuntimeConfigurationPort;
+  /** Live Host registries consumed by package-declared runtime contributions. */
+  readonly limbRegistry?: LimbRegistry;
+  readonly taskRunner?: DeclaredScheduleTaskRunner;
+  /** Injectable so isolated tests never regenerate a user's CLI configuration. */
+  readonly mcpConfigIO?: McpConfigIO;
+  /**
+   * F202 C1 gap B: the Host collaborators an authenticated connector ingress needs. The wake
+   * itself lives in the messaging domain (gap A); what was missing is that the composition which
+   * actually ships never offered them, so a wake proven with hand-injected collaborators did not
+   * exist in the running process. Offered as a set — see `ingressWakeDeps` in messaging-service.
+   */
+  readonly invokeTrigger?: MessagingDomainDeps['invokeTrigger'];
+  readonly socketManager?: MessagingDomainDeps['socketManager'];
+  readonly threadStore?: IThreadStore;
+  readonly threadBindingStore?: IConnectorThreadBindingStore;
+  readonly threadOwnerUserId?: string;
+  readonly getDefaultCatId?: MessagingDomainDeps['getDefaultCatId'];
+  readonly getMentionPatterns?: MessagingDomainDeps['getMentionPatterns'];
   readonly collectiveConnector?: Omit<CollectiveConnectorBuiltinRuntimeOptions, 'dataDirectory'> & {
     readonly dataDirectory?: string;
   };
@@ -94,83 +171,31 @@ export interface DormantPluginRuntimeComposition {
   readonly brokerStore: FileHostBrokerStore;
   readonly inventory: HostInventoryControlPlane;
   readonly broker: HostBrokerControlPlane;
-  readonly supervisor: HybridPluginRuntimeSupervisor;
+  readonly supervisor: PluginRuntimeCarrierRouter;
+  /** The child-process carrier itself. Exposed so the Host's one pre-active budget
+   * stays assertable against the runtime that spends it, not just the constant. */
+  readonly externalRuntime: ExternalPluginRuntimeSupervisor;
   readonly collectiveConnectorRuntime?: CollectiveConnectorBuiltinRuntime;
   readonly contentEditors?: ContentEditorPluginRuntime;
   readonly contentMaterializers?: ContentMaterializerPluginRuntime;
   readonly messaging: MessagingService;
+  readonly mediaLedger: FileMessagingMediaLedger;
+  readonly mediaEntitlements: MediaEntitlementLedger;
+  readonly mediaPending: PendingMediaPublication;
+  /** Deferred Host media messages (W2-5b); the outbound media job and the snapshot share it. */
+  readonly outboundMedia: FileOutboundMediaStore;
+  /**
+   * Drives thread activity out to whichever subscribers declared they want it. Exposed so the
+   * Host can drain a thread after it produces a message; it knows nothing about connectors.
+   */
+  readonly subscriptionDelivery: SubscriptionDelivery;
+  readonly lifecycleDelivery: LifecycleDelivery;
   readonly lifecycle: ExternalPluginLifecycleService;
   readonly packages: VerifiedPluginPackageLocator;
+  readonly mcpConfigIO: McpConfigIO;
   readonly contract?: PackageAdmissionContractRuntime;
-  registerBuiltinContributions(
-    options: Omit<BuiltinPluginContributionSupervisorOptions, 'inventory'>,
-  ): BuiltinPluginContributionSupervisor;
   recoverAfterRestart(): Promise<DormantPluginRuntimeRecovery>;
   shutdown(reason?: string): Promise<void>;
-}
-
-class PluginRuntimeSupervisorRouter implements PluginRuntimeLifecyclePort {
-  private builtin: BuiltinPluginContributionSupervisor | undefined;
-
-  constructor(
-    private readonly inventory: FilePluginInventoryStore,
-    private readonly base: HybridPluginRuntimeSupervisor,
-    private readonly baseBuiltinPluginIds: ReadonlySet<string>,
-  ) {}
-
-  registerBuiltin(options: Omit<BuiltinPluginContributionSupervisorOptions, 'inventory'>) {
-    if (this.builtin) throw new Error('builtin contribution supervisor is already registered');
-    this.builtin = new BuiltinPluginContributionSupervisor({ inventory: this.inventory, ...options });
-    return this.builtin;
-  }
-
-  private baseOwnsBuiltin(pluginId: string, manifest: PluginManifest): boolean {
-    return this.baseBuiltinPluginIds.has(pluginId) || staticEditorContributions(manifest).length > 0;
-  }
-
-  async start(pluginInstanceId: string): Promise<unknown> {
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const packageRecord = instance
-      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-      : undefined;
-    if (
-      packageRecord?.manifest.runtime.transport === 'builtin' &&
-      instance &&
-      !this.baseOwnsBuiltin(instance.pluginId, packageRecord.manifest)
-    ) {
-      if (!this.builtin) throw new Error('builtin contribution supervisor is unavailable');
-      return this.builtin.start(pluginInstanceId);
-    }
-    return this.base.start(pluginInstanceId);
-  }
-
-  async stop(pluginInstanceId: string, reason = 'host_stop'): Promise<void> {
-    const snapshot = await this.inventory.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    const packageRecord = instance
-      ? snapshot.packages.find((candidate) => candidate.packageDigest === instance.packageDigest)
-      : undefined;
-    if (
-      packageRecord?.manifest.runtime.transport === 'builtin' &&
-      instance &&
-      !this.baseOwnsBuiltin(instance.pluginId, packageRecord.manifest)
-    ) {
-      if (!this.builtin) throw new Error('builtin contribution supervisor is unavailable');
-      await this.builtin.stop(pluginInstanceId, reason);
-      return;
-    }
-    await this.base.stop(pluginInstanceId, reason);
-  }
-
-  async stopAll(reason = 'host_shutdown'): Promise<void> {
-    const settled = await Promise.allSettled([
-      this.base.stopAll(reason),
-      ...(this.builtin ? [this.builtin.stopAll(reason)] : []),
-    ]);
-    const failure = settled.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (failure) throw failure.reason;
-  }
 }
 
 // External runtimes must finish their own bounded source-readiness checks before
@@ -210,9 +235,79 @@ export function createDormantPluginRuntimeComposition(
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.contract === undefined ? {} : { contract: options.contract }),
   });
+  const mediaLedger = new FileMessagingMediaLedger(resolve(dirname(paths.inventorySnapshotPath), 'media'));
+  const mediaEntitlements = new MediaEntitlementLedger(
+    new FileMediaEntitlementPort(resolve(dirname(paths.inventorySnapshotPath), 'media-entitlements.json')),
+    { now: options.now ?? Date.now },
+  );
+  const moduleLogger = createModuleLogger('plugin/module-runtime');
+  const deliveryTarget: { current?: PluginRuntimeCarrierRouter } = {};
+  const resolveInstalledManifest = async (instanceId: string): Promise<PluginManifest | undefined> => {
+    const snapshot = await inventoryStore.snapshot();
+    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === instanceId);
+    if (!instance || instance.lifecycleState !== 'installed') return undefined;
+    return snapshot.packages.find((item) => item.packageDigest === instance.packageDigest)?.manifest;
+  };
+  const mediaImporter = new HostMediaSourceImporter({
+    ledger: mediaLedger,
+    resolveManifest: resolveInstalledManifest,
+    invoke: (instanceId, method, params) => {
+      if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+      return deliveryTarget.current.invoke(instanceId, method, params);
+    },
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const messagingStores = options.messagingStores ?? createMessagingStores(options.redis);
+  const outboundMedia = new FileOutboundMediaStore(
+    resolve(dirname(paths.inventorySnapshotPath), 'outbound-media.json'),
+  );
+  const mediaPending = new PendingMediaPublication({
+    store: new FileMediaStagingStore(resolve(dirname(paths.inventorySnapshotPath), 'media-staging.json')),
+    messageStore: options.messageStore,
+    events: messagingStores.events,
+    importer: mediaImporter,
+    postProcess: createHostMediaPostProcessor({
+      ledger: mediaLedger,
+      privateDir: resolve(dirname(paths.inventorySnapshotPath), 'media-post-processing'),
+      sttProvider: new WhisperSttProvider(),
+      ...(options.now === undefined ? {} : { now: options.now }),
+    }),
+    onSettleFailure: (fields) => moduleLogger.warn(fields, 'media-source settlement failed'),
+    ledger: new MessagingLedger(messagingStores.ledger),
+    ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.onMessagePublished === undefined ? {} : { onPublished: options.onMessagePublished }),
+    ...(ingressWakeDeps(options as MessagingDomainDeps) === undefined
+      ? {}
+      : { ingressWake: ingressWakeDeps(options as MessagingDomainDeps) }),
+  });
+  const mediaSources = {
+    resolve: async (instanceId: string, sourceId: string, ingressIdentity: string): Promise<boolean> => {
+      const manifest = await resolveInstalledManifest(instanceId);
+      if (!manifest) return false;
+      return mediaSourceMatchesIngress(manifest, sourceId, ingressIdentity);
+    },
+  };
   const messaging = createMessagingDomain({
     messageStore: options.messageStore,
+    mediaReferences: new MediaReferenceAuthority({ ledger: mediaLedger, entitlements: mediaEntitlements }),
+    mediaEntitlements,
+    mediaPending,
+    mediaSources,
+    outboundMedia,
+    ...(options.now === undefined ? {} : { snapshotClock: { now: options.now } }),
+    stores: messagingStores,
+    ...(options.onMessagePublished === undefined ? {} : { onPublished: options.onMessagePublished }),
     ...(options.redis === undefined ? {} : { redis: options.redis }),
+    ...(options.invokeTrigger === undefined ? {} : { invokeTrigger: options.invokeTrigger }),
+    ...(options.socketManager === undefined ? {} : { socketManager: options.socketManager }),
+    ...(options.threadStore === undefined ? {} : { threadStore: options.threadStore }),
+    ...(options.getDefaultCatId === undefined ? {} : { getDefaultCatId: options.getDefaultCatId }),
+    ...(options.getMentionPatterns === undefined ? {} : { getMentionPatterns: options.getMentionPatterns }),
+  });
+  const mediaRead = new PluginMediaReadService({
+    ledger: mediaLedger,
+    entitlements: mediaEntitlements,
+    onRejected: (reason) => moduleLogger.warn({ reason }, 'media.read rejected'),
   });
   const broker = new HostBrokerControlPlane({
     inventory: inventoryStore,
@@ -225,7 +320,7 @@ export function createDormantPluginRuntimeComposition(
         intakes: options.intakes,
         ...(options.now === undefined ? {} : { now: options.now }),
       }),
-      ...createMessagingBrokerHandlers({ messaging }),
+      ...createMessagingBrokerHandlers({ messaging, media: mediaRead }),
     ],
     preActiveTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.now === undefined ? {} : { now: options.now }),
@@ -235,10 +330,40 @@ export function createDormantPluginRuntimeComposition(
     new FilesystemVerifiedPluginPackageLocator(paths.packagesRoot, {
       ...(options.contract === undefined ? {} : { validateManifest: options.contract.validateManifest }),
     });
+  const readStoredConfigurationValue = async (pluginInstanceId: string, key: string) => {
+    const snapshot = await inventoryStore.snapshot();
+    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
+    return instance ? readPluginConfig(options.projectRoot, instance.pluginId)[key] : undefined;
+  };
+  const configuration: PluginRuntimeConfigurationPort = options.configuration ?? {
+    readConfig: readStoredConfigurationValue,
+    readSecret: readStoredConfigurationValue,
+  };
+  const subscriptionDelivery = createSubscriptionDelivery({
+    messaging,
+    presentation:
+      options.deliveryPresentation ??
+      ((threadId, actor) => Promise.resolve(buildDeliveryPresentation(threadId, actor))),
+    resolveInvocationId: async (messageId) =>
+      (await options.messageStore.getById(messageId))?.extra?.stream?.invocationId,
+    entitlements: mediaEntitlements,
+    onError: (fields) => moduleLogger.error(fields, 'subscription delivery failed'),
+    delivery: {
+      deliver: (pluginInstanceId, input) => {
+        if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+        return deliveryTarget.current.deliver(pluginInstanceId, input);
+      },
+      invoke: (pluginInstanceId, method, params) => {
+        if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+        return deliveryTarget.current.invoke(pluginInstanceId, method, params);
+      },
+    },
+  });
   const externalSupervisor = new ExternalPluginRuntimeSupervisor({
     inventory: inventoryStore,
     broker,
     packages,
+    configuration,
     handshakeTimeoutMs: EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS,
     ...(options.processes === undefined ? {} : { processes: options.processes }),
     ...(options.now === undefined ? {} : { now: options.now }),
@@ -268,23 +393,115 @@ export function createDormantPluginRuntimeComposition(
         });
   if (contentEditors)
     contentMaterializers = new ContentMaterializerPluginRuntime({ editors: contentEditors, packages });
-  const supervisor = new HybridPluginRuntimeSupervisor({
-    inventory: inventoryStore,
-    external: externalSupervisor,
-    builtinRuntimes: new Map(
-      collectiveConnectorRuntime ? [['official.collective-connector', collectiveConnectorRuntime] as const] : [],
-    ),
-    resolveBuiltinRuntime: (pkg) => (staticEditorContributions(pkg.manifest).length > 0 ? contentEditors : undefined),
-    ...(options.now === undefined ? {} : { now: options.now }),
+  // Every admitted instance takes this one path; the carrier is selected from the
+  // package's own manifest, most specific claim first (F202 C1 clauses 1/2/6).
+  const mcpConfigIO = options.mcpConfigIO ?? fileBasedMcpIO(options.projectRoot);
+  const builtinPackages =
+    options.builtinPackages ??
+    new FilesystemBuiltinPluginPackageMaterializer({
+      packagesRoot: paths.packagesRoot,
+      ...(options.contract?.validateManifest === undefined
+        ? {}
+        : { validateManifest: options.contract.validateManifest }),
+    });
+  const moduleRuntime = new ModulePluginRuntime({
+    packages,
+    materializer: builtinPackages,
+    configuration,
+    media: mediaRead,
+    ...(options.redis === undefined ? {} : { storage: new RedisPluginPrivateStorage(options.redis) }),
+    ...(options.taskStore === undefined ? {} : { taskStore: options.taskStore }),
+    ...(options.threadStore === undefined ||
+    options.threadBindingStore === undefined ||
+    options.threadOwnerUserId === undefined
+      ? {}
+      : {
+          threads: {
+            threadStore: options.threadStore,
+            bindingStore: options.threadBindingStore,
+            ownerUserId: options.threadOwnerUserId,
+            projectPath: resolve(options.projectRoot),
+          },
+        }),
+    ...(options.threadStore === undefined ||
+    options.threadBindingStore === undefined ||
+    options.threadOwnerUserId === undefined
+      ? {}
+      : {
+          messaging: {
+            service: messaging,
+            delivery: subscriptionDelivery,
+            threadStore: options.threadStore,
+            bindingStore: options.threadBindingStore,
+            ownerUserId: options.threadOwnerUserId,
+          },
+        }),
+    log: (level, message, fields) => {
+      if (fields === undefined) moduleLogger[level](message);
+      else moduleLogger[level](fields, message);
+    },
   });
-  const runtimeSupervisor = new PluginRuntimeSupervisorRouter(
+  const lifecycleDelivery = createLifecycleDelivery({
+    subscribers: (threadId) => subscriptionDelivery.lifecycleTargetsForThread(threadId),
+    supportsAction: (subscriberId, method) => typeof moduleRuntime.actions(subscriberId)?.[method] === 'function',
+    invoke: (subscriberId, method, input) => {
+      if (!deliveryTarget.current) throw new Error('plugin runtime supervisor is unavailable');
+      return deliveryTarget.current.invoke(subscriberId, method, input);
+    },
+    enqueueThread: (threadId, operation) => subscriptionDelivery.enqueueThread(threadId, operation),
+    drain: (threadId) => subscriptionDelivery.drain(threadId),
+    presentation:
+      options.lifecyclePresentation ??
+      ((threadId, catId) => Promise.resolve(buildDeliveryPresentation(threadId, { kind: 'cat', id: catId }))),
+    ...(options.lifecycleTriggerMessageId === undefined ? {} : { triggerMessageId: options.lifecycleTriggerMessageId }),
+    onError: (fields) => moduleLogger.error(fields, 'lifecycle delivery failed'),
+  });
+  const supervisor = new PluginRuntimeCarrierRouter(
     inventoryStore,
-    supervisor,
-    new Set(collectiveConnectorRuntime ? ['official.collective-connector'] : []),
+    {
+      projectRoot: options.projectRoot,
+      packages,
+      mcpPackages: builtinPackages,
+      resourcesRoot: resolve(dirname(paths.inventorySnapshotPath), 'resources'),
+      configuration,
+      mcpConfigIO,
+    },
+    {
+      packages,
+      configuration,
+      ...(options.limbRegistry === undefined ? {} : { limbRegistry: options.limbRegistry }),
+      ...(options.taskRunner === undefined ? {} : { taskRunner: options.taskRunner }),
+      ...(options.redis === undefined ? {} : { redis: options.redis }),
+    },
+    async (instanceId, reason) => {
+      if (reason === PLUGIN_OWNER_UNINSTALLED_REASON) await mediaPending.uninstall(instanceId);
+      await subscriptionDelivery.cancelInstance(
+        instanceId,
+        reason === PLUGIN_OWNER_UNINSTALLED_REASON ? 'instance_uninstalled' : 'instance_stopped',
+      );
+    },
   );
+  deliveryTarget.current = supervisor;
+  supervisor.register(
+    new BundledPluginRuntimeCarrier({
+      inventory: inventoryStore,
+      runtimes: [
+        ...(collectiveConnectorRuntime ? [collectiveConnectorRuntime] : []),
+        ...(contentEditors ? [contentEditors] : []),
+        // Last: the runtimes above implement one package the Host itself carries, so
+        // their narrower claims win. This one claims whatever declares a module to load.
+        moduleRuntime,
+        // Static-only packages still need the carrier's lifecycle fence before their
+        // declared Host resources activate, but have no package code to execute.
+        new StaticPluginRuntime(),
+      ],
+      ...(options.now === undefined ? {} : { now: options.now }),
+    }),
+  );
+  supervisor.register(externalSupervisor);
   const lifecycle = new ExternalPluginLifecycleService({
     store: inventoryStore,
-    supervisor: runtimeSupervisor,
+    supervisor,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
@@ -296,25 +513,33 @@ export function createDormantPluginRuntimeComposition(
     inventory,
     broker,
     supervisor,
+    externalRuntime: externalSupervisor,
     ...(collectiveConnectorRuntime === undefined ? {} : { collectiveConnectorRuntime }),
     ...(contentEditors === undefined ? {} : { contentEditors }),
     ...(contentMaterializers === undefined ? {} : { contentMaterializers }),
     messaging,
+    mediaLedger,
+    mediaEntitlements,
+    mediaPending,
+    outboundMedia,
+    subscriptionDelivery,
+    lifecycleDelivery,
     lifecycle,
     packages,
+    mcpConfigIO,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
-    registerBuiltinContributions: (builtinOptions) => runtimeSupervisor.registerBuiltin(builtinOptions),
     async recoverAfterRestart() {
       await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
       const brokerSessions = await supervisor.recoverAfterRestart();
       const inventoryRecovery = await lifecycle.recoverAfterRestart();
+      await mediaPending.recover();
       return {
         brokerSessions,
         inventoryInstances: inventoryRecovery.recoveredInstances,
         resumeRequested: inventoryRecovery.resumeRequested,
       };
     },
-    shutdown: (reason = 'host_shutdown') => runtimeSupervisor.stopAll(reason),
+    shutdown: (reason = 'host_shutdown') => supervisor.stopAll(reason),
   };
 }
 
@@ -420,14 +645,11 @@ function activeCapabilities(
   return active?.effectiveGrants ?? [];
 }
 
-function activeBuiltinCapabilities(
+async function activeDeclaredMcpCapabilities(
   pluginInstanceId: string,
   inventory: PluginInventorySnapshot,
-  supervisor: BuiltinPluginContributionSupervisor | undefined,
-): readonly Capability[] {
-  if (!supervisor) return [];
-  const activeContributionIds = new Set(supervisor.activeContributionIds(pluginInstanceId));
-  if (activeContributionIds.size === 0) return [];
+  configured: CapabilitiesConfig | null,
+): Promise<readonly Capability[]> {
   const instance = inventory.instances.find(
     (candidate) => candidate.pluginInstanceId === pluginInstanceId && candidate.lifecycleState === 'installed',
   );
@@ -436,7 +658,19 @@ function activeBuiltinCapabilities(
         (candidate) => candidate.packageDigest === instance.packageDigest && candidate.packageState === 'installed',
       )
     : undefined;
-  if (!packageRecord || packageRecord.manifest.runtime.transport !== 'builtin') return [];
+  if (!packageRecord) return [];
+  const activeContributionIds = new Set(
+    (configured?.capabilities ?? [])
+      .filter(
+        (capability) =>
+          capability.type === 'mcp' &&
+          capability.pluginId === packageRecord.pluginId &&
+          capability.enabled &&
+          capability.id.startsWith(`plugin:${packageRecord.pluginId}:`),
+      )
+      .map((capability) => capability.id.slice(`plugin:${packageRecord.pluginId}:`.length)),
+  );
+  if (activeContributionIds.size === 0) return [];
 
   const capabilities = new Set<Capability>();
   for (const feature of packageRecord.manifest.features) {
@@ -451,17 +685,17 @@ function activeBuiltinCapabilities(
   return [...capabilities];
 }
 
-function managerActiveCapabilities(
+async function managerActiveCapabilities(
   pluginInstanceId: string,
   inventory: PluginInventorySnapshot,
   broker: Awaited<ReturnType<FileHostBrokerStore['snapshot']>>,
   now: number,
-  builtinSupervisor: BuiltinPluginContributionSupervisor | undefined,
-): readonly string[] {
+  configured: CapabilitiesConfig | null,
+): Promise<readonly string[]> {
   return [
     ...new Set([
       ...activeCapabilities(pluginInstanceId, broker, now),
-      ...activeBuiltinCapabilities(pluginInstanceId, inventory, builtinSupervisor),
+      ...(await activeDeclaredMcpCapabilities(pluginInstanceId, inventory, configured)),
     ]),
   ];
 }
@@ -491,61 +725,78 @@ export class InventoryPluginManagerCompatibilityAdapter implements PluginManager
   constructor(
     private readonly inventory: FilePluginInventoryStore,
     private readonly broker: FileHostBrokerStore,
+    private readonly mcpConfigIO: McpConfigIO,
     private readonly now: () => number = Date.now,
-    private readonly builtinSupervisor?: BuiltinPluginContributionSupervisor,
   ) {}
 
   async list(): Promise<readonly PluginManagerDetail[]> {
-    const [inventory, broker] = await Promise.all([this.inventory.snapshot(), this.broker.snapshot()]);
-    return inventory.instances
-      .filter((instance) => instance.lifecycleState === 'installed')
-      .flatMap((instance) => {
-        const packageRecord = inventory.packages.find(
-          (candidate) => candidate.packageDigest === instance.packageDigest,
-        );
-        if (!packageRecord) return [];
-        const candidate = inventoryCandidate(packageRecord);
-        const projected = projectPluginManagerCatalogCandidate(candidate, inventory, {
-          activeCapabilityIds: managerActiveCapabilities(
-            instance.pluginInstanceId,
-            inventory,
-            broker,
-            this.now(),
-            this.builtinSupervisor,
-          ),
-          ...(candidate.ownerAuthRequired ? { authState: 'error' as const } : {}),
-        });
-        const provenance = packageRecord.provenance;
-        return [
-          {
-            ...projected,
-            source:
-              provenance === undefined
-                ? {
-                    kind: 'legacy' as const,
-                    packageName: null,
-                    trust: 'unknown' as const,
-                  }
-                : provenance.kind === 'catalog'
-                  ? {
-                      kind: 'catalog' as const,
-                      catalogId: provenance.catalogId,
-                      packageName: provenance.packageName,
-                      trust: 'official' as const,
-                    }
-                  : {
-                      kind: provenance.kind,
-                      packageName: provenance.packageName ?? null,
-                      trust: 'local-trusted' as const,
-                    },
-            capabilities: projected.capabilitySummary.map((capability) => ({ ...capability })),
-            contributions: pluginManagerContributionsFromManifest(packageRecord.manifest).map((contribution) => ({
-              ...contribution,
-            })),
-            configFields: [],
-          },
-        ];
+    const [inventory, broker, configured] = await Promise.all([
+      this.inventory.snapshot(),
+      this.broker.snapshot(),
+      this.mcpConfigIO.readConfig(),
+    ]);
+    const plugins: PluginManagerDetail[] = [];
+    for (const instance of inventory.instances.filter((candidate) => candidate.lifecycleState === 'installed')) {
+      const packageRecord = inventory.packages.find((candidate) => candidate.packageDigest === instance.packageDigest);
+      if (!packageRecord) continue;
+      const candidate = inventoryCandidate(packageRecord);
+      const projected = projectPluginManagerCatalogCandidate(candidate, inventory, {
+        activeCapabilityIds: await managerActiveCapabilities(
+          instance.pluginInstanceId,
+          inventory,
+          broker,
+          this.now(),
+          configured,
+        ),
+        ...(candidate.ownerAuthRequired ? { authState: 'error' as const } : {}),
       });
+      const provenance = packageRecord.provenance;
+      plugins.push({
+        ...projected,
+        source:
+          provenance === undefined
+            ? {
+                kind: 'legacy' as const,
+                packageName: null,
+                trust: 'unknown' as const,
+              }
+            : provenance.kind === 'catalog'
+              ? {
+                  kind: 'catalog' as const,
+                  catalogId: provenance.catalogId,
+                  packageName: provenance.packageName,
+                  trust: 'official' as const,
+                }
+              : provenance.kind === 'git'
+                ? {
+                    kind: 'git' as const,
+                    url: provenance.url,
+                    packageName: provenance.packageName ?? null,
+                    trust: 'local-trusted' as const,
+                    ...(provenance.dependencyClosure === undefined
+                      ? {}
+                      : { dependencyClosure: provenance.dependencyClosure }),
+                  }
+                : {
+                    kind: provenance.kind,
+                    packageName: provenance.packageName ?? null,
+                    trust: 'local-trusted' as const,
+                    ...(provenance.dependencyClosure === undefined
+                      ? {}
+                      : { dependencyClosure: provenance.dependencyClosure }),
+                  },
+        capabilities: projected.capabilitySummary.map((capability) => ({ ...capability })),
+        contributions: pluginManagerContributionsFromManifest(packageRecord.manifest).map((contribution) => ({
+          ...contribution,
+        })),
+        ...(packageRecord.manifest.steps === undefined
+          ? {}
+          : { steps: packageRecord.manifest.steps.map((step) => step.text) }),
+        testable: packageRecord.manifest.test !== undefined,
+        configFields: [],
+      });
+    }
+    return plugins;
   }
 }
 
@@ -565,8 +816,8 @@ class RuntimePluginManagerStateProjection implements PluginManagerStateProjectio
     private readonly broker: FileHostBrokerStore,
     private readonly catalogProvider: OfficialPluginCatalogProvider,
     private readonly auth: OfficialPluginAuthPort | undefined,
+    private readonly mcpConfigIO: McpConfigIO,
     private readonly now: () => number,
-    private readonly builtinSupervisor?: BuiltinPluginContributionSupervisor,
   ) {}
 
   async read(candidate: PluginManagerCatalogCandidate, inventory: PluginInventorySnapshot) {
@@ -575,12 +826,13 @@ class RuntimePluginManagerStateProjection implements PluginManagerStateProjectio
     );
     if (!instance) return {};
     const broker = await this.broker.snapshot();
-    const activeCapabilityIds = managerActiveCapabilities(
+    const configured = await this.mcpConfigIO.readConfig();
+    const activeCapabilityIds = await managerActiveCapabilities(
       instance.pluginInstanceId,
       inventory,
       broker,
       this.now(),
-      this.builtinSupervisor,
+      configured,
     );
     if (!candidate.ownerAuthRequired || !this.auth) return { activeCapabilityIds };
     const entry = (await this.catalogProvider.snapshot()).entries.find((item) => item.pluginId === candidate.pluginId);
@@ -603,19 +855,21 @@ export interface PluginManagerRuntimeCompositionOptions {
   readonly auth?: OfficialPluginAuthPort;
   readonly localGrantPolicy?: (manifest: PluginManifest) => Promise<readonly Capability[]> | readonly Capability[];
   readonly fetchOfficialArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
-  readonly builtinContributions?: Omit<BuiltinPluginContributionSupervisorOptions, 'inventory'>;
   readonly compatibility?: PluginManagerCompatibilityPort;
   readonly now?: () => number;
+  readonly gitBin?: string;
+  readonly gitCloneTimeoutMs?: number;
 }
 
 export interface PluginManagerRuntimeComposition {
   readonly manager: PluginManagerService;
+  readonly configuration: HostPluginConfigurationService;
   readonly officialInstaller: OfficialPluginPackageInstaller;
   readonly officialRouteInstaller: OfficialPluginPackageInstaller;
   readonly localAdmission: LocalPluginPackageAdmission;
+  readonly gitAdmission: GitPluginPackageAdmission;
   readonly assets: PluginManagerPackageAssetService;
   readonly quarantines: FilePluginPackageQuarantineStore;
-  readonly builtinSupervisor?: BuiltinPluginContributionSupervisor;
 }
 
 function lifecycleFailure(error: unknown): never {
@@ -639,9 +893,6 @@ export function createPluginManagerRuntimeComposition(
   options: PluginManagerRuntimeCompositionOptions,
 ): PluginManagerRuntimeComposition {
   const now = options.now ?? Date.now;
-  const builtinSupervisor = options.builtinContributions
-    ? options.runtime.registerBuiltinContributions(options.builtinContributions)
-    : undefined;
   const quarantines = new FilePluginPackageQuarantineStore(
     resolve(dirname(options.runtime.paths.inventorySnapshotPath), 'quarantines.json'),
     { now },
@@ -668,6 +919,12 @@ export function createPluginManagerRuntimeComposition(
     ...(options.runtime.contract === undefined ? {} : { validateManifest: options.runtime.contract.validateManifest }),
     quarantine: quarantines,
   });
+  const gitAdmission = new GitPluginPackageAdmission({
+    localAdmission,
+    cloneRoot: resolve(options.runtime.projectRoot, '.cat-cafe', 'plugin-host'),
+    ...(options.gitBin === undefined ? {} : { gitBin: options.gitBin }),
+    ...(options.gitCloneTimeoutMs === undefined ? {} : { timeoutMs: options.gitCloneTimeoutMs }),
+  });
   const assets = new PluginManagerPackageAssetService({
     inventory: options.runtime.inventoryStore,
     packages: options.runtime.packages,
@@ -685,8 +942,8 @@ export function createPluginManagerRuntimeComposition(
     new InventoryPluginManagerCompatibilityAdapter(
       options.runtime.inventoryStore,
       options.runtime.brokerStore,
+      options.runtime.mcpConfigIO,
       now,
-      builtinSupervisor,
     ),
     ...(options.compatibility === undefined ? [] : [options.compatibility]),
   ]);
@@ -694,8 +951,8 @@ export function createPluginManagerRuntimeComposition(
     options.runtime.brokerStore,
     options.catalogProvider,
     options.auth,
+    options.runtime.mcpConfigIO,
     now,
-    builtinSupervisor,
   );
   const configuration = new HostPluginConfigurationService({
     projectRoot: options.runtime.projectRoot,
@@ -719,7 +976,10 @@ export function createPluginManagerRuntimeComposition(
           });
           return { pluginId: candidate.pluginId, pluginInstanceId: installed.pluginInstanceId };
         }
-        const installed = await localAdmission.install(request.source);
+        const installed =
+          request.source.kind === 'git'
+            ? await gitAdmission.install(request.source)
+            : await localAdmission.install(request.source);
         return { pluginId: installed.pluginId, pluginInstanceId: installed.pluginInstanceId };
       },
     },
@@ -743,11 +1003,12 @@ export function createPluginManagerRuntimeComposition(
   });
   return {
     manager,
+    configuration,
     officialInstaller,
     officialRouteInstaller,
     localAdmission,
+    gitAdmission,
     assets,
     quarantines,
-    ...(builtinSupervisor === undefined ? {} : { builtinSupervisor }),
   };
 }

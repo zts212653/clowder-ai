@@ -30,6 +30,26 @@ export function extractImagePaths(contentBlocks: readonly MessageContent[] | und
   return paths;
 }
 
+/** Resolve HMR images only inside a Host-owned cat invocation, through the verified ledger. */
+export async function extractTrustedImagePaths(
+  contentBlocks: readonly MessageContent[] | undefined,
+  uploadDir: string | undefined,
+  resolveHmrPath: ((hmrId: string) => Promise<string | undefined>) | undefined,
+): Promise<string[]> {
+  const paths: string[] = [];
+  for (const block of contentBlocks ?? []) {
+    if (block.type !== 'image') continue;
+    if (block.url.startsWith('hmr:')) {
+      if (!/^hmr:hmr_[A-Za-z0-9_-]{32}$/.test(block.url) || !resolveHmrPath) continue;
+      const path = await resolveHmrPath(block.url.slice(4));
+      if (path) paths.push(path);
+    } else {
+      paths.push(...extractImagePaths([block], uploadDir));
+    }
+  }
+  return paths;
+}
+
 /**
  * F211-REG3 (Layer B): extract workspace-reachable HTTP image URLs from contentBlocks.
  * External runtimes (Antigravity/Bengal) cannot read absolute filesystem imagePaths under

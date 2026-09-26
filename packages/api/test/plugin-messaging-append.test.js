@@ -91,6 +91,23 @@ async function expectCode(promise, code) {
 }
 
 describe('AppendService — happy path (AC-4)', () => {
+  test('legacy platform media locator is replaced before append persistence', async () => {
+    const sent = await sendMessage();
+    await service.appendElements(
+      CTX,
+      appendInput(sent.messageHandle, {
+        elements: [
+          { elementId: 'old-media', kind: 'media_ref', payload: { type: 'image', reference: 'url|aeskey=secret' } },
+        ],
+      }),
+    );
+    const stored = messageStore.getById(sent.messageId);
+    const appended = stored.extra.pluginMessage.elements.find((element) => element.elementId === 'old-media');
+    assert.equal(appended.kind, 'media_unavailable');
+    assert.deepEqual(appended.payload, { type: 'image', reason: 'unavailable' });
+    assert.equal(JSON.stringify(stored).includes('aeskey=secret'), false);
+  });
+
   test('append bumps revision, persists elements, emits append event', async () => {
     const sent = await sendMessage();
     const receipt = await service.appendElements(CTX, appendInput(sent.messageHandle));

@@ -304,7 +304,11 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (located.manifest.runtime.transport !== 'stdio' && located.manifest.runtime.transport !== 'builtin') {
+      if (
+        located.manifest.runtime !== undefined &&
+        located.manifest.runtime.transport !== 'stdio' &&
+        located.manifest.runtime.transport !== 'builtin'
+      ) {
         throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
       }
       const staticEditors = staticEditorContributions(located.manifest);
@@ -365,7 +369,7 @@ export class OfficialPluginPackageInstaller {
         'bundled manifest identity differs from catalog',
       );
     }
-    if (manifest.runtime.transport !== 'builtin') {
+    if (manifest.runtime?.transport !== 'builtin') {
       throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'bundled package is not a builtin runtime');
     }
     if (bundledManifestDigest(manifest) !== entry.packageDigest) {

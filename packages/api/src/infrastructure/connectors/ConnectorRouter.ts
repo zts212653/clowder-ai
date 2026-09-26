@@ -16,7 +16,7 @@
  */
 
 import type { CatId, ConnectorDefinition, ConnectorSource, MessageContent } from '@cat-cafe/shared';
-import { catRegistry, getConnectorDefinition } from '@cat-cafe/shared';
+import { getConnectorDefinition } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import type { ConnectorCommandLayer } from './ConnectorCommandLayer.js';
@@ -24,7 +24,7 @@ import { type CardAction, ConnectorMessageFormatter, DEFAULT_QUICK_ACTIONS } fro
 import type { IConnectorPermissionStore } from './ConnectorPermissionStore.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
 import type { InboundMessageDedup } from './InboundMessageDedup.js';
-import { parseMentions } from './mention-parser.js';
+import { catRegistryMentionPatterns, parseMentions } from './mention-parser.js';
 import type { IOutboundAdapter } from './OutboundDeliveryHook.js';
 
 /** Emit a connector_message socket event using the canonical protocol.
@@ -165,14 +165,7 @@ export class ConnectorRouter {
 
   /** Build @-mention patterns from catRegistry for parseMentions. */
   private getMentionPatterns(): Map<string, string[]> {
-    const patterns = new Map<string, string[]>();
-    for (const catId of catRegistry.getAllIds()) {
-      const entry = catRegistry.tryGet(catId);
-      if (entry?.config.mentionPatterns && entry.config.mentionPatterns.length > 0) {
-        patterns.set(catId, [...entry.config.mentionPatterns]);
-      }
-    }
-    return patterns;
+    return catRegistryMentionPatterns();
   }
 
   async route(

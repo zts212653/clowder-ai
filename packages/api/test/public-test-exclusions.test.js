@@ -235,7 +235,6 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     'test/harness-eval/eval-capability-tips-enable-gate.test.js',
     'test/harness-eval/measurement-bundle-census.test.js',
     'test/system-prompt-builder.test.js',
-    'test/weixin-mp-path-security.test.js',
   ]) {
     assert.ok(resolved.selectedFiles.includes(file), `${file} should remain a public behavior contract`);
   }

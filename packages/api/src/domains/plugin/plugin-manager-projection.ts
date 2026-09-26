@@ -90,6 +90,8 @@ function contributionKind(contribution: ManifestContribution): PluginManagerCont
       return 'direct-tool';
     case 'message-subscription':
       return 'messaging';
+    case 'desktop-window':
+      return 'ui';
     default:
       return contribution.type;
   }
@@ -220,6 +222,16 @@ function candidateSource(
       kind: provenance.kind,
       packageName: provenance.packageName ?? null,
       trust: 'local-trusted',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
+    };
+  }
+  if (provenance?.kind === 'git') {
+    return {
+      kind: 'git',
+      url: provenance.url,
+      packageName: provenance.packageName ?? null,
+      trust: 'local-trusted',
+      ...(provenance.dependencyClosure === undefined ? {} : { dependencyClosure: provenance.dependencyClosure }),
     };
   }
   return {

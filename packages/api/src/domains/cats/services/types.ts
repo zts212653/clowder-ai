@@ -871,6 +871,8 @@ export interface AgentServiceOptions {
   contentBlocks?: readonly MessageContent[];
   /** Upload directory for resolving image paths */
   uploadDir?: string;
+  /** Host-only verified HMR path resolver; never provided to callback or plugin surfaces. */
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   /** AbortSignal to cancel the invocation */
   signal?: AbortSignal;
   /** Correlation context for audit logging and raw trace linking */

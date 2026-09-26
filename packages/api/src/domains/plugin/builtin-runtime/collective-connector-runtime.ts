@@ -6,7 +6,9 @@ import {
   type VerifiedAgent,
 } from '@cat-cafe/collective-connector';
 
-import type { BuiltinPluginRuntime } from './hybrid-supervisor.js';
+import type { PluginPackageRecord } from '../host-inventory/types.js';
+import { COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST } from '../official-catalog.js';
+import type { BundledPluginRuntime } from './bundled-runtime-carrier.js';
 
 export interface CollectiveConnectorBuiltinRuntimeOptions {
   readonly dataDirectory: string;
@@ -19,7 +21,7 @@ export interface CollectiveConnectorBuiltinRuntimeOptions {
   };
 }
 
-export class CollectiveConnectorBuiltinRuntime implements BuiltinPluginRuntime {
+export class CollectiveConnectorBuiltinRuntime implements BundledPluginRuntime {
   readonly #dataDirectory: string;
   readonly #syncIntervalMs: number;
   #connector: CollectiveConnector | undefined;
@@ -30,6 +32,15 @@ export class CollectiveConnectorBuiltinRuntime implements BuiltinPluginRuntime {
   constructor(private readonly options: CollectiveConnectorBuiltinRuntimeOptions) {
     this.#dataDirectory = resolve(options.dataDirectory);
     this.#syncIntervalMs = options.syncIntervalMs ?? 2_000;
+  }
+
+  /** This runtime implements exactly one bundled package — the one whose manifest the
+   * Host ships. The id lives in that manifest, never in the carrier that selects us. */
+  claims(packageRecord: Pick<PluginPackageRecord, 'manifest'>): boolean {
+    return (
+      packageRecord.manifest.pluginId === COLLECTIVE_CONNECTOR_PLUGIN_MANIFEST.pluginId &&
+      packageRecord.manifest.runtime?.transport === 'builtin'
+    );
   }
 
   async start(pluginInstanceId: string): Promise<void> {

@@ -3,6 +3,7 @@ import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import type { PluginRuntimeErrorCode } from '../host-inventory/types.js';
+import type { PluginRuntimeConfigurationPort } from '../manifest-configuration-projection.js';
 
 export type ExternalPluginRuntimeErrorCode =
   | 'INSTANCE_NOT_RUNNABLE'
@@ -17,6 +18,7 @@ export type ExternalPluginRuntimeErrorCode =
   | 'HEARTBEAT_TIMEOUT'
   | 'HEARTBEAT_REJECTED'
   | 'DELIVERY_REJECTED'
+  | 'CONFIG_UNAVAILABLE'
   | 'PROTOCOL_VIOLATION';
 
 export class ExternalPluginRuntimeError extends Error {
@@ -83,6 +85,12 @@ export interface ExternalPluginRuntimeHandle {
 
 export interface ExternalPluginRuntimeSupervisorOptions {
   readonly inventory: PluginInventoryStore;
+  /**
+   * F202 C1 gap C: reads the instance's stored configuration so manifest-declared fields can be
+   * projected into the child's environment. Absent means no projection — a package then receives
+   * only the protocol variables, which is the pre-C1 behaviour.
+   */
+  readonly configuration?: PluginRuntimeConfigurationPort;
   readonly broker: HostBrokerControlPlane;
   readonly packages: VerifiedPluginPackageLocator;
   readonly processes?: ExternalPluginProcessAdapter;

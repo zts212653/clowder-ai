@@ -49,7 +49,6 @@
 | `writing-skills` | 写新 skill | — |
 | `pencil-design` | 设计 UI / .pen 文件 | — |
 | `rich-messaging` | 发语音/发图/发卡片/富媒体 | — |
-| `enterprise-workflow` | 企微/飞书文档、表格、待办、会议、日程一键创建 | — |
 | `schedule-tasks` | 定时任务/周期提醒/延迟执行 | — |
 | `hyperfocus-brake` | operator健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |

@@ -1082,6 +1082,7 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  readonly resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   readonly messageStore?: import('../../stores/ports/MessageStore.js').IMessageStore;
   readonly collectiveContext?: () =>
     | import('../../../../plugin/builtin-runtime/collective-current-context.js').CollectiveCurrentContext
@@ -3766,6 +3767,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       ...(workingDirectory ? { workingDirectory } : {}),
       ...(params.contentBlocks ? { contentBlocks: params.contentBlocks } : {}),
       ...(params.uploadDir ? { uploadDir: params.uploadDir } : {}),
+      ...(deps.resolveTrustedImagePath ? { resolveTrustedImagePath: deps.resolveTrustedImagePath } : {}),
       ...(signal ? { signal } : {}),
       ...(spawnCliOverride ? { spawnCliOverride } : {}),
       ...(agentCarrierSessionFactory ? { agentCarrierSessionFactory } : {}),

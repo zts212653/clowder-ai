@@ -2276,18 +2276,18 @@ describe('resolveServersForCat', () => {
   it('carries the original capability id as managed-name ownership provenance', () => {
     const config = makeConfig([
       {
-        id: 'plugin:video-gen:protocol-server',
+        id: 'plugin:fixture-media:protocol-server',
         type: 'mcp',
         enabled: true,
         source: 'cat-cafe',
-        pluginId: 'video-gen',
+        pluginId: 'fixture-media',
         mcpServer: { command: 'node', args: ['protocol-server.js'] },
       },
     ]);
 
     const [server] = resolveServersForCat(config, 'opus');
-    assert.equal(server.name, 'plugin__video-gen__protocol-server');
-    assert.equal(server.capabilityId, 'plugin:video-gen:protocol-server');
+    assert.equal(server.name, 'plugin__fixture-media__protocol-server');
+    assert.equal(server.capabilityId, 'plugin:fixture-media:protocol-server');
     assert.equal(
       server.source,
       'plugin',

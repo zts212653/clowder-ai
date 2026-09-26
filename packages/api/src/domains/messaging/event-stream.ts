@@ -35,25 +35,43 @@ import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.j
 import type { PluginCallContext, ReadResult, SnapshotResult, SubscribeResult } from './contract/host-types.js';
 import { MessagingError, SnapshotUnavailableHostError } from './contract/host-types.js';
 import type { HandleService } from './handles.js';
+import type { MediaEntitlementLedger } from './media-entitlements.js';
+import type { OutboundMediaStore } from './outbound-media/store.js';
 import { SnapshotCaptureCoordinator } from './snapshot-capture.js';
 import { assembleSnapshotPage, resultFits } from './snapshot-page-assembly.js';
 import { decodeSnapshotPageToken, encodeSnapshotAckToken, encodeSnapshotPageToken } from './snapshot-tokens.js';
-import type { CursorStore, EventLogStore, SnapshotViewRecord, SubscriptionRecord } from './stores/ports.js';
+import type {
+  CursorStore,
+  EventLogStore,
+  HostPublicationTracker,
+  SnapshotPageLease,
+  SnapshotViewRecord,
+  SubscriptionRecord,
+} from './stores/ports.js';
 
 export const DEFAULT_READ_LIMIT = 32;
 export const MAX_READ_LIMIT = 32;
+export const SNAPSHOT_ACK_TOKEN_TTL_MS = 120_000;
 
 export interface EventStreamDeps {
   readonly events: EventLogStore;
   readonly cursors: CursorStore;
   readonly handles: HandleService;
   readonly messageStore: IMessageStore;
+  /** Host store-write → publish spans shared with the publishing seam (W2-5b-0). */
+  readonly publications?: Pick<HostPublicationTracker, 'isBusy'>;
+  /** Deferred Host media messages (W2-5b), read by the catch-up snapshot. */
+  readonly outboundMedia?: Pick<OutboundMediaStore, 'get'>;
+  readonly mediaEntitlements?: Pick<MediaEntitlementLedger, 'grantMany' | 'revoke'>;
+  readonly snapshotClock?: { now(): number };
+  readonly snapshotAckTokenTtlMs?: number;
 }
 
 interface AckTokenPayload {
   readonly s: string;
   readonly q: number;
   readonly n: string;
+  readonly v?: string;
   readonly k?: 'snapshot';
 }
 
@@ -80,6 +98,12 @@ function decodeAckToken(token: string): AckTokenPayload {
   ) {
     throw new MessagingError('VALIDATION', 'malformed ack token');
   }
+  if (
+    (parsed as Record<string, unknown>).k === 'snapshot' &&
+    typeof (parsed as Record<string, unknown>).v !== 'string'
+  ) {
+    throw new MessagingError('STALE_CURSOR', 'snapshot acknowledgement lease is stale');
+  }
   return parsed as unknown as AckTokenPayload;
 }
 
@@ -105,6 +129,59 @@ export class EventStreamService {
   constructor(deps: EventStreamDeps) {
     this.deps = deps;
     this.snapshots = new SnapshotCaptureCoordinator(deps);
+  }
+
+  private now(): number {
+    return this.deps.snapshotClock?.now() ?? Date.now();
+  }
+
+  private newPageLease(offset: number): SnapshotPageLease {
+    return {
+      sessionId: randomUUID(),
+      pageOffset: offset,
+      expiresAt: this.now() + (this.deps.snapshotAckTokenTtlMs ?? SNAPSHOT_ACK_TOKEN_TTL_MS),
+    };
+  }
+
+  private async grantPage(
+    instanceId: string,
+    lease: SnapshotPageLease,
+    items: M0CSnapshotResult['items'],
+  ): Promise<void> {
+    const media = items.flatMap((item) =>
+      item.payload.elements.flatMap((element) =>
+        element.kind === 'media_ref' && element.payload.reference.startsWith('hmr_')
+          ? [{ elementId: `${item.messageId}:${element.elementId}`, hmrId: element.payload.reference }]
+          : [],
+      ),
+    );
+    if (media.length > 0 && !this.deps.mediaEntitlements) {
+      throw new MessagingError('MEDIA_ACCESS_DENIED', 'Media access denied');
+    }
+    try {
+      if (media.length > 0) {
+        await this.deps.mediaEntitlements?.grantMany(
+          media.map((item) => ({
+            instanceId,
+            scope: { kind: 'snapshot', sessionId: lease.sessionId },
+            elementId: item.elementId,
+            hmrId: item.hmrId,
+            expiresAt: lease.expiresAt,
+          })),
+        );
+      }
+    } catch (error) {
+      await this.deps.mediaEntitlements?.revoke(
+        { scope: { kind: 'snapshot', sessionId: lease.sessionId } },
+        'grant_failed',
+      );
+      throw error;
+    }
+  }
+
+  private async revokePage(lease: SnapshotPageLease | undefined, reason: string): Promise<void> {
+    if (lease)
+      await this.deps.mediaEntitlements?.revoke({ scope: { kind: 'snapshot', sessionId: lease.sessionId } }, reason);
   }
 
   async subscribe(ctx: PluginCallContext, handleId: string): Promise<SubscribeResult> {
@@ -137,6 +214,17 @@ export class EventStreamService {
     return { subscriptionId: winner.subscriptionId };
   }
 
+  /**
+   * Host lifecycle control: end the durable cursor without revoking its stable address.
+   * A later subscribe on the same deterministic handle starts at the then-current head.
+   */
+  async withdraw(ctx: PluginCallContext, handleId: string): Promise<void> {
+    await this.deps.handles.resolveForSubscribe(ctx.pluginInstanceId, handleId);
+    const sub = await this.deps.cursors.findByHandle(ctx.pluginInstanceId, handleId);
+    await this.revokePage(sub?.snapshotView?.activePageLease, 'snapshot_withdrawn');
+    await this.deps.cursors.revokeByHandle(handleId, Date.now());
+  }
+
   /** Common gate: existence (instance-scoped lookup) → liveness. */
   private async requireLiveSubscription(ctx: PluginCallContext, subscriptionId: string): Promise<SubscriptionRecord> {
     const sub = await this.deps.cursors.get(ctx.pluginInstanceId, subscriptionId);
@@ -149,6 +237,17 @@ export class EventStreamService {
     // fan-out, so a dead handle can never retain a readable subscription.
     await this.deps.handles.resolveForSubscribe(ctx.pluginInstanceId, sub.handleId);
     return sub;
+  }
+
+  private async requireCurrentPageLease(
+    ctx: PluginCallContext,
+    subscriptionId: string,
+    lease: SnapshotPageLease,
+  ): Promise<void> {
+    const sub = await this.requireLiveSubscription(ctx, subscriptionId);
+    if (sub.snapshotView?.activePageLease?.sessionId !== lease.sessionId) {
+      throw new MessagingError('STALE_CURSOR', 'snapshot page lease is stale');
+    }
   }
 
   async read(ctx: PluginCallContext, subscriptionId: string, options: { limit?: number }): Promise<ReadResult> {
@@ -187,9 +286,24 @@ export class EventStreamService {
       throw new MessagingError('VALIDATION', 'ack token belongs to a different subscription (INV-5)');
     }
     if (payload.k === 'snapshot') {
-      const outcome = await this.deps.cursors.ackSnapshot(ctx.pluginInstanceId, subscriptionId, payload.n, payload.q);
+      const lease = sub.snapshotView?.activePageLease;
+      if (
+        sub.snapshotView &&
+        (sub.snapshotView.snapshotId !== payload.v || lease?.sessionId !== payload.n || lease.expiresAt <= this.now())
+      ) {
+        throw new MessagingError('STALE_CURSOR', 'snapshot acknowledgement lease is stale');
+      }
+      await this.revokePage(lease, 'snapshot_acked');
+      const outcome = await this.deps.cursors.ackSnapshot(
+        ctx.pluginInstanceId,
+        subscriptionId,
+        payload.v as string,
+        payload.q,
+        payload.n,
+        this.now(),
+      );
       if (outcome === 'rejected') {
-        throw new MessagingError('PERMISSION', 'snapshot ack token is not an active entitlement');
+        throw new MessagingError('STALE_CURSOR', 'snapshot acknowledgement lease is stale');
       }
       return;
     }
@@ -243,7 +357,9 @@ export class EventStreamService {
     if (offset > snapshot.itemCount) throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
     const requestedCount = Math.min(parsed.maxItems, snapshot.itemCount - offset);
     const availableItems = await this.readFrozenPage(ctx, parsed.subscriptionId, snapshot, offset, requestedCount);
-    const assembled = assembleSnapshotPage(parsed.subscriptionId, snapshot, offset, availableItems);
+    const lease = this.newPageLease(offset);
+    const assembled = assembleSnapshotPage(parsed.subscriptionId, snapshot, offset, availableItems, lease.sessionId);
+    await this.revokePage(snapshot.activePageLease, 'snapshot_page_advanced');
     let consumed: boolean;
     try {
       consumed = await this.deps.cursors.consumeSnapshotPage(
@@ -255,12 +371,20 @@ export class EventStreamService {
           offset: assembled.nextOffset,
           ...(assembled.nextPageTokenId === undefined ? {} : { tokenId: assembled.nextPageTokenId }),
           traversalComplete: assembled.traversalComplete,
+          lease,
         },
       );
     } catch {
       throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
     }
     if (!consumed) throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
+    await this.grantPage(ctx.pluginInstanceId, lease, assembled.result.items);
+    try {
+      await this.requireCurrentPageLease(ctx, parsed.subscriptionId, lease);
+    } catch (error) {
+      await this.revokePage(lease, 'snapshot_revoked');
+      throw error;
+    }
     return assembled.result;
   }
 
@@ -274,12 +398,24 @@ export class EventStreamService {
       throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
     }
     const items = await this.readFrozenPage(ctx, subscriptionId, snapshot, offset, snapshot.nextOffset - offset);
+    const priorLease = snapshot.activePageLease;
+    if (!priorLease) throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+    const lease = this.newPageLease(offset);
+    await this.revokePage(priorLease, 'snapshot_replayed');
+    const rotated = await this.deps.cursors.rotateSnapshotPageLease(
+      ctx.pluginInstanceId,
+      subscriptionId,
+      snapshot.snapshotId,
+      priorLease.sessionId,
+      { lease, ...(snapshot.traversalComplete ? {} : { nextPageTokenId: lease.sessionId }) },
+    );
+    if (!rotated) throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
     let result: M0CSnapshotResult;
     if (snapshot.traversalComplete) {
       result = {
         items,
         nextPageToken: null,
-        snapshotAckToken: encodeSnapshotAckToken(subscriptionId, snapshot),
+        snapshotAckToken: encodeSnapshotAckToken(subscriptionId, snapshot, lease.sessionId),
       };
     } else {
       if (snapshot.nextPageTokenId === undefined) {
@@ -291,13 +427,20 @@ export class EventStreamService {
           subscriptionId,
           snapshot.snapshotId,
           snapshot.nextOffset,
-          snapshot.nextPageTokenId,
+          lease.sessionId,
         ),
         snapshotAckToken: null,
       };
     }
     if (!resultFits('messaging.snapshot', result)) {
       throw new SnapshotUnavailableHostError('STORE_UNAVAILABLE');
+    }
+    await this.grantPage(ctx.pluginInstanceId, lease, result.items);
+    try {
+      await this.requireCurrentPageLease(ctx, subscriptionId, lease);
+    } catch (error) {
+      await this.revokePage(lease, 'snapshot_revoked');
+      throw error;
     }
     return result;
   }
@@ -340,6 +483,12 @@ export class EventStreamService {
       }
       if (!sub.snapshotView || sub.snapshotView.snapshotId !== token.v) {
         throw new SnapshotUnavailableHostError('VIEW_EXPIRED');
+      }
+      if (
+        sub.snapshotView.activePageLease?.sessionId !== token.n ||
+        sub.snapshotView.activePageLease.expiresAt <= this.now()
+      ) {
+        throw new MessagingError('STALE_CURSOR', 'snapshot page lease is stale');
       }
       return { snapshot: sub.snapshotView, offset: token.o, pageTokenId: token.n };
     }

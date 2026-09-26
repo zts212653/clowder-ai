@@ -1,5 +1,5 @@
 import type { PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
-import type { Capability } from '@clowder-ai/plugin-contract';
+import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
 import type { OfficialPluginCatalogEntry, OfficialPluginOwnerAuth } from '../official-catalog.js';
 import {
   compareOfficialPluginVersions,
@@ -126,6 +126,14 @@ export interface MachineOfficialPluginCatalogOptions {
   readonly hostPolicies: readonly MachineCatalogHostPolicy[];
   readonly refreshTtlMs?: number;
   readonly now?: () => number;
+}
+
+/** Applies Host-owned authority equally to catalog and owner-selected local bytes. */
+export function resolveLocalPluginEffectiveGrants(
+  hostPolicies: readonly MachineCatalogHostPolicy[],
+  manifest: Pick<PluginManifest, 'pluginId'>,
+): readonly Capability[] {
+  return hostPolicies.find((policy) => policy.pluginId === manifest.pluginId)?.effectiveGrants ?? [];
 }
 
 /**

@@ -6,6 +6,52 @@ export interface ActionApiResult {
   render?: string;
   data?: unknown;
   label?: string;
+  advance?: boolean;
+}
+
+export type ActionRendererTarget =
+  | { readonly kind: 'connector'; readonly id: string }
+  | { readonly kind: 'plugin'; readonly id: string };
+
+function targetBasePath(target: ActionRendererTarget): string {
+  const resource = target.kind === 'connector' ? 'connectors' : 'plugins';
+  return `/api/${resource}/${encodeURIComponent(target.id)}`;
+}
+
+export function actionRequest(
+  target: ActionRendererTarget,
+  operationName: string,
+  actionId: string,
+  pendingValues?: Readonly<Record<string, string>>,
+): { readonly url: string; readonly init: RequestInit } {
+  const url = `${targetBasePath(target)}/actions/${encodeURIComponent(operationName)}/${encodeURIComponent(actionId)}`;
+  if (!pendingValues || Object.keys(pendingValues).length === 0) return { url, init: { method: 'POST' } };
+  const body = target.kind === 'connector' ? { values: pendingValues } : pendingValues;
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
+export function operationResetRequest(
+  target: ActionRendererTarget,
+  operationName: string,
+  currentAction: string,
+): { readonly url: string; readonly init: RequestInit } {
+  const url = `${targetBasePath(target)}/operations/${encodeURIComponent(operationName)}/reset`;
+  if (target.kind === 'plugin') return { url, init: { method: 'POST' } };
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ currentAction }),
+    },
+  };
 }
 
 export function toResultState(r: ActionApiResult): ResultState {

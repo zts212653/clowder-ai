@@ -171,6 +171,16 @@ describe('RedisConnectorThreadBindingStore', { skip: redisIsolationSkipReason(RE
     assert.deepEqual(threads, ['thread-1', 'thread-2']);
   });
 
+  it('listByUser without a limit does not silently truncate plugin bindings', async () => {
+    await Promise.all(
+      Array.from({ length: 25 }, (_, index) =>
+        store.bind('dev.clowder.fixture', `group-${index}`, `thread-${index}`, 'user-1'),
+      ),
+    );
+
+    assert.equal((await store.listByUser('dev.clowder.fixture', 'user-1')).length, 25);
+  });
+
   it('listByUser respects limit', async () => {
     await store.bind('feishu', 'c1', 'thread-1', 'user-1');
     await store.bind('feishu', 'c2', 'thread-2', 'user-1');

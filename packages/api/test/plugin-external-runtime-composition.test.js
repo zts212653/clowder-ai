@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import Fastify from 'fastify';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import {
   createDormantPluginRuntimeComposition,
@@ -11,6 +13,7 @@ import {
   resolvePluginRuntimePersistencePaths,
 } from '../dist/domains/plugin/index.js';
 import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
+import { callbacksRoutes } from '../dist/routes/callbacks.js';
 import {
   completeExternalHandshake,
   EXTERNAL_PACKAGE_DIGEST,
@@ -226,7 +229,7 @@ test('production handshake policy covers verified external source readiness with
   assert.equal(await connection.ready({ bindingNonce: binding.bindingNonce }), null);
   assert.equal(EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS, 4 * 60_000);
   assert.equal(runtime.broker.preActiveTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
-  assert.equal(runtime.supervisor.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
+  assert.equal(runtime.externalRuntime.handshakeTimeoutMs, EXTERNAL_PLUGIN_PRE_ACTIVE_TIMEOUT_MS);
   assert.ok(runtime.messaging, 'composition must expose the single K-1 messaging domain used by Broker routes');
 });
 
@@ -238,7 +241,16 @@ test('production composition constructs and recovers K-2D but exposes no startup
   const managerCompositionIndex = source.indexOf('createPluginManagerRuntimeComposition({');
 
   assert.match(source, /createDormantPluginRuntimeComposition/);
-  assert.match(source, /messageStore,\s*\.\.\.\(redis \? \{ redis \} : \{\}\)/);
+  const compositionSource = source.slice(runtimeCompositionIndex, managerCompositionIndex);
+  for (const seam of [
+    /messageStore,/,
+    /messagingStores,/,
+    /onMessagePublished: subscriptionDrainScheduler\.schedule,/,
+    /taskStore,/,
+    /\.\.\.\(redis \? \{ redis \} : \{\}\)/,
+  ]) {
+    assert.match(compositionSource, seam, 'production must share the publishing stores and subscription drain seam');
+  }
   assert.match(source, /routes: signalRouteStore,\s*ownerId: privateUserId/);
   assert.ok(routeBootstrapIndex >= 0, 'production must provision official Host signal routes');
   assert.ok(
@@ -250,11 +262,9 @@ test('production composition constructs and recovers K-2D but exposes no startup
   const runtimeName = runtimeBinding[1];
   const recoveryIndex = source.indexOf(`await ${runtimeName}.recoverAfterRestart()`);
   assert.match(source, new RegExp(`await ${runtimeName}\\.recoverAfterRestart\\(\\)`));
-  assert.match(source, /new FilesystemBuiltinPluginPackageMaterializer\(\{/);
-  assert.match(source, /builtinContributions:\s*\{/);
   assert.ok(
     managerCompositionIndex >= 0 && managerCompositionIndex < recoveryIndex,
-    'builtin contribution routing must be registered before durable instances resume',
+    'Plugin Manager state projection must be composed before durable instances resume',
   );
   assert.match(source, new RegExp(`await ${runtimeName}\\.shutdown\\('api_shutdown'\\)`));
   assert.match(source, /OfficialPluginHistoryImportService/);
@@ -264,7 +274,43 @@ test('production composition constructs and recovers K-2D but exposes no startup
   assert.match(source, /new MachineOfficialPluginCatalog\(\{/);
   assert.match(source, /validateCatalog: validatePluginCatalog/);
   assert.match(source, /loadMachinePluginCatalog\(OFFICIAL_PLUGIN_CATALOG_URL\)/);
-  assert.match(source, /replacesRepositoryPluginId:\s*'video-analysis'/);
+  assert.match(source, /pluginId:\s*'dev\.clowder\.video-generation'/);
+  assert.match(source, /replacesRepositoryPluginId:\s*'video-gen'/);
+  assert.match(source, /pluginId:\s*'official\.weixin-mp'/);
+  assert.match(source, /replacesRepositoryPluginId:\s*'weixin-mp'/);
+  assert.doesNotMatch(source, /weixinMpHandlers/);
+  assert.doesNotMatch(source, /limbAdapterRegistry/);
+  assert.match(
+    source,
+    /pluginId:\s*'official\.wechat-visible-reader',\s*effectiveGrants:\s*\['plugin\.state\.get', 'plugin\.state\.set'\]/,
+  );
+  assert.match(source, /pluginId:\s*'dev\.clowder\.video-analysis'/);
+  assert.doesNotMatch(source, /replacesRepositoryPluginId:\s*'video-analysis'/);
+  assert.match(source, /pluginId:\s*'official\.enterprise-workflow',\s*effectiveGrants:\s*\['plugin\.config\.read'\]/);
+  for (const pluginId of ['official.connector.wecom-agent', 'official.connector.feishu']) {
+    const policy = source.match(
+      new RegExp(`pluginId:\\s*'${pluginId.replaceAll('.', '\\.')}',\\s*effectiveGrants:\\s*\\[([^\\]]+)\\]`),
+    );
+    assert.ok(policy, `${pluginId} must have a production Host grant policy`);
+    assert.deepEqual(
+      [...policy[1].matchAll(/'([^']+)'/g)].map((match) => match[1]).sort(),
+      [
+        'plugin.config.read',
+        'message.event.subscribe',
+        'messaging.send',
+        'secret.read',
+        'thread.listMetadata',
+        'thread.write',
+      ].sort(),
+      `${pluginId} must receive exactly its declared capability set`,
+    );
+  }
+  const callbackRoutes = readFileSync(new URL('../src/routes/callbacks.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(callbackRoutes, /registerCallback(?:WeCom|Lark)ActionRoutes/);
+  assert.match(
+    source,
+    /localGrantPolicy:\s*\(manifest\)\s*=>\s*resolveLocalPluginEffectiveGrants\(pluginManagerHostPolicies, manifest\)/,
+  );
   const managerCompatibilityIndex = source.indexOf('const repositoryPluginManagerCompatibility =');
   const managerComposition = source.slice(managerCompatibilityIndex, recoveryIndex);
   assert.ok(managerCompatibilityIndex >= 0, 'repository compatibility must be composed after catalog policy exists');
@@ -278,11 +324,34 @@ test('production composition constructs and recovers K-2D but exposes no startup
   assert.match(managerComposition, /pluginRuntime\.inventoryStore\.snapshot\(\)/);
   assert.match(managerComposition, /instance\.lifecycleState === 'installed'/);
   assert.match(source, /registerPluginManagerRoutes\(managerApp/);
-  assert.match(source, /contributions: pluginManagerRuntime\.builtinSupervisor/);
+  assert.match(source, /contributions: pluginRuntime\.supervisor/);
   assert.match(source, /register\(pluginManagerUploadRoutes/);
   assert.match(source, /officialRouteCatalogProvider:\s*officialPluginCatalog/);
   assert.match(source, /installer: pluginManagerRuntime\.officialRouteInstaller/);
   assert.doesNotMatch(source, /new OfficialPluginPackageInstaller\(/);
   assert.match(source, /registerOfficialPluginRoutes\(app/);
   assert.doesNotMatch(source, new RegExp(`${runtimeName}\\.supervisor\\.start\\(`));
+});
+
+test('enterprise actions have no legacy callback route after moving to package tools', async () => {
+  const app = Fastify();
+  try {
+    await app.register(callbacksRoutes, {
+      registry: new InvocationRegistry(),
+      messageStore: new MessageStore(),
+      socketManager: {
+        broadcastAgentMessage() {},
+        getMessages() {
+          return [];
+        },
+      },
+    });
+    for (const provider of ['wecom', 'lark']) {
+      const url = `/api/callbacks/${provider}-action`;
+      assert.equal(app.hasRoute({ method: 'POST', url }), false);
+      assert.equal((await app.inject({ method: 'POST', url, payload: { action: 'create_doc' } })).statusCode, 404);
+    }
+  } finally {
+    await app.close();
+  }
 });

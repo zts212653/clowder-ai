@@ -88,8 +88,23 @@ const localInstallSchema = z
       .strict(),
   })
   .strict();
+const gitInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('git'),
+        url: z
+          .string()
+          .trim()
+          .min(1)
+          .max(4_096)
+          .describe('Absolute https, ssh, git, or file repository URL selected by the user.'),
+      })
+      .strict(),
+  })
+  .strict();
 const pluginInstallRequestSchema = z
-  .union([catalogInstallSchema, localInstallSchema])
+  .union([catalogInstallSchema, localInstallSchema, gitInstallSchema])
   .describe('Closed Host Manager install request. Catalog installs are version/digest fenced.');
 
 export const pluginListInputSchema = {};
@@ -314,7 +329,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_list_tools',
     description:
-      'List callable tool schemas from one currently active Host-supervised plugin. Use when the user asks to use an installed plugin capability and after plugin_get confirms it is enabled/running. NOT for: catalog discovery, lifecycle changes, or guessing a tool schema. Output: active contribution ids, exact dynamic tool names, descriptions, and input schemas; no plugin process or authority is created.',
+      'List plugin-declared direct tool schemas from one currently active plugin. Use when the user asks to use an installed plugin capability and after plugin_get confirms it is enabled/running. NOT for: catalog discovery, lifecycle changes, MCP declarations, or guessing a tool schema. Output: active contribution ids, exact direct tool names, descriptions, and input schemas; no plugin process or authority is created.',
     inputSchema: pluginListToolsInputSchema,
     handler: handlers.listTools,
     governance: {
@@ -333,7 +348,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_call',
     description:
-      "Invoke one exact tool on a currently active Host-supervised plugin contribution. Use only when the user asks to perform that plugin capability after reading its schema with plugin_list_tools. NOT for: install, configuration, lifecycle changes, direct MCP process launch, or guessed arguments. Output/side effect: returns the plugin MCP result and may cause the dynamic tool's declared external effects; Host rechecks live instance and grant authority before every call, and secrets remain inside Host supervision.",
+      'Invoke one exact plugin-declared direct tool on a currently active plugin. Use only when the user asks to perform that plugin capability after reading its schema with plugin_list_tools. NOT for: install, configuration, lifecycle changes, MCP tools, or guessed arguments. Output/side effect: returns the direct tool result and may cause its declared external effects; Host rechecks live instance and grant authority before every call.',
     inputSchema: pluginCallInputSchema,
     handler: handlers.call,
     governance: {
@@ -352,7 +367,7 @@ export const pluginManagementTools = [
   defineTool({
     name: 'plugin_install',
     description:
-      'Install a catalog candidate or local directory/archive through Host package admission and inventory. Use only when the user explicitly asks to install/add that plugin. NOT for: arbitrary npm search, enable, update, repair, or bypassing package verification. Output/side effect: admits an immutable verified package and disabled instance, returning its ids; catalog requests require the exact observed version/digest, and local code is never imported into the API process.',
+      'Install a catalog candidate, git repository, or local directory/archive through Host package admission and inventory. Use only when the user explicitly asks to install/add that plugin. NOT for: arbitrary npm search, enable, update, repair, or bypassing package verification. Output/side effect: admits an immutable verified package and disabled instance, returning its ids; catalog requests require the exact observed version/digest, git clones are bounded and non-interactive, and local code is never imported into the API process.',
     inputSchema: pluginInstallInputSchema,
     handler: handlers.install,
     governance: {

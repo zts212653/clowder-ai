@@ -145,20 +145,36 @@ describe('SendService — happy path (AC-1/AC-2)', () => {
 
   test('non-text elements render as plaintext markers in content', async () => {
     const handleId = await issueHandle();
-    const receipt = await service.send(
-      CTX,
-      draftFor(handleId, {
-        payload: {
-          provenance: { epistemicStatus: 'inference' },
-          elements: [
-            { elementId: 'el-1', kind: 'text', payload: { text: 'caption' } },
-            { elementId: 'el-2', kind: 'media_ref', payload: { url: 'file://x.png' } },
-          ],
-        },
-      }),
-    );
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (...args) => warnings.push(args);
+    let receipt;
+    try {
+      receipt = await service.send(
+        CTX,
+        draftFor(handleId, {
+          payload: {
+            provenance: { epistemicStatus: 'inference' },
+            elements: [
+              { elementId: 'el-1', kind: 'text', payload: { text: 'caption' } },
+              { elementId: 'el-2', kind: 'media_ref', payload: { type: 'image', reference: 'legacy-platform-key' } },
+            ],
+          },
+        }),
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
     const stored = messageStore.getById(receipt.messageId);
-    assert.equal(stored.content, 'caption\n[media_ref:el-2]');
+    assert.equal(stored.content, 'caption\n[media_unavailable:el-2]');
+    assert.deepEqual(stored.extra.pluginMessage.elements[1], {
+      elementId: 'el-2',
+      kind: 'media_unavailable',
+      payload: { type: 'image', reason: 'unavailable' },
+    });
+    assert.equal(warnings.length, 1);
+    assert.equal(JSON.stringify(warnings).includes('legacy-platform-key'), false);
+    assert.equal(JSON.stringify(warnings).includes('el-2'), true);
   });
 });
 

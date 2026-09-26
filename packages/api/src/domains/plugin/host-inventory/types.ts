@@ -7,6 +7,7 @@ export type InstanceLifecycleState = 'installed' | 'retired';
 export type ConfigReadiness = 'incomplete' | 'ready';
 export type ActivationState = 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
 export type RuntimeState = 'stopped' | 'starting' | 'handshaking' | 'healthy' | 'degraded' | 'crashed';
+export type PluginDependencyClosure = 'shipped' | 'materialized';
 export type PluginPackageProvenance =
   | {
       readonly kind: 'catalog';
@@ -15,7 +16,17 @@ export type PluginPackageProvenance =
       /** Immutable admission metadata; absent legacy records fail closed while discovery is offline. */
       readonly ownerAuthRequired?: boolean;
     }
-  | { readonly kind: 'local-directory' | 'local-archive'; readonly packageName?: string };
+  | {
+      readonly kind: 'local-directory' | 'local-archive';
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    }
+  | {
+      readonly kind: 'git';
+      readonly url: string;
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    };
 export type PluginRuntimeErrorCode =
   | 'AUTH_EXPIRED'
   | 'EVENT_BUS_CONFLICT'

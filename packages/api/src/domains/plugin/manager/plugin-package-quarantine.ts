@@ -39,7 +39,8 @@ export type PluginPackageQuarantineSource =
       readonly catalogId: string;
       readonly packageName: string;
     }
-  | { readonly kind: 'local-directory' | 'local-archive' };
+  | { readonly kind: 'local-directory' | 'local-archive' }
+  | { readonly kind: 'git'; readonly url: string };
 
 export interface PluginPackageQuarantineRecord {
   readonly pluginId: string;
@@ -139,6 +140,7 @@ function parseSource(value: unknown): PluginPackageQuarantineSource {
     return { kind: 'catalog', catalogId: raw.catalogId, packageName: raw.packageName };
   }
   if (raw.kind === 'local-directory' || raw.kind === 'local-archive') return { kind: raw.kind };
+  if (raw.kind === 'git' && validBoundedString(raw.url, 4_096)) return { kind: 'git', url: raw.url };
   throw new PluginPackageQuarantineStoreError('CORRUPT_SNAPSHOT', 'quarantine source kind is invalid');
 }
 
@@ -362,7 +364,9 @@ function managerSource(source: PluginPackageQuarantineSource): PluginManagerPack
         packageName: source.packageName,
         trust: 'official',
       }
-    : { kind: source.kind, packageName: null, trust: 'local-trusted' };
+    : source.kind === 'git'
+      ? { kind: 'git', url: source.url, packageName: null, trust: 'local-trusted' }
+      : { kind: source.kind, packageName: null, trust: 'local-trusted' };
 }
 
 function managerDetail(record: PluginPackageQuarantineRecord): PluginManagerDetail {

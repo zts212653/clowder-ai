@@ -130,6 +130,7 @@ type CallbackFinalReplacementMetadataInput = {
   visibleTurnInvocationId?: string;
   persistedInvocationId?: string;
   turnTriggerMessageId?: string;
+  turnTriggerThreadId?: string;
   tracing?: NonNullable<StreamMetadataAugmentInput['extra']>['tracing'];
   executionProjections: NonNullable<StreamMetadataAugmentInput['extra']>;
 };
@@ -144,6 +145,7 @@ export function buildCallbackFinalReplacementMetadataPatch({
   visibleTurnInvocationId,
   persistedInvocationId,
   turnTriggerMessageId,
+  turnTriggerThreadId,
   tracing,
   executionProjections,
 }: CallbackFinalReplacementMetadataInput): StreamMetadataAugmentInput {
@@ -163,7 +165,11 @@ export function buildCallbackFinalReplacementMetadataPatch({
     };
   }
   if (turnTriggerMessageId) {
-    extra.causal = { kind: 'invocation_reply', triggerMessageId: turnTriggerMessageId };
+    extra.causal = {
+      kind: 'invocation_reply',
+      triggerMessageId: turnTriggerMessageId,
+      ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+    };
   }
   if (tracing) extra.tracing = tracing;
   if (Object.keys(extra).length > 0) patch.extra = extra;

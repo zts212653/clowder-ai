@@ -95,7 +95,12 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
   const raw = object(value, label);
   const kind = enumValue(
     raw.kind,
-    new Set<'catalog' | 'local-directory' | 'local-archive'>(['catalog', 'local-directory', 'local-archive']),
+    new Set<'catalog' | 'local-directory' | 'local-archive' | 'git'>([
+      'catalog',
+      'local-directory',
+      'local-archive',
+      'git',
+    ]),
     `${label}.kind`,
   );
   if (kind === 'catalog') {
@@ -108,9 +113,34 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
     };
   }
+  if (kind === 'git') {
+    return {
+      kind,
+      url: string(raw.url, `${label}.url`),
+      ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
+    };
+  }
   return {
     kind,
     ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+    ...(raw.dependencyClosure === undefined
+      ? {}
+      : {
+          dependencyClosure: enumValue(
+            raw.dependencyClosure,
+            new Set(['shipped', 'materialized'] as const),
+            `${label}.dependencyClosure`,
+          ),
+        }),
   };
 }
 

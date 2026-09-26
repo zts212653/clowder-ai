@@ -27,6 +27,14 @@ function failureDiagnostic(error: unknown) {
   return isCloudBridgeFailureDiagnosticV1(error.diagnostic) ? error.diagnostic : undefined;
 }
 
+/**
+ * Host rejections that mean the thread's route cannot be used until the owner binds it again: no
+ * conversation is authorized at all, or the routed one is no longer in the package's authorization
+ * list (the owner revoked it). Both are answered with needs-binding — the recovery card that lets the
+ * owner pick an authorized conversation — never with an append failure (F202 W2-3 h4).
+ */
+const NEEDS_BINDING_CODES: ReadonlySet<unknown> = new Set(['NEEDS_BINDING', 'BOUND_CONVERSATION_MISMATCH']);
+
 export async function dispatchBoundConversationThroughHost(args: {
   readonly adapter: IConversationHostAdapter | null | undefined;
   readonly boundUrl: string | null;
@@ -66,7 +74,7 @@ export async function dispatchBoundConversationThroughHost(args: {
       typeof error === 'object' &&
       error !== null &&
       'code' in error &&
-      (error as { code?: unknown }).code === 'NEEDS_BINDING'
+      NEEDS_BINDING_CODES.has((error as { code?: unknown }).code)
     ) {
       const detail = `Host append_message requires a current authorized thread binding: ${shortMessage(error)}`;
       return {

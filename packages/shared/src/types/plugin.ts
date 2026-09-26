@@ -155,6 +155,14 @@ export type PluginManagerPackageSource =
       kind: 'local-directory' | 'local-archive';
       packageName: string | null;
       trust: 'local-trusted';
+      dependencyClosure?: 'shipped' | 'materialized';
+    }
+  | {
+      kind: 'git';
+      url: string;
+      packageName: string | null;
+      trust: 'local-trusted';
+      dependencyClosure?: 'shipped' | 'materialized';
     }
   | {
       kind: 'bundled';
@@ -195,7 +203,8 @@ export type PluginManagerCapabilityKind =
   | 'connector'
   | 'service'
   | 'ui'
-  | 'content-editor-provider';
+  | 'content-editor-provider'
+  | 'media-source';
 
 export interface PluginManagerCapability {
   id: string;
@@ -241,7 +250,15 @@ export interface PluginManagerActions {
   blockingReasons: string[];
 }
 
-export type PluginManagerConfigFieldKind = 'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list';
+export type PluginManagerConfigFieldKind =
+  | 'string'
+  | 'secret'
+  | 'select'
+  | 'boolean'
+  | 'number'
+  | 'url'
+  | 'list'
+  | 'operation';
 
 export interface PluginManagerConfigOption {
   value: string;
@@ -257,11 +274,36 @@ export interface PluginManagerConfigField {
   description?: string;
   kind: PluginManagerConfigFieldKind;
   required: boolean;
+  hidden?: boolean;
+  requiredWhen?: {
+    key: string;
+    value: string | number | boolean | readonly (string | number | boolean)[];
+  };
+  /** Server-evaluated condition for a masked secret selector whose value cannot be projected. */
+  requiredNow?: boolean;
   default?: string | number | boolean | string[];
   options?: PluginManagerConfigOption[];
   /** Secret fields expose only the fixed mask or null, never the stored value. */
   currentValue: string | null;
   sensitive: boolean;
+  /** Operation-only projection. Callback method names stay Host-private. */
+  target?: string[];
+  /** True when all declared operation target fields have effective values; absent without targets. */
+  configured?: boolean;
+  actions?: Array<{
+    id: string;
+    label: string;
+    render: 'button' | 'polling' | 'status';
+    resultRender?: string;
+    next?: string;
+    rollback?: string;
+    timeout?: number;
+  }>;
+  operationState?: {
+    currentAction: string;
+    lastResult?: { render: string; data: unknown; label?: string };
+    updatedAt?: number;
+  };
 }
 
 /** Compact list/search projection. All lifecycle axes remain independent. */
@@ -294,6 +336,9 @@ export interface PluginManagerDetail extends PluginManagerListItem {
   contributions?: PluginManagerContribution[];
   docsUrl?: string;
   setupSteps?: string[];
+  /** Package-contract setup guidance. Kept distinct from legacy repository setupSteps. */
+  steps?: string[];
+  testable?: boolean;
   configFields: PluginManagerConfigField[];
 }
 
@@ -326,6 +371,9 @@ export type PluginManagerInstallRequest =
     }
   | {
       source: { kind: 'local-directory' | 'local-archive'; path: string };
+    }
+  | {
+      source: { kind: 'git'; url: string };
     };
 
 export interface PluginManagerSetEnabledRequest {

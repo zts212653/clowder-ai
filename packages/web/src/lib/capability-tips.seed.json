@@ -1436,7 +1436,7 @@
     "bodySource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
     "contexts": ["feature_dev"],
     "audience": ["cvo", "developer"],
-    "body": "视频插件已就绪：设置 → 插件 → video-gen / video-analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
+    "body": "视频插件已就绪：设置 → 插件 → Video Generation / Video Analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
     "action": {
       "type": "open_source",
       "label": "打开 F205 spec",
@@ -1452,7 +1452,7 @@
     "bodySource": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "User Journey" },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
-    "body": "微信公众号插件已就绪：设置 → 插件 → weixin-mp → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
+    "body": "微信公众号插件已就绪：设置 → 插件 → WeChat Official Account → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
     "action": { "type": "open_concierge_draft", "label": "了解更多" },
     "owner": "opus"
   },
@@ -1493,6 +1493,31 @@
     "action": {
       "type": "open_capability_surface",
       "label": "打开飞书会议设置",
+      "surfaceId": "settings.plugins"
+    },
+    "owner": "codex-sol"
+  },
+  {
+    "id": "feature-f202-git-plugin-install",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/plans/2026-09-21-f202-c1-contract.md",
+      "anchor": "S6a"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/settings/plugin-manager/PluginGitInstallButton.tsx",
+      "anchor": "PluginGitInstallButton"
+    },
+    "bodySource": {
+      "path": "docs/plans/2026-09-21-f202-c1-contract.md",
+      "anchor": "git 地址安装"
+    },
+    "contexts": ["feature_dev", "concierge_open"],
+    "audience": ["cvo", "developer"],
+    "body": "源码插件没有 npm 包时，到设置 → 插件管理选择“从 Git 安装”，粘贴只读仓库地址；Host 会浅克隆并沿用本地包的完整校验与准入流程。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "打开插件管理",
       "surfaceId": "settings.plugins"
     },
     "owner": "codex-sol"

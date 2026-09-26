@@ -267,6 +267,8 @@ export interface Thread {
   systemKind?: ThreadSystemKind;
   /** F088 Phase G: Connector Hub thread state — marks this thread as an IM Hub for command isolation. */
   connectorHubState?: ConnectorHubStateV1;
+  /** F202 C1: Carrier-neutral plugin ownership for threads created on behalf of one plugin instance. */
+  pluginOwnership?: ThreadPluginOwnershipV1;
   /** F211 Phase B: Hidden per-user runtime anchor for orphan external runtime sessions. */
   externalRuntimeAnchorState?: ExternalRuntimeAnchorStateV1;
   /** F168: Auto-switch workspace panel when this thread is opened. */
@@ -357,6 +359,24 @@ export interface ConnectorHubStateV1 {
   createdAt: number;
   /** G+ audit: timestamp of the most recent command exchange routed through this hub. */
   lastCommandAt?: number;
+}
+
+/** F202 C1: Durable, provider-neutral ownership of one thread by one installed plugin instance. */
+export interface ThreadPluginOwnershipV1 {
+  v: 1;
+  pluginInstanceId: string;
+}
+
+export function isThreadPluginOwnershipV1(value: unknown): value is ThreadPluginOwnershipV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Object.keys(candidate).length === 2 &&
+    candidate.v === 1 &&
+    typeof candidate.pluginInstanceId === 'string' &&
+    candidate.pluginInstanceId.length > 0 &&
+    candidate.pluginInstanceId.trim() === candidate.pluginInstanceId
+  );
 }
 
 /** F087: Bootcamp phase for operator onboarding (F171 v2 flow) */
@@ -777,6 +797,8 @@ export interface IThreadStore {
   updateSystemKind(threadId: string, kind: ThreadSystemKind | null): void | Promise<void>;
   /** F088 Phase G: Get/update connector hub state. */
   updateConnectorHubState(threadId: string, state: ConnectorHubStateV1 | null): void | Promise<void>;
+  /** F202 C1: Set or clear the plugin instance that owns this thread. */
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void | Promise<void>;
   updatePreferredWorkspaceMode(
     threadId: string,
     mode:
@@ -1349,6 +1371,19 @@ export class ThreadStore implements IThreadStore {
       delete thread.connectorHubState;
     } else {
       thread.connectorHubState = state;
+    }
+  }
+
+  updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): void {
+    if (ownership !== null && !isThreadPluginOwnershipV1(ownership)) {
+      throw new TypeError('invalid plugin thread ownership');
+    }
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (ownership === null) {
+      delete thread.pluginOwnership;
+    } else {
+      thread.pluginOwnership = ownership;
     }
   }
 

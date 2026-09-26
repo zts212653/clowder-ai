@@ -9,14 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
-  type CatConfig,
-  type CatId,
-  CORE_COMMANDS,
-  catRegistry,
-  type EventMemoryRecord,
-  type ILimbNode,
-} from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, type EventMemoryRecord } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -233,6 +226,15 @@ import { RedisWriteOpportunityTerminalLedger } from './domains/memory/people/Red
 import { EvidenceStoreWorkspacePersonResolver } from './domains/memory/people/WorkspacePersonResolver.js';
 import { refreshCanonicalProfileIndex } from './domains/memory/private-collection-bindings.js';
 import { RedisDeferredPersonMemoryReceiptStore } from './domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
+import {
+  createHostMediaPathResolver,
+  hostMediaPathRootsFromEnv,
+} from './domains/messaging/outbound-media/host-media-paths.js';
+import { OutboundMediaPublication } from './domains/messaging/outbound-media/publication.js';
+import { createListenAssetSpeech } from './domains/messaging/outbound-media/speech.js';
+import { createPublishingMessageStore } from './domains/messaging/publishing-message-store.js';
+import { createMessagingStores } from './domains/messaging/stores/factory.js';
+import { SubscriptionDrainScheduler } from './domains/messaging/subscription-drain-scheduler.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
@@ -289,6 +291,7 @@ import {
 import { restartConnectorGateway } from './infrastructure/connectors/connector-gateway-lifecycle.js';
 import { createConnectorReloadSubscriber } from './infrastructure/connectors/connector-reload-subscriber.js';
 import type { RepoIssueComment } from './infrastructure/connectors/github-repo-event/RepoCommentPollTaskSpec.js';
+import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-parser.js';
 import { IssueCommentRouter } from './infrastructure/email/IssueCommentRouter.js';
 import {
   CiCdRouter,
@@ -488,6 +491,7 @@ import {
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
+import { mediaRoutes } from './routes/media-routes.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { previewRoutes } from './routes/preview.js';
 import { resolveActiveInvocations } from './routes/queue.js';
@@ -832,10 +836,28 @@ async function main(): Promise<void> {
     | ReturnType<typeof import('./domains/growing/CustodyOpportunityRuntime.js').startCustodyOpportunityObservation>
     | undefined;
 
-  const messageStore = createMessageStore(redis, {
+  const rawMessageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
       custodyOpportunityObservation?.notifySourceChanged(msg);
+    },
+  });
+  const messagingStores = createMessagingStores(redis);
+  const subscriptionDrainScheduler = new SubscriptionDrainScheduler((error, threadId) => {
+    app.log.error({ error, threadId }, '[messaging] subscriber delivery drain failed');
+  });
+  // W2-5b: bound once the media ledger and TTS exist (below); until then media blocks publish as before.
+  let outboundMediaPublication: OutboundMediaPublication | undefined;
+  const messageStore = createPublishingMessageStore(rawMessageStore, {
+    events: messagingStores.events,
+    publications: messagingStores.publications,
+    outboundMedia: () => outboundMediaPublication,
+    onPublished: subscriptionDrainScheduler.schedule,
+    onPublishFailure: (error, stored) => {
+      app.log.error(
+        { error, messageId: stored.id, threadId: stored.threadId },
+        '[messaging] publish failed; subscribers will not see this message',
+      );
     },
   });
   const runtimeInteractionRuntime = await createRuntimeInteractionRuntime({
@@ -2496,7 +2518,9 @@ async function main(): Promise<void> {
   let collectiveContext:
     | import('./domains/plugin/builtin-runtime/collective-current-context.js').CollectiveCurrentContext
     | undefined;
+  let trustedImagePathResolver: (hmrId: string) => Promise<string | undefined> = async () => undefined;
   router = new AgentRouter({
+    resolveTrustedImagePath: async (hmrId) => trustedImagePathResolver(hmrId),
     collectiveContext: () => collectiveContext,
     agentRegistry,
     registry,
@@ -4362,25 +4386,20 @@ async function main(): Promise<void> {
   };
 
   let loadRepositoryPluginInfo: (() => Promise<readonly import('@cat-cafe/shared').PluginInfo[]>) | undefined;
+  let runInstalledPluginTest:
+    | ((
+        pluginId: string,
+      ) => Promise<import('./domains/plugin/operations/plugin-operation-routes.js').InstalledPluginOperationResult>)
+    | undefined;
 
   // F202: Plugin framework — discovery + config + resource activation
   {
     const { join } = await import('node:path');
     const { PluginRegistry } = await import('./domains/plugin/PluginRegistry.js');
-    const { PluginResourceActivator, rehydrateEnabledPluginLimbs, rehydrateEnabledPluginSchedules } = await import(
+    const { PluginResourceActivator, rehydrateEnabledPluginSchedules } = await import(
       './domains/plugin/PluginResourceActivator.js'
     );
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
-    const { PluginLimbAdapter } = await import('./domains/limb/PluginLimbAdapter.js');
-    const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
-    const { weixinMpHandlers } = await import('./plugins/weixin-mp/index.js');
-    const {
-      WeChatVisibleReaderArmStore,
-      WeChatVisibleReaderMetrics,
-      createWeChatVisibleReaderNativeRunner,
-      registerWeChatVisibleReaderArmRoutes,
-      registerWeChatVisibleReaderLimbFactory,
-    } = await import('./plugins/wechat-visible-reader/index.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
@@ -4409,14 +4428,6 @@ async function main(): Promise<void> {
       const githubManifest = pluginRegistry.getManifest('github');
       return githubManifest ? resolvePluginEnv([githubManifest]) : {};
     };
-    const limbAdapterRegistry = new Map<
-      string,
-      (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>
-    >();
-    const weChatVisibleReaderArmStore = new WeChatVisibleReaderArmStore();
-    const weChatVisibleReaderMetrics = new WeChatVisibleReaderMetrics();
-    const weChatVisibleReaderRunner = createWeChatVisibleReaderNativeRunner();
-
     // F202 Phase 2: Schedule factory registry + GitHub factories
     const scheduleFactoryRegistry = new ScheduleFactoryRegistry();
     const { registerGitHubScheduleFactories } = await import('./domains/plugin/github-schedule-factories.js');
@@ -4424,16 +4435,6 @@ async function main(): Promise<void> {
 
     // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
-
-    limbAdapterRegistry.set('weixin-mp', async (yamlPath, pluginConfig) => {
-      const declaration = loadLimbDeclaration(yamlPath);
-      return new PluginLimbAdapter({ declaration, pluginConfig, redis, handlers: weixinMpHandlers });
-    });
-    registerWeChatVisibleReaderLimbFactory(limbAdapterRegistry, {
-      armStore: weChatVisibleReaderArmStore,
-      metrics: weChatVisibleReaderMetrics,
-      runner: weChatVisibleReaderRunner,
-    });
 
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
@@ -4449,16 +4450,6 @@ async function main(): Promise<void> {
         await generateCliConfigs(config, paths, projectRoot);
       },
       withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
-      limbAdapterFactory: async (pluginId, limbYamlPath, pluginConfig) => {
-        const factory = limbAdapterRegistry.get(pluginId);
-        if (!factory) {
-          throw new Error(
-            `No platform-specific limb adapter registered for plugin '${pluginId}'. ` +
-              `Limb resources require a concrete adapter (see Phase 2 for examples).`,
-          );
-        }
-        return factory(limbYamlPath, pluginConfig);
-      },
       // F202 Phase 2: schedule resource activation deps
       scheduleFactoryRegistry,
       taskRunner: {
@@ -4468,16 +4459,6 @@ async function main(): Promise<void> {
       // F202-2B: Mutable deps ref — populated via rehydrateGitHubSchedules after GitHub services created
       scheduleFactoryDeps:
         scheduleFactoryDeps as import('./domains/plugin/ScheduleFactoryRegistry.js').ScheduleFactoryDeps,
-    });
-
-    const startupCaps = await readCapabilitiesConfig(resolveActiveProjectRoot());
-    await rehydrateEnabledPluginLimbs({
-      capabilities: startupCaps,
-      pluginRegistry,
-      pluginsDir,
-      limbAdapterRegistry,
-      limbRegistry,
-      log: app.log,
     });
 
     // F202-2B: Schedule rehydration deferred — GitHub factories need deps created later.
@@ -4589,29 +4570,15 @@ async function main(): Promise<void> {
       });
     };
 
-    const isWeChatVisibleReaderEnabled = async (): Promise<boolean> => {
-      if (process.platform !== 'darwin') return false;
-      const capabilities = await readCapabilitiesConfig(resolveActiveProjectRoot());
-      return Boolean(
-        capabilities?.capabilities.some(
-          (capability) =>
-            capability.type === 'limb' && capability.pluginId === 'wechat-visible-reader' && capability.enabled,
-        ),
-      );
-    };
-    registerWeChatVisibleReaderArmRoutes(app, {
-      armStore: weChatVisibleReaderArmStore,
-      metrics: weChatVisibleReaderMetrics,
-      isPluginEnabled: isWeChatVisibleReaderEnabled,
-    });
     registerPluginRoutes(app, {
       pluginRegistry,
       pluginActivator,
       limbRegistry,
       pluginsDir,
-      beforePluginDisable: (pluginId) => {
-        if (pluginId === 'wechat-visible-reader') weChatVisibleReaderArmStore.disarm();
-      },
+      runInstalledTest: async (pluginId) =>
+        runInstalledPluginTest
+          ? runInstalledPluginTest(pluginId)
+          : { matched: false, status: 404, body: { error: `Plugin '${pluginId}' is not installed` } },
     });
   }
   // F174 D2b-1 — single notifier instance shared between callback auth preHandler
@@ -4711,6 +4678,14 @@ async function main(): Promise<void> {
     auditLog: getEventAuditLog(),
   });
   const callbackOpts = {
+    resolveTrustedImagePath: async (hmrId: string) => {
+      try {
+        return await trustedImagePathResolver(hmrId);
+      } catch {
+        // A damaged private blob cannot become a path hint or fail the whole context read.
+        return undefined;
+      }
+    },
     registry,
     agentKeyRegistry,
     cloudReturnBindingSigner,
@@ -4985,6 +4960,17 @@ async function main(): Promise<void> {
     `[api] official plugin Host routes ready ` +
       `(created=${officialSignalRouteBootstrap.created}, preserved=${officialSignalRouteBootstrap.preserved})`,
   );
+  // Shared generic binding index: plugin thread lookup, thread cats and the legacy connector path
+  // must observe one truth while the legacy path still exists during cutover.
+  const { RedisConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
+  );
+  const { MemoryConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/ConnectorThreadBindingStore.js'
+  );
+  const connectorBindingStore = redisClient
+    ? new RedisConnectorThreadBindingStore(redisClient)
+    : new MemoryConnectorThreadBindingStore();
   const { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition } = await import(
     './domains/plugin/runtime-composition.js'
   );
@@ -5004,6 +4990,33 @@ async function main(): Promise<void> {
   const { resolveCollectiveStandingGrant } = await import(
     './domains/plugin/builtin-runtime/collective-standing-grant.js'
   );
+  const { buildDeliveryPresentation } = await import('./domains/messaging/lifecycle-delivery.js');
+  const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
+  const deliveryThreadMeta = async (threadId: string) => {
+    const thread = await threadStore.get(threadId);
+    if (!thread) return undefined;
+    return {
+      threadShortId: threadId.slice(0, 15),
+      ...(thread.title == null ? {} : { threadTitle: thread.title }),
+      deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
+    };
+  };
+  const deliveryPresentation = async (
+    threadId: string,
+    actor: { kind: 'cat' | 'user' | 'plugin' | 'device' | 'system'; id: string },
+  ) =>
+    buildDeliveryPresentation(
+      threadId,
+      {
+        ...actor,
+        ...(actor.kind === 'cat'
+          ? { displayName: catRegistry.tryGet(actor.id as CatId)?.config.displayName ?? actor.id }
+          : actor.kind === 'user'
+            ? { displayName: getCoCreatorConfig().name }
+            : {}),
+      },
+      await deliveryThreadMeta(threadId),
+    );
   const collectiveWorkAuthority = new CollectiveWorkAuthority({
     messageStore,
     taskStore,
@@ -5019,11 +5032,43 @@ async function main(): Promise<void> {
   });
   const pluginRuntime = createDormantPluginRuntimeComposition({
     projectRoot: pluginProjectRoot,
-    editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
+    limbRegistry,
+    taskRunner: {
+      registerPostStart: (task) => taskRunnerV2.registerPostStart(task),
+      unregister: (taskId) => taskRunnerV2.unregister(taskId),
+    },
+    editorParentOrigin: new URL(frontendBaseUrl).origin,
     routes: signalRouteStore,
     intakes: meetingIntakeStore,
     messageStore,
+    lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
+    // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
+    lifecycleTriggerMessageId: async (invocationId) => {
+      const record = await registry.getRecord(invocationId);
+      return record?.originTriggerMessageId ?? record?.a2aTriggerMessageId;
+    },
+    deliveryPresentation,
+    messagingStores,
+    onMessagePublished: subscriptionDrainScheduler.schedule,
+    taskStore,
     ...(redis ? { redis } : {}),
+    // F202 C1 gap B: the Host collaborators an authenticated connector ingress needs, in the
+    // process that actually ships. `invokeTrigger` is constructed further down this file, so it
+    // is resolved late through the same holder the eval-hub manual trigger route uses — the
+    // composition only ever calls it while serving a request, never during construction.
+    invokeTrigger: {
+      async trigger(threadId, catId, userId, message, messageId) {
+        const trigger = invokeTriggerHolder.get();
+        if (!trigger) throw new Error('connector invoke trigger is not wired yet');
+        return trigger.trigger(threadId, catId, userId, message, messageId);
+      },
+    },
+    socketManager: { broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data) },
+    threadStore,
+    threadBindingStore: connectorBindingStore,
+    threadOwnerUserId: privateUserId,
+    getDefaultCatId,
+    getMentionPatterns: catRegistryMentionPatterns,
     collectiveConnector: {
       verifyAgent: createCollectiveAgentVerifier({
         resolveCatDisplayName: (catId) => resolveCollectiveAgentIdentity(catId)?.displayName,
@@ -5051,6 +5096,9 @@ async function main(): Promise<void> {
         }),
     },
   });
+  trustedImagePathResolver = (hmrId) => pluginRuntime.mediaLedger.resolveTrustedBlobPath(hmrId);
+  await app.register(mediaRoutes, { ledger: pluginRuntime.mediaLedger, ownerUserId: privateUserId });
+  subscriptionDrainScheduler.attach(pluginRuntime.subscriptionDelivery);
   const { CollectiveCurrentContext } = await import('./domains/plugin/builtin-runtime/collective-current-context.js');
   collectiveContext = new CollectiveCurrentContext({
     connector: () => pluginRuntime.collectiveConnectorRuntime?.connector(),
@@ -5081,12 +5129,52 @@ async function main(): Promise<void> {
     MachineOfficialPluginCatalog,
     OFFICIAL_PLUGIN_CATALOG_URL,
     loadMachinePluginCatalog,
+    resolveLocalPluginEffectiveGrants,
     resolveRepositoryReplacementPluginIds,
   } = await import('./domains/plugin/manager/machine-catalog-provider.js');
   const pluginManagerHostPolicies = [
     {
+      pluginId: 'official.connector.wecom-agent',
+      effectiveGrants: [
+        'plugin.config.read',
+        'message.event.subscribe',
+        'messaging.send',
+        'secret.read',
+        'thread.listMetadata',
+        'thread.write',
+      ] as const,
+    },
+    {
+      pluginId: 'official.connector.feishu',
+      effectiveGrants: [
+        'plugin.config.read',
+        'message.event.subscribe',
+        'messaging.send',
+        'secret.read',
+        'thread.listMetadata',
+        'thread.write',
+      ] as const,
+    },
+    {
+      pluginId: 'official.wechat-visible-reader',
+      effectiveGrants: ['plugin.state.get', 'plugin.state.set'] as const,
+    },
+    {
+      pluginId: 'official.enterprise-workflow',
+      effectiveGrants: ['plugin.config.read'] as const,
+    },
+    {
+      pluginId: 'official.weixin-mp',
+      replacesRepositoryPluginId: 'weixin-mp',
+      effectiveGrants: ['plugin.config.read', 'secret.read'] as const,
+    },
+    {
+      pluginId: 'dev.clowder.video-generation',
+      replacesRepositoryPluginId: 'video-gen',
+      effectiveGrants: ['plugin.config.read', 'secret.read'] as const,
+    },
+    {
       pluginId: 'dev.clowder.video-analysis',
-      replacesRepositoryPluginId: 'video-analysis',
       effectiveGrants: ['plugin.config.read', 'secret.read'] as const,
     },
   ];
@@ -5095,15 +5183,6 @@ async function main(): Promise<void> {
     validateCatalog: validatePluginCatalog,
     hostPolicies: pluginManagerHostPolicies,
   });
-  const { FilesystemBuiltinPluginPackageMaterializer } = await import(
-    './domains/plugin/manager/builtin-package-materializer.js'
-  );
-  const { readPluginConfig } = await import('./domains/plugin/plugin-config-store.js');
-  const readBuiltinPluginValue = async (pluginInstanceId: string, key: string) => {
-    const snapshot = await pluginRuntime.inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    return instance ? readPluginConfig(pluginProjectRoot, instance.pluginId)[key] : undefined;
-  };
   if (loadRepositoryPluginInfo === undefined) {
     throw new Error('Repository plugin discovery must be ready before Plugin Manager composition');
   }
@@ -5134,16 +5213,18 @@ async function main(): Promise<void> {
     catalogManifests: [],
     compatibility: repositoryPluginManagerCompatibility,
     auth: officialPluginAuth,
-    builtinContributions: {
-      materializer: new FilesystemBuiltinPluginPackageMaterializer({
-        packagesRoot: pluginRuntime.paths.packagesRoot,
-      }),
-      configuration: {
-        readConfig: readBuiltinPluginValue,
-        readSecret: readBuiltinPluginValue,
-      },
-    },
+    localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(pluginManagerHostPolicies, manifest),
   });
+  const { InstalledPluginOperations, pluginOperationRoutes } = await import(
+    './domains/plugin/operations/plugin-operation-routes.js'
+  );
+  const installedPluginOperations = new InstalledPluginOperations({
+    inventory: pluginRuntime.inventoryStore,
+    configuration: pluginManagerRuntime.configuration,
+    invocation: pluginRuntime.supervisor,
+  });
+  runInstalledPluginTest = (pluginId) => installedPluginOperations.runTest(pluginId);
+  await app.register(pluginOperationRoutes, { operations: installedPluginOperations });
   const externalPluginRecovery = await pluginRuntime.recoverAfterRestart();
   app.log.info(
     `[api] K-2 plugin runtime recovered ` +
@@ -5155,9 +5236,7 @@ async function main(): Promise<void> {
   await app.register(async (managerApp) => {
     registerPluginManagerRoutes(managerApp, {
       manager: pluginManagerRuntime.manager,
-      ...(pluginManagerRuntime.builtinSupervisor === undefined
-        ? {}
-        : { contributions: pluginManagerRuntime.builtinSupervisor }),
+      contributions: pluginRuntime.supervisor,
       asset: pluginManagerRuntime.assets,
       documentation: pluginManagerRuntime.assets,
       callbackRegistry: registry,
@@ -5261,6 +5340,8 @@ async function main(): Promise<void> {
   registerPersonalChromePluginRoutes(app, {
     port: personalChromeInstallModule.createPersonalChromePluginPort({ projectRoot: resolveActiveProjectRoot() }),
   });
+  const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -5701,16 +5782,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
-  const { RedisConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
-  );
-  const { MemoryConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/ConnectorThreadBindingStore.js'
-  );
-  const connectorBindingStore = redisClient
-    ? new RedisConnectorThreadBindingStore(redisClient)
-    : new MemoryConnectorThreadBindingStore();
+  // F142: the shared binding store above is reused by threadCatsRoutes AND connector gateway.
   {
     const allCatConfigs = catRegistry.getAllConfigs();
     await app.register(threadCatsRoutes, {
@@ -6526,6 +6598,27 @@ async function main(): Promise<void> {
   await documentListenRepository.initialize();
   await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, documentListenRepository });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
+  // F202 W2-5b: Host messages carrying audio / file / gallery blocks reach the plugin stream as Host
+  // media references, published once after materialization (text-only audio via outbound speech).
+  const outboundSpeech = createListenAssetSpeech(ttsRegistry, ttsCacheDir);
+  app.addHook('onClose', async () => outboundSpeech.close());
+  outboundMediaPublication = new OutboundMediaPublication({
+    store: pluginRuntime.outboundMedia,
+    messages: rawMessageStore,
+    events: messagingStores.events,
+    ledger: pluginRuntime.mediaLedger,
+    resolvePath: createHostMediaPathResolver(
+      hostMediaPathRootsFromEnv(process.env, process.env.CONNECTOR_MEDIA_DIR ?? './data/connector-media'),
+    ),
+    speech: outboundSpeech,
+    onPublished: subscriptionDrainScheduler.schedule,
+    onPublishFailure: (error, messageId) => {
+      app.log.error({ error, messageId }, '[messaging] outbound media publication failed; recovered at next start');
+    },
+  });
+  void outboundMediaPublication
+    .recover()
+    .catch((error: unknown) => app.log.error({ error }, '[messaging] outbound media recovery failed'));
   initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir, documentListenRepository);
   app.addHook('onClose', async () => documentListenRepository.close());
@@ -6921,7 +7014,6 @@ async function main(): Promise<void> {
   }
 
   // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)
-  const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const invokeTrigger = new ConnectorInvokeTrigger({
     router,
     socketManager,
@@ -6932,17 +7024,65 @@ async function main(): Promise<void> {
     queueCustodyCoordinator,
     messageStore,
     actionSuccessorLeaseStore,
-    threadMetaLookup: async (threadId) => {
-      const thread = await threadStore.get(threadId);
-      if (!thread) return undefined;
-      return {
-        threadShortId: threadId.slice(0, 15),
-        threadTitle: thread.title ?? undefined,
-        deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
-      };
-    },
+    threadMetaLookup: deliveryThreadMeta,
     log: app.log,
   });
+
+  type StreamingHookPort = Parameters<typeof queueProcessor.setStreamingHook>[0];
+  const composeStreamingHook = (
+    legacy?: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>['streamingHook'],
+  ): StreamingHookPort => {
+    const lifecycle = pluginRuntime.lifecycleDelivery;
+    const project = async (operation: string, call: () => Promise<void>): Promise<void> => {
+      try {
+        await call();
+      } catch (err) {
+        app.log.warn({ err, operation }, '[messaging] streaming projection failed');
+      }
+    };
+    return {
+      async onStreamStart(threadId, catId, invocationId, senderHint) {
+        if (catId && invocationId)
+          await project('lifecycle.started', () => lifecycle.onStreamStart(threadId, catId, invocationId));
+        if (legacy)
+          await project('legacy.started', () =>
+            legacy.onStreamStart(threadId, catId as CatId, invocationId, senderHint),
+          );
+      },
+      async onStreamChunk(threadId, text, invocationId) {
+        if (legacy) await project('legacy.chunk', () => legacy.onStreamChunk(threadId, text, invocationId));
+      },
+      async onStreamEnd(threadId, text, invocationId) {
+        if (legacy) await project('legacy.ended', () => legacy.onStreamEnd(threadId, text, invocationId));
+        if (invocationId) await project('lifecycle.ended', () => lifecycle.onStreamEnd(threadId, text, invocationId));
+      },
+      async onClosureCatchingUp(threadId, catId, invocationId) {
+        if (invocationId)
+          await project('lifecycle.catching_up', () => lifecycle.onClosureCatchingUp(threadId, catId, invocationId));
+        if (legacy)
+          await project('legacy.catching_up', () => legacy.onClosureCatchingUp(threadId, catId, invocationId));
+      },
+      async onClosureBlocked(threadId, catId, reason, invocationId) {
+        if (invocationId)
+          await project('lifecycle.blocked', () => lifecycle.onClosureBlocked(threadId, catId, reason, invocationId));
+        if (legacy)
+          await project('legacy.blocked', () => legacy.onClosureBlocked(threadId, catId, reason, invocationId));
+      },
+      async cleanupPlaceholders(threadId, invocationId) {
+        if (legacy) await project('legacy.cleanup', () => legacy.cleanupPlaceholders(threadId, invocationId));
+      },
+      async notifyDeliveryBatchDone(threadId, chainDone, status, invocationId) {
+        if (legacy) await project('legacy.settled', () => legacy.notifyDeliveryBatchDone(threadId, chainDone));
+        await project('lifecycle.settled', () =>
+          lifecycle.notifyDeliveryBatchDone(threadId, chainDone, status, invocationId),
+        );
+      },
+    };
+  };
+  const pluginLifecycleHook = composeStreamingHook();
+  invokeTrigger.setStreamingHook(pluginLifecycleHook);
+  queueProcessor.setStreamingHook(pluginLifecycleHook);
+  (messagesOpts as { streamingHook?: StreamingHookPort }).streamingHook = pluginLifecycleHook;
 
   const { LimbTranscriptCatDelivery } = await import('./domains/limb/LimbTranscriptCatDelivery.js');
   limbTranscriptDelivery = new LimbTranscriptCatDelivery({
@@ -8072,12 +8212,13 @@ async function main(): Promise<void> {
   function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
     handle.outboundHook.setLimbDelivery(limbOutboundDelivery);
     invokeTrigger.setOutboundHook(handle.outboundHook);
-    invokeTrigger.setStreamingHook(handle.streamingHook);
+    const streamingHook = composeStreamingHook(handle.streamingHook);
+    invokeTrigger.setStreamingHook(streamingHook);
     queueProcessor.setOutboundHook(handle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0]);
-    queueProcessor.setStreamingHook(handle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0]);
+    queueProcessor.setStreamingHook(streamingHook);
     (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
     (messagesOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
-    (messagesOpts as { streamingHook?: typeof handle.streamingHook }).streamingHook = handle.streamingHook;
+    (messagesOpts as { streamingHook?: StreamingHookPort }).streamingHook = streamingHook;
     syncConnectorWebhookHandlers(handle);
     (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = handle.weixinAdapter;
     (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling = handle.startWeixinPolling;

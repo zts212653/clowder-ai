@@ -34,6 +34,19 @@ function expectValidationError(fn, detailSnippet) {
 }
 
 describe('validateAppendInput', () => {
+  test('beta.20 rejects append PMR with VALIDATION but accepts persisted HMR', () => {
+    const media = (reference) => ({
+      elementId: 'media-2',
+      kind: 'media_ref',
+      payload: { type: 'image', reference, ...(reference.startsWith('pmr_') ? { sourceId: 'source-1' } : {}) },
+    });
+    expectValidationError(() => validate.validateAppendInput(validAppend({ elements: [media('pmr_source')] })));
+    assert.equal(
+      validate.validateAppendInput(validAppend({ elements: [media('hmr_persisted')] })).elements[0].kind,
+      'media_ref',
+    );
+  });
+
   test('accepts minimal valid append input', () => {
     const input = validate.validateAppendInput(validAppend());
     assert.equal(input.handle.token, 'msg-1');

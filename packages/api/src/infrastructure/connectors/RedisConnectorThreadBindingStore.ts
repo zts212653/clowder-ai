@@ -191,8 +191,7 @@ export class RedisConnectorThreadBindingStore implements IConnectorThreadBinding
 
   async listByUser(connectorId: string, userId: string, limit?: number): Promise<ConnectorThreadBinding[]> {
     const userKey = ConnectorBindingKeys.byUser(connectorId, userId);
-    const effectiveLimit = limit ?? 20;
-    const memberKeys = await this.redis.zrevrange(userKey, 0, effectiveLimit - 1);
+    const memberKeys = await this.redis.zrevrange(userKey, 0, limit === undefined ? -1 : limit - 1);
     if (memberKeys.length === 0) return [];
 
     const pipeline = this.redis.multi();

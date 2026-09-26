@@ -15,9 +15,9 @@ import {
   type EventAuditLog,
   getEventAuditLog,
 } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
 import {
-  BuiltinPluginContributionError,
-  type BuiltinPluginContributionSupervisor,
+  ExternalPluginRuntimeError,
   LocalPluginPackageAdmissionError,
   PluginManagerPackageAssetError,
   type PluginManagerPackageAssetPort,
@@ -43,7 +43,7 @@ type PluginManagerRouteService = Pick<
 
 export interface PluginManagerRouteOptions {
   readonly manager: PluginManagerRouteService;
-  readonly contributions?: Pick<BuiltinPluginContributionSupervisor, 'listPluginTools' | 'callPluginTool'>;
+  readonly contributions?: Pick<PluginRuntimeCarrierRouter, 'listPluginTools' | 'callPluginTool'>;
   readonly asset?: PluginManagerPackageAssetPort;
   readonly documentation?: PluginManagerPackageDocumentationPort;
   readonly auditLog?: Pick<EventAuditLog, 'append'>;
@@ -94,7 +94,17 @@ const localInstallSchema = z
       .strict(),
   })
   .strict();
-const installSchema = z.union([catalogInstallSchema, localInstallSchema]);
+const gitInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('git'),
+        url: z.string().trim().min(1).max(4_096),
+      })
+      .strict(),
+  })
+  .strict();
+const installSchema = z.union([catalogInstallSchema, localInstallSchema, gitInstallSchema]);
 const setEnabledSchema = z.object({ enabled: z.boolean(), expectedRevision: lifecycleRevisionSchema }).strict();
 const uninstallSchema = z.object({ expectedRevision: lifecycleRevisionSchema }).strict();
 const configureSchema = z
@@ -207,9 +217,8 @@ function sendManagerError(reply: FastifyReply, error: unknown) {
 }
 
 function sendContributionError(reply: FastifyReply, error: unknown) {
-  if (error instanceof BuiltinPluginContributionError) {
-    const status =
-      error.code === 'CONTRIBUTION_NOT_ACTIVE' ? 409 : error.code === 'UNSUPPORTED_CONTRIBUTION' ? 422 : 503;
+  if (error instanceof ExternalPluginRuntimeError) {
+    const status = error.code === 'DELIVERY_REJECTED' ? 409 : error.code === 'PROTOCOL_VIOLATION' ? 422 : 503;
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   return reply.status(500).send({ error: 'Plugin contribution operation failed', code: 'CONTRIBUTION_FAILED' });
@@ -285,7 +294,7 @@ async function appendMutationAudit(
     readonly operator: string;
     readonly operation: 'install' | 'set-enabled' | 'uninstall';
     readonly pluginId?: string;
-    readonly sourceKind?: 'catalog' | 'local-directory' | 'local-archive';
+    readonly sourceKind?: 'catalog' | 'git' | 'local-directory' | 'local-archive';
     readonly expectedRevision?: number;
   },
 ): Promise<void> {
