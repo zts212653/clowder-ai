@@ -21,6 +21,7 @@ import { resolvePluginManagerDesignGate } from './plugin-manager/plugin-manager-
 import { PLUGIN_MANAGER_DESIGN_FIXTURES } from './plugin-manager/plugin-manager-fixtures';
 import { SettingsBadge } from './primitives/SettingsBadge';
 import { SettingsText } from './primitives/SettingsText';
+import { WorkspaceAgentPluginPanel } from './WorkspaceAgentPluginPanel';
 
 const BUILTIN_GITHUB_PLUGIN: PluginInfo = {
   id: 'github',
@@ -211,6 +212,7 @@ export function PluginsContent() {
     return (
       <div className="flex flex-col gap-3.5" data-testid="plugins-list">
         <PersonalChromePluginPanel />
+        <WorkspaceAgentPluginPanel />
         <OfficialPluginsPanel />
         <SettingsText as="p" variant="sm" tone="muted">
           加载本地插件中...
@@ -223,6 +225,7 @@ export function PluginsContent() {
     return (
       <div className="flex flex-col gap-3.5" data-testid="plugins-list">
         <PersonalChromePluginPanel />
+        <WorkspaceAgentPluginPanel />
         <OfficialPluginsPanel />
         <div
           className="flex flex-col items-center justify-center"
@@ -250,6 +253,7 @@ export function PluginsContent() {
   return (
     <div className="flex flex-col gap-3.5" data-testid="plugins-list">
       <PersonalChromePluginPanel />
+      <WorkspaceAgentPluginPanel />
       <OfficialPluginsPanel />
       {toggleError && (
         <div className="rounded-md bg-conn-red-bg px-3 py-2 text-sm text-conn-red-text">{toggleError}</div>

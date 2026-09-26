@@ -848,12 +848,31 @@ export interface IThreadStore {
    *  `isValidChatGptChatUrl()` from `utils/chatgpt-chat-url.ts` before writing.
    *  See `docs/features/F247-cloud-cat-family.md` AC-B1c-11 for URL contract. */
   updateCloudCatBinding(threadId: string, catId: CatId, chatUrl: string | null): void | Promise<void>;
-  /** F247 AC-B1c-1: Read all cloud cat bindings for this thread. Returns empty object
+  /**
+   * F247 workspace-agent dispatch success (astra round-4 R3): persist a
+   * VERSIONED binding entry so the owner-only recovery surface can resolve
+   * the thread's provider-side conversation after refresh / API rebuild /
+   * Redis restart. Redis-backed stores serialize the entry as a JSON string;
+   * readers normalize via `normalizeCloudCatBinding`. This is NOT a Personal
+   * Chrome route: the host path only consumes personal-chrome-host entries.
+   * Owner-only — authorization is enforced at the route layer, not here.
+   */
+  updateCloudCatBindingEntry(
+    threadId: string,
+    catId: CatId,
+    entry: import('../../cloud-bridge/cloud-cat-bindings-v1.js').CloudCatBindingV1 | null,
+  ): void | Promise<void>;
+  /**
+   * F247 AC-B1c-1: Read all cloud cat bindings for this thread. Returns empty object
    *  when no bindings exist (never returns undefined for ergonomic callers).
+   *
+   *  Values are legacy ChatGPT conversation URL strings OR versioned binding
+   *  objects (memory store) / JSON strings (Redis store); consumers normalize
+   *  via `normalizeCloudCatBinding` / `normalizeCloudCatBindings`.
    *
    *  Owner-only — authorization MUST be enforced at the route/MCP layer; this store method
    *  does not check ownership. */
-  getCloudCatBindings(threadId: string): Record<CatId, string> | Promise<Record<CatId, string>>;
+  getCloudCatBindings(threadId: string): Record<CatId, string | object> | Promise<Record<CatId, string | object>>;
   /** F224: Coordinator-facing strategy read. Undefined means default resume. */
   getMemberSessionStrategy?(
     threadId: string,
@@ -1494,11 +1513,27 @@ export class ThreadStore implements IThreadStore {
     thread.cloudCatBindings[catId] = chatUrl;
   }
 
-  getCloudCatBindings(threadId: string): Record<CatId, string> {
+  /** F247 round-4 R3: versioned binding write — stored as the object itself. */
+  updateCloudCatBindingEntry(
+    threadId: string,
+    catId: CatId,
+    entry: import('../../cloud-bridge/cloud-cat-bindings-v1.js').CloudCatBindingV1 | null,
+  ): void {
+    if (entry === null) {
+      this.updateCloudCatBinding(threadId, catId, null);
+      return;
+    }
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (!thread.cloudCatBindings) thread.cloudCatBindings = {};
+    (thread.cloudCatBindings as Record<CatId, string | object>)[catId] = entry;
+  }
+
+  getCloudCatBindings(threadId: string): Record<CatId, string | object> {
     const thread = this.get(threadId);
     if (!thread || !thread.cloudCatBindings) return {};
     // Defensive copy — callers should not mutate internal state.
-    return { ...thread.cloudCatBindings };
+    return { ...(thread.cloudCatBindings as Record<CatId, string | object>) };
   }
 
   /** #836: Check if cat uses reborn strategy in this thread. */

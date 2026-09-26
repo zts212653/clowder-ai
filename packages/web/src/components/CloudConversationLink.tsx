@@ -6,13 +6,16 @@ import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
 import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 
 interface CloudBindingsResponse {
-  bindings?: Record<string, string>;
+  // astra R2: values are canonical ChatGPT conversation URL strings by
+  // contract (the server projects versioned entries); guard against
+  // unexpected object shapes instead of feeding them to the URL parser.
+  bindings?: Record<string, string | { provider?: string; conversationUrl?: string }>;
 }
 
 type BindingState =
   | { kind: 'loading' }
   | { kind: 'empty' }
-  | { kind: 'bound'; chatUrl: string; conversationId: string }
+  | { kind: 'bound'; chatUrl: string; conversationId: string; provider: 'personal-chrome' | 'workspace-agent' }
   | { kind: 'unauthorized' }
   | { kind: 'invalid' }
   | { kind: 'error' };
@@ -35,8 +38,20 @@ async function readCloudConversationBinding(threadId: string, signal: AbortSigna
   const rawBinding = body.bindings?.['gpt-pro'];
   if (rawBinding === undefined) return { kind: 'empty' };
 
+  // astra round-4 R3 + round-5 R3: the workspace-agent entry carries its own
+  // owner-only conversationUrl; the provider rides along so recovery actions
+  // stay provider-aware — the workspace-agent card changes the actual route,
+  // the Personal Chrome binding flow does not.
+  if (typeof rawBinding === 'object' && rawBinding !== null) {
+    if (rawBinding.provider === 'workspace-agent' && typeof rawBinding.conversationUrl === 'string') {
+      const parsed = parseChatGptConversationUrl(rawBinding.conversationUrl);
+      return parsed ? { kind: 'bound', ...parsed, provider: 'workspace-agent' } : { kind: 'invalid' };
+    }
+    return { kind: 'invalid' };
+  }
+
   const parsed = parseChatGptConversationUrl(rawBinding);
-  return parsed ? { kind: 'bound', ...parsed } : { kind: 'invalid' };
+  return parsed ? { kind: 'bound', ...parsed, provider: 'personal-chrome' } : { kind: 'invalid' };
 }
 
 function bindingStatus(binding: BindingState) {
@@ -158,9 +173,18 @@ export function CloudConversationLink({ threadId }: { threadId: string }) {
           >
             打开会话
           </a>
-          <a className="font-medium text-cafe-muted transition-colors hover:text-cafe" href={settingsHref}>
-            更换绑定
-          </a>
+          {binding.provider === 'personal-chrome' ? (
+            <a className="font-medium text-cafe-muted transition-colors hover:text-cafe" href={settingsHref}>
+              更换绑定
+            </a>
+          ) : (
+            <a
+              className="font-medium text-cafe-muted transition-colors hover:text-cafe"
+              href="/settings?s=plugins#workspace-agent"
+            >
+              Workspace Agent 设置
+            </a>
+          )}
         </div>
       ) : binding.kind === 'empty' ? (
         <div className="mt-1.5 text-micro text-cafe-muted">

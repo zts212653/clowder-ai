@@ -474,3 +474,46 @@ describe('F247 AC-B1c-8: privacy — default GET /api/threads/:id strips cloudCa
     assert.equal(body.title, 'demo');
   });
 });
+
+// ── astra round-5 P3: GET/PATCH owner projection symmetry for versioned entries ──
+describe('round-5 P3: owner projection symmetry (no storage-form leak)', () => {
+  let app;
+  afterEach(async () => {
+    if (app) await app.close();
+    app = null;
+  });
+
+  it('GET and PATCH expose the SAME projected shape for mixed legacy + workspace-agent entries', async () => {
+    const versionedJsonString = JSON.stringify({
+      v: 1,
+      provider: 'workspace-agent',
+      workspaceId: 'ws_sym',
+      triggerId: 'agtch_sym',
+      conversationUrl: 'https://chatgpt.com/c/sym-1',
+    });
+    const bindings = new Map([['T1', { codex: versionedJsonString, opus: 'https://chatgpt.com/c/legacy-sym' }]]);
+    ({ app } = await makeApp({
+      thread: { id: 'T1', createdBy: 'alice', deletedAt: null },
+      bindingsByThread: bindings,
+    }));
+
+    const getRes = await app.inject({ method: 'GET', url: '/api/threads/T1/cloud-bindings', headers: AUTH_OWNER });
+    assert.equal(getRes.statusCode, 200);
+    const getBindings = getRes.json().bindings;
+    assert.equal(typeof getBindings.codex, 'object', 'GET decodes the JSON storage string');
+    assert.equal(getBindings.codex.conversationUrl, 'https://chatgpt.com/c/sym-1');
+    assert.equal(getBindings.opus, 'https://chatgpt.com/c/legacy-sym');
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/threads/T1/cloud-bindings',
+      headers: { ...AUTH_OWNER, 'content-type': 'application/json' },
+      payload: { catId: 'opus', chatUrl: 'https://chatgpt.com/c/legacy-sym-2' },
+    });
+    assert.equal(patchRes.statusCode, 200);
+    const patchBindings = patchRes.json().bindings;
+    assert.equal(typeof patchBindings.codex, 'object', 'PATCH must not leak the JSON storage string');
+    assert.equal(patchBindings.codex.conversationUrl, 'https://chatgpt.com/c/sym-1');
+    assert.equal(patchBindings.opus, 'https://chatgpt.com/c/legacy-sym-2');
+  });
+});

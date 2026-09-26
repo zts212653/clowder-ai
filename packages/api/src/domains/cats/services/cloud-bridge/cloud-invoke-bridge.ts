@@ -23,6 +23,7 @@
 
 import { CHATGPT_CHAT_URL_REGEX } from '../../../../utils/chatgpt-chat-url.js';
 import { buildDeltaPayload } from './build-delta-payload.js';
+import { normalizeCloudCatBinding } from './cloud-cat-bindings-v1.js';
 import { type BridgeLogger, type CloudInvokeBridgeDeps, noopBridgeLogger } from './cloud-invoke-bridge-deps.js';
 import { dispatchBoundConversationThroughHost } from './conversation-host-dispatch.js';
 import type {
@@ -32,6 +33,7 @@ import type {
   ICloudInvokeBridge,
   IPinchTabBridgeAdapter,
 } from './types.js';
+import { dispatchThroughWorkspaceAgent } from './workspace-agent-dispatch.js';
 
 export { buildCloudBridgeStatusContent, buildFallbackMessageContent } from './cloud-bridge-fallback.js';
 export type { BridgeLogger, CloudInvokeBridgeDeps, EmitFallbackFn } from './cloud-invoke-bridge-deps.js';
@@ -173,6 +175,46 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
     // 1. Build delta payload (AC-B1c-12).
     const renderedPrompt = buildDeltaPayload(params);
 
+    // 1b. F247 Workspace Agent: the officially configured Trigger API path
+    // owns the outbound outcome when present (fail closed — see
+    // workspace-agent-dispatch.ts for the precedence rationale). The
+    // resolver is read per dispatch so Settings changes apply immediately.
+    const workspaceAgentTransport = this.deps.workspaceAgent?.() ?? null;
+    const workspaceAgentDecision = await dispatchThroughWorkspaceAgent({
+      adapter: workspaceAgentTransport?.adapter,
+      workspaceId: workspaceAgentTransport?.workspaceId,
+      renderedPrompt,
+      params,
+    });
+    if (workspaceAgentDecision) {
+      if (workspaceAgentDecision.fallback) {
+        await this.fallback(params, workspaceAgentDecision.fallback.reason, workspaceAgentDecision.fallback.detail);
+      }
+      // astra round-4 R3: persist the owner-only recovery anchor for the
+      // thread's provider-side conversation. Best-effort — the dispatch is
+      // already accepted at the 202 boundary; a failed anchor write is
+      // logged and recoverable via the next successful dispatch.
+      if (workspaceAgentDecision.outcome.kind === 'sent' && workspaceAgentTransport) {
+        try {
+          await this.deps.threadStore.updateCloudCatBindingEntry?.(params.threadId, params.catId, {
+            v: 1,
+            provider: 'workspace-agent',
+            // Snapshot identity from before the await — never re-read from
+            // mutable Settings after the 202 boundary (round-5 R2).
+            workspaceId: workspaceAgentTransport.workspaceId,
+            triggerId: workspaceAgentTransport.triggerId,
+            conversationUrl: workspaceAgentDecision.outcome.capturedUrl,
+          });
+        } catch (err) {
+          this.logger.warn(
+            { threadId: params.threadId, catId: params.catId, err: serializeError(err) },
+            'F247 workspace-agent: recovery binding write failed (dispatch already delivered)',
+          );
+        }
+      }
+      return workspaceAgentDecision.outcome;
+    }
+
     // 2. Resolve the stable host conversation before choosing a transport.
     // The Host Adapter can append only to an existing binding; it never
     // manufactures a conversation by driving the foreground composer.
@@ -247,15 +289,18 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
   }
 
   /**
-   * Read the bound URL from thread metadata. Returns null if no binding or
-   * binding fails regex validation.
+   * Read the bound URL from thread metadata for the Personal Chrome Host
+   * path. Versioned bindings (F247 slice 2) normalize first: only a
+   * `personal-chrome-host` entry yields a conversation URL — a
+   * `workspace-agent` entry correctly reads as "no host binding" here
+   * because its conversation continuity lives on the provider side.
    */
   private async readBoundUrl(params: CloudInvokeDispatchParams): Promise<string | null> {
     try {
-      const bindings = (await this.deps.threadStore.getCloudCatBindings(params.threadId)) as Record<string, string>;
-      const existing = bindings[params.catId as unknown as string];
-      if (existing && CHATGPT_CHAT_URL_REGEX.test(existing)) {
-        return existing;
+      const bindings = (await this.deps.threadStore.getCloudCatBindings(params.threadId)) as Record<string, unknown>;
+      const binding = normalizeCloudCatBinding(bindings[params.catId as unknown as string]);
+      if (binding?.provider === 'personal-chrome-host' && CHATGPT_CHAT_URL_REGEX.test(binding.conversationUrl)) {
+        return binding.conversationUrl;
       }
     } catch (err) {
       this.logger.warn(

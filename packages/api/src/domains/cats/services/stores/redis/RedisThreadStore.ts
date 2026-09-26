@@ -1758,6 +1758,28 @@ export class RedisThreadStore implements IThreadStore {
   }
 
   /**
+   * F247 workspace-agent round-4 R3: versioned binding write, serialized as a
+   * JSON string in the same `cloudBinding:<catId>` hash field. Readers
+   * normalize via `normalizeCloudCatBinding` (legacy URL strings and JSON
+   * entries decode identically), so the field stays one-value-per-cat and
+   * restart-safe with the store's existing persistence semantics.
+   */
+  async updateCloudCatBindingEntry(
+    threadId: string,
+    catId: string,
+    entry: import('../../cloud-bridge/cloud-cat-bindings-v1.js').CloudCatBindingV1 | null,
+  ): Promise<void> {
+    if (entry === null) {
+      await this.updateCloudCatBinding(threadId, catId, null);
+      return;
+    }
+    const key = ThreadKeys.detail(threadId);
+    const field = `cloudBinding:${catId}`;
+    // Same guarded-Lua discipline as updateCloudCatBinding above.
+    await this.redis.eval(HSET_IF_HAS_ID_LUA, 1, key, field, JSON.stringify(entry));
+  }
+
+  /**
    * F247 AC-B1c-1: Read all cloud cat bindings for this thread.
    *
    * Scans the thread detail hash for `cloudBinding:<catId>` fields and returns
@@ -1775,6 +1797,9 @@ export class RedisThreadStore implements IThreadStore {
         if (catId.length > 0) result[catId] = value;
       }
     }
+    // Values may be legacy URL strings OR JSON-serialized versioned entries
+    // (updateCloudCatBindingEntry); both are strings at the Redis boundary and
+    // consumers normalize via normalizeCloudCatBinding.
     return result;
   }
 
