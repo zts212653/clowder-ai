@@ -4,6 +4,26 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 
+/**
+ * Windows cannot unlink a file that still has an open handle, so every store a service set owns
+ * must be closed before the temp data dir holding their sqlite files is removed.
+ */
+function closeMemoryServices(services) {
+  try {
+    services?.eventMemoryStore?.close();
+  } catch {
+    /* already closed */
+  }
+  const stores = [services?.store, services?.globalStore, ...(services?.collectionStores?.values() ?? [])];
+  for (const store of stores) {
+    try {
+      store?.close();
+    } catch {
+      /* already closed */
+    }
+  }
+}
+
 describe('createMemoryServices', () => {
   it('creates sqlite services', async () => {
     const { createMemoryServices } = await import('../../dist/domains/memory/factory.js');
@@ -100,6 +120,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f209-factory-data-'));
     const root = mkdtempSync(join(tmpdir(), 'f209-collection-root-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f209-docs-root-'));
+    let services;
     try {
       const manifest = {
         id: 'world:durable-root',
@@ -133,7 +154,7 @@ describe('createMemoryServices', () => {
       ]);
       seedStore.close();
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         docsRoot,
@@ -151,6 +172,7 @@ describe('createMemoryServices', () => {
       assert.equal(docResult.drillDown.params.path, 'cat-cafe://collection/world%3Adurable-root/docs/source.md');
       assert.ok(!docResult.drillDown.params.path.includes(root), 'drillDown path must not leak host source root');
     } finally {
+      closeMemoryServices(services);
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
@@ -163,6 +185,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-external-data-'));
     const root = mkdtempSync(join(tmpdir(), 'f263-private-external-root-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-external-docs-'));
+    let services;
     try {
       saveExternalCollection(dataDir, {
         id: 'domain:legacy-private',
@@ -178,7 +201,7 @@ describe('createMemoryServices', () => {
         updatedAt: '2026-05-22T00:00:00.000Z',
       });
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         globalDbPath: join(dataDir, 'global.sqlite'),
@@ -194,6 +217,7 @@ describe('createMemoryServices', () => {
         1,
       );
     } finally {
+      closeMemoryServices(services);
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(root, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
@@ -205,6 +229,7 @@ describe('createMemoryServices', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'f263-private-data-'));
     const docsRoot = mkdtempSync(join(tmpdir(), 'f263-private-docs-'));
     const memoryRoot = mkdtempSync(join(tmpdir(), 'f263-private-memory-'));
+    let services;
     try {
       const profileRoot = join(dataDir, 'profiles', 'owner-1', 'relationship');
       mkdirSync(profileRoot, { recursive: true });
@@ -219,7 +244,7 @@ describe('createMemoryServices', () => {
         '---\nname: Synthetic preference\ntype: user\n---\nSYNTHETIC_PERSONAL_MEMORY_TOKEN',
       );
 
-      const services = await createMemoryServices({
+      services = await createMemoryServices({
         type: 'sqlite',
         sqlitePath: join(dataDir, 'project.sqlite'),
         globalDbPath: join(dataDir, 'global.sqlite'),
@@ -258,6 +283,7 @@ describe('createMemoryServices', () => {
         'default/expedition context excludes private profile scope',
       );
     } finally {
+      closeMemoryServices(services);
       rmSync(dataDir, { recursive: true, force: true });
       rmSync(docsRoot, { recursive: true, force: true });
       rmSync(memoryRoot, { recursive: true, force: true });
