@@ -10,7 +10,8 @@ Electron 在此项目中充当**"服务编排器 + 浏览器壳"**，而非将�
 - ✅ Electron 启动时拉起后端进程（Redis / API / Web），加载 `localhost:3003`
 - ✅ 托盘图标、右键菜单、任务栏独立身份
 - ✅ 单实例锁：防止重复启动导致端口冲突
-- ❌ Electron 壳不内嵌 Node.js 依赖安装、环境检测、版本升级逻辑
+- ✅ 应用内更新（F273）：检查 GitHub Releases、校验大小与 SHA-256 后下载、Windows 原地静默升级、macOS 引导替换 DMG
+- ❌ 不代装 Provider CLI、不代做 Provider 登录：安装包只交付运行时，真正调用模型前仍需用户自行安装并登录 CLI
 
 后端（Redis / API / Web）仍然作为独立 Node.js 子进程运行，通过 `loadURL` 加载本地前端。这种设计保持了原有 Web 架构的完整性，同时提供了桌面级的托盘体验和一键启动能力。
 
@@ -26,7 +27,10 @@ desktop/
 ├── package.json         # Electron 包配置与 electron-builder 构建设置
 ├── scripts/
 │   ├── build-mac.sh     # macOS DMG 构建脚本（6 步流水线）
-│   └── build-desktop.ps1 # Windows 安装包构建脚本
+│   ├── build-desktop.ps1 # Windows 安装包构建脚本
+│   ├── verify-mac-bundle-arch.mjs # 打包后校验原生模块架构（失败闭合）
+│   └── lib/
+│       └── mac-native-arch.mjs    # 架构判定纯逻辑（含单测）
 └── assets/
     ├── icon.ico         # Windows 图标
     ├── icon.icns        # macOS 图标（由 icon.png 自动生成）
@@ -35,7 +39,7 @@ desktop/
 
 ## 前置要求
 
-1. **Node.js** ≥ 20（与主项目一致）
+1. **Node.js** ≥ 24（与主项目 `engines.node` 一致；构建脚本按构建机 Node 版本内嵌便携运行时）
 2. **pnpm** ≥ 8（主项目依赖管理）
 3. **desktop 子包依赖已安装**：
    ```bash
@@ -122,11 +126,14 @@ pnpm desktop:pack
 #### 构建命令
 
 ```bash
-# 完整构建（arm64 + x64 双架构 DMG）
+# 默认：只构建宿主架构（推荐；异架构构建见下方「原生模块架构」）
 ./desktop/scripts/build-mac.sh
 
-# 仅构建当前架构（Apple Silicon 机器推荐，速度更快）
+# 显式指定单个架构
 ./desktop/scripts/build-mac.sh --arch arm64
+
+# 双架构（arm64 + x64）——需要依赖树同时支持两种架构，见下方「原生模块架构」
+./desktop/scripts/build-mac.sh --arch both
 
 # 跳过已有缓存步骤（增量构建）
 ./desktop/scripts/build-mac.sh --skip-web --skip-deploy --skip-node --skip-redis
@@ -141,10 +148,14 @@ pnpm desktop:pack
 | 3/6 | 下载 Node.js 便携版（匹配构建机 ABI 版本） | `bundled/node-darwin-{arm64,x64}/` |
 | 4/6 | 从源码编译 Redis（~30s/架构） | `bundled/redis-darwin-{arm64,x64}/` |
 | 5/6 | 跳过（macOS DMG 无 post-install 阶段，不捆绑 CLI 工具；用户自行安装） | — |
-| 6/6 | 生成 icon.icns + electron-builder 构建 DMG | `dist/ClowderAI-{version}-{arch}.dmg` |
+| 6/6 | 生成 icon.icns + electron-builder 构建 .app + ad-hoc 签名 + **原生模块架构校验** + hdiutil 打 DMG | `dist/ClowderAI-{version}-{arch}.dmg` |
 
 #### 已知注意事项
 
+- **原生模块架构（重要）**：第 1–2 步只在本机跑**一次**依赖安装，因此原生模块（`better-sqlite3`、`sqlite-vec`、`sharp`）只按**宿主架构**落盘。在本机打包异架构会把宿主架构的二进制塞进产物 —— 实测在 arm64 机器上产出的 x64 DMG 内含 arm64 的 `better_sqlite3.node` 与 `vec0.dylib`，能构建、能签名、能安装、能启动，但在 Intel Mac 上 API 一加载 SQLite 即崩。因此：
+  - 默认只构建宿主架构；真正的双架构发布由 `.github/workflows/build-mac-dmg.yml` 用**每架构一台 runner** 完成，不要依赖单机 `--arch both`；
+  - 打包后 `desktop/scripts/verify-mac-bundle-arch.mjs` 会失败闭合地校验每个 bundle 的原生模块架构，不匹配就直接拒绝产出 DMG；
+  - `node-pty` 这类自带多平台 `prebuilds/` 的模块不受影响（运行期由 loader 选择正确变体），校验按"平台-架构家族"判定，不会误报。
 - **node_modules 补拷**：electron-builder 从 v20.15.2 起不再将 `node_modules` 目录包含在 `extraResources` 中（[electron-builder#3104](https://github.com/electron-userland/electron-builder/issues/3104)）。项目通过 `desktop/afterPack.js` hook 在打包后手动拷贝 `node_modules` 解决此问题。
 - **未签名应用**：代码签名已禁用（`identity=null`）。首次启动需右键 → 打开，或执行：
   ```bash
@@ -161,6 +172,8 @@ pnpm desktop:pack
     本文档 + 引导用户在哪个位置安装的 onboarding 文案。）
 
 #### 产物位置
+
+只产出**本次请求的架构**对应的 DMG：
 
 ```
 dist/ClowderAI-{version}-arm64.dmg   # Apple Silicon
@@ -192,7 +205,7 @@ pnpm desktop:installer
 安装包在目标机器上执行：
 - 复制运行时包 + 构建产物 + Electron 壳 + 便携 Node.js + 便携 Redis
 - 运行 `post-install-offline.ps1`：生成 `.env`、挂载 skills 软链接
-- 按用户在安装向导中选择的组件，尝试安装 AI CLI 工具（优先 bundled tarball，回退联网）
+- **不安装 Provider CLI**：安装包只交付运行时；`claude` / `codex` / `agy` / `kimi` 等需用户自行安装并登录（见「安装后首次启动」）
 - 创建桌面快捷方式
 - 注册表启用 Windows 长路径支持
 
@@ -204,8 +217,8 @@ pnpm desktop:installer
 | 长路径支持 | ✅ | 安装时自动启用 Windows LongPathsEnabled |
 | 单实例运行 | ✅ | 重复启动会聚焦已有窗口 |
 | 系统托盘 | ✅ | 最小化到托盘，右键菜单 |
-| AI CLI 工具 | ⚠️ 部分 | 优先从 bundled tarball 离线安装；无缓存时尝试联网；均失败则提示手动安装 |
-| 自动更新 | ❌ | 需手动下载新版安装包覆盖安装 |
+| AI CLI 工具 | ❌ | 安装器**不代装**任何 CLI；用户自行安装并登录后应用才可用 |
+| 自动更新 | ✅ | 应用内检查 GitHub Releases、校验大小与 SHA-256 后下载；Windows 原地静默升级，macOS 引导替换 DMG（F273） |
 
 ## 安装后首次启动（Windows）
 
@@ -213,15 +226,10 @@ pnpm desktop:installer
 
 ### 步骤
 
-1. **运行安装包** — 双击 `ClowderAI-Setup-x.x.x.exe`，选择 `Full`（全部 CLI 工具）或 `Minimal`（仅核心）
-2. **等待安装完成** — 安装器自动完成：解包应用 + 便携 Node.js + 便携 Redis → 生成 `.env` → 挂载 skills → 安装所选 CLI 工具
+1. **运行安装包** — 双击 `ClowderAI-Setup-x.x.x.exe`（安装器不带组件选择，所有用户装到同一份运行时）
+2. **等待安装完成** — 安装器自动完成：解包应用 + 便携 Node.js + 便携 Redis → 生成 `.env` → 挂载 skills。**Provider CLI 不在其中**
 3. **启动 Clowder AI** — 安装结束后勾选"Launch Clowder AI"，或从桌面快捷方式启动
-4. **配置 Provider** — 打开 Hub → 账号配置，为你要使用的 AI 服务完成认证：
-   - **Claude** — 运行 `claude` 命令完成 Anthropic 登录
-   - **Codex** — 运行 `codex` 命令完成 OpenAI 登录
-   - **Gemini / Antigravity CLI** — 运行 `agy` 完成 Google 登录，并用 `/model` 选择账号侧默认模型
-   - **Kimi** — 运行 `kimi` 命令完成 Moonshot 登录
-5. **补装 CLI（如有需要）** — 如果某个 CLI 工具在安装阶段未成功安装，可手动补装。
+4. **安装并登录至少一个 Provider CLI（必做）** — 安装包**不代装**任何 CLI；一个都没装时，首次引导的「客户端」步骤会是空列表。
    需要系统已安装对应运行时（Node.js/npm 用于 Claude/Codex 与可选 Gemini CLI fallback，Python/pip 用于 Kimi）：
    ```powershell
    npm install -g @anthropic-ai/claude-code        # Claude
@@ -230,7 +238,13 @@ pnpm desktop:installer
    npm install -g @google/gemini-cli                # Gemini CLI（可选 fallback）
    pip install --user --upgrade kimi-cli            # Kimi（Python）
    ```
-   > 安装包内已 bundle 便携 Node.js，安装过程中会自动使用。手动补装时需确保系统 PATH 中有 Node.js 或 Python。
+   然后在终端各跑一次完成登录（OAuth）：
+   - **Claude** — `claude`
+   - **Codex** — `codex`
+   - **Gemini / Antigravity CLI** — `agy`（并用 `/model` 选择账号侧默认模型）
+   - **Kimi** — `kimi`
+   > 安装包内已 bundle 便携 Node.js，但那份运行时只供应用自身使用；手动补装 CLI 需系统 PATH 中有 Node.js 或 Python。
+5. **配置 Provider 账号并验证连通** — 打开 Hub → 账号配置，新建/确认 profile（OAuth 或 Base URL + API Key + 模型），再点「连接测试」。测试不通过则首次引导无法继续。macOS 未签名版本首次打开需右键 → 打开。
 
 ## 调试
 
@@ -244,10 +258,21 @@ pnpm desktop:installer
 | 问题 | 可能原因 | 解决方式 |
 |------|---------|---------|
 | `app` 为 undefined | `ELECTRON_RUN_AS_NODE=1` 被继承 | Windows 用 `pnpm desktop:dev`；Unix 用 `pnpm desktop:dev:unix`，或手动清理该环境变量 |
-| API 启动失败（Redis PING failed） | Redis 未找到且环境变量冲突 | 检查 `cat-cafe-desktop.log`，确认 `MEMORY_STORE=1` 已正确设置 |
-| Next.js 启动超时 | `.cmd` 批处理在 spawn 中静默失败 | `service-manager.js` 已自动绕过 `.cmd`，直接调用 `node next/dist/bin/next` |
+| API 启动失败（Redis 连接失败） | 没有可用的 Redis 且降级被拒 | 查看 `desktop.log`；运行时会在**内存模式**下弹窗告知（会话不落盘），并给出原因与恢复入口 |
+| Next.js 启动超时 | entry 解析失败或端口被占 | `service-manager.js` 直接以 `node next/dist/bin/next` 启动（绕过 `.cmd`），并显式绑定 `--hostname 127.0.0.1`；端口冲突见下方「端口与实例」 |
 | 找不到 `node` | PATH 未包含 Node.js | 安装包已 bundle 便携版 Node.js；开发模式确保 Node.js 在系统 PATH 中 |
 | 安装包过大 | 包含完整运行时环境 | 正常，`pnpm deploy` 扁平化包 + Electron + Node.js + Redis |
+
+### 端口与实例
+
+桌面实例在启动时解析端口，并把选择记在用户数据目录（`data/desktop-instance.json`）。
+
+- **Web 端口与 API 端口必须相邻**（`api = web + 1`）。前端依据 `location.port + 1` 推导 API 地址，两者一旦错开就会「页面能开、请求全错」。
+- 默认从 **3003/3004** 开始找第一对**两个都空闲**的端口；上次用过的端口会被记住。
+- **Redis 不会被"顺手续用"**：只有带本实例标记（`clowder:desktop:instance`）的 Redis 才会被采纳；否则该实例会在空闲端口上另起自己的 Redis，**绝不读写别人的库**。
+- ⚠️ **安装目录只读时端口无法迁移**。Next.js 在**构建时**就把 API 地址写进 `.next/routes-manifest.json`，改变端口必须改写该文件；而 per-machine 安装位于 `Program Files`（运行时只读）。此时若 3003/3004 被占用，应用会**明确报错退出**，而不是启动一个 `/api` 指向别处的界面。
+  - 解决：释放 3003/3004，或改为按用户安装/便携包（目录可写）。
+- API 的网关与预览端口（如 4100）也可能与同机其他 Clowder 实例冲突；同一台机器上并行跑多个实例时请确保它们使用不同的数据目录。
 
 ## 平台支持
 
