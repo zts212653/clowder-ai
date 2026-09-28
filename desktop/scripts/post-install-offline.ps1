@@ -94,6 +94,15 @@ if ($AgentHooksOnly) {
     exit 0
 }
 
+# Project assets live under the elevated install root (possibly Program Files).
+# Keep this out of -AgentHooksOnly, which Inno runs as the original user.
+Write-Step "Claude project compaction hooks"
+$compactionInstaller = Join-Path $ProjectRoot "scripts\install-claude-compaction-hooks.mjs"
+$compactionNode = Resolve-Command "node"
+if (-not $compactionNode) { throw "Node.js is required for project compaction hooks" }
+& $compactionNode $compactionInstaller --source-root $ProjectRoot --project-root $ProjectRoot --apply
+if ($LASTEXITCODE -ne 0) { throw "Project compaction hook installation failed" }
+
 Write-Step "Step 1/3 - Generate .env"
 
 $envFile = Join-Path $ProjectRoot ".env"

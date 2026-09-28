@@ -526,9 +526,9 @@ if (-not $SkipPortableZip) {
     Copy-ToStaging (Join-Path $ProjectRoot "packages\api\src\plugins") "plugins"
 
     # Agent CLI hook templates
-    $hooksSource = Join-Path $ProjectRoot ".claude\hooks\user-level"
+    $hooksSource = Join-Path $ProjectRoot ".claude\hooks"
     if (Test-Path $hooksSource) {
-        Copy-ToStaging $hooksSource ".claude\hooks\user-level"
+        Copy-ToStaging $hooksSource ".claude\hooks"
     }
 
     # Electron app (win-unpacked contents → desktop-dist/)
