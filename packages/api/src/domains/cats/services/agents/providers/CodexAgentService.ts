@@ -84,8 +84,12 @@ import type {
   PreparedProviderRequestV1,
   ProviderCompactionObservation,
   ProviderContinuityPreflight,
+  ProviderNativeCapabilitySource,
   ProviderNativeGoal,
   ProviderNativeGoalRequest,
+  ProviderNativeRealtimeConsumer,
+  ProviderNativeRealtimeEvent,
+  ProviderNativeRealtimeSession,
   ProviderNativeReview,
   ProviderNativeReviewRequest,
   ProviderNativeStatus,
@@ -93,6 +97,7 @@ import type {
   TokenUsage,
   ToolExecutionPolicy,
 } from '../../types.js';
+import { appendProviderSubexecutionEvent } from '../../types.js';
 import type { AuditLogSink, RawArchiveSink } from '../providers/codex-audit-hooks.js';
 import { extractCommandExecutionLifecycle, sanitizeRawEvent } from '../providers/codex-audit-hooks.js';
 import {
@@ -107,6 +112,7 @@ import {
   createCodexSessionContextSnapshotResolver,
 } from '../providers/codex-session-context-snapshot.js';
 import { extractImagePaths } from '../providers/image-paths.js';
+import { collectCodexCapabilitySource } from './CodexAppServerCapabilitySource.js';
 import type {
   CodexAppServerLifecycleEvent,
   CodexAppServerLifecycleSnapshot,
@@ -115,6 +121,8 @@ import type {
 import { requestCodexAppServerGoal } from './CodexAppServerGoalControl.js';
 import type { CodexAppServerHostPool } from './CodexAppServerHostPool.js';
 import { recordCodexAppServerLifecycle } from './CodexAppServerLifecycleRegistry.js';
+import { runCodexAppServerInitializedRpc } from './CodexAppServerNativeRpc.js';
+import { openCodexAppServerRealtimeCompanion } from './CodexAppServerRealtimeCompanionControl.js';
 import { requestCodexAppServerReview } from './CodexAppServerReviewControl.js';
 import {
   type CodexAppServerRecoveryBlockedEvent,
@@ -124,6 +132,11 @@ import {
 import { requestCodexAppServerCompaction } from './CodexAppServerSessionControl.js';
 import { requestCodexAppServerFork, requestCodexAppServerStatus } from './CodexAppServerStatusControl.js';
 import { buildCodexNativeEffectGuardArgs } from './CodexNativeEffectGuard.js';
+import {
+  buildCodexRealtimeFeatureArgs,
+  isReservedRealtimeConfigKey,
+  isReservedRealtimeFeature,
+} from './CodexRealtimeFeatureConfig.js';
 import {
   appendCatCafeGithubWriteRouting,
   CODEX_APPS_WRITE_APPROVAL_ARGS,
@@ -135,6 +148,8 @@ import {
   resolveCodexAppServerControlOptions,
 } from './codex-app-server-control-options.js';
 import { buildCodexCapacityRecoveryCardMessage } from './codex-capacity-recovery-card.js';
+import { COLLECTIVE_CODEX_POLICY_ARGS, COLLECTIVE_MCP_ENV_KEYS } from './collective-cli-policy.js';
+import { prepareCollectiveCodexHome } from './collective-codex-home.js';
 import { createDirectAgentCarrierSession } from './DirectAgentCarrierSession.js';
 import { compileL0ViaSubprocess } from './l0-compiler.js';
 import {
@@ -266,6 +281,27 @@ function visitMcpConfigEnvironments(
   }
 }
 
+async function waitForAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signalReason(signal);
+  let rejectAbort!: (error: Error) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = (): void => rejectAbort(signalReason(signal));
+  signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+function signalReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(typeof signal.reason === 'string' ? signal.reason : 'native_operation_aborted');
+}
+
 function resolvePooledCredentialForLease(args: {
   current: PreparedCredentialEnv | null;
   sessionId?: string;
@@ -336,6 +372,8 @@ interface CodexAgentServiceOptions {
   approvalSurface?: CodexApprovalSurface;
   /** Warm app-server host pool. Omitted keeps the per-invocation carrier. */
   appServerHostPool?: CodexAppServerHostPool;
+  /** Server-owned Alpha admission for Codex Realtime conversation support. */
+  nativeRealtimeCompanionEnabled?: boolean;
 }
 
 type CodexAuthMode = 'oauth' | 'api_key' | 'auto';
@@ -461,7 +499,8 @@ function isReservedSystemConfigKey(key: string): boolean {
     key.startsWith('hooks.') ||
     key === 'features' ||
     key === 'features.hooks' ||
-    key.startsWith('features.hooks.')
+    key.startsWith('features.hooks.') ||
+    isReservedRealtimeConfigKey(key)
   );
 }
 
@@ -537,10 +576,10 @@ export function stripReservedCodexSystemConfigs(args: string[], catId: string): 
       continue;
     }
     const featureArg = parseCodexFeatureArg(args, i);
-    if (featureArg?.feature === 'hooks') {
+    if (featureArg && (featureArg.feature === 'hooks' || isReservedRealtimeFeature(featureArg.feature))) {
       log.warn(
-        { catId, key: 'features.hooks', form: featureArg.form },
-        'cliConfigArgs override of native guard feature dropped',
+        { catId, key: `features.${featureArg.feature}`, form: featureArg.form },
+        'cliConfigArgs override of reserved system feature dropped',
       );
       i += featureArg.tokenCount - 1;
       continue;
@@ -718,7 +757,33 @@ async function buildCatCafeMcpArgs(
       break;
     }
   }
-  if (!mcpDistDir) return { args: [], bearerEnv: {} };
+  if (!mcpDistDir) {
+    if (callbackEnv.CAT_CAFE_MCP_PROFILE === 'collective-participation')
+      throw new Error('Collective MCP runtime is not built');
+    return { args: [], bearerEnv: {} };
+  }
+  if (callbackEnv.CAT_CAFE_MCP_PROFILE === 'collective-participation') {
+    const entrypoint = resolve(mcpDistDir, CAT_CAFE_SPLIT_ENTRYPOINTS.get('cat-cafe-collab')!);
+    if (!existsSync(entrypoint)) throw new Error('Collective collab entrypoint is unavailable');
+    return {
+      bearerEnv: {},
+      declaredServerNames: ['cat-cafe-collab'],
+      args: [
+        '--config',
+        `mcp_servers.cat-cafe-collab.command=${toTomlString(resolveCatCafeNodeCommand())}`,
+        '--config',
+        `mcp_servers.cat-cafe-collab.args=[${toTomlString(entrypoint)}]`,
+        '--config',
+        `mcp_servers.cat-cafe-collab.env_vars=[${COLLECTIVE_MCP_ENV_KEYS.map(toTomlString).join(',')}]`,
+        '--config',
+        'mcp_servers.cat-cafe-collab.enabled=true',
+        '--config',
+        'mcp_servers.cat-cafe-collab.required=true',
+        '--config',
+        'mcp_servers.cat-cafe-collab.default_tools_approval_mode="approve"',
+      ],
+    };
+  }
 
   const binaryProjectRoot = resolve(mcpDistDir, '../../..');
   const capabilitiesProjectRoot = binaryProjectRoot;
@@ -1067,6 +1132,13 @@ function isCodexConfigObject(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function readInitializedProviderVersion(value: unknown): string {
+  if (!isCodexConfigObject(value)) return 'unknown';
+  const serverInfo = value.serverInfo;
+  if (!isCodexConfigObject(serverInfo) || typeof serverInfo.version !== 'string') return 'unknown';
+  return serverInfo.version.slice(0, 160);
+}
+
 /**
  * Service for invoking Codex via CLI subprocess.
  * Uses ChatGPT Plus/Pro subscription instead of API key.
@@ -1082,6 +1154,7 @@ export class CodexAgentService implements AgentService {
   private readonly carrierMode: CodexCarrierMode;
   private readonly approvalSurface: CodexApprovalSurface;
   private readonly appServerHostPool: CodexAppServerHostPool | undefined;
+  private readonly nativeRealtimeCompanionEnabled: boolean;
   /** F203 Phase C: compiles per-cat L0 → OpenAI developer role (-c). */
   private readonly l0CompilerFn: typeof compileL0ViaSubprocess;
 
@@ -1100,6 +1173,7 @@ export class CodexAgentService implements AgentService {
     // than relying on transport names or timing heuristics.
     this.approvalSurface = options?.approvalSurface ?? 'unavailable';
     this.appServerHostPool = options?.appServerHostPool;
+    this.nativeRealtimeCompanionEnabled = options?.nativeRealtimeCompanionEnabled ?? false;
   }
 
   /** F203 Phase C — this service injects L0 via `-c developer_instructions=` (Task 4). */
@@ -1108,6 +1182,7 @@ export class CodexAgentService implements AgentService {
   }
 
   supportsToolExecutionPolicy(policy: ToolExecutionPolicy): boolean {
+    if (policy.mode === 'collective_participation') return true;
     // exec_json has the proven --ignore-user-config + empty MCP hard fence.
     // app-server 0.144.4 exposes no equivalent ignore-user-config flag, so a
     // read-only supplement must fail before model launch instead of trusting
@@ -1177,6 +1252,30 @@ export class CodexAgentService implements AgentService {
     });
   }
 
+  async openNativeRealtimeCompanion(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly consumer: ProviderNativeRealtimeConsumer;
+    readonly startupTimeoutMs: number;
+    readonly maxDurationMs: number;
+    readonly onEvent?: (event: ProviderNativeRealtimeEvent) => void | Promise<void>;
+  }): Promise<ProviderNativeRealtimeSession> {
+    if (this.carrierMode !== 'app_server' || !this.appServerHostPool) {
+      throw new Error('codex_native_realtime_companion_unsupported');
+    }
+    const options = resolveCodexAppServerControlOptions(this.appServerHostPool, input.sessionId, input.invocationId);
+    if (!options) throw new Error('codex_native_session_owner_unavailable');
+    const wire = await this.appServerHostPool.createSessionAttachment(options);
+    return openCodexAppServerRealtimeCompanion({
+      wire,
+      threadId: input.sessionId,
+      consumer: input.consumer,
+      startupTimeoutMs: input.startupTimeoutMs,
+      maxDurationMs: input.maxDurationMs,
+      ...(input.onEvent ? { onEvent: input.onEvent } : {}),
+    });
+  }
+
   async requestNativeStatus(input: {
     readonly sessionId: string;
     readonly invocationId: string;
@@ -1195,6 +1294,52 @@ export class CodexAgentService implements AgentService {
       timeoutMs: input.timeoutMs,
       ...(input.cwd ? { cwd: input.cwd } : {}),
     });
+  }
+
+  async requestNativeCapabilitySource(input: {
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly cwd: string;
+  }): Promise<ProviderNativeCapabilitySource> {
+    if (this.carrierMode !== 'app_server' || !this.appServerHostPool) {
+      throw new Error('codex_native_capability_source_unsupported');
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(new Error('authoritative_native_capability_source_timeout')),
+      Math.max(1, input.timeoutMs),
+    );
+    timeout.unref?.();
+    const acquisition = this.appServerHostPool.createSession({
+      command: this.cliCommand,
+      args: ['app-server', '--stdio'],
+      cwd: input.cwd,
+      invocationId: input.invocationId,
+      signal: controller.signal,
+    });
+    void acquisition
+      .then(async (wire) => {
+        if (controller.signal.aborted) await wire.close().catch(async () => wire.terminate?.());
+      })
+      .catch(() => {});
+    try {
+      const wire = await waitForAbort(acquisition, controller.signal);
+      const observedAt = new Date().toISOString();
+      return await runCodexAppServerInitializedRpc({
+        wire,
+        timeoutMs: input.timeoutMs,
+        signal: controller.signal,
+        run: async (client, initialized) =>
+          collectCodexCapabilitySource({
+            cwd: input.cwd,
+            providerVersion: readInitializedProviderVersion(initialized),
+            observedAt,
+            request: client.request,
+          }),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async requestNativeFork(input: {
@@ -1303,7 +1448,17 @@ export class CodexAgentService implements AgentService {
   ): AsyncIterable<AgentMessage> {
     // The preflight seam exists only on app_server. Fail closed instead of
     // quietly falling back to a prompt frozen before the provider verdict.
-    if (promptSource.kind === 'preflight' && this.carrierMode !== 'app_server') {
+    const participation = options?.toolExecutionPolicy?.mode === 'collective_participation';
+    const carrierMode = participation ? 'exec_json' : this.carrierMode;
+    if (
+      participation &&
+      (!options?.systemPrompt ||
+        options.sessionId ||
+        !options.workingDirectory ||
+        options.callbackEnv?.CAT_CAFE_MCP_PROFILE !== 'collective-participation')
+    )
+      throw new Error('Invalid public participation launch');
+    if (promptSource.kind === 'preflight' && carrierMode !== 'app_server') {
       throw new Error('codex_continuity_preflight_requires_app_server');
     }
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
@@ -1322,11 +1477,11 @@ export class CodexAgentService implements AgentService {
     /** exec_json can only carry frozen bytes; undefined means "preflight, app_server only". */
     const execStdinInput = effectivePromptSource.kind === 'frozen' ? effectivePromptSource.prompt : undefined;
     const effectiveModel = options?.callbackEnv?.CAT_CAFE_OPENAI_MODEL_OVERRIDE ?? this.model;
-    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imagePaths = participation ? [] : extractImagePaths(options?.contentBlocks, options?.uploadDir);
     const imageArgs = imagePaths.flatMap((path) => ['--image', path]);
 
-    const sandboxMode = readOnly ? 'read-only' : getCodexSandboxMode();
-    const approvalPolicy = readOnly ? 'never' : getCodexApprovalPolicy();
+    const sandboxMode = readOnly || participation ? 'read-only' : getCodexSandboxMode();
+    const approvalPolicy = readOnly || participation ? 'never' : getCodexApprovalPolicy();
     const inheritedEffort = getCatEffort(this.catId as string, undefined, 'openai', effectiveModel);
     const effortLevel = resolveCliEffortOverride(
       'openai',
@@ -1349,7 +1504,7 @@ export class CodexAgentService implements AgentService {
         ? options.contextNativeWindowTokens
         : options?.contextCapacity?.windowTokens;
     const contextWindow =
-      this.carrierMode === 'exec_json' && nativeWindowTokens != null && nativeWindowTokens > 0
+      carrierMode === 'exec_json' && nativeWindowTokens != null && nativeWindowTokens > 0
         ? nativeWindowTokens
         : undefined;
     const contextWindowArgs: string[] =
@@ -1364,7 +1519,7 @@ export class CodexAgentService implements AgentService {
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
     const appServerHostPool = this.appServerHostPool;
     const wantsPooledAppServer =
-      this.carrierMode === 'app_server' &&
+      carrierMode === 'app_server' &&
       process.platform !== 'win32' &&
       !readOnly &&
       !options?.agentCarrierSessionFactory &&
@@ -1391,14 +1546,14 @@ export class CodexAgentService implements AgentService {
     } = readOnly
       ? { args: [], bearerEnv: {}, declaredServerNames: [] as readonly string[] }
       : await buildCatCafeMcpArgs(mcpCallbackEnv, options?.workingDirectory);
-    const gitRepoArgs = readOnly ? [] : buildGitRepoArgs(options?.workingDirectory);
+    const gitRepoArgs = readOnly || participation ? [] : buildGitRepoArgs(options?.workingDirectory);
     // User-defined CLI args from the member editor (#567) — passed as-is, no implicit wrapping.
     // Each entry is split by whitespace (e.g. "--config model_reasoning_effort=\"low\"").
     // F203 Phase C / 砚砚 P1: strip reserved system config keys (developer_instructions,
     // carries L0) before dedup — otherwise dedup() would skip the system push and the
     // L0 would be silently overridden by any cliConfigArgs entry with the same key.
     const userConfigArgs = stripReservedCodexSystemConfigs(
-      (readOnly ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) => arg.trim().split(/\s+/)),
+      (readOnly || participation ? [] : (options?.cliConfigArgs ?? [])).flatMap((arg) => arg.trim().split(/\s+/)),
       this.catId as string,
     );
     // Collect user config keys across every accepted spelling so ordinary,
@@ -1502,7 +1657,9 @@ export class CodexAgentService implements AgentService {
 
     // F203 Phase C: compile per-cat L0 → OpenAI `developer` role args.
     // fail-closed (generator contract, mirrors the CLI-not-found path below).
-    const l0Result = await this.compileDeveloperInstructions(cliModel, options?.callbackEnv?.CAT_CAFE_USER_ID);
+    const l0Result = participation
+      ? { value: options!.systemPrompt! }
+      : await this.compileDeveloperInstructions(cliModel, options?.callbackEnv?.CAT_CAFE_USER_ID);
     if ('error' in l0Result) {
       yield {
         type: 'error' as const,
@@ -1516,7 +1673,7 @@ export class CodexAgentService implements AgentService {
     }
     let nativeEffectGuardArgs: string[];
     try {
-      nativeEffectGuardArgs = buildCodexNativeEffectGuardArgs();
+      nativeEffectGuardArgs = participation ? [] : buildCodexNativeEffectGuardArgs();
     } catch (error) {
       const metadata: MessageMetadata = { provider: 'openai', model: cliModel };
       yield {
@@ -1530,12 +1687,14 @@ export class CodexAgentService implements AgentService {
       return;
     }
     const hasRuntimeInteractionSurface = Boolean(
-      this.carrierMode === 'app_server' && options?.runtimeInteractionPort && options.auditContext,
+      carrierMode === 'app_server' && options?.runtimeInteractionPort && options.auditContext,
     );
     const invocationApprovalSurface: CodexApprovalSurface = hasRuntimeInteractionSurface
       ? 'interactive'
       : this.approvalSurface;
-    const developerInstructions = appendCatCafeGithubWriteRouting(l0Result.value, invocationApprovalSurface);
+    const developerInstructions = participation
+      ? l0Result.value
+      : appendCatCafeGithubWriteRouting(l0Result.value, invocationApprovalSurface);
     const explicitIdeate = options?.routeIntent?.intent === 'ideate' && options.routeIntent.explicit;
     const collaborationModeKind: 'plan' | 'default' | null = explicitIdeate
       ? 'plan'
@@ -1553,14 +1712,14 @@ export class CodexAgentService implements AgentService {
             },
           }
         : undefined;
-    if (this.carrierMode === 'app_server' && collaborationModeKind && !cliModel) {
+    if (carrierMode === 'app_server' && collaborationModeKind && !cliModel) {
       log.warn(
         { catId: this.catId, collaborationMode: collaborationModeKind },
         'F306 route cannot set Codex collaboration mode without a selected model',
       );
     }
     const developerInstructionsArgs = ['--config', `developer_instructions=${toTomlString(developerInstructions)}`];
-    const appsWriteApprovalArgs = readOnly ? [] : [...CODEX_APPS_WRITE_APPROVAL_ARGS];
+    const appsWriteApprovalArgs = readOnly || participation ? [] : [...CODEX_APPS_WRITE_APPROVAL_ARGS];
 
     // resume 子命令不接受 --sandbox / --add-dir, but it does accept
     // sandbox_mode through --config. Replay the configured sandbox there so
@@ -1573,9 +1732,11 @@ export class CodexAgentService implements AgentService {
     // /proc/<pid>/cmdline 会把完整对话历史（含跨 thread/猫/用户内容）暴露给任何
     // 并发进程。'--' 结束选项解析，'-' 让 codex 从 stdin 读取 PROMPT。
     const promptArgs = ['--', '-'];
-    const readOnlyArgs = readOnly
-      ? ['--ignore-user-config', '--config', 'mcp_servers={}', '--config', 'apps._default.enabled=false']
-      : [];
+    const readOnlyArgs = participation
+      ? [...COLLECTIVE_CODEX_POLICY_ARGS]
+      : readOnly
+        ? ['--ignore-user-config', '--config', 'mcp_servers={}', '--config', 'apps._default.enabled=false']
+        : [];
 
     // Dedup: skip system --config/--flag pairs that the user explicitly overrides (#567).
     const dedup = (src: string[]): string[] => {
@@ -1626,9 +1787,8 @@ export class CodexAgentService implements AgentService {
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
-          '--sandbox',
-          sandboxMode,
-          ...(readOnly ? [] : ['--add-dir', '.git']),
+          ...(participation ? [] : ['--sandbox', sandboxMode]),
+          ...(readOnly || participation ? [] : ['--add-dir', '.git']),
           ...dedup(approvalArgs),
           ...dedup(appsWriteApprovalArgs),
           ...dedup(developerInstructionsArgs),
@@ -1649,6 +1809,7 @@ export class CodexAgentService implements AgentService {
       ...dedup(appsWriteApprovalArgs),
       ...dedup(providerArgs),
       ...userConfigArgs,
+      ...buildCodexRealtimeFeatureArgs(this.nativeRealtimeCompanionEnabled),
       ...nativeEffectGuardArgs,
       ...(usePooledAppServer ? [] : catCafeMcpArgs),
     ]);
@@ -1673,7 +1834,9 @@ export class CodexAgentService implements AgentService {
       }
       // For API Key mode: use temp HOME to prevent OAuth token refresh interference.
       // On Windows, Rust/codex uses USERPROFILE (not HOME) for config directory.
-      if (authMode === 'api_key' && customBaseUrl) {
+      if (participation) {
+        Object.assign(rawEnv, await prepareCollectiveCodexHome(options!.workingDirectory!, authMode));
+      } else if (authMode === 'api_key' && customBaseUrl) {
         const { mkdtempSync } = await import('node:fs');
         const { tmpdir } = await import('node:os');
         const isolatedHome = mkdtempSync(`${tmpdir()}/codex-apikey-`);
@@ -1707,7 +1870,7 @@ export class CodexAgentService implements AgentService {
       // F171: Account env vars applied LAST — user overrides provider-injected values.
       // Strip OPENAI_BASE_URL/OPENAI_API_BASE if already consumed via --config model_providers
       // to prevent the deprecated env var from conflicting with the CLI config.
-      if (options?.accountEnv) {
+      if (options?.accountEnv && !participation) {
         for (const [k, v] of Object.entries(options.accountEnv)) {
           if (customBaseUrl && (k === 'OPENAI_BASE_URL' || k === 'OPENAI_API_BASE')) continue;
           codexEnv[k] = v;
@@ -1723,12 +1886,14 @@ export class CodexAgentService implements AgentService {
 
       const semanticCompletionController = new AbortController();
 
-      const codexCommand = resolveCliCommand(this.cliCommand);
+      // Public policy is supported by the native Codex CLI, not arbitrary member command wrappers.
+      const effectiveCommand = participation ? 'codex' : this.cliCommand;
+      const codexCommand = resolveCliCommand(effectiveCommand);
       if (!codexCommand) {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError(this.cliCommand),
+          error: formatCliNotFoundError(effectiveCommand),
           metadata,
           timestamp: Date.now(),
         };
@@ -1784,8 +1949,12 @@ export class CodexAgentService implements AgentService {
         ...(options?.parentSpan ? { parentSpan: options.parentSpan } : {}),
         semanticCompletionSignal: semanticCompletionController.signal,
       };
-      const useAppServer = this.carrierMode === 'app_server';
-      const schemaDeliveryProfile = readOnly ? ('readonly' as const) : ('full' as const);
+      const useAppServer = carrierMode === 'app_server';
+      const schemaDeliveryProfile = participation
+        ? ('collective-participation' as const)
+        : readOnly
+          ? ('readonly' as const)
+          : ('full' as const);
       const schemaDelivery = resolveMcpSchemaDeliveryForProviderLaunch({
         repoRoot: findMonorepoRoot(dirname(fileURLToPath(import.meta.url))),
         command: codexCommand,
@@ -1828,6 +1997,7 @@ export class CodexAgentService implements AgentService {
             ...(requestedServiceTier ? { serviceTier: requestedServiceTier } : {}),
             ...(contextWindow ? { contextWindowTokens: contextWindow } : {}),
             ...(readOnly ? { toolExecutionPolicy: 'read_only' as const } : {}),
+            ...(participation ? { toolExecutionPolicy: 'collective_participation' as const } : {}),
           }),
           tools: Object.freeze({
             finalSurface: readOnly
@@ -1952,6 +2122,7 @@ export class CodexAgentService implements AgentService {
                       ...(options?.resolveEntrustedWorkTaskRef
                         ? { resolveEntrustedWorkTaskRef: options.resolveEntrustedWorkTaskRef }
                         : {}),
+                      declaredMcpServerNames: Object.freeze(declaredMcpServerNames ?? []),
                     },
                   }
                 : {}),
@@ -2356,12 +2527,18 @@ export class CodexAgentService implements AgentService {
         if (result !== null) {
           if (Array.isArray(result)) {
             for (const msg of result) {
+              if (msg.semanticEvent?.kind === 'subexecution') {
+                appendProviderSubexecutionEvent(metadata, msg.semanticEvent);
+              }
               if (msg.type === 'session_init' && msg.sessionId) {
                 metadata.sessionId = msg.sessionId;
               }
               yield { ...msg, metadata };
             }
           } else {
+            if (result.semanticEvent?.kind === 'subexecution') {
+              appendProviderSubexecutionEvent(metadata, result.semanticEvent);
+            }
             if (result.type === 'session_init' && result.sessionId) {
               metadata.sessionId = result.sessionId;
             }
@@ -2413,7 +2590,7 @@ export class CodexAgentService implements AgentService {
         }
       }
 
-      if (metadata.sessionId) {
+      if (metadata.sessionId && !participation) {
         try {
           const snapshot = await this.contextSnapshotResolver(metadata.sessionId);
           if (snapshot) {
@@ -2455,7 +2632,7 @@ export class CodexAgentService implements AgentService {
       }
 
       // F172 Phase B: Scan for generated images and publish to /uploads/
-      if (metadata.sessionId) {
+      if (metadata.sessionId && !participation) {
         try {
           const published = await scanAndPublishCodexImages({
             codexSessionId: metadata.sessionId,
@@ -2498,7 +2675,7 @@ export class CodexAgentService implements AgentService {
           ? '原生会话恢复仍被 active writer 拒绝；系统已拒绝自动替换或封存当前会话。请稍后重试。'
           : rawError;
       const errorMetadata =
-        this.carrierMode === 'app_server'
+        carrierMode === 'app_server'
           ? {
               ...metadata,
               ...(capacityRecoveryBlocked

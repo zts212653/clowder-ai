@@ -21,14 +21,23 @@ export function readProcessIdentity(pid, { execFileSyncFn = execFileSync, killFn
     return error?.code === 'ESRCH' ? { status: 'dead' } : { status: 'unknown' };
   }
   try {
-    const output = execFileSyncFn('ps', ['-ww', '-p', String(pid), '-o', 'lstart=', '-o', 'command='], {
-      encoding: 'utf8',
-      env: { ...process.env, LC_ALL: 'C' },
-    }).trim();
+    const output = execFileSyncFn(
+      'ps',
+      ['-ww', '-p', String(pid), '-o', 'lstart=', '-o', 'state=', '-o', 'ucomm=', '-o', 'command='],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, LC_ALL: 'C' },
+      },
+    ).trim();
     const startedAt = output.slice(0, 24).trim();
-    const command = output.slice(24).trim();
-    if (!startedAt || !command) return { status: 'unknown' };
-    return { status: 'live', identity: { pid, startedAt, command } };
+    const processFields = output
+      .slice(24)
+      .trim()
+      .match(/^(\S+)\s+(\S+)\s+(.+)$/s);
+    if (!startedAt || !processFields) return { status: 'unknown' };
+    const [, state, ucomm, command] = processFields;
+    if (state.startsWith('Z')) return { status: 'dead' };
+    return { status: 'live', identity: { pid, startedAt, ucomm, command } };
   } catch {
     return { status: 'unknown' };
   }
@@ -37,9 +46,12 @@ export function readProcessIdentity(pid, { execFileSyncFn = execFileSync, killFn
 export function inspectExpectedProcess(identity, deps) {
   const current = readProcessIdentity(Number(identity?.pid), deps);
   if (current.status !== 'live') return current;
-  return current.identity.startedAt === identity.startedAt && current.identity.command === identity.command
-    ? current
-    : { status: 'dead' };
+  if (current.identity.startedAt !== identity.startedAt) return { status: 'dead' };
+  // `ps command` reflects mutable argv; ucomm is the stable accounting name and changes on exec.
+  if (typeof identity.ucomm === 'string' && identity.ucomm) {
+    return current.identity.ucomm === identity.ucomm ? current : { status: 'dead' };
+  }
+  return current.identity.command === identity.command ? current : { status: 'dead' };
 }
 
 export function inspectLeaseOwner(identity, deps) {
@@ -48,6 +60,18 @@ export function inspectLeaseOwner(identity, deps) {
   // Bash may exec the final test command in-place, preserving PID and process
   // birth time while changing command. The start token still prevents PID reuse.
   return current.identity.startedAt === identity.startedAt ? current : { status: 'dead' };
+}
+
+function isValidProcessIdentity(identity) {
+  return (
+    Number.isSafeInteger(identity?.pid) &&
+    identity.pid > 0 &&
+    typeof identity.startedAt === 'string' &&
+    Boolean(identity.startedAt) &&
+    typeof identity.command === 'string' &&
+    Boolean(identity.command) &&
+    (identity.ucomm === undefined || (typeof identity.ucomm === 'string' && Boolean(identity.ucomm)))
+  );
 }
 
 function leasesDir(registryDir) {
@@ -75,16 +99,7 @@ function normalizeLease(raw, leaseFile) {
     return null;
   }
   for (const identity of [raw.owner, raw.redis]) {
-    if (
-      !Number.isSafeInteger(identity.pid) ||
-      identity.pid <= 0 ||
-      typeof identity.startedAt !== 'string' ||
-      !identity.startedAt ||
-      typeof identity.command !== 'string' ||
-      !identity.command
-    ) {
-      return null;
-    }
+    if (!isValidProcessIdentity(identity)) return null;
   }
   return { ...raw, leaseFile };
 }
@@ -162,16 +177,7 @@ function normalizeDevLease(raw, leaseFile) {
     return null;
   }
   for (const identity of [raw.owner, raw.redis]) {
-    if (
-      !Number.isSafeInteger(identity.pid) ||
-      identity.pid <= 0 ||
-      typeof identity.startedAt !== 'string' ||
-      !identity.startedAt ||
-      typeof identity.command !== 'string' ||
-      !identity.command
-    ) {
-      return null;
-    }
+    if (!isValidProcessIdentity(identity)) return null;
   }
   return { ...raw, leaseFile };
 }

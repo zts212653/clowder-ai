@@ -51,28 +51,43 @@ mcp_admission_claims:
     resourceFamily: evolution-program
     boundaryKind: resource-entry
     decision: accepted
+  - ref: "file:docs/features/F311-capability-evolution-workspace.md"
+    toolName: cat_cafe_record_request_review_owner_fact
+    resourceFamily: evolution-program
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F311-capability-evolution-workspace.md"
+    toolName: cat_cafe_begin_evolution_preparation_work
+    resourceFamily: evolution-program
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F311-capability-evolution-workspace.md"
+    toolName: cat_cafe_submit_evolution_preparation
+    resourceFamily: evolution-program
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F311: Capability Evolution Workspace（Meta-RSI 产品控制面）
 
-> **Status**: in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
+> **Status**: in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; roadshow retained as Phase 1 regression; operator-selected F314/F100 full-loop AC-41–44 and AC-UX4 remain open on owner-backed asset/evidence/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0
 >
 > **operator signoff**: 2026-08-28 [thread-id] `0001787926983474`（今年双旗舰之一，与 F310 Growing 并列）。
 > **v1 修订**: 2026-08-28 owner review by @codex-sol（`0001787928166311` 后续 verdict，CHANGES_REQUESTED 六 P1）——核心纠偏：**引用不是所有权**；F311 是薄联邦控制面，不私藏任何领域真相。
 > **v2 修订**: 2026-08-28 operator 授权 @codex-sol 接管修复（`0001787930692641`）——补齐 decision-surface census、证据消费归属、代理 claim 隔离、ADR-045 持久性与 F309/content-owner 边界；Phase 0 仍保持暂停，等待独立方法论复核与最终愿景审核。
 > **v3 修订**: 2026-08-28 平行 @codex-sol 方法论复核（exact `c12fc81446d64a074249b732c0ff854c16d84655`，advisory findings）——补齐用户显式 retention/forget opt-in、optimizer exposure 隔离与 promotion holdout、value owner + Eval 四角色分权、写回前 intervention card 与双 falsifier；Phase 0 继续暂停，等待最终愿景审核。
 > **Final seal**: 2026-08-28 @fable5 对 exact `87d072fec160074131122a47063cbad6712310c5` 给出 **APPROVED**（coordination terminal `0001787932225594`）：16/16 operator 需求在位，未发现 F311 吞并 F299/F267/F281/F309/F300/source owner；Phase 0 审核暂停解除，仅 OQ-1 PM/分工待 operator 指定。
-> **v4 operator correction**: 2026-08-28 `0001787933034346-000451-44d5c067`——v3 的“先造 Program 容器、再跑 Harness v1→v2”会滑成可丢弃 MVP/脚手架，方向作废。确定契约/运行闭环 bug 由真实 owner 立即修；F311 同步建设永久控制面并接回 owner truth。首个 Evolution Program 必须来自真实用户目标与不确定效用 claim，不拿这些 bug 冒充“自进化案例”，也不为证明自己另造一套。
-> **v4 final seal**: 2026-08-28 @fable5 对 exact `9066fe0404742630f42742a26edf3ac1d0c1ab1b` 给出 **APPROVED**（`0001787934042009-000484-68a84358`，one-shot，无 findings）：真实 bug 原 owner 真修、F311 永久接线、E0 合格真实 Program、无大瀑布四项全部通过；v3 方法论边界零损耗。
-> **Gate 0A landed**: 2026-08-28 PR #4053 合入 `main`（merge `0bdda236e6c968263369cc9d39c19dfb5efefbc8`）；canonical `capability-evolution-control` 薄 cell、Owner Matrix 与 production-only join 契约已冻结。独立架构审核对 exact `0095c9c60ba75621e7ece992c229c5c8e5dc43fb` **APPROVED**、无实质 finding（`[thread-id]#0001787939277471-000579-4e373607`）。
-> **v5 operator correction**: 2026-08-30，继 `0001788142745436-000574-3459f7d0` 强调“要的是一整套能力闭环”后，operator 再次以 Magic Word **“脚手架”**拉闸：Phase 不得围绕“先选一个对象跑通”或“先修完依赖”组织，必须直接按 F311 终态产品的永久能力器官拆分。首个 E0 Program 只是整环生产验收输入；owner bug repair 是横向车道；二者都不再充当产品 Phase。
-> **开放世界代理式进化愿景澄清**: 这不是 2026-09-02 临时扩出的新方向。operator 在 2026-08-28 已明确把“家里的记忆系统 / 外部托管的记忆系统 / Claude Code Harness”并列为任意对象（`0001787926057722-000244-97daafa1`），并把“外部托管”定义为 day-1 schema 约束。2026-09-02 再次钉死执行含义（`0001788337265835-000643-0a6a598a`）：对象和 Harness 不必属于 Clowder AI；获得对象 owner 明确授权后，可由该对象自己的 Developer/PM Agent 在其原仓库或原系统修改可变资产、测试、发布与回滚，F311 只编排 Program、Approval 与 refs/lineage 并接收可信 outcome receipt。F311 不搬运外部真相、不凭空扩权，也不把执行代理升级为价值裁判。
+> **v4 operator correction**: 2026-08-28 `private-source-id`——v3 的“先造 Program 容器、再跑 Harness v1→v2”会滑成可丢弃 MVP/脚手架，方向作废。确定契约/运行闭环 bug 由真实 owner 立即修；F311 同步建设永久控制面并接回 owner truth。首个 Evolution Program 必须来自真实用户目标与不确定效用 claim，不拿这些 bug 冒充“自进化案例”，也不为证明自己另造一套。
+> **v4 final seal**: 2026-08-28 @fable5 对 exact `9066fe0404742630f42742a26edf3ac1d0c1ab1b` 给出 **APPROVED**（`private-source-id`，one-shot，无 findings）：真实 bug 原 owner 真修、F311 永久接线、E0 合格真实 Program、无大瀑布四项全部通过；v3 方法论边界零损耗。
+> **Gate 0A landed**: 2026-08-28 PR #4053 合入 `main`（merge `0bdda236e6c968263369cc9d39c19dfb5efefbc8`）；canonical `capability-evolution-control` 薄 cell、Owner Matrix 与 production-only join 契约已冻结。独立架构审核对 exact `0095c9c60ba75621e7ece992c229c5c8e5dc43fb` **APPROVED**、无实质 finding（`[thread-id]#private-source-id`）。
+> **v5 operator correction**: 2026-08-30，继 `private-source-id` 强调“要的是一整套能力闭环”后，operator 再次以 Magic Word **“脚手架”**拉闸：Phase 不得围绕“先选一个对象跑通”或“先修完依赖”组织，必须直接按 F311 终态产品的永久能力器官拆分。首个 E0 Program 只是整环生产验收输入；owner bug repair 是横向车道；二者都不再充当产品 Phase。
+> **开放世界代理式进化愿景澄清**: 这不是 2026-09-02 临时扩出的新方向。operator 在 2026-08-28 已明确把“家里的记忆系统 / 外部托管的记忆系统 / Claude Code Harness”并列为任意对象（`private-source-id`），并把“外部托管”定义为 day-1 schema 约束。2026-09-02 再次钉死执行含义（`private-source-id`）：对象和 Harness 不必属于 Clowder AI；获得对象 owner 明确授权后，可由该对象自己的 Developer/PM Agent 在其原仓库或原系统修改可变资产、测试、发布与回滚，F311 只编排 Program、Approval 与 refs/lineage 并接收可信 outcome receipt。F311 不搬运外部真相、不凭空扩权，也不把执行代理升级为价值裁判。
 > **Phase 1 landed + Alpha accepted**: 2026-09-01 PR #4172 合入 `main`（merge `ed998da4088052a307ea6478a87cef6f86d8f215`）；非作者 @opus5 对 exact `f32e6d888179edc791cc47a9c11996a801b2cb0c` 最终 **APPROVED**，canonical `pnpm gate` PASS。Alpha loaded journey 在 thread `[thread-id]` 只输入“我们来进化 F311 Alpha 聊天入口验收”，猫经正式 MCP action 创建 `evolution-program:407070292b9ce01f374c523ef18de326`；REST、猫动作与 F307 Workbench 读取同一 Redis append-only truth。另以三个 Program 验证 pause/resume/needs_expert/withdraw/retention 审计、409 projection 恢复、terminal 不自动 TTL、active forget 原子 withdraw+retention 与四键同 TTL，以及进程重启后完整 replay。该验收运行于 Alpha（3011/3012/4111/6398），不冒充 production runtime deployment。
 > **Phase 1 production acceptance repair**: 2026-09-01 operator 现场验收发现 Home 直接倾倒机器化 Program projection，缺少一等产品入口；PR #4184 以 `dfcfa666d2ed6727c02a9e4242caf7d32565417a` 合入修复，非作者 @opus5 对 authored exact HEAD `37b8a55fd64cbba7775c8ea8484cc4e8ccf96719` 最终 **APPROVED**。Post-merge Alpha 在 exact `dfcfa666d2` 上真实点通 Workspace Home → 一等“能力进化”入口 → 专属 Capability Evolution Workspace → 人话 Program 标题、阶段与下一步 → typed blocker、历史与谱系 → canonical 生命周期 surface，并对 `evolution-program:407070292b9ce01f374c523ef18de326` 执行 pause/resume，API 两次 command 均 200、sequence `1→2→3`。该修复只改 Web presentation/admission，没有触碰 Phase 2 Program owner/composition 或 Phase 3 Attribution。
 > **Phase 1 用户入口与软层终态修复**: 2026-09-03 PR #4266（merge `d062840b54`）让 Workspace 主动作显式绑定目标对话、预览用户语言并保留既有草稿，把 owner/certificate/F 号、raw blocker 与 lineage 折叠到技术详情；PR #4270（merge `c586782a78`）加入 capability-evolution skill、catalog/wakeup 接线与信息问句/具体目标分流；PR #4275（merge `e294f443dc`）再把 `eval:capability-wakeup` 的机会判断绑定到 owner-scoped 触发消息，拒绝引用、截断证据与 assistant echo 伪 fallback。三笔均由非作者 @opus5 对最终实质 HEAD **APPROVED**。Fresh Alpha thread `[thread-id]` 先问“能自进化什么”时零 Program 写入，再说“我们来进化视频生成能力”时真实调用 canonical start tool，创建 `evolution-program:3285bc60902efcda2c259837430cac37` 并出现在 Workspace；sealed session `f0947e3f-9348-48f8-9aad-cb194cdb223e` 的真实 replay 产出恰好一条具体目标 trial。当前规则度量“消息以进化请求开头”；已有草稿后追加 CTA 的消息保守不进入分母，不能把较低 trial 数解释成较低产品使用量。
 >
 
-> **富文本导览**：[F311 终态施工地图：Phase 0 → 6](assets/F311/f311-final-phases-v5.html)——以用户旅程解释每个 Phase 的永久产品器官、用户收益、完成标准与 owner 边界。原始 Clowder AI 富文本锚点：`[thread-id]#0001788145036222-000045-f449310b`。
+> **富文本导览**：[F311 终态施工地图：Phase 0 → 6](assets/F311/f311-final-phases-v5.html)——以用户旅程解释每个 Phase 的永久产品器官、用户收益、完成标准与 owner 边界。原始 Clowder AI 富文本锚点：`[thread-id]#private-source-id`。
 
 > **Phase 2 landed + Alpha loaded-runtime accepted**: 2026-09-01 PR #4196 合入 `main`（merge `6a9880574fa0f4030bdb6361e6cc47dc073a595d`）；非作者 @opus5 对 authored exact HEAD `1c93c3066518099e119be07e256eba4e756ba740` 最终 **APPROVED**。
 > 按风险只运行 API build、五个相关 suite（24/24）、diff check 与 staged Biome，未重复运行 full gate/review。Alpha 在 exact merge 上加载成功（Frontend/API/Redis 3011/3012/6398）；三个 canonical Program 均从真实投影返回 F192 event/quota/time 注册、weekly `nextEvaluationAt` 与 owner drilldown。
@@ -80,6 +95,11 @@ mcp_admission_claims:
 > Hub visible-page receipt 因没有 matching client 未确认，故本次只声明 loaded-runtime/API acceptance，不冒充已完成可见点击验收。
 >
 > **Phase 4 implementation landed; real E0 Alpha acceptance is honestly incomplete**: 2026-09-02 PR #4254 合入 `main`（merge `2c2176119a35dc0d4ca6e2fa3b81ed7a82d1403f`）；非作者 @opus5 对 exact `89aa70bc3ff1cb15955e4fa121eca1aec2c6e84f` 最终 **APPROVED**、无 P1/P2，canonical `pnpm gate` PASS（1,097s）。同批落地 ref-only change bridge/lineage、exact Approval snapshot、owner receipt + fresh outcome join、五种代谢裁决与 F307 permanent surface；F246/F266/F313/asset owner 继续分别持有 Approval、dispatch/custody/outcome、mutation/receipt truth，F311 不建 shadow store。F267 Owner Repair 随后以 PR #4263 合入真实 E0 certificate/result/decision proof 与四角色 refs（merge `43ad070af04f37874ef1702571ed492c45414a2e`）；measurement 诚实保持两项指标 `n=0 · null · not_estimable`、decision=`insufficient`、唯一 action=`keep_observe`，且无 observation/consumption/exposure/holdout owner object。正式 Alpha 加载该 exact main 后，经公开 `cat_cafe_constitute_evolution_program` 将真实 Program `evolution-program:bcc336788a7df9d6075b1efb4c0a7e68` 从 `constituting · sequence=1` 推进至 `instrumenting · sequence=2`，三证书、value owner 与四角色均为 owner refs，constitution blockers 清零。其 observation 仍列出 trajectory、异质 owner surfaces、evidence role、consumption、optimizer exposure 与 promotion holdout 六项真实缺口，change lineage 仍为空。因而 AC-41–44 继续不勾选：没有 owner authorization、真实 audience observation、可开的评估轮、intervention/Approval、mutation receipt、fresh outcome 或 rollback/sunset/no-change ledger，不能把建制完成或 n=0 published-insufficient 冒充整环验收。
+
+> **Current full-loop acceptance target — F314**: 上段路演建制是历史证据，不再定义当前 AC-41–44 的验收对象。2026-09-06 回读直接 operator 原文 `[thread-id]#private-source-id`（希望用 F314 验收）、`#private-source-id`（交 F314 主 thread 推进）及责任落位 `#private-source-id`：整环对象为 `evolution-program:ba0f4524e49cc879279164d5b272cf8c` / `F100:capability:development-process-harness-effectiveness`。原 carrier `[thread-id]` 的 Sol 已核验 active/instrumenting、cycle 1、sequence 2；旧 wiring task `private-source-id` 已 **done**，临时 hourly guardian 退役，不再构成版本 repair 或恢复授权（terminal source `[thread-id]#private-source-id`，独立 task store 复核相同）。F100 asset owner `[thread-id]` / `@opus` 已确认 Cycle 1 映射到 `skill:cat-cafe-skills/request-review/SKILL.md` 的 accepted-source anchor 模板（source `[thread-id]#private-source-id`），无需新开 F100 Phase 3。PR #4517 已合入 `2baede2cf314e4f99fc6346d4ba773c67ddbff26`：F100 owner 现可发布语义 version/catalog/parent/diff，并以 exact lineage + active custody 持有受治理 action/evidence/use/rollback/fresh-outcome refs；F311 仍只消费这些原 owner refs。新 Alpha 从原 operator source `private-source-id` deterministic replay 同一 `ba0f…` identity，重启前后 owner read 与 F307 history 均读到 current `79acf4d7…` / parent `2b3cb8e0…`，且 Program 始终 sequence 2、`currentAssetVersionRefs=[]`。这关闭 AC-UX4 依赖的 owner-version 读取前置缺口，但 AC-UX4 本身与 AC-41–44 仍保持 open：三类自然证据、实际 adoption/use、必要 exact Approval、merged-and-loaded fresh outcome、成熟决策与 rollback/sunset/no_change 仍须由真实业务链产生；Alpha replay 不冒充生产 Program 进展。
+>
+
+> **F100 owner loop landed (2026-09-12)**: 原 reader Task `private-source-id` 已由 PR #4435 / `fce8043d0e16b90fe6f94b2e2757b785832378ec` 完成；接口 child Task `private-source-id` 随 PR #4517 merge 与重启前后 Alpha 同源消费验收转为 done。Terra 对 exact implementation HEAD `b8994347eaf2e083d008f8c87c6fb3c0c2f8a94e` 批准且无 P1/P2。该交付只证明 F100 owner 的版本、受治理动作、证据/use/fresh-outcome/rollback 与恢复接口及 F307 consumer；生产 runtime 未重启，`adoption_proof_unavailable`、`applied_use_proof_unavailable` 和六项 observation gap 保持可见。F314 parent Task `private-source-id` 与 observation Task `private-source-id` 继续持有业务闭环，旧 guardian 的 `accepted_then_retired` 不变。
 
 Architecture cell: capability-evolution-control
 Map delta: new cell landed via Gate 0A（薄控制面）——它**只拥有**：Program identity/lifecycle、Goal/claim/经济页、各领域资产的 **owner refs**、调度与阶段投影、keep/tune/rollback/sunset 编排状态。上述用户可见生命周期是 **TTL=0、跨重启恢复的 canonical Program truth**；瞬时 scheduler/cache 只能重建投影，不能决定生命周期。**不拥有**：rubric 内容、原始轨迹、verdict lifecycle、资产版本、写回结果、通用 feedback/证据消费账本。
@@ -93,7 +113,7 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 2. **版本归资产 owner**：v0 的"通用 Version DAG"改为**联邦 lineage view**——F311 只保存 `AssetVersionRef` 与因果边（哪条证据触发哪次改动、被谁复用/退役）；版本、回滚、mutation receipt 由资产 owner 持有（提示词/harness 版本 = 吴浪 R1 地基；**canonical 内容 bytes/schema/version = content owner；F309 只持协作 anchor/patch/disposition 与 owner-returned change receipt**）。哪个 owner 缺版本能力，改造那个 owner。
 3. **审批不自建**：delta 卡投递走 F246 审批聚合；F311 不造审批状态机。
 4. **宿主不自建**：产品面以 surface descriptor 提供给 F307 Composable Workbench（F284 为旧壳与迁移源）；F311 不存 layout。
-5. **单变量归因**：一条 Program 只改一层对象；跨层改动拆成多条 Program/claim。
+5. **候选地图、正式绑定与归因分开**：同一业务目标的准备地图可包含多个可变对象与条件，地图是准备提交，不是 `objectRef`，不授予写回权。每条正式 Program 仍绑定一个 canonical target（owner/objectRef/version）与单 claim；涉及多个对象时按共享上位 Goal 的 linked Programs 安排，各持权限、版本与恢复路径。在 owner 现有版本/评估契约与授权内，可把同一 target 的成套候选作为整体效用比较的干预单位；需要回答某部分贡献时，再明确待测主变量并保持其他相关条件可比。环境或量尺本身是被测变量时，控制的是其他条件；不把混合差异说成单因结论，也不把“单 target”误写成“每次只能改一个文件或主因”。对象选择由基线、诊断与竞争解释支持，不在准备入口固定改法。项目已冻结的单变量试验仍按其原契约执行。当前 runtime 的单 target 绑定不因地图或成套版本扩大而获得多 target 写回权；扩契约仍走原 owner 与正式变更，不新建目标或资产真相库。
 6. **决策信号不集中建账**：Phase 0 先做 decision-surface census——拒绝/取消/延后/撤回后的结构化 why 与有界 episode 复用 **F281**；审批 action/index 复用 **F246**；内容编辑/采纳/undo receipt 复用 **F309 + content owner**；其他采纳/复用/留存由各 source owner 持 canonical truth。F311 只注册 source ref、join key 与 named consumer。缺通用能力时改造最自然的原 owner，禁止在 F311 新建 `DecisionSignalStore` 或总 feedback schema。Agent 读取这些 owner truth 的同源 grounding/相关性策略复用 **F300**；**F300 仍为 spec-only 时只记依赖与 gate，禁止 F311 临时内建替代读取层**。
 7. **证据消费与 optimizer exposure 归 eval/source owner**：frozen cohort、证据角色、查询/消费/失效、重裁输入，以及样本在 `discovery / attribution / validation` 各阶段是否暴露给 candidate/rubric 的自适应选择，属于 F192/F267 measurement bundle 或 source owner；F311 只持 certificate/cohort/result/exposure refs。没有 owner-backed consumption + exposure proof 时结果必须是 `insufficient`，禁止补一个 CEW query ledger。冻结 cohort 可用于归因、可比性与旧/新尺 × 旧/新候选的 2×2 复判，但**promotion 另需 source owner 可证明 sealed 或 time-fresh、未被 candidate/rubric selection 看过的独立 holdout**；拿不到则 `insufficient` / `incomparable`，不得把同一污染 cohort 冒充 unseen-world 证明。
 8. **用户可见 Program 承诺服从 LL-048 + ADR-045**：Program identity/lifecycle、双证 refs、lineage 因果边、批准/回滚/sunset 历史在 active 与 terminal 状态都默认 `TTL=0`，跨进程/重启可恢复；**完成、关闭、毕业或 sunset 本身都不得产生 TTL**。只有用户/operator 对该 Program 做出显式 `retention/forget` opt-in 后才允许 TTL/GC，且不得由 GC 反向定义 Program 生命。F298 是持久性法源/家族 verdict 锚，不成为 F311 store；Gate 0A 已将 lifecycle ownership 归 `capability-evolution-control`，v5 plan 进一步冻结 append-only event stream 技术落点。
@@ -130,6 +150,10 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 | Eval evidence role / optimizer exposure / promotion holdout | **F267 + source owner** | 只持 role/exposure/holdout refs 与 gate；不复制 cohort payload |
 | Measurement roles / intervention card | **F267 + source owner** | 只持四角色 owner refs、overlap justification、card ref 与门状态；不拥有角色真相或 card 内容 |
 | Program durable lifecycle / retention choice | **`capability-evolution-control`**（受 LL-048/ADR-045 约束；F298 仅提供法源/家族 verdict） | active/terminal 均持 canonical TTL=0 truth；只执行用户显式 retention/forget 选择，cache 只做可重建投影 |
+| Program 展示名 | **F311 `capability-evolution-control`** | 可选 `displayName` 随创建或显式 `name` command 写入 Program event log；不重命名 owner 资产，不改变阶段、版本、采用或 retention |
+| Preparation section identity / dependency graph | **F311 `capability-evolution-control`** | 持四块稳定 identity、exact revision/dependency refs 与 current/history 投影；不复制正文、不推进 stage、不扩大单 target 写权 |
+| Preparation submission body | **F117 MessageStore** | F311 专用 invocation writer 以 protected `evolutionPreparationSubmissionV1` 幂等发布；Program 只持 ref/materialization intent，rich/browser cache 不是真相源 |
+| Preparation work liveness | **F167 invocation registry** | F311 只引用 server-derived invocation；读时联结 active/terminal/unknown，不能接受调用方自报猫、线程或 `running` |
 | 外部 signal/plugin/governance/mutation | **外部 asset owner**（F202/F292/F302 提供 owner-backed adapter；F246/F266/F313 复用审批、派工与 outcome closure） | 只持 capability/permission、target/version、evidence、action 与 receipt refs；不复制外仓资产或治理状态 |
 
 ## ASR 校正表（operator 语音输入的术语规范）
@@ -157,7 +181,7 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 
 ## Current State / 现状基线
 
-**当前 dependency-pain 与 owner repair 证据（v4）**：operator 在 `0001787933034346-000451-44d5c067` 展示的 F248/Eval Hub 卡片里，`eval:freshness` 曾显示“修复已落地”，但独立复评仍停在“等待复评”并超时升级；该缺口由 F266 owner 修复，PR #4056 已以 exact HEAD `1da990d6fbacd8e7071b4ddcfca1ba1426aa8fe2` 通过完整 `pnpm gate` 后 squash merge 为 `025eee675ef93253990d3962b3d318504acb27e2`（terminal source `0001787969475150-000791-d13ce27e`）。2026-08-30 owner 再核验确认：runtime deployment revision `7855f5e0adfb57c4bc633f512ee3e3638e64915e` 已包含该 merge，故代码已进入 **live binary**；但 stable case `eval-case-v1-fadb1e370581c53b1c60797f767540ea871d2294a17c4569b28bdacb3b2b02ae` 仍为 `closureStatus=escalated / reevalStatus=pending`，没有 trusted re-eval receipt，也没有可验证的 active invocation/carrier。F311 因而只声明 `live_code_active`，不把部署存在冒充 live acceptance。F278 曾三次 production reopen，证明“爪感差采到了”不等于“责任真的闭合”；其 owner 已于 2026-08-28 完成 Phase G production acceptance（merge `2e2f4455049f267375f8d72fbd62edd284b62fa4`，owner acceptance `0001787934303842-000491-4dd25ef6`，durable duty receipt `0001787140800835-000075-cad455f5` 44/44，独立 signer `0001787919538372-000072-fcfb3069` 处理 26 bundles / 35 signals、`signature_waiting=0`，owner closure `0001787935528248-000514-bb2dbccd`）。**F266/F278 都是 owner-backed dependency evidence，不是 Evolution Program 候选**：F311 只消费 F266 case lifecycle refs 与 F278 `unreviewed / bound_in_repair / signature_waiting / blocked / terminal` 投影、分母、evidence refs、durable receipt；不得复制第二套复评或责任闭环。
+**当前 dependency-pain 与 owner repair 证据（v4）**：operator 在 `private-source-id` 展示的 F248/Eval Hub 卡片里，`eval:freshness` 曾显示“修复已落地”，但独立复评仍停在“等待复评”并超时升级；该缺口由 F266 owner 修复，PR #4056 已以 exact HEAD `1da990d6fbacd8e7071b4ddcfca1ba1426aa8fe2` 通过完整 `pnpm gate` 后 squash merge 为 `025eee675ef93253990d3962b3d318504acb27e2`（terminal source `private-source-id`）。2026-08-30 owner 再核验确认：runtime deployment revision `7855f5e0adfb57c4bc633f512ee3e3638e64915e` 已包含该 merge，故代码已进入 **live binary**；但 stable case `eval-case-v1-fadb1e370581c53b1c60797f767540ea871d2294a17c4569b28bdacb3b2b02ae` 仍为 `closureStatus=escalated / reevalStatus=pending`，没有 trusted re-eval receipt，也没有可验证的 active invocation/carrier。F311 因而只声明 `live_code_active`，不把部署存在冒充 live acceptance。F278 曾三次 production reopen，证明“爪感差采到了”不等于“责任真的闭合”；其 owner 已于 2026-08-28 完成 Phase G production acceptance（merge `2e2f4455049f267375f8d72fbd62edd284b62fa4`，owner acceptance `private-source-id`，durable duty receipt `private-source-id` 44/44，独立 signer `private-source-id` 处理 26 bundles / 35 signals、`signature_waiting=0`，owner closure `private-source-id`）。**F266/F278 都是 owner-backed dependency evidence，不是 Evolution Program 候选**：F311 只消费 F266 case lifecycle refs 与 F278 `unreviewed / bound_in_repair / signature_waiting / blocked / terminal` 投影、分母、evidence refs、durable receipt；不得复制第二套复评或责任闭环。
 
 ### Dependency Repair Ledger（owner 真相投影，不是待补齐清单）
 
@@ -165,8 +189,8 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 
 | Owner surface | F311 投影状态 | Canonical evidence / 下一真相条件 |
 |---|---|---|
-| **F278 responsibility loop** | `owner_ready_production` | merge `2e2f4455`；44/44 durable receipt；owner closure `0001787935528248-000514-bb2dbccd`。F311 可读取五态投影与 receipt，不复制 inbox/ledger/workflow。 |
-| **F266 verdict closure** | `code_complete · live_code_active · live_acceptance_pending · no_active_executable_custody` | PR #4056 merge `025eee675`、full gate PASS；deployment revision `7855f5e0a` 已包含该 merge。两条实现任务 `0001787966912715-000738-77cfbed8`、`0001787934574646-000495-5589a3d7` 均为 `done`，目前没有必需的 F266 代码残留。生产 re-eval task `0001786849624181-000188-6997e901` 仍为 `doing`，projection 仍持 lease ref `594742fb-da9d-446c-a39d-fc28679ec88d:1`，但 `/api/executions/active` 无 `thread_eval_freshness` execution，thread 也没有匹配 task/lease 的持久 carrier；因此旧 lease ref 不等于 active custody。Owner acceptance task `0001786353574933-000146-1a44365c` 继续 `blocked`，其剩余范围明确为 **LIVE ACCEPTANCE ONLY**；旧 Design Gate task `0001784382099535-000749-b9d31ba6` 仍由 owner `gpt52` 保持 `blocked`。下一真相条件是 reconciler/eval cron 重新附着现有 task 并产生 executable carrier 或 typed blocker，随后完成 trusted same-case re-evaluation；较旧 F192/F200/F203 owner-thread 写入另需有界 operator 生产授权。 |
+| **F278 responsibility loop** | `owner_ready_production` | merge `2e2f4455`；44/44 durable receipt；owner closure `private-source-id`。F311 可读取五态投影与 receipt，不复制 inbox/ledger/workflow。 |
+| **F266 verdict closure** | `code_complete · live_code_active · live_acceptance_pending · no_active_executable_custody` | PR #4056 merge `025eee675`、full gate PASS；deployment revision `7855f5e0a` 已包含该 merge。两条实现任务 `private-source-id`、`private-source-id` 均为 `done`，目前没有必需的 F266 代码残留。生产 re-eval task `private-source-id` 仍为 `doing`，projection 仍持 lease ref `594742fb-da9d-446c-a39d-fc28679ec88d:1`，但 `/api/executions/active` 无 `thread_eval_freshness` execution，thread 也没有匹配 task/lease 的持久 carrier；因此旧 lease ref 不等于 active custody。Owner acceptance task `private-source-id` 继续 `blocked`，其剩余范围明确为 **LIVE ACCEPTANCE ONLY**；旧 Design Gate task `private-source-id` 仍由 owner `gpt52` 保持 `blocked`。下一真相条件是 reconciler/eval cron 重新附着现有 task 并产生 executable carrier 或 typed blocker，随后完成 trusted same-case re-evaluation；较旧 F192/F200/F203 owner-thread 写入另需有界 operator 生产授权。 |
 | **F299 invocation trajectory** | `owner_contract_available · no_open_bug_evidenced` | 唯一 `inv:<id>` trajectory 产品面与负向契约已在 Gate 0A 冻结；本轮没有查到 F311 专属未闭 bug。首个真实 Program 使用时按 join contract 实测，若失败再投 F299 owner。 |
 | **F192 / F267 / F246 / F307 joins** | `normal_dependency · no_open_bug_evidenced` | 它们分别持 verdict trigger/validity/approval/workspace projection；本轮没有证据把这些依赖升级为 bug。是否足够服务某个 Program，只能由该 Program 的真实 claim 与 owner receipt 验证。 |
 | **F300 same-source read** | `spec_only_dependency_gate` | 这是尚未具备可执行契约的能力缺口，不是假装成运行 bug；F311 不临时内建替代读取层。 |
@@ -178,6 +202,10 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 ### 总架构：薄联邦控制面（v3 归一）
 
 > **一句话**：F311 能看懂全局、能启动和编排，但**不私藏任何领域真相**——用稳定引用把已有能力组织起来。
+>
+> **终态解释与软方法收敛（2026-09-10，Fable 已复核，PR #4488 已合入）**：
+> 连接前轮低保真、已共同接受的方向、方法出处与本轮验证边界；Program 自身真相仍归
+> F311，领域真相留原系统。当前状态/owner/AC 不因解释稿或方法修改而改变。
 
 ```text
               用户入口："我们来进化 X"（一句话，零表单）
@@ -249,7 +277,7 @@ F311 复用 `harness-eval`（F192 registry/trigger/verdict + F266 closure + F267
 |---|---|---|
 | ① 业务能力 | 视频 skill、家内或外部托管的记忆系统 | 眼/手均走 owner-backed adapter |
 | ② 机制器官（二阶） | 立尺/开眼/归因能力 | 信号=一阶治理事件复用；慢环 |
-| ③ 猫画像与路由 | F208 dossier / F293 消费验证 / per-cat overlay | **三层拆开各自成 Program**（单变量）；写回走 F208 proposal 链 |
+| ③ 猫画像与路由 | F208 dossier / F293 消费验证 / per-cat overlay | **三层按各自 owner/target 分开成 Program**；权限与版本独立，画像写回走 F208 proposal 链 |
 | ④ Agent Harness | per-cat overlay、Claude Code 项目 Harness、OfficeAce PM Agent/Skill 栈 | 特化分层铁律：协作契约层不特化，执行层特化；对象可在家内或家外 |
 | ⑤ 组织变体 | TDD/SDD 团队分支 | 版本树+适用域归 skill owner；lineage 语义采用 HC 笔记 Skill/Gene/Capsule/Lineage 分工 |
 
@@ -268,8 +296,6 @@ OfficeAce 真实任务与用户后果：fresh outcome
         ↓
 F311：keep / tune / rollback / sunset；不接管 OfficeAce 真相
 ```
-
-同一规则也适用于 Claude Code：能进化的是 project owner 明确开放且可版本化、可测试、可回滚的 Harness 表面，例如 instructions、Skills、hooks、commands、MCP、subagent 编排、项目代码与 CI；不能声称直接修改未开放的模型权重、闭源二进制或供应商内部行为。若一次目标同时涉及 PM Skill、Agent 角色、工具链与产品代码，围绕同一上位 Goal 建立 linked Programs，每条仍只改变一个主因，避免“大升级有效但不知道为什么”。
 
 ### Phase 0: 宪法与所有权边界（已完成）
 
@@ -328,13 +354,13 @@ Phase 6 的**产品能力**必须交付，但“Meta 机制已经提高能力”
 四根轴（对象、过程、真值成本、时间积累）用于解释系统，不直接复制成用户导航。产品 UI 以一个对象的一次真实 journey 组织信息：
 
 1. **提出目标（Chat）**：用户用一句话发起；猫以紧凑目标卡确认“要改进什么、什么结果算好、哪些判断必须由人完成、何时采用或停止”。正常路径只需一次确认。
-2. **准备评估（Workspace 窄栏 + Needs Me）**：系统静默连接运行证据与独立验证，显示尚缺条件、下次检查时间和人工判断成本；只有不可替代的价值判断进入 Needs Me，并按同一 Program 去重。首页、正在进行、等我判断、最近完成与对象摘要都必须在真实窄栏内成立。
-3. **审阅候选（按需主区 Tab / split pane + F246）**：Program 摘要仍在窄栏；当用户需要持续阅读、并排回放或追版本来源时，从窄栏把 exact Program 晋升为临时主区 surface。同一主区内提供“本轮判断 / 更改历史”两种阅读面：前者呈现改进前后、单一主要改动、独立验证、成本、回滚与被拒候选；后者按时间选择 owner 资产版本，默认显示所选版本相对当前采用版的人话 diff，原始 diff、效果、来源与缺证按需下钻。“批准”只批准 exact action，不提前宣告已经采纳。采用成功后，owner 的 `currentVersionRef` 必须成为窄栏、审阅、历史与后续任务的共同状态源；`selectedVersionRef` 只表达用户当前阅读位置。普通往返恢复所选版本与滚动位置，来自原任务现场的来源入口则携带 exact version ref 并覆盖阅读选择。关闭或切回后，原 Program、所选版本对、滚动位置与未完成判断不能丢。
+2. **准备（Workspace 窄栏 + 按需主区）**：猫把可进化对象、好坏规约、测量与实验准备、基线与初步诊断提交为可交叉阅读的精确修订；系统分别显示真实工作、可改边界、GT 采集/可信性、未知与来源。只有不可替代的价值判断进入 Needs Me，并按同一 Program 去重；准备提交不等于证书、验证或效果成立。
+3. **探索进化（按需主区 Tab / split pane + F246）**：Program 摘要仍在窄栏；持续探索、并排回放或追版本来源时，从窄栏把 exact Program 晋升为临时主区 surface。以真实方案版本的谱系为主要阅读面，一个版本可以包含一组配合工作的改动；展开后分别读整套改动、挂在该版下的多次实验，以及当前选中的比较。每次实验保留环境、样本、量尺、GT 与来源；比较明确对照是谁、条件是否可比、看到了什么和仍不知道什么，不把版本来源自动当成实验对照。补测只增加测量记录，探索请求须等 owner 返回真实版本才增加节点；工作区显示真实在做的事、等待的证据、成本与下一步依据。整体方案的效用与内部单项归因分开判断。“批准”只批准 exact action，不提前宣告已经采纳。采用成功后，owner 的 `currentVersionRef` 仍是窄栏、审阅、历史与后续任务的共同状态源；`selectedVersionRef` 只表达当前阅读位置。普通往返恢复版本、实验/比较选择、画布位置与未完成输入；来源入口携带 exact version ref 并覆盖阅读选择。正式接线前先以可点稿验证下方 Exploration Focus，不能用草稿完成替代产品验收。
 4. **后续任务发生改变（原任务现场）**：下一次同类任务明确提示“已沿用上次确认的规则”，同时提供来源与撤销；将“上一轮发生什么”与“本轮行为为何不同”连成可追溯因果，不新增成长商店、成长页或总分。
 
-日常产品车道为 `journey_validation × internal_product_gate`，沿用 Clowder AI 现有视觉与 canonical owner truth。它是现有 Workspace 的 feature surface，不默认占据完整桌面，也不另造产品主壳。主区空间只在复杂裁决时按需借用，任务完成后回到原现场。路演技术剖面为 `concept_story × external_showcase`，可以展示四轴与对象版本 / 方法版本双时间线，但必须显式标注演示数据，不得伪装成生产界面或真实效果声明。两条车道共享概念和证据边界，不共享信息架构。
+日常产品车道为 `journey_validation × internal_product_gate`，沿用 Clowder AI 现有视觉与 canonical owner truth。它是现有 Workspace 的 feature surface，不默认占据完整桌面，也不另造产品主壳。主区空间在持续探索、并排比较或复杂裁决时按需借用，任务完成后回到原现场。路演技术剖面为 `concept_story × external_showcase`，可以展示四轴与对象版本 / 方法版本双时间线，但必须显式标注演示数据，不得伪装成生产界面或真实效果声明。两条车道共享概念和证据边界，不共享信息架构。
 
-谱系默认采用**稀疏版本历史投影**：版本关系回答“从哪个版本派生”，diff 回答“到底改了什么”，证据回答“凭什么采用”；F311 用 owner 资产 ref 与因果边把三者关联，但不把比赛、缺证、回退或裁决伪装成资产版本节点。窄栏始终只回答当前沿用什么、候选是什么、更改历史有几项与怎样进入对比；主区才显示版本 log、人话 diff、原始 diff、效果、来源、缺证与采用边界。每个来源与证据角色都绑定当前 `selectedVersionRef`，共有证据必须区分“比较基线 / 候选独立复验 / 采用后观察”，不得让另一版本继承不属于它的验证结果。只有 owner 已返回真实分叉时，才在版本关系列显示 compact graph，并区分未采用 / 仍可探索 / 停止投入；保留分支不自动触发新 rollout，一次个性化写回也不得直接命名为“能力已提升”。丰富搜索树属于高重复、低验证成本场景下的可选策略，不是每个 Program 的用户承诺。
+谱系采用**真实版本关系投影**：版本关系回答“从哪里继承”，diff 回答“这一整套改了什么”，测量与比较回答“在什么条件下知道了什么”；F311 用 owner refs 关联这些事实，不把比赛、补测、缺证、回退或裁决伪装成新版本。单一路线也可呈现为版本链，只有真实来源支持时才画分叉或组合关系；提供平移、缩放、折叠和定位，不为填满地图编造节点。窄栏保留当前沿用、候选与进入探索的入口；主区供持续阅读谱系、实验、比较和来源。测量属于 exact 版本，比较属于具体测量记录；条件变化只复核相关比较，旧证据在原范围内仍可读。公开探索、归因、独立复验与采用后观察按原 owner 的证据角色区分，不能借兄弟或后代的结果替当前版本背书。保留分支不自动触发 rollout，丰富搜索策略仍按真实问题与成本选择；肉鸽路线感、2.5D 沙盘或 3D 星图是表现探索，不改变这些真相与权限边界。
 
 Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进**。系统不仅持续改进环境、数据、模型与协作策略，也持续优化目标定义、证据获取、问题诊断、方案生成与成效验证的方法。二阶方法版本只有在后续一阶 Program 同时满足任务范围不缩水、独立或时间新鲜结果成立、失败可恢复且相对基线改善时才可晋升；用户介入次数下降只能作为辅助信号，不能单独证明成长。
 
@@ -347,6 +373,37 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 最终验收运行在正式架构上：重启后恢复 Program；真实 E0 journey 从一句话走到 fresh outcome；`observe/insufficient` 零卡；pending/rejected/superseded/target drift 零派工；外部对象可审计回滚；没有 shadow truth，也没有“演示后删除/重写”清单。只有这些生产证据齐全，F311 才可关闭。
 
 ## User Journey
+
+### 后续路线图：目标下的整体方案与证据阅读（09-15）
+
+- 用户从宽泛目标进入具体候选，再读整体方案版本、成员组成与历史；观测/规约可以是其中成员，并按本次实验的角色分别可读。版本号背后须有可核清单，diff、版本派生、当前生效和实际使用分别呈现。
+- 对象地图能解释看得见、改得动、判得了吗；每次实验关联实际方案、环境、样本、观测、规约、窗口与结果。条件变化时检查比较适用性，不因只改被试自动断言可比，也不把 2×2 固定为所有换尺的硬门。
+- 负责进化的猫读取反馈原文，保留时点、作用目标/决定和可修订解释；规约可回到原案例与校准依据。真实工作练习先验证环境恢复与证据范围，曝光及独立性沿原 owner 契约，后续使用与方法效用另证。
+
+本路线图是既有准备/探索/回流旅程的接续，不重分 Phase、不关闭现有 AC。准备页 #4548 已合入；鸭鸭正式内容与 PREP5 验收仍沿原 child 收口，其已合范围不被本次新增工作倒写扩大。
+
+### Preparation Focus: 先把准备过程共同看清
+
+- **Scope unit**: 同一 workspace、同一次明确改进请求的准备过程。业务目标下可保留多个候选；准备记录与正式单 target Program 的承接按硬约束 5 区分，不拿占位 ref 或入口单选代替调查。
+- **Source**: operator `[thread-id]#private-source-id`，量尺方法纠偏 `#private-source-id`，GT 来源/采集补充 `#private-source-id`；承接此前准备过程与人类 GT 交互需求。
+- **Entry / first output**: 用户说“让 PM Agent 专业地推进项目，只在必要时请人介入”。猫应用 `capability-evolution → evolution-method → eval-design`，交回目标理解、多候选范围、可校准量尺、取证与条件安排、当前未知；不能只复述“专业、省心”，也不能先定成改提示词。普通讨论/准备草案不自动创建 Program。
+- **Reading entries**: “可进化对象 / 好坏规约 / 测量与实验准备 / 基线与初步诊断”四块可交叉推进、逐项展开。显示名提议为“准备”，不改后端 phase id，也不重分永久能力 Phase。
+- **GT and measurement**: 每条量尺能查看 GT 域、合格裁判与付薪方，并进入对应来源、采集方式、可信性/适用范围、缺失/分歧和成本安排。原始业务事实、领域判例与真实使用后果分别处理；日志、反馈、模型自评或采集成功都不自动成为本业务 GT。沉默/放弃进入相应机会分母；零分母、缺资料、未成熟后果与未校准阈值保持未知。
+- **Visible work**: 工作进展与可改边界独立。“尚未调查/待接手”不同于“已核查且本轮不可改”；“正在准备”附真实接手、动作与活动依据；“已提交”不同于“已验证”。展开能读来源、精确修订、限制和下一步。运行结束停止转圈，无接手者不造猫名，不把技术准备逐项变成人工批准。
+- **Recovery and readiness**: 新猫读取当前材料、有效提交和依赖修订后续办，跨刷新/返回/重启保留原输入与历史。目标或来源变化后，旧提交可读但失效部分不能继续冒充当前完成；准备就绪也不意味着已测出改进。
+- **本轮范围**: 仅细化准备阶段。谱系、训练/比较、采用与后续复验保持原开放项；本 thread 保留设计与指挥，正式实现经 F128 交独立子 thread。
+
+### Exploration Focus
+
+- **Source**: `[thread-id]#private-source-id` 确认“探索进化”；`#private-source-id` 提出成套改动与阶段 2 承接；Fable `#private-source-id` 收准版本/测量/比较；operator `#private-source-id` 认可并补充游戏灵感；`#private-source-id` 引用 source 233 并回复“同意！走起吧！嘿嘿”，授权同步主 MD、真数据升级可点稿、体验收准后独立实施。
+- **Scope unit**: 一个被进化对象的版本谱系及其相关实验、比较和工作。节点是 owner 持有的真实版本，可以包含一组改动；还没测过的版本也可见。未产出版本的工作请求不占节点，补测不增版本，当前沿用与当前阅读独立。
+- **Finalization source**: operator `#private-source-id` 认可现稿主体，要求真实结果可视化并降低找证据摩擦；`#private-source-id` 补充第二 / 三阶段必须有颜色、图标与视觉重点。Fable `#private-source-id` 提出主证据、比较与失败可见；`#private-source-id` 收准 owner 原件 / 数据派生图、按实验设计比较、失败可见但不铺满的最终边界。
+- **Visual results first**: 选中版本与实验后，先看与实际记录绑定的可视结果和简短结论，再展开细节。机器人用真实回放 / 帧，UI 用真实截图 / 录屏，纯代码或 Agent 行为可用输入输出对照、用例矩阵或图形摘要。原件与数据派生图标明来源、版本 / 记录集合、样本与测量范围；解释性示意不证明效果。已知回归与关键失败默认可见，汇总可直接下钻到具体案例。素材缺失保留已有结果并说明恢复动作，不借旧图或生成图填成完成态。
+- **Low-friction reading**: 工作面原地播放、放大、查看前后与进入来源，普通阅读不要求用户复制路径、手工找文件或自行配对。取证安排进入准备过程，结果回执自动关联；加载 / 失败 / 切换与恢复状态清楚。可配对的记录默认前后对照，合法非配对按其原设计呈现样本 / 分布 / 不确定性；默认展示规则可查且两版一致，门槛未冻结保持未知。
+- **Preparation in use**: 选中一次实验或比较，能读到实际使用的环境、数据/样本、量尺与 GT 来源、可信性和缺项，回到阶段 2 的同源材料。条件摘要针对当前比较，不给整棵树贴一个虚假的统一实验条件；沿用版缺少相应条件的测量时明确提示。
+- **Comparison and learning**: 明确对照对象、观察窗和适用范围，呈现结果及证据数量/充分性，具体统计随 claim 决定，不强制所有任务共用总分。条件变化时按适用契约重比；AC-32 的换尺复判或重建 baseline 要求保留。方案整体效果、内部归因、反例/方法线索分别表达；没有可靠新发现时也如实显示，不把每次尝试自动算成长。
+- **Visible work and decisions**: 展示由真实回执支持的补测/修改、所需证据、成本及下一步依据。探索或采用请求绑定发起时版本，切换阅读不改其对象；版本、生效与独立验证回执各守其含义，数据收集或比较完成不自动采用。
+- **Draft input**: 鸭鸭公开数据入口包含 5 个控制器版本、8 轮实验、56 条含重复场景记录。v3 的三轮补测与 v4 右 farther“走近碰球但没有 kick”是本轮必走场景。该派生 catalog 和控制器 fingerprint 供展示溯源，不冒充正式 owner 资产版本、独立样本量、足球成功或采用回执。
 
 ### Primary Journey: 一句话开启一轮能力进化
 - **Scope unit**: workspace（一个 Evolution Program）
@@ -384,8 +441,28 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 
 - [ ] AC-UX1: Chat 能以一张紧凑卡完成目标、结果标准、人工判断成本与采用/停止条件的确认；内部 F 号、owner token、“立尺 / 开眼”等实现术语不进入前两层文案
 - [ ] AC-UX2: 真实 Workspace 窄栏可独立完成 Program 首页、正在进行、等我判断、最近完成与对象摘要；只有不可替代的人类判断进入 Needs Me，且同一 Program 不重复催促
-- [ ] AC-UX3: 复杂候选审阅可从窄栏将 exact Program 晋升到 typed 主区 Tab / split pane；同屏呈现 before/after、单变量改动、独立验证、被拒候选、成本与回滚，切回后选择与审阅状态不丢；批准绑定 exact action，不能把 approval、deploy 或一次通过提前写成“已采纳”
+- [ ] AC-UX3: 复杂候选审阅可从窄栏将 exact Program 晋升到 typed 主区 Tab / split pane；同屏呈现 before/after、成套改动及归因边界、独立验证、被拒候选、成本与回滚，切回后选择与审阅状态不丢；批准绑定 exact action，不能把 approval、deploy 或一次通过提前写成“已采纳”
 - [ ] AC-UX4: 下一次同类任务在原任务现场显示已沿用的上轮学习、来源与撤销；路演技术剖面与 canonical 产品 UI 分离，并对演示数据 / 未实证效用显式披露
+- [ ] AC-UX5: 准备与探索正式页面有清楚的视觉重点、有角色分工的颜色与语义 SVG；主动作、内容类别 / 对照系列、真实状态可辨识，颜色不独自承担含义；真实宿主默认态、窄屏与主题的渲染及 operator 体验验收通过，灰阶交互稿不能代替视觉完成
+
+### Preparation Experience（09-09 收准；PREP1–4 Alpha 已验，PREP5 待 operator）
+
+> 实现证据：PR #4474 已合入 strict schema、refs-only Program events、F117 protected body、event-first crash recovery、invocation-only MCP、F167 live join 与 F307 四块读面；PR #4475 merge `8f313228a3` 关闭 direct PM 目标 admission、认知入口和 AC-UX5 视觉层级缺口，Terra 对 exact `8ccd536043` 批准，canonical contract gate 通过。R1–R15 证伪的 regex 语义 classifier 已撤出，136 条暴露样本只作 calibration seed；命令式目标由语义 rubric judge 判断，不污染机械纵向分母。operator source `private-source-id` 选择的 B「柔和色块」以四类独立 token + 文字 + 语义 SVG 表达内容类别，主动作与状态继续分权。post-merge Alpha build `dbfb047b73` 在新 thread `[thread-id]` 以 source `private-source-id` 的 exact PM 原话完成正式 start/read/begin/submit/read，Program `evolution-program:c0cdd2f96310c9ce8acb690d7b391a96` 持四块 submitted refs；真实 F307 读到 5 个候选、6 条量尺与 4 个 GT 来源，1360/416/320、深色、刷新、零读取写入均通过，停服后 Redis 6398 保留且新进程完整恢复。PREP1–4 的运行与恢复证据已成立；visible-page 投递仍为 `unconfirmed / no_matching_client`，operator 尚未确认看到实际宿主，因此 PREP5 不关闭。
+
+- [x] AC-PREP1: 只给业务愿望的新 thread 能应用专业方法，生成可检查的候选范围、判断草案与条件安排；普通讨论零 Program 写入，正式绑定和 owner 权限不由候选地图推导
+- [x] AC-PREP2: 每条量尺可下钻 GT 域、裁判、付薪方及来源/采集/可信性；采集待接通、已采待核、可用于明确范围分别可见，缺失/分歧/沉默与未成熟后果不被藏掉
+- [x] AC-PREP3: 同屏可区分数据准备中、环境已核查且本轮不可改、记录待接手；每项可展开真实依据/修订/下一步，无工作证据不转圈，运行结束停止假忙
+- [x] AC-PREP4: 陌生输入经正式猫动作提交、读回同源结果；刷新/返回/重启和新猫续办均恢复，过期修订确认、来源删除、跨 workspace 与重复/中断写入按 owner 契约拒收或诚实恢复，用户原输入不丢
+- [ ] AC-PREP5: 在真实 F307 窄栏与按需主区完成四块阅读、量尺到 GT 跳转和回读提交；移动窄宽不溢出、reduced-motion 有效，operator 看过实际宿主再验收，不以 standalone HTML 代替正式产品完成；同时满足 AC-UX5 的颜色、图标与视觉重点要求，灰阶稿不作为正式风格验收
+
+### Exploration Experience（对应 Exploration Focus；正式宿主验收）
+
+- [x] AC-EXP1: 从真实版本谱系找到起点、当前阅读与当前沿用，展开一整组改动；平移/缩放/折叠/定位后仍可找回，未产出请求和补测不被画成新版本
+- [x] AC-EXP2: 同一版本的多轮实验分别可读，环境、样本/观察窗、量尺和 GT 来源/缺项绑定本次记录，并能回读准备材料；旧条件测过不冒充新条件已验证
+- [x] AC-EXP3: 比较明确所选记录、对照与配对 / 非配对设计；按实际方法呈现条件、结果、证据数量与充分性，门槛未冻结保持未知；关键失败 / 回归默认可见，汇总可进入案例，默认展示规则两版一致，不拼接口径或冒充内部单项归因
+- [ ] AC-EXP4: 陌生探索输入、补测与采用请求保持发起时版本；真实工作与回执可追溯、刷新/返回后可恢复，只有 owner 生效回执改变当前沿用
+- [x] AC-EXP5: 鸭鸭真实数据中 v3 多次补测保持一个版本，v4 右 farther 提前碰球不被标成踢球成功；重复公开记录不被计作独立验收，草稿与正式接线状态明确区分
+- [ ] AC-EXP6: 实际结果在工作面有可视主呈现；原件或数据派生图绑定正确版本、运行 / 记录集合与定义，可原地播放 / 放大 / 下钻，无需复制路径找证据；鸭鸭与至少一种纯代码行为记录的真实宿主路径、来源失效和切换恢复均验证，示意图不证明效果，视觉层级满足 AC-UX5
 
 ### Phase 0（宪法与所有权，已落地）
 - [x] AC-01: 薄 cell + Owner Matrix + F299/decision/query/durability/role/intervention 负向契约已落 ownership map（PR #4053 / `0bdda236e`）；F311 不内建任何 owner 替代面
@@ -461,7 +538,7 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 | 4 | 遥测不让用户当标注员（含猫反馈） | Journey Step 3；decision-surface census 复用 F281/F246/F309/各 source owner；paw_feel 上游源 |
 | 5 | 触发：事件/1d/7d/配额 | 调度器（注册进 F192 trigger） |
 | 6 | 归因分层确诊 | Phase 3 四层 + unresolved（AC-31）；写回前 intervention card 双 falsifier（AC-33） |
-| 7 | 一切可视化可感知 | Phase 1 起即 surface descriptor → F307（AC-14），后续每个器官持续补投影 |
+| 7 | 一切可视化可感知 | Phase 1 起即 surface descriptor → F307（AC-14）；准备 / 探索视觉层级 AC-UX5，阶段 3 可视结果与原地证据 AC-EXP6 |
 | 8 | 从"我驱动"变"猫自主" | Why②；Journey Step 1-2 |
 | 9 | GT 真值锚点分层 | 继承声明；范式分层判卷；fresh bit 定义 |
 | 10 | 机制自身进化、沉淀 skill、启发式学习 | Phase 6 二阶器官环（监督信号≠GT）；能力必交付，效用 claim 条件成立 |
@@ -490,6 +567,8 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 | 风险 | 缓解 |
 |------|------|
 | 控制面悄悄变成总数据库（v0 已犯） | 负向契约 1-10 + Owner Matrix 进 ownership map；review 检查点 |
+| 读取失败被误写成 owner 确认无证据/无使用 | loading、unavailable、resolved-empty 分离；有 blocker 时不从空数组断言不存在。鉴权失效清掉持久化 exact 选择，保留纯阅读偏好；错误页保留返回与重试 |
+| owner 长期不支持 versionReview 时，固定 2 秒轮询重复请求 404/422 | Opus 5 在旧 Alpha 实测约 100 秒 61 次 404，明确为非本轮回归、不阻塞 exact `7c4d78e324`。若合入后的 canonical owner-unavailable 仍是稳定状态，或同 workspace 达到既有 100 Program 阈值，按原 read-resource owner 的运行健康问题核对请求频率并调整退避/刷新策略；用 logs/metrics 验证，不新建效用 eval。来源 `[thread-id]#private-source-id`；此行不声称已修复轮询 |
 | claim 越界（Meta-RSI 宏大 claim 立项、CEW 小 claim 验收） | 三 claim 分开验收；演示禁跨层偷换主语 |
 | 二阶 Goodhart（器官 skill 讨好人） | GT 只用延迟真值；AC-61/62 分开“机制接通”与“效用实证”，不造样本 |
 | 信号密度不足 | v1 裁决加速器；owner-backed fresh-bit fabric；needs_expert 显式挂起 |
@@ -539,9 +618,11 @@ Meta Evolution 的正式定义为：**能力对象与改进机制的协同演进
 | KD-15 | 依赖真修与 F311 生产建设并行：缺能力改 owner，F311 只补永久联邦控制面；真实 Program 另过 E0 | “修 bug 同时串联”比“先证明 CEW 再重做”更快；分开 bug 与不确定效用又避免概念吞并 | 2026-08-28 |
 | KD-16 | Phase 按终态能力器官拆：建制与可见→开眼与取证→评估与归因→受治理写回与代谢→多对象联邦→机制自身进化；owner repair 与首个 E0 journey 均为横向车道 | 防 execution-first 把“下一步能做什么”偷换成“产品是什么”，杜绝脚手架与单点自进化叙事 | 2026-08-31 |
 | KD-17 | F311 是开放世界的代理式进化控制面：外部 owner/Agent 在原仓原系统执行获授权 mutation，F311 只持 Program refs/lineage；执行权可代理，权限与 value verdict 不可偷渡 | 把 08-28“外部托管对象/Claude Code Harness”的定义性愿景补成可验收的执行契约，避免把 federation 错做成只读连接器或外仓复制器 | 2026-09-02 |
-| KD-18 | 日常产品按“提出目标→准备评估→审阅候选→后续任务发生改变”组织；Growing 不成为新页面 | 让成长发生在用户正在做的事里，以行为变化而非功能导航证明长期价值 | 2026-09-04 |
+| KD-18 | 日常产品沿四时刻组织；09-09 第三时刻收准为“探索进化”，承接版本、实验、比较与下一步工作；Growing 不成为新页面，第四时刻的新名称仍待共创 | 让探索过程可见，准备材料在实际比较中被使用；以真实后续行为证明长期价值 | 2026-09-04 / 2026-09-09 |
 | KD-19 | canonical 产品 UI 与路演技术剖面分成两条车道；后者用对象版本 / 方法版本双时间线解释四轴与元进化 | 产品需要低认知负担，技术领导需要机制可解释性；混用会同时损害可用性和证据诚实 | 2026-09-04 |
 | KD-20 | 二阶方法版本不得自证：只有后续一阶 Program 在范围不缩水、独立结果成立且可恢复时改善，方法才可晋升 | 防止 rubric、归因或流程通过改写自己的判据制造“进化” | 2026-09-04 |
+| KD-21 | 探索结果默认以真实原件或绑定 owner 数据的只读图形呈现，原地比较与下钻；实验设计、失败和适用范围不被视觉叙事覆盖 | operator 413 / Fable 416、420：降低用户找文件、配对、解读证据的劳动，兼容纯代码对象 | 2026-09-09 |
+| KD-22 | 准备与探索的正式风格需要颜色、语义图标和视觉主次；灰阶稿仅收准交互骨架，视觉完成须在真实宿主验证 | operator 422：保留迭代形成的产品样貌，避免单色同权重与信息重点丢失 | 2026-09-09 |
 
 ## Review Gate
 

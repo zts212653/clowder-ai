@@ -13,11 +13,11 @@
 needs_rebuild() {
   local product="$1" stamp="$2" current_head="$3"
   [ -f "$product" ] || return 0   # build product missing → rebuild (git or not)
-  # HEAD check MUST come before stamp: non-git in-place runtime always has
-  # empty HEAD, and record_build_stamp refuses to write empty — without
-  # short-circuiting here, every restart would rebuild because the stamp
-  # never materializes (cloud P1 PR #1706, worse than the original bug).
-  [ -n "$current_head" ] || return 1  # HEAD unavailable (non-git deploy) → skip
+  # Provenance check MUST come before stamp: an unversioned in-place copy has
+  # neither Git HEAD nor an archive revision, and record_build_stamp refuses
+  # to write an empty identity. Without this short circuit every restart would
+  # rebuild because the stamp never materializes (cloud P1 PR #1706).
+  [ -n "$current_head" ] || return 1  # source identity unavailable → skip
   [ -f "$stamp" ] || return 0     # have HEAD but no stamp → legacy upgrade → rebuild
   [ "$(cat "$stamp" 2>/dev/null)" = "$current_head" ] && return 1  # stamp matches HEAD → fresh
   return 0  # stamp differs from HEAD (source synced) → rebuild

@@ -9,6 +9,7 @@ import {
   validateWireVersion,
   WIRE_METHOD_NAMES,
 } from '@clowder-ai/plugin-contract';
+import { parseStaticFeatureLedger } from './static-feature-ledger.js';
 import type {
   BrokerCallPhase,
   BrokerCallRecord,
@@ -358,5 +359,13 @@ export function parseHostBrokerSnapshot(value: unknown): HostBrokerSnapshot {
   const runtimeLeases = raw.runtimeLeases.map(parseLease);
   const calls = raw.calls.map(parseCall);
   assertReferences(sessions, runtimeLeases, calls);
-  return { schemaVersion: HOST_BROKER_SCHEMA_VERSION, sessions, runtimeLeases, calls };
+  return {
+    schemaVersion: HOST_BROKER_SCHEMA_VERSION,
+    sessions,
+    runtimeLeases,
+    calls,
+    ...(raw.staticFeatures === undefined
+      ? {}
+      : { staticFeatures: parseStaticFeatureLedger(raw.staticFeatures, sessions) }),
+  };
 }

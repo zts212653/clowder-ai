@@ -34,9 +34,13 @@ export interface ThreadAttentionGroup {
 }
 
 /** F277: private presentation state keyed only by a stable Group anchor. */
+export type ThreadAttentionMemberSort = 'manual' | 'running-first';
+
 export interface ThreadAttentionPreferences {
   aliases?: Record<string, string>;
   open?: Record<string, boolean>;
+  /** Missing inherits manual order. Running-first is a view; membership order remains durable truth. */
+  memberSort?: Record<string, ThreadAttentionMemberSort>;
 }
 
 export interface UserPreferences {

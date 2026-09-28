@@ -21,6 +21,13 @@ function computeProfileContentSignature(profileDir: string): string | null {
   const relationshipDir = resolve(profileDir, 'relationship');
   if (!existsSync(relationshipDir)) entries.push('relationship\tmissing');
   else if (!collectContentHashes(relationshipDir, 'relationship', entries)) return null;
+
+  // Phase E: corpus content is part of the profile signature so that corpus r1→r2
+  // invalidates the L0 cache for ALL cats sharing this owner (owner-wide pointer).
+  const corpusDir = resolve(profileDir, 'corpus');
+  if (!existsSync(corpusDir)) entries.push('corpus\tmissing');
+  else if (!collectContentHashes(corpusDir, 'corpus', entries)) return null;
+
   return entries.join('\n');
 }
 
@@ -135,6 +142,18 @@ export class L0ProfileCache {
     this.results.clear();
     this.inflight.clear();
     this.profileSignatures.clear();
+    this.bumpGlobalGeneration();
+  }
+
+  /**
+   * Phase E: owner-wide cache invalidation for corpus changes.
+   * Corpus is shared across all cats for this owner, so when corpus content changes,
+   * ALL cached L0s for this userId must be invalidated (not just one cat's).
+   */
+  clearOwner(userId: string): void {
+    for (const key of this.allKeys()) {
+      if (key.startsWith(`${userId}\0`)) this.deleteKey(key);
+    }
     this.bumpGlobalGeneration();
   }
 

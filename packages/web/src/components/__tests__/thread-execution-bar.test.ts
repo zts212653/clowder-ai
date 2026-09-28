@@ -169,7 +169,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
   });
 
   it('keeps no-execution hydration states out of the bottom-chrome layout', () => {
-    const loadingRequest = useActiveExecutionStore.getState().beginHydration('thread-1');
+    const loadingRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
     act(() => root.render(React.createElement(ThreadExecutionBar)));
     expect(container.childElementCount).toBe(0);
 
@@ -180,7 +180,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
     act(() => root.render(React.createElement(ThreadExecutionBar)));
     expect(container.childElementCount).toBe(0);
 
-    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1');
+    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
     useActiveExecutionStore.getState().failHydration('thread-1', failedRequest, new Error('offline'));
     act(() => root.render(React.createElement(ThreadExecutionBar)));
     expect(container.childElementCount).toBe(0);
@@ -188,7 +188,7 @@ describe('ThreadExecutionBar (F122B AC-B8 + B8/B9 polish)', () => {
 
   it('keeps active controls and marks retained execution truth as stale after hydration fails', async () => {
     seedExecutions([liveExecution({ executionId: 'inv-stale', catId: 'opus' })]);
-    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1');
+    const failedRequest = useActiveExecutionStore.getState().beginHydration('thread-1', '/project/cafe');
     useActiveExecutionStore.getState().failHydration('thread-1', failedRequest, new Error('offline'));
 
     await act(async () => root.render(React.createElement(ThreadExecutionBar)));

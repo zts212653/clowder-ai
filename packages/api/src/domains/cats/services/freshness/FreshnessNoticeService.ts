@@ -42,7 +42,7 @@ export interface NoticeStateStore {
 
 /** What the service needs from FreshnessAttentionEventLog */
 export interface NoticeEventLog {
-  append(event: FreshnessAttentionEvent): Promise<void>;
+  append(event: FreshnessAttentionEvent, scope: { ownerUserId: string }): Promise<void>;
   /** B2: query unresolved notices for hold_ball reminder (notices delivered but not acked/deferred) */
   getUnresolvedNotices(invocationId: string): Promise<NoticeAttachedEvent[]>;
 }
@@ -100,6 +100,7 @@ export class FreshnessNoticeService {
    * 3. unseen check: are there unseen messages in the current thread?
    */
   async checkAndMaybeNotice(params: {
+    ownerUserId: string;
     invocationId: string;
     threadId: string;
     catId: CatId;
@@ -148,18 +149,21 @@ export class FreshnessNoticeService {
     // ThreadUnseenChecker emits v2 via cursorFor — extract raw ID via parseCursor.
     // Legacy events have raw v1 in maxMessageId and no maxCursor.
     const parsed = parseCursor(unseen.maxMessageId);
-    await this.eventLog.append({
-      kind: 'notice_attached',
-      threadId,
-      catId,
-      invocationId,
-      timestamp: Date.now(),
-      toolName,
-      unseenSenders: unseen.senders,
-      noticeId,
-      maxMessageId: parsed?.id ?? unseen.maxMessageId,
-      maxCursor: unseen.maxMessageId,
-    });
+    await this.eventLog.append(
+      {
+        kind: 'notice_attached',
+        threadId,
+        catId,
+        invocationId,
+        timestamp: Date.now(),
+        toolName,
+        unseenSenders: unseen.senders,
+        noticeId,
+        maxMessageId: parsed?.id ?? unseen.maxMessageId,
+        maxCursor: unseen.maxMessageId,
+      },
+      { ownerUserId: params.ownerUserId },
+    );
 
     // AC-B5: OTel counter
     freshnessNoticeAttached.add(1);
@@ -184,6 +188,7 @@ export class FreshnessNoticeService {
    * Returns null if no unresolved notices exist.
    */
   async checkHoldBallReminder(params: {
+    ownerUserId: string;
     invocationId: string;
     threadId: string;
     catId: CatId;
@@ -239,14 +244,17 @@ export class FreshnessNoticeService {
     );
 
     // Record notice_deferred event (cat chose to hold despite unresolved notices)
-    await this.eventLog.append({
-      kind: 'notice_deferred',
-      threadId,
-      catId,
-      invocationId,
-      timestamp: Date.now(),
-      noticeIds,
-    });
+    await this.eventLog.append(
+      {
+        kind: 'notice_deferred',
+        threadId,
+        catId,
+        invocationId,
+        timestamp: Date.now(),
+        noticeIds,
+      },
+      { ownerUserId: params.ownerUserId },
+    );
 
     // AC-B5: OTel counter — increment per notice (not per hold_ball event) to match
     // freshnessNoticeAttached denominator granularity (cloud R1 P2).

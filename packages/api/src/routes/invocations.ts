@@ -137,8 +137,15 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       };
     }
 
-    // ④ Rebuild intent from stored content + targetCats
-    const intent = parseIntent(storedMessage.content, record.targetCats.length);
+    const previouslySuccessfulCatIds = [...(record.successfulCatIds ?? [])];
+    const retryTargetCats = record.targetCats.filter((catId) => !previouslySuccessfulCatIds.includes(catId));
+    if (retryTargetCats.length === 0) {
+      reply.status(409);
+      return { error: 'All original targets have already completed', code: 'INVOCATION_NOT_RETRYABLE' };
+    }
+
+    // ④ Preserve the original body; retry only targets without a success witness.
+    const intent = parseIntent(storedMessage.content, retryTargetCats.length);
 
     // ⑤ Delete guard check
     if (opts.invocationTracker.isDeleting(record.threadId)) {
@@ -168,14 +175,14 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
     }
 
     // ⑦ Start invocation tracking for ALL target cats (multi-cat F5 recovery)
-    const primaryCat = record.targetCats[0] ?? 'unknown';
+    const primaryCat = retryTargetCats[0] ?? 'unknown';
     const jointAcquire = opts.queueProcessor?.acquireExternalExecution?.bind(opts.queueProcessor);
     const controller = jointAcquire
-      ? await jointAcquire(record.threadId, record.targetCats, record.userId, {
+      ? await jointAcquire(record.threadId, retryTargetCats, record.userId, {
           mode: 'replacement',
           executionId: id,
         })
-      : opts.invocationTracker.startAll(record.threadId, record.targetCats, record.userId, id);
+      : opts.invocationTracker.startAll(record.threadId, retryTargetCats, record.userId, id);
     if (!controller) {
       // running -> queued is not a legal lifecycle transition. A retry of an already-queued
       // record that loses ownership therefore terminalizes as failed; an originally failed
@@ -245,15 +252,21 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
       // F39: Track final status for queue auto-dequeue
       let finalStatus: 'succeeded' | 'failed' | 'canceled' = 'failed';
       const terminalDispositions = new PerCatTerminalDispositionCollector({
-        targetCatIds: record.targetCats,
+        targetCatIds: retryTargetCats,
         isCanceled: (catId) => opts.invocationTracker.getSlotState?.(record.threadId, catId) === 'canceled',
       });
+      const successfulCatIds = () =>
+        [...new Set([...previouslySuccessfulCatIds, ...terminalDispositions.getSuccessfulCatIds()])] as CatId[];
+      const successWitness = () => {
+        const completed = successfulCatIds();
+        return completed.length > 0 ? { successfulCatIds: completed } : {};
+      };
 
       try {
         opts.socketManager.broadcastToRoom(`thread:${record.threadId}`, 'intent_mode', {
           threadId: record.threadId,
           mode: intent.intent,
-          targetCats: record.targetCats,
+          targetCats: retryTargetCats,
         });
 
         // ADR-008 S3: collect cursor boundaries; ack only after succeeded
@@ -268,7 +281,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           storedMessage.content,
           record.threadId,
           storedMessage.id,
-          record.targetCats,
+          retryTargetCats,
           intent,
           {
             ownerAuthProvenance,
@@ -340,6 +353,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
             error: `Message delivered but persistence failed: ${errorDetail}`,
+            ...successWitness(),
           });
           opts.socketManager.broadcastAgentMessage(
             {
@@ -354,6 +368,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           await opts.invocationRecordStore.update(id, {
             status: 'failed',
             error: governanceErrorCode,
+            ...successWitness(),
           });
         } else {
           // F-parallel-cancel (cloud #7): AGGREGATE finalStatus — a single-cat cancel no longer
@@ -362,7 +377,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
           // finally below, AFTER this, so tombstones are still visible). Mirrors QueueProcessor.
           const batchReason = controller.signal.reason;
           const aggStatus = opts.invocationTracker.resolveFinalStatus
-            ? opts.invocationTracker.resolveFinalStatus(record.threadId, record.targetCats, {
+            ? opts.invocationTracker.resolveFinalStatus(record.threadId, retryTargetCats, {
                 aborted: controller.signal.aborted,
                 reason: batchReason as string | undefined,
               })
@@ -376,16 +391,20 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             // ADR-008 S3: ack cursors before marking succeeded so that if ack
             // throws, the catch block sees running→failed (valid transition).
             await opts.router.ackCollectedCursors(record.userId, record.threadId, cursorBoundaries);
+            const error = terminalDispositions.getPrimaryTerminalError();
+            const completed = successfulCatIds();
+            const status = error ? ('failed' as const) : ('succeeded' as const);
             await requireInvocationRecordUpdate({
               store: opts.invocationRecordStore,
               invocationId: id,
               update: {
-                status: 'succeeded',
-                successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
+                status,
+                ...(completed.length > 0 || status === 'succeeded' ? { successfulCatIds: completed } : {}),
+                ...(error ? { error } : {}),
               },
               writer: 'invocation retry route',
             });
-            finalStatus = 'succeeded';
+            finalStatus = status;
           }
         }
       } catch (err) {
@@ -394,6 +413,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         await opts.invocationRecordStore.update(id, {
           status: 'failed',
           error: errorMsg,
+          ...successWitness(),
         });
         opts.socketManager.broadcastAgentMessage(
           {
@@ -407,7 +427,7 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
         );
       } finally {
         clearInterval(heartbeatInterval);
-        opts.invocationTracker.completeAll(record.threadId, record.targetCats, controller);
+        opts.invocationTracker.completeAll(record.threadId, retryTargetCats, controller);
         // F39: Notify queue processor for auto-dequeue chain
         opts.queueProcessor
           ?.onInvocationComplete(
@@ -418,6 +438,10 @@ export const invocationsRoutes: FastifyPluginAsync<InvocationsRoutesOptions> = a
             // now represents only queued_seen tokens freshly recorded during this attempt.
             id,
             finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
+            false,
+            terminalDispositions.getTerminalInvocationIdByCatId(),
+            [],
+            terminalDispositions.getTerminalConsumptionByInvocationId(),
           )
           .catch(() => {
             /* best-effort */

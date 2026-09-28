@@ -6,7 +6,7 @@ const APPEND_PROTOCOL_VERSION = 2;
 const SAFE_TOKEN = /^[A-Za-z0-9._:-]+$/;
 const MAX_TEXT_BYTES = 128 * 1024;
 const ASSISTANT_RESULT_TIMEOUT_MS = 2000;
-const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.10';
+const EXTENSION_REVISION = chrome.runtime.getManifest?.().version ?? '0.2.11';
 let nativePort = null;
 let bindingRequestSequence = 0;
 let bindingQuerySequence = 0;
@@ -86,15 +86,11 @@ function observedRevisionsFor(request, pageAdapter = 'unobserved') {
 }
 function failureFor(request, errorCode, pageAdapter) {
   return {
-    v: APPEND_PROTOCOL_VERSION,
-    kind: 'append_result',
+    v: APPEND_PROTOCOL_VERSION, kind: 'append_result',
     requestId: validToken(request?.requestId, 200) ? request.requestId : 'invalid-request',
     idempotencyKey: validToken(request?.idempotencyKey, 512) ? request.idempotencyKey : 'invalid-key',
-    status: 'failed',
-    errorCode,
-    ...(validToken(request?.expectedRevisions?.helper, 135)
-      ? { observedRevisions: observedRevisionsFor(request, pageAdapter) }
-      : {}),
+    status: 'failed', errorCode,
+    ...(validToken(request?.expectedRevisions?.helper, 135) ? { observedRevisions: observedRevisionsFor(request, pageAdapter) } : {}),
   };
 }
 function exactConversationId(tabUrl) {
@@ -140,6 +136,24 @@ function projectBindingState(update) {
 }
 function projectBound(message) {
   projectBindingState({ status: 'bound', conversationId: message.conversationId, boundAt: message.boundAt, errorCode: null });
+  postNative({ v: 1, kind: 'query_conversation_titles' });
+}
+async function describeAuthorizedConversations(request) {
+  const port = nativePort;
+  if (request.v !== 1 || !validToken(request.requestId, 200) || !Array.isArray(request.conversations) || request.conversations.length > 32) return;
+  const ids = request.conversations.map((entry) => entry?.conversationId);
+  if (new Set(ids).size !== ids.length || ids.some((id) => typeof id !== 'string' || !/^[A-Za-z0-9-]{1,200}$/.test(id))) return;
+  const titles = [];
+  for (const conversationId of ids) {
+    if (nativePort !== port) return;
+    const tabs = await chrome.tabs.query({ url: `https://chatgpt.com/c/${conversationId}*` });
+    const matches = tabs.filter((tab) => typeof tab.id === 'number' && exactConversationId(tab.url) === conversationId);
+    if (matches.length !== 1 || typeof matches[0].title !== 'string') continue;
+    const displayTitle = matches[0].title.trim().replace(/\s+/g, ' ');
+    if (!displayTitle || displayTitle.length > 160 || /[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/u.test(displayTitle) || /^(ChatGPT|New chat|新聊天)$/iu.test(displayTitle)) continue;
+    titles.push({ conversationId, displayTitle });
+  }
+  if (nativePort === port) postNative({ v: 1, kind: 'conversation_title_result', requestId: request.requestId, titles });
 }
 function projectBindingFailure(message, fallback = 'BINDING_FAILED') {
   projectBindingState({ status: 'failed', conversationId: null, boundAt: null, errorCode: validToken(message?.errorCode, 64) ? message.errorCode : fallback });
@@ -196,13 +210,10 @@ async function bindClickedConversation(tab) {
 async function dispatchAppend(request) {
   const expected = request?.expectedRevisions;
   if (
-    request?.v !== APPEND_PROTOCOL_VERSION ||
-    request?.kind !== 'append_message' ||
-    !validToken(request.requestId, 200) ||
-    !validToken(request.conversationId, 200) ||
+    request?.v !== APPEND_PROTOCOL_VERSION || request?.kind !== 'append_message' ||
+    !validToken(request.requestId, 200) || !validToken(request.conversationId, 200) ||
     !validToken(request.idempotencyKey, 512) ||
-    !validText(request.text) ||
-    !validRevisions(expected)
+    !validText(request.text) || !validRevisions(expected)
   ) {
     postNative(failureFor(request, 'INVALID_REQUEST'));
     return;
@@ -212,9 +223,7 @@ async function dispatchAppend(request) {
     return;
   }
   const candidates = await chrome.tabs.query({ url: `https://chatgpt.com/c/${request.conversationId}*` });
-  const matches = candidates.filter(
-    (tab) => typeof tab.id === 'number' && exactConversationId(tab.url) === request.conversationId,
-  );
+  const matches = candidates.filter((tab) => typeof tab.id === 'number' && exactConversationId(tab.url) === request.conversationId);
   if (matches.length === 0) {
     postNative(failureFor(request, 'BOUND_TAB_NOT_FOUND'));
     return;
@@ -224,11 +233,8 @@ async function dispatchAppend(request) {
     return;
   }
   postNative({
-    v: APPEND_PROTOCOL_VERSION,
-    kind: 'append_progress',
-    requestId: request.requestId,
-    idempotencyKey: request.idempotencyKey,
-    status: 'extension_received',
+    v: APPEND_PROTOCOL_VERSION, kind: 'append_progress', requestId: request.requestId,
+    idempotencyKey: request.idempotencyKey, status: 'extension_received',
   });
   try {
     const contentRequest = { ...request, kind: 'append_message_v2' };
@@ -245,11 +251,9 @@ async function dispatchAppend(request) {
 async function dispatchHealth(request) {
   const expected = request?.expectedRevisions;
   const result = (status, errorCode, pageAdapter = 'unobserved') => ({
-    v: APPEND_PROTOCOL_VERSION,
-    kind: 'health_result',
+    v: APPEND_PROTOCOL_VERSION, kind: 'health_result',
     requestId: validToken(request?.requestId, 200) ? request.requestId : 'invalid-request',
-    status,
-    ...(errorCode ? { errorCode } : {}),
+    status, ...(errorCode ? { errorCode } : {}),
     ...(validToken(expected?.helper, 135) ? { observedRevisions: observedRevisionsFor(request, pageAdapter) } : {}),
   });
   if (!validHealthRequest(request)) {
@@ -265,9 +269,7 @@ async function dispatchHealth(request) {
     return;
   }
   const candidates = await chrome.tabs.query({ url: `https://chatgpt.com/c/${request.conversationId}*` });
-  const matches = candidates.filter(
-    (tab) => typeof tab.id === 'number' && exactConversationId(tab.url) === request.conversationId,
-  );
+  const matches = candidates.filter((tab) => typeof tab.id === 'number' && exactConversationId(tab.url) === request.conversationId);
   if (matches.length !== 1) {
     postNative(result('dormant', matches.length > 1 ? 'AMBIGUOUS_BOUND_TABS' : 'BOUND_TAB_NOT_FOUND'));
     return;
@@ -296,17 +298,16 @@ function connectNativeHost() {
   nativeHealth.connected = true;
   nativeHealth.lastErrorCode = null;
   port.onMessage.addListener((message) => {
+    if (message?.kind === 'conversation_title_request') { void describeAuthorizedConversations(message).catch(() => undefined); return; }
     if (acceptAssistantFinalResult(message)) return;
     if (acceptBindingStatus(message)) return;
     if (acceptBindingResult(message)) return;
     if (message?.kind === 'health_check') {
       void dispatchHealth(message).catch(() =>
         postNative({
-          v: APPEND_PROTOCOL_VERSION,
-          kind: 'health_result',
+          v: APPEND_PROTOCOL_VERSION, kind: 'health_result',
           requestId: validToken(message?.requestId, 200) ? message.requestId : 'invalid-request',
-          status: 'failed',
-          errorCode: 'EXTENSION_INTERNAL_ERROR',
+          status: 'failed', errorCode: 'EXTENSION_INTERNAL_ERROR',
         }),
       );
       return;
@@ -343,7 +344,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 chrome.action.onClicked.addListener(bindClickedConversation);
 void chrome.alarms.create(NATIVE_RECONNECT_ALARM, {
-  delayInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
-  periodInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
+  delayInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES, periodInMinutes: NATIVE_RECONNECT_ALARM_DELAY_MINUTES,
 });
 connectNativeHost();

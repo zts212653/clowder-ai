@@ -26,7 +26,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { dirname, posix, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 
 const ROOT = resolve(process.cwd());
@@ -35,6 +35,9 @@ const ROOT = resolve(process.cwd());
 // Home repo has sync-to-opensource.sh; open-source repo does not.
 const isHomeRepo = existsSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'));
 const hasEnvExampleOpensource = existsSync(resolve(ROOT, '.env.example.opensource'));
+
+// Keep the source-only export regression in the canonical check:env-ports lane.
+if (isHomeRepo) await import('./sync-to-opensource-api-build.test.mjs');
 
 function readEnvFile(relPath) {
   const content = readFileSync(resolve(ROOT, relPath), 'utf-8');
@@ -160,14 +163,14 @@ function readJsonFile(relPath) {
   return JSON.parse(readFileSync(resolve(ROOT, relPath), 'utf-8'));
 }
 
-function extractScriptRefs(command) {
+function extractScriptRefs(command, packageRoot = '') {
   const refs = new Set();
   const matches = String(command).matchAll(
-    /(?:^|\s)(?:bash|node)\s+((?:\.\/)?scripts\/[^\s'"]+)|(?:^|\s)((?:\.\/)?scripts\/[^\s'"]+)/g,
+    /(?:^|\s)(?:bash|node)\s+['"]?((?:\.{1,2}\/|scripts\/)[^\s'"]+)|(?:^|\s)['"]?((?:\.{1,2}\/)*scripts\/[^\s'"]+)/g,
   );
   for (const match of matches) {
     const ref = match[1] ?? match[2];
-    if (ref) refs.add(ref.replace(/^\.\//, ''));
+    if (ref) refs.add(posix.join(packageRoot, ref));
   }
   return [...refs];
 }
@@ -186,7 +189,7 @@ function buildExportedRootScripts(sourceScripts) {
   scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
   scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
   scripts['check:pre-merge-gate'] =
-    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
   if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }
@@ -266,14 +269,14 @@ function buildExportedRootScripts(sourceScripts) {
   return scripts;
 }
 
-function executeRootPackageTransform(sourceScripts) {
+function executePackageScriptsTransform(sourceScripts, marker = 'PACKAGE_JSON_TRANSFORM_EOF') {
   const syncScript = readFileSync(resolve(ROOT, 'scripts/sync-to-opensource.sh'), 'utf8');
-  const startMarker = 'node - "$FILTERED_DIR/package.json" <<\'PACKAGE_JSON_TRANSFORM_EOF\'\n';
+  const startMarker = `<<'${marker}'\n`;
   const start = syncScript.indexOf(startMarker);
-  assert.notEqual(start, -1, 'public root package transform start marker must exist');
+  assert.notEqual(start, -1, `public package transform ${marker} start marker must exist`);
   const programStart = start + startMarker.length;
-  const end = syncScript.indexOf('\nPACKAGE_JSON_TRANSFORM_EOF', programStart);
-  assert.notEqual(end, -1, 'public root package transform end marker must exist');
+  const end = syncScript.indexOf(`\n${marker}`, programStart);
+  assert.notEqual(end, -1, `public package transform ${marker} end marker must exist`);
 
   const tempRoot = mkdtempSync(resolve(tmpdir(), 'cat-cafe-public-package-transform-'));
   const packagePath = resolve(tempRoot, 'package.json');
@@ -1200,7 +1203,7 @@ excluded:
 
     it('public package transform strips home-only memory architecture executables', () => {
       const sourceScripts = readJsonFile('package.json').scripts;
-      const transformedScripts = executeRootPackageTransform(sourceScripts);
+      const transformedScripts = executePackageScriptsTransform(sourceScripts);
       const mirroredScripts = buildExportedRootScripts(sourceScripts);
       const homeOnlyScripts = [
         'gate:shared-red',
@@ -1229,6 +1232,32 @@ excluded:
       );
     });
 
+    it('normalizes parent-relative script references from their package root', () => {
+      assert.deepEqual(
+        extractScriptRefs(
+          'node ./scripts/local.mjs && node ../../scripts/root.mjs && bash "../../scripts/verify.sh"',
+          'packages/api',
+        ),
+        ['packages/api/scripts/local.mjs', 'scripts/root.mjs', 'scripts/verify.sh'],
+      );
+    });
+
+    it('blocks an unexported parent-relative API build helper until managed_scripts includes it', () => {
+      const managedRoots = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_roots'));
+      const managedFiles = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_files'));
+      const managedScripts = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_scripts'));
+      const probe = 'scripts/future-public-closure-probe.mjs';
+      const sourceScripts = readJsonFile('packages/api/package.json').scripts;
+      sourceScripts['build:actual'] += ` && node ../../${probe}`;
+      const exportedScripts = executePackageScriptsTransform(sourceScripts, 'API_PACKAGE_JSON_TRANSFORM_EOF');
+      const refs = extractScriptRefs(exportedScripts.build, 'packages/api');
+      const missing = () => refs.filter((ref) => !isManagedPath(ref, managedRoots, managedFiles, managedScripts));
+
+      assert.deepEqual(missing(), [probe], 'the parent-relative dependency must not disappear from the guard');
+      managedScripts.add(probe);
+      assert.deepEqual(missing(), [], 'explicit export ownership closes the same dependency');
+    });
+
     it('sync-manifest exports every scripts/* target referenced by exported package.json surfaces', () => {
       const managedRoots = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_roots'));
       const managedFiles = new Set(readYamlTopLevelList('sync-manifest.yaml', 'managed_files'));
@@ -1245,13 +1274,18 @@ excluded:
       const missing = [];
       for (const packageJsonPath of packageJsonSurfaces) {
         const pkg = readJsonFile(packageJsonPath);
-        const scripts =
-          packageJsonPath === 'package.json' ? buildExportedRootScripts(pkg.scripts ?? {}) : (pkg.scripts ?? {});
+        const transformMarker = {
+          'package.json': 'PACKAGE_JSON_TRANSFORM_EOF',
+          'packages/api/package.json': 'API_PACKAGE_JSON_TRANSFORM_EOF',
+          'packages/shared/package.json': 'SHARED_PACKAGE_JSON_TRANSFORM_EOF',
+        }[packageJsonPath];
+        const scripts = transformMarker
+          ? executePackageScriptsTransform(pkg.scripts ?? {}, transformMarker)
+          : (pkg.scripts ?? {});
         const packageRoot = packageJsonPath === 'package.json' ? '' : packageJsonPath.slice(0, -'/package.json'.length);
 
         for (const [scriptName, command] of Object.entries(scripts)) {
-          for (const ref of extractScriptRefs(command)) {
-            const exportPath = packageRoot.length > 0 ? `${packageRoot}/${ref}` : ref;
+          for (const exportPath of extractScriptRefs(command, packageRoot)) {
             if (!isManagedPath(exportPath, managedRoots, managedFiles, managedScripts)) {
               missing.push(`${packageJsonPath}:${scriptName} -> ${exportPath}`);
             }
@@ -2191,7 +2225,7 @@ describe(
       );
       assert.match(
         content,
-        /git -C "\$SOURCE_SYNC_DIR" archive HEAD \| tar -x -C "\$STAGING_DIR"/,
+        /git -C "\$SOURCE_SYNC_DIR" archive 'HEAD\^\{tree\}' \| tar -x -C "\$STAGING_DIR"/,
         'step 1 export should archive the detached origin/main checkout for real full sync',
       );
       assert.match(

@@ -82,7 +82,7 @@ export interface InvocationRecord {
   intent: 'execute' | 'ideate';
   status: InvocationStatus;
   /** F254: cats with an exact successful terminal event for this invocation.
-   *  Persisted atomically with the running -> succeeded transition so restart
+   *  Persisted atomically with the terminal transition, including partial failure, so restart
    *  recovery never infers per-target success from the aggregate parent status. */
   successfulCatIds?: readonly CatId[];
   /** Idempotency key (client-provided or server-generated, always present) */
@@ -136,7 +136,7 @@ export interface CreateResult {
 /** Fields that can be updated on an InvocationRecord */
 export interface UpdateInvocationInput {
   status?: InvocationStatus;
-  /** Exact successful targets. Valid only on the transition to `succeeded`. */
+  /** Exact successful targets on a succeeded or partially failed terminal. Retries skip these targets. */
   successfulCatIds?: readonly CatId[];
   userMessageId?: string | null;
   error?: string;
@@ -407,8 +407,10 @@ export function normalizeSuccessfulCatIds(
   input: UpdateInvocationInput,
 ): CatId[] | undefined {
   if (input.successfulCatIds === undefined) return undefined;
-  if (input.status !== 'succeeded') {
-    throw new InvalidInvocationSuccessWitnessError('successfulCatIds may only be supplied with status succeeded');
+  if (input.status !== 'succeeded' && input.status !== 'failed') {
+    throw new InvalidInvocationSuccessWitnessError(
+      'successfulCatIds may only be supplied with status succeeded or failed',
+    );
   }
   if (targetCats.length > 0 && input.successfulCatIds.length === 0) {
     throw new InvalidInvocationSuccessWitnessError('successfulCatIds must be non-empty for a targeted invocation');

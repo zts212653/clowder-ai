@@ -154,6 +154,34 @@ describe('F278 paw-feel disposition projector', () => {
     );
   });
 
+  it('rejects a blocker condition whose server-derived episode or identity was forged', () => {
+    assert.throws(
+      () =>
+        projectPawFeelDisposition([
+          event('discovered'),
+          event('blocked', {
+            blockerCode: 'task_wait',
+            blockerRef: 'task:item:one',
+            resumeCondition: {
+              schemaVersion: 1,
+              blockedEpisode: {
+                ownerFeatureId: 'F278',
+                ownerStateRef: `paw-feel-blocked:${SIGNAL_ID}`,
+                version: '999',
+              },
+              selector: {
+                kind: 'task',
+                ref: { ownerFeatureId: 'F310', ownerStateRef: 'task:item:one' },
+              },
+              conditionId: '0'.repeat(64),
+              blockedVersion: '1'.repeat(64),
+            },
+          }),
+        ]),
+      /active signal episode/i,
+    );
+  });
+
   it('rejects automation transitions and source-cat terminal signatures', () => {
     assert.throws(
       () =>

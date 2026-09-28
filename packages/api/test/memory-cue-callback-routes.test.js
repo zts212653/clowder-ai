@@ -264,7 +264,19 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
         payload: { handle: handles.issue(input), outcome, requestId: `outcome-${outcome}` },
       });
       assert.equal(response.statusCode, 200);
-      assert.deepEqual(response.json(), { status: 'recorded', outcome });
+      const event = episodeStore
+        .listByCue(OWNER_SCOPE.ownerUserId, input.cueId)
+        .find((candidate) => candidate.consumptionOutcome === outcome);
+      assert.ok(event);
+      assert.deepEqual(response.json(), {
+        status: 'recorded',
+        outcome,
+        outcomeRef: {
+          ownerFeatureId: 'F287',
+          ownerStateRef: `memory-cue-consumption:${event.eventId}`,
+          version: event.createdAt,
+        },
+      });
     }
 
     const poisoned = await app.inject({
@@ -326,7 +338,16 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       payload: outcomePayload,
     });
     assert.equal(applied.statusCode, 200);
-    assert.deepEqual(applied.json(), { status: 'recorded', outcome: 'applied' });
+    const appliedEvent = episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId).at(-1);
+    assert.deepEqual(applied.json(), {
+      status: 'recorded',
+      outcome: 'applied',
+      outcomeRef: {
+        ownerFeatureId: 'F287',
+        ownerStateRef: `memory-cue-consumption:${appliedEvent.eventId}`,
+        version: appliedEvent.createdAt,
+      },
+    });
     assert.deepEqual(
       episodeStore
         .listByCue(OWNER_SCOPE.ownerUserId, input.cueId)
@@ -395,8 +416,17 @@ describe('F287 owner-authenticated memory cue callbacks', () => {
       payload: outcomePayload,
     });
     assert.equal(applied.statusCode, 200);
-    assert.deepEqual(applied.json(), { status: 'recorded', outcome: 'applied' });
-    assert.equal(episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId).at(-1).consumerCatId, 'codex-sol');
+    const appliedEvent = episodeStore.listByCue(OWNER_SCOPE.ownerUserId, input.cueId).at(-1);
+    assert.deepEqual(applied.json(), {
+      status: 'recorded',
+      outcome: 'applied',
+      outcomeRef: {
+        ownerFeatureId: 'F287',
+        ownerStateRef: `memory-cue-consumption:${appliedEvent.eventId}`,
+        version: appliedEvent.createdAt,
+      },
+    });
+    assert.equal(appliedEvent.consumerCatId, 'codex-sol');
 
     const crossCat = await app.inject({
       method: 'POST',

@@ -1146,6 +1146,7 @@ export function useChatHistory(threadId: string) {
                 provider: string;
                 model: string;
                 sessionId?: string;
+                subexecutionEvents?: NonNullable<ChatMessageData['metadata']>['subexecutionEvents'];
                 /** F212 Phase B (云端 codex P2 2026-05-27): stored CLI diagnostics on error events;
                  *  copied into extra.cliDiagnostics below so the folded panel survives cold hydration. */
                 cliDiagnostics?: CliDiagnostics;
@@ -1160,6 +1161,7 @@ export function useChatHistory(threadId: string) {
                 auxiliaryTurnExecutions?: NonNullable<ChatMessageData['extra']>['auxiliaryTurnExecutions'];
                 scheduler?: SchedulerMessageExtra['scheduler'];
                 systemKind?: 'a2a_routing' | 'context_briefing';
+                systemInfo?: NonNullable<ChatMessageData['extra']>['systemInfo'];
                 /** #814: explicit post_message bypass — survives hydration so F5/thread-switch
                  *  preserves the "don't merge by invocation" semantic. */
                 isExplicitPost?: boolean;
@@ -1234,6 +1236,7 @@ export function useChatHistory(threadId: string) {
                     m.extra?.auxiliaryTurnExecutions ||
                     m.extra?.scheduler ||
                     m.extra?.systemKind ||
+                    m.extra?.systemInfo ||
                     m.extra?.isExplicitPost ||
                     m.extra?.targetCats ||
                     m.extra?.recovery ||
@@ -1256,6 +1259,7 @@ export function useChatHistory(threadId: string) {
                         : {}),
                       ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
                       ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                      ...(m.extra?.systemInfo ? { systemInfo: m.extra.systemInfo } : {}),
                       ...(m.extra?.isExplicitPost ? { isExplicitPost: true as const } : {}),
                       ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
                       ...(m.extra?.recovery ? { recovery: m.extra.recovery } : {}),

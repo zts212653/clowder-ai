@@ -16,9 +16,19 @@ import { apiFetch } from '@/utils/api-client';
 
 interface Props {
   onInstalled?: () => void;
+  endpoint?: string;
+  label?: string;
+  docsHref?: string | false;
+  docsLabel?: string;
 }
 
-export function ConnectorPluginInstallButton({ onInstalled }: Props) {
+export function ConnectorPluginInstallButton({
+  onInstalled,
+  endpoint = '/api/connectors/plugins/install',
+  label = '安装 IM Connector',
+  docsHref = '/docs/guides/im-connector-dev-guide.md',
+  docsLabel = 'IM Connector 开发文档',
+}: Props) {
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -33,7 +43,7 @@ export function ConnectorPluginInstallButton({ onInstalled }: Props) {
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const res = await apiFetch('/api/connectors/plugins/install', {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         body: formData,
       });
@@ -59,7 +69,7 @@ export function ConnectorPluginInstallButton({ onInstalled }: Props) {
         title="上传 .tar.gz / .tgz 插件包"
       >
         <UploadIcon />
-        {uploading ? '安装中...' : '安装 IM Connector'}
+        {uploading ? '安装中...' : label}
         <input
           ref={fileInputRef}
           type="file"
@@ -70,14 +80,16 @@ export function ConnectorPluginInstallButton({ onInstalled }: Props) {
           }}
         />
       </label>
-      <a
-        href="/docs/guides/im-connector-dev-guide.md"
-        download="im-connector-dev-guide.md"
-        className="inline-flex items-center gap-1 text-xs text-cafe-muted underline decoration-cafe-border underline-offset-2 transition-colors hover:text-cafe-secondary"
-      >
-        <DocIcon />
-        IM Connector 开发文档
-      </a>
+      {docsHref !== false && (
+        <a
+          href={docsHref}
+          download
+          className="inline-flex items-center gap-1 text-xs text-cafe-muted underline decoration-cafe-border underline-offset-2 transition-colors hover:text-cafe-secondary"
+        >
+          <DocIcon />
+          {docsLabel}
+        </a>
+      )}
       {message && (
         <div
           className={`mt-1 rounded-lg px-3 py-2 text-xs ${

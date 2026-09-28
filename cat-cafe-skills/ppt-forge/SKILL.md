@@ -1,6 +1,6 @@
 ---
 name: ppt-forge
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "2026-09-15 storytelling handoff: clarifies fact gathering and causal layout in the existing slide workflow; the distinct story-preparation capability has its own tip."
 description: >
   PPT 制作全链路：内容分析 → 分页规划 → 低保真 MD → imagegen 精美图。
   架构猫写低保真 MD（ASCII art 结构图 + 视觉指引），imagegen 猫逐页出精美图。
@@ -45,9 +45,13 @@ description: >
 
 ## 场景 1-2: 低保真 MD 写作
 
+成长经历跨多年、人物贡献混在一起，或素材只剩履历与能力口号时，先用 `co-creation-storytelling` 还原事实、各方行动与因果节点，再回到本节安排版面。叙事已锁只改样式/错字时不重启取材；用户已经授权的制作不重复要求确认。
+
 > 详细规范：[ppt-lofi-authoring.md](../.cat-cafe-shared-refs/ppt-lofi-authoring.md)
 
 ### 写作流程
+
+给非技术读者用漫画/PPT解释一个机制、或材料仍像名词清单时，按[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)先做读者目标与因果节点。可以用示意人物和任务，不能编机制事实；不因漫画形式而转成动画或可点击 Demo。已有清楚蓝图则直接制作，不重复取材与确认。
 
 1. **内容分析**：读完全部原始内容，识别：
    - 核心板块（几个大的独立主题）
@@ -150,6 +154,7 @@ status: lofi-draft
 
 ## 和其他 Skill 的关系
 
+- `co-creation-storytelling`：长期真实经历的取材与贡献分镜 — 叙事需要厘清时使用，成稿后回到本技能制作。
 - `image-generation`：通用图片生成 — ppt-forge 是 PPT 专用流程
 - `expert-panel`：多猫分析报告 — ppt-forge 是做 PPT
 - `tech-writing`：写文档 — ppt-forge 做演示文稿（视觉优先）

@@ -48,6 +48,57 @@ describe('Dynamic Task Hydration', () => {
     assert.equal(summaries[0].dynamicTaskId, 'dyn-001');
   });
 
+  test('hydrateDynamic restores private owner authentication provenance without projecting it into params', () => {
+    const captured = [];
+    const fireAt = Date.now() + 60_000;
+    store.insert(
+      {
+        id: 'hold-ball-timer-owner',
+        templateId: 'reminder',
+        trigger: { type: 'once', fireAt },
+        params: {
+          message: 'resume owner work',
+          targetCatId: 'codex-sol',
+          holdLifecycle: { mode: 'timer', status: 'active' },
+        },
+        display: { label: 'Owner timer', category: 'system' },
+        deliveryThreadId: 'thread-owner',
+        enabled: true,
+        createdBy: 'hold-ball:codex-sol',
+        createdAt: new Date(fireAt - 10_000).toISOString(),
+      },
+      'strict',
+    );
+    const templateGetter = {
+      get: () => ({
+        templateId: 'reminder',
+        label: 'Reminder',
+        category: 'system',
+        description: 'test',
+        subjectKind: 'none',
+        defaultTrigger: { type: 'cron', expression: '0 9 * * *' },
+        paramSchema: {},
+        createSpec(instanceId, params) {
+          captured.push({ instanceId, params });
+          return {
+            id: instanceId,
+            profile: 'awareness',
+            trigger: params.trigger,
+            admission: { gate: async () => ({ run: false, reason: 'test' }) },
+            run: { overlap: 'skip', timeoutMs: 5_000, execute: async () => {} },
+            state: { runLedger: 'sqlite' },
+            outcome: { whenNoSignal: 'drop' },
+            enabled: () => true,
+          };
+        },
+      }),
+    };
+
+    assert.equal(runner.hydrateDynamic(store, templateGetter), 1);
+    assert.equal(captured[0].params.ownerAuthProvenance, 'strict');
+    assert.equal(Object.hasOwn(captured[0].params.params, 'ownerAuthProvenance'), false);
+  });
+
   test('hydrateDynamic skips disabled tasks', () => {
     store.insert({
       id: 'dyn-disabled',

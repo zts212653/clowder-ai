@@ -103,14 +103,14 @@ operator 已经明确介绍过一个低频但高价值的具名人物、稳定�
 
 来源：
 
-- `[thread-id]/0001785014645086-000091-8a3f3500`
-- `[thread-id]/0001785015126734-000097-464fce9f`
-- `[thread-id]/0001785040313762-000216-7ac202f8`
-- `[thread-id]/0001785059633834-000252-42d139ea`
-- `[thread-id]/0001785165071118-000167-256ec6cf`
-- `[thread-id]/0001785165896876-000182-c2913251`
-- `[thread-id]/0001785184786109-000007-82d809aa`
-- `[thread-id]/0001785185114109-000016-1c6ee114`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
+- `[thread-id]/private-source-id`
 
 ## Current State / 现状基线
 

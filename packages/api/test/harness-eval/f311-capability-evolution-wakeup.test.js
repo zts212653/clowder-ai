@@ -14,9 +14,18 @@ import { toolEvent, transcriptEvent } from './capability-wakeup-test-helpers.js'
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const ruleId = 'capability-evolution-concrete-target';
 const sourceMessageRef = 'thread_mtl5hu0v3ee0tloz#0001788417335925-000083-d76f43dd';
+const naturalGoalSourceMessageRef = 'thread_mtu5c35n3z5r74dv#0001788961246788-000000-b6582627';
 
 function readRepoFile(path) {
   return readFileSync(resolve(repoRoot, path), 'utf8');
+}
+
+function skillDescription(skill) {
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(skill);
+  assert.ok(frontmatter, 'skill must have YAML frontmatter');
+  const { description } = parseYaml(frontmatter[1]);
+  assert.equal(typeof description, 'string');
+  return description;
 }
 
 function traceFor(text, tool) {
@@ -67,6 +76,9 @@ describe('F311 capability evolution wakeup contract', () => {
 
     const index = readRepoFile('cat-cafe-skills/refs/capability-wakeup-index.md');
     assert.match(index, /`capability-evolution`[\s\S]*cat_cafe_start_evolution_program/u);
+    assert.match(index, /让 \/ 请让 Agent 或业务能力达到 Y[\s\S]*F311 admission identity/su);
+    assert.match(index, /问句、显式延后或只讨论[\s\S]*零写入/su);
+    assert.match(index, /语义型直接目标[\s\S]*rubric judge[\s\S]*机械分母/su);
 
     const bootstrap = readRepoFile('cat-cafe-skills/BOOTSTRAP.md');
     assert.match(bootstrap, /`capability-evolution`.*信息问题.*具体目标/u);
@@ -86,11 +98,12 @@ describe('F311 capability evolution wakeup contract', () => {
       /^“我们来进化 X” \/ “能进化什么” → F311 Capability Evolution 产品入口，不是事后复盘。/u,
     );
     assert.match(selfDescription, /^复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。/u);
-    assert.match(
-      capabilitySkill,
-      /description:\s*>\s*“我们来进化 X” \/ “能进化什么” → F311 Capability Evolution 产品入口，不是事后复盘。/u,
-    );
-    assert.match(selfSkill, /description:\s*>\s*复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。/u);
+    const capabilitySkillDescription = skillDescription(capabilitySkill);
+    assert.match(capabilitySkillDescription, /F311.*能力进化入口/u);
+    assert.match(capabilitySkillDescription, /Use when:.*询问可进化对象.*直接给出.*Agent\/业务能力结果/u);
+    assert.match(capabilitySkillDescription, /Not for:.*事后复盘.*只讨论或延后启动/u);
+    assert.match(capabilitySkillDescription, /Output:.*动作型目标.*Program.*同一 invocation.*首轮准备/u);
+    assert.match(skillDescription(selfSkill), /^复盘已经发生的工作并沉淀改进，不是“我们来进化 X”的产品入口。/u);
     assert.match(selfSkill, /Not for:.*“我们来进化 X”.*capability-evolution/su);
     assert.match(selfDescription, /Not for:.*“我们来进化 X”.*capability-evolution/su);
     assert.ok(capabilityEntry?.triggers?.includes('自进化什么'));
@@ -131,6 +144,16 @@ describe('F311 capability evolution wakeup contract', () => {
     assert.equal(trials[0].outcome, 'miss');
   });
 
+  it('does not let the mechanical denominator infer direct business-goal semantics', () => {
+    const rules = getCapabilityWakeupRules({ ruleIds: [ruleId] });
+    for (const prompt of [
+      '让 PM Agent 专业地推进项目，只在必要时请人介入',
+      '让 PM Agent 专业地推进项目，如果我确认风险后我在评估后通知客服智能体说我决定是否启动，只在必要时请人介入。',
+    ]) {
+      assert.deepEqual(evaluateCapabilityWakeupTrace(traceFor(prompt), rules), [], prompt);
+    }
+  });
+
   it('counts only a successful canonical start as capability use', () => {
     const rules = getCapabilityWakeupRules({ ruleIds: [ruleId] });
     const success = evaluateCapabilityWakeupTrace(
@@ -152,7 +175,7 @@ describe('F311 capability evolution wakeup contract', () => {
     assert.equal(failure[0].outcome, 'miss');
   });
 
-  it('binds the observed failure to the existing longitudinal eval domain', () => {
+  it('binds observed sources without broadening the mechanical denominator', () => {
     const domain = parseYaml(readRepoFile('docs/harness-feedback/eval-domains/eval-capability-wakeup.yaml'));
     const fixture = domain.fixtures?.find((value) => value.id === 'f311-capability-evolution-intent-routing');
     assert.equal(fixture?.featureId, 'F311');
@@ -160,7 +183,17 @@ describe('F311 capability evolution wakeup contract', () => {
 
     const fixtureSource = readRepoFile('docs/harness-feedback/fixtures/f311-capability-evolution-intent-routing.md');
     assert.match(fixtureSource, new RegExp(sourceMessageRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(fixtureSource, new RegExp(naturalGoalSourceMessageRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(fixtureSource, /命令式业务目标.*暂不进入当前.*分母.*rubric judge/su);
     assert.match(fixtureSource, /信息问题.*不创建/su);
     assert.match(fixtureSource, /具体目标.*cat_cafe_start_evolution_program/su);
+
+    const calibration = parseYaml(
+      readRepoFile('docs/harness-feedback/fixtures/f311-capability-evolution-intent-calibration-seed.yaml'),
+    );
+    assert.equal(calibration.status, 'provisional-non-ground-truth');
+    assert.ok(calibration.items.length >= 130);
+    assert.ok(calibration.forbiddenUses.includes('production-opportunity-denominator'));
+    assert.ok(calibration.forbiddenUses.includes('independent-holdout'));
   });
 });

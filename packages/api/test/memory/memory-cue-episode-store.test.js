@@ -96,6 +96,8 @@ describe('MemoryCueEpisodeStore', () => {
     const first = store.append(consumption());
     const retry = store.append(consumption());
     assert.deepEqual(retry, first);
+    assert.deepEqual(store.getByEventId(first.eventId), first);
+    assert.equal(store.getByEventId('missing'), null);
     assert.equal(store.listByCue('owner-1', 'cue-1').length, 1);
 
     const conflict = consumption({
@@ -155,9 +157,10 @@ describe('MemoryCueEpisodeStore', () => {
   });
 
   it('migrates a real v41 ledger to v43 without losing receipts or append-only guards', async () => {
-    const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
+    const { applyMigrations, CURRENT_SCHEMA_VERSION, SCHEMA_V5 } = await import('../../dist/domains/memory/schema.js');
     const { MemoryCueEpisodeStore } = await import('../../dist/domains/memory/cue/MemoryCueEpisodeStore.js');
     const db = new Database(':memory:');
+    db.exec(SCHEMA_V5);
     installV41CueLedgerFixture(db);
     const rowsBefore = db.prepare('SELECT * FROM memory_cue_events ORDER BY occurred_at').all();
     applyMigrations(db);
@@ -174,8 +177,11 @@ describe('MemoryCueEpisodeStore', () => {
       }),
     );
 
-    assert.equal(CURRENT_SCHEMA_VERSION, 43);
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 43);
+    assert.ok(CURRENT_SCHEMA_VERSION >= 43);
+    assert.equal(
+      db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version,
+      CURRENT_SCHEMA_VERSION,
+    );
     assert.deepEqual(
       db
         .prepare("SELECT * FROM memory_cue_events WHERE event_id LIKE 'v41-%' ORDER BY occurred_at")
@@ -243,7 +249,7 @@ describe('MemoryCueEpisodeStore', () => {
   });
 
   it('repairs rewound migration markers without downgrading a v43 ledger or losing its cat binding', async () => {
-    const { applyMigrations } = await import('../../dist/domains/memory/schema.js');
+    const { applyMigrations, CURRENT_SCHEMA_VERSION } = await import('../../dist/domains/memory/schema.js');
     const { MemoryCueEpisodeStore } = await import('../../dist/domains/memory/cue/MemoryCueEpisodeStore.js');
     const db = new Database(':memory:');
     applyMigrations(db);
@@ -256,7 +262,10 @@ describe('MemoryCueEpisodeStore', () => {
       db.prepare("SELECT consumer_cat_id FROM memory_cue_events WHERE event_id = 'event-1'").get().consumer_cat_id,
       'codex-sol',
     );
-    assert.equal(db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version, 43);
+    assert.equal(
+      db.prepare('SELECT MAX(version) AS version FROM schema_version').get().version,
+      CURRENT_SCHEMA_VERSION,
+    );
   });
 
   it('serializes two independent WAL connections racing on one idempotency key', async () => {

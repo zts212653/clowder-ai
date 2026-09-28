@@ -1,3 +1,8 @@
+import {
+  assertTypedWaitCustodyBindings,
+  rejectTypedWaitCustody,
+} from '../../../../ball-custody/TypedWaitCustodyGuard.js';
+import { ASSERT_TYPED_WAIT_CUSTODY_LUA, readRedisTypedWaitCustodyGuards } from './RedisTypedWaitCustodyGuard.js';
 /**
  * Redis Message Store
  * Redis-backed message storage with same interface as in-memory MessageStore.
@@ -32,12 +37,15 @@ import type {
   MessageIdScanPage,
   MessageScanCursor,
   OwnerComposerDraft,
+  PawFeelSourceMessageProjection,
+  PawFeelSourceProjectionRead,
   PutOwnerComposerDraftInput,
   PutOwnerComposerDraftResult,
   QueueAdmissionPrepareResult,
   QueueCustodyAdmissionInitializeResult,
   QueueCustodyAdmissionIntent,
   QueueCustodyInitializeResult,
+  QueueCustodyLifecycleRecord,
   QueueCustodyTransitionInput,
   QueueCustodyTransitionResult,
   QueuedMessageCustody,
@@ -90,6 +98,7 @@ import {
   safeParseMentions,
   safeParseMessageRecall,
   safeParseMetadata,
+  safeParsePawFeelSourceExtra,
   safeParsePluginMessage,
   safeParseQueueCustody,
   safeParseQueueCustodyAdmission,
@@ -109,6 +118,23 @@ const log = createModuleLogger('redis-message-store');
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_TTL_SECONDS = 0; // persistent — set >0 via env to enable expiry
+const PAW_FEEL_SOURCE_READ_BATCH_SIZE = 100;
+const PAW_FEEL_SOURCE_FIELDS = [
+  'id',
+  'threadId',
+  'userId',
+  'catId',
+  'content',
+  'timestamp',
+  'deliveredAt',
+  'timelineOrderAt',
+  'deliveryStatus',
+  'origin',
+  'source',
+  'queueCustody',
+  'extra',
+] as const;
+type PawFeelSourcePipelineResult = [Error | null, Array<string | null> | null];
 
 const REDIS_NUMBER_ALIASES = new Map<string, number>([
   ['', Number.NaN],
@@ -125,6 +151,75 @@ function parseRedisNumber(raw: string): number {
 
 function parseStoredMessageTimestamp(raw: string | undefined): number {
   return parseRedisNumber(raw ?? '0');
+}
+
+function parseOptionalRedisNumber(raw: string | null): number | undefined {
+  return raw === null ? undefined : parseRedisNumber(raw);
+}
+
+function parsePawFeelSourceOrigin(raw: string | null): StoredMessage['origin'] | undefined {
+  return raw === 'stream' || raw === 'callback' || raw === 'briefing' ? raw : undefined;
+}
+
+function projectPawFeelSourceTiming(
+  deliveredAt: string | null,
+  timelineOrderAt: string | null,
+  deliveryStatus: string | null,
+  origin: string | null,
+): Pick<PawFeelSourceMessageProjection, 'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'origin'> {
+  const projection: Pick<
+    PawFeelSourceMessageProjection,
+    'deliveredAt' | 'timelineOrderAt' | 'deliveryStatus' | 'origin'
+  > = {};
+  const parsedDeliveredAt = parseOptionalRedisNumber(deliveredAt);
+  const parsedTimelineOrderAt = parseOptionalRedisNumber(timelineOrderAt);
+  const parsedOrigin = parsePawFeelSourceOrigin(origin);
+  if (parsedDeliveredAt !== undefined) projection.deliveredAt = parsedDeliveredAt;
+  if (parsedTimelineOrderAt !== undefined) projection.timelineOrderAt = parsedTimelineOrderAt;
+  if (deliveryStatus) projection.deliveryStatus = deliveryStatus as StoredMessage['deliveryStatus'];
+  if (parsedOrigin) projection.origin = parsedOrigin;
+  return projection;
+}
+
+function projectPawFeelSourcePresence(
+  source: string | null,
+  queueCustody: string | null,
+): Pick<PawFeelSourceMessageProjection, 'source' | 'queueCustody'> {
+  const projection: Pick<PawFeelSourceMessageProjection, 'source' | 'queueCustody'> = {};
+  if (parseConnectorSourceField(source ?? undefined).kind === 'valid') projection.source = true;
+  if (safeParseQueueCustody(queueCustody ?? undefined)) projection.queueCustody = true;
+  return projection;
+}
+
+function hydratePawFeelSourceProjection(fields: readonly (string | null)[]): PawFeelSourceMessageProjection | null {
+  const [
+    id,
+    threadId,
+    userId,
+    catId,
+    content,
+    timestamp,
+    deliveredAt,
+    timelineOrderAt,
+    deliveryStatus,
+    origin,
+    source,
+    queueCustody,
+    extra,
+  ] = fields;
+  if (!id) return null;
+  const parsedExtra = safeParsePawFeelSourceExtra(extra ?? undefined);
+  return {
+    id,
+    threadId: threadId || DEFAULT_THREAD_ID,
+    userId: userId ?? 'unknown',
+    catId: (catId || null) as CatId | null,
+    content: content ?? '',
+    timestamp: parseStoredMessageTimestamp(timestamp ?? undefined),
+    ...projectPawFeelSourceTiming(deliveredAt, timelineOrderAt, deliveryStatus, origin),
+    ...projectPawFeelSourcePresence(source, queueCustody),
+    ...(parsedExtra ? { extra: parsedExtra } : {}),
+  };
 }
 const INITIALIZE_QUEUE_CUSTODY_LUA = `
 local messageId = redis.call('HGET', KEYS[1], 'id')
@@ -206,6 +301,8 @@ end
 local nextRevision = tonumber(ARGV[3])
 local okNextCustody, nextCustody = pcall(cjson.decode, ARGV[2])
 if not okNextCustody or type(nextCustody) ~= 'table' then return redis.error_reply('INVALID_NEXT_QUEUE_CUSTODY') end
+
+${ASSERT_TYPED_WAIT_CUSTODY_LUA}
 
 -- #1269 R8 P1-3: pre-mutation guard — compute visibilitySeq BEFORE any HSET/ZADD.
 -- redis.error_reply() does NOT rollback prior writes, so all validation must
@@ -467,8 +564,10 @@ for _, field in ipairs(fields) do table.insert(result, field) end
 return result
 `;
 
+type PersistedHostMessageExtra = Omit<NonNullable<StoredMessage['extra']>, 'pluginMessage' | 'custodyOfferV1'>;
+
 function splitMessageExtra(extra: StoredMessage['extra'] | undefined): {
-  hostExtra: HostMessageExtra;
+  hostExtra: PersistedHostMessageExtra;
   pluginMessage: StoredPluginMessage | undefined;
   custodyOfferV1: CustodyOfferV1 | undefined;
 } {
@@ -831,6 +930,67 @@ export class RedisMessageStore {
     return this.hydrateHash(data);
   }
 
+  /**
+   * F278 reads marker sources in bulk. The inbox only consumes this narrow
+   * projection, so full history-only payloads such as toolEvents and contentBlocks
+   * must not cross Redis or be parsed on every global inbox request.
+   */
+  async getPawFeelSourceProjections(ids: readonly string[]): Promise<Map<string, PawFeelSourceProjectionRead>> {
+    const reads = new Map<string, PawFeelSourceProjectionRead>();
+    const uniqueIds = [...new Set(ids)];
+    for (let start = 0; start < uniqueIds.length; start += PAW_FEEL_SOURCE_READ_BATCH_SIZE) {
+      await this.readPawFeelSourceProjectionBatch(
+        uniqueIds.slice(start, start + PAW_FEEL_SOURCE_READ_BATCH_SIZE),
+        reads,
+      );
+    }
+    return reads;
+  }
+
+  private async readPawFeelSourceProjectionBatch(
+    batch: readonly string[],
+    reads: Map<string, PawFeelSourceProjectionRead>,
+  ): Promise<void> {
+    const results = await this.executePawFeelSourceProjectionBatch(batch);
+    if (!results) {
+      for (const id of batch) reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+      return;
+    }
+    for (const [index, id] of batch.entries()) {
+      const result = results[index];
+      if (!result) {
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      const [error, fields] = result;
+      if (error || !fields) {
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      let message: PawFeelSourceMessageProjection | null;
+      try {
+        message = hydratePawFeelSourceProjection(fields);
+      } catch {
+        // Persisted per-message corruption is one unavailable source, never a poisoned batch.
+        reads.set(id, { kind: 'unavailable', reason: 'read_failed' });
+        continue;
+      }
+      reads.set(id, message ? { kind: 'available', message } : { kind: 'unavailable', reason: 'not_found' });
+    }
+  }
+
+  private async executePawFeelSourceProjectionBatch(
+    batch: readonly string[],
+  ): Promise<PawFeelSourcePipelineResult[] | undefined> {
+    const pipeline = this.redis.pipeline();
+    for (const id of batch) pipeline.hmget(MessageKeys.detail(id), ...PAW_FEEL_SOURCE_FIELDS);
+    try {
+      return (await pipeline.exec()) as PawFeelSourcePipelineResult[];
+    } catch {
+      return undefined;
+    }
+  }
+
   private hydrateOwnerComposerDraft(data: Record<string, string>): OwnerComposerDraft | null {
     if (!data.ownerUserId || !data.threadId || data.version !== '1') return null;
     const revision = Number(data.revision);
@@ -1153,6 +1313,58 @@ export class RedisMessageStore {
     );
     const messages = await this.hydrateMessages(ids);
     return messages.filter((message) => message.userId === ownerUserId && isDelivered(message));
+  }
+
+  async listOwnerMessageWindowSlice(
+    ownerUserId: string,
+    sinceInclusive: number,
+    untilInclusive: number,
+    limit: number,
+  ) {
+    assertValidStoredMessageTimestamp(sinceInclusive);
+    assertValidStoredMessageTimestamp(untilInclusive);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 5_000) throw new Error('Invalid message window limit');
+    if (sinceInclusive > untilInclusive) return { messages: [], hasMore: false };
+    const ids = await this.redis.zrangebyscore(
+      MessageKeys.user(ownerUserId),
+      String(sinceInclusive),
+      String(untilInclusive),
+      'LIMIT',
+      0,
+      limit + 1,
+    );
+    const messages = await this.hydrateMessages(ids.slice(0, limit));
+    return {
+      messages: messages.filter((message) => message.userId === ownerUserId && isDelivered(message)),
+      hasMore: ids.length > limit,
+    };
+  }
+
+  async listOwnerQueueCustodyLifecycles(ownerUserId: string): Promise<QueueCustodyLifecycleRecord[]> {
+    const ids = await this.redis.zrange(MessageKeys.user(ownerUserId), 0, -1);
+    const records: QueueCustodyLifecycleRecord[] = [];
+    const batchSize = 500;
+    for (let offset = 0; offset < ids.length; offset += batchSize) {
+      const messages = await this.hydrateMessages(ids.slice(offset, offset + batchSize));
+      for (const message of messages) {
+        const custody = message.queueCustody;
+        if (
+          message.userId !== ownerUserId ||
+          message.deletedAt ||
+          !custody ||
+          (custody.ownerUserId !== undefined && custody.ownerUserId !== ownerUserId)
+        ) {
+          continue;
+        }
+        records.push({
+          messageId: message.id,
+          threadId: message.threadId,
+          userId: message.userId,
+          custody: structuredClone(custody),
+        });
+      }
+    }
+    return records;
   }
 
   /**
@@ -2217,6 +2429,11 @@ export class RedisMessageStore {
     const {
       pluginMessage: _stripPlugin,
       custodyOfferV1: _stripCustody,
+      evolutionPreparationSubmissionV1: _stripPreparation,
+      deliveryBoundary: _stripBoundary,
+      collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
+      collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveAuthorizationInvalid: _stripCollectiveInvalid,
       ...hostPatch
     } = extra as Record<string, unknown>;
     const merged = { ...current, ...hostPatch };
@@ -2423,6 +2640,7 @@ export class RedisMessageStore {
       throw new Error('queue custody replacement proof source message mismatch');
     }
     assertQueueCustodyTransition(current.queueCustody, input);
+    assertTypedWaitCustodyBindings(current, input.next, input.waitContinuationGuards);
     const timelineScore =
       input.deliveredAt === undefined ? undefined : resolveDeliveryTimelineScore(current, input.deliveredAt);
 
@@ -2432,20 +2650,23 @@ export class RedisMessageStore {
       await this.ensureVisibilityMigrated(current.threadId);
     }
 
+    const waitGuards = await readRedisTypedWaitCustodyGuards(this.redis, input.waitContinuationGuards);
     const rawResult = (await this.redis.eval(
       TRANSITION_QUEUE_CUSTODY_LUA,
-      5,
+      5 + waitGuards.keys.length,
       MessageKeys.detail(id),
       MessageKeys.thread(current.threadId),
       MessageKeys.TIMELINE,
       MessageKeys.user(current.userId),
       MessageKeys.queueExposureIndex(current.threadId),
+      ...waitGuards.keys,
       String(input.expectedRevision),
       JSON.stringify(input.next),
       String(input.next.revision),
       input.deliveredAt === undefined ? '' : String(input.deliveredAt),
       timelineScore === undefined ? '' : String(timelineScore),
       this.keyPrefix, // [6] keyPrefix for visibility key construction inside Lua
+      JSON.stringify(waitGuards.witnesses),
     )) as [number | string, number | string];
     const outcome = Number(rawResult[0]);
     const actualRevision = Number(rawResult[1]);
@@ -2454,6 +2675,7 @@ export class RedisMessageStore {
     if (outcome === -2) {
       throw new Error('queue custody transition requires a queued message or exposed recall tombstone');
     }
+    if (outcome === -3) rejectTypedWaitCustody('authority_changed');
     if (outcome !== 1 && outcome !== 2) throw new Error(`unexpected queue custody transition result: ${outcome}`);
 
     const updated = await this.getById(id);

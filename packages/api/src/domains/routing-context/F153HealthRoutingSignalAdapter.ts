@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { RoutingSignalEventV1, RoutingSubjectRefV1 } from '@cat-cafe/shared';
+import { type RoutingSignalEventV1, type RoutingSubjectRefV1, routingSignalClosures } from '@cat-cafe/shared';
 import type { AutomaticRoutingSignalService } from './AutomaticRoutingSignalService.js';
 import type { IRoutingSignalEventStore, RoutingSignalEventAppendResult } from './RoutingSignalEventStore.js';
 import {
@@ -45,15 +45,6 @@ function reasonCode(
   state: ProviderHealthObservationV1['state'],
 ): string {
   return `health_${authority}_${state}`;
-}
-
-function closureSet(events: readonly RoutingSignalEventV1[]): Set<string> {
-  const closed = new Set<string>();
-  for (const event of events) {
-    if (event.eventType === 'asserted') continue;
-    for (const eventId of event.closesSignalIds) closed.add(eventId);
-  }
-  return closed;
 }
 
 function isProviderHealth(observation: RoutingSignalObservationV1): observation is ProviderHealthObservationV1 {
@@ -114,7 +105,7 @@ export class F153HealthRoutingSignalAdapter implements RoutingHealthObservationP
     observation: ProviderHealthObservationV1,
   ): Promise<RoutingSignalEventAppendResult[]> {
     const timeline = await this.options.signalStore.listBySubject(observation.ownerId, observation.subjectRef);
-    const closed = closureSet(timeline);
+    const closed = routingSignalClosures(timeline.filter((event) => event.observedAt <= observation.observedAt));
     const allowedReasons = new Set([
       reasonCode(observation.authority, 'degraded'),
       reasonCode(observation.authority, 'unavailable'),

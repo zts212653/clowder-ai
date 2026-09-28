@@ -55,7 +55,7 @@ function createMockSocketManager() {
  * Helper: set up a Fastify app with invocationsRoutes + a 'failed' InvocationRecord
  * that has a stored user message linked to it.
  */
-async function setupRetryScenario(routerOverride, trackerOverride, queueProcessorOverride) {
+async function setupRetryScenario(routerOverride, trackerOverride, queueProcessorOverride, targetCats = ['opus']) {
   const invocationRecordStore = new InvocationRecordStore();
   const messageStore = new MessageStore();
   const invocationTracker = trackerOverride ?? new InvocationTracker();
@@ -75,7 +75,7 @@ async function setupRetryScenario(routerOverride, trackerOverride, queueProcesso
   const createResult = invocationRecordStore.create({
     threadId: 'thread-1',
     userId: 'user-1',
-    targetCats: ['opus'],
+    targetCats,
     intent: 'execute',
     idempotencyKey: 'key-retry-1',
     actionLeaseCarrier: { kind: 'none' },
@@ -105,6 +105,37 @@ async function setupRetryScenario(routerOverride, trackerOverride, queueProcesso
 }
 
 describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
+  it('F293 retries only unfinished targets and preserves earlier successful witnesses', async () => {
+    const calls = [];
+    const router = createMockRouter();
+    router.routeExecution = async function* (_owner, content, _thread, messageId, targets, _intent, options) {
+      calls.push({ content, messageId, targets, options });
+      yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+    };
+    const {
+      app,
+      invocationRecordStore: store,
+      invocationId,
+    } = await setupRetryScenario(router, undefined, undefined, ['opus', 'codex']);
+    store.update(invocationId, { status: 'running' });
+    store.update(invocationId, { status: 'failed', error: 'routing_preflight_rejected', successfulCatIds: ['opus'] });
+    const originalMessageId = store.get(invocationId).userMessageId;
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/invocations/${invocationId}/retry`,
+      headers: { 'x-cat-cafe-user': 'user-1' },
+    });
+    assert.equal(response.statusCode, 202);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(calls[0].targets, ['codex']);
+    assert.equal(calls[0].messageId, originalMessageId);
+    assert.equal(calls[0].content, '@布偶猫 hello retry');
+    assert.equal(calls[0].options.ownerAuthProvenance, 'strict');
+    assert.deepEqual(store.get(invocationId).successfulCatIds, ['opus', 'codex']);
+    assert.equal(store.get(invocationId).status, 'succeeded');
+    await app.close();
+  });
+
   it('retry failed → 202 + record transitions running→succeeded', async () => {
     const { app, invocationRecordStore, router, invocationId } = await setupRetryScenario();
 
@@ -267,7 +298,7 @@ describe('POST /api/invocations/:id/retry (ADR-008 S2)', () => {
     assert.deepEqual(clearCalls, [['thread-1', ['opus'], invocationId]]);
     assert.deepEqual(
       completionCalls[0],
-      ['thread-1', 'opus', 'succeeded', invocationId, ['opus']],
+      ['thread-1', 'opus', 'succeeded', invocationId, ['opus'], false, {}, [], {}],
       'retry clears stale seen evidence before running, then uses the retry record id for current-attempt reads',
     );
     assert.deepEqual(invocationRecordStore.get(invocationId).successfulCatIds, ['opus']);

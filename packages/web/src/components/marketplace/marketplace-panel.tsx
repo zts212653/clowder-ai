@@ -26,6 +26,7 @@ function LoadingSkeleton() {
 
 export function MarketplacePanel() {
   const results = useMarketplaceStore((s) => s.results);
+  const sources = useMarketplaceStore((s) => s.sources);
   const selectedResult = useMarketplaceStore((s) => s.selectedResult);
   const installPlan = useMarketplaceStore((s) => s.installPlan);
   const loading = useMarketplaceStore((s) => s.loading);
@@ -62,6 +63,25 @@ export function MarketplacePanel() {
   return (
     <div className="space-y-4">
       <MarketplaceSearch />
+
+      {sources
+        .filter((source) => source.sourceKind === 'provider')
+        .map((source) => (
+          <div
+            key={source.ecosystem}
+            className={
+              source.availability === 'live'
+                ? 'rounded-lg bg-conn-green-bg p-3 text-xs text-conn-green-text'
+                : 'rounded-lg bg-conn-amber-bg p-3 text-xs text-conn-amber-text'
+            }
+          >
+            <p className="font-medium">
+              Codex provider {source.providerVersion ? 'v' + source.providerVersion : ''} ·{' '}
+              {source.availability === 'live' ? '实时' : source.availability === 'degraded' ? '部分可用' : '不可用'}
+            </p>
+            {source.issues?.[0] && <p className="mt-1">{source.issues[0]}</p>}
+          </div>
+        ))}
 
       {loading && <LoadingSkeleton />}
 

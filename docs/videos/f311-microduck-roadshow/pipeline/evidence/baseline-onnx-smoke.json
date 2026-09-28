@@ -1,0 +1,30 @@
+{
+  "input": {
+    "name": "obs",
+    "shape": [
+      1,
+      61
+    ],
+    "type": "tensor(float)"
+  },
+  "kind": "onnx_contract_smoke",
+  "output": {
+    "name": "actions",
+    "shape": [
+      1,
+      14
+    ],
+    "type": "tensor(float)"
+  },
+  "ownerRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+  "ownerRevision": "183f99a40bd7308da3e848de961ed32bb02624a5",
+  "receiptSha256": "040b6928a6e4e6ec72bd9ca3c58f0445d6496ab3219c9b4f2bc6f6f717e9a3a8",
+  "schemaVersion": 1,
+  "sha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+  "status": "passed",
+  "zeroObservationAction": {
+    "finite": true,
+    "maximum": 0.33868545293807983,
+    "minimum": -0.5535615086555481
+  }
+}

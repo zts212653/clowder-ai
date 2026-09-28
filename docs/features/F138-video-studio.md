@@ -1,10 +1,10 @@
 ---
 feature_ids: [F138]
-related_features: [F054, F093, F144]
-topics: [video, remotion, waoowaoo, bilibili, tutorial, content-pipeline, schema, tts-alignment, multimodal]
+related_features: [F054, F093, F144, F309]
+topics: [video, remotion, waoowaoo, bilibili, tutorial, content-pipeline, content-owner, schema, tts-alignment, multimodal]
 doc_kind: spec
 created: 2026-03-24
-updated: 2026-04-05
+updated: 2026-09-04
 ---
 
 # F138: Clowder AI Video Studio — AI 视频制作管线
@@ -92,6 +92,20 @@ F138 需要同时支持两条视频生产路径，对应不同场景和复杂度
 - ⚠️ 不是真正的视频渲染——网页自动播放 + QuickTime/OBS 录屏出视频
 - ⚠️ 逐 step TTS 切碎音频，与我们全局配音（KD-12）原则冲突
 - **吸收策略**：学起手体验和约束思想，不降级核心架构（KD-15）
+
+## User Journey
+
+**Scope unit：一个有稳定 `contentRef` 与 revision lineage 的视频项目。**
+
+1. You 从真实 brief、脚本和素材创建项目；素材进入 owner 后获得不可变引用，不把临时编辑器状态当真相。
+2. 猫猫基于同一项目 revision 生成 voice script、时间对齐与预览候选；每次可见改动都绑定输入 revision。
+3. You 在预览/审片表面接受或退回改动；接受只通过 owner CAS 产生新 revision 与 receipt，过期候选明确冲突。
+4. 关闭再打开 Workspace 后，系统从 owner 的项目、素材和 revision truth 恢复，不依赖旧 tab 或本地历史。
+5. final render 只消费已批准的冻结 snapshot；失败保持可恢复，不能把 renderer 输出反写成未经 owner 确认的成功。
+6. 发布是独立 release 状态，只有 approved render 与完整 provenance 才能进入上传和回写 external id。
+
+F309 共创接入复用这条 owner 语义：human/cat writer 都经各自身份结算，F309 只保存协作引用与 receipt，
+不复制 F138 的项目、素材或 revision truth。
 
 ## What
 

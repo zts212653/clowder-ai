@@ -62,7 +62,6 @@ import {
   legacyGuardWithoutActiveCustodyTotal,
   lineStartDetected,
   routingEventWaitBypassTotal,
-  routingEventWaitFalseBypassTotal,
   routingEventWaitRedundantHoldPreventedTotal,
   routingEventWaitRejectedTotal,
   routingTerminalReleaseCleanStopTotal,
@@ -108,6 +107,7 @@ import {
   type TurnCustodyProjection,
   type TurnCustodyWakeProvenance,
 } from '../../../../ball-custody/TurnCustodyProjectionService.js';
+import { resolveTypedWaitContinuation } from '../../../../ball-custody/TypedWaitContinuation.js';
 import {
   buildA2ADispatchTurnCustodyWake,
   buildCrossThreadNoObligationWake,
@@ -162,6 +162,7 @@ import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
+import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
 import {
   type AppendMessageInput,
   hydrateCrossThreadReplyHint,
@@ -181,7 +182,13 @@ import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.j
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getStreamingTtsRegistry, StreamingTtsChunker } from '../../tts/StreamingTtsChunker.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
-import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
+import {
+  type AgentMessage,
+  type AgentMessageType,
+  type AgentService,
+  type MessageMetadata,
+  mergeMessageMetadataSnapshots,
+} from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
 import {
@@ -194,6 +201,7 @@ import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/M
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
+import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
 import { detectInlineActionMentionsWithShadow, getMaxA2ADepth, parseA2AMentions } from '../routing/a2a-mentions.js';
 import {
   isSubstantiveTool,
@@ -216,10 +224,6 @@ import {
 import { extractContextEvalSignals } from './context-eval.js';
 import { validateRoutingSyntax } from './final-routing-slot.js';
 import { buildBriefingMessage } from './format-briefing.js';
-import {
-  isEventBackedRoutingBypassProofValid,
-  resolveEventBackedRoutingExit,
-} from './guards/event-backed-routing-exit.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
@@ -250,6 +254,8 @@ import {
   upsertMaxBoundary,
 } from './route-helpers.js';
 import { resolveRoutingDecisions } from './routing-decision.js';
+import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
+import { routingPreflightNotice } from './routing-preflight-notice.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 import { detectMatchedVerdictKeyword, shouldWarnVerdictWithoutPass } from './verdict-detect.js';
 import { evaluateVoidHold } from './void-hold-detect.js';
@@ -1043,21 +1049,58 @@ export async function* routeSerial(
         routingDispatchPreflightDecision = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
           ownerId: userId,
           targetCatIds: [catId],
+          ...(index < targetCats.length && isRoutingOwnerAttempt(options) ? { ownerRequestedAttempt: true } : {}),
           ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
         });
         const receipt = routingDispatchPreflightReceipt(routingDispatchPreflightDecision, catId);
-        if (receipt.target.disposition !== 'allowed') {
+        const notice = await routingPreflightNotice(
+          deps,
+          options,
+          routingDispatchPreflightDecision,
+          catId,
+          threadId,
+          index < targetCats.length,
+        );
+        if (notice) yield notice;
+        if (receipt.target.disposition === 'rejected') {
           yield {
-            type: 'system_info',
+            type: 'error',
             catId,
-            content: JSON.stringify(receipt),
+            errorCode: 'routing_preflight_rejected',
+            error: '本次未执行：成员当前不可用。恢复后可重试原消息。',
             timestamp: Date.now(),
           };
-        }
-        if (receipt.target.disposition === 'rejected') {
           index++;
           continue;
         }
+      }
+      let service: AgentService;
+      try {
+        service = getService(deps.services, catId, deps.unavailableServices);
+      } catch (error) {
+        if (!(error instanceof AgentServiceUnavailableError)) throw error;
+        yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
+        const commitAllowed = options.beforeOutputCommit ? await options.beforeOutputCommit(catId) : true;
+        if (commitAllowed) {
+          try {
+            await deps.messageStore.append({
+              userId: 'system',
+              catId: null,
+              content: `Error: ${error.message}`,
+              mentions: [],
+              origin: 'stream',
+              timestamp: Date.now(),
+              threadId,
+            });
+          } catch (persistError) {
+            log.error({ catId, err: persistError }, 'messageStore.append (unavailable member) failed');
+          }
+        } else if (options.persistenceContext) {
+          options.persistenceContext.actionOutputCommitRejected = true;
+        }
+        yield { type: 'done', catId, isFinal: false, timestamp: Date.now() };
+        worklistEntry.executedIndex = ++index;
+        continue;
       }
       // F148 OQ-2: briefing→invocation link + context eval
       let briefingMessageId: string | undefined;
@@ -1160,7 +1203,6 @@ export async function* routeSerial(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const service = getService(deps.services, catId);
       const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
         catId,
         service,
@@ -1266,8 +1308,9 @@ export async function* routeSerial(
         });
         if (!duplicate) turnCustodyTerminalWitnesses.push(witness);
       };
-      const adoptTurnCustodyWakes = async (wakes: readonly TurnCustodyWakeProvenance[]): Promise<void> => {
-        if (!deps.turnCustodyProjectionService) return;
+      const prepareTurnCustodyAdoption = async (wakes: readonly TurnCustodyWakeProvenance[]): Promise<() => void> => {
+        if (!deps.turnCustodyProjectionService) return () => undefined;
+        const prepared: typeof adoptedTurnCustodyProjections = [];
         for (const wake of wakes) {
           // Prompt/tool adoption currently applies only to command-backed hold
           // receipts. Dispatch custody still requires its own routed child.
@@ -1277,16 +1320,21 @@ export async function* routeSerial(
             turnCustodyWake.protocol === 'hold' &&
             turnCustodyWake.sourceMessageId === wake.sourceMessageId &&
             turnCustodyWake.taskId === wake.taskId;
-          const alreadyAdopted = adoptedTurnCustodyProjections.some(
+          const alreadyAdopted = [...adoptedTurnCustodyProjections, ...prepared].some(
             (candidate) =>
               candidate.wake.sourceMessageId === wake.sourceMessageId && candidate.wake.taskId === wake.taskId,
           );
           if (duplicatesPrimary || alreadyAdopted) continue;
-          adoptedTurnCustodyProjections.push({
+          prepared.push({
             wake,
             projection: await deps.turnCustodyProjectionService.open(wake),
           });
         }
+        // Queue/body custody is append-only, so all I/O happens above. The
+        // registry invokes this synchronous publication only after exposure commits.
+        return () => {
+          adoptedTurnCustodyProjections.push(...prepared);
+        };
       };
       const hasNativeL0 = service.injectsL0Natively?.() ?? false;
       const staticIdentity = hasNativeL0
@@ -1808,7 +1856,7 @@ export async function* routeSerial(
 
       let textContent = '';
       const thinkingChunks: string[] = [];
-      let firstMetadata: MessageMetadata | undefined;
+      let persistedMetadata: MessageMetadata | undefined;
       let doneMsg: AgentMessage | undefined;
       let persistedDoneContent: string | undefined;
       let hadError = false;
@@ -1968,7 +2016,7 @@ export async function* routeSerial(
       ): Promise<void> => {
         const metadataPatch = buildCallbackFinalReplacementMetadataPatch({
           thinkingChunks,
-          ...(firstMetadata ? { metadata: firstMetadata } : {}),
+          ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
           toolEvents: collectedToolEvents,
           ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
           mentionsUser: replacementMentionsUser,
@@ -1997,35 +2045,25 @@ export async function* routeSerial(
           );
         }
       };
-      let eventBackedRoutingExitPromise: ReturnType<typeof resolveEventBackedRoutingExit> | undefined;
       let verifiedEventBackedRoutingExit = false;
-      const hasVerifiedEventBackedRoutingExit = async (): Promise<boolean> => {
-        eventBackedRoutingExitPromise ??= resolveEventBackedRoutingExit({
+      const readVerifiedWaitContinuation = async (sourceMessageId: string | undefined, holdTaskId?: string) => {
+        const resolution = await resolveTypedWaitContinuation({
           taskStore: deps.taskStore,
           threadId,
+          userId,
           catId: catId as string,
           invocationId: ownInvocationId,
+          sourceMessageId,
+          ...(holdTaskId ? { holdTaskId } : {}),
         });
-        const resolution = await eventBackedRoutingExitPromise;
         if (resolution.kind === 'reject') {
           routingEventWaitRejectedTotal.add(1, { [ROUTING_EVENT_WAIT_REASON]: resolution.reason });
-          return false;
-        }
-        if (
-          !isEventBackedRoutingBypassProofValid(resolution, {
-            threadId,
-            catId: catId as string,
-            invocationId: ownInvocationId,
-          })
-        ) {
-          routingEventWaitFalseBypassTotal.add(1);
-          routingEventWaitRejectedTotal.add(1, { [ROUTING_EVENT_WAIT_REASON]: 'proof_invalid' });
-          return false;
+          return undefined;
         }
         routingEventWaitBypassTotal.add(1);
         routingEventWaitRedundantHoldPreventedTotal.add(1);
         verifiedEventBackedRoutingExit = true;
-        return true;
+        return resolution.reference;
       };
       let visibleContentInvocationIdOverride: string | undefined;
       // F111 Phase B: Streaming TTS chunker for real-time voice (voiceMode only)
@@ -2229,6 +2267,7 @@ export async function* routeSerial(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: initialExecutionKind,
         executionCausal: {
           ...((options.cloudDispatchProvenance?.sourceMessageId ??
@@ -2250,7 +2289,9 @@ export async function* routeSerial(
           ? {
               onPromptMessagesExposed: async (input) => {
                 const adoptedWakes = await options.onPromptMessagesExposed!(input);
-                if (adoptedWakes) await adoptTurnCustodyWakes(adoptedWakes);
+                if (adoptedWakes && !(await turnCustodyAdoptionRegistry.adopt(input.invocationId, adoptedWakes))) {
+                  throw new Error('turn custody adoption owner unavailable before prompt exposure');
+                }
                 return adoptedWakes;
               },
             }
@@ -2318,7 +2359,7 @@ export async function* routeSerial(
                 ownInvocationId = parsed.invocationId;
                 unregisterTurnCustodyAdoption = turnCustodyAdoptionRegistry.register(
                   parsed.invocationId,
-                  adoptTurnCustodyWakes,
+                  prepareTurnCustodyAdoption,
                 );
                 rememberTurnExecutionProjection(parsed.invocationId, initialExecutionKind);
                 if (!isFreshnessSupplement) {
@@ -2621,8 +2662,8 @@ export async function* routeSerial(
               collectedCliDiagnostics = meta.cliDiagnostics;
             }
           }
-          if (effectiveMsg.metadata && !firstMetadata) {
-            firstMetadata = effectiveMsg.metadata;
+          if (effectiveMsg.metadata) {
+            persistedMetadata = mergeMessageMetadataSnapshots(persistedMetadata, effectiveMsg.metadata);
           }
           if (effectiveMsg.type === 'done') {
             doneMsg = effectiveMsg; // Buffer — yield after A2A detection
@@ -2705,7 +2746,11 @@ export async function* routeSerial(
             catId: null,
             threadId,
             content:
-              '[F167 球权停止门]: 结构化补救后，当前协议球仍没有可验证状态迁移；已停止自动重试并保留原球权真相。',
+              structuredDispositionMissingCode === 'managed_hold_disposition_missing'
+                ? '[F167 球权停止门]: 本轮已读取的持球通知尚未结算；命令结果与通知结算是两件事。已保留通知及其回执，未启动其他回合代替结算。'
+                : structuredDispositionMissingCode === 'a2a_dispatch_disposition_missing'
+                  ? '[F167 球权停止门]: 本轮 A2A 消息尚未结算；已保留原消息及其回执，未启动其他回合代替结算。'
+                  : '[F167 球权停止门]: 结构化补救后，当前协议球仍没有可验证状态迁移；已停止自动重试并保留原球权真相。',
             mentions: [],
             timestamp: Date.now(),
             source: failureSource,
@@ -2757,9 +2802,16 @@ export async function* routeSerial(
           ...(crossThreadReplyHint?.effectClass ? { effectClass: crossThreadReplyHint.effectClass } : {}),
         });
         pendingTurnCustodyShadowCloses.push(async (closeCheckpoint) => {
-          const verifiedEventWait =
-            projection.state === 'covered_active' ? await hasVerifiedEventBackedRoutingExit() : false;
           const rawDecision = await deps.turnCustodyProjectionService!.close(projection);
+          const primaryHold =
+            turnCustodyWake.kind === 'structured' && turnCustodyWake.protocol === 'hold' ? turnCustodyWake : undefined;
+          const verifiedEventWait =
+            rawDecision.state === 'covered_active' && !rawDecision.transitionObserved
+              ? await readVerifiedWaitContinuation(
+                  primaryHold?.sourceMessageId ?? turnTriggerMessageId ?? options.currentUserMessageId,
+                  primaryHold?.taskId,
+                )
+              : undefined;
           const newDecision =
             verifiedEventWait && rawDecision.state === 'covered_active'
               ? {
@@ -2788,6 +2840,7 @@ export async function* routeSerial(
                 sourceMessageId: turnCustodyWake.sourceMessageId,
                 taskId: turnCustodyWake.taskId,
                 transition,
+                ...(transition === 'event_wait' && verifiedEventWait ? { waitRegistration: verifiedEventWait } : {}),
               });
             }
           }
@@ -2897,9 +2950,22 @@ export async function* routeSerial(
 
           let adoptedStructuredDispositionBlocked = false;
           for (const adopted of adoptedTurnCustodyProjections) {
-            const adoptedDecision = await deps.turnCustodyProjectionService!.close(adopted.projection);
-            const transition =
-              adoptedDecision.structuredTransitionKind === 'held'
+            const rawAdoptedDecision = await deps.turnCustodyProjectionService!.close(adopted.projection);
+            const adoptedWait =
+              rawAdoptedDecision.state === 'covered_active' && !rawAdoptedDecision.transitionObserved
+                ? await readVerifiedWaitContinuation(adopted.wake.sourceMessageId, adopted.wake.taskId)
+                : undefined;
+            const adoptedDecision = adoptedWait
+              ? {
+                  ...rawAdoptedDecision,
+                  shouldBlock: false,
+                  transitionObserved: true,
+                  evidenceRefs: [...rawAdoptedDecision.evidenceRefs, 'event_wait:verified'],
+                }
+              : rawAdoptedDecision;
+            const transition = adoptedWait
+              ? 'event_wait'
+              : adoptedDecision.structuredTransitionKind === 'held'
                 ? 'reheld'
                 : adoptedDecision.structuredTransitionKind === 'handed'
                   ? 'transferred'
@@ -2910,6 +2976,7 @@ export async function* routeSerial(
                 sourceMessageId: adopted.wake.sourceMessageId,
                 taskId: adopted.wake.taskId,
                 transition,
+                ...(transition === 'event_wait' && adoptedWait ? { waitRegistration: adoptedWait } : {}),
               });
             }
             adoptedStructuredDispositionBlocked = adoptedDecision.shouldBlock || adoptedStructuredDispositionBlocked;
@@ -2965,7 +3032,7 @@ export async function* routeSerial(
           const originalOwnInvocationId = ownInvocationId;
           const originalDoneMsg = doneMsg;
           const originalTextContent = textContent;
-          const originalFirstMetadata = firstMetadata;
+          const originalPersistedMetadata = persistedMetadata;
           try {
             await runTurnCustodyStopGateRemedial('', [], []);
             emitSingleAcceptedTurnCustodyHandoff();
@@ -2987,7 +3054,7 @@ export async function* routeSerial(
             ownInvocationId = originalOwnInvocationId;
             doneMsg = originalDoneMsg;
             textContent = originalTextContent;
-            firstMetadata = originalFirstMetadata;
+            persistedMetadata = originalPersistedMetadata;
           }
         });
       };
@@ -3048,7 +3115,7 @@ export async function* routeSerial(
 
         textContent = '';
         thinkingChunks.splice(0, thinkingChunks.length);
-        firstMetadata = undefined;
+        persistedMetadata = undefined;
         doneMsg = undefined;
         collectedToolEvents.splice(0, collectedToolEvents.length);
         collectedToolNames.splice(0, collectedToolNames.length);
@@ -3068,7 +3135,7 @@ export async function* routeSerial(
           ? [remedialRoutingPreflightNotice]
           : [];
         const remedialStripper = createLeakedToolCallStreamStripper();
-        const remedialService = getService(deps.services, catId);
+        const remedialService = getService(deps.services, catId, deps.unavailableServices);
         const resolvedRemedialCapacitySnapshot = await resolveInvocationCapacitySnapshot({
           catId,
           service: remedialService,
@@ -3155,6 +3222,7 @@ export async function* routeSerial(
             : {}),
           invocationSpanRef,
           ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+          ...(options.executionScope ? { executionScope: options.executionScope } : {}),
           executionKind: 'routing_guard',
           executionCausal: {
             ...((streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
@@ -3303,8 +3371,8 @@ export async function* routeSerial(
               }
             }
 
-            if (effectiveMsg.metadata && !firstMetadata) {
-              firstMetadata = effectiveMsg.metadata;
+            if (effectiveMsg.metadata) {
+              persistedMetadata = mergeMessageMetadataSnapshots(persistedMetadata, effectiveMsg.metadata);
             }
             if (effectiveMsg.type === 'done') {
               doneMsg = effectiveMsg;
@@ -3517,11 +3585,14 @@ export async function* routeSerial(
           onEvent: deps.freshnessEventLog
             ? (event) => {
                 deps
-                  .freshnessEventLog!.append({
-                    ...event,
-                    invocationId: ownInvocationId ?? 'unknown',
-                    catId: catId as string as import('@cat-cafe/shared').CatId,
-                  })
+                  .freshnessEventLog!.append(
+                    {
+                      ...event,
+                      invocationId: ownInvocationId ?? 'unknown',
+                      catId: catId as string as import('@cat-cafe/shared').CatId,
+                    },
+                    { ownerUserId: userId },
+                  )
                   .catch(() => {});
               }
             : undefined,
@@ -4077,6 +4148,20 @@ export async function* routeSerial(
 
           if (!callbackAlreadyStored) {
             const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+            const deliveryBoundary = createMessageDeliveryBoundary({
+              cursor: deliveryBoundaryId,
+              userId,
+              threadId,
+              catId,
+              turnInvocationId: visibleTurnInvocationId,
+              sourceMessageId: turnTriggerMessageId,
+              succeeded:
+                Boolean(doneMsg) &&
+                !hadError &&
+                !doneMsg?.errorCode &&
+                !catSignal?.aborted &&
+                visibleTurnInvocationId === ownInvocationId,
+            });
             const streamMessageInput: AppendMessageInput = {
               userId,
               catId,
@@ -4087,11 +4172,12 @@ export async function* routeSerial(
               threadId,
               ...(mentionsUser ? { mentionsUser } : {}),
               ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
-              ...(firstMetadata ? { metadata: firstMetadata } : {}),
+              ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
               ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
               extra: {
                 ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+                ...(deliveryBoundary ? { deliveryBoundary } : {}),
                 // F194 Phase Z3: dual id — invocationId=parent (legacy SoT for liveness/queue/cancel),
                 // turnInvocationId=own (Z3 new SoT for frontend bubble identity stable key, prevents
                 // same-parent multi-turn-same-cat bubble merge).
@@ -4866,6 +4952,20 @@ export async function* routeSerial(
               }
             } else {
               const executionProjections = await readTurnExecutionProjections(visibleTurnInvocationId);
+              const deliveryBoundary = createMessageDeliveryBoundary({
+                cursor: deliveryBoundaryId,
+                userId,
+                threadId,
+                catId,
+                turnInvocationId: visibleTurnInvocationId,
+                sourceMessageId: turnTriggerMessageId,
+                succeeded:
+                  Boolean(doneMsg) &&
+                  !hadError &&
+                  !doneMsg?.errorCode &&
+                  !catSignal?.aborted &&
+                  visibleTurnInvocationId === ownInvocationId,
+              });
               const noTextMessageInput: AppendMessageInput = {
                 userId,
                 catId,
@@ -4876,10 +4976,11 @@ export async function* routeSerial(
                 threadId,
                 ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
                 ...(thinkingChunks.length > 0 ? { thinking: renderThinkingChunks(thinkingChunks) } : {}),
-                ...(firstMetadata ? { metadata: firstMetadata } : {}),
+                ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
                 ...(collectedToolEvents.length > 0 ? { toolEvents: collectedToolEvents } : {}),
                 extra: {
                   ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                  ...(deliveryBoundary ? { deliveryBoundary } : {}),
                   // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
                   // (= ownInvocationId, else parent fallback).
                   ...((options.parentInvocationId ?? visibleTurnInvocationId)
@@ -5000,8 +5101,8 @@ export async function* routeSerial(
                 type: 'silent_completion',
                 detail: `${catConfig?.displayName ?? (catId as string)} completed without textual output.`,
                 toolCount: collectedToolEvents.length,
-                provider: firstMetadata?.provider,
-                model: firstMetadata?.model,
+                provider: persistedMetadata?.provider,
+                model: persistedMetadata?.model,
                 invocationId: ownInvocationId,
               }),
               timestamp: Date.now(),
@@ -5042,7 +5143,7 @@ export async function* routeSerial(
               timestamp: invocationStartedAt,
               threadId,
               ...(streamReplyTo ? { replyTo: streamReplyTo } : {}),
-              ...(firstMetadata ? { metadata: firstMetadata } : {}),
+              ...(persistedMetadata ? { metadata: persistedMetadata } : {}),
               toolEvents: collectedToolEvents,
               ...((options.parentInvocationId ?? visibleTurnInvocationId) || doneMsg?.tracing
                 ? {
@@ -5306,10 +5407,20 @@ export async function* routeSerial(
       // rounds (bug: "砚砚每次都疯狂回之前的消息").
       if (incrementalMode && deliveryBoundaryId) {
         if (options.cursorBoundaries) {
-          // ADR-008 S3: defer ack — caller acks after completion (or on abort/exception)
+          // Keep the same-route overlay and caller finalizer as idempotent consumers.
           upsertMaxBoundary(options.cursorBoundaries, catId, deliveryBoundaryId);
-        } else if (deps.deliveryCursorStore) {
-          // Legacy: ack immediately (deprecated route() path)
+        }
+        if (
+          deps.deliveryCursorStore &&
+          (!options.cursorBoundaries ||
+            (doneMsg &&
+              !hadError &&
+              !doneMsg.errorCode &&
+              !catSignal?.aborted &&
+              actionOutputCommitAllowed &&
+              (turnStoredMessageId || !catProducedOutput)))
+        ) {
+          // Commit before this target's done/slot release, not after the whole chain.
           try {
             await deps.deliveryCursorStore.ackCursor(userId, catId, threadId, deliveryBoundaryId);
           } catch (err) {

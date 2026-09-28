@@ -143,6 +143,139 @@ describe('public measurement census bootstrap', () => {
     }
   });
 
+  it('reconciles an existing domain owner without replacing instance-owned calibration', () => {
+    const root = seedPublicRepo();
+    const registryPath = resolve(root, domainDirRef, 'eval-freshness.yaml');
+    try {
+      const domain = parse(readFileSync(registryPath, 'utf8'));
+      domain.handoffTargetResolver.ownerCatId = 'codex';
+      writeFileSync(registryPath, stringify(domain));
+      ensureMeasurementBundleCensusFile(root, '2026-09-05T00:00:00.000Z');
+      const before = loadCensus(root);
+      const memory = before.entries.find((entry) => entry.domainId === 'eval:memory');
+      memory.functionalEquivalents = ['instance-owned memory calibration'];
+      memory.validityMigration = {
+        ...memory.validityMigration,
+        batch: 1,
+        status: 'certified_usable',
+        certificateRef: 'public-memory-certificate.yaml',
+        resultRef: 'public-memory-result.json',
+        replayRef: 'public-memory-replay.json',
+        actionGate: 'certificate_actions_allowed',
+        hardBlockReason: null,
+      };
+      writeFileSync(resolve(root, censusRef), stringify(before));
+      domain.handoffTargetResolver.ownerCatId = 'codex-sol';
+      writeFileSync(registryPath, stringify(domain));
+
+      const result = ensureMeasurementBundleCensusFile(root, '2026-09-10T00:00:00.000Z');
+      const after = loadCensus(root);
+
+      assert.equal(result.reconciled, true);
+      assert.deepEqual(
+        after.entries.map((entry) => entry.domainId),
+        before.entries.map((entry) => entry.domainId),
+      );
+      assert.equal(
+        after.entries.find((entry) => entry.domainId === 'eval:freshness').decisionConsumer.ownerCatId,
+        'codex-sol',
+      );
+      for (const previous of before.entries) {
+        const current = after.entries.find((entry) => entry.domainId === previous.domainId);
+        assert.deepEqual(current.validityMigration, previous.validityMigration);
+        assert.deepEqual(current.functionalEquivalents, previous.functionalEquivalents);
+      }
+      assert.doesNotThrow(() => validateMeasurementBundleCensus(after, root));
+      assert.doesNotThrow(() => assertMeasurementVerdictActionAllowed(after, 'eval:memory', 'fix'));
+      assert.throws(() => assertMeasurementVerdictActionAllowed(after, 'eval:freshness', 'fix'), /keep_observe_only/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an unchanged registry census byte-for-byte intact', () => {
+    const root = seedPublicRepo();
+    try {
+      const initial = ensureMeasurementBundleCensusFile(root, '2026-09-05T00:00:00.000Z');
+      const source = `# Instance-owned commentary\n${initial.source}`;
+      writeFileSync(initial.path, source);
+      const inode = statSync(initial.path).ino;
+
+      const result = ensureMeasurementBundleCensusFile(root, '2026-09-10T00:00:00.000Z');
+
+      assert.equal(result.created, false);
+      assert.equal(result.reconciled, false);
+      assert.equal(result.source, source);
+      assert.equal(readFileSync(initial.path, 'utf8'), source);
+      assert.equal(statSync(initial.path).ino, inode);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('requires explicit migration for domain removal without changing the census', () => {
+    const root = seedPublicRepo();
+    try {
+      const initial = ensureMeasurementBundleCensusFile(root, '2026-09-05T00:00:00.000Z');
+      rmSync(resolve(root, domainDirRef, 'eval-freshness.yaml'));
+
+      assert.throws(
+        () => ensureMeasurementBundleCensusFile(root, '2026-09-10T00:00:00.000Z'),
+        /domain removal requires explicit migration/,
+      );
+      assert.equal(readFileSync(initial.path, 'utf8'), initial.source);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not impose bootstrap activation on an already valid instance census', () => {
+    const root = seedPublicRepo();
+    try {
+      const initial = ensureMeasurementBundleCensusFile(root, '2026-09-05T00:00:00.000Z');
+      const domainPath = resolve(root, domainDirRef, 'eval-memory.yaml');
+      const domain = parse(readFileSync(domainPath, 'utf8'));
+      domain.enabled = false;
+      writeFileSync(domainPath, stringify(domain));
+      const census = loadCensus(root);
+      const memory = census.entries.find((entry) => entry.domainId === 'eval:memory');
+      memory.enabled = false;
+      memory.classification = 'gated';
+      memory.decisionConsumer.allowedActions = [];
+      memory.validityMigration = { ...memory.validityMigration, riskRank: null, status: 'gated' };
+      for (const entry of census.entries) {
+        if (entry.validityMigration.riskRank !== null) entry.validityMigration.riskRank -= 1;
+      }
+      assert.doesNotThrow(() => validateMeasurementBundleCensus(census, root));
+      const source = stringify(census);
+      writeFileSync(initial.path, source);
+
+      const result = ensureMeasurementBundleCensusFile(root, '2026-09-10T00:00:00.000Z');
+
+      assert.equal(result.reconciled, false);
+      assert.equal(readFileSync(initial.path, 'utf8'), source);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not repair invalid instance authorization into a publishable census', () => {
+    const root = seedPublicRepo();
+    try {
+      const initial = ensureMeasurementBundleCensusFile(root, '2026-09-05T00:00:00.000Z');
+      const census = loadCensus(root);
+      const memory = census.entries.find((entry) => entry.domainId === 'eval:memory');
+      memory.validityMigration.actionGate = 'certificate_actions_allowed';
+      const source = stringify(census);
+      writeFileSync(initial.path, source);
+
+      assert.throws(() => ensureMeasurementBundleCensusFile(root, '2026-09-10T00:00:00.000Z'), /action gate.*batch/i);
+      assert.equal(readFileSync(initial.path, 'utf8'), source);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('atomically replaces the census when publisher-derived fields refresh', () => {
     const root = seedPublicRepo();
     try {

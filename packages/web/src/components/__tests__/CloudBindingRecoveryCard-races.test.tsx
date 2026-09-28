@@ -85,6 +85,10 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
     });
     mockApiFetch.mockImplementation((path) => {
       if (path === '/api/plugins/personal-chrome' && mockApiFetch.mock.calls.length <= 2) return oldPlugin;
+      if (path.endsWith('/retry-authority'))
+        return Promise.resolve(
+          jsonResponse({ attemptId: path.includes('source-one') ? 'attempt-source-one' : 'attempt-source-new' }),
+        );
       if (path === '/api/plugins/personal-chrome')
         return Promise.resolve(jsonResponse(pluginState('conversation-new')));
       return Promise.resolve(jsonResponse({ bindings: {} }));
@@ -160,7 +164,7 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain('正在查找已授权的 ChatGPT 会话');
+    expect(container.textContent).toContain('正在读取会话与发送状态');
     expect(container.querySelector('button[data-recovery-primary]')).toBeNull();
     expect(
       mockApiFetch.mock.calls.filter(
@@ -180,6 +184,10 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       resolvePatch = resolve;
     });
     mockApiFetch.mockImplementation(async (path, init) => {
+      if (path.endsWith('/retry-authority'))
+        return Promise.resolve(
+          jsonResponse({ attemptId: path.includes('source-one') ? 'attempt-source-one' : 'attempt-source-new' }),
+        );
       if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState('one'));
       if (path.includes('/cloud-bindings') && !init?.method) return jsonResponse({ bindings: {} });
       if (path.includes('/cloud-bindings') && init?.method === 'PATCH') return pendingPatch;
@@ -203,6 +211,10 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
       resolveOldPatch = resolve;
     });
     mockApiFetch.mockImplementation(async (path, init) => {
+      if (path.endsWith('/retry-authority'))
+        return Promise.resolve(
+          jsonResponse({ attemptId: path.includes('source-one') ? 'attempt-source-one' : 'attempt-source-new' }),
+        );
       if (path === '/api/plugins/personal-chrome') {
         pluginReads += 1;
         return jsonResponse(pluginState(pluginReads === 1 ? 'conversation-old' : 'conversation-new'));
@@ -220,27 +232,40 @@ describe('CloudBindingRecoveryCard lifecycle fences', () => {
     );
 
     expect(container.querySelector('code[title="conversation-new"]')).not.toBeNull();
-    expect(container.textContent).not.toContain('已绑定，正在发送');
+    expect(container.textContent).not.toContain('消息已进入发送流程');
     expect(
       mockApiFetch.mock.calls.some(([path]) => path === '/api/messages/source-one/queue-targets/gpt-pro/retry'),
     ).toBe(false);
   });
 
-  it('reports a stale retry fence without creating a replacement message', async () => {
+  it('reconciles a stale retry fence to current pending state without duplicating the message', async () => {
+    let authorityReads = 0;
     mockApiFetch.mockImplementation(async (path) => {
       if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState('conversation-bound'));
-      if (path === '/api/threads/thread-one/cloud-bindings') {
+      if (path === '/api/threads/thread-one/cloud-bindings')
         return jsonResponse({ bindings: { 'gpt-pro': 'https://chatgpt.com/c/conversation-bound' } });
+      if (path.endsWith('/retry-authority')) {
+        authorityReads += 1;
+        return authorityReads === 1
+          ? jsonResponse({ attemptId: 'attempt-current' })
+          : jsonResponse({ code: 'QUEUE_TARGET_NOT_RETRYABLE', targetState: 'queued' }, 409);
       }
-      return jsonResponse({ code: 'QUEUE_RETRY_AUTHORITY_STALE' }, 409);
+      if (path.endsWith('/retry')) return jsonResponse({ code: 'QUEUE_RETRY_AUTHORITY_STALE' }, 409);
+      throw new Error(`unexpected ${String(path)}`);
     });
 
     await renderCard();
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.click();
-      await Promise.resolve();
     });
-    expect(container.textContent).toContain('发送状态已经变化');
+    await vi.waitFor(() => expect(container.textContent).toContain('消息已进入发送流程'));
+    expect(authorityReads).toBe(2);
+    expect(mockApiFetch).toHaveBeenCalledWith(
+      '/api/messages/source-one/queue-targets/gpt-pro/retry',
+      expect.objectContaining({ body: JSON.stringify({ attemptId: 'attempt-current' }) }),
+    );
+    expect(mockApiFetch.mock.calls.filter(([path]) => path.endsWith('/retry'))).toHaveLength(1);
     expect(mockApiFetch.mock.calls.some(([path]) => path === '/api/messages')).toBe(false);
+    expect(container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.disabled).toBe(true);
   });
 });

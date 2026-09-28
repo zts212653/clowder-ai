@@ -140,6 +140,24 @@ async function routeGet(
     });
     return;
   }
+  if (url.pathname === '/api/participants') {
+    writeJson(response, 200, {
+      participants: store.listParticipants(requireBearer(request), requiredQuery(url, 'collectiveId')),
+    });
+    return;
+  }
+  if (url.pathname === '/api/participation') {
+    writeJson(
+      response,
+      200,
+      store.readParticipationDeclaration(requireBearer(request), {
+        serviceInstanceId: requiredQuery(url, 'serviceInstanceId'),
+        collectiveId: requiredQuery(url, 'collectiveId'),
+        connectionId: requiredQuery(url, 'connectionId'),
+      }),
+    );
+    return;
+  }
   if (url.pathname === '/api/events/endpoint') {
     writeJson(
       response,
@@ -318,6 +336,10 @@ async function routeEventPost(
     writeJson(response, 201, await store.postAgentMessage(requireBearer(request), body));
   } else if (pathname === '/api/acks') {
     writeJson(response, 200, await store.acknowledge(requireBearer(request), body));
+  } else if (pathname === '/api/participation') {
+    writeJson(response, 200, await store.publishParticipation(requireBearer(request), body));
+  } else if (pathname === '/api/participation/context') {
+    writeJson(response, 200, store.readParticipationContext(requireBearer(request), body));
   } else {
     return false;
   }

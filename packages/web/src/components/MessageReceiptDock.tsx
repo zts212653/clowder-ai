@@ -201,7 +201,8 @@ export function MessageReceiptDock({
     }
   };
 
-  if (receipt.scope === 'primary_trigger') return null;
+  if (receipt.scope === 'primary_trigger' && !receipt.targets.some((target) => latestRetryableQueueAttempt(target)))
+    return null;
 
   return (
     <section

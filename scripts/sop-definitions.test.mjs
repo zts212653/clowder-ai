@@ -27,7 +27,7 @@ const EXPECTED_PORTED_RULE_TEXTS = [
   '压缩后忘了当前在做什么',
   '改 MCP tool / skill manifest 等当前已索引约定面前，先用 convention graph 查影响面；stale=true 先 reindex',
   '自检报告必须包含愿景覆盖度',
-  '声称完成但没有与风险面匹配的验证证据（至少 targeted；高风险才要求 full gate）',
+  '声称完成但没有与影响面匹配的验证证据（纯文档走文档校验；高风险加强独立审查，跨包影响无法由 targeted 覆盖才要求 full gate）',
   'Fresh-context 是 finding generator，不是 approval authority——不产出 verdict，不记入 Review Provenance Matrix',
   '同一个体不能 review 自己的代码',
   '涉及用户意图或愿景的 Review 请求必须附原始需求摘录',

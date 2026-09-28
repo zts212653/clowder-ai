@@ -35,6 +35,49 @@ function checkRun(name, conclusion) {
 }
 
 describe('fetchPrCiStatuses batch failure isolation', () => {
+  it('binds each rollup and HEAD to its own repo-plus-PR key', async () => {
+    const results = await fetchPrCiStatuses(
+      [
+        { repoFullName: 'owner/repo', prNumber: 7 },
+        { repoFullName: 'owner/repo', prNumber: 8 },
+      ],
+      { warn() {} },
+      {
+        async execFileAsync(file, args) {
+          assert.equal(file, 'gh');
+          assert.equal(args[0], 'api');
+          return {
+            stdout: JSON.stringify({
+              data: {
+                r0: {
+                  p0: graphQlPr({ sha: '7'.repeat(40), contexts: [checkRun('pr-7-gate', 'SUCCESS')] }),
+                  p1: graphQlPr({ sha: '8'.repeat(40), contexts: [checkRun('pr-8-gate', null)] }),
+                },
+              },
+            }),
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(
+      {
+        headSha: results.get('owner/repo#7')?.headSha,
+        bucket: results.get('owner/repo#7')?.aggregateBucket,
+        checks: results.get('owner/repo#7')?.checks.map((check) => check.name),
+      },
+      { headSha: '7'.repeat(40), bucket: 'pass', checks: ['pr-7-gate'] },
+    );
+    assert.deepEqual(
+      {
+        headSha: results.get('owner/repo#8')?.headSha,
+        bucket: results.get('owner/repo#8')?.aggregateBucket,
+        checks: results.get('owner/repo#8')?.checks.map((check) => check.name),
+      },
+      { headSha: '8'.repeat(40), bucket: 'pending', checks: ['pr-8-gate'] },
+    );
+  });
+
   it('passes cancellation to gh and does not swallow an abort as an empty poll', async () => {
     const controller = new AbortController();
     let commandCount = 0;

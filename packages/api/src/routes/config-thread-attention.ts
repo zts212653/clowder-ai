@@ -34,10 +34,11 @@ const putSchema = z
     anchor: stableAnchorSchema,
     alias: z.string().trim().min(1).max(120).nullable().optional(),
     open: z.boolean().nullable().optional(),
+    memberSort: z.enum(['manual', 'running-first']).nullable().optional(),
   })
   .strict()
-  .refine((value) => value.alias !== undefined || value.open !== undefined, {
-    message: 'alias or open is required',
+  .refine((value) => value.alias !== undefined || value.open !== undefined || value.memberSort !== undefined, {
+    message: 'alias, open or memberSort is required',
   });
 type GroupCommand = z.infer<typeof groupCommandSchema>;
 type GroupStore = Pick<IThreadStore, 'list' | 'getThreadMetadata' | 'atomicMergeThreadMetadata'>;

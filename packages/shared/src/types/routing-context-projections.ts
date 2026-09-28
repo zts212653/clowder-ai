@@ -29,6 +29,11 @@ const routingCandidateSnapshotV1Schema = z
     profile: routingCandidateProfileV1Schema,
     availability: z.enum(['available', 'scarce', 'degraded', 'unavailable', 'unknown']),
     freshness: z.enum(['fresh', 'stale', 'unknown']),
+    /** Derived from all active assertions, independently of bounded display reasons. */
+    dispatch: z
+      .object({ ownerAttemptAllowed: z.boolean(), automaticRetryAt: routingEpochMsSchema.optional() })
+      .strict()
+      .optional(),
     reasons: z.array(routingReasonV1Schema).max(32),
     matchedPreferences: z
       .array(
@@ -94,6 +99,8 @@ const routingPreflightTargetV1Schema = z
   .object({
     targetCatId: routingOwnerIdSchema,
     disposition: z.enum(['allowed', 'warned', 'rejected']),
+    ownerAttempt: z.literal(true).optional(),
+    automaticRetryAt: routingEpochMsSchema.optional(),
     reasons: z.array(routingReasonV1Schema).max(32),
     alternatives: z
       .array(
@@ -127,6 +134,20 @@ const routingPreflightTargetV1Schema = z
       }
     });
   });
+
+export const routingPreflightReceiptV1Schema = z
+  .object({
+    type: z.literal('routing_preflight'),
+    v: z.literal(ROUTING_CONTEXT_VERSION),
+    ownerId: routingOwnerIdSchema,
+    observedAt: routingEpochMsSchema,
+    resolverState: z.enum(['fresh', 'degraded']),
+    snapshotRef: routingReferenceSchema.optional(),
+    target: routingPreflightTargetV1Schema,
+    sourceMessageId: routingIdentifierSchema.optional(),
+    retryInvocationId: routingIdentifierSchema.optional(),
+  })
+  .strict();
 
 export const routingPreflightDecisionV1Schema = z
   .object({

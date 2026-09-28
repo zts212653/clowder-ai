@@ -961,8 +961,8 @@ describe('MCP Callback Tools', () => {
     assert.match(wrongCardinality.content[0].text, /exactly one target/);
   });
 
-  test('handleListTasks forwards threadId/catId/status filters', async () => {
-    const { handleListTasks } = await import('../dist/tools/callback-tools.js');
+  test('handleListTasks forwards threadId/catId/status/feature filters with API-compatible validation', async () => {
+    const { handleListTasks, listTasksInputSchema } = await import('../dist/tools/callback-tools.js');
 
     let capturedUrl;
     globalThis.fetch = async (url) => {
@@ -977,6 +977,8 @@ describe('MCP Callback Tools', () => {
       threadId: 'thread-42',
       catId: 'codex',
       status: 'blocked',
+      kind: 'work',
+      featureId: 'F299',
     });
 
     assert.equal(result.isError, undefined);
@@ -984,6 +986,11 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('threadId=thread-42'));
     assert.ok(capturedUrl.includes('catId=codex'));
     assert.ok(capturedUrl.includes('status=blocked'));
+    assert.ok(capturedUrl.includes('kind=work'));
+    assert.ok(capturedUrl.includes('featureId=F299'));
+    assert.equal(listTasksInputSchema.featureId.safeParse('F299').success, true);
+    assert.equal(listTasksInputSchema.featureId.safeParse('f299').success, false);
+    assert.equal(listTasksInputSchema.featureId.safeParse(`F${'1'.repeat(409)}`).success, false);
   });
 
   test('handleFeatIndex forwards limit/featId/query filters', async () => {
@@ -1636,7 +1643,12 @@ describe('MCP Callback Tools', () => {
 
     delete process.env.CAT_CAFE_INVOCATION_ID;
     delete process.env.CAT_CAFE_CALLBACK_TOKEN;
-    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: join(outboxDir, 'missing.secret') });
+    // #1494: credential availability is usability — a path to a missing
+    // sidecar now means "no agent-key creds", so write a real one to stay on
+    // the shared agent-key route this test exercises.
+    const keyPath = join(outboxDir, 'gemini25-real.secret');
+    writeFileSync(keyPath, 'gemini25-agent-key');
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: keyPath });
 
     globalThis.fetch = async () => {
       throw new Error('fetch must not be called without threadId');
@@ -1733,7 +1745,12 @@ describe('MCP Callback Tools', () => {
 
     delete process.env.CAT_CAFE_INVOCATION_ID;
     delete process.env.CAT_CAFE_CALLBACK_TOKEN;
-    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: join(outboxDir, 'missing.secret') });
+    // #1494: credential availability is usability — a path to a missing
+    // sidecar now means "no agent-key creds", so write a real one to stay on
+    // the shared agent-key route this test exercises.
+    const keyPath = join(outboxDir, 'gemini25-real.secret');
+    writeFileSync(keyPath, 'gemini25-agent-key');
+    process.env.CAT_CAFE_AGENT_KEY_FILES = JSON.stringify({ gemini25: keyPath });
 
     globalThis.fetch = async () => {
       throw new Error('fetch must not be called for invalid rich block payloads');

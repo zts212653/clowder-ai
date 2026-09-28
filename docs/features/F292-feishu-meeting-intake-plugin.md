@@ -26,7 +26,7 @@ mcp_admission_claims:
 > **Status**: implementation / live alpha.8 plus the paired Host repair are activated; the owner-selected future-only recovery skipped 3 bounded candidates without replay, and a fresh successful observation verifies that automatic intake is running
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
-> **operator kickoff**: `[thread-id]` / `0001786250693680-000748-45686450`
+> **operator kickoff**: `[thread-id]` / `private-source-id`
 
 ## Architecture Ownership
 
@@ -74,16 +74,16 @@ compatibility fixture; migrating GitHub is explicitly out of scope.
 
 ## Source
 
-- Workflow and pain point: `0001786246964071-000653-374c7712` — recorder → Feishu transcript → TXT
+- Workflow and pain point: `private-source-id` — recorder → Feishu transcript → TXT
   download → locate a cat thread → explain the path and context → request minutes.
-- Needs Me / long-lived-source insight: `0001786248868051-000702-e39c8093` — surface the generated
+- Needs Me / long-lived-source insight: `private-source-id` — surface the generated
   meeting artifact in Needs Me, and recognize GitHub as an already-running long-term event source.
-- Plugin-system constraint: `0001786249554440-000711-dcd1325b` — follow the independently published
+- Plugin-system constraint: `private-source-id` — follow the independently published
   plugin architecture from day one, as F285 did, so the implementation is not migrated later.
-- Feature authorization: `0001786250693680-000748-45686450` — formally establish F292 and request one
+- Feature authorization: `private-source-id` — formally establish F292 and request one
   bounded architecture review.
-- Live approval follow-ups: `0001787579895936-000010-0cd735df` and
-  `0001787580117810-000023-f4e3a869` — make a newly created destination immediately findable and keep
+- Live approval follow-ups: `private-source-id` and
+  `private-source-id` — make a newly created destination immediately findable and keep
   an explicit terminal no-write disposition available before successful delivery.
 - Public contract/design issue:
   [`clowder-ai-plugins#23`](https://github.com/zts212653/clowder-ai-plugins/issues/23).

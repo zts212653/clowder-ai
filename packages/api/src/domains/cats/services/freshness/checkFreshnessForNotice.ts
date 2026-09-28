@@ -84,6 +84,7 @@ export async function checkFreshnessForNotice(input: CheckFreshnessForNoticeInpu
   }
 
   return service.checkAndMaybeNotice({
+    ownerUserId: userId,
     invocationId,
     threadId,
     catId,

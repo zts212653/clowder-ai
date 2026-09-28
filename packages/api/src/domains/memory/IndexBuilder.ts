@@ -47,8 +47,9 @@ import type { VectorStore } from './VectorStore.js';
  *  10 — feature assets use path anchors; top-level feature specs own Fxxx
  *  11 — F287: approved Taste vignettes materialize complete decision passages
  *  12 — external-knowledge artifact roles, study tags, and authority backfill
+ *  13 — pathToAuthority normalizes Windows backslash source paths (re-derive authority)
  */
-export const INDEXING_VERSION = 12;
+export const INDEXING_VERSION = 13;
 
 /** Higher number = higher priority for anchor ownership */
 const KIND_PRIORITY: Record<EvidenceKind, number> = {

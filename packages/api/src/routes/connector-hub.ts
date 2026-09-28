@@ -490,7 +490,7 @@ export function buildConnectorStatus(
   return builtinStatuses;
 }
 
-function buildConnectorStatusWithStoredConfig(): {
+export function buildConnectorStatusWithStoredConfig(): {
   projectRoot: string;
   manifests: ConnectorManifest[];
   status: PlatformStatus[];

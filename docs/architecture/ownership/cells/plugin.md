@@ -1,7 +1,7 @@
 ---
 cell_id: plugin
 title: Plugin Framework
-summary: Repository-local plugin activation plus Host-governed external package inventory, Broker sessions, supervised stdio execution, grants, durable call settlement, owned resource adapters, and narrow receipt-bearing Host capabilities.
+summary: Terminal Plugin Manager plus Host-governed package inventory, repository-local and builtin activation, Broker sessions, supervised execution, grants, resource adapters, Console and Agent management surfaces.
 canonical_features: [F202, F247, F285, F290, F292]
 code_anchors:
   - packages/api/src/domains/plugin/PluginRegistry.ts
@@ -13,14 +13,23 @@ code_anchors:
   - packages/api/src/domains/plugin/host-broker/index.ts
   - packages/api/src/domains/plugin/host-broker/events-publish-handler.ts
   - packages/api/src/domains/plugin/external-runtime/index.ts
+  - packages/api/src/domains/plugin/content-editor-runtime/runtime.ts
+  - packages/api/src/domains/plugin/host-broker/static-feature-authority.ts
+  - packages/api/src/domains/plugin/content-materializer-runtime/runtime.ts
+  - packages/api/src/domains/plugin/content-materializer-runtime/browser-runner.ts
   - packages/api/src/domains/plugin/runtime-composition.ts
   - packages/api/src/domains/plugin/builtin-runtime/hybrid-supervisor.ts
+  - packages/api/src/domains/plugin/plugin-manager-service.ts
+  - packages/api/src/domains/plugin/plugin-manager-projection.ts
   - packages/api/src/domains/plugin/official-catalog.ts
   - packages/api/src/domains/plugin/official-catalog-provider.ts
   - packages/api/src/domains/plugin/official-package-installer.ts
   - packages/api/src/routes/plugin-official-routes.ts
   - packages/api/src/routes/plugin-routes.ts
+  - packages/api/src/routes/plugin-manager-routes.ts
   - packages/shared/src/types/plugin.ts
+  - packages/mcp-server/src/tools/plugin-management-tools.ts
+  - packages/web/src/components/settings/plugin-manager/PluginManagerContent.tsx
   - packages/api/src/domains/cats/services/cloud-bridge/conversation-host-adapter.ts
   - packages/api/src/domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-host-adapter.ts
   - packages/api/src/plugins/cloud-cat-personal-host/native-host/native-host.mjs
@@ -44,15 +53,20 @@ cited_by:
   - {feature: F202, date: 2026-08-11, delta: K-2D supervised stdio runtime and dormant production composition}
   - {feature: F292, date: 2026-08-15, delta: Host-policy-pinned hot official release discovery with explicit release-fenced update}
   - {feature: F290, date: 2026-08-28, delta: bundled official Connector distribution and hybrid builtin/external lifecycle seam; Collective Service truth stays in collective-runtime}
+  - {feature: F309, date: 2026-09-06, delta: archive-bound static editor admission and a separately declared private semantic worker reuse the same inventory and Broker feature authority}
+  - {feature: F202, date: 2026-09-01, delta: terminal unified Manager projection, external catalog ownership, and same-source Console/Agent operations}
 ---
 
 # Plugin Framework
 
 ## Canonical Owner
 
-F202 owns the trusted, repository-local plugin layer: plugin manifest discovery,
-manifest validation, configuration persistence, plugin-owned capability records,
-and activation of declared skill, MCP, limb, and schedule resources.
+F202 owns the terminal Plugin Manager and Host plugin control plane: manifest
+validation, package admission, installation inventory, configuration readiness,
+authorization projection, activation intent, supervised runtime state, plugin-owned
+capability records, and activation of declared resources. Console, REST and Agent
+management tools are consumers of one `PluginManagerService`; they are not separate
+registries or authorities.
 
 F285 adds the external **official-plugin** seam without moving authority out of
 the Host. `clowder-ai-plugins` owns public contribution schemas, SDK/runtime
@@ -67,9 +81,24 @@ code into the API process. The inventory owns admitted package, installation,
 grant, and activation truth. The Broker owns one-use handshake sessions,
 runtime leases, and a durable call ledger whose recovery consults the owning
 domain's canonical settlement before it can redispatch. Builtin loopback and a
-supervised child-process stdio bridge exercise the same state machine. Production
-composition constructs and restart-recovers these boundaries, but exposes no
-activation route and starts no package, so live runtime remains dormant.
+supervised child-process stdio bridge exercise the same state machine. F292's
+official lifecycle composes package installation and explicit activation routes
+onto these boundaries. Train B unifies their product projection; it does not build
+a second supervisor.
+
+F309's DOCX consumer adds a zero-effect static editor class: an exact public archive and
+contribution are admitted by the official installer, explicitly enabled by the owner, and
+connected through the existing Broker hello/ready/runtime lease. Static feature authority
+stores its lease in the Broker ledger. It does not import package code into the Host.
+The optional public `semanticMaterializer` declares a separate closed browser worker. F202
+owns its verified private package snapshot, bundle SRI, sandboxed process, no-egress request
+boundary, input/output/resource limits, cancellation and disposal. It receives only bounded
+document bytes and typed operations; it cannot access a Host credential, owner-write API,
+configuration, state API, raw lease or human browser. F202 revalidates installation/grant/
+runtime/package authority before and after computation, and joins cancellation on disable.
+F309 owns authenticated editor sessions and semantic intent identity; F138 retains the final
+content CAS and receipts. Production composition stays dormant until explicit installation
+and enablement; the public worker declaration does not authorize activation.
 
 F292 keeps official-plugin policy and release metadata on opposite sides of the
 trust boundary. Clowder AI statically owns catalog identity, package name, plugin
@@ -79,6 +108,19 @@ provenance may refresh from that channel. Refresh is a bounded process-local
 projection with monotonic last-known-good fallback, not installation truth.
 Package update remains an explicit owner mutation fenced to the version+digest
 that Settings displayed, and enable remains a later explicit lifecycle action.
+
+Verified plugin presentation metadata follows the same ownership split. The plugin
+manifest/package owns the default and localized capability description plus its icon
+declaration and package-relative SVG/PNG asset. Core validates package paths and media,
+then projects one description/icon truth to catalog search, Agent tools and Console.
+Console must not infer visuals from package source or keep a private metadata map.
+
+Dynamic contribution tools remain owned by the Host supervisor rather than becoming ungoverned canonical
+registry entries or agent-owned MCP processes. The canonical Agent surface exposes two statically governed
+indirections: `plugin_list_tools(pluginId)` returns schemas only for a currently active, authorized
+contribution, and `plugin_call(pluginId, contributionId, toolName, arguments)` rechecks live package/grant
+authority before delegating to the supervisor-held MCP client. Secrets and child-process lifecycle never
+cross into the Agent provider.
 
 F247 owns the first narrow conversation Host capability seam:
 `append_message(conversationId, text, idempotencyKey)` returns a durable Host
@@ -106,6 +148,8 @@ close, or restore owner tabs/windows.
 
 ## Use This When
 
+- Changing Plugin Manager list/search/detail/install/enable/disable/uninstall semantics,
+  or the status/capability projection shown to Console and Agent consumers.
 - Adding or changing `plugins/<plugin-id>/plugin.yaml` manifest semantics.
 - Changing plugin enable/disable, config persistence, resource activation, or
   plugin ownership metadata in `.cat-cafe/capabilities.json`.
@@ -120,8 +164,14 @@ close, or restore owner tabs/windows.
 
 ## Extend By
 
-- Keep plugin manifests declarative and repository-local unless a later feature
-  defines remote package trust, signing, and network policy.
+- Keep `plugin.yaml` declarative and contract-owned for repository-local and
+  published packages. Fixed lifecycle actions may carry structured command/args/mode;
+  they do not admit arbitrary shell strings or become a second SDK.
+- Join catalog candidates to Host inventory by verified identity. Persist package,
+  instance, grant and activation truth only in Host inventory; keep config, auth,
+  intent and live runtime as explicit orthogonal axes in the Manager projection.
+- Route Console, REST and Agent operations through one application service. Public
+  management verbs are list/search/get/install/set-enabled/uninstall.
 - Route skill, MCP, limb, and schedule declarations through `PluginResourceActivator`
   instead of adding parallel writers.
 - Keep schedule factories behind `ScheduleFactoryRegistry`; plugin manifests may
@@ -133,13 +183,12 @@ close, or restore owner tabs/windows.
 - Keep external official plugin source and its conformance fixtures in
   `clowder-ai-plugins`; core consumes a versioned contribution contract through
   a reusable Host-owned adapter rather than adding product-specific branches.
-- Keep official catalog policy static in Host code. Refresh only exact release
-  coordinates from a fixed registry/channel, require SemVer monotonicity plus
-  tarball/SHA512/provenance validation, retain last-known-good metadata on
-  failure, and reject rollback or same-version equivocation.
-- Fence an explicit official package update to the version and digest the owner
-  confirmed. A refresh must never auto-install, auto-update, auto-start, or
-  widen identity, grants, auth runners, domains, or release channels.
+- Keep the published catalog machine truth in `clowder-ai-plugins`; keep trust
+  policy, configured origins, allowed registries/channels and admission in Host.
+  Refresh must never imply install, enable, health or broader grants.
+- Keep generic update/repair out of public Console, Agent and canonical Manager
+  surfaces. If later required, define typed release replacement or integrity
+  recovery journeys with explicit data migration and revision fences.
 - Bind package digest, installation instance, runtime session, grants, and
   resource identity from Host-owned state. External runtimes cannot choose or
   widen those identities through self-report.
@@ -173,11 +222,16 @@ close, or restore owner tabs/windows.
   execution.
 - Do not merge this cell into `transport`: plugin MCP resources are tools, not
   message transport adapters.
-- Do not treat remote marketplace install/signing as already solved by F202
-  Phase 1. That trust boundary needs a separate design slice.
+- Do not merge catalog discovery with installation inventory. Published availability
+  is plugin-repository truth; installed/verified/running is Host truth.
+- Do not keep repository-local, official and connector plugin managers as separate
+  terminal product surfaces. Compatibility adapters may feed the Manager only until
+  Train C deletes the old business paths.
 - Do not load external executable plugins into the API process. Do not treat a
-  constructed/recovered dormant supervisor as proof that any package was started
-  or that an external plugin runtime is live.
+  verified package, configured instance or desired enabled flag as proof that a
+  runtime is live; only the current supervisor/Broker lease proves live state.
+- Do not expose `plugin_update`, `plugin_repair` or `updateAvailable` merely because
+  an internal official lifecycle primitive exists.
 - Do not let an external physical plugin register a parallel Limb registry,
   bypass F126 for actions, or turn device observations directly into cat intent.
 - Do not absorb K-3a routes, `MeetingIntake`, source-resolution authority, or
@@ -188,7 +242,9 @@ close, or restore owner tabs/windows.
 
 ## Static Scan Hints
 
-Watch for new or renamed `PluginRegistry`, `PluginResourceActivator`,
+Watch for new or renamed `PluginManagerService`, `PluginManagerProjection`,
+`plugin_list`, `plugin_search`, `plugin_get`, `plugin_install`, `plugin_set_enabled`,
+`plugin_uninstall`, `PluginRegistry`, `PluginResourceActivator`,
 `ScheduleFactoryRegistry`, `PluginInventoryStore`, `HostBrokerControlPlane`,
 `HostBrokerStore`, `ExternalPluginRuntimeSupervisor`, `PluginRuntimePersistencePaths`,
 `BrokerMethodHandler`, `PluginConfigStore`, `plugin.yaml`, `pluginId`,

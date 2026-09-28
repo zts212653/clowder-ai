@@ -44,12 +44,17 @@ export function manifest(overrides = {}) {
   };
 }
 
-export async function packageArchive({ packageManifest = manifest(), includeSchema = true } = {}) {
+export async function packageArchive({
+  packageManifest = manifest(),
+  includeSchema = true,
+  manifestFilename = 'manifest.json',
+  extraFiles = {},
+} = {}) {
   const sourceRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-f292-official-package-'));
   const packageRoot = join(sourceRoot, 'package');
   await mkdir(join(packageRoot, 'dist'), { recursive: true });
   await mkdir(join(packageRoot, 'schemas'), { recursive: true });
-  await writeFile(join(packageRoot, 'manifest.json'), `${JSON.stringify(packageManifest)}\n`, 'utf8');
+  await writeFile(join(packageRoot, manifestFilename), `${JSON.stringify(packageManifest)}\n`, 'utf8');
   await writeFile(join(packageRoot, 'dist/entrypoint.js'), '// official fixture\n', 'utf8');
   if (includeSchema) {
     await writeFile(
@@ -61,6 +66,11 @@ export async function packageArchive({ packageManifest = manifest(), includeSche
       })}\n`,
       'utf8',
     );
+  }
+  for (const [relativePath, contents] of Object.entries(extraFiles)) {
+    const target = join(packageRoot, relativePath);
+    await mkdir(join(target, '..'), { recursive: true });
+    await writeFile(target, contents);
   }
   const archivePath = join(sourceRoot, 'package.tgz');
   await execFileAsync('tar', ['czf', archivePath, '-C', sourceRoot, 'package']);
@@ -75,6 +85,7 @@ export function catalogEntry(integrity, overrides = {}) {
     packageName: '@clowder-ai/official-test-source',
     version: '0.1.0-alpha.1',
     pluginId: 'official.test-source',
+    distribution: 'registry',
     archiveUrl: 'https://registry.npmjs.org/@clowder-ai/official-test-source/-/official-test-source-0.1.0-alpha.1.tgz',
     packageDigest: integrity,
     effectiveGrants: ['events.publish'],

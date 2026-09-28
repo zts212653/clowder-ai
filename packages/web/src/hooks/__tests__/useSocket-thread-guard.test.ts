@@ -1747,7 +1747,7 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
     );
   });
 
-  it('keeps queue-processing hydrate alive when cleared only removes queued siblings in the background', async () => {
+  it('refreshes live slots after clearing queued siblings in the background', async () => {
     mockStoreCurrentThreadId = 'thread-B';
 
     let resolveQueueJson: ((value: { activeInvocations: Array<{ catId: string; startedAt: number }> }) => void) | null =
@@ -1780,12 +1780,13 @@ describe('useSocket thread guard (P1 regression: cross-thread event leakage)', (
       root.render(React.createElement(HookWrapper, { callbacks, threadId: 'thread-C' }));
     });
 
-    act(() => {
+    await act(async () => {
       simulateServerEvent('queue_updated', {
         threadId: 'thread-B',
         queue: [],
         action: 'cleared',
       });
+      await Promise.resolve();
     });
 
     mockStoreCurrentThreadId = 'thread-B';

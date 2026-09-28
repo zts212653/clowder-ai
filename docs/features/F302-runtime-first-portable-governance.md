@@ -8,7 +8,7 @@ description: "让猫通过 runtime 带着身份、协作与安全契约进入外
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-22T10:26:08Z
-cvo_signoff: "2026-08-21 — sourceMessageId 0001787329489768-000393-2f9188ad：完成立项；保留一键治理价值，但默认不要向用户项目制造大量文件，docs 等规范应可选。"
+cvo_signoff: "2026-08-21 — sourceMessageId private-source-id：完成立项；保留一键治理价值，但默认不要向用户项目制造大量文件，docs 等规范应可选。"
 ---
 
 # F302: Runtime-First Portable Governance — 零写入出征与可选项目治理

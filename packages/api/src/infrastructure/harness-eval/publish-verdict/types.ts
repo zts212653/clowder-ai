@@ -293,6 +293,12 @@ export interface PublishVerdictInput {
   catId: string;
   /** Server-trusted callback principal userId (not user-supplied). */
   ownerUserId?: string;
+  /**
+   * Invocation-authenticated source thread ID. Derived from CallbackPrincipal.threadId
+   * at the route layer — NEVER from client body (prevents forgery). Stamped into
+   * provenance.json and PR body for traceability. Absent for agent_key principals.
+   */
+  sourceThreadId?: string;
   /** 砚砚 R1 P1 #2: explicit evidence refs (sanitized YAML basenames OR replayable selector). Tool NEVER fabricates. */
   sourceRefs: VerdictSourceRefs;
   /** eval:friction only: caller judgments plus feature/component hints; routing truth is server-resolved. */

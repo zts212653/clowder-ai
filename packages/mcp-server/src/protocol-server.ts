@@ -17,6 +17,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadProtocolsFromDir } from './protocol-engine/loader.js';
 import type { ProtocolTemplate, ProviderInstance } from './protocol-engine/types.js';
 import { buildCredentialsFromEnv, buildProviderFromEnv, createProtocolTools } from './tools/protocol-tools.js';
+import { isDirectExecution } from './utils/is-direct-execution.js';
 
 function parseArgs(): { prefix: string; protocolsDir: string } {
   const args = process.argv.slice(2);
@@ -100,7 +101,7 @@ async function main(): Promise<void> {
   await server.connect(transport);
 }
 
-const isEntryPoint = process.argv[1] && resolve(fileURLToPath(import.meta.url)) === resolve(process.argv[1]);
+const isEntryPoint = isDirectExecution(import.meta.url);
 if (isEntryPoint) {
   main().catch((err) => {
     console.error('[protocol-server] Fatal:', err);

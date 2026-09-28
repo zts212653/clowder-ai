@@ -1,19 +1,25 @@
 import type {
+  PawFeelApprovalContinuationV1,
   PawFeelCaptureAssessment,
   PawFeelCaptureMethod,
   PawFeelDispositionEvent,
   PawFeelDispositionProjection,
 } from '@cat-cafe/shared';
 import type { CanonicalPawFeelCandidate } from '../friction/paw-feel-source.js';
-import { type PawFeelFixResolver, resolvePawFeelCommandContext } from './command-context.js';
 import {
-  type PawFeelBundleAction,
-  PawFeelBundleCommandSchema,
-  type PawFeelDispositionCommand,
-  PawFeelDispositionCommandSchema,
-  pawFeelCommandToEvent,
-} from './commands.js';
-import type { IPawFeelDispositionEventLog, PawFeelDispositionAppendResult } from './event-log.js';
+  type PawFeelBlockerReopenCommand,
+  planPawFeelConditionBlockerReopen,
+  preparePawFeelBlockerReopen,
+  projectPawFeelBlockerReopen,
+} from './blocker-recovery/service-blocker-reopen.js';
+import type { PawFeelFixResolver } from './command-context.js';
+import { PawFeelDispositionCommandSchema, pawFeelCommandToEvent } from './commands.js';
+import type {
+  IPawFeelDispositionEventLog,
+  PawFeelDispositionAppendResult,
+  PawFeelSignalScanCursorV1,
+  PawFeelSignalScanPage,
+} from './event-log.js';
 import { projectPawFeelDisposition } from './projector.js';
 import {
   isLegacyWrite,
@@ -24,12 +30,27 @@ import {
   requireMatchingEvent,
   sameDiscoveryIdentity,
 } from './service-guards.js';
+import {
+  type PawFeelBundleMembershipResolver,
+  preparePawFeelBundleCommands,
+} from './service-internals/service-bundle.js';
+import {
+  type PawFeelCommandEvidenceOptions,
+  resolvePawFeelWriteContext,
+} from './service-internals/service-command-resolution.js';
 
+export type { PawFeelBlockerReopenCommand } from './blocker-recovery/service-blocker-reopen.js';
 export type { PawFeelFixResolver } from './command-context.js';
 export { PawFeelDispositionServiceError, type PawFeelDispositionServiceErrorCode } from './service-guards.js';
+export type { PawFeelBundleMembershipResolver } from './service-internals/service-bundle.js';
 
 export type PawFeelDispositionCommandResult =
   | { outcome: 'appended' | 'duplicate'; projection: PawFeelDispositionProjection }
+  | {
+      outcome: 'continuation';
+      projection: PawFeelDispositionProjection;
+      continuation: PawFeelApprovalContinuationV1;
+    }
   | Extract<PawFeelDispositionAppendResult, { outcome: 'conflict' }>;
 
 export type PawFeelBulkCommandResult =
@@ -44,19 +65,12 @@ export type PawFeelBulkCommandResult =
 export interface PawFeelBundleCommandResult {
   bundleKey: string;
   results: PawFeelBulkCommandResult[];
-  counts: Record<'appended' | 'duplicate' | 'conflict' | 'rejected', number>;
+  counts: Record<'appended' | 'duplicate' | 'conflict' | 'rejected', number> & { continuation?: number };
 }
 
-export interface PawFeelBundleMembershipResolver {
-  assertBundleSnapshot(
-    bundleKey: string,
-    members: readonly { signalId: string; expectedSequence: number }[],
-    membershipToken: string,
-  ): Promise<void>;
-}
-
-export interface PawFeelDispositionServiceOptions {
+export interface PawFeelDispositionServiceOptions extends PawFeelCommandEvidenceOptions {
   eventLog: IPawFeelDispositionEventLog;
+  /** @deprecated Read models still consume this active-custody reader; writes require directRepairResolver. */
   fixResolver?: PawFeelFixResolver;
   bundleMembershipResolver?: PawFeelBundleMembershipResolver;
   now?: () => string;
@@ -66,31 +80,66 @@ export interface PawFeelExecutionOptions {
   ownerCatId?: string;
 }
 
-function commandForBundleMember(
-  action: import('./commands.js').PawFeelBundleAction,
-  member: import('./commands.js').PawFeelBundleCommand['members'][number],
-  eventId: string,
-): PawFeelDispositionCommand {
-  const base = { eventId, signalId: member.signalId, expectedSequence: member.expectedSequence };
-  if (action.type === 'duplicate') return { ...base, type: 'mark_duplicate', duplicateOf: action.duplicateOf };
-  if (action.type === 'no_action') return { ...base, type: 'mark_no_action', reasonCode: action.reasonCode };
-  if (action.type === 'fix') return { ...base, type: 'mark_fix', leaseId: action.leaseId };
-  if (action.type === 'request_signature') {
-    return {
-      ...base,
-      type: 'request_signature',
-      action: action.action,
-      ...(action.preferredSignerCatId ? { preferredSignerCatId: action.preferredSignerCatId } : {}),
-    };
-  }
-  return { ...base, type: 'mark_blocked', blockerCode: action.blockerCode, blockerRef: action.blockerRef };
-}
+export type PawFeelBlockerReconciliationOutcome = 'ignored' | 'stable' | 'reopened' | 'conflicted' | 'deferred';
 
 export class PawFeelDispositionService {
   private readonly now: () => string;
 
   constructor(private readonly options: PawFeelDispositionServiceOptions) {
     this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  async listSignalIds(): Promise<string[]> {
+    return this.options.eventLog.listSignalIds();
+  }
+
+  async scanSignalIds(cursor: PawFeelSignalScanCursorV1 | undefined, limit: number): Promise<PawFeelSignalScanPage> {
+    return this.options.eventLog.scanSignalIds(cursor, limit);
+  }
+
+  async readSignalEvents(signalId: string): Promise<PawFeelDispositionEvent[]> {
+    return this.options.eventLog.read(signalId);
+  }
+
+  async reconcileBlocker(signalId: string, mayWrite = true): Promise<PawFeelBlockerReconciliationOutcome> {
+    const currentEvents = await this.options.eventLog.read(signalId);
+    if (currentEvents.length === 0) {
+      throw new PawFeelDispositionServiceError('signal_not_found', `signal ${signalId} not found`);
+    }
+    const plan = await planPawFeelConditionBlockerReopen({
+      signalId,
+      currentEvents,
+      resolver: this.options.resumeConditionResolver,
+      occurredAt: this.now(),
+      mayWrite,
+    });
+    if (plan.outcome !== 'write') return plan.outcome;
+    const append = await this.options.eventLog.append(plan.attempted, currentEvents.length);
+    if (append.outcome === 'appended') return 'reopened';
+    if (append.outcome === 'conflict') return 'conflicted';
+    await this.resolveRacedCommand(signalId, plan.attempted);
+    return 'conflicted';
+  }
+
+  async reopenBlocker(command: PawFeelBlockerReopenCommand): Promise<PawFeelDispositionCommandResult> {
+    const attempted = preparePawFeelBlockerReopen(command);
+    const currentEvents = await this.options.eventLog.read(attempted.signalId);
+    if (currentEvents.length === 0) {
+      throw new PawFeelDispositionServiceError('signal_not_found', `signal ${attempted.signalId} not found`);
+    }
+    const existing = currentEvents.find((event) => event.eventId === attempted.eventId);
+    if (existing) {
+      requireMatchingEvent(existing, attempted);
+      return { outcome: 'duplicate', projection: projectPawFeelDisposition(currentEvents) };
+    }
+    if (currentEvents.length !== command.expectedSequence) {
+      return { outcome: 'conflict', actualSequence: currentEvents.length };
+    }
+    const nextProjection = projectPawFeelBlockerReopen(attempted, currentEvents);
+    const append = await this.options.eventLog.append(attempted, command.expectedSequence);
+    if (append.outcome === 'appended') return { outcome: 'appended', projection: nextProjection };
+    if (append.outcome === 'conflict') return append;
+    return this.resolveRacedCommand(attempted.signalId, attempted);
   }
 
   async discover(
@@ -147,9 +196,22 @@ export class PawFeelDispositionService {
     if (currentEvents.length === 0) {
       throw new PawFeelDispositionServiceError('signal_not_found', `signal ${command.signalId} not found`);
     }
-    const context = await resolvePawFeelCommandContext(actor, command, this.options.fixResolver, options.ownerCatId);
+    const currentProjection = projectPawFeelDisposition(currentEvents);
     const existing = currentEvents.find((event) => event.eventId === command.eventId);
-    const attempted = pawFeelCommandToEvent(actor, command, existing?.occurredAt ?? this.now(), context);
+    const occurredAt = existing?.occurredAt ?? this.now();
+    const resolved = await resolvePawFeelWriteContext({
+      actor,
+      command,
+      projection: currentProjection,
+      ...(existing ? { existing } : {}),
+      occurredAt,
+      ...(options.ownerCatId ? { ownerCatId: options.ownerCatId } : {}),
+      evidence: this.options,
+    });
+    if ('continuation' in resolved) {
+      return { outcome: 'continuation', projection: currentProjection, continuation: resolved.continuation };
+    }
+    const attempted = pawFeelCommandToEvent(actor, command, occurredAt, resolved.context);
     if (existing) {
       requireMatchingEvent(existing, attempted);
       return { outcome: 'duplicate', projection: projectPawFeelDisposition(currentEvents) };
@@ -216,57 +278,17 @@ export class PawFeelDispositionService {
     options: PawFeelExecutionOptions = {},
   ): Promise<PawFeelBundleCommandResult> {
     const actor = parsePrincipal(rawPrincipal);
-    const parsed = PawFeelBundleCommandSchema.safeParse(rawBundle);
-    if (!parsed.success) {
-      throw new PawFeelDispositionServiceError('bundle_invalid', `invalid bundle command: ${parsed.error.message}`);
-    }
-    const bundle = parsed.data;
-    const memberIds = bundle.members.map((member) => member.signalId);
-    if (new Set(memberIds).size !== memberIds.length) {
-      throw new PawFeelDispositionServiceError('bundle_invalid', 'bundle contains duplicate signal IDs');
-    }
-    const exceptions = new Map<string, PawFeelBundleAction>();
-    for (const exception of bundle.exceptions ?? []) {
-      if (!memberIds.includes(exception.signalId)) {
-        throw new PawFeelDispositionServiceError(
-          'bundle_invalid',
-          `bundle exception ${exception.signalId} is not in the submitted snapshot`,
-        );
-      }
-      if (exceptions.has(exception.signalId)) {
-        throw new PawFeelDispositionServiceError('bundle_invalid', `duplicate exception for ${exception.signalId}`);
-      }
-      exceptions.set(exception.signalId, exception.action);
-    }
-    if (!this.options.bundleMembershipResolver) {
-      throw new PawFeelDispositionServiceError(
-        'bundle_invalid',
-        'bundle actions require authoritative membership resolution',
-      );
-    }
-    try {
-      await this.options.bundleMembershipResolver.assertBundleSnapshot(
-        bundle.bundleKey,
-        bundle.members,
-        bundle.membershipToken,
-      );
-    } catch (error) {
-      throw new PawFeelDispositionServiceError(
-        'bundle_invalid',
-        `bundle membership mismatch: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-    const commands = bundle.members.map((member, index) =>
-      commandForBundleMember(
-        exceptions.get(member.signalId) ?? bundle.action,
-        member,
-        `${bundle.eventIdPrefix}:${index}`,
-      ),
+    const { bundleKey, commands } = await preparePawFeelBundleCommands(
+      rawBundle,
+      this.options.bundleMembershipResolver,
     );
     const results = await this.executeMany(actor, commands, options);
-    const counts = { appended: 0, duplicate: 0, conflict: 0, rejected: 0 };
-    for (const result of results) counts[result.outcome] += 1;
-    return { bundleKey: bundle.bundleKey, results, counts };
+    const counts: PawFeelBundleCommandResult['counts'] = { appended: 0, duplicate: 0, conflict: 0, rejected: 0 };
+    for (const result of results) {
+      if (result.outcome === 'continuation') counts.continuation = (counts.continuation ?? 0) + 1;
+      else counts[result.outcome] += 1;
+    }
+    return { bundleKey, results, counts };
   }
 
   private resolveDiscoveryReplay(

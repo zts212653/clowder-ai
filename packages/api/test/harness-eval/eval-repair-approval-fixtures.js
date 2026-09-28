@@ -197,8 +197,13 @@ export const principal = {
   originMessageId: 'message-origin-1',
 };
 
-export async function proposeAndAccept(ctx) {
-  const proposed = await ctx.service.propose({ caseActionRef: actionRef, clientMessageId: 'client-1', principal });
+export async function proposeAndAccept(ctx, ownerLineage) {
+  const proposed = await ctx.service.propose({
+    caseActionRef: actionRef,
+    clientMessageId: 'client-1',
+    principal,
+    ...(ownerLineage ? { ownerLineage } : {}),
+  });
   assert.equal(proposed.status, 'published');
   const accepted = await ctx.service.decide({
     proposalId: proposed.proposalId,

@@ -44,6 +44,8 @@ describe('F293 routing owner commands', () => {
     const unrelated = {
       eventId: 'signal-2',
       eventType: 'retracted',
+      subjectRef: asserted.subjectRef,
+      ownerId: asserted.ownerId,
       closesSignalIds: ['other'],
       observedAt: 300,
     } as RoutingSignalEventV1;

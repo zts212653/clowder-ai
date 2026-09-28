@@ -1,7 +1,10 @@
 id: video-analysis
 name: 视频分析
 version: "1.0.0"
-description: 声明式视频理解与分析 — 通过视频协议模板适配 Gemini、智谱等
+description:
+  default: Analyze local or remote video through declared Gemini or Zhipu provider protocols.
+  translations:
+    zh-CN: 声明式视频理解与分析——通过视频协议模板适配 Gemini、智谱等服务。
 icon: monitor-wave
 iconBg: "#0ea5e9"
 

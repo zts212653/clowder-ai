@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="assets/logo-transparent.png">
-  <title>Community — Clowder AI</title>
+  <title data-i18n="meta.community.title">Community — Clowder AI</title>
   <meta name="description" content="Join the Clowder AI community. Browse issues, join discussions, and connect with other operators.">
 
   <!-- Tailwind CSS (pre-built v3.4.17 + typography plugin, custom theme) -->
@@ -31,13 +31,13 @@
         <span class="font-bold text-lg text-stone-900 dark:text-white">Clowder AI</span>
       </a>
       <div class="hidden md:flex items-center gap-6 text-sm font-medium">
-        <a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition">Docs</a>
-        <a href="community.html" class="text-terracotta font-semibold">Community</a>
-        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1">Releases <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
+        <a href="docs.html" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition" data-i18n="nav.docs">Docs</a>
+        <a href="community.html" class="text-terracotta font-semibold" data-i18n="nav.community">Community</a>
+        <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="text-stone-600 dark:text-slate-400 hover:text-terracotta dark:hover:text-terracotta-light transition inline-flex items-center gap-1"><span data-i18n="nav.releases">Releases</span> <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>
       </div>
       <div class="flex items-center gap-3">
-        <!-- lang toggle omitted: only index.html hero has translations -->
-        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme">
+        <button id="lang-toggle" onclick="toggleLang()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-xs font-bold text-stone-500 dark:text-slate-400" aria-label="Switch language" data-i18n-aria-label="a11y.language">EN</button>
+        <button id="theme-toggle" onclick="toggleTheme()" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-stone-200/60 dark:hover:bg-slate-700/60 transition text-sm" aria-label="Toggle theme" data-i18n-aria-label="a11y.theme">
           <svg id="theme-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
         </button>
         <a href="https://github.com/zts212653/clowder-ai" target="_blank" rel="noopener"
@@ -45,15 +45,15 @@
           <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           <span>GitHub</span>
         </a>
-        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu">
+        <button onclick="toggleMobileMenu()" class="md:hidden w-8 h-8 flex items-center justify-center" aria-label="Menu" data-i18n-aria-label="a11y.menu">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         </button>
       </div>
     </div>
     <div id="mobile-menu" class="hidden md:hidden border-t border-stone-200 dark:border-slate-700 px-4 py-3 space-y-2">
-      <a href="docs.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Docs</a>
-      <a href="community.html" class="block py-1.5 text-sm text-terracotta font-semibold">Community</a>
-      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400">Releases</a>
+      <a href="docs.html" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.docs">Docs</a>
+      <a href="community.html" class="block py-1.5 text-sm text-terracotta font-semibold" data-i18n="nav.community">Community</a>
+      <a href="https://github.com/zts212653/clowder-ai/releases" target="_blank" rel="noopener" class="block py-1.5 text-sm text-stone-600 dark:text-slate-400" data-i18n="nav.releases">Releases</a>
     </div>
   </nav>
 
@@ -63,8 +63,8 @@
 
       <!-- Header -->
       <div class="text-center max-w-2xl mx-auto mb-12">
-        <h1 class="text-3xl sm:text-4xl font-extrabold text-stone-900 dark:text-white mb-3">Community</h1>
-        <p class="text-stone-600 dark:text-slate-400">Hang out with other operators, browse what the team is working on, and shape what's next.</p>
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-stone-900 dark:text-white mb-3" data-i18n="nav.community">Community</h1>
+        <p class="text-stone-600 dark:text-slate-400" data-i18n="community.subtitle">Hang out with other operators, browse what the team is working on, and shape what's next.</p>
       </div>
 
       <!-- Community links -->
@@ -75,7 +75,7 @@
             <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           </div>
           <h3 class="font-bold text-stone-900 dark:text-white mb-1 group-hover:text-terracotta transition">GitHub Discussions</h3>
-          <p class="text-xs text-stone-500 dark:text-slate-400">Ask questions and share ideas</p>
+          <p class="text-xs text-stone-500 dark:text-slate-400" data-i18n="community.card.github.desc">Ask questions and share ideas</p>
         </a>
 
         <a href="https://linux.do/t/topic/1900303" target="_blank" rel="noopener"
@@ -84,7 +84,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"/></svg>
           </div>
           <h3 class="font-bold text-stone-900 dark:text-white mb-1 group-hover:text-terracotta transition">LINUX DO</h3>
-          <p class="text-xs text-stone-500 dark:text-slate-400">Chinese community forum</p>
+          <p class="text-xs text-stone-500 dark:text-slate-400" data-i18n="community.card.linuxdo.desc">Chinese community forum</p>
         </a>
 
         <div class="community-card rounded-xl p-5 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700 opacity-60">
@@ -92,7 +92,7 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
           </div>
           <h3 class="font-bold text-stone-900 dark:text-white mb-1">Telegram</h3>
-          <p class="text-xs text-stone-500 dark:text-slate-400">Coming soon</p>
+          <p class="text-xs text-stone-500 dark:text-slate-400" data-i18n="community.comingsoon">Coming soon</p>
         </div>
 
         <div class="community-card rounded-xl p-5 bg-white dark:bg-slate-800/60 border border-stone-200 dark:border-slate-700 opacity-60">
@@ -100,20 +100,20 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
           </div>
           <h3 class="font-bold text-stone-900 dark:text-white mb-1">Discord</h3>
-          <p class="text-xs text-stone-500 dark:text-slate-400">Coming soon</p>
+          <p class="text-xs text-stone-500 dark:text-slate-400" data-i18n="community.comingsoon">Coming soon</p>
         </div>
       </div>
 
       <!-- Issues header -->
       <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
         <div>
-          <h2 class="text-xl font-bold text-stone-900 dark:text-white">Open Issues</h2>
-          <p class="text-sm text-stone-500 dark:text-slate-500">Recently active ideas and bugs. Click an issue to preview.</p>
+          <h2 class="text-xl font-bold text-stone-900 dark:text-white" data-i18n="community.issues.title">Open Issues</h2>
+          <p class="text-sm text-stone-500 dark:text-slate-500" data-i18n="community.issues.subtitle">Recently active ideas and bugs. Click an issue to preview.</p>
         </div>
         <a href="https://github.com/zts212653/clowder-ai/issues/new/choose" target="_blank" rel="noopener"
            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-terracotta text-white font-medium hover:bg-terracotta-light transition shrink-0">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
-          New Issue
+          <span data-i18n="community.newissue">New Issue</span>
         </a>
       </div>
 
@@ -121,14 +121,15 @@
       <div class="flex flex-col sm:flex-row gap-3 mb-6">
         <div class="relative flex-1">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 dark:text-slate-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input id="issue-search" type="text" placeholder="Search issues..."
+          <input id="issue-search" type="text" placeholder="Search issues..." data-i18n-placeholder="community.searchplaceholder"
+                 aria-label="Search issues..." data-i18n-aria-label="community.searchplaceholder"
                  class="w-full pl-9 pr-3 py-2.5 rounded-lg border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:outline-none focus:border-terracotta/50 transition"
                  oninput="searchIssues(this.value)">
         </div>
         <div class="flex gap-2">
-          <button onclick="loadIssues('all')" class="issue-filter active px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="all">All</button>
-          <button onclick="loadIssues('enhancement')" class="issue-filter px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="enhancement">Features</button>
-          <button onclick="loadIssues('bug')" class="issue-filter px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="bug">Bugs</button>
+          <button onclick="loadIssues('all')" class="issue-filter active px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="all" data-i18n="community.filter.all">All</button>
+          <button onclick="loadIssues('enhancement')" class="issue-filter px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="enhancement" data-i18n="community.filter.features">Features</button>
+          <button onclick="loadIssues('bug')" class="issue-filter px-3.5 py-2 rounded-lg text-sm font-medium border border-stone-300 dark:border-slate-600 transition" data-filter="bug" data-i18n="community.filter.bugs">Bugs</button>
         </div>
       </div>
 
@@ -136,7 +137,7 @@
       <div id="issues-container" class="space-y-3 min-h-[200px]">
         <div class="text-center py-12 text-stone-500 dark:text-slate-500">
           <svg class="w-6 h-6 mx-auto mb-2 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          Loading issues...
+          <span data-i18n="community.loading">Loading issues...</span>
         </div>
       </div>
 
@@ -145,27 +146,28 @@
            role="dialog" aria-modal="false" aria-labelledby="issue-detail-title">
         <div class="flex items-center justify-between px-6 py-4 border-b border-stone-200 dark:border-slate-700 bg-stone-50 dark:bg-slate-800">
           <h2 id="issue-detail-title" class="font-bold text-stone-900 dark:text-white truncate"></h2>
-          <button onclick="closeIssueDetail()" aria-label="Close issue detail"
+          <button id="issue-detail-close" onclick="closeIssueDetail()" aria-label="Close issue detail" data-i18n-aria-label="community.a11y.closeissue"
                   class="text-stone-400 dark:text-slate-500 hover:text-stone-600 dark:hover:text-slate-300 transition">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
         <div id="issue-detail-body" class="px-6 py-5 prose prose-stone dark:prose-invert prose-sm max-w-none max-h-96 overflow-y-auto"></div>
         <div class="px-6 py-3 border-t border-stone-200 dark:border-slate-700 text-right">
-          <a id="issue-detail-link" href="#" target="_blank" rel="noopener" class="text-sm text-terracotta hover:text-terracotta-light transition">View on GitHub &rarr;</a>
+          <a id="issue-detail-link" href="#" target="_blank" rel="noopener" class="text-sm text-terracotta hover:text-terracotta-light transition" data-i18n="community.viewongithub">View on GitHub &rarr;</a>
         </div>
       </div>
 
       <div class="text-center mt-8">
         <a href="https://github.com/zts212653/clowder-ai/issues" target="_blank" rel="noopener"
            class="inline-flex items-center gap-2 text-sm font-medium text-terracotta hover:text-terracotta-light transition">
-          View all issues on GitHub
+          <span data-i18n="community.viewall">View all issues on GitHub</span>
           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
         </a>
       </div>
     </div>
   </section>
 
+  <script src="i18n.js"></script>
   <script src="main.js"></script>
   <script>
     const REPO = 'zts212653/clowder-ai';
@@ -176,11 +178,16 @@
       good_first_issue: 'bg-codex/10 text-codex',
     };
     let allIssues = [];
+    let issueListStatus = 'loading';
+    let issueRequestVersion = 0;
     const issueMap = new Map();
+    const currentLang = () => (document.documentElement.lang === 'zh' ? 'zh' : 'en');
+    const t = (key) => window.I18N?.[currentLang()]?.[key] || window.I18N?.en?.[key] || key;
 
     async function loadIssues(filter = 'all') {
-      const container = document.getElementById('issues-container');
-      container.innerHTML = '<div class="text-center py-12 text-stone-500 dark:text-slate-500"><svg class="w-6 h-6 mx-auto mb-2 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>Loading...</div>';
+      const requestVersion = ++issueRequestVersion;
+      issueListStatus = 'loading';
+      renderIssueListStatus();
 
       document.querySelectorAll('.issue-filter').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
 
@@ -190,17 +197,33 @@
           : `https://api.github.com/repos/${REPO}/issues?state=open&labels=${filter}&sort=created&direction=desc&per_page=15`;
         const res = await fetch(url);
         if (!res.ok) throw new Error(`${res.status}`);
-        allIssues = await res.json();
+        const issues = await res.json();
+        if (requestVersion !== issueRequestVersion) return;
+        allIssues = issues;
+        issueListStatus = 'ready';
         renderIssues(allIssues);
       } catch (err) {
-        container.innerHTML = '<div class="text-center py-12 text-stone-500"><p class="mb-2">Could not load issues.</p><a href="https://github.com/' + REPO + '/issues" target="_blank" class="text-terracotta hover:underline text-sm">View on GitHub &rarr;</a></div>';
+        if (requestVersion !== issueRequestVersion) return;
+        issueListStatus = 'error';
+        renderIssueListStatus();
+      }
+    }
+
+    function renderIssueListStatus() {
+      const container = document.getElementById('issues-container');
+      if (issueListStatus === 'loading') {
+        container.innerHTML = `<div class="text-center py-12 text-stone-500 dark:text-slate-500"><svg class="w-6 h-6 mx-auto mb-2 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>${escapeHtml(t('community.loading'))}</div>`;
+        return;
+      }
+      if (issueListStatus === 'error') {
+        container.innerHTML = `<div class="text-center py-12 text-stone-500"><p class="mb-2">${escapeHtml(t('community.issues.error'))}</p><a href="https://github.com/${REPO}/issues" target="_blank" class="text-terracotta hover:underline text-sm">${t('community.viewongithub')}</a></div>`;
       }
     }
 
     function renderIssues(issues) {
       const container = document.getElementById('issues-container');
       if (!issues.length) {
-        container.innerHTML = '<p class="text-center py-12 text-stone-500 dark:text-slate-400">No issues found.</p>';
+        container.innerHTML = `<p class="text-center py-12 text-stone-500 dark:text-slate-400">${escapeHtml(t('community.issues.empty'))}</p>`;
         return;
       }
       issues.forEach(issue => issueMap.set(issue.number, issue));
@@ -211,7 +234,7 @@
         row.dataset.issueNumber = issue.number;
         row.setAttribute('role', 'button');
         row.setAttribute('tabindex', '0');
-        row.setAttribute('aria-label', `Issue #${issue.number}: ${issue.title}`);
+        row.setAttribute('aria-label', `${t('community.a11y.issue')} #${issue.number}: ${issue.title}`);
 
         const labelsHtml = issue.labels.map(l => {
           const cls = LABEL_COLORS[l.name.toLowerCase().replace(/ /g, '_')] || 'bg-stone-100 text-stone-600 dark:bg-slate-700 dark:text-slate-300';
@@ -245,15 +268,13 @@
       });
     }
 
-    /** @type {HTMLElement|null} Element that opened the detail panel (for focus restore) */
-    let _detailOpener = null;
+    /** @type {number|null} Issue number currently shown in the detail panel */
+    let _openIssueNum = null;
 
-    function showIssueDetail(num) {
-      const issue = issueMap.get(num);
-      if (!issue) return;
-      _detailOpener = document.activeElement;
-      const panel = document.getElementById('issue-detail');
-      document.getElementById('issue-detail-title').textContent = `#${issue.number} ${issue.title}`;
+    // The body is the only translatable part of the detail (title/link are GitHub
+    // data), so split it out — a language change can re-render it without stealing
+    // focus or re-scrolling.
+    function renderIssueDetailBody(issue) {
       const bodyEl = document.getElementById('issue-detail-body');
       if (issue.body) {
         bodyEl.innerHTML = window._sanitizeMarkdown(issue.body, { DOMPurify, marked });
@@ -261,24 +282,35 @@
         bodyEl.innerHTML = '';
         const p = document.createElement('p');
         p.className = 'text-stone-500';
-        p.textContent = 'No description.';
+        p.textContent = t('community.issues.nodesc');
         bodyEl.appendChild(p);
       }
+    }
+
+    function showIssueDetail(num) {
+      const issue = issueMap.get(num);
+      if (!issue) return;
+      _openIssueNum = num;
+      const panel = document.getElementById('issue-detail');
+      document.getElementById('issue-detail-title').textContent = `#${issue.number} ${issue.title}`;
+      renderIssueDetailBody(issue);
       document.getElementById('issue-detail-link').href = issue.html_url;
       panel.classList.remove('hidden');
       panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       // Move focus into the panel close button for keyboard users
-      const closeBtn = panel.querySelector('button[aria-label="Close issue detail"]');
+      const closeBtn = document.getElementById('issue-detail-close');
       if (closeBtn) closeBtn.focus();
     }
 
     function closeIssueDetail() {
       document.getElementById('issue-detail').classList.add('hidden');
-      // Restore focus to the row that opened the panel
-      if (_detailOpener && typeof _detailOpener.focus === 'function') {
-        _detailOpener.focus();
-        _detailOpener = null;
-      }
+      const openerIssueNum = _openIssueNum;
+      _openIssueNum = null;
+      // The list can be rebuilt while the panel is open (for example after a
+      // language change), so resolve the current row by stable issue identity
+      // instead of focusing a detached DOM reference.
+      const opener = document.querySelector(`.issue-row[data-issue-number="${openerIssueNum}"]`);
+      if (opener instanceof HTMLElement) opener.focus();
     }
 
     // Close detail panel on Escape key
@@ -306,8 +338,20 @@
     }
     /* escapeAttr removed — issue data is now looked up from issueMap, not passed via attributes */
     function formatDate(iso) {
-      return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      return new Date(iso).toLocaleDateString(currentLang() === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'short', day: 'numeric' });
     }
+
+    // Re-render the issue UI (which is generated in JS) when the language flips.
+    window.addEventListener('clowder:languagechange', () => {
+      // Re-apply the active search so a filtered view survives the toggle.
+      if (issueListStatus === 'ready') searchIssues(document.getElementById('issue-search').value);
+      else renderIssueListStatus();
+      // Re-render an open detail panel so its (only translatable) body updates.
+      if (_openIssueNum != null && !document.getElementById('issue-detail').classList.contains('hidden')) {
+        const issue = issueMap.get(_openIssueNum);
+        if (issue) renderIssueDetailBody(issue);
+      }
+    });
 
     document.addEventListener('DOMContentLoaded', () => loadIssues('all'));
   </script>

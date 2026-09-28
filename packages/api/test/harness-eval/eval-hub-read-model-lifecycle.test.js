@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
@@ -82,8 +82,9 @@ Evidence:
   });
 }
 
-function setupA2aOnlyHarnessFeedbackRoot(label) {
+function setupA2aOnlyHarnessFeedbackRoot(label, t) {
   const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), `f192-eval-hub-${label}-`));
+  t.after(() => rmSync(harnessFeedbackRoot, { recursive: true, force: true }));
   const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
   mkdirSync(domainsDir, { recursive: true });
   const a2aYaml = readFileSync(join(repoHarnessFeedbackRoot, 'eval-domains', 'eval-a2a.yaml'), 'utf8');
@@ -92,33 +93,40 @@ function setupA2aOnlyHarnessFeedbackRoot(label) {
 }
 
 describe('Eval Hub read model — lifecycle.stale', () => {
-  // PR-3 (F192 H 收尾): SKIP — #2114 merge added 2nd eval:a2a verdict (newer,
-  // not stale at FIXTURE_NOW_AFTER_DEADLINE). Supersede rule legitimately flips
-  // older fixture's lifecycle.stale to false. Per-item stale logic still covered
-  // by supersede tests below. TODO: rebuild with isolated temp fixture dir.
-  it.skip('marks lifecycle.stale = true and counts.stale = 1 when now is past nextEvalAt', () => {
+  it('marks lifecycle.stale = true and counts.stale = 1 when now is past nextEvalAt', (t) => {
+    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('past-deadline', t);
+    writeA2aLiveVerdict(harnessFeedbackRoot, {
+      verdictId: '2026-05-23-eval-a2a-live-verdict',
+      nextEvalAt: '2026-05-26T03:12:57.174Z',
+      generatedAt: '2026-05-23T03:12:57.174Z',
+    });
     const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      harnessFeedbackRoot,
       now: FIXTURE_NOW_AFTER_DEADLINE,
     });
-    assert.ok(summary.items.length >= 1);
+    assert.equal(summary.items.length, 1);
     const item = summary.items.find((v) => v.id === '2026-05-23-eval-a2a-live-verdict');
     assert.ok(item);
     assert.equal(item.lifecycle.stale, true);
     assert.equal(item.verdict, 'keep_observe');
     assert.equal(item.lifecycle.closureStatus, 'observing');
     assert.equal(item.lifecycle.ownerResponseStatus, 'not_required');
+    assert.equal(summary.counts.stale, 1);
   });
 
   // F192 P2 — boundary: at-deadline must not flip to stale (strict `>`, not `>=`)
-  it('keeps lifecycle.stale = false when now equals nextEvalAt exactly', () => {
+  it('keeps lifecycle.stale = false when now equals nextEvalAt exactly', (t) => {
+    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('at-deadline', t);
+    writeA2aLiveVerdict(harnessFeedbackRoot, {
+      verdictId: '2026-05-23-eval-a2a-live-verdict',
+      nextEvalAt: '2026-05-26T03:12:57.174Z',
+      generatedAt: '2026-05-23T03:12:57.174Z',
+    });
     const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      harnessFeedbackRoot,
       now: new Date('2026-05-26T03:12:57.174Z'),
     });
-    // PR-3 R3 (cloud R5 P2): #2114 accumulation means items[0] is now the newer
-    // 2026-06-06 verdict, not the 2026-05-23 fixture whose nextEvalAt matches `now`.
-    // Find fixture explicitly by id to preserve at-deadline boundary regression intent.
+    assert.equal(summary.items.length, 1);
     const fixture = summary.items.find((v) => v.id === '2026-05-23-eval-a2a-live-verdict');
     assert.ok(fixture, 'fixture verdict must remain in summary');
     assert.equal(fixture.lifecycle.stale, false, 'at-deadline tick is not yet stale');
@@ -126,14 +134,10 @@ describe('Eval Hub read model — lifecycle.stale', () => {
   });
 
   // F192 P2 — defensive: missing nextEvalAt cannot imply staleness
-  it('returns lifecycle.stale = false when the Re-eval bullet lacks an ISO timestamp', () => {
-    const harnessFeedbackRoot = mkdtempSync(join(tmpdir(), 'f192-eval-hub-no-deadline-'));
-    const domainsDir = join(harnessFeedbackRoot, 'eval-domains');
+  it('returns lifecycle.stale = false when the Re-eval bullet lacks an ISO timestamp', (t) => {
+    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('no-deadline', t);
     const verdictsDir = join(harnessFeedbackRoot, 'verdicts');
-    mkdirSync(domainsDir, { recursive: true });
     mkdirSync(verdictsDir, { recursive: true });
-    const a2aYaml = readFileSync(join(repoHarnessFeedbackRoot, 'eval-domains', 'eval-a2a.yaml'), 'utf8');
-    writeFileSync(join(domainsDir, 'eval-a2a.yaml'), a2aYaml);
     const verdictId = '2026-05-24-eval-a2a-no-deadline';
     const bundleDir = join(harnessFeedbackRoot, 'bundles', verdictId);
     mkdirSync(bundleDir, { recursive: true });
@@ -201,8 +205,8 @@ Evidence:
   });
 
   // F192 P2 — PR 791 review regression guard. Supersede rule on lifecycle.stale.
-  it('does not count an older overdue verdict as stale when a newer fresh verdict supersedes it (same domain)', () => {
-    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('supersede-fresh');
+  it('does not count an older overdue verdict as stale when a newer fresh verdict supersedes it (same domain)', (t) => {
+    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('supersede-fresh', t);
     writeA2aLiveVerdict(harnessFeedbackRoot, {
       verdictId: '2026-05-20-eval-a2a-older',
       nextEvalAt: '2026-05-23T00:00:00.000Z',
@@ -228,8 +232,8 @@ Evidence:
   });
 
   // F192 P2 — PR 791 review regression guard (companion case). Latest-only counting.
-  it('counts only the latest overdue verdict as stale per domain (not every historical overdue)', () => {
-    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('supersede-both-overdue');
+  it('counts only the latest overdue verdict as stale per domain (not every historical overdue)', (t) => {
+    const harnessFeedbackRoot = setupA2aOnlyHarnessFeedbackRoot('supersede-both-overdue', t);
     writeA2aLiveVerdict(harnessFeedbackRoot, {
       verdictId: '2026-05-15-eval-a2a-older-overdue',
       nextEvalAt: '2026-05-18T00:00:00.000Z',

@@ -247,7 +247,7 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 | 主执行猫 / 当前持球猫 | 发起并主导当前任务的猫 | 当前 invocation 的 catId |
 | QA/审查猫 | 负责质量审查的猫 | 跨 family，有 peer-reviewer 角色 |
 | 视觉把关猫 | 负责审美/品牌/UX 审查的猫 | 跨 family，视觉设计能力猫 |
-| 守护猫 | 愿景守护（非 author 非 reviewer） | roster 排除 author + reviewer |
+| 守护猫 | 愿景守护（非 author 非 reviewer） | 按 `feat-lifecycle` 的作者范围与独立性要求从 roster 选择 |
 | 全部参与猫 | 所有参与当前任务的猫 | 按 roster 可用猫列表 |
 
 **为什么**：猫名硬编码在 skill 里不受 roster disable 过滤，disable 猫后其他猫仍会按 skill 指令分配任务给已下线的猫。角色词 + 动态 roster = 增减猫只需改 cat-config.json。
@@ -262,9 +262,11 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 
 猫猫是家庭成员，不是外包工具。讨论 Clowder AI 团队时用"我们" / "咱们" / "家里"，禁止用"你们" / "他们"指代三猫。
 
-## 1. 交接五件套
+## 1. 交接要求与五项参考
 
-跨猫传话/交接必须包含：
+跨猫传话/交接必须让接手者能够正确继续：明确目标与范围、关键缘由/约束、真实进度与证据、影响行动的风险/未知，以及下一步由谁做什么。已有且有效的上下文可以引用，实际责任、授权和接口字段仍按选中的交接路径满足。
+
+以下五项是可选的组织与查漏参考。可以直接使用、改造或替换；没有真实取舍或未决问题不要求造栏目，不能因没用五栏格式阻止交接，也不按模型资格决定方法选择。
 
 | # | 项目 | 说明 |
 |---|------|------|
@@ -289,10 +291,10 @@ Skill/refs 中描述工作流分工时，用以下角色词代替具体猫名。
 - 问开放问题，不问引导性问题
 - 展示思考过程，保护观点独立性
 
-## 4. Bug 修复先写 Bug Report
+## 4. Bug 修复保留诊断与验证证据
 
-先写 bug report 再动手修。至少包含：报告人、复现步骤、根因分析、修复方案、验证方式。
-存放：`docs/bug-report/<bug-name>/bug-report.md`
+修复必须明确现象与预期、复现/观察证据、根因依据、修复和验证；推测不能冒充事实。信息可留在已有 issue、PR、thread 或 bug report，不强制先填诊断胶囊再抄写报告。
+需要独立报告时存放：`docs/bug-report/<bug-name>/bug-report.md`。调查方法与模板见 `debugging` 的可选参考；已有精准失败检查可按 `tdd` 复用。
 
 ## 5. Commit 纪律
 
@@ -328,8 +330,8 @@ commit body 补一行 `Why:` 说明决策理由。
 
 - Reviewer 每个发现有明确立场，禁止"修不修都行"
 - Author 收到意见必须判断，不能全盘接受
-- 零分歧 = 走过场，双方反思
-- 分歧升级 → 问operator
+- 核实后零分歧合法，不为了表示独立而制造争论
+- 分歧按证据、适用性与替代方案讨论；价值取舍或跨猫僵局才按决策漏斗升级
 
 **证据权重排序**（当 review 意见和现实冲突时）：
 1. 需求/AC 原文
@@ -349,7 +351,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 1. 开始 Feature 前必须读原始 Discussion/Interview
 2. AC 全打勾 ≠ 完成，问"operator用这个功能体验是什么样？"
-3. 前端功能产出截图证据（≤3 截图 + 15s 录屏）
+3. 前端功能产出覆盖实际入口、内容态、主旅程与相关响应式状态的证据；形式和数量按证明需要选择，交互 claim 仍须实际操作验证（详见 `feat-lifecycle` 的 Design Gate 与 Completion）
 4. 请求 review 附原始需求摘录（≤5 行）
 5. 拿捏不准上升operator
 6. **涉及 UX/前端的验证必须打开浏览器实际操作**——不管是 author 自检、reviewer 审查还是愿景守护，看代码不等于看效果
@@ -422,7 +424,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 三类合法消息：
 - **BLOCKED**：真的卡住，需要对方现在决策
-- **REVIEW READY**：到了五件套/review 边界
+- **REVIEW READY**：交接信息与适用的 review 证据已齐备
 - **DONE / HANDOFF**：任务结束，明确下一棒
 
 接球后静默执行到下一个状态迁移点。中间产出留在代码/文档里，不发。
@@ -460,11 +462,11 @@ commit body 补一行 `Why:` 说明决策理由。
 
 - `../cat-cafe-runtime` 是单实例运行态，默认当作在线服务处理。
 - `../cat-cafe-runtime` 的 `localhost:3003/3004` 默认视为**在线 runtime 端口**；对这两个端口做浏览器 / Playwright / curl 操作，等同于在操作 runtime，不是本地沙箱。
-- 在 runtime 会话中禁止执行重启命令：`pnpm start`、`pnpm runtime:start`、`./scripts/start-dev.sh`。
+- 在 runtime 会话中禁止执行生产生命周期命令：`pnpm start`、`pnpm runtime:start`、`pnpm runtime:restart`、`pnpm runtime:stop`、`./scripts/start-dev.sh`。
 - 前端证据采集先复用现有服务：先查 `curl -sf http://localhost:3004/health`。
 - 如果目的是验证**未合入的本地改动**，必须先确认“当前 CWD / worktree”和“要访问的 URL”属于同一实例；看到 `3003/3004` 就先停下来，确认自己是不是误打到了 runtime。
-- 必须重启时先拿到operator明确授权，再用 `CAT_CAFE_RUNTIME_RESTART_OK=1` 执行。
-- `--force` 只用于同步/脏树场景，不是重启 runtime 的授权令牌。
+- 必须重启时先拿到operator明确授权，再执行 `pnpm runtime:restart`；命令只表达动作，不自行证明授权。
+- `--force` 与 `CAT_CAFE_RUNTIME_RESTART_OK` 均已退出 runtime 生命周期入口；任何 shell 参数或环境变量都不能放宽进程归属检查。
 
 ## 13. 元思考触发器 §13（F086 M2）
 
@@ -550,6 +552,12 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 共享 schema、store、MCP tool 与跨包入口的改动必须按**真实契约影响**选择证据，不能只跑单文件测试，也不能再靠一份手写路径表无条件升级 full gate。统一入口是 `pnpm gate`：机器 route 为 full 就执行 full；机器看不见但存在外部契约风险时用 `pnpm gate -- --risk contract` 加严；可证明只影响局部实现时跑受影响测试 + 全仓跨包 typecheck，并把 consumer census 与命令写入 evidence manifest。说“不是我的 scope”不能免除已证明受影响的下游，但目录名本身也不是 full 的徽章。
 
+## 14d. 安装器测试的副作用边界
+
+- 测试 setup / installer / lifecycle function 时，必须在 source 任何脚本前设置任务专属 `HOME` / `CAT_CAFE_HOME`，不能等函数调用时才覆盖；脚本可能已在加载期冻结全局路径。
+- mock 最外层副作用边界（例如被委托的 installer executable、网络 client、package installer），不能只 mock 它旧实现里的内层 `python3` / `pip`；实现改成委托后，内层 stub 不再形成隔离。
+- 声称 dry-run / fixture-only 的测试必须证明所有写入目标位于临时根，且真实用户级 service venv、runtime 与 6399 均未被触达。发现逃逸立即停进程、只读核影响；没有旧版本账本时禁止猜测回滚。
+
 ## 14. 共享状态文件只在 main 改
 
 **机器强制的文件**（三层防御）：
@@ -589,14 +597,9 @@ git show :3:<path>   # THEIRS（main 上的版本）
 
 **禁止无证据说"没更新/没编译/没重启/还是旧代码"。**
 
-这不是"懒"，是**推卸责任**——在没有证据的情况下把operator的操作当成你的 bug 的替罪羊。启动脚本自动拉代码编译，"没更新"本来就极少发生。
+提出版本、实例或构建错配的诊断时，核到实际运行对象、加载版本与相关行为。仓库 HEAD、PID 启动时间或日志行数只能各自提供线索，不能单独证明进程加载了目标代码。
 
-遇到 runtime 行为异常时，在说出任何诊断判断之前：
-1. 查 PID + 启动时间（确认是哪个进程）
-2. 查 runtime HEAD 是否包含预期 commit
-3. grep 当前 PID 日志确认实际行为
-
-**三件套没完成 → 只能说"我还没查完"。** 详见 `debugging` skill 的 Runtime Preflight Gate。
+已有堆栈、失败测试等有效证据时，可沿该路径调查并说明已查实的现象，不为无关问题先采 API PID。方法见 `debugging` 的实例取证参考；运行环境与重启授权仍服从 §12。
 
 ### 16b. Spike/探索时工具优先级 + 卡 N 轮主动求助（2026-05-13 F198 spike 教训）
 

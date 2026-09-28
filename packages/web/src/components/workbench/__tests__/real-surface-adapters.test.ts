@@ -4,6 +4,7 @@ import {
   createAgentRunSurface,
   createArtifactSurface,
   createBrowserSurface,
+  createContentEditorSurface,
   createEvolutionProgramSurface,
   createFileSurface,
   createTeamWorkspaceSurface,
@@ -13,6 +14,7 @@ import {
   resolveArtifactTarget,
   resolveBrowserTarget,
   resolveChangesTarget,
+  resolveContentEditorTarget,
   resolveEvolutionProgramId,
   resolveFilesTarget,
   resolveFileTarget,
@@ -23,7 +25,43 @@ import { createInitialWorkbenchState } from '../workbench-model';
 import { restoreWorkbenchState } from '../workbench-restore';
 
 describe('F307 real surface adapters', () => {
-  it('restores a durable F311 Program by owner ref without copying Program state into layout', () => {
+  it('persists only F309 content/session refs for a DOCX editor surface', () => {
+    const contentRef = 'project:alpha/assets/proposal.docx';
+    const sessionRef = `editor-session:${'a'.repeat(64)}`;
+    const surface = createContentEditorSurface({ contentRef, sessionRef });
+
+    expect(surface).toMatchObject({
+      id: `content-editor:${sessionRef}`,
+      type: 'content-editor',
+      renderer: 'content-editor',
+      objectRef: { kind: 'content-editor-session', id: sessionRef },
+      ownerStateRef: { owner: 'f309-collaborative-content', key: contentRef },
+    });
+    expect(resolveContentEditorTarget(surface)).toEqual({ contentRef, sessionRef });
+    expect(JSON.stringify(surface)).not.toContain('sessionToken');
+    expect(restoreWorkbenchState(createInitialWorkbenchState([surface])).surfaces).toEqual([surface]);
+  });
+
+  it('fails a malformed or owner-inconsistent content editor descriptor closed', () => {
+    const surface = createContentEditorSurface({
+      contentRef: 'project:alpha/assets/proposal.docx',
+      sessionRef: `editor-session:${'a'.repeat(64)}`,
+    });
+    expect(
+      resolveContentEditorTarget({
+        ...surface,
+        resultTargetRef: { owner: 'f309-collaborative-content', key: encodeURIComponent('["forged"]') },
+      }),
+    ).toBeNull();
+    expect(
+      resolveContentEditorTarget({
+        ...surface,
+        objectRef: { kind: 'content-editor-session', id: 'editor-session:short' },
+      }),
+    ).toBeNull();
+  });
+
+  it('restores a durable F311 Program without a domain-specific attention capability', () => {
     const programId = `evolution-program:${'a'.repeat(32)}`;
     const surface = createEvolutionProgramSurface(programId);
 
@@ -34,11 +72,17 @@ describe('F307 real surface adapters', () => {
       objectRef: { kind: 'evolution-program', id: programId },
       ownerStateRef: { owner: 'f311-capability-evolution-control', key: programId },
       resultTargetRef: { owner: 'f311-capability-evolution-control', key: programId },
-      capabilities: { mainAreaAttention: true },
     });
+    expect(surface.capabilities).not.toHaveProperty('mainAreaAttention');
     expect(surface).not.toHaveProperty('program');
     expect(resolveEvolutionProgramId(surface)).toBe(programId);
     expect(restoreWorkbenchState(createInitialWorkbenchState([surface])).surfaces).toEqual([surface]);
+
+    const legacyOptIn = {
+      ...surface,
+      capabilities: { ...surface.capabilities, mainAreaAttention: true as const },
+    };
+    expect(restoreWorkbenchState(createInitialWorkbenchState([legacyOptIn])).surfaces).toEqual([legacyOptIn]);
   });
 
   it('rejects an owner-consistent descriptor whose Program id is not canonical', () => {
@@ -239,7 +283,8 @@ describe('F307 real surface adapters', () => {
   it('projects a real invocation with an exact Chat result target and reconstructs F299 input', () => {
     const execution: ActiveExecutionProjection = {
       kind: 'live_invocation',
-      executionId: 'invocation-f307',
+      executionId: 'parent-execution-f307',
+      turnInvocationId: 'invocation-f307',
       threadId: 'thread-f307',
       threadTitle: 'F307 Phase C',
       catId: 'codex-sol',
@@ -247,6 +292,7 @@ describe('F307 real surface adapters', () => {
       cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
     };
     const surface = createAgentRunSurface({ execution, sourceMessageId: 'message-agent-run' });
+    if (!surface) throw new Error('A canonical child must be openable');
 
     expect(surface).toMatchObject({
       type: 'agent-run',
@@ -266,5 +312,10 @@ describe('F307 real surface adapters', () => {
         viewportOffsetPx: 0,
       },
     });
+    const parallel = createAgentRunSurface({
+      execution: { ...execution, catId: 'fable5', turnInvocationId: 'turn-fable' },
+    });
+    expect(parallel?.id).not.toBe(surface.id);
+    expect(createAgentRunSurface({ execution: { ...execution, turnInvocationId: undefined } })).toBeNull();
   });
 });

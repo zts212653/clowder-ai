@@ -5,11 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 
-import {
-  loadMeasurementBundleRegistry,
-  MeasurementBundleCensusSchema,
-  refreshMeasurementBundleCensus,
-} from './measurement-bundle-census.js';
+import { MeasurementBundleCensusSchema, refreshMeasurementBundleCensus } from './measurement-bundle-census.js';
 import {
   createPublicMeasurementBundleCensus,
   reconcilePublicMeasurementBundleCensus,
@@ -69,15 +65,12 @@ export function ensureMeasurementBundleCensusFile(
 
   const currentSource = readMeasurementBundleCensusFile(repoRoot);
   const current = MeasurementBundleCensusSchema.parse(parseCensusDocument(currentSource).toJS());
-  const currentIds = new Set(current.entries.map((entry) => entry.domainId));
-  const registryIds = loadMeasurementBundleRegistry(repoRoot).map((domain) => domain.domainId);
-  const needsReconciliation = registryIds.some((domainId) => !currentIds.has(domainId));
-  if (!needsReconciliation) {
-    refreshMeasurementBundleCensus(current, repoRoot, generatedAt);
+  const reconciled = reconcilePublicMeasurementBundleCensus(current, repoRoot, generatedAt);
+  if (isDeepStrictEqual(nonDerivedMetadata(current), nonDerivedMetadata(reconciled))) {
     return { path, source: currentSource, created: false, reconciled: false };
   }
 
-  const source = stringifyYaml(reconcilePublicMeasurementBundleCensus(current, repoRoot, generatedAt));
+  const source = stringifyYaml(reconciled);
   writeMeasurementBundleCensusFileAtomically(path, source);
   return { path, source, created: false, reconciled: true };
 }

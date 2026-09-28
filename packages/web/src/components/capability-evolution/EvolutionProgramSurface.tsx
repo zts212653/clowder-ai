@@ -1,251 +1,350 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { apiFetch } from '@/utils/api-client';
-import { EvolutionAttributionPanel } from './EvolutionAttributionPanel';
+import { type ExactAssetVersionRefV1, refIdentity } from '@cat-cafe/shared';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  createCapabilityEvolutionWorkspaceSurface,
+  isCapabilityEvolutionWorkspaceSurface,
+  resolveCapabilityEvolutionTargetThreadId,
+} from '@/components/workbench/capability-evolution-workspace-adapter';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { createEvolutionProgramSurface } from '@/components/workbench/real-surface-adapters';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
+import { useChatStore } from '@/stores/chatStore';
+import { CapabilityEvolutionProgramDetail } from './CapabilityEvolutionProgramDetail';
+import { CapabilityEvolutionWorkspace } from './CapabilityEvolutionWorkspace';
+import { evolutionProgramPresentation, productStatus } from './capability-evolution-presentation';
 import { EvolutionChangePanel } from './EvolutionChangePanel';
-import { EvolutionObservationPanel } from './EvolutionObservationPanel';
-import { type EvolutionProgramProjection, isProjection, type OwnerRef } from './evolution-program-projection';
-
-function lifecycleClientMessageId(programId: string, action: 'pause' | 'resume', sequence: number): string {
-  return `workbench:${action}:${programId}:sequence:${sequence}`;
-}
-
-function RefRow({ label, value }: { label: string; value: OwnerRef }) {
-  return (
-    <div className="grid gap-1 border-b border-cafe-subtle py-2 last:border-0 sm:grid-cols-[9rem_1fr]">
-      <dt className="text-xs font-medium text-cafe-muted">{label}</dt>
-      <dd className="break-all font-mono text-xs text-cafe-secondary">{value.ownerStateRef}</dd>
-    </div>
-  );
-}
+import { EvolutionJourney, journeyMoment } from './EvolutionJourney';
+import { RawDetails } from './EvolutionProgramContext';
+import { EvolutionProgramName } from './EvolutionProgramName';
+import { EvolutionProgramOrigin } from './EvolutionProgramOrigin';
+import { EvolutionActualUse, EvolutionSource, EvolutionVersionEvidence } from './EvolutionVersionEvidence';
+import { EvolutionVersionHistory } from './EvolutionVersionHistory';
+import { useEvolutionAssetReview } from './evolution-asset-resource';
+import { evolutionReadingHref } from './evolution-navigation';
+import { acceptProgramProjection, useEvolutionPrograms } from './evolution-program-resource';
+import { pendingOwnerRead } from './evolution-read-status';
+import {
+  DEFAULT_READING,
+  type EvolutionReadingView,
+  navigateEvolutionVersion,
+  openEvolutionReading,
+  useEvolutionReading,
+} from './evolution-reading-state';
+import { projectAssetVersions, selectedAssetVersion } from './evolution-version-view';
+import { ExplorationOwnerEvidence } from './exploration/ExplorationOwnerEvidence';
+import { EvolutionMomentContext } from './journey/EvolutionMomentContext';
+import { EvolutionProgressAction } from './journey/EvolutionProgressAction';
+import { useEvolutionLifecycle } from './use-evolution-lifecycle';
+import { useEvolutionOwnerReadingDefault } from './use-evolution-owner-reading-default';
+import { useEvolutionScroll } from './use-evolution-scroll';
+import './evolution-workspace.css';
+import './preparation/evolution-preparation.css';
+import './preparation/evolution-preparation-visual.css';
+import './preparation/evolution-preparation.responsive.css';
+import './exploration/exploration.css';
+import './exploration/exploration-responsive.css';
 
 export function EvolutionProgramList({ onOpenProgram }: { onOpenProgram: (programId: string) => void }) {
-  const [programs, setPrograms] = useState<EvolutionProgramProjection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [unavailable, setUnavailable] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await apiFetch('/api/capability-evolution/programs');
-      if (!response.ok) throw new Error(`Program list failed (${response.status})`);
-      const body = (await response.json()) as { programs?: unknown };
-      if (!Array.isArray(body.programs)) throw new Error('Program list response is invalid');
-      setPrograms(body.programs.filter(isProjection));
-      setUnavailable(false);
-    } catch {
-      setUnavailable(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const loadWhenVisible = () => {
-      if (document.visibilityState === 'visible') void load();
-    };
-    void load();
-    const poll = window.setInterval(loadWhenVisible, 2_000);
-    window.addEventListener('focus', loadWhenVisible);
-    document.addEventListener('visibilitychange', loadWhenVisible);
-    return () => {
-      window.clearInterval(poll);
-      window.removeEventListener('focus', loadWhenVisible);
-      document.removeEventListener('visibilitychange', loadWhenVisible);
-    };
-  }, [load]);
-
-  return (
-    <section className="mx-auto w-full max-w-4xl px-5 pt-4" aria-label="Evolution Programs">
-      <div className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="text-sm font-semibold text-cafe">Evolution Programs</h2>
-          <span className="text-xs text-cafe-muted">建制与可见</span>
-        </div>
-        {loading ? (
-          <p className="mt-3 text-xs text-cafe-muted">正在读取 canonical Programs…</p>
-        ) : unavailable && programs.length === 0 ? (
-          <p className="mt-3 text-xs text-cafe-muted">Program owner 暂时不可用；Workbench 没有创建本地副本。</p>
-        ) : programs.length === 0 ? (
-          <p className="mt-3 text-xs text-cafe-muted">说“我们来进化 X”，这里会出现 durable Program。</p>
-        ) : (
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            {programs.map((projection) => (
-              <button
-                key={projection.program.programId}
-                type="button"
-                className="rounded-lg border border-cafe-subtle p-3 text-left hover:bg-cafe-hover"
-                onClick={() => onOpenProgram(projection.program.programId)}
-              >
-                <span className="block truncate text-sm font-medium text-cafe">
-                  {projection.program.objectRef.ownerStateRef}
-                </span>
-                <span className="mt-1 block text-xs text-cafe-muted">
-                  {projection.program.lifecycle} · {projection.program.stage} · {projection.blockers.length} 个阻塞
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
+  return <CapabilityEvolutionWorkspace targetThreadId={null} onOpenProgram={onOpenProgram} />;
 }
 
 export function EvolutionProgramSurface({ programId }: { programId: string }) {
-  const [projection, setProjection] = useState<EvolutionProgramProjection | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<{ code: 'program_state_synchronized'; message: string } | null>(null);
-  const [pending, setPending] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await apiFetch(`/api/capability-evolution/programs/${encodeURIComponent(programId)}`);
-      if (!response.ok) throw new Error(`Program read failed (${response.status})`);
-      const body: unknown = await response.json();
-      if (!isProjection(body)) throw new Error('Program projection is invalid');
-      setProjection(body);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  }, [programId]);
-
+  const { projection, error, reload } = useEvolutionPrograms(programId);
+  const reading = useEvolutionReading((state) => state.programs[programId] ?? DEFAULT_READING);
+  const update = useEvolutionReading((state) => state.update);
+  const asset = useEvolutionAssetReview(projection, reading.selectedVersionRef);
+  const lifecycle = useEvolutionLifecycle(projection);
+  const surfaceId = createEvolutionProgramSurface(programId).id;
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const lifecycleCommand = async (action: 'pause' | 'resume') => {
-    if (!projection || pending) return;
-    setPending(true);
-    const clientMessageId = lifecycleClientMessageId(programId, action, projection.program.sequence);
-    setNotice(null);
-    const stateRef = `evolution-lifecycle-choice:${programId}:${clientMessageId}`;
-    const commandAction =
-      action === 'pause'
-        ? { type: 'pause', reasonRef: { ownerFeatureId: 'F311', ownerStateRef: stateRef } }
-        : { type: 'resume', resumeRef: { ownerFeatureId: 'F311', ownerStateRef: stateRef } };
-    try {
-      const response = await apiFetch(`/api/capability-evolution/programs/${encodeURIComponent(programId)}/commands`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          expectedSequence: projection.program.sequence,
-          clientMessageId,
-          action: commandAction,
-        }),
-      });
-      const body = (await response.json()) as { projection?: unknown; detail?: string };
-      if (response.status === 409 && isProjection(body.projection)) {
-        setProjection(body.projection);
-        setError(null);
-        setNotice({
-          code: 'program_state_synchronized',
-          message:
-            'Program \u5df2\u88ab\u5176\u4ed6\u64cd\u4f5c\u8005\u66f4\u65b0\uff0c\u5df2\u540c\u6b65\u5230\u6700\u65b0\u72b6\u6001\u3002',
-        });
-        return;
-      }
-      if (!response.ok || !isProjection(body.projection)) {
-        throw new Error(body.detail ?? `Program command failed (${response.status})`);
-      }
-      setProjection(body.projection);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setPending(false);
-    }
+    const store = useF307ExperienceWorkbenchStore.getState();
+    const descriptor = createEvolutionProgramSurface(programId, projection?.program.displayName, projection?.origin);
+    const existing = store.layout.surfaces.find((surface) => surface.id === descriptor.id) ?? store.layout.sidecar;
+    if (
+      existing?.id === descriptor.id &&
+      (existing.title !== descriptor.title || existing.context !== descriptor.context)
+    )
+      store.dispatch({ type: 'refresh-surface', surface: descriptor });
+  }, [programId, projection?.program.displayName, projection?.origin]);
+  const main = useF307ExperienceWorkbenchStore((state) => state.mainAreaAttentionSurfaceId === surfaceId);
+  const desktop = useIsDesktop();
+  const [expanded, setExpanded] = useState(false);
+  const reviewing = main || (!desktop && expanded);
+  useEffect(() => {
+    if (main) setExpanded(true);
+  }, [main]);
+  const versions = useMemo(
+    () => (projection ? projectAssetVersions(projection, asset.catalog) : []),
+    [projection, asset.catalog],
+  );
+  const readStatus =
+    asset.error || asset.review?.blockers.length
+      ? 'unavailable'
+      : asset.loading
+        ? 'loading'
+        : asset.catalog
+          ? 'resolved'
+          : 'unavailable';
+  const selectedKey = reading.selectedVersionRef ? refIdentity(reading.selectedVersionRef) : undefined;
+  const selected = selectedAssetVersion(versions, selectedKey);
+  const selectedReview =
+    asset.review?.status === 'resolved' &&
+    selected &&
+    asset.review.selected &&
+    refIdentity(asset.review.selected.versionRef) === refIdentity(selected.ref)
+      ? asset.review.selected
+      : undefined;
+  const scrollKey = reviewing ? reading.view : 'detail';
+  const { viewport, onScroll } = useEvolutionScroll(programId, scrollKey, projection !== null);
+  useEvolutionOwnerReadingDefault(programId, selectedReview?.versionRef);
+  const select = (ref: ExactAssetVersionRefV1) => navigateEvolutionVersion(programId, ref);
+  const openPreparation = () => update(programId, { journeyMoment: 1, view: 'judgment' });
+  const open = (_id: string, view: EvolutionReadingView = 'judgment') => {
+    openEvolutionReading(programId, view);
+    setExpanded(true);
+    if (desktop) useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(surfaceId);
   };
-
-  if (!projection) {
-    return <div className="p-5 text-xs text-cafe-muted">{error ?? '正在读取 canonical Program…'}</div>;
-  }
-
+  const returnToRail = () => {
+    setExpanded(false);
+    useF307ExperienceWorkbenchStore.getState().exitMainAreaAttention();
+  };
+  const backToWorkspace = () => {
+    const store = useF307ExperienceWorkbenchStore.getState();
+    const home =
+      [...store.layout.surfaces, ...(store.layout.sidecar ? [store.layout.sidecar] : [])].find(
+        isCapabilityEvolutionWorkspaceSurface,
+      ) ?? createCapabilityEvolutionWorkspaceSurface(useChatStore.getState().currentThreadId ?? undefined);
+    useEvolutionReading
+      .getState()
+      .selectWorkspaceProgram(resolveCapabilityEvolutionTargetThreadId(home) ?? 'global', null);
+    if (store.layout.sidecar?.id === home.id) {
+      returnToRail();
+      return;
+    }
+    store.dispatch({ type: 'open-surface', surface: home, entitlement: { kind: 'user', reason: 'surface-tab' } });
+  };
+  if (!projection)
+    return (
+      <div
+        ref={viewport}
+        className="evolution-workspace min-h-0 flex-1 overflow-y-auto"
+        data-testid="evolution-program-surface"
+        data-reading-view={scrollKey}
+      >
+        <div className="evolution-content">
+          <header>
+            <button
+              type="button"
+              className="text-xs text-cafe-secondary"
+              onClick={reviewing ? returnToRail : backToWorkspace}
+            >
+              {reviewing ? (desktop ? '← 返回侧栏' : '← 返回详情') : '← 能力进化'}
+            </button>
+            <p className="evolution-eyebrow mt-6">能力进化 · 项目记录</p>
+            <h1 className="evolution-title mt-2">{createEvolutionProgramSurface(programId).title}</h1>
+          </header>
+          <p role="status" className="evolution-empty mt-5">
+            {error ?? '正在读取能力进化记录…'}
+          </p>
+          {error && (
+            <button type="button" className="evolution-link mt-4" onClick={() => void reload()}>
+              重试
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  const status = productStatus(projection);
+  const moment = reading.journeyMoment ?? journeyMoment(projection);
+  const showVersions = reading.view === 'history' || moment === 3;
+  const controls = (
+    <details className="relative text-xs text-cafe-secondary">
+      <summary className="cursor-pointer">更多</summary>
+      <div className="absolute right-0 top-6 z-10 w-36 rounded-lg border border-cafe-subtle bg-cafe-surface p-2 shadow-sm">
+        {projection.program.lifecycle === 'active' && (
+          <button
+            className="w-full p-2 text-left"
+            type="button"
+            disabled={lifecycle.pending}
+            onClick={() => void lifecycle.run('pause')}
+          >
+            暂停项目
+          </button>
+        )}
+        {projection.program.lifecycle === 'paused' && (
+          <button
+            className="w-full p-2 text-left"
+            type="button"
+            disabled={lifecycle.pending}
+            onClick={() => void lifecycle.run('resume')}
+          >
+            恢复项目
+          </button>
+        )}
+        {projection.program.lifecycle !== 'active' && projection.program.lifecycle !== 'paused' && (
+          <p className="p-2">记录已保留</p>
+        )}
+      </div>
+    </details>
+  );
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto p-5" data-testid="evolution-program-surface">
-      <div className="mx-auto max-w-3xl space-y-4">
-        <section className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4">
-          <p className="text-xs font-medium text-cafe-muted">{projection.program.objectRef.ownerFeatureId}</p>
-          <h2 className="mt-1 break-all text-base font-semibold text-cafe">
-            {projection.program.objectRef.ownerStateRef}
-          </h2>
-          <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-cafe-hover px-3 py-1 text-cafe-secondary">
-              {projection.program.lifecycle}
-            </span>
-            <span className="rounded-full bg-cafe-hover px-3 py-1 text-cafe-secondary">{projection.program.stage}</span>
-            <span className="rounded-full bg-cafe-hover px-3 py-1 text-cafe-secondary">
-              sequence {projection.program.sequence}
-            </span>
-          </div>
-          <div className="mt-4 flex gap-2">
-            {projection.program.lifecycle === 'active' && (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => void lifecycleCommand('pause')}
-                className="rounded-lg border border-cafe-subtle px-3 py-2 text-xs text-cafe-secondary"
-              >
-                暂停 Program
-              </button>
-            )}
-            {projection.program.lifecycle === 'paused' && (
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => void lifecycleCommand('resume')}
-                className="rounded-lg border border-cafe-subtle px-3 py-2 text-xs text-cafe-secondary"
-              >
-                恢复 Program
-              </button>
-            )}
-          </div>
-        </section>
-
-        <EvolutionObservationPanel observation={projection.observation} />
-
-        {/* Tolerate a projection from a runtime that predates Phase 3: no attribution is honest, undefined is not. */}
-        <EvolutionAttributionPanel explanation={projection.attribution ?? null} />
-
-        <EvolutionChangePanel projection={projection} onProjection={setProjection} />
-
-        <section className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4">
-          <h3 className="text-sm font-semibold text-cafe">建制 refs</h3>
-          <dl className="mt-2">
-            <RefRow label="Object" value={projection.program.objectRef} />
-            <RefRow label="Claim" value={projection.program.claimRef} />
-            <RefRow label="Goal draft" value={projection.drafts.goal} />
-            <RefRow label="Measurement draft" value={projection.drafts.measurement} />
-            <RefRow label="Economic draft" value={projection.drafts.economic} />
-            {Object.entries(projection.drafts.roles).map(([role, ref]) => (
-              <RefRow key={role} label={`${role} draft`} value={ref} />
-            ))}
-          </dl>
-        </section>
-
-        <section className="rounded-xl border border-cafe-subtle bg-cafe-surface p-4">
-          <h3 className="text-sm font-semibold text-cafe">阻塞与下一步</h3>
-          {projection.blockers.length === 0 ? (
-            <p className="mt-2 text-xs text-cafe-muted">当前没有 typed blocker。</p>
-          ) : (
-            <ul className="mt-2 space-y-2">
-              {projection.blockers.map((blocker) => (
-                <li key={blocker.code} className="rounded-lg bg-cafe-hover p-3">
-                  <p className="font-mono text-xs text-cafe-secondary">{blocker.code}</p>
-                  <p className="mt-1 text-xs leading-5 text-cafe-muted">{blocker.message}</p>
-                </li>
+    <div
+      ref={viewport}
+      className="evolution-workspace min-h-0 flex-1 overflow-y-auto"
+      data-testid="evolution-program-surface"
+      data-reading-view={reviewing ? reading.view : 'detail'}
+      onScroll={(event) => onScroll(event.currentTarget.scrollTop)}
+    >
+      <div
+        className="evolution-content"
+        data-exploration-focus={reviewing && moment === 2 && reading.view === 'judgment'}
+      >
+        {!reviewing ? (
+          <CapabilityEvolutionProgramDetail
+            projection={projection}
+            onClose={backToWorkspace}
+            onOpenProgram={open}
+            controls={controls}
+          />
+        ) : (
+          <>
+            <header>
+              <div className="mb-6 flex items-center justify-between">
+                <button type="button" className="text-xs text-cafe-secondary" onClick={returnToRail}>
+                  {desktop ? '← 返回侧栏' : '← 返回详情'}
+                </button>
+                {controls}
+              </div>
+              <p className="evolution-eyebrow">
+                能力进化 · 第 {projection.program.cycle} 轮 · {status.label}
+              </p>
+              <h1 className="evolution-title mt-2">
+                {evolutionProgramPresentation(projection.program, projection.origin).title}
+              </h1>
+              <EvolutionProgramOrigin projection={projection} />
+              <EvolutionProgramName projection={projection} />
+              <EvolutionJourney projection={projection} />
+            </header>
+            <EvolutionProgressAction projection={projection} compact={moment === 2} />
+            <div role="tablist" aria-label="项目阅读内容" className="evolution-tabs">
+              {(['judgment', 'history'] as const).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  role="tab"
+                  aria-selected={reading.view === view}
+                  onClick={() => update(programId, { view })}
+                >
+                  {view === 'judgment' ? (moment === 2 ? '探索工作面' : '本轮判断') : '更改历史'}
+                </button>
               ))}
-            </ul>
-          )}
-          <p className="mt-3 text-sm font-medium text-cafe">{projection.nextAction.label}</p>
-          {notice && (
-            <p role="status" data-notice-code={notice.code} className="mt-2 text-xs text-cafe-muted">
-              {notice.message}
-            </p>
-          )}
-          {error && <p className="mt-2 text-xs text-cafe-muted">{error}</p>}
-        </section>
+            </div>
+            <div className={showVersions ? 'evolution-review-grid' : 'space-y-6'}>
+              <div className="min-w-0 space-y-6">
+                {reading.view === 'history' ? (
+                  <EvolutionVersionHistory
+                    projection={projection}
+                    versions={versions}
+                    selectedKey={selectedKey}
+                    onSelect={select}
+                    review={asset.catalog}
+                    selectedReview={selectedReview}
+                    readStatus={readStatus}
+                    onOpenPreparation={openPreparation}
+                  />
+                ) : (
+                  <EvolutionMomentContext
+                    projection={projection}
+                    moment={moment}
+                    onSelectCandidate={select}
+                    onOpenPreparation={openPreparation}
+                    explorationMode="workspace"
+                  >
+                    {moment >= 2 && (
+                      <EvolutionChangePanel projection={projection} onProjection={acceptProgramProjection} />
+                    )}
+                    {moment === 2 && (
+                      <ExplorationOwnerEvidence
+                        asset={asset}
+                        versionRef={reading.selectedVersionRef}
+                        onSelect={(ref) => update(programId, { selectedVersionRef: ref })}
+                      />
+                    )}
+                    {moment === 3 && <EvolutionActualUse selected={selectedReview} readStatus={readStatus} />}
+                  </EvolutionMomentContext>
+                )}
+                <RawDetails projection={projection} />
+              </div>
+              {showVersions && (
+                <aside className="min-w-0 space-y-6">
+                  <section aria-label="阅读版本">
+                    <h2 className="text-sm font-semibold text-cafe">阅读版本</h2>
+                    {versions.length ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {versions.map((version) => (
+                          <button
+                            key={refIdentity(version.ref)}
+                            type="button"
+                            aria-pressed={selectedKey === refIdentity(version.ref)}
+                            onClick={() => select(version.ref)}
+                            className="rounded-lg border border-cafe-subtle px-3 py-2 text-left text-xs text-cafe-secondary aria-pressed:border-cafe-accent"
+                          >
+                            <span className="block font-semibold text-cafe">
+                              {asset.catalog?.versions.find(
+                                (item) => refIdentity(item.versionRef) === refIdentity(version.ref),
+                              )?.title ?? version.ref.version}
+                              {version.current && <span className="ml-2">当前采用</span>}
+                            </span>
+                            <span className="mt-1 block break-all font-mono text-cafe-muted">
+                              {version.ref.version}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="evolution-empty mt-3">
+                        {asset.catalog ? '资产来源尚未提供版本记录。' : pendingOwnerRead(readStatus, '版本记录')}
+                      </p>
+                    )}
+                    {asset.catalog && <EvolutionSource label="采用来源" source={asset.catalog.currentProofRef} />}
+                    {selected && typeof window !== 'undefined' && (
+                      <a
+                        data-testid="evolution-version-link"
+                        className="evolution-link mt-3 inline-block"
+                        href={evolutionReadingHref(
+                          { programId, view: reading.view, versionRef: selected.ref },
+                          window.location.href,
+                        )}
+                      >
+                        此版本的来源链接
+                      </a>
+                    )}
+                  </section>
+                  <EvolutionVersionEvidence selected={selectedReview} readStatus={readStatus} />
+                  {reading.view === 'history' && (
+                    <EvolutionActualUse selected={selectedReview} readStatus={readStatus} />
+                  )}
+                  {asset.error && (
+                    <p role="status" className="evolution-empty">
+                      {asset.error}
+                    </p>
+                  )}
+                </aside>
+              )}
+            </div>
+          </>
+        )}
+        {lifecycle.notice && (
+          <p role="status" data-notice-code="program_state_synchronized" className="evolution-empty mt-5">
+            {lifecycle.notice}
+          </p>
+        )}
+        {error && (
+          <p role="status" className="evolution-empty mt-4">
+            读取暂时中断，正在显示最近一次记录。
+          </p>
+        )}
       </div>
     </div>
   );

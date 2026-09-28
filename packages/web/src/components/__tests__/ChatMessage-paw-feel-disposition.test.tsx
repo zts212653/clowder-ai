@@ -64,6 +64,11 @@ const seenPage: PawFeelInboxPage = {
         captureAssessment: 'confirmed',
       },
       responsibility: { state: 'unreviewed', validExit: false, exitKind: 'none', evidenceRefs: [] },
+      issue: {
+        resolution: 'open',
+        continuation: { kind: 'review_required', evidenceRefs: [] },
+        ageMs: 3_600_000,
+      },
       source: {
         availability: 'available',
         preview: 'not rendered in the dock',
@@ -97,6 +102,7 @@ const seenPage: PawFeelInboxPage = {
     blocked: 0,
     terminal: 0,
   },
+  issueCounts: { open: 1, resolved: 0, overdue: 0 },
   degraded: false,
 };
 
@@ -209,6 +215,17 @@ describe('ChatMessage paw-feel disposition projection', () => {
         ownerCatId: 'opus',
         taskId: 'task-1',
         leaseId: 'lease-1',
+      },
+      issue: {
+        resolution: 'open' as const,
+        continuation: {
+          kind: 'repair_active' as const,
+          evidenceRefs: ['task-1', 'lease-1'],
+          ownerCatId: 'opus',
+          taskId: 'task-1',
+          leaseId: 'lease-1',
+        },
+        ageMs: 3_600_000,
       },
       disposition: {
         ...baseItem.disposition,

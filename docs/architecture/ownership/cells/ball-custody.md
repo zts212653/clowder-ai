@@ -22,10 +22,18 @@ code_anchors:
   - packages/api/src/domains/ball-custody/hold-ball-access-policy.ts
   - packages/api/src/routes/callback-hold-ball-cancel-routes.ts
   - packages/api/src/domains/ball-custody/TurnCustodyProjectionService.ts
+  - packages/api/src/domains/ball-custody/ManagedHoldSourceSelection.ts
+  - packages/api/src/domains/ball-custody/ManagedHoldDispositionService.ts
+  - packages/api/src/domains/ball-custody/TurnCustodyAdoptionRegistry.ts
   - packages/api/src/domains/ball-custody/turn-custody-wake-provenance.ts
   - packages/api/src/domains/ball-custody/wait-state-machine.ts
   - packages/api/src/domains/ball-custody/wait-continuation-carrier.ts
   - packages/api/src/domains/ball-custody/WaitContinuationRetryPreflight.ts
+  - packages/api/src/domains/ball-custody/TypedWaitRegistration.ts
+  - packages/api/src/domains/ball-custody/TypedWaitContinuation.ts
+  - packages/api/src/domains/ball-custody/TypedWaitCustodyGuard.ts
+  - packages/api/src/domains/cats/services/stores/redis/RedisTypedWaitCustodyGuard.ts
+  - packages/api/src/routes/callback-typed-wait-source.ts
   - packages/api/src/domains/github-signals/GitHubWaitLifecycleService.ts
   - packages/shared/src/types/github-wait.ts
   - packages/shared/src/types/wait-termination.ts
@@ -59,7 +67,11 @@ code_anchors:
   - packages/api/src/domains/cats/services/freshness/FreshnessRelevancePolicy.ts
   - packages/api/src/domains/cats/services/freshness/checkStreamOutputFreshness.ts
   - packages/api/src/domains/cats/services/stores/ports/DeliveryCursorStore.ts
+  - packages/api/src/domains/cats/services/stores/message-delivery-boundary.ts
+  - packages/api/src/domains/cats/services/agents/routing/delivery-boundary-recovery.ts
 doc_anchors:
+  - feature-specs/2026-09-12-issue1371-typed-wait-continuation.md
+  - feature-specs/2026-09-06-issue1371-parallel-cursor.md
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F167-a2a-chain-quality.md
   - feature-specs/2026-08-18-f167-hold-rescue-authorization.md
@@ -79,6 +91,8 @@ doc_anchors:
   - feature-specs/2026-07-16-f177-f254-f264-child-execution-truth.md
 static_scan_hints: [ActionSuccessorLease, ActionSuccessorLeaseStore, ActionSuccessorAdmissionService, ActionSubjectTruthResolver, ActionTerminalPredicateCatalog, ActionSuccessorCompletionService, terminalPredicate, completionCandidate, completionCandidates, preflightOutput, continueFreshRevision, claimOrigin, predecessorCatId, returnToPredecessor, returnDeliveryState, actionGeneration, HoldAccessRole, resolveHoldAccess, scheduleMutationAuditStore, AwaitState, WaitOwnerFence, WaitOutcomeV1, WaitContinuationCarrierV1, WaitContinuationRetryPreflight, RetryAuthorityDecision, waitContinuationCarrier, awaitGeneration, expiresAt, matchedPredicate, BallCustodyEvent, BallCustodyProjection, BallCustodyEventLog, BallCustodyIngest, ball-custody-events, buildHandedEvent, ball.dispatch_dispositioned, dispatch_handled_continuation, ball-custody-state-machine, ball-custody-projector, ballcustody:events, ballcustody:projection, blockedSinceAt, ProbeScheduler, WakeSender, FreshnessAttentionEventLog, FreshnessInvocationStateStore, FreshnessNoticeService, FreshnessReinvokeDecider, FreshnessClosureAggregate, FreshnessSupplementAggregate, FreshnessSupplementStateMachine, FreshnessClosureStore, FreshnessClosureLegacyMigrationState, MigrateLegacyFreshnessClosureInput, legacy_migrated, FreshnessOutputCommitCoordinator, FreshnessRelevancePolicy, same_user_wave_sibling_reply, coveredTriggerMessageIds, causal, triggerMessageId, freshnessClosureId, freshnessSupplementId, seenCursor]
 cited_by:
+  - {feature: issue-1371-typed-wait, date: 2026-09-12, delta: authenticated typed-wait registration installs a private exact-source receipt in the same Task generation CAS; primary and adopted consumers resolve independently and Queue atomically revalidates active authority}
+  - {feature: issue-1371-parallel-cursor, date: 2026-09-06, delta: per-target output carries an immutable canonical delivery boundary; cold recovery reuses the existing DeliveryCursorStore and loaded visibility window; legacy navigation verifies one exact terminal child without advancing a prefix}
   - {feature: F167-hold-rescue-authorization, date: 2026-08-18, delta: verified trigger principal, exact-thread collaborator, and configured operator become distinct hold access roles; collaborators retain rescue cancel but receive only a safe lifecycle summary, while exact task deletion and actor/owner audit commit atomically through the existing scheduler store}
   - {feature: F295, date: 2026-08-13, delta: active managed-command receipts are projected as cancelable executions without becoming a new lifecycle ledger; DELETE is fenced by exact taskId so an old hold bubble cannot cancel its replacement}
   - {feature: F280-Gate-5, date: 2026-08-12, delta: explicit retry reads the stored wait carrier for UX preflight, then atomically compares the raw Task/action-lease witness and Message custody revisions in the same commit that appends the attempt; stale witnesses and legacy unattributed agent work fail closed}
@@ -107,6 +121,15 @@ cited_by:
 # Ball Custody Engine
 
 Architecture cell: ball-custody
+
+## Typed registration to Queue continuation
+
+F280 的注册 producer 在 canonical Task hash 内，与 await generation 原子安装私有
+`TypedWaitRegistration`。注册入口快照既有 source/adoption，receipt 绑定当前 invocation、
+精确通知及等待身份；公开 AwaitState 不含这些消费权限。带锚审阅仍经过原 coverage 验证。
+F167 primary/adopted 对各自 source 独立查证，F233/F254 的 Queue 回执在原有原子提交中
+复验 Task/receipt/generation/expiry。已经匹配、过期或换代的等待不再授予 active continuation；
+已成功的历史回执可重放。私有字段随 Task 生命周期保存，不增加线程级权限布尔值或独立账本。
 
 ## Canonical Owner
 

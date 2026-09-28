@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -45,6 +46,78 @@ test('runtime composition registers the official Connector as a Host builtin and
   const disabled = await runtime.lifecycle.disable(installed.pluginInstanceId, enabled.lifecycleRevision);
   assert.equal(disabled.runtimeState, 'stopped');
   assert.equal(runtime.collectiveConnectorRuntime?.connector(), undefined);
+
+  const contributionRoot = join(projectRoot, 'contribution-package');
+  await mkdir(join(contributionRoot, 'dist'), { recursive: true });
+  await writeFile(join(contributionRoot, 'dist/entrypoint.js'), '// contribution fixture\n');
+  let contributionStarts = 0;
+  let contributionCloses = 0;
+  runtime.registerBuiltinContributions({
+    materializer: {
+      resolve: async () => ({
+        rootDir: contributionRoot,
+        verifyIntegrity: async () => {},
+        release: async () => {},
+      }),
+    },
+    configuration: {
+      readConfig: async () => undefined,
+      readSecret: async () => undefined,
+    },
+    runtime: {
+      start: async () => {
+        contributionStarts += 1;
+        return {
+          tools: [],
+          callTool: async () => ({}),
+          close: async () => {
+            contributionCloses += 1;
+          },
+        };
+      },
+    },
+  });
+  const contributionManifest = {
+    pluginId: 'dev.clowder.test-contribution',
+    version: '0.1.0',
+    contractVersion: '0.1.0',
+    name: 'Test contribution',
+    features: [
+      {
+        id: 'tools',
+        name: 'Tools',
+        resources: [],
+        contributions: [{ type: 'mcp', id: 'fixture-tools' }],
+        capabilities: [],
+      },
+    ],
+    contributions: [
+      {
+        type: 'mcp',
+        id: 'fixture-tools',
+        runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
+      },
+    ],
+    runtime: { transport: 'builtin' },
+  };
+  const contributionDigest = `sha512-${createHash('sha512').update('contribution').digest('base64')}`;
+  const contributionInstalled = await runtime.inventory.installPackage({
+    manifest: contributionManifest,
+    computedPackageDigest: contributionDigest,
+    expectedPackageDigest: contributionDigest,
+    packagePluginId: contributionManifest.pluginId,
+    effectiveGrants: [],
+    signalSchemas: {},
+  });
+  const contributionPrepared = await runtime.lifecycle.prepare(contributionInstalled.pluginInstanceId, 1);
+  const contributionEnabled = await runtime.lifecycle.enable(
+    contributionInstalled.pluginInstanceId,
+    contributionPrepared.lifecycleRevision,
+  );
+  assert.equal(contributionEnabled.runtimeState, 'healthy');
+  assert.equal(contributionStarts, 1);
+  await runtime.lifecycle.disable(contributionInstalled.pluginInstanceId, contributionEnabled.lifecycleRevision);
+  assert.equal(contributionCloses, 1);
   await runtime.shutdown();
 });
 

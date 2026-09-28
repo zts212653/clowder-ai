@@ -3,6 +3,7 @@ import {
   type CodexAppServerJsonObject,
   respondToCodexAppServerRequest,
 } from './CodexAppServerEventMapper.js';
+import { createCodexMcpCapabilityCorrelation } from './CodexMcpCapabilityCorrelation.js';
 import {
   type CodexRuntimeInteractionContext,
   isCodexApprovalInteractionMethod,
@@ -15,6 +16,7 @@ export type CodexRuntimeInteractionCloseReason = 'provider_cancelled' | 'transpo
 
 export interface CodexRuntimeInteractionRunState {
   bindProviderTurn(binding: { threadId: string; turnId: string }): void;
+  observe(envelope: CodexAppServerJsonObject): void;
   close(reasonCode: CodexRuntimeInteractionCloseReason): void;
   dispatch(
     request: CodexAppServerJsonObject,
@@ -31,11 +33,13 @@ export function createCodexRuntimeInteractionRunState(
   const controller = new AbortController();
   let closed = false;
   let providerTurn: { threadId: string; turnId: string } | null = null;
+  const capabilityCorrelation = createCodexMcpCapabilityCorrelation();
   const context: CodexRuntimeInteractionContext = { ...input, signal: controller.signal };
 
   const close = (reasonCode: CodexRuntimeInteractionCloseReason): void => {
     if (closed) return;
     closed = true;
+    capabilityCorrelation.close();
     controller.abort(reasonCode);
     void input.port.invalidateInvocation?.(input.owner.invocationId, reasonCode).catch(() => {});
   };
@@ -43,7 +47,9 @@ export function createCodexRuntimeInteractionRunState(
   return {
     bindProviderTurn: (binding) => {
       providerTurn = binding;
+      capabilityCorrelation.bindProviderTurn(binding);
     },
+    observe: (envelope) => capabilityCorrelation.observe(envelope),
     close,
     dispatch: (request, write, onFailure) => {
       const task = (async () => {
@@ -65,7 +71,7 @@ export function createCodexRuntimeInteractionRunState(
           if (response && !closed) await write(response);
           return;
         }
-        const adapted = await respondToCodexRuntimeInteraction(request, context);
+        const adapted = await respondToCodexRuntimeInteraction(request, context, capabilityCorrelation);
         const response = adapted ?? respondToCodexAppServerRequest(request);
         if (!response || closed) return;
         await write(response);

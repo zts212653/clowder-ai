@@ -12,6 +12,7 @@ import { resolveBoundAccountRefForCat } from '../../../../../../config/cat-accou
 import type { AcpVariantConfig } from '../../../../../../config/cat-config-loader.js';
 import { resolveContextCapacity } from '../../../../../../config/context-capacity.js';
 import { resolveEffectiveOpenCodeModel } from '../../../../../../config/opencode-model.js';
+import type { AgentRegistrationFailure } from '../../registry/AgentServiceUnavailableError.js';
 import { prepareOpenCodeAcpSpawnConfig } from '../opencode-acp-spawn-config.js';
 import { AcpAgentService } from './AcpAgentService.js';
 import { AcpClient } from './AcpClient.js';
@@ -21,6 +22,7 @@ import { resolveAcpBootstrapArgs, resolveAcpBootstrapCommand, resolveAcpBootstra
 // resolveAcpMcpServers + resolveDisabledServerIds moved to AcpAgentService.invoke()
 // for invoke-time resolution (#712 P1-1).
 import { createAcpPoolSpawnSignature } from './acp-pool-signature.js';
+import { skipAcpProfile } from './acp-registration-failure.js';
 import { tryPrepareAcpProcessEnv } from './acp-spawn-env.js';
 
 export type AcpPoolRegistry = Map<string, AcpProcessPool>;
@@ -34,6 +36,8 @@ export interface CreateAcpServiceForConfigInput {
   acpConfig: AcpVariantConfig;
   poolRegistry: AcpPoolRegistry;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+  /** Carry a safe registration failure to the router while leaving this service absent. */
+  onUnavailable?: (reason: AgentRegistrationFailure) => void;
 }
 
 interface AcpBootstrapContext {
@@ -79,34 +83,6 @@ function resolveAcpContextPolicy(config: CatConfig, effectiveModel: string): Acp
     inputCeilingTokens: resolved ? capacity.inputCeilingTokens : null,
     source: capacity.source,
   };
-}
-
-async function closeAcpPoolForProfile(
-  poolRegistry: AcpPoolRegistry,
-  profileId: string,
-  reason: string,
-  log: Pick<FastifyBaseLogger, 'warn'>,
-): Promise<void> {
-  const existingPool = poolRegistry.get(profileId);
-  if (!existingPool) return;
-  try {
-    await existingPool.closeAll();
-  } catch (err) {
-    log.warn({ err, profileId, reason }, 'ACP registry sync failed to close skipped member pool');
-  } finally {
-    poolRegistry.delete(profileId);
-  }
-}
-
-async function skipAcpProfile(
-  input: CreateAcpServiceForConfigInput,
-  reason: string,
-  logPayload: Record<string, unknown>,
-  message: string,
-): Promise<null> {
-  input.log.warn(logPayload, message);
-  await closeAcpPoolForProfile(input.poolRegistry, input.profileId, reason, input.log);
-  return null;
 }
 
 function resolveAcpBootstrap(
@@ -299,6 +275,7 @@ export async function createAcpServiceForConfig(
       'rejected-account-binding',
       { catId, profileId, reason: error.message },
       'ACP registry sync skipped member because its account could not be adjudicated',
+      error.message,
     );
   }
   if (accountContext.accountRef && !accountContext.account) {

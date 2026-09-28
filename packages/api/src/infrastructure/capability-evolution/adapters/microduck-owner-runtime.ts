@@ -1,3 +1,12 @@
+import type {
+  EvolutionAssetReviewRequestV1,
+  EvolutionAssetReviewV1,
+  EvolutionPreparationMediaRequestV1,
+  EvolutionPreparationReviewRequestV1,
+  EvolutionPreparationReviewV1,
+} from '@cat-cafe/shared';
+import { unavailableExploration } from '../read-model/program-exploration.js';
+import type { MicroduckExplorationBindings } from './microduck-exploration/publication.js';
 import { createMicroduckOwnerAdapter } from './microduck-owner-adapter.js';
 import type {
   MicroduckApprovalResolver,
@@ -6,10 +15,16 @@ import type {
   MicroduckOwnerPort,
   MicroduckProposalResolver,
 } from './microduck-owner-contract.js';
+import type { MicroduckPreparationMediaAsset } from './microduck-preparation/football-publication.js';
 
-export interface MicroduckOwnerRuntimeBindings {
+export interface MicroduckOwnerRuntimeBindings extends Partial<MicroduckExplorationBindings> {
   owner: MicroduckOwnerPort;
   credentialBoundary: MicroduckCredentialBoundary;
+  versionReview?: (input: EvolutionAssetReviewRequestV1) => Promise<EvolutionAssetReviewV1>;
+  preparationReview?: (input: EvolutionPreparationReviewRequestV1) => Promise<EvolutionPreparationReviewV1>;
+  preparationMedia?: (
+    input: EvolutionPreparationMediaRequestV1,
+  ) => Promise<MicroduckPreparationMediaAsset | MicroduckBlocked>;
 }
 
 /**
@@ -122,5 +137,63 @@ export function createMicroduckRuntimeAdapter(options: MicroduckRuntimeAdapterOp
       return { status: 'blocked', code: 'approval_missing' };
     },
   };
-  return createMicroduckOwnerAdapter({ owner, credentialBoundary, approvalResolver, proposalResolver });
+  const versionReview = async (input: EvolutionAssetReviewRequestV1): Promise<EvolutionAssetReviewV1> => {
+    const unavailable = (): EvolutionAssetReviewV1 => ({
+      schemaVersion: 1,
+      status: 'unavailable',
+      programRef: input.programRef,
+      objectRef: input.objectRef,
+      blockers: [{ code: 'owner_version_review_unavailable', ownerRef: input.objectRef }],
+    });
+    const result = await guardedOwnerCall(
+      registration,
+      async (bindings) => (bindings.versionReview ? bindings.versionReview(input) : unavailable()),
+      'owner_route_unavailable',
+    );
+    return result.status === 'blocked' ? unavailable() : result;
+  };
+  const preparationReview = async (
+    input: EvolutionPreparationReviewRequestV1,
+  ): Promise<EvolutionPreparationReviewV1> => {
+    const unavailable = (): EvolutionPreparationReviewV1 => ({
+      schemaVersion: 1,
+      status: 'unavailable',
+      programRef: input.programRef,
+      objectRef: input.objectRef,
+      blockers: [{ code: 'owner_preparation_reader_missing', ownerRef: input.objectRef }],
+    });
+    const result = await guardedOwnerCall(
+      registration,
+      async (bindings) => (bindings.preparationReview ? bindings.preparationReview(input) : unavailable()),
+      'owner_route_unavailable',
+    );
+    return result.status === 'blocked' ? unavailable() : result;
+  };
+  const preparationMedia = async (input: EvolutionPreparationMediaRequestV1) =>
+    guardedOwnerCall(
+      registration,
+      async (bindings) =>
+        bindings.preparationMedia
+          ? bindings.preparationMedia(input)
+          : ({ status: 'blocked', code: 'preparation_media_unavailable' } as const),
+      'preparation_media_unavailable',
+    );
+  return createMicroduckOwnerAdapter({
+    owner,
+    credentialBoundary,
+    approvalResolver,
+    proposalResolver,
+    versionReview,
+    preparationReview,
+    preparationMedia,
+    explorationReview: async (input) => {
+      const read = registration.snapshot()?.explorationReview;
+      return read ? read(input) : unavailableExploration(input, 'owner_exploration_unavailable');
+    },
+    explorationMedia: async (input) =>
+      registration.snapshot()?.explorationMedia?.(input) ?? {
+        status: 'unavailable',
+        reason: '公开归档原件读取器尚未连接。',
+      },
+  });
 }

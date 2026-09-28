@@ -1,6 +1,6 @@
 import type { CollectiveEventEnvelope } from '@cat-cafe/shared';
-
 import type { HumanAuthAttemptRecord, HumanAuthBindingRecord, HumanAuthCompletionRecord } from './human-auth-state.js';
+import type { ParticipationRecord } from './participation-store.js';
 
 export interface HumanRecord {
   readonly humanId: string;
@@ -86,6 +86,7 @@ export interface ServiceState {
   readonly pairingIntents: Record<string, PairingIntentRecord>;
   readonly connections: Record<string, ConnectionRecord>;
   readonly events: Record<string, CollectiveEventEnvelope[]>;
+  readonly participations: Record<string, ParticipationRecord>;
   readonly legacyEvents: Record<string, unknown[]>;
   readonly clientEventIndex: Record<string, string>;
 }

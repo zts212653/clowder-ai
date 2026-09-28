@@ -11,6 +11,7 @@ import {
 } from './f311-e0-eval-repair-owner-binding.js';
 
 const PROGRAM_ID = 'evolution-program:bcc336788a7df9d6075b1efb4c0a7e68';
+const TARGET_STATE_REF = 'capability:f311-investor-roadshow-expression';
 
 interface F311ProgramSnapshot {
   program: {
@@ -196,6 +197,15 @@ export function createF311E0EvalRepairOwnerBindingProvider(
   options: F311E0EvalRepairOwnerProviderOptions,
 ): EvalRepairOwnerRuntimeBindingProvider {
   return {
+    route: {
+      schemaVersion: 1,
+      providerId: 'f311-e0-eval-repair-owner-v1',
+      programRefs: [{ ownerFeatureId: 'F311', ownerStateRef: PROGRAM_ID }],
+      repairTargetRefs: [{ ownerFeatureId: 'F311', ownerStateRef: TARGET_STATE_REF, match: 'exact' }],
+      assetVersionRefs: [{ ownerFeatureId: 'F311', ownerStateRef: TARGET_STATE_REF, match: 'exact' }],
+      interventionReceiptRefs: [],
+      freshOutcomeReceiptRefs: [],
+    },
     async resolve() {
       const binding = await loadF311E0EvalRepairOwnerBinding(options.repoRoot);
       return createBindings(binding, options);

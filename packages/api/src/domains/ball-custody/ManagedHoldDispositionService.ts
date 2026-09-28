@@ -10,9 +10,19 @@ import {
   type ManagedHoldDisposition,
 } from './ball-custody-events.js';
 import { ManagedHoldReceiptError, type ManagedHoldReceiptService } from './ManagedHoldReceiptService.js';
+import {
+  type ManagedHoldDispositionAuth,
+  ManagedHoldDispositionError,
+  type ManagedHoldGuidance,
+  selectManagedHoldSource,
+} from './ManagedHoldSourceSelection.js';
 import type { ManagedCommandWakeDynamicTaskStore } from './managed-command-wake-lifecycle.js';
 import { parseManagedCommandWakeTask } from './managed-command-wake-lifecycle.js';
 import { classifyManagedHoldWake, findWakeTerminal } from './managed-hold-supersession.js';
+import { ManagedHoldHeartbeatConflict, recordManagedHoldDisposition } from './record-managed-hold-disposition.js';
+import { turnCustodyAdoptionRegistry } from './TurnCustodyAdoptionRegistry.js';
+
+export { ManagedHoldDispositionError } from './ManagedHoldSourceSelection.js';
 
 export interface ManagedHoldDispositionResult {
   readonly outcome: 'applied' | 'replayed';
@@ -22,13 +32,6 @@ export interface ManagedHoldDispositionResult {
   readonly taskId: string;
   /** The wake reached a terminal but was no longer the subject's live wake. */
   readonly retired: boolean;
-}
-
-export class ManagedHoldDispositionError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = 'ManagedHoldDispositionError';
-  }
 }
 
 interface ManagedHoldDispositionDeps {
@@ -41,15 +44,7 @@ interface ManagedHoldDispositionDeps {
   readonly receiptService: Pick<ManagedHoldReceiptService, 'complete'>;
   readonly repairProjection?: (subjectKey: string) => Promise<void>;
   readonly now?: () => number;
-}
-
-type ManagedHoldDispositionAuth = Pick<
-  InvocationRecord,
-  'invocationId' | 'userId' | 'catId' | 'threadId' | 'originTriggerMessageId'
->;
-
-function stringMeta(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
+  readonly log?: { warn(fields: Record<string, unknown>, message: string): void };
 }
 
 /** Invocation-bound terminal producer for an exact managed hold wake. */
@@ -64,8 +59,38 @@ export class ManagedHoldDispositionService {
     auth: ManagedHoldDispositionAuth,
     disposition: ManagedHoldDisposition,
   ): Promise<ManagedHoldDispositionResult> {
-    await this.assertLatestInvocation(auth.invocationId);
-    const { sourceMessageId, taskId } = await this.resolveSource(auth);
+    const adopted = turnCustodyAdoptionRegistry.snapshot(auth.invocationId);
+    let boundSource: ManagedHoldGuidance['candidates'][number] | undefined;
+    const attempt = async () => {
+      await this.assertLatestInvocation(auth.invocationId);
+      const selection = await selectManagedHoldSource(this.deps, auth, adopted, this.now());
+      const source = selection.state === 'single_canonical_pending' ? selection.candidates[0] : undefined;
+      if (!source) throw new ManagedHoldDispositionError(`managed_hold_disposition_${selection.state}`);
+      if (
+        boundSource &&
+        (source.sourceMessageId !== boundSource.sourceMessageId || source.taskId !== boundSource.taskId)
+      ) {
+        throw new ManagedHoldDispositionError('managed_hold_disposition_source_mismatch');
+      }
+      boundSource = source;
+      return this.completeSource(auth, disposition, source);
+    };
+    try {
+      return await attempt();
+    } catch (error) {
+      // Only a proven heartbeat-only conflict earns one fresh authority check.
+      // A second conflict propagates; retries cannot select another obligation.
+      if (!(error instanceof ManagedHoldHeartbeatConflict)) throw error;
+      return attempt();
+    }
+  }
+
+  private async completeSource(
+    auth: ManagedHoldDispositionAuth,
+    disposition: ManagedHoldDisposition,
+    selected: ManagedHoldGuidance['candidates'][number],
+  ): Promise<ManagedHoldDispositionResult> {
+    const { sourceMessageId, taskId } = selected;
     // Identity stays fail-closed exactly as before; the command state no longer
     // routes anything, so this is now a pure assertion.
     this.assertCarrierIdentity(auth, sourceMessageId, taskId);
@@ -121,15 +146,20 @@ export class ManagedHoldDispositionService {
     // ball. Any disposition that DOES advance the subject still must.
     if (!retired) await this.assertCurrentHolder(subjectKey, auth.catId);
 
-    await this.recordDisposition(
-      auth,
-      sourceMessageId,
-      taskId,
-      disposition,
-      subjectKey,
-      eventSourceId,
+    await this.assertLatestInvocation(auth.invocationId);
+    await recordManagedHoldDisposition(
+      this.deps,
+      buildHoldDispositionEvent({
+        threadId: auth.threadId,
+        catId: auth.catId,
+        invocationId: auth.invocationId,
+        sourceMessageId,
+        taskId,
+        disposition,
+        retired,
+        at: this.now(),
+      }),
       events.length,
-      retired,
     );
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
@@ -148,25 +178,10 @@ export class ManagedHoldDispositionService {
     }
   }
 
-  private async resolveSource(auth: ManagedHoldDispositionAuth): Promise<{ sourceMessageId: string; taskId: string }> {
-    const sourceMessageId = auth.originTriggerMessageId;
-    if (!sourceMessageId) throw new ManagedHoldDispositionError('managed_hold_disposition_source_missing');
-
-    const source = await this.deps.messageStore.getById(sourceMessageId);
-    const meta = source?.source?.meta;
-    const taskId = stringMeta(meta?.taskId);
-    if (
-      !source ||
-      source.source?.connector !== 'hold-ball' ||
-      meta?.wakeWhen !== true ||
-      !taskId ||
-      source.threadId !== auth.threadId ||
-      meta?.threadId !== auth.threadId ||
-      meta?.catId !== auth.catId
-    ) {
-      throw new ManagedHoldDispositionError('managed_hold_disposition_source_mismatch');
-    }
-    return { sourceMessageId, taskId };
+  async describe(auth: ManagedHoldDispositionAuth) {
+    const adopted = turnCustodyAdoptionRegistry.snapshot(auth.invocationId);
+    await this.assertLatestInvocation(auth.invocationId);
+    return selectManagedHoldSource(this.deps, auth, adopted, this.now());
   }
 
   /**
@@ -255,42 +270,6 @@ export class ManagedHoldDispositionService {
       event.payload.taskId !== taskId
     ) {
       throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
-    }
-  }
-
-  private async recordDisposition(
-    auth: ManagedHoldDispositionAuth,
-    sourceMessageId: string,
-    taskId: string,
-    disposition: ManagedHoldDisposition,
-    subjectKey: string,
-    eventSourceId: string,
-    expectedSequence: number,
-    retired: boolean,
-  ): Promise<void> {
-    try {
-      const result = await this.deps.ballCustody.recordFenced(
-        buildHoldDispositionEvent({
-          threadId: auth.threadId,
-          catId: auth.catId,
-          invocationId: auth.invocationId,
-          sourceMessageId,
-          taskId,
-          disposition,
-          retired,
-          at: this.now(),
-        }),
-        expectedSequence,
-      );
-      if (result.outcome === 'conflict') {
-        throw new ManagedHoldDispositionError('managed_hold_disposition_fence_conflict');
-      }
-    } catch (error) {
-      const appended = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
-        (event) => event.sourceEventId === eventSourceId,
-      );
-      if (!appended || !this.deps.repairProjection) throw error;
-      await this.deps.repairProjection(subjectKey);
     }
   }
 

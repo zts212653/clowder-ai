@@ -18,6 +18,9 @@ vi.mock('@/utils/api-client', () => ({
 vi.mock('../BindNewSessionSection', () => ({
   BindNewSessionSection: () => null,
 }));
+vi.mock('../CloudConversationLink', () => ({
+  CloudConversationLink: () => null,
+}));
 vi.mock('../ContextHealthBar', () => ({
   ContextHealthBar: () => null,
 }));

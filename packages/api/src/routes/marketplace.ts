@@ -19,7 +19,7 @@ export const marketplaceRoutes: FastifyPluginAsync<MarketplaceRouteOptions> = as
       limit?: string;
     };
 
-    const results = await registry.search({
+    const page = await registry.searchDetailed({
       query: q ?? '',
       ecosystems: ecosystems?.split(',') as MarketplaceEcosystem[] | undefined,
       trustLevels: trustLevels?.split(',') as TrustLevel[] | undefined,
@@ -27,7 +27,7 @@ export const marketplaceRoutes: FastifyPluginAsync<MarketplaceRouteOptions> = as
       limit: limit ? Number.parseInt(limit, 10) : undefined,
     });
 
-    return { results };
+    return page;
   });
 
   fastify.post('/api/marketplace/install/plan', async (request, reply) => {

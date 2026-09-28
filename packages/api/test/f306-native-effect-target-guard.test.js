@@ -34,6 +34,20 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     );
     assert.equal(decideNativeEffect(candidate('delete', 'ordinary', '/tmp/disposable')).decision, 'allow');
     assert.equal(decideNativeEffect(candidate('unknown', 'ordinary', '/tmp/opaque')).decision, 'allow');
+
+    const remoteMerge = decideNativeEffect(
+      candidate('remote_mutation', 'remote_repository', 'github://zts212653/cat-cafe/pull/4368'),
+    );
+    assert.equal(remoteMerge.decision, 'allow');
+    assert.equal(remoteMerge.reasonCode, 'remote_repository_policy_deferred');
+    assert.equal(
+      decideNativeEffect(candidate('remote_mutation', 'runtime_sanctuary', '/runtime/unresolved')).decision,
+      'deny',
+    );
+    assert.equal(
+      decideNativeEffect(candidate('unknown', 'remote_repository', 'github://current/pull/4368')).decision,
+      'deny',
+    );
   });
 
   test('adapts Codex Bash and apply_patch at the actual provider boundary', async () => {

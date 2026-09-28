@@ -24,6 +24,7 @@ const respondBodySchema = z
     response: z.unknown(),
   })
   .strict();
+const rejectBodySchema = z.object({ cardRef: cardRefSchema }).strict();
 
 export const runtimeInteractionRoutes: FastifyPluginAsync<RuntimeInteractionRoutesOptions> = async (app, options) => {
   app.get('/api/runtime-interactions/:interactionId', async (request, reply) => {
@@ -63,6 +64,30 @@ export const runtimeInteractionRoutes: FastifyPluginAsync<RuntimeInteractionRout
         ownerUserId,
         cardRef: body.data.cardRef,
         response: body.data.response,
+      });
+      return { interaction };
+    } catch (error) {
+      return mapInteractionError(error, reply);
+    }
+  });
+
+  app.post('/api/runtime-interactions/:interactionId/reject', async (request, reply) => {
+    const ownerUserId = resolveStrictUserId(request);
+    if (!ownerUserId) {
+      reply.status(401);
+      return { error: 'Authenticated owner session required' };
+    }
+    const params = paramsSchema.safeParse(request.params);
+    const body = rejectBodySchema.safeParse(request.body);
+    if (!params.success || !body.success) {
+      reply.status(400);
+      return { error: 'Invalid runtime interaction rejection' };
+    }
+    try {
+      const interaction = await options.service.reject({
+        interactionId: params.data.interactionId,
+        ownerUserId,
+        cardRef: body.data.cardRef,
       });
       return { interaction };
     } catch (error) {

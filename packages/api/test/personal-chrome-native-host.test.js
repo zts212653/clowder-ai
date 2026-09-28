@@ -49,7 +49,7 @@ async function createNativeHostBridge(options) {
               ...message,
               observedRevisions: {
                 helper: helperArtifactRevision,
-                extension: '0.2.10',
+                extension: '0.2.11',
                 pageAdapter: '2026-09-02.1',
               },
             }
@@ -115,7 +115,7 @@ function appendRequest(overrides = {}) {
     idempotencyKey: 'source-message-9',
     expectedRevisions: {
       helper: helperArtifactRevision,
-      extension: '0.2.10',
+      extension: '0.2.11',
       pageAdapter: '2026-09-02.1',
     },
     ...overrides,
@@ -293,7 +293,7 @@ describe('personal Chrome native host bridge', () => {
       conversationId: 'conversation-7',
       expectedRevisions: {
         helper: helperArtifactRevision,
-        extension: '0.2.10',
+        extension: '0.2.11',
         pageAdapter: '2026-09-02.1',
       },
     });
@@ -1521,7 +1521,7 @@ describe('native host install plan', () => {
         );
         const expectedRevisions = {
           helper: plan.artifactDigest,
-          extension: '0.2.10',
+          extension: '0.2.11',
           pageAdapter: '2026-09-02.1',
         };
         const outboundPromise = readOneNativeMessage(child.stdout);

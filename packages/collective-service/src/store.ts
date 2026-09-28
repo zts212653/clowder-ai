@@ -5,6 +5,7 @@ import { CollectiveConnectionEventStore, type PairingExchangeInput } from './con
 import { CollectiveServiceError } from './errors.js';
 import type { HumanAuthProvider, HumanAuthProviderId } from './human-auth-provider.js';
 import { CollectiveIdentityStore } from './identity-store.js';
+import { CollectiveParticipationStore } from './participation-store.js';
 import {
   createSecret,
   createStableId,
@@ -30,6 +31,7 @@ export interface OpenedCollectiveServiceStore {
 export class CollectiveServiceStore {
   readonly #identity: CollectiveIdentityStore;
   readonly #connections: CollectiveConnectionEventStore;
+  readonly #participation: CollectiveParticipationStore;
 
   private constructor(
     private readonly persistence: PersistentServiceState,
@@ -39,6 +41,7 @@ export class CollectiveServiceStore {
   ) {
     this.#identity = new CollectiveIdentityStore(persistence, now, humanAuthProvider, humanAuthRedirectUri);
     this.#connections = new CollectiveConnectionEventStore(persistence, now);
+    this.#participation = new CollectiveParticipationStore(persistence, now);
   }
 
   static async open(options: OpenCollectiveServiceStoreOptions): Promise<OpenedCollectiveServiceStore> {
@@ -80,6 +83,7 @@ export class CollectiveServiceStore {
         pairingIntents: {},
         connections: {},
         events: {},
+        participations: {},
         legacyEvents: {},
         clientEventIndex: {},
       };
@@ -207,6 +211,19 @@ export class CollectiveServiceStore {
 
   getConnectionProjection(connectionId: string) {
     return this.#connections.getConnectionProjection(connectionId);
+  }
+
+  publishParticipation(endpointCredential: string, input: unknown) {
+    return this.#participation.publish(endpointCredential, input);
+  }
+  readParticipationDeclaration(endpointCredential: string, input: unknown) {
+    return this.#participation.readDeclaration(endpointCredential, input);
+  }
+  listParticipants(sessionToken: string, collectiveId: string) {
+    return this.#participation.list(sessionToken, collectiveId);
+  }
+  readParticipationContext(endpointCredential: string, input: unknown) {
+    return this.#participation.readContext(endpointCredential, input);
   }
 }
 

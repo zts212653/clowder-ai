@@ -37,7 +37,13 @@ test('a visibility acknowledgement at the wait boundary never triggers a closing
     url() {
       return 'http://example.test/thread/f307';
     },
-    locator() {
+    locator(selector) {
+      if (selector === '[data-testid="workspace-panel-toggle"][data-client-interactive="true"]') {
+        return {
+          async waitFor() {},
+        };
+      }
+      assert.equal(selector, 'body');
       return {
         async innerText() {
           return 'fixture';

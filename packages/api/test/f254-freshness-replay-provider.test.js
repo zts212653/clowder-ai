@@ -125,6 +125,7 @@ describe('F254 AC-E9 freshness replay provider', () => {
   });
 
   it('applies the same thread selector to provider-native coverage events', async () => {
+    let requestedThreadIds;
     const event = (threadId) => ({
       kind: 'provider_notice_opportunity',
       threadId,
@@ -142,16 +143,147 @@ describe('F254 AC-E9 freshness replay provider', () => {
     const provider = new FreshnessReplayProviderImpl({
       store: new InMemoryFreshnessClosureStore(),
       fixtureRoot,
-      providerNativeEventLog: {
-        async queryProviderNativeBetween() {
-          return [event('thread-included'), event('thread-excluded')];
+      queueLifecycleSource: {
+        async listOwnerQueueCustodyLifecycles() {
+          return [];
+        },
+      },
+      attentionEventLog: {
+        async queryWindowBetween(_startMs, _endMs, _ownerUserId, options) {
+          requestedThreadIds = options.threadIds;
+          return {
+            events: [event('thread-included'), event('thread-excluded')],
+            coverage: { status: 'complete', completeFromMs: 1_000, observedThroughMs: 2_000 },
+          };
         },
       },
     });
 
-    const replay = await provider.resolve(selector({ threadIds: ['thread-included'] }));
+    const replay = await provider.resolve(selector({ threadIds: ['thread-included'] }), { ownerUserId: 'user-1' });
     assert.equal(replay.providerNativeCoverage.cells.length, 1);
     assert.equal(replay.providerNativeCoverage.cells[0].opportunityCount, 1);
+    assert.deepEqual(requestedThreadIds, ['thread-included']);
+  });
+
+  it('publishes a mature owner-scoped signal plane even when legacy closures are empty', async () => {
+    const store = new InMemoryFreshnessClosureStore();
+    const offered = await store.offerSupplement({
+      lineageId: 'message-original',
+      originalMessageId: 'message-original',
+      userId: 'user-1',
+      threadId: 'thread-live',
+      catId: 'codex-sol',
+      requiredMessageIds: ['message-update'],
+      requiredFrontierMessageId: 'message-update',
+      replayUnsafeToolNames: [],
+      now: 1_100,
+    });
+    await store.claimSupplement(offered.supplement.id, { invocationId: 'inv-supplement', now: 1_200 });
+    const queueRecord = {
+      messageId: 'message-queue',
+      threadId: 'thread-live',
+      userId: 'user-1',
+      custody: {
+        version: 1,
+        entryId: 'entry-queue',
+        revision: 2,
+        ownerUserId: 'user-1',
+        intent: 'respond',
+        status: 'processing',
+        allTargetCats: ['codex-sol'],
+        pendingTargetCats: ['codex-sol'],
+        notifiedByCatIds: ['codex-sol'],
+        seenByCatIds: ['codex-sol'],
+        seenInvocationIdByCatId: { 'codex-sol': 'inv-queue' },
+        bodyExposures: [{ targetCatId: 'codex-sol', invocationId: 'inv-queue', seenAt: 1_250 }],
+        failedByCatIds: [],
+        handledByCatIds: [],
+        priority: 'normal',
+        createdAt: 1_050,
+        updatedAt: 1_250,
+      },
+    };
+    const provider = new FreshnessReplayProviderImpl({
+      store,
+      fixtureRoot,
+      queueLifecycleSource: {
+        async listOwnerQueueCustodyLifecycles() {
+          return [
+            queueRecord,
+            {
+              ...queueRecord,
+              messageId: 'message-other-owner',
+              userId: 'user-2',
+              custody: { ...queueRecord.custody, entryId: 'entry-other-owner', ownerUserId: 'user-2' },
+            },
+          ];
+        },
+      },
+      attentionEventLog: {
+        async queryWindowBetween() {
+          return {
+            events: [
+              {
+                kind: 'held_decision',
+                threadId: 'thread-live',
+                catId: 'codex-sol',
+                invocationId: 'inv-queue',
+                timestamp: 1_300,
+                toolName: 'cat_cafe_post_message',
+                unseenCount: 1,
+                reason: 'queued_messages_pending',
+              },
+            ],
+            coverage: { status: 'complete', completeFromMs: 1_000, observedThroughMs: 2_000 },
+          };
+        },
+      },
+    });
+
+    const replay = await provider.resolve(selector(), { ownerUserId: 'user-1' });
+
+    assert.equal(replay.report.liveSampleCount, 0);
+    assert.equal(replay.report.verdict, 'no_data');
+    assert.equal(replay.samples.length, 8);
+    assert.equal(replay.measurementMaturity.status, 'ready');
+    assert.equal(replay.windowedSignals.queue.entryTargetCount, 1);
+    assert.equal(replay.windowedSignals.queue.admittedCount, 1);
+    assert.equal(replay.windowedSignals.queue.seenCount, 1);
+    assert.equal(replay.windowedSignals.queue.seenUnhandledAtWindowEndCount, 1);
+    assert.equal(replay.windowedSignals.supplements.offeredCount, 1);
+    assert.equal(replay.windowedSignals.supplements.claimedCount, 1);
+    assert.equal(replay.windowedSignals.attention.counts.held_decision, 1);
+    assert.ok(replay.windowedSignals.observedActivityCount > 0);
+  });
+
+  it('marks a window immature when the attention index cannot prove full coverage', async () => {
+    const provider = new FreshnessReplayProviderImpl({
+      store: new InMemoryFreshnessClosureStore(),
+      fixtureRoot,
+      queueLifecycleSource: {
+        async listOwnerQueueCustodyLifecycles() {
+          return [];
+        },
+      },
+      attentionEventLog: {
+        async queryWindowBetween() {
+          return {
+            events: [],
+            coverage: {
+              status: 'incomplete',
+              completeFromMs: 1_500,
+              observedThroughMs: 2_000,
+              reason: 'window_starts_before_coverage',
+            },
+          };
+        },
+      },
+    });
+
+    const replay = await provider.resolve(selector(), { ownerUserId: 'user-1' });
+
+    assert.equal(replay.measurementMaturity.status, 'blocked');
+    assert.deepEqual(replay.measurementMaturity.reasons, ['attention_events:window_starts_before_coverage']);
   });
 
   it('derives duplicate-final and stale-custody violations from durable live attempts', async () => {

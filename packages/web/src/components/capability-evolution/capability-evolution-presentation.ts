@@ -1,40 +1,13 @@
 import {
-  type EvolutionCycleV1,
   type EvolutionProgramLifecycle,
+  type EvolutionProgramOriginV1,
   type EvolutionProgramStage,
   type EvolutionProgramV1,
-  evolutionProgramStateV1Schema,
-  type OwnerTruthRefV1,
+  evolutionProgramTitle,
 } from '@cat-cafe/shared';
-
-export interface EvolutionProgramPresentationProjection {
-  program: EvolutionProgramV1;
-  cycles: EvolutionCycleV1[];
-  blockers: Array<{
-    code: string;
-    message: string;
-    ownerFeatureId: string;
-    ownerStateRef?: string;
-  }>;
-  nextAction: {
-    code: string;
-    label: string;
-  };
-}
-
-const LEGACY_WORDS: Record<string, string> = {
-  ability: '能力',
-  capability: '能力',
-  expression: '表达能力',
-  investor: '投资人',
-  roadshow: '路演',
-};
-
-const PRODUCT_TITLES: Record<string, string> = {
-  'development-process-harness-effectiveness': '研发协作改进',
-  'microduck-walking-stability': 'Microduck 行走稳定性',
-  'investor-roadshow-expression': '投资人路演效果',
-};
+import { type EvolutionProgramProjection, parseProgramProjection } from './evolution-program-projection';
+export type EvolutionProgramPresentationProjection = EvolutionProgramProjection;
+export const parseEvolutionProgramProjection = parseProgramProjection;
 
 const LIFECYCLE_LABELS: Record<EvolutionProgramLifecycle, string> = {
   active: '进行中',
@@ -57,16 +30,16 @@ const STAGE_LABELS: Record<EvolutionProgramStage, string> = {
 };
 
 const BLOCKER_LABELS: Record<string, string> = {
-  goal_certificate_missing: '确认改进目标',
-  measurement_certificate_missing: '接好评估方式',
+  goal_certificate_missing: '明确要改进什么',
+  measurement_certificate_missing: '约定怎样判断改进有效',
   economic_certificate_missing: '确认采用与停止条件',
   value_owner_missing: '确认结果负责人',
   observer_missing: '接好观测来源',
   domain_owner_missing: '确认能力负责人',
   consumer_missing: '确认谁会使用结论',
   calibrator_missing: '确认谁来校准评估',
-  trajectory_ref_missing: '接上运行轨迹',
-  heterogeneous_owner_surfaces_missing: '接上第二个独立信号来源',
+  trajectory_ref_missing: '补充真实任务的执行记录',
+  heterogeneous_owner_surfaces_missing: '补充不同来源的独立反馈',
   trigger_registration_missing: '设置自动检查条件',
   evidence_role_missing: '确认各项证据由谁提供',
   consumption_proof_missing: '证明结论会被真实使用',
@@ -91,8 +64,8 @@ export interface EvolutionProgramProductStatus {
 }
 
 const ACTIVE_STAGE_STATUS: Record<EvolutionProgramStage, EvolutionProgramProductStatus> = {
-  constituting: { label: '配置中', description: '正在确认评估条件', face: 'setup' },
-  instrumenting: { label: '配置中', description: '正在确认评估信号可用', face: 'setup' },
+  constituting: { label: '准备目标', description: '目标与评估方式已登记，等待确认。', face: 'setup' },
+  instrumenting: { label: '准备评估', description: '目标已确定，等待接入可验证的评估证据。', face: 'setup' },
   observing: { label: '观测中', description: '正在收集本轮证据', face: 'journey' },
   evaluating: { label: '评估中', description: '正在核对这次变化是否真实成立', face: 'journey' },
   attributing: { label: '评估中', description: '正在核对这次变化是否真实成立', face: 'journey' },
@@ -103,42 +76,11 @@ const ACTIVE_STAGE_STATUS: Record<EvolutionProgramStage, EvolutionProgramProduct
   deciding: { label: '待审阅', description: '本轮结论已形成，等待审阅', face: 'journey' },
 };
 
-function record(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function decodeRefPart(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
-
-function titleCase(words: string[]): string {
-  return words.map((word) => word.slice(0, 1).toLocaleUpperCase() + word.slice(1)).join(' ');
-}
-
-export function humanizeEvolutionTarget(ref: OwnerTruthRefV1): { eyebrow: string; title: string } {
-  const separator = ref.ownerStateRef.indexOf(':');
-  const rawId = separator >= 0 ? ref.ownerStateRef.slice(separator + 1) : ref.ownerStateRef;
-  const decoded = decodeRefPart(rawId)
-    .replace(/^f\d{2,4}[-_:]/i, '')
-    .trim();
-  const productTitle = PRODUCT_TITLES[decoded.toLocaleLowerCase()];
-  if (productTitle) return { eyebrow: ref.ownerFeatureId, title: productTitle };
-  if (/[\u3400-\u9fff]/u.test(decoded)) {
-    return { eyebrow: ref.ownerFeatureId, title: decoded.replace(/[-_]+/g, ' ') };
-  }
-  const words = decoded.split(/[-_]+/).filter(Boolean);
-  const translated = words.map((word) => LEGACY_WORDS[word.toLocaleLowerCase()]);
-  const title = translated.every(Boolean) ? translated.join('') : titleCase(words);
-  return {
-    eyebrow: ref.ownerFeatureId,
-    title: title || '未命名能力',
-  };
+export function evolutionProgramPresentation(
+  program: EvolutionProgramV1,
+  origin?: EvolutionProgramOriginV1,
+): { eyebrow: string; title: string } {
+  return { eyebrow: program.objectRef.ownerFeatureId, title: evolutionProgramTitle(program, origin) };
 }
 
 export function productStatus(projection: EvolutionProgramPresentationProjection): EvolutionProgramProductStatus {
@@ -154,15 +96,38 @@ export function productStatus(projection: EvolutionProgramPresentationProjection
     const label = terminalDisposition === 'kept' ? '已采纳' : terminalDisposition === 'sunset' ? '已停止' : '已完成';
     return { label, description: '本轮已经结束，结论与证据已保留。', face: 'journey' };
   }
+  const changeStatus = projection.lineage?.current?.status;
+  if (changeStatus === 'rejected')
+    return { label: '已拒绝', description: '这次候选已被拒绝，审阅记录仍然保留。', face: 'journey' };
+  if (changeStatus === 'withdrawn')
+    return { label: '已撤回', description: '这次候选已撤回，现有记录仍然保留。', face: 'journey' };
+  if (changeStatus === 'target_drift' || changeStatus === 'superseded')
+    return { label: '需要重新审阅', description: '目标或候选已经变化，需要重新确认这次改动。', face: 'journey' };
+  if (changeStatus === 'no_change')
+    return { label: '本次未改动', description: '执行方确认保持现状，后续判断继续以复验记录为准。', face: 'journey' };
   if (stageStatus.face === 'setup') {
-    const missing = projection.blockers.length;
+    const gaps = preparationGaps(projection);
+    const missing = gaps
+      .slice(0, 2)
+      .map((gap) => blockerLabel(gap.code))
+      .join('、');
     return {
-      label: '配置中',
-      description: missing > 0 ? `${missing} 项评估条件待完成` : '正在确认评估信号可用',
+      label: stageStatus.label,
+      description: gaps.length ? `还需要：${missing}${gaps.length > 2 ? '等' : ''}。` : stageStatus.description,
       face: 'setup',
     };
   }
   return stageStatus;
+}
+
+export function preparationGaps(projection: EvolutionProgramPresentationProjection) {
+  const conditions =
+    projection.program.stage === 'constituting'
+      ? projection.blockers
+      : [...projection.blockers, ...(projection.observation?.gaps ?? [])];
+  return [
+    ...new Map(conditions.map((gap) => [`${gap.code}:${gap.ownerFeatureId}:${gap.ownerStateRef ?? ''}`, gap])).values(),
+  ];
 }
 
 export function blockerLabel(code: string): string {
@@ -179,41 +144,4 @@ export function lifecycleLabel(lifecycle: EvolutionProgramLifecycle): string {
 
 export function stageLabel(stage: EvolutionProgramStage): string {
   return STAGE_LABELS[stage];
-}
-
-export function parseEvolutionProgramProjection(value: unknown): EvolutionProgramPresentationProjection | null {
-  const source = record(value);
-  if (!source) return null;
-  const state = evolutionProgramStateV1Schema.safeParse({ program: source.program, cycles: source.cycles });
-  if (!state.success || !/^evolution-program:[0-9a-f]{32}$/.test(state.data.program.programId)) return null;
-  if (!Array.isArray(source.blockers)) return null;
-  const blockers = source.blockers.flatMap((candidate) => {
-    const blocker = record(candidate);
-    if (
-      !blocker ||
-      typeof blocker.code !== 'string' ||
-      typeof blocker.message !== 'string' ||
-      typeof blocker.ownerFeatureId !== 'string' ||
-      (blocker.ownerStateRef !== undefined && typeof blocker.ownerStateRef !== 'string')
-    ) {
-      return [];
-    }
-    return [
-      {
-        code: blocker.code,
-        message: blocker.message,
-        ownerFeatureId: blocker.ownerFeatureId,
-        ...(typeof blocker.ownerStateRef === 'string' ? { ownerStateRef: blocker.ownerStateRef } : {}),
-      },
-    ];
-  });
-  if (blockers.length !== source.blockers.length) return null;
-  const nextAction = record(source.nextAction);
-  if (!nextAction || typeof nextAction.code !== 'string' || typeof nextAction.label !== 'string') return null;
-  return {
-    program: state.data.program,
-    cycles: state.data.cycles,
-    blockers,
-    nextAction: { code: nextAction.code, label: nextAction.label },
-  };
 }

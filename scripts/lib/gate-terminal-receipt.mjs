@@ -11,11 +11,15 @@ const REUSABLE_STATUS = 'green';
 export const DEFAULT_GATE_TERMINAL_WAIT_MS = 3 * 60 * 60_000;
 export const GATE_EXECUTION_PATHS = Object.freeze([
   'scripts/classify-gate-route.mjs',
+  'scripts/lib/git-patch-id.mjs',
+  'scripts/co-creation-docs-lane.mjs',
+  'scripts/design-gate/claim-journey-paths.mjs',
   'scripts/pre-merge-check.sh',
   'scripts/gate-terminal-receipt.mjs',
   'scripts/snapshot-gate-control-plane.mjs',
   'scripts/gate-prepared-artifacts.mjs',
   'scripts/run-with-gate-resource-permit.mjs',
+  'scripts/lib/gate-resource-health-monitor.mjs',
   'scripts/pre-merge-gate-guard.mjs',
   'scripts/lib/gate-terminal-receipt.mjs',
   'scripts/lib/gate-stage-receipts.mjs',

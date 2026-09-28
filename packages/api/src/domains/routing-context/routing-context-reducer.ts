@@ -10,6 +10,7 @@ import {
   routingCandidateBindingV1Schema,
   routingContextSnapshotV1Schema,
   routingPreferenceRevisionV1Schema,
+  routingSignalClosures,
   routingSignalEventV1Schema,
 } from '@cat-cafe/shared';
 import type { CapabilityProfileDiagnostic } from './CapabilityProfileRevisionSource.js';
@@ -82,19 +83,6 @@ function selectPreferenceHeads(preferences: readonly RoutingPreferenceRevisionV1
     }
   }
   return [...heads.values()].sort((left, right) => left.preferenceId.localeCompare(right.preferenceId));
-}
-
-function buildClosureMap(events: readonly ParsedSignal[]): Map<string, ClosingSignal> {
-  const closures = new Map<string, ClosingSignal>();
-  const closingEvents = events
-    .filter((event): event is ClosingSignal => event.eventType !== 'asserted')
-    .sort(compareIdentity);
-  for (const closer of closingEvents) {
-    for (const assertedId of closer.closesSignalIds) {
-      if (!closures.has(assertedId)) closures.set(assertedId, closer);
-    }
-  }
-  return closures;
 }
 
 function activeSignalReason(signal: AssertedSignal): RoutingReasonV1 {
@@ -177,7 +165,12 @@ function reduceCandidateSignals(input: {
   events: readonly ParsedSignal[];
   closures: ReadonlyMap<string, ClosingSignal>;
   observedAt: number;
-}): { availability: Availability; freshness: CandidateProjection['freshness']; reasons: RoutingReasonV1[] } {
+}): {
+  availability: Availability;
+  freshness: CandidateProjection['freshness'];
+  reasons: RoutingReasonV1[];
+  dispatch?: CandidateProjection['dispatch'];
+} {
   const matchingAssertions = input.events
     .filter((event): event is AssertedSignal => event.eventType === 'asserted')
     .filter((event) => subjectMatchesCandidate(event.subjectRef, input.candidate));
@@ -211,6 +204,22 @@ function reduceCandidateSignals(input: {
       availability: active[0].state,
       freshness: 'fresh',
       reasons: coalesceActiveSignalReasons(active),
+      ...(active[0].state === 'unavailable'
+        ? {
+            dispatch: {
+              ownerAttemptAllowed: !active.some(
+                (signal) => signal.state === 'unavailable' && signal.source === 'manual_cvo',
+              ),
+              automaticRetryAt: active.reduce(
+                (latest, signal) =>
+                  signal.state === 'unavailable'
+                    ? Math.max(latest, Math.min(signal.validUntil ?? Infinity, signal.resetAt ?? Infinity))
+                    : latest,
+                0,
+              ),
+            },
+          }
+        : {}),
     };
   }
   if (unknown.length > 0) {
@@ -277,7 +286,7 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
   const profiles = rawInput.profiles.map((profile) => capabilityProfileRevisionRefV1Schema.parse(profile));
   const signalEvents = rawInput.signalEvents
     .map((event) => routingSignalEventV1Schema.parse(event))
-    .filter((event) => event.ownerId === rawInput.ownerId);
+    .filter((event) => event.ownerId === rawInput.ownerId && event.observedAt <= rawInput.observedAt);
   const preferenceHeads = selectPreferenceHeads(
     rawInput.preferenceRevisions
       .map((preference) => routingPreferenceRevisionV1Schema.parse(preference))
@@ -285,7 +294,7 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
   );
   const profileHeads = selectProfileHeads(profiles);
   const profileDiagnostics = rawInput.profileDiagnostics ?? [];
-  const closures = buildClosureMap(signalEvents);
+  const closures = routingSignalClosures(signalEvents);
 
   const projectedCandidates: CandidateProjection[] = candidates
     .map((binding) => {
@@ -299,14 +308,22 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
         closures,
         observedAt: rawInput.observedAt,
       });
-      const reasons = [...signalState.reasons, ...profileReasons(profile)];
+      const capabilityReasons = profileReasons(profile);
+      const boundedDiagnostics = diagnostics.slice(0, 32);
+      const boundedCapabilityReasons = capabilityReasons.slice(0, 32 - boundedDiagnostics.length);
+      const signalReasonLimit = 32 - boundedDiagnostics.length - boundedCapabilityReasons.length;
       return {
         binding,
         profile:
           profile === undefined ? { state: 'absent' as const } : { state: 'applied' as const, revision: profile },
         availability: signalState.availability,
         freshness: signalState.freshness,
-        reasons: diagnostics.length > 0 ? [...diagnostics, ...reasons].slice(0, 32) : reasons,
+        ...(signalState.dispatch ? { dispatch: signalState.dispatch } : {}),
+        reasons: [
+          ...boundedDiagnostics,
+          ...signalState.reasons.slice(0, signalReasonLimit),
+          ...boundedCapabilityReasons,
+        ],
         matchedPreferences: [],
         effect: effectForAvailability(signalState.availability),
       };

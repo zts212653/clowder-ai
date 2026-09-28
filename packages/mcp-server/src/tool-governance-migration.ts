@@ -1,6 +1,7 @@
 import { bindMcpImplementation, defineMcpTool, defineMigrationCandidateMcpTool } from './tool-governance.js';
 import type {
   McpActionBoundary,
+  McpImplementationBinding,
   McpMigrationCandidateInput,
   McpRuntimeProfile,
   McpStandaloneReason,
@@ -31,6 +32,9 @@ export type McpMigrationSeed = {
 };
 
 type LegacyToolFields = Pick<McpMigrationCandidateInput, 'name' | 'description' | 'inputSchema' | 'handler'>;
+type CallExtraToolField = {
+  handlerWithExtra?: NonNullable<McpImplementationBinding['runWithExtra']>;
+};
 
 type MigrationFactoryDefaults = { resourceFamily?: string; authority?: MigrationAuthority };
 type ResolvedMigrationGovernance = McpMigrationCandidateInput['governance'] & {
@@ -155,7 +159,7 @@ export function defineMcpCanonicalFactory(
   implementationModule?: string,
   defaults: MigrationFactoryDefaults = {},
 ) {
-  return (input: LegacyToolFields & { governance: McpMigrationSeed }) => {
+  return (input: LegacyToolFields & CallExtraToolField & { governance: McpMigrationSeed }) => {
     const governance = resolveMigrationGovernance(sourceFile, implementationModule, defaults, input);
     return defineMcpTool({
       name: input.name,
@@ -166,7 +170,7 @@ export function defineMcpCanonicalFactory(
         inputSchema: input.inputSchema,
         boundary: governance.boundary,
       },
-      implementation: bindMcpImplementation(governance.implementationRef, input.handler),
+      implementation: bindMcpImplementation(governance.implementationRef, input.handler, input.handlerWithExtra),
       policy: {
         resourceFamily: governance.resourceFamily,
         schemaDelivery: {

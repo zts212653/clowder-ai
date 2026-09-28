@@ -43,7 +43,6 @@ export function createRoutingContextRuntime(options: CreateRoutingContextRuntime
     telemetry: signalObservationTelemetry,
   });
   const dispatchSignalAdapter = new RoutingDispatchSignalAdapter({
-    signalStore,
     automaticSignalService,
     telemetry: signalObservationTelemetry,
   });

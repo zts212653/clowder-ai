@@ -118,6 +118,7 @@ import {
   isTerminalDispositionEvent,
   PerCatTerminalDispositionCollector,
 } from './PerCatTerminalDispositionCollector.js';
+import type { OwnedQueueProgress } from './PersistedQueueCarrier.js';
 import { projectUnconsumedQueueCarrier, readQueueCarrierMessages } from './QueueCarrierSourceProjection.js';
 import { carrierEntryId } from './QueuedMessageCustodyCarrierProjection.js';
 import {
@@ -142,6 +143,10 @@ import {
   resolveQueueSourceResponseEvidence,
   resolveQueueSourceResponseEvidenceFromMessages,
 } from './queue-source-response-evidence.js';
+import {
+  normalizeQueueTerminalConsumptions,
+  type QueueTerminalConsumptionCollection,
+} from './queue-terminal-consumption.js';
 import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
 import {
   type CommitInvocationInput,
@@ -254,6 +259,16 @@ interface PromptMessagesExposedInput {
   seenAt: number;
 }
 
+interface PromptExposureAdoptionReservation {
+  commit(): void;
+  abort(): void;
+}
+
+interface PromptMessagesSeenOptions {
+  /** Resolve every fallible adoption dependency before append-only exposure is persisted. */
+  prepareAdoption?: (wakes: readonly TurnCustodyWakeProvenance[]) => Promise<PromptExposureAdoptionReservation | null>;
+}
+
 interface PromptMessagesAwakenedInput {
   threadId: string;
   userId: string;
@@ -269,80 +284,6 @@ export interface InvocationRecordStoreLike {
   create(input: Record<string, unknown>): Promise<{ outcome: string; invocationId: string }>;
   get?(id: string): InvocationRecord | null | Promise<InvocationRecord | null>;
   update(id: string, data: Record<string, unknown>): Promise<unknown | null>;
-}
-
-function isQueueTerminalConsumptionWitness(value: unknown): value is QueueTerminalConsumptionWitness {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.kind === 'terminal_silent' &&
-    candidate.projectionState === 'covered_empty' &&
-    candidate.wake === 'coordination_terminal'
-  ) {
-    return true;
-  }
-  if (
-    candidate.kind === 'dispatch_handled_continuation' &&
-    typeof candidate.sourceMessageId === 'string' &&
-    candidate.sourceMessageId.length > 0 &&
-    typeof candidate.dispositionEventId === 'string' &&
-    candidate.dispositionEventId.length > 0 &&
-    typeof candidate.dispositionAt === 'number' &&
-    Number.isFinite(candidate.dispositionAt) &&
-    candidate.dispositionAt >= 0
-  ) {
-    return true;
-  }
-  if (candidate.kind === 'source_response') {
-    const outputMessageIds = candidate.outputMessageIds;
-    return (
-      Array.isArray(outputMessageIds) &&
-      outputMessageIds.length > 0 &&
-      outputMessageIds.every((messageId) => typeof messageId === 'string' && messageId.length > 0) &&
-      new Set(outputMessageIds).size === outputMessageIds.length
-    );
-  }
-  return (
-    candidate.kind === 'managed_hold_continued' &&
-    typeof candidate.sourceMessageId === 'string' &&
-    candidate.sourceMessageId.length > 0 &&
-    typeof candidate.taskId === 'string' &&
-    candidate.taskId.length > 0 &&
-    (candidate.transition === 'reheld' ||
-      candidate.transition === 'event_wait' ||
-      candidate.transition === 'transferred')
-  );
-}
-
-type QueueTerminalConsumptionCollection = QueueTerminalConsumptionWitness | readonly QueueTerminalConsumptionWitness[];
-
-function normalizeQueueTerminalConsumptions(value: unknown): readonly QueueTerminalConsumptionWitness[] {
-  const candidates = Array.isArray(value) ? value : value ? [value] : [];
-  const result: QueueTerminalConsumptionWitness[] = [];
-  for (const candidate of candidates) {
-    if (!isQueueTerminalConsumptionWitness(candidate)) continue;
-    const key =
-      candidate.kind === 'terminal_silent'
-        ? candidate.kind
-        : candidate.kind === 'source_response'
-          ? `${candidate.kind}:${candidate.outputMessageIds.join(',')}`
-          : `${candidate.kind}:${candidate.sourceMessageId}`;
-    if (
-      result.some((existing) => {
-        const existingKey =
-          existing.kind === 'terminal_silent'
-            ? existing.kind
-            : existing.kind === 'source_response'
-              ? `${existing.kind}:${existing.outputMessageIds.join(',')}`
-              : `${existing.kind}:${existing.sourceMessageId}`;
-        return existingKey === key;
-      })
-    ) {
-      continue;
-    }
-    result.push(candidate);
-  }
-  return result;
 }
 
 function queueTerminalConsumptionForMessage(
@@ -1395,44 +1336,85 @@ export class QueueProcessor {
    * current invocation prompt. This is the prompt-transport analogue of an
    * explicit full-body get_thread_context read.
    */
-  async markPromptMessagesSeen(input: PromptMessagesExposedInput): Promise<readonly TurnCustodyWakeProvenance[]> {
+  async markPromptMessagesSeen(
+    input: PromptMessagesExposedInput,
+    options: PromptMessagesSeenOptions = {},
+  ): Promise<readonly TurnCustodyWakeProvenance[]> {
     const exposed = new Set(input.messageIds);
     const expectedWitnessMessageIds = new Set<string>();
     let receiptChanged = false;
-
+    const candidates: QueueEntry[] = [];
+    const candidateMessageIds = new Set<string>();
     for (const candidate of this.deps.queue.list(input.threadId, input.userId)) {
       const entryMessageIds = this.fullyExposedCandidateMessageIds(candidate, input.catId, exposed);
       if (!entryMessageIds) continue;
-      const persisted = await this.persistPromptCandidateSeen(candidate, input);
-      for (const messageId of persisted.witnessMessageIds) expectedWitnessMessageIds.add(messageId);
-      receiptChanged = persisted.receiptChanged || receiptChanged;
+      candidates.push(candidate);
+      for (const messageId of entryMessageIds) candidateMessageIds.add(messageId);
     }
 
-    await this.deps.queueCustodyCoordinator?.assertPromptExposurePersisted(
-      [...expectedWitnessMessageIds],
-      input.catId,
-      input.invocationId,
-    );
-    await this.deps.queueCustodyCoordinator?.assertPromptBodiesNotRecalled(
-      input.messageIds,
-      input.catId,
-      input.invocationId,
-    );
+    let adoptedWakes: readonly TurnCustodyWakeProvenance[] = [];
+    let adoptionReservation: PromptExposureAdoptionReservation | null | undefined;
+    if (options.prepareAdoption) {
+      adoptedWakes = await this.resolvePromptMessageCustodyWakes({
+        ...input,
+        messageIds: [...candidateMessageIds],
+      });
+      adoptionReservation = adoptedWakes.length > 0 ? await options.prepareAdoption(adoptedWakes) : undefined;
+      if (adoptedWakes.length > 0 && !adoptionReservation) {
+        throw new Error('turn custody adoption owner unavailable before prompt exposure');
+      }
+    }
+
+    try {
+      for (const candidate of candidates) {
+        const persisted = await this.persistPromptCandidateSeen(candidate, input);
+        for (const messageId of persisted.witnessMessageIds) expectedWitnessMessageIds.add(messageId);
+        receiptChanged = persisted.receiptChanged || receiptChanged;
+      }
+
+      await this.deps.queueCustodyCoordinator?.assertPromptExposurePersisted(
+        [...expectedWitnessMessageIds],
+        input.catId,
+        input.invocationId,
+      );
+      await this.deps.queueCustodyCoordinator?.assertPromptBodiesNotRecalled(
+        input.messageIds,
+        input.catId,
+        input.invocationId,
+      );
+      if (!options.prepareAdoption) {
+        adoptedWakes = await this.resolvePromptMessageCustodyWakes({
+          ...input,
+          messageIds: [...expectedWitnessMessageIds],
+        });
+      }
+      adoptionReservation?.commit();
+    } catch (error) {
+      adoptionReservation?.abort();
+      throw error;
+    }
 
     if (receiptChanged) {
-      await emitQueueUpdated(
-        this.deps.socketManager,
-        input.userId,
-        input.threadId,
-        this.deps.queue.list(input.threadId, input.userId),
-        this.deps.messageStore,
-        'queued_seen',
-      );
+      try {
+        await emitQueueUpdated(
+          this.deps.socketManager,
+          input.userId,
+          input.threadId,
+          this.deps.queue.list(input.threadId, input.userId),
+          this.deps.messageStore,
+          'queued_seen',
+        );
+      } catch (error) {
+        this.deps.log.warn(
+          { error, threadId: input.threadId, catId: input.catId, invocationId: input.invocationId },
+          '[F236] queue exposure persisted but queue_updated projection failed',
+        );
+      }
     }
-    return this.resolvePromptMessageCustodyWakes(input);
+    return adoptedWakes;
   }
 
-  /** Resolve structured obligations only after exact body exposure is durable. */
+  /** Resolve the structured obligations that must be prepared before exact body exposure is committed. */
   async resolvePromptMessageCustodyWakes(
     input: Pick<PromptMessagesExposedInput, 'threadId' | 'catId' | 'messageIds'>,
   ): Promise<readonly TurnCustodyWakeProvenance[]> {
@@ -2556,19 +2538,23 @@ export class QueueProcessor {
             disposition: 'completed_with_turn' as const,
             evidenceRef: { kind: 'turn_execution' as const, invocationId },
           };
-          await this.deps.freshnessEventLog.append({
-            kind: 'queued_handled',
-            threadId,
-            catId: catId as CatId,
-            invocationId,
-            timestamp: Date.now(),
-            queueEntryId: h.entryId,
-            messageIds: h.messageIds,
-            disposition: terminalOutcome.disposition,
-            evidenceRef: terminalOutcome.evidenceRef,
-            remainingTargetCats: h.remainingTargetCats,
-          });
+          await this.deps.freshnessEventLog.append(
+            {
+              kind: 'queued_handled',
+              threadId,
+              catId: catId as CatId,
+              invocationId,
+              timestamp: Date.now(),
+              queueEntryId: h.entryId,
+              messageIds: h.messageIds,
+              disposition: terminalOutcome.disposition,
+              evidenceRef: terminalOutcome.evidenceRef,
+              remainingTargetCats: h.remainingTargetCats,
+            },
+            { ownerUserId: h.userId },
+          );
           await this.deps.freshnessEventLog.markProviderNoticesHandled({
+            ownerUserId: h.userId,
             invocationId,
             catId: catId as CatId,
             queueEntryId: h.entryId,
@@ -3290,6 +3276,21 @@ export class QueueProcessor {
     return this.tryExecuteNextForUser(threadId, userId);
   }
 
+  /** Producer recovery confirms custody; it is never a user request to clear pause or override queue order. */
+  async progressOwnedCarrier(entry: QueueEntry, targetCatId: string): Promise<OwnedQueueProgress> {
+    const current = this.deps.queue.getEntrySnapshot(entry.threadId, entry.userId, entry.id);
+    if (!current) throw new Error('Owned Queue carrier disappeared before progress');
+    if (current.status === 'processing') return 'already_processing';
+    if (this.isAutoResumeSuppressed(entry.threadId, targetCatId)) return 'owned_deferred_suppressed';
+    if (this.isPaused(entry.threadId, targetCatId)) return 'owned_deferred_paused';
+    const slotKey = QueueProcessor.slotKey(entry.threadId, targetCatId);
+    if (this.processingSlots.has(slotKey) || this.deps.invocationTracker.has(entry.threadId, targetCatId)) {
+      return 'owned_deferred_busy';
+    }
+    const result = await this.tryExecuteNextAcrossUsers(entry.threadId, targetCatId, { onlyTargetCat: true });
+    return result.started && result.entry?.id === entry.id ? 'started' : 'owned_deferred_busy';
+  }
+
   /**
    * Claim one Steer reservation by its unforgeable process-local identity.
    * The route calls this immediately after preemption; generic queue mutations
@@ -3850,7 +3851,6 @@ export class QueueProcessor {
       isCanceled: (catId) => invocationTracker.getSlotState?.(threadId, catId) === 'canceled',
     });
     const observedChildInvocationIdByCatId = new Map<string, string>();
-    const terminalConsumptionByInvocationId = new Map<string, QueueTerminalConsumptionWitness[]>();
     let responseText = '';
     const cursorBoundaries = new Map<string, string>();
     const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
@@ -3898,7 +3898,7 @@ export class QueueProcessor {
             return exactInvocationId ? [[catId, exactInvocationId]] : [];
           }),
         ),
-        terminalConsumptionByInvocationId: Object.fromEntries(terminalConsumptionByInvocationId),
+        terminalConsumptionByInvocationId: terminalDispositions.getTerminalConsumptionByInvocationId(),
       };
       returnedExecutionResult = result;
       return result;
@@ -5209,7 +5209,9 @@ export class QueueProcessor {
         { intent, ...(entry.suggestedSkill ? { promptTags: [`skill:${entry.suggestedSkill}`] } : {}) },
         {
           ownerAuthProvenance: entry.ownerAuthProvenance,
+          ...(entry.executionScope ? { executionScope: entry.executionScope } : {}),
           humanDispositionInvocationOrigin: 'queue_replay',
+          routingQueueSource: entry.source,
           ...(memoryCueOpportunitySeeds.length > 0 ? { memoryCueOpportunitySeeds } : {}),
           ...(asrPersonMemoryScenes.length > 0 ? { asrPersonMemoryScenes } : {}),
           turnCustodyWakeForCat: (catId: string) => retargetTurnCustodyWake(turnCustodyWake, catId),
@@ -5351,7 +5353,6 @@ export class QueueProcessor {
           childInvocationId.length > 0 &&
           terminalConsumptions.length > 0
         ) {
-          terminalConsumptionByInvocationId.set(childInvocationId, [...terminalConsumptions]);
           const dispatchConsumption = terminalConsumptions.find(
             (candidate) => candidate.kind === 'dispatch_handled_continuation',
           );

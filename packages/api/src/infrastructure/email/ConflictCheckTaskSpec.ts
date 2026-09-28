@@ -9,7 +9,7 @@
  * KD-9: Gate passes ALL mergeState results (including MERGEABLE) so ConflictRouter
  *       can clear fingerprints for re-conflict detection.
  */
-import type { CatId, TaskItem } from '@cat-cafe/shared';
+import type { CatId, TaskItem, WaitOutcomeV1 } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
@@ -38,14 +38,43 @@ interface ConflictWorkItem {
   task: TaskItem;
 }
 
+/**
+ * #1392 R5: may this outcome authorise a repository write?
+ *
+ * Two independent facts have to hold, and neither implies the other.
+ *
+ * The reason must positively be `matched`. An expired wait keeps its last poll's deltas so the owner
+ * still sees the facts it ended on — that record is a report, not a renewed mandate, because the
+ * wait's authority ended with the wait. A conflict seen only after the deadline may be told; it may
+ * not be acted on, and the delta is never dropped to make that true.
+ *
+ * And the conflict must be inside that match. A delivery about HEAD, CI, a comment or a cancel is
+ * not a conflict just because the repository happens to be conflicting right now.
+ *
+ * Both are machine-checked enum fields rather than parsed prose, and both are positive tests: an
+ * absent outcome fails them, because writing to a repository needs proof, not the absence of denial.
+ */
+function conflictWasMatched(outcome: WaitOutcomeV1 | undefined): boolean {
+  if (outcome?.reason !== 'matched') return false;
+  return outcome.matched?.some((delta) => delta.kind === 'pr_became_conflicting') === true;
+}
+
 async function tryAutoResolveBeforeWake(
   opts: ConflictCheckTaskSpecOptions,
   workItem: ConflictWorkItem,
+  outcome: WaitOutcomeV1 | undefined,
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
   if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
+  // A conflicting repository state is not a mandate: a live wait of the owner's has to be what matched.
+  if (!conflictWasMatched(outcome)) return null;
   try {
-    return await opts.autoExecutor.resolve(workItem.signal.repoFullName, workItem.signal.prNumber, signal);
+    return await opts.autoExecutor.resolve(
+      workItem.signal.repoFullName,
+      workItem.signal.prNumber,
+      workItem.signal.headSha,
+      signal,
+    );
   } catch (error) {
     if (!signal?.aborted) throw error;
     opts.log.warn({ error }, '[conflict-check] cancellation interrupted optional auto-resolution; waking owner');
@@ -103,9 +132,10 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         ctx.signal?.throwIfAborted();
         const routeResult = await opts.conflictRouter.route(workItem.signal);
         if (routeResult.kind !== 'notified') return;
+        const conflictDelivery = conflictWasMatched(routeResult.outcome);
 
-        // F140 Phase C: try auto-resolve before waking cat
-        const result = await tryAutoResolveBeforeWake(opts, workItem, ctx.signal);
+        // F140 Phase C: try auto-resolve before waking cat — only for a conflict the wait matched.
+        const result = await tryAutoResolveBeforeWake(opts, workItem, routeResult.outcome, ctx.signal);
         if (result?.kind === 'resolved') {
           opts.log.info(`[conflict-check] Auto-resolved conflict for ${result.branch} (${result.method})`);
           return;
@@ -115,11 +145,14 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         }
 
         if (opts.invokeTrigger) {
-          const policy: ConnectorTriggerPolicy = {
-            priority: 'urgent',
-            reason: 'github_pr_conflict',
-            sourceCategory: 'conflict',
-          };
+          /*
+           * #1392 R5: this poller delivers whatever the wait produced, so only a matched conflict may
+           * be labelled and prioritised as one. Anything else — an expiry above all — is an ordinary
+           * wait delivery, and calling it a conflict would misfile it for the owner reading the wake.
+           */
+          const policy: ConnectorTriggerPolicy = conflictDelivery
+            ? { priority: 'urgent', reason: 'github_pr_conflict', sourceCategory: 'conflict' }
+            : { priority: 'normal', reason: 'github_wait_satisfied', sourceCategory: 'scheduled' };
           await opts.invokeTrigger
             .trigger(
               routeResult.threadId,
@@ -131,7 +164,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
               policy,
             )
             .catch((err) => opts.log.warn({ err }, '[conflict-check] trigger failed (best-effort)'));
-          opts.log.info(`[conflict-check] Triggered ${routeResult.catId} for PR conflict`);
+          opts.log.info(`[conflict-check] Triggered ${routeResult.catId} for ${policy.reason}`);
         }
       },
     },

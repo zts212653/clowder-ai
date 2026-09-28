@@ -27,6 +27,7 @@ describe('F177 event-backed routing eval', () => {
       'cat_cafe_a2a_routing_event_wait_rejected_total{routing_event_wait_reason="query_failed"}': 1,
       'cat_cafe_a2a_routing_event_wait_rejected_total{routing_event_wait_reason="no_candidate"}': 4,
       'cat_cafe_a2a_routing_event_wait_rejected_total{routing_event_wait_reason="missing_invocation"}': 5,
+      'cat_cafe_a2a_routing_event_wait_rejected_total{routing_event_wait_reason="missing_identity"}': 7,
       'cat_cafe_a2a_routing_event_wait_rejected_total{routing_event_wait_reason="proof_invalid"}': 6,
       cat_cafe_a2a_routing_event_wait_false_bypass_total: 0,
       cat_cafe_a2a_routing_event_wait_redundant_hold_prevented_total: 2,
@@ -40,7 +41,7 @@ describe('F177 event-backed routing eval', () => {
     assert.equal(component.activationCounts['event_wait.rejected_unrelated_total'], 2);
     assert.equal(component.activationCounts['event_wait.rejected_uncovered_total'], 3);
     assert.equal(component.activationCounts['event_wait.rejected_query_failed_total'], 1);
-    assert.equal(component.activationCounts['event_wait.rejected_other_total'], 15);
+    assert.equal(component.activationCounts['event_wait.rejected_other_total'], 22);
     assert.equal(component.activationCounts['event_wait.redundant_hold_prevented_total'], 2);
     assert.equal(component.frictionCounts['event_wait.false_bypass_total'], 0);
     assert.equal(component.activationCounts['terminal_release.clean_stop_total'], 3);

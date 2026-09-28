@@ -1,3 +1,13 @@
+import {
+  hasValidProviderSubexecutionPayload,
+  type ProviderSubexecutionSemanticEvent,
+} from './provider-subexecution-semantic-event.js';
+
+export type {
+  ProviderSubexecutionSemanticEvent,
+  ProviderSubexecutionStage,
+} from './provider-subexecution-semantic-event.js';
+
 export const PROVIDER_SEMANTIC_EVENT_KINDS = [
   'plan',
   'diff',
@@ -7,6 +17,7 @@ export const PROVIDER_SEMANTIC_EVENT_KINDS = [
   'capability',
   'goal',
   'review',
+  'subexecution',
 ] as const;
 
 export type ProviderSemanticEventKind = (typeof PROVIDER_SEMANTIC_EVENT_KINDS)[number];
@@ -17,7 +28,7 @@ export interface ProviderSemanticProvenance {
   nativeType?: string;
 }
 
-interface ProviderSemanticBase {
+export interface ProviderSemanticBase {
   v: 1;
   id: string;
   kind: ProviderSemanticEventKind;
@@ -119,7 +130,8 @@ export type ProviderSemanticEvent =
   | ProviderGuardianSemanticEvent
   | ProviderCapabilitySemanticEvent
   | ProviderGoalSemanticEvent
-  | ProviderReviewSemanticEvent;
+  | ProviderReviewSemanticEvent
+  | ProviderSubexecutionSemanticEvent;
 
 const semanticKinds = new Set<string>(PROVIDER_SEMANTIC_EVENT_KINDS);
 
@@ -251,6 +263,7 @@ const semanticPayloadValidators: Record<ProviderSemanticEventKind, SemanticPaylo
     (value.filePath === undefined || isNonEmptyString(value.filePath)) &&
     (value.severity === undefined || isOneOf(value.severity, ['info', 'warning', 'error'] as const)) &&
     (value.errorCode === undefined || isNonEmptyString(value.errorCode)),
+  subexecution: hasValidProviderSubexecutionPayload,
 };
 
 function hasValidKindPayload(value: Record<string, unknown>): boolean {

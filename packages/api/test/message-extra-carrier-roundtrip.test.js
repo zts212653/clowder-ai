@@ -29,6 +29,84 @@ const MESSAGE_BUNDLE = {
 };
 
 describe('durable message extra carriers survive Redis round-trips', () => {
+  it('F311 preserves a valid preparation submission and drops malformed content without dropping siblings', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const valid = {
+      schemaVersion: 1,
+      programId: 'evolution-program:0123456789abcdef0123456789abcdef',
+      section: 'baseline_diagnosis',
+      title: 'Baseline and initial diagnosis',
+      authorCatId: 'codex-sol',
+      revision: `sha256:${'a'.repeat(64)}`,
+      dependsOn: [],
+      body: {
+        kind: 'baseline_diagnosis',
+        summary: 'No customer baseline is connected.',
+        baselineState: 'unknown',
+        observationUnit: 'One complete project opportunity episode.',
+        facts: [],
+        competingExplanations: [
+          {
+            explanationId: 'missing-context',
+            hypothesis: 'The PM lacks current project context.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Replay with and without verified context.',
+          },
+          {
+            explanationId: 'policy-gap',
+            hypothesis: 'The PM policy does not express escalation boundaries.',
+            evidenceFor: [],
+            evidenceAgainst: [],
+            discriminatingNextStep: 'Hold context fixed and compare the policy.',
+          },
+        ],
+        unknowns: ['No production records.'],
+        nextAction: 'Connect records before choosing a change.',
+      },
+    };
+    assert.deepEqual(
+      safeParseExtra(serializeExtra({ evolutionPreparationSubmissionV1: valid }))?.evolutionPreparationSubmissionV1,
+      valid,
+    );
+    const malformed = safeParseExtra(
+      serializeExtra({
+        evolutionPreparationSubmissionV1: { ...valid, revision: 'mutable' },
+        targetCats: ['codex-sol'],
+      }),
+    );
+    assert.equal(malformed?.evolutionPreparationSubmissionV1, undefined);
+    assert.deepEqual(malformed?.targetCats, ['codex-sol']);
+  });
+  it('F293 preserves bounded routing receipt source refs and rejects malformed protocol data', async () => {
+    const { serializeExtra, safeParseExtra } = await import(
+      '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'
+    );
+    const payload = {
+      type: 'routing_preflight',
+      v: 1,
+      ownerId: 'owner-1',
+      observedAt: 10_000,
+      resolverState: 'fresh',
+      sourceMessageId: 'original-message',
+      retryInvocationId: 'original-invocation',
+      target: {
+        targetCatId: 'sol',
+        disposition: 'rejected',
+        automaticRetryAt: 30_000,
+        reasons: [{ code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['failure:1'] }],
+        alternatives: [],
+      },
+    };
+    const extra = { systemInfo: { v: 1, payload, fallbackCatId: 'sol' } };
+    assert.deepEqual(safeParseExtra(serializeExtra(extra)), extra);
+    assert.equal(
+      safeParseExtra(serializeExtra({ systemInfo: { v: 1, payload: { ...payload, target: {} } } }))?.systemInfo,
+      undefined,
+    );
+  });
   it('F167 preserves a typed local-review verdict as a durable review fact', async () => {
     const { serializeExtra, safeParseExtra } = await import(
       '../dist/domains/cats/services/stores/redis/redis-message-parsers.js'

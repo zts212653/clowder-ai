@@ -15,6 +15,11 @@ function HookHost() {
   return React.createElement('div');
 }
 
+function NavigationHost() {
+  useWorkspace({ loadContent: false });
+  return React.createElement('div');
+}
+
 async function flushEffects() {
   for (let i = 0; i < 5; i += 1) {
     await act(async () => {
@@ -172,6 +177,18 @@ describe('useWorkspace worktree refresh', () => {
     await flushEffects();
 
     expect(useChatStore.getState().workspaceWorktreeId).toBe('230809_cat-cafe-current');
+  });
+
+  it('does not duplicate tree or file reads when F307 content owners are mounted', async () => {
+    await act(async () => {
+      root.render(React.createElement(NavigationHost));
+    });
+    await flushEffects();
+
+    const urls = apiFetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.filter((url) => url.startsWith('/api/workspace/worktrees'))).toHaveLength(1);
+    expect(urls.some((url) => url.startsWith('/api/workspace/tree'))).toBe(false);
+    expect(urls.some((url) => url.startsWith('/api/workspace/file'))).toBe(false);
   });
 
   it('stays on the eval repo after switching away from a foreign project before opening a file', async () => {

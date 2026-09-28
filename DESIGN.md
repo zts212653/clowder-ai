@@ -33,6 +33,14 @@ colors:
   dark-warning: "#d9a441"
   dark-critical: "#e06b6b"
   dark-info: "#7fb0d0"
+  category-object: "#007565"
+  category-rubric: "#5c5fac"
+  category-measurement: "#8f4d89"
+  category-diagnosis: "#6c6610"
+  dark-category-object: "#52b9a7"
+  dark-category-rubric: "#969cee"
+  dark-category-measurement: "#cf88c8"
+  dark-category-diagnosis: "#aea85b"
   focus: "#b05f45"
   dark-focus: "#cc785c"
 
@@ -207,6 +215,38 @@ components:
     typography: "{typography.eyebrow}"
     rounded: "{rounded.pill}"
     padding: 2px 8px
+  category-accent-object:
+    backgroundColor: "{colors.category-object}"
+    size: 18px
+    rounded: "{rounded.md}"
+  category-accent-rubric:
+    backgroundColor: "{colors.category-rubric}"
+    size: 18px
+    rounded: "{rounded.md}"
+  category-accent-measurement:
+    backgroundColor: "{colors.category-measurement}"
+    size: 18px
+    rounded: "{rounded.md}"
+  category-accent-diagnosis:
+    backgroundColor: "{colors.category-diagnosis}"
+    size: 18px
+    rounded: "{rounded.md}"
+  dark-category-accent-object:
+    backgroundColor: "{colors.dark-category-object}"
+    size: 18px
+    rounded: "{rounded.md}"
+  dark-category-accent-rubric:
+    backgroundColor: "{colors.dark-category-rubric}"
+    size: 18px
+    rounded: "{rounded.md}"
+  dark-category-accent-measurement:
+    backgroundColor: "{colors.dark-category-measurement}"
+    size: 18px
+    rounded: "{rounded.md}"
+  dark-category-accent-diagnosis:
+    backgroundColor: "{colors.dark-category-diagnosis}"
+    size: 18px
+    rounded: "{rounded.md}"
   tab:
     backgroundColor: "{colors.canvas}"
     textColor: "{colors.muted}"
@@ -301,7 +341,7 @@ components:
 
 > **权威链**：结构判据 ADR-043 → 视觉语言与历史 [F056](docs/features/F056-cat-cafe-design-language.md) → **本文件 = 视觉意图与目标值的 canonical 真相源**（design intent / target） → 运行时实现 `packages/web/src/app/theme-tokens.css`。
 > **两个真相域，不互相冒充**：本文件回答"我们要长成什么样"；`theme-tokens.css` 回答"现在实际长什么样"。在 F056 AC-F6 的 parity 守护测试落地之前，**运行时以 CSS 为准**，本文件的 token 是 F2 迁移的目标值（见文末 Implementation Mapping）；AC-F6 之后二者由测试强制一致，红 = 一方漂移，先修漂移的那一方。本文件的十六进制值是设计意图，不是运行时字面值的第二份拷贝（与 F305 AC-A4 的精神一致，F056 KD-37 记录了这次升级）。
-> 出生：2026-09-04 co-creator选定 Anthropic + Linear 为视觉基线（thread_mtmmd0j92wuisea9）。种子取自两家真实站点提取的 DESIGN.md，再按 Clowder AI 是"密集协作工作区"而非"营销页"重新定标。
+> 出生：2026-09-04 co-creator选定 Anthropic + Linear 为视觉基线（[thread-id]）。种子取自两家真实站点提取的 DESIGN.md，再按 Clowder AI 是"密集协作工作区"而非"营销页"重新定标。
 
 ## Overview
 
@@ -322,6 +362,7 @@ Clowder AI 是人和几只猫一起工作的房间。看起来应该像一本安
 - **Hairline**：`{colors.hairline}` 是默认 1px 边线，和表面差一级，读起来像折痕不像墨线；`{colors.hairline-strong}` 只给输入框和需要被看见的边。
 - **Dark mode**：同一个房间关了灯。`{colors.dark-canvas}` 是暖近黑（不是蓝黑、不是纯黑），阶梯 `{colors.dark-surface-1..3}` 同样向上抬，边线 `{colors.dark-hairline}`。文字 `{colors.on-dark}` 带奶油色调，呼应画布。
 - **Semantic**：`{colors.success}` / `{colors.warning}` / `{colors.critical}` / `{colors.info}` 只表达状态，只以 8px 圆点（`status-dot-*`）、输入框错误态边线或 badge **左侧圆点**出现。它们是非文字状态元素，按 WCAG 1.4.11 在 canvas → surface-3 四档表面上 ≥ 3:1（成立范围 3.15–4.59:1）；**永远不做文字色**（做正文不过 AA），badge 文字用 `{colors.body}`。**圆点永远不单独承担状态**：旁边必须有文字标签（"运行中 / 待你决定 / 失败"），颜色只是冗余提示，不是唯一通道。暗色模式用 `{colors.dark-success}` 等四个亮化变体（`dark-status-dot-*`，在暗表面 ≥ 4.3:1），不复用浅色值。不做大面积底色，不参与装饰。
+- **Content Category**：`{colors.category-object}` / `{colors.category-rubric}` / `{colors.category-measurement}` / `{colors.category-diagnosis}` 只区分同一工作面里的稳定内容类别，不表达动作优先级或运行状态。类别必须同时有文字与语义 SVG；颜色可作为低浓度浅底字段和图标色，但不能单独承载类别。暗色使用四个 `dark-category-*` 亮化变体。初始映射为对象 = teal、规约 = violet、测量 = berry、诊断 = moss，来自 operator 对 F311 B「柔和色块」的选择（`[thread-id]#private-source-id`）；其他页面只有复用同一类别语义时才可消费，不能把它们变成第二品牌色或装饰色。
 - **Focus**：`{colors.focus}`（浅色）/ `{colors.dark-focus}`（暗色）只做键盘焦点环，配方见 Elevation 表：**外置 2px 实色 outline + 2px offset 间隙**。间隙露出宿主表面，所以焦点环只与表面相邻、永远不与控件本身相邻——控件是赭红主按钮还是画布色输入框都不影响可见性。浅色环对 canvas → surface-3 为 3.51–4.36:1，暗色环对 dark-canvas → dark-surface-3 为 4.31–5.47:1；焦点前后的变化对比 = 环色对表面，同一组数。没有透明层参与计算。
 - **猫 persona 色**：每只猫的身份色是第三层，只上头像、名字、persona chip；不进按钮、不进背景、不进图表默认色。
 
@@ -423,11 +464,12 @@ Clowder AI 是人和几只猫一起工作的房间。看起来应该像一本安
 - 让内容当主角：真实消息、真实 diff、真实数据。chrome 越退后越好。
 - 先写折叠态：用户不点开时需要知道的最小事实集在首屏，其余按需展开（ADR-043 C5）。
 - 猫味放在头像、名字、语气、彩蛋；一屏最多一个猫爪印级别的装饰。
-- 交付任何视觉改动前，附渲染后的截图；没有截图不进 Design Gate。
+- 交付视觉改动前看实际渲染结果，并留下足以回查判断的证据；可现场共看、截图或录屏，按声明选择。交互能力还须真实操作验证，不能由截图单独证明。Design Gate 具体入口见 `cat-cafe-skills/feat-lifecycle/SKILL.md`。
+- 新增或实质改变 UI/UX，先看同类产品怎样完成同一任务，优先使用co-creator提供的参考；保留成立的操作与空间关系，再适配本文件的颜色、图标与密度。交付前按同一任务对照实际页，方法见 `cat-cafe-skills/refs/design-in-context-checklist.md`。
 
 ### Don't
 - 不用纯白 `#ffffff` 做画布，不用纯黑 `#000000` 做暗底，不用冷灰。
-- 不用紫色、蓝紫渐变、任何渐变按钮、玻璃拟态、光斑、噪点——这些是"AI 味"的指纹。
+- 不用紫色作第二品牌色，不用蓝紫渐变、任何渐变按钮、玻璃拟态、光斑、噪点——这些是"AI 味"的指纹。唯一例外是已注册的 violet 内容类别 token；它只在稳定类别字段与配套 SVG 中出现。
 - 不引入第二个品牌色。绿黄红蓝只表达状态，只以圆点 / 错误边线 / badge 圆点出现，永远配文字标签，永远不做文字色。
 - 不用 emoji 当图标；不用猫 emoji 当装饰；不把猫爪印铺满界面。
 - 不用 Inter/无衬线做大标题，不把衬线用在 22px 以下。
@@ -435,7 +477,7 @@ Clowder AI 是人和几只猫一起工作的房间。看起来应该像一本安
 - 不在卡片里套卡片，不做全宽 stat tile 阵列，不做"上个世纪的仪表盘"（F174 教训）。
 - 不给 hover 加新的颜色语义；hover 只允许抬一级表面。
 - 不把 Feature ID、Gate、stage、内部术语写进产品文案（ADR-043 / design-in-context）。
-- 不凭"我觉得挺好看"交付；好看由co-creator在 A/B 截图里选，猫只负责给出可选项。
+- 不凭“我觉得挺好看”交付；猫要先完成设计判断并给出推荐，遇到影响方向的体验分歧时拿具体稿请co-creator共创。A/B 截图是可选比较方式，不把设计责任或常规 QA 转交co-creator。
 
 ## Implementation Mapping
 
@@ -447,7 +489,8 @@ Clowder AI 是人和几只猫一起工作的房间。看起来应该像一本安
 | `{colors.canvas}` #faf9f5 | `--surface-hue` / `--cafe-surface-*` 四档 | hue 80 / L 0.92–0.995 | hue ≈ 75，L 分布对齐 canvas → surface-3 |
 | `{colors.ink}` 系 | `--neutral-*` 11 档（hue 30） | 已是暖中性 | 不变 |
 | `{colors.dark-*}` | `[data-theme="dark"]` 表面四档 | L 0.21–0.36 | 对齐 dark-canvas → dark-surface-3，保持暖 hue |
+| `{colors.category-*}` / `{colors.dark-category-*}` | `--content-category-*` | F311 旧实现借用 chart / semantic 色 | teal / violet / berry / moss 独立类别角色；浅底字段 + SVG，和主动作及状态色分权 |
 | `{typography.display-*}` | 全局 `font-family`（目前仅 Inter） | 无衬线单声音 | 增加衬线 display 字体栈；正文保持 Inter |
 | `{rounded.*}` / 控件 32px | Tailwind `borderRadius` + 组件类 | 气泡 24px、pill 按钮存量 | 迁移到 8 / 12 / 16 |
 
-迁移在 F056 Phase F 里分步进行；每一步以 A/B 渲染截图由co-creator选定，再落 token。本文件 token 与运行时解析值的一致性由 F056 AC-F6 的 parity 守护测试保证（落地前不声明一致）；本文件**允许的角色配对**（文字 × 表面、on-primary × primary 等）的对比度由 `scripts/check-design-md.test.mjs` 的确定性矩阵守住，lint 只覆盖已声明的组件对，矩阵覆盖 prose 允许的全部配对。
+迁移在 F056 Phase F 里分步进行；每一步以 A/B 渲染截图由co-creator选定，再落 token。这是该迁移已确定的专项确认方式，不扩展为所有视觉改动的固定配额。本文件 token 与运行时解析值的一致性由 F056 AC-F6 的 parity 守护测试保证（落地前不声明一致）；本文件**允许的角色配对**（文字 × 表面、on-primary × primary 等）的对比度由 `scripts/check-design-md.test.mjs` 的确定性矩阵守住，lint 只覆盖已声明的组件对，矩阵覆盖 prose 允许的全部配对。

@@ -24,7 +24,11 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CURRENT_RELATIONSHIP_PROFILE_URI, DEFAULT_PROFILE_USER_ID } from '@cat-cafe/shared/profile-contract';
+import {
+  CURRENT_CORPUS_PROFILE_URI,
+  CURRENT_RELATIONSHIP_PROFILE_URI,
+  DEFAULT_PROFILE_USER_ID,
+} from '@cat-cafe/shared/profile-contract';
 import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/instruments.js';
 import { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { L0DependencySignatureTracker } from './l0-dependency-signature.js';
@@ -35,7 +39,10 @@ const l0Cache = new L0ProfileCache();
 const dependencySignatures = new L0DependencySignatureTracker();
 
 function recordProfilePointerEmission(compiledL0: string): void {
-  if (compiledL0.includes(CURRENT_RELATIONSHIP_PROFILE_URI)) profilePointerEmitted.add(1);
+  const hasPrimer = compiledL0.includes(CURRENT_RELATIONSHIP_PROFILE_URI);
+  const hasCorpus = compiledL0.includes(CURRENT_CORPUS_PROFILE_URI);
+  if (hasPrimer) profilePointerEmitted.add(1, { 'profile.layer': 'primer' });
+  if (hasCorpus) profilePointerEmitted.add(1, { 'profile.layer': 'corpus' });
 }
 
 function refreshL0DependencySignature(cwd: string, scriptPath: string): string | null {
@@ -45,6 +52,11 @@ function refreshL0DependencySignature(cwd: string, scriptPath: string): string |
 /** Clear cached L0 for one cat or all cats (call on hot-reload / re-sync). */
 export function clearL0Cache(catId?: string, userId?: string): void {
   l0Cache.clear(catId, userId);
+}
+
+/** Phase E: clear all cached L0s for a given owner (corpus is owner-wide, not cat-scoped). */
+export function clearL0CacheOwner(userId: string): void {
+  l0Cache.clearOwner(userId);
 }
 
 /** Number of cached entries (test/diagnostic). */

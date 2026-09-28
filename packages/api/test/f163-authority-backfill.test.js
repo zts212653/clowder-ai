@@ -61,6 +61,16 @@ describe('pathToAuthority', () => {
     assert.equal(pathToAuthority('doc:discussions/2026-04-15-harness-engineering'), 'candidate');
     assert.equal(pathToAuthority('doc:SOP.md'), 'constitutional');
   });
+
+  it('handles Windows backslash source paths (path.relative on win32)', () => {
+    assert.equal(pathToAuthority('docs\\lessons-learned.md'), 'constitutional');
+    assert.equal(pathToAuthority('cat-cafe-skills\\refs\\shared-rules.md'), 'constitutional');
+    assert.equal(pathToAuthority('features\\assets\\F088\\acceptance-criteria.md'), 'validated');
+    assert.equal(pathToAuthority('docs\\decisions\\009-skills-distribution.md'), 'validated');
+    assert.equal(pathToAuthority('docs\\architecture\\memory-philosophy.md'), 'validated');
+    assert.equal(pathToAuthority('docs\\discussions\\2026-04-15-harness-engineering\\README.md'), 'candidate');
+    assert.equal(pathToAuthority('random\\file.md'), 'observed');
+  });
 });
 
 describe('INDEXING_VERSION bump (P1 fix)', () => {
@@ -75,6 +85,13 @@ describe('INDEXING_VERSION bump (P1 fix)', () => {
     assert.ok(
       INDEXING_VERSION >= 7,
       'INDEXING_VERSION must stay at or above 7 so existing architecture docs stop ranking as plan/observed records',
+    );
+  });
+
+  it('stays at or above 13 to re-derive authority for Windows backslash source paths', () => {
+    assert.ok(
+      INDEXING_VERSION >= 13,
+      'INDEXING_VERSION must stay at or above 13 so Windows installs re-derive authority stored as observed',
     );
   });
 });

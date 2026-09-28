@@ -25,6 +25,7 @@ import {
   actionSuccessorFencesMatch,
   reconcileActionSuccessorEnqueue,
 } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
+import type { TurnCustodyWakeProvenance } from '../domains/ball-custody/TurnCustodyProjectionService.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
@@ -276,7 +277,8 @@ export interface MultiMentionRouteDeps {
       catId: string;
       invocationId: string;
       messageIds: readonly string[];
-    }): Promise<void>;
+      seenAt: number;
+    }): Promise<readonly TurnCustodyWakeProvenance[] | void>;
   };
 }
 

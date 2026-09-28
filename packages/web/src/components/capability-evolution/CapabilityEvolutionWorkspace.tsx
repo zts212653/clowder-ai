@@ -1,82 +1,91 @@
 'use client';
 
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
+import type { EvolutionProgramOriginV1 } from '@cat-cafe/shared';
+import { useLayoutEffect, useRef } from 'react';
 import { CapabilityEvolutionProgramDetail } from './CapabilityEvolutionProgramDetail';
 import { CapabilityEvolutionProgramRow } from './CapabilityEvolutionProgramRow';
 import {
   type EvolutionProgramPresentationProjection,
-  parseEvolutionProgramProjection,
+  evolutionProgramPresentation,
+  productStatus,
 } from './capability-evolution-presentation';
+import { EvolutionProgramOrigin } from './EvolutionProgramOrigin';
+import { useEvolutionAssetReview } from './evolution-asset-resource';
+import { useEvolutionPrograms } from './evolution-program-resource';
+import { DEFAULT_READING, useEvolutionReading } from './evolution-reading-state';
+import { StartEvolution } from './StartEvolution';
+import { useEvolutionScroll } from './use-evolution-scroll';
+import './evolution-workspace.css';
 
-function StartEvolution({ targetThreadId }: { targetThreadId: string | null }) {
-  const setPendingChatInsert = useChatStore((state) => state.setPendingChatInsert);
-  const targetThreadTitle = useChatStore((state) => {
-    if (!targetThreadId) return null;
-    const thread = state.threads.find((candidate) => candidate.id === targetThreadId);
-    return thread ? thread.title?.trim() || '未命名对话' : null;
-  });
-  const [target, setTarget] = useState('');
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const normalized = target.trim();
-    if (!normalized) return;
-    if (!targetThreadId || !targetThreadTitle) {
-      setNotice('当前工作区没有可写入的目标对话。');
-      return;
-    }
-    setPendingChatInsert({ threadId: targetThreadId, text: `我们来进化 ${normalized}` });
-    setTarget('');
-    setNotice(`已带到「${targetThreadTitle}」，原有草稿已保留。由你确认后发送。`);
-  };
-
+function ProgramFocus({
+  projection,
+  onSelect,
+}: {
+  projection: EvolutionProgramPresentationProjection;
+  onSelect: () => void;
+}) {
+  const status = productStatus(projection);
+  const asset = useEvolutionAssetReview(projection);
+  const target = evolutionProgramPresentation(projection.program, projection.origin);
   return (
-    <section className="rounded-2xl border border-cafe-subtle/75 bg-[var(--console-card-bg)] p-4 shadow-sm">
-      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
-        <label className="sr-only" htmlFor="capability-evolution-target">
-          想持续改进哪项能力
-        </label>
-        <input
-          id="capability-evolution-target"
-          data-testid="capability-evolution-start-input"
-          value={target}
-          onChange={(event) => {
-            setTarget(event.target.value);
-            setNotice(null);
-          }}
-          placeholder="例如：投资人路演效果"
-          className="min-w-0 flex-1 rounded-xl border border-cafe-subtle bg-cafe-surface px-3.5 py-2.5 text-sm text-cafe-black outline-none transition-colors placeholder:text-cafe-muted focus:border-cafe-accent"
-        />
-        <button
-          type="submit"
-          data-testid="capability-evolution-start"
-          disabled={!target.trim() || !targetThreadTitle}
-          className="rounded-xl bg-cafe-accent px-4 py-2.5 text-sm font-semibold text-[var(--cafe-surface)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          带到这个对话
-        </button>
-      </form>
-      <div className="mt-2 flex items-start justify-between gap-3 text-xs text-cafe-muted">
-        <div data-testid="capability-evolution-chat-destination">
-          {targetThreadTitle ? (
-            <p>当前对话：{targetThreadTitle}</p>
-          ) : (
-            <>
-              <p className="font-semibold text-cafe-secondary">没有可写入的目标对话</p>
-              <p className="mt-1 leading-5">请先回到一个对话，再从该对话的工作区打开能力进化。</p>
-            </>
-          )}
-        </div>
-      </div>
-      {notice && (
-        <output className="mt-2 text-xs text-cafe-secondary" aria-live="polite">
-          {notice}
-        </output>
+    <section className="evolution-focus" aria-label="当前关注项目">
+      <p className="text-xs font-semibold text-cafe-secondary">{status.label}</p>
+      <h2 className="mt-3 text-xl font-semibold leading-8 text-cafe">{target.title}</h2>
+      <EvolutionProgramOrigin projection={projection} />
+      <p className="mt-2 text-sm leading-6 text-cafe-secondary">{status.description}</p>
+      {asset.catalog && (
+        <p className="mt-3 text-xs text-cafe-muted">
+          {asset.catalog.currentVersionRefs.length
+            ? `当前采用：${asset.catalog.currentVersionRefs.map((ref) => ref.version).join('、')}`
+            : '尚无采用记录'}
+        </p>
       )}
+      <button type="button" className="evolution-primary mt-5" onClick={onSelect}>
+        查看进展
+      </button>
     </section>
+  );
+}
+
+function WorkspaceProgramDetail({
+  programId,
+  onClose,
+  onOpenProgram,
+}: {
+  programId: string;
+  onClose: () => void;
+  onOpenProgram: (programId: string, displayName?: string, origin?: EvolutionProgramOriginV1) => void;
+}) {
+  const { projection, error, reload } = useEvolutionPrograms(programId);
+  if (!projection)
+    return (
+      <section>
+        <button type="button" className="evolution-link" onClick={onClose}>
+          ← 全部项目
+        </button>
+        <p role="status" className="evolution-empty mt-5">
+          {error ?? '正在读取项目详情…'}
+        </p>
+        {error && (
+          <button type="button" className="evolution-link mt-4" onClick={() => void reload()}>
+            重试
+          </button>
+        )}
+      </section>
+    );
+  return (
+    <>
+      <CapabilityEvolutionProgramDetail
+        projection={projection}
+        onClose={onClose}
+        onOpenProgram={(id) => onOpenProgram(id, projection.program.displayName, projection.origin)}
+      />
+      {error && (
+        <p role="status" className="evolution-empty">
+          读取暂时中断，正在显示最近一次记录。
+        </p>
+      )}
+    </>
   );
 }
 
@@ -85,131 +94,127 @@ export function CapabilityEvolutionWorkspace({
   onOpenProgram,
 }: {
   targetThreadId: string | null;
-  onOpenProgram: (programId: string) => void;
+  onOpenProgram: (programId: string, displayName?: string, origin?: EvolutionProgramOriginV1) => void;
 }) {
-  const [programs, setPrograms] = useState<EvolutionProgramPresentationProjection[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [unavailable, setUnavailable] = useState(false);
-  const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null);
-  const [rejectedProgramCount, setRejectedProgramCount] = useState(0);
-
-  const load = useCallback(async () => {
-    try {
-      const response = await apiFetch('/api/capability-evolution/programs');
-      if (!response.ok) throw new Error('Program owner unavailable');
-      const body = (await response.json()) as { programs?: unknown };
-      if (!Array.isArray(body.programs)) throw new Error('Program list invalid');
-      const parsed = body.programs.flatMap((value) => {
-        const projection = parseEvolutionProgramProjection(value);
-        return projection ? [projection] : [];
-      });
-      setPrograms(parsed);
-      setRejectedProgramCount(body.programs.length - parsed.length);
-      setUnavailable(false);
-    } catch {
-      setUnavailable(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const loadWhenVisible = () => {
-      if (document.visibilityState === 'visible') void load();
-    };
-    void load();
-    const poll = window.setInterval(loadWhenVisible, 2_000);
-    window.addEventListener('focus', loadWhenVisible);
-    document.addEventListener('visibilitychange', loadWhenVisible);
-    return () => {
-      window.clearInterval(poll);
-      window.removeEventListener('focus', loadWhenVisible);
-      document.removeEventListener('visibilitychange', loadWhenVisible);
-    };
-  }, [load]);
-
-  const selected = useMemo(
-    () => programs.find((projection) => projection.program.programId === selectedProgramId) ?? null,
-    [programs, selectedProgramId],
-  );
-
+  const { programs, loading, error, rejected, reload } = useEvolutionPrograms();
+  const workspaceKey = targetThreadId ?? 'global';
+  const selectedProgramId = useEvolutionReading((state) => state.workspaceProgramIds[workspaceKey] ?? null);
+  const selectWorkspaceProgram = useEvolutionReading((state) => state.selectWorkspaceProgram);
+  const homeScroll = useRef(0);
+  const selected = programs.find((item) => item.program.programId === selectedProgramId);
+  const { viewport, onScroll } = useEvolutionScroll(selectedProgramId ?? '', 'detail', selected !== undefined);
+  const active = programs.filter((item) => item.program.lifecycle !== 'terminal');
+  const completed = programs.filter((item) => item.program.lifecycle === 'terminal');
+  const focus = [...active].sort((a, b) => {
+    const attention = (item: EvolutionProgramPresentationProjection) =>
+      item.program.stage === 'awaiting_approval' || item.program.stage === 'deciding'
+        ? 2
+        : item.program.stage !== 'constituting'
+          ? 1
+          : 0;
+    return attention(b) - attention(a) || b.program.updatedAt.localeCompare(a.program.updatedAt);
+  })[0];
+  useLayoutEffect(() => {
+    if (viewport.current)
+      viewport.current.scrollTop = selectedProgramId
+        ? (useEvolutionReading.getState().programs[selectedProgramId] ?? DEFAULT_READING).scroll.detail
+        : homeScroll.current;
+  }, [selectedProgramId]);
+  const select = (id: string) => {
+    homeScroll.current = viewport.current?.scrollTop ?? 0;
+    selectWorkspaceProgram(workspaceKey, id);
+  };
   return (
     <div
-      className="min-h-0 flex-1 overflow-y-auto bg-[var(--console-panel-bg)]"
+      className="evolution-workspace min-h-0 flex-1 overflow-y-auto"
+      ref={viewport}
       data-testid="capability-evolution-workspace"
+      onScroll={(event) => {
+        if (!selectedProgramId) return;
+        onScroll(event.currentTarget.scrollTop);
+      }}
     >
-      <div className="mx-auto w-full max-w-5xl space-y-5 px-5 py-5">
-        <header>
-          <h1 className="text-xl font-semibold tracking-tight text-cafe-black">能力进化</h1>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-cafe-secondary">持续观测、评估并采纳能力改进。</p>
-        </header>
-
-        <StartEvolution key={targetThreadId ?? 'unbound'} targetThreadId={targetThreadId} />
-
-        <section aria-labelledby="capability-evolution-programs-heading">
-          <div className="mb-2 flex items-end justify-between gap-3">
-            <div>
-              <h2 id="capability-evolution-programs-heading" className="text-sm font-semibold text-cafe-black">
-                能力项目
-              </h2>
-              <p className="mt-1 text-xs text-cafe-muted">每一项能力独立观测、评估与保留改进。</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="text-xs font-semibold text-cafe-accent hover:underline"
-            >
-              刷新
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              正在读取能力进化记录…
-            </div>
-          ) : unavailable && programs.length === 0 ? (
-            <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              暂时无法读取进化记录，请稍后刷新。系统不会用临时数据冒充真实进展。
-            </div>
-          ) : rejectedProgramCount > 0 && programs.length === 0 ? (
-            <div className="rounded-xl border border-cafe-subtle px-4 py-8 text-center text-xs text-cafe-muted">
-              {rejectedProgramCount} 项进化记录暂时无法读取；原始记录仍安全保留，请刷新或更新页面。
-            </div>
-          ) : programs.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-cafe-subtle px-4 py-8 text-center">
-              <p className="text-sm font-semibold text-cafe-black">还没有进化记录</p>
-              <p className="mt-1 text-xs text-cafe-muted">在上方写下想改进什么，再由你从目标对话发送即可开始。</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {rejectedProgramCount > 0 && (
-                <output
-                  aria-live="polite"
-                  className="block rounded-xl border border-cafe-subtle px-3 py-2 text-xs text-cafe-muted"
-                >
-                  {rejectedProgramCount} 项进化记录暂时无法读取；其余记录仍可使用。
+      <div className="evolution-content space-y-7">
+        {selected ? (
+          <WorkspaceProgramDetail
+            programId={selected.program.programId}
+            onClose={() => selectWorkspaceProgram(workspaceKey, null)}
+            onOpenProgram={onOpenProgram}
+          />
+        ) : (
+          <>
+            <header>
+              <p className="evolution-eyebrow">目标与进展</p>
+              <h1 className="evolution-title mt-2">能力进化</h1>
+              <p className="mt-3 text-sm leading-6 text-cafe-secondary">从一个目标开始，让每次改进有据可循。</p>
+            </header>
+            {focus && <ProgramFocus projection={focus} onSelect={() => select(focus.program.programId)} />}
+            <section aria-labelledby="capability-evolution-programs-heading">
+              <div className="mb-4 flex items-baseline justify-between gap-3">
+                <h2 id="capability-evolution-programs-heading" className="text-sm font-semibold text-cafe">
+                  能力项目
+                </h2>
+                <button type="button" className="evolution-link" onClick={() => void reload()}>
+                  刷新
+                </button>
+              </div>
+              {loading ? (
+                <p className="evolution-empty py-6">正在读取能力进化记录…</p>
+              ) : error && !programs.length ? (
+                <p className="evolution-empty py-6">
+                  暂时无法读取进化记录，请稍后刷新。系统不会用临时数据冒充真实进展。
+                </p>
+              ) : !programs.length && !rejected ? (
+                <p className="evolution-empty py-6">
+                  还没有进化记录。在下方写下想改进什么，由你从目标对话发送即可开始。
+                </p>
+              ) : null}
+              {rejected > 0 && (
+                <output className="evolution-empty mb-4 block">
+                  {rejected} 项进化记录暂时无法读取；
+                  {programs.length ? '其余记录仍可使用。' : '原始记录仍安全保留，请刷新或更新页面。'}
                 </output>
               )}
               <div className="space-y-2">
-                {programs.map((projection) => (
+                {active.map((projection) => (
                   <CapabilityEvolutionProgramRow
                     key={projection.program.programId}
                     projection={projection}
-                    selected={selectedProgramId === projection.program.programId}
-                    onSelect={() => setSelectedProgramId(projection.program.programId)}
+                    selected={false}
+                    onSelect={() => select(projection.program.programId)}
                   />
                 ))}
               </div>
-            </div>
-          )}
-        </section>
-
-        {selected && (
-          <CapabilityEvolutionProgramDetail
-            projection={selected}
-            onClose={() => setSelectedProgramId(null)}
-            onOpenProgram={onOpenProgram}
-          />
+              {!!completed.length && (
+                <details className="mt-5">
+                  <summary className="cursor-pointer text-xs text-cafe-secondary">
+                    已完成的项目 · {completed.length}
+                  </summary>
+                  <div className="mt-3 space-y-2">
+                    {completed.map((projection) => (
+                      <CapabilityEvolutionProgramRow
+                        key={projection.program.programId}
+                        projection={projection}
+                        selected={false}
+                        onSelect={() => select(projection.program.programId)}
+                      />
+                    ))}
+                  </div>
+                </details>
+              )}
+            </section>
+            <details open={!programs.length} className="border-t border-cafe-subtle pt-5">
+              <summary className="cursor-pointer text-sm font-semibold text-cafe">提出新目标</summary>
+              <div className="mt-4">
+                <StartEvolution key={targetThreadId ?? 'unbound'} targetThreadId={targetThreadId} />
+              </div>
+            </details>
+          </>
+        )}
+        {error && programs.length > 0 && (
+          <p role="status" className="evolution-empty">
+            读取暂时中断，正在显示最近一次记录。
+          </p>
         )}
       </div>
     </div>

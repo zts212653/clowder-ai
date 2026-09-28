@@ -88,6 +88,7 @@ function catalogWith(primary) {
     'f246.approval': emptyAdapter('f246.approval'),
     'f292.repair': emptyAdapter('f292.repair'),
     'f306.runtime_interaction': emptyAdapter('f306.runtime_interaction'),
+    'f309.content_review': emptyAdapter('f309.content_review'),
     [primary.producerId]: primary,
   };
   return new NeedsMeProducerCatalog(Object.values(byId));

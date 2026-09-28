@@ -1,0 +1,198 @@
+/* F311 AC-UX5: category colour, semantic SVG and state colour have separate jobs. */
+.evolution-preparation {
+  --preparation-active-tone: var(--content-category-object);
+  --preparation-active-tint: color-mix(in oklch, var(--preparation-active-tone) 10%, var(--console-card-bg));
+}
+.evolution-preparation[data-active-section="success_contract"] {
+  --preparation-active-tone: var(--content-category-rubric);
+}
+.evolution-preparation[data-active-section="measurement_plan"] {
+  --preparation-active-tone: var(--content-category-measurement);
+}
+.evolution-preparation[data-active-section="baseline_diagnosis"] {
+  --preparation-active-tone: var(--content-category-diagnosis);
+}
+.evolution-preparation-tabs button[data-preparation-category="object"] {
+  --preparation-category-tone: var(--content-category-object);
+}
+.evolution-preparation-tabs button[data-preparation-category="rubric"] {
+  --preparation-category-tone: var(--content-category-rubric);
+}
+.evolution-preparation-tabs button[data-preparation-category="measurement"] {
+  --preparation-category-tone: var(--content-category-measurement);
+}
+.evolution-preparation-tabs button[data-preparation-category="diagnosis"] {
+  --preparation-category-tone: var(--content-category-diagnosis);
+}
+.evolution-preparation-tabs button {
+  min-height: 92px;
+  border-color: color-mix(in oklch, var(--preparation-category-tone) 25%, var(--cafe-border));
+  background: color-mix(in oklch, var(--preparation-category-tone) 7%, var(--console-card-bg));
+  box-shadow: none;
+}
+.evolution-preparation-tabs button:hover {
+  background: color-mix(in oklch, var(--preparation-category-tone) 10%, var(--cafe-surface-sunken));
+}
+.evolution-preparation-tabs button[aria-selected="true"] {
+  border-color: color-mix(in oklch, var(--preparation-category-tone) 55%, var(--cafe-border));
+  background: color-mix(in oklch, var(--preparation-category-tone) 15%, var(--console-card-bg));
+  color: var(--cafe-text);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--preparation-category-tone) 32%, transparent);
+}
+.evolution-preparation-tab-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+}
+.evolution-preparation-tab-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  place-items: center;
+  border: 1px solid color-mix(in oklch, var(--preparation-category-tone) 38%, var(--cafe-border));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--preparation-category-tone) 12%, var(--console-card-bg));
+  color: var(--preparation-category-tone);
+}
+.evolution-preparation-tab-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.evolution-preparation-tab-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.evolution-preparation-tab-label,
+.evolution-preparation-tab-hint {
+  overflow-wrap: anywhere;
+}
+.evolution-preparation-tab-label {
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  font-weight: 600;
+  line-height: 1.35;
+}
+.evolution-preparation-tab-hint {
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+  font-weight: 400;
+  line-height: 1.35;
+}
+.evolution-preparation-tabs small,
+.evolution-preparation-source-status,
+.evolution-preparation-dual-status span {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--cafe-text-secondary);
+}
+.evolution-preparation-tabs small::before,
+.evolution-preparation-source-status::before,
+.evolution-preparation-dual-status span::before {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border: 1px solid var(--cafe-text-muted);
+  border-radius: 50%;
+  content: "";
+}
+.evolution-preparation-tabs small[data-preparation-section-state="working"]::before,
+.evolution-preparation-dual-status span[data-collection-state="collecting"]::before {
+  border-color: var(--semantic-info);
+  background: var(--semantic-info);
+}
+.evolution-preparation-tabs small[data-preparation-section-state="submitted"]::before,
+.evolution-preparation-source-status[data-source-status="submitted"]::before,
+.evolution-preparation-dual-status span[data-collection-state="collected"]::before,
+.evolution-preparation-dual-status span[data-validity-state="bounded"]::before {
+  border-color: var(--semantic-success);
+  background: var(--semantic-success);
+}
+.evolution-preparation-tabs
+  small:is(
+    [data-preparation-section-state="needs_continue"],
+    [data-preparation-section-state="needs_update"],
+    [data-preparation-section-state="materializing"]
+  )::before,
+.evolution-preparation-source-status:is(
+    [data-source-status="needs_update"],
+    [data-source-status="materializing"]
+  )::before,
+.evolution-preparation-dual-status span[data-validity-state="needs_review"]::before {
+  border-color: var(--semantic-warning);
+  background: var(--semantic-warning);
+}
+.evolution-preparation-tabs
+  small:is(
+    [data-preparation-section-state="source_unavailable"],
+    [data-preparation-section-state="source_invalid"]
+  )::before,
+.evolution-preparation-source-status:is(
+    [data-source-status="source_unavailable"],
+    [data-source-status="source_invalid"]
+  )::before {
+  border-color: var(--semantic-critical);
+  background: var(--semantic-critical);
+}
+.evolution-preparation-source-status[data-source-status="submitted"],
+.evolution-preparation-dual-status span[data-validity-state="bounded"] {
+  background: var(--cafe-surface-sunken);
+  color: var(--cafe-text-secondary);
+}
+.evolution-preparation-submission {
+  border-top: 2px solid var(--preparation-active-tone);
+}
+.evolution-preparation-goal {
+  border-left-color: var(--preparation-active-tone);
+  background: var(--preparation-active-tint);
+}
+.evolution-preparation-alert,
+.evolution-preparation-empty,
+.evolution-preparation-section-activity {
+  border-left-color: var(--preparation-active-tone);
+}
+
+/* F311 AC-UX5: one submission surface; nested content is separated by hairlines, not more cards. */
+.evolution-preparation-item,
+.evolution-preparation-rubric,
+.evolution-preparation-gt-source,
+.evolution-preparation-fact-card,
+.evolution-preparation-explanations > article {
+  border: 0;
+  border-top: 1px solid var(--cafe-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+.evolution-preparation-item > summary,
+.evolution-preparation-rubric > summary {
+  padding-right: 0;
+  padding-left: 0;
+}
+.evolution-preparation-item-body,
+.evolution-preparation-rubric-body {
+  padding-right: 0;
+  padding-left: 0;
+}
+.evolution-preparation-gt-source,
+.evolution-preparation-fact-card,
+.evolution-preparation-explanations > article {
+  padding-right: 0;
+  padding-left: 0;
+}
+.evolution-preparation-gt-source[data-focused="true"] {
+  border-color: var(--cafe-border-subtle);
+  padding-left: 10px;
+  background: color-mix(in oklch, var(--preparation-active-tone) 6%, transparent);
+  box-shadow: inset 3px 0 var(--preparation-active-tone);
+}
+.evolution-preparation-bounds,
+.evolution-preparation-unknowns {
+  padding: 11px 0 0;
+  border-top: 1px solid var(--cafe-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}

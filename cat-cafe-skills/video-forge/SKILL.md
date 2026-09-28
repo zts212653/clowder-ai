@@ -1,6 +1,6 @@
 ---
 name: video-forge
-tips_exempt: renewed 2026-09-04 for the current F308 public-link projection of agent-product-promo-director routing and risk-matched review guidance; this changes cat production discipline, not a user-invokable product capability
+tips_exempt: "2026-09-15 narrative-method update: routes unclear explanations to causal review before existing production; no new video command or user-facing operation."
 description: >
   视频制作全链路：素材入库 → 剧本冻结 → 全局配音 → 对齐 → 渲染 → 审查 → 交付。
   Use when: 已明确要制作视频、做 showcase、做教程视频、录屏剪辑、video review、节奏审查。
@@ -31,6 +31,8 @@ description: >
 > 失败史（2026-08-25）：用户最初要求研究真实 AI 产品宣传片的剪辑与叙事，团队却围绕一个 crime-wall 页面连续制作多版试片；后来即使修复了“PPT 化”的 motion 问题，仍然没有回答原问题。根因不是导演技巧不足，而是把 reference research 错路由成了 production。
 
 ## Narrative Subject Gate：产品是主角，成果只是 proof
+
+讲解视频或已有成片被反馈“没看懂”时，按[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)判断缺的是哪一步因果或角色行动，再进入对应制作/审查。只做技术剪辑、已有明确修订点时不重开叙事设计；不把技能读取当作观众理解的证据。
 
 产品宣传片在写分镜前，先用一句话回答：**观众看完应该想要哪个产品？**
 

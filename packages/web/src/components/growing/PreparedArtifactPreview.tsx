@@ -1,17 +1,22 @@
 'use client';
 
 import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 
 export type PreparedArtifactCoordinate = NonNullable<EntrustedWorkOwnerReadV1['preparedArtifact']>;
 
 export function PreparedArtifactPreview({
   coordinate,
   artifact,
+  loading = false,
   onOpen,
+  reviewAction,
 }: {
   coordinate: PreparedArtifactCoordinate;
   artifact?: GlobalArtifactDTO;
+  loading?: boolean;
   onOpen?: () => void;
+  reviewAction?: ReactNode;
 }) {
   return (
     <section
@@ -32,15 +37,20 @@ export function PreparedArtifactPreview({
             {artifact?.threadTitle ? ` · ${artifact.threadTitle}` : ''}
           </p>
         </div>
-        <button
-          type="button"
-          data-testid="needs-me-open-artifact"
-          data-open-ref={coordinate.openInWorkspaceRef}
-          className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover"
-          onClick={onOpen}
-        >
-          在 Workspace 打开
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {reviewAction}
+          <button
+            type="button"
+            data-testid="needs-me-open-artifact"
+            data-open-ref={coordinate.openInWorkspaceRef}
+            disabled={loading}
+            aria-busy={loading}
+            className="shrink-0 rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] hover:bg-cafe-accent-hover disabled:cursor-wait disabled:opacity-60"
+            onClick={onOpen}
+          >
+            {loading ? '正在加载产物…' : '在 Workspace 打开'}
+          </button>
+        </div>
       </div>
       {artifact?.type === 'image' && artifact.url ? (
         // biome-ignore lint/performance/noImgElement: F232 artifact URLs are runtime-owned and not Next image assets.

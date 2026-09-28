@@ -10,6 +10,7 @@ const AUTH_ENV_KEYS = [
   'CAT_CAFE_AGENT_KEY_FILES',
   'CAT_CAFE_AGENT_KEY_BOUND_CAT_ID',
   'CAT_CAFE_READONLY',
+  'CAT_CAFE_READONLY_AGENT_KEY_UNION',
 ];
 
 const originalEnv = Object.fromEntries(AUTH_ENV_KEYS.map((key) => [key, process.env[key]]));
@@ -66,6 +67,7 @@ describe('post_message principal-specific public schema', () => {
 
   test('agent-key-only registration requires threadId because there is no current invocation thread', async () => {
     process.env.CAT_CAFE_READONLY = 'true';
+    process.env.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
     process.env.CAT_CAFE_AGENT_KEY_SECRET = 'agent-key-schema-contract';
 
     const { createCollabServer } = await import('../dist/collab.js');

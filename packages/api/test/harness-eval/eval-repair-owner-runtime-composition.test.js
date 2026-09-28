@@ -22,6 +22,23 @@ const programRef = ref('F311', 'program:composition');
 const cycleRef = ref('F311', 'cycle:composition:1');
 const interventionRef = ref('F311', 'intervention:composition:1');
 
+function ownerRoute(
+  providerId,
+  routedProgramRef = programRef,
+  repairTargetRef = { ownerFeatureId: 'F188', ownerStateRef: 'evidence-reader' },
+  assetVersionRoute = { ownerFeatureId: 'F188', ownerStateRef: 'asset:F188:evidence-reader' },
+) {
+  return {
+    schemaVersion: 1,
+    providerId,
+    programRefs: [routedProgramRef],
+    repairTargetRefs: [{ ...repairTargetRef, match: 'exact' }],
+    assetVersionRefs: [{ ...assetVersionRoute, match: 'exact' }],
+    interventionReceiptRefs: [],
+    freshOutcomeReceiptRefs: [],
+  };
+}
+
 function compositionFixture() {
   const eventLog = new MemoryEventLog();
   const cards = [];
@@ -74,6 +91,7 @@ function compositionFixture() {
     },
   };
   const bindingProvider = {
+    route: ownerRoute('composition-owner-v1'),
     async resolve() {
       return ownerBindings;
     },
@@ -201,6 +219,7 @@ describe('F313 Phase D production owner composition', () => {
       const bindings = { ...ctx.ownerBindings, [key]: undefined };
       const registration = new EvalRepairOwnerRuntimeRegistration();
       registration.registerBindingProvider({
+        route: ctx.bindingProvider.route,
         async resolve() {
           return bindings;
         },
@@ -268,7 +287,7 @@ describe('F313 Phase D production owner composition', () => {
     assert.deepEqual(inactive.calls, { epoch: 1, owner: 0, dispatch: 0, authority: 0, lineage: 0, decision: 0 });
   });
 
-  it('requires one owner provider plus the outcome and F311 consumer seams without silent replacement', async () => {
+  it('requires owner providers plus the outcome and F311 consumer seams without silent consumer replacement', async () => {
     for (const missing of ['provider', 'evolutionConsumer', 'outcomeConsumer']) {
       const ctx = compositionFixture();
       const registration = new EvalRepairOwnerRuntimeRegistration();
@@ -291,12 +310,104 @@ describe('F313 Phase D production owner composition', () => {
     const registration = new EvalRepairOwnerRuntimeRegistration();
     const provider = compositionFixture().bindingProvider;
     registration.registerBindingProvider(provider);
-    assert.throws(() => registration.registerBindingProvider(provider), /already registered/);
     const consumer = { connect() {} };
     registration.registerEvolutionOwnerConsumer(consumer);
     assert.throws(() => registration.registerEvolutionOwnerConsumer(consumer), /already registered/);
     registration.registerOutcomeServiceConsumer(consumer);
     assert.throws(() => registration.registerOutcomeServiceConsumer(consumer), /already registered/);
+  });
+
+  it('retains multiple owner binding providers for one canonical F266/F246/F313 runtime', () => {
+    const registration = new EvalRepairOwnerRuntimeRegistration();
+    const first = compositionFixture().bindingProvider;
+    const second = compositionFixture().bindingProvider;
+
+    registration.registerBindingProvider(first);
+    registration.registerBindingProvider(second);
+
+    assert.deepEqual(registration.snapshot().bindingProviders, [first, second]);
+  });
+
+  it('routes a canonical approval request to exactly one provider while another owner stays untouched', async () => {
+    const ctx = compositionFixture();
+    const otherCalls = { authority: 0, lineage: 0, owner: 0 };
+    const otherProgramRef = ref('F311', 'program:other');
+    const otherBindings = {
+      ...ctx.ownerBindings,
+      async resolveOwnerChangeContract() {
+        otherCalls.owner += 1;
+        throw new Error('non-owning target provider was contacted');
+      },
+      requestAuthorityVerifier: {
+        async verify() {
+          otherCalls.authority += 1;
+          throw new Error('non-owning authority provider was contacted');
+        },
+      },
+      lineageResolver: {
+        async resolve() {
+          otherCalls.lineage += 1;
+          throw new Error('non-owning lineage provider was contacted');
+        },
+      },
+    };
+    const registration = new EvalRepairOwnerRuntimeRegistration();
+    registration.registerBindingProvider({
+      route: ownerRoute(
+        'other-owner-v1',
+        otherProgramRef,
+        { ownerFeatureId: 'other-owner', ownerStateRef: 'target' },
+        { ownerFeatureId: 'other-owner', ownerStateRef: 'asset:target' },
+      ),
+      async resolve() {
+        return otherBindings;
+      },
+    });
+    registration.registerBindingProvider(ctx.bindingProvider);
+    registration.registerEvolutionOwnerConsumer({ connect() {} });
+    registration.registerOutcomeServiceConsumer({ connect() {} });
+
+    const result = await createEvalRepairOwnerRuntime({ ...ctx.options, registration });
+    assert.equal(result.status, 'active');
+    const requested = await result.evolutionOwner.requestApproval({
+      programRef,
+      cycleRef,
+      interventionRef,
+      clientMessageId: 'federated-composition-request-1',
+      requestAuthority: principal,
+    });
+    assert.equal(requested.status, 'pending');
+    assert.deepEqual(otherCalls, { authority: 0, lineage: 0, owner: 0 });
+    assert.equal(ctx.cards.length, 1);
+  });
+
+  it('fails the whole composition closed before connecting consumers when owner routes overlap', async () => {
+    const ctx = compositionFixture();
+    const registration = new EvalRepairOwnerRuntimeRegistration();
+    registration.registerBindingProvider(ctx.bindingProvider);
+    registration.registerBindingProvider({
+      route: { ...ctx.bindingProvider.route, providerId: 'ambiguous-owner-v1' },
+      async resolve() {
+        return ctx.ownerBindings;
+      },
+    });
+    let connected = false;
+    registration.registerEvolutionOwnerConsumer({
+      connect() {
+        connected = true;
+      },
+    });
+    registration.registerOutcomeServiceConsumer({
+      connect() {
+        connected = true;
+      },
+    });
+
+    const result = await createEvalRepairOwnerRuntime({ ...ctx.options, registration });
+    assert.equal(result.status, 'dormant');
+    assert.ok(result.missing.includes('ownerBindings:route_ambiguous'));
+    assert.equal(connected, false);
+    assert.equal(ctx.cards.length, 0);
   });
 
   it('resolves one concrete binding snapshot into the cutover, outcome service, and reachable F311 port', async () => {

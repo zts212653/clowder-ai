@@ -1,0 +1,268 @@
+.exploration-results-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--console-font-base);
+  font-weight: 600;
+}
+.exploration-results-heading svg {
+  color: var(--content-category-diagnosis);
+}
+.exploration-counts {
+  display: flex;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin: 18px 0 8px;
+  margin-top: 12px;
+}
+.exploration-counts button {
+  text-align: left;
+  padding: 0 12px 8px 0;
+  border-bottom: 2px solid var(--chart-4);
+  flex: 1;
+  padding-bottom: 5px;
+}
+.exploration-counts button.exploration-failure-count {
+  border-color: var(--semantic-critical);
+}
+.exploration-counts button:last-child {
+  border-color: var(--semantic-warning);
+}
+.exploration-counts strong {
+  display: inline;
+  font-size: var(--console-font-lg);
+  font-weight: 500;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  margin-right: 8px;
+}
+.exploration-counts span {
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-secondary);
+}
+.exploration-cases {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin: 12px 0 22px;
+}
+.exploration-cases button {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 9px 8px;
+  border-bottom: 1px solid var(--cafe-border-subtle);
+  border-radius: 4px;
+}
+.exploration-cases button > span {
+  min-width: 0;
+}
+.exploration-cases strong {
+  display: block;
+  font-weight: 500;
+  font-size: var(--console-font-xs);
+}
+.exploration-cases button span span {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-secondary);
+}
+.exploration-cases button[aria-pressed="true"] {
+  background: var(--cafe-surface-elevated);
+  outline: 1px solid var(--cafe-border);
+}
+.exploration-cases [data-result="satisfied"] > svg {
+  color: var(--semantic-success);
+}
+.exploration-cases [data-result="unknown"] > svg {
+  color: var(--semantic-warning);
+}
+.exploration-result > h3 {
+  font-size: var(--console-font-base);
+  font-weight: 600;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.exploration-result > h3 > span {
+  font-size: var(--console-font-xs);
+  font-weight: 400;
+  color: var(--cafe-text-secondary);
+}
+.exploration-behavior {
+  min-width: 0;
+  border-top: 1px solid var(--cafe-border-subtle);
+  padding-top: 12px;
+}
+.exploration-behavior-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.exploration-behavior-heading > svg {
+  color: var(--chart-4);
+}
+.exploration-behavior-heading h4 {
+  font-weight: 600;
+}
+.exploration-behavior-heading > span {
+  margin-left: auto;
+}
+.exploration-io {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  gap: 12px;
+  background: var(--cafe-surface);
+  padding: 16px;
+  border-radius: 8px;
+}
+.exploration-io h5 {
+  color: var(--chart-4);
+  font-size: var(--console-font-xs);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.exploration-io > div:last-child h5 {
+  color: var(--chart-5);
+}
+.exploration-io dl > div {
+  margin-bottom: 10px;
+}
+.exploration-io dt {
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-muted);
+}
+.exploration-io dd {
+  color: var(--cafe-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.exploration-io-arrow {
+  align-self: center;
+  color: var(--cafe-text-muted);
+}
+.exploration-measurements {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 20px;
+  margin: 14px 0;
+}
+.exploration-measurements summary {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  cursor: pointer;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--cafe-border-subtle);
+  font-size: var(--console-font-xs);
+}
+.exploration-measurements strong {
+  font-weight: 500;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.exploration-measurements details p,
+.exploration-sources p {
+  margin: 8px 0;
+  font-size: var(--console-font-xs);
+  color: var(--cafe-text-secondary);
+}
+.exploration-sources {
+  margin-top: 12px;
+  font-size: var(--console-font-xs);
+}
+.exploration-sources > summary {
+  color: var(--cafe-text-muted);
+  cursor: pointer;
+}
+.exploration-all-cases {
+  margin-block: 8px 14px;
+  font-size: var(--console-font-xs);
+}
+.exploration-all-cases > summary {
+  color: var(--cafe-text-muted);
+  cursor: pointer;
+}
+.exploration-failure-summary {
+  display: flex;
+  gap: 6px 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: var(--console-font-xs);
+  margin-top: 8px;
+}
+.exploration-failure-summary > svg {
+  color: var(--semantic-critical);
+}
+.exploration-failure-summary button {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.exploration-trace {
+  min-width: 0;
+  padding: 12px;
+  background: var(--cafe-surface);
+  border-radius: 10px;
+}
+.exploration-trace figcaption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--console-font-xs);
+}
+.exploration-trace figcaption svg {
+  color: var(--chart-4);
+}
+.exploration-trace figcaption span {
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-muted);
+  margin-left: auto;
+}
+.exploration-trace > svg {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  margin-top: 12px;
+}
+.exploration-trace text {
+  fill: var(--cafe-text-secondary);
+  font-size: var(--console-font-micro);
+}
+.exploration-trace-grid {
+  stroke: var(--cafe-border-subtle);
+  stroke-width: 0.5;
+}
+.exploration-trace-a,
+.exploration-trace-b {
+  fill: none;
+  stroke: var(--chart-4);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.exploration-trace-b {
+  stroke: var(--chart-5);
+}
+.exploration-trace-start {
+  fill: var(--cafe-text);
+}
+.exploration-trace-end {
+  fill: var(--chart-4);
+}
+.exploration-trace-target {
+  fill: var(--chart-2);
+  stroke: var(--cafe-surface);
+  stroke-width: 1;
+}
+.exploration-trace details {
+  font-size: var(--console-font-label);
+  margin-top: 8px;
+  color: var(--cafe-text-muted);
+}

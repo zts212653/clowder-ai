@@ -1,5 +1,6 @@
 .root {
   container-type: inline-size;
+  container-name: team;
 }
 
 .teamGrid {
@@ -8,8 +9,32 @@
   gap: 0.625rem;
 }
 
-@container (min-width: 48.75rem) {
+@container team (min-width: 48.75rem) {
   .teamGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/*
+ * F293 AC-UX6 — one member per row, avatar first, honest state last.
+ * Wide columns keep the state chip on the same baseline as the name; a 360px
+ * workbench column drops it under the text so nothing needs horizontal scroll.
+ */
+.memberRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.75rem;
+  row-gap: 0.375rem;
+}
+
+@container team (max-width: 26rem) {
+  .memberRow {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .memberRow > :last-child {
+    grid-column: 2;
   }
 }

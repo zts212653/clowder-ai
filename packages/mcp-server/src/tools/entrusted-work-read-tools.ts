@@ -40,7 +40,7 @@ export const entrustedWorkReadTools = [
     description:
       'Read canonical entrusted-work owner truth for the current Task without mutating it. ' +
       'Web and cats receive the same refs/revisions/Artifact/time serializer. ' +
-      'Producer receipts are discovered only through the closed F246/F292/F306 owner adapters; stale Task reads are inert and never expose actions.',
+      'Producer receipts are discovered only through registered F246/F292/F306/F309 owner adapters; stale Task reads are inert and never expose actions.',
     inputSchema: readEntrustedWorkInputSchema,
     handler: handleReadEntrustedWork,
     governance: {

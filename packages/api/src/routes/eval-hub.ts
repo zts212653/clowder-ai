@@ -319,6 +319,10 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
         domain: domainId,
         catId: principal.catId,
         ownerUserId: principal.userId,
+        // Invocation-authenticated sourceThreadId for provenance traceability.
+        // Only invocation principals carry threadId; agent_key principals don't.
+        // Server-side only — never read from body (prevents client forgery).
+        ...(principal.kind === 'invocation' && principal.threadId ? { sourceThreadId: principal.threadId } : {}),
         // PR-2 (砚砚 R1 Q3): sourceRefs is a discriminated union (a2a vs capability-wakeup-trial-window);
         // adapter discriminates by `kind` field. Cast through unknown — handler/adapter validate shape.
         sourceRefs: (body.sourceRefs ??

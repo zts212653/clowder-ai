@@ -104,6 +104,7 @@ export class AutomaticRoutingSignalService {
       eventType: 'recovered',
       state: 'available',
       closesSignalIds: input.closesSignalIds,
+      ...(input.probeStartedAt !== undefined ? { probeStartedAt: input.probeStartedAt } : {}),
     });
     return this.options.signalStore.append(event);
   }

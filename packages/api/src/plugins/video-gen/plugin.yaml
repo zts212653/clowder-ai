@@ -1,7 +1,10 @@
 id: video-gen
 name: 视频生成
 version: "1.0.0"
-description: 声明式视频/图片生成 — 通过协议模板适配多视频协议（智谱、可灵、即梦等）
+description:
+  default: Generate video or images through declared Zhipu, Kling, Jimeng, and compatible provider protocols.
+  translations:
+    zh-CN: 声明式视频/图片生成——通过协议模板适配智谱、可灵、即梦等服务。
 icon: video
 iconBg: "#6366f1"
 

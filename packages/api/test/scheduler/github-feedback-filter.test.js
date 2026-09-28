@@ -23,6 +23,20 @@ describe('createGitHubFeedbackFilter (post-E.2 cutover — Rule A only)', () => 
     assert.equal(filter.shouldSkipReview({ author: 'alice' }), false);
   });
 
+  /*
+   * #1392: GitHub logins are case-insensitive. Before #1392 this comparison could be
+   * exact without anyone noticing, because comments never reached a predicate. Once they do, a
+   * configured login whose case differs from GitHub's would wake the owner with their own comments.
+   */
+  it('skips self-authored feedback whatever the case of the configured login', async () => {
+    const { createGitHubFeedbackFilter } = await import('../../dist/infrastructure/email/github-feedback-filter.js');
+    const filter = createGitHubFeedbackFilter({ selfGitHubLogin: 'Cat-Self' });
+    assert.equal(filter.shouldSkipComment({ author: 'cat-self', commentType: 'inline' }), true);
+    assert.equal(filter.shouldSkipComment({ author: 'CAT-SELF', commentType: 'conversation' }), true);
+    assert.equal(filter.shouldSkipReview({ author: 'cat-self' }), true);
+    assert.equal(filter.shouldSkipComment({ author: 'cat-selfish' }), false, 'identity, not a prefix match');
+  });
+
   it('does NOT skip Codex bot inline comments (Rule B dropped — polling is sole source)', async () => {
     const { createGitHubFeedbackFilter } = await import('../../dist/infrastructure/email/github-feedback-filter.js');
     const filter = createGitHubFeedbackFilter({ selfGitHubLogin: 'me' });

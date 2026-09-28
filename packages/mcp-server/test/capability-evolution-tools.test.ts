@@ -48,20 +48,44 @@ describe('F311 MCP chat admission', () => {
     await handleStartEvolutionProgram({
       targetRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
       clientMessageId: 'message-start-video-forge',
+      displayName: '视频生成能力',
     });
 
     assert.deepEqual(Object.keys(startEvolutionProgramInputSchema).sort(), [
       'agentKeyCatId',
       'clientMessageId',
+      'displayName',
       'targetRef',
     ]);
     assert.equal(startEvolutionProgramInputSchema.agentKeyCatId.isOptional(), true);
+    assert.equal(startEvolutionProgramInputSchema.displayName.isOptional(), false);
     assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/evolution-programs');
     assert.deepEqual(JSON.parse(String(requests[0].init.body)), {
       targetRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:video-forge', version: 'v1' },
       clientMessageId: 'message-start-video-forge',
+      displayName: '视频生成能力',
     });
     assert.equal(requests[0].init.headers?.['x-invocation-id'], 'inv-f311');
+  });
+
+  it('carries the user goal as readable naming metadata through chat creation and renaming', async () => {
+    const displayName = '改进路演表达';
+    await handleStartEvolutionProgram({
+      targetRef: { ownerFeatureId: 'F311', ownerStateRef: 'capability:opaque-target' },
+      clientMessageId: 'message-start-readable',
+      displayName,
+    });
+    assert.equal(JSON.parse(String(requests[0].init.body)).displayName, displayName);
+    assert.equal(startEvolutionProgramInputSchema.displayName.safeParse('bad\nname').success, false);
+    const action = { type: 'name' as const, displayName };
+    assert.equal(updateEvolutionProgramInputSchema.action.safeParse(action).success, true);
+    await handleUpdateEvolutionProgram({
+      programId: 'evolution-program:00000000000000000000000000000001',
+      expectedSequence: 2,
+      clientMessageId: 'message-name',
+      action,
+    });
+    assert.deepEqual(JSON.parse(String(requests[1].init.body)).action, action);
   });
 
   it('reads and updates the same Program endpoints', async () => {

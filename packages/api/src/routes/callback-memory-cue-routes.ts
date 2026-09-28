@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { RecallScopeV1 } from '@cat-cafe/shared';
+import { type OwnerTruthRefV1, ownerTruthRefV1Schema, type RecallScopeV1 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import {
@@ -12,6 +12,7 @@ import type {
 } from '../domains/memory/cue/MemoryCueDrillHandleService.js';
 import {
   MemoryCueEpisodeStore,
+  type MemoryCueEvent,
   MemoryCueInvalidatedError,
   type MemoryCueInvalidationReason,
   MemoryCuePresentationRequiredError,
@@ -97,9 +98,9 @@ function appendConsumption(
   outcome: 'drilled' | 'applied' | 'dismissed',
   requestId: string,
   occurredAt: number,
-): void {
+): MemoryCueEvent {
   const idempotencyKey = consumptionIdempotencyKey(coordinate.cueId, outcome, requestId);
-  store.append({
+  return store.append({
     ...eventBase(coordinate, occurredAt),
     eventId: idempotencyKey,
     idempotencyKey,
@@ -139,14 +140,21 @@ function appendConsumptionOrReply(
   requestId: string,
   now: number,
   reply: FastifyReply,
-): boolean {
+): MemoryCueEvent | null {
   try {
-    appendConsumption(deps.episodeStore, coordinate, outcome, requestId, now);
-    return true;
+    return appendConsumption(deps.episodeStore, coordinate, outcome, requestId, now);
   } catch (error) {
-    if (replyLedgerConflict(reply, error)) return false;
+    if (replyLedgerConflict(reply, error)) return null;
     throw error;
   }
+}
+
+function memoryCueOutcomeRef(event: MemoryCueEvent): OwnerTruthRefV1 {
+  return ownerTruthRefV1Schema.parse({
+    ownerFeatureId: 'F287',
+    ownerStateRef: `memory-cue-consumption:${event.eventId}`,
+    version: event.createdAt,
+  });
 }
 
 function verifyCoordinate(
@@ -302,7 +310,8 @@ export function registerCallbackMemoryCueRoutes(app: FastifyInstance, deps: Call
       }))
     )
       return;
-    if (!appendConsumptionOrReply(deps, coordinate, body.data.outcome, body.data.requestId, now, reply)) return;
-    return { status: 'recorded', outcome: body.data.outcome };
+    const event = appendConsumptionOrReply(deps, coordinate, body.data.outcome, body.data.requestId, now, reply);
+    if (!event) return;
+    return { status: 'recorded', outcome: body.data.outcome, outcomeRef: memoryCueOutcomeRef(event) };
   });
 }

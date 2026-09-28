@@ -1,213 +1,52 @@
+import {
+  type EvolutionCycleV1,
+  type EvolutionProgramOriginV1,
+  type EvolutionProgramV1,
+  evolutionProgramOriginV1Schema,
+  evolutionProgramStateV1Schema,
+} from '@cat-cafe/shared';
 import type { EvolutionAttributionExplanation } from './EvolutionAttributionPanel';
 import type { EvolutionObservationView } from './EvolutionObservationPanel';
+import { isAttribution } from './evolution-attribution-validation';
+import { type EvolutionProgramLineage, isLineage, isOwnerRef, type OwnerRef } from './evolution-lineage';
+import {
+  type EvolutionPreparationProjection,
+  parseEvolutionPreparationProjection,
+} from './preparation/evolution-preparation-resource';
 
-/**
- * The Program projection as it crosses the network, plus the runtime guards that decide whether a
- * response really is one.
- *
- * The surface renders owner refs it did not compute, so it has to be able to say "this payload is
- * not a projection" instead of destructuring its way into a blank panel. Kept beside the component
- * rather than inside it because these are assertions about the API contract, not about the view.
- */
+export {
+  type EvolutionChangeLineage,
+  type EvolutionChangeStatus,
+  type EvolutionProgramLineage,
+  type ExactAssetVersionRef,
+  isOwnerRef,
+  type OwnerRef,
+} from './evolution-lineage';
 
-export interface OwnerRef {
-  ownerFeatureId: string;
-  ownerStateRef: string;
-  version?: string;
-}
-
-export interface ExactAssetVersionRef extends OwnerRef {
-  version: string;
-  assetKind: string;
-  assetId: string;
-}
-
-export type EvolutionChangeStatus =
-  | 'pending'
-  | 'approved'
-  | 'rejected'
-  | 'withdrawn'
-  | 'superseded'
-  | 'target_drift'
-  | 'changed'
-  | 'no_change'
-  | 'outcome';
-
-export interface EvolutionChangeLineage {
-  caseRef: OwnerRef;
-  proposalRef: OwnerRef;
-  ownerAuthorizationRef: OwnerRef;
-  targetVersionRef: ExactAssetVersionRef;
-  status: EvolutionChangeStatus;
-  approvalRef?: OwnerRef;
-  approvalDecisionRef?: OwnerRef;
-  interventionKind?: 'changed' | 'no_change';
-  interventionReceiptRef?: OwnerRef;
-  assetVersionRef?: ExactAssetVersionRef;
-  outcomeReceiptRef?: OwnerRef;
-  loadedRuntimeRef?: OwnerRef;
-  freshnessProofRef?: OwnerRef;
-}
-
-export interface EvolutionProgramLineage {
-  cycles: Array<{
-    cycle: number;
-    changes: EvolutionChangeLineage[];
-    decision?: 'keep' | 'tune' | 'rollback' | 'sunset' | 'no_change';
-    decisionRef?: OwnerRef;
-    executionReceiptRef?: OwnerRef;
-    decisionAssetVersionRef?: ExactAssetVersionRef;
-  }>;
-  current?: EvolutionChangeLineage;
-}
-
+/** A single owner read model. Missing owner projections remain distinguishable from empty records. */
 export interface EvolutionProgramProjection {
-  program: {
-    programId: string;
-    workspaceId: string;
-    objectRef: OwnerRef;
-    claimRef: OwnerRef;
-    lifecycle: 'active' | 'paused' | 'needs_expert' | 'terminal';
-    stage: string;
-    sequence: number;
-    createdAt: string;
-    updatedAt: string;
-  };
-  drafts: {
+  program: EvolutionProgramV1;
+  origin?: EvolutionProgramOriginV1;
+  cycles: EvolutionCycleV1[];
+  drafts?: {
     goal: OwnerRef;
-    claim: OwnerRef;
+    claim?: OwnerRef;
     measurement: OwnerRef;
     economic: OwnerRef;
     roles: Record<string, OwnerRef>;
   };
   blockers: Array<{ code: string; message: string; ownerFeatureId: string; ownerStateRef?: string }>;
   nextAction: { code: string; label: string };
-  observation: EvolutionObservationView;
-  attribution: EvolutionAttributionExplanation | null;
-  lineage: EvolutionProgramLineage;
+  observation?: EvolutionObservationView;
+  attribution?: EvolutionAttributionExplanation | null;
+  lineage?: EvolutionProgramLineage;
+  preparation?: EvolutionPreparationProjection;
 }
-
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : undefined;
 }
-
-export function isOwnerRef(value: unknown): value is OwnerRef {
-  const candidate = record(value);
-  return (
-    candidate !== undefined &&
-    typeof candidate.ownerFeatureId === 'string' &&
-    typeof candidate.ownerStateRef === 'string' &&
-    (candidate.version === undefined || typeof candidate.version === 'string')
-  );
-}
-
-function isExactAssetVersionRef(value: unknown): value is ExactAssetVersionRef {
-  const candidate = record(value);
-  return (
-    isOwnerRef(value) &&
-    typeof candidate?.version === 'string' &&
-    typeof candidate.assetKind === 'string' &&
-    typeof candidate.assetId === 'string'
-  );
-}
-
-const isOptionalOwnerRef = (value: unknown): boolean => value === undefined || isOwnerRef(value);
-const isOptionalExactAssetVersionRef = (value: unknown): boolean =>
-  value === undefined || isExactAssetVersionRef(value);
-
-function isChange(value: unknown): value is EvolutionChangeLineage {
-  const candidate = record(value);
-  if (
-    candidate === undefined ||
-    !isOwnerRef(candidate.caseRef) ||
-    !isOwnerRef(candidate.proposalRef) ||
-    !isOwnerRef(candidate.ownerAuthorizationRef) ||
-    !isExactAssetVersionRef(candidate.targetVersionRef) ||
-    ![
-      'pending',
-      'approved',
-      'rejected',
-      'withdrawn',
-      'superseded',
-      'target_drift',
-      'changed',
-      'no_change',
-      'outcome',
-    ].includes(String(candidate.status)) ||
-    !isOptionalOwnerRef(candidate.approvalRef) ||
-    !isOptionalOwnerRef(candidate.approvalDecisionRef) ||
-    (candidate.interventionKind !== undefined &&
-      candidate.interventionKind !== 'changed' &&
-      candidate.interventionKind !== 'no_change') ||
-    !isOptionalOwnerRef(candidate.interventionReceiptRef) ||
-    !isOptionalExactAssetVersionRef(candidate.assetVersionRef) ||
-    !isOptionalOwnerRef(candidate.outcomeReceiptRef) ||
-    !isOptionalOwnerRef(candidate.loadedRuntimeRef) ||
-    !isOptionalOwnerRef(candidate.freshnessProofRef)
-  ) {
-    return false;
-  }
-  if (candidate.status === 'approved') return isOwnerRef(candidate.approvalRef);
-  if (['rejected', 'withdrawn', 'superseded', 'target_drift'].includes(String(candidate.status))) {
-    return isOwnerRef(candidate.approvalDecisionRef);
-  }
-  if (candidate.status === 'changed' || candidate.status === 'no_change') {
-    return (
-      candidate.interventionKind === candidate.status &&
-      isOwnerRef(candidate.interventionReceiptRef) &&
-      isExactAssetVersionRef(candidate.assetVersionRef) &&
-      (candidate.status === 'changed'
-        ? isOwnerRef(candidate.loadedRuntimeRef)
-        : candidate.loadedRuntimeRef === undefined)
-    );
-  }
-  if (candidate.status === 'outcome') {
-    return (
-      isOwnerRef(candidate.approvalRef) &&
-      (candidate.interventionKind === 'changed' || candidate.interventionKind === 'no_change') &&
-      isOwnerRef(candidate.interventionReceiptRef) &&
-      isExactAssetVersionRef(candidate.assetVersionRef) &&
-      isOwnerRef(candidate.outcomeReceiptRef) &&
-      (candidate.interventionKind === 'changed'
-        ? isOwnerRef(candidate.loadedRuntimeRef)
-        : candidate.loadedRuntimeRef === undefined) &&
-      isOwnerRef(candidate.freshnessProofRef)
-    );
-  }
-  return true;
-}
-
-function isLineage(value: unknown): value is EvolutionProgramLineage {
-  const candidate = record(value);
-  return (
-    candidate !== undefined &&
-    Array.isArray(candidate.cycles) &&
-    candidate.cycles.every((value) => {
-      const cycle = record(value);
-      return (
-        cycle !== undefined &&
-        typeof cycle.cycle === 'number' &&
-        Array.isArray(cycle.changes) &&
-        cycle.changes.every(isChange) &&
-        (cycle.decision === undefined ||
-          ['keep', 'tune', 'rollback', 'sunset', 'no_change'].includes(String(cycle.decision))) &&
-        isOptionalOwnerRef(cycle.decisionRef) &&
-        isOptionalOwnerRef(cycle.executionReceiptRef) &&
-        isOptionalExactAssetVersionRef(cycle.decisionAssetVersionRef) &&
-        (cycle.decision === undefined || isOwnerRef(cycle.decisionRef)) &&
-        (cycle.decision !== 'rollback' || isOwnerRef(cycle.executionReceiptRef)) &&
-        (cycle.decision !== 'sunset' || isOwnerRef(cycle.executionReceiptRef)) &&
-        (cycle.decision !== 'no_change' || isOwnerRef(cycle.executionReceiptRef)) &&
-        ((cycle.decision !== 'rollback' && cycle.decision !== 'no_change') ||
-          isExactAssetVersionRef(cycle.decisionAssetVersionRef))
-      );
-    }) &&
-    (candidate.current === undefined || isChange(candidate.current))
-  );
-}
-
 function isObservation(value: unknown): value is EvolutionObservationView {
   const candidate = record(value);
   if (!candidate || (candidate.status !== 'connected' && candidate.status !== 'insufficient')) return false;
@@ -231,7 +70,13 @@ function isObservation(value: unknown): value is EvolutionObservationView {
     Array.isArray(candidate.gaps) &&
     candidate.gaps.every((rawGap) => {
       const gap = record(rawGap);
-      return gap !== undefined && typeof gap.code === 'string' && typeof gap.message === 'string';
+      return (
+        gap !== undefined &&
+        typeof gap.code === 'string' &&
+        typeof gap.message === 'string' &&
+        typeof gap.ownerFeatureId === 'string' &&
+        (gap.ownerStateRef === undefined || typeof gap.ownerStateRef === 'string')
+      );
     }) &&
     (candidate.trajectory === undefined ||
       (trajectory !== undefined &&
@@ -249,20 +94,62 @@ function isObservation(value: unknown): value is EvolutionObservationView {
   );
 }
 
-export function isProjection(value: unknown): value is EvolutionProgramProjection {
-  if (!value || typeof value !== 'object') return false;
-  const projection = value as {
-    program?: { programId?: unknown };
-    blockers?: unknown;
-    nextAction?: unknown;
-    observation?: unknown;
-    lineage?: unknown;
+export function parseProgramProjection(value: unknown): EvolutionProgramProjection | null {
+  const source = record(value);
+  if (!source) return null;
+  const state = evolutionProgramStateV1Schema.safeParse({ program: source.program, cycles: source.cycles });
+  if (!state.success || !/^evolution-program:[0-9a-f]{32}$/.test(state.data.program.programId)) return null;
+  if (!Array.isArray(source.blockers) || !source.blockers.every(isBlocker)) return null;
+  const nextAction = record(source.nextAction);
+  if (!nextAction || typeof nextAction.code !== 'string' || typeof nextAction.label !== 'string') return null;
+  if (source.lineage !== undefined && !isLineage(source.lineage)) return null;
+  if (source.observation !== undefined && !isObservation(source.observation)) return null;
+  if (source.attribution !== undefined && source.attribution !== null && !isAttribution(source.attribution))
+    return null;
+  if (source.drafts !== undefined && !isDrafts(source.drafts)) return null;
+  const origin = evolutionProgramOriginV1Schema.optional().safeParse(source.origin);
+  if (!origin.success) return null;
+  const preparation =
+    source.preparation === undefined
+      ? undefined
+      : parseEvolutionPreparationProjection(source.preparation, state.data.program.programId);
+  if (source.preparation !== undefined && !preparation) return null;
+  return {
+    ...state.data,
+    ...(origin.data ? { origin: origin.data } : {}),
+    blockers: source.blockers,
+    nextAction: { code: nextAction.code, label: nextAction.label },
+    ...(isLineage(source.lineage) ? { lineage: source.lineage } : {}),
+    ...(isObservation(source.observation) ? { observation: source.observation } : {}),
+    ...(source.attribution === null || isAttribution(source.attribution) ? { attribution: source.attribution } : {}),
+    ...(isDrafts(source.drafts) ? { drafts: source.drafts } : {}),
+    ...(preparation ? { preparation } : {}),
   };
+}
+function isBlocker(value: unknown): value is EvolutionProgramProjection['blockers'][number] {
+  const blocker = record(value);
   return (
-    typeof projection.program?.programId === 'string' &&
-    Array.isArray(projection.blockers) &&
-    typeof projection.nextAction === 'object' &&
-    isObservation(projection.observation) &&
-    isLineage(projection.lineage)
+    !!blocker &&
+    typeof blocker.code === 'string' &&
+    typeof blocker.message === 'string' &&
+    typeof blocker.ownerFeatureId === 'string' &&
+    (blocker.ownerStateRef === undefined || typeof blocker.ownerStateRef === 'string')
   );
+}
+function isDrafts(value: unknown): value is NonNullable<EvolutionProgramProjection['drafts']> {
+  const drafts = record(value);
+  const roles = record(drafts?.roles);
+  return (
+    !!drafts &&
+    !!roles &&
+    isOwnerRef(drafts.goal) &&
+    isOwnerRef(drafts.measurement) &&
+    isOwnerRef(drafts.economic) &&
+    (drafts.claim === undefined || isOwnerRef(drafts.claim)) &&
+    Object.values(roles).every(isOwnerRef)
+  );
+}
+export function isProjection(value: unknown): value is EvolutionProgramProjection {
+  const parsed = parseProgramProjection(value);
+  return parsed !== null && parsed.lineage !== undefined;
 }

@@ -21,6 +21,10 @@ GitHub checks
 ## 等 CI 的注册方式
 
 ```text
+# 普通：跟踪这个 PR，CI 终态与冲突都在默认条件里
+cat_cafe_register_pr_tracking(repoFullName="<owner>/repo", prNumber=<N>)
+
+# 高级：只想被 CI 与冲突叫醒，不要其它条件
 cat_cafe_register_pr_tracking(
   repoFullName="<owner>/repo",
   prNumber=<N>,
@@ -28,8 +32,7 @@ cat_cafe_register_pr_tracking(
     { kind: "pr_ci_terminal" },
     { kind: "pr_became_conflicting" }
   ],
-  nextStep="Re-check checks and mergeability, then continue merge-gate.",
-  expiresAt=<future unix ms>
+  expiresAt=<future unix ms>  # 可选；省略则没有时间到期
 )
 ```
 

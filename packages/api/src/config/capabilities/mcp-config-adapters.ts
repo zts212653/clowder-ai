@@ -21,6 +21,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { McpServerDescriptor } from '@cat-cafe/shared';
+import { hasUsableAgentKeyCredentials } from '@cat-cafe/shared/utils';
 import { parse as parseToml } from 'smol-toml';
 import { createModuleLogger } from '../../infrastructure/logger.js';
 import { DEPRECATED_MANAGED_SERVERS, isOurOwnedDeprecatedEntry } from './deprecated-managed-servers.js';
@@ -207,8 +208,24 @@ function ensureWorkspaceEnvForManagedCatCafe(
   };
 }
 
-function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>): Record<string, string> | undefined {
-  if (!isCatCafeServer(name)) return env;
+/**
+ * Provenance, not name, grants the union opt-in (upstream #1454 review P1):
+ * synthesizing CAT_CAFE_READONLY_AGENT_KEY_UNION from ambient
+ * CAT_CAFE_AGENT_KEY_* vars inside the name-gated baseline handed the
+ * write-tool union to preserved third-party/fork-like entries that merely
+ * reuse a cat-cafe-* name. The opt-in may only be synthesized for a managed
+ * descriptor (source === 'cat-cafe'), and only when the final merged env
+ * actually delivers USABLE agent-key credentials (shared semantics with the
+ * server toolset gate: a '{}' variant map, bad JSON, a blank secret, or a
+ * path to a missing sidecar is not a credential). Anything explicitly set —
+ * including "false", which forces strict readonly — always wins over
+ * synthesis; preserved entries keep whatever the user wrote themselves.
+ */
+function ensureAntigravityCatCafeEnv(
+  server: Pick<McpServerDescriptor, 'name' | 'source'>,
+  env?: Record<string, string>,
+): Record<string, string> | undefined {
+  if (!isCatCafeServer(server.name)) return env;
   const safeEnv = { ...(env ?? {}) };
   delete safeEnv.CAT_CAFE_AGENT_KEY_SECRET;
   // codex review (PR #1414) P1-2: previous merge order put defaults LAST,
@@ -217,11 +234,19 @@ function ensureAntigravityCatCafeEnv(name: string, env?: Record<string, string>)
   //   1. baseline (fillable defaults, e.g. ALLOWED_WORKSPACE_DIRS) — lowest priority
   //   2. descriptor env / pre-existing config — wins for user-controllable keys
   //   3. enforced (CAT_CAFE_API_URL, CAT_CAFE_READONLY) — highest, can't be opted out
-  return {
+  const merged: Record<string, string> = {
     ...buildAntigravityCatCafeEnvBaseline(),
     ...safeEnv,
     ...buildAntigravityCatCafeEnforcedEnv(),
   };
+  if (
+    server.source === 'cat-cafe' &&
+    merged.CAT_CAFE_READONLY_AGENT_KEY_UNION === undefined &&
+    hasUsableAgentKeyCredentials(merged)
+  ) {
+    merged.CAT_CAFE_READONLY_AGENT_KEY_UNION = 'true';
+  }
+  return merged;
 }
 
 // ────────── Readers ──────────
@@ -515,7 +540,7 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
       continue;
     }
     const entry: Record<string, unknown> = { command: s.command, args: s.args };
-    const env = ensureAntigravityCatCafeEnv(s.name, s.env);
+    const env = ensureAntigravityCatCafeEnv(s, s.env);
     if (env && Object.keys(env).length > 0) entry.env = env;
     if (s.workingDir) entry.cwd = s.workingDir;
     existingMcp[s.name] = entry;
@@ -526,7 +551,10 @@ export async function writeAntigravityMcpConfig(filePath: string, servers: McpSe
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
     const cfg = value as Record<string, unknown>;
     const currentEnv = toStringRecord(cfg.env);
-    cfg.env = ensureAntigravityCatCafeEnv(name, currentEnv);
+    // File-preserved entries carry no managed provenance (F213: no reliable
+    // ownership proof → preserve), so they get the file-read default source —
+    // union synthesis can never fire for them here.
+    cfg.env = ensureAntigravityCatCafeEnv({ name, source: 'external' }, currentEnv);
     existingMcp[name] = cfg;
   }
 

@@ -10,7 +10,8 @@ function isPage(value: unknown): value is PawFeelInboxPage {
   return (
     candidate.projectionStatus === 'available' &&
     typeof candidate.denominator === 'object' &&
-    typeof candidate.counts === 'object'
+    typeof candidate.counts === 'object' &&
+    typeof candidate.issueCounts === 'object'
   );
 }
 
@@ -43,7 +44,7 @@ export function PawFeelAuditSummary() {
           <AuditCount label="报告" value={page.denominator.reportOccurrences} />
           <AuditCount label="审阅包" value={page.denominator.reviewBundles} />
           <AuditCount label="歧义 / 污染" value={page.denominator.ambiguousOrContaminated} />
-          <AuditCount label="72h+" value={page.counts.overdue} />
+          <AuditCount label="问题 72h+" value={page.issueCounts.overdue} />
         </div>
       ) : (
         <p className="mt-2 text-xs text-cafe-muted">

@@ -44,24 +44,33 @@ const ZH_STRONG_CUSTODY =
   /(?:帮我(?:接住|跟进|跟踪|盯(?:住|着)|负责)|这(?:件|个)事(?:情)?(?:就)?你来|交给你(?:来)?|你来(?:负责|跟进|跟踪|推进|处理))/u;
 const ZH_DELEGATION = /(?:帮我|请你|麻烦你|劳烦你|替我)/u;
 const ZH_DURABLE_OUTCOME =
-  /(?:准备|整理|制作|产出|完成|做完|跟进|跟踪|推进|处理|提交|交付|汇总|梳理|清单|方案|报告|手册|回来(?:给我|让我)|给我(?:一份|两个|结果))/u;
+  /(?:准备|整理|制作|产出|完成|做完|跟进|跟踪|推进|处理|提交|交付|汇总|梳理|演示|展示|跑通|走通|demo|showcase|清单|方案|报告|手册|回来(?:给我|让我)|给我(?:一份|两个|结果))/iu;
 const ZH_IMPLICIT_FUTURE = /(?:别忘了|不要忘了|记得|之后要|回头要|到时候要)/u;
+const ZH_WORK_INTRO = /(?:有(?:个|件|一件)?(?:活(?:儿)?|任务|工作|事情?)|(?:这个|这件)(?:活(?:儿)?|任务|工作|事情?))/u;
 
 const EN_STRONG_CUSTODY =
   /\b(?:take (?:this|it) (?:over|on)|own (?:this|the work)|you (?:handle|track|follow up on)|leave (?:this|it) (?:with|to) you)\b/i;
 const EN_DELEGATION = /\b(?:could you|can you|please|i need you to|would you)\b/i;
 const EN_DURABLE_OUTCOME =
-  /\b(?:prepare|deliver|finish|complete|follow up|track|draft|compile|put together|send me|come back with)\b/i;
+  /\b(?:prepare|deliver|finish|complete|follow up|track|draft|compile|put together|demo|showcase|present|send me|come back with)\b/i;
 const EN_IMPLICIT_FUTURE = /\b(?:don't forget|do not forget|remember to|later (?:we|i) need to)\b/i;
+const EN_WORK_INTRO = /\b(?:there(?:'s| is) (?:a )?(?:task|job|piece of work)|(?:a|one) (?:task|job|piece of work))\b/i;
 
 function shouldWakeCustodyRecognition(message: string): boolean {
   if (ZH_STRONG_CUSTODY.test(message) || EN_STRONG_CUSTODY.test(message)) return true;
 
+  const hasTimeSignal = containsEntrustedWorkTimeSignal(message);
   const explicitTimeBound =
     ((ZH_DELEGATION.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||
       (EN_DELEGATION.test(message) && EN_DURABLE_OUTCOME.test(message))) &&
-    containsEntrustedWorkTimeSignal(message);
+    hasTimeSignal;
   if (explicitTimeBound) return true;
+
+  const introducedTimeBoundWork =
+    ((ZH_WORK_INTRO.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||
+      (EN_WORK_INTRO.test(message) && EN_DURABLE_OUTCOME.test(message))) &&
+    hasTimeSignal;
+  if (introducedTimeBoundWork) return true;
 
   return (
     (ZH_IMPLICIT_FUTURE.test(message) && ZH_DURABLE_OUTCOME.test(message)) ||

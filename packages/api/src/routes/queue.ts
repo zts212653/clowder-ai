@@ -153,6 +153,7 @@ function projectCanonicalLiveCandidate(
   const trackerExecutionId = tracker.getExecutionId?.(threadId, candidate.catId);
   return {
     ...candidate,
+    ...(candidate.turnInvocationId ? { invocationId: candidate.turnInvocationId } : {}),
     ownerUserId,
     controlSource: candidate.executionId && trackerExecutionId === candidate.executionId ? 'tracker' : 'unavailable',
   };

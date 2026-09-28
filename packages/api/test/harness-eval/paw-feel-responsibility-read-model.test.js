@@ -149,6 +149,11 @@ describe('F278 responsibility read model', () => {
       source: { availability: 'available', preview: 'preview', sourceHref: '/source', digestVerified: true },
       ageMs: 1,
       overdue: false,
+      issue: {
+        resolution: 'open',
+        continuation: { kind: 'review_required', evidenceRefs: [] },
+        ageMs: 1,
+      },
       reviewContext: { sourceMarkerCount: 2 },
     };
     const [mixed] = derivePawFeelBundles([

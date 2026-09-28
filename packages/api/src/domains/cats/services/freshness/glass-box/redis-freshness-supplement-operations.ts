@@ -81,6 +81,13 @@ export class RedisFreshnessSupplementOperations {
     return (await this.readMany(ids)).sort((left, right) => left.createdAt - right.createdAt || left.seq - right.seq);
   }
 
+  async listAll(): Promise<FreshnessSupplementAggregate[]> {
+    const ids = await this.redis.smembers(FreshnessSupplementKeys.ALL);
+    return (await this.readMany(ids)).sort(
+      (left, right) => left.createdAt - right.createdAt || left.id.localeCompare(right.id),
+    );
+  }
+
   async listRecoverable(): Promise<FreshnessSupplementAggregate[]> {
     const ids = await this.redis.smembers(FreshnessSupplementKeys.ALL);
     const supplements = await this.readMany(ids);

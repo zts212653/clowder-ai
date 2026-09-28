@@ -1,4 +1,13 @@
-import { type OwnerTruthRefV1, ownerTruthRefV1Schema } from '@cat-cafe/shared';
+import {
+  type EvolutionAssetReviewRequestV1,
+  type EvolutionExplorationMediaReadV1,
+  type EvolutionExplorationMediaRequestV1,
+  type EvolutionExplorationRequestV1,
+  type EvolutionPreparationMediaRequestV1,
+  type EvolutionPreparationReviewRequestV1,
+  type OwnerTruthRefV1,
+  ownerTruthRefV1Schema,
+} from '@cat-cafe/shared';
 
 export const PROGRAM_ADAPTER_CAPABILITIES = [
   'observe',
@@ -39,6 +48,14 @@ export type ProgramAdapter = {
   rollback: ProgramAdapterOperation;
   manifest?: ProgramAdapterOperation;
   media?: ProgramAdapterOperation;
+  /** Read-time owner federation. It grants none of the seven execution capabilities. */
+  versionReview?: (input: EvolutionAssetReviewRequestV1) => unknown;
+  preparationReview?: (input: EvolutionPreparationReviewRequestV1) => unknown;
+  preparationMedia?: (input: EvolutionPreparationMediaRequestV1) => unknown;
+  explorationReview?: (input: EvolutionExplorationRequestV1) => unknown;
+  explorationMedia?: (
+    input: EvolutionExplorationMediaRequestV1,
+  ) => EvolutionExplorationMediaReadV1 | Promise<EvolutionExplorationMediaReadV1>;
 };
 
 export type ProgramAdapterResolution =

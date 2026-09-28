@@ -23,6 +23,26 @@ export class MemoryPawFeelEventLog {
   async listSignalIds() {
     return [...this.events.keys()].sort();
   }
+
+  async scanSignalIds(cursor, limit) {
+    const signalIds = await this.listSignalIds();
+    const offset = cursor ? Number(cursor.redisCursor) : 0;
+    const page = signalIds.slice(offset, offset + limit);
+    const nextOffset = offset + page.length;
+    return {
+      signalIds: page,
+      scanCalls: 1,
+      ...(nextOffset < signalIds.length
+        ? {
+            nextCursor: {
+              redisCursor: String(nextOffset),
+              pendingSignalIds: [],
+              completeAfterPending: false,
+            },
+          }
+        : {}),
+    };
+  }
 }
 
 export function pawFeelCandidate({
@@ -73,6 +93,54 @@ export function createPawFeelServiceHarness({
   const service = new PawFeelDispositionService({
     eventLog,
     fixResolver: { resolve: resolveFix },
+    directRepairResolver: {
+      async resolve({ projection, leaseId }) {
+        const fix = await resolveFix(leaseId);
+        const ownerRef = (ownerFeatureId, ownerStateRef, version) => ({
+          ownerFeatureId,
+          ownerStateRef,
+          ...(version ? { version } : {}),
+        });
+        return {
+          status: 'authorized',
+          fix,
+          binding: {
+            schemaVersion: 1,
+            bindingRef: ownerRef('F278', `paw-feel-direct-repair-binding:${projection.signalId}:${leaseId}`),
+            sourceSignalRef: ownerRef(
+              'F278',
+              `paw-feel-signal:${projection.signalId}`,
+              `${projection.markerDigest}:${projection.sameDigestOrdinal}`,
+            ),
+            sourceToolRef: ownerRef('F278', 'paw-feel-tool:fixture'),
+            providerId: 'fixture-provider',
+            providerVersion: 'v1',
+            providerRouteRef: ownerRef('F278', 'paw-feel-direct-repair-route:fixture-provider', 'v1'),
+            resolvedActionRef: ownerRef('F278', `fixture-action:${leaseId}`),
+            actionScopeRef: ownerRef('F278', 'fixture-action-scope:paw-feel'),
+            ownerAuthorizationRef: ownerRef('F278', 'fixture-authorization:existing'),
+            targetVersionRef: {
+              ...ownerRef('F278', `fixture-target:${leaseId}`, 'v1'),
+              assetKind: 'fixture',
+              assetId: leaseId,
+            },
+            ownerCatId: fix.ownerCatId,
+            outcomeVerifierRef: ownerRef('F278', 'fixture-outcome-verifier:v1'),
+          },
+        };
+      },
+    },
+    resumeConditionResolver: {
+      async resolve(selector) {
+        return {
+          normalizedSelector: selector,
+          state: 'waiting',
+          version: JSON.stringify(selector),
+          satisfied: false,
+          evidenceRefs: selector.kind === 'bounded_time' ? [] : [selector.ref],
+        };
+      },
+    },
     bundleMembershipResolver: { assertBundleSnapshot },
     now: () => new Date(T0 + tick++ * 1_000).toISOString(),
   });

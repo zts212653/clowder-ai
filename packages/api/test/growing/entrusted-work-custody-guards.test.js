@@ -17,7 +17,7 @@ const { tasksRoutes } = await import('../../dist/routes/tasks.js');
 const now = 1_788_170_000_000;
 
 function noOpSocketManager() {
-  return { broadcastAgentMessage() {}, broadcastToRoom() {} };
+  return { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} };
 }
 
 function admissionCommand(overrides = {}) {

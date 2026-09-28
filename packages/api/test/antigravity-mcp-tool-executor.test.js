@@ -140,6 +140,114 @@ describe('CallMcpToolExecutor', () => {
     assert.equal(explicit.CAT_CAFE_API_URL, 'http://127.0.0.1:4999');
   });
 
+  test('buildMcpEnv synthesizes the union opt-in only when usable creds exist', () => {
+    const strict = buildMcpEnvForTest({});
+    assert.equal(strict.CAT_CAFE_READONLY, 'true');
+    assert.equal(strict.CAT_CAFE_READONLY_AGENT_KEY_UNION, undefined, 'no agent-key creds → no union opt-in');
+
+    // #1494 round 3: a whitespace-only secret is no material — no synthesis.
+    const blankSecret = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_SECRET: '   ' });
+    assert.equal(
+      blankSecret.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+      undefined,
+      'blank SECRET must not synthesize the union',
+    );
+    const paddedSecret = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_SECRET: ' s ' });
+    assert.equal(paddedSecret.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'true', 'non-blank SECRET keeps the union');
+
+    const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-key-'));
+    try {
+      const sidecar = path.join(keyDir, 'agent.secret');
+      fs.writeFileSync(sidecar, 'agent-key-material\n', 'utf-8');
+
+      const withKeyFile = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILE: sidecar });
+      assert.equal(
+        withKeyFile.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+        'true',
+        'antigravity mount with a usable sidecar keeps the union',
+      );
+
+      const withKeyFiles = buildMcpEnvForTest({
+        CAT_CAFE_AGENT_KEY_FILES: JSON.stringify({ antigravity: sidecar }),
+      });
+      assert.equal(withKeyFiles.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'true');
+
+      const withSecret = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_SECRET: 's' });
+      assert.equal(withSecret.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'true');
+    } finally {
+      fs.rmSync(keyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('buildMcpEnv treats env presence without usable credentials as no creds (#1494)', () => {
+    const missingSidecar = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILE: '/nonexistent/agent-key.secret' });
+    assert.equal(
+      missingSidecar.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+      undefined,
+      'a path to a missing sidecar is not a credential',
+    );
+
+    const emptyMap = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILES: '{}' });
+    assert.equal(emptyMap.CAT_CAFE_READONLY_AGENT_KEY_UNION, undefined, "'{}' variant map resolves zero keys");
+
+    const badJson = buildMcpEnvForTest({ CAT_CAFE_AGENT_KEY_FILES: 'not-json' });
+    assert.equal(badJson.CAT_CAFE_READONLY_AGENT_KEY_UNION, undefined, 'bad-JSON variant map is not a credential');
+  });
+
+  test('buildMcpEnv never clobbers an explicit union switch (#1494)', () => {
+    const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-key-'));
+    try {
+      const sidecar = path.join(keyDir, 'agent.secret');
+      fs.writeFileSync(sidecar, 'agent-key-material\n', 'utf-8');
+      const creds = { CAT_CAFE_AGENT_KEY_FILE: sidecar };
+
+      const forcedFalse = buildMcpEnvForTest({ ...creds, CAT_CAFE_READONLY_AGENT_KEY_UNION: 'false' });
+      assert.equal(forcedFalse.CAT_CAFE_READONLY_AGENT_KEY_UNION, 'false', 'explicit false forces strict readonly');
+
+      const forcedEmpty = buildMcpEnvForTest({ ...creds, CAT_CAFE_READONLY_AGENT_KEY_UNION: '' });
+      assert.equal(forcedEmpty.CAT_CAFE_READONLY_AGENT_KEY_UNION, '', 'explicit empty string is preserved verbatim');
+
+      const forcedUpper = buildMcpEnvForTest({ ...creds, CAT_CAFE_READONLY_AGENT_KEY_UNION: 'TRUE' });
+      assert.equal(
+        forcedUpper.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+        'TRUE',
+        'explicit non-canonical value stays verbatim',
+      );
+    } finally {
+      fs.rmSync(keyDir, { recursive: true, force: true });
+    }
+  });
+
+  test('buildMcpEnv honors the bound-identity restriction when synthesizing (#1494)', () => {
+    const keyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-key-'));
+    try {
+      const sidecar = path.join(keyDir, 'agent.secret');
+      fs.writeFileSync(sidecar, 'agent-key-material\n', 'utf-8');
+
+      const boundWrongMap = buildMcpEnvForTest({
+        CAT_CAFE_AGENT_KEY_BOUND_CAT_ID: 'gpt-pro',
+        CAT_CAFE_AGENT_KEY_FILES: JSON.stringify({ antigravity: sidecar }),
+      });
+      assert.equal(
+        boundWrongMap.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+        undefined,
+        'a bound identity whose map entry is missing must not synthesize the union',
+      );
+
+      const boundOwnEntry = buildMcpEnvForTest({
+        CAT_CAFE_AGENT_KEY_BOUND_CAT_ID: 'antigravity',
+        CAT_CAFE_AGENT_KEY_FILES: JSON.stringify({ antigravity: sidecar }),
+      });
+      assert.equal(
+        boundOwnEntry.CAT_CAFE_READONLY_AGENT_KEY_UNION,
+        'true',
+        "the bound identity's own readable entry keeps the union",
+      );
+    } finally {
+      fs.rmSync(keyDir, { recursive: true, force: true });
+    }
+  });
+
   test('resolveMcpEntrypointForTest resolves from invocation workspace cwd when runtime root is unset', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-root-'));
     const processRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'antigravity-mcp-process-root-'));

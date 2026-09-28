@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { auditPublicTestIsolation, MIN_PUBLIC_TEST_SHARDS, planPublicTestShards } from './plan-public-test-shards.mjs';
+import { planPublicTestShards } from './plan-public-test-shards.mjs';
 import { normalizePublicTestCliArgv } from './public-test-cli-args.mjs';
 import {
   currentPublicTestProvenance,
@@ -18,7 +18,9 @@ import { buildPublicTestManifest, resolvePublicTestFiles } from './resolve-publi
 
 export function timingMapFromSummary({ summary, manifest, provenance }) {
   publicTestInvariant(
-    summary?.schemaVersion === 1 && summary.kind === 'public_test_shard_summary' && summary.status === 'succeeded',
+    (summary?.schemaVersion === 1 || summary?.schemaVersion === 2) &&
+      summary.kind === 'public_test_shard_summary' &&
+      summary.status === 'succeeded',
     'timing artifact must be a green public-test shard summary',
   );
   publicTestInvariant(
@@ -68,7 +70,7 @@ export async function runPublicTestShardPlannerCli(argv = process.argv.slice(2))
   const options = parsePublicTestCliOptions(normalizePublicTestCliArgv(argv));
   if (options.help) {
     process.stdout.write(
-      'Usage: node packages/api/scripts/plan-public-test-shards.mjs --output <path> [--shards 4..6] [--timings <path>] [--classification <path>]\n',
+      'Usage: node packages/api/scripts/plan-public-test-shards.mjs --output <path> [--timings <path>] [--classification <path>]\n',
     );
     return;
   }
@@ -82,7 +84,6 @@ export async function runPublicTestShardPlannerCli(argv = process.argv.slice(2))
     'could not load public-test shard classification',
   );
   const manifest = buildPublicTestManifest(await resolvePublicTestFiles({ packageRoot }));
-  const audit = await auditPublicTestIsolation({ selectedFiles: manifest.selectedFiles, packageRoot });
   const provenance = currentPublicTestProvenance(packageRoot);
   const timing = options.timings
     ? timingMapFromSummary({
@@ -99,12 +100,11 @@ export async function runPublicTestShardPlannerCli(argv = process.argv.slice(2))
     plannerProvenance: provenance,
     timingByFile: timing.timingByFile,
     timingSource: timing.timingSource,
-    isolationAuditByFile: audit,
-    shardCount: options.shards === undefined ? MIN_PUBLIC_TEST_SHARDS : Number(options.shards),
   });
   await atomicPublicTestJsonWrite(options.output, plan);
-  const pureFiles = plan.pureShards.reduce((total, shard) => total + shard.files.length, 0);
+  const sharedSerialFiles = plan.sharedSerialLane.files.length;
+  const distributableFiles = plan.distributableShards.reduce((total, shard) => total + shard.files.length, 0);
   process.stdout.write(
-    `public-test shard plan: selected=${plan.selectedFiles.length} serial=${plan.lanes.serial.files.length} pure=${pureFiles} shards=${plan.pureShards.length} fingerprint=${plan.planFingerprint}\n`,
+    `public-test shard plan: selected=${plan.selectedFiles.length} serial_shared=${sharedSerialFiles} distributable=${distributableFiles} distributable_shards=${plan.distributableShards.length} fingerprint=${plan.planFingerprint}\n`,
   );
 }

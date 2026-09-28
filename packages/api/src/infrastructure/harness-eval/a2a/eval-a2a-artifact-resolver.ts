@@ -128,6 +128,9 @@ const bundleProvenanceSchema = z.object({
     commit: z.string().min(1).optional(),
   }),
   sanitizeRulesVersion: z.string().optional(),
+  /** Invocation-authenticated source thread ID. Stamped by the publish pipeline
+   *  (not by individual generators) from CallbackPrincipal.threadId. */
+  sourceThreadId: z.string().min(1).optional(),
 });
 
 export interface ResolveA2aEvidenceBundleInput {

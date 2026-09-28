@@ -1,6 +1,15 @@
-import type { CollectiveEventEnvelope, CollectiveTarget } from '@cat-cafe/shared';
+import { isDeepStrictEqual } from 'node:util';
+import type {
+  CollectiveEventEnvelope,
+  CollectiveLocation,
+  CollectiveRecipient,
+  CollectiveTarget,
+} from '@cat-cafe/shared';
 
 import { CollectiveServiceError } from './errors.js';
+import { resolveEventAddress } from './event-location.js';
+import { requireMembership } from './identity-store.js';
+import { requireParticipant } from './participation-store.js';
 import { createStableId } from './persistence.js';
 import type { MutableServiceState } from './state.js';
 
@@ -9,8 +18,11 @@ export interface AppendEventInput {
     readonly serviceInstanceId: string;
     readonly collectiveId: string;
     readonly clientEventId: string;
-    readonly target: CollectiveTarget;
+    readonly target?: CollectiveTarget;
+    readonly location?: CollectiveLocation;
+    readonly recipient?: CollectiveRecipient;
     readonly replyToEventId?: string;
+    readonly workRequest?: 'entrust';
     readonly body: string;
   };
   readonly actorScope: string;
@@ -20,7 +32,25 @@ export interface AppendEventInput {
 
 export function appendEvent(state: MutableServiceState, input: AppendEventInput): CollectiveEventEnvelope {
   const events = state.events[input.coordinates.collectiveId] ?? [];
-  validateMessageTarget(events, input.coordinates.target, input.coordinates.replyToEventId);
+  const address = resolveEventAddress(events, input.coordinates);
+  if (input.coordinates.workRequest && (input.actor.kind !== 'human' || address.recipient.kind !== 'agent')) {
+    throw new CollectiveServiceError(
+      'PARTICIPATION_INVALID',
+      'A sustained request requires a Human and an exact participant',
+      422,
+    );
+  }
+  if (address.recipient.kind === 'human')
+    requireMembership(state, input.coordinates.collectiveId, address.recipient.humanId);
+  if (address.recipient.kind === 'agent')
+    requireParticipant(state, {
+      ...input.coordinates,
+      connectionId: address.recipient.connectionId,
+      catId: address.recipient.agentId,
+      participationRevision: address.recipient.participationRevision,
+      channelId: address.location.channelId,
+      humanId: address.recipient.humanId,
+    });
   const indexKey = `${input.coordinates.collectiveId}:${input.actorScope}:${input.coordinates.clientEventId}`;
   const existingId = state.clientEventIndex[indexKey];
   const existing = existingId ? events.find((event) => event.eventId === existingId) : undefined;
@@ -28,7 +58,10 @@ export function appendEvent(state: MutableServiceState, input: AppendEventInput)
     const matches =
       existing.body === input.coordinates.body &&
       existing.replyToEventId === input.coordinates.replyToEventId &&
-      JSON.stringify(existing.target) === JSON.stringify(input.coordinates.target);
+      existing.workRequest === input.coordinates.workRequest &&
+      isDeepStrictEqual(existing.location, address.location) &&
+      isDeepStrictEqual(existing.recipient, address.recipient) &&
+      isDeepStrictEqual(existing.actor, input.actor);
     if (!matches) {
       throw new CollectiveServiceError('CLIENT_EVENT_CONFLICT', 'clientEventId already names a different event', 409);
     }
@@ -41,8 +74,9 @@ export function appendEvent(state: MutableServiceState, input: AppendEventInput)
     clientEventId: input.coordinates.clientEventId,
     sequence: (events.at(-1)?.sequence ?? 0) + 1,
     actor: input.actor,
-    target: input.coordinates.target,
+    ...address,
     ...(input.coordinates.replyToEventId ? { replyToEventId: input.coordinates.replyToEventId } : {}),
+    ...(input.coordinates.workRequest ? { workRequest: input.coordinates.workRequest } : {}),
     body: input.coordinates.body,
     acceptedAt: new Date(input.now).toISOString(),
   };
@@ -50,17 +84,4 @@ export function appendEvent(state: MutableServiceState, input: AppendEventInput)
   state.events[input.coordinates.collectiveId] = events;
   state.clientEventIndex[indexKey] = event.eventId;
   return structuredClone(event);
-}
-
-function validateMessageTarget(
-  events: CollectiveEventEnvelope[],
-  target: CollectiveTarget,
-  replyToEventId?: string,
-): void {
-  const referencedIds = [replyToEventId, target.kind === 'message' ? target.eventId : undefined].filter(
-    (value): value is string => value !== undefined,
-  );
-  if (referencedIds.some((eventId) => !events.some((event) => event.eventId === eventId))) {
-    throw new CollectiveServiceError('COORDINATE_MISMATCH', 'Message target is outside Collective', 409);
-  }
 }

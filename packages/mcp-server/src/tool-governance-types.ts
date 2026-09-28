@@ -60,7 +60,13 @@ export type McpOperationContract =
       }>;
     };
 
-export type McpRuntimeProfile = 'full' | 'readonly' | 'agent-key' | 'desktop:fable-phase0' | 'desktop:cloud-pro-phase0';
+export type McpRuntimeProfile =
+  | 'full'
+  | 'readonly'
+  | 'agent-key'
+  | 'desktop:fable-phase0'
+  | 'desktop:cloud-pro-phase0'
+  | 'collective-participation';
 
 export type McpSchemaDeliveryPolicy = {
   policy: 'host-default' | 'always-visible' | 'discoverable';
@@ -105,9 +111,14 @@ export type ResolvedEvidenceCatalog = Readonly<{
 
 export const implementationBindingBrand: unique symbol = Symbol('McpImplementationBinding');
 
+export type McpToolCallExtra = {
+  signal?: AbortSignal;
+};
+
 export type McpImplementationBinding = {
   ref: `module:${string}#${string}`;
   run: (args: never) => Promise<unknown>;
+  runWithExtra?: (args: never, extra: McpToolCallExtra) => Promise<unknown>;
   readonly [implementationBindingBrand]: true;
 };
 

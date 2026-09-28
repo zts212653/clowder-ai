@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Database from 'better-sqlite3';
-import { applyMigrations } from '../../dist/domains/memory/schema.js';
+import { applyMigrations, SCHEMA_V5 } from '../../dist/domains/memory/schema.js';
 import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTaskStore.js';
 
 // --- Task 1: Schema V8 ---
@@ -48,6 +51,56 @@ test('dynamic_task_defs has correct columns', () => {
   assert.ok(names.includes('enabled'));
   assert.ok(names.includes('created_by'));
   assert.ok(names.includes('created_at'));
+  assert.ok(names.includes('owner_auth_provenance'));
+  db.close();
+});
+
+test('V44 preserves legacy tasks and private owner auth across a database restart', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'cat-cafe-v44-owner-auth-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const dbPath = join(root, 'scheduler.sqlite');
+  let db = new Database(dbPath);
+  db.exec(SCHEMA_V5);
+  db.exec(`
+    CREATE TABLE schema_version (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    );
+    INSERT INTO schema_version (version, applied_at) VALUES (43, '2026-09-01T00:00:00Z');
+    CREATE TABLE dynamic_task_defs (
+      id TEXT PRIMARY KEY,
+      template_id TEXT NOT NULL,
+      trigger_json TEXT NOT NULL,
+      params_json TEXT NOT NULL,
+      entrusted_work_reevaluation_json TEXT,
+      display_json TEXT NOT NULL,
+      delivery_thread_id TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO dynamic_task_defs (
+      id, template_id, trigger_json, params_json, entrusted_work_reevaluation_json,
+      display_json, delivery_thread_id, enabled, created_by, created_at
+    ) VALUES (
+      'legacy-task', 'reminder', '{"type":"once","fireAt":1000}', '{"message":"legacy"}', NULL,
+      '{"label":"Legacy","category":"system","description":"legacy"}', 'thread-legacy', 1,
+      'hold-ball:codex-sol', '2026-09-01T00:00:00Z'
+    );
+  `);
+
+  applyMigrations(db);
+  let migrated = new DynamicTaskStore(db);
+  assert.equal(migrated.getById('legacy-task').params.message, 'legacy');
+  assert.equal(migrated.getPrivateOwnerAuthProvenance('legacy-task'), 'unknown');
+  migrated.insert({ ...SAMPLE_DEF, id: 'strict-task' }, 'strict');
+  db.close();
+
+  db = new Database(dbPath);
+  migrated = new DynamicTaskStore(db);
+  assert.equal(migrated.getPrivateOwnerAuthProvenance('legacy-task'), 'unknown');
+  assert.equal(migrated.getPrivateOwnerAuthProvenance('strict-task'), 'strict');
+  assert.equal(Object.hasOwn(migrated.getById('strict-task'), 'ownerAuthProvenance'), false);
   db.close();
 });
 
@@ -85,6 +138,36 @@ describe('DynamicTaskStore', () => {
     assert.deepEqual(all[0].params, { message: '检查 backlog' });
     assert.equal(all[0].deliveryThreadId, 'thread-abc');
     assert.equal(all[0].enabled, true);
+  });
+
+  test('managed-command owner auth is durable, immutable, and absent from task projections', () => {
+    store.insert(SAMPLE_DEF, 'strict');
+
+    assert.equal(store.getPrivateOwnerAuthProvenance('dyn-001'), 'strict');
+    assert.equal(Object.hasOwn(store.getById('dyn-001'), 'ownerAuthProvenance'), false);
+    assert.equal(Object.hasOwn(store.getById('dyn-001').params, 'ownerAuthProvenance'), false);
+
+    const observed = store.getById('dyn-001').params;
+    assert.equal(store.updateParams('dyn-001', { ...observed, message: 'updated' }), true);
+    store.upsert({ ...SAMPLE_DEF, params: { message: 'upserted' } });
+    assert.equal(
+      store.getPrivateOwnerAuthProvenance('dyn-001'),
+      'strict',
+      'ordinary lifecycle writes and public schedule upserts cannot rewrite private auth provenance',
+    );
+
+    assert.equal(store.remove('dyn-001'), true);
+    assert.equal(store.getPrivateOwnerAuthProvenance('dyn-001'), 'unknown');
+  });
+
+  test('legacy dynamic tasks without private owner auth fail closed to unknown', () => {
+    store.insert(SAMPLE_DEF);
+    assert.equal(store.getPrivateOwnerAuthProvenance('dyn-001'), 'unknown');
+  });
+
+  test('rejects an invalid private owner auth producer value before persistence', () => {
+    assert.throws(() => store.insert(SAMPLE_DEF, 'forged'), /ownerAuthProvenance must be explicit/);
+    assert.equal(store.getById('dyn-001'), null);
   });
 
   test('getById returns matching def', () => {
@@ -130,6 +213,52 @@ describe('DynamicTaskStore', () => {
   test('insert rejects duplicate id', () => {
     store.insert(SAMPLE_DEF);
     assert.throws(() => store.insert(SAMPLE_DEF), /UNIQUE|constraint/i);
+  });
+
+  test('findByDeliveryThreadAndCreatedBy returns matching tasks', () => {
+    const hold1 = {
+      ...SAMPLE_DEF,
+      id: 'hold-ball-001',
+      templateId: 'reminder',
+      deliveryThreadId: 'thread-xyz',
+      createdBy: 'hold-ball:codex',
+    };
+    const hold2 = {
+      ...SAMPLE_DEF,
+      id: 'hold-ball-002',
+      templateId: 'reminder',
+      deliveryThreadId: 'thread-xyz',
+      createdBy: 'hold-ball:codex',
+      createdAt: '2026-03-27T04:00:00Z',
+    };
+    const otherCat = {
+      ...SAMPLE_DEF,
+      id: 'hold-ball-003',
+      deliveryThreadId: 'thread-xyz',
+      createdBy: 'hold-ball:opus',
+    };
+    const otherThread = {
+      ...SAMPLE_DEF,
+      id: 'hold-ball-004',
+      deliveryThreadId: 'thread-other',
+      createdBy: 'hold-ball:codex',
+    };
+    store.insert(hold1);
+    store.insert(hold2);
+    store.insert(otherCat);
+    store.insert(otherThread);
+
+    const results = store.findByDeliveryThreadAndCreatedBy('thread-xyz', 'hold-ball:codex');
+    assert.equal(results.length, 2);
+    const ids = results.map((r) => r.id);
+    assert.ok(ids.includes('hold-ball-001'));
+    assert.ok(ids.includes('hold-ball-002'));
+  });
+
+  test('findByDeliveryThreadAndCreatedBy returns empty array when no matches', () => {
+    store.insert(SAMPLE_DEF);
+    const results = store.findByDeliveryThreadAndCreatedBy('nonexistent-thread', 'hold-ball:codex');
+    assert.deepEqual(results, []);
   });
 
   test('#415: once trigger round-trips correctly', () => {

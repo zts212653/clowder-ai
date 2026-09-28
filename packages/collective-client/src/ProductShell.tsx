@@ -21,26 +21,38 @@ function BellIcon() {
 export function ProductShell({
   embedded,
   collective,
+  collectives,
+  onSelectCollective,
   connection,
   canSteward,
   canPair,
   notice,
   onInvite,
   onPair,
+  destinations,
+  experienceGate,
   children,
 }: {
   readonly embedded: boolean;
   readonly collective?: CollectiveMembership;
+  readonly collectives?: readonly CollectiveMembership[];
+  readonly onSelectCollective?: (collectiveId: string) => void;
   readonly connection: 'online' | 'offline';
   readonly canSteward: boolean;
   readonly canPair: boolean;
   readonly notice?: string;
   readonly onInvite: () => void;
   readonly onPair: () => void;
+  readonly destinations?: ReactNode;
+  readonly experienceGate?: 'f290-assembly';
   readonly children: ReactNode;
 }) {
   return (
-    <main className="collective-shell" data-embedded={embedded ? 'true' : 'false'}>
+    <main
+      className="collective-shell"
+      data-embedded={embedded ? 'true' : 'false'}
+      data-experience-gate={experienceGate}
+    >
       {!embedded && (
         <aside className="global-rail" data-spatial-role="global-rail" aria-label="世界切换">
           <div className="brand-mark" role="img" aria-label="Clowder AI Collective">
@@ -67,22 +79,43 @@ export function ProductShell({
         <header className="destination-header">
           <span>COLLECTIVE</span>
           <h1>{collective?.name ?? '共同家园'}</h1>
+          {collectives && collectives.length > 1 && (
+            <label className="world-selector">
+              共同家园
+              <select
+                aria-label="选择 Collective"
+                value={collective?.collectiveId ?? ''}
+                onChange={(event) => onSelectCollective?.(event.target.value)}
+              >
+                <option value="" disabled>
+                  选择要进入的家园
+                </option>
+                {collectives.map((item) => (
+                  <option key={item.collectiveId} value={item.collectiveId}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <p>{connection === 'online' ? '共同现场已连接' : '暂时离线，正在等待恢复'}</p>
         </header>
         <label className="destination-search">
           <span aria-hidden="true">⌕</span>
           <input type="search" placeholder="搜索这个 Collective" disabled />
         </label>
-        <nav className="destination-list" aria-label="Collective 目的地">
-          <p>频道</p>
-          <button type="button" className="destination-item destination-item-active" aria-current="page">
-            <span className="destination-symbol">#</span>
-            <span>
-              <strong>general</strong>
-              <small>共同讨论与回应</small>
-            </span>
-          </button>
-        </nav>
+        {destinations ?? (
+          <nav className="destination-list" aria-label="Collective 目的地">
+            <p>频道</p>
+            <button type="button" className="destination-item destination-item-active" aria-current="page">
+              <span className="destination-symbol">#</span>
+              <span>
+                <strong>general</strong>
+                <small>共同讨论与回应</small>
+              </span>
+            </button>
+          </nav>
+        )}
         <footer className="destination-footer">
           {(canSteward || (embedded && canPair)) && (
             <div className="steward-actions">

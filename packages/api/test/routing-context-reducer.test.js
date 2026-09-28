@@ -196,6 +196,38 @@ describe('F293 pure routing-context reducer', () => {
     );
   });
 
+  it('keeps dossier diagnostics and capability evidence when signal reasons fill the snapshot budget', () => {
+    const events = Array.from({ length: 40 }, (_, index) =>
+      asserted({
+        eventId: `signal:budget:${index}`,
+        subjectRef: { type: 'cat', catId: 'sol' },
+        state: 'scarce',
+        reasonCode: `budget_${index}`,
+      }),
+    );
+    const sol = byCat(
+      reduce({
+        profiles: [profile('sol', 'dossier:v1')],
+        profileDiagnostics: [
+          {
+            catId: 'sol',
+            reason: {
+              code: 'capability_profile_invalid',
+              summary: 'Dossier line 7 has invalid YAML',
+              sourceRefs: ['docs/team/cat-dossier.md#L7'],
+            },
+          },
+        ],
+        signalEvents: events,
+      }),
+      'sol',
+    );
+    assert.equal(sol.reasons.length, 32);
+    assert.equal(sol.reasons[0].code, 'capability_profile_invalid');
+    assert.equal(sol.reasons.at(-1).code, 'capability_strength');
+    assert.equal(sol.reasons.filter((reason) => reason.code === 'routing_signal_scarce').length, 30);
+  });
+
   it('turns expired or retracted negative evidence into unknown, never synthetic available', () => {
     const expiring = asserted({
       eventId: 'signal:expired',

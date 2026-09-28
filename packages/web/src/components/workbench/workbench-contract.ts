@@ -3,6 +3,7 @@ export type WorkbenchSurfaceType =
   | 'artifact'
   | 'browser'
   | 'code'
+  | 'content-editor'
   | 'evolution-program'
   | 'file'
   | 'review'
@@ -14,6 +15,7 @@ export type WorkbenchRenderer =
   | 'artifact-view'
   | 'browser-preview'
   | 'code-editor'
+  | 'content-editor'
   | 'evolution-program'
   | 'file-preview'
   | 'review-summary'
@@ -23,6 +25,7 @@ export type WorkbenchRenderer =
 export type WorkbenchObjectKind =
   | 'agent-run'
   | 'artifact'
+  | 'content-editor-session'
   | 'evolution-program'
   | 'file'
   | 'preview-session'
@@ -49,11 +52,13 @@ export interface WorkspaceSurfaceDescriptor {
     owner: string;
     key: string;
   };
+  /** Navigation edge captured when this Artifact is opened from one exact entrusted-work item. */
+  returnTargetRef?: { owner: string; key: string };
   capabilities: {
     split: boolean;
     sidecar: boolean;
     pin: boolean;
-    /** The F307 host may temporarily move this exact mounted surface over the main Chat area. */
+    /** Legacy schema-v2 hint. F307 now gives every mounted Workspace tab the same host-owned attention action. */
     mainAreaAttention?: true;
     closePolicy: 'detach-host';
     restorePolicy: 'descriptor';

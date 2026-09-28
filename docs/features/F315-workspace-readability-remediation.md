@@ -16,12 +16,12 @@ description_updated_at: 2026-09-03T21:40:00-07:00
 > **Status**: in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P1
 >
 > **operator sources**:
-> - `[thread-id]#0001788492776995-000225-df6cc10c`——Workspace 多数页面仍违背 F305，信息难读、内部概念过多；F305 关闭后应另立 Feature 盘点现状并治理。
-> - `[thread-id]#0001788494281788-000279-49ac2988`——先回答 Team、Needs Me、能力进化为什么读起来吃力，指出颜色、层级与信息表达的问题，并参考真实产品给出更清楚的方案。
-> - `[thread-id]#0001788513469323-000709-a23d8f5f`——operator 明确否定把 F315 的当前主线解释成“先换全局颜色、先规划 19 个房间”；F315 必须先交付点名页面的可见修复。
-> - `[thread-id]#0001788515250111-000776-c05f7e0c`——operator 对首版 after 明确要求继续调整：Team 只比 before 好但分组措辞不讲人话；Needs Me 缺少 populated 态；Capability Evolution 横排不自然且缺少图形落点。
-> - `[thread-id]#0001788516088680-000807-4144e5b7`、`#0001788516258766-000813-8bef4d8f`、`#0001788520033748-000893-23213efd`——Capability Evolution 的用户旅程不能照抄猫的执行阶段；根节点、首屏、展开层分别回答不同问题，并区分造仪器的准备态与真正开始观察/进化后的状态。
-> - `[thread-id]#0001788521646251-000943-bb82ce5d`——operator 退回“愿望 / 愿望名”措辞，并要求先用 F314、Microduck 与路演能力三份真实 Program 讲清前端到底如何表达。
+> - `[thread-id]#private-source-id`——Workspace 多数页面仍违背 F305，信息难读、内部概念过多；F305 关闭后应另立 Feature 盘点现状并治理。
+> - `[thread-id]#private-source-id`——先回答 Team、Needs Me、能力进化为什么读起来吃力，指出颜色、层级与信息表达的问题，并参考真实产品给出更清楚的方案。
+> - `[thread-id]#private-source-id`——operator 明确否定把 F315 的当前主线解释成“先换全局颜色、先规划 19 个房间”；F315 必须先交付点名页面的可见修复。
+> - `[thread-id]#private-source-id`——operator 对首版 after 明确要求继续调整：Team 只比 before 好但分组措辞不讲人话；Needs Me 缺少 populated 态；Capability Evolution 横排不自然且缺少图形落点。
+> - `[thread-id]#private-source-id`、`#private-source-id`、`#private-source-id`——Capability Evolution 的用户旅程不能照抄猫的执行阶段；根节点、首屏、展开层分别回答不同问题，并区分造仪器的准备态与真正开始观察/进化后的状态。
+> - `[thread-id]#private-source-id`——operator 退回“愿望 / 愿望名”措辞，并要求先用 F314、Microduck 与路演能力三份真实 Program 讲清前端到底如何表达。
 
 Architecture cell: **none（cross-owner presentation remediation）**；相关产品宿主为 `hub-action-surface`。
 
@@ -63,9 +63,9 @@ operator 附了 Team、Needs Me、Capability Evolution、Status / Sessions、App
 
 ### 第一批 owner 收件状态（2026-09-04）
 
-- **Team / F293**：owner 已收到 L1 文案 finding，并提交 PR #4293（exact HEAD `fa0accbe805187541f0a1c11c37f8fc9c6dabc47`，当前 OPEN）；T1–T4 已绑定到 F293 主线程消息 `0001788514405609-000745-e877281f`。Owner receipt `0001788514594985-000756-c69a8a4d` 确认没有硬契约冲突，同时要求身份信息只做现有 `/api/cats` presentation join、exact provenance 只下沉不删除、nested back 与 F208 来源入口只降视觉权重不删行为。
-- **Needs Me / F310**：L1 用户处境文案已由 PR #4309 合入 main（merge `ec15b86c483997639e537f2af4cd4b448271893e`）；N1–N4 已绑定到 F310 主线程消息 `0001788514405649-000746-807db5fe`。Owner receipt `0001788514594355-000755-93c158ff` 确认 N2 已满足且没有领域契约冲突，同时要求 loading/error 不显示缓存计数或伪造 `0`、错误态保留可见重试、空态不声称 Schedule 必然存在任务并复用既有目的地。
-- **Capability Evolution / F311**：输入机制说明已由 PR #4292 合入 main（merge `f3abdd5f07bb149585f85183ec3f78b45f8c4c22`）；C1–C4 已绑定到 F311 主线程消息 `0001788514405784-000747-cdfc65ab`。Owner receipt `0001788515395998-000780-bd92d471` 确认没有 Program/action/revision 契约冲突，同时要求 `StartEvolution.submit` 继续绑定 exact `targetThreadId`、只写 `setPendingChatInsert` 且不自动发送；quiet conversation chip 保持未知 thread fail-closed；人类化标题与状态不删除 raw owner/lifecycle/stage truth 或 `onOpenProgram(programId)`；颜色与字体不得暗示不存在的业务 actionability。该回执工具响应误继承的 T2 coordination id/subject 不属于 F315 真相，F315 只引用这条持久消息正文。operator 后续思辨形成的 C5–C9 已随 `39003a6a58` 落地，并沿同一 carrier 以 `0001788520611809-000916-1f172264` 增量绑定 F311 owner；owner receipt `0001788520876264-000931-ad6a463a` 确认 after-v2 没有架构阻塞，并冻结下列实现条件。
+- **Team / F293**：owner 已收到 L1 文案 finding，并提交 PR #4293（exact HEAD `fa0accbe805187541f0a1c11c37f8fc9c6dabc47`，当前 OPEN）；T1–T4 已绑定到 F293 主线程消息 `private-source-id`。Owner receipt `private-source-id` 确认没有硬契约冲突，同时要求身份信息只做现有 `/api/cats` presentation join、exact provenance 只下沉不删除、nested back 与 F208 来源入口只降视觉权重不删行为。
+- **Needs Me / F310**：L1 用户处境文案已由 PR #4309 合入 main（merge `ec15b86c483997639e537f2af4cd4b448271893e`）；N1–N4 已绑定到 F310 主线程消息 `private-source-id`。Owner receipt `private-source-id` 确认 N2 已满足且没有领域契约冲突，同时要求 loading/error 不显示缓存计数或伪造 `0`、错误态保留可见重试、空态不声称 Schedule 必然存在任务并复用既有目的地。
+- **Capability Evolution / F311**：输入机制说明已由 PR #4292 合入 main（merge `f3abdd5f07bb149585f85183ec3f78b45f8c4c22`）；C1–C4 已绑定到 F311 主线程消息 `private-source-id`。Owner receipt `private-source-id` 确认没有 Program/action/revision 契约冲突，同时要求 `StartEvolution.submit` 继续绑定 exact `targetThreadId`、只写 `setPendingChatInsert` 且不自动发送；quiet conversation chip 保持未知 thread fail-closed；人类化标题与状态不删除 raw owner/lifecycle/stage truth 或 `onOpenProgram(programId)`；颜色与字体不得暗示不存在的业务 actionability。该回执工具响应误继承的 T2 coordination id/subject 不属于 F315 真相，F315 只引用这条持久消息正文。operator 后续思辨形成的 C5–C9 已随 `39003a6a58` 落地，并沿同一 carrier 以 `private-source-id` 增量绑定 F311 owner；owner receipt `private-source-id` 确认 after-v2 没有架构阻塞，并冻结下列实现条件。
 
   - Program 标题使用该能力的实际产品名，只从 owner/claim display metadata 或可逆 ref-humanization 投影取得，不新增 free-text Program 字段或复制 owner payload；内部 token 留在 Raw。
   - `已采纳` 只对应 fresh outcome 后的 `keep → terminalDisposition=kept`；`已回滚` 只作为历史回执，根节点显示新 Cycle 的当前状态；`writing_back`、`revalidating`、`deciding` 必须有诚实的非终态表达。
@@ -77,9 +77,9 @@ operator 附了 Team、Needs Me、Capability Evolution、Status / Sessions、App
 
 ### Phase A 已接受的视觉证据（2026-09-04）
 
-operator 已在 `[thread-id]#0001788507425448-000448-484d78d7` 选择全家视觉基线 **Anthropic + Linear**，但没有接受首版三页 after。其 `[thread-id]#0001788515250111-000776-c05f7e0c` 明确指出：Team 仅是“比之前好”，分组措辞仍不讲人话；Needs Me 只画空态，无法判断有内容时的样子；Capability Evolution 横排别扭、缺少图标与视觉落点。首版 after 因此是有效诊断证据而不是 Design Gate 签字，下一次比较必须补 Team 对称用户语言、Needs Me populated 态、Capability Evolution 竖向节奏与图形锚点，并继续用真实同类产品 anatomy 校准。
+operator 已在 `[thread-id]#private-source-id` 选择全家视觉基线 **Anthropic + Linear**，但没有接受首版三页 after。其 `[thread-id]#private-source-id` 明确指出：Team 仅是“比之前好”，分组措辞仍不讲人话；Needs Me 只画空态，无法判断有内容时的样子；Capability Evolution 横排别扭、缺少图标与视觉落点。首版 after 因此是有效诊断证据而不是 Design Gate 签字，下一次比较必须补 Team 对称用户语言、Needs Me populated 态、Capability Evolution 竖向节奏与图形锚点，并继续用真实同类产品 anatomy 校准。
 
-operator 又在 `[thread-id]#0001788521646251-000943-bb82ce5d` 明确退回“愿望 / 愿望名”及常驻“是否需要你”表达。Capability Evolution after-v2 必须以能力的实际产品名作标题，以稳定的产品状态 pill 表达进度，并且只有 canonical action 对当前用户真实可执行时才出现 attention / 主动作。方案必须把 F314-backed 开发流程改进、Microduck 行走稳定性、投资人路演表达能力三份真实 Program 并排代入同一 anatomy；三者是同一 Workspace 里的三个能力对象，不得假设为三个阶段、相互替代的方案或相同 lifecycle。
+operator 又在 `[thread-id]#private-source-id` 明确退回“愿望 / 愿望名”及常驻“是否需要你”表达。Capability Evolution after-v2 必须以能力的实际产品名作标题，以稳定的产品状态 pill 表达进度，并且只有 canonical action 对当前用户真实可执行时才出现 attention / 主动作。方案必须把 F314-backed 开发流程改进、Microduck 行走稳定性、投资人路演表达能力三份真实 Program 并排代入同一 anatomy；三者是同一 Workspace 里的三个能力对象，不得假设为三个阶段、相互替代的方案或相同 lifecycle。
 
 ### 三层诊断，不把所有问题叫“换皮”
 
@@ -204,7 +204,7 @@ F293、F310、F311 各自修复本页命中的 renderer、projection 或必要 s
 
 - [x] AC-A1: Team、Needs Me、Capability Evolution 各有逐块标注的真实壳诊断，明确颜色语义、视觉层级、重复信息、内部术语及其对用户理解的影响。
 - [x] AC-A2: 三页各有至少一个任务相符的野外参照和一个同壳改后方案；参照说明借用的表达原则，不照抄品牌外观。
-- [x] AC-A3: 三页 finding 分别绑定 F293/F310/F311 的 renderer / projection / schema anchor 与 owner receipt，不等待 census 或 fold map 才行动。（T1–T4、N1–N4、C1–C9 均已完成 owner receipt；C5–C9 条件见 `0001788520876264-000931-ad6a463a`。）
+- [x] AC-A3: 三页 finding 分别绑定 F293/F310/F311 的 renderer / projection / schema anchor 与 owner receipt，不等待 census 或 fold map 才行动。（T1–T4、N1–N4、C1–C9 均已完成 owner receipt；C5–C9 条件见 `private-source-id`。）
 - [x] AC-A4: 审计只引用 ADR-043、F056、`DESIGN.md` 与唯一 design-in-context checklist；仓内没有新增 Design Gate、评分体系、规则清单或 Workspace registry。
 
 ### Phase B（三页 owner 修复与真实壳验收）

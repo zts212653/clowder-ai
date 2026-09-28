@@ -4,6 +4,7 @@ import type {
   GitHubReviewThreadBaseline,
   PrAutomationState,
 } from '@cat-cafe/shared';
+import { reviewVerdictsOf } from './GitHubReviewVerdicts.js';
 
 interface GithubIdItem {
   readonly id?: unknown;
@@ -11,6 +12,7 @@ interface GithubIdItem {
 
 interface GithubReviewItem extends GithubIdItem {
   readonly state?: string;
+  readonly user?: { readonly login?: string } | null;
 }
 
 export interface GitHubWaitBaselineReaderDeps {
@@ -65,6 +67,10 @@ export async function readGitHubWaitBaseline(
     'pr_review_result_available',
     'pr_review_decision_changed',
     'pr_review_thread_changed',
+    // #1392 AC-6: without these the comment frontiers were never captured at registration, so
+    // every pre-registration comment would have looked new.
+    'pr_conversation_comment_added',
+    'pr_inline_comment_added',
   );
   const needsCi = hasPredicate(input.when, 'pr_ci_terminal');
   const needsConflict = hasPredicate(input.when, 'pr_became_conflicting');
@@ -85,6 +91,11 @@ export async function readGitHubWaitBaseline(
   const inlineCommentCursor = maxGithubId(inlineComments);
   const conversationCommentCursor = maxGithubId(conversationComments);
   const decisionCursor = maxGithubId(reviews);
+  // #1392: every verdict as of registration, dismissed ones included, so a dismissal that happened
+  // before tracking started is never reported as news.
+  const verdicts = reviewVerdictsOf(
+    reviews.map((review) => ({ id: review.id, state: review.state, author: review.user?.login })),
+  );
   const latestReview = [...reviews]
     .filter((review): review is GithubReviewItem & { id: number } => typeof review.id === 'number')
     .sort((a, b) => a.id - b.id)
@@ -105,6 +116,7 @@ export async function readGitHubWaitBaseline(
         conversationCommentCursor,
         decisionCursor,
         ...(latestReview?.state ? { decision: latestReview.state } : {}),
+        verdicts,
         ...(resultTriggerCommentId !== undefined ? { resultTriggerCommentId, resultTriggerHeadSha: ci.headSha } : {}),
         ...(threads.length > 0 ? { threads } : {}),
       }

@@ -1325,6 +1325,43 @@ describe('POST /api/messages/:messageId/queue-targets/:targetCatId/retry', () =>
     assert.equal(retryCalls.length, 0);
   });
 
+  it('projects pending target state without granting retry or disclosing it to another owner', async () => {
+    const queued = messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: '@gpt-pro hello',
+      mentions: ['gpt-pro'],
+      timestamp: 1_000,
+      threadId: 'thread-f247-pending',
+      deliveryStatus: 'queued',
+      queueCustody: makeQueuedMessageCustody({
+        entryId: 'entry-pending',
+        allTargetCats: ['gpt-pro'],
+        pendingTargetCats: ['gpt-pro'],
+        targetAttempts: [
+          {
+            id: 'entry-pending:gpt-pro:1',
+            targetCatId: 'gpt-pro',
+            sequence: 1,
+            state: 'queued',
+            createdAt: 1_000,
+            updatedAt: 1_100,
+          },
+        ],
+      }),
+    });
+    const url = `/api/messages/${queued.id}/queue-targets/gpt-pro/retry-authority`;
+    const response = await app.inject({ method: 'GET', url });
+    assert.equal(response.statusCode, 409);
+    assert.equal(JSON.parse(response.body).targetState, 'queued');
+    assert.equal(JSON.parse(response.body).attemptId, undefined);
+    const otherOwner = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'different-user' } });
+    assert.equal(otherOwner.statusCode, 404);
+    assert.equal(JSON.parse(otherOwner.body).targetState, undefined);
+    assert.equal(authorityCalls.length, 1);
+    assert.equal(retryCalls.length, 0);
+  });
+
   it('does not project a retry fence when current authority has gone stale', async () => {
     const queued = messageStore.append({
       userId: 'default-user',

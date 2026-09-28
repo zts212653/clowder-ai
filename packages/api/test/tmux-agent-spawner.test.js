@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, before, describe, it } from 'node:test';
-import { spawnCliInTmux } from '../dist/domains/terminal/tmux-agent-spawner.js';
 import { TmuxGateway } from '../dist/domains/terminal/tmux-gateway.js';
+import { spawnCliInTmuxForTest } from './helpers/tmux-test-spawn.js';
 
 describe('spawnCliInTmux', () => {
   const WORKTREE = `test-agent-spawn-${Date.now()}`;
@@ -15,10 +19,11 @@ describe('spawnCliInTmux', () => {
     await gateway.destroyServer(WORKTREE);
   });
 
-  it('yields NDJSON events from a simple echo command', async () => {
+  it('yields NDJSON events from a simple echo command', async (t) => {
     const events = [];
     // echo command that outputs two JSON lines
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo \'{"type":"init","id":"t1"}\'; echo \'{"type":"done"}\''],
@@ -47,13 +52,14 @@ describe('spawnCliInTmux', () => {
     assert.equal(jsonEvents[1].type, 'done');
   });
 
-  it('forwards stdinInput to the pane command via stdin redirect (P1 regression)', async () => {
+  it('forwards stdinInput to the pane command via stdin redirect (P1 regression)', async (t) => {
     // Incident 2026-05-29 P1 (cloud codex review): codex `-- -` reads prompt from stdin,
     // but a tmux pane has no stdin pipe. stdinInput must be redirected from a temp file.
     // Real tmux pane round-trip — guards the production worktree path that mock/dogfood missed.
     const SECRET = 'TMUX-STDIN-REDIRECT-披着专业外衣-R8';
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: process.execPath,
         args: [
@@ -73,19 +79,20 @@ describe('spawnCliInTmux', () => {
     assert.equal(echo.got, SECRET, 'stdinInput must reach the pane command via stdin redirect');
   });
 
-  it('cleans up the stdin temp file when tmux setup fails (P1 #2 regression)', async () => {
+  it('cleans up the stdin temp file when tmux setup fails (P1 #2 regression)', async (t) => {
     // Incident 2026-05-29 P1 #2 (cloud codex review): the stdin temp file holds the full
     // conversation history. If setup fails before the main try/finally, it must still be
-    // removed — otherwise the prompt is left on disk forever. Mock createAgentPane to throw.
+    // removed — otherwise the prompt is left on disk forever. Mock createAgentPaneLease to throw.
     const failGateway = {
-      createAgentPane: async () => {
+      createAgentPaneLease: async () => {
         throw new Error('tmux unavailable (simulated setup failure)');
       },
     };
     const uniqueInv = `test-cleanup-${Date.now()}`;
     let threw = false;
     try {
-      const gen = spawnCliInTmux(
+      const gen = spawnCliInTmuxForTest(
+        t,
         {
           command: '/bin/sh',
           args: ['-c', 'true'],
@@ -109,9 +116,10 @@ describe('spawnCliInTmux', () => {
     assert.equal(leftover.length, 0, `stdin temp dir must be cleaned up on setup failure, found: ${leftover}`);
   });
 
-  it('reports non-zero exit code via __cliError', async () => {
+  it('reports non-zero exit code via __cliError', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo \'{"type":"start"}\'; exit 42'],
@@ -135,9 +143,10 @@ describe('spawnCliInTmux', () => {
   // plainText mode: stderrFile populated via L62-64 independent redirect; abnormal exit reads it.
   // NDJSON mode: stderr merges into fifo via 2>&1; non-JSON lines collected from parse-error branch
   //              (bounded nonJsonOutput buffer) feed buildCliDiagnostics — see L294 in tmux-agent-spawner.ts.
-  it('F212: __cliError on non-zero exit carries cliDiagnostics built from stderr (plainText mode)', async () => {
+  it('F212: __cliError on non-zero exit carries cliDiagnostics built from stderr (plainText mode)', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         // stderr contains "401 Unauthorized" → classifier should map to auth_failed
@@ -173,9 +182,10 @@ describe('spawnCliInTmux', () => {
   // F212 round-4 (砚砚 P2): NDJSON mode also classifies stderr via nonJsonOutput buffer.
   // tmux NDJSON command does `2>&1 | tee fifo` so stderr noise lands as non-JSON lines in
   // the NDJSON parse loop. parse-error branch collects them (bounded) → fed to buildCliDiagnostics.
-  it('F212: __cliError carries cliDiagnostics built from non-JSON noise (NDJSON mode)', async () => {
+  it('F212: __cliError carries cliDiagnostics built from non-JSON noise (NDJSON mode)', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         // Emit one valid NDJSON event + stderr "401 Unauthorized" noise + non-zero exit.
@@ -208,9 +218,10 @@ describe('spawnCliInTmux', () => {
     );
   });
 
-  it('exit code 0 does not yield __cliError', async () => {
+  it('exit code 0 does not yield __cliError', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo \'{"type":"ok"}\'; exit 0'],
@@ -236,13 +247,14 @@ describe('spawnCliInTmux', () => {
   // `turn.completed → exit 1` regressed for tmux-backed cats. R1 fix mirrors the direct-spawn
   // gate. Simulation: caller signal already aborted before iteration completes (as if
   // CodexAgentService.turn.completed handler had fired mid-stream). Expected: no __cliError.
-  it('F212 Phase H R1 P1-1: semanticCompletionSignal.aborted suppresses __cliError on non-zero exit', async () => {
+  it('F212 Phase H R1 P1-1: semanticCompletionSignal.aborted suppresses __cliError on non-zero exit', async (t) => {
     const events = [];
     const controller = new AbortController();
     // Pre-abort — simulates provider's turn.completed handler flipping the signal
     // before the tmux stdout iteration reaches exit.
     controller.abort();
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo \'{"type":"turn.completed"}\'; exit 1'],
@@ -274,14 +286,15 @@ describe('spawnCliInTmux', () => {
   // `localFinalTerminal` (chronological last terminal event) instead of the
   // sticky signal. These tests lock the new contract.
 
-  it('F212 Phase H cloud R5 P2: multi-turn tmux (turn.completed then turn.failed) → __cliError surfaces', async () => {
+  it('F212 Phase H cloud R5 P2: multi-turn tmux (turn.completed then turn.failed) → __cliError surfaces', async (t) => {
     // Simulates the exact multi-turn regression cloud flagged. Pre-abort the signal
     // (so old R1 P1-1 code would have suppressed) but emit turn.completed followed by
     // turn.failed — under the R5 fix, localFinalTerminal='failed' wins over sticky signal.
     const events = [];
     const controller = new AbortController();
     controller.abort();
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: [
@@ -305,12 +318,13 @@ describe('spawnCliInTmux', () => {
     assert.equal(errEvent.exitCode, 1);
   });
 
-  it('F212 Phase H cloud R5 P2 companion: multi-turn tmux (turn.failed then recovery turn.completed) → silent success', async () => {
+  it('F212 Phase H cloud R5 P2 companion: multi-turn tmux (turn.failed then recovery turn.completed) → silent success', async (t) => {
     // Opposite direction: attempt #1 fails, retry succeeds. Final terminal = completed.
     // R1 P1-1 tolerance for recovery must survive R5 fix.
     const events = [];
     const controller = new AbortController();
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: [
@@ -337,13 +351,14 @@ describe('spawnCliInTmux', () => {
     );
   });
 
-  it('F212 Phase H R1 P1-1 companion: semanticCompletionSignal NOT aborted → __cliError fires normally', async () => {
+  it('F212 Phase H R1 P1-1 companion: semanticCompletionSignal NOT aborted → __cliError fires normally', async (t) => {
     // Guard against over-suppression: without semanticDone, tmux still surfaces exit=1
     // via __cliError so terminal failures are not swallowed.
     const events = [];
     const controller = new AbortController();
     // NOT aborted — represents a turn that ended without turn.completed
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo \'{"type":"item.completed"}\'; exit 1'],
@@ -364,9 +379,10 @@ describe('spawnCliInTmux', () => {
     assert.equal(errEvent.exitCode, 1);
   });
 
-  it('plainText mode yields raw stdout without NDJSON parsing', async () => {
+  it('plainText mode yields raw stdout without NDJSON parsing', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo plain-output; echo debug-log >&2'],
@@ -390,9 +406,10 @@ describe('spawnCliInTmux', () => {
     assert.equal(plain.exitCode, 0);
   });
 
-  it('plainText mode resets timeout on stdout chunks without newline', async () => {
+  it('plainText mode resets timeout on stdout chunks without newline', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'printf part1; sleep 1; printf part2; sleep 1; printf done'],
@@ -401,8 +418,6 @@ describe('spawnCliInTmux', () => {
         invocationId: 'test-inv-plaintext-no-newline',
         cwd: '/tmp',
         timeoutMs: 1500,
-        // Full-gate load can delay pane startup independently of the idle
-        // contract under test. Once stdout starts, the 1.5s idle budget applies.
         firstEventTimeoutMs: 8000,
       },
       { tmuxGateway: gateway },
@@ -420,9 +435,10 @@ describe('spawnCliInTmux', () => {
     assert.equal(plain.exitCode, 0);
   });
 
-  it('plainText mode does not time out after stdout reaches EOF while the exit sentinel is pending', async () => {
+  it('plainText mode does not time out after stdout reaches EOF while the exit sentinel is pending', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'printf done; exec 1>&-; sleep 0.5'],
@@ -448,40 +464,127 @@ describe('spawnCliInTmux', () => {
     assert.equal(plain.exitCode, 0);
   });
 
-  it('plainText mode resets timeout on stderr activity before final stdout', async () => {
+  it('plainText mode resets timeout on stderr activity before final stdout', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
-      {
-        command: '/bin/sh',
-        args: ['-c', 'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do echo "progress-$i" >&2; sleep 0.75; done; echo done'],
-        outputMode: 'plainText',
-        worktreeId: WORKTREE,
-        invocationId: 'test-inv-plaintext-stderr-progress',
-        cwd: '/tmp',
-        timeoutMs: 1500,
-        // Full gate load can delay tmux pane startup. Final stdout still lands
-        // after this window, so stderr progress must cancel the startup timer.
-        firstEventTimeoutMs: 8000,
-      },
-      { tmuxGateway: gateway },
-    );
+    // Vacuous-proof design (2026-09-07 Sol R3 P1 — explicit iterator ordering):
+    //   Shell starts running at `execInPane()`, but `startFirstEventTimeout()`
+    //   and `startPlainTextStderrWatcher()` are only armed AFTER
+    //   `setAgentPaneReadOnly()` + `yield __tmuxPaneCreated` + generator resume.
+    //   Under load, pre-arm setup can eat several seconds of real shell time,
+    //   so fixed-duration commands are defeated: stdout can arrive inside the
+    //   20 s budget even if the stderr watcher is inert.
+    //
+    //   Fix: a marker-file barrier — but the marker MUST be written AFTER the
+    //   generator has resumed past `yield __tmuxPaneCreated` and executed the
+    //   synchronous body that arms the timer + watcher. In a `for await` loop
+    //   that ordering is impossible: the generator is suspended at yield until
+    //   the consumer body returns and the loop calls `next()` again. Any
+    //   `await setTimeout` inside the body is dead time — release still races
+    //   the next `next()`. So this test drives the iterator manually:
+    //     1. `iter.next()` → receive `__tmuxPaneCreated`; generator suspends
+    //        at yield.
+    //     2. `iter.next()` again (without awaiting) → the async generator
+    //        synchronously resumes from yield and runs through the sync body
+    //        (init state vars, `startFirstEventTimeout()`,
+    //        `startPlainTextStderrWatcher()`) up to the first async point
+    //        (`for await (chunk of fifoStream)`). Timer + watcher are now
+    //        armed.
+    //     3. `await setImmediate` → macrotask boundary as an extra guarantee
+    //        the generator has settled at its FIFO await before we do
+    //        anything shell-visible.
+    //     4. `writeFileSync(marker)` → shell notices in ≤50 ms and begins
+    //        the 30-iter stderr loop; total shell time from here is measured
+    //        against the just-armed 20 s firstEventTimer.
+    //     5. Drain the outstanding `next()` promise + the rest.
+    //
+    //   Mutation probe (Sol R3 direction): with an inert stderr watcher, this
+    //   layout goes RED even under an arbitrarily slow `setAgentPaneReadOnly` or
+    //   pre-first-event consumer delay, because release only happens after
+    //   the timer is armed.
+    const markerPath = join(tmpdir(), `tmux-firstevent-marker-${randomUUID()}`);
+    try {
+      const gen = spawnCliInTmuxForTest(
+        t,
+        {
+          command: '/bin/sh',
+          args: [
+            '-c',
+            `while [ ! -f "${markerPath}" ]; do sleep 0.05; done; i=1; while [ "$i" -le 30 ]; do echo "progress-$i" >&2; sleep 0.75; i=$((i+1)); done; echo done`,
+          ],
+          outputMode: 'plainText',
+          worktreeId: WORKTREE,
+          invocationId: 'test-inv-plaintext-stderr-progress',
+          cwd: '/tmp',
+          timeoutMs: 1500,
+          firstEventTimeoutMs: 20_000,
+        },
+        { tmuxGateway: gateway },
+      );
 
-    for await (const event of gen) {
-      events.push(event);
+      const iter = gen[Symbol.asyncIterator]();
+
+      // Step 1: consume the __tmuxPaneCreated event (generator now suspended
+      // at the yield that follows tmux pane setup).
+      const first = await iter.next();
+      assert.equal(first.done, false, 'generator should yield the pane-created event first');
+      assert.ok(first.value?.__tmuxPaneCreated, 'first yielded event must be __tmuxPaneCreated');
+      events.push(first.value);
+
+      // Step 2: kick off the next iteration — this synchronously resumes the
+      // generator through startFirstEventTimeout() + startPlainTextStderrWatcher()
+      // up to the first async point (the FIFO for-await). Do NOT await yet.
+      const drainPromise = iter.next();
+
+      // Step 3: yield a macrotask so the generator has definitely settled at
+      // its FIFO await before any shell-visible action happens.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Step 4: release the shell. Timer + watcher are already armed, so the
+      // 22.5 s stderr loop and stdout arrival now share a clock origin with
+      // the 20 s firstEventTimer. Only the stderr watcher can cancel it.
+      writeFileSync(markerPath, '');
+
+      // Step 5: drain the rest of the stream.
+      let result = await drainPromise;
+      while (!result.done) {
+        events.push(result.value);
+        result = await iter.next();
+      }
+
+      const timeout = events.find((e) => e.__cliTimeout);
+      assert.equal(
+        timeout,
+        undefined,
+        'stderr activity should cancel first-event timer before final stdout (which arrives after the 20s budget)',
+      );
+      const plain = events.find((e) => e.__cliPlainText);
+      assert.ok(plain, 'should yield raw plain-text stdout result');
+      assert.equal(plain.stdout, 'done\n');
+      // Full stderr sequence must land — proves stderr progress kept the run
+      // alive across the entire 22.5s post-marker window, not just the first
+      // few writes before an idle timeout would otherwise fire.
+      assert.match(plain.stderr, /progress-30/);
+      assert.equal(plain.exitCode, 0);
+    } finally {
+      try {
+        unlinkSync(markerPath);
+      } catch {
+        /* best-effort: marker may have been consumed or never created */
+      }
     }
-
-    const timeout = events.find((e) => e.__cliTimeout);
-    assert.equal(timeout, undefined, 'stderr activity should keep plainText tmux command alive before final stdout');
-    const plain = events.find((e) => e.__cliPlainText);
-    assert.ok(plain, 'should yield raw plain-text stdout result');
-    assert.equal(plain.stdout, 'done\n');
-    assert.match(plain.stderr, /progress-4/);
-    assert.equal(plain.exitCode, 0);
   });
 
-  it('sets environment variables in pane', async () => {
+  // NOTE: F212 deadline-callback sync-recheck regression lives in
+  // `tmux-agent-spawner-deadline-recheck.test.js` (deterministic 4-cell
+  // fake-gateway) — Sol R1 P1 flagged that a real-tmux timing-based
+  // integration test cannot deterministically execute the sync-recheck
+  // code path (the 250 ms interval poll rescues first under any
+  // `firstEventTimeoutMs` ≥ 250 ms). See that file for the actual gate.
+
+  it('sets environment variables in pane', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'echo "{\\"val\\":\\"$TEST_VAR\\"}"'],
@@ -502,9 +605,10 @@ describe('spawnCliInTmux', () => {
     assert.equal(valEvent.val, 'hello-tmux');
   });
 
-  it('parse-error noise does not reset timeout forever', async () => {
+  it('parse-error noise does not reset timeout forever', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'while true; do echo not-json-line; sleep 0.05; done'],
@@ -525,9 +629,10 @@ describe('spawnCliInTmux', () => {
     assert.ok(timeoutEvent, 'invalid tmux output noise should still hit timeout');
   });
 
-  it('firstEventTimeout fires when CLI produces no valid NDJSON', async () => {
+  it('firstEventTimeout fires when CLI produces no valid NDJSON', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         // Sleep forever — never produces any output at all
@@ -554,9 +659,10 @@ describe('spawnCliInTmux', () => {
     assert.ok(elapsed < 5000, `should converge via firstEventTimeout, took ${elapsed}ms`);
   });
 
-  it('idleTimeout fires after first event when CLI goes silent', async () => {
+  it('idleTimeout fires after first event when CLI goes silent', async (t) => {
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         // Emit one valid event, then sleep forever
@@ -588,10 +694,11 @@ describe('spawnCliInTmux', () => {
     assert.ok(elapsed < 30000, `should converge well before firstEventTimeout, took ${elapsed}ms`);
   });
 
-  it('AbortSignal unblocks FIFO read (no deadlock)', async () => {
+  it('AbortSignal unblocks FIFO read (no deadlock)', async (t) => {
     const ac = new AbortController();
     const events = [];
-    const gen = spawnCliInTmux(
+    const gen = spawnCliInTmuxForTest(
+      t,
       {
         command: '/bin/sh',
         args: ['-c', 'sleep 3600'],

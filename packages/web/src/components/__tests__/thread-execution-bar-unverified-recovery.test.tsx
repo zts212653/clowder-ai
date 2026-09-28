@@ -125,7 +125,7 @@ describe('ThreadExecutionBar — canonical-empty + legacy-unverified recovery', 
       catInvocations: {},
       threadStates: {},
     });
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [
@@ -161,7 +161,7 @@ describe('ThreadExecutionBar — canonical-empty + legacy-unverified recovery', 
   });
 
   it('keeps foreign scheduler occupancy visible with an explicit non-cancelable reason', () => {
-    const request = useActiveExecutionStore.getState().beginHydration('thread-a');
+    const request = useActiveExecutionStore.getState().beginHydration('thread-a', '/project/cafe');
     useActiveExecutionStore.getState().applySnapshot('thread-a', request, {
       projectPath: '/project/cafe',
       executions: [

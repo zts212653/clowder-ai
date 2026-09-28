@@ -1,21 +1,9 @@
 {
-  "version": 1,
-  "rules": [
-    {
-      "id": "stateful-by-name",
-      "match": "^test/.*(?:redis|store|socket|server|port|watch|worker|process|network|integration|runtime|lifecycle|queue|invocation|session|thread).*\\.test\\.js$",
-      "lane": "serial",
-      "reason": "stateful or process-bound test names remain serial unless a narrower future isolation proof supersedes them"
-    },
-    {
-      "id": "pure-static-audit",
-      "match": "^test/(?!.*(?:redis|store|socket|server|port|watch|worker|process|network|integration|runtime|lifecycle|queue|invocation|session|thread)).*\\.test\\.js$",
-      "lane": "pure",
-      "isolationEvidence": {
-        "kind": "static-negative-scan",
-        "rulesVersion": "f308-static-v1",
-        "source": "The planner additionally requires a current per-file negative scan for Redis, ports, filesystem writes/watchers, child processes, workers, and network clients."
-      }
-    }
-  ]
+  "version": 2,
+  "defaultIsolationEvidence": {
+    "kind": "kernel-no-egress-plus-runtime-guard",
+    "rulesVersion": "f308-runtime-v2",
+    "source": "Target-CI distributable lanes run inside a Linux network namespace with only loopback enabled, then irreversibly drop privilege with no_new_privs and empty capability sets before tests start. The kernel therefore denies cross-VM IP egress and prevents re-entering the parent namespace independently of the Node, native, or shell API used. Each file still runs in a fresh process, one file at a time. The preload guard adds before-I/O diagnostics for its recognized Node and child-process surfaces, including non-loopback Bash /dev/tcp and /dev/udp redirections and explicit privilege-escape commands; exact temporary executable fixtures remain explicitly declared."
+  },
+  "sharedResources": []
 }

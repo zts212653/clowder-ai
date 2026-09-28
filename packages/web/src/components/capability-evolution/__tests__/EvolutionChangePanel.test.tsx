@@ -1,12 +1,17 @@
+import type { EvolutionProgramStage } from '@cat-cafe/shared';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { resolveApprovalActionTarget } from '@/components/workbench/real-surface-adapters';
 import { EvolutionChangePanel } from '../EvolutionChangePanel';
+import { evolutionApprovalId } from '../evolution-approval-navigation';
 import {
   type EvolutionChangeLineage,
   type EvolutionProgramProjection,
   isProjection,
 } from '../evolution-program-projection';
+import { programFixture } from './evolution-fixtures';
 
 const apiFetchMock = vi.fn();
 vi.mock('@/utils/api-client', () => ({ apiFetch: (...args: unknown[]) => apiFetchMock(...args) }));
@@ -28,30 +33,13 @@ const currentChange = (status: EvolutionChangeLineage['status']): EvolutionChang
   status,
 });
 
-function projection(stage: string, sequence: number, current?: EvolutionChangeLineage): EvolutionProgramProjection {
+function projection(
+  stage: EvolutionProgramStage,
+  sequence: number,
+  current?: EvolutionChangeLineage,
+): EvolutionProgramProjection & { lineage: NonNullable<EvolutionProgramProjection['lineage']> } {
   return {
-    program: {
-      programId: 'evolution-program:abc',
-      workspaceId: 'user:operator',
-      objectRef: { ownerFeatureId: 'F202', ownerStateRef: 'skill:investor-roadshow-expression' },
-      claimRef: { ownerFeatureId: 'F311', ownerStateRef: 'evolution-claim:abc' },
-      lifecycle: 'active',
-      stage,
-      sequence,
-      createdAt: '2026-09-01T00:00:00.000Z',
-      updatedAt: '2026-09-01T00:00:00.000Z',
-    },
-    drafts: {
-      goal: { ownerFeatureId: 'F311', ownerStateRef: 'goal:abc' },
-      claim: { ownerFeatureId: 'F311', ownerStateRef: 'claim:abc' },
-      measurement: { ownerFeatureId: 'F267', ownerStateRef: 'measurement:abc' },
-      economic: { ownerFeatureId: 'F311', ownerStateRef: 'economic:abc' },
-      roles: {},
-    },
-    blockers: [],
-    nextAction: { code: 'continue_stage', label: '继续当前阶段' },
-    observation: { status: 'insufficient', connectedEyes: [], gaps: [] },
-    attribution: null,
+    ...programFixture(stage, sequence),
     lineage: {
       cycles: [{ cycle: 1, changes: current ? [current] : [] }],
       ...(current ? { current } : {}),
@@ -98,13 +86,15 @@ describe('F311 Change & Learn permanent surface', () => {
     await act(async () => sync.click());
 
     const [path, init] = apiFetchMock.mock.calls[0] as [string, RequestInit];
-    expect(path).toBe('/api/capability-evolution/programs/evolution-program%3Aabc/changes');
+    expect(path).toBe(
+      '/api/capability-evolution/programs/evolution-program%3Abcc336788a7df9d6075b1efb4c0a7e68/changes',
+    );
     expect(JSON.parse(String(init.body))).toEqual({
       expectedSequence: 8,
-      clientMessageId: 'workbench:change:sync:evolution-program:abc:sequence:8',
+      clientMessageId: 'workbench:change:sync:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:sequence:8',
       action: { kind: 'sync' },
     });
-    expect(container.textContent).toContain('Owner 仍在处理');
+    expect(container.textContent).toContain('执行方仍在处理');
   });
 
   it('keeps proposal creation on the authenticated cat ingress instead of the browser', async () => {
@@ -113,9 +103,29 @@ describe('F311 Change & Learn permanent surface', () => {
     expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('提交'))).toBe(
       false,
     );
-    expect(container.textContent).toContain('认证猫');
-    expect(container.textContent).toContain('Workbench 不构造 Approval');
+    expect(container.textContent).toContain('负责这项资产的来源');
+    expect(container.textContent).toContain('批准后还需等待执行确认');
     expect(apiFetchMock).not.toHaveBeenCalled();
+  });
+
+  it('opens the exact canonical Approval without approving or executing in the Program browser', async () => {
+    await act(async () =>
+      root.render(<Harness initial={projection('awaiting_approval', 8, currentChange('pending'))} />),
+    );
+    const review = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '审阅并批准这次操作',
+    );
+    expect(review).toBeDefined();
+    await act(async () => review?.click());
+    const approval = useF307ExperienceWorkbenchStore
+      .getState()
+      .layout.surfaces.find((surface) => surface.id === 'workspace:mode:approval');
+    expect(approval && resolveApprovalActionTarget(approval)?.proposalId).toBe('proposal-1');
+    expect(apiFetchMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('批准后还需等待执行确认');
+    expect(evolutionApprovalId({ ownerFeatureId: 'F246', ownerStateRef: 'approval:proposal-2' })).toBe('proposal-2');
+    expect(evolutionApprovalId({ ownerFeatureId: 'F202', ownerStateRef: 'approval:proposal-2' })).toBeUndefined();
+    expect(evolutionApprovalId({ ownerFeatureId: 'F266', ownerStateRef: 'eval-repair-proposal:' })).toBeUndefined();
   });
 
   it('adopts a conflict projection without hiding the fresh sequence as an HTTP error', async () => {
@@ -131,7 +141,7 @@ describe('F311 Change & Learn permanent surface', () => {
     if (!sync) throw new Error('change sync action missing');
     await act(async () => sync.click());
 
-    expect(container.textContent).toContain('Program 已同步到最新 sequence');
+    expect(container.textContent).toContain('项目已同步到最新状态');
     expect(container.textContent).not.toContain('Change owner request failed (409)');
   });
 
@@ -147,7 +157,7 @@ describe('F311 Change & Learn permanent surface', () => {
     if (!sync) throw new Error('change sync action missing');
     await act(async () => sync.click());
 
-    expect(container.textContent).toContain('Owner 拒绝执行：proposal_not_found');
+    expect(container.textContent).toContain('执行方暂未完成这次操作。原因：proposal_not_found');
   });
 
   it('offers every metabolism decision only after a fresh outcome', async () => {
@@ -170,6 +180,9 @@ describe('F311 Change & Learn permanent surface', () => {
     const deciding = projection('deciding', 11, outcome);
     const terminal = structuredClone(deciding);
     terminal.program.lifecycle = 'terminal';
+    terminal.program.terminalDisposition = 'no_change';
+    terminal.cycles[0].closedAt = '2026-09-05T01:00:00.000Z';
+    terminal.cycles[0].decision = 'no_change';
     terminal.program.sequence = 12;
     terminal.lineage.cycles[0].decision = 'no_change';
     terminal.lineage.cycles[0].decisionRef = {
@@ -187,16 +200,17 @@ describe('F311 Change & Learn permanent surface', () => {
     await act(async () => root.render(<Harness initial={deciding} />));
 
     expect(container.textContent).toContain('Asset version');
-    for (const label of ['Keep', 'Tune', 'Rollback', 'Sunset', 'No change']) {
+    for (const label of ['采纳这次改进', '继续调整', '回退版本', '停止这项进化', '保持现状']) {
       expect([...container.querySelectorAll('button')].some((button) => button.textContent === label)).toBe(true);
     }
-    const noChange = [...container.querySelectorAll('button')].find((button) => button.textContent === 'No change');
+    const noChange = [...container.querySelectorAll('button')].find((button) => button.textContent === '保持现状');
     if (!noChange) throw new Error('no-change action missing');
     await act(async () => noChange.click());
 
     expect(JSON.parse(String((apiFetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({
       expectedSequence: 11,
-      clientMessageId: 'workbench:change:decide-no_change:evolution-program:abc:sequence:11',
+      clientMessageId:
+        'workbench:change:decide-no_change:evolution-program:bcc336788a7df9d6075b1efb4c0a7e68:sequence:11',
       action: { kind: 'decide', decision: 'no_change' },
     });
     expect(container.textContent).toContain('no_change');
@@ -207,17 +221,19 @@ describe('F311 Change & Learn permanent surface', () => {
       await act(async () =>
         root.render(<Harness initial={projection('awaiting_approval', 9, currentChange(status))} />),
       );
-      expect(container.textContent).toContain('fresh proposal');
+      expect(container.textContent).toContain('提交候选后，会进入批准流程');
       expect([...container.querySelectorAll('button')].some((button) => button.textContent?.includes('提交'))).toBe(
         false,
       );
-      expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Keep')).toBe(false);
+      expect([...container.querySelectorAll('button')].some((button) => button.textContent === '采纳这次改进')).toBe(
+        false,
+      );
     }
   });
 
   it('does not expose metabolism actions for a deciding projection without complete outcome lineage', async () => {
     await act(async () => root.render(<Harness initial={projection('deciding', 11, currentChange('pending'))} />));
-    for (const label of ['Keep', 'Tune', 'Rollback', 'Sunset', 'No change']) {
+    for (const label of ['采纳这次改进', '继续调整', '回退版本', '停止这项进化', '保持现状']) {
       expect([...container.querySelectorAll('button')].some((button) => button.textContent === label)).toBe(false);
     }
   });
@@ -236,7 +252,7 @@ describe('F311 Change & Learn permanent surface', () => {
     await act(async () => root.render(<Harness initial={projection('deciding', 11, outcome)} />));
     expect(container.textContent).toContain('no-change-intervention-receipt:n1');
     expect(container.textContent).not.toContain('loaded-runtime');
-    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'No change')).toBe(true);
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === '保持现状')).toBe(true);
   });
 
   it('fails closed when a runtime has not loaded the Phase 4 lineage contract', () => {
@@ -274,6 +290,9 @@ describe('F311 Change & Learn permanent surface', () => {
     };
     const terminal = projection('deciding', 11, outcome);
     terminal.program.lifecycle = 'terminal';
+    terminal.program.terminalDisposition = 'no_change';
+    terminal.cycles[0].closedAt = '2026-09-05T01:00:00.000Z';
+    terminal.cycles[0].decision = 'no_change';
     terminal.lineage.cycles[0].decision = 'no_change';
     terminal.lineage.cycles[0].decisionRef = {
       ownerFeatureId: 'F266',

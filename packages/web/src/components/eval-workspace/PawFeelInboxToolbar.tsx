@@ -37,17 +37,11 @@ export function PawFeelInboxToolbar({
   onSort: (sort: PawFeelInboxSort) => void;
   onNewest: () => void;
 }) {
-  const activeCount = page
-    ? page.responsibilityCounts.unreviewed +
-      page.responsibilityCounts.bound_in_repair +
-      page.responsibilityCounts.signature_waiting +
-      page.responsibilityCounts.blocked
-    : 0;
   const filterCounts: Record<PawFeelFilter, number> = {
-    active: activeCount,
+    active: page?.issueCounts.open ?? 0,
     all: page?.bundleCounts.total ?? 0,
-    overdue: page?.counts.overdue ?? 0,
-    disposed: page?.responsibilityCounts.terminal ?? 0,
+    overdue: page?.issueCounts.overdue ?? 0,
+    disposed: page?.issueCounts.resolved ?? 0,
   };
 
   return (
@@ -57,12 +51,14 @@ export function PawFeelInboxToolbar({
           className="flex min-w-0 flex-wrap items-baseline gap-x-5 gap-y-2 rounded-xl bg-[var(--console-card-bg)] px-3 py-2.5 shadow-[var(--console-shadow-soft)]"
           data-testid="paw-feel-primary-summary"
         >
+          <SummaryMetric label="issue-open" value={page.issueCounts.open} alert={page.issueCounts.overdue > 0} />
+          <SummaryMetric label="issue-resolved" value={page.issueCounts.resolved} />
           <SummaryMetric label="unreviewed" value={page.responsibilityCounts.unreviewed} />
           <SummaryMetric label="bound-in-repair" value={page.responsibilityCounts.bound_in_repair} />
           <SummaryMetric label="signature-waiting" value={page.responsibilityCounts.signature_waiting} />
           <SummaryMetric label="blocked" value={page.responsibilityCounts.blocked} />
           <SummaryMetric label="terminal" value={page.responsibilityCounts.terminal} />
-          <SummaryMetric label="72h+" value={page.counts.overdue} alert={page.counts.overdue > 0} />
+          <SummaryMetric label="issue 72h+" value={page.issueCounts.overdue} alert={page.issueCounts.overdue > 0} />
         </dl>
       ) : null}
 
@@ -136,11 +132,12 @@ export function PawFeelInboxToolbar({
               <div className="mt-3 border-t border-[var(--console-border-soft)] pt-3 text-cafe-secondary">
                 <p className="font-semibold text-cafe">处置规则</p>
                 <p className="mt-1 leading-relaxed">
-                  重复 · 不修（带理由）· 要修（真实 task、owner 与 active F167 lease）。
+                  重复 · 不修（带理由）· 要修（真实 task、owner 与 active F167 lease；另由 source-selected provider
+                  证明动作授权）。
                 </p>
                 <p className="mt-1 text-micro leading-relaxed text-cafe-muted">
                   {dutyConfigured
-                    ? 'Primary 持续负责；Backup 仅在显式交接后接班。报告猫不能签自己的 terminal，routed 也不冒充业务完成。'
+                    ? 'Primary 持续负责；Backup 仅在显式交接后接班；值班交账不等于问题解决。报告猫不能签自己的 terminal，routed、Task done 与 merge 也不冒充验证结果。'
                     : '值班未配置；Workspace 不代猫签，也不会猜 owner。'}
                 </p>
               </div>

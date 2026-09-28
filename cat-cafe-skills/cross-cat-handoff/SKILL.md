@@ -1,7 +1,7 @@
 ---
 name: cross-cat-handoff
-tips_exempt: F167/F314 keep local-review custody and accepted-source provenance inside harness routing; no distinct end-user-invocable capability surface
-description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 五件套 + formal/advisory 分类 + provenance 路由。"
+tips_exempt: "This revision makes handoff templates optional while retaining required context and custody; it is an internal delivery convention with no new user action."
+description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
   - "传话"
@@ -15,19 +15,16 @@ triggers:
 
 # Cross-Cat Handoff
 
-**Core principle:** 交接不能只写"改了什么"。没有 Why = 接手方无法判断 = 低效协作。
+交接要让接手者能够正确继续。家里的历史坑是只报改动、没有缘由与上下文；栏目格式服务这个目标。
 
-## 五件套（必须全部包含）
+## 必须做到
 
-每次交接/传话/review 请求必须包含：
+- 让接手者明确目标与范围、关键缘由/约束、真实进度与证据，以及下一步由谁做什么。
+- 会影响下一步判断的风险、取舍和未知不能漏；已有且有效的上下文可准确引用，没有真实取舍或未决问题不编造栏目内容。
+- 交接对象、授权、责任与审查证据服从实际选中的路径。下面的 structured successor、external review 与 local review 契约按场景适用，接口必填字段不因 prose 简写而省略。
+- 未完成、未送达、未验证如实说明；一次交接是否完成看合法出口与接手需要，不看五个标题是否齐全。
 
-| # | 项目 | 说明 | 示例 |
-|---|------|------|------|
-| 1 | **What** | 具体改动或决策 | "新增了 CAS Lua 脚本保护状态更新" |
-| 2 | **Why** | 为什么这样做 | "内存 store 返回活引用导致竞态" |
-| 3 | **Tradeoff** | 放弃了什么备选 | "考虑过乐观锁，但 Lua 更原子" |
-| 4 | **Open Questions** | 还不确定的点（分技术/价值两类） | "keyPrefix 行为需要验证"（技术）/ Decision Packet（价值） |
-| 5 | **Next Action** | 希望接手方做什么 | "请 review 这三个文件的改动" |
+五项提示、例子和排版均为可选参考，可以直接使用、改造或替换；不按模型资格决定方法选择，也不因未采用模板另设审批。只处理自己任务时不进入交接流程。
 
 ## Action Successor Single-Flight
 
@@ -119,103 +116,25 @@ verdict 已完成最后一次合法交接：作者在 exact target 匹配且 `no
 clean-stop，不需要再 `@reviewer` 证明收到。如后续真有行为 delta、stale/blocking 或 Review Provenance Matrix
 显式指回 local peer，发一条新的普通 review 请求；没有新信息就拒绝回传。旧 verdict 保留为历史证据，但不批准新 HEAD。
 
-## 检查流程
+## 可选参考：交接五项
 
-```
-BEFORE 发送交接/传话/review请求:
+不知道怎样组织信息时，可以用这五项起步或查漏；它们不是缺一栏就禁发的表单。
 
-1. SCAN: 检查消息是否包含五件套
-2. MISSING: 识别缺失项
-3. BLOCK: 如有缺失，阻止发送并提示补充
-4. PASS: 全部包含，允许发送
-```
+| 提示 | 可帮助想清什么 |
+|---|---|
+| What | 具体改动、决定或当前状态 |
+| Why | 目标、原因与关键约束 |
+| Tradeoff | 存在真实取舍时说明理由 |
+| Open Questions | 影响接手的未知或阻塞；技术与价值问题分清 |
+| Next Action | 接手者需要做的具体动作 |
 
-## Block 场景
+例如：
 
-### ❌ 只写 What
+> 空输入会让提交失败；本轮已修复解析边界，复现和红绿验证见 PR X。请核查另一入口是否受同一问题影响，并对 HEAD Y 给结论。
 
-```
-Author 猫准备写: "@ Reviewer 我改完了三个文件，帮我 review"
+如果这是正式 review 请求，还要携带该路径要求的 target/source 字段。复杂状态交接可展开恢复、并发和未决边界；简单交接可直接用短段落。关键事实已有准确来源时引用即可。
 
-⚠️ BLOCKED — 交接缺失必要信息
-
-缺失项:
-- ❌ Why: 为什么要改？
-- ❌ Tradeoff: 有没有考虑过其他方案？
-- ❌ Open Questions: 有什么不确定的？
-- ❌ Next Action: 希望 review 什么重点？
-
-请补充五件套后再发送。
-```
-
-### ❌ 只有 What + Why
-
-```
-Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题"
-
-⚠️ BLOCKED — 交接缺失必要信息
-
-已有:
-- ✅ What: 加了 CAS 保护
-- ✅ Why: 发现竞态问题
-
-缺失:
-- ❌ Tradeoff: 为什么选 CAS？考虑过其他方案吗？
-- ❌ Open Questions: 有什么不确定的？
-- ❌ Next Action: 希望 Reviewer 做什么？
-
-请补充后再发送。
-```
-
-## 通过场景
-
-### ✅ 完整的交接
-
-```
-## 交给 Reviewer Review: ADR-008 S2 Retry + CAS
-
-### What
-新增 CAS Lua 脚本保护 InvocationRecord 状态更新：
-- `CAS_UPDATE_LUA`: HGET 比对 + HSET 更新
-- 修改 `RedisInvocationRecordStore.updateStatus()`
-- 新增 `snapshotStatus` 在调用前保存原始状态
-
-### Why
-内存 store 的 `get()` 返回活引用，导致：
-1. 读取 status 后，在比对前可能被其他请求修改
-2. 原来的 CAS 逻辑比对的是已经被修改的值
-3. 导致竞态条件：两个并发请求都能通过比对
-
-### Tradeoff
-考虑过的方案：
-- **乐观锁（version 字段）**: 需要改 schema，影响面大
-- **分布式锁**: 太重，且 Redis 单线程本身就是串行的
-- **Lua CAS**: 选择这个，原子性由 Redis 保证
-
-### Open Questions
-
-**技术 OQ**（猫猫解决）：
-1. `keyPrefix` 在 `eval()` 中的行为是否和普通命令一致？
-2. 是否需要添加重试逻辑？
-
-**价值 OQ**（如需 operator 拍板，附 Decision Packet——格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）：
-- （本次无）
-
-### Next Action
-请 review 这三个文件：
-1. `RedisInvocationRecordStore.ts` - CAS Lua 实现
-2. `InvocationRecordStore.ts` - snapshotStatus 逻辑
-3. `invocation-flow.spec.ts` - 竞态测试用例
-
-重点关注：
-- Lua 脚本的原子性是否正确
-- snapshotStatus 时机是否正确
-- 测试是否覆盖竞态场景
-
-✅ 检查通过 - 五件套完整
-```
-
-## 交接类型
+## 可选参考：不同交接的重点
 
 ### 1. Review 请求
 
@@ -263,7 +182,7 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 - **同 lineage key 新提案自动超替旧提案**（AC-J4）。重新提交 = 再发一次，旧提案原子变 `superseded`
 - **超替提案不可 approve/reject**（INV-J6）——终态，无需手动处理
 - **Legacy 迁移中**：Phase J `required` 模式上线后，不带 ActionEnvelope 的提案将禁止 approve（只能 reject + re-attest）。当前 `shadow` 模式下行为不变
-- 交接五件套中的 **Next Action** 应引导接手方使用正确的 successor 原语（见下方常见错误表）
+- 交接的下一步应引导接手方使用正确的 successor 原语（见下方常见错误表）
 
 ## 常见错误
 
@@ -274,33 +193,24 @@ Author 猫准备写: "@ Reviewer 我加了 CAS 保护，因为发现竞态问题
 | "按你说的改了" | 不知道改对了没 | 说明具体改了什么 |
 | "遇到问题，你看看" | 不知道具体问题 | 描述问题 + 你的分析 |
 | 前手没终止就继续喊 Terra/GPT/Claude | 同一动作膨胀成猫军团 | 接受 `safe_wait`；有 terminal proof 才原子 replace |
-| 只派一只 reviewer 却调用 `multi_mention` | 入口语义反直觉，迁移数据持续污染 | 新调用改用 `post_message(action.mode=single)` |
+| 只派一只本地 reviewer 却调用 `multi_mention` | 无必要地扩大调用与责任 | local review 用 ordinary durable A2A；其他动作按其 successor 契约选择入口 |
 | 为绕 single-flight 换 thread/slot 名 | 重复或 stale 工作继续运行 | 使用 server-authorized slot；thread/carrier 不进 identity |
 | 把所有 review completion 一律写 GitHub | 本地猫作者收不到 verdict，平台账号还会伪装成 self-review | 先按 author/custody/handoff source 分类，再选 external artifact 或 author cat route |
 | verdict 后为了出口再 `@` 回 reviewer | 无新信息也被路由规则变成 ACK ping-pong | recipient clean-stop；有实质新内容才发新的普通 review 请求 |
 | 旧 dispatch 被超替仍尝试 approve/reject | 超替是终态，409（approve 和 reject 均拒绝） | 直接操作最新 pending 提案即可（旧提案已被超替无需手动处理） |
 | legacy 提案在 required 模式下尝试 approve | 无 ActionEnvelope，409 | reject legacy 提案 + 通过新 dispatch 入口重新提交（re-attest） |
 
-## 五件套检查清单
+## 自检
 
-复制此清单用于自检：
-
-```
-交接五件套自检:
-- [ ] What: 具体改动/决策是什么？
-- [ ] Why: 为什么这样做？约束/风险/目标是什么？
-- [ ] Tradeoff: 放弃了什么备选方案？
-- [ ] Open Questions: 还有什么不确定的？
-- [ ] Next Action: 希望接手方下一步做什么？
-```
+接手者能从消息与引用读到目标、依据、风险和下一步吗？真实进度与适用的责任/审查回执相符吗？这些是完成标准；五项提示仅帮助查漏。
 
 ## 下一步
 
-- 交接 review 请求 → 接收方用 `receive-review`
-- 交接开发工作 → 接收方用 `worktree` 开始
+- 本地 review 请求与回执契约 → `request-review`；作者收到反馈后才用 `receive-review`
+- 交接开发工作 → 接收方按现有任务与风险继续，需要隔离时用 `worktree`
 - 交接讨论邀请 → 接收方用 `collaborative-thinking`
 
 ## 参考
 
-- 五件套详见：`../.cat-cafe-shared-refs/shared-rules.md` §1
+- 交接要求与五项参考：`../.cat-cafe-shared-refs/shared-rules.md` §1
 - Review 信存放：`review-notes/`

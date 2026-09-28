@@ -1,5 +1,6 @@
 import type { CatId, QueueReminderAttempt, QueueTargetAttempt, QueueTargetOutcome } from '@cat-cafe/shared';
 import { actionSuccessorFencesMatch } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import { rejectTypedWaitCustody, type TypedWaitCustodyGuard } from '../../../../ball-custody/TypedWaitCustodyGuard.js';
 import type {
   RetryAuthorityCommit,
   RetryCustodyTransition,
@@ -27,11 +28,13 @@ import {
   markReminderAttemptSeen,
   requestReminderAttempt,
 } from '../../stores/ports/queued-message-receipt.js';
+import type { ITaskStore } from '../../stores/ports/TaskStoreContract.js';
 import type { QueueEntry } from './InvocationQueue.js';
 import { normalizeOwnerAuthProvenance } from './owner-auth-provenance.js';
 
 interface CoordinatorDeps {
   messageStore: IMessageStore;
+  readWaitRegistration?: ITaskStore['getWaitRegistration'];
   now?: () => number;
 }
 
@@ -703,6 +706,7 @@ export function createInitialQueuedMessageCustody(entry: QueueEntry): QueuedMess
     revision: 1,
     ownerUserId: entry.userId,
     ownerAuthProvenance: entry.ownerAuthProvenance,
+    ...(entry.executionScope ? { executionScope: entry.executionScope } : {}),
     ...(entry.authorIntentByCatId ? { authorIntentByCatId: structuredClone(entry.authorIntentByCatId) } : {}),
     intent: entry.intent,
     status: 'queued',
@@ -1115,7 +1119,9 @@ function activeCustodyFromEntry(entry: QueueEntry, current: QueuedMessageCustody
     ...(bodyExposures.length > 0 ? { bodyExposures } : {}),
     ...(targetAttempts.length > 0 ? { targetAttempts } : {}),
     failedByCatIds: catIds(entry.queuedFailedByCatIds),
-    handledByCatIds: catIds(entry.queuedHandledByCatIds),
+    // The live carrier prunes retired siblings. Their committed outcomes still
+    // belong to this source when a remaining sibling fails or is retried.
+    handledByCatIds: catIds([...new Set([...current.handledByCatIds, ...(entry.queuedHandledByCatIds ?? [])])]),
     ...(entry.steerRequestedByCatIds?.length ? { steerRequestedByCatIds: catIds(entry.steerRequestedByCatIds) } : {}),
     ...(entry.steeredInvocationIdByCatId && Object.keys(entry.steeredInvocationIdByCatId).length > 0
       ? { steeredInvocationIdByCatId: { ...entry.steeredInvocationIdByCatId } }
@@ -1310,12 +1316,14 @@ function buildRetryTargetTransition(
   };
 }
 export class QueuedMessageCustodyCoordinator {
+  private readonly readWaitRegistration: ITaskStore['getWaitRegistration'] | undefined;
   private readonly messageStore: IMessageStore;
   private readonly now: () => number;
   private readonly entryLocks = new Map<string, Promise<void>>();
 
   constructor(deps: CoordinatorDeps) {
     this.messageStore = deps.messageStore;
+    this.readWaitRegistration = deps.readWaitRegistration;
     this.now = deps.now ?? Date.now;
   }
 
@@ -1741,15 +1749,38 @@ export class QueuedMessageCustodyCoordinator {
   ): Promise<QueueCustodyCompletionResult> {
     const message = await this.messageStore.getById(messageId);
     assertExactDispatchContinuationWitness(messageId, successfulTargetCats, outcomeByCatId);
+    const waitContinuationGuards: TypedWaitCustodyGuard[] = [];
     if (message && isManagedHoldWakeMessage(message)) {
       for (const catId of successfulTargetCats) {
         const outcome = outcomeByCatId?.[catId];
         const continuation = outcome?.consumption?.kind === 'managed_hold_continued' ? outcome.consumption : undefined;
         if (
+          continuation?.transition === 'event_wait' &&
+          !message.queueCustody?.handledByCatIds.some((holder) => holder === catId)
+        ) {
+          const reference = continuation.waitRegistration;
+          if (!reference || !this.readWaitRegistration || outcome?.invocationId !== invocationId) {
+            rejectTypedWaitCustody('proof_invalid');
+          }
+          waitContinuationGuards.push({
+            reference,
+            identity: {
+              invocationId,
+              userId: message.queueCustody?.ownerUserId ?? '',
+              catId,
+              threadId: message.threadId,
+              sourceMessageId: messageId,
+              holdTaskId: continuation.taskId,
+            },
+            readSnapshot: () => this.readWaitRegistration!(reference.taskId),
+          });
+        }
+        if (
           outcome?.disposition !== 'managed_hold_disposition' ||
           (continuation !== undefined &&
             (continuation.sourceMessageId !== messageId || continuation.taskId !== message.source?.meta?.taskId))
         ) {
+          if (continuation?.transition === 'event_wait') rejectTypedWaitCustody('proof_invalid');
           throw new Error('managed hold receipt requires its invocation-bound disposition');
         }
       }
@@ -1775,6 +1806,7 @@ export class QueuedMessageCustodyCoordinator {
       },
       deliveredAt,
       true,
+      waitContinuationGuards,
     );
     return completion;
   }
@@ -1850,8 +1882,11 @@ export class QueuedMessageCustodyCoordinator {
     buildNext: (current: QueuedMessageCustody) => QueuedMessageCustody,
     deliveredAt?: number,
     allowTerminalCurrent = false,
+    waitContinuationGuards?: readonly TypedWaitCustodyGuard[],
   ): Promise<boolean> {
-    return (await this.transitionManaged(messageId, buildNext, deliveredAt, allowTerminalCurrent)).changed;
+    return (
+      await this.transitionManaged(messageId, buildNext, deliveredAt, allowTerminalCurrent, waitContinuationGuards)
+    ).changed;
   }
 
   private async transitionManaged(
@@ -1859,6 +1894,7 @@ export class QueuedMessageCustodyCoordinator {
     buildNext: (current: QueuedMessageCustody) => QueuedMessageCustody,
     deliveredAt?: number,
     allowTerminalCurrent = false,
+    waitContinuationGuards?: readonly TypedWaitCustodyGuard[],
   ): Promise<{ managed: boolean; changed: boolean }> {
     for (let attempt = 0; attempt < QUEUE_CUSTODY_CAS_MAX_ATTEMPTS; attempt += 1) {
       const message = await this.messageStore.getById(messageId);
@@ -1871,6 +1907,7 @@ export class QueuedMessageCustodyCoordinator {
       const result = await this.messageStore.transitionQueueCustody(messageId, {
         expectedRevision: current.revision,
         next,
+        ...(waitContinuationGuards ? { waitContinuationGuards } : {}),
         ...(current.status !== 'terminal' && next.status === 'terminal' && deliveredAt !== undefined
           ? { deliveredAt }
           : {}),

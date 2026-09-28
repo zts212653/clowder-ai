@@ -3,9 +3,11 @@
  * POST /api/callbacks/hold-ball — register ball hold + schedule wake-up via reminder template
  *
  * Semantic note (gpt52 review on PR #1289):
- * The hold counter is a ROLLING WINDOW counter, not a true "consecutive" counter.
+ * The hold counter is a SLIDING WINDOW counter (single-bucket, lastAt-anchored).
  * A cat can hold up to MAX_HOLDS_PER_WINDOW times within HOLD_WINDOW_MS per
- * (threadId, catId); the window slides on each increment. State is process-local
+ * (threadId, catId); each successful hold advances lastAt to now, so the 1h
+ * expiry slides forward from the most recent success — not per-item. Rejected
+ * 429 calls do NOT advance the window. State is process-local
  * (in-memory Map) — best-effort only. API restart or multi-instance deployments
  * will reset the counter. Durable enforcement would require sharing state with the
  * reminder scheduler; that is intentionally deferred.
@@ -42,6 +44,7 @@ import type {
   InvocationRecord as CallbackInvocationRecord,
   InvocationRegistry,
 } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { OwnerAuthProvenance } from '../domains/cats/services/owner-auth-provenance.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -370,11 +373,12 @@ export interface HoldBallRouteDeps {
       message: string,
       messageId: string,
       contentBlocks?: undefined,
-      policy?: { sourceCategory?: string; forceQueue?: boolean },
+      policy?: { sourceCategory?: string; forceQueue?: boolean; ownerAuthProvenance?: OwnerAuthProvenance },
     ): Promise<'dispatched' | 'enqueued' | 'full'>;
   };
   /** F167×F254: exact current-wake terminal producer. */
-  managedHoldDispositionService?: Pick<ManagedHoldDispositionService, 'complete'>;
+  managedHoldDispositionService?: Pick<ManagedHoldDispositionService, 'complete'> &
+    Partial<Pick<ManagedHoldDispositionService, 'describe'>>;
   /** F167: exact ordinary A2A dispatch terminal producer. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'complete'>;
 }
@@ -703,18 +707,27 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
 
     const currentCount = getHoldCount(threadId, catIdStr);
     if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+      const holdKey = `${threadId}:${catIdStr}`;
+      const holdEntry = holdCounts.get(holdKey);
+      const rejectNow = Date.now();
+      // +1: getHoldCount clears at strict `>` (now - lastAt > HOLD_WINDOW_MS),
+      // so lastAt + HOLD_WINDOW_MS is the last rejecting moment; +1 is the first admit.
+      const retryAtMs = holdEntry ? holdEntry.lastAt + HOLD_WINDOW_MS + 1 : rejectNow;
+      const retryAfterMs = Math.max(0, retryAtMs - rejectNow);
       log.warn(
-        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS },
+        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS, retryAtMs },
         'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
       );
       reply.status(429);
       return {
         error:
-          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
+          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h sliding window) reached. ` +
           'You MUST pass the ball now: @ another cat or @co-creator.',
         holdsInWindow: currentCount,
         maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
         windowMs: HOLD_WINDOW_MS,
+        retryAt: new Date(retryAtMs).toISOString(),
+        retryAfterMs,
       };
     }
 
@@ -728,7 +741,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // F167 Phase G (KD-23): single-slot semantics. Before scheduling a new hold
     // wake, cancel + remove any pending hold task for the same (threadId, catId).
     // Keyed on `createdBy === 'hold-ball:{catId}'` + `deliveryThreadId === threadId`.
-    // Per-cat rolling window counter is orthogonal (still enforced above).
+    // Per-cat sliding window counter is orthogonal (still enforced above).
     //
     // P1 fix (cloud Codex review on c04c5552a): the old sequence was
     // "cancel prior → insert new → register new", so if insert/register threw
@@ -846,25 +859,29 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         ...(holdLifecycle ? { holdLifecycle } : {}),
       },
       deliveryThreadId: threadId as string | null,
+      ownerAuthProvenance: record.ownerAuthProvenance,
     };
 
     const spec = template.createSpec(taskId, taskParams);
 
-    dynamicTaskStore.insert({
-      id: taskId,
-      templateId: 'reminder',
-      trigger: { type: 'once', fireAt },
-      params: taskParams.params,
-      display: {
-        label: `持球唤醒 (${catIdStr})`,
-        category: 'system',
-        description: wakeMessage.slice(0, 100),
+    dynamicTaskStore.insert(
+      {
+        id: taskId,
+        templateId: 'reminder',
+        trigger: { type: 'once', fireAt },
+        params: taskParams.params,
+        display: {
+          label: `持球唤醒 (${catIdStr})`,
+          category: 'system',
+          description: wakeMessage.slice(0, 100),
+        },
+        deliveryThreadId: threadId,
+        enabled: true,
+        createdBy: `hold-ball:${catIdStr}`,
+        createdAt: new Date().toISOString(),
       },
-      deliveryThreadId: threadId,
-      enabled: true,
-      createdBy: `hold-ball:${catIdStr}`,
-      createdAt: new Date().toISOString(),
-    });
+      record.ownerAuthProvenance,
+    );
     // Atomic swap: try register; on failure, remove the just-inserted row so
     // prior hold stays authoritative (caller gets 500; prior wake still fires).
     try {

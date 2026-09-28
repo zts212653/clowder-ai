@@ -84,7 +84,9 @@ describe('CloudConversationLink', () => {
     expect(container.textContent).toContain('ChatGPT Conversation');
     expect(container.textContent).toContain('先在目标会话点击扩展的「授权此会话」');
     expect(container.querySelector('a[href="https://chatgpt.com/"]')).not.toBeNull();
-    expect(container.querySelector('a[href="/settings?s=plugins#personal-chatgpt-pro"]')).not.toBeNull();
+    expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(
+      '/settings?s=plugins&threadId=thread-empty#personal-chatgpt-pro',
+    );
     expect(container.querySelector('a[aria-label="在 ChatGPT 中打开当前会话"]')).toBeNull();
   });
 
@@ -194,6 +196,8 @@ describe('CloudConversationLink', () => {
 
     expect(container.textContent).toContain('绑定记录无效');
     expect(container.querySelector('a[aria-label="在 ChatGPT 中打开当前会话"]')).toBeNull();
-    expect(container.querySelector('a[href="/settings?s=plugins#personal-chatgpt-pro"]')).not.toBeNull();
+    expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(
+      '/settings?s=plugins&threadId=thread-invalid#personal-chatgpt-pro',
+    );
   });
 });

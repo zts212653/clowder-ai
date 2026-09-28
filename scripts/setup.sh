@@ -512,8 +512,8 @@ if [ "$HAS_REDIS" = true ]; then
     echo "    2. Start: pnpm start"
     echo "       启动: pnpm start"
 else
-    echo "    2. Start (no Redis): pnpm start --memory"
-    echo "       启动（无 Redis）: pnpm start --memory"
+    echo "    2. Start (no Redis): pnpm start -- --memory"
+    echo "       启动（无 Redis）: pnpm start -- --memory"
 fi
 echo ""
 echo "    3. Open http://localhost:3003"

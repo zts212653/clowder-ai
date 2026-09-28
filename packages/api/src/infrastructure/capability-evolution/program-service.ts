@@ -53,9 +53,9 @@ import {
   linkEvolutionProgramObservation,
   type ProgramObservationLinkInput,
 } from './program-observation-linker.js';
-import type { EvolutionTriggerRegistrationProjection } from './program-observation-projection.js';
-import { type EvolutionProgramProjectionV1, projectEvolutionProgram } from './program-projection.js';
 import { type CommandBase, type EvolutionProgramServiceOptions, stableId } from './program-service-options.js';
+import type { EvolutionTriggerRegistrationProjection } from './read-model/program-observation-projection.js';
+import { type EvolutionProgramProjectionV1, projectEvolutionProgram } from './read-model/program-projection.js';
 
 export class EvolutionProgramService {
   private readonly eventLog: IEvolutionProgramEventLog;
@@ -84,6 +84,7 @@ export class EvolutionProgramService {
   async create(input: {
     workspaceId: string;
     targetRef: OwnerTruthRefV1;
+    displayName?: string;
     clientMessageId: string;
     actorRef: string;
     originRef: string;
@@ -94,6 +95,7 @@ export class EvolutionProgramService {
       type: 'program_created',
       workspaceId: input.workspaceId,
       objectRef: targetRef,
+      ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
       claimRef: { ownerFeatureId: 'F311', ownerStateRef: `evolution-claim:${programId}` },
     });
     return this.appender.appendValidated(envelope);
@@ -326,7 +328,8 @@ export class EvolutionProgramService {
     });
   }
 
-  private project(
+  /** Canonical read model for one event snapshot, also used when preparation bodies are attached. */
+  project(
     events: readonly EvolutionProgramEventEnvelopeV1[],
     observationBlockers?: readonly ProgramObservationBlocker[],
   ): EvolutionProgramProjectionV1 {

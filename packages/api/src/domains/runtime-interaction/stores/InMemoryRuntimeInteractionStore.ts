@@ -16,6 +16,14 @@ export class InMemoryRuntimeInteractionStore implements RuntimeInteractionStore 
   async createStaged(input: CreateRuntimeInteractionInput): Promise<RuntimeInteractionRecord> {
     const id = input.request.interactionId;
     if (this.records.has(id)) throw new Error(`runtime interaction already exists: ${id}`);
+    const invocationId = input.request.owner.invocationId;
+    if (
+      [...this.records.values()].some(
+        (record) => isActive(record) && record.request.owner.invocationId === invocationId,
+      )
+    ) {
+      throw new Error(`active interaction already exists for invocation: ${invocationId}`);
+    }
     const record: RuntimeInteractionRecord = {
       request: structuredClone(input.request),
       status: 'staged',

@@ -1,3 +1,4 @@
+import { evolutionProgramDisplayNameSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 import { callbackGet, callbackPost } from './callback-tools.js';
@@ -43,6 +44,7 @@ const agentKeyCatId = bounded(120)
     'Persistent-agent identity selector. Required for shared agent-key MCP variants; ignored under invocation auth.',
   );
 const commandAction = z.union([
+  z.object({ type: z.literal('name'), displayName: evolutionProgramDisplayNameSchema }).strict(),
   z.object({ type: z.literal('pause'), reasonRef: ownerRef }).strict(),
   z.object({ type: z.literal('resume'), resumeRef: ownerRef }).strict(),
   z
@@ -75,6 +77,9 @@ const commandAction = z.union([
 
 export const startEvolutionProgramInputSchema = {
   targetRef: ownerRef.describe('Canonical ref to the one capability/object being evolved; never copy its payload.'),
+  displayName: evolutionProgramDisplayNameSchema.describe(
+    'Readable project name from the user’s stated goal X. Required at creation; do not translate an opaque target slug or invent an asset name.',
+  ),
   clientMessageId: clientMessageId.describe('Stable idempotency id for the user message that requested this Program.'),
   agentKeyCatId,
 };
@@ -129,6 +134,7 @@ export const linkEvolutionProgramObservationInputSchema = {
 };
 
 export interface StartEvolutionProgramInput {
+  displayName: string;
   targetRef: z.infer<typeof ownerRef>;
   clientMessageId: string;
   agentKeyCatId?: string;
@@ -168,6 +174,7 @@ export function handleStartEvolutionProgram(input: StartEvolutionProgramInput): 
     '/api/callbacks/evolution-programs',
     {
       targetRef: input.targetRef,
+      displayName: input.displayName,
       clientMessageId: input.clientMessageId,
     },
     { agentKeyCatId: input.agentKeyCatId },
@@ -243,7 +250,7 @@ export const capabilityEvolutionTools = [
     name: 'cat_cafe_start_evolution_program',
     description:
       'Start the permanent Evolution Program when the user says “我们来进化 X” or clearly asks to evolve one capability. ' +
-      'Use only targetRef + clientMessageId: the server drafts the Goal/claim, economic and measurement refs, and role refs; typed blocker explains anything still missing，不让用户填写大表. ' +
+      'Pass targetRef + displayName from the user’s stated goal X + clientMessageId: the server drafts the Goal/claim, economic and measurement refs, and role refs; typed blocker explains anything still missing，不让用户填写大表. ' +
       'NOT for: copying owner payload, caller-authored lifecycle/stage/certificates, mock cards, or a second queue. ' +
       'Output: appended/duplicate plus the canonical Program projection and its F307 Workbench surface descriptor. ' +
       'GOTCHA: shared persistent MCP callers pass agentKeyCatId so callback auth selects the matching Cat sidecar key.',
@@ -260,10 +267,10 @@ export const capabilityEvolutionTools = [
   defineTool({
     name: 'cat_cafe_get_evolution_program',
     description:
-      'Read the caller workspace canonical Evolution Program projection or list. ' +
-      'Use for lifecycle, constitution progress, typed blockers, refs, and the next action. ' +
+      'Read one exact caller-workspace Evolution Program projection, or a lightweight Program list. ' +
+      'Use for lifecycle, constitution progress, typed blockers, refs and next action; exact reads also return versioned preparation bodies, history, source status and real invocation activity. ' +
       'NOT for: reading owner payloads or inferring readiness beyond the projection. ' +
-      'Output: the same durable truth consumed by REST and F307 Workbench. ' +
+      'Output: the same durable truth consumed by REST and F307 Workbench; list results intentionally omit preparation bodies. ' +
       'GOTCHA: shared persistent MCP callers pass agentKeyCatId so callback auth selects the matching Cat sidecar key.',
     inputSchema: getEvolutionProgramInputSchema,
     handler: handleGetEvolutionProgram,

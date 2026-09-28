@@ -2,7 +2,7 @@
 name: image-generation
 description: >
   AI 图片生成：原生 tool call（Codex/Antigravity）或浏览器自动化（Gemini/ChatGPT）。
-  Use when: 需要 AI 生成概念图、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
+  Use when: 需要 AI 生成概念图、解释型漫画、UI 参考、像素画素材、完整 PPT 页面、复杂架构图、信息图或视觉 mock。
   Not for: 已有图片的展示（用 media_gallery rich block）、硬要求可编辑/native text 的 PPT/图表（用 PPT/HTML 管线）。
   Output: 生成图片自动发布，或作为完整视觉 mock / 图像素材进入后续交付。
 ---
@@ -21,6 +21,8 @@ description: >
 - 用户明确说“不需要可编辑”“内部 mock”“直接生成完整页面”
 
 ## Codex 原生能力校准：不要低估 imagegen
+
+解释型漫画、信息图或“用一张图讲清某个机制”，在本轮生成前按[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)把读者问题、各方动作与可见变化收成简短生成指引，随后直接出图。已给定分镜、纯装饰或局部修图不重新编故事；不新增确认回合，也不改变下方原生 imagegen 优先的制作路径。
 
 Codex `image_gen` 不只是“概念图/素材生成器”。当前实测能力可以直接生成**完整高保真 raster 页面**，包括：
 

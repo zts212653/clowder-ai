@@ -23,7 +23,13 @@ import { AttentionArrangeToolbar } from './AttentionArrangeToolbar';
 import { AttentionClusterHeader, AttentionClusterMember } from './AttentionCluster';
 import { AttentionGroupableThreadRow } from './AttentionGroupableThreadRow';
 import { readProjectNames, writeProjectNames } from './active-workspace';
-import { type AttentionListRow, arrangeAttentionRows, flattenAttentionRows } from './attention-clusters';
+import {
+  type AttentionListRow,
+  type AttentionRenderItem,
+  arrangeAttentionRows,
+  flattenAttentionRows,
+} from './attention-clusters';
+import { orderAttentionList } from './attention-list-order';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
 import {
@@ -58,6 +64,7 @@ import {
   type ThreadGroup,
 } from './thread-utils';
 import { useAttentionClusters } from './use-attention-clusters';
+import { useAttentionListOrder } from './use-attention-list-order';
 import { useCollapseState } from './use-collapse-state';
 import { useProjectPins } from './use-project-pins';
 import { useScrollAnchor } from './use-scroll-anchor';
@@ -567,8 +574,12 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     mutateGroup: mutateAttentionGroup,
     preferenceError: attentionPreferenceError,
     groupLoadState: attentionLoadState,
+    groupLoadError: attentionLoadError,
     reloadGroups: reloadAttentionGroups,
     openGroup: openAttentionGroup,
+    memberSort: attentionMemberSort,
+    changeMemberSort: changeAttentionMemberSort,
+    pendingSort: attentionPendingSort,
   } = useAttentionClusters(liveThreads, currentThreadId, normalizedQuery);
   const [attentionArrangeMode, setAttentionArrangeMode] = useState(false);
   const [searchGroupRequest, setSearchGroupRequest] = useState<SearchGroupRequest | null>(null);
@@ -957,11 +968,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     const arranged = arrangeAttentionRows(activeTabContent.threads, liveThreads, attentionClusters, activeTab);
     return arranged.some((item) => item.kind === 'cluster') ? arranged : null;
   }, [activeTab, activeTabContent, attentionClusters, liveThreads]);
-  const flatAttentionRows = useMemo(
-    () =>
-      flatAttentionItems ? flattenAttentionRows(flatAttentionItems, isAttentionClusterOpen, normalizedQuery) : null,
-    [flatAttentionItems, isAttentionClusterOpen, normalizedQuery],
-  );
   const recentThreadIds = useMemo(
     () =>
       new Set(
@@ -991,6 +997,40 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     [liveThreads, pinnedProjects, unreadIds],
   );
   const threadGroups = activeTab === 'project' ? projectThreadGroups : [];
+
+  const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({
+    threadGroups: projectThreadGroups,
+    searchQuery: normalizedQuery,
+    currentThreadId,
+  });
+  const attentionLists = useMemo(() => {
+    const lists: Record<string, AttentionRenderItem[]> = {};
+    if (flatAttentionItems) lists.flat = flatAttentionItems;
+    if (activeTab === 'project') {
+      const sections = projectThreadGroups
+        .filter((group) => !isCollapsed(groupKeyForSection(group)))
+        .flatMap((group) => group.archivedGroups ?? [group])
+        .filter((section) => !isCollapsed(groupKeyForSection(section)));
+      for (const section of sections) {
+        lists[groupKeyForSection(section)] = arrangeAttentionRows(
+          section.threads,
+          section.threads,
+          attentionClusters,
+          'project',
+        );
+      }
+    }
+    return lists;
+  }, [activeTab, attentionClusters, flatAttentionItems, isCollapsed, projectThreadGroups]);
+  const attentionListRows = useAttentionListOrder(
+    attentionLists,
+    isAttentionClusterOpen,
+    attentionMemberSort,
+    JSON.stringify([activeTab, normalizedQuery, labelFilter, attentionArrangeMode]),
+    normalizedQuery,
+    attentionArrangeMode,
+  );
+  const flatAttentionRows = attentionListRows.flat ?? null;
 
   const filterKey =
     normalizedQuery.length === 0 && labelFilter === null ? '' : JSON.stringify([normalizedQuery, labelFilter]);
@@ -1082,10 +1122,16 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const revealMissingVirtualThread = useCallback(
     (threadId: string) => {
       if (activeTabContent.kind !== 'flat') return;
-      const index = activeTabContent.threads.findIndex((thread) => thread.id === threadId);
+      const index = flatAttentionRows
+        ? flatAttentionRows.findIndex((row) =>
+            row.kind === 'thread'
+              ? row.thread.id === threadId
+              : row.kind === 'cluster-member' && row.member.id === threadId,
+          )
+        : activeTabContent.threads.findIndex((thread) => thread.id === threadId);
       if (index >= 0) virtualThreadListRef.current?.ensureIndexVisible(index);
     },
-    [activeTabContent],
+    [activeTabContent, flatAttentionRows],
   );
 
   // F095 Phase E: Scroll anchor — keeps visible content in place when threads reorder
@@ -1099,12 +1145,6 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     onSelectedThreadMissing: revealMissingVirtualThread,
   });
 
-  // F095: Collapse state with localStorage persistence + search/active auto-expand
-  const { isCollapsed, toggleGroup, expandAll, collapseAll } = useCollapseState({
-    threadGroups: projectThreadGroups,
-    searchQuery: normalizedQuery,
-    currentThreadId,
-  });
   const sidebarWidthClass = className === undefined ? 'w-60' : className;
 
   const scrollToActiveThread = useCallback(() => {
@@ -1136,13 +1176,19 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         ? null
         : buildSidebarTabContent(targetTab, liveThreads, pinnedProjects, unreadIds).threads;
     const targetAttentionRows =
-      targetFlatThreads && (targetTab === 'pinned' || targetTab === 'recent')
-        ? flattenAttentionRows(
-            arrangeAttentionRows(targetFlatThreads, liveThreads, attentionClusters, targetTab),
-            isAttentionClusterOpen,
-            '',
-          )
-        : null;
+      activeTab === targetTab && !needsFilterClear && flatAttentionRows
+        ? flatAttentionRows
+        : targetFlatThreads && (targetTab === 'pinned' || targetTab === 'recent')
+          ? flattenAttentionRows(
+              orderAttentionList(
+                arrangeAttentionRows(targetFlatThreads, liveThreads, attentionClusters, targetTab),
+                isAttentionClusterOpen,
+                attentionArrangeMode ? {} : attentionMemberSort,
+              ).items,
+              isAttentionClusterOpen,
+              '',
+            )
+          : null;
     const needsTabSwitch = activeTab !== targetTab;
     if (needsTabSwitch) handleSelectTab(targetTab);
 
@@ -1180,6 +1226,9 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     }
   }, [
     activeTab,
+    attentionArrangeMode,
+    attentionMemberSort,
+    flatAttentionRows,
     attentionClusters,
     currentThreadId,
     handleSelectTab,
@@ -1237,6 +1286,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       <SearchGroupAction
         count={searchGroupMatches.length}
         loadState={attentionLoadState}
+        errorMessage={attentionLoadError}
         onOpen={() => openSearchGroup({ query: searchQuery.trim() })}
         onRetry={() => void reloadAttentionGroups()}
       />
@@ -1320,7 +1370,11 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
   const renderAttentionRow = useCallback(
     (row: AttentionListRow) => {
       if (row.kind === 'thread') {
-        return <div key={row.key}>{renderThreadItem(row.thread)}</div>;
+        return (
+          <div key={row.key} className="h-20">
+            {renderThreadItem(row.thread)}
+          </div>
+        );
       }
       if (row.kind === 'cluster-member') {
         return (
@@ -1338,6 +1392,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         <div
           key={row.key}
           role="group"
+          className="h-20"
           aria-label={`对话组：${attentionClusterTitle(row.cluster)}`}
           data-attention-drop-group={row.cluster.anchor}
           onDragOver={(event) => {
@@ -1362,11 +1417,23 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
             onToggle={() => toggleAttentionCluster(row.cluster)}
             onRename={(alias) => renameAttentionCluster(row.cluster, alias)}
             onAdd={() => openSearchGroup({ query: '', groupId: row.cluster.groupId })}
+            memberSort={attentionArrangeMode ? 'manual' : (attentionMemberSort[row.cluster.anchor] ?? 'manual')}
+            onMemberSort={(mode) => {
+              void changeAttentionMemberSort(row.cluster, mode);
+            }}
+            sortingDisabled={
+              attentionArrangeMode || attentionLoadState !== 'ready' || attentionPendingSort.has(row.cluster.anchor)
+            }
           />
         </div>
       );
     },
     [
+      attentionArrangeMode,
+      attentionMemberSort,
+      attentionPendingSort,
+      attentionLoadState,
+      changeAttentionMemberSort,
       attentionClusterTitle,
       openSearchGroup,
       commitAttentionClusterDrop,
@@ -1398,11 +1465,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
           onRenameProject={forProjectPath(projectPath, (path) => (name: string) => handleRenameProject(path, name))}
           onArchiveThreads={forProjectPath(projectPath, (path) => () => handleArchiveThreads(path))}
         >
-          {flattenAttentionRows(
-            arrangeAttentionRows(group.threads, group.threads, attentionClusters, 'project'),
-            isAttentionClusterOpen,
-            normalizedQuery,
-          ).map(renderAttentionRow)}
+          {attentionListRows[groupKey]?.map(renderAttentionRow)}
         </SectionGroup>
       );
     },
@@ -1412,10 +1475,8 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       handleOpenInFinder,
       handleQuickCreate,
       handleRenameProject,
-      attentionClusters,
-      isAttentionClusterOpen,
+      attentionListRows,
       isCollapsed,
-      normalizedQuery,
       pinnedProjects,
       projectNames,
       renderAttentionRow,

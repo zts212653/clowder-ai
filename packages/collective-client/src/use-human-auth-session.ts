@@ -20,6 +20,15 @@ import { finishProviderSetupCallback, useProviderSetup } from './use-provider-se
 
 export const SESSION_KEY = 'collective-session';
 
+function selectedCollective(me?: CollectiveMe) {
+  const id = new URLSearchParams(location.search).get('collectiveId');
+  return id
+    ? me?.collectives.find((item) => item.collectiveId === id)
+    : me?.collectives.length === 1
+      ? me.collectives[0]
+      : undefined;
+}
+
 type SnapshotSetter = Dispatch<SetStateAction<ClientSnapshot>>;
 type EntryMode = ReturnType<typeof entryModeFromHash>;
 
@@ -95,7 +104,7 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     ...current,
     meta,
     me,
-    collective: me?.collectives[0],
+    collective: selectedCollective(me),
     phase: me ? phaseForHuman(me) : 'entry',
     error: authError,
   }));
@@ -149,7 +158,7 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         ...current,
         phase: phaseForHuman(me),
         me,
-        collective: me.collectives[0],
+        collective: selectedCollective(me),
         error: undefined,
       }));
     },

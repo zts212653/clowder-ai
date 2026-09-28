@@ -24,6 +24,7 @@ import {
 } from './builtin-loopback.js';
 import { digestBrokerValue } from './canonical-json.js';
 import type { HostBrokerStore, HostBrokerTransaction } from './ports.js';
+import { revokeStaticFeatures } from './static-feature-ledger.js';
 import type {
   BrokerCallContext,
   BrokerCallError,
@@ -379,6 +380,18 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
   }
 
   async authorizeHostCall(pluginInstanceId: string, requiredGrant: Capability): Promise<BrokerCallContext> {
+    return this.authorizeConnection(pluginInstanceId, requiredGrant);
+  }
+
+  /** Host Manager only: intrinsic lifecycle binding grants no plugin effect API. */
+  async authorizeStaticFeature(pluginInstanceId: string): Promise<BrokerCallContext> {
+    return this.authorizeConnection(pluginInstanceId, 'protocol-intrinsic');
+  }
+
+  private async authorizeConnection(
+    pluginInstanceId: string,
+    requiredGrant: Capability | 'protocol-intrinsic',
+  ): Promise<BrokerCallContext> {
     const sessions = (await this.options.store.snapshot()).sessions.filter(
       (candidate) => candidate.pluginInstanceId === pluginInstanceId && candidate.phase === 'active',
     );
@@ -502,6 +515,12 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       });
       const lease = transaction.runtimeLeases.get(current.runtimeLeaseId);
       if (lease) transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
+      const features = transaction.staticFeatures.get();
+      if (features.leases.some((r) => r.brokerSessionId === current.brokerSessionId && r.state !== 'revoked')) {
+        transaction.staticFeatures.put(
+          revokeStaticFeatures(features, (r) => r.brokerSessionId === current.brokerSessionId, now),
+        );
+      }
     });
     if (session) await this.setInventoryRuntimeState(session.pluginInstanceId, session.packageDigest, 'stopped');
   }
@@ -528,6 +547,10 @@ export class HostBrokerControlPlane implements BrokerConnectionController {
       for (const lease of transaction.runtimeLeases.list()) {
         if (lease.state === 'closed') continue;
         transaction.runtimeLeases.put({ ...lease, state: 'closed', updatedAt: now });
+      }
+      const features = transaction.staticFeatures.get();
+      if (features.leases.some((r) => r.state !== 'revoked')) {
+        transaction.staticFeatures.put(revokeStaticFeatures(features, () => true, now));
       }
     });
     for (const [pluginInstanceId, packageDigest] of affected) {

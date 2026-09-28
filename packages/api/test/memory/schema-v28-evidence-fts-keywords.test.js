@@ -10,6 +10,7 @@ describe('V28 migration — evidence_fts keywords', () => {
 
     const db = new Database(':memory:');
     try {
+      db.exec(schema.SCHEMA_V5);
       db.exec(`
         CREATE TABLE evidence_docs (
           anchor TEXT PRIMARY KEY,

@@ -8,7 +8,7 @@ description: "让新增 consumer、重构与“保持既有行为”声明在现
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-23T19:50:00Z
-cvo_signoff: "2026-08-21 — sourceMessageId 0001787331361033-000441-1574d35e：完成立项，但必须复用已有概念、语言和规则；立项后只请 Fable 做一次审核，不做过度 A2A。"
+cvo_signoff: "2026-08-21 — sourceMessageId private-source-id：完成立项，但必须复用已有概念、语言和规则；立项后只请 Fable 做一次审核，不做过度 A2A。"
 tips_exempt: "内部开发治理立项；没有新增用户可调用 surface。若未来实现产生可见操作入口，再按 F244 补指向真实入口的 tip。"
 ---
 
@@ -49,7 +49,7 @@ operator experience：
 
 ## Phase delivery contract
 
-operator source：`0001787410619622-000083-b477a451`。统一指挥与 phase checkpoint 位于
+operator source：`private-source-id`。统一指挥与 phase checkpoint 位于
 `[thread-id]`；每个 Phase 的实现与 review 在各自执行 thread 闭环：
 
 - 一个 Phase = 一个执行 thread = 一个 PR；同一 Phase 可以有多个 commit，但不能拆成多个 PR；
@@ -216,7 +216,7 @@ registry、永久 Matrix、F299 domain lint、`eval:design-gate` 注册或 F192 
 
 - **实现与 review truth**：PR #3904 的 exact reviewed HEAD
   `8e8211015f5fdb83cb86bd244b253f5d90760f3c` 经 `pnpm gate` 全量 PASS（896s），Opus 4.8
-  非作者 review message `0001787513299658-000188-df854483` 终态 APPROVED；squash merge
+  非作者 review message `private-source-id` 终态 APPROVED；squash merge
   `8ae536b96228a8cfd505c82f989906cf79b56233` 已由 GitHub MERGED truth 确认。
 - **earlier self-check 与 landed Alpha 分离**：canonical episode #3901 的
   `docs/harness-feedback/design-gate/receipts/f303-phase-c-pr3901-alpha.yaml` 将 PR-head

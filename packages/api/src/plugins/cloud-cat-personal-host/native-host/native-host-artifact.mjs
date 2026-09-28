@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
-import { access, chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, chmod, lstat, mkdir, mkdtemp, open, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const NATIVE_HOST_ARTIFACT_FILES = Object.freeze([
   'assistant-return-inbox.mjs',
   'conversation-binding.mjs',
+  'conversation-title-exchange.mjs',
+  'conversation-titles.mjs',
   'native-framing.mjs',
   'native-host-cli.mjs',
   'native-host.mjs',
@@ -34,6 +37,50 @@ export async function digestNativeHostArtifactDirectory(directory) {
     digest.update(Buffer.of(0));
   }
   return `sha512:${digest.digest('hex')}`;
+}
+
+async function readBoundedMember(file, limit) {
+  const metadata = await file.stat();
+  if (!metadata.isFile() || metadata.size > limit) throw new Error('invalid artifact file');
+  const buffer = Buffer.alloc(limit + 1);
+  let totalRead = 0;
+  while (totalRead < buffer.length) {
+    const { bytesRead } = await file.read(buffer, totalRead, buffer.length - totalRead, totalRead);
+    if (bytesRead === 0) break;
+    totalRead += bytesRead;
+  }
+  if (totalRead > limit) throw new Error('artifact exceeds size limit');
+  return buffer.subarray(0, totalRead);
+}
+
+/** The installed generation owns its member set; its pinned digest covers every member. */
+export async function digestInstalledNativeHostArtifactDirectory(directory) {
+  try {
+    if (!(await lstat(directory)).isDirectory()) throw new Error('artifact must be a directory');
+    const files = (await readdir(directory)).sort();
+    if (files.length > 64 || !files.includes('native-host-cli.mjs')) throw new Error('invalid artifact members');
+    const digest = createHash('sha512');
+    let remainingBytes = 2 * 1024 * 1024;
+    for (const filename of files) {
+      if (!/^[a-z0-9-]+\.mjs$/.test(filename)) throw new Error('invalid artifact member');
+      // Nonblocking open prevents a swapped FIFO from stalling before fstat can reject it.
+      const file = await open(
+        join(directory, filename),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const bytes = await readBoundedMember(file, remainingBytes);
+        remainingBytes -= bytes.length;
+        digest.update(filename, 'utf8').update(Buffer.of(0)).update(bytes).update(Buffer.of(0));
+      } finally {
+        await file.close();
+      }
+    }
+    return `sha512:${digest.digest('hex')}`;
+  } catch (cause) {
+    // A missing member in a recorded generation is corruption, not an absent install.
+    throw new Error('installed native host artifact is unreadable or invalid', { cause });
+  }
 }
 
 async function stageArtifact(sourceDirectory, stagingDirectory, expectedDigest) {
@@ -73,7 +120,7 @@ export async function publishNativeHostArtifact(sourceDirectory, artifactsDirect
   const artifactDigest = await digestNativeHostArtifactDirectory(sourceDirectory);
   const artifactDirectory = join(artifactsDirectory, artifactDigest.slice('sha512:'.length));
   await ensureArtifactPublished(sourceDirectory, artifactsDirectory, artifactDirectory, artifactDigest);
-  if ((await digestNativeHostArtifactDirectory(artifactDirectory)) !== artifactDigest) {
+  if ((await digestInstalledNativeHostArtifactDirectory(artifactDirectory)) !== artifactDigest) {
     throw new Error('installed native host artifact digest mismatch');
   }
   return { artifactDigest, artifactDirectory, artifactEntrypoint: join(artifactDirectory, 'native-host-cli.mjs') };

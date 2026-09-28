@@ -72,9 +72,49 @@ describe('cloud binding recovery projection', () => {
     expect(isLinkedCloudBindingRecoveryNotice(warning, [authored, warning])).toBe(true);
   });
 
-  it('hides a stale recovery after the exact target advances beyond failed', () => {
+  it('keeps the source card in a truthful waiting state after queue retry acceptance', () => {
     const authored = source('queued');
-    expect(projectCloudBindingRecovery(authored, [authored, notice()])).toBeUndefined();
+    expect(projectCloudBindingRecovery(authored, [authored, notice()])).toEqual({
+      targetCatId: 'gpt-pro',
+      deliveryStatus: 'sending',
+    });
+  });
+
+  it.each([
+    ['queued', 'sent'],
+    ['queued', 'unknown'],
+    ['failed', 'sent'],
+    ['failed', 'unknown'],
+  ] as const)('keeps %s authoritative until a %s receipt matches the current dispatch', (state, receiptStatus) => {
+    const authored = source(state);
+    const attempt = authored.extra!.queueReceipt!.targets[0]!.attempts![0]!;
+    attempt.createdAt = 4;
+    const receiptNotice = notice({ id: 'receipt-2', timestamp: 5 });
+    receiptNotice.source!.meta = {
+      cloudBridgeOutboundReceipt: {
+        v: 1,
+        sourceMessageId: authored.id,
+        sourceSender: { kind: 'user', id: 'owner' },
+        targetCatId: 'gpt-pro',
+        dispatchInvocationId: 'dispatch-old',
+        status: receiptStatus,
+        transport: 'host',
+        hostMessageId: 'real-host-id',
+        idempotency: { keyKind: 'source_message_id', disposition: 'fresh' },
+      },
+    };
+    const pendingProjection =
+      state === 'queued'
+        ? { targetCatId: 'gpt-pro', deliveryStatus: 'sending' }
+        : { targetCatId: 'gpt-pro', attemptId: 'attempt-failed' };
+    expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])).toEqual(pendingProjection);
+    attempt.invocationId = 'dispatch-new';
+    expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])).toEqual(pendingProjection);
+    (receiptNotice.source!.meta.cloudBridgeOutboundReceipt as { dispatchInvocationId: string }).dispatchInvocationId =
+      'dispatch-new';
+    expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])?.deliveryStatus).toBe(
+      receiptStatus,
+    );
   });
 
   it('rejects forged or cross-source recovery metadata', () => {

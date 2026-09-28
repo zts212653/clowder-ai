@@ -6,6 +6,7 @@ import './styles/tokens.css';
 import './styles/shell.css';
 import './styles/channel.css';
 import './styles/channel-message.css';
+import './styles/f290-assembly.css';
 import './styles/onboarding.css';
 
 const root = document.getElementById('collective-root');

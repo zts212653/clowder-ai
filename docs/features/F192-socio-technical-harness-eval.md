@@ -340,7 +340,7 @@ Phase E 将 F192 从单域试点提升为横切的 Harness Eval Control Plane：
 - [x] AC-G13: Cancel burst proxy signal——CancelBurstDetector（threshold=3, window=60s）+ index.ts authorization handler 接线，burst 触发时追加 proxy signal（8 tests green）
 - [x] AC-G11: 端到端验证——自动化 e2e 集成测试（PR #2167）：6 chain × 10 assertions，三条 production helper（appendPermissionCancelToEpisode / appendMagicWordRefToEpisode / checkAndAppendCancelBurst）从 index.ts 提取后 test + production 共用同一路径；含 reason normalization 边界测试。手动 runtime 验收待operator + Ragdoll一起看 eval hub
 
-> **2026-08-24 sunset disposition:** AC-G2/G6/G8/G9/G10/G11/G13 记录的是当时已交付的历史链路，不再表示当前 writer。operator 决定直接落日 generic permission lifecycle（source `[thread-id]#0001787632982035-000007-ecf7a681`）；F286 同步移除 authorization deny hook、manual task-outcome cancel route、permission-cancel builder/wiring 与 cancel-burst detector。`permission_cancel` / `cancel_burst` schema、read projection、adapter 和统计仍保留，仅用于读取既有 episode 数据；不得据此恢复新的写入入口。
+> **2026-08-24 sunset disposition:** AC-G2/G6/G8/G9/G10/G11/G13 记录的是当时已交付的历史链路，不再表示当前 writer。operator 决定直接落日 generic permission lifecycle（source `[thread-id]#private-source-id`）；F286 同步移除 authorization deny hook、manual task-outcome cancel route、permission-cancel builder/wiring 与 cancel-burst detector。`permission_cancel` / `cancel_burst` schema、read projection、adapter 和统计仍保留，仅用于读取既有 episode 数据；不得据此恢复新的写入入口。
 
 依赖：复用 F192 已有 Eval Domain Registry / Verdict Handoff / Re-eval Closure / Eval Hub 控制面。与 F222 Frustration Auto-Issue 的打通（confirmed issue → episode signal）标记为 v1。
 
@@ -480,7 +480,7 @@ Alpha 与 validity 归属不变。
 - [x] AC-I7: RED→GREEN 覆盖 threshold crossing、event/cron race、cooldown、失败与 expired-claim replay、stale event replay、`time_only` 拒绝 event、Redis unavailable fail-closed event、legacy registry migration、F303 1→20 / 20→21 / invalid-source；targeted tests、API build 与风险匹配 gate 全绿。
 
 **完成证据（2026-08-24）**：PR #3920（squash `57cf27a0f`）合入；非作者 exact-HEAD
-review 结论为 APPROVED（`local-review:0001787580847720-000049-18ddf94e:g3:approved`）；full
+review 结论为 APPROVED（`local-review:private-source-id:g3:approved`）；full
 `pnpm gate`、52 项 focused tests、API build 与 Redis 6398 CAS 均通过。
 
 **Compatibility / migration**：registry parser 对缺 `triggerPolicy` 的社区 YAML 保持读兼容，并投影为与旧

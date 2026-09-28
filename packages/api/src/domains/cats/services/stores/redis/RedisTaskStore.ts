@@ -23,6 +23,12 @@ import type {
 } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import {
+  assertTypedWaitRegistrationInstallation,
+  parseTypedWaitRegistration,
+  TYPED_WAIT_REGISTRATION_FIELD,
+  type TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
 import { automationGeneration, mergeTaskAutomationState } from '../ports/TaskAutomationState.js';
 import { createEntrustedTaskItem, createGenericTaskItem } from '../ports/TaskItemFactory.js';
 import { assertSubjectUpdateOwnership, type ITaskStore } from '../ports/TaskStore.js';
@@ -43,6 +49,7 @@ import {
   type UpdateEntrustedWorkStoreInput,
   type UpdateEntrustedWorkStoreResult,
 } from '../ports/TaskStoreContract.js';
+import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds } from './RedisTaskCollectionReader.js';
@@ -65,6 +72,12 @@ const MAX_ANCHOR_LIFETIME_RECONCILIATION_RETRIES = 5;
 const MAX_UNIQUE_SUBJECT_CREATE_RETRIES = 8;
 
 export class RedisTaskStore implements ITaskStore {
+  async getWaitRegistration(taskId: string): Promise<TypedWaitRegistrationSnapshot | null> {
+    const raw = await this.redis.hgetall(TaskKeys.detail(taskId));
+    return raw.id
+      ? { task: hydrateTask(raw), receipt: parseTypedWaitRegistration(raw[TYPED_WAIT_REGISTRATION_FIELD]) }
+      : null;
+  }
   private readonly redis: RedisClient;
   private readonly ttlSeconds: number | null;
   private readonly managedWorkBindings: RedisTaskManagedWorkBindingStore;
@@ -353,9 +366,28 @@ export class RedisTaskStore implements ITaskStore {
           if (!this.matchesAutomationReplacementExpectation(existing, input)) {
             return null;
           }
-          const updated = this.buildAutomationReplacement(existing, input);
+          const binding = input.trackingRegistration?.managedWorkBinding;
+          if (binding) await session.watch(TaskKeys.managedWorkBinding(taskId));
+          const currentBinding = binding ? await new RedisTaskManagedWorkBindingStore(session).get(taskId) : null;
+          const updated = buildTaskWaitReplacement(existing, input, currentBinding);
+          if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
           const pipeline = session.multi();
           pipeline.hset(key, serializeTask(updated));
+          if (updated.threadId !== existing.threadId) {
+            pipeline.zrem(TaskKeys.thread(existing.threadId), taskId);
+            pipeline.zadd(TaskKeys.thread(updated.threadId), String(updated.createdAt), taskId);
+          }
+          if (binding && !currentBinding) {
+            pipeline.set(
+              TaskKeys.managedWorkBinding(taskId),
+              JSON.stringify({ workId: binding.workId, attemptId: binding.attemptId }),
+            );
+          }
+          if (input.waitRegistration)
+            pipeline.hset(key, TYPED_WAIT_REGISTRATION_FIELD, JSON.stringify(input.waitRegistration));
+          else if (automationGeneration(existing.automationState) !== automationGeneration(updated.automationState)) {
+            pipeline.hdel(key, TYPED_WAIT_REGISTRATION_FIELD);
+          }
           const result = await pipeline.exec();
           return result ? updated : undefined;
         },
@@ -542,16 +574,6 @@ export class RedisTaskStore implements ITaskStore {
   ): boolean {
     if (input.expectedUpdatedAt !== undefined && existing.updatedAt !== input.expectedUpdatedAt) return false;
     return automationGeneration(existing.automationState) === input.expectedGeneration;
-  }
-
-  private buildAutomationReplacement(existing: TaskItem, input: ReplaceAutomationStateIfGenerationInput): TaskItem {
-    return {
-      ...existing,
-      automationState: input.automationState,
-      ...(input.why !== undefined ? { why: input.why } : {}),
-      ...(input.status !== undefined ? { status: input.status } : {}),
-      updatedAt: Date.now(),
-    };
   }
 
   /** Tracking tasks (pr_tracking/issue_tracking) with status!=done never expire; others get default TTL. */

@@ -13,11 +13,11 @@ tips_exempt: "续租 2026-08-29 / conditional full snapshot：ETag/304 只减少
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入
 
-> **Status**: in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`0001787464914112-000015-317297b0`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1
+> **Status**: in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`private-source-id`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1
 >
-> **operator kickoff**: `0001786949883267-000007-1c4fc745`（“回到数学之美和第一性原理”“可以立项一下”“你主导，他辅助 review”；并授权 F081 AC-B2 处置由 owner 自决）+ `0001786950276392-000031-c800463d`（“立项直接 commit push，不需要提 PR，Maine Coon re 出来的问题当场改”）。
+> **operator kickoff**: `private-source-id`（“回到数学之美和第一性原理”“可以立项一下”“你主导，他辅助 review”；并授权 F081 AC-B2 处置由 owner 自决）+ `private-source-id`（“立项直接 commit push，不需要提 PR，Maine Coon re 出来的问题当场改”）。
 >
-> **Phase C operator authorization**: `0001787125999181-000083-03fb3f46`（Phase C 改由 @codex-sol 主写；exact-HEAD reviewer 优先 @kimi；Phase D / 合入后 alpha acceptance 另行闭环）。
+> **Phase C operator authorization**: `private-source-id`（Phase C 改由 @codex-sol 主写；exact-HEAD reviewer 优先 @kimi；Phase D / 合入后 alpha acceptance 另行闭环）。
 >
 > Ownership boundary：独立窄 Sidebar projection store/DTO、刷新/缓存边界与用户侧消费归 `thread-navigation`。运行态输入继续由 `dispatch` 的 F295 active-execution projection 与 F194 liveness classifier 持有；F297 只组合并切断 Sidebar 的 legacy read，不复制或全局禁写其生命周期状态。Map delta: **updated in this AC-A3 review**。
 
@@ -396,7 +396,7 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 - **C3 / C4**：`check:sidebar-projection-boundary` 同时运行 checker 自测与真实源码检查；除既有 Web writer/read/DTO canary，2026-08-19 起还结构性禁止 API presence projection import `ThreadParticipantActivity` 或调用 `getParticipantsWithActivityBatch`，防止聊天历史再次冒充 lifecycle。
 - **C5**：`sidebar-commands.test.ts` 与 `sidebarProjectionStore.test.ts` 覆盖成功观察后 retire、失败撤销、同字段并发 last-command-wins、timeout 后权威刷新，以及“canonical snapshot 永不被闭包旧值回滚”。Proposal pin 同样改走共享 field command。
 - **C7 / C8**：Sidebar render/sort 完全消费 snapshot `presence` / `lastActiveAt`。固定同一 snapshot 后，任意修改 legacy unread、raw liveness 或 `lastActivity` 均不能改变 row、图标或排序；Chat runtime 的既有 messages / cat status writer 仍保留。
-- **旧 Chromium 自证已被 runtime 反例推翻**：受控 fixture 只验证了 DTO 能显示 `working/done/error`，没有验证 done/error 的**来源真是 lifecycle**。用户现场 `0001787165232870-000010-bdadf699` 证明历史聊天被批量投成绿 ✓；旧证据不得用于 AC-D4/CloseGate。
+- **旧 Chromium 自证已被 runtime 反例推翻**：受控 fixture 只验证了 DTO 能显示 `working/done/error`，没有验证 done/error 的**来源真是 lifecycle**。用户现场 `private-source-id` 证明历史聊天被批量投成绿 ✓；旧证据不得用于 AC-D4/CloseGate。
 - **浏览器反哺的 RED → GREEN**：Chromium 首轮把 snapshot reorder 期间的 `scrollTop 706 → 0` 暴露出来；`use-scroll-anchor.test.tsx` 随后构造“最后一次用户滚动为 200、浏览器瞬时归零、内容偏移 +84”的 RED（实际得到 0），修复后断言恢复到 284，真实浏览器复验保持 `706 → 706`。
 
 #### AC-C6 race disposition（Phase C boundary view）
@@ -418,7 +418,7 @@ AC-C4 fixtures 必须同时证明：合法 Chat runtime fixture 写 `messages + 
 - [x] AC-D2: 当前诊断预测的 6 个未报告 race 已逐条核验：1/2/3/4/6 由 canonical snapshot、overlay 与 owner boundary 消除或隔离；5 明确归还 dispatch queue owner，不冒充 F297 修复。修复 merge `878181270` 上 boundary guard 7/7、API F297 5 suites / 37 tests、Web 10 files / 82 tests 通过。后续 #1371 PR5 暴露的 restart owner 错配同样按边界收口：producer 在 Queue custody 中持久化 server-derived `ownerUserId`，startup reconstruction 不再把 scheduler message authorship 当 execution owner；F297 的 `ActiveExecutionService` 仍按 user 隔离，未放宽 foreign-user scan。author 在 latest-main `08b6ea756` 重跑 restart discriminating test，owner presence=`working + activeSince`、scheduler/foreign 均无 row；隔离 Redis custody parity 14/14。
 - [x] AC-D3: F295 的现有 4s project scan 与 F297 refresh 做重复读取审计；保留一个 server composition service，不留两份 liveness 算法。**闭合 2026-08-18**：审计结论是「两份**读法**」而非两份算法——`active-execution-routes.ts` 的 project scan 仍 `threads.map(resolveLiveExecutions)`，每 4 秒 O(T)。已改为消费同一个 composition service 的 **live/child candidate view** 收窄候选：O(T) → O(A)；managed-command 不参与 live 定性，仍由完整投影枚举器读取，且同一请求只读一次 SQLite task 表。service 提前创建，queue / active-execution / Sidebar 注入同一实例，但两个 HTTP consumer 各自建立请求内 snapshot，不宣称跨请求共享物化结果。**降级方向与 Sidebar 相反且刻意**：Sidebar 漏报 → 显示 `idle`（用户无损）⇒ fail-closed；本列表漏报 → 正在跑的执行不在可取消列表里、用户停不掉（功能损坏）⇒ **fail-open**，未接线 / 读失败 / `complete=false` 一律退回全量扫描。三种降级路径各有 regression。
 - [x] AC-D4: **终态 attention/read 旅程闭合（#3817 / `c66ded63b`）**。#3798 的 lifecycle witness 与 attention gate 保留；修复归 F069 visibility/read-state owner，F297 未新增 `needsAttention` 或第二份 unread。`read/latest`、mark-all 与 direct `PATCH /read` 都以同一 durable-owner-read predicate 拒绝未 settled 的 mutable stream；最终 delivery 后，仅当前选中且 document visible 的消费面才 ACK。RED→GREEN 覆盖离开后完成 → `unread + done/error`、停留看到完成 → `idle`、hidden document 不提前 ACK，以及同一 bubble 的 final-delivery retry。fresh alpha 用真实 Redis 6398 验证 direct PATCH 在 partial 时为 `{advanced:false,caughtUp:false}`，同一 message final 后为 `{advanced:true,caughtUp:true}`；Memory/Redis parity 4/4，F5/reconnect 前后采用同一 durable evidence 规则。
-- [ ] AC-D6: **窄栏 crowded-row 可见性仍待闭合**（blocker: `0001787464914112-000015-317297b0`）。在 12 个 participants + preferred cat + label 的现场密度下，canonical C10 `done/error`、unread/mention 与 compact time 必须仍在 Sidebar viewport 内可见；只能裁剪或折叠可牺牲的 metadata rail，不得在 UI 新造 terminal/unread/time truth。完成条件是该真实密度旅程的 DOM/Alpha 证据与非作者 CloseGate；本次 conditional snapshot 性能 PR 不冒充已修复此展示契约。
+- [ ] AC-D6: **窄栏 crowded-row 可见性仍待闭合**（blocker: `private-source-id`）。在 12 个 participants + preferred cat + label 的现场密度下，canonical C10 `done/error`、unread/mention 与 compact time 必须仍在 Sidebar viewport 内可见；只能裁剪或折叠可牺牲的 metadata rail，不得在 UI 新造 terminal/unread/time truth。完成条件是该真实密度旅程的 DOM/Alpha 证据与非作者 CloseGate；本次 conditional snapshot 性能 PR 不冒充已修复此展示契约。
 
 ### CloseGate User Visibility Disclosure（2026-08-21 final）
 

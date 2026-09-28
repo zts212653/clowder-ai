@@ -36,7 +36,10 @@ export function parseVerdictMarkdown(path: string): ParsedVerdictMarkdown {
 }
 
 function parseFrontmatter(markdown: string): Record<string, unknown> {
-  const match = markdown.match(/^---\n([\s\S]*?)\n---/);
+  // CRLF-tolerant: Windows checkouts with core.autocrlf=true normalize LF-committed
+  // fixtures to CRLF on disk. A bare \n match silently returns {} on CRLF input,
+  // which drops domain_id and makes every verdict vanish before buildEvalHubItem runs.
+  const match = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match?.[1]) return {};
   const parsed = parseYaml(match[1]);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};

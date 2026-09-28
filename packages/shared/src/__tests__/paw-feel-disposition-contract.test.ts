@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PAW_FEEL_CONTINUATION_KINDS } from '../types/paw-feel-continuation.js';
 import {
   PAW_FEEL_DISPOSITION_STATES,
   PAW_FEEL_INBOX_SORTS,
@@ -43,6 +44,13 @@ describe('F278 paw-feel disposition shared contract', () => {
 
   it('keeps inbox ordering explicit across API, MCP and Workspace', () => {
     expect(PAW_FEEL_INBOX_SORTS).toEqual(['newest', 'oldest']);
+  });
+
+  it('keeps issue continuation orthogonal to duty responsibility states', () => {
+    expect(PAW_FEEL_CONTINUATION_KINDS).toContain('done_unverified');
+    expect(PAW_FEEL_CONTINUATION_KINDS).toContain('legacy_blocker_unbound');
+    expect(PAW_FEEL_CONTINUATION_KINDS).toContain('verified_outcome');
+    expect(PAW_FEEL_RESPONSIBILITY_STATES).not.toContain('done_unverified');
   });
 
   it('names denominator facts without fabricating a problem-family count', () => {

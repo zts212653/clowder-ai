@@ -709,6 +709,54 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
     );
   });
 
+  it('legacy restart environment cannot bypass foreign process ownership', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const script = `
+source "$1" --source-only >/dev/null
+pid_cwd() { printf '%s\\n' /tmp/foreign-runtime-owner; }
+CAT_CAFE_RUNTIME_RESTART_OK=1
+guard_fn=guard_port_kill_ownership
+"$guard_fn" 39876 API 424242
+`;
+      const result = spawnSync('bash', ['-c', script, '_', join(sandboxDir, 'scripts', 'start-dev.sh')], {
+        cwd: sandboxDir,
+        encoding: 'utf8',
+        env: { ...process.env, API_SERVER_PORT: '39876', FRONTEND_PORT: '39875', PREVIEW_GATEWAY_PORT: '0' },
+      });
+
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(`${result.stdout}\n${result.stderr}`, /cross worktree|跨 worktree/i);
+      assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /继续强制释放/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('legacy restart environment cannot bypass an unreadable process owner', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const script = `
+source "$1" --source-only >/dev/null
+pid_cwd() { return 1; }
+CAT_CAFE_RUNTIME_RESTART_OK=1
+guard_fn=guard_port_kill_ownership
+"$guard_fn" 39876 API 424242
+`;
+      const result = spawnSync('bash', ['-c', script, '_', join(sandboxDir, 'scripts', 'start-dev.sh')], {
+        cwd: sandboxDir,
+        encoding: 'utf8',
+        env: { ...process.env, API_SERVER_PORT: '39876', FRONTEND_PORT: '39875', PREVIEW_GATEWAY_PORT: '0' },
+      });
+
+      assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+      assert.match(`${result.stdout}\n${result.stderr}`, /unknown-cwd/);
+      assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /继续强制释放/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it('start-windows.ps1 clears inherited profile vars when strict mode is on', () => {
     const ps1 = readFileSync(resolve(ROOT, 'scripts/start-windows.ps1'), 'utf8');
 

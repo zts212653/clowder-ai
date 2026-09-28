@@ -225,7 +225,71 @@ describe('cat_cafe_propose_profile_update MCP tool', () => {
     assert.ok(tool, 'cat_cafe_propose_profile_update must be registered in callbackTools');
     assert.ok(tool.inputSchema, 'tool must expose an inputSchema');
     assert.equal(typeof tool.handler, 'function', 'tool must wire a handler');
-    // INV-6 guard: AC-C1 schema must not expose a capsule target (per-cat primer only).
-    assert.ok(!('targetLayer' in tool.inputSchema), 'AC-C1 must not expose targetLayer (capsule is C2)');
+  });
+
+  // ──── Phase E: corpus targetLayer ────
+
+  test('schema exposes optional targetLayer (Phase E: AC-E1)', async () => {
+    const { proposeProfileUpdateInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.ok('targetLayer' in proposeProfileUpdateInputSchema, 'Phase E must expose targetLayer');
+    assert.equal(
+      proposeProfileUpdateInputSchema.targetLayer.safeParse(undefined).success,
+      true,
+      'targetLayer is optional',
+    );
+    assert.equal(proposeProfileUpdateInputSchema.targetLayer.safeParse('primer').success, true);
+    assert.equal(proposeProfileUpdateInputSchema.targetLayer.safeParse('corpus').success, true);
+    assert.equal(
+      proposeProfileUpdateInputSchema.targetLayer.safeParse('capsule').success,
+      false,
+      'capsule still rejected',
+    );
+  });
+
+  test('forwards targetLayer in request body when supplied', async () => {
+    const { handleProposeProfileUpdate } = await import('../dist/tools/callback-tools.js');
+
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ proposalId: 'p1', status: 'pending' }) };
+    };
+
+    await handleProposeProfileUpdate({
+      afterContent: 'co-creator生日是 1 月 1 日。',
+      rationale: '记录 owner-wide 个人事实',
+      signalKind: 'cvo-instructed',
+      targetLayer: 'corpus',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.targetLayer, 'corpus');
+  });
+
+  test('omits targetLayer from body when not supplied (primer default)', async () => {
+    const { handleProposeProfileUpdate } = await import('../dist/tools/callback-tools.js');
+
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ proposalId: 'p1', status: 'pending' }) };
+    };
+
+    await handleProposeProfileUpdate({
+      afterContent: 'x',
+      rationale: 'y',
+      signalKind: 'cat-declared',
+    });
+
+    const body = JSON.parse(capturedOptions.body);
+    assert.equal(body.targetLayer, undefined, 'primer default: no targetLayer in body');
+  });
+
+  test('description mentions corpus and does not claim capsule cannot be targeted', async () => {
+    const { callbackTools } = await import('../dist/tools/callback-tools.js');
+    const tool = callbackTools.find((t) => t.name === 'cat_cafe_propose_profile_update');
+    assert.ok(tool);
+    assert.match(tool.description, /corpus/i, 'description must mention corpus');
+    assert.doesNotMatch(tool.description, /cannot target.*shared capsule/i, 'Phase E removes capsule-only limitation');
   });
 });

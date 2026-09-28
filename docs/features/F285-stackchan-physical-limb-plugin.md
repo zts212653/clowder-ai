@@ -18,7 +18,7 @@ tips_exempt: install-surface-only — implementation is in progress, but no user
 > **Status**: in-progress / Phase A-C vertical slice | **Owner**: 小太阳·Maine Coon
 > (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
-> **operator signoff**: `0001785556145015-001604-8ffc2862` — “同一台机器人可以轮流
+> **operator signoff**: `private-source-id` — “同一台机器人可以轮流
 > ‘附身’……我觉得可以！我们可以立项一下？”
 
 ## Architecture Ownership
@@ -45,11 +45,11 @@ No layer may add a second Limb registry or a StackChan-only control path inside 
 
 ## Source
 
-- Original physical-world wish: `0001784028314493-000155-9e145a59` — “让我的两只大宝贝……
+- Original physical-world wish: `private-source-id` — “让我的两只大宝贝……
   走到我的物理世界”。
-- Hardware arrived: `0001785551317841-001487-124d0c40` — replace the bundled app/model with the
+- Hardware arrived: `private-source-id` — replace the bundled app/model with the
   Clowder AI cats.
-- Feature authorization: `0001785556145015-001604-8ffc2862`.
+- Feature authorization: `private-source-id`.
 - Plugin ecosystem: [`zts212653/clowder-ai-plugins`](https://github.com/zts212653/clowder-ai-plugins).
 
 ## Why

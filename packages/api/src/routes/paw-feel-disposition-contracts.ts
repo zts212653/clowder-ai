@@ -1,4 +1,4 @@
-import { PAW_FEEL_INBOX_SORTS } from '@cat-cafe/shared';
+import { ownerTruthRefV1Schema, PAW_FEEL_INBOX_SORTS, PAW_FEEL_ISSUE_RESOLUTIONS } from '@cat-cafe/shared';
 import { z } from 'zod';
 import {
   PawFeelBundleCommandSchema,
@@ -12,6 +12,8 @@ export const PawFeelInboxQuerySchema = z
     sourceCatId: z.string().trim().min(1).optional(),
     sourceMessageId: z.string().trim().min(1).optional(),
     overdueOnly: z.enum(['true', 'false']).optional(),
+    resolution: z.enum(PAW_FEEL_ISSUE_RESOLUTIONS).optional(),
+    issueOverdueOnly: z.enum(['true', 'false']).optional(),
     limit: z.coerce.number().int().min(1).max(50).optional(),
     cursor: z.string().min(1).optional(),
     sort: z.enum(PAW_FEEL_INBOX_SORTS).optional(),
@@ -21,6 +23,17 @@ export const PawFeelInboxQuerySchema = z
 export const PawFeelTriageBodySchema = z
   .object({
     commands: z.array(PawFeelDispositionCommandSchema).min(1).max(50),
+  })
+  .strict();
+
+export const PawFeelRepairOutcomeBodySchema = z
+  .object({
+    type: z.literal('link_repair_outcome'),
+    eventId: z.string().trim().min(1),
+    signalId: z.string().trim().min(1),
+    expectedSequence: z.number().int().nonnegative(),
+    bindingRef: ownerTruthRefV1Schema,
+    ownerOutcomeRef: ownerTruthRefV1Schema,
   })
   .strict();
 
@@ -77,6 +90,7 @@ export const PawFeelSingleActionBodySchema = z.discriminatedUnion('type', [
       signalId: z.string().trim().min(1),
       expectedSequence: z.number().int().nonnegative(),
       leaseId: z.string().trim().min(1),
+      actionRef: z.string().trim().min(1),
     })
     .strict(),
 ]);
@@ -99,5 +113,5 @@ export function pawFeelSingleActionCommand(
   if (action.type === 'no_action') {
     return { ...base, type: 'mark_no_action', reasonCode: action.reasonCode };
   }
-  return { ...base, type: 'mark_fix', leaseId: action.leaseId };
+  return { ...base, type: 'mark_fix', leaseId: action.leaseId, actionRef: action.actionRef };
 }

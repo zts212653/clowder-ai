@@ -4,21 +4,12 @@ import {
   type EvolutionProgramEventV1,
   type EvolutionProgramStage,
   type EvolutionProgramStateV1,
-  type EvolutionProgramV1,
   evolutionProgramEventEnvelopeV1Schema,
   evolutionProgramStateV1Schema,
 } from './capability-evolution.js';
 import { metabolismAssetTransitionError } from './capability-evolution-metabolism.js';
+import { initialEvolutionProgramState } from './capability-evolution-reducer-initial.js';
 import { assetOwnerIdentity, type OwnerTruthRefV1 } from './capability-evolution-refs.js';
-
-/**
- * The Program's pure reducer, kept apart from the schemas it folds over.
- *
- * Every state transition a Program can make is here and nowhere else, so "can this event happen from
- * this stage" is one file to read. The schemas next door say what an event looks like; this says what
- * it means.
- */
-
 export type EvolutionProgramReducerErrorCode =
   | 'event_before_creation'
   | 'program_already_exists'
@@ -39,31 +30,29 @@ const reject = (code: EvolutionProgramReducerErrorCode, message: string): never 
   throw new EvolutionProgramReducerError(code, message);
 };
 const refs = (...values: OwnerTruthRefV1[]) => values.map((value) => value.ownerStateRef);
-
 interface ReducerContext {
-  program: EvolutionProgramV1;
+  program: EvolutionProgramStateV1['program'];
   cycles: EvolutionCycleV1[];
   cycle: EvolutionCycleV1;
   occurredAt: string;
 }
-
 function addRefs(ctx: ReducerContext, ...values: OwnerTruthRefV1[]): void {
   ctx.cycle.lineageRefIds = [...new Set([...ctx.cycle.lineageRefIds, ...refs(...values)])];
 }
-
-function replaceCurrentAssetVersion(ctx: ReducerContext, next: EvolutionProgramV1['currentAssetVersionRefs'][number]) {
+function replaceCurrentAssetVersion(
+  ctx: ReducerContext,
+  next: EvolutionProgramStateV1['program']['currentAssetVersionRefs'][number],
+) {
   const identity = assetOwnerIdentity(next);
   ctx.program.currentAssetVersionRefs = [
     ...ctx.program.currentAssetVersionRefs.filter((value) => assetOwnerIdentity(value) !== identity),
     next,
   ];
 }
-
 function setStage(ctx: ReducerContext, next: EvolutionProgramStage): void {
   ctx.program.stage = next;
   ctx.cycle.stage = next;
 }
-
 function requireActiveAt(ctx: ReducerContext, expected: EvolutionProgramStage): void {
   if (ctx.program.lifecycle !== 'active' || ctx.program.stage !== expected)
     reject('invalid_transition', `expected active/${expected}`);
@@ -81,6 +70,9 @@ function assertMetabolismAssetTransition(ctx: ReducerContext, event: EvolutionPr
 
 function applyLifecycleEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
   switch (event.type) {
+    case 'program_named':
+      ctx.program.displayName = event.displayName;
+      return true;
     case 'program_paused':
       if (ctx.program.lifecycle !== 'active') reject('invalid_transition', 'only active Programs can pause');
       ctx.program.lifecycle = 'paused';
@@ -121,6 +113,22 @@ function applyLifecycleEvent(ctx: ReducerContext, event: EvolutionProgramEventV1
 
 function applyEvidenceEvent(ctx: ReducerContext, event: EvolutionProgramEventV1): boolean {
   switch (event.type) {
+    case 'preparation_work_registered':
+      requireActiveAtAny(
+        ctx,
+        ['constituting', 'instrumenting', 'observing'],
+        'preparation work is closed at this stage',
+      );
+      addRefs(ctx, event.activityRef, ...(event.baseSubmissionRef ? [event.baseSubmissionRef] : []));
+      return true;
+    case 'preparation_submission_committed':
+      requireActiveAtAny(
+        ctx,
+        ['constituting', 'instrumenting', 'observing'],
+        'preparation submission is closed at this stage',
+      );
+      addRefs(ctx, event.submissionRef, ...event.dependencies);
+      return true;
     case 'certificates_linked':
       requireActiveAt(ctx, 'constituting');
       ctx.program.certificates = event.certificates;
@@ -271,46 +279,20 @@ export function reduceEvolutionProgramEvent(
 ): EvolutionProgramStateV1 {
   const envelope = evolutionProgramEventEnvelopeV1Schema.parse(rawEnvelope);
   if (rawState == null) {
-    const creation = envelope.event;
-    if (creation.type === 'program_created') {
-      if (envelope.expectedSequence !== 0) reject('sequence_conflict', 'Program creation expects sequence zero');
-      const program: EvolutionProgramV1 = {
-        schemaVersion: 1,
-        programId: envelope.programId,
-        workspaceId: creation.workspaceId,
-        objectRef: creation.objectRef,
-        claimRef: creation.claimRef,
-        certificates: {},
-        measurementRoleRefs: {},
-        lifecycle: 'active',
-        stage: 'constituting',
-        cycle: 1,
-        sequence: 1,
-        currentAssetVersionRefs: [],
-        createdAt: envelope.occurredAt,
-        updatedAt: envelope.occurredAt,
-      };
-      return evolutionProgramStateV1Schema.parse({
-        program,
-        cycles: [
-          {
-            programId: envelope.programId,
-            cycle: 1,
-            stage: 'constituting',
-            lineageRefIds: refs(creation.objectRef, creation.claimRef),
-            openedAt: envelope.occurredAt,
-          },
-        ],
-      });
-    }
-    return reject('event_before_creation', 'the first event must create the Program');
+    if (envelope.event.type !== 'program_created')
+      return reject('event_before_creation', 'the first event must create the Program');
+    if (envelope.expectedSequence !== 0) reject('sequence_conflict', 'Program creation expects sequence zero');
+    return initialEvolutionProgramState({ ...envelope, event: envelope.event });
   }
   const current = evolutionProgramStateV1Schema.parse(rawState);
   if (envelope.event.type === 'program_created') reject('program_already_exists', 'a Program has already been created');
   if (envelope.programId !== current.program.programId) reject('program_mismatch', 'event belongs to another Program');
   if (envelope.expectedSequence !== current.program.sequence)
     reject('sequence_conflict', 'event sequence does not follow the projection');
-  if (current.program.lifecycle === 'terminal' && envelope.event.type !== 'retention_opted_in')
+  if (
+    current.program.lifecycle === 'terminal' &&
+    !['retention_opted_in', 'program_named'].includes(envelope.event.type)
+  )
     reject('program_terminal', 'terminal Programs cannot accept business events');
 
   const cycles = current.cycles.map((cycle) => ({ ...cycle, lineageRefIds: [...cycle.lineageRefIds] }));

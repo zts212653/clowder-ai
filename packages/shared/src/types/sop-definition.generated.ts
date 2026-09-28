@@ -210,7 +210,7 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'quality-gate-risk-matched-evidence',
           kind: 'pitfall',
-          text: '声称完成但没有与风险面匹配的验证证据（至少 targeted；高风险才要求 full gate）',
+          text: '声称完成但没有与影响面匹配的验证证据（纯文档走文档校验；高风险加强独立审查，跨包影响无法由 targeted 覆盖才要求 full gate）',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'quality-gate' },
           predicate: {

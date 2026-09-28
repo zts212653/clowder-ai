@@ -154,34 +154,43 @@ export function SearchGroupOrganizer({
               从「{groupTitle(currentGroup)}」移出当前对话
             </button>
           )}
-          <input
-            aria-label="筛选待整理对话"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索要加入的对话"
-            className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs text-cafe-black"
-          />
-          <select
-            aria-label="整理目标"
-            value={destination}
-            onChange={(event) => setDestination(event.target.value)}
-            className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs text-cafe-black"
-          >
-            <option value="">新建 Group</option>
-            {observedGroups.map((group) => (
-              <option key={group.id} value={group.id}>
-                加入 {groupTitle(group)}
-              </option>
-            ))}
-          </select>
-          {!destination && (
+          <label className="block space-y-1 text-xs font-medium text-cafe-black">
+            <span>搜索对话</span>
             <input
-              aria-label="Group 名称"
-              maxLength={120}
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs text-cafe-black"
+              aria-label="搜索对话"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索要加入的对话"
+              className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
             />
+          </label>
+          <label className="block space-y-1 text-xs font-medium text-cafe-black">
+            <span>整理到</span>
+            <select
+              aria-label="整理到"
+              value={destination}
+              onChange={(event) => setDestination(event.target.value)}
+              className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
+            >
+              <option value="">新建 Group</option>
+              {observedGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  加入 {groupTitle(group)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!destination && (
+            <label className="block space-y-1 text-xs font-medium text-cafe-black">
+              <span>新组名称</span>
+              <input
+                aria-label="新组名称"
+                maxLength={120}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                className="w-full rounded-lg border border-cafe-subtle bg-cafe-surface px-2 py-1.5 text-xs font-normal text-cafe-black"
+              />
+            </label>
           )}
           <div className="flex flex-wrap items-center justify-between gap-2 text-micro">
             <span className="text-cafe-muted">

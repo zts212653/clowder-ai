@@ -1,6 +1,6 @@
 ---
 name: request-review
-tips_exempt: F167/F314 keep local review as an internal durable handoff and add provenance guards; no distinct end-user-invocable capability surface
+tips_exempt: Renewed 2026-09-05 for separating review assurance from test coverage; this internal review policy adds no distinct end-user-invocable capability surface.
 description: >
   Route a change to a non-author local peer when local review is the selected independent validation source.
   Use when: risk routing chooses a stateful local reviewer for implementation, governance, or semantic context.
@@ -71,8 +71,10 @@ triggers:
 ```text
 Review target: <branch@HEAD>
 Review-Subject-Ref: <pr:owner/repo#N | task:taskId>
-Accepted-Source-Ref: <docs/features/F*.md | threadId#messageId>
-Accepted-Revision: <full Git OID | immutable source message id>
+Reviewed-Head-Sha: <exact full Git OID>
+Request-Review-Consumption-Handle: <cat_cafe_prepare_request_review_consumption.handle>
+Accepted-Source-Ref: <canonical docs/features/F*.md | immutable threadId#messageId>
+Accepted-Revision: <that file's last-content-change full Git OID | the same immutable source message id>
 Scope: <changed files / one-line intent>
 Risk: <最高风险面，或 none + 理由>
 Evidence: <真实命令 / preview 结果>
@@ -80,8 +82,8 @@ Engagement: <iterative|one_shot_calibration|final_seal> + <stop condition / repa
 Ask: checked=<请 reviewer 指认最高风险面> verdict=approve|block
 ```
 
-Feature 以 `docs/features/F*.md` + 完整 40/64 位 Git OID 为 anchor；小事以
-`threadId#messageId` 为 anchor，revision 就是同一个 messageId。只传引用，不复制 source 正文。
+Feature 以 canonical `docs/features/F*.md` + 该文件最后一次内容变更的完整 40/64 位 Git OID 为 anchor；消息 source 以
+`threadId#messageId` 自身为 revision。author 先用同一 `reviewSubjectRef / reviewedHeadSha / acceptedSourceRef / acceptedRevision` 调 `cat_cafe_prepare_request_review_consumption`；reviewer 先 bind，发 typed verdict 后 record，不适用则 dismiss；三步使用对应 `request_review_consumption` tools。只传引用，不复制 source 正文。
 
 ### 完整 packet
 
@@ -203,7 +205,7 @@ replacement 或第二套 review 状态。
 ## 正反灰例
 
 - 正例：skill/SOP 语义改动 → 一只跨族 local peer，targeted checks，跳 cloud。
-- 正例：auth callback 变更 → cloud + full gate；若还需要家里状态语义，再有理由叠 local。
+- 正例：auth callback 变更 → cloud + 回调鉴权 / consumer 测试；若局部验证覆盖不了跨包影响才补 full，需要家里状态语义才叠 local。
 - 反例：local 已审纯文案，又因“流程到了”触发 cloud。
 - 反例：author 没 preview，要求 operator 截图后才肯发 review。
 - 灰例：前端 copy-only 改动仍应由 author preview；截图可选，DOM/页面证据足够时不阻塞。

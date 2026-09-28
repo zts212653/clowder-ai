@@ -1,0 +1,22 @@
+{
+  "id": "crash-cancel",
+  "scenario": "crash_cancel",
+  "threadId": "thread_fixture_f254_crash_cancel",
+  "catIds": ["codex-sol"],
+  "evidenceRefs": ["fixture:F254/AC-E9/crash-cancel@v1"],
+  "facts": {
+    "responsibilityCount": 1,
+    "custodyCount": 1,
+    "formalFinalCount": 0,
+    "formalFinalLimit": 1,
+    "knownStaleFinalCount": 0,
+    "targetCount": 1,
+    "accountedTargetCount": 1,
+    "sameBatchSiblingWakeCount": 0,
+    "automaticAttemptCount": 1,
+    "automaticAttemptLimit": 5,
+    "commitRecheckCount": 0,
+    "commitRecheckLimit": 10,
+    "terminalEvidenceComplete": true
+  }
+}

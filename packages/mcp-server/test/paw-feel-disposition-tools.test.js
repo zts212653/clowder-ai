@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import {
   handleCapturePawFeel,
+  handleCensusLegacyPawFeelBlockers,
+  handleLinkPawFeelRepairOutcome,
   handleListPawFeelInbox,
   handleTriagePawFeel,
   pawFeelDispositionTools,
@@ -43,6 +45,8 @@ describe('F278 MCP paw-feel tools', () => {
       states: ['new', 'seen'],
       sourceCatId: 'codex-sol',
       overdueOnly: true,
+      resolution: 'open',
+      issueOverdueOnly: true,
       limit: 25,
       cursor: 'opaque',
       sort: 'newest',
@@ -55,9 +59,26 @@ describe('F278 MCP paw-feel tools', () => {
     assert.equal(url.searchParams.get('states'), 'new,seen');
     assert.equal(url.searchParams.get('sourceCatId'), 'codex-sol');
     assert.equal(url.searchParams.get('overdueOnly'), 'true');
+    assert.equal(url.searchParams.get('resolution'), 'open');
+    assert.equal(url.searchParams.get('issueOverdueOnly'), 'true');
     assert.equal(url.searchParams.get('limit'), '25');
     assert.equal(url.searchParams.get('sort'), 'newest');
     assert.equal(requests[0].init.headers['x-invocation-id'], 'inv-1');
+  });
+
+  it('continues the authenticated refs-only legacy blocker census', async () => {
+    const result = await handleCensusLegacyPawFeelBlockers({ limit: 25, cursor: 'signed-cursor' });
+
+    assert.equal(result.isError, undefined);
+    const url = new URL(requests[0].url);
+    assert.equal(url.pathname, '/api/callbacks/paw-feel-legacy-blocker-census');
+    assert.equal(url.searchParams.get('limit'), '25');
+    assert.equal(url.searchParams.get('cursor'), 'signed-cursor');
+    const tool = pawFeelDispositionTools.find(
+      (candidate) => candidate.name === 'cat_cafe_census_legacy_paw_feel_blockers',
+    );
+    assert.ok(tool);
+    assert.ok(tool.description.includes('partial'));
   });
 
   it('declares current-invocation capture before the final source message exists', async () => {
@@ -86,7 +107,7 @@ describe('F278 MCP paw-feel tools', () => {
       exceptions: [
         {
           signalId: 'signal-2',
-          action: { type: 'fix', leaseId: 'lease-active' },
+          action: { type: 'fix', leaseId: 'lease-active', actionRef: 'opaque-action' },
         },
       ],
     };
@@ -109,9 +130,28 @@ describe('F278 MCP paw-feel tools', () => {
       true,
     );
     assert.equal(
-      tool.inputSchema.action.safeParse({ type: 'block', blockerCode: 'external_wait', blockerRef: 'case:123' })
-        .success,
+      tool.inputSchema.action.safeParse({
+        type: 'block',
+        blockerCode: 'external_wait',
+        blockerRef: 'case:123',
+        resume: { kind: 'bounded_time', recheckAt: '2026-09-08T00:00:00.000Z' },
+      }).success,
       true,
     );
+  });
+
+  it('links a refs-only owner repair outcome through callback auth', async () => {
+    const input = {
+      eventId: 'outcome-1',
+      signalId: 'signal-1',
+      expectedSequence: 2,
+      bindingRef: { ownerFeatureId: 'F278', ownerStateRef: 'paw-feel-direct-repair-binding:one' },
+      ownerOutcomeRef: { ownerFeatureId: 'F167', ownerStateRef: 'owner-outcome:one' },
+    };
+    const result = await handleLinkPawFeelRepairOutcome(input);
+
+    assert.equal(result.isError, undefined);
+    assert.equal(new URL(requests[0].url).pathname, '/api/callbacks/paw-feel-repair-outcome');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { ...input, type: 'link_repair_outcome' });
   });
 });

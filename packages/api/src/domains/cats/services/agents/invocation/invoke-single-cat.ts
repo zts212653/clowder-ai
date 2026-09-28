@@ -148,6 +148,7 @@ import {
   writeOpenCodeRuntimeConfig,
 } from '../providers/opencode-config-writer.js';
 import { appendTranscriptPathHints } from '../providers/transcript-path-hints.js';
+import { invokeCollectivePublic } from './collective-public-invocation.js';
 import {
   continuityDispositionFromProviderEvidence,
   resolveContextContinuity,
@@ -1081,6 +1082,10 @@ async function syncAntigravityRuntimeMetadata(input: {
  * Shared dependencies for all cat invocations within one AgentRouter
  */
 export interface InvocationDeps {
+  readonly messageStore?: import('../../stores/ports/MessageStore.js').IMessageStore;
+  readonly collectiveContext?: () =>
+    | import('../../../../plugin/builtin-runtime/collective-current-context.js').CollectiveCurrentContext
+    | undefined;
   /** F293: fresh owner-scoped sparse routing projection resolved for every provider generation. */
   readonly routingContextPromptProjection?: import('../../../../routing-context/RoutingContextPromptProjector.js').RoutingContextPromptProjectionPort;
   /** F293: observes routing evidence only after the canonical child terminal is durable. */
@@ -1298,6 +1303,7 @@ export interface InvocationParams {
   readonly continuityCapsule?: RouteStateContinuityCapsule;
   /** ADR-042 hard execution boundary for automatic supplement checks. */
   readonly toolExecutionPolicy?: import('../../types.js').ToolExecutionPolicy;
+  readonly executionScope?: 'collective-participation' | 'collective-work';
   /** Typed child purpose; never inferred from prompt or logs. */
   readonly executionKind?: TurnExecutionKind;
   /** Typed causal provenance used by history, relevance, and UI projections. */
@@ -1352,6 +1358,35 @@ export interface InvocationParams {
  * - Storing the final response in messageStore
  */
 export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationParams): AsyncIterable<AgentMessage> {
+  const originTriggerMessageId = params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId;
+  const originMessage = originTriggerMessageId ? await deps.messageStore?.getById(originTriggerMessageId) : undefined;
+  if (originMessage?.extra?.collectiveAuthorizationInvalid) throw new Error('collective_authority_invalid');
+  const collectiveContext = deps.collectiveContext?.();
+  if (originMessage?.source?.connector === 'collective' && !collectiveContext)
+    throw new Error('collective_participation_runtime_unavailable');
+  const participation =
+    originMessage?.source?.connector === 'collective'
+      ? await collectiveContext!.resolvePublic({ ...params, originTriggerMessageId })
+      : undefined;
+  if (params.executionScope === 'collective-participation' && !participation)
+    throw new Error('collective_source_unavailable');
+  const needsWorkAuthority =
+    params.executionScope === 'collective-work' || originMessage?.extra?.collectiveWorkInvocationV1 !== undefined;
+  const privateWork = needsWorkAuthority
+    ? await collectiveContext?.resolvePrivate({ ...params, originTriggerMessageId }, 'admission')
+    : undefined;
+  if (needsWorkAuthority && !privateWork) throw new Error('collective_owner_admission_unavailable');
+  if (participation) {
+    if (params.toolExecutionPolicy && params.toolExecutionPolicy.mode !== 'collective_participation')
+      throw new Error('collective_participation_replay_policy_conflict');
+    params = {
+      ...params,
+      prompt: '',
+      promptMessageIds: [participation.grant.originTriggerMessageId],
+      ownerAuthProvenance: 'unknown',
+      toolExecutionPolicy: { mode: 'collective_participation' },
+    };
+  }
   const { registry, sessionManager, threadStore, apiUrl } = deps;
   const { catId, service, userId, threadId, isLastCat, signal: callerSignal } = params;
   let prompt = params.prompt;
@@ -1405,6 +1440,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     params.a2aTriggerMessageId ?? params.executionCausal?.triggerMessageId,
     params.ownerAuthProvenance,
     managedWorkBinding,
+    participation?.grant,
+    privateWork
+      ? {
+          v: 1,
+          taskId: privateWork.work.task.id,
+          observedRevision: privateWork.work.revision,
+          sourceRef: privateWork.sourceRef,
+          authorityRef: privateWork.work.authorityRef,
+        }
+      : undefined,
   );
   let invocationHasAuthoritativeUsage = false;
   let invocationPolicyRecordId: string | undefined;
@@ -1480,6 +1525,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   let turnExecutionInterruptionReason: string | undefined;
   let turnExecutionCompletedSuccessfully = false;
   let routingDispatchFailureClass: RoutingDispatchFailureClass | undefined;
+  let routingFailureObservedAt: number | undefined;
 
   // F153: Record cat invocation count with trigger type
   const triggerType = params.a2aTriggerMessageId ? 'mention' : params.parentInvocationId ? 'routing' : 'default';
@@ -1951,7 +1997,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // The running record is created before provider/session preflight. A
       // factory-owned projection does not have truthful covered ids yet, so do
       // not persist the caller's stale pre-decision set as immutable causal data.
-      const initialCoveredMessageIds = params.contextPromptFactory ? [] : promptMessageIds;
+      const initialCoveredMessageIds = params.contextPromptFactory && !participation ? [] : promptMessageIds;
       const executionCausal = {
         ...(params.executionCausal ?? {}),
         ...(initialCoveredMessageIds.length > 0 ? { coveredMessageIds: initialCoveredMessageIds } : {}),
@@ -2029,6 +2075,21 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     // A contextPromptFactory owns the final prompt/exposure projection and runs
     // only after the epoch decision below. Legacy/cloud paths still expose here.
+    if (participation) {
+      await exposeCurrentPromptMessages();
+      for await (const message of invokeCollectivePublic({
+        source: participation,
+        service,
+        callbackEnv,
+        signal: signal!,
+      })) {
+        resetInvocationTimeout();
+        if (message.type === 'error') hadError = true;
+        if (message.type === 'done' && !hadError) turnExecutionCompletedSuccessfully = true;
+        yield { ...message, turnInvocationId: invocationId, turnExecutionStartedAt: executionStartedAt };
+      }
+      return;
+    }
     if (!params.contextPromptFactory) await exposeCurrentPromptMessages();
 
     if (isCloudOnlyInvocation) {
@@ -4969,6 +5030,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
     const streamProcessedOutputs = async function* (sourceMsg: AgentMessage | undefined): AsyncIterable<AgentMessage> {
       if (!sourceMsg) return;
+      const messageObservedAt = Date.now();
       for (const out of await processMessage(sourceMsg)) {
         routingDispatchFailureClass ??= classifyRoutingDispatchFailure({
           ...(out.metadata?.cliDiagnostics?.reasonCode
@@ -4976,6 +5038,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
             : {}),
           ...(out.errorCode ? { providerErrorCode: out.errorCode } : {}),
         });
+        if (routingDispatchFailureClass !== undefined) routingFailureObservedAt ??= messageObservedAt;
         if (out.type === 'error') {
           hadError = true;
           turnExecutionFailureReason ??= 'provider_execution_failed';
@@ -5970,6 +6033,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
               catId,
               status: result.record.status,
               ...(result.record.status === 'failed' && failureClass ? { failureClass } : {}),
+              ...(result.record.status === 'failed' && routingFailureObservedAt !== undefined
+                ? { failureObservedAt: routingFailureObservedAt }
+                : {}),
               preflightDecision: params.routingDispatchPreflightDecision,
             });
           } catch (err) {

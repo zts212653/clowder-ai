@@ -5,18 +5,18 @@
 
 ## Skills 列表（按 manifest 路由）
 
-### 开发流程链
-```
-feat-lifecycle → Design Gate(设计确认) → writing-plans → worktree → tdd
-    → quality-gate → [fresh-context-review] → request-review → receive-review
-    → merge-gate → feat-lifecycle(完成)
+### 开发导航（按当前任务与风险选择）
 
-co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
-```
+- Feature 愿景、讨论、设计确认与收尾：`feat-lifecycle`。
+- 需要理清实施路径：`writing-plans`；需要隔离：`worktree`；行为保护：`tdd`；未知根因：`debugging`。
+- 完成声明自证：`quality-gate`；选择本地独立审查后：`request-review`；收到反馈：`receive-review`；合入：`merge-gate`。
+- `fresh-context-review` 是可选 finding generator；共创文档由 `co-creation-docs` 选择 direct push 或 PR。
+
+这些是职责入口，不要求顺序经过全部 skill。已接受的愿景与范围贯穿各步，模板与方法参考可按各 skill 的边界选用。
 
 | Skill | 触发场景 | SOP Step |
 |-------|----------|----------|
-| `feat-lifecycle` | 新功能立项/讨论/完成 | — |
+| `feat-lifecycle` | 立项/讨论、设计确认、愿景或范围偏移、完成验收 | — |
 | `owner-friendly-plugin-development` | 设计有安装/授权/runtime/Host 路由的operator友好插件 | — |
 | `guide-authoring` | 编排场景引导 YAML / registry / 标签契约 | — |
 | `guide-interaction` | 判断是否需要交互引导，并按 Guide Matched/Pending/Active 等状态驱动回复 | — |
@@ -36,7 +36,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `merge-gate` | 门禁→PR→remote review→merge→清理 | ④⑤⑥ |
 | `open-source-teardown` | 热门开源项目/竞品 agent/runtime 的源码拆解、算法剥皮、营销水分和 tradeoff 判断 | — |
 | `opensource-ops` | 外部 PR/issue grounding、作者/custody 与 adoption；deployment 可叠加 Issue/PR/Sync/Intake/Hotfix SOP | — |
-| `cross-cat-handoff` | 跨猫交接/传话（五件套） | — |
+| `cross-cat-handoff` | 跨猫交接/传话（必要信息与可选五项提示） | — |
 | `deep-research` | 多源深度调研 | — |
 | `source-audit` | 外部数字/benchmark/因果/趋势等高风险 claim 的信源审计与 provenance | — |
 | `eval-design` | E0 资格门 + 指标出生证契约 + 纵向运行拓扑 + 七公理设计自检 + 五病体检尺（划水/污染/归因停滞/干预失证/摸鱼） | — |
@@ -54,7 +54,7 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `hyperfocus-brake` | operator健康提醒/三猫撒娇打断 | — |
 | `incident-response` | 闯祸了/不可挽回/人很难过 | — |
 | `image-generation` | 生成图片/画头像/AI 画图 | — |
-| `capability-evolution` | “我们来进化 X”/“能进化什么”的 F311 产品入口；信息问题只解释，具体目标才创建 canonical Evolution Program | — |
+| `capability-evolution` | “我们来进化 X”/“能进化什么”及直接命令式能力目标的 F311 产品入口；信息问题只解释，具体目标创建 canonical Program 并同轮交出首轮准备 | — |
 | `self-evolution` | 复盘已发生的工作：scope 守护/重复流程改进/知识沉淀；不接能力进化产品入口 | — |
 | `vision-rescue` | 任务绝境/反复摆动/投降修辞/放弃愿景 | — |
 | `bootcamp-guide` | operator 新手训练营引导 | — |
@@ -65,7 +65,8 @@ co-creation docs → co-creation-docs → direct push | merge-gate(docs PR)
 | `organize-threads` | 整理未分类 thread，建议合适标签 | — |
 | `workspace-navigator` | operator说"打开日志/看代码/打开设计图"等模糊指令 → 猫猫自己找路径 → API 导航 | — |
 | `ppt-forge` | 做 PPT/演示文稿/视觉审查（三猫流水线） | — |
-| `concept-demo-design` | 把抽象理念变成可录屏、可讲解、可验证的交互概念演示 | — |
+| `co-creation-storytelling` | 长期真实经历讲清楚、成长故事压成一页、人和 AI 各做了什么 | — |
+| `concept-demo-design` | 参考产品设计借鉴、交互叙事；授权后制作可讲解、可验证的 Demo | — |
 | `agent-product-promo-director` | Agent/AI 产品宣传片的主角、信念变化、格式、故事、镜头、运动、声音与 provenance creative brief | — |
 | `video-forge` | 做视频/showcase/教程视频/视频审查 | — |
 | `anime-forge` | 做动画短剧/角色 IP 短片/图生视频管线（素材是生成的不是录的） | — |

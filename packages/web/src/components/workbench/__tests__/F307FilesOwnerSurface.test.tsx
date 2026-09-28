@@ -22,7 +22,10 @@ const mocks = vi.hoisted(() => ({
   useFileManagement: vi.fn(),
 }));
 
-vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.apiFetch }));
+vi.mock('@/utils/api-client', () => ({ API_URL: 'http://localhost:3102', apiFetch: mocks.apiFetch }));
+vi.mock('socket.io-client', () => ({
+  io: () => ({ on: vi.fn(), emit: vi.fn(), disconnect: vi.fn() }),
+}));
 vi.mock('@/hooks/useFileManagement', () => ({ useFileManagement: mocks.useFileManagement }));
 vi.mock('@/hooks/useFileEditing', () => ({
   useFileEditing: () => ({

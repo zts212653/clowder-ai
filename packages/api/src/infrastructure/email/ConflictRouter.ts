@@ -1,3 +1,4 @@
+import type { WaitOutcomeV1 } from '@cat-cafe/shared';
 import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
@@ -18,6 +19,12 @@ export type ConflictRouteResult =
       readonly catId: string;
       readonly messageId: string;
       readonly content: string;
+      /**
+       * #1392 R5: the outcome that was actually delivered, carried instead of collapsed into the word
+       * "notified". A consumer that writes to a repository has to know WHICH condition matched: an
+       * expiry and a conflict are both deliveries, and only one of them is a conflict.
+       */
+      readonly outcome: WaitOutcomeV1;
     }
   | { readonly kind: 'deduped' | 'skipped'; readonly reason: string };
 
@@ -52,7 +59,7 @@ export class ConflictRouter {
     });
     if (result.kind !== 'notified') {
       return {
-        kind: result.kind === 'deduped' ? 'deduped' : 'skipped',
+        kind: result.kind === 'deduped' || result.kind === 'unrecorded' ? 'deduped' : 'skipped',
         reason: result.reason,
       };
     }
@@ -62,6 +69,7 @@ export class ConflictRouter {
       catId: result.task.ownerCatId ?? '',
       messageId: result.messageId,
       content: result.content,
+      outcome: result.outcome,
     };
   }
 }

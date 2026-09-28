@@ -1,3 +1,4 @@
+import { participationDeclaration, requireParticipation } from './participation-custody.js';
 import { ConnectorPersistence } from './persistence.js';
 import { type ConnectorProjection, projectConnection } from './projection.js';
 import { CollectiveServiceClient, ConnectorTransportError } from './service-client.js';
@@ -42,6 +43,19 @@ export class ConnectorSynchronization {
       return projectConnection(initial, initialSnapshot.hostRoutes[connectionId]);
     }
     if (initial.authorityStatus === 'revoking') return this.finishRevoke(connectionId);
+    const hostRoute = initialSnapshot.hostRoutes[connectionId];
+    if (hostRoute) {
+      try {
+        await this.service.publishParticipation(
+          initial.serviceUrl,
+          requireCredential(initial),
+          participationDeclaration(initial, hostRoute),
+        );
+      } catch (error) {
+        if (!(error instanceof ConnectorTransportError)) throw error;
+        return this.markOffline(connectionId, error.message, error.causeCode);
+      }
+    }
     if (initial.pendingAckSequence !== undefined) {
       try {
         await this.finishPendingAck(connectionId);
@@ -50,7 +64,7 @@ export class ConnectorSynchronization {
         return this.markOffline(connectionId, error.message, error.causeCode);
       }
     }
-    const hadPendingOutbox = initial.outbox.some((item) => item.status !== 'accepted');
+    const hadPendingOutbox = initial.outbox.some((item) => item.status === 'queued' || item.status === 'sending');
     const flushed = await this.flushOutbox(connectionId);
     // Polling is the reconnect probe when no outbound item was attempted.
     if (hadPendingOutbox && flushed.liveStatus === 'offline') return flushed;
@@ -90,8 +104,53 @@ export class ConnectorSynchronization {
   private async flushOutbox(connectionId: string): Promise<ConnectorProjection> {
     while (true) {
       const snapshot = requireConnection(this.persistence.snapshot().connections[connectionId]);
-      const pending = snapshot.outbox.find((item) => item.status !== 'accepted');
+      if (snapshot.authorityStatus !== 'connected')
+        return projectConnection(snapshot, this.persistence.snapshot().hostRoutes[connectionId]);
+      const pending = snapshot.outbox.find((item) => item.status === 'queued' || item.status === 'sending');
       if (!pending) return projectConnection(snapshot, this.persistence.snapshot().hostRoutes[connectionId]);
+      if (pending.replySource) {
+        try {
+          requireParticipation(this.persistence.snapshot(), pending.replySource);
+          await this.service.readParticipationContext(
+            snapshot.serviceUrl,
+            requireCredential(snapshot),
+            pending.replySource,
+            0,
+            1,
+          );
+          requireParticipation(this.persistence.snapshot(), pending.replySource);
+        } catch (error) {
+          const code =
+            error instanceof ConnectorTransportError
+              ? error.causeCode
+              : error && typeof error === 'object' && 'code' in error
+                ? error.code
+                : undefined;
+          if (
+            code === 'PARTICIPATION_REVOKED' ||
+            code === 'CONNECTION_REVOKED' ||
+            code === 'RETURN_UNAVAILABLE' ||
+            code === 'FORBIDDEN'
+          ) {
+            await this.persistence.transaction((state) => {
+              const item = state.connections[connectionId]?.outbox.find(
+                (candidate) => candidate.outboxId === pending.outboxId,
+              );
+              if (item) {
+                item.status = 'blocked';
+                item.failureCode = code;
+              }
+            });
+            continue;
+          }
+          return this.markOffline(
+            connectionId,
+            'Public source could not be revalidated',
+            typeof code === 'string' ? code : undefined,
+          );
+        }
+      }
+      if (!pending.agent) throw new Error('Queued outbox item has no named author');
       await this.persistence.transaction((state) => {
         const item = requireConnection(state.connections[connectionId]).outbox.find(
           (candidate) => candidate.outboxId === pending.outboxId,
@@ -106,6 +165,8 @@ export class ConnectorSynchronization {
           clientEventId: pending.clientEventId,
           agent: pending.agent,
           target: pending.target,
+          ...(pending.location ? { location: pending.location, recipient: { kind: 'channel' as const } } : {}),
+          ...(pending.replySource ? { participationRevision: pending.replySource.participationRevision } : {}),
           ...(pending.replyToEventId ? { replyToEventId: pending.replyToEventId } : {}),
           body: pending.body,
         });

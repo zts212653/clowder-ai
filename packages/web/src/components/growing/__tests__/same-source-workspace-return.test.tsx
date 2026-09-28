@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
-import { createInitialWorkbenchState, reduceWorkbench } from '@/components/workbench/workbench-model';
+import {
+  createInitialWorkbenchState,
+  reduceWorkbench,
+  restoreWorkbenchState,
+} from '@/components/workbench/workbench-model';
 import { resolveEntrustedWorkActionTarget } from '@/hooks/useWorkspaceNavigate';
 
 const capabilities: WorkspaceSurfaceDescriptor['capabilities'] = {
@@ -85,7 +89,7 @@ describe('F310 same-source Workspace return', () => {
       entitlement: user,
     });
 
-    expect(state.surfaces).toEqual([artifact]);
+    expect(state.surfaces).toEqual([{ ...artifact, returnTargetRef: needsMe.resultTargetRef }]);
     expect(state.activeSurfaceId).toBe(artifact.id);
     expect(state.sidecar).toEqual(needsMe);
 
@@ -111,7 +115,7 @@ describe('F310 same-source Workspace return', () => {
       entitlement: user,
     });
 
-    expect(state.surfaces).toEqual([needsMe, artifact]);
+    expect(state.surfaces).toEqual([needsMe, { ...artifact, returnTargetRef: needsMe.resultTargetRef }]);
     expect(state.activeSurfaceId).toBe(artifact.id);
     expect(state.sidecar).toBeNull();
 
@@ -148,5 +152,58 @@ describe('F310 same-source Workspace return', () => {
     expect(state.surfaces).toEqual([productSchedule]);
     expect(state.activeSurfaceId).toBe(productSchedule.id);
     expect(state.surfaces[0]?.resultTargetRef).toEqual(productSchedule.resultTargetRef);
+  });
+
+  it.each([
+    'desktop',
+    'mobile',
+  ] as const)('the ordinary tab close also restores the exact return on %s', (presentation) => {
+    let state = reduceWorkbench(createInitialWorkbenchState([productSchedule]), {
+      type: 'open-artifact-with-return',
+      artifact,
+      returnSurface: productSchedule,
+      presentation,
+      entitlement: user,
+    });
+    state = reduceWorkbench(state, {
+      type: 'close-surface',
+      surfaceId: artifact.id,
+      entitlement: { kind: 'user', reason: 'close-button' },
+    });
+    expect(state.activeSurfaceId).toBe(productSchedule.id);
+    expect(state.surfaces).toEqual([productSchedule]);
+    expect(state.sidecar).toBeNull();
+  });
+
+  it('persists the Artifact return edge and never borrows a different current item after reload', () => {
+    let state = reduceWorkbench(createInitialWorkbenchState([productSchedule]), {
+      type: 'open-artifact-with-return',
+      artifact,
+      returnSurface: productSchedule,
+      presentation: 'desktop',
+      entitlement: user,
+    });
+    state = {
+      ...state,
+      sidecar: {
+        ...productSchedule,
+        resultTargetRef: {
+          owner: 'f310-product-schedule-navigation',
+          key: encodeURIComponent(JSON.stringify(['global', 'task:work:other|9'])),
+        },
+      },
+    };
+    state = restoreWorkbenchState(JSON.parse(JSON.stringify(state)));
+    state = reduceWorkbench(state, { type: 'close-surface', surfaceId: artifact.id, entitlement: user });
+    expect(state.surfaces[0]?.resultTargetRef).toEqual(productSchedule.resultTargetRef);
+    expect(state.activeSurfaceId).toBe(productSchedule.id);
+    expect(state.sidecar).toBeNull();
+  });
+
+  it('closing an unrelated Artifact does not promote a different work item from the sidecar', () => {
+    const state = { ...createInitialWorkbenchState([artifact]), sidecar: productSchedule };
+    const closed = reduceWorkbench(state, { type: 'close-surface', surfaceId: artifact.id, entitlement: user });
+    expect(closed.surfaces).toEqual([]);
+    expect(closed.sidecar).toEqual(productSchedule);
   });
 });

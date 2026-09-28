@@ -120,6 +120,45 @@ test('#1371: merged carrier drops only handled body and keeps the independent so
   assert.deepEqual(projected.targetCats, ['opus']);
 });
 
+for (const state of ['pending', 'handled']) {
+  test(`#1371: owner-bound scheduler custody participates in Queue projection (${state})`, async () => {
+    const store = new MessageStore();
+    const queue = new InvocationQueue();
+    const { entry, message } = appendSource(store, queue, { state });
+    message.userId = 'scheduler';
+    message.source = {
+      connector: 'hold-ball',
+      label: '持球通知',
+      meta: { taskId: 'managed-task', threadId: 'thread-1', catId: 'opus', wakeWhen: true },
+    };
+    message.queueCustody.ownerUserId = 'user-1';
+    assert.deepEqual(await readQueueCarrierMessages(entry, store), [message]);
+    const projected = await enrichQueueEntries([entry], store);
+    assert.equal(projected.length, state === 'pending' ? 1 : 0);
+  });
+}
+
+for (const boundary of ['foreign owner', 'missing owner', 'foreign thread', 'hidden trigger', 'forged author']) {
+  test(`#1371: scheduler provenance never bypasses ${boundary}`, async () => {
+    const store = new MessageStore();
+    const queue = new InvocationQueue();
+    const { entry, message } = appendSource(store, queue, { state: 'pending' });
+    message.userId = 'scheduler';
+    message.source = {
+      connector: 'hold-ball',
+      label: '持球通知',
+      meta: { taskId: 'managed-task', threadId: 'thread-1', catId: 'opus', wakeWhen: true },
+    };
+    message.queueCustody.ownerUserId = 'user-1';
+    if (boundary === 'foreign owner') message.queueCustody.ownerUserId = 'user-2';
+    if (boundary === 'missing owner') delete message.queueCustody.ownerUserId;
+    if (boundary === 'foreign thread') message.threadId = 'thread-2';
+    if (boundary === 'hidden trigger') message.extra = { scheduler: { hiddenTrigger: true } };
+    if (boundary === 'forged author') message.catId = 'opus';
+    await assert.rejects(readQueueCarrierMessages(entry, store), /out of scope/);
+  });
+}
+
 test('#1371: partial target completion cannot hide an unhandled sibling', async () => {
   const store = new MessageStore();
   const queue = new InvocationQueue();

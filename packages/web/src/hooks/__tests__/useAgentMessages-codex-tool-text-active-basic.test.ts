@@ -48,6 +48,53 @@ function invocationCreated(parent: string, turn: string, ts = 1050) {
 describe('Codex active path — tool work-log + text converge', () => {
   const harness = installActiveHarness();
 
+  it('attaches a suppressed child event to the live root bubble without mixing child prose into root text', () => {
+    const parent = 'parent-subexecution-active';
+    const turn = 'turn-subexecution-active';
+    const childEvent = {
+      v: 1 as const,
+      id: 'subexecution:child-active:message',
+      kind: 'subexecution' as const,
+      occurredAt: 1010,
+      stage: 'message' as const,
+      subexecutionId: 'child-active',
+      rootExecutionId: 'root-provider-thread',
+      parentExecutionId: 'root-provider-thread',
+      rootTurnId: 'root-provider-turn',
+      parentTurnId: 'root-provider-turn',
+      turnId: 'child-provider-turn',
+      agentPath: '/root/review_delta',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Approve from child',
+      messagePhase: 'final_answer' as const,
+    };
+
+    harness.render();
+    harness.send({
+      type: 'system_info',
+      catId: 'codex',
+      threadId: THREAD,
+      invocationId: parent,
+      turnInvocationId: turn,
+      timestamp: 1010,
+      semanticEvent: childEvent,
+      metadata: {
+        provider: 'openai',
+        model: 'gpt-5.6-sol',
+        subexecutionEvents: [childEvent],
+      },
+    });
+    harness.send(text(parent, 'root final survives', 1020, turn));
+
+    const rootBubble = flatCodexStreamBubbles()[0];
+    expect(rootBubble?.content).toBe('root final survives');
+    expect(rootBubble?.metadata?.subexecutionEvents).toEqual([childEvent]);
+    expect(useChatStore.getState().messages.some((message) => message.content.includes('Approve from child'))).toBe(
+      false,
+    );
+  });
+
   it('[real shape] tool_use + text both carrying turn id stay ONE stream bubble', () => {
     const PARENT = 'parent-inv-a2a';
     const TURN = 'turn-inv-codex';

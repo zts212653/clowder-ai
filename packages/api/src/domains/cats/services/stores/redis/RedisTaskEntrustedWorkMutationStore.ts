@@ -34,7 +34,7 @@ end
 if current ~= ARGV[1] then
   return 0
 end
-redis.call('HSET', KEYS[1], 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3])
+redis.call('HSET', KEYS[1], 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3], 'status', ARGV[4])
 return 1
 `;
 
@@ -95,7 +95,12 @@ export class RedisTaskEntrustedWorkMutationStore {
       const existing = hydrateTask(data);
       const prepared = prepareEntrustedWorkUpdate(existing, input);
       if (prepared.kind !== 'ready') return prepared;
-      const updated: TaskItem = { ...existing, entrustedWork: prepared.entrustedWork, updatedAt: Date.now() };
+      const updated: TaskItem = {
+        ...existing,
+        status: prepared.status,
+        entrustedWork: prepared.entrustedWork,
+        updatedAt: Date.now(),
+      };
       const serialized = serializeTask(updated);
       const result = await this.redis.eval(
         UPDATE_ENTRUSTED_WORK_LUA,
@@ -104,6 +109,7 @@ export class RedisTaskEntrustedWorkMutationStore {
         data.entrustedWork,
         serialized.entrustedWork,
         serialized.updatedAt,
+        serialized.status,
       );
       if (result === 1) {
         await this.applyTtl(updated);

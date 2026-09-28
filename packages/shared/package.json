@@ -41,6 +41,10 @@
     "./profile-contract": {
       "import": "./dist/profile-contract.js",
       "types": "./dist/profile-contract.d.ts"
+    },
+    "./profile-revision": {
+      "import": "./dist/profile-revision.js",
+      "types": "./dist/profile-revision.d.ts"
     }
   },
   "scripts": {

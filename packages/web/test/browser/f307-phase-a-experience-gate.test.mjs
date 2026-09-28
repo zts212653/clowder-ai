@@ -8,12 +8,15 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerDefaultEntryJourney } from './default-entry-journey.harness.mjs';
 import {
   EVOLUTION_PROGRAM_ID,
+  fixedFixture,
   INVOCATION_ID,
   OTHER_THREAD_ID,
   OTHER_WORKTREE_ID,
   realSurfaceApiResponse,
+  SUBEXECUTION_EVENTS,
   THREAD_ID,
   WORKTREE_ID,
 } from './f307-real-surface-fixtures.mjs';
@@ -112,6 +115,71 @@ async function assertOwnerSurfaceFillsPane(surfacePane, ownerRoot) {
   );
 }
 
+async function assertMainAreaAttentionRoundTrip(page, { surfaceId, closeTestId, evidenceName }) {
+  const workbench = page.getByTestId('f307-experience-workbench');
+  const surfacePane = workbench.locator(`[data-surface-id="${surfaceId}"]`);
+  const ownerRoot = surfacePane.locator('[data-testid="f307-owner-surface-host"] > :first-child');
+  await ownerRoot.waitFor();
+  const surfaceCount = await workbench.getAttribute('data-surface-count');
+  const split = [
+    await workbench.getAttribute('data-split-primary'),
+    await workbench.getAttribute('data-split-secondary'),
+  ];
+  await ownerRoot.evaluate((node) => {
+    window.__f307SharedAttentionOwner = node;
+  });
+
+  await page.getByTestId('f307-enter-main-area').click();
+  await page.waitForFunction(
+    (expectedSurfaceId) =>
+      document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+        'main-area-attention' &&
+      document.querySelector('[data-testid="f307-experience-workbench"]')?.getAttribute('data-main-area-attention') ===
+        expectedSurfaceId,
+    surfaceId,
+  );
+
+  assert.equal(await workbench.getAttribute('data-active-surface'), surfaceId);
+  assert.equal(
+    await workbench.locator('[data-surface-id][aria-hidden="false"]').count(),
+    1,
+    'main-area attention must project only the exact active tab even when the saved topology is split',
+  );
+  assert.equal(
+    await ownerRoot.evaluate((node) => window.__f307SharedAttentionOwner === node && node.isConnected),
+    true,
+    'promotion must preserve the exact owner DOM instance',
+  );
+  if (evidenceName) {
+    await page.screenshot({ path: path.join(EVIDENCE_DIR, evidenceName), fullPage: true });
+  }
+
+  const close = page.getByTestId(closeTestId);
+  assert.match(await close.getAttribute('aria-label'), /^返回侧栏 /);
+  await close.click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
+      'right-rail',
+  );
+
+  assert.equal(await workbench.getAttribute('data-main-area-attention'), '');
+  assert.equal(await workbench.getAttribute('data-surface-count'), surfaceCount);
+  assert.deepEqual(
+    [await workbench.getAttribute('data-split-primary'), await workbench.getAttribute('data-split-secondary')],
+    split,
+    'return must restore the exact saved split without topology mutation',
+  );
+  assert.equal(
+    await ownerRoot.evaluate((node) => window.__f307SharedAttentionOwner === node && node.isConnected),
+    true,
+    'return must keep the same owner DOM instance mounted',
+  );
+  await page.evaluate(() => {
+    delete window.__f307SharedAttentionOwner;
+  });
+}
+
 let server;
 let browser;
 let baseUrl;
@@ -168,6 +236,144 @@ after(async () => {
   if (server) await stopServer(server);
   if (testDistDirPath) await rm(testDistDirPath, { recursive: true, force: true });
   if (testTsconfigPath) await rm(testTsconfigPath, { force: true });
+});
+
+test('Workspace open waits for client interactivity instead of clicking server-rendered chrome', async () => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  try {
+    await page.setContent(`
+      <div data-testid="thread-chat-host">
+        <button
+          type="button"
+          data-testid="workspace-panel-toggle"
+          data-client-interactive="false"
+          aria-label="打开 Workspace"
+        >
+          Workspace
+        </button>
+        <section data-testid="f307-experience-workbench" hidden>Workbench</section>
+      </div>
+      <script>
+        setTimeout(() => {
+          const toggle = document.querySelector('[data-testid="workspace-panel-toggle"]');
+          const workbench = document.querySelector('[data-testid="f307-experience-workbench"]');
+          toggle.addEventListener('click', () => {
+            workbench.hidden = false;
+            toggle.setAttribute('aria-label', '收起 Workspace');
+          });
+          toggle.setAttribute('data-client-interactive', 'true');
+        }, 150);
+      </script>
+    `);
+
+    await ensureWorkspaceOpen(page, { attempts: 1, waitMs: 50, readinessTimeoutMs: 1_000 });
+    assert.equal(await page.getByTestId('f307-experience-workbench').isVisible(), true);
+  } finally {
+    await context.close();
+  }
+});
+
+// Design-gate claim evidence (docs/design-gate-claims/f307-phase-a-real-shell.json):
+// the product shell reaches the Workbench from its default entry, no query string.
+registerDefaultEntryJourney(
+  {
+    journeyId: 'f307-workspace-default-entry',
+    surfaceTestId: 'f307-experience-workbench',
+    title: 'the real Thread shell opens the F307 Workbench from its default entry',
+    timeout: 90_000,
+  },
+  async (journey) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await context.addInitScript(() => window.localStorage.clear());
+    const page = await context.newPage();
+    await page.route('**/api/**', (route) => {
+      const response = realSurfaceApiResponse(route.request(), false);
+      return json(route, response.body, response.status);
+    });
+    try {
+      await journey.enter(page, baseUrl);
+      await page.getByRole('navigation', { name: '主导航' }).waitFor({ timeout: 20_000 });
+      await ensureWorkspaceOpen(page);
+      await journey.arrive(page);
+    } finally {
+      await context.close();
+    }
+  },
+);
+
+test('root reply keeps child identity distinct after hydration at desktop and 390px', { timeout: 90_000 }, async () => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await context.addInitScript(() => window.localStorage.clear());
+  const page = await context.newPage();
+  let messageReads = 0;
+  await page.route('**/api/**', (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/messages') {
+      messageReads += 1;
+      return json(route, {
+        messages: [
+          {
+            id: 'f307-root-final-with-child',
+            type: 'assistant',
+            catId: 'codex-sol',
+            content: '主 agent 最终交付仍然可见。',
+            metadata: {
+              provider: 'openai',
+              model: 'gpt-5.6-sol',
+              sessionId: 'root-provider-thread',
+              subexecutionEvents: SUBEXECUTION_EVENTS,
+            },
+            timestamp: 105,
+          },
+        ],
+        hasMore: false,
+      });
+    }
+    const response = realSurfaceApiResponse(route.request(), false);
+    return json(route, response.body, response.status);
+  });
+  try {
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    const rootMessage = page.locator('[data-message-id="f307-root-final-with-child"]');
+    await rootMessage.waitFor({ timeout: 30_000 }).catch(async () => {
+      throw new Error(
+        `root message did not hydrate; messageReads=${messageReads}; body=${(
+          await page.locator('body').innerText()
+        ).slice(0, 4_000)}`,
+      );
+    });
+
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+      if (width === 390) {
+        const hideSidebar = page.getByRole('button', { name: 'Hide sidebar' });
+        if ((await hideSidebar.count()) > 0) {
+          await page.mouse.click(350, 100);
+          await page.getByRole('button', { name: 'Show sidebar' }).waitFor();
+        }
+      }
+      await rootMessage.scrollIntoViewIfNeeded();
+      await rootMessage.getByText('主 agent 最终交付仍然可见。', { exact: true }).waitFor();
+      await rootMessage.locator('[data-agent-role="root"]').waitFor();
+      const child = rootMessage.locator('[data-subexecution-id="child-f307-bohr"]');
+      await child.waitFor();
+      assert.match(await child.locator('summary').innerText(), /子 agent.*Bohr.*已完成/s);
+      assert.match(await child.locator('summary').innerText(), /\/root\/review_knowledge_delta/);
+      if ((await child.getAttribute('open')) === null) await child.locator('summary').click();
+      await child.locator('[data-subexecution-message-phase="final_answer"]').waitFor();
+      assert.match(await child.innerText(), /子 agent 最终回报.*Approve：子 agent 只读核对完成。/s);
+      assert.equal((await child.innerText()).includes('审阅者'), false, 'role must not be guessed from Approve prose');
+      if (width === 390) {
+        const childBox = await child.boundingBox();
+        assert.ok(childBox, '390px child identity card must have measurable geometry');
+        assert.ok(childBox.x >= 0 && childBox.x + childBox.width <= 390, '390px child identity must stay in viewport');
+        await page.screenshot({ path: path.join(EVIDENCE_DIR, '13-root-child-identity-390.png'), fullPage: true });
+      }
+    }
+  } finally {
+    await context.close();
+  }
 });
 
 test(
@@ -274,6 +480,11 @@ test(
       assert.equal(await workbench.getAttribute('data-workbench-focus'), 'surface');
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       await page.getByText(`Owner file: ${WORKTREE_ID}`, { exact: false }).waitFor({ timeout: 5_000 });
+      await assertMainAreaAttentionRoundTrip(page, {
+        surfaceId: `file-owner:${WORKTREE_ID}`,
+        closeTestId: 'f307-close-code',
+        evidenceName: '09-shared-attention-file.png',
+      });
       const tabStrip = page.getByTestId('f307-tab-strip');
       const controlRail = page.getByTestId('f307-control-rail');
       assert.equal(await tabStrip.getByTestId('f307-add-surface').count(), 0);
@@ -294,6 +505,11 @@ test(
       assert.equal(await workbench.getAttribute('data-split-secondary'), '');
       assert.equal(await page.getByTestId('f307-tab-code').isVisible(), true);
       assert.equal(await page.getByTestId('f307-tab-terminal').isVisible(), true);
+      await assertMainAreaAttentionRoundTrip(page, {
+        surfaceId: `terminal-owner:${WORKTREE_ID}`,
+        closeTestId: 'f307-close-terminal',
+        evidenceName: '10-shared-attention-terminal.png',
+      });
       await page.screenshot({ path: path.join(EVIDENCE_DIR, '00-file-terminal-inline-add.png'), fullPage: true });
 
       await addSurface.click();
@@ -332,6 +548,11 @@ test(
         () => document.querySelector('[data-owner-preview]')?.getAttribute('data-owner-path') === '/owner-a',
       );
       assert.equal(await browserPane.locator('[data-owner-preview]').getAttribute('data-owner-port'), '4173');
+      await assertMainAreaAttentionRoundTrip(page, {
+        surfaceId: `browser-owner:${WORKTREE_ID}`,
+        closeTestId: 'f307-close-browser',
+        evidenceName: '11-shared-attention-browser.png',
+      });
 
       await addSurface.click();
       await home.getByTestId('workspace-launcher-artifacts').click();
@@ -389,6 +610,14 @@ test(
       await addSurface.click();
       await page.getByTestId('f307-workspace-home-page').getByTestId('workspace-open-running-object').click();
       await page.getByTestId('invocation-trajectory-detail').waitFor({ timeout: 10_000 });
+      const childTrajectory = page.locator('[data-subexecution-id="child-f307-bohr"]');
+      await childTrajectory.first().waitFor();
+      assert.equal(await childTrajectory.count(), SUBEXECUTION_EVENTS.length);
+      const childFinal = page.locator('[data-subexecution-stage="message"]').filter({
+        hasText: '子 agent 最终回报',
+      });
+      await childFinal.waitFor();
+      assert.match(await childFinal.innerText(), /Bohr.*\/root\/review_knowledge_delta.*Approve/s);
       assert.equal(await workbench.getAttribute('data-active-surface'), `agent-run:${INVOCATION_ID}`);
       assert.equal(await workbench.getAttribute('data-surface-count'), '8');
       assert.equal(
@@ -396,6 +625,11 @@ test(
         false,
         'controlled Agent Run must not mutate global URL',
       );
+      await assertMainAreaAttentionRoundTrip(page, {
+        surfaceId: `agent-run:${INVOCATION_ID}`,
+        closeTestId: 'f307-close-agent-run',
+        evidenceName: '12-shared-attention-agent-run.png',
+      });
 
       await page.getByTestId('f307-tab-browser').click();
       await page.getByTestId('f307-close-browser').click();
@@ -653,6 +887,55 @@ test(
   },
 );
 
+test(
+  'mobile Approval bell opens the canonical F307 host instead of the legacy sheet',
+  { timeout: 90_000 },
+  async () => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    await context.addInitScript(() => window.localStorage.clear());
+    const page = await context.newPage();
+    await page.route('**/api/**', (route) => {
+      const response = realSurfaceApiResponse(route.request(), false);
+      return json(route, response.body, response.status);
+    });
+
+    try {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+      await ensureWorkspaceOpen(page);
+      await assertCanonicalZeroTopologyShell(page);
+
+      const bell = page.getByTestId('approval-hub-button');
+      const workbench = page.getByTestId('f307-experience-workbench');
+      const host = page.getByTestId('contextual-workspace-host');
+      await page.getByTestId('workspace-shell-fold').click();
+      await workbench.waitFor({ state: 'hidden' });
+      await bell.click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('[data-testid="f307-experience-workbench"]')?.getAttribute('data-active-surface') ===
+          'workspace:mode:approval',
+      );
+
+      assert.equal(
+        await page.getByTestId('mobile-approval-sheet').count(),
+        0,
+        'the legacy mobile sheet must not mask the canonical Workbench owner',
+      );
+      await workbench.waitFor({ state: 'visible' });
+      await page.getByTestId('approval-panel').waitFor();
+      const box = await host.boundingBox();
+      assert.ok(box && box.width > 0 && box.height > 0, 'the canonical mobile Workbench must occupy the viewport');
+      assert.equal(await workbench.getAttribute('data-active-surface'), 'workspace:mode:approval');
+      await page.screenshot({
+        path: path.join(EVIDENCE_DIR, '09-mobile-approval-canonical-workbench.png'),
+        fullPage: true,
+      });
+    } finally {
+      await context.close();
+    }
+  },
+);
+
 test('Evolution Program temporarily owns the main area and returns the same owner instance to its rail', async () => {
   const evolutionSurfaceId = `evolution-program:${EVOLUTION_PROGRAM_ID}`;
   const context = await browser.newContext({ viewport: { width: 1440, height: 760 } });
@@ -672,7 +955,8 @@ test('Evolution Program temporarily owns the main area and returns the same owne
     const programRow = page.getByTestId(`capability-evolution-program-${EVOLUTION_PROGRAM_ID}`);
     await programRow.waitFor();
     await programRow.click();
-    await page.getByRole('button', { name: '管理', exact: true }).click();
+    await page.getByRole('button', { name: '展开阅读 →', exact: true }).click();
+    await page.getByRole('button', { name: '← 返回侧栏', exact: true }).click();
 
     const workbench = page.getByTestId('f307-experience-workbench');
     const programOwner = page.getByTestId('evolution-program-surface');
@@ -720,7 +1004,11 @@ test('Evolution Program temporarily owns the main area and returns the same owne
       true,
       'promotion must preserve the exact Program owner instance',
     );
-    assert.equal(await programOwner.evaluate((node) => node.scrollTop), scrollBefore);
+    assert.equal(await programOwner.getAttribute('data-reading-view'), 'judgment');
+    const reviewScroll = await programOwner.evaluate((node) => {
+      node.scrollTop = Math.min(120, node.scrollHeight - node.clientHeight);
+      return node.scrollTop;
+    });
     await page.screenshot({ path: path.join(EVIDENCE_DIR, '06-evolution-program-main-area.png'), fullPage: true });
 
     await page.getByTestId('f307-close-workspace').click();
@@ -750,6 +1038,11 @@ test('Evolution Program temporarily owns the main area and returns the same owne
       () =>
         document.querySelector('[data-testid="contextual-workspace-host"]')?.getAttribute('data-presentation') ===
         'main-area-attention',
+    );
+    assert.equal(
+      await programOwner.evaluate((node) => node.scrollTop),
+      reviewScroll,
+      'reopening judgment must restore its own reading position independently of the rail detail',
     );
     await page.getByTestId('f307-close-evolution-program').click();
     await page.waitForFunction(
@@ -1099,3 +1392,118 @@ test('the real Thread shell resolves invalid persisted surfaces to canonical Hom
     await context.close();
   }
 });
+
+test(
+  'F310 exact prepared publication returns to the same Schedule/Needs Me item at desktop and 390px',
+  { timeout: 180_000 },
+  async () => {
+    for (const width of [1440, 390]) {
+      for (const projection of ['product-schedule', 'needs-me']) {
+        const context = await browser.newContext({ viewport: { width, height: 900 } });
+        await context.addInitScript(() => window.localStorage.clear());
+        const page = await context.newPage();
+        const ownerRead = structuredClone(fixedFixture('/api/entrusted-work/needs-me').ownerReads[0]);
+        const artifactRef = '/uploads/f310-prepared-review.md';
+        const artifact = {
+          type: 'file',
+          name: 'Prepared review.md',
+          catId: 'codex-sol',
+          createdAt: 700,
+          sourceMessageId: 'publication-f310',
+          url: artifactRef,
+          threadId: THREAD_ID,
+          threadTitle: 'Source work',
+        };
+        ownerRead.preparedArtifact = {
+          artifactRef,
+          artifactRevision: '700',
+          completenessRef: `message:${THREAD_ID}:publication-f310#available:700`,
+          previewRef: `message:${THREAD_ID}:publication-f310#preview:700`,
+          openInWorkspaceRef: `workspace:artifact:${THREAD_ID}:700:${artifactRef}`,
+        };
+        ownerRead.timeRefs = [
+          {
+            role: 'review_by',
+            subjectRef: ownerRead.envelope.subjectRef,
+            ownerRef: ownerRead.envelope.ownerRef,
+            revision: 4,
+            value: Date.now() + 86_400_000,
+          },
+        ];
+        let artifactRevision = 700;
+        let releaseCatalog;
+        const catalogReady = new Promise((resolve) => {
+          releaseCatalog = resolve;
+        });
+        await page.route('**/api/**', async (route) => {
+          const url = new URL(route.request().url());
+          if (url.pathname === '/api/entrusted-work/owner-reads' || url.pathname === '/api/entrusted-work/needs-me') {
+            return json(route, { ownerReads: [ownerRead] });
+          }
+          if (url.pathname === '/api/artifacts') await catalogReady;
+          if (url.pathname === '/api/artifacts' || url.pathname === `/api/threads/${THREAD_ID}/artifacts`) {
+            return json(route, { threadId: THREAD_ID, artifacts: [{ ...artifact, createdAt: artifactRevision }] });
+          }
+          const result = realSurfaceApiResponse(route.request(), false);
+          return json(route, result.body, result.status);
+        });
+        await page.route('**/uploads/f310-prepared-review.md', (route) =>
+          route.fulfill({
+            status: 200,
+            contentType: 'text/markdown',
+            body: '# Browser regression fixture\nPrepared source publication.',
+          }),
+        );
+        try {
+          await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+          await ensureWorkspaceOpen(page);
+          await page.getByTestId(`workspace-launcher-${projection}`).click();
+          const item = page.getByTestId(`${projection}-item`).first();
+          await item.waitFor();
+          const itemRef = await item.getAttribute('data-item-ref');
+          const openId = projection === 'needs-me' ? 'needs-me-open-artifact' : 'product-schedule-open-artifact';
+          assert.equal(await page.getByTestId(openId).first().isDisabled(), true);
+          assert.equal(await page.getByTestId(openId).first().getAttribute('aria-busy'), 'true');
+          assert.equal(await page.getByRole('alert').filter({ hasText: '这份内容已更新或暂时不可用' }).count(), 0);
+          releaseCatalog();
+          await page.getByTestId(openId).first().click();
+          await page.waitForFunction(() =>
+            document
+              .querySelector('[data-testid="f307-experience-workbench"]')
+              ?.getAttribute('data-active-surface')
+              ?.startsWith('artifact:'),
+          );
+          assert.equal(await page.getByTestId('f307-owner-unavailable').count(), 0);
+          await page.getByTestId('f307-close-artifact').first().click();
+          await page.getByTestId(`${projection}-panel`).first().waitFor();
+          const returned = page.getByTestId(`${projection}-item`).first();
+          assert.equal(await returned.getAttribute('data-item-ref'), itemRef);
+          assert.equal(await returned.getAttribute('data-selected'), 'true');
+          const panel = page.getByTestId(`${projection}-panel`).first();
+          assert.equal(await panel.evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
+          // Refresh the global Artifact owner into a newer publication while this read stays pinned.
+          artifactRevision = 701;
+          await page.reload({ waitUntil: 'domcontentloaded' });
+          await ensureWorkspaceOpen(page);
+          await page.getByTestId(`workspace-launcher-${projection}`).click();
+          await page.getByTestId(openId).first().click();
+          const unavailable = page.getByRole('alert').filter({ hasText: '这份内容已更新或暂时不可用' });
+          await unavailable.waitFor();
+          assert.equal(
+            await unavailable.evaluate((node) => node.getBoundingClientRect().height < 110),
+            true,
+            'unavailable feedback must stay compact instead of pushing the judgment out of view',
+          );
+          assert.equal(
+            await page.getByTestId('f307-experience-workbench').getAttribute('data-active-surface'),
+            `workspace:mode:${projection}`,
+          );
+          await page.screenshot({ path: path.join(EVIDENCE_DIR, `f310-${projection}-${width}.png`), fullPage: true });
+          process.stdout.write(`F310 browser fixture PASS ${width}px ${projection} at ${baseUrl}\n`);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  },
+);

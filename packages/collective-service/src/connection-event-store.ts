@@ -17,8 +17,10 @@ import {
   requireConnection,
 } from './connection-authority.js';
 import { CollectiveServiceError } from './errors.js';
+import { resolveEventAddress } from './event-location.js';
 import { appendEvent } from './event-log.js';
 import { requireHumanAuthBinding, requireMembership, requireSteward, resolveSession } from './identity-store.js';
+import { requireParticipant } from './participation-store.js';
 import {
   createSecret,
   createStableId,
@@ -155,6 +157,32 @@ export class CollectiveConnectionEventStore {
       const connection = requireConnection(state, endpointCredential, input.connectionId);
       assertConnectionCoordinates(state, connection, input);
       const authorizedHuman = requireAuthorizedHuman(state, connection);
+      if (input.participationRevision !== undefined) {
+        const address = resolveEventAddress(state.events[input.collectiveId] ?? [], input);
+        const participant = requireParticipant(state, {
+          ...input,
+          catId: input.agent.catId,
+          humanId: authorizedHuman.humanId,
+          channelId: address.location.channelId,
+          participationRevision: input.participationRevision,
+        });
+        const source = (state.events[input.collectiveId] ?? []).find((event) => event.eventId === input.replyToEventId);
+        if (
+          input.agent.agentId !== input.agent.catId ||
+          participant.displayName !== input.agent.displayName ||
+          source?.recipient?.kind !== 'agent' ||
+          source.recipient.connectionId !== connection.connectionId ||
+          source.recipient.agentId !== input.agent.catId ||
+          source.recipient.participationRevision !== input.participationRevision ||
+          address.recipient.kind !== 'channel'
+        ) {
+          throw new CollectiveServiceError(
+            'PARTICIPATION_REVOKED',
+            'Reply is not bound to the current participant source',
+            403,
+          );
+        }
+      }
       return appendEvent(state, {
         coordinates: input,
         actorScope: `connection:${connection.connectionId}`,

@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
-
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ClientSnapshot,
   ClientTarget,
   CollectiveEventEnvelope,
+  CollectiveParticipant,
   InviteResult,
   PairingIntentResult,
 } from './client-types.js';
 import { phaseForHuman } from './human-auth-flow.js';
+import { acknowledgeHumanSend, collectiveClientNamespace, prepareHumanSend } from './human-send-custody.js';
 import {
   announcePairingAvailability,
   resolvePairingAuthority,
@@ -33,6 +34,11 @@ const initialSnapshot: ClientSnapshot = {
 
 export function useCollectiveClient() {
   const [snapshot, setSnapshot] = useState<ClientSnapshot>(initialSnapshot);
+  const currentNamespace = useRef<string>();
+  currentNamespace.current = collectiveClientNamespace(snapshot);
+  const refreshGeneration = useRef(0);
+  const refreshAbort = useRef<AbortController>();
+  const sending = useRef<{ fingerprint: string; promise: Promise<void> }>();
   const { token, request, loadMe, invitationMode, bootstrap, authenticate, configureProvider } = useHumanAuthSession(
     snapshot,
     setSnapshot,
@@ -41,82 +47,129 @@ export function useCollectiveClient() {
   const refreshEvents = useCallback(async () => {
     const collective = snapshot.collective;
     if (!collective || !token.current) return;
+    const namespace = collectiveClientNamespace(snapshot);
+    const generation = ++refreshGeneration.current;
+    refreshAbort.current?.abort();
+    const abort = new AbortController();
+    refreshAbort.current = abort;
     try {
-      const result = await request<{ readonly events: readonly CollectiveEventEnvelope[] }>(
-        `/api/events/human?collectiveId=${encodeURIComponent(collective.collectiveId)}`,
-      );
+      const [result, declared] = await Promise.all([
+        request<{ readonly events: readonly CollectiveEventEnvelope[] }>(
+          `/api/events/human?collectiveId=${encodeURIComponent(collective.collectiveId)}`,
+          { signal: abort.signal },
+        ),
+        request<{ readonly participants: readonly CollectiveParticipant[] }>(
+          `/api/participants?collectiveId=${encodeURIComponent(collective.collectiveId)}`,
+          { signal: abort.signal },
+        ),
+      ]);
+      if (abort.signal.aborted || namespace !== currentNamespace.current || generation !== refreshGeneration.current)
+        return;
       setSnapshot((current) => ({
         ...current,
         events: result.events,
+        participants: declared.participants,
         connection: 'online',
         error: undefined,
       }));
     } catch (error) {
+      if (abort.signal.aborted || namespace !== currentNamespace.current || generation !== refreshGeneration.current)
+        return;
       setSnapshot((current) => ({
         ...current,
         connection: 'offline',
         error: collectiveClientErrorMessage(error),
       }));
     }
-  }, [request, snapshot.collective, token]);
+  }, [request, snapshot.collective, snapshot.meta, snapshot.me, token]);
 
   useEffect(() => {
     if (snapshot.phase !== 'ready') return;
     void refreshEvents();
     const interval = window.setInterval(() => void refreshEvents(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      refreshAbort.current?.abort();
+    };
   }, [refreshEvents, snapshot.phase]);
 
   const createCollective = useCallback(
     async (name: string) => {
-      await request('/api/collectives', { method: 'POST', body: JSON.stringify({ name }) });
+      const created = await request<{ collectiveId: string }>('/api/collectives', {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
       const me = await loadMe();
+      const collective = me.collectives.find((item) => item.collectiveId === created.collectiveId);
+      if (!collective) throw new Error('新建的 Collective 暂不可用');
+      const url = new URL(location.href);
+      url.searchParams.set('collectiveId', created.collectiveId);
+      history.replaceState(null, '', url);
       setSnapshot((current) => ({
         ...current,
         phase: phaseForHuman(me),
         me,
-        collective: me.collectives[0],
+        collective,
       }));
     },
     [loadMe, request],
   );
 
   const sendMessage = useCallback(
-    async (body: string, destination: ClientTarget) => {
+    (body: string, destination: ClientTarget) => {
       const { collective, meta } = snapshot;
-      if (!collective || !meta) return;
-      setSnapshot((current) => ({
-        ...current,
-        delivery: { kind: 'requesting', label: '正在送往共同现场…' },
-      }));
-      try {
-        await request('/api/events/human', {
-          method: 'POST',
-          body: JSON.stringify({
-            serviceInstanceId: meta.serviceInstanceId,
-            collectiveId: collective.collectiveId,
-            clientEventId: crypto.randomUUID(),
-            target: destination.target,
-            ...(destination.replyToEventId ? { replyToEventId: destination.replyToEventId } : {}),
-            body,
-          }),
-        });
+      const namespace = collectiveClientNamespace(snapshot);
+      if (!collective || !meta || !namespace) return Promise.reject(new Error('请先登录并选择 Collective'));
+      const fingerprint = JSON.stringify([namespace, body, destination]);
+      if (sending.current)
+        return sending.current.fingerprint === fingerprint
+          ? sending.current.promise
+          : Promise.reject(new Error('上一条消息仍在送达，请稍后再发。'));
+      const operation = prepareHumanSend(localStorage, namespace, {
+        serviceInstanceId: meta.serviceInstanceId,
+        collectiveId: collective.collectiveId,
+        ...(destination.target ? { target: destination.target } : {}),
+        ...(destination.location ? { location: destination.location } : {}),
+        ...(destination.recipient ? { recipient: destination.recipient } : {}),
+        ...(destination.replyToEventId ? { replyToEventId: destination.replyToEventId } : {}),
+        ...(destination.workRequest ? { workRequest: destination.workRequest } : {}),
+        body,
+      });
+      const send = async () => {
         setSnapshot((current) => ({
           ...current,
-          delivery: {
-            kind: 'accepted',
-            label: '已进入共同现场；这不代表某只猫已经接住',
-          },
+          delivery: { kind: 'requesting', label: '正在送往共同现场…' },
         }));
-        await refreshEvents();
-      } catch (error) {
-        setSnapshot((current) => ({
-          ...current,
-          delivery: { kind: 'failed', label: '尚未送达，可以重试' },
-          error: collectiveClientErrorMessage(error),
-        }));
-        throw error;
-      }
+        try {
+          await request('/api/events/human', {
+            method: 'POST',
+            body: JSON.stringify(operation),
+          });
+          acknowledgeHumanSend(localStorage, namespace, operation.clientEventId);
+          if (namespace !== currentNamespace.current) return;
+          setSnapshot((current) => ({
+            ...current,
+            delivery: {
+              kind: 'accepted',
+              label: '已进入共同现场；这不代表某只猫已经接住',
+            },
+          }));
+          await refreshEvents();
+        } catch (error) {
+          if (namespace !== currentNamespace.current) throw error;
+          setSnapshot((current) => ({
+            ...current,
+            delivery: { kind: 'failed', label: '尚未确认送达，可以重试' },
+            error: collectiveClientErrorMessage(error),
+          }));
+          throw error;
+        }
+      };
+      const promise = send().finally(() => {
+        sending.current = undefined;
+      });
+      sending.current = { fingerprint, promise };
+      return promise;
     },
     [refreshEvents, request, snapshot],
   );
@@ -130,6 +183,28 @@ export function useCollectiveClient() {
     const inviteUrl = `${location.origin}/#invite=${encodeURIComponent(result.inviteToken)}`;
     setSnapshot((current) => ({ ...current, notice: inviteUrl }));
   }, [request, snapshot.collective]);
+
+  const selectCollective = useCallback(
+    (collectiveId: string) => {
+      const collective = snapshot.me?.collectives.find((item) => item.collectiveId === collectiveId);
+      if (!collective) return;
+      ++refreshGeneration.current;
+      refreshAbort.current?.abort();
+      currentNamespace.current = collectiveClientNamespace({ ...snapshot, collective });
+      const url = new URL(location.href);
+      url.searchParams.set('collectiveId', collectiveId);
+      history.replaceState(null, '', url);
+      setSnapshot((current) => ({
+        ...current,
+        collective,
+        events: [],
+        participants: [],
+        error: undefined,
+        delivery: { kind: 'idle' },
+      }));
+    },
+    [snapshot],
+  );
 
   const pairHost = useCallback(async () => {
     const hostOrigin = new URLSearchParams(location.search).get('hostOrigin');
@@ -213,5 +288,6 @@ export function useCollectiveClient() {
     sendMessage,
     createInvite,
     pairHost,
+    selectCollective,
   };
 }

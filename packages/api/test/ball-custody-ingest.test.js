@@ -147,6 +147,25 @@ describe('ball-custody-events — PR3 source builders', () => {
     assert.strictEqual(buildTaskDoneEvent({ taskId: 'task1', at: 4000 }).sourceEventId, 'task:task1:done');
   });
 
+  it('entrusted status IDs are stable per owner revision and distinct from legacy timestamps', () => {
+    for (const build of [
+      (revision, at) =>
+        buildTaskBlockedEvent({
+          taskId: 'task1',
+          threadId: 'thr1',
+          blockedSinceAt: at,
+          entrustedWorkRevision: revision,
+        }),
+      (revision, at) => buildTaskUnblockedEvent({ taskId: 'task1', at, entrustedWorkRevision: revision }),
+    ]) {
+      const first = build(2, 1000);
+      assert.equal(build(2, 2000).sourceEventId, first.sourceEventId);
+      assert.notEqual(build(3, 1000).sourceEventId, first.sourceEventId);
+      assert.notEqual(build(undefined, 2).sourceEventId, first.sourceEventId);
+      assert.equal(first.at, 1000);
+    }
+  });
+
   it('构造 invocation lifecycle events（lastScanAt 保留在 died payload）', () => {
     const started = buildInvocationStartedEvent({ invocationId: 'inv1', threadId: 'thr1', catId: 'codex', at: 1000 });
     assert.strictEqual(started.sourceEventId, 'inv:inv1:started');

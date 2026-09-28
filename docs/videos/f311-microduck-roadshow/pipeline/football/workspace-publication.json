@@ -1,0 +1,413 @@
+{
+  "schemaVersion": 1,
+  "ownerFeatureId": "microduck-owner",
+  "objectStateRef": "simulator:walking",
+  "resourceCommit": "a9b28fa76235f5635bd9b2fd3a974a78afafc732",
+  "updatedAt": "2026-09-07T22:39:35.000Z",
+  "groups": [
+    {
+      "groupStateRef": "preparation-group:football-public-archive",
+      "title": "足球公开归档（新项目尚未建制）",
+      "items": [
+        {
+          "materialStateRef": "repo-material:football:overview",
+          "title": "足球环境、采集与录像总览",
+          "summary": "main 已保存 44 场景、38,644 条状态、20 段真实录像；Workspace 精选其中 14 段。它们是可复查的公开准备材料，不是 simulator:football 已发布、独立验证或采用。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T22:39:35.000Z",
+            "detail": "公开环境、采集与回放材料已归档；v4 局部改善与左侧反例已追加。"
+          },
+          "facts": [
+            {
+              "label": "环境",
+              "value": "官方 walking / standing / 左右 kick ONNX，真实 MuJoCo + BAM M6；模型与场景按 hash 固定"
+            },
+            {
+              "label": "采集",
+              "value": "50 Hz 控制、200 Hz 物理与接触采样；保存球、机器人、关节、61 维观测与 14 维动作"
+            },
+            {
+              "label": "诊断",
+              "value": "全部成功和失败均保留；无滚动摩擦、仿真真值球位与固定镜头限制没有被隐藏"
+            },
+            {
+              "label": "录像",
+              "value": "20 段同轮 MuJoCo 原始 MP4；Workspace 精选与 v0/v1/v2/v3/26 秒补充及 v4 对应的 14 段"
+            },
+            {
+              "label": "尚缺",
+              "value": "operator 足球目标选择、owner 发布 simulator:football@exact revision、新 Program、独立验证与采用决定"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "足球准备总览",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/README.md",
+              "sha256": "39ad109c8872ede8a959e19ee8dba205de8a1ac96f44a680e52129c28c53db49"
+            },
+            {
+              "kind": "document",
+              "label": "十段回放说明",
+              "path": "docs/videos/f311-microduck-roadshow/briefing/README.md",
+              "sha256": "35258cae00aa4be8f560d1fa314091bbbe9a598c25ddd6ce216d3eeb446cd6e8"
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:diagnostics",
+          "title": "起步、侧移与转向诊断",
+          "summary": "单变量诊断解释了版本变化：0.20 m/s 未启动步态、0.25 m/s 能前进；纯侧移和原地转向不能持续，保持前进时可以走弧线。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "三组边界诊断已完成并公开。"
+          },
+          "facts": [
+            {
+              "label": "起步",
+              "value": "同一 reset 下速度命令从 0.20 调到 0.25 m/s 后恢复前进；先站立与有无推扰不是静止根因"
+            },
+            {
+              "label": "侧移",
+              "value": "±0.25 m/s 仍只有毫米级瞬态，不能把纵向 floor 复制到偏侧收尾"
+            },
+            {
+              "label": "转向",
+              "value": "原地 yaw 只短暂响应；保持 0.25 m/s 前进并加 yaw 才能持续转弯"
+            },
+            {
+              "label": "取舍",
+              "value": "因此 v2 先修纵向起步，v3 再改为保持步态的前进弧线路径"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "六项起步对照",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-walking-startup/README.md",
+              "sha256": "3c73b91c31d26e4a8890f6553dde62074035f8d530e1902a52e427dd74738d19"
+            },
+            {
+              "kind": "document",
+              "label": "四项纯侧移诊断",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-lateral-boundary/README.md",
+              "sha256": "a7b1b6ecb4182f30e59b2f2d204ca2df39cd2a6b7367eee326fee3575e7c5d24"
+            },
+            {
+              "kind": "document",
+              "label": "两项转向诊断",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-yaw-boundary/README.md",
+              "sha256": "4b5d4879f542b1e533c94a575519129b9896f4f9df38161e31d8ea1a9e82f68f"
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v0",
+          "title": "v0 · 原地踢球基线",
+          "summary": "官方 kick 能触到近球，但远球完全未触球；0.5 秒与 3 秒球轨迹相同，没有测得时长收益。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "原地踢球公开基线已完成。"
+          },
+          "facts": [
+            {
+              "label": "改了什么",
+              "value": "没有接近控制；只验证 standing / kick-left / kick-right、球状态和防瞬移采集"
+            },
+            {
+              "label": "为什么没停在这里",
+              "value": "只能原地踢近球，远球不动；缺走近与对齐，且没有足球目标或独立样本"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v0 完整结果",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-fixed-kicks/README.md",
+              "sha256": "15f4d7b2ec60851144d24cc3bbac638cc7f6cb0425a7ce011d5752f561d34162"
+            },
+            {
+              "kind": "video",
+              "label": "v0 · 近球真实回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-fixed-kicks/left-manifest.mp4",
+              "sha256": "82b977dc26d124061c5dd44c68c329861eb34aff3ccd2dc26edc69f828243aeb",
+              "contentType": "video/mp4",
+              "durationSeconds": 8.1
+            },
+            {
+              "kind": "video",
+              "label": "v0 · 远球未触球回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-fixed-kicks/left-far.mp4",
+              "sha256": "d4d20c7c47964b64caf706c36b50a0b0b25b3f8f5efaf4e5e073794c8f1c72a3",
+              "contentType": "video/mp4",
+              "durationSeconds": 8.1
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v1",
+          "title": "v1 · 走近命令尚未起步",
+          "summary": "加入球位反馈、接近、停稳和单次 kick；近球完成，四个远球持续发命令却没有走到。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "v1 公开运行已完成，结果未解决远球接近。"
+          },
+          "facts": [
+            {
+              "label": "改了什么",
+              "value": "用 MuJoCo 真值球位闭环生成有界 walking 指令，到脚前窗口后停稳再踢"
+            },
+            {
+              "label": "为什么继续改",
+              "value": "纵向命令最高 0.20 m/s 且接近时继续衰减，落在固定模型未启动步态的区间"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v1 完整结果",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v1/README.md",
+              "sha256": "6a51cccb98c8e7844a297926c52530b712674429dc10506768963af4dd1643a5"
+            },
+            {
+              "kind": "video",
+              "label": "v1 · 近球停稳后踢回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v1/approach-left-near.mp4",
+              "sha256": "e64156547a9e0b85de3cf2c8619ed022a5d050c5d33c900dd63abf8dd0ad22c3",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v1 · 远球未走到回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v1/approach-left-straight.mp4",
+              "sha256": "4495275afc28ffef076c949e18d969776c43d78546cb1954ca35a787705265e1",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v2",
+          "title": "v2 · 直线远球恢复",
+          "summary": "只把前进命令保持在 0.25 m/s，直线远球于 5.21 / 5.225 秒触球；偏侧收尾仍因纯侧移停住。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "v2 公开运行已完成，直线恢复而偏侧未完成。"
+          },
+          "facts": [
+            {
+              "label": "改了什么",
+              "value": "保留模型、场景和控制链，只提高纵向最低非零命令"
+            },
+            {
+              "label": "为什么继续改",
+              "value": "正前方场景恢复，但偏侧球仍差 5.5 / 7.4 cm；纯侧移诊断证明继续加 lateral floor 不成立"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v2 完整结果",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v2/README.md",
+              "sha256": "388711447ecb55742fb27c499c553b4c326343a670adc0b7bad4f37a46f5b471"
+            },
+            {
+              "kind": "video",
+              "label": "v2 · 直线远球触球回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v2/approach-left-straight.mp4",
+              "sha256": "70aae6c9565521989956795cda017b905322f50b2d9c60c5742f92da3b68a901",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v2 · 偏侧仍停住回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v2/approach-left-far.mp4",
+              "sha256": "2d45a5581573c0b2cb2256d967f4a31d3d3ac39a7f0f98a2bf0028b7806a6b30",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v3",
+          "title": "v3 · 前进弧线路径",
+          "summary": "保持前进步态并用朝向反馈走 CSC 弧线；直线远球约 4.7 秒触球，两个偏侧场景在原 20 秒内仍未完成。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "v3 原 20 秒公开运行已结束；偏侧场景未完成。"
+          },
+          "facts": [
+            {
+              "label": "改了什么",
+              "value": "把偏侧收尾从纯横移改为持续前进的弧线—直线—弧线路径"
+            },
+            {
+              "label": "为什么仍未定案",
+              "value": "偏侧路径已接近准备位但超过 20 秒；这是公开仿真准备，不是球门命中、泛化或采用"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v3 原八场景",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3/README.md",
+              "sha256": "8cd04a31792bff2329abb59ceeb455c84e1f0281463e801d4e19a28855491440"
+            },
+            {
+              "kind": "video",
+              "label": "v3 · 直线远球触球回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3/approach-left-straight.mp4",
+              "sha256": "e03594fa2c24a3e67549a325e819037995060e022ce7d25ead018a2c2470fbdf",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v3 · 偏侧 20 秒未完成回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3/approach-left-far.mp4",
+              "sha256": "d45b35c94609c77bbb01c8a7cacf16aea958d661a9d99892eb4c8a90e4f5bc85",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v3-extended",
+          "title": "v3 时间补充 · 同一控制器的 26 秒条件",
+          "summary": "只把两个偏侧场景延长到 26 秒，左右于 22.35 / 21.365 秒触球；前 20 秒状态逐条相同。它不是第五个控制器版本，也不改判 v3 原 20 秒未完成。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T19:31:35.000Z",
+            "detail": "同一 v3 控制器的 26 秒公开补充已完成。"
+          },
+          "facts": [
+            {
+              "label": "唯一变化",
+              "value": "控制器、模型、物理、球位和 reset 不变；实验时长 20→26 秒"
+            },
+            {
+              "label": "取舍",
+              "value": "证明固定控制链在更长预算内能完成偏侧接近，但暴露约 21–22 秒时间代价"
+            },
+            {
+              "label": "不能推出",
+              "value": "不是正式候选、独立验证、球门得分、真实机器人表现或采用结果"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v3 时间补充结果",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3-extended/README.md",
+              "sha256": "2fbb1c265061f4326e049fefa52bedd5df28a19f6786cedb5fece5e2282506bf"
+            },
+            {
+              "kind": "video",
+              "label": "v3 · 左偏远球 26 秒回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3-extended/approach-left-far.mp4",
+              "sha256": "0c69db6c19035ad9cb2e404cacf538019d538174fc0e27de61bc9492dbb2f30f",
+              "contentType": "video/mp4",
+              "durationSeconds": 26.1
+            },
+            {
+              "kind": "video",
+              "label": "v3 · 右偏远球 26 秒回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v3-extended/approach-right-far.mp4",
+              "sha256": "6430e6662a94fd0191da2fa5aef0806888fcc7416f3041308f8ae7c631679ae8",
+              "contentType": "video/mp4",
+              "durationSeconds": 26.1
+            }
+          ]
+        },
+        {
+          "materialStateRef": "repo-material:football:v4-radius-018",
+          "title": "v4 · 缩短弧线，右侧踢中、左侧踢空",
+          "summary": "只把弧线半径从 0.22 m 缩到 0.18 m，左右规划路径各缩短约 0.25 m；右偏远球 18.905 秒触球，左偏远球 18.9 秒踢腿但全程无接触。公开迭代已完成，但双侧改善假设不满足，配置不采用。",
+          "status": "available",
+          "activity": {
+            "state": "completed",
+            "updatedAt": "2026-09-07T22:39:35.000Z",
+            "detail": "v4 八场景公开运行与四段同场回放已归档；整体接受条件未满足。"
+          },
+          "facts": [
+            {
+              "label": "唯一变化",
+              "value": "approachController.arc.radiusM 从 0.22 m 调到 0.18 m；八场景、模型、物理、速度上限、停稳和 kick 保持不变"
+            },
+            {
+              "label": "右侧结果",
+              "value": "右偏远球在 18.905 秒由对应 ankle 接触，20 秒内完成触球"
+            },
+            {
+              "label": "左侧反例",
+              "value": "左偏远球 18.9 秒触发 kick，但整场机器人与球没有接触；失败和完整 trace 均保留"
+            },
+            {
+              "label": "整体判定",
+              "value": "双侧改善假设不满足；不采用。右侧局部改善只作为后续准备材料"
+            },
+            {
+              "label": "不能推出",
+              "value": "不是正式 candidate/current、独立验证、球门得分、真实机器人表现、Program 建制或采用结果"
+            }
+          ],
+          "resources": [
+            {
+              "kind": "document",
+              "label": "v4 完整结果与失败分析",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/README.md",
+              "sha256": "bee953a90f20291a6b5e03a7a9648078432873304dd09453abfcb437508f622b"
+            },
+            {
+              "kind": "video",
+              "label": "v4 · 左偏远球踢空回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/approach-left-far.mp4",
+              "sha256": "d0cc70e7df0efb9de009a876ed6e5bcccdc4481dd9cd5db63fdc003c84d003ce",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v4 · 右偏远球踢中回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/approach-right-far.mp4",
+              "sha256": "2838bf655ce702d4fca3de5ec5b390efd81b4ba8a8ebb75802ba06a565eccf96",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v4 · 左直线回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/approach-left-straight.mp4",
+              "sha256": "27bc3dbdaeb15b23d8e032990ebc761b3ded4d924c91b4a236ba928d9668735d",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            },
+            {
+              "kind": "video",
+              "label": "v4 · 右直线回放",
+              "path": "docs/videos/f311-microduck-roadshow/pipeline/football/evidence/20260907-approach-v4/approach-right-straight.mp4",
+              "sha256": "dd820f2a6efff121712b4fc33fe781637f439fd9ea1b306d0a8c4b3672595030",
+              "contentType": "video/mp4",
+              "durationSeconds": 20.1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

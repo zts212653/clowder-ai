@@ -22,6 +22,8 @@ export interface RoutingDispatchTerminalEvidence {
   catId: string;
   status: 'succeeded' | 'failed' | 'canceled' | 'interrupted';
   failureClass?: RoutingDispatchFailureClass;
+  /** Time the runtime observed the failure, before delayed terminal persistence. */
+  failureObservedAt?: number;
   preflightDecision: RoutingPreflightDecisionV1;
 }
 
@@ -48,10 +50,23 @@ export const routingDispatchTerminalEvidenceSchema = z
     catId: ownerId,
     status: z.enum(['succeeded', 'failed', 'canceled', 'interrupted']),
     failureClass: failureClassSchema.optional(),
+    failureObservedAt: z.number().int().finite().nonnegative().optional(),
     preflightDecision: routingPreflightDecisionV1Schema,
   })
   .strict()
   .superRefine((evidence, ctx) => {
+    if (
+      evidence.failureObservedAt !== undefined &&
+      (evidence.status !== 'failed' ||
+        evidence.failureObservedAt < evidence.preflightDecision.observedAt ||
+        evidence.failureObservedAt > evidence.observedAt)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failureObservedAt'],
+        message: 'failure observation must be within the failed dispatch interval',
+      });
+    }
     if (evidence.status !== 'failed' && evidence.failureClass !== undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

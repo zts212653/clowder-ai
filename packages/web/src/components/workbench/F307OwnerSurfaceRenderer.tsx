@@ -3,13 +3,11 @@
 import { type ReactNode, useCallback } from 'react';
 import { ApprovalPanel } from '@/components/ApprovalPanel';
 import { ArtifactsPanel } from '@/components/ArtifactsPanel';
-import { ArtifactDetailView } from '@/components/artifacts/ArtifactDetailView';
 import { CommunityPanel } from '@/components/CommunityPanel';
 import { CapabilityEvolutionWorkspace } from '@/components/capability-evolution/CapabilityEvolutionWorkspace';
 import { EvolutionProgramSurface } from '@/components/capability-evolution/EvolutionProgramSurface';
+import { ArtifactReviewSurface } from '@/components/content-review/ArtifactReviewSurface';
 import { EvalWorkspacePanel } from '@/components/eval-workspace/EvalWorkspacePanel';
-import { NeedsMePanel } from '@/components/growing/NeedsMePanel';
-import { type PreparedArtifactCoordinate, ProductSchedulePanel } from '@/components/growing/ProductSchedulePanel';
 import { RecallFeed } from '@/components/memory/RecallFeed';
 import { TeamWorkspacePanel } from '@/components/routing-context/TeamWorkspacePanel';
 import { TaskBoardPanel } from '@/components/TaskBoardPanel';
@@ -19,81 +17,51 @@ import { ChangesPanel } from '@/components/workspace/ChangesPanel';
 import { GitPanel } from '@/components/workspace/GitPanel';
 import { SchedulePanel } from '@/components/workspace/SchedulePanel';
 import { TerminalTab } from '@/components/workspace/TerminalTab';
+import { ThreadChatLink } from '@/components/workspace/ThreadChatLink';
 import { TrajectoryPanel } from '@/components/workspace/trajectory/TrajectoryPanel';
-import { useGlobalArtifacts } from '@/hooks/useGlobalArtifacts';
-import { useThreadArtifacts } from '@/hooks/useThreadArtifacts';
-import { navigateToEntrustedWorkAction, resolveEntrustedWorkActionTarget } from '@/hooks/useWorkspaceNavigate';
 import { useChatStore } from '@/stores/chatStore';
-import { scrollToMessage } from '@/utils/scrollToMessage';
+import { resolveArtifactReviewTarget } from './artifact-review-surface';
 import {
   isCapabilityEvolutionWorkspaceSurface,
   resolveCapabilityEvolutionTargetThreadId,
 } from './capability-evolution-workspace-adapter';
+import { ContentEditorOwnerSurface } from './content-editor/ContentEditorOwnerSurface';
+import { useF307ExperienceWorkbenchStore } from './experience-workbench-store';
+import { F307ArtifactOwnerSurface } from './F307ArtifactOwnerSurface';
 import { F307FileOwnerSurface } from './F307FileOwnerSurface';
 import { F307FilesOwnerSurface } from './F307FilesOwnerSurface';
+import { F307OwnerUnavailable as OwnerUnavailable } from './F307OwnerUnavailable';
+import { NeedsMeOwnerSurface, ProductScheduleOwnerSurface } from './GrowingOwnerSurfaces';
 import {
-  artifactObjectId,
-  createApprovalActionSurface,
   createArtifactSurface,
   createBrowserSurface,
   createEvolutionProgramSurface,
-  createNeedsMeReturnSurface,
-  createProductScheduleReturnSurface,
   createTeamWorkspaceSurface,
   resolveAgentRunTarget,
   resolveApprovalActionTarget,
-  resolveArtifactTarget,
   resolveBrowserTarget,
   resolveChangesTarget,
+  resolveContentEditorTarget,
   resolveEvolutionProgramId,
-  resolveNeedsMeReturnTarget,
-  resolveProductScheduleReturnTarget,
   resolveTeamWorkspaceTarget,
   resolveTerminalWorktreeId,
   resolveWorkspaceDestinationTarget,
 } from './real-surface-adapters';
-
-function OwnerUnavailable({ message }: { message: string }) {
-  return (
-    <div className="grid h-full min-h-52 place-items-center p-6 text-center" data-testid="f307-owner-unavailable">
-      <div>
-        <p className="text-sm font-semibold text-cafe">这个对象目前无法恢复</p>
-        <p className="mt-1 max-w-sm text-xs leading-5 text-cafe-muted">{message}</p>
-      </div>
-    </div>
-  );
-}
-
-function ArtifactOwnerSurface({
-  surface,
-  onRequestDetach,
-}: {
-  surface: WorkspaceSurfaceDescriptor;
-  onRequestDetach: () => void;
-}) {
-  const target = resolveArtifactTarget(surface);
-  const { artifacts, loading, error } = useThreadArtifacts(target?.threadId);
-  const hostThreadId = useChatStore((state) => state.currentThreadId);
-  const hostWorktreeId = useChatStore((state) => state.workspaceWorktreeId);
-  if (!target) return <OwnerUnavailable message="Artifact descriptor 没有合法的 F232 owner 引用。" />;
-  if (loading) return <div className="p-5 text-xs text-cafe-muted">正在从原 Thread 恢复产物…</div>;
-  if (error) return <OwnerUnavailable message="F232 产物 owner 暂时不可用；Workbench 没有猜测或复制内容。" />;
-  const artifact = artifacts.find((candidate) => artifactObjectId(candidate) === target.artifactId);
-  if (!artifact) return <OwnerUnavailable message="原 owner 已找不到这个产物；其余 Workbench surface 保持可用。" />;
-  return (
-    <ArtifactDetailView
-      artifact={artifact}
-      worktreeId={target.threadId === hostThreadId ? hostWorktreeId : null}
-      onBack={onRequestDetach}
-      onJump={(messageId) => scrollToMessage(messageId)}
-    />
-  );
-}
+import { WorkspaceSurfaceVisibilityProvider } from './WorkspaceSurfaceVisibility';
 
 function AgentRunOwnerSurface({ surface }: { surface: WorkspaceSurfaceDescriptor }) {
   const target = resolveAgentRunTarget(surface);
-  if (!target) return <OwnerUnavailable message="Agent Run descriptor 没有合法的 F299 invocation 引用。" />;
-  return <TrajectoryPanel threadId={target.threadId} targetOverride={target} />;
+  if (!target?.threadId) return <OwnerUnavailable message="Agent Run descriptor 没有合法的 F299 invocation 引用。" />;
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 justify-end border-b border-cafe-subtle px-3 py-2">
+        <ThreadChatLink threadId={target.threadId} />
+      </div>
+      <div className="min-h-0 flex-1">
+        <TrajectoryPanel threadId={target.threadId} targetOverride={target} />
+      </div>
+    </div>
+  );
 }
 
 function TeamWorkspaceOwnerSurface({
@@ -109,94 +77,13 @@ function TeamWorkspaceOwnerSurface({
   return (
     <TeamWorkspacePanel
       subject={target.subject}
+      // Same owner-state key the descriptor uses, so one thread's reading posture
+      // never leaks into another's Team surface.
+      ownerKey={target.threadId ?? 'global'}
       onSubjectChange={(subject) => {
         setTeamWorkspaceSubject(subject);
         onRefreshSurface(createTeamWorkspaceSurface({ threadId: target.threadId ?? undefined, subject }));
       }}
-    />
-  );
-}
-
-function ProductScheduleOwnerSurface({
-  surface,
-  onOpenArtifactWithReturn,
-}: {
-  surface: WorkspaceSurfaceDescriptor;
-  onOpenArtifactWithReturn: (input: {
-    artifact: WorkspaceSurfaceDescriptor;
-    returnSurface: WorkspaceSurfaceDescriptor;
-  }) => void;
-}) {
-  const { artifacts } = useGlobalArtifacts(true);
-  const selectedItemRef = resolveProductScheduleReturnTarget(surface)?.itemRef ?? null;
-  const openArtifact = useCallback(
-    (coordinate: PreparedArtifactCoordinate, itemRef: string) => {
-      const matches = artifacts.filter((artifact) => (artifact.ref ?? artifact.url) === coordinate.artifactRef);
-      const artifact = matches.length === 1 ? matches[0] : undefined;
-      const returnSurface = createProductScheduleReturnSurface(surface, itemRef);
-      if (!artifact || !returnSurface) return;
-      onOpenArtifactWithReturn({
-        artifact: createArtifactSurface({ threadId: artifact.threadId, artifact }),
-        returnSurface,
-      });
-    },
-    [artifacts, onOpenArtifactWithReturn, surface],
-  );
-  return <ProductSchedulePanel selectedItemRef={selectedItemRef} onOpenArtifact={openArtifact} />;
-}
-
-function NeedsMeOwnerSurface({
-  surface,
-  onOpenSurface,
-  onOpenArtifactWithReturn,
-  onRefreshSurface,
-}: {
-  surface: WorkspaceSurfaceDescriptor;
-  onOpenSurface: (surface: WorkspaceSurfaceDescriptor) => void;
-  onOpenArtifactWithReturn: (input: {
-    artifact: WorkspaceSurfaceDescriptor;
-    returnSurface: WorkspaceSurfaceDescriptor;
-  }) => void;
-  onRefreshSurface: (surface: WorkspaceSurfaceDescriptor) => void;
-}) {
-  const { artifacts } = useGlobalArtifacts(true);
-  const selectedItemRef = resolveNeedsMeReturnTarget(surface)?.itemRef ?? null;
-  const returnSurface = useCallback((itemRef: string) => createNeedsMeReturnSurface(surface, itemRef), [surface]);
-  const openArtifact = useCallback(
-    (coordinate: PreparedArtifactCoordinate, itemRef: string) => {
-      const matches = artifacts.filter((artifact) => (artifact.ref ?? artifact.url) === coordinate.artifactRef);
-      const artifact = matches.length === 1 ? matches[0] : undefined;
-      const selectedSurface = returnSurface(itemRef);
-      if (!artifact || !selectedSurface) return;
-      onOpenArtifactWithReturn({
-        artifact: createArtifactSurface({ threadId: artifact.threadId, artifact }),
-        returnSurface: selectedSurface,
-      });
-    },
-    [artifacts, onOpenArtifactWithReturn, returnSurface],
-  );
-  const openAction = useCallback(
-    (actionRef: string, itemRef: string) => {
-      const selectedSurface = returnSurface(itemRef);
-      if (!selectedSurface) return;
-      const target = resolveEntrustedWorkActionTarget(actionRef);
-      if (!target) return;
-      onRefreshSurface(selectedSurface);
-      if (target.kind === 'message') {
-        navigateToEntrustedWorkAction(actionRef);
-        return;
-      }
-      const approvalSurface = createApprovalActionSurface(selectedSurface, target.proposalId);
-      if (approvalSurface) onOpenSurface(approvalSurface);
-    },
-    [onOpenSurface, onRefreshSurface, returnSurface],
-  );
-  return (
-    <NeedsMePanel
-      artifacts={artifacts}
-      selectedItemRef={selectedItemRef}
-      onOpenArtifact={openArtifact}
-      onOpenAction={openAction}
     />
   );
 }
@@ -277,7 +164,11 @@ function WorkspaceDestinationOwnerSurface({
     return (
       <CapabilityEvolutionWorkspace
         targetThreadId={resolveCapabilityEvolutionTargetThreadId(surface)}
-        onOpenProgram={(programId) => onOpenSurface(createEvolutionProgramSurface(programId))}
+        onOpenProgram={(programId, displayName, origin) => {
+          const programSurface = createEvolutionProgramSurface(programId, displayName, origin);
+          onOpenSurface(programSurface);
+          useF307ExperienceWorkbenchStore.getState().enterMainAreaAttention(programSurface.id);
+        }}
       />
     );
   }
@@ -306,15 +197,9 @@ function WorkspaceDestinationOwnerSurface({
   );
 }
 
-export function F307OwnerSurfaceRenderer({
-  surface,
-  statusSurface,
-  onOpenSurface,
-  onOpenArtifactWithReturn,
-  onRefreshSurface,
-  onRequestDetach,
-}: {
+interface F307OwnerSurfaceRendererProps {
   surface: WorkspaceSurfaceDescriptor;
+  surfaceVisible?: boolean;
   statusSurface?: ReactNode;
   onOpenSurface: (surface: WorkspaceSurfaceDescriptor) => void;
   onOpenArtifactWithReturn: (input: {
@@ -323,7 +208,16 @@ export function F307OwnerSurfaceRenderer({
   }) => void;
   onRefreshSurface: (surface: WorkspaceSurfaceDescriptor) => void;
   onRequestDetach: () => void;
-}) {
+}
+
+function F307OwnerSurfaceContent({
+  surface,
+  statusSurface,
+  onOpenSurface,
+  onOpenArtifactWithReturn,
+  onRefreshSurface,
+  onRequestDetach,
+}: Omit<F307OwnerSurfaceRendererProps, 'surfaceVisible'>) {
   const browserTarget = resolveBrowserTarget(surface);
   const handleBrowserNavigate = useCallback(
     (port: number, path: string) => {
@@ -335,6 +229,14 @@ export function F307OwnerSurfaceRenderer({
 
   if (surface.renderer === 'file-preview' || surface.renderer === 'code-editor') {
     return <F307FileOwnerSurface surface={surface} onRequestDetach={onRequestDetach} />;
+  }
+  if (surface.renderer === 'content-editor') {
+    const contentEditorTarget = resolveContentEditorTarget(surface);
+    return contentEditorTarget ? (
+      <ContentEditorOwnerSurface target={contentEditorTarget} />
+    ) : (
+      <OwnerUnavailable message="Content editor descriptor 没有合法的 F309 content/session owner 引用。" />
+    );
   }
   if (surface.renderer === 'browser-preview') {
     return browserTarget ? (
@@ -362,8 +264,18 @@ export function F307OwnerSurfaceRenderer({
       <OwnerUnavailable message="Terminal descriptor 没有合法 worktree owner。" />
     );
   }
+  if (surface.renderer === 'review-summary' && surface.ownerStateRef.owner === 'f309-content-review') {
+    const target = resolveArtifactReviewTarget(surface);
+    return target ? (
+      <ArtifactReviewSurface reviewId={target.reviewId} onBack={onRequestDetach} />
+    ) : (
+      <OwnerUnavailable message="审阅引用已不可用。" />
+    );
+  }
   if (surface.renderer === 'artifact-view' || surface.renderer === 'review-summary') {
-    return <ArtifactOwnerSurface surface={surface} onRequestDetach={onRequestDetach} />;
+    return (
+      <F307ArtifactOwnerSurface surface={surface} onRequestDetach={onRequestDetach} onOpenSurface={onOpenSurface} />
+    );
   }
   if (surface.renderer === 'agent-run') return <AgentRunOwnerSurface surface={surface} />;
   if (surface.renderer === 'evolution-program') {
@@ -386,4 +298,12 @@ export function F307OwnerSurfaceRenderer({
     );
   }
   return <OwnerUnavailable message="未知 renderer 已 fail closed。" />;
+}
+
+export function F307OwnerSurfaceRenderer({ surfaceVisible = true, ...props }: F307OwnerSurfaceRendererProps) {
+  return (
+    <WorkspaceSurfaceVisibilityProvider visible={surfaceVisible}>
+      <F307OwnerSurfaceContent {...props} />
+    </WorkspaceSurfaceVisibilityProvider>
+  );
 }

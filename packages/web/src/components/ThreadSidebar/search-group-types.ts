@@ -1,4 +1,7 @@
-import type { ThreadAttentionGroup } from '@cat-cafe/shared';
+import type {
+  ThreadAttentionPreferences as SavedThreadAttentionPreferences,
+  ThreadAttentionGroup,
+} from '@cat-cafe/shared';
 
 interface Membership {
   v: 1;
@@ -18,7 +21,7 @@ export interface GroupSnapshot {
   id: string;
   threadIds: string[];
 }
-export interface ThreadAttentionPreferences {
+export interface ThreadAttentionPreferences extends SavedThreadAttentionPreferences {
   aliases: Record<string, string>;
   open: Record<string, boolean>;
   groups: ThreadAttentionGroup[];

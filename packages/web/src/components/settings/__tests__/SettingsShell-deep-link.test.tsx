@@ -41,4 +41,22 @@ describe('SettingsShell deep-link routing', () => {
     expect(html).toContain('data-section="members"');
     expect(html).toContain('data-active="members"');
   });
+
+  it('delegates scrolling to the two Plugin Manager panes', () => {
+    mockSearchParams = new URLSearchParams('s=plugins&pluginManagerLive=1');
+
+    const html = renderToStaticMarkup(<SettingsShell />);
+
+    expect(html).toContain('min-w-0 flex-1 overflow-hidden');
+    expect(html).toContain('flex h-full min-h-0 flex-col gap-5');
+  });
+
+  it('keeps the default legacy Plugins page vertically scrollable', () => {
+    mockSearchParams = new URLSearchParams('s=plugins&standalone=1');
+
+    const html = renderToStaticMarkup(<SettingsShell />);
+
+    expect(html).toContain('overflow-y-auto');
+    expect(html).not.toContain('overflow-hidden');
+  });
 });

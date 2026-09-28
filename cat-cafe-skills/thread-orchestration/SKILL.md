@@ -144,7 +144,7 @@ object 与 author grounding，再执行 maintainer 五问与 custody 判断。�
 thread 内的执行遵循已有 skill：
 - 写代码 → `tdd`
 - 完成后自检 → `quality-gate`
-- 请 review → `request-review` + `cross-cat-handoff`（五件套）
+- 请 review → `request-review` + `cross-cat-handoff`（满足接手与审查要求，五项提示可选）
 - 收到反馈 → `receive-review`
 
 **加速手段**：thread 内可用 CLI 内置的 subagent 并行模式加速实现，但 review 必须由其他猫完成。

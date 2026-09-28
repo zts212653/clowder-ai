@@ -193,7 +193,7 @@ describe('classifyGitHubExecutionFailure', () => {
     assert.ok(fixture.commands.some((args) => args[0] === 'api' && args[1].includes('/annotations?')));
   });
 
-  it('marks an empty GitHub rollup without prematurely classifying it as pass', async () => {
+  it('marks an empty GitHub rollup as pending, never as pass', async () => {
     const commands = [];
     const result = await fetchPrCiStatus(
       'zts212653/clowder-ai',
@@ -281,9 +281,10 @@ describe('normalizeBucket', () => {
 });
 
 describe('computeAggregateBucket', () => {
-  it('keeps an empty rollup pending until the poller proves it is stable', () => {
-    // A single empty statusCheckRollup is ambiguous: the repository may have no
-    // checks, or GitHub may not have created the check runs yet for a fresh HEAD.
+  it('keeps an empty rollup pending however long it stays empty', () => {
+    // An empty statusCheckRollup is ambiguous: the repository may have no checks,
+    // or GitHub may not have created the check runs yet for a fresh HEAD. Neither
+    // is evidence that CI passed, so it stays pending no matter how many polls see it.
     assert.strictEqual(computeAggregateBucket([]), 'pending');
   });
 

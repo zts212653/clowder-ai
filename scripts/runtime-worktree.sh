@@ -19,10 +19,13 @@ DEFAULT_RUNTIME_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-runtime"
 RUNTIME_DIR="${CAT_CAFE_RUNTIME_DIR:-$DEFAULT_RUNTIME_DIR}"
 RUNTIME_BRANCH="${CAT_CAFE_RUNTIME_BRANCH:-runtime/main-sync}"
 REMOTE_NAME="${CAT_CAFE_RUNTIME_REMOTE:-origin}"
-FORCE=false
 RUN_INSTALL=true
 SYNC_BEFORE_START=true
+EXPECTED_TARGET_SHA=""
 START_ARGS=()
+RUNTIME_DAEMON_STATUS="unknown"
+RUNTIME_DAEMON_DETAIL=""
+FROZEN_TARGET_REF=""
 
 usage() {
   cat <<'EOF'
@@ -30,7 +33,8 @@ Clowder AI Runtime Worktree Manager
 
 Usage:
   ./scripts/runtime-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
-  ./scripts/runtime-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--] [start-dev args...]
+  ./scripts/runtime-worktree.sh start  [--expected-target-sha FULL_SHA] [--dir PATH] [--branch NAME] [--remote NAME] [--no-sync] [--] [start-dev args...]
+  ./scripts/runtime-worktree.sh restart [--expected-target-sha FULL_SHA] [--dir PATH] [--branch NAME] [--remote NAME] [--no-sync] [--] [start-dev args...]
   ./scripts/runtime-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
   ./scripts/runtime-worktree.sh daemon-status [--dir PATH]
   ./scripts/runtime-worktree.sh stop   [--dir PATH]
@@ -40,16 +44,24 @@ Defaults:
   --branch runtime/main-sync
   --remote origin
 
+Target identity:
+  Normal Git starts fetch once and freeze that invocation's origin/main SHA.
+  --expected-target-sha optionally pins and verifies a specific full SHA.
+  The runtime HEAD + tracked content and API/MCP/Web build stamps must all equal the frozen target.
+  --no-sync derives the target from an existing preserved tree and never creates one.
+
 Runtime Contract (passive frozen):
-  Runtime restarts ONLY on explicit `pnpm start` invocation.
-  start runs sync (git pull) + build invariant (rebuild stale dist) internally.
+  start launches a stopped runtime and returns successfully when the same managed runtime is already running.
+  restart performs one ownership-verified stop followed by the same start path.
+  start/restart run sync (one fetch + exact ff-only target) + build invariant internally.
   No standalone `sync` subcommand — fold into `pnpm start` as a single entry.
   No tsx watch auto-restart — runtime doesn't track main src changes.
   See docs/decisions/039-runtime-passive-freeze.md for design rationale.
 
 Safety:
-  start refuses to kill an active API by default.
-  To intentionally restart runtime, set CAT_CAFE_RUNTIME_RESTART_OK=1.
+  Shell flags and environment variables do not prove authorization.
+  Lifecycle commands act only on the identity-verified managed runtime state.
+  Unknown or cross-worktree port owners are never force-killed.
 EOF
 }
 
@@ -99,22 +111,39 @@ abs_path() {
   printf '%s/%s\n' "${dir%/}" "${base%/}"
 }
 
-read_env_file_value() {
-  local env_file="$1"
+read_runtime_dotenv_value() {
+  local runtime_dir="$1"
   local key="$2"
-  [ -f "$env_file" ] || return 1
+  if [ ! -f "$runtime_dir/.env" ] && [ ! -f "$runtime_dir/.env.local" ]; then
+    return 1
+  fi
 
   env -i HOME="$HOME" PATH="$PATH" bash -c '
+    cd "$1"
     set -a
-    source "$1" >/dev/null 2>&1
+    [ ! -f .env ] || source .env >/dev/null 2>&1
+    [ ! -f .env.local ] || source .env.local >/dev/null 2>&1
+    set +a
     eval "printf %s \"\${'"$2"':-}\""
-  ' _ "$env_file"
+  ' _ "$runtime_dir"
 }
 
 runtime_env_value() {
-  local runtime_dir
+  local key="$1"
+  local runtime_dir cli_value cli_prefer dotenv_value dotenv_prefer prefer_dotenv
   runtime_dir="$(abs_path "$RUNTIME_DIR")"
-  read_env_file_value "$runtime_dir/.env" "$1"
+  eval "cli_value=\${${key}-}"
+  cli_prefer="${CAT_CAFE_RESPECT_DOTENV_PORTS-}"
+  dotenv_value="$(read_runtime_dotenv_value "$runtime_dir" "$key" 2>/dev/null || true)"
+  dotenv_prefer="$(read_runtime_dotenv_value "$runtime_dir" CAT_CAFE_RESPECT_DOTENV_PORTS 2>/dev/null || true)"
+  prefer_dotenv="${cli_prefer:-$dotenv_prefer}"
+
+  if [ "$prefer_dotenv" != "1" ] && [ -n "$cli_value" ]; then
+    printf '%s\n' "$cli_value"
+    return 0
+  fi
+  [ -n "$dotenv_value" ] || return 1
+  printf '%s\n' "$dotenv_value"
 }
 
 require_git_repo() {
@@ -186,13 +215,6 @@ port_is_listening() {
   fi
 
   return 1
-}
-
-is_api_running() {
-  local port
-  port="$(runtime_env_value API_SERVER_PORT 2>/dev/null || true)"
-  port="${port:-${API_SERVER_PORT:-3004}}"
-  port_is_listening "$port"
 }
 
 start_arg_present() {
@@ -320,6 +342,9 @@ ensure_runtime_dist_freshness() {
   # main source moved do we actually rebuild.
   local head_commit
   head_commit="$(git -C "$RUNTIME_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+  if [ -z "$head_commit" ]; then
+    head_commit="$(cat "$RUNTIME_DIR/.cat-cafe-runtime-revision" 2>/dev/null || true)"
+  fi
 
   # Order matters: shared first (api/mcp depend on it), then api, then mcp, then web.
   if needs_rebuild "$RUNTIME_DIR/packages/shared/dist/index.js" \
@@ -351,22 +376,85 @@ ensure_runtime_dist_freshness() {
   fi
 }
 
+validate_explicit_target_sha() {
+  if [ -n "$EXPECTED_TARGET_SHA" ] && [[ ! "$EXPECTED_TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    die "--expected-target-sha must be one lowercase full 40-character Git SHA"
+  fi
+}
+
+require_resolved_target_sha() {
+  if [[ ! "$EXPECTED_TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    die "runtime source does not provide a valid lowercase full 40-character revision"
+  fi
+}
+
+cleanup_frozen_runtime_target_ref() {
+  [ -n "$FROZEN_TARGET_REF" ] || return 0
+  git -C "$PROJECT_DIR" update-ref -d "$FROZEN_TARGET_REF" >/dev/null 2>&1 || true
+  FROZEN_TARGET_REF=""
+}
+
+assert_runtime_tree_target() {
+  local runtime_root="$1"
+  local head dirty
+  head="$(git -C "$runtime_root" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+  if [ "$head" != "$EXPECTED_TARGET_SHA" ]; then
+    die "runtime tree HEAD '$head' does not equal expected target '$EXPECTED_TARGET_SHA'"
+  fi
+
+  if ! dirty="$(git -C "$runtime_root" status --short --untracked-files=no 2>/dev/null)"; then
+    die "could not verify tracked runtime tree content for expected target '$EXPECTED_TARGET_SHA'"
+  fi
+  if [ -n "$dirty" ]; then
+    die "runtime worktree has local changes: tracked content does not exactly match expected target '$EXPECTED_TARGET_SHA'"
+  fi
+}
+
+assert_in_place_runtime_target() {
+  local runtime_root="$1"
+  local revision
+  revision="$(cat "$runtime_root/.cat-cafe-runtime-revision" 2>/dev/null || true)"
+  if [ "$revision" != "$EXPECTED_TARGET_SHA" ]; then
+    die "runtime bundle revision '$revision' does not equal expected target '$EXPECTED_TARGET_SHA'"
+  fi
+}
+
+assert_runtime_build_target() {
+  local runtime_root="$1"
+  local label stamp revision
+  while IFS='|' read -r label stamp; do
+    [ -n "$label" ] || continue
+    revision="$(cat "$runtime_root/$stamp" 2>/dev/null || true)"
+    if [ "$revision" != "$EXPECTED_TARGET_SHA" ]; then
+      die "$label build stamp '$revision' does not equal expected target '$EXPECTED_TARGET_SHA'"
+    fi
+  done <<'EOF'
+API|packages/api/dist/.build-commit
+MCP|packages/mcp-server/dist/.build-commit
+Web|packages/web/.next/.build-commit
+EOF
+}
+
+assert_runtime_target_ready() {
+  local runtime_root="$1"
+  assert_runtime_tree_target "$runtime_root"
+  assert_runtime_build_target "$runtime_root"
+}
+
+assert_explicit_running_target() {
+  [ -n "$EXPECTED_TARGET_SHA" ] || return 0
+  if is_git_repo; then
+    worktree_exists || die "managed runtime state exists but its registered worktree is missing"
+    assert_runtime_target_ready "$RUNTIME_DIR"
+    return 0
+  fi
+  assert_in_place_runtime_target "$PROJECT_DIR"
+  assert_runtime_build_target "$PROJECT_DIR"
+}
+
 ensure_runtime_start_prereqs() {
   ensure_runtime_dependencies
   ensure_runtime_dist_freshness
-}
-
-ensure_restart_authorized() {
-  if ! is_api_running; then
-    return 0
-  fi
-
-  if [ "${CAT_CAFE_RUNTIME_RESTART_OK:-0}" = "1" ]; then
-    info "CAT_CAFE_RUNTIME_RESTART_OK=1; proceeding with explicit runtime restart."
-    return 0
-  fi
-
-  die "API port appears active. Refusing to restart runtime by default (anti-self-TERM guard). If intentional, rerun with CAT_CAFE_RUNTIME_RESTART_OK=1."
 }
 
 ensure_runtime_clean() {
@@ -374,17 +462,17 @@ ensure_runtime_clean() {
   # are harmless for ff-only merge and should not block startup.
   local dirty
   dirty=$(git -C "$RUNTIME_DIR" status --short -uno 2>/dev/null || true)
-  if [ -n "$dirty" ] && [ "$FORCE" != "true" ]; then
+  if [ -n "$dirty" ]; then
     # Auto-stash isolated pnpm-lock.yaml drift (common after pnpm install on
     # a previous run). Only the lock file dirty → safe to stash and proceed.
     local drift_files
     drift_files=$(git -C "$RUNTIME_DIR" diff HEAD --name-only 2>/dev/null || true)
-    if [ "$drift_files" = "pnpm-lock.yaml" ]; then
+    if [ "$drift_files" = "pnpm-lock.yaml" ] && [ "$RUNTIME_DAEMON_STATUS" != "running" ]; then
       info "lock drift detected — stashing before sync"
       git -C "$RUNTIME_DIR" stash push -m "lock-drift-pre-sync-stash" -- pnpm-lock.yaml
       return 0
     fi
-    die "runtime worktree has local changes. Commit/stash first, or re-run with --force."
+    die "runtime worktree has local changes: tracked content does not exactly match frozen target '$EXPECTED_TARGET_SHA'; commit/stash first"
   fi
 }
 
@@ -397,8 +485,9 @@ ensure_runtime_branch() {
 }
 
 # The runtime worktree is a passive mirror of origin/main (ADR-039). Any commit
-# in origin/main..HEAD is, by definition, NOT reachable from the branch we sync
-# to, so a `reset --hard` would delete it from this worktree. We deliberately do
+# in frozen-target..HEAD is, by definition, NOT reachable from the exact commit
+# selected for this action, so a destructive restore would delete it from this
+# worktree. We deliberately do
 # NOT try to prove a commit is "safe to discard" from remote-tracking refs:
 # startup only fetches origin/main, so a stale origin/* ref (whose upstream
 # branch was deleted out-of-band) makes `git branch -r --contains` claim a
@@ -413,11 +502,11 @@ report_diverged_runtime_commits() {
     [ -n "$sha" ] || continue
     at_risk_shas+=("$sha")
     at_risk_count=$((at_risk_count + 1))
-  done < <(git -C "$RUNTIME_DIR" rev-list "$REMOTE_NAME/main..HEAD" 2>/dev/null)
+  done < <(git -C "$RUNTIME_DIR" rev-list "$EXPECTED_TARGET_SHA..HEAD" 2>/dev/null)
 
   if [ "$at_risk_count" -eq 0 ]; then
     # Caller already asserted ahead_count>0; nothing structured to enumerate.
-    echo "  Inspect:  git -C \"$RUNTIME_DIR\" log --oneline $REMOTE_NAME/main..HEAD"
+    echo "  Inspect:  git -C \"$RUNTIME_DIR\" log --oneline $EXPECTED_TARGET_SHA..HEAD"
     return 0
   fi
 
@@ -425,8 +514,8 @@ report_diverged_runtime_commits() {
   backup_branch="runtime-sanctuary-backup-$(git -C "$RUNTIME_DIR" rev-parse --short HEAD 2>/dev/null)"
 
   echo ""
-  echo "  $at_risk_count commit(s) here are ahead of $REMOTE_NAME/main."
-  echo "  Startup only fetches $REMOTE_NAME/main, so remote-tracking refs cannot"
+  echo "  $at_risk_count commit(s) here are ahead of the frozen target $EXPECTED_TARGET_SHA."
+  echo "  Startup only fetches $REMOTE_NAME/main once, so remote-tracking refs cannot"
   echo "  prove these are saved elsewhere — a 'reset --hard' could permanently"
   echo "  delete this work:"
   for sha in "${at_risk_shas[@]}"; do
@@ -452,7 +541,7 @@ report_diverged_runtime_commits() {
   echo "    2. If it did not land, publish it from the backup branch first:"
   echo "         git -C \"$RUNTIME_DIR\" push $REMOTE_NAME $backup_branch:feat/<your-branch>"
   echo "    3. Once the work is safe, restore the mirror:"
-  echo "         git -C \"$RUNTIME_DIR\" reset --hard $REMOTE_NAME/main"
+  echo "         git -C \"$RUNTIME_DIR\" reset --hard $EXPECTED_TARGET_SHA"
 }
 
 print_untracked_merge_blockers() {
@@ -475,7 +564,7 @@ print_untracked_merge_blockers() {
         candidate="$candidate/$segment"
       fi
 
-      type=$(git -C "$RUNTIME_DIR" cat-file -t "$REMOTE_NAME/main:$candidate" 2>/dev/null || true)
+      type=$(git -C "$RUNTIME_DIR" cat-file -t "$EXPECTED_TARGET_SHA:$candidate" 2>/dev/null || true)
       if [ -n "$type" ] && [ "$type" != "tree" ]; then
         blocker="$candidate"
         note=" (incoming tracked path replaces local directory)"
@@ -484,13 +573,13 @@ print_untracked_merge_blockers() {
     done
 
     if [ -z "$blocker" ]; then
-      type=$(git -C "$RUNTIME_DIR" cat-file -t "$REMOTE_NAME/main:$path" 2>/dev/null || true)
+      type=$(git -C "$RUNTIME_DIR" cat-file -t "$EXPECTED_TARGET_SHA:$path" 2>/dev/null || true)
       if [ -n "$type" ]; then
         blocker="$path"
         note=""
         if [ "$type" != "tree" ] \
           && [ -f "$RUNTIME_DIR/$path" ] \
-          && cmp -s -- "$RUNTIME_DIR/$path" <(git -C "$RUNTIME_DIR" show "$REMOTE_NAME/main:$path" 2>/dev/null); then
+          && cmp -s -- "$RUNTIME_DIR/$path" <(git -C "$RUNTIME_DIR" show "$EXPECTED_TARGET_SHA:$path" 2>/dev/null); then
           note=" (same bytes as incoming)"
         fi
       fi
@@ -524,6 +613,111 @@ print_untracked_merge_blockers() {
   [ "$found" = true ]
 }
 
+preflight_runtime_tree_target() {
+  ensure_runtime_clean
+  ensure_runtime_branch
+
+  local head ahead_count
+  head="$(git -C "$RUNTIME_DIR" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+  [ -n "$head" ] || die "could not resolve the preserved runtime tree HEAD"
+  if [ "$head" = "$EXPECTED_TARGET_SHA" ]; then
+    assert_runtime_tree_target "$RUNTIME_DIR"
+    return 0
+  fi
+
+  if ! git -C "$RUNTIME_DIR" merge-base --is-ancestor "$head" "$EXPECTED_TARGET_SHA" 2>/dev/null; then
+    ahead_count="$(git -C "$RUNTIME_DIR" rev-list --count "$EXPECTED_TARGET_SHA..HEAD" 2>/dev/null || echo 0)"
+    echo ""
+    echo "  Runtime tree cannot fast-forward to the frozen target $EXPECTED_TARGET_SHA."
+    if [ "$ahead_count" -gt 0 ]; then
+      report_diverged_runtime_commits
+    fi
+    die "runtime tree diverged from the frozen target; no running process was changed"
+  fi
+
+  if print_untracked_merge_blockers; then
+    die "untracked runtime files would block the exact target update; no running process was changed"
+  fi
+}
+
+freeze_remote_runtime_target() {
+  require_git_repo
+  ensure_remote_exists
+  validate_explicit_target_sha
+
+  local fetched
+  FROZEN_TARGET_REF="refs/cat-cafe-runtime-target/$$"
+  git -C "$PROJECT_DIR" update-ref -d "$FROZEN_TARGET_REF" >/dev/null 2>&1 || true
+  info "fetching $REMOTE_NAME/main once into an invocation-private ref"
+  git -C "$PROJECT_DIR" fetch "$REMOTE_NAME" "+refs/heads/main:$FROZEN_TARGET_REF"
+  fetched="$(git -C "$PROJECT_DIR" rev-parse --verify "$FROZEN_TARGET_REF^{commit}" 2>/dev/null || true)"
+  if [ -n "$EXPECTED_TARGET_SHA" ] && [ "$fetched" != "$EXPECTED_TARGET_SHA" ]; then
+    die "fetched $REMOTE_NAME/main '$fetched' does not equal expected target '$EXPECTED_TARGET_SHA'; runtime tree was preserved"
+  fi
+  EXPECTED_TARGET_SHA="${EXPECTED_TARGET_SHA:-$fetched}"
+  require_resolved_target_sha
+}
+
+freeze_preserved_runtime_target() {
+  require_git_repo
+  worktree_exists || die "--no-sync requires an existing preserved runtime worktree"
+  validate_explicit_target_sha
+  if [ -z "$EXPECTED_TARGET_SHA" ]; then
+    EXPECTED_TARGET_SHA="$(git -C "$RUNTIME_DIR" rev-parse --verify 'HEAD^{commit}' 2>/dev/null || true)"
+  fi
+  require_resolved_target_sha
+  preflight_runtime_tree_target
+}
+
+freeze_archive_runtime_target() {
+  validate_explicit_target_sha
+  local archive_revision
+  archive_revision="$(cat "$PROJECT_DIR/.cat-cafe-runtime-revision" 2>/dev/null || true)"
+  if [ -z "$EXPECTED_TARGET_SHA" ]; then
+    EXPECTED_TARGET_SHA="$archive_revision"
+  fi
+  require_resolved_target_sha
+  assert_in_place_runtime_target "$PROJECT_DIR"
+}
+
+freeze_runtime_target() {
+  if ! is_git_repo; then
+    freeze_archive_runtime_target
+    return 0
+  fi
+
+  if [ "$SYNC_BEFORE_START" = "true" ]; then
+    freeze_remote_runtime_target
+    if worktree_exists; then
+      preflight_runtime_tree_target
+    fi
+  else
+    freeze_preserved_runtime_target
+  fi
+}
+
+create_runtime_worktree_checkout() {
+  # Git materialization only. A target-bearing start must sync and prove this
+  # checkout before package install/lifecycle or config seeding can run.
+  mkdir -p "$(dirname "$RUNTIME_DIR")"
+
+  if [ -e "$RUNTIME_DIR" ]; then
+    if [ -n "$(ls -A "$RUNTIME_DIR" 2>/dev/null || true)" ]; then
+      die "target path exists and is not an empty runtime worktree: $RUNTIME_DIR"
+    fi
+  fi
+
+  require_resolved_target_sha
+
+  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$RUNTIME_BRANCH"; then
+    info "adding existing branch '$RUNTIME_BRANCH' to $RUNTIME_DIR"
+    git -C "$PROJECT_DIR" worktree add "$RUNTIME_DIR" "$RUNTIME_BRANCH"
+  else
+    info "creating branch '$RUNTIME_BRANCH' from frozen target $EXPECTED_TARGET_SHA"
+    git -C "$PROJECT_DIR" worktree add "$RUNTIME_DIR" -b "$RUNTIME_BRANCH" "$EXPECTED_TARGET_SHA"
+  fi
+}
+
 init_runtime_worktree() {
   require_git_repo
   ensure_remote_exists
@@ -533,24 +727,8 @@ init_runtime_worktree() {
     return 0
   fi
 
-  mkdir -p "$(dirname "$RUNTIME_DIR")"
-
-  if [ -e "$RUNTIME_DIR" ]; then
-    if [ -n "$(ls -A "$RUNTIME_DIR" 2>/dev/null || true)" ]; then
-      die "target path exists and is not an empty runtime worktree: $RUNTIME_DIR"
-    fi
-  fi
-
-  info "fetching $REMOTE_NAME/main"
-  git -C "$PROJECT_DIR" fetch "$REMOTE_NAME" main
-
-  if git -C "$PROJECT_DIR" show-ref --verify --quiet "refs/heads/$RUNTIME_BRANCH"; then
-    info "adding existing branch '$RUNTIME_BRANCH' to $RUNTIME_DIR"
-    git -C "$PROJECT_DIR" worktree add "$RUNTIME_DIR" "$RUNTIME_BRANCH"
-  else
-    info "creating branch '$RUNTIME_BRANCH' from $REMOTE_NAME/main"
-    git -C "$PROJECT_DIR" worktree add "$RUNTIME_DIR" -b "$RUNTIME_BRANCH" "$REMOTE_NAME/main"
-  fi
+  freeze_remote_runtime_target
+  create_runtime_worktree_checkout
 
   if [ "$RUN_INSTALL" = "true" ]; then
     info "installing dependencies in runtime worktree"
@@ -565,28 +743,22 @@ init_runtime_worktree() {
 
 sync_runtime_worktree() {
   require_git_repo
-  ensure_remote_exists
   worktree_exists || die "runtime worktree not found at $RUNTIME_DIR (run init first)"
-
-  if is_api_running && [ "$FORCE" != "true" ]; then
-    die "API port appears active; stop dev server before sync, or re-run with --force."
-  fi
 
   ensure_runtime_clean
   ensure_runtime_branch
 
-  info "syncing runtime worktree with $REMOTE_NAME/main (ff-only)"
-  git -C "$RUNTIME_DIR" fetch "$REMOTE_NAME" main
-  if ! git -C "$RUNTIME_DIR" merge --ff-only "$REMOTE_NAME/main" 2>/dev/null; then
+  info "syncing runtime worktree to frozen target $EXPECTED_TARGET_SHA (ff-only)"
+  if ! git -C "$RUNTIME_DIR" merge --ff-only "$EXPECTED_TARGET_SHA" 2>/dev/null; then
     echo ""
     echo "  ff-only merge failed."
     if print_untracked_merge_blockers; then
       echo "  Move or remove the listed files, then re-run sync."
       echo "  Files marked 'same bytes as incoming' will be restored by the merge with identical content."
     else
-      ahead_count=$(git -C "$RUNTIME_DIR" rev-list --count "$REMOTE_NAME/main..HEAD" 2>/dev/null || echo 0)
+      ahead_count=$(git -C "$RUNTIME_DIR" rev-list --count "$EXPECTED_TARGET_SHA..HEAD" 2>/dev/null || echo 0)
       if [ "$ahead_count" -gt 0 ]; then
-        echo "  Local branch is ahead of $REMOTE_NAME/main by $ahead_count commit(s) — diverged, cannot fast-forward."
+        echo "  Local branch is ahead of the frozen target by $ahead_count commit(s) — diverged, cannot fast-forward."
         report_diverged_runtime_commits
       else
         echo "  No untracked files matching incoming tracked files were found."
@@ -596,6 +768,8 @@ sync_runtime_worktree() {
     echo ""
     die "runtime sync failed (see above)"
   fi
+
+  assert_runtime_tree_target "$RUNTIME_DIR"
 
   if [ "$RUN_INSTALL" = "true" ]; then
     info "refreshing dependencies in runtime worktree"
@@ -663,6 +837,70 @@ runtime_daemon_state() {
     --deployment-id runtime
 }
 
+inspect_runtime_daemon() {
+  local root inspection
+  root="$(runtime_daemon_root)"
+  if [ ! -d "$root" ]; then
+    RUNTIME_DAEMON_STATUS="missing"
+    RUNTIME_DAEMON_DETAIL="runtime root does not exist"
+    return 0
+  fi
+
+  migrate_legacy_runtime_daemon_state
+  if ! inspection="$(runtime_daemon_state inspect 2>&1)"; then
+    die "could not inspect managed runtime ownership: $inspection"
+  fi
+  case "$inspection" in
+    running:*)
+      RUNTIME_DAEMON_STATUS="running"
+      RUNTIME_DAEMON_DETAIL="${inspection#running:}"
+      ;;
+    missing)
+      RUNTIME_DAEMON_STATUS="missing"
+      RUNTIME_DAEMON_DETAIL="no managed daemon state"
+      ;;
+    stale:*)
+      RUNTIME_DAEMON_STATUS="stale"
+      RUNTIME_DAEMON_DETAIL="${inspection#stale:}"
+      ;;
+    invalid:*|mismatch:*)
+      die "managed runtime state is unsafe ($inspection); refusing lifecycle action"
+      ;;
+    *)
+      die "unexpected managed runtime inspection result: $inspection"
+      ;;
+  esac
+}
+
+active_runtime_application_ports() {
+  local api_port frontend_port preview_port entry label port active=""
+  api_port="$(runtime_env_value API_SERVER_PORT 2>/dev/null || true)"
+  api_port="${api_port:-${API_SERVER_PORT:-3004}}"
+  frontend_port="$(runtime_env_value FRONTEND_PORT 2>/dev/null || true)"
+  frontend_port="${frontend_port:-${FRONTEND_PORT:-3003}}"
+  preview_port="$(runtime_env_value PREVIEW_GATEWAY_PORT 2>/dev/null || true)"
+  preview_port="${preview_port:-${PREVIEW_GATEWAY_PORT:-4100}}"
+
+  for entry in "API:$api_port" "Frontend:$frontend_port" "Preview Gateway:$preview_port"; do
+    label="${entry%%:*}"
+    port="${entry##*:}"
+    [ "$port" != "0" ] || continue
+    if port_is_listening "$port"; then
+      active="${active}${active:+, }${label}:${port}"
+    fi
+  done
+  [ -n "$active" ] && printf '%s\n' "$active"
+}
+
+ensure_no_unowned_runtime_processes() {
+  local active
+  [ "$RUNTIME_DAEMON_STATUS" != "running" ] || return 0
+  active="$(active_runtime_application_ports || true)"
+  if [ -n "$active" ]; then
+    die "runtime ports are active ($active) but no matching managed ownership was verified ($RUNTIME_DAEMON_DETAIL); refusing to terminate or replace them"
+  fi
+}
+
 migrate_legacy_runtime_daemon_state() {
   local root
   root="$(runtime_daemon_root)"
@@ -677,8 +915,22 @@ migrate_legacy_runtime_daemon_state() {
 
 stop_runtime_daemon() {
   export CAT_CAFE_DEPLOYMENT_ID=runtime
-  migrate_legacy_runtime_daemon_state
-  runtime_daemon_state stop
+  if ! is_git_repo; then
+    RUNTIME_DIR="$PROJECT_DIR"
+  fi
+  inspect_runtime_daemon
+  ensure_no_unowned_runtime_processes
+  case "$RUNTIME_DAEMON_STATUS" in
+    running|stale)
+      runtime_daemon_state stop
+      RUNTIME_DAEMON_STATUS="missing"
+      RUNTIME_DAEMON_DETAIL="managed daemon is no longer running"
+      ensure_no_unowned_runtime_processes
+      ;;
+    missing)
+      info "runtime is not running; nothing to stop"
+      ;;
+  esac
 }
 
 status_runtime_daemon() {
@@ -698,12 +950,33 @@ status_runtime_daemon() {
 }
 
 start_runtime_worktree() {
-  info "preparing runtime worktree (checking ports, syncing origin/main...)"
+  if ! is_git_repo; then
+    RUNTIME_DIR="$PROJECT_DIR"
+  fi
+  inspect_runtime_daemon
+  if [ "$COMMAND" = "start" ] && [ "$RUNTIME_DAEMON_STATUS" = "running" ]; then
+    assert_explicit_running_target
+    info "runtime is already running as the verified managed daemon (PID $RUNTIME_DAEMON_DETAIL)"
+    # This path deliberately does not fetch, so it cannot know whether the
+    # remote moved. Name the action that does, instead of leaving the operator
+    # to conclude that start already loaded the newest main.
+    info "this start made no source change; to load a newer $REMOTE_NAME/main run: pnpm runtime:restart"
+    return 0
+  fi
+  ensure_no_unowned_runtime_processes
+
+  info "preparing runtime source and freezing one exact target..."
+  freeze_runtime_target
+
+  if [ "$COMMAND" = "restart" ] && [ "$RUNTIME_DAEMON_STATUS" = "running" ]; then
+    info "restarting the verified managed runtime daemon (PID $RUNTIME_DAEMON_DETAIL)"
+    stop_runtime_daemon
+  fi
 
   if ! is_git_repo; then
     RUNTIME_DIR="$PROJECT_DIR"
-    ensure_restart_authorized
     ensure_runtime_start_prereqs
+    assert_runtime_build_target "$PROJECT_DIR"
     info "running in-place (deployment mode): $PROJECT_DIR"
     cd "$PROJECT_DIR"
     # In-place deployment: binary == workspace == PROJECT_DIR
@@ -713,35 +986,27 @@ start_runtime_worktree() {
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1
     export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
     # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
-    # Restart only happens on explicit `pnpm start` (which runs build invariant first).
-    # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
     export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
+    cleanup_frozen_runtime_target_ref
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
 
   if ! worktree_exists; then
-    info "runtime worktree missing; initializing first"
-    init_runtime_worktree
+    info "runtime worktree missing; creating the frozen target checkout"
+    create_runtime_worktree_checkout
   fi
 
-  # Runtime is single-instance infra; restarting an active API requires
-  # explicit opt-in so accidental `pnpm start` in runtime sessions cannot
-  # kill the live process.
-  ensure_restart_authorized
-
   if [ "$SYNC_BEFORE_START" = "true" ]; then
-    if is_api_running && [ "$FORCE" != "true" ]; then
-      info "API port is active; skip pre-start sync to avoid in-place hot swap."
-      info "Stop API first (pnpm stop), then re-run 'pnpm start' to sync + restart."
-      seed_runtime_config_from_project
-    else
-      sync_runtime_worktree
-    fi
+    sync_runtime_worktree
   else
+    assert_runtime_tree_target "$RUNTIME_DIR"
     seed_runtime_config_from_project
   fi
 
+  assert_runtime_tree_target "$RUNTIME_DIR"
+  cleanup_frozen_runtime_target_ref
   ensure_runtime_start_prereqs
+  assert_runtime_target_ready "$RUNTIME_DIR"
 
   info "starting production stack from runtime worktree: $RUNTIME_DIR"
   cd "$RUNTIME_DIR"
@@ -770,10 +1035,18 @@ start_runtime_worktree() {
 
 [[ "${1:-}" == "--source-only" ]] && { return 0 2>/dev/null; exit 0; }
 
+trap cleanup_frozen_runtime_target_ref EXIT
 ensure_supported_node_runtime "$SCRIPT_DIR/runtime-worktree.sh" "$@"
 
 COMMAND="${1:-status}"
 shift || true
+
+# pnpm forwards its leading `--` to both public start entry points. Consume
+# only that first separator so runtime options still reach this parser; a
+# later `--` continues to delimit arguments intended for start-dev.sh.
+if { [ "$COMMAND" = "start" ] || [ "$COMMAND" = "restart" ]; } && [ "${1:-}" = "--" ]; then
+  shift
+fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -793,8 +1066,7 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --force)
-      FORCE=true
-      shift
+      die "--force is retired; use the ownership-verified runtime:restart action instead"
       ;;
     --no-install)
       RUN_INSTALL=false
@@ -802,6 +1074,15 @@ while [ $# -gt 0 ]; do
       ;;
     --no-sync)
       SYNC_BEFORE_START=false
+      shift
+      ;;
+    --expected-target-sha)
+      [ $# -ge 2 ] || die "--expected-target-sha requires a lowercase full 40-character Git SHA"
+      EXPECTED_TARGET_SHA="$2"
+      shift 2
+      ;;
+    --expected-target-sha=*)
+      EXPECTED_TARGET_SHA="${1#--expected-target-sha=}"
       shift
       ;;
     --sync)
@@ -818,7 +1099,7 @@ while [ $# -gt 0 ]; do
       exit 0
       ;;
     *)
-      if [ "$COMMAND" = "start" ]; then
+      if [ "$COMMAND" = "start" ] || [ "$COMMAND" = "restart" ]; then
         START_ARGS+=("$1")
         shift
       else
@@ -833,6 +1114,11 @@ case "$COMMAND" in
     init_runtime_worktree
     ;;
   start)
+    validate_explicit_target_sha
+    start_runtime_worktree
+    ;;
+  restart)
+    validate_explicit_target_sha
     start_runtime_worktree
     ;;
   status)

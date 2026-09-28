@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 
 import type { DeliveryState } from './client-types.js';
 
@@ -9,6 +9,7 @@ export function Composer({
   onClearContext,
   onSend,
   compact = false,
+  children,
 }: {
   readonly placeholder: string;
   readonly context?: string;
@@ -16,14 +17,21 @@ export function Composer({
   readonly onClearContext?: () => void;
   readonly onSend: (body: string) => Promise<void>;
   readonly compact?: boolean;
+  readonly children?: ReactNode;
 }) {
   const [body, setBody] = useState('');
+  const sending = useRef(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const value = body.trim();
-    if (!value) return;
-    await onSend(value);
-    setBody('');
+    if (!value || sending.current) return;
+    sending.current = true;
+    try {
+      await onSend(value);
+      setBody('');
+    } finally {
+      sending.current = false;
+    }
   };
   return (
     <form
@@ -40,6 +48,7 @@ export function Composer({
           )}
         </p>
       )}
+      {children}
       <div className="composer-box">
         <textarea
           value={body}

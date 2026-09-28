@@ -195,6 +195,8 @@ export interface PlatformFieldStatus {
   sensitive: boolean;
   /** Field type from manifest (AC-A24). Frontend renders generically based on this. */
   type?: 'input' | 'select' | 'toggle' | 'list';
+  /** More precise browser semantics for typed plugin string fields. */
+  inputType?: 'text' | 'number' | 'url';
   /** Select options (only for type: select). */
   options?: Array<{ value: string; label: string }>;
   currentValue: string | null;

@@ -8,10 +8,12 @@ export function RuntimeInteractionQuestionForm({
   request,
   disabled,
   onSubmit,
+  onReject,
 }: {
   request: QuestionRequest;
   disabled: boolean;
   onSubmit: (response: RuntimeInteractionResponse) => void;
+  onReject: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
   const [otherValues, setOtherValues] = useState<Record<string, string>>({});
@@ -56,13 +58,23 @@ export function RuntimeInteractionQuestionForm({
           }}
         />
       ))}
-      <button
-        type="submit"
-        disabled={!complete || disabled}
-        className="min-h-10 w-full rounded-xl bg-[var(--semantic-success)] px-3 py-2 text-sm font-medium text-[var(--cafe-accent-foreground)] disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        提交回答
-      </button>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onReject}
+          className="min-h-10 rounded-xl border border-cafe px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          不回答
+        </button>
+        <button
+          type="submit"
+          disabled={!complete || disabled}
+          className="min-h-10 rounded-xl bg-[var(--semantic-success)] px-3 py-2 text-sm font-medium text-[var(--cafe-accent-foreground)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          提交回答
+        </button>
+      </div>
     </form>
   );
 }

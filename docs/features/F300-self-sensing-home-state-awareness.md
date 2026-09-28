@@ -3,22 +3,30 @@ feature_ids: [F300]
 related_features: [F153, F192, F220, F223, F233, F237, F246, F281, F293, F296, F298, F299]
 topics: [self-sensing, self-management, operational-grounding, agent-first-observability, growing-agent, home-state, integration-policy, capability, availability, user-friction, interaction-adaptation, feedback-loop]
 doc_kind: spec
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F300-self-sensing-home-state-awareness.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F300-self-sensing-home-state-awareness.md"
+    toolName: cat_cafe_home_state_self
+    resourceFamily: home-state
+    boundaryKind: resource-entry
+    decision: accepted
 created: 2026-08-17
 description: "Agent Self-Sensing & Self-Management：让 Agent 定位自身与当前协作现场、读取人猫同源的 owner truth，并在权限边界内完成诊断、恢复、能力成长与结果复验"
 description_source: human
 description_author: cat-eqdvbcxw
 description_updated_at: 2026-08-26T08:43:20Z
-tips_exempt: "2026-09-02 publication-convergence truth only; F300 remains spec-only and its planned cancellation-awareness tip waits for a delivered Phase A journey and stable entry surface."
+tips_exempt: "Renewed 2026-09-10 for WP1.1: this repair changes what the self facet is allowed to claim, not what anyone can open. `runtime.head` now says whether a revision describes the running artifact or merely the checkout, `heldLeases` reports `unknown` instead of an empty list when no reader answered, an unattributable quota comes back typed-absent rather than as some other pool's numbers, and stop re-verification measures the restarted deployment itself instead of trusting the caller's `--health-ok`. Every one of those is read by a cat through an MCP self-read or enforced before a side effect; none adds a user-openable surface, so a tip would still advertise an action nobody can take. Renewing rather than inheriting because the checker is right that an exemption must be re-asserted deliberately. The planned cancellation-awareness tip still waits for a delivered user journey and a stable entry surface."
 ---
 
 # F300: Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长
 
-> **Status**: spec；product contract refreshed，runtime 未实现；canonical home source `81a4fa006` landed；public PR #1391 terminal-reviewed and merged as `85b10815c`；后续 runtime delivery 仍未启动
-> **Owner**: Wu Lang (@mindfn) | **Priority**: P1
-> **Clowder AI source steward / maintainer reviewer**: Ragdoll (@fable5, claude-fable-5)；不是 implementation owner
+> **Status**: in-progress；product contract refreshed；canonical home source `81a4fa006` landed；public PR #1391 terminal-reviewed and merged as `85b10815c`；**WP1（自身定位 / 宿主依赖 / 停启保护）已合入 main**（PR #4426，`8ff8d1d4f`）——落地的是 cat-facing 的 self facet 读取、self-host 停机拒绝与 StopOperationRecord，**没有任何用户可打开的界面**；Phase 1A/1B 的 AC 一条未勾，见 Timeline 的范围说明；WP2 及之后未启动；**2026-09-07 家里接手推进**（operator `0001788779461388`），Design Gate 收敛见 2026-09-07 讨论记录
+> **Owner**: Ragdoll (@fable5, claude-fable-5)——plan owner，实现按工作包分派 opus 家族（2026-09-07 家里接手；Packet P1 待 operator 确认，可逆）| **Contract co-author**: Wu Lang (@mindfn) | **Priority**: P1
+> **Design Gate 2026-09-07**: fable-5 + codex-astra 收敛终态定义、情境驱动发现、D3 归一契约、停启归属与工作包；技术结论见 KD-11～KD-14
 
 - **Original operator direction**: 2026-08-16/17（`0001786845058052`：“期待你们在运行过程中可感知到家里整个系统的情况……不是黑盒”）及后续三机制确认。
-- **Product direction**: 2026-08-25/26（`0001787716986266-000439-d91c1b16`、`0001787732933337-000877-fadab387`）：F300 承载完整的自感知/自管理产品目标；它要成为 growing Agent platform 的开发依据，而不是只覆盖 Home-State 小切片或为某个用户做一次性玩具。当前 runtime 尚未启动，Plugin 整改完成后按本文启动首个生产纵切。
+- **Product direction**: 2026-08-25/26（`private-source-id`、`private-source-id`）：F300 承载完整的自感知/自管理产品目标；它要成为 growing Agent platform 的开发依据，而不是只覆盖 Home-State 小切片或为某个用户做一次性玩具。当前 runtime 尚未启动，Plugin 整改完成后按本文启动首个生产纵切。
 - **Recalibration evidence**: clowder-ai PR #1391 maintainer design audit（comment `5421892668`）：保留完整产品旅程，但把 F300 收敛为薄 journey/integration owner，不建立超级状态系统或第二真相。
 - **Custody and convergence clarification**: clowder-ai PR #1391 maintainer comments `5426488247`、`5426596994`：本 PR 是吴浪授权的完整 F300 Markdown 候选与后续实现 custody 载体，但本次 delivery 仅含 docs；先在本 PR 完成候选并取得 maintainer wording acceptance，再把该 exact accepted contract 手工融合进 Clowder AI 单一 canonical F300 Markdown 并先落地 home source，随后让 public PR 与 source 达成 byte/explicit semantic equivalence、完成 current-HEAD publication review 后再合入。任何 delivery copy 都不得成为独立决策面，Clowder AI 猫不得另开平行 runtime implementation。
 - **Architecture cells**: 不新增 `self-sensing-management` cell。F300 只跨 `routing-context`、`identity-session`、`approval-index`、`human-disposition-feedback` 等现有 owner 组织集成政策和只读关联视图。
@@ -277,7 +285,40 @@ type SelfManagementJourneyRefsV1 = Readonly<{
 
 F300 可以判断这些证据是否满足 voice slice entry criteria，但**无权宣布 Plugin 全域整改完成**。生产 runtime kickoff 必须引用 Plugin owner/operator 的 exact evidence，不能把一句口头“整改完成”当 gate。
 
-## 7. Phases
+## 7. Work Packages（2026-09-07 家里接手重排；原 Phase 0–4 内容并入，原文保留在本节末）
+
+### WP0 — 合同与来源归属（fable-5）
+
+- 原 Phase 0 全部保留：冻结四条不变量、薄 envelope、owner map、Plugin slice-local gate；禁止通用 self-state ontology、新 canonical episode/proposal 与过宽 ownership cell（AC-0.1～0.8 ✅）。
+- 2026-09-07 追加：终态定义、情境驱动发现（KD-11）、归一契约（KD-12/13）、停启归属（KD-14）；**两条旅程冻结为验收目标**：Stop Journey、Discovery Journey；§8 事实来源表。
+- 外部契约：plugin-contract 平台 / 执行节点字段 → clowder-ai [#1446](https://github.com/zts212653/clowder-ai/issues/1446)（Packet P2）。
+- 2026-09-14 追加：可用性键 = (member binding, carrier/adapter, 实际执行节点) 三元组（KD-17，来源 clowder-ai [#1463](https://github.com/zts212653/clowder-ai/issues/1463) maintainer comment 5664171162；KD-13 保持第三维反例）；§8「猫 roster」行去混淆（启用位 ≠ readiness）；KD 表撞号修正（吴浪 08-26 的 KD-11/12 → KD-15/16）。
+
+### WP1 — 自身定位 → 依赖与停启（✅ merged PR #4426 `8ff8d1d4f`，2026-09-08）
+
+- 从原 Phase 1 拆出：`HomeStateSelfFacet` 纯投影（零存储）、M1 self-host / sanctuary 纯判定（接 F306 provider-neutral guard 公共层）、M3 `cat_cafe_home_state_self`（不收参数，身份由 callback 凭据证明）、`StopOperationRecord` 停启生命周期（世代链独占 claim、frozen identity、restart 授权、reverify）。
+- 明确未勾并归属：AC-O3 的多 owner 覆盖（F153 / F237 / F192）与 AC-1.4 `heldLeases`（F167 lease 读取链未接，WP1.1 起恒 `unknown`）→ **WP3 承接**，不作 deferred 藏匿。
+
+### WP2 — 新手第一次成功使用（@opus5；2026-09-09 按 WP1 愿景守护重写）
+
+- 从"新手第一次成功使用"反向定义（愿景门槛：猫说得准、知道何时该提、用户选择后能真的做成、下一次尊重处置）：2.0 在 Alpha 真实产品壳冻结完整旅程 + 前端 Design Gate（每步谁执行、结果怎么回原任务）→ 2.1 从 `GET /api/capabilities` 拆出**只读**读取服务（现有入口会 bootstrap 写回，M3 不得直接包装）→ 2.2 availability 改为 `facts + actionable + executionNode`（保留各 owner 事实、另给可执行性与阻碍；`remote_authorized` 只认实时授权事实）→ 2.3 情境由**猫判断**、系统供有界授权内容并守边界（不用固定映射）→ 2.4 接受后由原 owner 执行并回到当前任务（receipt + first-use evidence）→ 2.5 处置语义（情境身份 / `this_time` `this_situation` `this_capability` / 失效条件）→ 2.6 **Alpha** 完整验收，不等生产。
+- 原 Phase 1 "可并行补 quota topology、非 Plugin runtime readiness adapter" 并入 2.2。验收：AC-D1～D4 + 2.2 / 2.5 语义测试 + Alpha 旅程截图。
+- **WP1 愿景守护交回的 P1 repair（WP1.1，代码已合入 #4545，Alpha 已复验；codex-astra 接续）**：`runtime.head` 使用进程启动时捕获的版本，缺运行产物证据时如实标注 checkout；`heldLeases` 未接来源表达 `unknown`（schema 改 `| TypedAbsent`）；quota 因缺账户与配额池的归属证明而返回 `unknown`；记录方实测健康，验证 listener 归属、拒绝跳转，并在写入前核对原操作与实例。2026-09-15 Alpha 完整状态历史及同一操作的最终回执已归档于上方 evidence；其余 Phase AC 未据此扩大勾选。
+
+### WP3 — 接入行动边界
+
+- 原 Phase 1 的取消例在此完成：cancellation 经 F233 账本 exact subject 回源（AC-1.1）、quota topology（AC-1.5）、plugin readiness（AC-G1）；M2 走 F296 admission（AC-1.2 / 1.3），不建第二通道；`heldLeases` 接 F167（AC-1.4）；AC-O2 / O3 扩到 F153 / F237 / F192 多 owner 同源读取。
+
+### WP4 — 完整旅程验收、异质证明与反馈（原 Phase 3 / 4）
+
+- Stop Journey 与 Discovery Journey 即两条不同 owner、不同媒介的异质纵切（AC-3.1）；只有两条都重复出现的结构才从 journey-local 提升为 integration adapter（AC-3.2）。
+- 通过现有 feedback / disposition / preference owners 完成保留、调整、忽略、撤回与失效；以 first-use evidence 判定"真的减少摩擦"，配置写入或 UI 出现都不算成功（AC-3.3、AC-2.6）。
+
+### Phase 5 — First capability-growth journey: voice（原 Phase 2；Packet P3 排 WP4 之后）
+
+- 原文保留：Plugin gate 满足后，用"反复打字摩擦 → 语音候选 → 亲授麦克风 → owner receipt → 首次真实使用 → 用户处置"跑通能力成长旅程；语音能同时验证 capability、availability、friction、authority、surface 与 rollback，但不是永久架构中心（AC-G1～G4、AC-2.1～2.5 的语音语义在此验收）。
+
+> **以下为 2026-08-26 合同的原 Phase 0–4 原文，已并入上方 WP；保留供追溯，不再驱动排期。**
 
 ### Phase 0 — Thin product contract
 
@@ -307,6 +348,25 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 
 - 通过现有 feedback/disposition/preference owners 完成保留、调整、忽略、撤回和失效。
 - 用 first-use evidence 判断“真的减少摩擦”，而不是把配置或 UI 出现当成成功。
+
+## 8. 事实来源表（写入者 / 读取链 / 缺失字段 / 承接）
+
+> 归一的是**写入源与读取链**，不是对象（KD-12）。每项事实只有一个写入者；F300 只读。
+
+| 事实 | 写入者（唯一） | 读取链 | 2026-09-07 缺失 | 承接 |
+|---|---|---|---|---|
+| 自身宿主 / 平台 / 坐标 | daemon-state 进程身份 + runtime-worktree status + InvocationRecord + process | `HomeStateSelfFacet` → `cat_cafe_home_state_self` | — | WP1 ✅ |
+| 自身 quota | quota canonical owner（F051 / account resolver） | self facet `quota`；WP1.1 起返回 `unknown` | 当前来源没有账户与配额池的可证对应关系，不能用 clientId 级缓存代替 | WP1 投影已落地；归属读取链由 WP3 补齐 |
+| 持有 lease | F167 lease store | self facet `heldLeases` | 读取 API 未接（WP1.1 起恒 `unknown`，不再冒充空集） | WP3 |
+| MCP 能力 | F286 `capabilities.json` + tool governance | F041 读取链 | platform / ready 状态 | WP2 |
+| Plugin | F202 `PluginManifest` + `PluginStatus` | F041 读取链 | platform / executionNode（外部 #1446；本地 optional，缺 = unknown） | WP2 |
+| Limb | limb registry `ILimbNode`（已有 platform / authLevel） | F041 读取链 | online → availability 映射 | WP2 |
+| Skill | `manifest.yaml` + requiresMcp | F041 读取链 | 可用性维度（由 requiresMcp 派生） | WP2 |
+| 猫 roster | `cat-config.json`（`available` = 启用位，`cat-config-loader.ts:232`） | `runtime-cat-catalog.ts`（启用位透传） | 成员就绪事实：(binding, carrier, 执行节点) 三元组（KD-17）——启用位不是 readiness，此前本行写「available 已有」是混淆 | WP2（2.2 首个实现 PR 落「CLI agent 可用性」行） |
+| Hub UI mode | `workspace-modes.ts` | — | 声明字段全缺 | WP2（descriptor 补齐供导游） |
+| custody（取消 / 审批） | F233 Phase B 账本 | M1 exact subject 回源；M2 via F296 | — | WP3 |
+| 用户情境 | 当前 thread 消息 / workspace 对象 / 操作 refs（各自 owner） | discovery adapter（member-scoped，AC-0.2） | 授权边界 | WP2 |
+| disposition | F281 | `candidate.dispositionRef` | — | WP2 |
 
 ## User Journey
 
@@ -356,6 +416,30 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 3. 猫在同一 subject 上准备再次 @/dispatch 前执行 M1；若 cancelled 则阻止，若 unknown 则 fail closed。
 4. 用户在原动作位置看见 recorded / pending / presented / failed-or-unknown；只有 provider receipt 才能写 presented。
 5. 新 subject 的无关工作不继承旧 cancellation。
+
+### Stop Journey：授权停机，猫不会杀死自己，恢复后有回执
+- **Scope unit**: runtime
+- **Actor**: operator + 猫猫
+- **Entry**: 猫在 worktree 准备执行 `runtime:stop` / kill / 端口操作；或 You 授权一次停启
+- **Flow**:
+  1. 猫动作前 M1 判定：目标 ∩ self facet 宿主集合 / 圣域 → 命中 → typed 拒绝（`self_host` / `sanctuary`）+ 改道建议；解析不出目标的破坏性动词 → `unknown` fail closed
+  2. You 授权的停机经 daemon-state `requestStop`（执行者不在被停进程集合，INV-1）→ `stopped` 回执
+  3. 授权重启 → `restarted` → `reverified`（同 opId，INV-3），全程不依赖已停 API / 回调
+  4. 任一步失败 → `failed`，不宣称恢复
+- **Success evidence**: C0 / C5 纯判定矩阵绿 + 隔离进程停启链 INV-1～5 与四个对抗场景绿（WP1 ✅，PR #4426）
+- **Non-goals**: 一律拒绝停机；用 3001 / 3002 / 6399 做真实破坏验收
+
+### Discovery Journey：新手没说能力名，猫从情境里认出他需要什么
+- **Scope unit**: thread
+- **Actor**: 社区新手operator（不是 You）
+- **Entry**: 新手在做自己的事（如接入社区仓库、开始处理反馈），没有报错、没有说"我想要 X"
+- **Flow**:
+  1. 猫从当前对话 + 授权 workspace/对象上下文 + 用户正在进行的操作认出情境（"在处理 GitHub 反馈"）
+  2. 对照同源能力真相（F041 读取链 + 平台/执行节点对照）→ 家里有 `opensource-ops`，此环境可用
+  3. 猫在现场一句话："你这一堆 issue 的事，家里有个能力叫 X，要不要我带你试一下"——可撤回、不弹窗
+  4. 用户接受 → 带到首次真实使用；用户拒绝 → 后续发现尊重该处置
+- **Success evidence**: 新手 dogfood——不知道能力存在的人描述处境后被带到能力；三条验收：无能力名无失败也能提 / 环境不支持诚实解释 / 拒绝后尊重
+- **Non-goals**: 功能列表页（"大而全"反模式）；需求驱动查询（新手说不出需求）；弹窗推销
 
 ### Supporting Journeys
 
@@ -415,7 +499,7 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 - [ ] **AC-G3**: Plugin invocation 与 surface mutation 均有 owner receipts，失败原因可定位
 - [ ] **AC-G4**: disable/uninstall/revoke 后 proposal/surface/preference 能按原 owner 规则失效或回滚；该 capability gate 不改变 Phase 1 / 非 Plugin owner contracts，生产启动另按第 6 节 sequencing
 
-### Phase 2：完整 voice 产品旅程
+### Phase 2：首条完整旅程（Design Gate 2026-09-07：通用旅程语义由 Discovery Journey 承担；voice 专属语义移 Phase 5——Packet P3）
 
 - [ ] **AC-2.1**: friction evidence 只描述 Agent 能力/交互效果，不诊断用户；候选可解释、可拒绝、可撤回
 - [ ] **AC-2.2**: capability + availability refs 能支持 why-now；证据不足时继续原任务而不是诱导失败
@@ -423,6 +507,13 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 - [ ] **AC-2.4**: surface 出现不等于成功；首次真实语音输入必须回到原任务并留下 owner evidence
 - [ ] **AC-2.5**: permission denied、Plugin unavailable、device missing、provider failure、surface failure、first-use failure 六类失败分别验收
 - [ ] **AC-2.6**: 用户可保留、调整、忽略或撤回；F300 只引用 existing disposition/preference/retention truth
+
+### Phase 2'：新手发现旅程（Design Gate 2026-09-07 新增，WP2 验收）
+
+- [ ] **AC-D1**: 用户没说能力名、没有失败信号，猫仍能从情境（当前对话 + 授权 workspace 对象 + 正在进行的操作）提出相关能力 candidate；无情境时给 ≤3 个具体成果示例
+- [ ] **AC-D2**: 环境不支持（含平台 / 执行节点对照）时入口以 `honestLimit` 诚实解释，不诱导失败
+- [ ] **AC-D3**: 用户拒绝后（F281 disposition），后续发现尊重该处置，同情境不再提
+- [ ] **AC-D4**: darwin-only 能力在 `platform.os=win32` 猫的 snapshot 为 `unsupported`；同猫可调已授权远端 Mac 节点时为 `ready(executionNode=remote_authorized)`
 
 ### Phase 3–4：异质证明与反馈
 
@@ -449,10 +540,39 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 | Plugin capability / command / readiness | Plugin truth owner/operator | preflight + entry gate |
 | user preference / retention | 对应 preference/retention owner | 关联 ref，不复制 |
 
+## Eval / Tracking Contract（Discovery Journey · WP2；2026-09-15 Design Gate 出生）
+
+> 触发：情境驱动发现改变猫的行为模式（主动提议）且效用不确定；consumer = 本机制的 keep / tune / sunset 裁决（F192 eval 域 `eval:contextual-discovery`，Phase 2' 起）。接受率**不是**猫的 KPI（F281 KD-3），只裁决机制去留。Stop Journey / WP1 是确定契约（纯判定 test + F306 guard），不在本节。
+
+### 1. Primary Users + Activation Signal
+
+- Users：operator / 社区新手operator（受益方，说处境不说能力名）；Cats：作者猫（判断情境、提出结果）；Runtime：`situation-context` 装配 + F041 纯读服务 + F281 producer `F300`。
+- Activation signal（F153 trace / 消息可 query）：① 猫回复里出现 `ContextualDiscoveryCandidate`（refs-only，`judgedBy`、`evidenceRefs`）；② 用户在 interactive 块上落成 typed decision（accept / not_now / rejected@情境级 / rejected@能力级）；③ accept 后出现 owner receipt → first-use evidence ref（`inv:<id>`）。三段齐 = 一次完整旅程。
+
+### 2. Friction Metric
+
+- `rejected@能力级` 占比持续偏高（提的都是用户不要的能力）；
+- `other` 自由文本中"不相关 / 现在在忙"类占比；
+- accept 后停在 `pending_owner` 超过一个会话（owner 回执链断）；
+- 同一情境指纹被提 >1 次（dedup 失效，直接违反 Design Gate D4）。
+
+### 3. Regression Fixture
+
+- [两域情境各得相关候选] → Task 2.3 fixture（"处理社区反馈"、"整理会议纪要"）
+- [无相关能力不硬凑] → Task 2.3 `no_situation_example`
+- [越权情境内容] → Task 2.3 `not_authorized`（不裁剪成"没有"）
+- [darwin-only @ win32 诚实限制] → Task 2.2 `facts.supported=false` + AC-D4
+- [情境级拒绝后同情境不提；能力级拒绝后任何情境不提；unsupported→ready 后情境级拒绝失效] → Task 2.5 三条
+- [真实旅程] → Task 2.6 Alpha 六场景（Design Gate mock 即验收脚本）
+
+### 4. Sunset Signal
+
+连续 4 个 eval 窗口 accept≈0 且 `rejected@能力级` 居高，或 operator 判"吵"（Packet P1 打扰预算被击穿）→ 撤下主动提议段，保留诚实限制解释、F041 看板与零情境空态示例；F281 决策事实与 first-use ref 不删。
+
 ## Dependencies
 
 - **Can proceed now**: 公共合同 exact-HEAD review、owner contracts、acceptance fixtures 与只读 adapter 设计；这不等于 runtime 已启动。
-- **Runtime kickoff sequencing**: 当前 F300 runtime 尚未开发；Plugin 完整改造提供 exact evidence 后，按 Phase 1 → Phase 2 的顺序启动。
+- **Runtime kickoff sequencing**: WP1 已落地 Phase 1 的 Home-State 读取底座与停启保护（PR #4426）；Phase 1A/1B 的其余部分与 Phase 2 尚未启动。Plugin-backed 的部分仍等 Plugin 完整改造提供 exact evidence，再按 Phase 1 → Phase 2 顺序推进。
 - **Plugin-backed voice slice blocked by**: Plugin truth owner/operator 对 AC-G1–G4 的完整证据；不是一句“整改完成”。该架构 gate 不把 F153/F237/F192 等非 Plugin truth 归给 Plugin。
 - **Runtime delivery depends on**: F296 presentation/receipt contract 与 F298 principal/admission/result durability。
 - **Related**: F223 capability surfaces、F246 proposals/approval、F281 human disposition、F299 user-visible trajectory。
@@ -498,8 +618,13 @@ F300 可以判断这些证据是否满足 voice slice entry criteria，但**无�
 | KD-8 | 产品改善必须有 first real use + disposition | 防止把 proposal、配置或 UI 投影视为真实用户价值 | 2026-08-26 |
 | KD-9 | public PR 先形成完整候选并取得 maintainer wording acceptance；再把 exact accepted contract 融合进 Clowder AI canonical F300、先落地 home source；最后让 public PR 与 landed source 等价并完成 current-HEAD publication review/merge | 候选负责共创与接受，home F300 负责单一 canonical source，publication 负责等价交付；三阶段不产生并行裁决面 | 2026-08-26 |
 | KD-10 | F300 是完整 Self-Sensing/Self-Management 产品 umbrella，但 runtime ownership 保持薄 | 若只写 Home-State/适配器，owner 各自能给 UI 暴露事实，Agent 仍可能没有统一现场、相关性与旅程验收；扩大产品目标不等于接管数据与执行 | 2026-08-26 |
-| KD-11 | “用户说这个功能不对”是 Primary Journey，语音是 capability-growth journey | 前者直接判定 Agent 能否在安装后理解自己与用户所见；后者验证能力构建、权限、首次使用与 disposition | 2026-08-26 |
-| KD-12 | Agent 与 Console 采用 same-source、different-presentation | 避免用户看到的 tracing/eval 状态与 Agent 理解不一致，同时保留 F153/F237/F192 ownership | 2026-08-26 |
+| KD-11 | 用户消费面 = **情境驱动发现**（主输入：当前对话 + 授权 workspace/对象上下文 + 用户正在进行的操作；摩擦只是时机线索）；猫是翻译器不是目录 | 新手不会说能力名——未知的未知；F245/F278 不能回答"此刻在做什么"，不作前置依赖 | 2026-09-07 |
+| KD-12 | 能力归一 = 同一事实的写入源归一 + 各入口读取链共用（基础：F041 能力看板已统一 mcp/skill/limb 读取模型），不是统一对象、不扩 F286（`McpRuntimeProfile` 是暴露范围枚举）；平台/执行节点约束进 plugin-contract 原契约 | 不多一份真相源；"能力契约由运行状态生成"修正为"用途与静态约束声明 + 此刻可用性由声明与现场事实共同计算" | 2026-09-07 |
+| KD-13 | 可用性对照**实际执行节点**而非猫所在机器（Windows 猫可调已授权远端 Mac 则可用） | 防误判；列为反例验收 | 2026-09-07 |
+| KD-14 | 停启承接归部署/daemon 管理模块（沿 `daemon-state.mjs` 扩展），脚本入口、API 消费；须证明执行者独立于被停进程集合、后续步骤与回执不依赖已停 API/回调、授权重启后同一操作记录关联复验；复用 F306 native guard 审计缺口，危险命令验收只做纯判定 + 隔离进程 | 授权停机照常执行而非一律拒绝；不向 6399/生产发破坏请求 | 2026-09-07 |
+| KD-15 | “用户说这个功能不对”是 Primary Journey，语音是 capability-growth journey | 前者直接判定 Agent 能否在安装后理解自己与用户所见；后者验证能力构建、权限、首次使用与 disposition | 2026-08-26（原编号 KD-11，2026-09-14 修号：与 09-07 行撞号，全库无按号引用） |
+| KD-16 | Agent 与 Console 采用 same-source、different-presentation | 避免用户看到的 tracing/eval 状态与 Agent 理解不一致，同时保留 F153/F237/F192 ownership | 2026-08-26（原编号 KD-12，同上） |
+| KD-17 | 可用性的键 = **(member binding, carrier/adapter, 实际执行节点)** 上的运行事实，不是 `clientId` 的静态属性；KD-13 是第三维的反例验收。每个 provider/carrier 拥有并暴露自己的 resolved executable / readiness 事实，M3 只投影；member 级 `facts.installed` = carrier 为该 binding resolve 出可启动物（`client-detection` 的 clientId 级 PATH 命中只是输入，不是输出）；`cat-config.available` 是启用位（`cat-config-loader.ts:232` `z.boolean()`），不产生任何 readiness 事实；三元组任一维无法确认 → 对应 fact / `executionNode` = `'unknown'` 且 `actionable='unknown'`（M1 消费侧按不放行处理），不折叠成 `false`；`blockers[].fact` 仍 ⊆ `facts` 键，三元组是行的键不是 blocker 值；跨重启快照只能按 F289 登记为 canonical data root 下 typed `rebuildable-cache`，不落 project config root；探测全程 LL-055 spawn-free | 来源：clowder-ai #1463 maintainer comment 5664171162（2026-09-14）——公开合同已把 F300 引为 Q1 答案，源必须与之等价（KD-9）；防 clientId 级 installed 冒充成员可用；unknown 独立第三态（WP1 P0 教训） | 2026-09-14 |
 
 ## Review & Delivery Gate
 

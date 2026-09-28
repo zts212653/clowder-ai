@@ -1,4 +1,3 @@
-import { PAW_FEEL_DISPOSITION_STATES, type PawFeelDispositionState } from '@cat-cafe/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { requireConnectorWriteNetworkGuard } from '../config/connector-secret-write-guards.js';
 import {
@@ -26,11 +25,12 @@ import {
   PawFeelBundleActionBodySchema,
   PawFeelCaptureBodySchema,
   PawFeelDutyUpdateBodySchema,
-  PawFeelInboxQuerySchema,
+  PawFeelRepairOutcomeBodySchema,
   PawFeelSingleActionBodySchema,
   PawFeelTriageBodySchema,
   pawFeelSingleActionCommand,
 } from './paw-feel-disposition-contracts.js';
+import { parsePawFeelInboxQuery } from './paw-feel-inbox-query.js';
 
 export interface PawFeelDispositionRoutesOptions {
   readModel?: Pick<PawFeelDispositionReadModel, 'list'>;
@@ -54,35 +54,6 @@ function requireSession(request: FastifyRequest, reply: FastifyReply): string | 
   return userId;
 }
 
-function parseInboxQuery(request: FastifyRequest, reply: FastifyReply): PawFeelInboxQuery | undefined {
-  const parsed = PawFeelInboxQuerySchema.safeParse(request.query);
-  if (!parsed.success) {
-    reply.status(400).send({ error: 'invalid paw-feel inbox query', details: parsed.error.issues });
-    return undefined;
-  }
-  let states: PawFeelDispositionState[] | undefined;
-  if (parsed.data.states) {
-    const requested = parsed.data.states.split(',').filter(Boolean);
-    const invalid = requested.find(
-      (state): state is string => !PAW_FEEL_DISPOSITION_STATES.includes(state as PawFeelDispositionState),
-    );
-    if (invalid) {
-      reply.status(400).send({ error: `invalid paw-feel state: ${invalid}` });
-      return undefined;
-    }
-    states = requested as PawFeelDispositionState[];
-  }
-  return {
-    ...(states ? { states } : {}),
-    ...(parsed.data.sourceCatId ? { sourceCatId: parsed.data.sourceCatId } : {}),
-    ...(parsed.data.sourceMessageId ? { sourceMessageId: parsed.data.sourceMessageId } : {}),
-    ...(parsed.data.overdueOnly ? { overdueOnly: parsed.data.overdueOnly === 'true' } : {}),
-    ...(parsed.data.limit ? { limit: parsed.data.limit } : {}),
-    ...(parsed.data.cursor ? { cursor: parsed.data.cursor } : {}),
-    ...(parsed.data.sort ? { sort: parsed.data.sort } : {}),
-  };
-}
-
 async function listInbox(
   readModel: Pick<PawFeelDispositionReadModel, 'list'> | undefined,
   request: FastifyRequest,
@@ -90,7 +61,7 @@ async function listInbox(
   overrides: PawFeelInboxQuery = {},
 ) {
   if (!readModel) return reply.status(503).send({ error: 'paw-feel disposition ledger unavailable' });
-  const query = parseInboxQuery(request, reply);
+  const query = parsePawFeelInboxQuery(request, reply);
   if (!query) return;
   return readModel.list({ ...query, ...overrides });
 }
@@ -146,12 +117,34 @@ async function triage(
   if (!parsed.success) {
     return reply.status(400).send({ error: 'invalid paw-feel triage commands', details: parsed.error.issues });
   }
+  if (parsed.data.commands.some((command) => command.type === 'link_repair_outcome')) {
+    return reply.status(400).send({ error: 'repair outcome requires the dedicated owner callback' });
+  }
   try {
     const results: PawFeelBulkCommandResult[] = await service.executeMany(
       { kind: 'cat', id: principal.catId },
       parsed.data.commands,
     );
     return { results, ...(await reconcileDutyReceipt(receiptService, principal.catId)) };
+  } catch (error) {
+    return mapServiceError(error, reply);
+  }
+}
+
+async function linkRepairOutcome(
+  service: Pick<PawFeelDispositionService, 'executeMany'> | undefined,
+  request: FastifyRequest,
+  reply: FastifyReply,
+) {
+  if (!service) return reply.status(503).send({ error: 'paw-feel disposition ledger unavailable' });
+  const principal = requireCallbackPrincipal(request, reply);
+  if (!principal) return;
+  const parsed = PawFeelRepairOutcomeBodySchema.safeParse(request.body);
+  if (!parsed.success) {
+    return reply.status(400).send({ error: 'invalid paw-feel repair outcome', details: parsed.error.issues });
+  }
+  try {
+    return { results: await service.executeMany({ kind: 'cat', id: principal.catId }, [parsed.data]) };
   } catch (error) {
     return mapServiceError(error, reply);
   }
@@ -288,6 +281,10 @@ export const pawFeelDispositionRoutes: FastifyPluginAsync<PawFeelDispositionRout
 
   app.post('/api/callbacks/paw-feel-triage', async (request, reply) => {
     return triage(opts.dispositionService, opts.dutyReceiptService, request, reply);
+  });
+
+  app.post('/api/callbacks/paw-feel-repair-outcome', async (request, reply) => {
+    return linkRepairOutcome(opts.dispositionService, request, reply);
   });
 
   app.post('/api/callbacks/paw-feel-bundle-triage', async (request, reply) => {

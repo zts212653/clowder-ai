@@ -182,7 +182,7 @@ SessionStart / shell hook 检测到 main 上有 unexpected 状态（untracked do
 ## Post-close Follow-up: Duplicate Legacy MCP Topology
 
 **Status**: open follow-up, do not reopen F193 close.
-**Task**: `[F193/F209] Fix duplicate legacy cat-cafe MCP topology when cat-cafe-limb is external` (`0001779676617089-000049-765d9510`).
+**Task**: `[F193/F209] Fix duplicate legacy cat-cafe MCP topology when cat-cafe-limb is external` (`private-source-id`).
 **Found during**: F209 D.0 dogfood, 2026-05-24.
 
 ### Symptom

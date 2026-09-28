@@ -40,6 +40,7 @@ export interface ThreadInvokeDeps {
   readonly invocationTracker: InvocationTracker;
   readonly queueProcessor?: Pick<QueueProcessor, 'markPromptMessagesSeen'> & {
     enqueueRaw?: QueueProcessor['enqueueRaw'];
+    onInvocationComplete?: QueueProcessor['onInvocationComplete'];
   };
 }
 
@@ -219,6 +220,7 @@ export async function generateScriptViaThread(
   // ④ Route execution and collect text response
   const intent = { intent: 'execute' as const, explicit: false, promptTags: [] as string[] };
   let fullText = '';
+  let finalStatus: 'succeeded' | 'failed' = 'failed';
   const terminalDispositions = new PerCatTerminalDispositionCollector({
     targetCatIds: targetCats,
     isCanceled: (catId) => deps.invocationTracker.getSlotState?.(threadId, catId) === 'canceled',
@@ -269,6 +271,7 @@ export async function generateScriptViaThread(
       },
       writer: 'podcast generator',
     });
+    finalStatus = 'succeeded';
   } catch (err) {
     await deps.invocationRecordStore.update(createResult.invocationId, {
       status: 'failed',
@@ -277,6 +280,19 @@ export async function generateScriptViaThread(
     throw err;
   } finally {
     deps.invocationTracker.complete(threadId, primaryCat, controller);
+    await deps.queueProcessor
+      ?.onInvocationComplete?.(
+        threadId,
+        primaryCat,
+        finalStatus,
+        createResult.invocationId,
+        finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
+        false,
+        terminalDispositions.getTerminalInvocationIdByCatId(),
+        [],
+        terminalDispositions.getTerminalConsumptionByInvocationId(),
+      )
+      .catch((error) => log.warn({ error, threadId }, 'Podcast Queue completion failed'));
   }
 
   return parseScriptResponse(fullText, request.mode);

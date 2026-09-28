@@ -343,7 +343,7 @@ Maine Coon确认引擎/extractor 分层补上了第一轮最大隐性漏洞，**
 | "减少你们费力的 grep 之类的" | AC-A1 dogfood：`codeConsumers("cat_cafe_post_message")` 抓出 3 consumes + 1 registers（含 grep 漏的 dynamic dispatch `COLLAB_TOOL_SOURCES` + callback registration）；`as const` 漏识别 bug 在 dogfood 中被真实抓到并修复（`54cfc4582`） | ✅ |
 | "改了这个似乎可以改，结果导致另一个模块炸了" | freshness contract（`engine-freshness-contract.test.ts` A/B/C 三组）：改文件后标 stale、per-domain scope fail-closed、别 domain 不误报；edge provenance 每条边有 source span + extractor + scope；scope 消歧 AC-A2 有 negative fixture | ✅ |
 
-原结论：**PASS / close accepted**。当前状态：**feature close retracted**；完整 guardian message: `0001781845013679-000557-797f4741`。
+原结论：**PASS / close accepted**。当前状态：**feature close retracted**；完整 guardian message: `private-source-id`。
 
 ## CloseGateReport
 

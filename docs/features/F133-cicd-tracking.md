@@ -206,6 +206,7 @@ GitHub API 轮询 → CiCdCheckPoller (新)
 | KD-6 | 独立 github-ci-bootstrap.ts | lifecycle 和日志独立，不复用 review bootstrap 语义 | 2026-03-23 |
 | KD-7 | PrTrackingStore 新增 patchCiState()，不复用 register() | register() 会整 hash 重写并刷新 registeredAt，把注册和运行态状态更新混成一个操作 | 2026-03-23 |
 | KD-8 | 状态迁移去重（headSha + aggregateBucket），不复用 ProcessedEmailStore 时间窗口 | 5min 窗口会吞掉合法的 pending → fail → success 迁移；CI 需要按状态变化去重 | 2026-03-23 |
+| KD-9 | 空 rollup 永远不是 CI 证据：当前 HEAD 的 checks 与 statuses 都为空时保持 `pending`，跨多少个轮询周期都不晋升为 `pass` | 空集合没有任何一条成功的 check 能支撑终态结论。workflow 没触发的情况（PR 冲突时 GitHub 不生成 merge ref、workflow 语法错、路径过滤、Actions 停用）与「仓库没配 CI」都返回 `[]`，按时长晋升会把它们统一报成 `pass (0 blockers)`，并可能被当作合并依据。没配 CI 的仓库因此会一直 pending，这是接受的代价 | 2026-09-23 |
 
 ## Design Gate 讨论归档
 

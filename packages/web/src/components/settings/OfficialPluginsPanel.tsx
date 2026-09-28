@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { type OfficialPluginAction, OfficialPluginCard, type OfficialPluginInfo } from './OfficialPluginCard';
 import type { OfficialPluginCatchUpAction } from './OfficialPluginCatchUp';
+import { officialPluginEnableConfirmation } from './official-plugin-presentation';
 import { SettingsText } from './primitives/SettingsText';
 
 const HEALTH_REFRESH_MS = 5_000;
@@ -21,22 +22,18 @@ interface OfficialPluginCatalogStatus {
 
 function actionConfirmed(plugin: OfficialPluginInfo, action: OfficialPluginAction): boolean {
   if (action === 'enable') {
-    return window.confirm(
-      plugin.catalogId === 'collective-connector'
-        ? '确认启用 Collective Connector？它会恢复 Host 托管的 endpoint 连接，但不会启动 Collective Service。'
-        : '确认启用飞书会议纪要同步？启用后会连接本机 lark-cli。',
-    );
+    return window.confirm(officialPluginEnableConfirmation(plugin));
   }
   if (action === 'update') {
     const enabled = plugin.instance?.activationState === 'enabled';
     return window.confirm(
       enabled
-        ? `确认更新到 ${plugin.availableVersion}？接收服务会短暂重连，并保持已启用状态。`
+        ? `确认更新到 ${plugin.availableVersion}？请先保存正在进行的工作；插件会短暂重启，并保持已启用状态。`
         : `确认更新到 ${plugin.availableVersion}？更新后会保持当前停用状态。`,
     );
   }
   if (action === 'uninstall') {
-    return window.confirm('确认卸载？运行中的进程会先停止，已缓存的不可变包会保留。');
+    return window.confirm('确认卸载？插件会先停止，已缓存的不可变包会保留。');
   }
   return true;
 }

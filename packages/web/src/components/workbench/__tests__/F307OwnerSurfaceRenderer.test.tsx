@@ -4,9 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCapabilityEvolutionWorkspaceSurface } from '../capability-evolution-workspace-adapter';
 import {
   createApprovalActionSurface,
+  createContentEditorSurface,
   createEvolutionProgramSurface,
   createWorkspaceDestinationSurface,
 } from '../real-surface-adapters';
+
+vi.mock('../content-editor/ContentEditorOwnerSurface', () => ({
+  ContentEditorOwnerSurface: ({ target }: { target: { contentRef: string; sessionRef: string } }) => (
+    <div data-testid="content-editor-owner" data-content-ref={target.contentRef} data-session-ref={target.sessionRef} />
+  ),
+}));
 
 const ARTIFACT_COORDINATE = {
   artifactRef: 'artifact:ppt:tomorrows-ppt',
@@ -41,6 +48,7 @@ vi.mock('@/components/capability-evolution/CapabilityEvolutionWorkspace', () => 
   ),
 }));
 
+const artifactFixture = vi.hoisted(() => ({ revision: 7, threadId: 'thread-f310' }));
 vi.mock('@/hooks/useGlobalArtifacts', () => ({
   useGlobalArtifacts: () => ({
     artifacts: [
@@ -48,10 +56,10 @@ vi.mock('@/hooks/useGlobalArtifacts', () => ({
         type: 'file',
         name: 'Tomorrow presentation',
         catId: 'codex-sol',
-        createdAt: 7,
+        createdAt: artifactFixture.revision,
         sourceMessageId: null,
         url: 'artifact:ppt:tomorrows-ppt',
-        threadId: 'thread-f310',
+        threadId: artifactFixture.threadId,
         threadTitle: 'PPT source',
       },
     ],
@@ -107,6 +115,7 @@ describe('F307 owner surface renderer', () => {
   let root: ReturnType<typeof createRoot>;
 
   beforeEach(() => {
+    Object.assign(artifactFixture, { revision: 7, threadId: 'thread-f310' });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -115,6 +124,28 @@ describe('F307 owner surface renderer', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('mounts the F309 content editor owner from persisted content/session refs', () => {
+    const contentRef = 'project:alpha/assets/proposal.docx';
+    const sessionRef = `editor-session:${'a'.repeat(64)}`;
+    const surface = createContentEditorSurface({ contentRef, sessionRef });
+
+    act(() =>
+      root.render(
+        <F307OwnerSurfaceRenderer
+          surface={surface}
+          onOpenSurface={() => undefined}
+          onOpenArtifactWithReturn={() => undefined}
+          onRefreshSurface={() => undefined}
+          onRequestDetach={() => undefined}
+        />,
+      ),
+    );
+
+    const owner = container.querySelector('[data-testid="content-editor-owner"]');
+    expect(owner?.getAttribute('data-content-ref')).toBe(contentRef);
+    expect(owner?.getAttribute('data-session-ref')).toBe(sessionRef);
   });
 
   it('restores the persisted Changes worktree and native Review Thread together', () => {
@@ -270,6 +301,44 @@ describe('F307 owner surface renderer', () => {
         },
       }),
     });
+  });
+
+  it.each([
+    { revision: 8, threadId: 'thread-f310' },
+    { revision: 7, threadId: 'other-thread' },
+  ])('does not substitute a matching URL from another revision or thread: %j', (changed) => {
+    Object.assign(artifactFixture, changed);
+    const surface = createWorkspaceDestinationSurface(
+      {
+        kind: 'mode',
+        id: 'product-schedule',
+        label: 'Schedule',
+        description: 'Work',
+        searchTerms: 'schedule',
+      },
+      'thread-host',
+    );
+    if (!surface) throw new Error('Expected Schedule surface');
+    const open = vi.fn();
+    act(() =>
+      root.render(
+        <F307OwnerSurfaceRenderer
+          surface={surface}
+          onOpenSurface={() => undefined}
+          onOpenArtifactWithReturn={open}
+          onRefreshSurface={() => undefined}
+          onRequestDetach={() => undefined}
+        />,
+      ),
+    );
+    act(() =>
+      container
+        .querySelector('[data-testid="schedule-open-owner-artifact"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
+    expect(open).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('这份内容已更新或暂时不可用');
+    Object.assign(artifactFixture, { revision: 7, threadId: 'thread-f310' });
   });
 
   it('opens inline approval and meeting repair refs in the existing Approval owner surface', () => {

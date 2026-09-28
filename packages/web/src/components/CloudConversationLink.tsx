@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { parseChatGptConversationUrl } from '@/utils/chatgpt-chat-url';
+import { personalChromeSettingsHref } from '@/utils/personal-chrome-settings';
 
 interface CloudBindingsResponse {
   bindings?: Record<string, string>;
@@ -119,7 +120,7 @@ export function CloudConversationLink({ threadId }: { threadId: string }) {
   }, [binding, threadId]);
 
   const status = bindingStatus(binding);
-  const settingsHref = '/settings?s=plugins#personal-chatgpt-pro';
+  const settingsHref = personalChromeSettingsHref(threadId);
 
   return (
     <div className="console-list-card mt-2 min-w-0 rounded-xl p-2.5" data-testid="cloud-conversation-link">

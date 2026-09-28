@@ -58,7 +58,7 @@ export function createProgramEvidenceProofResolver(input: {
         };
       }
 
-      if (proof.consumerConsumption.consumerFeatureId !== 'F311') {
+      if (proof.consumerConsumption.receipt.ownerFeatureId !== proof.consumerConsumption.consumerFeatureId) {
         return {
           status: 'insufficient',
           blockers: [blocker('consumption_proof_missing', evidenceProofRef)],

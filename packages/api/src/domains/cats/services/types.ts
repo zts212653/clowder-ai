@@ -12,6 +12,7 @@ import type {
   FreshnessCarrierCapability,
   MessageContent,
   ProviderSemanticEvent,
+  ProviderSubexecutionSemanticEvent,
   QueueTerminalConsumptionWitness,
   ReplyPreview,
   RequestGenerationRetryReason,
@@ -126,6 +127,8 @@ export interface MessageMetadata {
    */
   resumeSessionId?: string;
   usage?: TokenUsage;
+  /** F306: bounded provider-neutral child lifecycle for live/F5 Agent Run parity. */
+  subexecutionEvents?: readonly ProviderSubexecutionSemanticEvent[];
   /** F061: false when provider cannot verify which model actually ran (e.g. CDP bridge) */
   modelVerified?: boolean;
   /** F061: diagnostic context attached when empty_response is triggered */
@@ -140,6 +143,53 @@ export interface MessageMetadata {
    *  Populated by providers when isCliError/isCliTimeout fires, consumed by Phase B folded panel.
    *  Carries `__cliError.cliDiagnostics` / `__cliTimeout.cliDiagnostics` from cli-spawn. */
   cliDiagnostics?: CliDiagnostics;
+}
+
+/**
+ * Fold provider metadata snapshots into the one record persisted for a turn.
+ *
+ * Later defined fields are authoritative snapshots. In particular, usage is
+ * replaced rather than added because providers may report cumulative totals at
+ * terminal time. Diagnostics are the exception: independent diagnostic kinds
+ * remain useful together, while a later observation of the same kind wins.
+ */
+export function mergeMessageMetadataSnapshots(
+  existing: MessageMetadata | undefined,
+  incoming: MessageMetadata,
+): MessageMetadata {
+  const definedIncoming = Object.fromEntries(
+    Object.entries(incoming).filter(([, value]) => value !== undefined),
+  ) as Partial<MessageMetadata>;
+  const diagnostics =
+    existing?.diagnostics || incoming.diagnostics ? { ...existing?.diagnostics, ...incoming.diagnostics } : undefined;
+  const subexecutionEvents = mergeSubexecutionEvents(existing?.subexecutionEvents, incoming.subexecutionEvents);
+
+  return {
+    ...(existing ?? incoming),
+    ...definedIncoming,
+    ...(diagnostics ? { diagnostics } : {}),
+    ...(subexecutionEvents ? { subexecutionEvents } : {}),
+  } as MessageMetadata;
+}
+
+export const MAX_PERSISTED_SUBEXECUTION_EVENTS = 256;
+
+export function appendProviderSubexecutionEvent(
+  metadata: MessageMetadata,
+  event: ProviderSubexecutionSemanticEvent,
+): void {
+  metadata.subexecutionEvents = mergeSubexecutionEvents(metadata.subexecutionEvents, [event]);
+}
+
+function mergeSubexecutionEvents(
+  existing: readonly ProviderSubexecutionSemanticEvent[] | undefined,
+  incoming: readonly ProviderSubexecutionSemanticEvent[] | undefined,
+): readonly ProviderSubexecutionSemanticEvent[] | undefined {
+  if (!existing && !incoming) return undefined;
+  const byId = new Map<string, ProviderSubexecutionSemanticEvent>();
+  for (const event of existing ?? []) byId.set(event.id, event);
+  for (const event of incoming ?? []) byId.set(event.id, event);
+  return [...byId.values()].slice(-MAX_PERSISTED_SUBEXECUTION_EVENTS);
 }
 
 /**
@@ -636,12 +686,92 @@ export interface ProviderNativeStatus {
   }>;
 }
 
+/** Request-scoped, secret-free capability inventory observed from one provider process. */
+export interface ProviderNativeCapabilityArtifact {
+  readonly id: string;
+  readonly kind: 'mcp_server' | 'skill' | 'app' | 'plugin' | 'bundle' | 'pack';
+  readonly name: string;
+  readonly description: string;
+  readonly sourceLocator: string;
+  readonly trustLevel: 'official' | 'verified' | 'community';
+  readonly publisher: string;
+  readonly versionRef?: string;
+  readonly lifecycle?: {
+    readonly installed?: boolean;
+    readonly enabled?: boolean;
+    readonly accessible?: boolean;
+    readonly callable?: boolean;
+    readonly maturity?: 'stable' | 'experimental';
+    readonly authPolicy?: string;
+    readonly authStatus?: string;
+    readonly runtimeStatus?: string;
+    readonly toolCount?: number;
+    readonly resourceCount?: number;
+    readonly resourceTemplateCount?: number;
+    readonly pluginId?: string;
+  };
+}
+
+export interface ProviderNativeCapabilitySource {
+  readonly availability: 'live' | 'degraded' | 'unavailable';
+  readonly providerVersion: string;
+  readonly observedAt: string;
+  readonly artifacts: readonly ProviderNativeCapabilityArtifact[];
+  readonly issues: readonly string[];
+}
+
 /** A provider fork is binding evidence, never a Clowder AI Thread representation. */
 export interface ProviderNativeThreadFork {
   readonly sourceRuntimeSessionId: string;
   readonly forkedRuntimeSessionId: string;
   readonly source: 'codex_app_server';
   readonly observedAt: number;
+}
+
+/** The only product journeys admitted to the experimental Codex realtime seam. */
+export type ProviderNativeRealtimeConsumer = 'watch_video' | 'meeting_companion';
+
+/** F195-owned transcript data forwarded to Codex as explicitly untrusted text. */
+export interface ProviderNativeRealtimeTranscript {
+  readonly text: string;
+  readonly observedAt: number;
+  readonly inputId?: string;
+  readonly inputSource?: string;
+  readonly inputLabel?: string;
+  readonly speakerLabel?: string;
+}
+
+export type ProviderNativeRealtimeEvent =
+  | {
+      readonly kind: 'assistant_transcript';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly text: string;
+      readonly occurredAt: number;
+    }
+  | {
+      readonly kind: 'error';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly message: string;
+      readonly occurredAt: number;
+    }
+  | {
+      readonly kind: 'closed';
+      readonly runtimeSessionId: string;
+      readonly realtimeSessionId: string | null;
+      readonly reason?: string;
+      readonly occurredAt: number;
+    };
+
+/** Long-lived provider seam; capture and durable transcript ownership stay in F195. */
+export interface ProviderNativeRealtimeSession {
+  readonly runtimeSessionId: string;
+  readonly realtimeSessionId: string | null;
+  readonly version: 'v2';
+  readonly closed: Promise<{ readonly reason?: string }>;
+  appendTranscript(transcript: ProviderNativeRealtimeTranscript): Promise<void>;
+  stop(): Promise<void>;
 }
 
 /**
@@ -687,10 +817,12 @@ export interface AgentContextBinding {
 }
 
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
-export interface ToolExecutionPolicy {
-  readonly mode: 'read_only';
-  readonly replayDeniedToolNames: readonly string[];
-}
+export type ToolExecutionPolicy =
+  | {
+      readonly mode: 'read_only';
+      readonly replayDeniedToolNames: readonly string[];
+    }
+  | { readonly mode: 'collective_participation' };
 
 /**
  * Route-owned intent projection for provider behavior controls.
@@ -905,12 +1037,29 @@ export interface AgentService {
     readonly cwd?: string;
   }): Promise<ProviderNativeStatus>;
 
+  /** F306 Phase D: read provider inventory without joining or mutating a runtime thread. */
+  requestNativeCapabilitySource?(input: {
+    readonly invocationId: string;
+    readonly timeoutMs: number;
+    readonly cwd: string;
+  }): Promise<ProviderNativeCapabilitySource>;
+
   /** F306: fork one exact native binding; the caller remains responsible for Clowder AI target ownership. */
   requestNativeFork?(input: {
     readonly sessionId: string;
     readonly invocationId: string;
     readonly timeoutMs: number;
   }): Promise<ProviderNativeThreadFork>;
+
+  /** F306 experimental companion: text-only bridge into one exact native Codex thread. */
+  openNativeRealtimeCompanion?(input: {
+    readonly sessionId: string;
+    readonly invocationId: string;
+    readonly consumer: ProviderNativeRealtimeConsumer;
+    readonly startupTimeoutMs: number;
+    readonly maxDurationMs: number;
+    readonly onEvent?: (event: ProviderNativeRealtimeEvent) => void | Promise<void>;
+  }): Promise<ProviderNativeRealtimeSession>;
 
   /** True only when this concrete carrier applies the requested policy before model launch. */
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;

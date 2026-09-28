@@ -53,16 +53,23 @@ export * from './recall-outcome.js';
 // NOT re-exported here — uses Node.js fs, same pattern as Redis utils.
 // Export registry (CatRegistry, catIdSchema, assertKnownCatId)
 export * from './registry/index.js';
+export * from './runtime-question-retirement.js';
 // Export all schemas
 export * from './schemas/index.js';
 // Export shared source-code extension helpers (F232 artifact classification + preview)
 export * from './source-code-extensions.js';
 export * from './text-utils.js';
+export * from './types/artifact-review.js';
+export * from './types/artifact-review-drawing.js';
 // F255 runtime schemas are exported directly while their source remains grouped
 // with shared types; API and MCP must validate the same owner-free settlement shape.
 export * from './types/auto-dream.js';
+export * from './types/collective-participation.js';
+export * from './types/collective-work.js';
 // F167 direct carriers expose only action identities backed by terminal producers.
 export * from './types/executable-action-successor.js';
+// F300: refs-only home-state contract (self facet + side-effect assessment).
+export * from './types/home-state.js';
 // Export all types
 export * from './types/index.js';
 // F314: one accepted-source contract shared by API persistence and MCP producers.

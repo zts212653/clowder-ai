@@ -94,6 +94,8 @@ export interface QueueManagedHoldContinuationWitness {
   sourceMessageId: string;
   taskId: string;
   transition: 'reheld' | 'event_wait' | 'transferred';
+  /** New event_wait commits require this exact private Task registration reference. */
+  waitRegistration?: { taskId: string; generation: number };
 }
 
 /**

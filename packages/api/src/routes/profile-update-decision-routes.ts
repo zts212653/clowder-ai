@@ -16,7 +16,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireAnchoredPublication } from '../domains/approval-hub/requireAnchoredPublication.js';
 import type { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
-import { clearL0Cache as defaultClearL0Cache } from '../domains/cats/services/agents/providers/l0-compiler.js';
+import {
+  clearL0Cache as defaultClearL0Cache,
+  clearL0CacheOwner as defaultClearL0CacheOwner,
+} from '../domains/cats/services/agents/providers/l0-compiler.js';
 import {
   type ApproveProfileUpdateResult,
   approveProfileUpdate as defaultApproveProfileUpdate,
@@ -36,6 +39,8 @@ export interface ProfileUpdateDecisionDeps {
   repository: FileProfileRepository;
   socketManager: Pick<SocketManager, 'emitToUser'>;
   clearL0Cache?: (catId?: string, userId?: string) => void;
+  clearL0CacheOwner?: (userId: string) => void;
+  refreshProfileCollectionIndex?: (userId: string) => Promise<{ status: string; error?: string }>;
   approveProfileUpdate?: typeof defaultApproveProfileUpdate;
 }
 
@@ -81,11 +86,19 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     repository,
     socketManager,
     clearL0Cache = defaultClearL0Cache,
+    clearL0CacheOwner = defaultClearL0CacheOwner,
+    refreshProfileCollectionIndex,
     approveProfileUpdate = defaultApproveProfileUpdate,
   } = deps;
 
-  const clearCommittedPrimerCache = (result: ApproveProfileUpdateResult): void => {
-    if (result.proposal?.writtenPath) {
+  const clearCommittedProfileCache = (result: ApproveProfileUpdateResult): void => {
+    // If anything was written to disk, cache is stale — regardless of result.ok.
+    // Partial commits (write OK, checkpoint/provenance failed) must still invalidate.
+    if (!result.proposal?.writtenPath) return;
+    if (result.proposal.targetLayer === 'corpus') {
+      // Corpus is owner-wide: all cats sharing this owner must see the updated pointer.
+      clearL0CacheOwner(result.proposal.createdBy);
+    } else {
       clearL0Cache(result.proposal.sourceCatId, result.proposal.createdBy);
     }
   };
@@ -108,16 +121,25 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
     await requireAnchoredPublication(store, proposal.proposalId);
 
     const result = await approveProfileUpdate(proposal.proposalId, userId, { store, lock, repository });
-    clearCommittedPrimerCache(result);
+    clearCommittedProfileCache(result);
     if (result.ok) {
       // F231 AC-C3 eval counter (KD-10)
-      profileUpdateApproved.add(1, { 'agent.id': result.proposal.sourceCatId });
+      profileUpdateApproved.add(1, { 'agent.id': result.proposal.sourceCatId, 'target.layer': result.targetLayer });
+      // Phase E (INV-9): refresh private collection index so owner-auth search_evidence finds
+      // newly written content immediately. Awaited — not fire-and-forget (R3 ≥3-轮 fix).
+      const indexRefresh = await refreshProfileCollectionIndex?.(userId)?.catch((err: Error) => ({
+        status: 'error' as const,
+        error: err.message,
+      }));
       socketManager.emitToUser(userId, 'proposal_updated', result.proposal);
       return {
         proposalId: result.proposal.proposalId,
         status: result.proposal.status,
         writtenPath: result.proposal.writtenPath,
         recovered: result.recovered,
+        revision: result.revision,
+        targetLayer: result.targetLayer,
+        ...(indexRefresh ? { indexRefreshStatus: indexRefresh.status } : {}),
       };
     }
     switch (result.reason) {
@@ -167,7 +189,7 @@ export function registerProfileUpdateDecisionRoutes(app: FastifyInstance, deps: 
       return { error: 'Proposal status changed concurrently — retry reject', status: proposal.status };
     }
     // F231 AC-C3 eval counter (KD-10)
-    profileUpdateRejected.add(1, { 'agent.id': marked.sourceCatId });
+    profileUpdateRejected.add(1, { 'agent.id': marked.sourceCatId, 'target.layer': marked.targetLayer });
     socketManager.emitToUser(userId, 'proposal_updated', marked);
     return { proposalId: marked.proposalId, status: marked.status };
   });

@@ -1,7 +1,10 @@
 id: weixin-mp
 name: 微信公众号
 version: "1.0.0"
-description: 微信公众号文章发布 — 发文、上传图片、查看草稿
+description:
+  default: Publish WeChat Official Account articles, upload images, and inspect drafts.
+  translations:
+    zh-CN: 微信公众号文章发布——发文、上传图片、查看草稿。
 icon: megaphone
 iconBg: "#07c160"
 

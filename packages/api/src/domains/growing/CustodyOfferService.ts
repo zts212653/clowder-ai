@@ -120,6 +120,7 @@ export class CustodyOfferService {
   constructor(
     private readonly messages: IMessageStore,
     private readonly admission?: AcceptedCustodyAdmissionPort,
+    private readonly options: { readonly now?: () => number } = {},
   ) {}
 
   async readOffer(sourceMessageId: string): Promise<CustodyOfferReadResult> {
@@ -152,6 +153,7 @@ export class CustodyOfferService {
       sourceMessageRevision: input.sourceMessageRevision,
       policyVersion: input.policyVersion,
       reasonCode: input.reasonCode,
+      recognizedAt: (this.options.now ?? Date.now)(),
       disposition: 'pending',
     };
     const transitioned = await this.messages.compareAndTransitionCustodyOffer(input.sourceMessageId, {

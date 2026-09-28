@@ -1,4 +1,5 @@
 import type { CandidateHello, Capability, HandshakeRejectReason, WireMethodName } from '@clowder-ai/plugin-contract';
+import type { StaticFeatureLedger } from './static-feature-ledger.js';
 
 export const HOST_BROKER_SCHEMA_VERSION = 1 as const;
 
@@ -69,6 +70,8 @@ export interface HostBrokerSnapshot {
   readonly sessions: readonly BrokerSessionRecord[];
   readonly runtimeLeases: readonly BrokerRuntimeLeaseRecord[];
   readonly calls: readonly BrokerCallRecord[];
+  /** Absent on pre-feature snapshots; added only when a static feature is used. */
+  readonly staticFeatures?: StaticFeatureLedger;
 }
 
 export type HostBrokerErrorCode =

@@ -1,0 +1,223 @@
+.toolbar {
+  position: absolute;
+  z-index: 5;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  max-width: calc(100% - 24px);
+  width: max-content;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.dock {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 99px;
+  background: var(--cafe-surface-canvas);
+  box-shadow: var(--shadow-elevation-2);
+}
+.modeButton {
+  display: inline-flex;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 15px;
+  border-radius: 99px;
+  font-size: var(--console-font-sm);
+  font-weight: 550;
+  color: var(--cafe-text);
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.modeButton svg {
+  color: var(--cafe-accent);
+}
+.modeButton:hover,
+.iconButton:hover {
+  background: var(--cafe-surface);
+}
+.modeButton:disabled,
+.iconButton:disabled {
+  opacity: 0.32;
+  cursor: not-allowed;
+}
+.modeButton:focus-visible,
+.iconButton:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 3px;
+}
+.iconButton {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--cafe-text-secondary);
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.iconButton[aria-pressed="true"] {
+  color: var(--cafe-accent);
+  background: color-mix(in srgb, var(--cafe-accent) 12%, var(--cafe-surface-canvas));
+}
+.toolbox {
+  gap: 3px;
+  padding: 6px 8px;
+}
+.separator {
+  height: 22px;
+  width: 1px;
+  flex-shrink: 0;
+  background: var(--cafe-border-subtle);
+  margin: 0 4px;
+}
+.toolMenu {
+  position: relative;
+}
+.toolMenu summary {
+  list-style: none;
+  cursor: pointer;
+}
+.toolMenu summary::-webkit-details-marker {
+  display: none;
+}
+.menu {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 168px;
+  padding: 10px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 16px;
+  background: var(--cafe-surface-canvas);
+  box-shadow: var(--shadow-elevation-3);
+}
+.menuLabel {
+  margin: 0 0 8px;
+  padding: 0 4px;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+.toolbox > .toolMenu:last-of-type .menu {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.menuRow {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.menuChoice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.menuChoice:hover,
+.menuChoice[aria-pressed="true"] {
+  background: var(--cafe-surface);
+  color: var(--cafe-accent);
+}
+.imageMenu {
+  left: auto;
+  right: -10px;
+  transform: none;
+  min-width: 196px;
+}
+.ratioIcon {
+  display: block;
+  width: 18px;
+  max-height: 26px;
+  border: 1.5px solid currentColor;
+  border-radius: 3px;
+}
+.colorDot {
+  display: block;
+  width: 23px;
+  height: 23px;
+  border: 2px solid var(--cafe-surface-canvas);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--cafe-border-subtle);
+}
+.swatch {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+.swatch[aria-pressed="true"] {
+  border-color: var(--cafe-text);
+}
+.textTool {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 12px;
+  background: var(--cafe-surface-canvas);
+  box-shadow: var(--shadow-elevation-2);
+  color: var(--cafe-accent);
+}
+.textTool input {
+  width: 210px;
+  max-width: 55vw;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text);
+  font-size: var(--console-font-compact);
+  outline: none;
+}
+@media (max-width: 600px) {
+  .toolbar {
+    top: 10px;
+    max-width: calc(100% - 12px);
+    gap: 6px;
+  }
+  .modeButton {
+    height: 32px;
+    padding: 0 12px;
+    font-size: var(--console-font-xs);
+    gap: 6px;
+  }
+  .modeButton svg {
+    width: 18px;
+    height: 18px;
+  }
+  .iconButton {
+    width: 31px;
+    height: 32px;
+  }
+  .toolbox {
+    gap: 0;
+    padding: 5px;
+  }
+  .separator {
+    margin: 0 2px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modeButton,
+  .iconButton {
+    transition: none;
+  }
+}

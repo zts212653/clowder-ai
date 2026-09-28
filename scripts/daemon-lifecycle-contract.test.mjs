@@ -31,6 +31,7 @@ test('official runtime and alpha wrappers declare deployment identity before sta
 test('package scripts expose unambiguous stop commands', () => {
   assert.equal(pkg.scripts['dev:stop'], './scripts/start-dev.sh --stop');
   assert.equal(pkg.scripts['runtime:stop'], './scripts/runtime-worktree.sh stop');
+  assert.equal(pkg.scripts['runtime:restart'], './scripts/runtime-worktree.sh restart');
   assert.equal(pkg.scripts['alpha:stop'], './scripts/alpha-worktree.sh stop');
 });
 

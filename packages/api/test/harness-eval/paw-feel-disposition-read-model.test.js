@@ -55,6 +55,9 @@ function eventLogFixture(messages, transitions = new Map()) {
     async listSignalIds() {
       return [...events.keys()].sort();
     },
+    async listSignalIdsBySourceMessageId(sourceMessageId) {
+      return [...events.keys()].filter((signalId) => signalId.startsWith(`${sourceMessageId}:`));
+    },
     async read(signalId) {
       return events.get(signalId) ?? [];
     },
@@ -136,6 +139,167 @@ describe('F278 paw-feel read model', () => {
     });
   });
 
+  it('uses the source projection reader without full-message hydration and keeps canonical source context', async () => {
+    const source = {
+      ...message(1, 1, '[爪感差: hmget+source projection]'),
+      timestamp: NOW_MS - 4 * HOUR,
+      timelineOrderAt: NOW_MS - 3 * HOUR,
+      extra: { stream: { turnInvocationId: 'turn-source', invocationId: 'legacy-source' } },
+    };
+    let fullReads = 0;
+    let requestedIds = [];
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog: eventLogFixture([source]),
+      messageStore: {
+        async getById() {
+          fullReads += 1;
+          throw new Error('full message hydration must not service paw-feel source reads');
+        },
+        async getPawFeelSourceProjections(ids) {
+          requestedIds = [...ids];
+          return new Map([
+            [
+              source.id,
+              {
+                kind: 'available',
+                message: {
+                  id: source.id,
+                  threadId: source.threadId,
+                  userId: source.userId,
+                  catId: source.catId,
+                  content: source.content,
+                  timestamp: source.timestamp,
+                  timelineOrderAt: source.timelineOrderAt,
+                  extra: source.extra,
+                },
+              },
+            ],
+          ]);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const page = await readModel.list({ limit: 1 });
+
+    assert.deepEqual(requestedIds, [source.id]);
+    assert.equal(fullReads, 0);
+    assert.equal(page.projectionStatus, 'available');
+    assert.equal(page.counts.total, 1);
+    assert.equal(page.denominator.reportOccurrences, 1);
+    assert.equal(page.bundles.length, 1);
+    assert.equal(page.items[0].source.availability, 'available');
+    assert.equal(page.items[0].sourceOccurredAt, new Date(source.timelineOrderAt).toISOString());
+    assert.equal(page.items[0].reviewContext?.turnInvocationId, 'turn-source');
+    await readModel.assertBundleSnapshot(
+      page.bundles[0].bundleKey,
+      page.bundles[0].members.map((item) => ({
+        signalId: item.disposition.signalId,
+        expectedSequence: item.disposition.sequence,
+      })),
+      page.bundles[0].membershipToken,
+    );
+  });
+
+  it('keeps the legacy delivery order when a source projection has no timeline score', async () => {
+    const source = {
+      ...message(1, 1, '[爪感差: legacy delivery ordering]'),
+      timestamp: NOW_MS - 4 * HOUR,
+      deliveredAt: NOW_MS - 2 * HOUR,
+      deliveryStatus: 'delivered',
+    };
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog: eventLogFixture([source]),
+      messageStore: {
+        async getById() {
+          throw new Error('full message hydration must not service paw-feel source reads');
+        },
+        async getPawFeelSourceProjections() {
+          return new Map([
+            [
+              source.id,
+              {
+                kind: 'available',
+                message: {
+                  id: source.id,
+                  threadId: source.threadId,
+                  userId: source.userId,
+                  catId: source.catId,
+                  content: source.content,
+                  timestamp: source.timestamp,
+                  deliveredAt: source.deliveredAt,
+                  deliveryStatus: source.deliveryStatus,
+                },
+              },
+            ],
+          ]);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const page = await readModel.list({ limit: 1 });
+
+    assert.equal(page.items[0].sourceOccurredAt, new Date(source.deliveredAt).toISOString());
+  });
+
+  it('keeps a ledger row unavailable when the source projection reader reports a failed read', async () => {
+    const source = message(1);
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog: eventLogFixture([source]),
+      messageStore: {
+        async getById() {
+          return source;
+        },
+        async getPawFeelSourceProjections() {
+          return new Map([[source.id, { kind: 'unavailable', reason: 'read_failed' }]]);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const page = await readModel.list();
+
+    assert.equal(page.projectionStatus, 'available');
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0].source.availability, 'unavailable');
+    assert.equal(page.items[0].source.reason, 'source read failed');
+  });
+
+  it('rejects a cross-post copy returned by the source projection reader', async () => {
+    const source = message(1);
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog: eventLogFixture([source]),
+      messageStore: {
+        async getById() {
+          return source;
+        },
+        async getPawFeelSourceProjections() {
+          return new Map([
+            [
+              source.id,
+              {
+                kind: 'available',
+                message: {
+                  ...source,
+                  extra: { crossPost: { sourceThreadId: 'thread-origin' } },
+                },
+              },
+            ],
+          ]);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const page = await readModel.list();
+
+    assert.equal(page.projectionStatus, 'available');
+    assert.equal(page.items.length, 1);
+    assert.equal(page.items[0].source.availability, 'unavailable');
+    assert.equal(page.items[0].source.reason, 'source digest mismatch');
+  });
+
   it('fails loud per row when the original message is missing or its digest no longer matches', async () => {
     const missing = message(1);
     const changed = message(2);
@@ -181,6 +345,52 @@ describe('F278 paw-feel read model', () => {
     assert.equal(failingItem?.source.availability, 'unavailable');
     assert.equal(failingItem?.source.reason, 'source read failed');
     assert.equal(healthyItem?.source.availability, 'available');
+  });
+
+  it('keeps exact-source ledger rows visible across missing, read-error, and digest-drift sources', async () => {
+    const source = message(1);
+    const fixtures = [
+      {
+        name: 'missing',
+        reason: 'source message unavailable',
+        configure(store) {
+          store.byId.delete(source.id);
+        },
+      },
+      {
+        name: 'read error',
+        reason: 'source read failed',
+        configure(store) {
+          store.getById = async () => {
+            throw new Error('message store timeout');
+          };
+        },
+      },
+      {
+        name: 'digest drift',
+        reason: 'source digest mismatch',
+        configure(store) {
+          store.byId.set(source.id, { ...source, content: '[爪感差: rg+changed body]' });
+        },
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const store = messageStoreFixture([source]);
+      fixture.configure(store);
+      const readModel = new PawFeelDispositionReadModel({
+        eventLog: eventLogFixture([source]),
+        messageStore: store,
+        now: () => NOW,
+      });
+
+      const page = await readModel.list({ sourceMessageId: source.id });
+
+      assert.equal(page.projectionStatus, 'available', fixture.name);
+      assert.equal(page.items.length, 1, fixture.name);
+      assert.equal(page.items[0].source.availability, 'unavailable', fixture.name);
+      assert.equal(page.items[0].source.reason, fixture.reason, fixture.name);
+    }
   });
 
   it('paginates 50 at a time while counts and duty summaries remain complete', async () => {
@@ -274,6 +484,58 @@ describe('F278 paw-feel read model', () => {
     assert.equal(page.coverage.lagMs, HOUR);
   });
 
+  it('follows only the exact duplicate dependency graph for a source projection', async () => {
+    const canonical = message(1, 3);
+    const duplicate = message(2, 2);
+    const unrelated = message(3, 1);
+    const eventLog = eventLogFixture([canonical, duplicate, unrelated]);
+    const canonicalInspection = inspectPawFeelMessage(canonical);
+    const duplicateInspection = inspectPawFeelMessage(duplicate);
+    assert.equal(canonicalInspection.kind, 'canonical');
+    assert.equal(duplicateInspection.kind, 'canonical');
+    const canonicalSignalId = canonicalInspection.candidates[0].signalId;
+    const duplicateSignalId = duplicateInspection.candidates[0].signalId;
+    eventLog.events.get(canonicalSignalId).push({
+      eventId: `no-action:${canonicalSignalId}`,
+      signalId: canonicalSignalId,
+      type: 'no_action',
+      actor: { kind: 'cat', id: 'opus' },
+      occurredAt: NOW,
+      reasonCode: 'not_actionable',
+      ownerCatId: 'opus',
+    });
+    eventLog.events.get(duplicateSignalId).push({
+      eventId: `duplicate:${duplicateSignalId}`,
+      signalId: duplicateSignalId,
+      type: 'duplicate',
+      actor: { kind: 'cat', id: 'opus' },
+      occurredAt: NOW,
+      duplicateOf: canonicalSignalId,
+      ownerCatId: 'opus',
+    });
+    const store = messageStoreFixture([canonical, duplicate, unrelated]);
+    const sourceReads = [];
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog,
+      messageStore: {
+        async getById(messageId) {
+          sourceReads.push(messageId);
+          return store.getById(messageId);
+        },
+      },
+      now: () => NOW,
+    });
+
+    const page = await readModel.list({ sourceMessageId: duplicate.id });
+
+    assert.equal(page.items.length, 1);
+    assert.equal(page.counts.total, 1);
+    assert.equal(page.items[0].issue.resolution, 'resolved');
+    assert.equal(page.items[0].issue.continuation.kind, 'no_action');
+    assert.equal(page.items[0].issue.continuation.canonicalSignalId, canonicalSignalId);
+    assert.deepEqual(sourceReads, [duplicate.id, canonical.id]);
+  });
+
   it('returns an unavailable projection instead of an empty-success lie when the ledger fails', async () => {
     const readModel = new PawFeelDispositionReadModel({
       eventLog: {
@@ -297,6 +559,40 @@ describe('F278 paw-feel read model', () => {
     assert.equal(page.degraded, true);
     assert.match(page.unavailableReason, /redis unavailable/);
     assert.equal(page.items.length, 0);
+  });
+
+  it('fails loud when exact-source membership points at a missing event log', async () => {
+    const source = message(1);
+    const inspection = inspectPawFeelMessage(source);
+    assert.equal(inspection.kind, 'canonical');
+    const signalId = inspection.candidates[0].signalId;
+    const eventLog = {
+      async listSignalIds() {
+        return [signalId];
+      },
+      async listSignalIdsBySourceMessageId(sourceMessageId) {
+        return sourceMessageId === source.id ? [signalId] : [];
+      },
+      async read() {
+        return [];
+      },
+      async readMany(signalIds) {
+        return new Map(signalIds.map((id) => [id, []]));
+      },
+    };
+    const readModel = new PawFeelDispositionReadModel({
+      eventLog,
+      messageStore: messageStoreFixture([source]),
+      now: () => NOW,
+    });
+
+    const globalPage = await readModel.list();
+    const sourcePage = await readModel.list({ sourceMessageId: source.id });
+
+    assert.equal(globalPage.projectionStatus, 'unavailable');
+    assert.equal(sourcePage.projectionStatus, 'unavailable');
+    assert.equal(sourcePage.unavailableReason, globalPage.unavailableReason);
+    assert.match(sourcePage.unavailableReason, new RegExp(`signal ${signalId} has no durable events`));
   });
 
   it('partitions every row into one deterministic message, turn, legacy invocation, or safe signal bundle', async () => {

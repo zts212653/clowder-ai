@@ -2861,7 +2861,9 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
               promptMessageIds: [`msg-cold-${decision.contextEpoch}`],
             };
           },
-          onPromptMessagesExposed: async ({ messageIds }) => exposed.push(...messageIds),
+          onPromptMessagesExposed: async ({ messageIds }) => {
+            exposed.push(...messageIds);
+          },
           continuityCapsule: buildCapsuleFromRouteState({
             threadId: 'thread-oversized-epoch',
             catId: 'codex',

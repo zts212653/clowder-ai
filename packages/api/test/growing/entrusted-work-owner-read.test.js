@@ -61,18 +61,45 @@ function catalogWith(primary) {
     'f246.approval': ineligibleAdapter('f246.approval'),
     'f292.repair': ineligibleAdapter('f292.repair'),
     'f306.runtime_interaction': ineligibleAdapter('f306.runtime_interaction'),
+    'f309.content_review': ineligibleAdapter('f309.content_review'),
     [primary.producerId]: primary,
   };
   return new NeedsMeProducerCatalog(Object.values(byId));
 }
 
 function catalogWithMany(...adapters) {
-  const producerIds = ['f246.approval', 'f292.repair', 'f306.runtime_interaction'];
+  const producerIds = ['f246.approval', 'f292.repair', 'f306.runtime_interaction', 'f309.content_review'];
   const provided = new Set(adapters.map((adapter) => adapter.producerId));
   return new NeedsMeProducerCatalog([
     ...adapters,
     ...producerIds.filter((producerId) => !provided.has(producerId)).map(ineligibleAdapter),
   ]);
+}
+
+function publishedArtifactMessages() {
+  return [
+    {
+      id: 'published-ppt',
+      threadId: 'thread-f310',
+      userId: 'owner-1',
+      catId: 'codex-sol',
+      timestamp: now + 7,
+      content: 'Prepared for review',
+      extra: {
+        rich: {
+          blocks: [
+            {
+              kind: 'file',
+              v: 1,
+              id: 'published-ppt',
+              fileName: 'Tomorrow presentation.pptx',
+              url: 'artifact:ppt:tomorrows-ppt',
+            },
+          ],
+        },
+      },
+    },
+  ];
 }
 
 function artifactReader() {
@@ -94,7 +121,7 @@ describe('F310 entrusted-work owner-read backbone', () => {
     const reader = new F232PreparedArtifactReader({
       messages: {
         async getByThread() {
-          return [];
+          return publishedArtifactMessages();
         },
         async getByThreadBefore() {
           return [];
@@ -139,8 +166,8 @@ describe('F310 entrusted-work owner-read backbone', () => {
     assert.deepEqual(prepared, {
       artifactRef: 'artifact:ppt:tomorrows-ppt',
       artifactRevision: String(now + 7),
-      completenessRef: `artifact:ppt:tomorrows-ppt#available:${now + 7}`,
-      previewRef: `artifact:ppt:tomorrows-ppt#preview:${now + 7}`,
+      completenessRef: `message:thread-f310:published-ppt#available:${now + 7}`,
+      previewRef: `message:thread-f310:published-ppt#preview:${now + 7}`,
       openInWorkspaceRef: `workspace:artifact:thread-f310:${now + 7}:artifact:ppt:tomorrows-ppt`,
     });
   });
@@ -331,7 +358,7 @@ describe('F310 entrusted-work owner-read backbone', () => {
       artifactReader: new F232PreparedArtifactReader({
         messages: {
           async getByThread() {
-            return [];
+            return publishedArtifactMessages();
           },
           async getByThreadBefore() {
             return [];
@@ -376,7 +403,7 @@ describe('F310 entrusted-work owner-read backbone', () => {
     assert.equal(after.preparedArtifact.artifactRef, 'artifact:ppt:tomorrows-ppt');
     assert.deepEqual(after.brief.verifiedMilestone, {
       kind: 'artifact_ready',
-      evidenceRef: `artifact:ppt:tomorrows-ppt#available:${now + 7}`,
+      evidenceRef: `message:thread-f310:published-ppt#available:${now + 7}`,
       revision: String(now + 7),
     });
     assert.equal(

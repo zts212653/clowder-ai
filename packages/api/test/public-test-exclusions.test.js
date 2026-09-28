@@ -13,7 +13,6 @@ const RECONCILED_EXCLUSIONS = [
   'redis-',
   'session-strategy-phase3',
   'workflow-sop-store',
-  'codex-agent-service',
   'kimi-agent-service',
   'test/memory/',
   'thread-wiring\\.test',
@@ -21,7 +20,9 @@ const RECONCILED_EXCLUSIONS = [
   'shared-state-wiring\\.test',
   'write-vignette-publication-hook\\.test',
   'capability-evolution-evaluation-owner-join\\.test',
+  'capability-evolution-microduck-football-private-archive\\.test\\.js$',
   '(?:capability-evolution-e0-owner-inputs|f314-capability-evolution-owner-inputs|harness-eval/(?:capability-evolution-measurement-(?:issuer(?:-security)?|source-store)|f311-(?:capability-evolution-wakeup|e0-eval-repair-owner-provider)))\\.test',
+  '^test/capability-evolution-exploration-(?:archive-projection|football|integrity|record-failures)\\.test\\.js$',
   'signal-fetcher-launchd',
   'reflection-capsule-m3',
   'pack-integration\\.test',
@@ -131,6 +132,40 @@ test('resolver excludes source-only cc anchor hook coverage from the public gate
   assert.ok(!resolved.selectedFiles.includes('test/f236-cc-anchor-hook.test.js'));
 });
 
+test('resource-only SOP coverage stays excluded while portable Codex contracts are re-admitted', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  const workflowEntry = resolved.registry.entries.find((entry) => entry.id === 'workflow-sop-store');
+
+  assert.ok(workflowEntry, 'workflow SOP resource contract must retain an audited exclusion');
+  assert.equal(workflowEntry.audit.status, 'resource_contract');
+  assert.equal(workflowEntry.publicAudit?.status, 'resource_contract');
+  assert.equal(
+    workflowEntry.expiresOn,
+    '2027-12-31',
+    'the stable isolated-Redis resource contract must not require rolling short renewals',
+  );
+  assert.ok(resolved.excludedFiles.includes('test/workflow-sop-store.test.js'));
+  assert.ok(!resolved.selectedFiles.includes('test/workflow-sop-store.test.js'));
+
+  for (const portableContract of ['test/codex-agent-service.test.js', 'test/codex-agent-service-l0.test.js']) {
+    assert.ok(resolved.selectedFiles.includes(portableContract), `${portableContract} must stay re-admitted`);
+    assert.ok(!resolved.excludedFiles.includes(portableContract), `${portableContract} must not be source-only`);
+  }
+});
+
+test('memory exclusion audit binds the current source-managed candidate', async () => {
+  const { loadPublicTestExclusions } = await import(resolverModuleUrl);
+  const registry = await loadPublicTestExclusions({ configPath: registryPath });
+  const memoryEntry = registry.entries.find((entry) => entry.id === 'memory-tests');
+
+  assert.ok(memoryEntry, 'memory exclusion must remain audited');
+  assert.equal(memoryEntry.audit.sourceHead, '6bffad45ecb50e6cbe1f11ae897358a54ef5ff39');
+  assert.equal(memoryEntry.audit.publicHead, '6b6fbbaa863ced704081f0ddc718d797b619f8c2');
+  assert.equal(memoryEntry.audit.matchedFileCount, 257);
+  assert.equal(memoryEntry.publicAudit, undefined, 'the stale public-main snapshot is not an exported-candidate audit');
+});
+
 test('resolver excludes source-only Claude hook bytes but keeps public F296 composition coverage', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
@@ -165,6 +200,7 @@ test('resolver excludes capability-evolution integrations backed by home-only ow
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   for (const sourceOnlyTest of [
     'test/capability-evolution-e0-owner-inputs.test.js',
+    'test/capability-evolution-microduck-football-private-archive.test.js',
     'test/f314-capability-evolution-owner-inputs.test.js',
     'test/harness-eval/capability-evolution-measurement-issuer-security.test.js',
     'test/harness-eval/capability-evolution-measurement-issuer.test.js',
@@ -267,4 +303,31 @@ test('default expiry date helper falls back to the repo policy timezone when env
     if (previousHostTimezone === undefined) delete process.env.TZ;
     else process.env.TZ = previousHostTimezone;
   }
+});
+
+/**
+ * The `redis-` exclusion is a *filename prefix* standing in for a resource
+ * dependency, and a prefix cannot tell the two apart. `redis-thread-list-batch`
+ * built its own Map and a plain object literal for `redis`, constructed
+ * `RedisThreadStore` on top, and never created a client or opened a connection
+ * -- but it matched the prefix, so re-signing the audit for it would have moved
+ * 21 ordinary product regressions out of the public suite under a reason
+ * ("public CI resource availability") that was never true of them.
+ *
+ * The file is named for the behaviour it tests now. This pins that: a store
+ * test that needs no Redis must stay in the public selection, so the next
+ * inventory drift is resolved by asking what the test needs rather than by
+ * re-signing whatever the prefix happened to catch.
+ */
+test('a mock-only store test stays in the public selection regardless of what it imports', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  assert.ok(
+    resolved.selectedFiles.includes('test/thread-list-batch.test.js'),
+    'the mock-only batch test must run in the public suite',
+  );
+  assert.ok(
+    !resolved.excludedFiles.includes('test/thread-list-batch.test.js'),
+    'no exclusion may claim a test that needs no excluded resource',
+  );
 });

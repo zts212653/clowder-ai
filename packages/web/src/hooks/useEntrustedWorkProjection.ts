@@ -27,7 +27,7 @@ export function useEntrustedWorkProjection(
     setError(false);
     try {
       const endpoint = projection === 'needs-me' ? '/api/entrusted-work/needs-me' : '/api/entrusted-work/owner-reads';
-      const response = await apiFetch(endpoint, { signal: controller.signal });
+      const response = await apiFetch(endpoint, { signal: controller.signal }, { afterCurrentGet: true });
       if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
       const body = (await response.json()) as { ownerReads?: unknown };
       const parsed = entrustedWorkOwnerReadV1Schema.array().parse(body.ownerReads);

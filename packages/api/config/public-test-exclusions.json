@@ -47,34 +47,25 @@
       "id": "workflow-sop-store",
       "match": "workflow-sop-store",
       "category": "source_only",
-      "reason": "The bounded public audit discovered no matching test file; retain only until the explicit inventory recheck completes.",
+      "reason": "The exact public test remains a RedisWorkflowSopStore resource contract: without the explicit isolated Redis service it skips its whole suite, so it supplies no public CI coverage.",
       "owner": "@zts212653",
       "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-09-08",
+      "expiresOn": "2027-12-31",
       "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
-        "status": "pending_bounded_recheck",
+        "reviewedOn": "2026-09-09",
+        "sourceHead": "6bffad45ecb50e6cbe1f11ae897358a54ef5ff39",
+        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
+        "status": "resource_contract",
         "matchedFileCount": 1,
         "matchedFilesHash": "f2bb4b4bfdab922a8169ff8df9d041e0d694b636be18fa81ce58850ba264e0c8"
-      }
-    },
-    {
-      "id": "codex-agent-service",
-      "match": "codex-agent-service",
-      "category": "source_only",
-      "reason": "The bounded public audit reached its 120-second cap; retain only until a completed public recheck replaces this evidence.",
-      "owner": "@zts212653",
-      "introducedBy": "78f3bc57c",
-      "expiresOn": "2026-09-08",
-      "audit": {
-        "reviewedOn": "2026-09-01",
-        "sourceHead": "b741f42fdbbb4484a54cde7eadca08b3b11652e3",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
-        "status": "pending_bounded_recheck",
-        "matchedFileCount": 2,
-        "matchedFilesHash": "bb6f15490d1f0a407ece89b4a005c9fbea371b0d2b57e3d3ce080c9b27f08113"
+      },
+      "publicAudit": {
+        "reviewedOn": "2026-09-09",
+        "sourceHead": "6bffad45ecb50e6cbe1f11ae897358a54ef5ff39",
+        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
+        "status": "resource_contract",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "f2bb4b4bfdab922a8169ff8df9d041e0d694b636be18fa81ce58850ba264e0c8"
       }
     },
     {
@@ -103,12 +94,12 @@
       "introducedBy": "78f3bc57c",
       "expiresOn": "2026-10-01",
       "audit": {
-        "reviewedOn": "2026-09-04",
-        "sourceHead": "5a0b3a6bb96fa0ecefd4081ecd8cd739a991bd97",
-        "publicHead": "182d8ec9abc87ff7905441dca0575aab9787ee8f",
+        "reviewedOn": "2026-09-09",
+        "sourceHead": "6bffad45ecb50e6cbe1f11ae897358a54ef5ff39",
+        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
         "status": "source_dependency_failure",
-        "matchedFileCount": 256,
-        "matchedFilesHash": "ce05e5d09e8db161d0cf131380ae0fcbb82e9838bbc2e14c2588a3f2341d538d"
+        "matchedFileCount": 257,
+        "matchedFilesHash": "44c17c6a5c91da002e0ca89cfdf8b3a68455552fd50768c9b78816d0a9830357"
       }
     },
     {
@@ -205,6 +196,23 @@
       }
     },
     {
+      "id": "capability-evolution-microduck-football-private-archive",
+      "match": "capability-evolution-microduck-football-private-archive\\.test\\.js$",
+      "category": "private_fixture",
+      "reason": "The exact v3 and v3-extended package identity check reads source-owned Microduck evidence archives that are deliberately absent from the public allowlist; portable synthetic tests retain the public package, loader, ABI, and raw-attempt contracts.",
+      "owner": "@zts212653",
+      "introducedBy": "3cecb3ba30",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-10",
+        "sourceHead": "3cecb3ba30891695d68aca10995a1bb48aead59d",
+        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 1,
+        "matchedFilesHash": "927318502deb6b9171963d901a9dfdd60aabf94385b6debf6783a8135a4301b8"
+      }
+    },
+    {
       "id": "capability-evolution-private-owner-evidence",
       "match": "(?:capability-evolution-e0-owner-inputs|f314-capability-evolution-owner-inputs|harness-eval/(?:capability-evolution-measurement-(?:issuer(?:-security)?|source-store)|f311-(?:capability-evolution-wakeup|e0-eval-repair-owner-provider)))\\.test",
       "category": "private_fixture",
@@ -219,6 +227,23 @@
         "status": "private_fixture_failure",
         "matchedFileCount": 7,
         "matchedFilesHash": "e2f0a28bfba90b3e3ed4bb219e79cde7edef8eb55bdd01360be757aa4e3013cd"
+      }
+    },
+    {
+      "id": "exploration-private-football-archive",
+      "match": "^test/capability-evolution-exploration-(?:archive-projection|football|integrity|record-failures)\\.test\\.js$",
+      "category": "private_fixture",
+      "reason": "These four source acceptance files read real football raw captures and readiness manifests deliberately outside the #4429 file allowlist. At the audited source head, an isolated public-asset shape reproduces missing-archive failures in all four files while eight portable projection/source-isolation tests pass; this is a resource audit, not a full public gate. Portable routes, message idempotency, lineage recovery, and missing-archive behavior remain selected.",
+      "owner": "@codex-astra",
+      "introducedBy": "63110820fb1eb629f0c57dd09c3fcee77c9fc33a",
+      "expiresOn": "2026-10-01",
+      "audit": {
+        "reviewedOn": "2026-09-09",
+        "sourceHead": "63110820fb1eb629f0c57dd09c3fcee77c9fc33a",
+        "publicHead": "6b6fbbaa863ced704081f0ddc718d797b619f8c2",
+        "status": "private_fixture_failure",
+        "matchedFileCount": 4,
+        "matchedFilesHash": "e65929c6b21ceaf0f103d16ce2c5cd7ebc24196feff28441287d5de8bc8b5ab4"
       }
     },
     {

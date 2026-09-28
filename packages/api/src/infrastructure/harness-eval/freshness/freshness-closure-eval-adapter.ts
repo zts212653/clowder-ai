@@ -141,7 +141,10 @@ export function buildFreshnessReplayReport(
     verdict,
     healthy: verdict === 'healthy',
     ...(liveSampleCount === 0
-      ? { noDataReason: 'No eligible live freshness closure samples resolved for this window.' }
+      ? {
+          noDataReason:
+            'No eligible live legacy freshness closure samples resolved; consult windowed Queue, Supplement, and attention signals for activity.',
+        }
       : {}),
   };
 }

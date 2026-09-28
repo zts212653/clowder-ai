@@ -129,6 +129,7 @@ async function buildPairedApp({ recordStore, draftStore, tracker, turnExecutionS
   // Stub thread store: any thread is public (createdBy='system')
   const threadStore = {
     get: async (id) => ({ id, title: 'Test', createdBy: 'system' }),
+    listByProject: async (_userId, projectPath) => [{ id: THREAD_ID, title: 'Test', createdBy: 'system', projectPath }],
   };
   await app.register(queueRoutes, {
     threadStore,
@@ -464,6 +465,18 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
           freshnessCarrierCapability: UNDECLARED_FRESHNESS_CARRIER_CAPABILITY,
         },
       ]);
+      const active = await app.inject({
+        method: 'GET',
+        url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+        headers: { 'x-cat-cafe-user': USER_ID },
+      });
+      assert.equal(active.statusCode, 200);
+      assert.equal(active.json().executions[0]?.executionId, parentId);
+      assert.equal(
+        active.json().executions[0]?.turnInvocationId,
+        childId,
+        'F295 must retain the canonical child from F194',
+      );
       await new Promise((resolve) => setTimeout(resolve, 25));
       assert.equal(updates.length, 0, '/queue must not reconcile a parent whose durable child is running');
       assert.equal(parent.status, 'running');

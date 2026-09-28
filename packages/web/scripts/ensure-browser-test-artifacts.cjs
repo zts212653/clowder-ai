@@ -64,6 +64,10 @@ function ensureBrowserTestArtifacts() {
   console.log('[browser-test] preparing the API writer artifact');
   run('pnpm', ['--filter', '@cat-cafe/api', 'build']);
 
+  // F309 invokes the compiled MCP handlers from an independent authenticated process.
+  console.log('[browser-test] preparing the MCP document tools artifact');
+  run('pnpm', ['--filter', '@cat-cafe/mcp-server', 'build']);
+
   if (webBuild.fresh) {
     console.log(`[browser-test] reusing Web production artifact: ${webBuild.reason}`);
     return;

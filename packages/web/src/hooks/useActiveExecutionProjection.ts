@@ -1,7 +1,7 @@
 'use client';
 
 import type { ActiveExecutionListResponse, ActiveExecutionProjection } from '@cat-cafe/shared';
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
@@ -19,7 +19,7 @@ export async function refreshActiveExecutionProjection(
   signal?: AbortSignal,
 ): Promise<void> {
   const store = useActiveExecutionStore.getState();
-  const requestVersion = store.beginHydration(anchorThreadId);
+  const requestVersion = store.beginHydration(anchorThreadId, projectPath);
   try {
     const response = await apiFetch(activeExecutionResource(projectPath), {
       signal,
@@ -79,8 +79,11 @@ export function useActiveExecutionProjection(anchorThreadId: string, socketConne
   );
   const projectPath = canonicalProjectPath ?? compatibilityProjectPath;
 
-  useEffect(() => {
-    if (!projectPath) return;
+  useLayoutEffect(() => {
+    if (!projectPath) {
+      useActiveExecutionStore.getState().beginHydration(anchorThreadId, null);
+      return;
+    }
     const controller = new AbortController();
     const refresh = () => void refreshActiveExecutionProjection(anchorThreadId, projectPath, controller.signal);
     refresh();

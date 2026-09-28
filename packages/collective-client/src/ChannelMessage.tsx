@@ -14,6 +14,7 @@ function MessageBody({ event }: { readonly event: CollectiveEventEnvelope }) {
   return (
     <>
       {mention && <p className="target-line">@{mention}</p>}
+      {event.workRequest && <p className="request-kind">请求持续处理</p>}
       <p className="message-body">{event.body}</p>
     </>
   );

@@ -2,6 +2,7 @@
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
 import type Database from 'better-sqlite3';
+import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
 CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
@@ -70,7 +71,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 43;
+export const CURRENT_SCHEMA_VERSION = 45;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1416,6 +1417,31 @@ export function applyMigrations(db: Database.Database): void {
         db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(43, new Date().toISOString());
       })();
     }
+  }
+
+  // V44: F275 — persist managed-command owner authentication outside every
+  // public DynamicTaskDef / schedule-proposal projection. NULL is the only
+  // legacy shape and hydrates fail-closed as `unknown`; new hold producers
+  // write one immutable value in the same INSERT as the durable task.
+  if (currentVersion < 44) {
+    try {
+      db.exec(`
+        ALTER TABLE dynamic_task_defs ADD COLUMN owner_auth_provenance TEXT
+          CHECK (owner_auth_provenance IN ('strict', 'compatibility_fallback', 'unknown'))
+      `);
+    } catch {
+      // Column may already exist from a partial migration.
+    }
+    db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(44, new Date().toISOString());
+  }
+
+  // V45: polling schedule summaries must not scan millions of retained runs.
+  // Backfill and triggers commit with the version marker, including for old writers.
+  if (currentVersion < 45) {
+    db.transaction(() => {
+      db.exec(RUN_LEDGER_STATS_SCHEMA);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(45, new Date().toISOString());
+    })();
   }
 }
 

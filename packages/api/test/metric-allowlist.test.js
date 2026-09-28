@@ -15,7 +15,12 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { THREAD_SYSTEM_KIND, TRIGGER } from '../dist/infrastructure/telemetry/genai-semconv.js';
+import {
+  PROFILE_LAYER,
+  TARGET_LAYER,
+  THREAD_SYSTEM_KIND,
+  TRIGGER,
+} from '../dist/infrastructure/telemetry/genai-semconv.js';
 import { ALLOWED_METRIC_ATTRIBUTES } from '../dist/infrastructure/telemetry/metric-allowlist.js';
 import {
   TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR,
@@ -56,6 +61,27 @@ describe('F167 Phase T metric-allowlist — bounded stop-gate labels', () => {
     assert.ok(ALLOWED_METRIC_ATTRIBUTES.has(TURN_CUSTODY_METRIC_STATE_ATTR));
     assert.ok(ALLOWED_METRIC_ATTRIBUTES.has(TURN_CUSTODY_METRIC_COMPARISON_ATTR));
     assert.ok(ALLOWED_METRIC_ATTRIBUTES.has(TURN_CUSTODY_METRIC_CLASSIFICATION_ATTR));
+  });
+
+  describe('F231 Phase E metric-allowlist — per-layer profile telemetry', () => {
+    test('P1: PROFILE_LAYER is allowlisted (otherwise pointer_emitted per-layer breakdown is silently dropped)', () => {
+      assert.ok(
+        ALLOWED_METRIC_ATTRIBUTES.has(PROFILE_LAYER),
+        `metric-allowlist must include ${PROFILE_LAYER} so profile pointer telemetry can attribute by layer (primer/corpus)`,
+      );
+    });
+
+    test('P1: TARGET_LAYER is allowlisted (otherwise propose/approve/reject per-layer breakdown is silently dropped)', () => {
+      assert.ok(
+        ALLOWED_METRIC_ATTRIBUTES.has(TARGET_LAYER),
+        `metric-allowlist must include ${TARGET_LAYER} so profile update telemetry can attribute by target layer`,
+      );
+    });
+
+    test('pins string literal values for Prometheus query stability', () => {
+      assert.equal(PROFILE_LAYER, 'profile.layer');
+      assert.equal(TARGET_LAYER, 'target.layer');
+    });
   });
 
   test('does not widen the global allowlist to generic state/comparison keys', () => {

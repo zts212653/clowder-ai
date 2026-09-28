@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { z } from 'zod';
+import { buildCanonicalToolRegistry } from '../src/canonical-tool-registry.js';
 import {
   bindMcpImplementation,
   compareToolRegistries,
@@ -179,6 +180,26 @@ describe('F286 MCP governance contract', () => {
     assert.ok(result.findings.some((finding) => finding.message.includes(missingRef)));
   });
 
+  it('rejects write-class definitions from the readonly runtime profile', () => {
+    const definition = makeDefinition({
+      resourceFamily: 'plugin-manager',
+      operation: operation('mutate', writeBoundary),
+      runtimeProfiles: ['full', 'readonly'],
+    });
+
+    assert.throws(
+      () =>
+        buildCanonicalToolRegistry({
+          collab: [definition],
+          memory: [],
+          signals: [],
+          limb: [],
+          audio: [],
+          finance: [],
+        }),
+      /write operation in readonly/i,
+    );
+  });
   it('derives executable schema, action inventory, risk, and SDK annotations from one operation', () => {
     const schema = { subject: z.string(), depth: z.number().optional() };
     const definition = makeDefinition({

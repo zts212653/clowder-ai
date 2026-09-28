@@ -65,4 +65,68 @@ describe('external GitHub review-loop R4 brake', () => {
     assert.match(content, /history unavailable.*warn-open/i);
     assert.match(content, /Next: Fix and request review/);
   });
+  /*
+   * #1392: every delivery must say what happens next to the tracking itself. The failures the issue
+   * opened with were all silent about exactly this — tracking had ended, and nothing said so.
+   */
+  describe('the tracking status line', () => {
+    const base = {
+      v: 1,
+      outcomeId: 'wait:pr:owner/repo#7:g4:matched',
+      generation: 4,
+      subjectRef: 'pr:owner/repo#7',
+      ownerFence: { kind: 'containing_task', generation: 4 },
+      reason: 'matched',
+      at: 700,
+      delivery: 'pending',
+      matched: [{ kind: 'pr_head_changed', delta: 'HEAD aaaa111 → bbbb222' }],
+      nextStep: 'Re-lock the exact HEAD.',
+    };
+
+    it('says tracking continues after a renewal', async () => {
+      const { renderGitHubWaitOutcome } = await import('../dist/domains/github-signals/github-wait-renderer.js');
+      assert.match(renderGitHubWaitOutcome({ ...base, renewal: 'rearmed' }), /Tracking continues/);
+    });
+
+    it('says loudly that tracking was not rearmed when the next generation could not be installed', async () => {
+      const { renderGitHubWaitOutcome } = await import('../dist/domains/github-signals/github-wait-renderer.js');
+      const content = renderGitHubWaitOutcome({ ...base, renewal: 'rearm_failed' });
+      assert.match(content, /tracking not rearmed/i);
+      assert.doesNotMatch(content, /Tracking continues/, 'a failed rearm must never read as success');
+    });
+
+    it('says a single-fire wait has ended', async () => {
+      const { renderGitHubWaitOutcome } = await import('../dist/domains/github-signals/github-wait-renderer.js');
+      assert.match(renderGitHubWaitOutcome(base), /Tracking ended/);
+    });
+
+    it('delivers an expiry as its own terminal notice rather than a satisfied wait', async () => {
+      const { renderGitHubWaitOutcome } = await import('../dist/domains/github-signals/github-wait-renderer.js');
+      const content = renderGitHubWaitOutcome({
+        ...base,
+        outcomeId: 'wait:pr:owner/repo#7:g4:expired',
+        reason: 'expired',
+        matched: undefined,
+      });
+      assert.match(content, /expired/i);
+      assert.doesNotMatch(content, /wait satisfied/, 'nothing was satisfied; the deadline passed');
+      assert.match(content, /Tracking ended/);
+    });
+
+    it('an expiry lists what its final poll observed, and only an empty poll says nothing matched', async () => {
+      const { renderGitHubWaitOutcome } = await import('../dist/domains/github-signals/github-wait-renderer.js');
+      const expired = { ...base, outcomeId: 'wait:pr:owner/repo#7:g4:expired', reason: 'expired' };
+
+      const content = renderGitHubWaitOutcome({
+        ...expired,
+        matched: [{ kind: 'pr_conversation_comment_added', delta: 'conversation comment #31 by maintainer' }],
+        terminalSubjectState: 'merged',
+      });
+      assert.match(content, /conversation comment #31 by maintainer/);
+      assert.match(content, /PR state: merged/);
+      assert.doesNotMatch(content, /before anything matched/, 'something did match');
+
+      assert.match(renderGitHubWaitOutcome({ ...expired, matched: undefined }), /before anything matched/);
+    });
+  });
 });

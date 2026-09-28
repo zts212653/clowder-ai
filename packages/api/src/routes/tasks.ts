@@ -139,7 +139,10 @@ function entrustedWorkLifecycleHttpStatus(error: EntrustedWorkLifecycleError): 4
 
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, socketManager } = opts;
-  const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore);
+  const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore, {
+    onChanged: (ownerUserId) =>
+      socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+  });
 
   // POST /api/tasks
   app.post('/api/tasks', async (request, reply) => {

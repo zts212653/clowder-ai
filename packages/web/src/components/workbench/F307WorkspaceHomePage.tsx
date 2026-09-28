@@ -101,7 +101,10 @@ export function F307WorkspaceHomePage({
     <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--console-panel-bg)]" data-testid="f307-workspace-home-page">
       <WorkspaceNowSurface
         repository={repository}
-        onSelectExecution={(execution) => onSelectSurface(createAgentRunSurface({ execution }))}
+        onSelectExecution={(execution) => {
+          const surface = createAgentRunSurface({ execution });
+          if (surface) onSelectSurface(surface);
+        }}
       />
       {destinationMessage && (
         <div className="mx-auto w-full max-w-4xl px-5 pt-3">

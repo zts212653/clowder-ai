@@ -1,0 +1,102 @@
+.exploration-media {
+  min-width: 0;
+  margin: 0 0 18px;
+}
+.exploration-media figcaption {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  font-size: var(--console-font-xs);
+  margin-bottom: 8px;
+}
+.exploration-media figcaption > svg {
+  color: var(--chart-3);
+}
+.exploration-media figcaption > span {
+  font-size: var(--console-font-label);
+  color: var(--cafe-text-muted);
+}
+.exploration-image {
+  display: block;
+  position: relative;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+.exploration-image img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+.exploration-image > span {
+  display: block;
+  padding: 16px;
+  color: var(--cafe-text-secondary);
+}
+.exploration-video-cover {
+  position: relative;
+  min-height: 96px;
+  background: var(--cafe-surface-sunken);
+  border-radius: 12px;
+  padding-bottom: 4px;
+}
+.exploration-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 6px auto;
+  min-height: 32px;
+  border: 1px solid var(--cafe-border);
+  border-radius: 8px;
+  background: var(--cafe-surface);
+  color: var(--cafe-text);
+}
+.exploration-media video {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  background: var(--code-bg);
+  border-radius: 12px;
+}
+.exploration-media-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0;
+}
+.exploration-media-choices button {
+  padding: 4px 8px;
+  font-size: var(--console-font-label);
+  border-radius: 4px;
+  color: var(--cafe-text-secondary);
+}
+.exploration-media-choices [aria-pressed="true"] {
+  background: var(--cafe-surface-elevated);
+  color: var(--cafe-text);
+}
+.exploration-media-missing {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 0;
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-xs);
+}
+.exploration-media-missing > svg {
+  color: var(--chart-4);
+}
+.exploration-media-message {
+  padding: 20px 12px;
+  background: var(--cafe-surface);
+  border-radius: 8px;
+}
+.exploration-media-message button {
+  margin-top: 8px;
+  color: var(--evolution-focus-text);
+  text-decoration: underline;
+}

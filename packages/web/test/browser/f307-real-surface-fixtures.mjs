@@ -7,6 +7,42 @@ export const INVOCATION_ID = 'inv-f307-real-run';
 export const SESSION_ID = 'session-f307-real-run';
 export const EVOLUTION_PROGRAM_ID = `evolution-program:${'e'.repeat(32)}`;
 
+const childIdentity = {
+  v: 1,
+  kind: 'subexecution',
+  subexecutionId: 'child-f307-bohr',
+  rootExecutionId: 'root-provider-thread',
+  parentExecutionId: 'root-provider-thread',
+  rootTurnId: 'root-provider-turn',
+  parentTurnId: 'root-provider-turn',
+  turnId: 'child-provider-turn',
+  agentPath: '/root/review_knowledge_delta',
+  nickname: 'Bohr',
+  depth: 1,
+  provenance: { provider: 'codex', carrier: 'app_server', nativeType: 'subAgentActivity' },
+};
+
+export const SUBEXECUTION_EVENTS = [
+  { ...childIdentity, id: 'subexecution:child-f307-bohr:started', occurredAt: 101, stage: 'started' },
+  {
+    ...childIdentity,
+    id: 'subexecution:child-f307-bohr:commentary',
+    occurredAt: 102,
+    stage: 'message',
+    content: '正在核对真实材料。',
+    messagePhase: 'commentary',
+  },
+  {
+    ...childIdentity,
+    id: 'subexecution:child-f307-bohr:final',
+    occurredAt: 103,
+    stage: 'message',
+    content: 'Approve：子 agent 只读核对完成。',
+    messagePhase: 'final_answer',
+  },
+  { ...childIdentity, id: 'subexecution:child-f307-bohr:completed', occurredAt: 104, stage: 'completed' },
+];
+
 export const evolutionProgramProjection = {
   program: {
     schemaVersion: 1,
@@ -190,13 +226,14 @@ export function activeExecutionFixture(enabled) {
     executions: enabled
       ? [
           {
-            executionId: INVOCATION_ID,
+            executionId: 'execution-f307-real-run',
+            turnInvocationId: INVOCATION_ID,
             threadId: THREAD_ID,
             threadTitle: 'F307 Real Surface Adapters',
             catId: 'codex-sol',
             kind: 'live_invocation',
             startedAt: invocationSummary.startedAt,
-            cancelability: { state: 'not_cancelable', reason: 'foreign_principal' },
+            cancelability: { state: 'not_cancelable', reason: 'terminalizing' },
           },
         ]
       : [],
@@ -289,14 +326,24 @@ export function fixedFixture(pathname) {
         total: 1,
         summary: invocationSummary,
         events: [
-          {
+          ...SUBEXECUTION_EVENTS.map((semanticEvent, index) => ({
             v: 1,
-            t: invocationSummary.startedAt,
+            t: invocationSummary.startedAt + index,
             threadId: THREAD_ID,
             catId: 'codex-sol',
             sessionId: SESSION_ID,
             invocationId: INVOCATION_ID,
-            eventNo: 0,
+            eventNo: index,
+            event: { type: 'system_info', semanticEvent },
+          })),
+          {
+            v: 1,
+            t: invocationSummary.startedAt + SUBEXECUTION_EVENTS.length,
+            threadId: THREAD_ID,
+            catId: 'codex-sol',
+            sessionId: SESSION_ID,
+            invocationId: INVOCATION_ID,
+            eventNo: SUBEXECUTION_EVENTS.length,
             event: { type: 'text', content: 'real owner-backed Agent Run' },
           },
         ],

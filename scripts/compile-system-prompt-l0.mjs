@@ -43,8 +43,10 @@ import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 import { getDossierL0Pronouns, getDossierL0RoutingNote, getDossierL0SelfDescription } from '@cat-cafe/shared/dossier';
 import {
+  CURRENT_CORPUS_PROFILE_URI,
   CURRENT_RELATIONSHIP_PROFILE_URI,
   DEFAULT_PROFILE_USER_ID,
+  profileCorpusRelativePath,
   profileUserRelativePath,
   relationshipPrimerRelativePath,
   renderUserCapsuleSection,
@@ -384,29 +386,44 @@ function renderCvoRef() {
 export function resolveUserCapsule(profileDir, relationshipKey) {
   const capsulePath = resolve(profileDir, 'operator-capsule.md');
   const primerPath = resolve(profileDir, relationshipPrimerRelativePath(relationshipKey));
+  const corpusPath = resolve(profileDir, profileCorpusRelativePath());
   let primerEntry = '';
+  let corpusEntry = '';
   try {
     accessSync(primerPath);
     primerEntry = `关系轨迹: ${CURRENT_RELATIONSHIP_PROFILE_URI}（cat_cafe_read_profile 按需读）`;
   } catch {
     // No primer for this persona — no pointer line.
   }
+  // Phase E: corpus pointer — existence-gated, never leaks content into L0 (INV-6 no existence leakage
+  // is about non-owner; owner sees pointer only when file exists).
+  try {
+    accessSync(corpusPath);
+    corpusEntry = `共享事实: ${CURRENT_CORPUS_PROFILE_URI}（cat_cafe_read_profile layer=corpus 按需读）`;
+  } catch {
+    // No corpus yet — no pointer line.
+  }
 
-  // State 1: missing / unreadable → primer entry only, if one exists.
-  // Capsule and primer are independently optional profile layers.
+  // State 1: missing / unreadable → pointer entries only, if any exist.
+  // Capsule, primer, and corpus are independently optional profile layers.
   let raw;
   try {
     raw = readFileSync(capsulePath, 'utf8');
   } catch {
-    return primerEntry;
+    const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
+    return pointers;
   }
 
   // The same pure transform is used by F299 when binding durable profile
   // evidence, so the sourceRef describes these exact bytes rather than a
   // later profile revision.
   let section = renderUserCapsuleSection(raw);
-  if (!section) return primerEntry;
-  if (primerEntry) section += `\n\n${primerEntry}`;
+  if (!section) {
+    const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
+    return pointers;
+  }
+  const pointers = [primerEntry, corpusEntry].filter(Boolean).join('\n');
+  if (pointers) section += `\n\n${pointers}`;
 
   return section;
 }

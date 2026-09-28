@@ -14,25 +14,25 @@ description_updated_at: 2026-07-26T13:00:00Z
 
 > **Status**: implementation — Phase B core + Phase C L1/L1b merged；remaining ACs + L2 pending | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
 >
-> **operator signoff**: `0001785068607739-000522-d5a5681f` — “你来立项吧”；正式批准
+> **operator signoff**: `private-source-id` — “你来立项吧”；正式批准
 > 独立 F 号承载写入端语义、可重建投影与三层 UX。实现必须先通过 Phase A UX
 > Design Gate。
 >
 > **operator L1 visual signoff / implementation authorization**:
-> `0001787499735819-000062-789a686e` — “我感觉不错了……更新一下我们的 feat md？感觉可以开始实现了？”
+> `private-source-id` — “我感觉不错了……更新一下我们的 feat md？感觉可以开始实现了？”
 > 该签字批准真实 Sidebar 壳中的折叠注意力簇，并解除 Phase B 与 Phase C L1 的生产实现门；
 > 它不代替 AC-A1/A2 对第二 Chat 最终 carrier 的选择，Phase C L2 仍保持独立视觉门。
 >
 > **operator 对话组交互裁决 / implementation authorization**:
-> `0001787633448033-000031-7f7a7317` 选择“像苹果长按抖动后装到一起”的用户心智；
-> `0001787714957674-000148-7a9e2a03` 授权直接完成下一段并交由 operator 看真实 feature preview。
-> `0001788339388845-000685-aa1ddb65` 附吴浪原始对话截图，`0001788340304234-000704-3242b55a`
+> `private-source-id` 选择“像苹果长按抖动后装到一起”的用户心智；
+> `private-source-id` 授权直接完成下一段并交由 operator 看真实 feature preview。
+> `private-source-id` 附吴浪原始对话截图，`private-source-id`
 > 纠正了错误的记忆归因：默认 Sidebar 与上线前完全一致，只有用户明确长按/拖动/菜单整理才创建
 > `Group`；新能力由 capability tip 教会用户，成员关系写入 typed thread metadata。该裁决授权
 > Phase C L1b；不授权 Phase C L2 dual Chat 或 merge。
 >
 > **2026-07-31 scope reset**: operator 将 F277 与通用自适应/动态 UX 重构明确解耦
->（`0001785494350337-000269-73941a81`）。F277 只解决相关 thread 的导航、监看与
+>（`private-source-id`）。F277 只解决相关 thread 的导航、监看与
 > 并排阅读；旧 Tree / Section Rollup / Contextual Orbit Design Gate PR #3238 已关闭，
 > 不作为实现依据。
 
@@ -115,6 +115,20 @@ Group 只由用户的明确动作出生：长按/菜单进入整理模式，把�
 安全的轻微抖动提示；桌面可以直接拖；键盘/读屏及拖拽失败时从每条 thread 的“更多操作”进入
 “整理 Group”。“抖动”只是可用性反馈，不参与状态 truth，也不能阻塞正常滚动与点开 thread。
 
+### Group 排序与阅读位置
+
+组头提供“手动顺序 / 运行优先”；存量 Group 默认手动，用户的显式选择通过既有 owner preference
+writer 持久化，TTL=0，不改写 `metadata.attentionGroup.order`。选择运行优先后，展开时将当前运行中的
+成员稳定移到前面，其他成员保留手动相对顺序；进入拖动整理模式时仍展示保存的手动顺序。
+
+Group 展开期间，未读变已读、运行开始或结束只更新最新状态，不搬动成员行及当前列表中整组的位置。
+收起后重新展开、主动改排序或切换导航范围时重新计算；成员增删仍按当前 membership 生效。
+阅读快照只保留显示 ID 顺序，每次渲染都重新关联最新 `SidebarSnapshotRow`，不得冻结或复制状态事实。
+普通、项目和虚拟列表复用同一顺序投影与固定行高，避免徽标变化造成鼠标下的行位移。
+
+本增量授权：`[thread-id]#private-source-id`；设计原文
+`private-source-id`。仅改变用户明确选择的显示方式，Group membership 与手动顺序仍由用户拥有。
+
 ## Group Display Name Boundary（名字不是成员关系）
 
 Group 的**成员关系**与**显示名称**是两个正交变量。F277 先从 explicit metadata 得到 membership，
@@ -190,9 +204,9 @@ F277 不新建 status enum、row store、event、room 或 refresh loop；Phase C
 继续验证结构，但生产接线不得把 C7 `lastActiveAt` 冒充执行时长；只认 C10 `activeSince`，缺失时
 只写“执行中”。`invocation done` 仍不得触发自动折叠或宣告 thread 收尾。
 
-Provenance：原始 Sidebar 刷新现象 `0001786400064889-000238-0f857ea8`；独立根因定位
-`0001786401368767-000307-85885a95`；operator 要求与 F277 对齐
-`0001786403618286-000332-302032d0`。
+Provenance：原始 Sidebar 刷新现象 `private-source-id`；独立根因定位
+`private-source-id`；operator 要求与 F277 对齐
+`private-source-id`。
 
 ## Current State / 现状基线
 
@@ -363,7 +377,7 @@ operator 亲自看过可操作原型并签字前，不进入 Phase B/C 实现；
 pin、label、project、title 与出生关系不变，新对话不自动吸收。搜索范围是当前用户完整普通对话集合中的
 标题/项目/ID 匹配，不能宣称正文提及检索或全部 feature 归属；完整 F 号避免匹配更长编号。
 首次搜索多条结果时显示可关闭的操作提示；同一文案进入 capability tip inventory。
-授权 source：`[thread-id]#0001788616514255-000177-bef93871`，author `codex-astra`。
+授权 source：`[thread-id]#private-source-id`，author `codex-astra`。
 
 | ID | Scope unit | Actor | Flow | Evidence |
 |----|------------|-------|------|----------|
@@ -386,7 +400,7 @@ pin、label、project、title 与出生关系不变，新对话不自动吸收�
   `in_context_observability` 决策字段，明确监看/阅读边界、canonical content renderer、
   focus/scroll/draft 保持与 Workspace 归属。
 - [x] AC-A4（L1）: operator 已对真实 Sidebar 壳中的折叠簇给出 signoff；生产行为代码在
-  `0001787499735819-000062-789a686e` 之后进入实现分支。该勾选不覆盖 A1/A2 的 L2 carrier 门。
+  `private-source-id` 之后进入实现分支。该勾选不覆盖 A1/A2 的 L2 carrier 门。
 - [ ] AC-A5: 隐藏 F 号与 A/B/C 开发层后，产品 chrome 不出现 relation / graph / canonical /
   origin / placement / unknown / orphan 等内部 ontology；五秒测试只需用户语言即可复述主动作。
 - [ ] AC-A6: 显式 Group 有 C5 折叠摘要；`置顶` 由 fixture 中 3 个 pinned 锚点带出完整 5 个 Group 成员，
@@ -465,18 +479,21 @@ pin、label、project、title 与出生关系不变，新对话不自动吸收�
   滚动不被长按计时器劫持。鼠标、touch/pointer、键盘/读屏菜单路径在真实生产 `ThreadItem` 壳中
   产生相同 canonical group command；dev preview 不维护平行视觉实现。
 
-#### 当前实现证据（2026-09-05）
+#### 当前实现证据（2026-09-07）
 
 - [x] AC-C16: 任意 Sidebar 分类的搜索均提供完整普通对话匹配的批量入口；置顶下可收进未置顶匹配，系统/Hub 不入组，完整 F 号不误配更长编号。
 - [x] AC-C17: 原地多选、默认名、加入已有 Group、跨组来源提示与一次确认；取消不写入，失败保留选择/名称并可重试。
 - [x] AC-C18: 批量写入复用 owner-scoped metadata writer；保留 Group/pin 的独立真相，刷新后成员及别名恢复。
 - [x] AC-C19: 成功反馈提供前置条件保护的撤销；源组完整恢复，后续 membership 改动或成员消失时诚实拒绝覆盖。
 - [x] AC-C20: 搜索现场提示可关闭且持久记住；capability tip 教会同一真实操作，具有非作者 review 与真实浏览器证据。
+- [x] AC-C21: Group 支持持久化的“手动顺序 / 运行优先”；缺省手动，展开时按实时运行状态稳定分区，既有 alias/open 写入不丢排序偏好，metadata 手动顺序不变。
+- [x] AC-C22: 展开期间读/运行状态更新不改变成员及整组的显示位置；重新展开或主动改变导航/排序时重算，所有状态继续来自当前 F297 row，普通/项目/虚拟列表共用显示顺序。
 
 | 已闭合 AC | 证据 |
 |-----------|------|
-| C16–C20 | PR #4355，merge `9d410dde42028e08072294c59f83d9aac82d47b2`；API 34/34、生产 Sidebar 188/188、跨包类型检查与真实 Chromium 1/1。Terra R3 typed approval `0001788631632960-000655-779128e4`；四个作者提交 rebase 后 patch-equivalent，operator `0001788635490984-000737-6552439b` 明确授权手动相关检查后直接合入。旧 full gate 取消，未计为 PASS。 |
-| A4-L1 / A7 / A9 | operator source `0001787499735819-000062-789a686e`；真实 `ThreadItem` 集成测试 `thread-sidebar-attention-clusters.test.tsx` |
+| C16–C20 | PR #4355，merge `9d410dde42028e08072294c59f83d9aac82d47b2`；API 34/34、生产 Sidebar 188/188、跨包类型检查与真实 Chromium 1/1。Terra R3 typed approval `private-source-id`；四个作者提交 rebase 后 patch-equivalent，operator `private-source-id` 明确授权手动相关检查后直接合入。旧 full gate 取消，未计为 PASS。 |
+| C21–C22 | PR #4400，merge `89b11dba1d9affe4da10d7331bbb6a2093f0b400`；Terra exact-HEAD approval `private-source-id`。API 39/39、Sidebar/preview 218/218、双端 TypeScript、F297 boundary guard 与实际 Chromium 1/1；置顶页与 320px 旅程验证偏好恢复、重新展开排序及读/运行变化前后逐行像素坐标不变。采用受影响检查，未声称 full gate PASS。 |
+| A4-L1 / A7 / A9 | operator source `private-source-id`；真实 `ThreadItem` 集成测试 `thread-sidebar-attention-clusters.test.tsx` |
 | B1 / B4 | `proposal-flow.test.js`、`proposal-enrich-header.test.js`、`propose-thread-work-mode.test.js`、`thread-relation-projection.test.js` |
 | B2 | `thread-branch.test.js` + `thread-relation-projection.test.js` |
 | C6 / C10 | `attention-clusters.test.ts` + `thread-sidebar-attention-clusters.test.tsx` |

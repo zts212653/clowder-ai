@@ -83,15 +83,37 @@ describe('RedisRuntimeInteractionStore', { skip }, () => {
     assert.equal(await redis.pttl(RuntimeInteractionKeys.detail(request.interactionId)), -1);
   });
 
+  it('atomically rejects a second active interaction for one invocation', async () => {
+    const first = {
+      ...request,
+      interactionId: 'invocation-fence-first',
+      owner: { ...request.owner, invocationId: 'invocation-fence' },
+      provider: { ...request.provider, requestId: 'rpc-fence-first' },
+    };
+    const second = {
+      ...first,
+      interactionId: 'invocation-fence-second',
+      provider: { ...first.provider, requestId: 'rpc-fence-second' },
+    };
+    await store.createStaged({ request: first, hostEpoch: 'host-1', now: 1500 });
+    await assert.rejects(
+      store2.createStaged({ request: second, hostEpoch: 'host-1', now: 1501 }),
+      /active interaction already exists for invocation/,
+    );
+    await store.invalidate({ interactionId: first.interactionId, reasonCode: 'provider_cancelled', now: 1502 });
+  });
+
   it('invalidates every old-host active record without touching terminal history', async () => {
     const oldRequest = {
       ...request,
       interactionId: 'old-pending',
+      owner: { ...request.owner, invocationId: 'inv-old' },
       provider: { ...request.provider, requestId: 'rpc-2' },
     };
     const newRequest = {
       ...request,
       interactionId: 'new-pending',
+      owner: { ...request.owner, invocationId: 'inv-new' },
       provider: { ...request.provider, requestId: 'rpc-3' },
     };
     await store.createStaged({ request: oldRequest, hostEpoch: 'old-host', now: 2000 });
@@ -117,6 +139,7 @@ describe('RedisRuntimeInteractionStore', { skip }, () => {
     const formRequest = {
       ...request,
       interactionId: 'empty-required',
+      owner: { ...request.owner, invocationId: 'inv-empty-required' },
       kind: 'elicitation',
       mode: 'form',
       message: 'Optional configuration',
@@ -143,6 +166,7 @@ describe('RedisRuntimeInteractionStore', { skip }, () => {
     const questionRequest = {
       ...request,
       interactionId: 'empty-secret-ids',
+      owner: { ...request.owner, invocationId: 'inv-empty-secret-ids' },
       kind: 'question',
       questions: [{ id: 'environment', header: 'Environment', question: 'Where?' }],
     };

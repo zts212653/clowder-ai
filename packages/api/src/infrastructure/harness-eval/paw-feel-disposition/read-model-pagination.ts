@@ -2,6 +2,7 @@ import type {
   PawFeelDispositionProjection,
   PawFeelDispositionState,
   PawFeelInboxCounts,
+  PawFeelInboxItem,
   PawFeelInboxSort,
   PawFeelReviewBundle,
 } from '@cat-cafe/shared';
@@ -56,20 +57,24 @@ export function countPawFeelProjections(
   return counts;
 }
 
-function sortKey(projection: PawFeelDispositionProjection, sort: PawFeelInboxSort): SortKey {
-  const terminal = isTerminalPawFeelState(projection.state);
+function issueSortKey(item: PawFeelInboxItem, sort: PawFeelInboxSort): SortKey {
+  const resolved = item.issue.resolution === 'resolved';
   return {
     sort,
-    terminal: terminal ? 1 : 0,
-    time: terminal
-      ? -Date.parse(projection.lastTransitionAt)
-      : (sort === 'newest' ? -1 : 1) * Date.parse(projection.discoveredAt),
-    signalId: projection.signalId,
+    terminal: resolved ? 1 : 0,
+    time: resolved
+      ? -Date.parse(item.issue.resolvedAt ?? item.disposition.lastTransitionAt)
+      : (sort === 'newest' ? -1 : 1) * Date.parse(item.disposition.discoveredAt),
+    signalId: item.disposition.signalId,
   };
 }
 
 function bundleSortKey(bundle: PawFeelReviewBundle, sort: PawFeelInboxSort): SortKey {
-  const first = bundle.members.map((member) => sortKey(member.disposition, sort)).sort(compareKey)[0];
+  let first: SortKey | undefined;
+  for (const member of bundle.members) {
+    const key = issueSortKey(member, sort);
+    if (!first || compareKey(key, first) < 0) first = key;
+  }
   if (!first) throw new Error(`paw-feel bundle ${bundle.bundleKey} has no members`);
   return { ...first, signalId: bundle.bundleKey };
 }
@@ -109,13 +114,14 @@ export function paginatePawFeelBundles(
   const sort = query.sort ?? 'oldest';
   const cursor = query.cursor ? decodeCursor(query.cursor, sort) : undefined;
   const filtered = bundles
-    .sort((left, right) => compareKey(bundleSortKey(left, sort), bundleSortKey(right, sort)))
-    .filter((bundle) => !cursor || compareKey(bundleSortKey(bundle, sort), cursor) > 0);
+    .map((bundle) => ({ bundle, key: bundleSortKey(bundle, sort) }))
+    .sort((left, right) => compareKey(left.key, right.key))
+    .filter(({ key }) => !cursor || compareKey(key, cursor) > 0);
   const limit = Math.min(MAX_LIMIT, Math.max(1, query.limit ?? DEFAULT_LIMIT));
   const page = filtered.slice(0, limit);
-  const lastBundle = page.at(-1);
+  const last = page.at(-1);
   return {
-    bundles: page,
-    ...(filtered.length > limit && lastBundle ? { nextCursor: encodeCursor(bundleSortKey(lastBundle, sort)) } : {}),
+    bundles: page.map(({ bundle }) => bundle),
+    ...(filtered.length > limit && last ? { nextCursor: encodeCursor(last.key) } : {}),
   };
 }

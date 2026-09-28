@@ -14,7 +14,12 @@ import type { PluginRegistry } from '../domains/plugin/PluginRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import type { PluginResourceActivator as PluginResourceActivatorType } from '../domains/plugin/PluginResourceActivator.js';
 import { assertPluginResourceInsideRoot } from '../domains/plugin/PluginResourceActivator.js';
-import { loadAllPluginConfigs, resolvePluginEnv, writePluginConfig } from '../domains/plugin/plugin-config-store.js';
+import {
+  loadAllPluginConfigs,
+  readPluginEnvSnapshot,
+  resolvePluginEnv,
+  writePluginConfig,
+} from '../domains/plugin/plugin-config-store.js';
 import { validateEnvSafety } from '../domains/plugin/plugin-manifest.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
@@ -42,11 +47,11 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
       return pluginAccessError(reply, access);
     }
 
-    const manifests = refreshPluginRegistry(pluginRegistry);
+    const manifests = pluginRegistry.scan();
     const projectRoot = resolveActiveProjectRoot();
     const capabilities = await readCapabilitiesConfig(projectRoot);
 
-    const envSnapshot = resolvePluginEnv(manifests);
+    const envSnapshot = readPluginEnvSnapshot(projectRoot, manifests);
     const plugins: PluginInfo[] = manifests.map((m) => pluginRegistry.getPluginInfo(m, capabilities, envSnapshot));
 
     return { plugins };
@@ -59,7 +64,7 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
     }
 
     const { id } = request.params;
-    refreshPluginRegistry(pluginRegistry);
+    pluginRegistry.scan();
     const manifest = pluginRegistry.getManifest(id);
     if (!manifest) {
       reply.status(404);
@@ -68,7 +73,7 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
 
     const projectRoot = resolveActiveProjectRoot();
     const capabilities = await readCapabilitiesConfig(projectRoot);
-    const envSnapshot = resolvePluginEnv([manifest]);
+    const envSnapshot = readPluginEnvSnapshot(projectRoot, [manifest]);
     return pluginRegistry.getPluginInfo(manifest, capabilities, envSnapshot);
   });
 

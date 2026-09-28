@@ -1,7 +1,7 @@
 import type { OwnerTruthRefV1 } from '@cat-cafe/shared';
 import { parse } from 'yaml';
 
-import type { EvolutionProgramProjectionV1 } from '../../../capability-evolution/program-projection.js';
+import type { EvolutionProgramProjectionV1 } from '../../../capability-evolution/read-model/program-projection.js';
 import type { GitPublisher } from '../../publish-verdict/types.js';
 import { persistImmutableMeasurementArtifact } from '../measurement-artifact-files.js';
 import { digest, readContainedFile } from '../measurement-decision-proof-files.js';

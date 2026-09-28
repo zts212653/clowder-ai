@@ -1,7 +1,7 @@
 ---
 name: merge-gate
 description: 合入 main：按行为 / 数据 / 安全 / 契约 / 不可逆风险选择 targeted 或 full gate，并消费一个或多个有客观触发理由的独立 review source。
-tips_exempt: F314 extends harness-internal review/source provenance policy; no distinct end-user-invocable capability surface
+tips_exempt: "2026-09-10：对齐阶段校准与守护角色入口，不新增可向用户推荐的产品操作；F314 review/source provenance 契约保留。"
 triggers:
   - "合入 main"
   - "merge"
@@ -43,7 +43,7 @@ triggers:
 2. 至少一个非作者独立 review source（local 或 cloud）有明确 verdict；仅在不同高风险面需要不同视角时叠加，愿景守护另按 feature-close 触发。
 3. **所有 P1/P2** 已修复，并由提出 finding 的活跃 source 覆盖当前 HEAD（含 Harness Diet Rebase Continuity 的 continuityProof 桥接）。
 4. 适用的 feature / BACKLOG 真相源没有过度声称，PR 载体与 changed files 匹配。
-5. 与风险匹配的 gate 全绿：低 / 中风险用 targeted commands；安全、鉴权、生产数据、迁移、外部契约或不可逆风险用 `pnpm gate` 全量。
+5. 与影响范围匹配的 gate 全绿：纯文档走文档校验，窄改跑受影响检查；共享契约、门禁执行链或 targeted 无法覆盖的跨包风险才要求 full。安全、数据、契约或不可逆风险加强对应独立审查 / 授权，不凭标签自动全量。
 
 默认只选一个合适的独立 source：家里语境与治理语义优先 local；context-blind 安全 / 契约代码扫描优先 cloud。**动作类型（“开了 PR”“改了代码”）不是叠加理由。**
 
@@ -51,9 +51,9 @@ triggers:
 
 `pnpm gate`、rebase、fixup、biome 格式化刷新等都可能让 HEAD 变化。**HEAD 变化只触发 provenance 判定，不自动等于 re-review**：先分清 review 后是否真的改了本 PR 的内容、base 前进是否与本 PR 有逻辑关联；两者都没有，或只有可机械证明的派生物重建 / 规范化，旧 review 用 continuityProof 桥接。只有真实的作者 delta 或相关 base delta 回 active source，而且只看那一小块。
 
-**昂贵 gate 连续性（ROI 硬边界）**：一次 full gate 绑定“作者 patch + gate 开始时冻结的 base”，而不是绑定会继续移动的 `origin/main` 字符串。full gate 已完整通过后，若后续只是纯 rebase、作者 patch 不变或 patch-equivalent，且 C2 证明 base 增量无关联，则 rebase 后只跑风险匹配的 targeted continuity checks；**禁止仅因 main 又前进而重跑 full gate**。上一轮 full gate 未完整通过只会使旧 receipt 不可复用，**不会单独把本来属于 targeted 的改动升级为 full**。`pnpm gate` 会在冻结 base 后从 Git diff、既有 terminal/stage receipt 与失败输出尾部自动选择车道：只有作者实质 delta、相关或无法判定的 base delta、冲突中的语义取舍、相关旧失败，或真实高风险面才重新运行 full gate。机器判为 `targeted` 时，命令会在申请 full-gate 资源前退出；必须另行刷新受影响检查与全仓跨包 typecheck，并把命令写进 evidence manifest。classifier 只选车道，不代替这些绿色证据。
+**昂贵 gate 连续性（ROI 硬边界）**：一次 full gate 绑定“作者 patch + gate 开始时冻结的 base”，而不是绑定会继续移动的 `origin/main` 字符串。full gate 已完整通过后，若后续只是纯 rebase、作者 patch 不变或 patch-equivalent，且 C2 证明 base 增量无关联，则 rebase 后只跑风险匹配的 targeted continuity checks；**禁止仅因 main 又前进而重跑 full gate**。上一轮 full gate 未完整通过只会使旧 receipt 不可复用，**不会单独把本来属于 targeted 的改动升级为 full**。`pnpm gate` 会在冻结 base 后从 Git diff、既有 terminal/stage receipt 与失败输出尾部自动选择车道：纯文档要求文档校验；代码的共享契约、门禁执行链、相关或无法判定的 base delta / 旧失败仍走 full。作者实质 delta 或冲突语义取舍要求重判影响范围，不凭风险标签自动全量。机器判为 `targeted` 时，命令会在申请 full-gate 资源前退出；必须另行刷新受影响检查，触及跨包类型时补对应 typecheck，并把命令写进 evidence manifest。classifier 只选车道，不代替这些绿色证据。
 
-机器看不见的语义风险可用 `pnpm gate -- --risk <behavior|data|security|contract|irreversible>` 加严；该参数只能把 targeted 升为 full，不能降级机器的 full 结论。不要直接调用内部 `scripts/classify-gate-route.mjs`，也不要手填路径、历史状态或失败相关性。
+机器看不见的语义风险用 `pnpm gate -- --risk <behavior|data|security|contract|irreversible>` 声明审查强度；输出的 `assuranceLevel` 与覆盖范围 `route` 分开。高风险窄改可走 high-assurance + targeted，保留对应独立 review、受影响 consumer 测试和授权；该参数不会凭标签升级 full，也不能降级机器的 full 结论。不要直接调用内部 `scripts/classify-gate-route.mjs`，也不要手填路径、历史状态或失败相关性。
 
 **Report 载体铁则（斩断 SHA 自噬环，operator 2026-07-15 投诉②修复）**：**review verdict 之后、merge 之前，不得再向被审分支 commit 任何 review report / handoff 信 / evidence 说明类文档**——这类内容的合法载体只有 PR comment、thread 消息、tracking 系统。被审分支的 HEAD 只应因代码内容（含 rebase）变化。病灶机制：report 进分支 → SHA 变 → 旧 APPROVE 失效 → re-review → 新 report → SHA 又变（round-10 自噬环）。review **请求**信（mailbox，reviewer 开审前已在 HEAD 内）不受此限。
 
@@ -128,9 +128,9 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 | `headChangeCause` | Review Provenance Matrix 已有 | HEAD 变化原因 |
 | `nextGateOwner` | Review Provenance Matrix 已有 | 下一步门禁所有者 |
 | `gate_passed` | 适用 gate 的退出码 | 选定的 targeted 或 full gate 是否通过；不是由“regular PR”自动决定 |
-| `gate_commands` | 实际执行的命令 | 逐条记录真实命令；高风险通常为 `["pnpm gate"]`，其他风险记录受影响检查 + `git diff --check` |
+| `gate_commands` | 实际执行的命令 | 逐条记录真实命令；按影响范围记录文档 / 受影响检查或 `["pnpm gate"]`，附 `git diff --check` |
 | `trigger_reason` | 猫判断 | 五轴风险快照 + 为什么选择这些 gate / review source；动作类型不能单独充当理由 |
-| `stale` | `head` vs **headChangeCause 决定的活跃 review 源** | 按 `headChangeCause`（不是 `nextGateOwner`）判定哪个 review 源必须覆盖 `head`：`cloud-finding` → 只看 `cloudReviewSha`；`local-gate` / `ci-fix` → 实际作者 delta 默认回 local，除非 C1 证明只是机械规范化；`rebase` → **C1–C3 全满足时 continuity 默认有效，author 自决合入 + 留痕 `skip=rebase-rereview`，无需 reviewer pre-approval**。**条款归因**：operator directive（`[thread-id]` msg `0001783847510596-000126-50011546`）的原意是“diff 不涉及我们自己改的代码、没有相关联的逻辑关系 → 别 re-review”；C1 的证明方法与 C3 gate 是猫方实现，不得反过来静默加严原意。**C1（作者 delta）**：比较 review 时的 authored patch 与 current authored patch；逐 commit stable patch-id 全部相同只是零 delta 的**快路**。不相同时必须显式列 `postReviewDeltaPaths`，不能把它送进 C2 冒充 base 相关性：①仅 canonical 派生物路径可在运行生成器后、再次运行得到零工作树 diff 时桥接；②仅 canonical formatter / normalizer 造成的变化，必须证明“对 reviewed 内容运行该命令得到的输出 == current blob”，且 current tree 幂等重跑零 diff；③**机械三方合并**可在逐冲突路径证明 current blob 只是 reviewed authored 内容与新 base 内容的无损并集、没有改写观点或行为时桥接（记录 reviewed/base/current 三方 diff 或等价证据）；重叠处需要语义取舍就只审那个 hunk；④其余代码、测试、配置、接口或无法证明的 delta，只让 active source review 这些真实变化。**C2（base 相关性）**：`git diff --name-only <oldBase>..<newBase>`（base 前进）与本 PR 的非派生物路径无交集，并留痕 `baseDeltaDomains=<...> relation=none:<理由>`；共享契约 / schema / export / 构建配置等跨文件耦合拿不准就只审关联部分。**C3**：rebase 后风险匹配的 gate / targeted tests 绿。continuityProof 在 rebase 前固定 `reviewedHead/oldBase/newBase`，rebase 后记录 `currentHead`；任一项不满足只使对应真实 delta stale，不让无关 commit 重审。`pr-meta` 不改 SHA；local-only / cloud-only 分别消费自己选择的 source。 |
+| `stale` | `head` vs **headChangeCause 决定的活跃 review 源** | 按 `headChangeCause`（不是 `nextGateOwner`）判定哪个 review 源必须覆盖 `head`：`cloud-finding` → 只看 `cloudReviewSha`；`local-gate` / `ci-fix` → 实际作者 delta 默认回 local，除非 C1 证明只是机械规范化；`rebase` → **C1–C3 全满足时 continuity 默认有效，author 自决合入 + 留痕 `skip=rebase-rereview`，无需 reviewer pre-approval**。**条款归因**：operator directive（`[thread-id]` msg `private-source-id`）的原意是“diff 不涉及我们自己改的代码、没有相关联的逻辑关系 → 别 re-review”；C1 的证明方法与 C3 gate 是猫方实现，不得反过来静默加严原意。**C1（作者 delta）**：比较 review 时的 authored patch 与 current authored patch；逐 commit stable patch-id 全部相同只是零 delta 的**快路**。不相同时必须显式列 `postReviewDeltaPaths`，不能把它送进 C2 冒充 base 相关性：①仅 canonical 派生物路径可在运行生成器后、再次运行得到零工作树 diff 时桥接；②仅 canonical formatter / normalizer 造成的变化，必须证明“对 reviewed 内容运行该命令得到的输出 == current blob”，且 current tree 幂等重跑零 diff；③**机械三方合并**可在逐冲突路径证明 current blob 只是 reviewed authored 内容与新 base 内容的无损并集、没有改写观点或行为时桥接（记录 reviewed/base/current 三方 diff 或等价证据）；重叠处需要语义取舍就只审那个 hunk；④其余代码、测试、配置、接口或无法证明的 delta，只让 active source review 这些真实变化。**C2（base 相关性）**：`git diff --name-only <oldBase>..<newBase>`（base 前进）与本 PR 的非派生物路径无交集，并留痕 `baseDeltaDomains=<...> relation=none:<理由>`；共享契约 / schema / export / 构建配置等跨文件耦合拿不准就只审关联部分。**C3**：rebase 后风险匹配的 gate / targeted tests 绿。continuityProof 在 rebase 前固定 `reviewedHead/oldBase/newBase`，rebase 后记录 `currentHead`；任一项不满足只使对应真实 delta stale，不让无关 commit 重审。`pr-meta` 不改 SHA；local-only / cloud-only 分别消费自己选择的 source。 |
 | `continuityProof` | `reviewedHead/oldBase/newBase/currentHead` + C1 authored-patch 对照（快路 patch-id，或 `postReviewDeltaPaths` 与 canonical-output 等价证明）+ C2 base 交集与 `relation=` + C3 gate 结果 | review provenance 桥接凭证；证明“review 后没有相关作者变化”，不是要求 SHA / range-diff 字面全等 |
 | `verdict` | 猫判断 | `passed`（review APPROVE on final HEAD **或经 continuityProof 桥接的 APPROVE**）/ `blocked`（未 APPROVE）/ `pending` |
 
@@ -186,11 +186,11 @@ merge-gate 执行时，在 Step 7（squash merge）**之前**，猫必须**组�
 
 **与已有 Review Continuity Guard 的关系**：Review Continuity Guard 定义了"HEAD 变了怎么判 nextGateOwner"的规则；Evidence Validation Checker 在 merge 前**执行**这些规则的最终验证。前者是政策，后者是门禁。
 
-### Gate 选择 — targeted 默认，高风险 full
+### Gate 选择 — targeted 默认，full 按影响范围
 
 默认运行受影响检查 + `git diff --check`；现有精确检查已经红时，它就是 RED。确定性生成物刷新不为仪式感另造测试。
 
-命中安全 / 鉴权 / 生产数据 / 数据迁移 / 外部契约 / 不可逆面，或 targeted 检查无法覆盖跨包合流风险时，运行 Latest Main 全量门禁：
+命中共享契约、门禁执行链，或 targeted 检查无法覆盖跨包合流风险时，运行 Latest Main 全量门禁，并明确局部验证缺少哪项覆盖：
 
 ```bash
 pnpm gate
@@ -229,7 +229,7 @@ git worktree remove ../cat-cafe-exact-main-receipt
 git branch -d gate/exact-main-receipt
 ```
 
-**不要**加 `--no-rebase`——`--no-rebase` 跳过 route classifier 和 durable receipt `begin`，receipt 不会铸造。正常 gate 会 fetch + rebase，但因 branch 已在 `origin/main` HEAD，rebase 是 no-op；install、classifier、receipt 和全量检查全部正常走。
+**不要**加 `--no-rebase`——本节要铸造 latest-main receipt。`--no-rebase` 仍执行 route classifier，但只作本地验证，不执行 durable receipt `begin` 或发布 canonical sentinel；未提交改动也参与分类，不能复用旧 green。正常 gate 会 fetch + rebase，但因 branch 已在 `origin/main` HEAD，rebase 是 no-op；classifier、receipt 和选中的检查正常走。
 
 ### Root Artifact Guard（Step 0.5，开 PR 前必跑）
 
@@ -261,14 +261,15 @@ gh pr create --title "feat(xxx): ..." --body "$(cat <<'EOF'
 EOF
 )"
 
-# 3. 只注册当前真正阻塞你的显式等待（F280；不是订阅所有 PR 事件）
-# → 调用 MCP: cat_cafe_register_pr_tracking(
-#      repoFullName, prNumber,
-#      when=[1–4 个 typed predicate],
-#      nextStep="条件满足后的具体动作",
-#      expiresAt=<future unix ms>
-#    )
-# 例：当前下一步是“CI 到终态后继续 merge-gate”：
+# 3. 注册这个 PR 的追踪（F280 + #1392 AC-7）
+# → 调用 MCP: cat_cafe_register_pr_tracking(repoFullName, prNumber)
+#    普通情况这就是全部参数。服务端会装上 PR 自身的状态条件（review decision /
+#    CI 终态 / 冲突 / 新 HEAD）和两个评论面，受众按你在这个 PR 上的角色解析；
+#    返回里的 notification 写明实际装了什么、过滤了什么。
+# 可选：expiresAt=<future unix ms>（省略则没有时间到期）、
+#      goal={kind:'await_reply_from', authorLogins:[...]}（只听点名的人）、
+#      when=[...]（高级精确入口，每种 typed 条件最多一个）
+# 例：只想被 CI 终态与冲突叫醒时才写 when：
 #    when=[{kind:'pr_ci_terminal'}, {kind:'pr_became_conflicting'}]
 # 若注册时 CI 已经终态，live baseline 会吸收历史，不补发；立即 `gh pr checks {PR}` 并继续。
 # 等待目标变化时显式 re-register；新 generation 原子替换旧 generation，不叠加 tracker/hold。
@@ -579,7 +580,7 @@ cd "$MAIN_WT" && git pull origin main   # 取回刚 squash 的 commit，doc-sync
 
 | 错误 | 正确 |
 |------|------|
-| 上一轮 full gate 未完整通过就自动再跑 full | 非绿色 receipt 只禁止复用；重新运行 canonical `pnpm gate` 消费其机器 route，无关小改走 targeted + 全仓跨包 typecheck |
+| 上一轮 full gate 未完整通过就自动再跑 full | 非绿色 receipt 只禁止复用；重新运行 canonical `pnpm gate` 消费其机器 route，无关小改走受影响 targeted；纯文档走文档校验 |
 | 因为“regular PR / packages 改动”默认叠 local + cloud | 先做五轴风险判断，默认一个合适的独立 source；高风险才按不同风险面叠加 |
 | PR body 里写了remote review 触发句柄 | 在 PR **comment** 里写（body 里写会触发代码修改权限而非 review） |
 | PR body 或 HTML 注释里写了 `@句柄`（例如签名） | **PR body 禁止任何 @句柄**，签名改为纯文本（如 `codex` / `gpt52`） |
@@ -678,15 +679,11 @@ gh pr comment {PR_NUMBER} --body '@codex review'
 
 **最后一个 Phase（或小 Feature）** → `feat-lifecycle` completion：
 1. 自己做愿景三问。
-2. 用户可见、产品方向或愿景发生变化 → @ **非 reviewer、非作者**的猫做愿景守护；这是终态风险触发，不是每个 PR 固定第三审。
+2. 用户可见、产品方向或愿景发生变化 → 按 `feat-lifecycle` 的作者范围与独立性要求选择守护猫（含排除当前体验 Design Gate 定稿人）；这是终态风险触发，不是每个 PR 固定第三审。
 3. 纯内部机械 change 且没有 feature-close 愿景面 → 记录 `guardian=not-triggered reason=<...>`，不为流程完整度召唤守护猫。
 4. 守护触发时：放行才 close；踢回则修改并跑与 delta 匹配的验证。
 
-**中间 Phase（大 Feature，3+ Phase）** → Phase 文档同步（Step 7.5 已做）+ **主动碰头operator**：
-1. 成果展示（截图 / demo / 关键改动）
-2. 愿景进度（哪些 AC ✅ 了）
-3. 下个 Phase 方向 + 新发现
-4. "方向对吗？" → operator确认 → 继续下一个 Phase
+**中间 Phase** → 按 Step 7.5 同步实际 truth delta，让阶段成果、用户实得、剩余差距和下一步可见。已确认方向内自主推进；发现愿景、范围或体验分叉时，按 `feat-lifecycle` 的「Phase 进度与方向校准」拿具体稿及时共创，不为每次 merge 再设确认轮次。
 
 ---
 

@@ -402,7 +402,7 @@ Maine Coon code review 抓 3 个 P1（同族：projectPath 契约在非主路径
 ### Phase AE: Requester Withdrawal（2026-07-31）
 
 > **Status**: ✅ merged via PR #3337 (squash `6971b7c5c`, 2026-07-31)
-> **Source**: message `0001785279417233-000077-cfa9912c`
+> **Source**: message `private-source-id`
 > **Why**: 猫误提 F128 proposal 后没有撤回能力，只能把错误决策留给用户 reject。requester withdrawal 应是猫修正自己未生效意图的生命周期动作，而 user reject 继续表达独立的用户决策。
 > **Architecture cell**: approval-index
 > **Map delta**: none

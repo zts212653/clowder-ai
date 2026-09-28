@@ -3,6 +3,10 @@ import { runtimeInteractionObjectSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const nonBlank = z.string().trim().min(1);
+const exactCoordinate = z
+  .string()
+  .min(1)
+  .refine((value) => value === value.trim());
 const providerCoordinates = { threadId: nonBlank, turnId: nonBlank };
 
 export const commandParamsSchema = z
@@ -59,6 +63,31 @@ const mcpBase = { serverName: nonBlank, threadId: nonBlank, turnId: nonBlank.nul
 export const mcpFormParamsSchema = z
   .object({ ...mcpBase, mode: z.literal('form'), requestedSchema: z.unknown() })
   .passthrough();
+export type CodexMcpFormParams = z.infer<typeof mcpFormParamsSchema>;
+
+/**
+ * Provider-authored capability consent provenance. The human-facing message is
+ * deliberately excluded: presentation text must never grant authority or
+ * decide whether an elicitation bypasses the human interaction surface.
+ */
+export const mcpCapabilityApprovalMetaSchema = z
+  .object({
+    callId: exactCoordinate.optional(),
+    codex_approval_kind: z.literal('mcp_tool_call'),
+    connector_id: exactCoordinate,
+    tool_name: exactCoordinate,
+    tool_params: z.object({ app: exactCoordinate }).passthrough(),
+  })
+  .passthrough();
+
+export function isMcpCapabilityApprovalMarker(input: unknown): boolean {
+  return (
+    typeof input === 'object' &&
+    input !== null &&
+    !Array.isArray(input) &&
+    (input as Record<string, unknown>).codex_approval_kind === 'mcp_tool_call'
+  );
+}
 
 export const mcpUrlParamsSchema = z
   .object({ ...mcpBase, mode: z.literal('url'), elicitationId: nonBlank, url: z.string().url() })

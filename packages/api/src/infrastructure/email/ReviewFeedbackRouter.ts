@@ -1,6 +1,9 @@
-import type { GitHubReviewThreadBaseline } from '@cat-cafe/shared';
+import type { GitHubReviewThreadBaseline, GitHubReviewVerdicts } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
-import type { GitHubWaitLifecycleService } from '../../domains/github-signals/GitHubWaitLifecycleService.js';
+import type {
+  GitHubWaitLifecycleResult,
+  GitHubWaitLifecycleService,
+} from '../../domains/github-signals/GitHubWaitLifecycleService.js';
 import type { GitHubReviewLoopBrake } from '../../domains/github-signals/github-wait-renderer.js';
 import type { ConnectorDeliveryDeps } from './deliver-connector-message.js';
 
@@ -45,6 +48,8 @@ export interface ReviewFeedbackSignal {
   readonly inlineCommentCursor: number;
   readonly conversationCommentCursor: number;
   readonly decisionCursor: number;
+  /** #1392: every verdict on the PR as of this poll; how an in-place dismissal is seen. */
+  readonly reviewVerdicts?: GitHubReviewVerdicts;
   readonly reviewThreads?: readonly GitHubReviewThreadBaseline[];
   readonly resultTriggerCommentId?: number;
   readonly resultSourceRef?: string;
@@ -55,7 +60,7 @@ export interface ReviewFeedbackSignal {
   readonly reviewLoopBrake?: GitHubReviewLoopBrake;
 }
 
-export type ReviewFeedbackRouteResult =
+export type ReviewFeedbackRouteResult = (
   | {
       readonly kind: 'notified';
       readonly threadId: string;
@@ -63,12 +68,32 @@ export type ReviewFeedbackRouteResult =
       readonly messageId: string;
       readonly content: string;
     }
-  | { readonly kind: 'skipped'; readonly reason: string };
+  | { readonly kind: 'skipped'; readonly reason: string }
+) & {
+  /**
+   * `false`: the wait lifecycle recorded nothing of this observation — every write lost its race — so
+   * the collector must not move its cursor past it.
+   */
+  readonly recorded?: false;
+};
 
 export interface ReviewFeedbackRouterOptions {
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly waitLifecycle: GitHubWaitLifecycleService;
   readonly log: FastifyBaseLogger;
+}
+
+/** One wait outcome, projected for the collector: what to wake, and whether it may move its cursor. */
+function routeResultOf(result: GitHubWaitLifecycleResult): ReviewFeedbackRouteResult {
+  if (result.kind === 'unrecorded') return { kind: 'skipped', reason: result.reason, recorded: false };
+  if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
+  return {
+    kind: 'notified',
+    threadId: result.task.threadId,
+    catId: result.task.ownerCatId ?? '',
+    messageId: result.messageId,
+    content: result.content,
+  };
 }
 
 export class ReviewFeedbackRouter {
@@ -84,13 +109,35 @@ export class ReviewFeedbackRouter {
         headSha: signal.headSha,
         review: {
           decisionCursor: signal.decisionCursor,
+          // The collector keeps reviews of an older commit out of `newDecisions`.
+          ...(latestDecision ? { headDecisionCursor: latestDecision.id } : {}),
           ...(resultDecision ? { decision: resultDecision } : {}),
           ...(resultReviewer ? { reviewer: resultReviewer } : {}),
+          ...(signal.reviewVerdicts ? { verdicts: signal.reviewVerdicts } : {}),
           ...(signal.reviewThreads ? { threads: signal.reviewThreads } : {}),
           ...(signal.resultTriggerCommentId ? { resultTriggerCommentId: signal.resultTriggerCommentId } : {}),
           ...(signal.resultSourceRef ? { resultSourceRef: signal.resultSourceRef } : {}),
           ...(signal.resultConversationCommentCursor
             ? { resultConversationCommentCursor: signal.resultConversationCommentCursor }
+            : {}),
+          // #1392 AC-6: these were only ever used to advance cursors below, so no predicate could
+          // see them — "data collected, no notification". They are facts now.
+          ...(signal.newComments.length > 0
+            ? {
+                comments: signal.newComments.map((comment) => ({
+                  id: comment.id,
+                  author: comment.author,
+                  commentType: comment.commentType,
+                  // #1392 AC-7: a wake says who replied, never what they said, so it has to hand the
+                  // owner a way to go read it. Same shape the issue surface already emits.
+                  sourceRef: `github:pr-comment:${comment.id}`,
+                  // #1392 AC-7: the accepted maintainer/reviewer default filters bots and pure summon
+                  // commands, and both are decided at delivery. The body reaches the matcher and stops
+                  // there — it is never copied into what the owner is sent.
+                  ...(comment.actorType ? { actorType: comment.actorType } : {}),
+                  ...(comment.body ? { body: comment.body } : {}),
+                })),
+              }
             : {}),
         },
       },
@@ -106,14 +153,7 @@ export class ReviewFeedbackRouter {
       ...(signal.subjectState ? { subjectState: signal.subjectState } : {}),
       ...(signal.reviewLoopBrake ? { reviewLoopBrake: signal.reviewLoopBrake } : {}),
     });
-    if (result.kind !== 'notified') return { kind: 'skipped', reason: result.reason };
-    return {
-      kind: 'notified',
-      threadId: result.task.threadId,
-      catId: result.task.ownerCatId ?? '',
-      messageId: result.messageId,
-      content: result.content,
-    };
+    return routeResultOf(result);
   }
 }
 

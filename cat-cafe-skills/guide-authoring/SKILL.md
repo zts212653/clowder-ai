@@ -3,7 +3,7 @@ name: guide-authoring
 description: >
   标准引导流程设计 SOP：场景识别 → YAML 编排 → 标签标注 → 注册发现 → 测试验证。
   Use when: 新建引导流程、添加场景引导、维护 Guide Catalog、编写引导 YAML。
-  Not for: 使用引导（用户侧）、Guide Engine 代码实现（用 tdd）、视觉设计（用 pencil-design）。
+  Not for: 使用引导（用户侧）、参考产品拆解/未定交互叙事（用 concept-demo-design）、Guide Engine 代码实现（用 tdd）、视觉设计（用 pencil-design）。
   Output: Flow YAML + tag-manifest 更新 + registry 注册 + CI 校验通过。
 triggers:
   - "新建引导"
@@ -11,6 +11,7 @@ triggers:
   - "写引导流程"
   - "guide authoring"
   - "引导 YAML"
+tips_exempt: "2026-09-15 authoring-contract clarification: documents existing advance modes and separates tutorial navigation from real business success; adds no guide flow or end-user operation."
 ---
 
 # Guide Authoring
@@ -25,6 +26,7 @@ triggers:
 
 **Not for**：
 - 用户正在实际使用引导流程时的交互处理，用 `guide-interaction`
+- 仅拆解参考产品、设计尚未明确的首启节奏，用 `concept-demo-design`；不因出现“引导”二字直接写 YAML
 - Guide Engine / callback route / overlay 的代码实现与 bug 修复，用 `tdd`
 - 纯视觉稿、动效或高保真设计稿，用 `pencil-design`
 
@@ -34,7 +36,7 @@ triggers:
 |------|------|
 | 编排即产品 | Flow YAML 是终态产物，不是脚手架 |
 | 页面零侵入 | 只加 `data-guide-id` 标签，不改业务逻辑 |
-| 自动推进 | 用户操作即推进，无手动导航按钮（v2 KD-9） |
+| 按语义推进 | 纯讲解可翻页；业务完成以实际结果为依据，不把引导前进当业务成功 |
 | 平台内聚焦 | 聚焦 Console 已有功能的引导（KD-13），外部平台配置改为独立页签 |
 
 **前置依赖**：F155 Guide Engine Phase A 已验收。
@@ -42,6 +44,8 @@ triggers:
 ## 流程
 
 ### Step 1: 场景识别
+
+复用已经确认的黄金路径。首次设计或存在交接未知时，按[交互叙事方法](../.cat-cafe-shared-refs/interaction-narrative.md)补用户此刻的问题、可见变化、下一步真实条件和退出/返回位置，再编排 YAML；已有路径只改提示词时不重做故事。设计猫用当前可用产品/原型先走关键路径，未验证处明确保留，不让用户负责替设计者发现所有断点。
 
 确认需要引导的场景，产出"场景卡片"：
 
@@ -64,14 +68,18 @@ related_features: [F155]
 
 ### Step 2: 步骤拆分 + YAML 编排
 
-按 v2 自动推进模式编排，4 种 advance mode：
+按当前引擎支持的 advance mode 编排；以 `packages/web/src/stores/guideStore.ts`、事件生产者和已有 flow 为准，不给 YAML 编造新字段：
 
 | advance | 用途 | 说明 |
 |---------|------|------|
 | `click` | 点击目标元素 | 用户点击后自动前进 |
 | `visible` | 目标元素出现 | 页面切换/展开后自动前进 |
 | `input` | 输入填充 | 用户填写输入框后前进 |
-| `confirm` | 操作确认 | 需要 `guide:confirm` 事件触发（如保存成功） |
+| `confirm` | 步骤确认 | 匹配 `guide:confirm` 事件；HUD 也可手动发出，不单独证明业务成功 |
+| `auto-confirm` | 等匹配事件自动推进 | 无 `confirm` 模式的 HUD 手动完成按钮；仍须查清事件来自什么真实结果 |
+| `next` | 纯讲解的翻页 | 手动 HUD 按钮，不用于宣告保存/授权成功 |
+
+**教学推进与业务完成分开**：`click` 只证明点击、`input` 只证明非空输入。保存、登录、授权要核对应结果；同名确认事件不自动是成功证据。当前 `GuideOverlayHUD.tsx` 可以由“已完成该步骤”发送事件，而 `HubCatEditor.tsx` 在成功保存后发送；`useSendMessage.ts` 的发送成功事件也不证明模型已回复。需要无人手动跳过的结果确认时，使用引擎已支持的 `auto-confirm`，同时验证事件生产者、对象与业务结果；只有事件名一致仍不够。外仓不照搬这些路径或模式，先查当地契约。
 
 **Flow YAML 模板**（v2 schema）：
 
@@ -94,14 +102,14 @@ steps:
   - id: step-final
     target: "namespace.save-button"
     tips: "点击保存完成配置"
-    advance: confirm               # 保存成功后 guide:confirm 触发
+    advance: auto-confirm          # 已核实业务成功生产者后，等匹配结果事件；不能只凭模式名判成功
 ```
 
 **编排规则**：
 - 每个 flow 必须有退出路径（HUD 退出按钮始终可用）
 - target 值必须匹配 `data-guide-id`，命名空间式（如 `hub.trigger`）
 - target 必须通过 whitelist：`/^[a-zA-Z0-9._-]+$/`
-- 最后一步建议用 `confirm` 类型，确保操作真正成功后才完成
+- 业务结果为终点时，读取对应成功状态并验证结果事件；不能凭 `confirm` / `auto-confirm` 的名字或引导完成回调宣告成功。纯讲解可用 `next`
 - 全局 Esc 键已禁用（KD-14），防止误退出
 
 ### Step 3: 元素标签标注
@@ -159,8 +167,8 @@ tags:
 1. 启动 dev 环境
 2. 在聊天中触发引导（说匹配关键词）
 3. 走完全流程：每步高亮正确 → 操作后自动推进 → 完成回调生效
-4. 测试异常路径：退出 → 刷新 → 目标元素不存在时的 locating 行为
-5. 确认完成后猫猫收到 completion 通知
+4. 按声明覆盖退出/跳过、拒绝/失败、刷新返回与目标元素不存在；有续接承诺时核对同一对象和正确阶段，不重新播放整段教学冒充恢复
+5. 确认引导 completion 通知与业务结果分别成立；发送成功、模型回复与任务完成不互相代替
 
 ## Quick Reference
 
@@ -177,7 +185,7 @@ tags:
 |------|------|------|
 | 标签用 CSS class 名 | UI 重构后引导失效 | 用语义命名 |
 | 忘记注册 registry | 猫猫查不到引导 | Step 4 不可跳过 |
-| 最后一步不用 confirm | 操作未成功就完成 | 涉及保存/提交的最后一步必须 confirm |
+| 把确认事件或引导完成当作业务成功 | 事件可能来自手动完成按钮，或只证明发送动作 | 核 producer、对象与真实结果；纯教学与业务完成分别验证 |
 | 关键词太泛 | 误匹配其他场景 | 用具体术语 |
 | 跳过 E2E 验证 | 线上引导卡死 | Step 6 是发布前必做 |
 

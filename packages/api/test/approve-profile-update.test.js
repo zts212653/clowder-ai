@@ -320,4 +320,73 @@ describe('approveProfileUpdate service (lock + crash recovery + state machine)',
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'not_found');
   });
+
+  // --- T4: Phase E corpus approve + revision ---
+
+  it('corpus proposal: approve writes corpus/shared-facts.md and returns revision + targetLayer', async () => {
+    const { profileRevisionOf } = await import('@cat-cafe/shared/profile-revision');
+    const store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    const lock = new MutexMod.SessionMutex();
+    const p = makeProposal(store, {
+      targetLayer: 'corpus',
+      targetPath: 'corpus/shared-facts.md',
+      beforeContent: '',
+      baseContentHash: writeMod.hashContent(''),
+      afterContent: 'You prefers blue',
+    });
+    const r = await mod.approveProfileUpdate(p.proposalId, 'alice', deps(store, lock));
+    assert.equal(r.ok, true);
+    assert.equal(r.proposal.status, 'approved');
+    const corpusPath = join(profileDir, 'corpus', 'shared-facts.md');
+    assert.equal(readFileSync(corpusPath, 'utf8'), 'You prefers blue');
+    assert.equal(r.revision, profileRevisionOf('You prefers blue'));
+    assert.equal(r.targetLayer, 'corpus');
+  });
+
+  it('corpus proposal: tampered targetPath → write_failed, zero writes (A5)', async () => {
+    const store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    const lock = new MutexMod.SessionMutex();
+    const p = makeProposal(store, {
+      targetLayer: 'corpus',
+      targetPath: '../operator-capsule.md',
+      beforeContent: '',
+      baseContentHash: writeMod.hashContent(''),
+      afterContent: 'evil',
+    });
+    const r = await mod.approveProfileUpdate(p.proposalId, 'alice', deps(store, lock));
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'write_failed');
+    assert.equal((await store.get(p.proposalId)).status, 'pending');
+    assert.equal(existsSync(join(profileDir, '..', 'operator-capsule.md')), false);
+  });
+
+  it('corpus proposal: stale_hash when content changed', async () => {
+    mkdirSync(join(profileDir, 'corpus'), { recursive: true });
+    writeFileSync(join(profileDir, 'corpus', 'shared-facts.md'), 'version 1', 'utf8');
+    const store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    const lock = new MutexMod.SessionMutex();
+    const p = makeProposal(store, {
+      targetLayer: 'corpus',
+      targetPath: 'corpus/shared-facts.md',
+      beforeContent: 'version 1',
+      baseContentHash: writeMod.hashContent('STALE'),
+      afterContent: 'version 2',
+    });
+    const r = await mod.approveProfileUpdate(p.proposalId, 'alice', deps(store, lock));
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'stale_hash');
+    assert.equal(readFileSync(join(profileDir, 'corpus', 'shared-facts.md'), 'utf8'), 'version 1');
+  });
+
+  it('primer proposal: still works unchanged after corpus support (A8 / INV-7)', async () => {
+    seedPrimer('OLD');
+    const store = new StoreMod.InMemoryProfileUpdateProposalStore();
+    const lock = new MutexMod.SessionMutex();
+    const p = makeProposal(store);
+    const r = await mod.approveProfileUpdate(p.proposalId, 'alice', deps(store, lock));
+    assert.equal(r.ok, true);
+    assert.equal(readFileSync(primerPath(), 'utf8'), 'NEW');
+    assert.equal(r.targetLayer, 'primer');
+    assert.ok(r.revision);
+  });
 });

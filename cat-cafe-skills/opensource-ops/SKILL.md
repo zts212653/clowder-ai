@@ -166,7 +166,8 @@ triggers:
 - **不要为每个 PR/issue 自动注册 tracking**。只有以下两类情况才注册显式 typed predicate：
   1. 工作真实阻塞在外部条件（等作者回复、等 CI、等 maintainer review）。
   2. 计划做 formal external review 时，需要先用 `cat_cafe_register_pr_tracking` seed projection，才能在终端态记录 `cat_cafe_record_external_review_verdict`。
-- 注册时必须写明 `when`、阻塞解除后的 `nextStep` 和 `expiresAt`。
+- 注册只需要给出对象（`repoFullName` + PR/issue 号）。`when`、`goal`、`nextStep` 都不必填——服务端按角色解析默认受众并生成确定性 continuation；`expiresAt` 可选，省略则没有时间到期，写了就是一个真实、可见的截止时间。
+- 读注册返回里的 `notification`：它写明实际装了哪些条件、解析出的角色，以及评论面的过滤规则。若 `perspective.role` 是 `unresolved`，说明身份/角色没能确定——评论会照常投递但标注「身份/角色未知」，**不要把它当成正常覆盖已建立**。
 - Advisory / triage / 纯审计不需要注册 tracking。
 
 ### Merge / closure

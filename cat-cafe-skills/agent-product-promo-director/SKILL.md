@@ -1,6 +1,6 @@
 ---
 name: agent-product-promo-director
-tips_exempt: internal creative-direction discipline; produces a brief, not a new user-facing capability
+tips_exempt: "2026-09-15 narrative-method update: clarifies audience, causal scenes and handoff within the existing creative-direction workflow; no new filming tool or user entry."
 description: >
   Agent/AI 产品宣传片的创意导演层：先锁产品主角、观众信念变化与影片格式，再把不可见的 Agent
   协作翻译成可拍的故事、镜头、运动、声音和 provenance contract。Use when: 用户问 Agent 产品宣传片
@@ -30,6 +30,8 @@ description: >
 用户给出的页面、thread、录屏或成果是**候选素材**，不是拍摄授权，也不是自动主题。
 
 ## 1. 锁定真正的主角
+
+陌生观众仍无法理解主张时，按[叙事清晰度](../.cat-cafe-shared-refs/narrative-clarity.md)把主张落到人物、任务和因果动作；产品引导中的真实接手与返回另看[交互叙事](../.cat-cafe-shared-refs/interaction-narrative.md)。已锁 brief 的生产不重新走导演判断。
 
 先写三句话：
 

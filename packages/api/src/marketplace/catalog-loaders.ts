@@ -3,7 +3,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AntigravityCatalogEntry } from './adapters/antigravity-adapter.js';
 import type { ClaudeCatalogEntry } from './adapters/claude-adapter.js';
-import type { CodexCatalogEntry } from './adapters/codex-adapter.js';
 import type { OpenClawCatalogEntry } from './adapters/openclaw-adapter.js';
 
 const thisDir = dirname(fileURLToPath(import.meta.url));
@@ -16,10 +15,6 @@ async function loadJSON<T>(filename: string): Promise<T[]> {
 
 export function loadClaudeCatalog(): Promise<ClaudeCatalogEntry[]> {
   return loadJSON<ClaudeCatalogEntry>('claude.json');
-}
-
-export function loadCodexCatalog(): Promise<CodexCatalogEntry[]> {
-  return loadJSON<CodexCatalogEntry>('codex.json');
 }
 
 export function loadOpenClawCatalog(): Promise<OpenClawCatalogEntry[]> {

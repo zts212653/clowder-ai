@@ -50,6 +50,10 @@ import {
   createA2ASlotTrackingBridge,
   type PersistenceContext,
 } from '../../domains/cats/services/agents/routing/route-helpers.js';
+import {
+  normalizeOwnerAuthProvenance,
+  type OwnerAuthProvenance,
+} from '../../domains/cats/services/owner-auth-provenance.js';
 import type {
   IInvocationRecordStore,
   InvocationActionLeaseCarrier,
@@ -180,6 +184,8 @@ export interface ConnectorTriggerPolicy {
   readonly suggestedSkill?: string;
   /** Event carriers use the existing Queue/F254/F264 custody even when the thread is idle. */
   readonly forceQueue?: boolean;
+  /** Server-private owner proof restored by durable managed-command producers. */
+  readonly ownerAuthProvenance?: OwnerAuthProvenance;
   /**
    * Optional queue coalescing key for connector bursts that supersede earlier queued work.
    * Later hits reuse the first queued entry: messageIds are merged, but the original content/body stays in place.
@@ -259,6 +265,7 @@ export class ConnectorInvokeTrigger {
   ): Promise<TriggerOutcome> {
     const { invocationTracker } = this.opts;
     const priority = policy?.priority ?? 'normal';
+    const ownerAuthProvenance = normalizeOwnerAuthProvenance(policy?.ownerAuthProvenance);
 
     if (policy?.forceQueue) {
       const outcome = await this.enqueueWhileActive(
@@ -273,6 +280,7 @@ export class ConnectorInvokeTrigger {
         policy.suggestedSkill,
         policy.coalesceKey,
         true,
+        ownerAuthProvenance,
       );
       if (outcome === 'enqueued') {
         const exactEntry = this.opts.invocationQueue.findEntryWithMessageId(threadId, messageId);
@@ -301,6 +309,8 @@ export class ConnectorInvokeTrigger {
         policy?.sourceCategory,
         policy?.suggestedSkill,
         policy?.coalesceKey,
+        false,
+        ownerAuthProvenance,
       );
     }
 
@@ -317,6 +327,8 @@ export class ConnectorInvokeTrigger {
         policy?.sourceCategory,
         policy?.suggestedSkill,
         policy?.coalesceKey,
+        false,
+        ownerAuthProvenance,
       );
     }
 
@@ -334,6 +346,8 @@ export class ConnectorInvokeTrigger {
         policy?.sourceCategory,
         policy?.suggestedSkill,
         policy?.coalesceKey,
+        false,
+        ownerAuthProvenance,
       );
     }
 
@@ -378,6 +392,7 @@ export class ConnectorInvokeTrigger {
       contentBlocks,
       policy?.sourceCategory,
       policy?.suggestedSkill,
+      ownerAuthProvenance,
       sender,
       controller,
       executionStartReceipt,
@@ -563,6 +578,7 @@ export class ConnectorInvokeTrigger {
     suggestedSkill?: string,
     coalesceKey?: string,
     autoExecute = false,
+    requestedOwnerAuthProvenance: OwnerAuthProvenance = 'unknown',
   ): Promise<'full' | 'enqueued'> {
     const { invocationQueue, socketManager, log } = this.opts;
 
@@ -588,14 +604,16 @@ export class ConnectorInvokeTrigger {
       ? actionSuccessorCarrierKey(actionLeaseAdmission.actionSuccessorFence, catId)
       : undefined;
 
-    const custodyOwner = sourceMessage?.queueCustody?.ownerAuthProvenance;
+    // Once Queue custody exists it is canonical, including a legacy missing
+    // value that must stay unknown. The private producer carrier is used only
+    // for the first admission of a source message with no custody yet.
+    const ownerAuthProvenance = sourceMessage?.queueCustody
+      ? normalizeOwnerAuthProvenance(sourceMessage.queueCustody.ownerAuthProvenance)
+      : requestedOwnerAuthProvenance;
     const result = invocationQueue.enqueue({
       threadId,
       userId,
-      ownerAuthProvenance:
-        custodyOwner === 'strict' || custodyOwner === 'compatibility_fallback' || custodyOwner === 'unknown'
-          ? custodyOwner
-          : 'unknown',
+      ownerAuthProvenance,
       content: message,
       messageId,
       ...(actionLeaseQueueKey
@@ -741,6 +759,7 @@ export class ConnectorInvokeTrigger {
     contentBlocks?: readonly MessageContent[],
     sourceCategory?: ConnectorTriggerPolicy['sourceCategory'],
     suggestedSkill?: string,
+    ownerAuthProvenance: OwnerAuthProvenance = 'unknown',
     sender?: { id: string; name?: string },
     preAcquiredController?: AbortController,
     executionStartReceipt?: ExecutionStartReceipt,
@@ -904,7 +923,7 @@ export class ConnectorInvokeTrigger {
       }
 
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {
-        ownerAuthProvenance: 'unknown',
+        ownerAuthProvenance,
         humanDispositionInvocationOrigin: 'connector',
         turnCustodyWake,
         turnCustodyWakeForCat: (catId) => retargetTurnCustodyWake(turnCustodyWake, catId),
@@ -915,10 +934,10 @@ export class ConnectorInvokeTrigger {
         queueHasQueuedMessages: (tid: string) => invocationQueue.hasQueuedNonAgentForThread(tid),
         getQueuedFreshnessMessagesForCat: (tid: string, uid: string, catId: string, parentInvocationId?: string) =>
           invocationQueue.getQueuedFreshnessMessagesForCat(tid, uid, catId, { parentInvocationId }),
-        deferA2AEnqueue: (e) => invocationQueue.enqueue({ ...e, ownerAuthProvenance: 'unknown' }),
+        deferA2AEnqueue: (e) => invocationQueue.enqueue({ ...e, ownerAuthProvenance }),
         freshnessReinvokeEnqueue: (entry) => {
           const { freshnessContext: _freshnessContext, ...queueFields } = entry;
-          return invocationQueue.enqueue({ ...queueFields, ownerAuthProvenance: 'unknown' });
+          return invocationQueue.enqueue({ ...queueFields, ownerAuthProvenance });
         },
         hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
           invocationQueue.hasActiveOrQueuedAgentForCat(tid, catId),
@@ -1409,6 +1428,10 @@ export class ConnectorInvokeTrigger {
           finalStatus,
           invocationId,
           finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
+          false,
+          terminalDispositions.getTerminalInvocationIdByCatId(),
+          [],
+          terminalDispositions.getTerminalConsumptionByInvocationId(),
         )
         .catch(() => {
           /* best-effort, don't crash background task */

@@ -1,3 +1,8 @@
+import {
+  SubexecutionIdentity,
+  subexecutionMessageLabel,
+  subexecutionStatusLabel,
+} from '@/components/SubexecutionActivity';
 import type { InvocationTimelineRow } from './invocation-trajectory-model';
 import { formatTrajectoryDuration } from './invocation-trajectory-ui';
 
@@ -151,39 +156,77 @@ function ToolRow({ row }: { row: Extract<InvocationTimelineRow, { kind: 'tool' }
   );
 }
 
-export function SemanticTimelineRow({ row }: { row: InvocationTimelineRow }) {
-  if (row.kind === 'status-group') {
-    return (
-      <SemanticFrame semanticRole="context">
-        <details data-testid="status-event-fold">
-          <summary className="cursor-pointer text-xs font-medium text-cafe-secondary">
-            <span className="mr-2 inline-flex">
-              <SemanticBadge semanticRole="context" />
+function StatusGroupRow({ row }: { row: Extract<InvocationTimelineRow, { kind: 'status-group' }> }) {
+  return (
+    <SemanticFrame semanticRole="context">
+      <details data-testid="status-event-fold">
+        <summary className="cursor-pointer text-xs font-medium text-cafe-secondary">
+          <span className="mr-2 inline-flex">
+            <SemanticBadge semanticRole="context" />
+          </span>
+          状态流水已折叠 · {row.count} 条
+        </summary>
+        <div className="mt-2 flex flex-wrap gap-1 text-micro text-cafe-muted">
+          {Object.entries(row.types).map(([type, count]) => (
+            <span key={type} className="rounded bg-cafe-surface-elevated px-1.5 py-0.5">
+              {type} {count}
             </span>
-            状态流水已折叠 · {row.count} 条
-          </summary>
-          <div className="mt-2 flex flex-wrap gap-1 text-micro text-cafe-muted">
-            {Object.entries(row.types).map(([type, count]) => (
-              <span key={type} className="rounded bg-cafe-surface-elevated px-1.5 py-0.5">
-                {type} {count}
-              </span>
-            ))}
-          </div>
-        </details>
-      </SemanticFrame>
-    );
-  }
-  if (row.kind === 'overflow') {
-    return (
-      <div className="rounded-lg border border-dashed border-cafe-subtle px-3 py-2 text-xs text-cafe-muted">
-        已收起 {row.count} 条 ·{' '}
-        {Object.entries(row.types)
-          .map(([type, count]) => `${type} ${count}`)
-          .join(' / ')}
+          ))}
+        </div>
+      </details>
+    </SemanticFrame>
+  );
+}
+
+function OverflowRow({ row }: { row: Extract<InvocationTimelineRow, { kind: 'overflow' }> }) {
+  return (
+    <div className="rounded-lg border border-dashed border-cafe-subtle px-3 py-2 text-xs text-cafe-muted">
+      已收起 {row.count} 条 ·{' '}
+      {Object.entries(row.types)
+        .map(([type, count]) => `${type} ${count}`)
+        .join(' / ')}
+    </div>
+  );
+}
+
+function SubexecutionTimelineRow({ row }: { row: Extract<InvocationTimelineRow, { kind: 'subexecution' }> }) {
+  const event = row.event;
+  return (
+    <div
+      data-subexecution-event={event.id}
+      data-subexecution-id={event.subexecutionId}
+      data-subexecution-stage={event.stage}
+      className="rounded-xl border border-conn-purple-ring bg-conn-purple-bg/40 px-3 py-2.5"
+    >
+      <div className="flex items-start gap-2">
+        <SubexecutionIdentity agentPath={event.agentPath} nickname={event.nickname} depth={event.depth} />
+        <span className="shrink-0 text-micro font-semibold text-conn-purple-text">
+          {subexecutionStatusLabel(event.stage)}
+        </span>
       </div>
-    );
+      {event.stage === 'message' && event.content && (
+        <div className="mt-2 border-t border-conn-purple-ring/50 pt-2">
+          <div className="text-micro font-semibold text-conn-purple-text">
+            {subexecutionMessageLabel(event.messagePhase)}
+          </div>
+          <div className="mt-1 whitespace-pre-wrap break-words text-xs text-cafe-secondary">{event.content}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SemanticTimelineRow({ row }: { row: InvocationTimelineRow }) {
+  switch (row.kind) {
+    case 'status-group':
+      return <StatusGroupRow row={row} />;
+    case 'overflow':
+      return <OverflowRow row={row} />;
+    case 'tool':
+      return <ToolRow row={row} />;
+    case 'subexecution':
+      return <SubexecutionTimelineRow row={row} />;
   }
-  if (row.kind === 'tool') return <ToolRow row={row} />;
   const role: SemanticRole =
     row.kind === 'error' ? 'error' : row.kind === 'session' ? 'context' : row.kind === 'message' ? row.role : 'system';
   const content = 'content' in row ? row.content : '';

@@ -4,9 +4,9 @@ related_features: [F160, F167, F192, F233, F246, F267]
 topics: [managed-work, work-admission, identity, sop, task-outcome, provenance]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-08-02
+updated: 2026-09-09
 community_issue: "clowder-ai#1213"
-tips_exempt: "Internal work-identity and provenance contract; workId is deliberately absent from user-facing surfaces"
+tips_exempt: "Internal work-identity and private provenance propagation contract; workId and owner auth grades are deliberately absent from user-facing surfaces"
 user_journey_exempt: "Internal execution identity substrate; TaskItem remains the only optional user-visible work projection"
 description: "SOP 受理时铸造的内部工作身份，贯穿执行、产物与 outcome provenance，同时保持闲聊和开放探索不进入任务分母。"
 description_source: human
@@ -20,7 +20,7 @@ description_updated_at: 2026-07-26T23:35:00Z
 >
 > **Source**: [clowder-ai#1213](https://github.com/zts212653/clowder-ai/issues/1213)
 >
-> **operator signoff**: kickoff `0001785016546254-000128-a24e15f3`; slim identity-kernel implementation `0001785589044166-000630-cc9fec30` — internal `workId/attemptId` plus explicit attribution only, with zero new user/cat steps and no new SOP, workflow, automatic TaskItem, or management surface.
+> **operator signoff**: kickoff `private-source-id`; slim identity-kernel implementation `private-source-id` — internal `workId/attemptId` plus explicit attribution only, with zero new user/cat steps and no new SOP, workflow, automatic TaskItem, or management surface.
 
 ## Architecture Ownership
 
@@ -199,5 +199,5 @@ Slice 3 的 TaskItem anchor 与 private binding 共享一条生命周期不变�
 
 ## Review Gate
 
-- Phase A Design Gate：Terra exact-HEAD APPROVE（`14462ca35990dfd0bdaae31042486cf40bb24000`，message `0001785109618172-000199-2fe2f8df`）+ operator ownership signoff（message `0001785589044166-000630-cc9fec30`）。F246 不在 v1 producer schema 内，未来启用时另过 Design Gate。
+- Phase A Design Gate：Terra exact-HEAD APPROVE（`14462ca35990dfd0bdaae31042486cf40bb24000`，message `private-source-id`）+ operator ownership signoff（message `private-source-id`）。F246 不在 v1 producer schema 内，未来启用时另过 Design Gate。
 - Phase B/C：非作者跨 family review 覆盖 identity propagation、terminal ownership、fail-closed 与同 thread 双任务 fixture。

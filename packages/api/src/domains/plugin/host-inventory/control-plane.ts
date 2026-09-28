@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { Capability } from '@clowder-ai/plugin-contract';
-import { type VerifiedPackageAdmission, verifyPackageAdmission } from './manifest-verifier.js';
+import {
+  type PackageAdmissionContractRuntime,
+  type VerifiedPackageAdmission,
+  verifyPackageAdmission,
+} from './manifest-verifier.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from './ports.js';
 import { normalizePluginInstanceAfterRestart } from './restart-recovery.js';
 import type {
@@ -18,6 +22,7 @@ import { PluginInventoryError } from './types.js';
 export interface HostInventoryControlPlaneOptions {
   readonly now?: () => number;
   readonly createInstanceId?: () => string;
+  readonly contract?: PackageAdmissionContractRuntime;
 }
 
 function assertCurrentInstance(
@@ -108,7 +113,7 @@ export class HostInventoryControlPlane {
 
   async installPackage(input: PackageAdmissionCandidate): Promise<InventoryMutationResult> {
     const now = this.now();
-    const verified = verifyPackageAdmission(input, now);
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
     const pluginInstanceId = this.createInstanceId();
     return this.store.transaction((transaction) => {
       if (transaction.instances.getCurrent(verified.package.pluginId)) {
@@ -134,7 +139,7 @@ export class HostInventoryControlPlane {
 
   async upgradePackage(input: UpgradePackageInput): Promise<InventoryMutationResult> {
     const now = this.now();
-    const verified = verifyPackageAdmission(input, now);
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
     return this.store.transaction((transaction) => {
       const current = assertCurrentInstance(transaction, input.pluginInstanceId);
       assertLifecycleRevision(current, input.expectedLifecycleRevision);
@@ -181,7 +186,7 @@ export class HostInventoryControlPlane {
 
   async reinstallPackage(input: ReinstallPackageInput): Promise<InventoryMutationResult> {
     const now = this.now();
-    const verified = verifyPackageAdmission(input, now);
+    const verified = verifyPackageAdmission(input, now, this.options.contract);
     const nextInstanceId = this.createInstanceId();
     return this.store.transaction((transaction) => {
       const current = assertCurrentInstance(transaction, input.previousPluginInstanceId);

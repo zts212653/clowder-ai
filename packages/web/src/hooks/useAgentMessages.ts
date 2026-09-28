@@ -291,6 +291,7 @@ interface AgentMsg {
     sessionId?: string;
     usage?: import('../stores/chat-types').TokenUsage;
     diagnostics?: Record<string, unknown>;
+    subexecutionEvents?: ChatMessageMetadata['subexecutionEvents'];
     /** F212 Phase B: structured CLI error diagnostics stamped by api providers. */
     cliDiagnostics?: CliDiagnostics;
   };
@@ -528,6 +529,7 @@ export interface BackgroundAgentMessage {
     sessionId?: string;
     usage?: TokenUsage;
     diagnostics?: Record<string, unknown>;
+    subexecutionEvents?: ChatMessageMetadata['subexecutionEvents'];
     /** F212 Phase B: structured CLI error diagnostics stamped by api providers on __cliError/__cliTimeout.
      *  Travels as-is through `broadcastAgentMessage` spread; web error-path unpacks into `extra.cliDiagnostics`. */
     cliDiagnostics?: CliDiagnostics;
@@ -2134,7 +2136,7 @@ function addBackgroundSystemMessage(
 ): void {
   const id =
     explicitId ??
-    (extra?.systemKind === 'a2a_routing' && msg.messageId
+    ((extra?.systemKind === 'a2a_routing' || extra?.systemInfo?.payload.type === 'routing_preflight') && msg.messageId
       ? msg.messageId
       : `bg-sys-${msg.timestamp}-${msg.catId}-${options.nextBgSeq()}`);
   options.store.addMessageToThread(msg.threadId, {
@@ -2551,6 +2553,9 @@ export function handleBackgroundAgentMessage(
   const existing = options.bgStreamRefs.get(streamKey);
 
   if (msg.semanticEvent) {
+    if (msg.semanticEvent.kind === 'subexecution' && msg.metadata?.subexecutionEvents?.length) {
+      ensureBackgroundAssistantMessage(msg, streamKey, existing, options);
+    }
     const semantic = resolveSemanticSystemMessage(msg);
     if (semantic.action === 'replace') {
       const exists = options.store
@@ -4703,6 +4708,15 @@ export function useAgentMessages() {
       resetTimeout();
 
       if (msg.semanticEvent) {
+        if (msg.semanticEvent.kind === 'subexecution' && msg.metadata?.subexecutionEvents?.length) {
+          const rootMessageId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+            ...(msg.invocationId ? { invocationId: msg.invocationId } : {}),
+            ...(msg.turnInvocationId ? { turnInvocationId: msg.turnInvocationId } : {}),
+            currentEventTimestamp: msg.timestamp,
+            currentEventSeq: msg.seq,
+          });
+          patchMessage(rootMessageId, { metadata: msg.metadata });
+        }
         const semantic = resolveSemanticSystemMessage(msg as BackgroundAgentMessage);
         if (semantic.action === 'replace') {
           const exists = useChatStore.getState().messages.some((message) => message.id === semantic.message.id);
@@ -6268,7 +6282,10 @@ export function useAgentMessages() {
                 }
               : undefined;
           addMessage({
-            id: `sysinfo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            id:
+              systemInfo?.payload.type === 'routing_preflight' && msg.messageId
+                ? msg.messageId
+                : `sysinfo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
             type: 'system',
             variant: sysVariant,
             content: sysContent,

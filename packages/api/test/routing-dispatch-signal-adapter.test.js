@@ -7,6 +7,7 @@ const { AutomaticRoutingSignalService } = await import(
 const { RoutingDispatchSignalAdapter } = await import(
   '../dist/domains/routing-context/RoutingDispatchSignalAdapter.js'
 );
+const { routingSignalClosures } = await import('@cat-cafe/shared');
 const { classifyRoutingDispatchFailure } = await import(
   '../dist/domains/routing-context/RoutingDispatchSignalContract.js'
 );
@@ -78,7 +79,7 @@ function createHarness(sink = { record: () => undefined }) {
   return {
     store,
     automaticSignalService,
-    adapter: new RoutingDispatchSignalAdapter({ signalStore: store, automaticSignalService, telemetry }),
+    adapter: new RoutingDispatchSignalAdapter({ automaticSignalService, telemetry }),
   };
 }
 
@@ -153,7 +154,7 @@ describe('RoutingDispatchSignalAdapter', () => {
     ]);
   });
 
-  it('recovers only referenced, older, still-open cat-scoped health/provider assertions for the exact target', async () => {
+  it('recovers older cat-scoped health/provider assertions for the exact target independently of display refs', async () => {
     const { adapter, automaticSignalService, store } = createHarness();
     const exactProviderError = await assertSignal(automaticSignalService, {
       observationId: 'provider-error-exact',
@@ -218,13 +219,15 @@ describe('RoutingDispatchSignalAdapter', () => {
       }),
     );
 
-    const recovered = store.events.filter((event) => event.eventType === 'recovered');
-    const closed = new Set(recovered.flatMap((event) => event.closesSignalIds));
-    assert.deepEqual([...closed].sort(), [exactProviderError.eventId, exactHealth.eventId].sort());
+    const closed = routingSignalClosures(store.events);
+    assert.deepEqual(
+      [...closed.keys()].sort(),
+      [exactProviderError.eventId, exactHealth.eventId, unreferenced.eventId].sort(),
+    );
     assert.equal(closed.has(providerHealth.eventId), false);
     assert.equal(closed.has(quota.eventId), false);
     assert.equal(closed.has(otherCat.eventId), false);
-    assert.equal(closed.has(unreferenced.eventId), false);
+    assert.equal(closed.has(unreferenced.eventId), true);
     assert.equal(closed.has(newer.eventId), false);
 
     const beforeReplay = store.events.length;

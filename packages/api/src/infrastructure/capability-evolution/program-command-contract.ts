@@ -1,7 +1,8 @@
 import { type EvolutionProgramEventV1, type OwnerTruthRefV1, ownerTruthRefV1Schema } from '@cat-cafe/shared';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 export type EvolutionProgramCommandAction =
+  | { type: 'name'; displayName: string }
   | { type: 'pause'; reasonRef: OwnerTruthRefV1 }
   | { type: 'resume'; resumeRef: OwnerTruthRefV1 }
   | {
@@ -57,6 +58,8 @@ export function eventForAction(
   occurredAt: string,
 ): EvolutionProgramEventV1 {
   switch (action.type) {
+    case 'name':
+      return { type: 'program_named', displayName: action.displayName };
     case 'pause':
       return { type: 'program_paused', reasonRef: ownerTruthRefV1Schema.parse(action.reasonRef) };
     case 'resume':

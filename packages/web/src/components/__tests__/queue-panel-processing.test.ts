@@ -88,6 +88,40 @@ describe('QueuePanel processing recovery', () => {
   let container: HTMLDivElement;
   let root: Root;
 
+  it('#1371 exposes the failed managed wake behind a paused queue instead of an empty counter', () => {
+    const failedWake: QueueEntry = {
+      ...withTargetStates({ opus: 'failed' }),
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      content: '[定时任务] 持球唤醒（命令完成）：gate 已通过，通知结算失败',
+      recoveryActions: [
+        {
+          id: 'queue-withdraw:q1',
+          entryId: 'q1',
+          kind: 'withdraw',
+          request: { method: 'DELETE', path: '/api/threads/thread-1/queue/q1' },
+        },
+      ],
+    };
+    useChatStore.setState({ queue: [failedWake], queuePaused: true, queuePauseReason: 'failed' });
+    act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
+    expect(container.textContent).toContain('通知结算失败');
+    expect(container.querySelectorAll('[data-queue-target-row="opus"]')).toHaveLength(1);
+  });
+
+  it('#1371 keeps routine scheduler control messages hidden without an actionable failure', () => {
+    const wake: QueueEntry = {
+      ...withTargetStates({ opus: 'queued' }),
+      source: 'connector',
+      sourceCategory: 'scheduled',
+      content: '[定时任务] routine internal wake',
+      recoveryActions: [],
+    };
+    useChatStore.setState({ queue: [wake] });
+    act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
+    expect(container.textContent).not.toContain('routine internal wake');
+  });
+
   beforeAll(() => {
     (globalThis as { React?: typeof React }).React = React;
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

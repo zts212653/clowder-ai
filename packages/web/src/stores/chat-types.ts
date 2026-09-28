@@ -7,6 +7,7 @@ import type {
   MessageBundleCarrierV1,
   MessageContent,
   ProviderSemanticEvent,
+  ProviderSubexecutionSemanticEvent,
   PublishedFreshnessAnnotation,
   QueueMessageReceipt,
   QueueRecoveryAction,
@@ -55,6 +56,8 @@ export interface ChatMessageMetadata {
   model: string;
   sessionId?: string;
   usage?: TokenUsage;
+  /** Provider-neutral child lifecycle recovered with the owning root message. */
+  subexecutionEvents?: readonly ProviderSubexecutionSemanticEvent[];
 }
 
 export interface EvidenceResultData {
@@ -901,6 +904,7 @@ export interface WorkspaceOpenRequest {
   threadId: string;
   target:
     | { kind: 'mode'; mode: Exclude<WorkspaceMode, 'dev' | 'team'> }
+    | { kind: 'evolution-program'; programId: string }
     | { kind: 'team'; subject: TeamWorkspaceSubject | null };
 }
 

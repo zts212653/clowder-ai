@@ -1,11 +1,11 @@
 ---
 name: writing-plans
-tips_exempt: internal plan-authoring command-provenance guard; no new end-user capability or discovery surface
+tips_exempt: internal plan-authoring guidance and command provenance; no distinct end-user capability
 description: >
-  将 spec/需求拆分为可执行的分步实施计划。
-  Use when: 有 spec 或需求，准备动手前需要拆分步骤。
-  Not for: trivial 改动（≤5 行）、已有详细计划。
-  Output: 分步实施计划（含 TDD 步骤和检查点）。
+  把已接受的愿景与需求转成接手者可实施、可验收的计划。
+  Use when: 跨组件、状态对象、依赖或实施顺序需要先理清，且没有足够的现成计划。
+  Not for: 路径已明确的简单改动、已有可执行计划、尚未接受的愿景决策。
+  Output: 目标与范围、关键契约/依赖、可执行工作单元和验证方式。
 triggers:
   - "写计划"
   - "implementation plan"
@@ -14,130 +14,55 @@ triggers:
 
 # Writing Plans
 
-## Overview
+计划让实际接手者能够按原始愿景实施与验收。历史上既有把模板写得很细却偏离目标，也有遗漏状态边界、留给 reviewer 逐轮补课的问题；计划应消除这些歧义。
 
-将 spec/需求拆分为分步实施计划。写清楚每步改哪些文件、代码、测试、怎么验证。DRY. YAGNI. TDD. Frequent commits.
+## 必须做到
 
-**Announce at start:** "I'm using the writing-plans skill to create the implementation plan."
+- 回读已接受的原始需求、feature/spec 与相关决定，写清本计划的目标、覆盖范围、验收要求和来源。计划分步不等于缩减愿景或把未完成包装成已完成。
+- 关键依赖、契约和改动位置足够明确，让接手者知道从哪里开始、哪些决定已定、什么仍需查证；无需重复抄写已有真相源全文。
+- 每个工作单元有可观察的结果与适用验证。涉及行为/回归风险按 `tdd`；现有精准检查可以提供 RED，纯文档/机械改动走对应检查。
+- 关键未决问题可见：技术问题由猫在职责内解决，真正的价值取舍附 Decision Packet；已接受范围内的可逆细节不重复询问 operator。
+- 计划需要跨 session/跨猫消费时，保存在可追溯载体并持久化。通常使用 `feature-specs/YYYY-MM-DD-<topic>.md`；Git 载体按当前工作现场与仓库风险规则选择，不为写计划专门切回 main。
 
-**Context:** Write the plan on main before opening a feature worktree. After the plan is committed, continue to `worktree` and then `tdd`.
+模板与例子是可选参考。可以照用、改造或换成更清楚的表达；不要求按固定分钟粒度拆动作，不要求预写完整实现，也不按模型资格决定谁可以不用模板。路径已经明确或已有详细计划时直接继续执行。
 
-**开工前 Recall（F102 记忆系统）🔴**：写计划前先搜相关历史——`search_evidence("{feature}")` 找相关 spec/ADR/讨论，避免重复造轮子。
+## Stateful Object Gate：状态契约必须清楚
 
-**Save plans to:** `feature-specs/YYYY-MM-DD-<feature-name>.md`
+涉及有生命周期的对象时，识别本次新增或改变的状态及消费路径，包括复用现有 API 后新增的轮询、发送闸门或到达判定。必须讲清：
 
-## Straight-Line Check (A→B, No Detour)
+- 谁拥有生命周期，哪些事件改变状态，恢复/删除/list 等旁路如何与之保持一致；
+- 哪些不变量必须成立，怎样观察或验证；
+- 适用的 crash、并发、恢复和误用边界，以及对应预期。
 
-**Before splitting steps, do this first:**
+已有契约直接引用，只补本次 delta。能由纯投影表达的状态不另存一份。转移表、编号不变量、图与测试矩阵都是可选表达，契约是否完整可验证才是判断依据。
 
-1. **Pin the finish line**: one-sentence B definition + acceptance criteria + "what we're NOT building"
-2. **Define terminal schema**: interfaces / types / data structures of the final form — steps are built around this, not throwaway scaffolding
-3. **Every step passes three questions:**
-   - Will this step's output stay in the final system as-is (extend only, no rewrite)? → Yes = on the line; No = detour
-   - What can we demo/test after this step? (no verifiable evidence = detour)
-   - If we remove this step, what specific cost does it add to reaching B? (can't articulate = detour)
-4. **Pure exploration = explicit Spike** (time-boxed + output is a decision/conclusion, not a deliverable)
+来源：F229 PR #2202 多轮补状态边界，以及消费侧状态漏普查的教训。可参考 *(internal reference removed)*。
 
-**Steps are internal implementation rhythm, NOT delivery batches.** The deliverable to the user is a complete feat matching the full spec — not a step's output. Do not expose intermediate steps as "验收点" to the user.
+## 可选参考：从终态拆工作
 
-## Stateful Object Gate（F229 PR-A1 20 轮教训）🔴
+1. 用一句话定义要达到的结果，核对验收要求和范围。
+2. 找出真正影响实现的接口、状态和依赖；需要探索的问题用明确问题与可验证结论组织 Spike。
+3. 按可实施、可验证的工作单元拆分。每步的产物要服务终态，避免把将来必重写的临时实现冒充交付。
+4. 为接手者容易误解的边界给一个例子或局部代码；不为模板补全普通实现。
 
-Plan 涉及**有生命周期的状态对象**（thread 标记 / carrier / session / 持久 config / cache / 索引 / 注册表）时，「功能描述 + 幂等测试点」**不够**——那是把状态机的边留给 reviewer 逐轮补（PR #2202 实测：4 P1 + 16 P2 全是同一对象的状态转移边——crash window / restore 复活 / deleted-list 漏过滤 / 并发 race / self-heal，打了 20 轮才合入）。
-
-**Census 先行（F229 A3a 二次教训 2026-06-11）**：gate 第一步是**普查**——列出 plan 涉及的全部有生命周期对象再逐个三件套。特别注意"复用现有 API"场景下的**新消费侧状态**（轮询循环、发送闸门、到达判定器都是状态机）。漏报对象 = gate 形同虚设：F229 A3b 三对象三件套齐全，A3a 的 ConversationSendCycle 漏普查 → 云端同型 5 轮逐边补课。
-
-**三件套，缺一 = plan 不完整，不准发给实现猫：**
-
-1. **状态×事件转移表** — 含「唯一 lifecycle owner 是谁」+「旁路 API（generic restore / delete / list）禁止哪些操作」
-2. **不变量清单** — INV-N 编号，每条标注可测方式，test matrix 逐条对应
-3. **对抗场景** — crash window / 并发双写 / 恢复路径 / 旁路 API 误用，每个场景一条测试
-
-**派生值规则**：能用纯投影（pure selector，零存储）表达的状态，禁止落独立存储——无同步即无失同步。
-
-- 范例：*(internal reference removed)*（球态纯投影 + INV-1~9 + test matrix 即写码顺序）
-- 反例：同 feature PR-A1 plan 段（一行"幂等懒创建"→ remote review 20 轮逐边补课）
-
-## Bite-Sized Task Granularity
-
-**Each step is one action (2-5 minutes):**
-- "Write the failing test" - step
-- "Run it to make sure it fails" - step
-- "Implement the minimal code to make the test pass" - step
-- "Run the tests and make sure they pass" - step
-- "Commit" - step
-
-## Plan Document Header
-
-**Every plan MUST start with this header:**
+### 可选计划骨架
 
 ```markdown
-# [Feature Name] Implementation Plan
+# <目标> 实施计划
 
-**Feature:** F0xx — `docs/features/F0xx-xxx.md`
-**Goal:** [One sentence — must match feat doc 的 goal]
-**Acceptance Criteria:** [从 feat doc 逐条抄过来，plan 必须覆盖全部 AC]
-**Architecture cell:** [ownership cell id from docs/architecture/ownership/README.md]
-**Map delta:** none | update required | new cell required
-**Map delta why:** [一句话说明为什么不改 map / 改哪个 cell / 为什么需要新 cell]
-**Architecture:** [2-3 sentences about approach]
-**Tech Stack:** [Key technologies/libraries]
-**前端验证:** [涉及前端？标注 Yes — reviewer 必须用 Playwright/Chrome 实测]
+来源：<原始需求 / feature / accepted decision>
+目标与范围：<本计划兑现什么，哪些要求属于已接受的其他范围>
+验收：<可验证要求，或准确引用已有 AC>
+关键契约与依赖：<已定约束、相关状态/接口、先后关系>
+未决问题：<技术 / 价值，以及解决路径>
 
----
+## 工作单元：<可观察结果>
+改动位置：<已核实的文件 / 模块>
+行为与边界：<具体预期；需要时附图、表或局部代码>
+验证：<当前仓真实命令 / 用户路径与预期结果>
 ```
 
-**F191 约束**：普通增量写 `Map delta: none`，不得重新画架构图。`update required` 或 `new cell required` 代表 Phase 0 还包含 ownership map 更新，必须在 implementation steps 里列出来。
-
-## Task Structure
-
-```markdown
-### Task N: [Component Name]
-
-**Files:**
-- Create: `exact/path/to/file.py`
-- Modify: `exact/path/to/existing.py:123-145`
-- Test: `tests/exact/path/to/test.py`
-
-**Step 1: Write the failing test**
-
-```python
-def test_specific_behavior():
-    result = function(input)
-    assert result == expected
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: FAIL with "function not defined"
-
-**Step 3: Write minimal implementation**
-
-```python
-def function(input):
-    return expected
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `pytest tests/path/test.py::test_name -v`
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-git add tests/path/test.py src/path/file.py
-git commit -m "feat: add specific feature"
-```
-```
-
-## Open Questions in Plans
-
-计划中的 Open Question 必须分类：
-- **技术 OQ**：实现过程中自行解决
-- **价值 OQ**：需要 operator 判断 → 附 Decision Packet（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`），包含 TL;DR + 回滚成本 + 真正需要判断的价值问题
-
-先判断可逆性：回滚成本低的不升级 operator，猫猫自决。
+F191/F303 的适用声明仍按 Design Gate 契约提供：`Architecture cell` / `Map delta` / `Why`，命中 consumer/authority 边界时补对应 evidence。普通增量写 `Map delta: none`，不因计划模板而重画架构图。
 
 ## Formatting Command Contract
 
@@ -147,14 +72,18 @@ git commit -m "feat: add specific feature"
 - 仅格式化本次文件：`pnpm biome format --write <files>`
 - 终态验证：`pnpm check`
 
-若仓库真相源提供不同命令，以真相源为准，并在计划中标明来源。
+若仓库真相源提供不同命令，以真相源为准，并在计划中标明来源。以上仅在计划确实需要该检查时选用，不构成每份计划的全仓检查要求。
 
-## Remember
-- Exact file paths always
-- Complete code in plan (not "add validation")
-- Exact commands with expected output
-- DRY, YAGNI, TDD, frequent commits
+## 常见误区
+
+| 误区 | 正确做法 |
+|---|---|
+| 每步都很细，愿景里的关键路径却没进计划 | 回读原始需求并核对覆盖 |
+| “复用 API”就忽略新消费侧状态 | 检查本次状态对象与生命周期 delta |
+| 计划必须含完整代码、每步 2–5 分钟 | 写到足以实施与验证，细节用于消除真实歧义 |
+| 小改也先回 main 写新计划 | 使用已有现场与计划，按仓库规则决定载体 |
+| 为了通过模板抄全 spec、加无关步骤 | 准确引用已有契约，留下本次真正需要的内容 |
 
 ## 下一步
 
-计划写完并提交 → `worktree`（隔离开发环境）→ `tdd`（实现）。
+在已接受的愿景范围内继续实施；需要隔离时用 `worktree`，需要行为保护时用 `tdd`。尚缺价值决策则回对应讨论/Design Gate，计划本身不触发整条固定流程。

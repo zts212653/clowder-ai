@@ -535,7 +535,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       const attemptId = currentRetryableAttemptId(message, request.params.targetCatId);
       if (!attemptId) {
         reply.status(409);
-        return { error: 'This target is no longer retryable', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
+        const target = projectQueueReceipt(message.queueCustody).targets.find(
+          (candidate) => candidate.catId === request.params.targetCatId,
+        );
+        return {
+          error: 'This target is no longer retryable',
+          code: 'QUEUE_TARGET_NOT_RETRYABLE',
+          targetState: target?.attempts?.at(-1)?.state,
+        };
       }
       return { attemptId };
     },
@@ -1053,14 +1060,29 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       );
     })();
     const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
+    const durableCloudAdmission =
+      mode !== 'force' &&
+      targetCats.some((catId) => catRegistry.tryGet(catId)?.config.provider === 'openai-chatgpt-pro');
     log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
+
+    if (durableCloudAdmission) {
+      if (!opts.invocationQueue || !opts.queueProcessor) {
+        reply.status(503);
+        return { error: 'Cloud message recovery is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
+      }
+      const existing = await opts.messageStore.getByIdempotencyKey(userId, resolvedThreadId, resolvedIdempotencyKey);
+      if (existing) {
+        reply.status(202);
+        return { status: 'duplicate', userMessageId: existing.id };
+      }
+    }
 
     if (admittedMessageBundle && mode !== 'queue' && !opts.invocationRecordStore) {
       reply.status(503);
       return { error: 'Message Bundle immediate routing is unavailable', code: 'MESSAGE_BUNDLE_UNAVAILABLE' };
     }
 
-    if (mode === 'queue' && hasActive && opts.invocationQueue) {
+    if (((mode === 'queue' && hasActive) || durableCloudAdmission) && opts.invocationQueue) {
       // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
       const enqueueResult = opts.invocationQueue.enqueue({
         threadId: resolvedThreadId,
@@ -1168,6 +1190,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       );
 
       tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
+
+      // The admitting request owns kickoff only after its source + custody commit.
+      // A concurrent replay may observe an entry whose messageId is still null.
+      if (durableCloudAdmission && !hasActive && !enqueueResult.deduped && storedUserMessageId && enqueueResult.entry) {
+        void opts.queueProcessor?.progressOwnedCarrier(enqueueResult.entry, primaryCat).catch((err) => {
+          log.error({ err, threadId: resolvedThreadId }, 'Durable cloud message remains queued after dispatch failure');
+        });
+      }
 
       reply.status(202);
       return {
@@ -1491,7 +1521,17 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
           queueCompletionNotified = true;
           const completedCatIds = status === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [];
           opts.queueProcessor
-            ?.onInvocationComplete(resolvedThreadId, primaryCat, status, createResult.invocationId, completedCatIds)
+            ?.onInvocationComplete(
+              resolvedThreadId,
+              primaryCat,
+              status,
+              createResult.invocationId,
+              completedCatIds,
+              false,
+              terminalDispositions.getTerminalInvocationIdByCatId(),
+              [],
+              terminalDispositions.getTerminalConsumptionByInvocationId(),
+            )
             .catch((err) => {
               log.error(
                 { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus: status },
@@ -1888,7 +1928,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
             // P1 fix: finalize streaming session on abort so external placeholders are cleaned up
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else if (primaryTerminalError && successfulCatIds.length === 0) {
+          } else if (
+            primaryTerminalError &&
+            (successfulCatIds.length === 0 || terminalDispositions.getPreflightRejectedCatIds().length > 0)
+          ) {
             finalStatus = 'failed';
             routeChainTracker.fail(createResult.invocationId);
             if (cursorBoundaries.size > 0) {
@@ -1897,6 +1940,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             await opts.invocationRecordStore?.update(createResult.invocationId, {
               status: 'failed',
               error: primaryTerminalError,
+              ...(successfulCatIds.length > 0 ? { successfulCatIds } : {}),
             });
             await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
           } else if (persistenceContext.failed) {
@@ -2474,6 +2518,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       m.extra?.messageBundle ||
       m.extra?.scheduler ||
       m.extra?.systemKind ||
+      m.extra?.systemInfo ||
       m.extra?.a2aRouting ||
       m.extra?.freshness ||
       m.extra?.supplement ||
@@ -2498,6 +2543,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
               ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
               ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
               ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
+              ...(m.extra?.systemInfo ? { systemInfo: m.extra.systemInfo } : {}),
               ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
               ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
               ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),

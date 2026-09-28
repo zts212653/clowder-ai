@@ -9,6 +9,7 @@ import {
   type ActionSuccessorFence,
   actionSuccessorFencesMatch,
 } from '../../../../ball-custody/ActionSuccessorAdmissionContract.js';
+import type { TypedWaitCustodyGuard } from '../../../../ball-custody/TypedWaitCustodyGuard.js';
 import { normalizeOwnerAuthProvenance, type OwnerAuthProvenance } from '../../owner-auth-provenance.js';
 
 export type QueuedMessageCustodyStatus = 'queued' | 'processing' | 'terminal';
@@ -88,6 +89,7 @@ export interface QueuedMessageCustody {
   ownerUserId?: string;
   /** Immutable server-derived authentication fact. Missing only on legacy records. */
   ownerAuthProvenance?: OwnerAuthProvenance;
+  executionScope?: 'collective-participation' | 'collective-work';
   /** The message started this invocation; keep custody but suppress the work-period timeline dock. */
   receiptScope?: 'primary_trigger' | 'cross_thread_delivery';
   /** F264: per-target author-declared work disposition. Missing legacy records mean next_work. */
@@ -142,6 +144,8 @@ export interface QueuedMessageCustody {
 }
 
 export interface QueueCustodyTransitionInput {
+  /** Transient exact Task authority, consumed at the same boundary as this Queue CAS. */
+  waitContinuationGuards?: readonly TypedWaitCustodyGuard[];
   expectedRevision: number;
   next: QueuedMessageCustody;
   deliveredAt?: number;
@@ -258,6 +262,21 @@ export function queueCustodyAdmissionIntentsMatch(
 
 function assertCustodyIdentity(custody: QueuedMessageCustody): void {
   if (custody.version !== 1) throw new Error('queue custody version must be 1');
+  if (
+    custody.executionScope !== undefined &&
+    custody.executionScope !== 'collective-participation' &&
+    custody.executionScope !== 'collective-work'
+  )
+    throw new Error('invalid queue executionScope');
+  if (
+    custody.executionScope &&
+    (custody.allTargetCats.length !== 1 ||
+      (custody.executionScope === 'collective-participation'
+        ? custody.ownerAuthProvenance !== 'unknown'
+        : custody.ownerAuthProvenance !== 'strict'))
+  ) {
+    throw new Error('Collective execution scope must preserve exact target and provenance');
+  }
   if (!custody.entryId) throw new Error('queue custody entryId is required');
   if (custody.ownerUserId !== undefined && custody.ownerUserId.length === 0) {
     throw new Error('queue custody ownerUserId must be non-empty');
@@ -1051,6 +1070,7 @@ export function assertQueueCustodyTransition(current: QueuedMessageCustody, inpu
   if (input.next.ownerAuthProvenance !== current.ownerAuthProvenance) {
     throw new Error('queue custody ownerAuthProvenance is immutable');
   }
+  if (input.next.executionScope !== current.executionScope) throw new Error('queue executionScope is immutable');
   if (input.next.ownerUserId !== current.ownerUserId) {
     throw new Error('queue custody ownerUserId is immutable');
   }

@@ -231,6 +231,160 @@ describe('profile-update decision routes (approve / reject)', () => {
     assert.deepEqual(clearedL0, [{ catId: 'codex', userId: 'alice' }]);
   });
 
+  it('P2: clears L0 cache (owner-wide) when a partial corpus commit later fails', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal({ targetLayer: 'corpus', targetPath: 'corpus/shared-facts.md' });
+    await app.close();
+    app = Fastify();
+    const clearedOwners = [];
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      clearL0Cache: () => {},
+      clearL0CacheOwner: (userId) => clearedOwners.push(userId),
+      approveProfileUpdate: async () => ({
+        ok: false,
+        reason: 'write_failed',
+        error: 'provenance failed',
+        proposal: {
+          ...p,
+          targetLayer: 'corpus',
+          status: 'approving',
+          writtenPath: join(profileDir, 'corpus/shared-facts.md'),
+        },
+      }),
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+
+    assert.equal(res.statusCode, 500);
+    assert.deepEqual(clearedOwners, ['alice'], 'corpus partial commit clears owner-wide cache');
+  });
+
+  // --- R3 ≥3-轮: index projection lifecycle tests ---
+
+  it('P1: approve returns indexRefreshStatus when refreshProfileCollectionIndex is wired', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    await app.close();
+    app = Fastify();
+    const refreshCalls = [];
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      refreshProfileCollectionIndex: async (userId) => {
+        refreshCalls.push(userId);
+        return { status: 'refreshed' };
+      },
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.indexRefreshStatus, 'refreshed', 'response includes indexRefreshStatus');
+    assert.deepEqual(refreshCalls, ['alice'], 'refresh called with approve userId');
+  });
+
+  it('P1: approve does not swallow index refresh errors — returns error status', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    await app.close();
+    app = Fastify();
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      refreshProfileCollectionIndex: async () => {
+        throw new Error('sqlite disk I/O');
+      },
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+
+    // Approve still succeeds (profile IS written), but index error is visible
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.indexRefreshStatus, 'error', 'refresh error is surfaced, not swallowed');
+  });
+
+  it('P1: approve awaits refresh before responding (not fire-and-forget)', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    await app.close();
+    app = Fastify();
+    let refreshSettled = false;
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      refreshProfileCollectionIndex: async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        refreshSettled = true;
+        return { status: 'refreshed' };
+      },
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+
+    assert.equal(res.statusCode, 200);
+    assert.ok(refreshSettled, 'refresh must settle BEFORE response (not fire-and-forget)');
+  });
+
+  it('P1: approve surfaces rebuild_blocked as indexRefreshStatus error (INV-9a — not false success)', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    await app.close();
+    app = Fastify();
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      refreshProfileCollectionIndex: async () => {
+        return { status: 'error', error: 'rebuild_blocked' };
+      },
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.indexRefreshStatus, 'error', 'blocked rebuild must not report as refreshed');
+  });
+
+  it('P1: approve surfaces hot_registration_rebuild_blocked as indexRefreshStatus error (INV-9c)', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    await app.close();
+    app = Fastify();
+    routeMod.registerProfileUpdateDecisionRoutes(app, {
+      store,
+      lock: new MutexMod.SessionMutex(),
+      repository,
+      socketManager: { emitToUser() {} },
+      refreshProfileCollectionIndex: async () => {
+        return { status: 'error', error: 'hot_registration_rebuild_blocked' };
+      },
+    });
+    await app.ready();
+
+    const res = await approve('alice', p.proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.indexRefreshStatus, 'error', 'blocked hot registration must surface error');
+  });
+
   it('reject happy path → 200 rejected, primer untouched', async () => {
     seedPrimer('OLD');
     const p = makeProposal();
@@ -267,6 +421,36 @@ describe('profile-update decision routes (approve / reject)', () => {
     const p = makeProposal();
     const res = await reject('bob', p.proposalId);
     assert.equal(res.statusCode, 403);
+  });
+
+  // --- T6: Phase E decision route response fields ---
+
+  it('approve primer → response includes revision and targetLayer', async () => {
+    seedPrimer('OLD');
+    const p = makeProposal();
+    const res = await approve('alice', p.proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.targetLayer, 'primer');
+    assert.ok(body.revision?.startsWith('sha256:'), 'revision must be sha256 prefixed');
+  });
+
+  it('approve corpus → response includes revision and targetLayer corpus', async () => {
+    mkdirSync(join(profileDir, 'corpus'), { recursive: true });
+    writeFileSync(join(profileDir, 'corpus', 'shared-facts.md'), 'OLD FACT', 'utf8');
+    const p = makeProposal({
+      targetLayer: 'corpus',
+      targetPath: 'corpus/shared-facts.md',
+      beforeContent: 'OLD FACT',
+      baseContentHash: writeMod.hashContent('OLD FACT'),
+      afterContent: 'NEW FACT',
+    });
+    const res = await approve('alice', p.proposalId);
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.targetLayer, 'corpus');
+    assert.ok(body.revision?.startsWith('sha256:'), 'revision must be sha256 prefixed');
+    assert.equal(readFileSync(join(profileDir, 'corpus', 'shared-facts.md'), 'utf8'), 'NEW FACT');
   });
 
   it('reject rejects trusted-origin browser request without session (no default-user fallback)', async () => {

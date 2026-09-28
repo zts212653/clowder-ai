@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>猫带着东西回来了 · 主动性概念分镜</title>
+<style>
+:root{--ink:#302925;--secondary:#6f625c;--muted:#86766e;--line:#e7ded5;--surface:#f6f2ea;--paper:#fffdf9;--accent:#a45531;--soft:#f4e8da;--neutral-900:oklch(.2 .005 30);--cafe-surface:oklch(.95 .012 80);--cafe-surface-elevated:oklch(.99 .005 80);--cafe-border-subtle:oklch(.915 .005 30)}
+*{box-sizing:border-box}body{margin:0;background:var(--surface);color:var(--ink);font:15px/1.65 Inter,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}button,summary{font:inherit}button{cursor:pointer}button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:3px}button:disabled{opacity:.35;cursor:default}
+main{max-width:880px;margin:auto;padding:26px 26px 20px}h1,h2,h3,p{margin:0}h1{font-size:29px;letter-spacing:-.8px;font-weight:650;line-height:1.3}h2{font-size:20px;line-height:1.45;font-weight:600}h3{font-size:14px;font-weight:650}.eyebrow{display:flex;align-items:center;gap:9px;margin-bottom:9px;font-size:11px;letter-spacing:1.5px;color:var(--accent);font-weight:650}.eyebrow:before{content:"";width:22px;height:1px;background:var(--accent)}.intro{margin-top:9px;color:var(--secondary);font-size:14px}.label{color:var(--muted);font-size:11px;letter-spacing:.6px}
+nav{display:flex;gap:5px;margin:24px 0 16px}.scene-link{flex:1;text-align:left;background:transparent;border:0;border-top:2px solid var(--line);padding:9px 4px;color:var(--muted);font-size:12px;line-height:1.5}.scene-link b{display:block;font-size:10px;font-weight:500;letter-spacing:1px;margin-bottom:3px}.scene-link[aria-current="step"]{color:var(--accent);border-color:var(--accent);font-weight:650}
+.story{border:1px solid var(--line);background:var(--paper);border-radius:18px;overflow:hidden}.scene-heading{padding:20px 24px 17px;border-bottom:1px solid var(--line)}.scene-heading .label{margin-bottom:5px}.scene{padding:20px 24px 24px;min-height:325px}.time{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:11px;margin:0 0 19px}.time:before,.time:after{content:"";height:1px;background:var(--line);flex:1}.message{display:flex;gap:9px;align-items:flex-start;margin-top:17px}.message:first-of-type{margin-top:0}.avatar{flex:0 0 29px;width:29px;height:29px;border-radius:50%;display:grid;place-items:center;background:var(--soft);color:var(--accent);font-size:11px}.avatar svg{width:20px;height:20px}.message-body{min-width:0;max-width:91%}.name{font-size:11px;color:var(--secondary);margin:0 0 5px 2px}.bubble{border:1px solid var(--line);border-radius:16px 16px 4px 16px;padding:12px 16px;background:var(--surface);font-size:14px}.human{justify-content:flex-end}.human .message-body{max-width:85%}.human .name{text-align:right;margin-right:2px}.human .bubble{background:var(--paper);border-radius:16px 16px 16px 4px}.aside{font-size:12px;color:var(--muted);margin-top:9px}.cat-action{font-style:italic;color:var(--secondary);font-size:13px}
+.artifact{margin-top:12px;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}.artifact summary{display:flex;align-items:center;gap:11px;cursor:pointer;padding:12px;list-style:none;font-size:13px}.artifact summary::-webkit-details-marker{display:none}.doc-icon{width:32px;height:37px;border:1px solid #d7c8b8;border-radius:4px;display:grid;place-items:center;color:var(--accent);background:#fcf6ee;font-size:16px}.artifact-label{flex:1}.artifact-label small{display:block;font-size:10px;color:var(--muted)}.chevron{color:var(--muted);font-size:17px}.artifact[open] .chevron{transform:rotate(90deg)}.artifact-content{padding:0 12px 13px}.options{display:grid;grid-template-columns:1fr 1fr;gap:8px}.option{padding:11px;background:var(--surface);border:1px solid var(--line);border-radius:7px;font-size:12px}.option strong{display:block;margin-bottom:5px;font-size:12px}.option p{color:var(--secondary);font-size:11px;line-height:1.7}.micro{display:inline-block;padding:4px 7px;margin:8px 0;border:1px solid #deccba;border-radius:20px;background:var(--paper);font-size:10px;color:var(--accent)}
+.pending{padding:12px 14px;margin-top:12px;border-left:2px solid var(--accent);background:var(--paper)}.pending .label{color:var(--accent);margin-bottom:4px}.pending p{font-size:12px;color:var(--secondary)}.proof{display:flex;gap:8px;align-items:flex-start;margin:16px 0 0;padding:12px 14px;border:1px dashed #d9cbbd;border-radius:9px;font-size:12px;color:var(--secondary)}.proof-mark{color:var(--accent)}.quiet{padding:13px 16px;border-radius:10px;background:var(--surface);color:var(--secondary);font-size:13px}.quiet small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
+.insight{padding:15px 24px;background:#f9f6f0;border-top:1px solid var(--line);display:grid;grid-template-columns:70px 1fr;gap:10px;font-size:13px}.insight strong{color:var(--accent);font-size:11px;line-height:1.8;letter-spacing:.5px}.branch{margin-top:15px;display:flex;gap:8px;align-items:center}.branch button{border:1px solid var(--line);border-radius:20px;padding:5px 10px;background:var(--paper);font-size:11px;color:var(--secondary)}.branch button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--soft)}.branch .label{font-size:10px}
+.controls{display:flex;justify-content:space-between;align-items:center;margin:17px 0 12px;gap:8px}.control-group{display:flex;align-items:center;gap:8px}.control{border:1px solid var(--line);background:var(--paper);color:var(--secondary);border-radius:7px;padding:7px 12px;font-size:12px}.control.primary{background:var(--accent);color:white;border-color:var(--accent)}#play{min-width:65px}#status{font-size:11px;color:var(--muted)}.truth{color:var(--muted);font-size:11px}.contract{margin-top:17px;padding-top:12px;border-top:1px solid var(--line);color:var(--secondary);font-size:11px}.contract summary{cursor:pointer;color:var(--muted)}.contract p{margin-top:8px;line-height:1.8}.trace{padding-top:8px;color:var(--muted)}[hidden]{display:none!important}
+@media(max-width:530px){main{padding:21px 14px}h1{font-size:25px}h2{font-size:18px}.scene-heading{padding:17px}.scene{padding:17px;min-height:335px}.scene-link{font-size:10px;padding:8px 2px}.scene-link b{font-size:9px}.bubble{padding:11px 12px;font-size:13px}.insight{padding:14px 17px;grid-template-columns:1fr;gap:3px;font-size:12px}.message-body{max-width:calc(100% - 38px)}.human .message-body{max-width:95%}.options{grid-template-columns:1fr}.controls{align-items:flex-start}.control-group{gap:5px;flex-wrap:wrap}.control{padding:7px 9px}.intro{font-size:13px}.branch{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}
+</style></head><body><main>
+<div class="eyebrow">CAT CAFÉ · 概念分镜</div>
+<h1>猫带着东西回来了。</h1>
+<p class="intro">把主动性放进熟悉的对话里。先看五个片刻，再决定它像不像我们家的猫。</p>
+<nav aria-label="分镜场景">
+<button class="scene-link" data-scene="0"><b>01 / 机会</b>先在身边</button>
+<button class="scene-link" data-scene="1"><b>02 / 来访</b>带一点成果</button>
+<button class="scene-link" data-scene="2"><b>03 / 当下</b>听懂这一次</button>
+<button class="scene-link" data-scene="3"><b>04 / 记住</b>分清以后</button>
+<button class="scene-link" data-scene="4"><b>05 / 后来</b>真的有变化</button>
+</nav>
+<section class="story" aria-label="预设对话演示">
+<div class="scene-heading"><p class="label" id="scene-label"></p><h2 id="scene-title"></h2></div>
+<div class="scene" id="scene-content" aria-live="polite"></div>
+<div class="insight"><strong id="insight-key"></strong><p id="insight-text"></p></div>
+</section>
+<div class="controls" aria-label="演示控制">
+<div class="control-group"><button class="control" id="prev">上一幕</button><button class="control primary" id="next">下一幕 →</button><button class="control" id="play" aria-pressed="false">播放</button></div>
+<span id="status" role="status">1 / 5 · 已暂停</span>
+</div>
+<p class="truth">演示控制仅切换预设场景；以下对白与未来状态均为假设，不会写入偏好、任务或审批。方向键翻页，空格播放 / 暂停。</p>
+<details class="contract"><summary>原型边界与设计依据</summary>
+<p>这是嵌在 Chat 内的概念分镜，借用现有消息的头像、署名、圆角气泡与产物展开方式。视觉沿用 F056 的暖色、细边框和单一强调色；场景按钮属于演示工具。</p>
+<p>想验证：先做一点有价值的事，再回来分享；当次反馈与长期意图分开；未来机会里的变化能看见。场景只展示一种产品形态，不证明后台已经会主动发现机会或已经完成个性化。</p>
+<p>来访仍回到猫的固定关系对话。工作成果可以链接到它的原处，不把同一来访复制到多个 thread。长期偏好沿用既有审批边界；拒绝、撤回和无回应不能被伪装成批准。</p>
+<p class="trace">依据：F272 来访与固定归属 / F231、Taste 记忆权限 / F311 引用各自证据做后续验证。F311 不接管原始记忆与事件的真相源。</p>
+</details>
+</main>
+<script>
+(function(){
+"use strict";
+var current=0, timer=null, silent=false;
+var catIcon='<span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9 4 3l6 4h4l6-4-1 6c2 2 2 7-1 9-3 3-9 3-12 0-3-2-3-7-1-9Z"/><path d="M8 12h.01M16 12h.01M11 15l1 1 1-1M12 16v2M3 14l4 1M21 14l-4 1"/></svg></span>';
+function cat(body){return '<div class="message">'+catIcon+'<div class="message-body"><div class="name">小星星 · 砚砚</div><div class="bubble">'+body+'</div></div></div>';}
+function human(body){return '<div class="message human"><div class="message-body"><div class="name">You · 演示台词</div><div class="bubble">'+body+'</div></div></div>';}
+function art(compact){return '<details class="artifact"'+(compact?'':' open')+'><summary><span class="doc-icon" aria-hidden="true">≋</span><span class="artifact-label">'+(compact?'留在这里的小成果':'两个主动来访的小场景')+'<small>可展开 · 概念对比</small></span><span class="chevron" aria-hidden="true">›</span></summary><div class="artifact-content"><div class="options"><div class="option"><strong>先轻轻露面</strong><span class="micro">猫带来了一份小演示</span><p>一行预览。你展开后，再看完整成果。适合现在拿不准时机的时候。</p></div><div class="option"><strong>直接展开成果</strong><span class="micro">一起看这两个现场</span><p>对话已经围绕这个问题展开，成果直接接上。少一步点击，多一点占屏。</p></div></div><p class="aside">这两种方式都需要一个真实机会；没有值得带来的东西，安静也可以。</p></div></details>';}
+var scenes=[
+{label:'周末 · 和小星星的关系对话',title:'先听见，你正在关心什么。',key:'机会来自对话',note:'猫有一个具体问题可以继续想。抱抱本身也成立，不需要每次都附带一件工作。',body:function(){return '<div class="time">周末 · 一段还没结束的聊天</div>'+human('主动性我还没想到好的产品形态……先抱抱！')+cat('<p class="cat-action">把毛茸茸的大脑袋靠过来。</p><p style="margin-top:7px">抱住。这个问题我接着想。</p>');}},
+{label:'稍后 · 回到同一条关系对话',title:'猫回来时，已经带来一点东西。',key:'成果先到',note:'一次来访让你直接看见已经做好的东西。读不读、现在读还是以后读，都不用先交一份反馈。',body:function(){return '<div class="time">稍后 · 一个可逆的小成果准备好了</div>'+cat('刚才那个问题，我做了两个小场景，放在下面了。'+art(false))+'<details class="contract"><summary>这次为什么来？</summary><p>回应你刚才提到的未尽问题；已经画好了可看的片段；仍回到这条关系对话。准备成果不意味着获得发布、改权限或替你承诺的授权。</p></details>';}},
+{label:'同一刻 · 当次分寸',title:'你一句话，先改变这一次。',key:'当次反馈',note:'“这次先陪我”立即生效；它还不能推出“每个周末都不要谈工作”。没有回复，则保留未知。',body:function(){var content=silent?'<div class="time">另一条分支 · 没有新回复</div><div class="quiet">原来的小成果留在原来的消息里。<small>不追加催问，不生成“You 喜欢这种来访”的长期判断。</small></div>'+cat('<p class="cat-action">安静地趴回旁边。</p>'):'<div class="time">你接住了这次来访</div>'+human('这次只想抱猫，工作的小发现先留着。')+cat('好，图留在这条对话里。我把脑袋放回来了。<p class="cat-action" style="margin-top:7px">用额头轻轻顶了顶你的手心。</p>');return content+'<div class="branch"><span class="label">演示分支</span><button id="reply-branch" aria-pressed="'+(!silent)+'">有一句反馈</button><button id="silent-branch" aria-pressed="'+silent+'">如果没有回复</button></div>';}},
+{label:'另一次对话 · 出现明确长期意图',title:'把这份分寸，留给以后。',key:'长期意图',note:'把候选偏好及其适用范围讲清楚，再走现有确认。当前这张演示卡没有任何写入能力。',body:function(){return '<div class="time">演示假设 · 后来你主动补了一句</div>'+human('以后周末贴贴时，工作的小发现先安静放着，我想看时再展开。')+cat('我会把它理解为：周末贴贴时，工作发现先轻量呈现，别连续展开。范围先限在这个场景。<div class="pending"><div class="label">待确认的长期偏好 · 演示</div><p>周末贴贴时：保留工作成果，降低展示强度。</p><p style="margin-top:5px">适用范围和表述可以改；确认后才成为后续记忆。</p></div>');}},
+{label:'又一个周末 · 偏好已确认是本幕假设',title:'下一次机会，才看得出有没有学会。',key:'变化可见',note:'同类机会再次出现：成果仍然可找，展示更轻。是否更合心意，要等这次真实体验；一张批准的卡还不足以证明进步。',body:function(){return '<div class="time">时间跳转 · 偏好已确认（仅剧情前提）</div>'+cat('<p class="cat-action">在你手边坐下，把脑袋伸过来。</p><p style="margin-top:7px">这里有一份小发现，先安静留着。</p>'+art(true))+'<div class="proof"><span class="proof-mark">↳</span><div><strong>这次变了什么</strong><br>上次直接展开；这次只留一行入口。成果还在。<br><span class="label">依据：上一幕明确确认的场景偏好。以后仍可改或撤回。</span></div></div>';}}
+];
+var content=document.getElementById('scene-content');
+function stop(){if(timer!==null){clearInterval(timer);timer=null;}updateStatus();}
+function updateStatus(){document.getElementById('play').textContent=timer===null?'播放':'暂停';document.getElementById('play').setAttribute('aria-pressed',timer!==null?'true':'false');document.getElementById('status').textContent=(current+1)+' / '+scenes.length+' · '+(timer===null?'已暂停':'播放中');}
+function render(){var s=scenes[current];document.getElementById('scene-label').textContent=s.label;document.getElementById('scene-title').textContent=s.title;document.getElementById('insight-key').textContent=s.key;document.getElementById('insight-text').textContent=s.note;content.innerHTML=s.body();document.querySelectorAll('[data-scene]').forEach(function(b){if(Number(b.dataset.scene)===current)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current');});document.getElementById('prev').disabled=current===0;document.getElementById('next').disabled=current===scenes.length-1;updateStatus();}
+function go(n,manual){if(manual)stop();current=Math.max(0,Math.min(scenes.length-1,n));render();}
+function togglePlay(){if(timer!==null){stop();return;}if(current===scenes.length-1)go(0,false);timer=setInterval(function(){if(current===scenes.length-1){stop();return;}go(current+1,false);if(current===scenes.length-1)stop();},8000);updateStatus();}
+document.querySelectorAll('[data-scene]').forEach(function(b){b.addEventListener('click',function(){go(Number(b.dataset.scene),true);});});
+document.getElementById('prev').addEventListener('click',function(){go(current-1,true);});
+document.getElementById('next').addEventListener('click',function(){go(current+1,true);});
+document.getElementById('play').addEventListener('click',togglePlay);
+content.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;if(b.id==='silent-branch'||b.id==='reply-branch'){stop();silent=b.id==='silent-branch';render();}});
+document.addEventListener('keydown',function(e){if(e.target.closest('button,summary,input,textarea,select'))return;if(e.key==='ArrowRight'){e.preventDefault();go(current+1,true);}else if(e.key==='ArrowLeft'){e.preventDefault();go(current-1,true);}else if(e.code==='Space'){e.preventDefault();togglePlay();}});
+document.addEventListener('visibilitychange',function(){if(document.hidden)stop();});
+render();
+})();
+</script></body></html>

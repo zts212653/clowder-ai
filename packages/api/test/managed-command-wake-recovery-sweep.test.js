@@ -63,6 +63,9 @@ function makeHarness(options = {}) {
     dynamicTaskStore: {
       getAll: () => [...tasks.values()],
       getById: (id) => tasks.get(id) ?? null,
+      ...(Object.hasOwn(options, 'ownerAuthProvenance')
+        ? { getPrivateOwnerAuthProvenance: () => options.ownerAuthProvenance }
+        : {}),
       updateParams(id, params) {
         const task = tasks.get(id);
         if (!task) return false;
@@ -151,6 +154,55 @@ async function loadSweep() {
 }
 
 describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
+  test('dispatch restores strict owner auth from the durable private hold carrier', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ ownerAuthProvenance: 'strict' });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'strict owner command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.deepEqual(h.triggerCalls[0][6], {
+      sourceCategory: 'scheduled',
+      forceQueue: true,
+      ownerAuthProvenance: 'strict',
+    });
+  });
+
+  test('legacy holds without private owner auth dispatch as unknown', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness();
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'legacy command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0][6].ownerAuthProvenance, 'unknown');
+  });
+
+  test('compatibility-fallback holds cannot be promoted during recovery', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const h = makeHarness({ ownerAuthProvenance: 'compatibility_fallback' });
+    const sweep = new ManagedCommandWakeRecoverySweep(h.deps);
+
+    await sweep.recordCompletion({
+      taskId: 'hold-ball-task-1',
+      wakeContent: 'compatibility owner command completed',
+      result: { exitCode: 0, timedOut: false, durationMs: 9_000 },
+    });
+
+    assert.equal(h.triggerCalls.length, 1);
+    assert.equal(h.triggerCalls[0][6].ownerAuthProvenance, 'compatibility_fallback');
+  });
+
   test('persists the terminal result before attempting thread delivery', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();
     const h = makeHarness({ appendError: new Error('message plane unavailable') });

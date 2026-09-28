@@ -40,7 +40,11 @@ export function computeVariantId(flags: F163FlagSnapshot): string {
 
 /** Phase D: derive authority from doc path — no manual promotion needed */
 export function pathToAuthority(sourcePath: string): F163Authority {
-  const p = sourcePath.replace(/^doc:/, '').replace(/^docs\//, '');
+  // Scanners store path.relative() output, which uses backslashes on Windows.
+  const p = sourcePath
+    .replace(/\\/g, '/')
+    .replace(/^doc:/, '')
+    .replace(/^docs\//, '');
   if (/^(lessons-learned|SOP)\.md$/i.test(p) || /shared-rules\.md$/i.test(p)) return 'constitutional';
   if (/^(decisions|features|architecture)\//i.test(p)) return 'validated';
   if (/^(catalogs|competitor-research|discussions|plans|research|reflections|study)\//i.test(p)) return 'candidate';

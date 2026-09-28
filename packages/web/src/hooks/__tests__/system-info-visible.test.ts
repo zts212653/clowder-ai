@@ -98,7 +98,7 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     );
 
     expect(visible).toEqual({
-      content: '宪宪（@opus5）的发送前检查已拒绝：当前暂不可用。原目标未改派；可考虑 @kimi。',
+      content: '宪宪：当前暂不可用。本次未执行。',
       variant: 'info',
     });
   });
@@ -135,10 +135,29 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     });
 
     expect(visible).toEqual({
-      content: 'codex-sol（@codex-sol）的发送前检查需注意：路由上下文暂时无法完整读取。原目标未改派。',
+      content: 'codex-sol：路由上下文暂时无法完整读取。本次仍按原目标尝试。',
       variant: 'info',
     });
     expect(visible?.content).not.toContain('resolver_degraded');
     expect(visible?.content).not.toContain('original target');
+  });
+
+  it('explains an owner attempt without raw quota codes or a wall of alternative handles', () => {
+    const result = formatVisibleSystemInfo(
+      {
+        type: 'routing_preflight',
+        target: {
+          targetCatId: 'codex-astra',
+          disposition: 'warned',
+          ownerAttempt: true,
+          reasons: [{ code: 'routing_signal_unavailable', summary: 'quota_exhausted', sourceRefs: ['signal:1'] }],
+          alternatives: Array.from({ length: 32 }, (_, index) => ({ catId: `alternative-${index}` })),
+        },
+      },
+      () => 'Astra',
+    );
+    expect(result?.content).toBe('Astra：近期遇到额度限制。这次仍会按你的选择尝试。');
+    expect(result?.content).not.toContain('quota_exhausted');
+    expect(result?.content).not.toContain('alternative-');
   });
 });

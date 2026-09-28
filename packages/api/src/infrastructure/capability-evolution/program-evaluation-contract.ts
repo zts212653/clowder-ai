@@ -12,7 +12,7 @@ import type {
   MeasurementUncertaintyBasis,
   RejudgeCell,
 } from './program-eval-bridge.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 /**
  * F311 Phase 3 - the shape of the evaluation ingress, kept apart from the writer that enforces it.

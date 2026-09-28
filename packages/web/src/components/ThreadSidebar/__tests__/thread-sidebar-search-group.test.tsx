@@ -96,7 +96,7 @@ describe('F277 search Group production journey', () => {
 
   it('keeps editable selection and name after failure, then submits exact members on retry', async () => {
     await start();
-    await setInput(harness.container.querySelector('input[aria-label="Group 名称"]')!, '发布工作台');
+    await setInput(harness.container.querySelector('input[aria-label="新组名称"]')!, '发布工作台');
     mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
       if (path === '/api/config/thread-attention/groups' && init?.method === 'POST') return textFail(500, 'failed');
       return path === '/api/config/thread-attention'
@@ -108,9 +108,7 @@ describe('F277 search Group production journey', () => {
     );
     await harness.flush();
     expect(harness.container.querySelector('[data-testid="search-group-editor"]')).not.toBeNull();
-    expect(harness.container.querySelector<HTMLInputElement>('input[aria-label="Group 名称"]')?.value).toBe(
-      '发布工作台',
-    );
+    expect(harness.container.querySelector<HTMLInputElement>('input[aria-label="新组名称"]')?.value).toBe('发布工作台');
     expect(harness.container.textContent).toContain('重试');
     expect(commandBodies()[0]).toMatchObject({
       action: 'organize',
@@ -201,7 +199,7 @@ describe('F277 search Group production journey', () => {
     mockApiFetch.mockImplementation((path: string) =>
       path.endsWith('/groups') ? textFail(500, 'retry') : jsonOk({ aliases: {}, open: {}, groups }),
     );
-    const select = harness.container.querySelector<HTMLSelectElement>('select[aria-label="整理目标"]')!;
+    const select = harness.container.querySelector<HTMLSelectElement>('select[aria-label="整理到"]')!;
     await act(async () => {
       select.value = 'attention_other';
       select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -290,6 +288,15 @@ describe('F277 search Group production journey', () => {
     await harness.flush();
     await setInput(harness.container.querySelector('input[placeholder="搜索对话、项目或 ID..."]')!, 'f311');
     const action = harness.container.querySelector<HTMLButtonElement>('[data-testid="search-group-organize"]');
+    expect(action?.textContent).toContain('正在读取 Group');
+    expect(action?.disabled).toBe(true);
+    await act(async () => {
+      await vi.waitFor(
+        () =>
+          expect(mockApiFetch.mock.calls.filter(([path]) => path === '/api/config/thread-attention')).toHaveLength(2),
+        { timeout: 1_500 },
+      );
+    });
     expect(action?.textContent).toContain('读取 Group 失败');
     await act(async () => action?.click());
     await harness.flush();

@@ -50,6 +50,7 @@ export type WritableProfileUpdate = Pick<
   | 'proposalId'
   | 'sourceCatId'
   | 'sourceThreadId'
+  | 'targetLayer'
   | 'targetPath'
   | 'afterContent'
   | 'baseContentHash'
@@ -92,13 +93,38 @@ export function resolvePrimerPath(profileDir: string, targetPath: string, relati
 }
 
 /** Deterministic provenance path (proposalId-based → retry overwrites same file, no dup). */
-export function provenancePathFor(profileDir: string, proposal: WritableProfileUpdate): string {
-  return join(profileDir, 'provenance', `${proposal.proposalId}-${proposal.sourceCatId}-primer.md`);
+export function provenancePathFor(
+  profileDir: string,
+  proposal: Pick<WritableProfileUpdate, 'proposalId' | 'sourceCatId' | 'targetLayer'>,
+): string {
+  return join(profileDir, 'provenance', `${proposal.proposalId}-${proposal.sourceCatId}-${proposal.targetLayer}.md`);
+}
+
+/**
+ * Phase E: generic target write — re-read current, optimistic-lock check, atomic write.
+ * Works for any target (primer, corpus) given the resolved absolute path.
+ * Returns the writtenPath; the route checkpoints it BEFORE calling writeProfileProvenance.
+ */
+export function writeProfileTarget(
+  proposal: WritableProfileUpdate,
+  absolutePath: string,
+  options: WriteProfilePrimerOptions = {},
+): { writtenPath: string } {
+  const fileOps = options.fileOps ?? DEFAULT_FILE_OPS;
+  const current = existsSync(absolutePath) ? readFileSync(absolutePath, 'utf8') : '';
+  const currentHash = hashContent(current);
+  if (currentHash !== proposal.baseContentHash) {
+    if (options.allowAlreadyApplied && current === proposal.afterContent) return { writtenPath: absolutePath };
+    throw new StaleProfileUpdateError(proposal.baseContentHash, currentHash);
+  }
+  mkdirSync(dirname(absolutePath), { recursive: true });
+  atomicWriteUtf8(absolutePath, proposal.afterContent, fileOps);
+  return { writtenPath: absolutePath };
 }
 
 /**
  * P1-1 step 1: re-read current primer, optimistic-lock check, write afterContent.
- * Returns the writtenPath; the route checkpoints it BEFORE calling writeProfileProvenance.
+ * Now a thin wrapper around writeProfileTarget with primer path resolution.
  */
 export function writeProfilePrimer(
   proposal: WritableProfileUpdate,
@@ -106,17 +132,8 @@ export function writeProfilePrimer(
   relationshipKey: string,
   options: WriteProfilePrimerOptions = {},
 ): { writtenPath: string } {
-  const fileOps = options.fileOps ?? DEFAULT_FILE_OPS;
   const primerPath = resolvePrimerPath(profileDir, proposal.targetPath, relationshipKey);
-  const current = existsSync(primerPath) ? readFileSync(primerPath, 'utf8') : '';
-  const currentHash = hashContent(current);
-  if (currentHash !== proposal.baseContentHash) {
-    if (options.allowAlreadyApplied && current === proposal.afterContent) return { writtenPath: primerPath };
-    throw new StaleProfileUpdateError(proposal.baseContentHash, currentHash);
-  }
-  mkdirSync(dirname(primerPath), { recursive: true });
-  atomicWriteUtf8(primerPath, proposal.afterContent, fileOps);
-  return { writtenPath: primerPath };
+  return writeProfileTarget(proposal, primerPath, options);
 }
 
 /**
@@ -139,6 +156,7 @@ function renderProvenance(proposal: WritableProfileUpdate): string {
     `# Provenance: profile-update ${proposal.proposalId}`,
     '',
     `- cat: ${proposal.sourceCatId}`,
+    `- layer: ${proposal.targetLayer}`,
     `- target: ${proposal.targetPath}`,
     `- thread: ${proposal.sourceThreadId}`,
     `- rationale: ${proposal.rationale}`,

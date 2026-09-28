@@ -12,7 +12,14 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { CatId, ManagedWorkBinding } from '@cat-cafe/shared';
+import {
+  type CatId,
+  type CollectiveExecutionGrant,
+  type CollectiveWorkBinding,
+  collectiveExecutionGrantSchema,
+  collectiveWorkBindingSchema,
+  type ManagedWorkBinding,
+} from '@cat-cafe/shared';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import type { ToolExecutionPolicy } from '../../types.js';
@@ -45,6 +52,9 @@ export interface InvocationRecord {
   traceContext?: CallerTraceContext;
   /** ADR-042 callback authorization boundary, persisted across API restarts. */
   toolExecutionPolicy?: ToolExecutionPolicy;
+  /** F290: non-owner authority, bound to this authenticated invocation and its durable source. */
+  executionGrant?: CollectiveExecutionGrant;
+  collectiveWorkBinding?: CollectiveWorkBinding;
   /** In-invocation idempotency keys for callback post-message de-duplication. */
   clientMessageIds: Set<string>;
   createdAt: number;
@@ -194,7 +204,22 @@ export class InvocationRegistry {
     originTriggerMessageId?: string,
     ownerAuthProvenance: OwnerAuthProvenance = 'unknown',
     managedWorkBinding?: ManagedWorkBinding,
+    executionGrant?: CollectiveExecutionGrant,
+    collectiveWorkBinding?: CollectiveWorkBinding,
   ): Promise<{ invocationId: string; callbackToken: string }> {
+    const grant = executionGrant ? collectiveExecutionGrantSchema.parse(executionGrant) : undefined;
+    const workBinding = collectiveWorkBinding ? collectiveWorkBindingSchema.parse(collectiveWorkBinding) : undefined;
+    if (workBinding && (ownerAuthProvenance !== 'strict' || grant || !originTriggerMessageId))
+      throw new Error('Collective Work requires independent owner admission');
+    if (grant) {
+      if (ownerAuthProvenance !== 'unknown' || managedWorkBinding)
+        throw new Error('Public participation cannot acquire owner authority');
+      if (grant.source.catId !== catId || grant.originTriggerMessageId !== originTriggerMessageId)
+        throw new Error('Participation grant source identity mismatch');
+      if (toolExecutionPolicy?.mode !== 'collective_participation')
+        throw new Error('Participation grant requires scoped tool policy');
+    } else if (toolExecutionPolicy?.mode === 'collective_participation')
+      throw new Error('Participation tool policy requires a source grant');
     if (managedWorkBinding) {
       if (ownerAuthProvenance !== 'strict') {
         throw new Error('Managed-work invocation binding requires strict owner authentication');
@@ -212,6 +237,8 @@ export class InvocationRegistry {
       callbackToken,
       userId,
       ownerAuthProvenance,
+      ...(grant ? { executionGrant: grant } : {}),
+      ...(workBinding ? { collectiveWorkBinding: workBinding } : {}),
       ...(managedWorkBinding ? { managedWorkBinding: Object.freeze({ ...managedWorkBinding }) } : {}),
       catId,
       threadId,

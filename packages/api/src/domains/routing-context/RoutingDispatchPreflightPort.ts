@@ -6,6 +6,8 @@ export interface RoutingDispatchPreflightInput {
   ownerId: string;
   targetCatIds: readonly string[];
   intent?: 'review' | 'architecture';
+  /** Set only by trusted dispatch ingress, never by agent/user payload. */
+  ownerRequestedAttempt?: boolean;
 }
 
 export interface RoutingDispatchPreflightPort {
@@ -88,6 +90,7 @@ export class RuntimeRoutingDispatchPreflight implements RoutingDispatchPreflight
         catalogRevision: catalog.catalogRevision,
         candidates: catalog.candidates,
         targetCatIds: input.targetCatIds,
+        ...(input.ownerRequestedAttempt ? { ownerRequestedAttempt: true } : {}),
         ...(input.intent ? { intent: input.intent } : {}),
       });
     } catch {

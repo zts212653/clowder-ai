@@ -90,9 +90,9 @@ describe('PipelinePromptBuilder (AC-P2-6)', () => {
     assert.ok(output.includes('布偶猫'), 'Contains identity anchor');
   });
 
-  it('routes an ordinary time-bound entrustment into the custody-recognition hook', async () => {
+  it('routes a natural time-bound work introduction into the custody-recognition hook', async () => {
     const { parseIntent } = await import('../dist/domains/cats/services/context/IntentParser.js');
-    const intent = parseIntent('下周一下午 3 点前帮我准备两个方案，做完回来让我选', 1);
+    const intent = parseIntent('@codex-astra 有个活儿，周四 F311 需要去演示，我现在好焦虑怎么办！', 1);
 
     const output = ppb.buildInvocationContextViaHookPipeline({
       catId: 'opus',

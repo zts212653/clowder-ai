@@ -5,226 +5,68 @@
  * Communication channel between the MCP tool layer (B1/B2 notice delivery)
  * and the harness layer (B3/B4 re-invoke decisions).
  *
- * Uses Redis LIST per invocation (key: freshness:events:inv:{invocationId}).
- * Events have TTL (7 days) for automatic cleanup — unlike BallCustodyEventLog
- * which is permanent. Freshness events are operational, not user-visible state.
+ * Uses Redis LIST per invocation (key: freshness:events:inv:{invocationId}) and
+ * an owner-scoped 35-day replay index. Per-invocation logs retain seven days;
+ * the wider index covers the maximum 31-day selector plus scheduling delay.
  *
  * Closed union type with kind discriminator (spec §B0a):
  *   held_decision | forward_decision | notice_attached | notice_implicit_acked |
  *   notice_deferred | reinvoke_triggered | reinvoke_skipped | queued_handled
  */
 
-import type {
-  CatId,
-  FreshnessCarrier,
-  FreshnessCarrierDeliverySemantics,
-  FreshnessCarrierProvider,
-  QueueHandledDisposition,
-  QueueTargetOutcomeEvidenceRef,
-} from '@cat-cafe/shared';
+import { randomUUID } from 'node:crypto';
+import type { CatId, QueueTargetOutcomeEvidenceRef } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
-import type { FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
+import type {
+  FreshnessAttentionEvent,
+  FreshnessAttentionEventWindow,
+  NoticeAttachedEvent,
+  ProviderNoticeDeliveredEvent,
+  ProviderNoticeEventBase,
+  ProviderNoticeHandledEvent,
+  ProviderNoticeSeenEvent,
+} from './freshness-attention-event-types.js';
 
-// --- Event type definitions (closed union) ---
-
-interface FreshnessEventBase {
-  threadId: string;
-  catId: CatId;
-  invocationId: string;
-  timestamp: number;
-}
-
-interface HeldDecisionEvent extends FreshnessEventBase {
-  kind: 'held_decision';
-  toolName: string;
-  unseenCount: number;
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-interface ForwardDecisionEvent extends FreshnessEventBase {
-  kind: 'forward_decision';
-  toolName: string;
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-interface NoticeAttachedEvent extends FreshnessEventBase {
-  kind: 'notice_attached';
-  toolName: string;
-  unseenSenders: string[];
-  noticeId: string;
-  maxMessageId: string;
-  /** #1200 Sol R6 P2-2: v2 cursor for maxMessageId position.
-   *  New events always set this. Absent on legacy events — consumers
-   *  must fall back to canonicalizing maxMessageId or conservatively keep. */
-  maxCursor?: string;
-}
-
-interface NoticeImplicitAckedEvent extends FreshnessEventBase {
-  kind: 'notice_implicit_acked';
-  noticeIds: string[];
-  ackedVia: 'seenCursor_advance';
-}
-
-interface NoticeDeferredEvent extends FreshnessEventBase {
-  kind: 'notice_deferred';
-  noticeIds: string[];
-}
-
-interface ReinvokeTriggeredEvent extends FreshnessEventBase {
-  kind: 'reinvoke_triggered';
-  triggeredInvocationId: string;
-  sourceNoticeIds: string[];
-}
-
-interface ReinvokeSkippedEvent extends FreshnessEventBase {
-  kind: 'reinvoke_skipped';
-  reason: 'quota_exhausted' | 'already_handled' | 'low_priority' | 'cursor_caught_up' | 'newer_invocation';
-}
-
-/** F254 Phase D: stream output was generated while unseen messages existed */
-interface StreamStaleDetectedEvent extends FreshnessEventBase {
-  kind: 'stream_stale_detected';
-  unseenCount: number;
-  unseenSenders: string[];
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-/** F254 Phase D: stream output freshness check determined output is fresh */
-interface StreamFreshEvent extends FreshnessEventBase {
-  kind: 'stream_fresh';
-  reason: string;
-  relevanceSuppressions?: Partial<Record<FreshnessRelevanceReason, number>>;
-}
-
-/** F254 D1.2b: queued message was handled by one target cat after a successful invocation */
-interface QueuedHandledEvent extends FreshnessEventBase {
-  kind: 'queued_handled';
-  queueEntryId: string;
-  messageIds: string[];
-  disposition: QueueHandledDisposition;
-  evidenceRef: QueueTargetOutcomeEvidenceRef;
-  remainingTargetCats: string[];
-}
-
-export type ProviderNativeFreshnessProvider = FreshnessCarrierProvider;
-export type ProviderNativeFreshnessCarrier = FreshnessCarrier;
-export type ProviderNativeFreshnessDeliverySemantics = FreshnessCarrierDeliverySemantics;
-export type ProviderNativeFreshnessToolSurface =
-  | 'command_execution'
-  | 'file_change'
-  | 'mcp_tool_call'
-  | 'dynamic_tool_call'
-  | 'collab_agent_tool_call'
-  | 'sub_agent_activity'
-  | 'web_search'
-  | 'image_view'
-  | 'image_generation'
-  | 'sleep'
-  | 'unknown'
-  | 'other';
-export type ProviderNativeFreshnessMissReason =
-  | 'unsupported_carrier'
-  | 'no_safe_boundary'
-  | 'turn_mismatch'
-  | 'rpc_rejected'
-  | 'turn_completed'
-  | 'transport_failed'
-  | 'not_read';
-
-interface ProviderNoticeEventBase extends FreshnessEventBase {
-  noticeId: string;
-  frontier: string;
-  /** Exact durable identities used for receipt correlation; legacy events fall back to frontier. */
-  correlationMessageIds?: string[];
-  provider: ProviderNativeFreshnessProvider;
-  carrier: ProviderNativeFreshnessCarrier;
-  deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
-  toolSurface: ProviderNativeFreshnessToolSurface;
-  expectedTurnId: string;
-}
-
-export interface ProviderNoticeOpportunityEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_opportunity';
-}
-
-export interface ProviderNoticePreparedEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_prepared';
-}
-
-export interface ProviderNoticeDeliveredEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_delivered';
-  acceptedTurnId: string;
-}
-
-export interface ProviderNoticeMissedEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_missed';
-  missReason: ProviderNativeFreshnessMissReason;
-}
-
-export interface ProviderNoticeSeenEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_seen';
-  seenMessageIds: string[];
-  evidenceKind: 'full_contiguous_thread_context' | 'queue_exact_read';
-}
-
-export interface ProviderNoticeHandledEvent extends ProviderNoticeEventBase {
-  kind: 'provider_notice_handled';
-  queueEntryId: string;
-  evidenceRef: QueueTargetOutcomeEvidenceRef;
-}
-
-export interface ProviderCarrierCapabilityDeclaredEvent extends FreshnessEventBase {
-  kind: 'provider_carrier_capability_declared';
-  provider: ProviderNativeFreshnessProvider;
-  carrier: ProviderNativeFreshnessCarrier;
-  deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
-}
-
-export interface ProviderProtocolItemObservedEvent extends FreshnessEventBase {
-  kind: 'provider_protocol_item_observed';
-  provider: ProviderNativeFreshnessProvider;
-  carrier: ProviderNativeFreshnessCarrier;
-  deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
-  toolSurface: ProviderNativeFreshnessToolSurface;
-  /** Low-cardinality census key. Unrecognized provider strings collapse to `unknown`. */
-  itemType: string;
-  status: string;
-  classification: 'safe_boundary' | 'intentional_non_boundary' | 'deferred_no_data' | 'unknown';
-  /** At most eight distinct, 64-character samples are persisted per invocation. */
-  boundedUnknownSample?: string;
-}
-
-export type FreshnessAttentionEvent =
-  | HeldDecisionEvent
-  | ForwardDecisionEvent
-  | NoticeAttachedEvent
-  | NoticeImplicitAckedEvent
-  | NoticeDeferredEvent
-  | ReinvokeTriggeredEvent
-  | ReinvokeSkippedEvent
-  | StreamStaleDetectedEvent
-  | StreamFreshEvent
-  | QueuedHandledEvent
-  | ProviderNoticeOpportunityEvent
-  | ProviderNoticePreparedEvent
-  | ProviderNoticeDeliveredEvent
-  | ProviderNoticeMissedEvent
-  | ProviderNoticeSeenEvent
-  | ProviderNoticeHandledEvent
-  | ProviderCarrierCapabilityDeclaredEvent
-  | ProviderProtocolItemObservedEvent;
-
-// Re-export for consumers
-export type { NoticeAttachedEvent };
+export type * from './freshness-attention-event-types.js';
 
 // --- Constants ---
 
 /** TTL for event log keys: 7 days in seconds */
 const EVENT_LOG_TTL_SECONDS = 7 * 24 * 60 * 60; // 604800
 const PROVIDER_NATIVE_INDEX_KEY = 'freshness:events:provider-native';
+/** Replay selectors are bounded to 31 days; keep four extra days for scheduling delay. */
+const WINDOW_INDEX_RETENTION_MS = 35 * 24 * 60 * 60 * 1_000;
+/** Do not certify the actively mutating tail of the event index as a settled replay window. */
+const WINDOW_SETTLEMENT_DELAY_MS = 60_000;
+const WINDOW_INDEX_KEY = 'freshness:events:window:v2';
+const WINDOW_COVERAGE_STARTED_AT_KEY = 'freshness:events:window:v2:coverage-started-at';
+const ADVANCE_WINDOW_COVERAGE_LUA = `
+local current = tonumber(redis.call('GET', KEYS[1]))
+local candidate = tonumber(ARGV[1])
+if not candidate then
+  return redis.error_reply('invalid coverage candidate')
+end
+if not current or candidate > current then
+  redis.call('SET', KEYS[1], ARGV[1])
+  return candidate
+end
+return current
+`;
+
+/** Shared by every log instance in this API process; startup reset is the durable restart fence. */
+let processCoverageGapAt: number | undefined;
+
+function recordProcessCoverageGap(timestamp: number): void {
+  processCoverageGapAt = Math.max(processCoverageGapAt ?? 0, timestamp);
+}
+
+interface IndexedFreshnessEventV1 {
+  schemaVersion: 1;
+  eventId: string;
+  /** Missing means the event cannot participate in an owner-scoped replay. */
+  ownerUserId?: string;
+  event: FreshnessAttentionEvent;
+}
 
 function exactReadCoversProviderNotice(
   notice: Pick<ProviderNoticeEventBase, 'frontier' | 'correlationMessageIds'>,
@@ -242,26 +84,66 @@ function invocationKey(invocationId: string): string {
 // --- Event Log ---
 
 export class FreshnessAttentionEventLog {
-  constructor(private readonly redis: RedisClient) {}
+  constructor(
+    private readonly redis: RedisClient,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  /**
+   * Mark the first instant from which every append is eligible for the global
+   * replay index. Startup calls this before accepting traffic. Advancing on every
+   * restart deliberately invalidates windows that cross a crash, rollback, or
+   * off-mode interval whose older binary may not have written the v2 index.
+   */
+  async initializeWindowedReplayCoverage(startedAt = this.now()): Promise<number> {
+    try {
+      const stored = Number(
+        await this.redis.eval(ADVANCE_WINDOW_COVERAGE_LUA, 1, WINDOW_COVERAGE_STARTED_AT_KEY, String(startedAt)),
+      );
+      if (!Number.isFinite(stored) || stored < 0) throw new Error('invalid freshness replay coverage watermark');
+      return stored;
+    } catch (error) {
+      recordProcessCoverageGap(startedAt);
+      throw error;
+    }
+  }
 
   /**
    * Append an event to the invocation's event log.
    * Sets TTL on first write (idempotent — EXPIRE resets if already set).
    */
-  async append(event: FreshnessAttentionEvent): Promise<void> {
+  async append(event: FreshnessAttentionEvent, scope: { ownerUserId: string }): Promise<void> {
     const key = invocationKey(event.invocationId);
     const serialized = JSON.stringify(event);
-
-    await this.redis.rpush(key, serialized);
-    // Set TTL (resets on every append — last event keeps the log alive)
-    await this.redis.expire(key, EVENT_LOG_TTL_SECONDS);
-    if (event.kind.startsWith('provider_')) {
-      await this.redis.zadd(PROVIDER_NATIVE_INDEX_KEY, String(event.timestamp), serialized);
-      await this.redis.zremrangebyscore(
-        PROVIDER_NATIVE_INDEX_KEY,
-        '-inf',
-        String(Date.now() - EVENT_LOG_TTL_SECONDS * 1_000),
-      );
+    const appendAttemptAt = this.now();
+    const indexed: IndexedFreshnessEventV1 = {
+      schemaVersion: 1,
+      eventId: randomUUID(),
+      ...(scope?.ownerUserId ? { ownerUserId: scope.ownerUserId } : {}),
+      event,
+    };
+    try {
+      const transaction = this.redis
+        .multi()
+        .rpush(key, serialized)
+        // Resetting the TTL keeps the invocation-local diagnostic view alive
+        // for seven days after its last event.
+        .expire(key, EVENT_LOG_TTL_SECONDS)
+        .zadd(WINDOW_INDEX_KEY, String(event.timestamp), JSON.stringify(indexed))
+        .zremrangebyscore(WINDOW_INDEX_KEY, '-inf', String(appendAttemptAt - WINDOW_INDEX_RETENTION_MS));
+      if (event.kind.startsWith('provider_')) {
+        transaction
+          .zadd(PROVIDER_NATIVE_INDEX_KEY, String(event.timestamp), serialized)
+          .zremrangebyscore(PROVIDER_NATIVE_INDEX_KEY, '-inf', String(appendAttemptAt - EVENT_LOG_TTL_SECONDS * 1_000));
+      }
+      const results = await transaction.exec();
+      if (!results) throw new Error('freshness event append transaction returned no result');
+      for (const [error] of results) {
+        if (error) throw error;
+      }
+    } catch (error) {
+      recordProcessCoverageGap(Math.max(appendAttemptAt, event.timestamp));
+      throw error;
     }
   }
 
@@ -279,7 +161,78 @@ export class FreshnessAttentionEventLog {
     return raw.map((value: string) => JSON.parse(value) as FreshnessAttentionEvent);
   }
 
+  /** Query the complete cross-invocation signal plane for one half-open window. */
+  async queryWindowBetween(
+    startMs: number,
+    endMs: number,
+    ownerUserId: string,
+    options: { threadIds?: readonly string[] } = {},
+  ): Promise<FreshnessAttentionEventWindow> {
+    const sampledAt = this.now();
+    const observedThroughMs = sampledAt - WINDOW_SETTLEMENT_DELAY_MS;
+    const rawStartedAt = await this.redis.get(WINDOW_COVERAGE_STARTED_AT_KEY);
+    const raw = await this.redis.zrangebyscore(WINDOW_INDEX_KEY, String(startMs), `(${endMs}`);
+    const threadFilter = options.threadIds ? new Set(options.threadIds) : null;
+    const indexed = raw
+      .map(parseIndexedFreshnessEvent)
+      .filter((item) => !threadFilter || threadFilter.has(item.event.threadId));
+    const events = indexed.filter((item) => item.ownerUserId === ownerUserId).map((item) => item.event);
+    if (rawStartedAt === null) {
+      return {
+        events,
+        coverage: { status: 'unavailable', observedThroughMs, reason: 'coverage_not_initialized' },
+      };
+    }
+    const initializedAt = Number(rawStartedAt);
+    if (!Number.isFinite(initializedAt) || initializedAt < 0) {
+      throw new Error('invalid freshness replay coverage watermark');
+    }
+    const completeFromMs = Math.max(
+      initializedAt,
+      sampledAt - WINDOW_INDEX_RETENTION_MS,
+      processCoverageGapAt === undefined ? 0 : processCoverageGapAt + 1,
+    );
+    if (startMs < completeFromMs) {
+      return {
+        events,
+        coverage: {
+          status: 'incomplete',
+          completeFromMs,
+          observedThroughMs,
+          reason:
+            processCoverageGapAt !== undefined && startMs <= processCoverageGapAt
+              ? 'event_append_gap'
+              : 'window_starts_before_coverage',
+        },
+      };
+    }
+    if (endMs > observedThroughMs) {
+      return {
+        events,
+        coverage: {
+          status: 'incomplete',
+          completeFromMs,
+          observedThroughMs,
+          reason: 'window_ends_after_observed_through',
+        },
+      };
+    }
+    if (indexed.some((item) => item.ownerUserId === undefined)) {
+      return {
+        events,
+        coverage: {
+          status: 'incomplete',
+          completeFromMs,
+          observedThroughMs,
+          reason: 'unscoped_events_present',
+        },
+      };
+    }
+    return { events, coverage: { status: 'complete', completeFromMs, observedThroughMs } };
+  }
+
   async markProviderNoticesSeen(input: {
+    ownerUserId: string;
     invocationId: string;
     catId: CatId;
     exactMessageIds: readonly string[];
@@ -300,19 +253,23 @@ export class FreshnessAttentionEventLog {
     let marked = 0;
     for (const notice of delivered) {
       if (seenIds.has(notice.noticeId) || !exactReadCoversProviderNotice(notice, exactIds)) continue;
-      await this.append({
-        ...notice,
-        kind: 'provider_notice_seen',
-        timestamp: Date.now(),
-        seenMessageIds: [...input.exactMessageIds],
-        evidenceKind: input.evidenceKind,
-      });
+      await this.append(
+        {
+          ...notice,
+          kind: 'provider_notice_seen',
+          timestamp: this.now(),
+          seenMessageIds: [...input.exactMessageIds],
+          evidenceKind: input.evidenceKind,
+        },
+        { ownerUserId: input.ownerUserId },
+      );
       marked++;
     }
     return marked;
   }
 
   async markProviderNoticesHandled(input: {
+    ownerUserId: string;
     invocationId: string;
     catId: CatId;
     queueEntryId: string;
@@ -332,13 +289,16 @@ export class FreshnessAttentionEventLog {
     let marked = 0;
     for (const notice of seen) {
       if (handledIds.has(notice.noticeId) || !exactReadCoversProviderNotice(notice, messageIds)) continue;
-      await this.append({
-        ...notice,
-        kind: 'provider_notice_handled',
-        timestamp: Date.now(),
-        queueEntryId: input.queueEntryId,
-        evidenceRef: input.evidenceRef,
-      });
+      await this.append(
+        {
+          ...notice,
+          kind: 'provider_notice_handled',
+          timestamp: this.now(),
+          queueEntryId: input.queueEntryId,
+          evidenceRef: input.evidenceRef,
+        },
+        { ownerUserId: input.ownerUserId },
+      );
       marked++;
     }
     return marked;
@@ -372,4 +332,12 @@ export class FreshnessAttentionEventLog {
     // Return notices that haven't been resolved
     return events.filter((e): e is NoticeAttachedEvent => e.kind === 'notice_attached' && !resolvedIds.has(e.noticeId));
   }
+}
+
+function parseIndexedFreshnessEvent(raw: string): IndexedFreshnessEventV1 {
+  const parsed = JSON.parse(raw) as Partial<IndexedFreshnessEventV1>;
+  if (parsed.schemaVersion !== 1 || !parsed.eventId || !parsed.event) {
+    throw new Error('invalid indexed freshness event');
+  }
+  return parsed as IndexedFreshnessEventV1;
 }

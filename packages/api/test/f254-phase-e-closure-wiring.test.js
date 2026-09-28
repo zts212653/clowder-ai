@@ -62,7 +62,16 @@ describe('F254 Phase E production wiring guard', () => {
     const messages = source('routes/messages.ts');
 
     assert.match(messages, /queueCustody:\s*createInitialQueuedMessageCustody\(enqueueResult\.entry\)/);
-    assert.match(index, /const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator\(\{ messageStore \}\)/);
+    const custodyDependencies = index.match(
+      /const queueCustodyCoordinator = new QueuedMessageCustodyCoordinator\(\{([\s\S]*?)\}\);/,
+    )?.[1];
+    assert.ok(custodyDependencies, 'production must instantiate the canonical Queue custody coordinator');
+    assert.match(custodyDependencies, /\bmessageStore\s*[,}]/);
+    assert.match(
+      custodyDependencies,
+      /readWaitRegistration:\s*\(id\)\s*=>\s*taskStore\.getWaitRegistration\(id\)/,
+      'Queue settlement must read the canonical Task registration instead of relying on a route snapshot',
+    );
     assert.match(index, /const queueProcessor = new QueueProcessor\(\{[\s\S]*?queueCustodyCoordinator,[\s\S]*?\}\)/);
     assert.match(index, /await app\.register\(queueRoutes, \{[\s\S]*?queueCustodyCoordinator,[\s\S]*?\}\)/);
     assert.match(index, /const callbackOpts = \{[\s\S]*?queueCustodyCoordinator,[\s\S]*?\} as Parameters/);

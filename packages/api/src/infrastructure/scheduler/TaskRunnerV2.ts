@@ -344,6 +344,7 @@ export class TaskRunnerV2 {
         params: def.params,
         ...(def.entrustedWorkReevaluation ? { entrustedWorkReevaluation: def.entrustedWorkReevaluation } : {}),
         deliveryThreadId: def.deliveryThreadId,
+        ownerAuthProvenance: store.getPrivateOwnerAuthProvenance(def.id),
       });
       // Override display with persisted display
       spec.display = def.display;

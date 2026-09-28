@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
+tips_exempt: "Renewed 2026-09-05 for separating worktree isolation and review assurance from test coverage; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
 description: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。
 triggers:
   - "开始开发"
@@ -11,7 +11,7 @@ renamed-from: using-git-worktrees
 
 # Worktree
 
-开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使只有几行，也不按“纯文档免验证”处理：默认跑 skill reference/surface 与 claim 对应的定向检查；只有五轴实际命中高风险或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`。非 trivial 行为改动仍应开 worktree。
+开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使只有几行，也不按“纯文档免验证”处理：默认跑 skill reference/surface 与 claim 对应的定向检查；只有共享契约、门禁执行链或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`；高风险标签单独加强对应独立审查 / 授权。非 trivial 行为改动仍应开 worktree。
 
 ## Co-Creation Docs 边界
 
@@ -251,7 +251,7 @@ Thread-Context: threadId=[thread-id] invocationId=0001780508313338 catId=codex
 - [ ] 目录放在 relay-station/ 同级（不在项目内部）
 - [ ] 不是 `*-runtime` 命名
 - [ ] `.env` 包含 `REDIS_URL=redis://localhost:6398`
-- [ ] 风险匹配的 baseline 通过（targeted 默认；高风险 / 跨包不确定才全量）
+- [ ] 风险匹配的 baseline 通过（targeted 默认；共享契约、门禁执行链或无法覆盖的跨包影响才全量）
 - [ ] 当前会话不是 `cat-cafe-runtime` 的运行态验收会话（验收会话默认只读，不做重启命令）
 - [ ] 验证目标 URL 已明确；若是 `3003/3004`，你知道自己在打 runtime，而不是当前 worktree 的本地改动
 

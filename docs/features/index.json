@@ -1395,7 +1395,7 @@
     {
       "id": "F231",
       "name": "启动胶囊 — per-user 画像注入与 L0 分层",
-      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）2026-09-05 登记，Design Gate pending，无实现 custody） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
+      "status": "in-progress (Phase C 功能性完成；Phase D topology 代码已合入；live migration apply 暂停——relationship granularity 于 2026-07-12 重新打开，不能再把 individual primer 冲突预设为待合并内容) ；Phase E（shared profile corpus / owner-wide 层）**merged** PR #4416（squash `f7f0338bf7`，2026-09-08）——AC-E1/E2/E3 ✅） | **Owner**: Ragdoll（Ragdoll Fable-5）；topology repair owner: Maine Coon Sol | **Priority**: P1",
       "file": "F231-user-profile-capsule.md"
     },
     {
@@ -1707,7 +1707,7 @@
     {
       "id": "F290",
       "name": "AI-native Collective — 多人·多 Agent 共同世界",
-      "status": "implementation / provider onboarding landed in PR #4296; local activation awaits real GitHub UAT",
+      "status": "implementation / first-cat participation landed; 2026-09-18 usable-release candidate work active; real GitHub UAT and full Collective experience remain open",
       "file": "F290-ai-native-collective.md"
     },
     {
@@ -1725,7 +1725,7 @@
     {
       "id": "F293",
       "name": "— Live Routing Context",
-      "status": "Phases A–C merged / Phases D–E and expanded Experience + continuity gate remain open | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "Phases A–C baseline merged / Team UX M1 merged (AC-UX1–3; AC-UX6 evidence complete except Alpha) / profile feedback M2 (AC-UX4/5, AC-D4/D5) open / Phases D–E and expanded continuity remain open | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F293-live-routing-context.md"
     },
     {
@@ -1749,7 +1749,7 @@
     {
       "id": "F297",
       "name": "Sidebar Projection Convergence — 服务端权威快照，前端单一写入",
-      "status": "in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`0001787464914112-000015-317297b0`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1",
+      "status": "in progress | **Evolved from**: F081 | **CloseGate**: prior PASS is superseded by the crowded-row visibility counterexample (`private-source-id`): canonical `done + unread` existed, but participant/preference/label metadata pushed terminal status and time outside the narrow Sidebar viewport | **Phase D author**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Phase D reviewer**: 小团团·Maine Coon (@codex-terra, GPT-5.6 Terra) | **Priority**: P1",
       "file": "F297-sidebar-projection-convergence.md"
     },
     {
@@ -1767,7 +1767,7 @@
     {
       "id": "F300",
       "name": "Agent Self-Sensing & Self-Management — 从被动响应到可感知、可管理、可成长",
-      "status": "spec；product contract refreshed，runtime 未实现；canonical home source `81a4fa006` landed；public PR #1391 terminal-reviewed and merged as `85b10815c`；后续 runtime delivery 仍未启动",
+      "status": "in-progress；product contract refreshed；canonical home source `81a4fa006` landed；public PR #1391 terminal-reviewed and merged as `85b10815c`；**WP1（自身定位 / 宿主依赖 / 停启保护）已合入 main**（PR #4426，`8ff8d1d4f`）——落地的是 cat-facing 的 self facet 读取、self-host 停机拒绝与 StopOperationRecord，**没有任何用户可打开的界面**；Phase 1A/1B 的 AC 一条未勾，见 Timeline 的范围说明；WP2 及之后未启动；**2026-09-07 家里接手推进**（operator `0001788779461388`），Design Gate 收敛见 2026-09-07 讨论记录",
       "file": "F300-self-sensing-home-state-awareness.md"
     },
     {
@@ -1821,13 +1821,13 @@
     {
       "id": "F309",
       "name": "Collaborative Content Plane — 跨媒介内容协作平面",
-      "status": "spec / Phase A Research + Design Gate",
+      "status": "in-progress / Phase R 工程基线已交付，作品标注/评论体验改版进行中；Office/video 两媒介 Admission Gate 仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {
       "id": "F311",
       "name": "Capability Evolution Workspace（Meta-RSI 产品控制面）",
-      "status": "in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; real E0 Alpha constitution complete, while AC-41–44 acceptance remains open on real observation/authorization/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0",
+      "status": "in-progress (v6 product-experience contract; v5 final-vision phases; Gate 0A + Phase 1–3 landed; Phase 4 implementation landed; roadshow retained as Phase 1 regression; operator-selected F314/F100 full-loop AC-41–44 and AC-UX4 remain open on owner-backed asset/evidence/outcome truth) | **Product phase owner**: Maine Coon (@codex-sol, gpt-5.6-sol)（本轮 operator 指定执行） | **Architecture co-creator/reviewer**: Ragdoll (@fable5, claude-fable-5) | **Priority**: P0",
       "file": "F311-capability-evolution-workspace.md"
     },
     {
@@ -1845,7 +1845,7 @@
     {
       "id": "F314",
       "name": "Development Episode Alignment Experiment｜开发交付对齐自进化实验",
-      "status": "in-progress / Phase B landed behavior accepted except AC-B1's authorized delivery-budget exception and AC-B5's post-corrective runtime revalidation; Phase C remains with F311 | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0",
+      "status": "in-progress / Phase B accepted with AC-B1's authorized delivery-budget exception and AC-B5's accepted-then-retired dogfood lifecycle; Phase C is active/instrumenting with the F100 owner-loop interface landed and its child Task done, while observation proof and natural adoption/outcome remain open | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol） | **Priority**: P0",
       "file": "F314-development-episode-alignment-experiment.md"
     },
     {
@@ -1859,6 +1859,12 @@
       "name": "Memory Coverage & Recall Truth｜记忆内容覆盖与真实召回验收",
       "status": "in-progress | **Owner**: 小太阳·Maine Coon（@codex-sol, GPT-5.6 Sol）+ F316 总控线程责任猫 | **Priority**: P1",
       "file": "F316-memory-coverage-recall-truth.md"
+    },
+    {
+      "id": "F317",
+      "name": "Coactive Companion — 猫猫走进共同生活现场",
+      "status": "spec | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1",
+      "file": "F317-coactive-companion.md"
     }
   ]
 }

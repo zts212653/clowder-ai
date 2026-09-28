@@ -49,6 +49,51 @@ function bgInvocationCreated(parent: string, turn: string, ts = 1050) {
 describe('Codex background path — tool work-log + text converge', () => {
   const bg = installBackgroundHarness();
 
+  it('attaches a suppressed child event to the background root bubble without a child system bubble', () => {
+    const parent = 'parent-subexecution-background';
+    const childEvent = {
+      v: 1 as const,
+      id: 'subexecution:child-background:message',
+      kind: 'subexecution' as const,
+      occurredAt: 1010,
+      stage: 'message' as const,
+      subexecutionId: 'child-background',
+      rootExecutionId: 'root-provider-thread',
+      parentExecutionId: 'root-provider-thread',
+      rootTurnId: 'root-provider-turn',
+      parentTurnId: 'root-provider-turn',
+      turnId: 'child-provider-turn',
+      agentPath: '/root/review_delta',
+      nickname: 'Bohr',
+      depth: 1,
+      content: 'Approve from background child',
+      messagePhase: 'final_answer' as const,
+    };
+
+    bg.dispatchBg({
+      type: 'system_info',
+      catId: 'codex',
+      threadId: BG,
+      invocationId: parent,
+      timestamp: 1010,
+      semanticEvent: childEvent,
+      metadata: {
+        provider: 'openai',
+        model: 'gpt-5.6-sol',
+        subexecutionEvents: [childEvent],
+      },
+    });
+
+    const rootBubble = threadCodexStreamBubbles(BG)[0];
+    expect(rootBubble?.metadata?.subexecutionEvents).toEqual([childEvent]);
+    expect(
+      useChatStore
+        .getState()
+        .getThreadState(BG)
+        .messages.some((message) => message.content.includes('Approve from background child')),
+    ).toBe(false);
+  });
+
   it('[bg race] tool_use before turn + invocation_created + text(turn) converge to ONE bubble', () => {
     const PARENT = 'parent-bg-a2a';
     const TURN = 'turn-bg-codex';

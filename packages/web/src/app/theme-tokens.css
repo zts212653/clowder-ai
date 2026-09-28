@@ -68,6 +68,12 @@
   --semantic-info-surface: oklch(0.96 0.03 210);
   --semantic-spotlight-surface: oklch(0.96 0.04 45);
 
+  /* --- Content category 4色（F311 operator B：类别 ≠ 主动作 ≠ 状态） --- */
+  --content-category-object: oklch(0.5 0.1 180);
+  --content-category-rubric: oklch(0.52 0.12 280);
+  --content-category-measurement: oklch(0.52 0.12 330);
+  --content-category-diagnosis: oklch(0.5 0.1 105);
+
   /* --- 5. Code Block（github-light 风格固定 palette） --- */
   --code-bg: oklch(0.9 0.005 30);
   --code-text: oklch(0.19 0.02 30);
@@ -139,6 +145,12 @@
   --overlay-fg: oklch(0.98 0 0);
   --overlay-fg-muted: oklch(0.98 0 0 / 0.8);
 
+  /* F311 accepted warm Workspace focus; scoped consumers do not change the shell accent. */
+  --evolution-focus: #b05f45;
+  --evolution-focus-text: #8f4730;
+  --evolution-focus-soft: #f7ebe5;
+  --evolution-title-font: Georgia, "Noto Serif SC", "Songti SC", serif;
+
   /* --- 兼容旧通用 alias --- */
   --color-cafe-accent: var(--cafe-accent);
   --color-base-white: var(--cafe-surface);
@@ -152,6 +164,9 @@
  * DARK MODE
  * ============================================================ */
 [data-theme="dark"] {
+  --evolution-focus: var(--accent-500);
+  --evolution-focus-text: var(--accent-600);
+  --evolution-focus-soft: var(--accent-100);
   /* Dark accent/surface hue/chroma — aligned with INIT_DARK */
   --accent-hue: 35;
   --accent-chroma: 0.08;
@@ -192,6 +207,12 @@
   --semantic-warning-surface: oklch(0.25 0.05 70);
   --semantic-info-surface: oklch(0.25 0.05 230);
   --semantic-spotlight-surface: oklch(0.25 0.06 70);
+
+  /* --- Content category（dark: 同语义、提高 L，不借 semantic palette） --- */
+  --content-category-object: oklch(0.72 0.1 180);
+  --content-category-rubric: oklch(0.72 0.12 280);
+  --content-category-measurement: oklch(0.72 0.12 330);
+  --content-category-diagnosis: oklch(0.72 0.1 105);
 
   /* --- 5. Code Block（vscode-dark+ 风格固定 palette） --- */
   --code-bg: oklch(0.25 0.005 30);

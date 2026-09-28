@@ -119,7 +119,8 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // incorrectly removes indeterminate notices. Fix: keep if cmp > 0 OR
       // (cmp === 0 AND strings differ = indeterminate, not truly resolved).
       // True equality (same string) = notice maxMessageId matches seenCursor exactly → resolved.
-      const preFilterNoticeCount = unresolvedNotices.length;
+      const preFilterNotices = unresolvedNotices;
+      const preFilterNoticeCount = preFilterNotices.length;
       if (seenCursor) {
         // #1200 Sol R6 P2-2: prefer maxCursor (v2) for same-format comparison.
         // Legacy events lack maxCursor — canonicalize maxMessageId via messageStore.
@@ -145,6 +146,28 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // Used for unified ack counting regardless of subsequent reinvoke/skip decision
       // (cloud R2 P2-3 audit: trigger path + other skip paths all need this).
       const cursorFilteredCount = preFilterNoticeCount - unresolvedNotices.length;
+      if (cursorFilteredCount > 0) {
+        const unresolvedIds = new Set(unresolvedNotices.map((notice) => notice.noticeId));
+        const ackedNoticeIds = preFilterNotices
+          .map((notice) => notice.noticeId)
+          .filter((noticeId) => !unresolvedIds.has(noticeId));
+        try {
+          await eventLog.append(
+            {
+              kind: 'notice_implicit_acked',
+              invocationId,
+              threadId,
+              catId,
+              timestamp: Date.now(),
+              noticeIds: ackedNoticeIds,
+              ackedVia: 'seenCursor_advance',
+            },
+            { ownerUserId: userId },
+          );
+        } catch {
+          // fail-open: cursor truth still prevents a stale re-invoke.
+        }
+      }
 
       // 4. Get latest message ID in thread (for decider context)
       const recentMessages = await deps.messageStore.getByThread(threadId, 1);
@@ -219,15 +242,18 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
         // triggeredInvocationId is 'queued-pending' because the actual new
         // invocation ID is assigned later by QueueProcessor.
         try {
-          await eventLog.append({
-            kind: 'reinvoke_triggered',
-            invocationId,
-            threadId,
-            catId,
-            timestamp: Date.now(),
-            triggeredInvocationId: 'queued-pending',
-            sourceNoticeIds: decision.noticeIds,
-          });
+          await eventLog.append(
+            {
+              kind: 'reinvoke_triggered',
+              invocationId,
+              threadId,
+              catId,
+              timestamp: Date.now(),
+              triggeredInvocationId: 'queued-pending',
+              sourceNoticeIds: decision.noticeIds,
+            },
+            { ownerUserId: userId },
+          );
         } catch {
           // fail-open: audit event failure → don't block
         }
@@ -251,19 +277,22 @@ export function createFreshnessReinvokeCheck(deps: FreshnessReinvokeCheckDeps): 
       // Spec §B4: "每次 skip 记录 reinvoke_skipped 事件（含 reason）"
       if (!decision.shouldReinvoke && decision.skipReason) {
         try {
-          await eventLog.append({
-            kind: 'reinvoke_skipped',
-            invocationId,
-            threadId,
-            catId,
-            timestamp: Date.now(),
-            reason: decision.skipReason as
-              | 'quota_exhausted'
-              | 'already_handled'
-              | 'low_priority'
-              | 'cursor_caught_up'
-              | 'newer_invocation',
-          });
+          await eventLog.append(
+            {
+              kind: 'reinvoke_skipped',
+              invocationId,
+              threadId,
+              catId,
+              timestamp: Date.now(),
+              reason: decision.skipReason as
+                | 'quota_exhausted'
+                | 'already_handled'
+                | 'low_priority'
+                | 'cursor_caught_up'
+                | 'newer_invocation',
+            },
+            { ownerUserId: userId },
+          );
         } catch {
           // fail-open: audit event failure → don't block
         }

@@ -14,6 +14,8 @@ function eventBoundary(event: RoutingSignalEventV1): string {
     const boundary = event.validUntil ?? event.resetAt;
     return boundary ? `至 ${new Date(boundary).toLocaleString()}` : '无有效边界';
   }
+  if (event.eventType === 'recovered' && event.probeStartedAt !== undefined)
+    return '调用成功，先前的同猫自动故障已恢复';
   return `关闭 ${event.closesSignalIds.join(', ')}`;
 }
 

@@ -33,11 +33,11 @@ function sumRejectedReasons(metrics: Record<string, number>, reasons: ReadonlySe
   return total;
 }
 
-const STALE_REASONS = new Set(['task_done', 'invocation_mismatch']);
+const STALE_REASONS = new Set(['task_done', 'invocation_mismatch', 'authority_stale', 'authority_changed']);
 const UNRELATED_REASONS = new Set(['owner_mismatch', 'thread_mismatch', 'subject_mismatch']);
 const UNCOVERED_REASONS = new Set(['coverage_unconfirmed', 'intent_mismatch']);
 const QUERY_FAILED_REASONS = new Set(['query_failed', 'state_source_unavailable']);
-const OTHER_REASONS = new Set(['missing_invocation', 'no_candidate', 'proof_invalid']);
+const OTHER_REASONS = new Set(['missing_invocation', 'missing_identity', 'no_candidate', 'proof_invalid']);
 
 /** F177 Phase J runtime verdict component, consumed by the longitudinal F167 eval. */
 export function buildEventBackedRoutingExitEval(metrics: Record<string, number>): ComponentHealth {

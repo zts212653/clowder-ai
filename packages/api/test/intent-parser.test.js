@@ -75,8 +75,14 @@ describe('parseIntent', () => {
     assert.deepEqual(r.promptTags, ['skill:custody-recognition']);
   });
 
+  it('wakes custody recognition for a natural time-bound work introduction mixed with anxiety', () => {
+    const r = parseIntent('@codex-astra 有个活儿，周四 F311 需要去演示，我现在好焦虑怎么办！', 1);
+    assert.deepEqual(r.promptTags, ['skill:custody-recognition']);
+  });
+
   it('does not treat venting or a one-turn request as durable custody', () => {
     assert.deepEqual(parseIntent('下周又要写汇报，想想就烦', 1).promptTags, []);
+    assert.deepEqual(parseIntent('下周有个活儿，想到就烦', 1).promptTags, []);
     assert.deepEqual(parseIntent('帮我看看这段代码', 1).promptTags, []);
   });
 

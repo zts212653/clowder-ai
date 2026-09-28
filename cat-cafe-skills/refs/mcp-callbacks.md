@@ -36,13 +36,21 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 
 ## Tracking registration policy
 
-PR tracking 是显式、一次性的 typed wait，不是事件订阅器。调用方必须给出：
+PR/issue tracking 注册一次，匹配后默认自动续代，不需要再注册。**普通注册只给对象**：PR 是 `repoFullName + prNumber`，issue 是 `repoFullName + issueNumber`。`when`、`goal`、`nextStep` 全部可选（#1392 AC-7）。
 
-- `when`：1–4 个 flat any-of predicate；只允许 F280 catalog 中的 typed 条件。
-- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。
-- `expiresAt`：责任失效时间。baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
+省略 `when` 时服务端装上对象自身的状态条件**和两个评论面**，受众按角色解析：PR 作者收除自己以外的全部回复（含 bot）；有可核验依据的 maintainer/reviewer 只收 PR 作者的回复（过滤 bot 与可确定识别的纯召唤命令）；issue 收除自己以外的全部评论。身份或角色无法确定时，评论照常投递并标注「身份/角色未知」，**不静默丢弃、不扩大收件人、也不因此关闭追踪**。注册返回的 `notification` 写明实际装了什么、解析出什么角色、过滤规则是什么。
 
-不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta。merged/closed 会投递 terminal outcome；expiry、owner change、user cancel 静默终止。re-register 原子替换上一 generation。
+可选：
+
+- `when`：高级精确入口，flat any-of typed predicate，每种条件最多一个。写在这里的 `pr_conversation_comment_added` / `pr_inline_comment_added` 仍然必须自带 `authorLogins`，且不会被套上角色过滤。
+- `goal`：把两个评论面收窄到你点名的人，是收窄而不是前置条件。
+- `nextStep`：条件满足后要做什么；只显示、不解析为 policy。省略则由服务端确定性生成。
+
+- `expiresAt`：责任失效时间（Unix ms）。**省略则没有时间到期**；写了必须在未来，并会在注册返回中可见。
+
+baseline 与 owner fence 均由 server 从实时真相生成，调用方不能提交。
+
+不匹配的 GitHub 事实只推进 collector 台账；匹配时每个 generation 最多投递一次 compact delta，并默认原子地装上下一代（`autoRenew: false` 为单次等待）。merged/closed 会投递 terminal outcome 并结束追踪；expiry 投递明确的到期通知并结束追踪；owner change、user cancel 静默终止。要等待**另一个条件**时 re-register，它原子替换上一 generation。
 
 Issue tracking 在 F280 Phase C 前仍保留自己的 comment actor policy；不要把 issue 的 `wakePolicy` 借回 PR。正常调用只传 MCP 参数，不要为了设置 policy 手写 callback HTTP。
 

@@ -20,6 +20,18 @@ function sha256File(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+function assertCleanPublicTestWorkspace(workspaceRoot) {
+  const status = commandOutput(
+    'git',
+    ['-C', workspaceRoot, 'status', '--porcelain=v1', '--untracked-files=all'],
+    'could not inspect public-test workspace state',
+  );
+  invariant(
+    status.length === 0,
+    'public-test provenance requires a clean workspace; commit or revert staged, unstaged, and untracked changes',
+  );
+}
+
 export function stablePublicTestValue(value) {
   if (Array.isArray(value)) return value.map(stablePublicTestValue);
   if (!value || typeof value !== 'object') return value;
@@ -56,6 +68,7 @@ export function currentPublicTestProvenance(packageRoot) {
     ['-C', packageRoot, 'rev-parse', '--show-toplevel'],
     'could not resolve workspace root',
   );
+  assertCleanPublicTestWorkspace(workspaceRoot);
   return validatePublicTestProvenance({
     workspaceTree: commandOutput(
       'git',

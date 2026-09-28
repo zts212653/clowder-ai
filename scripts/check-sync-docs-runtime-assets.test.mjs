@@ -27,6 +27,26 @@ import {
 const SELF_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SELF_DIR, '..');
 const SYNC_SCRIPT_PATH = resolve(SELF_DIR, 'sync-to-opensource.sh');
+const MICRODUCK_ROADSHOW_ROOT = 'docs/videos/f311-microduck-roadshow';
+const MICRODUCK_PIPELINE_ROOT = 'docs/videos/f311-microduck-roadshow/pipeline';
+const MICRODUCK_FOOTBALL_PUBLICATION = `${MICRODUCK_PIPELINE_ROOT}/football/workspace-publication.json`;
+const MICRODUCK_RUNTIME_SOURCE_FILES = [
+  'packages/api/src/infrastructure/capability-evolution/adapters/microduck-local-owner-evidence.ts',
+  'packages/api/src/infrastructure/capability-evolution/adapters/microduck-preparation/publication.ts',
+  'packages/api/src/infrastructure/capability-evolution/adapters/microduck-preparation/football-publication.ts',
+];
+const MICRODUCK_LITERAL_RUNTIME_ASSETS = [
+  `${MICRODUCK_PIPELINE_ROOT}/manifests/owner-contract.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/manifests/policies.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/baseline-onnx-smoke.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/go-no-go.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/baseline-space-live.png`,
+  `${MICRODUCK_PIPELINE_ROOT}/manifests/control-experiment.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/control-public-evaluation.json`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/football-scene-smoke.md`,
+  `${MICRODUCK_PIPELINE_ROOT}/evidence/football-scene-ball-29e887ec.png`,
+  MICRODUCK_FOOTBALL_PUBLICATION,
+];
 
 describe('F221 private Taste outbound exclusion', () => {
   it('hard-excludes docs/taste and gives neither its index nor vignettes public sync coverage', () => {
@@ -37,6 +57,71 @@ describe('F221 private Taste outbound exclusion', () => {
     assert.ok(excluded.includes('docs/taste/'));
     assert.equal(isCoveredBySync('docs/taste/index.md', coverage), false);
     assert.equal(isCoveredBySync('docs/taste/vignettes/private-house-memory.md', coverage), false);
+  });
+});
+
+describe('F311 Microduck runtime asset boundary', () => {
+  it('exports only the exact owner inputs, never the full training project', () => {
+    const manifestText = readFileSync(resolve(REPO_ROOT, 'sync-manifest.yaml'), 'utf8');
+    const publication = JSON.parse(readFileSync(resolve(REPO_ROOT, MICRODUCK_FOOTBALL_PUBLICATION), 'utf8'));
+    const publicationResources = publication.groups.flatMap((group) =>
+      group.items.flatMap((item) => item.resources.map((resource) => resource.path)),
+    );
+    const experiment = JSON.parse(
+      readFileSync(resolve(REPO_ROOT, MICRODUCK_PIPELINE_ROOT, 'manifests/control-experiment.json'), 'utf8'),
+    );
+    // Preparation reads these content-addressed files through the experiment,
+    // so the direct docs-literal scan cannot see this runtime dependency edge.
+    const experimentResources = [
+      ...new Set([
+        experiment.runnerPath,
+        experiment.evaluationEnvPath,
+        experiment.publicSeedSet.path,
+        ...experiment.subjects.map((subject) => subject.configPath),
+      ]),
+    ].map((path) => `${MICRODUCK_PIPELINE_ROOT}/${path}`);
+    const expectedAssets = [...MICRODUCK_LITERAL_RUNTIME_ASSETS, ...publicationResources, ...experimentResources];
+    const runtimeAssets = parseManifestList(manifestText, 'docs_runtime_assets_allowlist').filter((path) =>
+      path.startsWith(MICRODUCK_ROADSHOW_ROOT),
+    );
+    const referencedAssets = MICRODUCK_RUNTIME_SOURCE_FILES.flatMap((sourceFile) =>
+      parseDocsReferences(readFileSync(resolve(REPO_ROOT, sourceFile), 'utf8'), sourceFile)
+        .map(({ path }) => path)
+        .filter((path) => path.startsWith(MICRODUCK_ROADSHOW_ROOT)),
+    );
+
+    assert.deepEqual(referencedAssets, MICRODUCK_LITERAL_RUNTIME_ASSETS);
+    assert.deepEqual(runtimeAssets.toSorted(), expectedAssets.toSorted());
+    assert.equal(new Set(publicationResources).size, publicationResources.length);
+    assert.equal(publicationResources.filter((path) => path.endsWith('.mp4')).length, 14);
+    assert.equal(
+      publicationResources.some((path) => path.endsWith('.json.gz')),
+      false,
+    );
+    assert.equal(
+      publicationResources.some((path) => path.endsWith('/briefing/index.html')),
+      false,
+    );
+    assert.equal(runtimeAssets.includes(`${MICRODUCK_PIPELINE_ROOT}/`), false);
+  });
+
+  it('keeps the optional installation archive out of export without exempting its mandatory published resources', () => {
+    const archiveRoot = `${MICRODUCK_PIPELINE_ROOT}/football`;
+    const reader =
+      'packages/api/src/infrastructure/capability-evolution/adapters/microduck-exploration/archive-reader.ts';
+    assert.deepEqual(
+      parseDocsReferences(readFileSync(resolve(REPO_ROOT, reader), 'utf8'), reader).map(({ path }) => path),
+      [archiveRoot],
+    );
+    assert.equal(isIgnored(archiveRoot), true);
+    assert.equal(isIgnored(MICRODUCK_PIPELINE_ROOT), false);
+    const capture = `${archiveRoot}/evidence/20260907-fixed-kicks/left-manifest.json.gz`;
+    assert.equal(isIgnored(capture), false, 'the exception is for one installation root, never a descendant prefix');
+    assert.equal(isCoveredBySync(capture, loadSyncCoveragePaths(REPO_ROOT)), false);
+    for (const path of MICRODUCK_LITERAL_RUNTIME_ASSETS) {
+      assert.equal(isIgnored(path), false);
+      assert.equal(isCoveredBySync(path, loadSyncCoveragePaths(REPO_ROOT)), true);
+    }
   });
 });
 

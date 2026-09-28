@@ -64,8 +64,15 @@ test('Node process adapter starts without a shell, inherits no ambient env, and 
     assert.equal('NPM_TOKEN' in childEnvironment, false);
     assert.equal('REDIS_URL' in childEnvironment, false);
     assert.equal('PATH' in childEnvironment, false);
+    const publicTestGuardKeys =
+      process.env.CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE === 'distributable'
+        ? new Set(['CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE', 'GIT_ALLOW_PROTOCOL', 'NODE_OPTIONS'])
+        : new Set();
+    for (const key of publicTestGuardKeys) assert.equal(childEnvironment[key], process.env[key]);
     assert.deepEqual(
-      Object.keys(childEnvironment).filter((key) => !key.startsWith('CLOWDER_') && key !== '__CF_USER_TEXT_ENCODING'),
+      Object.keys(childEnvironment).filter(
+        (key) => !key.startsWith('CLOWDER_') && key !== '__CF_USER_TEXT_ENCODING' && !publicTestGuardKeys.has(key),
+      ),
       [],
     );
   } finally {

@@ -367,6 +367,16 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
+    name: 'CAT_CAFE_READONLY_AGENT_KEY_UNION',
+    defaultValue: '(空)',
+    description:
+      'readonly+agent-key 并集的显式开关：仅由合法的 agent-key 启动方（Antigravity executor / desktop writer）在确有密钥时置 "true"。' +
+      'CAT_CAFE_READONLY=true 默认严格只读，继承环境里残留的 CAT_CAFE_AGENT_KEY_* 不再扩大工具面。',
+    category: 'server',
+    sensitive: false,
+    runtimeEditable: false,
+  },
+  {
     name: 'CAT_CAFE_AGENT_KEY_BOUND_CAT_ID',
     defaultValue: '(空)',
     description:

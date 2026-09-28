@@ -29,7 +29,7 @@ import {
   requireLinkedEvidence,
   requireOwnerBundle,
 } from './program-evaluation-resolution.js';
-import type { EvolutionProgramProjectionV1 } from './program-projection.js';
+import type { EvolutionProgramProjectionV1 } from './read-model/program-projection.js';
 
 /**
  * F311 Phase 3 - the production writer (AC-31-33).

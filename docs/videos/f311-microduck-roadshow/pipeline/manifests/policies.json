@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "defaultPolicy": "baseline",
+  "policies": [
+    {
+      "id": "baseline",
+      "available": true,
+      "ownerRef": "hf-space:pollen-robotics/microduck-simulator@183f99a40bd7308da3e848de961ed32bb02624a5#app/public/policies/BEST_alpha_walking.onnx",
+      "ownerRevision": "183f99a40bd7308da3e848de961ed32bb02624a5",
+      "url": "https://huggingface.co/spaces/pollen-robotics/microduck-simulator/resolve/183f99a40bd7308da3e848de961ed32bb02624a5/app/public/policies/BEST_alpha_walking.onnx",
+      "sha256": "e36332d383997d51401897734cd3e79cf5038406feddb18b4d57ecfb141daa6c",
+      "blockerRef": null
+    },
+    {
+      "id": "control",
+      "available": false,
+      "ownerRef": null,
+      "ownerRevision": null,
+      "url": null,
+      "sha256": null,
+      "blockerRef": "blocker:official-checkpoint-and-hf-auth"
+    },
+    {
+      "id": "push-range",
+      "available": false,
+      "ownerRef": null,
+      "ownerRevision": null,
+      "url": null,
+      "sha256": null,
+      "blockerRef": "blocker:official-checkpoint-and-hf-auth"
+    },
+    {
+      "id": "spawn-tilt",
+      "available": false,
+      "ownerRef": null,
+      "ownerRevision": null,
+      "url": null,
+      "sha256": null,
+      "blockerRef": "blocker:official-checkpoint-and-hf-auth"
+    },
+    {
+      "id": "upright-weight",
+      "available": false,
+      "ownerRef": null,
+      "ownerRevision": null,
+      "url": null,
+      "sha256": null,
+      "blockerRef": "blocker:official-checkpoint-and-hf-auth"
+    }
+  ]
+}

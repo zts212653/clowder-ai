@@ -1,31 +1,80 @@
 ---
 feature_ids: [F309]
-related_features: [F063, F138, F202, F290, F307]
+related_features: [F063, F138, F202, F290, F307, F310]
 topics: [collaborative-content, co-editing, change-awareness, selection-anchors, annotations, agent-patch, office, media]
 doc_kind: spec
+design_gate_claim_contracts:
+  - docs/design-gate-claims/f309-artwork-review-real-shell.json
 created: 2026-08-27
 description: "让人和猫在异质内容上共同编辑、感知有版本的变化、精确批注并安全审阅 Agent patch，同时让 canonical 内容和版本留在各自 owner。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-09-04T07:10:00Z
-tips_exempt: "Phase A Research + Design Gate 的 GenOffice-first content-editor-provider admission 仍是未授权、未激活的候选设计，无稳定用户入口；Phase D KEEP 后随真实共同编辑入口补 capability tip。"
+description_updated_at: 2026-09-13T20:42:00Z
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F309-collaborative-content-plane.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_inspect_office_document
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_edit_office_document
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_read_artifact_review
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_prepare_artifact_review
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_act_artifact_review
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F309-collaborative-content-plane.md"
+    toolName: cat_cafe_respond_artifact_review
+    resourceFamily: collaborative-content
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F309: Collaborative Content Plane — 跨媒介内容协作平面
 
-> **Status**: spec / Phase A Research + Design Gate
+> **Status**: in-progress / Phase R 工程基线已交付，作品标注/评论体验改版进行中；Office/video 两媒介 Admission Gate 仍开放
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **Source thread**: `[thread-id]`
-> **operator origin**: 从 F290 完整剥离 Office、富文本、图片、视频、画布的编辑、选区、批注与 Agent patch；“能用开源就用开源集成”；最终要支持人猫共同编辑，猫能感知人的编辑。来源：`0001787892832734-000882-d75c3999`。
-> **operator final-state correction**: DOCX + video 必须优先直接集成成熟开源能力；禁止用 fake owner、最小编辑器或独立脚手架证明“可行”，开发从真实候选的最终宿主/内容边界起步。来源：`0001787927110398-000292-cccc31fc`。
-> **operator Workspace correction**: Office 不是孤立工具或多内核拼盘；家里只维护一条 Office 主线，把它嵌入现有浏览器 Workspace。人和具名猫都是同一实时内容模型里的第一等 writer，不能让猫离线改旧文件或借用人的光标、身份冒充共同编辑。来源：`0001788227480178-000216-494528d3`、`0001788228380574-000234-d2034eaa`。
-> **operator plugin choice**: Office 是用户可选择安装/启用的 provider plugin，不是 core 默认重依赖；GenOffice 是第一个真实 admission candidate。第一轮只开 DOCX vertical slice，验证通过后 XLSX/PPTX/PDF 才在同一插件内逐项开放。来源：`0001788503343691-000297-3bfa0fb4`。
+> **operator origin**: 从 F290 完整剥离 Office、富文本、图片、视频、画布的编辑、选区、批注与 Agent patch；“能用开源就用开源集成”；最终要支持人猫共同编辑，猫能感知人的编辑。来源：`private-source-id`。
+> **operator final-state correction**: DOCX + video 必须优先直接集成成熟开源能力；禁止用 fake owner、最小编辑器或独立脚手架证明“可行”，开发从真实候选的最终宿主/内容边界起步。来源：`private-source-id`。
+> **operator Workspace correction**: Office 不是孤立工具或多内核拼盘；家里只维护一条 Office 主线，把它嵌入现有浏览器 Workspace。人和具名猫都是同一实时内容模型里的第一等 writer，不能让猫离线改旧文件或借用人的光标、身份冒充共同编辑。来源：`private-source-id`、`private-source-id`。
+> **operator plugin choice**: Office 是用户可选择安装/启用的 provider plugin，不是 core 默认重依赖；GenOffice 是第一个真实 admission candidate。第一轮只开 DOCX vertical slice，验证通过后 XLSX/PPTX/PDF 才在同一插件内逐项开放。来源：`private-source-id`。
 
 Architecture cell: `collaborative-content-plane`
 
+具名猫入口契约（2026-09-06，Host 已由 PR #4394 合入 main；production runtime 尚未加载）：
+`cat_cafe_inspect_office_document` 按 Host 给出的 contentRef，或已打开文档的 workspace
+`{worktreeId, path}`，只读定位同一份协作内容（不导入文件、不绑定或启用插件），返回 contentRef 与有 ownerRevision 的有界
+段落 anchor、精确 quote 与 editable 状态；`cat_cafe_edit_office_document` 只接受同一目标上的
+tracked-change / comment 和稳定 operationId。两入口共用 callback 身份、线程/owner 范围与
+F202 live feature authority；作者从认证 principal 取得，不接受 caller author、人类 bearer 或整文件
+替换。读取是 readonly 可用的数据入口，修改只在 write profile 暴露；文档正文始终是 untrusted data。
+两者均消费已安装且启用的 provider，不自建内容、授权或保存回执真相。详细验收与发布证据见
+
 Map delta: `new cell required` — F307 只拥有 Workbench topology，F290 只拥有 Collective domain，
 现有 ownership map 没有跨媒介 anchor/annotation/patch mechanics 的 owner。
+
+Canonical source: `packages/api/src/domains/collaborative-content/editor-surface-admission.ts#EditorSurfaceAdmissionV1`
+
+Consumer evidence: `rg -n "EditorSurfaceLocatorPort|surfaceAdmissionMatchesSession|f202-content-editor-surface-admission" packages/api/src packages/web/src` → API resume route 只在 typed F202 admission 与 prepared F309 session 全字段匹配后轮换 bearer；Web 只消费该闭合 response shape。
+
+Claim guard: “任意 HTTPS URL、stale package/grant/lifecycle、错误 entrypoint/framing/navigation policy 都不能获得 session bearer” → `packages/api/test/collaborative-content-routes.test.js` 的 `requires one typed F202 attestation...` + `packages/web/src/components/workbench/content-editor/__tests__/ContentEditorOwnerSurface.test.tsx` → 任一 authority 字段漂移或非 exact parent origin 时在 `sessions.resume` / iframe mount 前变红。
 
 ## Why
 
@@ -79,7 +128,8 @@ CAS、可见 attribution、owner receipt 与 undo，且用户可随时收回权�
 | [F290](F290-ai-native-collective.md) | Artifact lineage、权限、Collective result target 与局部 true-frontend 协作旅程 | 不应继续拥有公共跨媒介协作契约 |
 | [F063](F063-hub-workspace-explorer.md) | repo file/code 编辑与一次性 selection attachment | AC31 不承诺文件变化后的稳定 anchor；不覆盖 Office/media/canvas |
 | [F138](F138-video-studio.md) | video spec、素材、配音、render pipeline | 无 time/frame-range annotation + patch lifecycle |
-| [F202](F202-plugin-framework.md) | Host-owned external package、installation/grants/runtime/settlement boundary | 当前 manifest 只支持 skill/MCP/limb/schedule；还没有 content editor provider contribution |
+| [F202](F202-plugin-framework.md) | Host-owned package/install/grant/Broker authority；公开 beta.15 的 content editor contribution、静态 renderer 与隔离 materializer 已在 #4394 装配 | 不拥有内容、版本、选区或 owner settlement；不代表 production activation |
+| F290 W4 Markdown consumer census | F307 已有 typed content surface mount；content-owner 层已有通用 bytes/revision/receipt primitives；F290 分支已有 authenticated Human/Collective membership 基础 | 尚无两个不同 Human 围绕同一 canonical Markdown 完成 read/annotate/propose/apply/version/revoke 的 owner-backed 路径；当前 Workspace editor 仅支持 DOCX 且绑定单一 Host owner |
 
 关联检测已覆盖 feature graph、ownership docs、相关 threads 与语义检索，三路命中后无新的 canonical
 anchor。结论：F309 不是 F307/F290/F063/F138 的 Phase 或 adapter 子任务，而是四者共同消费/实现的
@@ -141,12 +191,18 @@ F309 的 Office 实现必须扩展 F202 external-package contract，新增 versi
 在 core 按 vendor 写产品分支。
 
 - contribution 声明 `providerId`、支持格式/capabilities、F307 surface entry、runtime mode 与请求的 Host grants；
-- Host 绑定 package digest、installation instance、effective grants、runtime lease 和 provider identity；
+- Host 以单个 typed surface admission 绑定 package digest、installation instance、effective grants、runtime lease、
+  provider identity、renderer origin、entrypoint、framing policy 与 navigation policy；
   installed/configured/authorized/selected/live 是五种独立状态，任何一项不能替另一项报成功；
 - `clowder-ai-plugins` 拥有公开 contribution schema/SDK/conformance 与 GenOffice-specific provider source；
   Clowder AI core 只实现可复用的 F202 Host adapter 和 F309/F307 domain ports；
 - F309/F307 Host adapter 只允许 open/render、owner load/settle、named actor、resolve、preview、apply/invert、
   receipt 等窄 ports；插件不得获得任意文件系统、任意网络或 Clowder AI credentials；
+- provider renderer 只能由 F202 从无 Clowder AI cookie/Host API 的 dedicated origin 提供，并以精确 Host origin
+  的 framing policy + exact origin/window/nonce ready handshake 一次性交付 `MessagePort`；冻结 renderer 必须在
+  upstream code 前以 Navigation API fail-closed 阻止 self-navigation 请求，缺该 API 就不得发 ready。后续 load
+  仍撤权作为纵深防御，但不能冒充前置 egress fence；禁止 opaque-origin storage 假设、同 Host/API origin、
+  `targetOrigin='*'`，或仅凭 URL 形状/`surfaceIntegrity` 字符串向任意 HTTPS origin 交付 bearer；
 - F309 持久化唯一 authoritative `OfficeProviderBindingV1`；content owner 只缓存带 `bindingRevision` 的
   非权威 projection 用于 settlement fence，不得自行选择/迁移 provider。一个 `contentRef` 任一时刻只绑定
   一个 production provider；切换必须经 F309 显式转换/重开并产生新 lineage，禁止双引擎离线覆盖；
@@ -349,9 +405,46 @@ F309/F307/content-owner 边界，并指定 DOCX + video 直接走成熟开源终
 本 Phase 还需为 Office 与 video 各选一个能进入最终宿主的 exact-source candidate，闭合 license、host、
 部署、数据与维护边界。operator 先授权 leading candidates 的真实 final-surface dependency/service admission，
 但该授权不等于 adopted/admitted；只有 stable target、authoritative owner settlement 与跨会话 recovery 证据
-闭合后才完成 AC-A4。operator 已选 GenOffice `v0.8.1039@e833fff` 作为第一个 Office plugin candidate；
-dependency/runtime 仍待 exact Packet D 授权。Office 只准入一条 production binding；SuperDoc、ONLYOFFICE、
-Collabora 仅作退出路径，不并行演化成第二套 Office 产品。未闭合前 Phase B 保持关闭。
+闭合后才完成 AC-A4。operator 已选 GenOffice `v0.8.1039@e833fff` 作为第一个 Office plugin candidate，
+并授权 Packet D 的隔离准入及后续交付、merge/npm 发布；当前公共包已发布，Host 已合入
+[#4394](https://github.com/zts212653/clowder-ai/pull/4394)，合入后隔离 Alpha 的真实入口验收仍待完成。
+准确来源及组合门禁证据见交付闭环记录。Office 只准入一条 production binding；SuperDoc、ONLYOFFICE、
+Collabora 仅作退出路径，不并行演化成第二套 Office 产品。未闭合前，Office/video 共同编辑的 Phase B/C 保持关闭；
+operator 已明确授权下面的 Phase R 在该门之前完整交付，不能用 R 的完成代替 AC-A4 或整个 Feature 完成。
+
+### Phase R: Complete Immutable Artifact Review（2026-09-07 operator 授权先行）
+
+**体验改版已授权准备并开工（2026-09-09）**：operator 用四张参考图指出标注/评论体验差距，要求把原消息、截图和作者思考挂回 F309 后开始工作。
+原话 `[thread-id]#private-source-id`、开工指令 `#private-source-id`，
+
+**已交付（2026-09-08）**：PR #4432、#4444、#4447 已合入；真实 Alpha 最终 cut 为
+`8789118210ed72182960c25848d2fde0f1a14554`。Sonnet 主链验收 `private-source-id`
+及最终有界验收 `private-source-id` 均通过。原图片/mp4 Task 已 typed closure，
+记录独立技术审阅、实际 Alpha 和权限反例。PNG 最后经 Astra 明确提醒后续办，MP4 自动收口；
+不把两者概括为全自动。此阶段完成不改变 Office、可编辑 video、AC-A4/B/C/D 或生产启用状态。
+
+在原 F310 prepared Artifact 入口完成图片/mp4 的整轮审阅：固定真实 asset revision → 圈选批注与具名回复 →
+明确提交/裁决 → 猫用新版本逐条回应 → 原 Task owner 续接与 typed closure。旧版、回复、身份与裁决均持久可恢复。
+
+F309 拥有无原生评论资产的唯一 annotation/review-round truth；媒体 bytes/version/授权保留在实际内容 owner。
+图片按原图像素空间定位；视频按真实 stream/timebase/tick range 与帧空间定位。新版本没有 transform proof
+就保留旧锚点/history，不猜 moved。DOCX 原生评论正文仍归 owner bytes，本 Phase 不搬迁它。
+
+只有真正需要人裁决的 review round 才产生 `f309.content_review`；reader/auth、owner adapter、
+shared ID/schema、list/read/reevaluate、Task revision 绑定、producer catalog/join 与 exact action surface
+必须在一个完整集成中交付。普通评论、猫已能执行的工作不制造提醒，review receipt 不自动关闭 Task。
+F310 当前 Phase B 不扩 scope、不等待本 Phase；本 F309 执行单元 Astra 领实现，PM Sol 审 Task/catalog 边界。
+
+此路径本身保留到终态；没有自研 Office/timeline editor，没有空 producer 或 fake asset owner。
+权限、持久恢复、版本漂移、并发、真实 UI/窄屏、独立审阅、合入后 Alpha 是整条交付的共同条件。
+授权/范围来源：`#private-source-id`；PM：`#private-source-id`；
+已审决策包：`34f8e9465ee819825e23bd33aa10c1f08ace18ad`，review `#private-source-id`。
+
+Phase R 的具名猫入口按上述授权登记为 `cat_cafe_prepare_artifact_review`（固定既有发布物并恢复同一审阅）、
+`cat_cafe_read_artifact_review`（有界读取版本、批注、回应与审计）、`cat_cafe_act_artifact_review`
+（经认证的猫批注/回复/请求人的裁决）和 `cat_cafe_respond_artifact_review`（新媒体版本逐条回应）。
+它们沿用 callback/agent-key 的独立 principal；人类裁决仍只在认证的人类 surface，Task 更新/closure 仍归原 owner。
+此登记是已批准完整审阅范围的工具映射，不是新的引擎准入、runtime 激活或交付完成结论。
 
 ### Phase B: Real Open-source Owner Foundations + Contract Kernel
 
@@ -360,6 +453,27 @@ version、semantic transaction、selection、authorization、resolve/apply/inver
 versioned contracts、TTL=0 collaboration ledger、durable stream/outbox checkpoint 与 receipts。自动测试消费
 真实 adapter 产生或录制的 transactions/receipts；故障注入只服务确定性 contract test，不产生第二套
 fake editor、demo-only owner 或可被误认成产品的最小实现。
+
+F290 W4 的第一条 consumer slice 复用同一 Phase，不新增“共享文档平台”或第二套权限系统。责任与顺序冻结为：
+
+1. F290 提供可验证、可过期的 Collective/Channel/Artifact domain context，以及两个认证 Human 的当前
+   membership/visibility 约束；F290 只保存 Artifact lineage/result target，不保存 Markdown bytes。
+2. canonical Markdown content owner 通过既有 content-owner port 持有 `text/markdown` bytes、opaque owner
+   version、mutation/undo receipt 与最终 action authorization；它消费 F290 domain context，但任何 deny
+   都不能被 F290 或 F309 覆盖。
+3. F309 在同一 `contentRef` 上提供 fresh read、text-range annotation、version-bound proposal/preview、
+   disposition/apply、history/version projection 与 revocation-safe session invalidation；apply 继续使用既有
+   proposal-state/revision CAS + owner-version CAS + exact receipt，不为 Markdown 发明旁路状态机。
+4. F307 只以 `contentRef + sessionRef` mount owner surface；revoke/expiry 后后续 read、projection 与 mutation
+   fail closed，旧 preview/正文不再披露，只保留允许范围内的 content-free audit evidence。
+5. owner 返回新 version/receipt 后，F290 只关联新的 Artifact lineage/result；它不接收 canonical bytes 副本。
+
+2026-09-13 的独立代码普查没有找到已交付路径：F290 的 census 位于候选 commit
+`7830a45ed2ad90bb8b0aade54270d3a48a555c75`（`feat/f290-default-prototype`，当时尚未合入 main；其
+merge-base 为 `40fa28ab2f609e4f36dc654817c5c5e9938a6337`）。当前 `WorkspaceEditorService` / direct Human route /
+`NamedCatContentService` 都是 DOCX + 单一 `ownerUserId` 边界；F063 的本地 worktree Markdown SHA CAS、
+F232 read projection 与 F290 dev localStorage fixture 均不满足跨 Human authority/revocation。因此 W4
+依赖被记录为 Phase B 的真实缺口，而不是把现有局部 primitive 包装成“已可用”。
 
 ### Phase C: Two-media Collaboration Lifecycle Completion
 
@@ -405,6 +519,16 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 - **Non-goals**: Office 全格式矩阵、按键级 Agent 调用、跨引擎统一 CRDT、完整 Label Studio/GenOffice
   移植、F307 视觉重做、fake owner/minimal editor、textarea/contenteditable 或独立 demo 冒充集成
 
+### Primary Journey R — 成品审阅回到同一托付
+
+- **Scope unit:** 一个原 Task、一个真实 immutable Artifact lineage、一轮 version-bound review。
+- **Entry:** F310 已准备的图片或 mp4 Artifact → “审阅产物”，进入正式 Host surface。
+- **Flow:** You 选中区域/时间段写批注 → 具名猫读取同一轮并回复、发布新版逐条回应 →
+  需要人的不可替代判断时回到 Needs Me → You 明确裁决 → 原 owner 继续原 Task → typed evidence closure。
+- **体验改版期望（operator 083/164）:** 先看到作品；分别进入画面标注或点位评论；点击画面上的标记继续同一讨论并看猫回应。版本/历史/回流按需展开，F307 的工作集合、聚焦和原处返回保留。
+- **Success:** 两种媒介均可重开与回看旧版；身份、范围、回复和裁决有真实来源；无重复提醒/错误返回/自动关 Task。
+- **Non-goals:** 修改媒体 bytes 的最小编辑器、DOCX 共同编辑替代品、复制 F232/Task/权限真相，或扩张正在施工的 F310 B。
+
 ### Supporting Journeys
 
 | ID | Scope unit | Actor | Flow | Evidence |
@@ -419,6 +543,7 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | S8 | disposition race | 两个人/猫 | double accept 或 accept/reject race → 一个 state CAS winner → 至多一次 owner apply | deterministic race test |
 | S9 | stale target | 人 + 猫 | 猫读完目标后人删除/改写该处 → 拒绝、唯一重定位或显式冲突 → 绝不命中相似段落 | stale-target test + screenshot |
 | S10 | inactive human tab | 猫 | 用户关闭编辑 tab 后猫继续任务 → owner-backed server writer/专用 session 成功，或诚实返回 unavailable | close/reopen trace + receipt |
+| S11 | shared Markdown Artifact | 两个认证 Human + 猫 | 两位成员读取同一 `contentRef` → B 精确批注并提 version-bound patch → 获授权的 A apply 得到新 owner version → B 被 revoke 后无法再读或写 | two-principal auth matrix + owner receipts + restart readback |
 
 ## Requirements Checklist
 
@@ -445,6 +570,9 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | R19 | Agent 写入不能依赖人的当前光标或活跃 tab；无 server writer/专用 session 时必须诚实 unavailable | AC-A4, AC-B1 | close-tab + reconnect journey | [ ] |
 | R20 | Office editor 只能通过 F202 Host-governed `content-editor-provider` contribution 接入；plugin/Host/content-owner/F309 各守自己的 truth | AC-A4, AC-B1 | manifest/contract + lifecycle/grant/receipt tests | [ ] |
 | R21 | GenOffice 是首个 Office plugin candidate；第一轮只开放 DOCX，其他 surfaces 逐项过 Gate；一个 contentRef 同时只有一个 production provider | AC-A4, AC-B1, AC-D1 | exact package + binding/switch/fail-closed journeys | [ ] |
+| R22 | 完整不可变图片/mp4 审阅先行交付，review round 与原 Task/Artifact 同源回流，保留共同编辑原 Gate | AC-R1, AC-R2, AC-R3, AC-R4, AC-R5, AC-R6 | 两媒介真实完整旅程 + 并发/恢复/权限反例 + Alpha | [x] |
+| R23 | 作品优先、标注与评论各自清晰、图上直接接续讨论，并用可信内容和真实壳验证体验 | AC-R7, AC-R8, AC-R9, AC-R10, AC-R11, AC-R12 | operator 四图/243 → #4489 → Sonnet335/594真实Alpha原生输入、原Task版本回流及历史只读 | [x] |
+| R24 | F290 W4 复用 F309/content-owner 边界：两个认证 Human 共享 canonical Markdown，F290 不保存 bytes，撤权立即失效 | AC-B6 | two-principal read/annotate/propose/apply/version/revoke + restart evidence | [ ] |
 
 ### 覆盖检查
 
@@ -465,10 +593,10 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
   dedupe/order/gap/replay、resolve 四态、manual reanchor lineage、proposal-state + content-version CAS、
   immutable disposition、drift-safe undo 与 review-only/direct-apply authority；ownership map/feature docs
   一致且 `pnpm check:architecture-ownership`、`pnpm check:features` 通过。证据：Terra exact-HEAD approval
-  `0001787895886036-000941-14264622`；operator boundary approval `0001787927110398-000292-cccc31fc`。
+  `private-source-id`；operator boundary approval `private-source-id`。
 - [x] **AC-A3**：operator 选择 DOCX + video 作为首条异质纵切片，并把“开源优先”冻结为 final-state
   integration constraint：禁止 fake owner、最小编辑器、textarea/contenteditable 或独立脚手架冒充
-  feasibility/product evidence。证据：`0001787927110398-000292-cccc31fc`。
+  feasibility/product evidence。证据：`private-source-id`。
 - [ ] **AC-A4**：Office 与 video 各有一个 exact-source 开源 candidate 通过 source/license、最终 host/mount、
   canonical content/version、transaction/selection、patch/apply/undo seam、部署/数据驻留、升级维护与退出路径
   Gate；operator 对实际第三方依赖/服务边界签字。签字只授权真实 final-surface admission，不自动让候选通过：
@@ -485,6 +613,32 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
     不把 local engine undo 当跨会话安全保证。
   任一候选必须长期依赖 private/internal API、复制 editor 内核或无法闭合上述证据，就换开源候选，不自研
   替代内核。
+
+### Phase R — Complete Immutable Artifact Review
+
+- [x] **AC-R1**：从现有 prepared Artifact 打开真实 owner-backed 图片/mp4，绑定原 Task/Artifact lineage、
+  asset identity/digest/revision 与 fresh read authority；不隐式迁移 raw uploads 或另存媒体 bytes。
+- [x] **AC-R2**：图片空间及视频 stream/timebase/half-open ticks/帧区域完整且可校验；圈选、批注、回复、
+  编辑/解决/重开与历史持久化，作者由认证 principal 产生；新版本无 owner proof 不静默搬锚。
+- [x] **AC-R3**：review round 从起草/交流到明确提交、人的裁决、新版逐条回应与再审完整闭合；稳定 operationId、
+  round revision CAS 与审计回执防重复/竞态；评论状态、review 决定和整个 Task 状态互不代偿。
+- [x] **AC-R4**：真实 `f309.content_review` producer、reader、shared ID/schema、list/read/reevaluate、
+  Task revision 绑定、catalog/join 与 exact action surface 一体落地；原 owner typed update/closure 回流，
+  同轮只一份有效 attention receipt，版本/权限/Task 变化或裁决后由 owner 重判/退休。
+- [x] **AC-R5**：两媒介各覆盖刷新/崩溃/重启、重复/乱序、并发提交/裁决、资产换版、Task 漂移、撤权及
+  跨 owner/thread 读取反例；用户可恢复数据 TTL=0，权限 fresh deny 不披露旧 preview/正文。
+- [x] **AC-R6**：正式 Hub 主旅程、默认/空/错误状态、390px 与主题/真实人猫身份全部验收；图片/mp4 各从
+  原 Task 到审阅、新版回应、owner 续接和 typed closure 跑通。独立技术审阅、合入与真实 Alpha 证据齐全，
+  才称 Phase R 交付；原 AC-A4/B/C/D 与整个 Feature 不因 R 完成而自动打勾。
+
+#### 作品标注/评论体验改版（2026-09-09，原工程基线之上的新增验收）
+
+- [x] **AC-R7**：在原 prepared Artifact/F307 路径中让作品与主要动作占首屏；支持可预测的聚焦/返回，版本和流程信息按需展开，390px 不靠长表单进入核心动作。
+- [x] **AC-R8**：标注与评论是明确的两种模式；画笔、基本形状、文字、颜色、删除标记、撤销/重做有真实行为，视觉标记不强制伪造评论正文。
+- [x] **AC-R9**：可从画面点位/区域发起评论，也可直接点击或键盘聚焦已存在标记打开同一讨论；人/猫身份、回复、草稿、保存状态与持久化来源真实。
+- [x] **AC-R10**：图片/视频缩放、定位与圈画仍使用真实媒体坐标及已呈现帧 proof；视频时间范围可直接操作，精确数值按需调整；保留 VFR/旋转/暂停帧/切版反例。
+- [x] **AC-R11**：新增标记/点位与旧记录的版本、恢复、并发、未知写结果、历史只读、Task 漂移和撤权语义完整；TTL=0、既有 owner/媒体 bytes/原任务回流边界不变。
+- [x] **AC-R12**：使用可信作品/真实参考截图与陌生输入在正式 F307 壳走完整交互；operator 确认主旅程、默认态、窄屏方向，非作者技术验证和合入后 Alpha 齐全后才称本次体验改版完成。
 
 ### Phase B — Real Open-source Owner Foundations and Contract Kernel
 
@@ -509,6 +663,12 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
   direct apply、manual reanchor 与 undo 返回可验证 decision reference；expired/revoked/epoch mismatch/issuer
   unknown/owner unavailable 一律 fail closed。撤权后清 presence、owner 内容 redacted，F309 只留
   content-free audit tombstone；F290 domain context 不能覆盖 owner deny。
+- [ ] **AC-B6**：在正式 F307 owner surface 上，以两个不同的 authenticated Human principal 打开同一个
+  canonical `text/markdown` `contentRef`：两者均经 fresh owner authorization 读取；其中一人创建精确
+  text-range annotation 与 version-bound proposal，另一位获授权的人通过 proposal-state/revision CAS +
+  expected owner version apply，得到唯一新 owner version/receipt。撤销前一人的 Collective/content access 后，
+  其已有 session、重放 read 与任何 mutation 均 fail closed，且 restart 后仍成立。证据同时证明 F307 只
+  mount、F290 只持 Artifact lineage/domain context、F309 ledger 不含 canonical Markdown bytes。
 
 ### Phase C — Two-media Adapters
 
@@ -530,8 +690,9 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 ## Dependencies
 
 - **Evolved from**: F290（剥离原挂在 Collective Artifact 上的通用 selection/annotation/patch contract）。
-- **Related**: F307（surface host）、F063（file/code content owner）、F138（video content owner）。
-- **Blocked by**: Phase A operator Design Gate；任何第三方依赖/服务另需明确授权。
+- **Related**: F307（surface host）、F063（file/code content owner）、F138（video content owner）、F310（原 Task/Artifact 与 Needs Me 消费）。
+- **Phase R sequencing**: 已获 operator `private-source-id` 授权先行，独立于下述 Office/editable-video admission；F310 当前 B 继续原范围。
+- **F290 W4 consumer**: 依赖 Phase B 的 AC-B6 shared Markdown slice；F290 的 W3 Meeting/Needs Me 与 W5 可独立推进，不以 F063 owner-local edit token、F232 read projection 或 localStorage fixture 代偿本依赖。
 
 ## Risk
 
@@ -556,8 +717,8 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 
 | # | 问题 | 推荐 | 状态 |
 |---|---|---|---|
-| OQ-1 | 第一切片是否用 DOCX + video | 是；两个媒介均直接走成熟开源终态集成 | ✅ operator `0001787927110398-000292-cccc31fc` |
-| OQ-2 | 哪个 Office/video 开源组合能通过最终 host、license、部署、数据与维护 Gate | Office 顺序已裁决：GenOffice `v0.8.1039@e833fff` 是首个 plugin pre-admission，SuperDoc v2 是 DOCX 退出路径，ONLYOFFICE/Collabora 是服务型 suite 退出路径；一个 contentRef 只绑定一个 production provider。Video：Elah 是 leading pre-admission | 🟨 operator plugin choice `0001788503343691-000297-3bfa0fb4` 已闭合顺序；Packet D dependency authorization + AC-A4 runtime proof 未闭合 |
+| OQ-1 | 第一切片是否用 DOCX + video | 是；两个媒介均直接走成熟开源终态集成 | ✅ operator `private-source-id` |
+| OQ-2 | 哪个 Office/video 开源组合能通过最终 host、license、部署、数据与维护 Gate | Office 顺序已裁决：GenOffice `v0.8.1039@e833fff` 是首个 plugin pre-admission，SuperDoc v2 是 DOCX 退出路径，ONLYOFFICE/Collabora 是服务型 suite 退出路径；一个 contentRef 只绑定一个 production provider。Video：Elah 是 leading pre-admission | 🟨 GenOffice alpha.1 已发布、Host #4394 已合入；合入后 Alpha 与完整两媒介 AC-A4 仍待闭合 |
 | OQ-3 | TabTin root AGPL 与 package MIT 的实际发布/复用边界 | 必须上游/法务澄清 | ⬜ 外部证据 |
 
 当前唯一可授权的 dependency/runtime scope 见
@@ -584,6 +745,8 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | KD-15 | Workspace 只维护一条 Office 生产主线；人和具名猫是同一 owner lineage 的第一等 writer | 避免多内核产品债，也避免“猫离线覆盖文件”冒充实时共同编辑 | 2026-09-01 |
 | KD-16 | Office editor 是 F202 Host-governed `content-editor-provider`，不是 core 默认依赖或现有四类 manifest resource | 让用户选择安装/启用，同时保留 Host 的 package/grant/runtime 与 owner 的内容真相 | 2026-09-03 |
 | KD-17 | GenOffice 是第一个 Office plugin admission candidate；第一轮只开 DOCX，其他格式逐项 Gate | 先验证效果最强候选的真实人猫路径，又不把完整 monorepo 一次性变成产品负担 | 2026-09-03 |
+| KD-18 | 完整 immutable image/mp4 review 作为 Phase R 先交付；Office/video 共编与 AC-A4 保持原门，producer/reader/catalog/join 一次完整集成 | operator `private-source-id` 明确批准；独立终态路径不应共同等待引擎选型 | 2026-09-07 |
+| KD-19 | F290 W4 的 shared Markdown 复用既有 F309 lifecycle + canonical content-owner port；F290 只提供 domain context/Artifact lineage，F307 只 mount | 用最少的新概念补齐真实 consumer：不复制 Markdown bytes、不把 owner-local SHA CAS 或 fixture 冒充跨 Human authority | 2026-09-13 |
 
 ## Thread Topology（执行载体，不是真相源）
 
@@ -596,15 +759,21 @@ Feature、Research、ownership、commit/PR 与 task 状态仍是 canonical truth
 
 ## Review Gate
 
-- Phase A: @codex-terra 已对 exact-source、absence claims、typed union 与 ownership 做非作者攻击；operator
-  已批准边界、final-state OSS integration posture 与 GenOffice-first plugin 顺序。GenOffice `v0.8.1039`
-  re-audit、Packet D 和本次 provider contract delta 仍需非作者 review；实际 dependency/runtime 授权与
-  AC-A4 evidence 未闭合前不进入 Phase B。
+- Phase A: exact-source、公开契约/包、Host authority 与后续修复均已有对应非作者审阅；公开 #49
+  已合入并发布 beta.15/alpha.1。Terra R4 批准 `73d61f05d2`；15 个作者 patch 的等价 rebase 与
+  Sol 的 API 44/44、Workspace 21/21 补验覆盖最终 `7944b1b0c7`，已由 #4394 合入。
+  原 canonical run `93eaa939…` 保留 RED/unknown；完整 native check、六个绿色产品阶段及
+  gate owner 独立 237/237 复验组成已接受的验证证据，不声称单次全门禁变绿。隔离 Alpha 验收仍待完成。
+  逐轮 exact HEAD/continuity 与 operator 授权来源见
 - Phase B/C: 按行为/数据/契约风险重新选择非作者 reviewer；第三方服务/依赖需 operator 授权。
 
 ## Tips Contribution (F244)
 
-Phase A 当前只有研究与契约；即使获准进入 AC-A4，也只产生受控的真实引擎准入证据，尚无稳定用户入口，
-因此不提前发布“如何使用共同编辑”的 capability tip。
-Phase D KEEP 后，真实入口必须贡献一条场景 tip：从任意 F309-aware surface 精确选中内容、@猫提改动，
-以及在人猫并发编辑后查看 patch 的 rebase/conflict 状态；若 SUNSET，则删除候选 tip 而不是保留死引导。
+Phase A 已贡献 developer-facing admission tip：接入 Office provider 时，F202 必须在 F309 轮换 bearer 前
+精确核验 installation/grant/runtime、renderer origin/entrypoint、SRI、framing 与 navigation policy。该 tip
+只教实现者守住准入边界。GenOffice alpha.1 与 Host #4394 已落地，feature worktree 真实引擎验收通过；
+隔离 Alpha 与 Phase D dogfood 仍待完成，因此不提前发布稳定“共同编辑”入口的使用 tip。
+
+Phase D KEEP 后，真实入口还必须贡献一条 operator-facing 场景 tip：从任意 F309-aware surface 精确选中内容、
+@猫提改动，以及在人猫并发编辑后查看 patch 的 rebase/conflict 状态；若 SUNSET，则删除候选 tip，
+不能保留死引导。

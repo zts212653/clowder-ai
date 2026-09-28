@@ -219,6 +219,10 @@ export class InMemoryFreshnessClosureStore implements FreshnessClosureStore {
     return this.supplementOperations.listByThread(threadId);
   }
 
+  async listAllSupplements(): Promise<FreshnessSupplementAggregate[]> {
+    return this.supplementOperations.listAll();
+  }
+
   async listRecoverableSupplements(): Promise<FreshnessSupplementAggregate[]> {
     return this.supplementOperations.listRecoverable();
   }

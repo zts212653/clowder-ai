@@ -41,6 +41,7 @@ import {
   rebindCrossThreadQueueCarrierActionFence,
   sameFanoutCustodyIdentity,
 } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
 import { createA2ASlotTrackingBridge } from '../domains/cats/services/agents/routing/route-helpers.js';
@@ -73,13 +74,7 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { emitQueueUpdated } from '../utils/queue-enrichment.js';
 
 export interface QueueProcessorLike {
-  onInvocationComplete(
-    threadId: string,
-    catId: string,
-    status: 'succeeded' | 'failed' | 'canceled',
-    invocationId: string | undefined,
-    completedCatIds: readonly string[],
-  ): Promise<void>;
+  onInvocationComplete: QueueProcessor['onInvocationComplete'];
   tryAutoExecute?(threadId: string): Promise<void>;
   markPromptMessagesSeen?(input: {
     threadId: string;
@@ -87,6 +82,7 @@ export interface QueueProcessorLike {
     catId: string;
     invocationId: string;
     messageIds: readonly string[];
+    seenAt: number;
   }): Promise<readonly TurnCustodyWakeProvenance[]>;
   /** F216 c3 supersede: reuse the force-send abort-resume coordinate system.
    *  clearPause prevents the aborted invocation's async cleanup from poisoning QueueProcessor state (F39).
@@ -1223,6 +1219,10 @@ export async function triggerA2AInvocation(
           finalStatus,
           createResult.invocationId,
           finalStatus === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [],
+          false,
+          terminalDispositions.getTerminalInvocationIdByCatId(),
+          [],
+          terminalDispositions.getTerminalConsumptionByInvocationId(),
         )
         .catch(() => {
           /* best-effort */

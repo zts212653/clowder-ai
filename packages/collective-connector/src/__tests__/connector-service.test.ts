@@ -7,6 +7,7 @@ import {
   type RunningCollectiveServer,
   startCollectiveServer,
 } from '@cat-cafe/collective-service';
+import { collectiveEventSourceIdentity } from '@cat-cafe/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CollectiveConnector } from '../connector.js';
@@ -74,11 +75,20 @@ describe('official Collective Connector', () => {
     ]);
     const firstServiceEvent = serviceEvents[0];
     if (!firstServiceEvent) throw new Error('Expected the Connector signal to reach the Service');
+    await declareCat(connector, connection.connectionId, fixture.ownerHumanId, 'codex-sol', 'Sol');
 
     await fixture.store.postHumanMessage(fixture.ownerSessionToken, {
       serviceInstanceId: fixture.store.serviceInstanceId,
       collectiveId: fixture.collectiveId,
       clientEventId: 'owner-reply-1',
+      location: { channelId: 'general' },
+      recipient: {
+        kind: 'agent',
+        humanId: fixture.ownerHumanId,
+        agentId: 'codex-sol',
+        connectionId: connection.connectionId,
+        participationRevision: 1,
+      },
       target: { kind: 'agent', humanId: fixture.ownerHumanId, agentId: 'codex-sol' },
       replyToEventId: firstServiceEvent.eventId,
       body: '@Sol welcome.',
@@ -311,10 +321,19 @@ describe('official Collective Connector', () => {
     await memberConnector.sync(memberConnection.connectionId);
     await ownerConnector.sync(ownerConnection.connectionId);
 
+    await declareCat(memberConnector, memberConnection.connectionId, member.human.humanId, 'codex-terra', 'Terra');
     await fixture.store.postHumanMessage(fixture.ownerSessionToken, {
       serviceInstanceId: fixture.store.serviceInstanceId,
       collectiveId: fixture.collectiveId,
       clientEventId: 'owner-targets-member-agent',
+      location: { channelId: 'general' },
+      recipient: {
+        kind: 'agent',
+        humanId: member.human.humanId,
+        agentId: 'codex-terra',
+        connectionId: memberConnection.connectionId,
+        participationRevision: 1,
+      },
       target: { kind: 'agent', humanId: member.human.humanId, agentId: 'codex-terra' },
       body: '@Terra please take this on the Member Café endpoint.',
     });
@@ -644,6 +663,118 @@ describe('official Collective Connector', () => {
   });
 });
 
+it('recovers an accepted reply after response loss and restart without duplicating the event or author', async () => {
+  const f = await createFixture();
+  let loseResponse = true;
+  const connector = await openConnector(f.connectorDirectory, async (input, init) => {
+    const response = await fetch(input, init);
+    if (loseResponse && String(input).includes('/api/events/agent')) {
+      loseResponse = false;
+      throw Object.assign(new Error('accepted response lost'), { code: 'ECONNRESET' });
+    }
+    return response;
+  });
+  const connection = await connector.pair({ serviceUrl: f.server.url, intent: f.pairing, endpointLabel: 'Same name' });
+  await declareCat(connector, connection.connectionId, f.ownerHumanId, 'codex-sol', 'Sol');
+  expect(await connector.isParticipationPublished(connection.connectionId)).toBe(true);
+  const event = await f.store.postHumanMessage(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    clientEventId: 'source',
+    location: { channelId: 'general' },
+    recipient: {
+      kind: 'agent',
+      humanId: f.ownerHumanId,
+      agentId: 'codex-sol',
+      connectionId: connection.connectionId,
+      participationRevision: 1,
+    },
+    body: 'A useful request',
+  });
+  const source = collectiveEventSourceIdentity(event)!;
+  const operation = await connector.prepareReply(source, 'message:source', 'work:canonical-task', 1);
+  await connector.submitReply(source, 'message:source', 'work:canonical-task', operation.outboxId, 'A named answer', {
+    catId: 'codex-sol',
+    agentId: 'codex-sol',
+    displayName: 'Sol',
+    sessionRef: 'invocation:verified',
+  });
+  expect(await connector.sync(connection.connectionId)).toMatchObject({ liveStatus: 'offline' });
+  const before = await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId);
+  expect(before).toHaveLength(2);
+  const reopened = await openConnector(f.connectorDirectory);
+  await reopened.sync(connection.connectionId);
+  const recovered = await reopened.prepareReply(source, 'message:source', 'work:canonical-task', 2);
+  expect(recovered).toMatchObject({
+    status: 'accepted',
+    clientEventId: operation.clientEventId,
+    acceptedEventId: before[1]!.eventId,
+    agent: { sessionRef: 'invocation:verified' },
+    workPurpose: { taskRef: 'task:work:canonical-task', admittedRevision: 1, resultRevision: 1 },
+  });
+  expect(await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).toEqual(before);
+  await expect(
+    reopened.submitReply(source, 'message:source', 'work:canonical-task', operation.outboxId, 'A different answer', {
+      catId: 'codex-sol',
+      agentId: 'codex-sol',
+      displayName: 'Sol',
+      sessionRef: 'invocation:verified',
+    }),
+  ).rejects.toMatchObject({ code: 'REPLY_PAYLOAD_CONFLICT' });
+});
+
+it('a committed participation revocation blocks an already queued reply, preserves history and cannot be resurrected on restart', async () => {
+  const f = await createFixture();
+  const connector = await openConnector(f.connectorDirectory);
+  const connection = await connector.pair({ serviceUrl: f.server.url, intent: f.pairing, endpointLabel: 'Owner' });
+  await declareCat(connector, connection.connectionId, f.ownerHumanId, 'codex-sol', 'Sol');
+  const event = await f.store.postHumanMessage(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    clientEventId: 'source',
+    location: { channelId: 'general' },
+    recipient: {
+      kind: 'agent',
+      humanId: f.ownerHumanId,
+      agentId: 'codex-sol',
+      connectionId: connection.connectionId,
+      participationRevision: 1,
+    },
+    body: 'Keep this request',
+  });
+  const source = collectiveEventSourceIdentity(event)!;
+  const op = await connector.prepareReply(source, 'message:source', 'request');
+  await connector.submitReply(source, 'message:source', 'request', op.outboxId, 'Must not be sent', {
+    catId: 'codex-sol',
+    agentId: 'codex-sol',
+    displayName: 'Sol',
+    sessionRef: 'invocation:verified',
+  });
+  const route = (await connector.getHostRoute(connection.connectionId))!;
+  await connector.setHostRoute(
+    connection.connectionId,
+    {
+      localOwnerUserId: route.localOwnerUserId,
+      defaultIngressThreadId: route.defaultIngressThreadId,
+      humanNotificationThreadId: route.humanNotificationThreadId,
+      agentRoutes: {},
+    },
+    route.revision,
+  );
+  expect(await connector.isParticipationPublished(connection.connectionId)).toBe(false);
+  await connector.sync(connection.connectionId);
+  const reopened = await openConnector(f.connectorDirectory);
+  await reopened.sync(connection.connectionId);
+  await expect(reopened.prepareReply(source, 'message:source', 'request')).rejects.toMatchObject({
+    code: 'PARTICIPATION_REVOKED',
+  });
+  expect(await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).toEqual([event]);
+  const persisted = JSON.parse(await readFile(join(f.connectorDirectory, 'collective-connector.json'), 'utf8'));
+  expect(persisted.connections[connection.connectionId].outbox).toMatchObject([
+    { status: 'blocked', failureCode: 'PARTICIPATION_REVOKED', body: 'Must not be sent' },
+  ]);
+});
+
 async function createFixture() {
   const serviceDirectory = await temporaryDirectory('collective-service-connector-');
   const connectorDirectory = await temporaryDirectory('collective-connector-');
@@ -718,6 +849,28 @@ function openConnector(dataDirectory: string, fetchImpl?: typeof fetch) {
       (agent.catId === 'codex-terra' && agent.sessionRef === 'invocation:member-verified'),
     ...(fetchImpl ? { fetchImpl } : {}),
   });
+}
+
+async function declareCat(
+  connector: CollectiveConnector,
+  connectionId: string,
+  humanId: string,
+  catId: string,
+  displayName: string,
+) {
+  await connector.setHostRoute(
+    connectionId,
+    {
+      localOwnerUserId: 'owner',
+      defaultIngressThreadId: 'public',
+      humanNotificationThreadId: 'public',
+      agentRoutes: {
+        [`${humanId}:${catId}`]: { catId, threadId: 'public', participation: { displayName, channelIds: ['general'] } },
+      },
+    },
+    0,
+  );
+  await connector.publishParticipation(connectionId);
 }
 
 async function temporaryDirectory(prefix: string): Promise<string> {

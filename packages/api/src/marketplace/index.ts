@@ -29,4 +29,5 @@ export function createAdapterRegistry(options: CreateRegistryOptions): AdapterRe
 }
 
 export { AdapterRegistry } from './adapter-registry.js';
+export { deduplicateInFlightCapabilitySource } from './adapters/codex-adapter.js';
 export { toMcpInstallRequest, validateInstallPlan } from './install-plan-bridge.js';

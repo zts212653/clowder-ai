@@ -68,6 +68,7 @@ import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
+import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import {
@@ -80,7 +81,13 @@ import { deriveResultSummary } from '../../tool-usage/derive-result-summary.js';
 import { normalizeMcpToolName } from '../../tool-usage/normalize-mcp-tool-name.js';
 import { RECALL_CORRELATION_EVENT_WINDOW } from '../../tool-usage/ToolEventLog.js';
 import { getVoiceBlockSynthesizer } from '../../tts/VoiceBlockSynthesizer.js';
-import type { AgentMessage, AgentMessageType, MessageMetadata } from '../../types.js';
+import {
+  type AgentMessage,
+  type AgentMessageType,
+  type AgentService,
+  type MessageMetadata,
+  mergeMessageMetadataSnapshots,
+} from '../../types.js';
 import { buildCapsuleFromRouteState } from '../invocation/CollaborationContinuityCapsule.js';
 import { resolveInvocationOrigin } from '../invocation/context-continuity.js';
 import {
@@ -94,6 +101,7 @@ import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
+import { AgentServiceUnavailableError } from '../registry/AgentServiceUnavailableError.js';
 import { parseA2AMentions } from '../routing/a2a-mentions.js';
 import { accumulateTextAggregate } from '../text-aggregation.js';
 import { type ContextEvalInput, extractContextEvalSignals } from './context-eval.js';
@@ -127,6 +135,8 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
+import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
+import { routingPreflightNotice } from './routing-preflight-notice.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
@@ -192,18 +202,24 @@ export async function* routeParallel(
     const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
       ownerId: userId,
       targetCatIds: requestedTargetCats,
+      ...(isRoutingOwnerAttempt(options) ? { ownerRequestedAttempt: true } : {}),
       ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
     });
     routingDispatchPreflightDecision = routingPreflight;
     for (const targetCatId of requestedTargetCats) {
       const receipt = routingDispatchPreflightReceipt(routingPreflight, targetCatId);
       if (receipt.target.disposition === 'allowed') continue;
-      yield {
-        type: 'system_info',
-        catId: targetCatId,
-        content: JSON.stringify(receipt),
-        timestamp: Date.now(),
-      };
+      const notice = await routingPreflightNotice(deps, options, routingPreflight, targetCatId, threadId, true);
+      if (notice) yield notice;
+      if (receipt.target.disposition === 'rejected') {
+        yield {
+          type: 'error',
+          catId: targetCatId,
+          errorCode: 'routing_preflight_rejected',
+          error: '本次未执行：成员当前不可用。恢复后可重试原消息。',
+          timestamp: Date.now(),
+        };
+      }
     }
     targetCats = requestedTargetCats.filter(
       (catId) => routingPreflight.targets.find((target) => target.targetCatId === catId)?.disposition !== 'rejected',
@@ -265,7 +281,7 @@ export async function* routeParallel(
         : undefined,
       onEvent: deps.freshnessEventLog
         ? (event) => {
-            deps.freshnessEventLog!.append({ ...event, invocationId, catId }).catch(() => {});
+            deps.freshnessEventLog!.append({ ...event, invocationId, catId }, { ownerUserId: userId }).catch(() => {});
           }
         : undefined,
     });
@@ -551,6 +567,7 @@ export async function* routeParallel(
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
+  const unavailableCats = new Set<CatId>();
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -574,7 +591,18 @@ export async function* routeParallel(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const service = getService(deps.services, catId);
+      let service: AgentService;
+      try {
+        service = getService(deps.services, catId, deps.unavailableServices);
+      } catch (error) {
+        if (!(error instanceof AgentServiceUnavailableError)) throw error;
+        unavailableCats.add(catId);
+        // Keep registration rejection in the per-cat completion pipeline, without aborting siblings' preparation.
+        return (async function* unavailableMember(): AsyncGenerator<AgentMessage> {
+          yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
+          yield { type: 'done', catId, timestamp: Date.now() };
+        })();
+      }
       const resolvedCapacitySnapshot = await resolveInvocationCapacitySnapshot({
         catId,
         service,
@@ -1154,6 +1182,7 @@ export async function* routeParallel(
         ...(options.asrPersonMemoryScenes?.length ? { asrPersonMemoryScenes: options.asrPersonMemoryScenes } : {}),
         ...(memoryCueLegacyFallbacks.length > 0 ? { memoryCueLegacyFallbacks } : {}),
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
+        ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: turnExecutionKind,
         executionCausal: {
           ...(bridgeTriggerMessageId ? { triggerMessageId: bridgeTriggerMessageId } : {}),
@@ -1286,8 +1315,8 @@ export async function* routeParallel(
     if (msg.type === 'text' && msg.content && msg.catId) {
       effectiveMsgs.push({ ...msg, content: getPayloadStripper(msg.catId).push(msg.content) });
     } else if (msg.type === 'done' && msg.catId) {
-      if (msg.metadata && !catMeta.has(msg.catId)) {
-        catMeta.set(msg.catId, msg.metadata);
+      if (msg.metadata) {
+        catMeta.set(msg.catId, mergeMessageMetadataSnapshots(catMeta.get(msg.catId), msg.metadata));
       }
       const flushedText = getPayloadStripper(msg.catId).flush();
       if (flushedText) {
@@ -1511,8 +1540,11 @@ export async function* routeParallel(
             .catch(() => {});
         }
       }
-      if (effectiveMsg.metadata && effectiveMsg.catId && !catMeta.has(effectiveMsg.catId)) {
-        catMeta.set(effectiveMsg.catId, effectiveMsg.metadata);
+      if (effectiveMsg.metadata && effectiveMsg.catId) {
+        catMeta.set(
+          effectiveMsg.catId,
+          mergeMessageMetadataSnapshots(catMeta.get(effectiveMsg.catId), effectiveMsg.metadata),
+        );
       }
 
       // F188 Phase F AC-F10 (砚砚 七审 P1): merge result-side summary; parses real Codex
@@ -1729,6 +1761,20 @@ export async function* routeParallel(
       const actionOutputCommitAllowed = options.beforeOutputCommit
         ? await options.beforeOutputCommit(msg.catId as CatId)
         : true;
+      const targetSucceeded =
+        actionOutputCommitAllowed &&
+        !catHadError.has(msg.catId) &&
+        !msg.errorCode &&
+        !(signalForCat?.(msg.catId) ?? signal)?.aborted;
+      const deliveryBoundary = createMessageDeliveryBoundary({
+        cursor: boundaryByCat.get(msg.catId as CatId),
+        userId,
+        threadId,
+        catId: msg.catId as CatId,
+        turnInvocationId: ownInvId,
+        sourceMessageId: currentUserMessageId ?? options.a2aTriggerMessageId,
+        succeeded: targetSucceeded,
+      });
       if (!actionOutputCommitAllowed) {
         catProducedOutput = Boolean(
           text || bufferedBlocks.length > 0 || (catToolEvents.get(msg.catId)?.length ?? 0) > 0,
@@ -1934,6 +1980,7 @@ export async function* routeParallel(
             ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
             extra: {
               ...(allRichBlocks.length > 0 ? { rich: { v: 1 as const, blocks: allRichBlocks } } : {}),
+              ...(deliveryBoundary ? { deliveryBoundary } : {}),
               // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
               // (= ownInvId else parent fallback).
               ...(persistedInvocationId
@@ -2100,6 +2147,7 @@ export async function* routeParallel(
               ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               extra: {
                 ...(noTextBlocks.length > 0 ? { rich: { v: 1 as const, blocks: noTextBlocks } } : {}),
+                ...(deliveryBoundary ? { deliveryBoundary } : {}),
                 // F194 Phase Z3 dual id (see route-serial.ts:1370 for contract)
                 // F194 Phase Z9 AC-Z25 (KD-28): always stamp turnInvocationId
                 // (= ownInvId else parent fallback) — prevents multi-turn same-cat
@@ -2317,11 +2365,12 @@ export async function* routeParallel(
       catUserFacingSystemInfoContents.delete(msg.catId);
 
       // Persist error as system message so it survives F5 reload but does NOT
-      // re-enter the prompt as a cat message (aligned with route-serial.ts).
+      // re-enter the prompt as a cat message. Preserve ordinary provider error persistence;
+      // only registration diagnostics use the output fence, as in route-serial's early rejection path.
       // Previously errors were mixed into catText and persisted with userId=user,
       // which polluted the conversation history and caused "context poisoning".
       const errorText = catErrorText.get(msg.catId);
-      if (errorText) {
+      if (errorText && (!unavailableCats.has(msg.catId) || actionOutputCommitAllowed)) {
         const cliDiag = catCliDiagnostics.get(msg.catId);
         try {
           await deps.messageStore.append({
@@ -2378,10 +2427,15 @@ export async function* routeParallel(
         const boundaryId = boundaryByCat.get(msg.catId as CatId);
         if (boundaryId) {
           if (options.cursorBoundaries) {
-            // ADR-008 S3: defer ack — caller acks after invocation succeeds
+            // Preserve the route overlay and the caller's idempotent finalizer.
             upsertMaxBoundary(options.cursorBoundaries, msg.catId, boundaryId);
-          } else if (deps.deliveryCursorStore) {
-            // Legacy: ack immediately
+          }
+          if (
+            deps.deliveryCursorStore &&
+            (!options.cursorBoundaries || (targetSucceeded && (turnStoredMessageId || !catProducedOutput)))
+          ) {
+            // A completed target must commit before done releases its slot,
+            // independently of a hanging sibling or the parent finalizer.
             try {
               await deps.deliveryCursorStore.ackCursor(userId, msg.catId as CatId, threadId, boundaryId);
             } catch (err) {

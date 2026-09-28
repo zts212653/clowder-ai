@@ -5,7 +5,9 @@ import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbenc
 import { WorkspaceFileViewer } from '@/components/workspace/WorkspaceFileViewer';
 import { useFileEditing } from '@/hooks/useFileEditing';
 import type { FileData } from '@/hooks/useWorkspace';
+import { useWorkspaceFileChange } from '@/hooks/useWorkspaceFileChange';
 import { apiFetch } from '@/utils/api-client';
+import { WorkspaceOfficeSurface } from './content-editor/WorkspaceOfficeSurface';
 import { resolveFileTarget } from './real-surface-adapters';
 
 interface FileOwnerTarget {
@@ -73,6 +75,12 @@ function ResolvedFileOwnerSurface({
     file,
     fetchFile,
   });
+  const { pendingExternalSha, onDirtyChange, applyExternalChange, dismissExternalChange } = useWorkspaceFileChange({
+    worktreeId: target.worktreeId,
+    path: target.path,
+    currentSha: file?.sha256 ?? null,
+    onReload: fetchFile,
+  });
 
   const revealInFinder = useCallback(
     async (path: string) => {
@@ -120,6 +128,10 @@ function ResolvedFileOwnerSurface({
         onToggleHtmlPreview={() => setHtmlPreview((current) => !current)}
         onToggleJsxPreview={() => setJsxPreview((current) => !current)}
         onSave={handleSave}
+        onDirtyChange={onDirtyChange}
+        pendingExternalSha={pendingExternalSha}
+        onApplyExternalChange={applyExternalChange}
+        onDismissExternalChange={dismissExternalChange}
         revealInFinder={revealInFinder}
       />
     </div>
@@ -135,5 +147,13 @@ export function F307FileOwnerSurface({
 }) {
   const target = resolveFileTarget(surface);
   if (!target) return <FileOwnerUnavailable message="File descriptor 没有合法的 F063 owner/result target。" />;
+  if (/\.docx$/i.test(target.path))
+    return (
+      <WorkspaceOfficeSurface
+        key={`${target.worktreeId}:${target.path}`}
+        worktreeId={target.worktreeId}
+        path={target.path}
+      />
+    );
   return <ResolvedFileOwnerSurface target={target} onRequestDetach={onRequestDetach} />;
 }

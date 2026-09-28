@@ -22,7 +22,10 @@ export function buildProfileUpdateCardBlock(proposal: ProfileUpdateProposal): Ri
     id: `profile-update-${proposal.proposalId}`,
     kind: 'card',
     v: 1,
-    title: `提议更新 ${proposal.sourceCatId} 的关系档案（primer）`,
+    title:
+      proposal.targetLayer === 'corpus'
+        ? '提议更新共享事实档案（corpus）'
+        : `提议更新 ${proposal.sourceCatId} 的关系档案（primer）`,
     bodyMarkdown: renderDiff(proposal),
     tone: 'info',
     fields: [
