@@ -32,6 +32,22 @@ describe('F161: env-map — resolveEnvMap', () => {
     });
   });
 
+  it('resolves Atlas Cloud provider mapping with OpenAI-compatible and Atlas aliases', () => {
+    const result = resolveEnvMap('openai', 'atlascloud', {
+      apiKey: 'sk-atlas-xxx',
+      baseUrl: 'https://api.atlascloud.ai/v1',
+    });
+    assert.deepEqual(result, {
+      OPENAI_API_KEY: 'sk-atlas-xxx',
+      OPENAI_BASE_URL: 'https://api.atlascloud.ai/v1',
+      OPENAI_API_BASE: 'https://api.atlascloud.ai/v1',
+      ATLASCLOUD_API_KEY: 'sk-atlas-xxx',
+      ATLAS_CLOUD_API_KEY: 'sk-atlas-xxx',
+      ATLASCLOUD_BASE_URL: 'https://api.atlascloud.ai/v1',
+      ATLAS_CLOUD_BASE_URL: 'https://api.atlascloud.ai/v1',
+    });
+  });
+
   it('resolves google built-in mapping (triple key)', () => {
     const result = resolveEnvMap('google', undefined, {
       apiKey: 'AIza-xxx',
