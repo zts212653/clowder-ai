@@ -298,9 +298,13 @@ _install_project_python_locked() {
   fi
   local curl_log
   curl_log=$(mktemp) || curl_log=""
-  local curl_proxy_args=()
-  [ -n "$pbs_proxy" ] && [ -z "${HTTP_PROXY:-}${HTTPS_PROXY:-}" ] && curl_proxy_args=(-x "$pbs_proxy")
-  if ! curl -fL --silent --show-error "${curl_proxy_args[@]}" -o "${tmpdir}/python.tar.gz" -w "  HTTP status: %{http_code}  time: %{time_total}s  size: %{size_download} bytes\n" "$tar_url" 2>"${curl_log:-/dev/null}"; then
+  local curl_status=0
+  if [ -n "$pbs_proxy" ] && [ -z "${HTTP_PROXY:-}${HTTPS_PROXY:-}" ]; then
+    curl -fL --silent --show-error -x "$pbs_proxy" -o "${tmpdir}/python.tar.gz" -w "  HTTP status: %{http_code}  time: %{time_total}s  size: %{size_download} bytes\n" "$tar_url" 2>"${curl_log:-/dev/null}" || curl_status=$?
+  else
+    curl -fL --silent --show-error -o "${tmpdir}/python.tar.gz" -w "  HTTP status: %{http_code}  time: %{time_total}s  size: %{size_download} bytes\n" "$tar_url" 2>"${curl_log:-/dev/null}" || curl_status=$?
+  fi
+  if [ "$curl_status" -ne 0 ]; then
     echo "  Failed to download $tar_url" >&2
     if [ -n "$curl_log" ] && [ -s "$curl_log" ]; then
       echo "  curl error detail:" >&2
