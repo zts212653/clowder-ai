@@ -11,7 +11,9 @@ if (!command) {
 const signalExitCodes = { SIGINT: 130, SIGTERM: 143 };
 let forwardedSignal = null;
 
-const child = spawn(command, args, {
+// Node CLI consumers pass their JS entry directly, avoiding Windows .cmd
+// interpretation. Keep the runtime that launched this wrapper, including ABI.
+const child = spawn(command === 'node' ? process.execPath : command, args, {
   env: process.env,
   stdio: 'inherit',
 });

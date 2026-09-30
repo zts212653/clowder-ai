@@ -1,0 +1,646 @@
+
+==> Step 1/6 — Build web application
+  [OK] Skipped (--skip-web)
+
+==> Step 2/6 — pnpm deploy runtime packages
+  Deploying @cat-cafe/api ...
+.                                        |  WARN  A pnpm-lock.yaml file exists. The current configuration prohibits to read or write a lockfile
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/lang/Library/pnpm/store/v3
+  Virtual store is at:             bundled/deploy/api/node_modules/.pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Progress: resolved 7, reused 0, downloaded 0, added 0
+Progress: resolved 13, reused 0, downloaded 0, added 0
+Progress: resolved 26, reused 0, downloaded 0, added 0
+Progress: resolved 28, reused 0, downloaded 0, added 0
+Progress: resolved 38, reused 0, downloaded 0, added 0
+Progress: resolved 43, reused 0, downloaded 0, added 0
+Progress: resolved 44, reused 0, downloaded 0, added 0
+Progress: resolved 45, reused 0, downloaded 0, added 0
+Progress: resolved 56, reused 0, downloaded 0, added 0
+Progress: resolved 57, reused 0, downloaded 0, added 0
+Progress: resolved 59, reused 0, downloaded 0, added 0
+Progress: resolved 62, reused 0, downloaded 0, added 0
+Progress: resolved 70, reused 0, downloaded 0, added 0
+Progress: resolved 71, reused 0, downloaded 0, added 0
+Progress: resolved 82, reused 0, downloaded 0, added 0
+Progress: resolved 94, reused 0, downloaded 0, added 0
+Progress: resolved 96, reused 0, downloaded 0, added 0
+Progress: resolved 99, reused 0, downloaded 0, added 0
+Progress: resolved 145, reused 0, downloaded 0, added 0
+Progress: resolved 146, reused 0, downloaded 0, added 0
+Progress: resolved 149, reused 0, downloaded 0, added 0
+Progress: resolved 152, reused 0, downloaded 0, added 0
+Progress: resolved 159, reused 0, downloaded 0, added 0
+Progress: resolved 165, reused 0, downloaded 0, added 0
+Progress: resolved 175, reused 0, downloaded 0, added 0
+Progress: resolved 184, reused 0, downloaded 0, added 0
+Progress: resolved 221, reused 0, downloaded 0, added 0
+Progress: resolved 223, reused 0, downloaded 0, added 0
+Progress: resolved 235, reused 0, downloaded 0, added 0
+Progress: resolved 270, reused 0, downloaded 0, added 0
+Progress: resolved 275, reused 0, downloaded 0, added 0
+Progress: resolved 278, reused 0, downloaded 0, added 0
+Progress: resolved 289, reused 0, downloaded 0, added 0
+Progress: resolved 302, reused 0, downloaded 0, added 0
+Progress: resolved 303, reused 0, downloaded 0, added 0
+Progress: resolved 322, reused 0, downloaded 0, added 0
+Progress: resolved 328, reused 0, downloaded 0, added 0
+Progress: resolved 331, reused 0, downloaded 0, added 0
+Progress: resolved 333, reused 0, downloaded 0, added 0
+Progress: resolved 337, reused 0, downloaded 0, added 0
+Progress: resolved 342, reused 0, downloaded 0, added 0
+Progress: resolved 351, reused 0, downloaded 0, added 0
+Progress: resolved 360, reused 0, downloaded 0, added 0
+Progress: resolved 367, reused 0, downloaded 0, added 0
+Progress: resolved 376, reused 0, downloaded 0, added 0
+Progress: resolved 384, reused 0, downloaded 0, added 0
+Progress: resolved 394, reused 0, downloaded 0, added 0
+Progress: resolved 405, reused 0, downloaded 0, added 0
+Progress: resolved 406, reused 0, downloaded 0, added 0
+Progress: resolved 408, reused 0, downloaded 0, added 0
+Progress: resolved 416, reused 0, downloaded 0, added 0
+Progress: resolved 423, reused 0, downloaded 0, added 0
+Progress: resolved 425, reused 0, downloaded 0, added 0
+Progress: resolved 439, reused 0, downloaded 0, added 0
+Progress: resolved 448, reused 0, downloaded 0, added 0
+Progress: resolved 455, reused 0, downloaded 0, added 0
+Progress: resolved 466, reused 0, downloaded 0, added 0
+Progress: resolved 471, reused 0, downloaded 0, added 0
+Progress: resolved 479, reused 0, downloaded 0, added 0
+Progress: resolved 488, reused 0, downloaded 0, added 0
+Progress: resolved 491, reused 0, downloaded 0, added 0
+Progress: resolved 502, reused 0, downloaded 0, added 0
+Progress: resolved 504, reused 0, downloaded 0, added 0
+Progress: resolved 510, reused 0, downloaded 0, added 0
+Progress: resolved 515, reused 0, downloaded 0, added 0
+Progress: resolved 543, reused 0, downloaded 0, added 0
+Progress: resolved 547, reused 0, downloaded 0, added 0
+Progress: resolved 553, reused 0, downloaded 0, added 0
+Progress: resolved 557, reused 0, downloaded 0, added 0
+Progress: resolved 564, reused 0, downloaded 0, added 0
+Progress: resolved 574, reused 0, downloaded 0, added 0
+Progress: resolved 577, reused 0, downloaded 0, added 0
+Progress: resolved 586, reused 0, downloaded 0, added 0
+Progress: resolved 592, reused 0, downloaded 0, added 0
+Progress: resolved 595, reused 0, downloaded 0, added 0
+Progress: resolved 604, reused 0, downloaded 0, added 0
+Progress: resolved 606, reused 0, downloaded 0, added 0
+Progress: resolved 611, reused 0, downloaded 0, added 0
+Progress: resolved 616, reused 0, downloaded 0, added 0
+Progress: resolved 625, reused 0, downloaded 0, added 0
+Progress: resolved 639, reused 0, downloaded 0, added 0
+Progress: resolved 641, reused 0, downloaded 0, added 0
+Progress: resolved 656, reused 0, downloaded 0, added 0
+Progress: resolved 658, reused 0, downloaded 0, added 0
+Progress: resolved 659, reused 0, downloaded 0, added 0
+Progress: resolved 671, reused 0, downloaded 0, added 0
+Progress: resolved 674, reused 0, downloaded 0, added 0
+Progress: resolved 679, reused 0, downloaded 0, added 0
+Progress: resolved 685, reused 0, downloaded 0, added 0
+Progress: resolved 688, reused 0, downloaded 0, added 0
+Progress: resolved 698, reused 0, downloaded 0, added 0
+Progress: resolved 699, reused 0, downloaded 0, added 0
+Progress: resolved 702, reused 0, downloaded 0, added 0
+Progress: resolved 703, reused 0, downloaded 0, added 0
+Progress: resolved 704, reused 0, downloaded 0, added 0
+Progress: resolved 713, reused 0, downloaded 0, added 0
+Progress: resolved 716, reused 0, downloaded 0, added 0
+Progress: resolved 725, reused 0, downloaded 0, added 0
+Progress: resolved 731, reused 0, downloaded 0, added 0
+Progress: resolved 741, reused 0, downloaded 0, added 0
+Progress: resolved 748, reused 0, downloaded 0, added 0
+Progress: resolved 759, reused 0, downloaded 0, added 0
+Progress: resolved 770, reused 0, downloaded 0, added 0
+Progress: resolved 775, reused 0, downloaded 0, added 0
+Progress: resolved 779, reused 0, downloaded 0, added 0
+Progress: resolved 781, reused 0, downloaded 0, added 0
+Progress: resolved 783, reused 0, downloaded 0, added 0
+Progress: resolved 786, reused 0, downloaded 0, added 0
+Progress: resolved 787, reused 0, downloaded 0, added 0
+Progress: resolved 788, reused 0, downloaded 0, added 0
+Progress: resolved 789, reused 0, downloaded 0, added 0
+ WARN  2 deprecated subdependencies found: prebuild-install@7.1.3, whatwg-encoding@3.1.1
+ WARN  Issues with peer dependencies found
+packages/api
+└─┬ @anthropic-ai/claude-agent-sdk 0.3.280
+  └── ✕ unmet peer zod@^4.0.0: found 3.25.76
+
+.                                        | +576 ++++++++++++++++++++++++++++++++
+Progress: resolved 793, reused 0, downloaded 0, added 0
+Progress: resolved 793, reused 560, downloaded 0, added 60
+Progress: resolved 793, reused 560, downloaded 0, added 210
+Progress: resolved 793, reused 560, downloaded 0, added 519
+Progress: resolved 793, reused 560, downloaded 1, added 574
+Progress: resolved 793, reused 560, downloaded 2, added 576, done
+. preinstall$ node scripts/check-node-runtime.mjs
+. preinstall: Done
+  Deploying @cat-cafe/web ...
+.                                        |  WARN  A pnpm-lock.yaml file exists. The current configuration prohibits to read or write a lockfile
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/lang/Library/pnpm/store/v3
+  Virtual store is at:             bundled/deploy/web/node_modules/.pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Progress: resolved 5, reused 0, downloaded 0, added 0
+Progress: resolved 17, reused 0, downloaded 0, added 0
+Progress: resolved 32, reused 0, downloaded 0, added 0
+packages/web                             |  WARN  deprecated @types/dompurify@3.2.0
+Progress: resolved 41, reused 0, downloaded 0, added 0
+packages/web                             |  WARN  deprecated eslint@8.57.1
+Progress: resolved 51, reused 0, downloaded 0, added 0
+Progress: resolved 56, reused 0, downloaded 0, added 0
+ WARN  GET https://registry.npmmirror.com/unified error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+Progress: resolved 57, reused 0, downloaded 0, added 0
+Progress: resolved 58, reused 0, downloaded 0, added 0
+Progress: resolved 73, reused 0, downloaded 0, added 0
+Progress: resolved 87, reused 0, downloaded 0, added 0
+Progress: resolved 113, reused 0, downloaded 0, added 0
+Progress: resolved 120, reused 0, downloaded 0, added 0
+Progress: resolved 128, reused 0, downloaded 0, added 0
+Progress: resolved 140, reused 0, downloaded 0, added 0
+Progress: resolved 152, reused 0, downloaded 0, added 0
+Progress: resolved 163, reused 0, downloaded 0, added 0
+Progress: resolved 175, reused 0, downloaded 0, added 0
+Progress: resolved 190, reused 0, downloaded 0, added 0
+Progress: resolved 204, reused 0, downloaded 0, added 0
+Progress: resolved 208, reused 0, downloaded 0, added 0
+Progress: resolved 218, reused 0, downloaded 0, added 0
+Progress: resolved 224, reused 0, downloaded 0, added 0
+Progress: resolved 225, reused 0, downloaded 0, added 0
+Progress: resolved 228, reused 0, downloaded 0, added 0
+Progress: resolved 238, reused 0, downloaded 0, added 0
+Progress: resolved 250, reused 0, downloaded 0, added 0
+Progress: resolved 290, reused 0, downloaded 0, added 0
+Progress: resolved 299, reused 0, downloaded 0, added 0
+Progress: resolved 303, reused 0, downloaded 0, added 0
+Progress: resolved 327, reused 0, downloaded 0, added 0
+Progress: resolved 336, reused 0, downloaded 0, added 0
+Progress: resolved 351, reused 0, downloaded 0, added 0
+Progress: resolved 364, reused 0, downloaded 0, added 0
+Progress: resolved 373, reused 0, downloaded 0, added 0
+Progress: resolved 382, reused 0, downloaded 0, added 0
+Progress: resolved 389, reused 0, downloaded 0, added 0
+Progress: resolved 399, reused 0, downloaded 0, added 0
+Progress: resolved 405, reused 0, downloaded 0, added 0
+Progress: resolved 417, reused 0, downloaded 0, added 0
+Progress: resolved 424, reused 0, downloaded 0, added 0
+Progress: resolved 434, reused 0, downloaded 0, added 0
+Progress: resolved 440, reused 0, downloaded 0, added 0
+Progress: resolved 448, reused 0, downloaded 0, added 0
+Progress: resolved 457, reused 0, downloaded 0, added 0
+Progress: resolved 458, reused 0, downloaded 0, added 0
+Progress: resolved 464, reused 0, downloaded 0, added 0
+Progress: resolved 472, reused 0, downloaded 0, added 0
+Progress: resolved 485, reused 0, downloaded 0, added 0
+Progress: resolved 490, reused 0, downloaded 0, added 0
+Progress: resolved 498, reused 0, downloaded 0, added 0
+Progress: resolved 508, reused 0, downloaded 0, added 0
+Progress: resolved 517, reused 0, downloaded 0, added 0
+Progress: resolved 523, reused 0, downloaded 0, added 0
+Progress: resolved 525, reused 0, downloaded 0, added 0
+Progress: resolved 529, reused 0, downloaded 0, added 0
+Progress: resolved 538, reused 0, downloaded 0, added 0
+Progress: resolved 541, reused 0, downloaded 0, added 0
+Progress: resolved 547, reused 0, downloaded 0, added 0
+Progress: resolved 556, reused 0, downloaded 0, added 0
+Progress: resolved 560, reused 0, downloaded 0, added 0
+Progress: resolved 562, reused 0, downloaded 0, added 0
+Progress: resolved 565, reused 0, downloaded 0, added 0
+Progress: resolved 569, reused 0, downloaded 0, added 0
+Progress: resolved 572, reused 0, downloaded 0, added 0
+Progress: resolved 579, reused 0, downloaded 0, added 0
+Progress: resolved 588, reused 0, downloaded 0, added 0
+Progress: resolved 593, reused 0, downloaded 0, added 0
+Progress: resolved 594, reused 0, downloaded 0, added 0
+Progress: resolved 606, reused 0, downloaded 0, added 0
+Progress: resolved 620, reused 0, downloaded 0, added 0
+Progress: resolved 627, reused 0, downloaded 0, added 0
+Progress: resolved 635, reused 0, downloaded 0, added 0
+Progress: resolved 640, reused 0, downloaded 0, added 0
+Progress: resolved 645, reused 0, downloaded 0, added 0
+Progress: resolved 652, reused 0, downloaded 0, added 0
+Progress: resolved 659, reused 0, downloaded 0, added 0
+Progress: resolved 666, reused 0, downloaded 0, added 0
+Progress: resolved 673, reused 0, downloaded 0, added 0
+Progress: resolved 674, reused 0, downloaded 0, added 0
+Progress: resolved 680, reused 0, downloaded 0, added 0
+Progress: resolved 682, reused 0, downloaded 0, added 0
+Progress: resolved 691, reused 0, downloaded 0, added 0
+Progress: resolved 698, reused 0, downloaded 0, added 0
+Progress: resolved 706, reused 0, downloaded 0, added 0
+Progress: resolved 712, reused 0, downloaded 0, added 0
+Progress: resolved 715, reused 0, downloaded 0, added 0
+Progress: resolved 717, reused 0, downloaded 0, added 0
+Progress: resolved 728, reused 0, downloaded 0, added 0
+Progress: resolved 737, reused 0, downloaded 0, added 0
+Progress: resolved 746, reused 0, downloaded 0, added 0
+Progress: resolved 756, reused 0, downloaded 0, added 0
+Progress: resolved 760, reused 0, downloaded 0, added 0
+Progress: resolved 764, reused 0, downloaded 0, added 0
+Progress: resolved 771, reused 0, downloaded 0, added 0
+Progress: resolved 775, reused 0, downloaded 0, added 0
+Progress: resolved 781, reused 0, downloaded 0, added 0
+Progress: resolved 815, reused 0, downloaded 0, added 0
+Progress: resolved 827, reused 0, downloaded 0, added 0
+Progress: resolved 834, reused 0, downloaded 0, added 0
+Progress: resolved 839, reused 0, downloaded 0, added 0
+Progress: resolved 846, reused 0, downloaded 0, added 0
+Progress: resolved 857, reused 0, downloaded 0, added 0
+Progress: resolved 870, reused 0, downloaded 0, added 0
+Progress: resolved 884, reused 0, downloaded 0, added 0
+Progress: resolved 890, reused 0, downloaded 0, added 0
+Progress: resolved 898, reused 0, downloaded 0, added 0
+Progress: resolved 909, reused 0, downloaded 0, added 0
+Progress: resolved 927, reused 0, downloaded 0, added 0
+Progress: resolved 937, reused 0, downloaded 0, added 0
+Progress: resolved 945, reused 0, downloaded 0, added 0
+ WARN  GET https://registry.npmmirror.com/@jridgewell%2Fsource-map error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+ WARN  GET https://registry.npmmirror.com/jake error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+Progress: resolved 953, reused 0, downloaded 0, added 0
+Progress: resolved 961, reused 0, downloaded 0, added 0
+Progress: resolved 974, reused 0, downloaded 0, added 0
+Progress: resolved 980, reused 0, downloaded 0, added 0
+Progress: resolved 992, reused 0, downloaded 0, added 0
+Progress: resolved 1002, reused 0, downloaded 0, added 0
+Progress: resolved 1011, reused 0, downloaded 0, added 0
+ WARN  GET https://registry.npmmirror.com/functions-have-names error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+ WARN  GET https://registry.npmmirror.com/@csstools%2Fcolor-helpers error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+Progress: resolved 1021, reused 0, downloaded 0, added 0
+Progress: resolved 1027, reused 0, downloaded 0, added 0
+Progress: resolved 1031, reused 0, downloaded 0, added 0
+Progress: resolved 1035, reused 0, downloaded 0, added 0
+Progress: resolved 1038, reused 0, downloaded 0, added 0
+Progress: resolved 1039, reused 0, downloaded 0, added 0
+Progress: resolved 1040, reused 0, downloaded 0, added 0
+Progress: resolved 1042, reused 0, downloaded 0, added 0
+Progress: resolved 1043, reused 0, downloaded 0, added 0
+Progress: resolved 1044, reused 0, downloaded 0, added 0
+Progress: resolved 1045, reused 0, downloaded 0, added 0
+Progress: resolved 1048, reused 0, downloaded 0, added 0
+Progress: resolved 1049, reused 0, downloaded 0, added 0
+Progress: resolved 1070, reused 0, downloaded 0, added 0
+Progress: resolved 1071, reused 0, downloaded 0, added 0
+Progress: resolved 1078, reused 0, downloaded 0, added 0
+Progress: resolved 1084, reused 0, downloaded 0, added 0
+ WARN  GET https://registry.npmmirror.com/minimizer-webpack-plugin error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+Progress: resolved 1088, reused 0, downloaded 0, added 0
+Progress: resolved 1089, reused 0, downloaded 0, added 0
+Progress: resolved 1102, reused 0, downloaded 0, added 0
+Progress: resolved 1107, reused 0, downloaded 0, added 0
+Progress: resolved 1108, reused 0, downloaded 0, added 0
+ WARN  6 deprecated subdependencies found: @humanwhocodes/config-array@0.13.0, @humanwhocodes/object-schema@2.0.3, glob@7.2.3, inflight@1.0.6, rimraf@3.0.2, sourcemap-codec@1.4.8
+.                                        | +722 ++++++++++++++++++++++++++++++++
+Progress: resolved 1108, reused 1, downloaded 0, added 0
+Progress: resolved 1108, reused 32, downloaded 0, added 0
+Progress: resolved 1108, reused 350, downloaded 0, added 0
+Progress: resolved 1108, reused 649, downloaded 0, added 42
+Progress: resolved 1108, reused 649, downloaded 0, added 183
+Progress: resolved 1108, reused 649, downloaded 4, added 340
+Progress: resolved 1108, reused 649, downloaded 11, added 482
+Progress: resolved 1108, reused 649, downloaded 12, added 654
+ WARN  GET https://registry.npmmirror.com/@codemirror/lang-markdown/-/lang-markdown-6.5.2.tgz error (ECONNRESET). Will retry in 10 seconds. 2 retries left.
+Progress: resolved 1108, reused 649, downloaded 12, added 655
+Progress: resolved 1108, reused 649, downloaded 12, added 656
+Progress: resolved 1108, reused 649, downloaded 14, added 659
+Progress: resolved 1108, reused 649, downloaded 15, added 661
+Progress: resolved 1108, reused 649, downloaded 19, added 664
+Progress: resolved 1108, reused 649, downloaded 21, added 668
+Progress: resolved 1108, reused 649, downloaded 22, added 668
+Progress: resolved 1108, reused 649, downloaded 27, added 675
+Progress: resolved 1108, reused 649, downloaded 28, added 676
+Progress: resolved 1108, reused 649, downloaded 31, added 679
+Progress: resolved 1108, reused 649, downloaded 33, added 681
+Progress: resolved 1108, reused 649, downloaded 40, added 688
+Progress: resolved 1108, reused 649, downloaded 42, added 691
+Progress: resolved 1108, reused 649, downloaded 44, added 692
+Progress: resolved 1108, reused 649, downloaded 45, added 692
+Progress: resolved 1108, reused 649, downloaded 54, added 703
+Progress: resolved 1108, reused 649, downloaded 59, added 709
+Progress: resolved 1108, reused 649, downloaded 65, added 715
+Progress: resolved 1108, reused 649, downloaded 71, added 721
+Progress: resolved 1108, reused 649, downloaded 72, added 722, done
+. preinstall$ node scripts/check-node-runtime.mjs
+. preinstall: Done
+  Deploying @cat-cafe/mcp-server ...
+.                                        |  WARN  A pnpm-lock.yaml file exists. The current configuration prohibits to read or write a lockfile
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/lang/Library/pnpm/store/v3
+  Virtual store is at:             bundled/deploy/mcp-server/node_modules/.pnpm
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Progress: resolved 5, reused 0, downloaded 0, added 0
+Progress: resolved 11, reused 0, downloaded 0, added 0
+Progress: resolved 15, reused 0, downloaded 0, added 0
+Progress: resolved 18, reused 0, downloaded 0, added 0
+Progress: resolved 57, reused 0, downloaded 0, added 0
+Progress: resolved 73, reused 0, downloaded 0, added 0
+Progress: resolved 88, reused 0, downloaded 0, added 0
+Progress: resolved 100, reused 0, downloaded 0, added 0
+Progress: resolved 109, reused 0, downloaded 0, added 0
+Progress: resolved 149, reused 0, downloaded 0, added 0
+Progress: resolved 165, reused 0, downloaded 0, added 0
+Progress: resolved 180, reused 0, downloaded 0, added 0
+Progress: resolved 187, reused 0, downloaded 0, added 0
+Progress: resolved 200, reused 0, downloaded 0, added 0
+Progress: resolved 211, reused 0, downloaded 0, added 0
+Progress: resolved 222, reused 0, downloaded 0, added 0
+Progress: resolved 232, reused 0, downloaded 0, added 0
+Progress: resolved 244, reused 0, downloaded 0, added 0
+Progress: resolved 260, reused 0, downloaded 0, added 0
+Progress: resolved 276, reused 0, downloaded 0, added 0
+Progress: resolved 284, reused 0, downloaded 0, added 0
+Progress: resolved 298, reused 0, downloaded 0, added 0
+Progress: resolved 305, reused 0, downloaded 0, added 0
+Progress: resolved 317, reused 0, downloaded 0, added 0
+Progress: resolved 331, reused 0, downloaded 0, added 0
+Progress: resolved 335, reused 0, downloaded 0, added 0
+Progress: resolved 341, reused 0, downloaded 0, added 0
+Progress: resolved 342, reused 0, downloaded 0, added 0
+.                                        | +178 ++++++++++++++++++
+Progress: resolved 342, reused 1, downloaded 0, added 0
+Progress: resolved 342, reused 175, downloaded 0, added 1
+Progress: resolved 342, reused 177, downloaded 0, added 153
+Progress: resolved 342, reused 177, downloaded 0, added 177
+Progress: resolved 342, reused 177, downloaded 0, added 178
+Progress: resolved 342, reused 177, downloaded 0, added 178, done
+. preinstall$ node scripts/check-node-runtime.mjs
+. preinstall: Done
+  [OK] Copied packages/web/.next -> bundled/deploy/web/.next
+  [OK] Deploy artifacts ready under bundled/deploy/
+
+==> Step 3/6 — Bundle Node.js portable (arm64)
+  Build-machine Node: v24.15.0 (arm64)
+  Downloading node-v24.15.0-darwin-arm64 ...
+v24.15.0
+  [OK] node-darwin-arm64 bundled
+sqlite/vec: v0.1.9
+native-smoke: OK
+v24.15.0
+
+==> Step 4/6 — Build Redis portable from source
+  Downloading redis 7.4.1 source ...
+  Compiling redis for arm64 ...
+cd src && /Applications/Xcode.app/Contents/Developer/usr/bin/make all
+/bin/sh: pkg-config: command not found
+/bin/sh: pkg-config: command not found
+    CC Makefile.dep
+/bin/sh: pkg-config: command not found
+/bin/sh: pkg-config: command not found
+rm -rf redis-server redis-sentinel redis-cli redis-benchmark redis-check-rdb redis-check-aof *.o *.gcda *.gcno *.gcov redis.info lcov-html Makefile.dep *.so
+rm -f threads_mngr.d adlist.d quicklist.d ae.d anet.d dict.d ebuckets.d mstr.d kvstore.d server.d sds.d zmalloc.d lzf_c.d lzf_d.d pqsort.d zipmap.d sha1.d ziplist.d release.d networking.d util.d object.d db.d replication.d rdb.d t_string.d t_list.d t_set.d t_zset.d t_hash.d config.d aof.d pubsub.d multi.d debug.d sort.d intset.d syncio.d cluster.d cluster_legacy.d crc16.d endianconv.d slowlog.d eval.d bio.d rio.d rand.d memtest.d syscheck.d crcspeed.d crc64.d bitops.d sentinel.d notify.d setproctitle.d blocked.d hyperloglog.d latency.d sparkline.d redis-check-rdb.d redis-check-aof.d geo.d lazyfree.d module.d evict.d expire.d geohash.d geohash_helper.d childinfo.d defrag.d siphash.d rax.d t_stream.d listpack.d localtime.d lolwut.d lolwut5.d lolwut6.d acl.d tracking.d socket.d tls.d sha256.d timeout.d setcpuaffinity.d monotonic.d mt19937-64.d resp_parser.d call_reply.d script_lua.d script.d functions.d function_lua.d commands.d strl.d connection.d unix.d logreqres.d anet.d adlist.d dict.d redis-cli.d zmalloc.d release.d ae.d redisassert.d crcspeed.d crc64.d siphash.d crc16.d monotonic.d cli_common.d mt19937-64.d strl.d cli_commands.d ae.d anet.d redis-benchmark.d adlist.d dict.d zmalloc.d redisassert.d release.d crcspeed.d crc64.d siphash.d crc16.d monotonic.d cli_common.d mt19937-64.d strl.d
+(cd ../deps && /Applications/Xcode.app/Contents/Developer/usr/bin/make distclean)
+(cd hiredis && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd linenoise && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd lua && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd jemalloc && [ -f Makefile ] && /Applications/Xcode.app/Contents/Developer/usr/bin/make distclean) > /dev/null || true
+(cd hdr_histogram && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd fpconv && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(rm -f .make-*)
+(cd modules && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean)
+rm -rf *.xo *.so
+(cd ../tests/modules && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean)
+rm -f commandfilter.so basics.so testrdb.so fork.so infotest.so propagate.so misc.so hooks.so blockonkeys.so blockonbackground.so scan.so datatype.so datatype2.so auth.so keyspace_events.so blockedclient.so getkeys.so getchannels.so test_lazyfree.so timer.so defragtest.so keyspecs.so hash.so zset.so stream.so mallocsize.so aclcheck.so list.so subcommands.so reply.so cmdintrospection.so eventloop.so moduleconfigs.so moduleconfigstwo.so publish.so usercall.so postnotifications.so moduleauthtwo.so rdbloadsave.so crash.so commandfilter.xo basics.xo testrdb.xo fork.xo infotest.xo propagate.xo misc.xo hooks.xo blockonkeys.xo blockonbackground.xo scan.xo datatype.xo datatype2.xo auth.xo keyspace_events.xo blockedclient.xo getkeys.xo getchannels.xo test_lazyfree.xo timer.xo defragtest.xo keyspecs.xo hash.xo zset.xo stream.xo mallocsize.xo aclcheck.xo list.xo subcommands.xo reply.xo cmdintrospection.xo eventloop.xo moduleconfigs.xo moduleconfigstwo.xo publish.xo usercall.xo postnotifications.xo moduleauthtwo.xo rdbloadsave.xo crash.xo
+(rm -f .make-*)
+echo STD=-pedantic -DREDIS_STATIC='' -Wno-c11-extensions -std=gnu11 >> .make-settings
+echo WARN=-Wall -W -Wno-missing-field-initializers -Werror=deprecated-declarations -Wstrict-prototypes >> .make-settings
+echo OPT=-O3 -flto -fno-omit-frame-pointer >> .make-settings
+echo MALLOC=libc >> .make-settings
+echo BUILD_TLS=no >> .make-settings
+echo USE_SYSTEMD=no >> .make-settings
+echo CFLAGS= >> .make-settings
+echo LDFLAGS= >> .make-settings
+echo REDIS_CFLAGS= >> .make-settings
+echo REDIS_LDFLAGS= >> .make-settings
+echo PREV_FINAL_CFLAGS=-pedantic -DREDIS_STATIC='' -Wno-c11-extensions -std=gnu11 -Wall -W -Wno-missing-field-initializers -Werror=deprecated-declarations -Wstrict-prototypes -O3 -flto -fno-omit-frame-pointer -g -ggdb   -I../deps/hiredis -I../deps/linenoise -I../deps/lua/src -I../deps/hdr_histogram -I../deps/fpconv >> .make-settings
+echo PREV_FINAL_LDFLAGS= -O3 -flto -fno-omit-frame-pointer  -g -ggdb >> .make-settings
+(cd ../deps && /Applications/Xcode.app/Contents/Developer/usr/bin/make hiredis linenoise lua hdr_histogram fpconv)
+(cd hiredis && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd linenoise && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd lua && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd jemalloc && [ -f Makefile ] && /Applications/Xcode.app/Contents/Developer/usr/bin/make distclean) > /dev/null || true
+(cd hdr_histogram && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(cd fpconv && /Applications/Xcode.app/Contents/Developer/usr/bin/make clean) > /dev/null || true
+(rm -f .make-*)
+(echo "" > .make-ldflags)
+(echo "" > .make-cflags)
+MAKE lua
+MAKE hiredis
+cd lua/src && /Applications/Xcode.app/Contents/Developer/usr/bin/make all CFLAGS="-Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2 " MYLDFLAGS="" AR="ar rc"
+cd hiredis && /Applications/Xcode.app/Contents/Developer/usr/bin/make static
+MAKE linenoise
+MAKE hdr_histogram
+cd hdr_histogram && /Applications/Xcode.app/Contents/Developer/usr/bin/make
+cd linenoise && /Applications/Xcode.app/Contents/Developer/usr/bin/make
+MAKE fpconv
+cd fpconv && /Applications/Xcode.app/Contents/Developer/usr/bin/make
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lapi.o lapi.c
+cc  -Wall -Os -g  -c linenoise.c
+cc -std=c99 -Wall -Os -g  -DHDR_MALLOC_INCLUDE=\"hdr_redis_malloc.h\" -c  hdr_histogram.c
+cc  -Wall -Os -g  -c  fpconv_dtoa.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lcode.o lcode.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ldebug.o ldebug.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ldo.o ldo.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ldump.o ldump.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lfunc.o lfunc.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lgc.o lgc.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o llex.o llex.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lmem.o lmem.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lobject.o lobject.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic alloc.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lopcodes.o lopcodes.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic net.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lparser.o lparser.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lstate.o lstate.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic hiredis.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic sds.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lstring.o lstring.c
+ar rcs libfpconv.a fpconv_dtoa.o
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ltable.o ltable.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ltm.o ltm.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lundump.o lundump.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic async.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lvm.o lvm.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lzio.o lzio.c
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic read.c
+ar rcs libhdrhistogram.a hdr_histogram.o
+cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Werror -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -g -ggdb  -pedantic sockcompat.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o strbuf.o strbuf.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o fpconv.o fpconv.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lauxlib.o lauxlib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lbaselib.o lbaselib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ldblib.o ldblib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o liolib.o liolib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lmathlib.o lmathlib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o loslib.o loslib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o ltablib.o ltablib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lstrlib.o lstrlib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o loadlib.o loadlib.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o linit.o linit.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lua_cjson.o lua_cjson.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lua_struct.o lua_struct.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lua_cmsgpack.o lua_cmsgpack.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lua_bit.o lua_bit.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o lua.o lua.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o luac.o luac.c
+cc -Wall -DLUA_ANSI -DENABLE_CJSON_GLOBAL -DREDIS_STATIC='' -DLUA_USE_MKSTEMP  -O2    -c -o print.o print.c
+ar rc liblua.a lapi.o lcode.o ldebug.o ldo.o ldump.o lfunc.o lgc.o llex.o lmem.o lobject.o lopcodes.o lparser.o lstate.o lstring.o ltable.o ltm.o lundump.o lvm.o lzio.o strbuf.o fpconv.o lauxlib.o lbaselib.o ldblib.o liolib.o lmathlib.o loslib.o ltablib.o lstrlib.o loadlib.o linit.o lua_cjson.o lua_struct.o lua_cmsgpack.o lua_bit.o	# DLL needs all object files
+ar rcs libhiredis.a alloc.o net.o hiredis.o sds.o async.o read.o sockcompat.o
+ranlib liblua.a
+cc -o lua  lua.o liblua.a -lm
+cc -o luac  luac.o print.o liblua.a -lm
+    CC threads_mngr.o
+    CC ae.o
+    CC adlist.o
+    CC anet.o
+    CC dict.o
+    CC ebuckets.o
+    CC quicklist.o
+    CC mstr.o
+    CC kvstore.o
+    CC server.o
+    CC sds.o
+    CC zmalloc.o
+    CC lzf_c.o
+    CC lzf_d.o
+    CC pqsort.o
+    CC zipmap.o
+    CC sha1.o
+    CC ziplist.o
+    CC release.o
+    CC networking.o
+    CC util.o
+    CC object.o
+    CC db.o
+    CC replication.o
+    CC rdb.o
+    CC t_string.o
+    CC t_list.o
+    CC t_set.o
+    CC t_zset.o
+    CC t_hash.o
+    CC config.o
+    CC aof.o
+    CC pubsub.o
+    CC multi.o
+    CC debug.o
+    CC sort.o
+    CC intset.o
+    CC syncio.o
+    CC cluster.o
+    CC cluster_legacy.o
+    CC crc16.o
+    CC endianconv.o
+    CC slowlog.o
+    CC eval.o
+    CC bio.o
+    CC rio.o
+    CC rand.o
+    CC memtest.o
+    CC syscheck.o
+    CC crcspeed.o
+    CC crc64.o
+    CC bitops.o
+    CC sentinel.o
+    CC notify.o
+    CC setproctitle.o
+    CC blocked.o
+    CC hyperloglog.o
+    CC latency.o
+    CC sparkline.o
+    CC redis-check-rdb.o
+    CC redis-check-aof.o
+    CC geo.o
+    CC module.o
+    CC lazyfree.o
+    CC evict.o
+    CC expire.o
+    CC geohash.o
+    CC geohash_helper.o
+    CC childinfo.o
+    CC defrag.o
+    CC siphash.o
+    CC rax.o
+    CC t_stream.o
+    CC listpack.o
+    CC localtime.o
+    CC lolwut.o
+    CC lolwut5.o
+    CC lolwut6.o
+    CC acl.o
+    CC tracking.o
+    CC socket.o
+    CC sha256.o
+    CC tls.o
+    CC timeout.o
+    CC setcpuaffinity.o
+    CC monotonic.o
+    CC mt19937-64.o
+    CC resp_parser.o
+    CC call_reply.o
+    CC script_lua.o
+timeout.c:156:21: warning: implicit conversion from 'long long' to 'long double' changes value from 9223372036854775807 to 9223372036854775808 [-Wimplicit-const-int-float-conversion]
+  156 |         if (ftval > LLONG_MAX) {
+      |                   ~ ^~~~~~~~~
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/21/include/limits.h:109:20: note: expanded from macro 'LLONG_MAX'
+  109 | #define LLONG_MAX  __LONG_LONG_MAX__
+      |                    ^~~~~~~~~~~~~~~~~
+<built-in>:64:27: note: expanded from macro '__LONG_LONG_MAX__'
+   64 | #define __LONG_LONG_MAX__ 9223372036854775807LL
+      |                           ^~~~~~~~~~~~~~~~~~~~~
+    CC script.o
+1 warning generated.
+    CC functions.o
+    CC function_lua.o
+    CC commands.o
+    CC strl.o
+    CC connection.o
+    CC unix.o
+    CC logreqres.o
+    CC redis-cli.o
+    CC redisassert.o
+    CC cli_common.o
+    CC cli_commands.o
+    CC redis-benchmark.o
+    LINK redis-benchmark
+    LINK redis-server
+    LINK redis-cli
+    INSTALL redis-sentinel
+    INSTALL redis-check-rdb
+    INSTALL redis-check-aof
+
+Hint: It's a good idea to run 'make test' ;)
+
+  [OK] redis-darwin-arm64 built (7.4.1)
+
+==> Step 5/6 — CLI tools (skipped on macOS)
+  [OK] Skipped — macOS DMG does not auto-install CLI tools
+
+==> Step 6/6 — Assets + electron-builder
+  [OK] icon.icns already present
+  Installing desktop dependencies ...
+npm warn Unknown env config "shamefully-hoist". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "auto-install-peers". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated rimraf@2.6.3: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm error code 1
+npm error path /Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/electron
+npm error command failed
+npm error command sh -c node install.js
+npm error RequestError: Client network socket disconnected before secure TLS connection was established
+npm error     at ClientRequest.<anonymous> (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/got/dist/source/core/index.js:970:111)
+npm error     at Object.onceWrapper (node:events:631:26)
+npm error     at ClientRequest.emit (node:events:521:24)
+npm error     at origin.emit (/Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/node_modules/@szmarczak/http-timer/dist/source/index.js:43:20)
+npm error     at emitErrorEvent (node:_http_client:109:11)
+npm error     at TLSSocket.socketErrorListener (node:_http_client:593:5)
+npm error     at TLSSocket.emit (node:events:509:28)
+npm error     at emitErrorNT (node:internal/streams/destroy:170:8)
+npm error     at emitErrorCloseNT (node:internal/streams/destroy:129:3)
+npm error     at TLSSocket.onConnectEnd (node:internal/tls/wrap:1709:19)
+npm error     at TLSSocket.emit (node:events:521:24)
+npm error     at endReadableNT (node:internal/streams/readable:1729:12)
+npm error     at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+npm error A complete log of this run can be found in: /Users/lang/repo/npm/_logs/2026-09-30T17_10_12_920Z-debug-0.log
+  [ERR] npm install failed in desktop/
