@@ -10,7 +10,7 @@
  * cascades to subscriptions via CursorStore.revokeByHandle.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { MessageAddress, MessageHandle } from '@clowder-ai/plugin-contract';
 import type { HandleScope } from './contract/host-types.js';
 import { MessagingError } from './contract/host-types.js';
@@ -38,7 +38,11 @@ export class HandleService {
   private readonly handles: HandleStore;
   private readonly cursors: CursorStore;
 
-  constructor(handles: HandleStore, cursors: CursorStore) {
+  constructor(
+    handles: HandleStore,
+    cursors: CursorStore,
+    private readonly pending?: { isUnpublished(messageId: string): Promise<boolean> },
+  ) {
     this.handles = handles;
     this.cursors = cursors;
   }
@@ -70,6 +74,66 @@ export class HandleService {
     };
     await this.handles.put(record);
     return { handleId: record.handleId };
+  }
+
+  async ensureThreadHandle(input: IssueThreadHandleInput): Promise<{ handleId: string }> {
+    return this.ensureAddressHandle('thread_handle', input);
+  }
+
+  async ensureConnectorBindingHandle(input: IssueConnectorBindingHandleInput): Promise<{ handleId: string }> {
+    return this.ensureAddressHandle('connector_binding', input);
+  }
+
+  private async ensureAddressHandle(
+    kind: AddressHandleRecord['kind'],
+    input: IssueThreadHandleInput | IssueConnectorBindingHandleInput,
+  ): Promise<{ handleId: string }> {
+    const connectorBinding =
+      kind === 'connector_binding'
+        ? {
+            connectorId: (input as IssueConnectorBindingHandleInput).connectorId,
+            externalChatId: (input as IssueConnectorBindingHandleInput).externalChatId,
+          }
+        : undefined;
+    const stable = JSON.stringify({
+      kind,
+      pluginInstanceId: input.pluginInstanceId,
+      threadId: input.threadId,
+      userId: input.userId,
+      scope: input.scope,
+      connectorBinding,
+    });
+    const handleId = `ih_${createHash('sha256').update(stable).digest('hex')}`;
+    const candidate: AddressHandleRecord = {
+      handleId,
+      kind,
+      pluginInstanceId: input.pluginInstanceId,
+      threadId: input.threadId,
+      userId: input.userId,
+      scope: input.scope,
+      ...(connectorBinding === undefined ? {} : { connectorBinding }),
+      issuedAt: Date.now(),
+    };
+    const stored = await this.handles.getOrCreateAddressHandle(candidate);
+    this.assertAddressBinding(stored.record, candidate);
+    return { handleId };
+  }
+
+  private assertAddressBinding(existing: HandleRecord, candidate: AddressHandleRecord): void {
+    if (
+      existing.kind === 'message_handle' ||
+      existing.kind !== candidate.kind ||
+      existing.pluginInstanceId !== candidate.pluginInstanceId ||
+      existing.threadId !== candidate.threadId ||
+      existing.userId !== candidate.userId ||
+      JSON.stringify(existing.scope) !== JSON.stringify(candidate.scope) ||
+      JSON.stringify(existing.connectorBinding) !== JSON.stringify(candidate.connectorBinding)
+    ) {
+      throw new MessagingError('CONFLICT', 'internal address handle is bound to different authority');
+    }
+    if (existing.revokedAt !== undefined) {
+      throw new MessagingError('PERMISSION', 'internal address handle has been revoked');
+    }
   }
 
   /** Common gate: existence → instance binding (INV-8) → liveness. */
@@ -159,6 +223,9 @@ export class HandleService {
     const record = await this.resolveLive(pluginInstanceId, handle.token);
     if (record.kind !== 'message_handle') {
       throw new MessagingError('VALIDATION', 'handle token is not a message handle');
+    }
+    if (await this.pending?.isUnpublished(record.messageId)) {
+      throw new MessagingError('MESSAGE_NOT_PUBLISHED', 'message has not been published');
     }
     const parent = await this.resolveLive(pluginInstanceId, record.parentHandleId);
     if (parent.kind === 'message_handle' || parent.threadId !== record.threadId) {

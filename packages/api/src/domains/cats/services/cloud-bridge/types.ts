@@ -2,8 +2,8 @@
  * F247 AC-B1c-2: Cloud invoke bridge — shared types.
  *
  * Defines the contract between `invokeSingleCat` (caller) and the bridge
- * implementation (which fires off ChatGPT Pro mentions via PinchTab CDP in
- * subsequent PR-C).
+ * implementation, which appends ChatGPT Pro mentions to the bound conversation
+ * through the receipt-bearing conversation Host adapter.
  */
 
 import type { CatId, CloudBridgeFailureDiagnosticV1, CloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
@@ -55,56 +55,15 @@ export interface CloudInvokeDispatchParams {
 }
 
 /**
- * Pluggable adapter for talking to PinchTab Chrome via CDP.
- *
- * PR-B (this PR) ships only the interface + a logging/null stub. PR-C will
- * add the real CDP raw WebSocket implementation that injects the delta
- * payload into ChatGPT's `#prompt-textarea`, clicks the send button, polls
- * `window.location.href` for the new `/c/<id>` URL, and writes the binding
- * back via `threadStore.updateCloudCatBinding`.
- */
-export interface IPinchTabBridgeAdapter {
-  /**
-   * Returns true if PinchTab CDP is reachable AND ChatGPT is logged in.
-   * Bridge uses this to decide between dispatching for real vs emitting a
-   * fallback notification (AC-B1c-4).
-   */
-  isReady(): Promise<boolean>;
-  /**
-   * Inject the rendered delta payload into the cloud cat's bound ChatGPT
-   * chat and capture the resulting chat URL.
-   *
-   * Returns the captured `https://chatgpt.com/c/<id>` URL (validated by the
-   * adapter against `CHATGPT_CHAT_URL_REGEX`), or throws on:
-   *  - chrome down / not logged in
-   *  - selector failure (ChatGPT DOM changed)
-   *  - URL capture failure (regex mismatch)
-   *  - eval timeout
-   */
-  injectAndCaptureUrl(args: {
-    /**
-     * The rendered delta payload + intent (already wrapped in
-     * `<thread-runtime>` block — caller pre-builds via `buildDeltaPayload`).
-     */
-    readonly renderedPrompt: string;
-    /**
-     * Existing bound chat URL for this (thread, cat) pair. If null, the
-     * adapter opens a new chat at `https://chatgpt.com/` and captures the
-     * resulting `/c/<id>` URL on first send.
-     */
-    readonly boundUrl: string | null;
-  }): Promise<string>;
-}
-
-/**
  * Bridge dispatch outcome — observable for tests + logging.
  */
 export type BridgeDispatchOutcome =
   | {
       readonly kind: 'sent';
       readonly capturedUrl: string;
-      readonly transport?: 'host' | 'legacy-pinchtab';
-      readonly hostMessageId?: string;
+      /** The only transport; the legacy PinchTab bridge was removed (F202 W2-3 h3a, issue #1538). */
+      readonly transport: 'host';
+      readonly hostMessageId: string;
       readonly idempotentReplay?: boolean;
     }
   | {
@@ -115,23 +74,29 @@ export type BridgeDispatchOutcome =
     }
   | {
       readonly kind: 'error';
-      readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'inject-failed'>;
+      readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'dispatch-failed'>;
       readonly message: string;
       readonly detail?: string;
       readonly idempotentReplay?: boolean;
       readonly failureDiagnostic?: CloudBridgeFailureDiagnosticV1;
     };
 
+/**
+ * Why a dispatch did not end in a Host receipt. `dispatch-failed` is the bridge's last-resort
+ * catch: it failed before producing a transport outcome, so the effect is unknown. Messages and
+ * receipts written before the PinchTab bridge was removed may still carry its reasons; they are
+ * read as stored and never produced again.
+ */
 export type BridgeFallbackReason =
-  | 'adapter-not-ready'
   | 'no-adapter'
   | 'needs-binding'
-  | 'invalid-captured-url'
-  | 'inject-failed'
+  | 'dispatch-failed'
   | 'host-append-failed'
   | 'missing-source-message-id'
   | 'incomplete-dispatch-provenance'
-  | 'legacy-delivery-unverified';
+  | 'ambiguous-cloud-cat'
+  | 'source-retargeted'
+  | 'source-history-unknown';
 
 /**
  * The cloud invoke bridge — awaited by `invokeSingleCat` only until a bounded
@@ -140,10 +105,9 @@ export type BridgeFallbackReason =
  *  1. Building the source-bound delta payload (AC-B1c-12) with JSON.stringify
  *     safety (AC-B1c-10).
  *  2. Reading the binding from the thread metadata.
- *  3. Invoking the PinchTab adapter (if ready) — AC-B1c-3 in PR-C.
- *  4. Writing the captured URL back to the binding.
- *  5. Emitting a `system_info` fallback notification to the local thread
- *     when adapter is unreachable / errors (AC-B1c-4).
+ *  3. Appending to the bound conversation through the conversation Host adapter.
+ *  4. Emitting a `system_info` fallback notification to the local thread
+ *     when there is no adapter or binding, or the append fails (AC-B1c-4).
  *
  * The interface returns the bounded transport outcome. The local invocation
  * waits only for this receipt/failure boundary — never for the cloud cat's

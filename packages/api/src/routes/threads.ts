@@ -7,8 +7,8 @@
  * DELETE /api/threads/:id  - 删除对话
  */
 
-import type { CatId } from '@cat-cafe/shared';
-import { catIdSchema } from '@cat-cafe/shared';
+import type { CatId, CloudBindingRefusal } from '@cat-cafe/shared';
+import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
@@ -20,6 +20,7 @@ import {
   collectAllThreadMessages,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
+import { resolveCloudConversationCat } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
 import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/closure/freshness-closure-telemetry.js';
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
@@ -1212,7 +1213,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Only the thread owner can read cloud cat bindings' };
     }
     const bindings = await threadStore.getCloudCatBindings(id);
-    return { bindings };
+    // F202 h3c-2: which cat's binding is the thread's ChatGPT conversation is the Host's answer, not
+    // a fixed id — the panel lists the binding of the configured cloud cat, and none when the
+    // provider has no cat or several.
+    return { bindings, cloudCat: resolveCloudConversationCat(catRegistry, 'chatgpt') };
   });
 
   // PATCH /api/threads/:id/cloud-bindings — STRICT user-owned only.
@@ -1221,34 +1225,51 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
   //
   // Auth model: same 4 layers as GET (strict resolver / reserved-identity reject /
   // system-thread reject / literal owner match). See GET doc above for history.
+  //
+  // F202 h3c-1: every refusal carries a `CloudBindingRefusal` code, and only these checks — all made
+  // before the write — send one. A client reads such a refusal as "nothing was written"; any other
+  // failure leaves the outcome unknown, and the client reads the binding back.
   app.patch<{ Params: { id: string } }>('/api/threads/:id/cloud-bindings', async (request, reply) => {
     const { id } = request.params;
     const userId = resolveStrictUserId(request);
     if (!userId) {
       reply.status(401);
-      return { error: 'Authentication required' };
+      return { error: 'Authentication required', code: 'CLOUD_BINDING_AUTH_REQUIRED' satisfies CloudBindingRefusal };
     }
     if (SYSTEM_USER_IDS.has(userId)) {
       reply.status(401);
-      return { error: 'Reserved internal identity cannot be used' };
+      return {
+        error: 'Reserved internal identity cannot be used',
+        code: 'CLOUD_BINDING_RESERVED_IDENTITY' satisfies CloudBindingRefusal,
+      };
     }
     const parseResult = cloudBindingPatchSchema.safeParse(request.body);
     if (!parseResult.success) {
       reply.status(400);
-      return { error: 'Invalid request body', details: parseResult.error.issues };
+      return {
+        error: 'Invalid request body',
+        code: 'CLOUD_BINDING_INVALID_BODY' satisfies CloudBindingRefusal,
+        details: parseResult.error.issues,
+      };
     }
     const thread = await threadStore.get(id);
     if (!thread || thread.deletedAt) {
       reply.status(404);
-      return { error: 'Thread not found' };
+      return { error: 'Thread not found', code: 'CLOUD_BINDING_THREAD_NOT_FOUND' satisfies CloudBindingRefusal };
     }
     if (SYSTEM_USER_IDS.has(thread.createdBy)) {
       reply.status(403);
-      return { error: 'Cloud cat bindings are not supported on system-owned threads' };
+      return {
+        error: 'Cloud cat bindings are not supported on system-owned threads',
+        code: 'CLOUD_BINDING_SYSTEM_THREAD' satisfies CloudBindingRefusal,
+      };
     }
     if (thread.createdBy !== userId) {
       reply.status(403);
-      return { error: 'Only the thread owner can update cloud cat bindings' };
+      return {
+        error: 'Only the thread owner can update cloud cat bindings',
+        code: 'CLOUD_BINDING_NOT_OWNER' satisfies CloudBindingRefusal,
+      };
     }
     const { catId, chatUrl } = parseResult.data;
     await threadStore.updateCloudCatBinding(id, catId as CatId, chatUrl);

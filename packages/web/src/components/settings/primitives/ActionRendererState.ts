@@ -6,6 +6,84 @@ export interface ActionApiResult {
   render?: string;
   data?: unknown;
   label?: string;
+  advance?: boolean;
+}
+
+/** A result the plugin marks as failed (`advance: false` or `data.status === 'error'`), with its message. */
+function actionResultFailure(result: ActionApiResult): string | null {
+  const data = result.data;
+  const failedStatus = data !== null && typeof data === 'object' && 'status' in data && data.status === 'error';
+  if (result.advance !== false && !failedStatus) return null;
+  const message = data !== null && typeof data === 'object' && 'message' in data ? data.message : undefined;
+  return typeof message === 'string' && message.length > 0 ? message : (result.label ?? 'Action failed');
+}
+
+/** Why an action call failed — the request itself, or a result the plugin marks as failed — or null. */
+export function actionCallFailure(result: ActionApiResult | null): string | null {
+  if (!result?.ok) return result?.label ?? 'Network error';
+  return actionResultFailure(result);
+}
+
+export type ActionRendererTarget =
+  | { readonly kind: 'connector'; readonly id: string }
+  | { readonly kind: 'plugin'; readonly id: string };
+
+function targetBasePath(target: ActionRendererTarget): string {
+  const resource = target.kind === 'connector' ? 'connectors' : 'plugins';
+  return `/api/${resource}/${encodeURIComponent(target.id)}`;
+}
+
+function actionUrl(target: ActionRendererTarget, operationName: string, actionId: string): string {
+  return `${targetBasePath(target)}/actions/${encodeURIComponent(operationName)}/${encodeURIComponent(actionId)}`;
+}
+
+export function actionRequest(
+  target: ActionRendererTarget,
+  operationName: string,
+  actionId: string,
+  pendingValues?: Readonly<Record<string, string>>,
+): { readonly url: string; readonly init: RequestInit } {
+  const url = actionUrl(target, operationName, actionId);
+  if (!pendingValues || Object.keys(pendingValues).length === 0) return { url, init: { method: 'POST' } };
+  const body = target.kind === 'connector' ? { values: pendingValues } : pendingValues;
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
+/** F202 W2-3 h1 ④: a row action is invoked with the input of the row it acts on. */
+export function rowActionRequest(
+  target: ActionRendererTarget,
+  operationName: string,
+  actionId: string,
+  input: Readonly<Record<string, string | number | boolean>>,
+): { readonly url: string; readonly init: RequestInit } {
+  return {
+    url: actionUrl(target, operationName, actionId),
+    init: { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) },
+  };
+}
+
+export function operationResetRequest(
+  target: ActionRendererTarget,
+  operationName: string,
+  currentAction: string,
+): { readonly url: string; readonly init: RequestInit } {
+  const url = `${targetBasePath(target)}/operations/${encodeURIComponent(operationName)}/reset`;
+  if (target.kind === 'plugin') return { url, init: { method: 'POST' } };
+  return {
+    url,
+    init: {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ currentAction }),
+    },
+  };
 }
 
 export function toResultState(r: ActionApiResult): ResultState {

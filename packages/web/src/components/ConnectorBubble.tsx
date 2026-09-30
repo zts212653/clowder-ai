@@ -6,7 +6,8 @@ import { tintedLight } from '@/lib/color-utils';
 import { connectorThemeToken } from '@/lib/connector-theme-token';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { ChatMessage as ChatMessageType, MessageContent } from '@/stores/chatStore';
-import { API_URL, apiFetch } from '@/utils/api-client';
+import { apiFetch } from '@/utils/api-client';
+import { AuthenticatedMediaImage } from './AuthenticatedMediaImage';
 import { ExecutionCancelButton } from './ExecutionCancelButton';
 import {
   AuthKeyIcon,
@@ -20,6 +21,7 @@ import {
   UsersIcon,
 } from './icons/ConnectorIcons';
 import { BallotIcon } from './icons/VoteIcons';
+import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
 import { MessageBubble } from './MessageBubble';
 import { RichBlocks } from './rich/RichBlocks';
@@ -43,22 +45,19 @@ function formatTime(ts: number): string {
   return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
-function renderContentBlocks(blocks: MessageContent[]) {
+function renderContentBlocks(blocks: MessageContent[], onImageOpen: (src: string) => void) {
   return blocks.map((block, i) => {
     if (block.type === 'text') {
       return <MarkdownContent key={i} content={block.text} />;
     }
     if (block.type === 'image') {
-      const src = block.url.startsWith('/uploads/') ? `${API_URL}${block.url}` : block.url;
-      const isSafeUrl = src.startsWith('/') || src.startsWith('http://') || src.startsWith('https://');
       return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <AuthenticatedMediaImage
           key={i}
-          src={src}
+          url={block.url}
           alt="attachment"
           className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
-          onClick={() => isSafeUrl && window.open(src, '_blank', 'noopener')}
+          onOpen={onImageOpen}
         />
       );
     }
@@ -227,6 +226,7 @@ interface ConnectorBubbleProps {
  * Uses MessageBubble for shared layout; adds connector-specific avatar, header, and actions.
  */
 export function ConnectorBubble({ message, threadId, timelineMessages }: ConnectorBubbleProps) {
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const source = message.source;
   if (!source) return null;
   if (message.extra?.scheduler?.hiddenTrigger) return null;
@@ -241,6 +241,13 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
   const srcUrl = rawUrl && /^https?:\/\//.test(rawUrl) ? rawUrl : undefined;
   const sourceCatId = typeof source.meta?.catId === 'string' ? source.meta.catId : undefined;
   const holdStatusRefreshKey = getHoldStatusRefreshKey(message, timelineMessages);
+  const openImage = (src: string) => {
+    if (src.startsWith('blob:')) {
+      setLightboxSrc(src);
+    } else if (src.startsWith('/') || src.startsWith('http://') || src.startsWith('https://')) {
+      window.open(src, '_blank', 'noopener');
+    }
+  };
 
   const avatar = (
     <div
@@ -291,7 +298,12 @@ export function ConnectorBubble({ message, threadId, timelineMessages }: Connect
         color: 'var(--cat-msg-text, var(--cafe-text))',
       }}
     >
-      {hasBlocks ? renderContentBlocks(message.contentBlocks!) : <MarkdownContent content={message.content} />}
+      {hasBlocks ? (
+        renderContentBlocks(message.contentBlocks!, openImage)
+      ) : (
+        <MarkdownContent content={message.content} />
+      )}
+      {lightboxSrc && <Lightbox url={lightboxSrc} alt="attachment" onClose={() => setLightboxSrc(null)} />}
       {richBlocks && richBlocks.length > 0 && <RichBlocks blocks={richBlocks} messageSource={message.source} />}
       {source.connector === 'hold-ball' && typeof source.meta?.taskId === 'string' && (
         <div className="mt-2 pt-2 border-t border-cafe-border">

@@ -107,7 +107,9 @@ describe('PersonalChromeAssistantReturnPoller when the Host Adapter is unavailab
 
     await h.tickUntil(20_000);
 
-    assert.deepEqual(h.ingested, [{ sourceMessageId: reply.sourceMessageId, content: reply.content }]);
+    assert.deepEqual(h.ingested, [
+      { provider: 'chatgpt', sourceMessageId: reply.sourceMessageId, content: reply.content },
+    ]);
     assert.deepEqual(h.acknowledgements, [[reply.conversationId, reply.sourceMessageId, reply.assistantMessageId]]);
     assert.deepEqual(h.acknowledgedAt, [14_000], 'handled by the first poll that gets an answer, not a later one');
     assert.deepEqual(h.calls, [0, 2_000, 6_000, ...RECOVERED_CADENCE]);

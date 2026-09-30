@@ -63,7 +63,7 @@ import type {
   ToolExecutionPolicy,
 } from '../../types.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from '../providers/image-cli-bridge.js';
-import { extractImagePaths } from '../providers/image-paths.js';
+import { extractTrustedImagePaths } from '../providers/image-paths.js';
 import {
   type AgyProfile,
   preflightAgyProfile,
@@ -586,7 +586,11 @@ export class GeminiAgentService implements AgentService {
     // Gemini CLI has no system prompt flag; prepend identity to prompt text
     let effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
 
-    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imagePaths = await extractTrustedImagePaths(
+      options?.contentBlocks,
+      options?.uploadDir,
+      options?.resolveTrustedImagePath,
+    );
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     // Gemini CLI -i is prompt-interactive (conflicts with -p), so we pass path hints
     // and include image directories for tool access.
@@ -937,7 +941,11 @@ export class GeminiAgentService implements AgentService {
     }
 
     let effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
-    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imagePaths = await extractTrustedImagePaths(
+      options?.contentBlocks,
+      options?.uploadDir,
+      options?.resolveTrustedImagePath,
+    );
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     effectivePrompt = appendLocalImagePathHints(effectivePrompt, imagePaths);
     effectivePrompt = appendAgyMcpIdentityContract(effectivePrompt, this.catId, options?.callbackEnv !== undefined);

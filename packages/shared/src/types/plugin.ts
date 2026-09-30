@@ -155,6 +155,14 @@ export type PluginManagerPackageSource =
       kind: 'local-directory' | 'local-archive';
       packageName: string | null;
       trust: 'local-trusted';
+      dependencyClosure?: 'shipped' | 'materialized';
+    }
+  | {
+      kind: 'git';
+      url: string;
+      packageName: string | null;
+      trust: 'local-trusted';
+      dependencyClosure?: 'shipped' | 'materialized';
     }
   | {
       kind: 'bundled';
@@ -195,7 +203,9 @@ export type PluginManagerCapabilityKind =
   | 'connector'
   | 'service'
   | 'ui'
-  | 'content-editor-provider';
+  | 'content-editor-provider'
+  | 'media-source'
+  | 'cloud-conversation-host';
 
 export interface PluginManagerCapability {
   id: string;
@@ -229,6 +239,8 @@ export interface PluginManagerContributionToolsResponse {
 
 export interface PluginManagerDiagnostic {
   code: string;
+  /** F202 W2-6b: with `CAPABILITY_NOT_GRANTED`, the capability the Host refused. */
+  capability?: string;
   message: string;
   occurredAt: number;
   revision: number | null;
@@ -241,7 +253,15 @@ export interface PluginManagerActions {
   blockingReasons: string[];
 }
 
-export type PluginManagerConfigFieldKind = 'string' | 'secret' | 'select' | 'boolean' | 'number' | 'url' | 'list';
+export type PluginManagerConfigFieldKind =
+  | 'string'
+  | 'secret'
+  | 'select'
+  | 'boolean'
+  | 'number'
+  | 'url'
+  | 'list'
+  | 'operation';
 
 export interface PluginManagerConfigOption {
   value: string;
@@ -257,11 +277,78 @@ export interface PluginManagerConfigField {
   description?: string;
   kind: PluginManagerConfigFieldKind;
   required: boolean;
+  hidden?: boolean;
+  requiredWhen?: {
+    key: string;
+    value: string | number | boolean | readonly (string | number | boolean)[];
+  };
+  /** Server-evaluated condition for a masked secret selector whose value cannot be projected. */
+  requiredNow?: boolean;
   default?: string | number | boolean | string[];
   options?: PluginManagerConfigOption[];
   /** Secret fields expose only the fixed mask or null, never the stored value. */
   currentValue: string | null;
   sensitive: boolean;
+  /** Operation-only projection. Callback method names stay Host-private. */
+  target?: string[];
+  /** True when all declared operation target fields have effective values; absent without targets. */
+  configured?: boolean;
+  actions?: Array<{
+    id: string;
+    label: string;
+    render: 'button' | 'polling' | 'status';
+    resultRender?: string;
+    next?: string;
+    rollback?: string;
+    timeout?: number;
+    /** Plain text; when present the owner must confirm before every invocation. */
+    confirm?: string;
+  }>;
+  /**
+   * Actions callable only from one row of this operation's `rows` result, with that row's input
+   * (F202 W2-3 h1). Never rendered as standalone buttons.
+   */
+  rowActions?: Array<{
+    id: string;
+    label: string;
+    /** Plain text; a row's own `confirm` may replace the wording but never skips the step. */
+    confirm?: string;
+    next?: string;
+  }>;
+  operationState?: {
+    currentAction: string;
+    lastResult?: { render: string; data: unknown; label?: string };
+    updatedAt?: number;
+  };
+}
+
+/**
+ * The data of a `rows` operation result, as the Host passes it on after validating it against the
+ * declaring operation (F202 W2-3 h1). Mirrors the contract's OperationRows.
+ */
+export interface PluginOperationRows {
+  /** At most 200; keys are unique within the result. */
+  rows: PluginOperationRow[];
+  /** Plain text shown when there are no rows. */
+  empty?: string;
+}
+
+export interface PluginOperationRow {
+  key: string;
+  label: string;
+  detail?: string;
+  /** At most 4. */
+  actions?: PluginOperationRowAction[];
+}
+
+export interface PluginOperationRowAction {
+  /** The id of one of the operation's `rowActions`. */
+  action: string;
+  label?: string;
+  /** Sent as the action's input when the owner invokes it from this row. */
+  input: Record<string, string | number | boolean>;
+  /** Plain text; replaces the declared confirmation wording, or asks where none is declared. */
+  confirm?: string;
 }
 
 /** Compact list/search projection. All lifecycle axes remain independent. */
@@ -294,6 +381,9 @@ export interface PluginManagerDetail extends PluginManagerListItem {
   contributions?: PluginManagerContribution[];
   docsUrl?: string;
   setupSteps?: string[];
+  /** Package-contract setup guidance. Kept distinct from legacy repository setupSteps. */
+  steps?: string[];
+  testable?: boolean;
   configFields: PluginManagerConfigField[];
 }
 
@@ -326,6 +416,9 @@ export type PluginManagerInstallRequest =
     }
   | {
       source: { kind: 'local-directory' | 'local-archive'; path: string };
+    }
+  | {
+      source: { kind: 'git'; url: string };
     };
 
 export interface PluginManagerSetEnabledRequest {

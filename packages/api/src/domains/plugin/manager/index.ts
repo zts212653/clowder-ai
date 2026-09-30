@@ -1,5 +1,5 @@
-export * from './builtin-contribution-supervisor.js';
 export * from './builtin-package-materializer.js';
+export * from './git-package-admission.js';
 export * from './local-package-admission.js';
 export * from './machine-catalog-provider.js';
 export * from './plugin-manager-compatibility.js';

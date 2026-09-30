@@ -143,7 +143,7 @@ describe('CloudBindingRecoveryCard', () => {
     await renderCard();
 
     expect(container.textContent).toContain('选择 ChatGPT 会话');
-    expect(container.querySelectorAll('input[name="cloud-recovery-conversation"]')).toHaveLength(2);
+    expect(container.querySelectorAll('input[name^="cloud-recovery-conversation-"]')).toHaveLength(2);
     expect(container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.disabled).toBe(true);
 
     act(() => {
@@ -193,11 +193,11 @@ describe('CloudBindingRecoveryCard', () => {
 
     await act(async () => {
       await vi.waitFor(() => {
-        expect(container.querySelectorAll('input[name="cloud-recovery-conversation"]')).toHaveLength(2);
+        expect(container.querySelectorAll('input[name^="cloud-recovery-conversation-"]')).toHaveLength(2);
       });
     });
 
-    const choices = [...container.querySelectorAll<HTMLInputElement>('input[name="cloud-recovery-conversation"]')];
+    const choices = [...container.querySelectorAll<HTMLInputElement>('input[name^="cloud-recovery-conversation-"]')];
     expect(choices.map((choice) => choice.value)).toEqual([newerId, olderId]);
     expect(container.textContent).toContain('名称尚未同步');
     expect(container.textContent).toContain('授权于');

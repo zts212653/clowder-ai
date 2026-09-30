@@ -1,6 +1,6 @@
 'use client';
 
-import type { AuthorizedConversationCandidate } from './cloud-binding-recovery-operations';
+import type { AuthorizedConversationCandidate } from './authorized-conversations';
 
 function authorizationTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -61,33 +61,52 @@ export function ConversationDetails({ candidate }: { candidate: AuthorizedConver
   );
 }
 
+/**
+ * `cards` stands alone inside a message; `rows` sits inside a card that already frames it (the thread
+ * panel), so its choices are hairline-separated rows rather than cards within a card, and a long list
+ * scrolls inside the panel so the actions below it stay in reach. Every chooser on a page needs its
+ * own radio `name`: a message's recovery card and the thread panel can be open at the same time.
+ */
 export function CloudConversationChoices({
   candidates,
   selectedConversationId,
   boundConversationId,
   busy,
   onSelect,
+  name,
+  layout = 'cards',
 }: {
   candidates: AuthorizedConversationCandidate[];
   selectedConversationId: string | null;
   boundConversationId: string | null;
   busy: boolean;
   onSelect: (id: string) => void;
+  /** The radio group's name, unique on the page. */
+  name: string;
+  layout?: 'cards' | 'rows';
 }) {
+  const rows = layout === 'rows';
+  const itemClass = (selected: boolean) =>
+    rows
+      ? `min-w-0 px-1 py-1.5 ${selected ? 'bg-[var(--console-hover-bg)]' : ''}`
+      : `min-w-0 rounded-lg border px-3 py-2 ${selected ? 'border-cafe-accent bg-[var(--console-hover-bg)]' : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)]'}`;
   return (
-    <fieldset className="mt-3 grid gap-2">
+    <fieldset
+      className={
+        rows
+          ? 'mt-2 grid max-h-72 divide-y divide-[var(--console-border-soft)] overflow-y-auto overscroll-contain border-y border-[var(--console-border-soft)]'
+          : 'mt-3 grid gap-2'
+      }
+    >
       <legend className="sr-only">选择 ChatGPT 会话</legend>
       {candidates.map((candidate) => (
-        <div
-          key={candidate.conversationId}
-          className={`min-w-0 rounded-lg border px-3 py-2 ${selectedConversationId === candidate.conversationId ? 'border-cafe-accent bg-[var(--console-hover-bg)]' : 'border-[var(--console-border-soft)] bg-[var(--console-card-bg)]'}`}
-        >
+        <div key={candidate.conversationId} className={itemClass(selectedConversationId === candidate.conversationId)}>
           <div className="flex items-start gap-3">
             <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2 py-1">
               <input
                 className="mt-1 shrink-0"
                 type="radio"
-                name="cloud-recovery-conversation"
+                name={name}
                 value={candidate.conversationId}
                 checked={selectedConversationId === candidate.conversationId}
                 disabled={busy}
@@ -97,7 +116,8 @@ export function CloudConversationChoices({
             </label>
             <OpenConversation candidate={candidate} />
           </div>
-          <ConversationDetails candidate={candidate} />
+          {/* In a panel's rows the choice stays one line each; "打开原对话" identifies the conversation. */}
+          {rows ? null : <ConversationDetails candidate={candidate} />}
         </div>
       ))}
     </fieldset>

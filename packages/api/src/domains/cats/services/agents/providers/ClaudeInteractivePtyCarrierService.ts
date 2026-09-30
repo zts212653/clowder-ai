@@ -57,7 +57,7 @@ import {
   isHookTerminalEvent,
 } from './HookSidechannelConsumer.js';
 import { appendLocalImagePathHints, collectImageAccessDirectories } from './image-cli-bridge.js';
-import { extractImagePaths } from './image-paths.js';
+import { extractTrustedImagePaths } from './image-paths.js';
 import { type HookInfrastructureResult, setupHookInfrastructure } from './pty/hook-setup.js';
 import type { PtyDriverOptions } from './pty/PtyDriver.js';
 import { PtyDriver } from './pty/PtyDriver.js';
@@ -239,7 +239,11 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     // `--session-id` removed (R10): flag writes ai-title only; real events go to a different UUID. PtyDriver watches via watchForTranscriptFile.
 
     // ─── Image inputs: extract paths, grant --add-dir, append path hints (F230 P2-image-inputs fix) ──
-    const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+    const imagePaths = await extractTrustedImagePaths(
+      options?.contentBlocks,
+      options?.uploadDir,
+      options?.resolveTrustedImagePath,
+    );
     const imageAccessDirs = collectImageAccessDirectories(imagePaths);
     const effectivePrompt = appendLocalImagePathHints(prompt, imagePaths);
     for (const dir of imageAccessDirs) {

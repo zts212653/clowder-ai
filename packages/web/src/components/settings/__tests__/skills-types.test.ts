@@ -113,19 +113,21 @@ describe('composeSkillItems', () => {
   });
 
   it('maps pluginId from CapabilityBoardItem', () => {
-    const governance = makeGovernance([makeSkillEntry({ name: 'weixin-mp', category: '插件', trigger: '/weixin' })]);
+    const governance = makeGovernance([
+      makeSkillEntry({ name: 'fixture-skill', category: '插件', trigger: '/fixture' }),
+    ]);
     const caps: CapabilityBoardItem[] = [
       {
-        id: 'weixin-mp',
+        id: 'fixture-skill',
         type: 'skill',
         source: 'cat-cafe',
         enabled: true,
         cats: { claude: true },
-        pluginId: 'weixin-mp',
+        pluginId: 'official.fixture',
       },
     ];
     const result = composeSkillItems(governance, caps);
-    expect(result[0].pluginId).toBe('weixin-mp');
+    expect(result[0].pluginId).toBe('official.fixture');
   });
 
   it('pluginId is undefined when capability item has no pluginId', () => {
@@ -194,18 +196,18 @@ describe('composeSkillItems', () => {
   it('appends capability-only plugin-owned skills with controls', () => {
     const caps: CapabilityBoardItem[] = [
       {
-        id: 'weixin-mp',
+        id: 'fixture-skill',
         type: 'skill',
         source: 'cat-cafe',
         enabled: true,
         cats: {},
-        pluginId: 'weixin-mp',
+        pluginId: 'official.fixture',
       },
     ];
 
     const result = composeSkillItems(makeGovernance(), caps);
 
-    expect(result[0].pluginId).toBe('weixin-mp');
+    expect(result[0].pluginId).toBe('official.fixture');
     expect(result[0].controls).toEqual({
       source: 'cat-cafe',
       enabled: true,

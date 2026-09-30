@@ -400,7 +400,7 @@ test('verified Agent principal can read and mutate through the same owner/loopba
   }
 });
 
-test('verified Agent principal discovers and invokes only active Host-supervised plugin tools', async () => {
+test('verified Agent principal discovers and invokes only active plugin-declared direct tools', async () => {
   const contributionCalls = [];
   const inputSchema = {
     type: 'object',
@@ -713,6 +713,35 @@ test('local path install audit records source kind but never persists the raw pa
     assert.equal(response.statusCode, 201, response.payload);
     assert.equal(audits[0].data.sourceKind, 'local-archive');
     assert.equal(JSON.stringify(audits[0]).includes('/private/tmp/secret-name.tgz'), false);
+  } finally {
+    await app.close();
+  }
+});
+
+test('git install passes the closed source through one Manager route without auditing the repository URL', async () => {
+  const { app, audits, calls } = await harness();
+  const url = 'https://git.example.invalid/plugins/example.git';
+  try {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'git', url } },
+    });
+    assert.equal(response.statusCode, 201, response.payload);
+    assert.deepEqual(calls, [['install', { source: { kind: 'git', url } }]]);
+    assert.equal(audits[0].data.sourceKind, 'git');
+    assert.equal(JSON.stringify(audits[0]).includes(url), false);
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/plugin-manager/plugins/install',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { source: { kind: 'git', url, extra: true } },
+    });
+    assert.equal(invalid.statusCode, 400, invalid.payload);
   } finally {
     await app.close();
   }

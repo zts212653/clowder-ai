@@ -443,17 +443,17 @@ export interface OutboundDeliveryHookLike {
 export interface StreamingOutboundHookLike {
   onStreamStart(
     threadId: string,
-    catId: string,
-    invocationId: string,
+    catId?: string,
+    invocationId?: string,
     senderHint?: { id: string; name?: string },
   ): Promise<void>;
-  onStreamChunk(threadId: string, accumulatedText: string, invocationId: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId: string): Promise<void>;
-  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId: string): Promise<void>;
-  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId: string): Promise<void>;
-  cleanupPlaceholders?(threadId: string, invocationId: string): Promise<void>;
+  onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
+  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
+  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId?: string): Promise<void>;
+  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId?: string): Promise<void>;
+  cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that delivery batch is complete for a thread. */
-  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean, status?: string, invocationId?: string): Promise<void>;
 }
 
 /** Thread metadata for outbound delivery (deep link, title, etc.) */
@@ -2791,10 +2791,10 @@ export class QueueProcessor {
   /** F151: Signal streaming adapters that delivery is done for this thread invocation.
    *  Fires on both success AND failure — failed invocations must close the task
    *  immediately instead of waiting for TASK_TIMEOUT_MS (P2-1 review fix). */
-  private signalDeliveryBatchDone(threadId: string, _status: string): void {
+  private signalDeliveryBatchDone(threadId: string, status: string, invocationId?: string): void {
     if (!this.deps.streamingHook?.notifyDeliveryBatchDone) return;
     const threadStillBusy = this.deps.invocationTracker.has(threadId) || this.isThreadBusy(threadId);
-    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
+    this.deps.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy, status, invocationId).catch((err) => {
       this.deps.log.warn({ err, threadId }, '[QueueProcessor] notifyDeliveryBatchDone failed');
     });
   }
@@ -3597,7 +3597,7 @@ export class QueueProcessor {
             { threadId: entry.threadId, catId, entryId: entry.id, invocationId: result.invocationId },
             '[QueueProcessor] skipped stale completion side effects after processing reservation changed',
           );
-          this.signalDeliveryBatchDone(entry.threadId, result.status);
+          this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
           return;
         }
         if (result.deferredForBusyTarget) {
@@ -3609,7 +3609,7 @@ export class QueueProcessor {
             this.deps.messageStore,
             'target_busy',
           );
-          this.signalDeliveryBatchDone(entry.threadId, result.status);
+          this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
           return;
         }
         const completion = this.onInvocationComplete(
@@ -3629,7 +3629,7 @@ export class QueueProcessor {
             this.deps.queue.pruneExactUserBatchReservation(exactReservationId);
           });
         }
-        this.signalDeliveryBatchDone(entry.threadId, result.status);
+        this.signalDeliveryBatchDone(entry.threadId, result.status, result.invocationId);
       },
       () => {
         if (!this.releaseProcessingSlot(slotKey, reservation)) {

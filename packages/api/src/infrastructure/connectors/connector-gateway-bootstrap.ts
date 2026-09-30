@@ -27,11 +27,13 @@ import {
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
-import { resolveTtsCacheDir } from '../../domains/cats/services/tts/document-listen-paths.js';
 import type { IssueCommentClassification } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
+import {
+  createHostMediaPathResolver,
+  hostMediaPathRootsFromEnv,
+} from '../../domains/messaging/outbound-media/host-media-paths.js';
 import type { ConnectorWebhookHandler } from '../../routes/connector-webhooks.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
-import { getDefaultUploadDir } from '../../utils/upload-paths.js';
 import { encodeDefault } from '../config-field-parser.js';
 import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { ConnectorCommandLayer, type ConnectorCommandLayerDeps } from './ConnectorCommandLayer.js';
@@ -966,25 +968,9 @@ export async function startConnectorGateway(
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
   }
 
-  // R3-P1: Resolve route URLs to local file paths for real media delivery
-  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
-  const ttsCacheDir = resolve(resolveTtsCacheDir());
+  // R3-P1: Resolve route URLs to local file paths for real media delivery (shared whitelist, W2-5b)
   const resolvedMediaDir = resolve(mediaDir);
-  const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');
-  const mediaPathResolver = (url: string): string | undefined => {
-    // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
-    const safeResolve = (base: string, suffix: string): string | undefined => {
-      const resolved = resolve(base, suffix);
-      if (!(resolved.startsWith(base + '/') || resolved === base)) return undefined;
-      return existsSync(resolved) ? resolved : undefined;
-    };
-    if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
-    if (url.startsWith('/api/tts/audio/')) return safeResolve(ttsCacheDir, url.slice('/api/tts/audio/'.length));
-    if (url.startsWith('/api/connector-media/'))
-      return safeResolve(resolvedMediaDir, url.slice('/api/connector-media/'.length));
-    if (url.startsWith('/avatars/')) return safeResolve(webPublicDir, url.slice(1));
-    return undefined;
-  };
+  const mediaPathResolver = createHostMediaPathResolver(hostMediaPathRootsFromEnv(process.env, mediaDir));
 
   const messageLookup = deps.messageStore.getById
     ? async (messageId: string) => deps.messageStore.getById!(messageId)

@@ -1,12 +1,13 @@
 import type { ContentEditorProviderContribution } from '@clowder-ai/plugin-contract';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
-import type { BuiltinPluginRuntime } from '../builtin-runtime/hybrid-supervisor.js';
+import type { BundledPluginRuntime } from '../builtin-runtime/bundled-runtime-carrier.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
 import type { HostBrokerStore } from '../host-broker/ports.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import type { PluginPackageRecord } from '../host-inventory/types.js';
 import { staticEditorContributions } from './admission.js';
 import { type EditorSurfaceServer, startEditorSurfaceServer } from './surface-server.js';
 
@@ -50,7 +51,7 @@ interface ActivePackage {
 /** Trusted Host adapter for the admitted static transport class. It imports no
  * package code and exposes no plugin-side bootstrap or effect APIs.
  */
-export class ContentEditorPluginRuntime implements BuiltinPluginRuntime {
+export class ContentEditorPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private readonly active = new Map<string, ActivePackage>();
   private readonly starting = new Map<string, { controller: AbortController; promise: Promise<void> }>();
@@ -67,6 +68,12 @@ export class ContentEditorPluginRuntime implements BuiltinPluginRuntime {
         await run.package.verifyIntegrity();
       },
     });
+  }
+
+  /** This runtime implements any package whose manifest is the narrow static-editor
+   * shape — a manifest-derived claim, so no pluginId reaches carrier selection. */
+  claims(packageRecord: Pick<PluginPackageRecord, 'manifest'>): boolean {
+    return staticEditorContributions(packageRecord.manifest).length > 0;
   }
 
   start(id: string): Promise<void> {

@@ -7,6 +7,7 @@ export type InstanceLifecycleState = 'installed' | 'retired';
 export type ConfigReadiness = 'incomplete' | 'ready';
 export type ActivationState = 'disabled' | 'enabling' | 'enabled' | 'disabling' | 'error';
 export type RuntimeState = 'stopped' | 'starting' | 'handshaking' | 'healthy' | 'degraded' | 'crashed';
+export type PluginDependencyClosure = 'shipped' | 'materialized';
 export type PluginPackageProvenance =
   | {
       readonly kind: 'catalog';
@@ -15,7 +16,17 @@ export type PluginPackageProvenance =
       /** Immutable admission metadata; absent legacy records fail closed while discovery is offline. */
       readonly ownerAuthRequired?: boolean;
     }
-  | { readonly kind: 'local-directory' | 'local-archive'; readonly packageName?: string };
+  | {
+      readonly kind: 'local-directory' | 'local-archive';
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    }
+  | {
+      readonly kind: 'git';
+      readonly url: string;
+      readonly packageName?: string;
+      readonly dependencyClosure?: PluginDependencyClosure;
+    };
 export type PluginRuntimeErrorCode =
   | 'AUTH_EXPIRED'
   | 'EVENT_BUS_CONFLICT'
@@ -33,6 +44,25 @@ export interface PluginRuntimeErrorRecord {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly occurredAt: number;
+}
+
+/**
+ * F202 W2-6b — what the Host knows about a failure beyond its `lastRuntimeError` code. It sits
+ * beside that record instead of inside it, so a Host from before it reads the record unchanged and
+ * drops this (its instance parser keeps only the fields it knows). A diagnostic only: no grant
+ * decision reads it.
+ *
+ * It explains one failure of one package, and nothing after it: when the failure is replaced or the
+ * instance's package changes, it is stale — a new version is never judged by what an old one did.
+ */
+export interface PluginRuntimeErrorDetail {
+  /** The failure was the Host refusing a capability the instance was not granted. */
+  readonly kind: 'capability_not_granted';
+  readonly capability: Capability;
+  /** The `occurredAt` of the `lastRuntimeError` it explains. */
+  readonly occurredAt: number;
+  /** The package that was starting when the Host refused it. */
+  readonly packageDigest: string;
 }
 
 export interface PluginPackageRecord {
@@ -65,6 +95,8 @@ export interface PluginInstanceRecord {
   readonly retiredAt?: number;
   /** Sanitized machine-readable failure only. Raw child stderr is never persisted. */
   readonly lastRuntimeError?: PluginRuntimeErrorRecord;
+  /** Written and cleared with `lastRuntimeError`; see {@link PluginRuntimeErrorDetail}. */
+  readonly lastRuntimeErrorDetail?: PluginRuntimeErrorDetail;
 }
 
 export interface PluginGrantRecord {
@@ -110,6 +142,13 @@ export interface RevokeGrantInput {
   readonly expectedGrantRevision: number;
 }
 
+/** F202 W2-6: what a Host-owned policy now allows the instance; its requests still bound the grant. */
+export interface ReconcileGrantsInput {
+  readonly pluginInstanceId: string;
+  readonly allowedCapabilities: readonly string[];
+  readonly expectedGrantRevision: number;
+}
+
 export interface InventoryMutationResult {
   readonly pluginInstanceId: string;
   readonly packageDigest: string;
@@ -124,6 +163,7 @@ export type PluginInventoryErrorCode =
   | 'CONTRACT_VERSION_MISMATCH'
   | 'INVALID_GRANT'
   | 'PACKAGE_ALREADY_INSTALLED'
+  | 'DATA_DIRECTORY_IN_USE'
   | 'INSTANCE_NOT_FOUND'
   | 'STALE_INSTANCE'
   | 'STALE_LIFECYCLE_REVISION'

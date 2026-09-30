@@ -266,7 +266,7 @@ describe('PersonalChromePluginPanel', () => {
     expect(container.textContent).toContain('待授权');
   });
 
-  it('refreshes Host authorization in place so the current-thread route step appears', async () => {
+  it('refreshes Host authorization in place and points the per-thread choice to the thread panel', async () => {
     let inspectCount = 0;
     mockApiFetch.mockImplementation(async (url, init) => {
       if (url === '/api/plugins/personal-chrome' && !init) {
@@ -289,14 +289,13 @@ describe('PersonalChromePluginPanel', () => {
           }),
         );
       }
-      if (url.endsWith('/cloud-bindings')) return jsonResponse({ bindings: {} }, 403);
       return jsonResponse({}, 404);
     });
 
     await act(async () => root.render(<PersonalChromePluginPanel />));
     await flushEffects();
     await act(async () => findButton(container, '查看 Personal ChatGPT Pro 详情')?.click());
-    expect(container.textContent).not.toContain('当前 thread 路由');
+    expect(container.textContent).not.toContain('在对话右栏的「ChatGPT 会话」里选择');
 
     await act(async () => findButton(container, '刷新状态')?.click());
     await flushEffects();
@@ -304,7 +303,7 @@ describe('PersonalChromePluginPanel', () => {
     expect(inspectCount).toBe(2);
     expect(container.textContent).toContain('Host 会话授权');
     expect(container.textContent).toContain('conversation-after-refresh');
-    expect(container.textContent).toContain('当前 thread 路由');
+    expect(container.textContent).toContain('在对话右栏的「ChatGPT 会话」里选择');
   });
 
   it('shows a bounded authorization list and revokes one exact conversation', async () => {
@@ -349,7 +348,7 @@ describe('PersonalChromePluginPanel', () => {
     await act(async () => findButton(container, '查看 Personal ChatGPT Pro 详情')?.click());
 
     expect(container.textContent).toContain('已授权会话（2/32）');
-    expect(container.textContent).toContain('当前 thread 路由');
+    expect(container.textContent).toContain('在对话右栏的「ChatGPT 会话」里选择');
     expect(container.textContent).toContain('conversation-17');
     expect(container.textContent).toContain('conversation-18');
     await act(async () => findButton(container, '撤销会话 conversation-17')?.click());

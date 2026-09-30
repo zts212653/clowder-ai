@@ -26,6 +26,11 @@ export function useConfirm(): ConfirmFn {
   return fn;
 }
 
+/** Like useConfirm, but null outside a <ConfirmProvider>, so a caller can fail closed. */
+export function useOptionalConfirm(): ConfirmFn | null {
+  return useContext(ConfirmContext);
+}
+
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<(ConfirmOptions & { resolve: (v: boolean) => void }) | null>(null);
   const resolveRef = useRef<((v: boolean) => void) | null>(null);

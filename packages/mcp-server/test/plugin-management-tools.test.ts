@@ -38,6 +38,10 @@ describe('F202 Agent plugin management surface', () => {
         `${tool.name} must state its output and side effects`,
       );
     }
+    const byName = new Map(pluginManagementTools.map((tool) => [tool.name, tool]));
+    assert.match(byName.get('plugin_list_tools')?.description ?? '', /plugin-declared direct tool schemas/);
+    assert.match(byName.get('plugin_call')?.description ?? '', /plugin-declared direct tool/);
+    assert.doesNotMatch(byName.get('plugin_call')?.description ?? '', /Host-supervised|plugin MCP result/);
   });
 
   it('derives read/write/destructive annotations and profile exposure from governance', () => {
@@ -127,6 +131,21 @@ describe('F202 Agent plugin management surface', () => {
       }).success,
       true,
     );
+
+    const installTool = byName.get('plugin_install');
+    assert.ok(installTool);
+    const install = z.object(installTool.inputSchema as z.ZodRawShape).strict();
+    assert.equal(
+      install.safeParse({ request: { source: { kind: 'git', url: 'https://git.example/plugins/example.git' } } })
+        .success,
+      true,
+    );
+    assert.equal(
+      install.safeParse({
+        request: { source: { kind: 'git', url: 'https://git.example/plugins/example.git', extra: true } },
+      }).success,
+      false,
+    );
   });
 
   it('delegates management and contribution operations to one injected Host client contract', async () => {
@@ -185,6 +204,7 @@ describe('F202 Agent plugin management surface', () => {
         expectedDigest: digest,
       },
     });
+    await handlers.install({ request: { source: { kind: 'git', url: 'ssh://git@git.example/plugins/example.git' } } });
     await handlers.setEnabled({ pluginId: 'official.video', enabled: true, expectedRevision: 4 });
     await handlers.uninstall({ pluginId: 'official.video', expectedRevision: 5 });
 
@@ -208,6 +228,7 @@ describe('F202 Agent plugin management surface', () => {
           expectedDigest: digest,
         },
       ],
+      ['install', { source: { kind: 'git', url: 'ssh://git@git.example/plugins/example.git' } }],
       ['set-enabled', 'official.video', { enabled: true, expectedRevision: 4 }],
       ['uninstall', 'official.video', { expectedRevision: 5 }],
     ]);
@@ -236,7 +257,7 @@ describe('F202 Agent plugin management surface', () => {
     await client.call('official.video', 'video-analysis-toolset', 'video_analysis', {
       videoUrl: 'https://media.example/video.mp4',
     });
-    await client.install({ source: { kind: 'local-directory', path: '/tmp/plugin' } });
+    await client.install({ source: { kind: 'git', url: 'https://git.example/plugins/example.git' } });
     await client.setEnabled('official.video', { enabled: true, expectedRevision: 2 });
     await client.uninstall('official.video', { expectedRevision: 3 });
 

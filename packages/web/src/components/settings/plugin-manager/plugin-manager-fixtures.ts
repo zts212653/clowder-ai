@@ -28,6 +28,7 @@ export interface PluginManagerDesignFixture {
   packageName: string;
   source: 'catalog' | 'local';
   trust: 'official' | 'local-trusted';
+  dependencyClosure?: 'shipped' | 'materialized';
   sourceAdapter?: 'repository-local' | 'connector';
   availableVersion: string;
   installedVersion: string | null;
@@ -41,6 +42,8 @@ export interface PluginManagerDesignFixture {
   tools?: Array<Pick<PluginManagerContributionTool, 'contributionId' | 'name' | 'description'>>;
   readme: PluginManagerReadmeState;
   setupSteps?: string[];
+  steps?: string[];
+  testable?: boolean;
   docsUrl?: string;
   configFields?: PluginManagerDetail['configFields'];
   diagnostic?: string;
@@ -69,6 +72,8 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
     intent: 'enabled',
     live: 'running',
     readme: { state: 'absent' },
+    steps: ['使用 GitHub CLI 登录', '保存可选凭据后测试连接'],
+    testable: true,
     setupSteps: [
       '在运行 Clowder AI 的机器上使用 GitHub CLI 登录',
       '可选：仅为显式消费凭据的插件子进程配置 token',
@@ -99,6 +104,19 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
         required: false,
         currentValue: null,
         sensitive: true,
+      },
+      {
+        kind: 'operation',
+        key: 'github_login',
+        label: '连接 GitHub',
+        required: false,
+        currentValue: null,
+        sensitive: false,
+        actions: [
+          { id: 'authorize', label: '开始授权', render: 'button', next: 'check' },
+          { id: 'check', label: '等待授权', render: 'polling', next: 'disconnect', rollback: 'authorize' },
+          { id: 'disconnect', label: '断开连接', render: 'status', next: 'authorize' },
+        ],
       },
     ],
     capabilities: [
@@ -163,7 +181,7 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
     packageName: '@clowder-ai/video-analysis',
     source: 'catalog',
     trust: 'official',
-    availableVersion: '0.1.0-alpha.0',
+    availableVersion: '0.1.0-alpha.2',
     installedVersion: null,
     artifact: 'absent',
     config: 'incomplete',
@@ -177,7 +195,7 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
     ],
   },
   {
-    id: 'wechat-visible-reader',
+    id: 'official.wechat-visible-reader',
     displayName: '微信读屏',
     description: {
       default: 'Read the currently visible WeChat window during a bounded user authorization.',
@@ -189,8 +207,8 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
     packageName: '@clowder-ai/wechat-visible-reader',
     source: 'local',
     trust: 'local-trusted',
-    availableVersion: '1.0.0',
-    installedVersion: '1.0.0',
+    availableVersion: '0.1.0-alpha.1',
+    installedVersion: '0.1.0-alpha.1',
     artifact: 'installed',
     config: 'invalid',
     auth: 'expired',
@@ -198,23 +216,38 @@ export const PLUGIN_MANAGER_DESIGN_FIXTURES: readonly PluginManagerDesignFixture
     live: 'stopped',
     readme: { state: 'absent' },
     capabilities: [{ name: '屏幕观察', description: '在有界授权窗口内采集当前可见内容' }],
+    configFields: [
+      {
+        kind: 'operation',
+        key: 'visibleReadingAuthorization',
+        label: 'Visible WeChat reading authorization',
+        required: false,
+        currentValue: null,
+        sensitive: false,
+        actions: [
+          { id: 'arm', label: 'Authorize for 10 minutes', render: 'button', next: 'disarm' },
+          { id: 'disarm', label: 'Revoke authorization', render: 'button', next: 'arm' },
+          { id: 'status', label: 'Authorization status', render: 'status' },
+        ],
+      },
+    ],
     diagnostic: '短时授权已过期；重新授权前不会采集屏幕。',
   },
   {
-    id: 'video-gen',
-    displayName: '本地视频生成',
+    id: 'dev.clowder.video-generation',
+    displayName: 'Video Generation',
     description: {
-      default: 'Generate short videos with a local model and report progress back to the conversation.',
-      translations: { 'zh-CN': '通过本地模型生成短视频，并把进度回写到会话。' },
+      default: 'Generate videos through a configured provider and report progress back to the conversation.',
+      translations: { 'zh-CN': '通过已配置的提供商生成视频，并把进度回写到会话。' },
     },
     icon: 'video',
     iconBg: '#6366f1',
     publisher: 'Clowder AI',
-    packageName: '@clowder-ai/video-gen',
+    packageName: '@clowder-ai/video-generation',
     source: 'catalog',
     trust: 'official',
-    availableVersion: '0.1.0-alpha.1',
-    installedVersion: '0.1.0-alpha.1',
+    availableVersion: '0.1.0-alpha.0',
+    installedVersion: '0.1.0-alpha.0',
     artifact: 'installed',
     config: 'ready',
     auth: 'not-required',

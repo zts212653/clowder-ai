@@ -15,9 +15,9 @@ import {
   type EventAuditLog,
   getEventAuditLog,
 } from '../domains/cats/services/orchestration/EventAuditLog.js';
+import type { PluginRuntimeCarrierRouter } from '../domains/plugin/carrier/runtime-carrier.js';
 import {
-  BuiltinPluginContributionError,
-  type BuiltinPluginContributionSupervisor,
+  ExternalPluginRuntimeError,
   LocalPluginPackageAdmissionError,
   PluginManagerPackageAssetError,
   type PluginManagerPackageAssetPort,
@@ -43,7 +43,7 @@ type PluginManagerRouteService = Pick<
 
 export interface PluginManagerRouteOptions {
   readonly manager: PluginManagerRouteService;
-  readonly contributions?: Pick<BuiltinPluginContributionSupervisor, 'listPluginTools' | 'callPluginTool'>;
+  readonly contributions?: Pick<PluginRuntimeCarrierRouter, 'listPluginTools' | 'callPluginTool'>;
   readonly asset?: PluginManagerPackageAssetPort;
   readonly documentation?: PluginManagerPackageDocumentationPort;
   readonly auditLog?: Pick<EventAuditLog, 'append'>;
@@ -94,7 +94,17 @@ const localInstallSchema = z
       .strict(),
   })
   .strict();
-const installSchema = z.union([catalogInstallSchema, localInstallSchema]);
+const gitInstallSchema = z
+  .object({
+    source: z
+      .object({
+        kind: z.literal('git'),
+        url: z.string().trim().min(1).max(4_096),
+      })
+      .strict(),
+  })
+  .strict();
+const installSchema = z.union([catalogInstallSchema, localInstallSchema, gitInstallSchema]);
 const setEnabledSchema = z.object({ enabled: z.boolean(), expectedRevision: lifecycleRevisionSchema }).strict();
 const uninstallSchema = z.object({ expectedRevision: lifecycleRevisionSchema }).strict();
 const configureSchema = z
@@ -187,7 +197,7 @@ async function appendContributionCallAudit(
 
 function officialInstallStatus(code: OfficialPluginInstallError['code']): number {
   if (code === 'UNKNOWN_CATALOG_ID' || code === 'INSTANCE_NOT_FOUND') return 404;
-  if (code === 'STALE_CATALOG' || code === 'STALE_REVISION') return 409;
+  if (code === 'STALE_CATALOG' || code === 'STALE_REVISION' || code === 'DATA_DIRECTORY_IN_USE') return 409;
   if (code === 'QUARANTINE_UNAVAILABLE') return 503;
   return 422;
 }
@@ -197,7 +207,8 @@ function sendManagerError(reply: FastifyReply, error: unknown) {
     return reply.status(managerServiceStatus(error.code)).send({ error: error.message, code: error.code });
   }
   if (error instanceof LocalPluginPackageAdmissionError) {
-    const status = error.code === 'QUARANTINE_UNAVAILABLE' ? 503 : error.code === 'PACKAGE_DIGEST_MISMATCH' ? 409 : 422;
+    const conflict = error.code === 'PACKAGE_DIGEST_MISMATCH' || error.code === 'DATA_DIRECTORY_IN_USE';
+    const status = error.code === 'QUARANTINE_UNAVAILABLE' ? 503 : conflict ? 409 : 422;
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   if (error instanceof OfficialPluginInstallError) {
@@ -207,9 +218,8 @@ function sendManagerError(reply: FastifyReply, error: unknown) {
 }
 
 function sendContributionError(reply: FastifyReply, error: unknown) {
-  if (error instanceof BuiltinPluginContributionError) {
-    const status =
-      error.code === 'CONTRIBUTION_NOT_ACTIVE' ? 409 : error.code === 'UNSUPPORTED_CONTRIBUTION' ? 422 : 503;
+  if (error instanceof ExternalPluginRuntimeError) {
+    const status = error.code === 'DELIVERY_REJECTED' ? 409 : error.code === 'PROTOCOL_VIOLATION' ? 422 : 503;
     return reply.status(status).send({ error: error.message, code: error.code });
   }
   return reply.status(500).send({ error: 'Plugin contribution operation failed', code: 'CONTRIBUTION_FAILED' });
@@ -285,7 +295,7 @@ async function appendMutationAudit(
     readonly operator: string;
     readonly operation: 'install' | 'set-enabled' | 'uninstall';
     readonly pluginId?: string;
-    readonly sourceKind?: 'catalog' | 'local-directory' | 'local-archive';
+    readonly sourceKind?: 'catalog' | 'git' | 'local-directory' | 'local-archive';
     readonly expectedRevision?: number;
   },
 ): Promise<void> {

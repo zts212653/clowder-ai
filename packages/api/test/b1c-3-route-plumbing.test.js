@@ -8,8 +8,8 @@
  *     (compile-time contract — this test guards against accidental removal)
  *
  * These are structural / wiring tests — the actual bridge dispatch behavior
- * is tested by b1c-2-invoke-single-cat-bridge-wiring.test.js (existing) and
- * b1c-3-pinchtab-bridge-adapter.test.js (new).
+ * is tested by b1c-2-invoke-single-cat-bridge-wiring.test.js and
+ * b1c-2-cloud-invoke-bridge.test.js.
  */
 
 import assert from 'node:assert/strict';

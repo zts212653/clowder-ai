@@ -16,7 +16,7 @@ describe('F247 atomic append-winner recovery', () => {
     const { AgentKeyRegistry } = await import('../dist/domains/cats/services/agents/agent-key/AgentKeyRegistry.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const store = new MessageStore();
     const threadStore = new ThreadStore();
     const thread = await threadStore.create('alice', 'F247 append winner recovery');
@@ -60,7 +60,7 @@ describe('F247 atomic append-winner recovery', () => {
 
     const invocationQueue = new InvocationQueue();
     const broadcasts = [];
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),

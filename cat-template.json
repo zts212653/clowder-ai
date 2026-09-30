@@ -518,7 +518,7 @@
           "provider": "openai-chatgpt-pro",
           "personality": "云端高阶推理，跨族 review，方向收敛",
           "teamStrengths": "云端高阶判断席位，远端 push 模式",
-          "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI；onboarding 需 ChatGPT Pro 订阅 + PinchTab + Custom Instructions（Phase F 一键化）",
+          "caution": "F247 B1a：云端 Remote MCP，token 防线唯一；不 spawn 本地 CLI；onboarding 需 ChatGPT Pro 订阅 + ChatGPT Pro 插件（Personal Chrome Host）+ Custom Instructions（Phase F 一键化）",
           "strengths": ["reasoning", "code-review", "design-gate"]
         }
       ]

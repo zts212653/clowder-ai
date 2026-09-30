@@ -496,6 +496,7 @@ function buildMentionData(configs: Record<string, import('@cat-cafe/shared').Cat
  * Options for AgentRouter constructor
  */
 export interface AgentRouterOptions {
+  resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   collectiveContext?: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
   agentRegistry: AgentRegistry;
   registry: InvocationRegistry;
@@ -632,6 +633,7 @@ export class AgentRouter {
   private unavailableServices: ReadonlyMap<string, AgentRegistrationFailure> = new Map();
   private registry: InvocationRegistry;
   private messageStore: IMessageStore;
+  private resolveTrustedImagePath?: (hmrId: string) => Promise<string | undefined>;
   private collectiveContext: import('../invocation/invoke-single-cat.js').InvocationDeps['collectiveContext'];
   private sessionManager: SessionManager;
   private deliveryCursorStore: DeliveryCursorStore;
@@ -800,6 +802,7 @@ export class AgentRouter {
 
     this.registry = options.registry;
     this.messageStore = options.messageStore;
+    this.resolveTrustedImagePath = options.resolveTrustedImagePath;
     this.collectiveContext = options.collectiveContext;
     this.sessionManager = new SessionManager(options.sessionStore);
     // #1200 P2-3: wire cursor canonicalizer for v1→v2 async resolution
@@ -1480,6 +1483,7 @@ export class AgentRouter {
       unavailableServices: this.unavailableServices,
       ...(this.routingDispatchPreflight ? { routingDispatchPreflight: this.routingDispatchPreflight } : {}),
       invocationDeps: {
+        ...(this.resolveTrustedImagePath ? { resolveTrustedImagePath: this.resolveTrustedImagePath } : {}),
         messageStore: this.messageStore,
         ...(this.collectiveContext ? { collectiveContext: this.collectiveContext } : {}),
         registry: this.registry,

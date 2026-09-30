@@ -85,6 +85,7 @@ export class PersonalChromeAssistantReturnPoller {
         return;
       }
       const outcome = await this.deps.ingestService.ingest({
+        provider: 'chatgpt',
         sourceMessageId: item.sourceMessageId,
         content: item.content,
       });

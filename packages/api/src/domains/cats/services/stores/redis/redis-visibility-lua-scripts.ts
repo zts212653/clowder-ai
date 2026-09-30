@@ -95,6 +95,9 @@ end
 -- 1. Pre-mutation guard: compute visibilitySeq and check exhaustion BEFORE
 --    any writes. Redis Lua error_reply does NOT rollback prior mutations, so
 --    all fail-closed checks must precede the first write. (#1200 P1-2 fix)
+if redis.call('EXISTS', hash) == 1 then
+  return redis.error_reply('MESSAGE_ID_COLLISION')
+end
 local seq = 0
 local metaKey = kp .. 'msg:visibility-meta:' .. threadId
 local visKey = kp .. 'msg:visibility:' .. threadId

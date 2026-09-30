@@ -96,6 +96,10 @@ function exchangeLocalFrame<
     const socket = createConnection(options.socketPath);
     let settled = false;
     let input = '';
+    // HOST_UNAVAILABLE promises that nothing reached the host (ledger h3 (e)). Once the request is
+    // handed to the socket it may have been applied, so a later failure is ambiguous, never
+    // "unavailable": the caller must not report the message as unsent.
+    let requestSent = false;
     const finish = (callback: () => void): void => {
       if (settled) return;
       settled = true;
@@ -104,16 +108,29 @@ function exchangeLocalFrame<
       callback();
     };
     const timer = setTimeout(() => {
-      finish(() => reject(new PersonalChromeHostError('HOST_TIMEOUT', 'personal Chrome host timed out')));
+      const error = requestSent
+        ? new PersonalChromeHostError(
+            'AMBIGUOUS_EFFECT',
+            'personal Chrome host did not answer after the request was sent',
+          )
+        : new PersonalChromeHostError('HOST_UNAVAILABLE', 'personal Chrome host did not accept the connection');
+      finish(() => reject(error));
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     timer.unref?.();
 
     socket.setEncoding('utf8');
-    socket.once('connect', () => socket.write(serialized));
+    socket.once('connect', () => {
+      requestSent = true;
+      socket.write(serialized);
+    });
     socket.once('error', (error) => {
-      finish(() =>
-        reject(new PersonalChromeHostError('HOST_UNAVAILABLE', `personal Chrome host unavailable: ${error.message}`)),
-      );
+      const failure = requestSent
+        ? new PersonalChromeHostError(
+            'AMBIGUOUS_EFFECT',
+            `personal Chrome host connection failed after the request was sent: ${error.message}`,
+          )
+        : new PersonalChromeHostError('HOST_UNAVAILABLE', `personal Chrome host unavailable: ${error.message}`);
+      finish(() => reject(failure));
     });
     socket.on('data', (chunk) => {
       input += chunk;

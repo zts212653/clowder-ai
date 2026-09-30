@@ -108,3 +108,27 @@ it('lets the current retry authority replace a stale sending projection', async 
     expect.objectContaining({ body: JSON.stringify({ attemptId: 'attempt-current' }) }),
   );
 });
+
+// F202 h3c-2 — the card reads back the binding of the cat it recovers, whatever its id.
+it.each([
+  ['its own binding', { 'cloud-alt': url, 'gpt-pro': 'https://chatgpt.com/c/conversation-other' }, true],
+  ["only another cat's binding", { 'gpt-pro': url }, false],
+])('a cloud cat that is not gpt-pro is connected by %s', async (_case, bindings, connected) => {
+  mockFetch.mockImplementation(async (path) => {
+    if (path === '/api/plugins/personal-chrome')
+      return json({
+        authorization: {
+          conversations: [{ conversationId, displayTitle: '云端小星星接回家', authorizedAt: stamp, updatedAt: stamp }],
+        },
+      });
+    if (String(path).endsWith('/cloud-bindings')) return json({ bindings });
+    if (String(path).endsWith('/retry-authority')) return json({ code: 'QUEUE_MESSAGE_NOT_FOUND' }, 404);
+    throw new Error(`unexpected request ${String(path)}`);
+  });
+  await act(async () => {
+    root.render(<CloudBindingRecoveryCard threadId="thread-7" sourceMessageId="source-7" targetCatId="cloud-alt" />);
+  });
+  await vi.waitFor(() => expect(container.textContent).toContain('云端小星星接回家'));
+  if (connected) expect(container.textContent).toContain('已连接');
+  else expect(container.querySelector<HTMLButtonElement>('[data-recovery-primary]')?.textContent).toBe('连接此会话');
+});

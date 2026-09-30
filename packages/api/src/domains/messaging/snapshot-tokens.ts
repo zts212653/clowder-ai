@@ -7,6 +7,7 @@ interface SnapshotAckTokenPayload {
   readonly s: string;
   readonly q: number;
   readonly n: string;
+  readonly v: string;
   readonly k: 'snapshot';
 }
 
@@ -17,11 +18,16 @@ export interface SnapshotPageTokenPayload {
   readonly n: string;
 }
 
-export function encodeSnapshotAckToken(subscriptionId: string, snapshot: SnapshotViewRecord): string {
+export function encodeSnapshotAckToken(
+  subscriptionId: string,
+  snapshot: SnapshotViewRecord,
+  sessionId: string,
+): string {
   const payload: SnapshotAckTokenPayload = {
     s: subscriptionId,
     q: snapshot.headSequence,
-    n: snapshot.snapshotId,
+    n: sessionId,
+    v: snapshot.snapshotId,
     k: 'snapshot',
   };
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');

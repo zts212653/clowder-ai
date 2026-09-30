@@ -5,6 +5,7 @@
  */
 
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { HostPublicationGate } from './host-publication-gate.js';
 import {
   MemoryAppendLock,
   MemoryCursorStore,
@@ -23,6 +24,7 @@ export function createMessagingStores(redis?: RedisClient): MessagingStores {
       events: new RedisEventLogStore(redis),
       cursors: new RedisCursorStore(redis),
       appendLock: new RedisAppendLock(redis),
+      publications: new HostPublicationGate(),
     };
   }
   return {
@@ -31,5 +33,6 @@ export function createMessagingStores(redis?: RedisClient): MessagingStores {
     events: new MemoryEventLogStore(),
     cursors: new MemoryCursorStore(),
     appendLock: new MemoryAppendLock(),
+    publications: new HostPublicationGate(),
   };
 }

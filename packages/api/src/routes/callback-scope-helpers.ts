@@ -121,7 +121,10 @@ export async function resolveScopedThreadId(
   return { ok: true, threadId: requestedThreadId };
 }
 
-export function derivePrincipal(record: InvocationRecord | AgentKeyRecord): CallbackPrincipal {
+export function derivePrincipal(
+  record: InvocationRecord | AgentKeyRecord,
+  options: { readonly cloudBoundary?: boolean } = {},
+): CallbackPrincipal {
   if ('agentKeyId' in record) {
     return {
       kind: 'agent_key',
@@ -129,6 +132,7 @@ export function derivePrincipal(record: InvocationRecord | AgentKeyRecord): Call
       userId: record.userId,
       catId: createCatId(record.catId),
       scope: record.scope,
+      cloudBoundary: options.cloudBoundary === true,
     };
   }
   return {

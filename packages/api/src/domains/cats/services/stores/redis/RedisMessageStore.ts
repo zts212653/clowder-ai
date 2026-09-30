@@ -763,9 +763,13 @@ export class RedisMessageStore {
       // APPEND_WITH_VISIBILITY_LUA will reclaim it atomically (#1210).
     }
 
-    const id = generateSortableId(msg.timestamp);
-    const { idempotencyKey, ...payload } = msg;
+    if (msg.reservedId !== undefined && !/^\d{16}-\d{6,}-[0-9a-f]{8}$/.test(msg.reservedId)) {
+      throw new TypeError('reserved message id has invalid shape');
+    }
+    const id = msg.reservedId ?? generateSortableId(msg.timestamp);
+    const { idempotencyKey, reservedId, ...payload } = msg;
     void idempotencyKey;
+    void reservedId;
     const stored: StoredMessage = { ...payload, id, threadId };
     const score = msg.timestamp;
     const hashKey = MessageKeys.detail(id);

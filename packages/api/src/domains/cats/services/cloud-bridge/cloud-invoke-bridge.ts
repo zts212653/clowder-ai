@@ -2,23 +2,18 @@
  * F247 AC-B1c-2 + AC-B1c-4: Cloud invoke bridge — main service.
  *
  * Bounded transport orchestrator that takes a local @ mention of a cloud cat
- * (e.g. @gpt-pro) and pushes it to that cat's bound ChatGPT chat through a
- * receipt-bearing Host Adapter or an explicitly enabled legacy PinchTab path.
+ * (e.g. @gpt-pro) and appends it to that cat's bound ChatGPT conversation
+ * through the receipt-bearing conversation Host adapter.
  *
- * Scope of this PR (B1c PR-B):
- *  - AC-B1c-2: service skeleton + non-throwing transport-outcome contract
- *  - AC-B1c-4: fallback notification on adapter unavailable / inject failure
- *  - AC-B1c-10: eval-boundary JSON.stringify safety (delegated to build-delta-payload + adapter)
+ *  - AC-B1c-2: non-throwing transport-outcome contract
+ *  - AC-B1c-4: fallback notification when there is no adapter or binding, or the append fails
+ *  - AC-B1c-9: (threadId, catId) singleflight — concurrent dispatches to one
+ *    conversation reach the Host one at a time, in order
  *  - AC-B1c-12: source-bound delta payload format (delegated to build-delta-payload)
  *
- * PR-D (B1c hardening, this PR) adds:
- *  - AC-B1c-9: (threadId, catId) singleflight lock-first ordering —
- *    concurrent dispatches serialized via in-process Map<string, Promise>
- *  - AC-B1c-6: stale binding self-heal — adapter fail on bound URL →
- *    clear binding → retry with boundUrl=null (open fresh chat)
- *  - AC-B1c-7: multi-thread × same cloud cat isolation (test coverage)
- *
- * Previously completed: PR-B (skeleton + fallback), PR-C (real CDP adapter).
+ * The legacy PinchTab bridge, which drove the foreground ChatGPT tab and could
+ * open a fresh chat, was removed (F202 W2-3 h3a, issue #1538): the bridge never
+ * sends through a second transport after the Host declines.
  */
 
 import { CHATGPT_CHAT_URL_REGEX } from '../../../../utils/chatgpt-chat-url.js';
@@ -30,7 +25,6 @@ import type {
   BridgeFallbackReason,
   CloudInvokeDispatchParams,
   ICloudInvokeBridge,
-  IPinchTabBridgeAdapter,
 } from './types.js';
 
 export { buildCloudBridgeStatusContent, buildFallbackMessageContent } from './cloud-bridge-fallback.js';
@@ -42,15 +36,11 @@ export type { BridgeLogger, CloudInvokeBridgeDeps, EmitFallbackFn } from './clou
  * Awaited by `invokeSingleCat` only through the bounded transport outcome. The
  * `dispatch()` method:
  *   1. Builds the source-bound delta payload (AC-B1c-12 + exact source return capability).
- *   2. Reads the existing chat URL binding (if any) from thread metadata.
- *   3. If no adapter or adapter not ready → emits fallback + returns a typed
- *      outcome (no exception escapes the transport boundary).
- *   4. Otherwise calls `adapter.injectAndCaptureUrl()`. The adapter is
- *      responsible for the actual CDP eval / send-button click / URL poll
- *      (deferred to PR-C).
- *   5. Validates the captured URL against `CHATGPT_CHAT_URL_REGEX` (defense
- *      in depth — adapter is also expected to validate, AC-B1c-11).
- *   6. Writes the new/refreshed binding via threadStore.
+ *   2. Reads the existing conversation binding (if any) from thread metadata.
+ *   3. Appends to the bound conversation through the Host adapter and returns
+ *      its receipt.
+ *   4. With no adapter, no binding or a failed append it emits a fallback and
+ *      returns a typed outcome (no exception escapes the transport boundary).
  *
  * Errors are caught and returned as typed outcomes. The invocation owns the
  * single user-visible status and exact source-carrier settlement.
@@ -63,7 +53,7 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
    * binding read (lock-first ordering per KD-20 R2).
    *
    * Why in-process Map instead of Redis lock: the bridge runs single-node
-   * (PinchTab Chrome is local); cross-node lock is unnecessary overhead.
+   * (the conversation Host is local); a cross-node lock is unnecessary overhead.
    */
   private readonly singleflightLocks = new Map<string, Promise<BridgeDispatchOutcome>>();
 
@@ -92,8 +82,8 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
         { threadId: params.threadId, catId: params.catId, err: serializeError(err) },
         'F247 B1c bridge dispatch threw (caught — structured failure returned)',
       );
-      await this.fallback(params, 'inject-failed', detail);
-      return { kind: 'error', reason: 'inject-failed', message: shortMessage(err), detail };
+      await this.fallback(params, 'dispatch-failed', detail);
+      return { kind: 'error', reason: 'dispatch-failed', message: shortMessage(err), detail };
     }
   }
 
@@ -103,9 +93,8 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
    *
    * AC-B1c-9: Wraps the core dispatch in a singleflight lock keyed by
    * `(threadId, catId)`. Concurrent callers with the same key wait for the
-   * first holder to finish, then re-read the binding inside the lock —
-   * the second invocation sees the URL written by the first and navigates
-   * to the bound chat instead of opening a duplicate.
+   * first holder to finish and read the binding inside the lock, so sends to
+   * one conversation reach the Host one at a time, in order.
    */
   async dispatchInternal(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
     if (!params.sourceMessageId || params.sourceMessageId.length > 512) {
@@ -151,7 +140,7 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
     }, CloudInvokeBridge.LOCK_TTL_MS);
 
     try {
-      const outcome = await this.dispatchCoreWithSelfHeal(params);
+      const outcome = await this.dispatchCore(params);
       return outcome;
     } finally {
       // Release the lock
@@ -163,19 +152,15 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
     }
   }
 
-  /**
-   * Core dispatch logic with AC-B1c-6 self-heal: if the adapter throws on a
-   * bound URL (stale chat), clear the binding and retry with boundUrl=null.
-   */
-  private async dispatchCoreWithSelfHeal(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
-    const { hostAdapter, pinchTabAdapter, threadStore } = this.deps;
+  /** Appends to the bound conversation through the Host adapter; any other case is a typed fallback. */
+  private async dispatchCore(params: CloudInvokeDispatchParams): Promise<BridgeDispatchOutcome> {
+    const { hostAdapter } = this.deps;
 
     // 1. Build delta payload (AC-B1c-12).
     const renderedPrompt = buildDeltaPayload(params);
 
-    // 2. Resolve the stable host conversation before choosing a transport.
-    // The Host Adapter can append only to an existing binding; it never
-    // manufactures a conversation by driving the foreground composer.
+    // 2. Resolve the stable host conversation. The Host adapter can append only
+    // to an existing binding; it never manufactures a conversation.
     const boundUrl = await this.readBoundUrl(params);
     if (hostAdapter && !boundUrl) {
       const detail = 'Personal Chrome Host is available, but this thread has no bound ChatGPT conversation';
@@ -195,55 +180,11 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
       return hostDecision.outcome;
     }
 
-    // 3. Legacy adapter availability gate (AC-B1c-4). Production wiring keeps
-    // this null unless the operator explicitly opts into foreground automation.
-    if (!pinchTabAdapter) {
-      const detail = boundUrl
-        ? 'No conversation Host Adapter is installed; legacy foreground automation is disabled'
-        : 'No bound host conversation is available; legacy foreground automation is disabled';
-      await this.fallback(params, 'no-adapter', detail);
-      return { kind: 'fallback', reason: 'no-adapter', detail };
-    }
-    const ready = await pinchTabAdapter.isReady().catch(() => false);
-    if (!ready) {
-      await this.fallback(params, 'adapter-not-ready', 'PinchTab Chrome unreachable or ChatGPT not logged in');
-      return {
-        kind: 'fallback',
-        reason: 'adapter-not-ready',
-        detail: 'PinchTab Chrome unreachable or ChatGPT not logged in',
-      };
-    }
-
-    // 4. Invoke explicitly enabled legacy adapter with self-heal retry.
-    const injectResult = await this.injectWithSelfHeal(pinchTabAdapter, params, renderedPrompt, boundUrl);
-    if (injectResult.kind !== 'ok') return injectResult.outcome;
-    const capturedUrl = injectResult.capturedUrl;
-
-    // 5. Defense-in-depth URL validation (AC-B1c-11).
-    if (!CHATGPT_CHAT_URL_REGEX.test(capturedUrl)) {
-      await this.fallback(
-        params,
-        'invalid-captured-url',
-        `Captured URL did not match canonical pattern: ${capturedUrl.slice(0, 60)}`,
-      );
-      return {
-        kind: 'fallback',
-        reason: 'invalid-captured-url',
-        detail: `Captured URL did not match canonical pattern: ${capturedUrl.slice(0, 60)}`,
-      };
-    }
-
-    // 6. Write binding (idempotent — same URL just refreshes).
-    try {
-      await threadStore.updateCloudCatBinding(params.threadId, params.catId, capturedUrl);
-    } catch (err) {
-      this.logger.warn(
-        { threadId: params.threadId, catId: params.catId, capturedUrl, err: serializeError(err) },
-        'F247 B1c bridge: binding write failed (message already delivered)',
-      );
-    }
-
-    return { kind: 'sent', capturedUrl, transport: 'legacy-pinchtab' };
+    // 3. No conversation Host adapter can take it (none installed, or it is
+    // unavailable). There is no second transport to try.
+    const detail = boundUrl ? 'No conversation Host Adapter is available' : 'No bound host conversation is available';
+    await this.fallback(params, 'no-adapter', detail);
+    return { kind: 'fallback', reason: 'no-adapter', detail };
   }
 
   /**
@@ -264,64 +205,6 @@ export class CloudInvokeBridge implements ICloudInvokeBridge {
       );
     }
     return null;
-  }
-
-  /**
-   * AC-B1c-6: Invoke the adapter with self-heal retry. If the adapter fails
-   * on a bound URL, clears the stale binding and retries with boundUrl=null.
-   * Returns { kind: 'ok', capturedUrl } on success, or { kind: 'failed', outcome }
-   * with a pre-built BridgeDispatchOutcome on failure.
-   */
-  private async injectWithSelfHeal(
-    adapter: IPinchTabBridgeAdapter,
-    params: CloudInvokeDispatchParams,
-    renderedPrompt: string,
-    boundUrl: string | null,
-  ): Promise<{ kind: 'ok'; capturedUrl: string } | { kind: 'failed'; outcome: BridgeDispatchOutcome }> {
-    try {
-      const capturedUrl = await adapter.injectAndCaptureUrl({ renderedPrompt, boundUrl });
-      return { kind: 'ok', capturedUrl };
-    } catch (err) {
-      if (!boundUrl) {
-        // No existing binding — no self-heal possible, just fail.
-        await this.fallback(params, 'inject-failed', `PinchTab adapter inject failed: ${shortMessage(err)}`);
-        return {
-          kind: 'failed',
-          outcome: {
-            kind: 'error',
-            reason: 'inject-failed',
-            message: shortMessage(err),
-            detail: `PinchTab adapter inject failed: ${shortMessage(err)}`,
-          },
-        };
-      }
-
-      // Self-heal: bound URL failed (chat may be deleted). Clear stale + retry.
-      this.logger.info(
-        { threadId: params.threadId, catId: params.catId, staleUrl: boundUrl, err: serializeError(err) },
-        'F247 B1c bridge: bound URL failed — self-heal retry (re-open fresh chat)',
-      );
-      try {
-        await this.deps.threadStore.updateCloudCatBinding(params.threadId, params.catId, null);
-      } catch {
-        /* best-effort clear */
-      }
-      try {
-        const capturedUrl = await adapter.injectAndCaptureUrl({ renderedPrompt, boundUrl: null });
-        return { kind: 'ok', capturedUrl };
-      } catch (retryErr) {
-        await this.fallback(params, 'inject-failed', `PinchTab self-heal retry also failed: ${shortMessage(retryErr)}`);
-        return {
-          kind: 'failed',
-          outcome: {
-            kind: 'error',
-            reason: 'inject-failed',
-            message: shortMessage(retryErr),
-            detail: `PinchTab self-heal retry also failed: ${shortMessage(retryErr)}`,
-          },
-        };
-      }
-    }
   }
 
   private async fallback(

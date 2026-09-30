@@ -1,4 +1,5 @@
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
+import { withRuntimeFailure } from '../host-inventory/runtime-failure-record.js';
 import type { PluginRuntimeErrorRecord } from '../host-inventory/types.js';
 import type { ExternalPluginProcess } from './types.js';
 
@@ -33,13 +34,12 @@ export async function projectRuntimeCrash(
     const occurredAt = now();
     const error = options.suppressExitDiagnostic ? undefined : runtimeError(execution.exit, occurredAt);
     transaction.instances.put({
-      ...instance,
+      ...(error === undefined ? instance : withRuntimeFailure(instance, error)),
       ...(execution.started && !options.preserveActivation
         ? { activationState: 'error' as const, lifecycleRevision: instance.lifecycleRevision + 1 }
         : {}),
       runtimeState: 'crashed',
       updatedAt: occurredAt,
-      ...(error === undefined ? {} : { lastRuntimeError: error }),
     });
   });
 }

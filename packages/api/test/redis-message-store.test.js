@@ -795,6 +795,38 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(listenerCalls, 0);
   });
 
+  // F202 W2-5b: the extra parser is a whitelist, so a marker it does not know is dropped on read.
+  // Cat replies reach Redis through the frontier writes, so all three entrypoints must keep it.
+  it('all Redis append entrypoints round-trip the deferred media publication marker', async () => {
+    const appenders = [
+      ['append', async (target, message) => target.append(message)],
+      [
+        'appendIfThreadFrontier',
+        async (target, message) => (await target.appendIfThreadFrontier(message, null)).message,
+      ],
+      [
+        'appendAndObservePriorFrontier',
+        async (target, message) => (await target.appendAndObservePriorFrontier(message)).message,
+      ],
+    ];
+    const markerStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
+    for (const [name, append] of appenders) {
+      const stored = await append(markerStore, {
+        userId: 'user1',
+        catId: 'opus',
+        content: `${name} voice reply`,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: `thread-w2-5b-${name}`,
+        extra: {
+          rich: { v: 1, blocks: [{ id: 'voice', kind: 'audio', v: 1, url: '', text: 'hello' }] },
+          mediaPublication: 'deferred',
+        },
+      });
+      const reread = await markerStore.getById(stored.id);
+      assert.equal(reread?.extra?.mediaPublication, 'deferred', `${name} must keep the marker`);
+    }
+  });
   it('append admits and rehydrates the sortable-ID-safe Date boundaries', async () => {
     const roundTripStore = new RedisMessageStore(redis, { ttlSeconds: 0 });
     for (const timestamp of [0, 1, 8_640_000_000_000_000]) {
@@ -1356,6 +1388,31 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     const threadMessages = await store.getByThread('thread-idem', 10, 'u1');
     assert.equal(threadMessages.length, 1);
     assert.equal(threadMessages[0].id, first.id);
+  });
+
+  it('reserves a staged message id without allowing a different send to overwrite it', async () => {
+    const timestamp = Date.now();
+    const reservedId = generateSortableId(timestamp);
+    const input = {
+      userId: 'staged-owner',
+      catId: null,
+      threadId: 'staged-thread',
+      content: 'final media message',
+      mentions: [],
+      timestamp,
+      reservedId,
+      idempotencyKey: 'staged-send-key',
+    };
+    const first = await store.appendIdempotent(input);
+    assert.equal(first.message.id, reservedId);
+    const retry = await store.appendIdempotent({ ...input, content: 'must not replace' });
+    assert.equal(retry.message.id, reservedId);
+    assert.equal(retry.message.content, 'final media message');
+    await assert.rejects(
+      store.appendIdempotent({ ...input, idempotencyKey: 'different-send-key', content: 'collision' }),
+      /MESSAGE_ID_COLLISION/,
+    );
+    assert.equal((await store.getById(reservedId)).content, 'final media message');
   });
 
   it('concurrent idempotent append creates exactly one thread member', async () => {

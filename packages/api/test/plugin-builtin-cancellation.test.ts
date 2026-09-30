@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
-  type BuiltinPluginRuntime,
-  HybridPluginRuntimeSupervisor,
-} from '../src/domains/plugin/builtin-runtime/hybrid-supervisor.js';
+  type BundledPluginRuntime,
+  BundledPluginRuntimeCarrier,
+} from '../src/domains/plugin/builtin-runtime/bundled-runtime-carrier.js';
 import { HostInventoryControlPlane } from '../src/domains/plugin/host-inventory/control-plane.js';
 import { MemoryPluginInventoryStore } from '../src/domains/plugin/host-inventory/stores.js';
 import {
@@ -19,7 +19,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-async function fixture(runtime: BuiltinPluginRuntime) {
+async function fixture(runtime: Omit<BundledPluginRuntime, 'claims'>) {
   const store = new MemoryPluginInventoryStore();
   const inventory = new HostInventoryControlPlane(store);
   const entry = OFFICIAL_PLUGIN_CATALOG.find((row) => row.catalogId === 'collective-connector')!;
@@ -38,20 +38,9 @@ async function fixture(runtime: BuiltinPluginRuntime) {
       activationState: 'enabled',
     });
   });
-  const unused = async (): Promise<never> => {
-    throw new Error('external runtime must not run');
-  };
-  const supervisor = new HybridPluginRuntimeSupervisor({
+  const supervisor = new BundledPluginRuntimeCarrier({
     inventory: store,
-    builtinRuntimes: new Map([[entry.pluginId, runtime]]),
-    external: {
-      start: unused,
-      stop: unused,
-      stopAll: unused,
-      deliver: unused,
-      recoverAfterRestart: unused,
-      handshakeTimeoutMs: 1000,
-    },
+    runtimes: [{ claims: ({ manifest }) => manifest.pluginId === entry.pluginId, ...runtime }],
   });
   return { store, supervisor, id: installed.pluginInstanceId };
 }

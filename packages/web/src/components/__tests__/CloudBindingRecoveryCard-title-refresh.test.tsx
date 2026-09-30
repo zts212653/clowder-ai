@@ -80,7 +80,7 @@ it('an older intact Helper exposes repair guidance while keeping existing author
   expect(container.textContent).toContain('连接组件需要更新');
   expect(container.textContent).toContain('已有会话授权仍保留');
   expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(
-    '/settings?s=plugins&threadId=thread#personal-chatgpt-pro',
+    '/settings?s=plugins#personal-chatgpt-pro',
   );
   expect(container.textContent).not.toContain('重新点击扩展授权');
 });

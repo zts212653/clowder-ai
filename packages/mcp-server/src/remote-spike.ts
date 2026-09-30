@@ -123,7 +123,13 @@ function wrapResponseWithRedact(res: http.ServerResponse): http.ServerResponse {
 
 const EXPECTED_MODE = 'cloud-pro-phase0' as const;
 const EXPECTED_READONLY = 'true' as const;
-const EXPECTED_CAT_ID = 'gpt-pro' as const;
+/**
+ * F202 h3c-2: the cloud cat is whichever cat the Host configures for the cloud provider — not a
+ * fixed id. The launcher names it; this gate only requires the name to be a cat id that can hold a
+ * key file (the Host's rule), and every identity below to agree with it. The Host then honours
+ * the bound key only while that cat is its configured cloud cat.
+ */
+const CLOUD_CAT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const SPIKE_VERSION = '0.0.5-b1a' as const;
 const SPIKE_ARTIFACT_REVISION = crypto
   .createHash('sha256')
@@ -142,13 +148,14 @@ function validateB1aEnv(): void {
   if (process.env.CAT_CAFE_READONLY !== EXPECTED_READONLY) {
     errors.push(`CAT_CAFE_READONLY must be "${EXPECTED_READONLY}" (got: "${process.env.CAT_CAFE_READONLY ?? ''}")`);
   }
-  if (process.env.CAT_CAFE_CAT_ID !== EXPECTED_CAT_ID) {
-    errors.push(`CAT_CAFE_CAT_ID must be "${EXPECTED_CAT_ID}" (got: "${process.env.CAT_CAFE_CAT_ID ?? ''}")`);
+  const boundCatId = process.env.CAT_CAFE_CAT_ID ?? '';
+  if (!CLOUD_CAT_ID.test(boundCatId) || boundCatId.includes('..')) {
+    errors.push(`CAT_CAFE_CAT_ID must name the configured cloud cat (got: ${JSON.stringify(boundCatId)})`);
   }
-  if (process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID !== EXPECTED_CAT_ID) {
+  if (process.env.CAT_CAFE_AGENT_KEY_BOUND_CAT_ID !== boundCatId) {
     errors.push(
-      `CAT_CAFE_AGENT_KEY_BOUND_CAT_ID must be "${EXPECTED_CAT_ID}" so this dedicated ` +
-        'cloud process can authenticate source-bound returns without a caller-supplied selector',
+      `CAT_CAFE_AGENT_KEY_BOUND_CAT_ID must equal CAT_CAFE_CAT_ID (${JSON.stringify(boundCatId)}) so this ` +
+        'dedicated cloud process can authenticate source-bound returns without a caller-supplied selector',
     );
   }
   if (!process.env.CAT_CAFE_USER_ID) {
@@ -182,7 +189,7 @@ function validateB1aEnv(): void {
         'Use env -u CAT_CAFE_CALLBACK_TOKEN in the spike startup wrapper.',
     );
   }
-  // This process is dedicated to gpt-pro and binds that identity at startup.
+  // This process is dedicated to the configured cloud cat and binds that identity at startup.
   // The single-entry variant map remains the key source of truth; validating both
   // prevents a caller from selecting another principal and lets source-bound
   // returns omit deployment knowledge that only the server possesses.
@@ -192,7 +199,7 @@ function validateB1aEnv(): void {
   if (!agentKeyFilesRaw) {
     errors.push(
       `CAT_CAFE_AGENT_KEY_FILES is required for cloud-pro-phase0 — ` +
-        `the bound identity "${EXPECTED_CAT_ID}" resolves only through its variantMap entry. ` +
+        `the bound identity "${boundCatId}" resolves only through its variantMap entry. ` +
         'CAT_CAFE_AGENT_KEY_FILE alone is not a dedicated-principal contract.',
     );
   } else {
@@ -215,24 +222,24 @@ function validateB1aEnv(): void {
       // resolveAgentKeySecret indexes that caller-supplied key. If the inherited
       // map contains other cats (antigravity / antig-opus / etc.), any spike-token
       // holder can pass another catId and authenticate as that cat. Fail closed
-      // by requiring the map to contain ONLY EXPECTED_CAT_ID.
-      const extraCats = Object.keys(map).filter((k) => k !== EXPECTED_CAT_ID);
+      // by requiring the map to contain ONLY boundCatId.
+      const extraCats = Object.keys(map).filter((k) => k !== boundCatId);
       if (extraCats.length > 0) {
         errors.push(
           `CAT_CAFE_AGENT_KEY_FILES contains extra cats [${extraCats.join(', ')}] — ` +
             `spike-token holder could impersonate them by picking input.agentKeyCatId. ` +
-            `Override the inherited map to a single-entry "${EXPECTED_CAT_ID}" map in the spike wrapper.`,
+            `Override the inherited map to a single-entry "${boundCatId}" map in the spike wrapper.`,
         );
       }
-      const candidate = map[EXPECTED_CAT_ID];
+      const candidate = map[boundCatId];
       if (typeof candidate !== 'string' || candidate.trim().length === 0) {
         errors.push(
-          `CAT_CAFE_AGENT_KEY_FILES has no usable "${EXPECTED_CAT_ID}" entry — ` +
-            `callback resolver returns undefined for the bound identity "${EXPECTED_CAT_ID}".`,
+          `CAT_CAFE_AGENT_KEY_FILES has no usable "${boundCatId}" entry — ` +
+            `callback resolver returns undefined for the bound identity "${boundCatId}".`,
         );
       } else {
         const resolvedPath = candidate.trim();
-        const resolutionSource = `CAT_CAFE_AGENT_KEY_FILES["${EXPECTED_CAT_ID}"]`;
+        const resolutionSource = `CAT_CAFE_AGENT_KEY_FILES["${boundCatId}"]`;
         try {
           const stat = fs.statSync(resolvedPath);
           if (!stat.isFile()) {

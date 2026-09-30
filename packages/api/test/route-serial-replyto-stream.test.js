@@ -178,6 +178,13 @@ describe('routeSerial replyTo on stream messages', () => {
 
     assert.equal(appendCalls.length, 1, 'should persist normal queued stream message');
     assert.equal(appendCalls[0].replyTo, undefined, 'normal queue stream must not reply to currentUserMessageId');
+    assert.deepEqual(appendCalls[0].extra?.causal, {
+      kind: 'invocation_reply',
+      triggerMessageId: 'msg-user',
+      triggerThreadId: 'thread1',
+    });
+    const { projectEnvelope } = await import('../dist/domains/messaging/envelope.js');
+    assert.equal(projectEnvelope(appendCalls[0])?.replyTo, 'msg-user');
 
     const codexText = yielded.find((msg) => msg.type === 'text' && msg.catId === 'codex');
     assert.ok(codexText, 'should yield codex stream text');

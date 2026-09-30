@@ -2,7 +2,7 @@ import {
   PersonalChromeAuthorizationList,
   type PersonalChromeAuthorizedConversation,
 } from './PersonalChromeAuthorizationList';
-import { PersonalChromeThreadBinding } from './PersonalChromeThreadBinding';
+import { SettingsText } from './primitives/SettingsText';
 
 export function PersonalChromeAuthorizationSection({
   status,
@@ -28,7 +28,12 @@ export function PersonalChromeAuthorizationSection({
         busy={busy}
         onRevoke={onRevoke}
       />
-      {status === 'authorized' && <PersonalChromeThreadBinding conversations={conversations} disabled={busy} />}
+      {/* F202 h3c-1: which conversation a thread uses is chosen in the thread itself, not here. */}
+      {status === 'authorized' && (
+        <SettingsText as="p" tone="secondary" className="mt-3">
+          扩展里的授权决定可以用哪些会话；每个对话具体连哪一个，在对话右栏的「ChatGPT 会话」里选择。
+        </SettingsText>
+      )}
     </>
   );
 }

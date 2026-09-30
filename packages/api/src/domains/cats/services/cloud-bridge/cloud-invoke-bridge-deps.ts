@@ -1,7 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { IConversationHostAdapter } from './conversation-host-adapter.js';
-import type { BridgeFallbackReason, IPinchTabBridgeAdapter } from './types.js';
+import type { BridgeFallbackReason } from './types.js';
 
 export type EmitFallbackFn = (params: {
   readonly threadId: string;
@@ -18,7 +18,6 @@ export interface BridgeLogger {
 
 export interface CloudInvokeBridgeDeps {
   readonly hostAdapter?: IConversationHostAdapter | null;
-  readonly pinchTabAdapter: IPinchTabBridgeAdapter | null;
   readonly emitFallback: EmitFallbackFn;
   readonly threadStore: IThreadStore;
   readonly logger?: BridgeLogger;

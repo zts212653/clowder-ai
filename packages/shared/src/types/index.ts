@@ -88,7 +88,7 @@ export type {
   ManagedCommandCancelTarget,
 } from './active-execution.js';
 // F178 Phase B: agent-key record + verify result
-export type { AgentKeyRecord, AgentKeyVerifyResult } from './agent-key.js';
+export type { AgentKeyRecord, AgentKeyScope, AgentKeyVerifyResult } from './agent-key.js';
 // F178 Phase B: agent-key reason taxonomy
 export {
   AGENT_KEY_FAILURE_REASONS,
@@ -284,6 +284,12 @@ export {
   legacyAccountFamilyForRef,
   protocolForClient,
 } from './client-routing.js';
+// F202 h3c-1: refusals of a thread cloud-binding write that prove nothing was written
+export {
+  CLOUD_BINDING_REFUSALS,
+  type CloudBindingRefusal,
+  isCloudBindingRefusal,
+} from './cloud-binding-refusals.js';
 export type {
   CloudBridgeDomFingerprintV1,
   CloudBridgeFailureDiagnosticV1,
@@ -1265,6 +1271,9 @@ export type {
   PluginManagerSetEnabledRequest,
   PluginManagerUninstallRequest,
   PluginManifest,
+  PluginOperationRow,
+  PluginOperationRowAction,
+  PluginOperationRows,
   PluginResourceDef,
   PluginResourceStatus,
   PluginStatus,

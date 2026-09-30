@@ -152,21 +152,21 @@ describe('PluginsContent GitHub configuration', () => {
         return jsonResponse({
           plugins: [
             {
-              id: 'weixin-mp',
-              name: '微信公众号',
+              id: 'fixture-plugin',
+              name: 'Fixture Plugin',
               version: '1.0.0',
-              icon: 'message-circle',
+              icon: 'box',
               iconBg: '#10b981',
               status: 'enabled',
               configured: false,
               hasHealthCheck: true,
               config: [],
-              resources: [{ type: 'limb', path: 'limbs/weixin-mp.yml' }],
+              resources: [{ type: 'limb', path: 'limbs/fixture.yml' }],
             },
           ],
         });
       }
-      if (url === '/api/plugins/weixin-mp/disable' && init?.method === 'POST') {
+      if (url === '/api/plugins/fixture-plugin/disable' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
       return jsonResponse({}, 404);
@@ -186,6 +186,6 @@ describe('PluginsContent GitHub configuration', () => {
     });
     await flushEffects();
 
-    expect(mockApiFetch.mock.calls.some((call) => call[0] === '/api/plugins/weixin-mp/disable')).toBe(true);
+    expect(mockApiFetch.mock.calls.some((call) => call[0] === '/api/plugins/fixture-plugin/disable')).toBe(true);
   });
 });

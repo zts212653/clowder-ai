@@ -154,6 +154,23 @@ export function PluginManagerLiveContent() {
     [refresh],
   );
 
+  const installFromGit = useCallback(
+    async (url: string) => {
+      setError(null);
+      const response = await apiFetch('/api/plugin-manager/plugins/install', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ source: { kind: 'git', url } }),
+      });
+      if (!response.ok) {
+        const failure = await responseError(response, `Git 插件安装失败 (${response.status})`);
+        throw new Error(failure.message);
+      }
+      await refresh();
+    },
+    [refresh],
+  );
+
   const plugins = snapshot?.plugins ?? [];
   const fixtures = plugins.map((plugin) => {
     const projection = detailProjection(plugin.pluginId, detailState);
@@ -191,6 +208,7 @@ export function PluginManagerLiveContent() {
           expectedDigest: plugin.packageDigest,
         });
       }}
+      onGitInstall={installFromGit}
       onSetEnabled={(pluginId, enabled) => {
         const plugin = plugins.find((candidate) => candidate.pluginId === pluginId);
         if (!plugin || plugin.lifecycleRevision === null) {
@@ -225,6 +243,7 @@ export function PluginManagerLiveContent() {
         })();
       }}
       onConfigure={(pluginId, updates) => void configure(pluginId, updates)}
+      onOperationChange={(pluginId) => void loadDetail(pluginId, true)}
     />
   );
 }

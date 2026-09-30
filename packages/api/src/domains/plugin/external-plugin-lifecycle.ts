@@ -1,5 +1,14 @@
 import {
+  logPluginStartFailure,
+  type PluginStartPhase,
+  pluginStartFailureReport,
+  startFailedMessage,
+  startFailureRecord,
+} from './diagnostics/plugin-start-failure.js';
+import {
   type ExternalPluginLifecycleServiceOptions,
+  PLUGIN_OWNER_DISABLED_REASON,
+  PLUGIN_OWNER_UNINSTALLED_REASON,
   PluginLifecycleError,
   type PluginMaintenanceInput,
   type PluginMaintenanceResult,
@@ -7,33 +16,15 @@ import {
 } from './external-plugin-lifecycle-types.js';
 import type { PluginInventoryTransaction } from './host-inventory/ports.js';
 import { normalizePluginInstanceAfterRestart } from './host-inventory/restart-recovery.js';
+import { withoutRuntimeFailure, withRuntimeFailure } from './host-inventory/runtime-failure-record.js';
 import type { ActivationState, PluginInstanceRecord } from './host-inventory/types.js';
+import { InstanceOperationQueue } from './lifecycle/instance-operation-queue.js';
 
 export * from './external-plugin-lifecycle-types.js';
 
 export interface ExternalPluginRestartRecovery {
   readonly recoveredInstances: number;
   readonly resumeRequested: number;
-}
-
-class InstanceOperationQueue {
-  private readonly tails = new Map<string, Promise<void>>();
-
-  async run<T>(instanceId: string, operation: () => Promise<T>): Promise<T> {
-    const previous = this.tails.get(instanceId) ?? Promise.resolve();
-    let release = () => {};
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.tails.set(instanceId, current);
-    await previous;
-    try {
-      return await operation();
-    } finally {
-      release();
-      if (this.tails.get(instanceId) === current) this.tails.delete(instanceId);
-    }
-  }
 }
 
 function currentInstance(transaction: PluginInventoryTransaction, instanceId: string): PluginInstanceRecord {
@@ -79,7 +70,7 @@ export class ExternalPluginLifecycleService {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'plugin configuration is not ready');
       }
       this.assertState(current, ['disabled', 'error'], ['stopped', 'crashed'], 'enable');
-      return this.startFromDormant(instanceId, expectedRevision);
+      return this.startFromDormant(instanceId, expectedRevision, 'enable');
     });
   }
   disable(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
@@ -88,7 +79,7 @@ export class ExternalPluginLifecycleService {
       assertRevision(current, expectedRevision);
       this.assertState(current, ['enabled'], undefined, 'disable');
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, 'owner_disabled');
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_DISABLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
         activationState: 'disabled',
         runtimeState: 'stopped',
@@ -111,7 +102,7 @@ export class ExternalPluginLifecycleService {
         activationState: 'disabled',
         runtimeState: 'stopped',
       });
-      return this.startFromDormant(instanceId, dormant.lifecycleRevision);
+      return this.startFromDormant(instanceId, dormant.lifecycleRevision, 'repair');
     });
   }
   uninstall(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
@@ -119,7 +110,7 @@ export class ExternalPluginLifecycleService {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
       const disabling = await this.advance(instanceId, expectedRevision, { activationState: 'disabling' });
-      await this.stopOrFail(instanceId, disabling.lifecycleRevision, 'owner_uninstalled');
+      await this.stopOrFail(instanceId, disabling.lifecycleRevision, PLUGIN_OWNER_UNINSTALLED_REASON);
       return this.advance(instanceId, disabling.lifecycleRevision, {
         lifecycleState: 'retired',
         activationState: 'disabled',
@@ -157,7 +148,8 @@ export class ExternalPluginLifecycleService {
         if (shouldResume) {
           try {
             await this.options.supervisor.start(input.instanceId);
-          } catch {
+          } catch (resumeError) {
+            this.reportStartFailure(stopped, 'maintenance_rollback_resume', resumeError, this.now());
             const resumeFailureCode =
               input.stopReason === 'package_update' ? 'UPDATE_ROLLBACK_RESUME_FAILED' : input.resumeFailureCode;
             await this.projectMaintenanceResumeFailure(input.instanceId, resumeFailureCode);
@@ -172,7 +164,8 @@ export class ExternalPluginLifecycleService {
       if (shouldResume) {
         try {
           await this.options.supervisor.start(input.instanceId);
-        } catch {
+        } catch (resumeError) {
+          this.reportStartFailure(stopped, 'maintenance_resume', resumeError, this.now());
           await this.projectMaintenanceResumeFailure(input.instanceId, input.resumeFailureCode);
           throw new PluginLifecycleError(
             input.resumeFailureCode,
@@ -227,13 +220,31 @@ export class ExternalPluginLifecycleService {
       }
       try {
         await this.options.supervisor.start(instanceId);
-      } catch {
-        await this.projectResumeFailure(instanceId);
+      } catch (error) {
+        const failedAt = this.now();
+        this.reportStartFailure(current, 'restart_resume', error, failedAt);
+        await this.projectResumeFailure(instanceId, startFailureRecord(error, failedAt, current.packageDigest));
       }
     });
   }
 
-  private projectResumeFailure(instanceId: string): Promise<void> {
+  /** Observing a failure must never change what the lifecycle records or reports. */
+  private reportStartFailure(
+    instance: PluginInstanceRecord,
+    phase: PluginStartPhase,
+    error: unknown,
+    at: number,
+  ): void {
+    try {
+      const { pluginId, pluginInstanceId } = instance;
+      const report = pluginStartFailureReport({ pluginId, pluginInstanceId, phase, occurredAt: at, error });
+      (this.options.onStartFailure ?? logPluginStartFailure)(report);
+    } catch {
+      // A failing observer loses one log line, never the failure itself.
+    }
+  }
+
+  private projectResumeFailure(instanceId: string, failure: ReturnType<typeof startFailureRecord>): Promise<void> {
     return this.options.store.transaction((transaction) => {
       const current = transaction.instances.get(instanceId);
       if (
@@ -245,19 +256,12 @@ export class ExternalPluginLifecycleService {
       ) {
         return;
       }
-      const now = this.now();
       transaction.instances.put({
-        ...current,
+        ...withRuntimeFailure(current, failure.record, failure.detail),
         activationState: 'error',
         runtimeState: 'stopped',
-        lastRuntimeError: {
-          code: 'UNEXPECTED_RUNTIME_FAILURE',
-          exitCode: null,
-          signal: null,
-          occurredAt: now,
-        },
         lifecycleRevision: current.lifecycleRevision + 1,
-        updatedAt: now,
+        updatedAt: failure.record.occurredAt,
       });
     });
   }
@@ -267,15 +271,9 @@ export class ExternalPluginLifecycleService {
       const current = currentInstance(transaction, instanceId);
       const now = this.now();
       transaction.instances.put({
-        ...current,
+        ...withRuntimeFailure(current, { code, exitCode: null, signal: null, occurredAt: now }),
         activationState: 'error',
         runtimeState: 'stopped',
-        lastRuntimeError: {
-          code,
-          exitCode: null,
-          signal: null,
-          occurredAt: now,
-        },
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: now,
       });
@@ -286,14 +284,22 @@ export class ExternalPluginLifecycleService {
     instanceId: string,
     expectedRevision: number,
     patch: Partial<PluginInstanceRecord>,
-    options: { readonly clearRuntimeError?: boolean; readonly at?: number } = {},
+    options: {
+      readonly clearRuntimeError?: boolean;
+      readonly failure?: ReturnType<typeof startFailureRecord>;
+      readonly at?: number;
+    } = {},
   ): Promise<PluginInstanceRecord> {
     return this.options.store.transaction((transaction) => {
       const current = currentInstance(transaction, instanceId);
       assertRevision(current, expectedRevision);
-      const { lastRuntimeError: _lastRuntimeError, ...withoutRuntimeError } = current;
+      const base = options.failure
+        ? withRuntimeFailure(current, options.failure.record, options.failure.detail)
+        : options.clearRuntimeError
+          ? withoutRuntimeFailure(current)
+          : current;
       const next = {
-        ...(options.clearRuntimeError ? withoutRuntimeError : current),
+        ...base,
         ...patch,
         lifecycleRevision: current.lifecycleRevision + 1,
         updatedAt: options.at ?? this.now(),
@@ -303,7 +309,11 @@ export class ExternalPluginLifecycleService {
     });
   }
 
-  private async startFromDormant(instanceId: string, expectedRevision: number): Promise<PluginInstanceRecord> {
+  private async startFromDormant(
+    instanceId: string,
+    expectedRevision: number,
+    phase: Extract<PluginStartPhase, 'enable' | 'repair'>,
+  ): Promise<PluginInstanceRecord> {
     const enabling = await this.advance(
       instanceId,
       expectedRevision,
@@ -313,24 +323,17 @@ export class ExternalPluginLifecycleService {
     const enabled = await this.advance(instanceId, enabling.lifecycleRevision, { activationState: 'enabled' });
     try {
       await this.options.supervisor.start(instanceId);
-    } catch {
+    } catch (error) {
       const failedAt = this.now();
+      this.reportStartFailure(enabled, phase, error, failedAt);
+      const failure = startFailureRecord(error, failedAt, enabled.packageDigest);
       await this.advance(
         instanceId,
         enabled.lifecycleRevision,
-        {
-          activationState: 'error',
-          runtimeState: 'stopped',
-          lastRuntimeError: {
-            code: 'UNEXPECTED_RUNTIME_FAILURE',
-            exitCode: null,
-            signal: null,
-            occurredAt: failedAt,
-          },
-        },
-        { at: failedAt },
+        { activationState: 'error', runtimeState: 'stopped' },
+        { failure, at: failedAt },
       );
-      throw new PluginLifecycleError('START_FAILED', 'official plugin runtime failed to start');
+      throw new PluginLifecycleError('START_FAILED', startFailedMessage(failure.detail));
     }
     return this.readCurrent(instanceId);
   }

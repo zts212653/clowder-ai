@@ -5,10 +5,11 @@
  * verifies via InvocationRegistry, and decorates request.callbackAuth.
  */
 
-import type { AgentKeyVerifyResult, CallbackPrincipal } from '@cat-cafe/shared';
+import { type AgentKeyVerifyResult, type CallbackPrincipal, catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { InvocationRecord, VerifyResult } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
+import { cloudPrincipalStanding } from '../domains/cats/services/cloud-bridge/cloud-conversation-identity.js';
 import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
 import { makeCallbackAuthError } from './callback-errors.js';
@@ -131,7 +132,16 @@ export function registerCallbackAuthHook(
           reply.status(401).send(makeCallbackAuthError(akResult.reason));
           return;
         }
-        request.callbackPrincipal = derivePrincipal(akResult.record);
+        // F202 h3c-2: a key of the cloud return boundary whose cat is no longer the configured cloud
+        // cat is honoured on no route — it must not fall back to being an ordinary agent key. The
+        // standing found here travels with the principal, so a route never re-derives it on its own.
+        const standing = cloudPrincipalStanding(catRegistry, akResult.record);
+        if (standing === 'refused') {
+          recordCallbackAuthFailure({ reason: 'cloud_principal_not_configured', tool });
+          reply.status(403).send(makeCallbackAuthError('cloud_principal_not_configured'));
+          return;
+        }
+        request.callbackPrincipal = derivePrincipal(akResult.record, { cloudBoundary: standing === 'cloud' });
         return;
       }
       return;

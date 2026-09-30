@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, rm, unlink, writeFile } from 'node:fs/promises';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -475,6 +477,103 @@ describe('PersonalChromeHostAdapter', () => {
       );
     } finally {
       await server.close();
+    }
+  });
+});
+
+/**
+ * A socket the test drives by hand. Unix-socket peers cannot make the client see an error after
+ * its request is written, so the transport is handed this one through the builtin `node:net`.
+ */
+class FakeSocket extends EventEmitter {
+  readonly written: string[] = [];
+  setEncoding(): this {
+    return this;
+  }
+  write(data: string): boolean {
+    this.written.push(data);
+    return true;
+  }
+  destroy(): this {
+    return this;
+  }
+}
+
+async function withFakeConnection(run: (socket: FakeSocket, created: Promise<void>) => Promise<void>): Promise<void> {
+  const netModule = createRequire(import.meta.url)('node:net') as { createConnection: unknown };
+  const original = netModule.createConnection;
+  const socket = new FakeSocket();
+  let markCreated!: () => void;
+  const created = new Promise<void>((resolve) => {
+    markCreated = resolve;
+  });
+  netModule.createConnection = () => {
+    markCreated();
+    return socket;
+  };
+  syncBuiltinESMExports();
+  try {
+    await run(socket, created);
+  } finally {
+    netModule.createConnection = original;
+    syncBuiltinESMExports();
+  }
+}
+
+describe('PersonalChromeHostAdapter transport failures (F202 W2-3 h3a, ledger h3 (e))', () => {
+  const adapter = (timeoutMs?: number) =>
+    new PersonalChromeHostAdapter({
+      socketPath: '/tmp/cat-cafe-f247-unused.sock',
+      pairingSecret: 'secret'.repeat(16),
+      helperArtifactRevision,
+      requestId: () => 'request-9',
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    });
+
+  it('reports a failure after the request was handed to the socket as AMBIGUOUS_EFFECT, never HOST_UNAVAILABLE', async () => {
+    await withFakeConnection(async (socket, created) => {
+      const pending = adapter().append_message('conversation-7', 'hello', 'source-message-9');
+      await created;
+      socket.emit('connect');
+      socket.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }));
+
+      await assert.rejects(
+        pending,
+        (error: unknown) => error instanceof PersonalChromeHostError && error.code === 'AMBIGUOUS_EFFECT',
+      );
+      assert.equal(socket.written.length, 1, 'the request was handed to the socket before it failed');
+    });
+  });
+
+  it('reports a failure before the connection as HOST_UNAVAILABLE, having sent nothing', async () => {
+    await withFakeConnection(async (socket, created) => {
+      const pending = adapter().append_message('conversation-7', 'hello', 'source-message-9');
+      await created;
+      socket.emit('error', Object.assign(new Error('connect ENOENT'), { code: 'ENOENT' }));
+
+      await assert.rejects(
+        pending,
+        (error: unknown) => error instanceof PersonalChromeHostError && error.code === 'HOST_UNAVAILABLE',
+      );
+      assert.equal(socket.written.length, 0);
+    });
+  });
+
+  it('times out as HOST_UNAVAILABLE before the connection, and as AMBIGUOUS_EFFECT after the request was sent', async () => {
+    for (const [connected, code] of [
+      [false, 'HOST_UNAVAILABLE'],
+      [true, 'AMBIGUOUS_EFFECT'],
+    ] as const) {
+      await withFakeConnection(async (socket, created) => {
+        const pending = adapter(20).append_message('conversation-7', 'hello', 'source-message-9');
+        await created;
+        if (connected) socket.emit('connect');
+
+        await assert.rejects(
+          pending,
+          (error: unknown) => error instanceof PersonalChromeHostError && error.code === code,
+        );
+      });
     }
   });
 });

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { AuthenticatedMediaImage } from './AuthenticatedMediaImage';
 import { ContextAttachmentView } from './ContextAttachmentView';
 import { Lightbox } from './Lightbox';
 import { MarkdownContent } from './MarkdownContent';
@@ -37,16 +38,13 @@ export function ContentBlocks({ blocks }: { blocks: MessageContent[] }) {
           return <MarkdownContent key={i} content={block.text} />;
         }
         if (block.type === 'image') {
-          const src = resolveUrl(block.url);
           return (
-            // biome-ignore lint/performance/noImgElement: uploaded images cannot use next/image
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <AuthenticatedMediaImage
               key={i}
-              src={src}
+              url={block.url}
               alt="attached image"
               className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
-              onClick={() => setLightboxSrc(src)}
+              onOpen={setLightboxSrc}
             />
           );
         }

@@ -48,7 +48,7 @@ describe('F247 normal owner-Chrome product chain', () => {
       timestamp: 1_000,
       extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
     });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const bridgeCalls = [];
     const dispositionCalls = [];
     const events = await drain(
@@ -150,7 +150,7 @@ describe('F247 normal owner-Chrome product chain', () => {
     assert.deepEqual(durableReceipt.source.meta.cloudBridgeOutboundReceipt, status.outboundReceipt);
 
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),

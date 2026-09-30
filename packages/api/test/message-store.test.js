@@ -7,6 +7,39 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 describe('MessageStore', () => {
+  test('a staged plugin send appends exactly at its reserved id', async () => {
+    const { MessageStore, generateSortableId } = await import(
+      '../dist/domains/cats/services/stores/ports/MessageStore.js'
+    );
+    const store = new MessageStore();
+    const id = generateSortableId(Date.now());
+    const message = store.append({
+      userId: 'u',
+      catId: null,
+      threadId: 't',
+      content: 'final',
+      mentions: [],
+      timestamp: Date.now(),
+      reservedId: id,
+    });
+    assert.equal(message.id, id);
+    assert.equal(store.getById(id)?.content, 'final');
+    assert.equal(store.size, 1);
+    assert.equal('reservedId' in message, false);
+    assert.throws(
+      () =>
+        store.append({
+          userId: 'u',
+          catId: null,
+          threadId: 't',
+          content: 'collision',
+          mentions: [],
+          timestamp: Date.now(),
+          reservedId: id,
+        }),
+      /collision/,
+    );
+  });
   test('append() stores message and returns with id', async () => {
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 

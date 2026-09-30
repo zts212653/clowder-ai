@@ -1211,57 +1211,6 @@ skills:
     merged_from: null
     feature: "F066"
 
-  # ── 企业 IM 工作流 (F162) ──
-  enterprise-workflow:
-    category: "创作与媒体"
-    description: >
-      企业 IM 工作流自动化：文档、表格、待办/任务、会议/日程一键创建。
-      Use when: operator要求创建企微/飞书的文档/表格/待办/会议/日程/幻灯片，或"一句话生成完整工作流"。
-      Not for: 普通聊天、消息收发（那是 F088 Transport Plane 的活）。
-      Output: 资源链接（文档 URL、企微会议链接、日程 summary 等）通过 callback 返回。
-    triggers:
-      - "创建文档"
-      - "写个文档"
-      - "create doc"
-      - "建个表格"
-      - "创建表格"
-      - "smart table"
-      - "多维表"
-      - "bitable"
-      - "建个待办"
-      - "创建待办"
-      - "todo"
-      - "创建任务"
-      - "task"
-      - "约个会"
-      - "创建会议"
-      - "create meeting"
-      - "创建日程"
-      - "calendar event"
-      - "幻灯片"
-      - "slides"
-      - "deck"
-      - "整理成文档"
-      - "拆成任务"
-      - "golden chain"
-      - "黄金链路"
-      - "工作流"
-      - "enterprise workflow"
-      - "飞书"
-      - "feishu"
-      - "lark"
-      - "企微"
-      - "wecom"
-      - "企业微信"
-    not_for:
-      - "普通聊天"
-      - "消息收发"
-    output: "Enterprise resource links returned through callback"
-    next: []
-    sop_step: null
-    merged_from: null
-    feature: "F162"
-
   # ── Workspace 导航 (F131) ──
   workspace-navigator:
     category: "工具"
