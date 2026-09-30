@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { toPosixPath } from './path-utils.js';
 import type { SecretFinding } from './SecretScanner.js';
 import { SecretScanner } from './SecretScanner.js';
 
@@ -67,14 +68,14 @@ export class BindingDryRun {
               excludedDirs++;
               continue;
             }
-            const rel = relative(root, full);
+            const rel = toPosixPath(relative(root, full));
             if (isExcluded(rel, exclude)) {
               excludedDirs++;
               continue;
             }
             walk(full, depth + 1);
           } else if (stat.isFile()) {
-            const rel = relative(root, full);
+            const rel = toPosixPath(relative(root, full));
             if (isExcluded(rel, exclude)) {
               excludedFiles++;
               continue;

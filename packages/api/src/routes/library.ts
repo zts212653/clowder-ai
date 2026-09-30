@@ -22,6 +22,7 @@ import { GraphQueryResolver } from '../domains/memory/GraphQueryResolver.js';
 import { GraphResolver } from '../domains/memory/GraphResolver.js';
 import type { IEmbeddingService, IEvidenceStore } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
+import { isPathInside, toPosixPath } from '../domains/memory/path-utils.js';
 import { RecentBrowseResolver } from '../domains/memory/RecentBrowseResolver.js';
 import { getRecallStats24h } from '../domains/memory/recall-stats.js';
 import { SqliteEvidenceStore } from '../domains/memory/SqliteEvidenceStore.js';
@@ -234,8 +235,8 @@ export const libraryRoutes: FastifyPluginAsync<LibraryRoutesOptions> = async (ap
     if (opts.indexBuilder && opts.parentRoot && resolvedRoot) {
       const absParent = resolve(opts.parentRoot);
       const absChild = resolve(resolvedRoot);
-      if (absChild.startsWith(absParent + '/') && absChild !== absParent) {
-        const rel = relative(absParent, absChild);
+      if (absChild !== absParent && isPathInside(absParent, absChild)) {
+        const rel = toPosixPath(relative(absParent, absChild));
         const pattern = `${rel}/**`;
         opts.indexBuilder.addExcludePatterns([pattern]);
 

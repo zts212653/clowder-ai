@@ -2,6 +2,7 @@ import { basename, relative } from 'node:path';
 import { inferKindFromPath } from '@cat-cafe/shared/scanner-discovery-pure';
 import type { EvidenceKind, EvidenceStatus, ScannedEvidence } from './interfaces.js';
 import { isMarkdownSeparator, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
+import { toPosixPath } from './path-utils.js';
 
 const VALID_EVIDENCE_STATUSES = new Set<EvidenceStatus>([
   'active',
@@ -61,7 +62,7 @@ export function parseSvgAssetToEvidence(
   const text = extractSvgTextContent(content);
   if (!text) return null;
 
-  const sourcePath = relative(projectRoot, filePath);
+  const sourcePath = toPosixPath(relative(projectRoot, filePath));
   const title = extractSvgTitle(content) ?? basename(filePath, '.svg').replace(/[-_]+/g, ' ');
   const summary = text.length > 3000 ? `${text.slice(0, 2997)}...` : text;
 
