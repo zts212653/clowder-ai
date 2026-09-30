@@ -1965,6 +1965,14 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'F102_MODEL',
+    defaultValue: 'claude-opus-4-6',
+    description:
+      'Phase G 摘要调度用的模型（须由 Anthropic Messages 兼容端点提供；下一轮调度生效；留空=claude-opus-4-6，非默认模型不保证摘要质量）',
+    category: 'evidence',
+    sensitive: false,
+  },
+  {
     name: 'EMBED_PORT',
     defaultValue: '9880',
     description: 'Embedding 服务端口（仅在 EMBED_URL 未设置时使用）',

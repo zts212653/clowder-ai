@@ -233,6 +233,46 @@ describe('SummaryCompaction e2e', () => {
     assert.ok(candidates[0].title.includes('YAML'));
   });
 
+  for (const [label, override, expected] of [
+    ['default', undefined, 'claude-opus-4-6'],
+    ['override', 'claude-opus-5-5', 'claude-opus-5-5'],
+  ]) {
+    it(`persists the request model as summary_segments.model_id (${label})`, async (t) => {
+      const { createAbstractiveClient } = await import('../../dist/domains/memory/AbstractiveSummaryClient.js');
+      const saved = process.env.F102_MODEL;
+      if (override === undefined) delete process.env.F102_MODEL;
+      else process.env.F102_MODEL = override;
+      t.after(() => {
+        if (saved === undefined) delete process.env.F102_MODEL;
+        else process.env.F102_MODEL = saved;
+      });
+      const requested = [];
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        requested.push(JSON.parse(init.body).model);
+        const text = '# Title\n\nA summary paragraph long enough to parse as a single segment of the thread.';
+        return new Response(JSON.stringify({ content: [{ type: 'text', text }] }), { status: 200 });
+      });
+      const msgs = makeMsgs(25);
+      const deps = {
+        db,
+        enabled: () => true,
+        getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60 * 1000 }),
+        getMessagesAfterWatermark: async () => msgs,
+        generateAbstractive: createAbstractiveClient(
+          async () => ({ mode: 'api_key', baseUrl: 'https://relay.example', apiKey: 'sk-test' }),
+          { info: () => {}, error: () => {} },
+        ),
+        reEmbed: async () => {},
+        logger: { info: () => {}, error: () => {} },
+      };
+      const state = db.prepare('SELECT * FROM summary_state WHERE thread_id = ?').get('test-thread');
+      assert.equal(await processThread(state, deps, SUMMARY_CONFIG_OVERRIDE), true);
+      const seg = db.prepare('SELECT model_id FROM summary_segments WHERE thread_id = ?').get('test-thread');
+      assert.deepEqual(requested, [expected]);
+      assert.equal(seg.model_id, expected);
+    });
+  }
+
   it('sets carry_over=1 when messages remain after batch', async () => {
     const batch1 = makeMsgs(200, 1);
     const remaining = makeMsgs(50, 201);

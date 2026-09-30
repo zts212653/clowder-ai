@@ -40,6 +40,8 @@ export interface DurableCandidate {
 
 export interface AbstractiveResult {
   segments: TopicSegment[];
+  /** Model that produced this result; persisted as summary_segments.model_id. */
+  model?: string;
 }
 
 interface ProviderProfile {
@@ -277,6 +279,13 @@ function buildSingleSegment(
 }
 
 // ─── Client factory ─────────────────────────────────────────────
+/** KD-37 summary-fidelity baseline; used when F102_MODEL is unset or blank. */
+export const DEFAULT_ABSTRACTIVE_MODEL = 'claude-opus-4-6';
+
+function resolveAbstractiveModel(): string {
+  return process.env.F102_MODEL?.trim() || DEFAULT_ABSTRACTIVE_MODEL;
+}
+
 export function createAbstractiveClient(
   resolveProfile: () => Promise<ProviderProfile | null>,
   logger: { info: (msg: string) => void; error: (msg: string, err?: unknown) => void },
@@ -288,6 +297,9 @@ export function createAbstractiveClient(
         logger.info('[abstractive-client] no API key profile, skipping');
         return null;
       }
+      // Resolved once per invocation (next tick picks up F102_MODEL changes); the same value
+      // is returned on the result so persisted summary_segments.model_id matches the request.
+      const model = resolveAbstractiveModel();
       const userContent = buildUserPrompt(input);
       const res = await fetch(buildProviderEndpoint({ protocol: 'anthropic', baseUrl: profile.baseUrl }), {
         method: 'POST',
@@ -298,7 +310,7 @@ export function createAbstractiveClient(
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-6',
+          model,
           max_tokens: 8192,
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userContent }],
@@ -327,7 +339,7 @@ export function createAbstractiveClient(
       logger.info(
         `[abstractive-client] parsed: "${result.segments[0]?.topicLabel}" (${result.segments[0]?.summary.length} chars, ${result.segments[0]?.candidates?.length ?? 0} candidates)`,
       );
-      return result;
+      return { ...result, model };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[abstractive-client] fetch/parse error: ${msg}`);
