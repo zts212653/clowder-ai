@@ -52,6 +52,15 @@ export interface CloudInvokeDispatchParams {
   readonly intent: string;
   /** Exact persisted source message ID: return anchor and Host idempotency key. */
   readonly sourceMessageId: string;
+  /**
+   * F247 loop suppression (slice 2b): the child invocation executing this
+   * dispatch becomes `bridgeEventId` in the runtime delta, and the source
+   * sender's originating invocation becomes `causationId` — the workspace
+   * agent echoes them back via Remote MCP so the return ingest can break
+   * outbound→return→outbound cycles. Optional for older callers.
+   */
+  readonly dispatchInvocationId?: string;
+  readonly causationId?: string;
 }
 
 /**
@@ -103,8 +112,10 @@ export type BridgeDispatchOutcome =
   | {
       readonly kind: 'sent';
       readonly capturedUrl: string;
-      readonly transport?: 'host' | 'legacy-pinchtab';
+      readonly transport?: 'host' | 'legacy-pinchtab' | 'workspace-agent';
       readonly hostMessageId?: string;
+      /** Workspace Agent beta run id — transport telemetry only. */
+      readonly providerRunId?: string;
       readonly idempotentReplay?: boolean;
     }
   | {
@@ -115,7 +126,7 @@ export type BridgeDispatchOutcome =
     }
   | {
       readonly kind: 'error';
-      readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'inject-failed'>;
+      readonly reason: Extract<BridgeFallbackReason, 'host-append-failed' | 'inject-failed' | 'workspace-agent-failed'>;
       readonly message: string;
       readonly detail?: string;
       readonly idempotentReplay?: boolean;
@@ -131,7 +142,11 @@ export type BridgeFallbackReason =
   | 'host-append-failed'
   | 'missing-source-message-id'
   | 'incomplete-dispatch-provenance'
-  | 'legacy-delivery-unverified';
+  | 'legacy-delivery-unverified'
+  | 'cloud-loop-suppressed'
+  | 'workspace-agent-unauthorized'
+  | 'workspace-agent-rejected'
+  | 'workspace-agent-failed';
 
 /**
  * The cloud invoke bridge — awaited by `invokeSingleCat` only until a bounded

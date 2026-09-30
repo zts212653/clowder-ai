@@ -20,6 +20,22 @@ import {
   collectAllThreadMessages,
 } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import { resolveBootcampWorkspaceRoot } from '../domains/cats/services/bootcamp/workspace-root.js';
+import { normalizeCloudCatBinding } from '../domains/cats/services/cloud-bridge/cloud-cat-bindings-v1.js';
+
+/** astra round-5 P3: the single owner-facing projection for cloud bindings —
+ *  legacy URL strings stay strings; versioned entries surface their provider
+ *  shape (workspace-agent entries include the owner-only conversationUrl).
+ *  GET and PATCH must share it so storage form never leaks into the contract. */
+function projectCloudBindingsForOwner(bindings: Record<string, unknown>): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const [bindingCatId, value] of Object.entries(bindings)) {
+    const normalized = normalizeCloudCatBinding(value);
+    if (!normalized) continue;
+    projected[bindingCatId] = normalized.provider === 'personal-chrome-host' ? normalized.conversationUrl : normalized;
+  }
+  return projected;
+}
+
 import { recordFreshnessClosureTransition } from '../domains/cats/services/freshness/closure/freshness-closure-telemetry.js';
 import { projectFreshnessClosure } from '../domains/cats/services/freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { projectFreshnessSupplementForHistory } from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
@@ -1212,7 +1228,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Only the thread owner can read cloud cat bindings' };
     }
     const bindings = await threadStore.getCloudCatBindings(id);
-    return { bindings };
+    return { bindings: projectCloudBindingsForOwner(bindings) };
   });
 
   // PATCH /api/threads/:id/cloud-bindings — STRICT user-owned only.
@@ -1253,7 +1269,9 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     const { catId, chatUrl } = parseResult.data;
     await threadStore.updateCloudCatBinding(id, catId as CatId, chatUrl);
     const bindings = await threadStore.getCloudCatBindings(id);
-    return { bindings };
+    // astra round-5 P3: PATCH returns the same owner projection as GET so
+    // JSON-string stored entries never leak their storage form.
+    return { bindings: projectCloudBindingsForOwner(bindings) };
   });
 
   // DELETE /api/threads/:id - 删除对话 (with cascade delete)

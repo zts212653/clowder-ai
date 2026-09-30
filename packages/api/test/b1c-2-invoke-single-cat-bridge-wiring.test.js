@@ -353,3 +353,65 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     assert.equal(messages.at(-1).type, 'done');
   });
 });
+
+describe('F247 workspace-agent loop suppression (astra round-3 next step ②)', () => {
+  const provenanceFrom = (catId) => ({
+    sourceMessageId: 'source-message-cloud-return-1',
+    sourceSender: { kind: 'cat', id: catId },
+    calledByCatId: 'opus-47',
+    intent: 'echo of an outbound dispatch',
+  });
+
+  it('SUPPRESSES dispatch when the source message is authored by the target cloud cat itself', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    const messages = await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        mentionContent: '@gpt-pro please continue',
+        mentioningCatId: 'gpt-pro',
+        cloudDispatchProvenance: provenanceFrom('gpt-pro'),
+      }),
+    );
+    assert.equal(bridge.calls.length, 0, 'self-authored return must not re-trigger the outbound direction');
+    const status = bridgeStatus(messages);
+    assert.ok(status, 'a typed terminal status must still be published');
+    assert.equal(status.reason, 'cloud-loop-suppressed');
+  });
+
+  it('DISPATCHES normally when the source is a different cat (legal cross-cat handoff)', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        mentionContent: '@gpt-pro please review',
+        mentioningCatId: 'opus-47',
+        cloudDispatchProvenance: provenanceFrom('opus-47'),
+      }),
+    );
+    assert.equal(bridge.calls.length, 1);
+  });
+
+  it('DISPATCHES normally for user-authored sources (normal @ summon)', async () => {
+    ensureGptProRegistered();
+    const bridge = makeRecordingBridge();
+    const deps = makeMinimalDeps({ cloudInvokeBridge: bridge });
+    await drainGenerator(
+      invokeSingleCat(deps, {
+        ...baseParams,
+        mentionContent: '@gpt-pro status?',
+        mentioningCatId: 'opus-47',
+        cloudDispatchProvenance: {
+          sourceMessageId: 'source-message-user-9',
+          sourceSender: { kind: 'user', id: 'alice' },
+          calledByCatId: 'opus-47',
+          intent: 'status?',
+        },
+      }),
+    );
+    assert.equal(bridge.calls.length, 1);
+  });
+});

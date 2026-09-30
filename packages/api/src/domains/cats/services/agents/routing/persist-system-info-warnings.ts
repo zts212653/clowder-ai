@@ -108,6 +108,7 @@ function projectOutboundReceipt(value: unknown): CloudBridgeOutboundReceiptV1 | 
     status: value.status,
     transport: value.transport,
     ...(value.hostMessageId ? { hostMessageId: value.hostMessageId } : {}),
+    ...(value.providerRunId ? { providerRunId: value.providerRunId } : {}),
     ...(value.failure ? { failure: value.failure } : {}),
     idempotency: {
       keyKind: 'source_message_id',

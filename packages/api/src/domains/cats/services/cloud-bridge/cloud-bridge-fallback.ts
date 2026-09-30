@@ -18,6 +18,14 @@ const messageByReason: Record<BridgeFallbackReason, (catId: string) => string> =
     `未发送给 @${catId}：投递来源或回程绑定不完整，系统已阻止无法精确审计的云端调用。`,
   'legacy-delivery-unverified': (catId) =>
     `投递给 @${catId} 的结果未知：旧版页面桥没有返回可验证的 Host message receipt。`,
+  'cloud-loop-suppressed': (catId) =>
+    `未再次发送给 @${catId}：这条消息来自 @${catId} 自己的云端回程，再触发同方向派发会形成回声环；如需继续对话请由本地猫或用户重新发起。`,
+  'workspace-agent-unauthorized': (catId) =>
+    `未发送给 @${catId}：Workspace Agent 授权被拒绝（token 失效或权限不足）。请在设置里重新授权后再试。`,
+  'workspace-agent-rejected': (catId) =>
+    `未发送给 @${catId}：Workspace Agent 拒绝了本次触发（trigger id 不存在或通道不可运行）。请检查 trigger 配置。`,
+  'workspace-agent-failed': (catId) =>
+    `投递给 @${catId} 的结果未知：Workspace Agent 触发请求在到达 202 边界前失败，请稍后重试或检查网络。`,
 };
 
 export interface CloudBridgeAuditContext {
@@ -28,12 +36,16 @@ export interface CloudBridgeAuditContext {
 
 function receiptStatus(outcome: BridgeDispatchOutcome): CloudBridgeOutboundReceiptV1['status'] {
   if (outcome.kind === 'sent') {
-    return outcome.transport === 'host' && Boolean(outcome.hostMessageId) ? 'sent' : 'unknown';
+    if (outcome.transport === 'host') return outcome.hostMessageId ? 'sent' : 'unknown';
+    // The Workspace Agent 202 boundary IS its durable transport receipt.
+    if (outcome.transport === 'workspace-agent') return 'sent';
+    return 'unknown';
   }
   if (
     outcome.reason === 'host-append-failed' ||
     outcome.reason === 'inject-failed' ||
-    outcome.reason === 'invalid-captured-url'
+    outcome.reason === 'invalid-captured-url' ||
+    outcome.reason === 'workspace-agent-failed'
   ) {
     return 'unknown';
   }
@@ -43,6 +55,13 @@ function receiptStatus(outcome: BridgeDispatchOutcome): CloudBridgeOutboundRecei
 function receiptTransport(outcome: BridgeDispatchOutcome): CloudBridgeOutboundReceiptV1['transport'] {
   if (outcome.kind === 'sent') return outcome.transport ?? 'legacy-pinchtab';
   if (outcome.reason === 'host-append-failed') return 'host';
+  if (
+    outcome.reason === 'workspace-agent-unauthorized' ||
+    outcome.reason === 'workspace-agent-rejected' ||
+    outcome.reason === 'workspace-agent-failed'
+  ) {
+    return 'workspace-agent';
+  }
   if (
     outcome.reason === 'inject-failed' ||
     outcome.reason === 'invalid-captured-url' ||
@@ -78,6 +97,9 @@ function buildOutboundReceipt(args: {
     ...(args.outcome.kind === 'sent' && args.outcome.hostMessageId
       ? { hostMessageId: args.outcome.hostMessageId }
       : {}),
+    ...(args.outcome.kind === 'sent' && args.outcome.providerRunId
+      ? { providerRunId: args.outcome.providerRunId }
+      : {}),
     ...(args.outcome.kind === 'error' && args.outcome.failureDiagnostic
       ? { failure: args.outcome.failureDiagnostic }
       : {}),
@@ -103,7 +125,11 @@ export function buildFallbackMessageContent(args: {
 function unverifiedSentOutcome(
   outcome: BridgeDispatchOutcome,
 ): Extract<BridgeDispatchOutcome, { kind: 'sent' }> | undefined {
-  if (outcome.kind !== 'sent' || (outcome.transport === 'host' && outcome.hostMessageId)) return undefined;
+  if (outcome.kind !== 'sent') return undefined;
+  // Workspace Agent's 202 acceptance is its verified transport receipt —
+  // it must not be mislabeled as a legacy unverified page-bridge delivery.
+  if (outcome.transport === 'workspace-agent') return undefined;
+  if (outcome.transport === 'host' && outcome.hostMessageId) return undefined;
   return outcome;
 }
 

@@ -203,6 +203,12 @@ function renderEnvelope(params: CloudInvokeDispatchParams, intent: string): stri
     calledBy: params.calledBy,
     intent,
     sourceMessageId: params.sourceMessageId,
+    // F247 loop suppression (slice 2b): fixed origin marker plus the
+    // dispatch/causation ids. Server-authored values only — user-controlled
+    // fields stay JSON-stringified below exactly as before.
+    origin: 'clowder-outbound' as const,
+    ...(params.dispatchInvocationId ? { bridgeEventId: params.dispatchInvocationId } : {}),
+    ...(params.causationId ? { causationId: params.causationId } : {}),
   };
   // JSON.stringify with no spaces — compact, stable, escapes all delimiters.
   const json = JSON.stringify(delta);

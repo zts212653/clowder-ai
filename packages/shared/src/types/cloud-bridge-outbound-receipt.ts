@@ -1,5 +1,10 @@
 export type CloudBridgeOutboundStatus = 'sent' | 'failed' | 'unknown';
-export type CloudBridgeOutboundTransport = 'host' | 'legacy-pinchtab' | 'none';
+/**
+ * F247 Workspace Agent: 'workspace-agent' marks a dispatch through the
+ * official Trigger API. Such receipts carry `providerRunId` (beta telemetry)
+ * and MUST NOT carry `hostMessageId` — the 202 boundary has no host message.
+ */
+export type CloudBridgeOutboundTransport = 'host' | 'legacy-pinchtab' | 'workspace-agent' | 'none';
 export type CloudBridgeIdempotencyDisposition = 'fresh' | 'replayed' | 'not_attempted' | 'unknown';
 const DIAGNOSTIC_FIELDS = new Set(['v', 'errorCode', 'nextAction', 'fingerprint']);
 const FINGERPRINT_FIELDS = new Set([
@@ -60,6 +65,11 @@ export interface CloudBridgeOutboundReceiptV1 {
   readonly status: CloudBridgeOutboundStatus;
   readonly transport: CloudBridgeOutboundTransport;
   readonly hostMessageId?: string;
+  /**
+   * Workspace Agent Trigger API beta run id (`apirun_*`) — transport
+   * telemetry only. Never a substitute for the exact Remote MCP return.
+   */
+  readonly providerRunId?: string;
   readonly failure?: CloudBridgeFailureDiagnosticV1;
   readonly idempotency: {
     readonly keyKind: 'source_message_id';
@@ -194,8 +204,13 @@ export function isCloudBridgeOutboundReceiptV1(value: unknown): value is CloudBr
   if (receipt.v !== 1 || !isBoundedReceiptRef(receipt.sourceMessageId)) return false;
   if (!isBoundedReceiptRef(receipt.dispatchInvocationId) || !isBoundedReceiptRef(receipt.targetCatId)) return false;
   if (!['sent', 'failed', 'unknown'].includes(String(receipt.status))) return false;
-  if (!['host', 'legacy-pinchtab', 'none'].includes(String(receipt.transport))) return false;
+  if (!['host', 'legacy-pinchtab', 'workspace-agent', 'none'].includes(String(receipt.transport))) return false;
   if (receipt.hostMessageId !== undefined && !isBoundedReceiptRef(receipt.hostMessageId)) return false;
+  if (receipt.providerRunId !== undefined && !isBoundedReceiptRef(receipt.providerRunId)) return false;
+  // F247 Workspace Agent: the 202 boundary has no host message — a receipt
+  // that claims both transports' identifiers is malformed and must fail closed.
+  if (receipt.transport === 'workspace-agent' && receipt.hostMessageId !== undefined) return false;
+  if (receipt.transport !== 'workspace-agent' && receipt.providerRunId !== undefined) return false;
   if (receipt.failure !== undefined && !isCloudBridgeFailureDiagnosticV1(receipt.failure)) return false;
 
   return isReceiptSender(receipt.sourceSender) && isReceiptIdempotency(receipt.idempotency);
