@@ -123,6 +123,7 @@ managed_scripts:
   - scripts/check-capability-tips-stale.mjs
   - scripts/check-capability-tips-stale.test.mjs
   - scripts/check-env-port-drift.test.mjs
+  - scripts/check-github-body-transport.test.mjs
   - scripts/update-public-governance-hash.mjs
   - scripts/check-env-registry.test.mjs
   - scripts/check-env-example.test.mjs
