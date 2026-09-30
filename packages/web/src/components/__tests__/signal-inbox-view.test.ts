@@ -109,6 +109,32 @@ describe('SignalInboxView', () => {
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
 
+  it('renders a responsive Settings body without nested scrolling or a duplicate heading', async () => {
+    await act(async () => {
+      root.render(React.createElement(SignalInboxView, { variant: 'settings' }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const body = container.querySelector('[data-testid="signal-settings-body"]');
+    const surface = container.querySelector('[data-testid="signal-inbox-content-surface"]');
+    const layout = container.querySelector('[data-testid="signal-inbox-layout"]');
+    const listPane = container.querySelector('[data-testid="signal-list-pane"]');
+    const detailPane = container.querySelector('[data-testid="signal-detail-pane"]');
+
+    expect(body).not.toBeNull();
+    expect(container.querySelector('h1')).toBeNull();
+    expect(surface?.className).not.toContain('rounded-[18px]');
+    expect(surface?.className).not.toContain('overflow-hidden');
+    expect(layout?.className).toContain('flex-col');
+    expect(layout?.className).toContain('xl:flex-row');
+    expect(listPane?.className).toContain('w-full');
+    expect(listPane?.className).not.toContain('overflow-y-auto');
+    expect(detailPane?.className).not.toContain('overflow-y-auto');
+  });
+
   it('forwards active status/source/tier filters to server-side search', async () => {
     await act(async () => {
       root.render(React.createElement(SignalInboxView));
