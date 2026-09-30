@@ -1,6 +1,6 @@
 'use client';
 
-import { supportsCodexFastModel } from '@cat-cafe/shared';
+import { type ClientDefaultsEntry, resolveClientDefaults, supportsCodexFastModel } from '@cat-cafe/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CatData } from '@/hooks/useCatData';
@@ -9,6 +9,7 @@ import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
+import { clientSwitchPatch, modelScopeKey, resolveScopedDefaultModel } from './hub-cat-editor.client-scope';
 import {
   autoSlug,
   buildCatPatchPayload,
@@ -16,6 +17,7 @@ import {
   buildCodexConfigPatches,
   buildStrategyPayload,
   builtinAccountIdForClient,
+  CLIENT_OPTIONS,
   type CodexRuntimeSettings,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterAccounts,
@@ -69,9 +71,13 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const [codexSettings, setCodexSettings] = useState<CodexRuntimeSettings | null>(null);
   const [codexSettingsBaseline, setCodexSettingsBaseline] = useState<CodexRuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
+  /** #768: cat-template.json clientDefaults — per-client default model menu, keyed by ClientId. */
+  const [clientDefaults, setClientDefaults] = useState<Record<string, ClientDefaultsEntry>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>('custom');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const pendingProfileIdRef = useRef<string | null>(null);
+  /** #768: the (client, account) scope the current defaultModel was resolved for. */
+  const modelScopeRef = useRef<string | null>(null);
 
   const availableProfiles = useMemo(() => filterAccounts(form.clientId, profiles), [form.clientId, profiles]);
   const selectedProfile = useMemo(
@@ -114,6 +120,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     setHasUnsavedChanges(false);
     setShowAuthModal(false);
     pendingProfileIdRef.current = null;
+    modelScopeRef.current = null;
   }, [open, cat, draft]);
 
   // Re-fetch profiles when Provider Profiles page creates/saves/deletes an account.
@@ -127,19 +134,27 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   useEffect(() => {
     if (!open || cat) {
       setTemplates([]);
+      setClientDefaults({});
       return;
     }
     let cancelled = false;
     apiFetch('/api/cat-templates')
       .then(async (res) => {
         if (!res.ok) throw new Error('load failed');
-        return (await res.json()) as { templates?: TemplateCard[] };
+        return (await res.json()) as {
+          templates?: TemplateCard[];
+          clientDefaults?: Record<string, ClientDefaultsEntry>;
+        };
       })
       .then((body) => {
-        if (!cancelled) setTemplates(body.templates ?? []);
+        if (cancelled) return;
+        setTemplates(body.templates ?? []);
+        setClientDefaults(body.clientDefaults ?? {});
       })
       .catch(() => {
-        if (!cancelled) setTemplates([]);
+        if (cancelled) return;
+        setTemplates([]);
+        setClientDefaults({});
       });
     return () => {
       cancelled = true;
@@ -276,19 +291,28 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     });
   }, [availableProfiles, cat, draft, form.clientId]);
 
-  // Auto-fill first available model only on profile/client change — NOT when
-  // the user clears the field. Previous code had form.defaultModel in deps,
-  // which re-filled immediately after the user cleared the input (#802).
+  // #768: resolve the model for the current (client, account) scope. The field is
+  // filled when empty, and re-resolved when the scope itself changes — so a template
+  // default never outlives the account it was chosen for. Deps intentionally exclude
+  // form.defaultModel: this runs on scope change, not when the user edits the input
+  // (#802 — that regression was re-filling immediately after the user cleared it).
   useEffect(() => {
-    if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
+    const scope = modelScopeKey(form.clientId, form.accountRef);
+    const scopeChanged = modelScopeRef.current !== null && modelScopeRef.current !== scope;
+    modelScopeRef.current = scope;
     setForm((prev) => {
-      if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
-      return { ...prev, defaultModel: modelOptions[0] ?? '' };
+      // Guard against a value resolved for a client the form has since left.
+      if (prev.clientId !== form.clientId) return prev;
+      const nextModel = resolveScopedDefaultModel({
+        currentModel: prev.defaultModel,
+        accountModels: modelOptions,
+        templateDefaultModel: resolveClientDefaults(clientDefaults, form.clientId)?.defaultModel,
+        scopeChanged,
+      });
+      return nextModel === null ? prev : { ...prev, defaultModel: nextModel };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
-    // excludes form.defaultModel: auto-fill runs on profile change, not on
-    // user clearing the model input.
-  }, [form.clientId, modelOptions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above.
+  }, [clientDefaults, form.clientId, form.accountRef, modelOptions]);
 
   useEffect(() => {
     if (form.clientId !== 'antigravity') return;
@@ -354,7 +378,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       }
       return normalized; // fallback — backend will catch it
     });
-    patchForm({
+    const patch: Parameters<typeof patchForm>[0] = {
       name,
       displayName: name,
       nickname: t.nickname ?? '',
@@ -366,7 +390,44 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       teamStrengths: t.teamStrengths ?? '',
       catId,
       mentionPatterns: joinTags(deduped),
-    });
+    };
+    // #768: template selection binds the client the template recommends, plus that
+    // client's default model from clientDefaults. Only clients this editor can render
+    // and save are accepted, so an unknown recommendation leaves the current client be.
+    // A recommendation that changes the client goes through the same normalization the
+    // Client selector uses, so no client-scoped state (transport, provider, effort,
+    // carrier) survives into the new client. The model is then applied here rather than
+    // left to the auto-fill effect: selecting a template must not depend on an effect
+    // dependency happening to change.
+    const recommendedClient = CLIENT_OPTIONS.find((option) => option.value === t.defaultClient)?.value;
+    if (recommendedClient) {
+      const templateDefaultModel = resolveClientDefaults(clientDefaults, recommendedClient)?.defaultModel;
+      if (recommendedClient !== form.clientId) {
+        // Client changes: `modelOptions` still describes the client being left, so no
+        // account can speak for the new scope yet. Bind the template default and let the
+        // resolution effect refine it once the new client's account settles.
+        Object.assign(patch, clientSwitchPatch(form, recommendedClient));
+        patch.defaultModel = templateDefaultModel ?? '';
+      } else {
+        // Same client: the (client, account) scope never moves, so the resolution effect
+        // does not re-run and this is the only place left that can honour the account.
+        // Same precedence it uses -- the account's own list first, template default only
+        // when the account has none -- because a template default the account does not
+        // serve fails save validation on an API-key account.
+        patch.defaultModel =
+          resolveScopedDefaultModel({
+            currentModel: form.defaultModel,
+            accountModels: modelOptions,
+            templateDefaultModel,
+            // The scope is (client, account) and a template keeping the client moves
+            // neither, so this is not an invalidation: a model the user picked or typed
+            // survives, and the template default only fills an empty field.
+            scopeChanged: false,
+          }) ?? form.defaultModel;
+      }
+      patch.clientId = recommendedClient;
+    }
+    patchForm(patch);
   };
 
   const requestClose = async () => {

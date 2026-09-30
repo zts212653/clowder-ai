@@ -219,6 +219,84 @@ describe('cats routes read runtime catalog', { concurrency: false }, () => {
     assert.equal(body.templates[0].id, 'template-cat-breed');
     // The legacy breeds path does not include source or roster in the response.
     assert.equal(body.templates[0].name, '模板猫');
+    // #768 P2: the breed's client binding is projected so the picker can recommend a client.
+    assert.equal(body.templates[0].defaultClient, 'anthropic');
+    // #768 P2 (cloud codex): a legacy project has no `clientDefaults` either, so the
+    // client binding alone leaves `defaultModel` with no source -- a client whose accounts
+    // expose no model list then saves a model-less member. The breed's own model is its
+    // client's default.
+    assert.equal(body.clientDefaults.anthropic.defaultModel, 'claude-opus-4-6');
+    assert.deepEqual(body.clientDefaults.anthropic.models, ['claude-opus-4-6']);
+
+    await app.close();
+  });
+
+  it('GET /api/cat-templates keeps every template when a legacy breed uses an Object.prototype clientId', async () => {
+    // #252 deliberately relaxed the schema to `z.string().min(1)` so an unknown provider
+    // cannot crash the whole config. That makes `constructor` / `toString` / `__proto__`
+    // reachable clientId values, and the legacy clientDefaults map is indexed by them:
+    // a plain `{}` returns the inherited `Object` for `constructor`, so the "already seen"
+    // branch reads `entry.models` off a function, throws, and the route catch degrades the
+    // entire response to `templates: []` — one odd breed hides every template.
+    const templateConfig = makeVersion2Config('proto-cat', '原型猫', {
+      provider: 'constructor',
+      defaultModel: 'weird-model-1',
+    });
+    const projectRoot = createRuntimeCatalogProject(templateConfig, templateConfig);
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cat-templates' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    // The regression that actually hurts: the template list must not be wiped.
+    assert.equal(body.templates.length, 1, 'a prototype-key clientId must not blank the template list');
+    assert.equal(body.templates[0].defaultClient, 'constructor');
+    // And the breed still supplies its own client default, like any other client.
+    assert.ok(Object.hasOwn(body.clientDefaults, 'constructor'), 'clientDefaults needs an own `constructor` entry');
+    assert.equal(body.clientDefaults.constructor.defaultModel, 'weird-model-1');
+    assert.deepEqual(body.clientDefaults.constructor.models, ['weird-model-1']);
+
+    await app.close();
+  });
+
+  it('GET /api/cat-templates still carries a default for a legacy breed whose clientId is `__proto__`', async () => {
+    // `__proto__` crashes the same way `constructor` does, but it also pins *which* remedy
+    // is correct. Measured against these four lines:
+    //   plain `{}`, unguarded read  -> throws, route catch empties the whole response
+    //   plain `{}` + `Object.hasOwn` -> no crash, but `map['__proto__'] = entry` hits the
+    //                                   prototype setter, so the entry is silently dropped
+    //   `Object.create(null)`        -> the entry is a real own key
+    // A read-side own-property check therefore only downgrades the crash into the exact hole
+    // this fallback exists to close: a projected client binding with no model behind it.
+    const templateConfig = makeVersion2Config('proto-key-cat', '原型键猫', {
+      provider: '__proto__',
+      defaultModel: 'weird-model-2',
+    });
+    const projectRoot = createRuntimeCatalogProject(templateConfig, templateConfig);
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const res = await app.inject({ method: 'GET', url: '/api/cat-templates' });
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.equal(body.templates.length, 1);
+    assert.equal(body.templates[0].defaultClient, '__proto__');
+    // Read it the way `resolveClientDefaults` does — own enumerable entries — so this asserts
+    // what a consumer actually sees rather than what a prototype lookup would hand back.
+    const protoEntry = Object.entries(body.clientDefaults).find(([key]) => key === '__proto__')?.[1];
+    assert.ok(protoEntry, '`__proto__` must be an own key, not a prototype write');
+    assert.equal(protoEntry.defaultModel, 'weird-model-2');
 
     await app.close();
   });
