@@ -5,12 +5,13 @@ import { useCallback, useEffect, useState } from 'react';
 const STORAGE_KEY = 'cat-cafe:pinned-settings-sections';
 const SYNC_EVENT = 'cat-cafe:pinned-settings-sync';
 const MAX_PINS = 8;
+const DEFAULT_PINS = ['members', 'accounts'];
 
 function read(): string[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
+    if (!raw) return [...DEFAULT_PINS];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter((item): item is string => typeof item === 'string');

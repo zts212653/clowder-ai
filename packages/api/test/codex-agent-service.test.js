@@ -3346,6 +3346,65 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('model_provider="openai_https"'), 'api_key mode must not force OpenAI OAuth provider');
   });
 
+  test('auto mode inherits the active Codex config provider instead of forcing OpenAI OAuth', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(service.invoke('native config test', { callbackEnv: { CODEX_AUTH_MODE: 'auto' } }));
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'native-config-thread' }]);
+    await promise;
+    const args = spawnFn.mock.calls[0].arguments[1];
+    assert.ok(!args.includes('model_provider="openai"'));
+    assert.ok(!args.includes('model_provider="openai_https"'));
+  });
+
+  test('explicit OAuth binding still selects the built-in provider and strips ambient API keys', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(
+      service.invoke('explicit oauth test', {
+        callbackEnv: { CODEX_AUTH_MODE: 'oauth', OPENAI_API_KEY: 'fixture-key' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-oauth-thread' }]);
+    await promise;
+    const [, args, opts] = spawnFn.mock.calls[0].arguments;
+    assert.ok(args.includes('model_provider="openai"'));
+    assert.equal(opts.env.OPENAI_API_KEY, undefined);
+  });
+
+  test('explicit API Key binding retains its key without forcing the OAuth provider', async () => {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const service = new ProductionCodexAgentService({
+      l0CompilerFn: fakeL0Compiler,
+      spawnFn,
+      model: 'gpt-5.3-codex',
+      cliCommand: 'node',
+    });
+    const promise = collect(
+      service.invoke('explicit key test', {
+        callbackEnv: { CODEX_AUTH_MODE: 'api_key', OPENAI_API_KEY: 'fixture-key' },
+      }),
+    );
+    emitCodexEvents(proc, [{ type: 'thread.started', thread_id: 'explicit-key-thread' }]);
+    await promise;
+    const [, args, opts] = spawnFn.mock.calls[0].arguments;
+    assert.ok(!args.includes('model_provider="openai"'));
+    assert.equal(opts.env.OPENAI_API_KEY, 'fixture-key');
+  });
+
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);

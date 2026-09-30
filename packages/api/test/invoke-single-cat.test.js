@@ -7342,6 +7342,57 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.equal(callbackEnv.OPENAI_API_BASE, undefined);
   });
 
+  it('first-run synthetic Codex binding inherits CLI provider config instead of forcing oauth', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'first-run-codex-native-'));
+    const apiDir = join(root, 'packages', 'api');
+    await mkdir(apiDir, { recursive: true });
+    await writeFile(join(root, 'pnpm-workspace.yaml'), 'packages:\n  - "packages/*"\n', 'utf-8');
+    const prevGlobalRoot = process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+    process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = root;
+    const registrySnapshot = catRegistry.getAllConfigs();
+    const originalConfig = catRegistry.tryGet('codex')?.config;
+    assert.ok(originalConfig);
+    const catId = 'first-run-native-codex';
+    catRegistry.register(catId, {
+      ...originalConfig,
+      id: catId,
+      mentionPatterns: [`@${catId}`],
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+    });
+    const optionsSeen = [];
+    const service = {
+      l0CompilerFn: dummyL0CompilerFn,
+      async *invoke(_prompt, options) {
+        optionsSeen.push(options ?? {});
+        yield { type: 'done', catId, timestamp: Date.now() };
+      },
+    };
+    const previousCwd = process.cwd();
+    try {
+      process.chdir(apiDir);
+      await collect(
+        invokeSingleCat(makeDeps(), {
+          catId,
+          service,
+          prompt: 'test',
+          userId: 'first-run-native-user',
+          threadId: 'first-run-native-thread',
+          isLastCat: true,
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      catRegistry.reset();
+      for (const [id, config] of Object.entries(registrySnapshot)) catRegistry.register(id, config);
+      if (prevGlobalRoot === undefined) delete process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT;
+      else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = prevGlobalRoot;
+      await rmWithRetry(root);
+    }
+    assert.equal(optionsSeen[0]?.callbackEnv?.CODEX_AUTH_MODE, 'auto');
+  });
+
   it('F127 P1: keeps env-based codex auth untouched when no openai profile is explicitly configured', async () => {
     const root = await mkdtemp(join(tmpdir(), 'f127-openai-env-auth-'));
     const apiDir = join(root, 'packages', 'api');

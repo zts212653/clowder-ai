@@ -46,7 +46,12 @@ import { getConfiguredMemberWindowSetting, resolveContextCapacity } from '../con
 import { inferOpenCodeProviderFromModelName } from '../config/opencode-model.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
-import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
+import {
+  createRuntimeCat,
+  deleteRuntimeCat,
+  updateRuntimeCat,
+  withRuntimeCatMutationLock,
+} from '../config/runtime-cat-catalog.js';
 import { deleteRuntimeOverride, getRuntimeOverride, setRuntimeOverride } from '../config/session-strategy-overrides.js';
 import type { InvocationCapacitySnapshot } from '../domains/cats/services/agents/invocation/invocation-capacity-snapshot.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
@@ -461,7 +466,7 @@ async function validateAccountBindingOrThrow(
     throw new Error(`provider "${trimmedAccountRef}" not found`);
   }
   // api_key accounts require an explicit model; OAuth/subscription CLIs have defaults
-  if (runtimeProfile.authType === 'api_key' && !defaultModel?.trim()) {
+  if (runtimeProfile.authType === 'api_key' && !defaultModel?.trim() && !runtimeProfile.syntheticNative) {
     throw new Error('API Key 认证类型需要指定 Model');
   }
   const compatibilityError = validateRuntimeProviderBinding(client, runtimeProfile, defaultModel);
@@ -760,6 +765,25 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
     const managedIdsBefore = getManagedCatalogIds(projectRoot);
     const body = parsed.data;
 
+    // First-run retries may arrive after a lost response. A stable catId is the
+    // idempotency key; return the persisted member instead of creating a second one.
+    const existingCat = getResolvedCats(projectRoot)[body.catId] ?? catRegistry.tryGet(body.catId)?.config;
+    if (existingCat) {
+      const metadata = buildCatResponseMetadataResolver(projectRoot);
+      const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+      return {
+        cat: await toCatResponse(
+          existingCat,
+          projectRoot,
+          metadata(existingCat.id),
+          resolveEffectiveAccountRef,
+          opts.resolveContextCapacitySnapshot,
+        ),
+        updatedBy: operator,
+        idempotent: true,
+      };
+    }
+
     // Validate alias uniqueness across all existing members
     if (body.mentionPatterns?.length) {
       const allConfigs = catRegistry.getAllConfigs();
@@ -776,6 +800,8 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
 
     const accountRef = resolveAccountRef(body);
     try {
+      const createRuntimeCatSerialized = (input: Parameters<typeof createRuntimeCat>[1]) =>
+        withRuntimeCatMutationLock(projectRoot, () => createRuntimeCat(projectRoot, input));
       /* Infer provider for opencode API-key accounts from the model name when no
          explicit provider is given. This avoids hard-coding 'openai' for all bare
          models — Anthropic/Google accounts get the correct adapter.
@@ -803,7 +829,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       );
       const resolvedAvatar = body.avatar ?? '/avatars/default.png';
       if (body.clientId === 'antigravity') {
-        createRuntimeCat(projectRoot, {
+        await createRuntimeCatSerialized({
           catId: body.catId,
           name: body.name,
           displayName: body.displayName,
@@ -831,7 +857,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
         });
       } else if (body.clientId === 'acp') {
         // F161: Generic ACP client — no CLI config, ACP section is the transport.
-        createRuntimeCat(projectRoot, {
+        await createRuntimeCatSerialized({
           catId: body.catId,
           name: body.name,
           displayName: body.displayName,
@@ -872,7 +898,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
               );
               return usesAcpTransport ? stripCliTransportExtensions(cli) : cli;
             })();
-        createRuntimeCat(projectRoot, {
+        await createRuntimeCatSerialized({
           catId: body.catId,
           name: body.name,
           displayName: body.displayName,
@@ -909,6 +935,24 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, opt
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('already exists')) {
+        const racedCat = getResolvedCats(projectRoot)[body.catId] ?? catRegistry.tryGet(body.catId)?.config;
+        if (racedCat) {
+          const metadata = buildCatResponseMetadataResolver(projectRoot);
+          const resolveEffectiveAccountRef = buildEffectiveAccountRefResolver();
+          return {
+            cat: await toCatResponse(
+              racedCat,
+              projectRoot,
+              metadata(racedCat.id),
+              resolveEffectiveAccountRef,
+              opts.resolveContextCapacitySnapshot,
+            ),
+            updatedBy: operator,
+            idempotent: true,
+          };
+        }
+      }
       reply.status(400);
       return { error: message };
     }

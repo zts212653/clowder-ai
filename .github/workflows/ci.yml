@@ -50,6 +50,20 @@ jobs:
       - run: pnpm --filter @cat-cafe/api build
       - run: pnpm --filter @cat-cafe/web build
 
+  web-first-run-onboarding:
+    name: Test (Web First-run Onboarding)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cat-cafe/web run test:first-run-onboarding
+
   public-test-prepare:
     name: Public test plan
     runs-on: ubuntu-latest
@@ -269,7 +283,7 @@ jobs:
 
   test:
     name: Test (Public)
-    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract]
+    needs: [public-test-prepare, public-test-shards, public-test-summary, public-test-serial, public-test-contract, web-first-run-onboarding]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -281,11 +295,13 @@ jobs:
           SHARDED_RESULT: ${{ needs.public-test-shards.result }}
           SUMMARY_RESULT: ${{ needs.public-test-summary.result }}
           SERIAL_RESULT: ${{ needs.public-test-serial.result }}
+          WEB_FIRST_RUN_ONBOARDING_RESULT: ${{ needs.web-first-run-onboarding.result }}
           TEST_MODE: ${{ needs.public-test-prepare.outputs.mode }}
         run: |
           set -euo pipefail
           [[ "$PREPARE_RESULT" == 'success' ]]
           [[ "$CONTRACT_RESULT" == 'success' ]]
+          [[ "$WEB_FIRST_RUN_ONBOARDING_RESULT" == 'success' ]]
           case "$TEST_MODE" in
             sharded)
               [[ "$SHARDED_RESULT" == 'success' ]]

@@ -18,6 +18,7 @@ import { awaitStoreRead, throwIfStoreReadAborted } from '../ports/StoreReadOptio
 import type {
   BootcampStateV1,
   ConnectorHubStateV1,
+  EnsureOnboardingThreadResult,
   ExternalRuntimeAnchorRuntime,
   IThreadStore,
   MentionActionabilityMode,
@@ -38,6 +39,7 @@ import {
   deriveAutoThreadTitle,
   isThreadGoalStateV1,
   mergeThreadMetadata,
+  onboardingThreadId,
   parseThreadMetadataJson,
   validateMergedTotals,
 } from '../ports/ThreadStore.js';
@@ -67,6 +69,18 @@ if redis.call('HEXISTS', KEYS[1], 'id') == 0 then
   return 0
 end
 redis.call('HSET', KEYS[1], unpack(ARGV))
+return 1
+`;
+
+/** Atomic first-run thread creation keyed by the stable onboarding journey. */
+const ENSURE_ONBOARDING_THREAD_LUA = `
+if redis.call('HEXISTS', KEYS[1], 'id') == 1 then
+  return 0
+end
+for i = 1, #ARGV - 2, 2 do
+  redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 1])
+end
+redis.call('ZADD', KEYS[2], ARGV[#ARGV - 1], ARGV[#ARGV])
 return 1
 `;
 
@@ -316,6 +330,43 @@ export class RedisThreadStore implements IThreadStore {
     await this.redis.hset(key, this.serializeThread(thread));
     // System threads are persistent — no TTL applied (W5: user state default persistent)
     return thread;
+  }
+
+  async ensureOnboardingThread(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState: BootcampStateV1,
+  ): Promise<EnsureOnboardingThreadResult> {
+    const threadId = onboardingThreadId(userId, journeyId);
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath,
+      title,
+      createdBy: userId,
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      bootcampState,
+    };
+    const fields = this.serializeThread(thread);
+    const args = Object.entries(fields).flatMap(([key, value]) => [key, value]);
+    args.push(String(now), threadId);
+    const created =
+      Number(
+        await this.redis.eval(
+          ENSURE_ONBOARDING_THREAD_LUA,
+          2,
+          ThreadKeys.detail(threadId),
+          ThreadKeys.userList(userId),
+          ...args,
+        ),
+      ) === 1;
+    const existing = await this.get(threadId);
+    if (!existing) throw new Error('Failed to ensure onboarding thread');
+    return { thread: existing, created };
   }
 
   async ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Promise<Thread> {

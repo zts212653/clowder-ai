@@ -482,6 +482,7 @@ const bootcampStateSchema = z
       .optional(),
     advancedFeatures: z.record(z.enum(['available', 'unavailable', 'skipped'])).optional(),
     startedAt: z.number(),
+    journeyId: z.string().min(8).max(200).optional(),
     completedAt: z.number().optional(),
   })
   .strict();
@@ -727,13 +728,48 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
 
+    const onboardingJourneyId = request.headers['x-cat-cafe-onboarding-journey'];
+    const idempotencyKey = request.headers['idempotency-key'];
+    const headerJourneyId = typeof onboardingJourneyId === 'string' ? onboardingJourneyId : undefined;
+    const keyJourneyId =
+      typeof idempotencyKey === 'string' && idempotencyKey.startsWith('onboarding:')
+        ? idempotencyKey.slice('onboarding:'.length)
+        : undefined;
+    const journeyId = headerJourneyId ?? bootcampState?.journeyId ?? keyJourneyId;
+    if (journeyId !== undefined && (journeyId.length < 8 || journeyId.length > 200)) {
+      reply.status(400);
+      return { error: 'Invalid onboarding journey id' };
+    }
+    if (journeyId) {
+      const existing = (await threadStore.list(userId)).find(
+        (candidate) => candidate.bootcampState?.journeyId === journeyId,
+      );
+      if (existing) return sanitizeThreadForResponse(existing, userId);
+    }
+
     const resolvedProjectPath = await resolveCreateThreadProjectPath(projectPath, bootcampState as BootcampStateV1);
     if (!resolvedProjectPath.ok) {
       reply.status(resolvedProjectPath.statusCode);
       return { error: resolvedProjectPath.error };
     }
 
-    let thread: Thread = await threadStore.create(userId, title, resolvedProjectPath.projectPath);
+    let thread: Thread;
+    if (journeyId && bootcampState && threadStore.ensureOnboardingThread) {
+      const ensured = await threadStore.ensureOnboardingThread(
+        userId,
+        journeyId,
+        title ?? '首启协作旅程',
+        resolvedProjectPath.projectPath ?? 'default',
+        bootcampState as BootcampStateV1,
+      );
+      if (ensured.thread.createdBy !== userId) {
+        reply.status(409);
+        return { error: 'Onboarding journey belongs to another user' };
+      }
+      reply.status(ensured.created ? 201 : 200);
+      return sanitizeThreadForResponse(ensured.thread, userId);
+    }
+    thread = await threadStore.create(userId, title, resolvedProjectPath.projectPath);
 
     // F32-b Phase 2: Set preferred cats if provided at creation time
     if (preferredCats && preferredCats.length > 0) {
@@ -1078,6 +1114,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       reply.status(404);
       return { error: 'Thread not found' };
     }
+    const patchOwner = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
 
     const {
       title,
@@ -1137,8 +1174,7 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       reply.status(404);
       return { error: 'Thread not found' };
     }
-    const patchUserId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
-    return sanitizeThreadForResponse(updated, patchUserId);
+    return sanitizeThreadForResponse(updated, patchOwner);
   });
 
   // ─── F247 AC-B1c-1: cloudCatBindings owner-only endpoints ───
