@@ -10,9 +10,16 @@ interface LabelFilterBarProps {
   selectedFilter: string | null;
   onSelect: (filter: string | null) => void;
   uncategorizedCount: number;
+  labelCounts: ReadonlyMap<string, number>;
 }
 
-export function LabelFilterBar({ labels, selectedFilter, onSelect, uncategorizedCount }: LabelFilterBarProps) {
+export function LabelFilterBar({
+  labels,
+  selectedFilter,
+  onSelect,
+  uncategorizedCount,
+  labelCounts,
+}: LabelFilterBarProps) {
   const [showOverflow, setShowOverflow] = useState(false);
   const overflowRef = useRef<HTMLDivElement>(null);
   const visibleLabels = labels.slice(0, MAX_INLINE);
@@ -68,8 +75,9 @@ export function LabelFilterBar({ labels, selectedFilter, onSelect, uncategorized
           <FilterMenuItem
             selected={selectedFilter === '__uncategorized__'}
             onClick={() => handleClick('__uncategorized__')}
+            count={uncategorizedCount}
           >
-            未分类{uncategorizedCount > 0 ? ` (${uncategorizedCount})` : ''}
+            未分类
           </FilterMenuItem>
           {visibleLabels.map((label) => (
             <FilterMenuItem
@@ -77,6 +85,7 @@ export function LabelFilterBar({ labels, selectedFilter, onSelect, uncategorized
               selected={selectedFilter === label.id}
               onClick={() => handleClick(label.id)}
               color={label.color}
+              count={labelCounts.get(label.id)}
             >
               {label.name}
             </FilterMenuItem>
@@ -88,6 +97,7 @@ export function LabelFilterBar({ labels, selectedFilter, onSelect, uncategorized
               selected={selectedFilter === label.id}
               onClick={() => handleClick(label.id)}
               color={label.color}
+              count={labelCounts.get(label.id)}
             >
               {label.name}
             </FilterMenuItem>
@@ -103,11 +113,13 @@ function FilterMenuItem({
   selected,
   onClick,
   color,
+  count,
 }: {
   children: ReactNode;
   selected: boolean;
   onClick: () => void;
   color?: string;
+  count?: number;
 }) {
   return (
     <button
@@ -124,6 +136,7 @@ function FilterMenuItem({
         <span className="h-2 w-2 flex-shrink-0 rounded-full border border-cafe-subtle" />
       )}
       <span className="min-w-0 flex-1 truncate">{children}</span>
+      {count !== undefined && count > 0 && <span className="shrink-0 tabular-nums text-cafe-muted">{count}</span>}
     </button>
   );
 }

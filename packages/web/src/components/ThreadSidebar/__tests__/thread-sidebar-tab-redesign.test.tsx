@@ -207,7 +207,8 @@ describe('ThreadSidebar v9 tab redesign', () => {
     ).find((button): button is HTMLButtonElement => button.textContent?.includes('未分类') ?? false);
     expect(filterButton).toBeTruthy();
     if (!filterButton) throw new Error('uncategorized filter button not found');
-    expect(filterButton.textContent).toContain('未分类 (1)');
+    expect(filterButton.querySelector('span.flex-1')?.textContent).toBe('未分类');
+    expect(filterButton.querySelector('span.tabular-nums')?.textContent).toBe('1');
 
     await act(async () => filterButton.click());
     await harness.flush();
