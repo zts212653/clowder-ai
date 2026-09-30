@@ -1252,6 +1252,14 @@ fi
 echo "  ✓ cat-config.json (full roster, coCreator sanitized)"
 TRANSFORM_COUNT=$((TRANSFORM_COUNT + 1))
 
+GITHUB_BODY_TRANSPORT_SECTION=$(cat <<'GITHUB_BODY_TRANSPORT_EOF'
+## GitHub Body Transport
+- For PR, issue, comment, or review bodies containing non-ASCII text or Markdown (including backticks or newlines), write the exact body to a UTF-8 file without BOM and send it with file transport: `gh ... --body-file <path>`. For endpoints without `--body-file`, write a UTF-8 JSON request file and pass it with `gh api ... --input <path>`. Never pass body text through command-line arguments, `echo` or string interpolation, or inline JSON.
+- In Windows PowerShell, read the body with `[System.IO.File]::ReadAllText($bodyPath, [System.Text.Encoding]::UTF8)`, fail unless `$body -is [string]`, build `@{ body = [string]$body } | ConvertTo-Json`, and write the JSON with `[System.IO.File]::WriteAllText($jsonPath, $json, [System.Text.UTF8Encoding]::new($false))`.
+- After every create or edit, read the remote body back through the GitHub API and compare it with the source file. A successful command or local preview is not verification. If mojibake is present, edit the original object in place and read it back again; do not create a duplicate comment.
+GITHUB_BODY_TRANSPORT_EOF
+)
+
 # 3b: CLAUDE.md（通用版）
 cat > "$FILTERED_DIR/CLAUDE.md" << 'CLAUDE_EOF'
 # Clowder AI — Claude Agent Guide
@@ -1279,6 +1287,7 @@ See `cat-cafe-skills/` for the full skill-based workflow:
 - Biome: `pnpm check` / `pnpm check:fix`
 - Types: `pnpm lint`
 CLAUDE_EOF
+printf '\n%s\n' "$GITHUB_BODY_TRANSPORT_SECTION" >> "$FILTERED_DIR/CLAUDE.md"
 echo "  ✓ CLAUDE.md (generic)"
 TRANSFORM_COUNT=$((TRANSFORM_COUNT + 1))
 
@@ -1310,6 +1319,7 @@ You are the Maine Coon cat (Codex/GPT), the code reviewer and security specialis
 - SOP & development flow: `docs/SOP.md`
 - Memory routing: `cat-cafe-skills/refs/memory-routing-partial.md`
 AGENTS_EOF
+printf '\n%s\n' "$GITHUB_BODY_TRANSPORT_SECTION" >> "$FILTERED_DIR/AGENTS.md"
 echo "  ✓ AGENTS.md (generic)"
 TRANSFORM_COUNT=$((TRANSFORM_COUNT + 1))
 
@@ -1337,6 +1347,7 @@ You are the Siamese cat (Gemini), the visual designer and creative thinker of th
 - Always validate suggestions against the project's design system
 - Provide visual references when suggesting changes
 GEMINI_EOF
+printf '\n%s\n' "$GITHUB_BODY_TRANSPORT_SECTION" >> "$FILTERED_DIR/GEMINI.md"
 echo "  ✓ GEMINI.md (generic)"
 TRANSFORM_COUNT=$((TRANSFORM_COUNT + 1))
 

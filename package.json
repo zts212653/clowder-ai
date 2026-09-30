@@ -64,7 +64,7 @@
     "check:dir-size": "bash scripts/check-dir-size.sh",
     "check:deps": "depcruise packages/api/src packages/shared/src --config .dependency-cruiser.cjs",
     "check:lockfile": "pnpm install --frozen-lockfile",
-    "check:env-ports": "node --test scripts/check-env-port-drift.test.mjs",
+    "check:env-ports": "node --test scripts/check-env-port-drift.test.mjs scripts/check-github-body-transport.test.mjs",
     "check:env-registry": "node --test scripts/check-env-registry.test.mjs",
     "check:env-example": "node --test scripts/check-env-example.test.mjs",
     "check:worktree-port-offset": "node --test scripts/derive-worktree-ports.test.mjs && node scripts/check-worktree-port-offset.mjs",
