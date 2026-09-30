@@ -214,6 +214,10 @@ interface EnvVar {
   sensitive: boolean;
   currentValue: string | null;
   allowedValues?: string[];
+  /** False/absent = bootstrap-only; PATCH /api/config/env rejects it (400). */
+  runtimeEditable?: boolean;
+  /** True when the effective value only changes after a process restart. */
+  restartRequired?: boolean;
 }
 
 interface EnvSummaryResponse {
@@ -248,6 +252,7 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
   const [error, setError] = useState<string | null>(null);
   const [envVars, setEnvVars] = useState<EnvVar[]>([]);
   const [updatingKey, setUpdatingKey] = useState<string | null>(null);
+  const [envError, setEnvError] = useState<string | null>(null);
   const [warmupTriggering, setWarmupTriggering] = useState(false);
 
   const evidenceVars = useMemo(() => filterEvidenceVars(envVars), [envVars]);
@@ -280,13 +285,23 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
         newValue = currentValue === 'on' ? 'off' : 'on';
       }
       try {
-        await apiFetch('/api/config/env', {
+        const res = await apiFetch('/api/config/env', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ updates: [{ name, value: newValue }] }),
         });
+        // apiFetch does not throw on 4xx — check ok explicitly, otherwise a
+        // rejected update (e.g. non-editable var) silently reverts and the
+        // switch just looks dead.
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+          setEnvError((body as { error?: string }).error ?? `HTTP ${res.status}`);
+        } else {
+          setEnvError(null);
+        }
         await fetchAll();
       } catch {
+        setEnvError('网络错误');
         /* fetchAll will refresh state */
       } finally {
         setUpdatingKey(null);
@@ -444,7 +459,19 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
       {evidenceVars.length > 0 && (
         <div id="evidence-feature-flags" className="rounded-lg bg-[var(--console-card-bg)] p-3 transition-shadow">
           <h3 className="mb-2 text-xs font-semibold text-cafe-black">功能开关</h3>
+          <p className="mb-2 text-micro text-cafe-secondary">
+            可点击的开关即时生效；灰色只读项在服务启动时读取，请在 .env 中修改后重启生效。
+          </p>
+          {envError && (
+            <p
+              data-testid="env-update-error"
+              className="mb-2 rounded bg-conn-red-bg px-2 py-1 text-micro text-conn-red-text"
+            >
+              {envError}
+            </p>
+          )}
           {evidenceVars.map((v) => {
+            const isEditable = v.runtimeEditable === true;
             const isOn = v.currentValue === 'on';
             const hasMultiValues = v.allowedValues && v.allowedValues.length > 2;
             const isUpdating = updatingKey === v.name;
@@ -455,9 +482,10 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
                   <div className="text-xs font-medium text-cafe-black">{v.name}</div>
                   <div className="text-micro text-cafe-secondary">{v.description}</div>
                 </div>
-                {hasMultiValues ? (
+                {isEditable && hasMultiValues ? (
                   <button
                     type="button"
+                    data-testid={`feature-cycle-${v.name}`}
                     disabled={isUpdating}
                     onClick={() => cycleEnvVar(v.name, v.currentValue, v.allowedValues)}
                     className={`rounded px-2 py-0.5 text-micro font-medium transition-colors ${
@@ -471,9 +499,10 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
                   >
                     {current}
                   </button>
-                ) : (
+                ) : isEditable ? (
                   <button
                     type="button"
+                    data-testid={`feature-toggle-${v.name}`}
                     disabled={isUpdating}
                     onClick={() => cycleEnvVar(v.name, v.currentValue)}
                     className={`relative h-5 w-9 rounded-full transition-colors ${isOn ? 'bg-cafe-accent' : 'bg-[var(--console-field-bg)]'} ${isUpdating ? 'opacity-50' : ''}`}
@@ -482,6 +511,17 @@ export function IndexStatus({ refreshToken = 0 }: { refreshToken?: number }) {
                       className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-[var(--cafe-surface)] shadow transition-transform ${isOn ? 'translate-x-4' : ''}`}
                     />
                   </button>
+                ) : (
+                  // Bootstrap-only flags: PATCH /api/config/env rejects them, so
+                  // render the current value read-only instead of a dead switch.
+                  <span
+                    data-testid={`feature-readonly-${v.name}`}
+                    title="只读：此开关在服务启动时读取，请在 .env 中设置后重启生效"
+                    className="shrink-0 cursor-not-allowed rounded px-2 py-0.5 text-micro font-medium bg-[var(--console-field-bg)] text-cafe-secondary"
+                  >
+                    {current}
+                    {v.restartRequired ? ' · 需重启' : ''}
+                  </span>
                 )}
               </div>
             );
