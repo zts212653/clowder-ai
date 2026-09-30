@@ -340,9 +340,10 @@ function isKnownEmptyExactPidSnapshot(input: {
 export function readUnixProcessSnapshotSync(
   options: ProcessSnapshotOptions = {},
 ): Map<number, UnixProcessSnapshotEntry> | null {
-  if (process.platform === 'win32') return null;
   const pids = options.pids?.filter(isPositiveSafeInteger);
+  // An explicit empty PID set needs no platform-specific process lookup.
   if (pids && pids.length === 0) return new Map();
+  if (process.platform === 'win32') return null;
   const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
   const result = spawnSync('/bin/ps', args, {
@@ -380,9 +381,9 @@ export function readUnixProcessSnapshotSync(
 export function readUnixProcessSnapshot(
   options: ProcessSnapshotOptions = {},
 ): Promise<Map<number, UnixProcessSnapshotEntry> | null> {
-  if (process.platform === 'win32') return Promise.resolve(null);
   const pids = options.pids?.filter(isPositiveSafeInteger);
   if (pids && pids.length === 0) return Promise.resolve(new Map());
+  if (process.platform === 'win32') return Promise.resolve(null);
   const args = buildUnixProcessSnapshotArgs(options.includeEnvironment === true, pids);
   if (options.includeEnvironment) processDebug('ownership-process-table-scan');
   return new Promise((resolveSnapshot) => {
