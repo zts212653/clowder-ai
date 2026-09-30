@@ -16,8 +16,15 @@ vi.mock('@/utils/api-client', () => ({
 
 let capturedHook: ReturnType<typeof useChatHistory> | null = null;
 
-function HookProbe({ threadId }: { threadId: string }) {
+function HookProbe({
+  threadId,
+  onCapture,
+}: {
+  threadId: string;
+  onCapture?: (hook: ReturnType<typeof useChatHistory>) => void;
+}) {
   capturedHook = useChatHistory(threadId);
+  onCapture?.(capturedHook);
   return React.createElement(
     'div',
     { ref: capturedHook.scrollContainerRef },
@@ -155,6 +162,219 @@ describe('useChatHistory scroll memory (#27)', () => {
     scrollEl.appendChild(boundary);
     return boundary;
   }
+
+  it('keeps compact thread scrolling independent from the selected full thread', async () => {
+    const threadA = 'thread-compact-selected-a';
+    const threadB = 'thread-compact-background-b';
+    const aMessages = [makeMsg('a1', 1)];
+    const bMessages = [makeMsg('b1', 2)];
+    useChatStore.setState({
+      currentThreadId: threadA,
+      messages: aMessages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadA]: makeThreadState(aMessages),
+        [threadB]: makeThreadState(bMessages),
+      },
+    });
+
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadA })));
+    const fullEl = capturedHook!.scrollContainerRef.current!;
+    const fullTop = defineMutableNumberProp(fullEl, 'scrollTop', 200);
+    defineMutableNumberProp(fullEl, 'clientHeight', 600);
+    defineMutableNumberProp(fullEl, 'scrollHeight', 1000);
+    cancelInitialRestoreWithWheel(fullEl, -1);
+    act(() => capturedHook?.handleScroll());
+
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadB })));
+    const compactEl = capturedHook!.scrollContainerRef.current!;
+    const compactTop = defineMutableNumberProp(compactEl, 'scrollTop', 0);
+    defineMutableNumberProp(compactEl, 'clientHeight', 600);
+    defineMutableNumberProp(compactEl, 'scrollHeight', 1000);
+    const endEl = capturedHook!.messagesEndRef.current!;
+    endEl.scrollIntoView = vi.fn(() => compactTop.set(400));
+
+    act(() => capturedHook?.jumpToLatest());
+    expect(endEl.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadB, [...bMessages, makeMsg('b2', 3)]);
+    });
+    expect(endEl.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(fullTop.get()).toBe(200);
+
+    act(() => root.unmount());
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root.render(React.createElement(HookHost, { threadId: threadA })));
+    const restoredEl = capturedHook!.scrollContainerRef.current!;
+    const restoredTop = defineMutableNumberProp(restoredEl, 'scrollTop', 0);
+    defineMutableNumberProp(restoredEl, 'clientHeight', 600);
+    defineMutableNumberProp(restoredEl, 'scrollHeight', 1000);
+    act(() => flushAnimationFrames());
+    expect(restoredTop.get()).toBe(200);
+  });
+
+  it('follows compact thread B while full thread A remains mounted and scrolled up', async () => {
+    const threadA = 'thread-mounted-full-a';
+    const threadB = 'thread-mounted-compact-b';
+    const aMessages = [makeMsg('a1', 1)];
+    const bMessages = [makeMsg('b1', 2)];
+    useChatStore.setState({
+      currentThreadId: threadA,
+      messages: aMessages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: {
+        [threadA]: makeThreadState(aMessages),
+        [threadB]: makeThreadState(bMessages),
+      },
+    });
+
+    let fullHook: ReturnType<typeof useChatHistory> | null = null;
+    let compactHook: ReturnType<typeof useChatHistory> | null = null;
+    await act(async () =>
+      root.render(
+        React.createElement(
+          ThreadChatHistoryAdmissionProvider,
+          null,
+          React.createElement(HookProbe, { threadId: threadA, onCapture: (hook) => (fullHook = hook) }),
+          React.createElement(HookProbe, { threadId: threadB, onCapture: (hook) => (compactHook = hook) }),
+        ),
+      ),
+    );
+
+    const fullEl = fullHook!.scrollContainerRef.current!;
+    const compactEl = compactHook!.scrollContainerRef.current!;
+    const fullTop = defineMutableNumberProp(fullEl, 'scrollTop', 400);
+    defineMutableNumberProp(fullEl, 'clientHeight', 600);
+    defineMutableNumberProp(fullEl, 'scrollHeight', 1000);
+    const compactTop = defineMutableNumberProp(compactEl, 'scrollTop', 400);
+    defineMutableNumberProp(compactEl, 'clientHeight', 600);
+    defineMutableNumberProp(compactEl, 'scrollHeight', 1000);
+    const fullEnd = fullHook!.messagesEndRef.current!;
+    const compactEnd = compactHook!.messagesEndRef.current!;
+    fullEnd.scrollIntoView = vi.fn(() => fullTop.set(400));
+    compactEnd.scrollIntoView = vi.fn(() => compactTop.set(400));
+    act(() => flushAnimationFrames());
+    act(() => fullHook?.handleScroll());
+    act(() => fullEl.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
+    fullTop.set(200);
+    act(() => fullHook?.handleScroll());
+
+    act(() => compactHook?.jumpToLatest());
+    expect(compactEnd.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth' });
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadB, [...bMessages, makeMsg('b2', 3)]);
+    });
+    expect(compactEnd.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().replaceThreadMessages(threadA, [...aMessages, makeMsg('a2', 4)]);
+    });
+    expect(fullTop.get()).toBe(200);
+    expect(fullEnd.scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['full', false],
+    ['compact', false],
+    ['full', true],
+    ['compact', true],
+  ] as const)('scopes %s layout anchors (detached=%s) and restores both surfaces on remount', async (origin, detached) => {
+    const threadA = `layout-full-${origin}-${detached}`;
+    const threadB = `layout-compact-${origin}-${detached}`;
+    const aMessages = [makeMsg(`${threadA}-1`, 1)];
+    const bMessages = [makeMsg(`${threadB}-1`, 2)];
+    useChatStore.setState({
+      currentThreadId: threadA,
+      messages: aMessages,
+      hasMore: false,
+      isLoadingHistory: false,
+      threadStates: { [threadA]: makeThreadState(aMessages), [threadB]: makeThreadState(bMessages) },
+    });
+    let fullHook: ReturnType<typeof useChatHistory> | null = null;
+    let compactHook: ReturnType<typeof useChatHistory> | null = null;
+    const renderSurfaces = () =>
+      root.render(
+        React.createElement(
+          ThreadChatHistoryAdmissionProvider,
+          null,
+          React.createElement(HookProbe, { threadId: threadA, onCapture: (hook) => (fullHook = hook) }),
+          React.createElement(HookProbe, { threadId: threadB, onCapture: (hook) => (compactHook = hook) }),
+        ),
+      );
+    await act(async () => renderSurfaces());
+    const fullEl = fullHook!.scrollContainerRef.current!;
+    const compactEl = compactHook!.scrollContainerRef.current!;
+    const fullTop = defineMutableNumberProp(fullEl, 'scrollTop', 200);
+    const compactTop = defineMutableNumberProp(compactEl, 'scrollTop', 600);
+    for (const el of [fullEl, compactEl]) {
+      defineMutableNumberProp(el, 'clientHeight', 600);
+      defineMutableNumberProp(el, 'scrollHeight', 1600);
+      cancelInitialRestoreWithWheel(el, -1);
+    }
+    act(() => {
+      fullHook?.handleScroll();
+      compactHook?.handleScroll();
+    });
+    const sourceEl = origin === 'full' ? fullEl : compactEl;
+    const sourceTop = origin === 'full' ? fullTop : compactTop;
+    const fallbackScrollTop = sourceTop.get();
+    const anchor = document.createElement('div');
+    anchor.getBoundingClientRect = () => ({ top: 140 }) as DOMRect;
+    sourceEl.appendChild(anchor);
+    if (detached) {
+      anchor.remove();
+      sourceTop.set(fallbackScrollTop + 80);
+    }
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(CHAT_LAYOUT_CHANGED_EVENT, {
+          detail: { viewportAnchor: { container: sourceEl, element: anchor, viewportTop: 100, fallbackScrollTop } },
+        }),
+      ),
+    );
+    const expectedFull = origin === 'full' && !detached ? 240 : 200;
+    const expectedCompact = origin === 'compact' && !detached ? 640 : 600;
+    expect(fullTop.get()).toBe(expectedFull);
+    expect(compactTop.get()).toBe(expectedCompact);
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => renderSurfaces());
+    const restoredFull = fullHook!.scrollContainerRef.current!;
+    const restoredCompact = compactHook!.scrollContainerRef.current!;
+    const restoredFullTop = defineMutableNumberProp(restoredFull, 'scrollTop', 0);
+    const restoredCompactTop = defineMutableNumberProp(restoredCompact, 'scrollTop', 0);
+    for (const el of [restoredFull, restoredCompact]) {
+      defineMutableNumberProp(el, 'clientHeight', 600);
+      defineMutableNumberProp(el, 'scrollHeight', 1600);
+    }
+    // A delayed event from the previous mount must not cancel either restore.
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(CHAT_LAYOUT_CHANGED_EVENT, {
+          detail: { viewportAnchor: { container: sourceEl, element: anchor, viewportTop: 100, fallbackScrollTop } },
+        }),
+      ),
+    );
+    act(() => flushAnimationFrames());
+    expect(restoredFullTop.get()).toBe(expectedFull);
+    expect(restoredCompactTop.get()).toBe(expectedCompact);
+  });
 
   it('retries saved offset restore until the remounted thread becomes scrollable again', async () => {
     const threadA = 'thread-scroll-a';
@@ -848,7 +1068,9 @@ describe('useChatHistory scroll memory (#27)', () => {
     act(() => {
       window.dispatchEvent(
         new CustomEvent(CHAT_LAYOUT_CHANGED_EVENT, {
-          detail: { viewportAnchor: { element: anchor, viewportTop: 340, fallbackScrollTop: 400 } },
+          detail: {
+            viewportAnchor: { container: scrollEl, element: anchor, viewportTop: 340, fallbackScrollTop: 400 },
+          },
         }),
       );
     });

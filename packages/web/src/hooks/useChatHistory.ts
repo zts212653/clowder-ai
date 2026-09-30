@@ -50,6 +50,7 @@ import {
 } from '@/utils/teleport';
 import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 import { hydrateQueueActiveInvocationSlots, type QueueActiveInvocationSlot } from './queue-active-invocation-hydration';
+import { selectThreadMessages } from './useThreadScopedSelectors';
 
 type SavedScrollState =
   | { top: number; anchor: 'bottom' }
@@ -865,9 +866,10 @@ export function useChatHistory(threadId: string) {
     isOfflineSnapshot,
   } = useChatStore(
     useShallow((s) => ({
-      messages: s.messages,
-      isLoadingHistory: s.isLoadingHistory,
-      hasMore: s.hasMore,
+      messages: selectThreadMessages(s, threadId),
+      isLoadingHistory:
+        s.currentThreadId === threadId ? s.isLoadingHistory : (s.threadStates[threadId]?.isLoadingHistory ?? false),
+      hasMore: s.currentThreadId === threadId ? s.hasMore : (s.threadStates[threadId]?.hasMore ?? true),
       replaceThreadMessages: s.replaceThreadMessages,
       hydrateThread: s.hydrateThread,
       setThreadLoadingHistory: s.setThreadLoadingHistory,
@@ -901,6 +903,7 @@ export function useChatHistory(threadId: string) {
   // Always-current threadId for stale response checks
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
+  const previousSurfaceThreadIdRef = useRef(threadId);
 
   const isStaleThreadRequest = useCallback((controller: AbortController, capturedThreadId: string) => {
     return controller.signal.aborted || abortRef.current !== controller || threadIdRef.current !== capturedThreadId;
@@ -917,7 +920,7 @@ export function useChatHistory(threadId: string) {
   const followBottomAnchor = useCallback((behavior: ScrollBehavior = 'auto') => {
     const currentThread = threadIdRef.current;
     const el = scrollContainerRef.current;
-    if (!el || useChatStore.getState().currentThreadId !== currentThread) return;
+    if (!el) return;
 
     const saved = scrollPositionsByThread.get(currentThread);
     if (saved?.anchor !== 'bottom') return;
@@ -932,7 +935,7 @@ export function useChatHistory(threadId: string) {
   const jumpToLatest = useCallback(() => {
     const currentThread = threadIdRef.current;
     const el = scrollContainerRef.current;
-    if (!el || useChatStore.getState().currentThreadId !== currentThread) return;
+    if (!el) return;
 
     cancelPendingRestore();
     userScrollUpRef.current = false;
@@ -998,7 +1001,7 @@ export function useChatHistory(threadId: string) {
       if (threadIdRef.current !== scheduledForThread) return;
 
       const el = scrollContainerRef.current;
-      if (!el || useChatStore.getState().currentThreadId !== scheduledForThread) return;
+      if (!el) return;
       if (saved.anchor === 'bottom') {
         followBottomAnchor('auto');
         return;
@@ -1602,10 +1605,11 @@ export function useChatHistory(threadId: string) {
     // thread and reset refs so the scroll-adjustment effect treats the new thread
     // as an initial load (prevCount===0 → scheduleRestore).
     const el = scrollContainerRef.current;
-    const departingThread = useChatStore.getState().currentThreadId;
-    if (el && departingThread && departingThread !== threadId) {
+    const departingThread = previousSurfaceThreadIdRef.current;
+    if (el && departingThread !== threadId) {
       rememberScrollState(departingThread, el);
     }
+    previousSurfaceThreadIdRef.current = threadId;
     prevCountRef.current = 0;
     prevFirstIdRef.current = null;
 
@@ -1903,15 +1907,8 @@ export function useChatHistory(threadId: string) {
 
     if (messages.length === 0) return;
 
-    // clowder-ai#27: wait for store to sync before acting on scroll.
-    // On remount, threadId (prop) updates immediately but store.currentThreadId
-    // is still the OLD thread until ChatContainer's useEffect calls setCurrentThread().
-    // If we act now, we'd restore scroll on the wrong DOM content, then the store
-    // swap re-render would trigger append-case scrollIntoView → position lost.
-    // By returning early (without updating tracking refs), we ensure the NEXT
-    // effect run (after store sync) still sees prevCount=0 and does the restore.
-    const storeThreadId = useChatStore.getState().currentThreadId;
-    if (storeThreadId !== threadId) return;
+    // The timeline and this effect use the same thread-scoped message projection.
+    // A compact surface can restore while another thread is selected in the full view.
 
     const prevCount = prevCountRef.current;
     const prevFirstId = prevFirstIdRef.current;
@@ -1961,7 +1958,6 @@ export function useChatHistory(threadId: string) {
   // (isOfflineSnapshot=false), so a stale-snapshot miss keeps the jump alive for the fresh page.
   useEffect(() => {
     if (messages.length === 0) return;
-    if (useChatStore.getState().currentThreadId !== threadId) return;
     const targetId = resolveCrossPostScrollTarget(threadId, messages, {
       authoritative: !isOfflineSnapshot && !isLoadingHistory && !loadingRef.current,
     });
@@ -1978,7 +1974,6 @@ export function useChatHistory(threadId: string) {
   // auto-load chain) and an explicit kick (same-thread teleport, where no route changes).
   const resolveTeleport = useCallback(() => {
     if (messages.length === 0) return;
-    if (useChatStore.getState().currentThreadId !== threadId) return;
     if (loadingRef.current) return;
     const targetId = resolvePendingTeleport(
       threadId,
@@ -2025,7 +2020,9 @@ export function useChatHistory(threadId: string) {
 
       const currentThread = threadIdRef.current;
       const el = scrollContainerRef.current;
-      if (!el || useChatStore.getState().currentThreadId !== currentThread) return;
+      // Capture ownership before layout changes can detach the anchor element.
+      // A foreign surface must keep its pending restoration and scroll memory.
+      if (!el || viewportAnchor.container !== el) return;
       cancelPendingRestore();
 
       if (el.contains(viewportAnchor.element)) {
@@ -2132,13 +2129,10 @@ export function useChatHistory(threadId: string) {
     if (!el) return;
 
     // clowder-ai#27: continuously save scroll position for this thread.
-    // Guard: don't save during store swap (DOM content may not match threadId,
-    // and browser may fire scroll events with scrollTop=0 during content swap).
-    if (useChatStore.getState().currentThreadId === threadIdRef.current) {
-      rememberScrollState(threadIdRef.current, el, userScrollUpRef.current, !userScrollIntentRef.current);
-      userScrollUpRef.current = false;
-      userScrollIntentRef.current = false;
-    }
+    // This hook owns the container for threadIdRef, independent of the full route.
+    rememberScrollState(threadIdRef.current, el, userScrollUpRef.current, !userScrollIntentRef.current);
+    userScrollUpRef.current = false;
+    userScrollIntentRef.current = false;
 
     if (!hasMore || isLoadingHistory) return;
     if (el.scrollTop < 80 && messages.length > 0) {

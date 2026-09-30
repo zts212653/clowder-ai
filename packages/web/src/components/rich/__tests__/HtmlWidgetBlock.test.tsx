@@ -354,6 +354,7 @@ describe('HtmlWidgetBlock responsive height contract', () => {
       const interactiveChange = changes.at(-1);
       expect(interactiveChange).toBeInstanceOf(CustomEvent);
       expect((interactiveChange as CustomEvent).detail?.viewportAnchor).toEqual({
+        container,
         element: fixture.widget,
         viewportTop: 240,
         fallbackScrollTop: 180,
