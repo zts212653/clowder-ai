@@ -14,11 +14,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { contentRevision } = await import('../dist/domains/cats/services/session/content-revision.js');
-const { mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js');
+const { contentRevision } = await import('../dist/domains/cats/services/session/context/content-revision.js');
+const { mapToPresentation } = await import('../dist/domains/cats/services/session/context/context-presentation.js');
 const { mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js');
 const { InMemoryPresentationLedgerStore, PresentationLedger } = await import(
-  '../dist/domains/cats/services/session/PresentationLedger.js'
+  '../dist/domains/cats/services/session/context/PresentationLedger.js'
 );
 
 describe('F296 B3a gate 4: content-derived revision', () => {

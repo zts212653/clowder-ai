@@ -160,11 +160,11 @@ import {
   startSerializedRuntimeSessionSealReaperInterval,
 } from './domains/cats/services/runtime-session/RuntimeSessionSealReaper.js';
 import { createRuntimeSessionStore } from './domains/cats/services/runtime-session/RuntimeSessionStoreFactory.js';
-import { ContextEpochOwner } from './domains/cats/services/session/ContextEpochOwner.js';
+import { ContextEpochOwner } from './domains/cats/services/session/context/ContextEpochOwner.js';
 import {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
-} from './domains/cats/services/session/PresentationLedger.js';
+} from './domains/cats/services/session/context/PresentationLedger.js';
 import type { HandoffConfig } from './domains/cats/services/session/SessionSealer.js';
 import { SessionSealer } from './domains/cats/services/session/SessionSealer.js';
 import { TranscriptReader } from './domains/cats/services/session/TranscriptReader.js';

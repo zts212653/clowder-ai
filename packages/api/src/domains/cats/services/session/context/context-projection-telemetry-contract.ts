@@ -6,8 +6,8 @@ import {
   CONTEXT_PROJECTION_REASON,
   CONTEXT_PROJECTION_TIER,
   CONTEXT_PROJECTION_TRANSITION,
-} from '../../../../infrastructure/telemetry/genai-semconv.js';
-import type { ContextContinuityHandshake, ContinuityDisposition } from '../types.js';
+} from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import type { ContextContinuityHandshake, ContinuityDisposition } from '../../types.js';
 
 export const CONTINUITY_DISPOSITION_REASON_SET = Object.freeze({
   no_prior_session: true,

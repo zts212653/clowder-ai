@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
-const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
 const SMALL_CONTEXT_OPUS = 'small-context-opus';

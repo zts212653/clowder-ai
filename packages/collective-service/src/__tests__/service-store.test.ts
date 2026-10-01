@@ -1,11 +1,10 @@
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it } from 'vitest';
-
 import type { HumanAuthProvider } from '../human-auth-provider.js';
 import { CollectiveServiceError, CollectiveServiceStore } from '../store.js';
+import { privateTestDirectory as mkdtemp } from './private-test-directory.js';
 
 const createdDirectories: string[] = [];
 

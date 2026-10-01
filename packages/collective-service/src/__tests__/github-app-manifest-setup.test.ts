@@ -1,11 +1,10 @@
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it, vi } from 'vitest';
-
 import { GitHubAppManifestSetup } from '../github-app-manifest-setup.js';
 import { ConfigurableGitHubHumanAuthProvider } from '../github-human-auth-provider.js';
+import { privateTestDirectory as mkdtemp } from './private-test-directory.js';
 
 const directories: string[] = [];
 
@@ -58,7 +57,7 @@ describe('GitHub App Manifest setup', () => {
       expect.objectContaining({ method: 'POST' }),
     );
     const credentialPath = join(dataDirectory, 'github-app-oauth.json');
-    expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect((await stat(credentialPath)).mode & 0o777).toBe(0o600);
     const persisted = await readFile(credentialPath, 'utf8');
     expect(persisted).toContain('generated-client-id');
     expect(persisted).toContain('generated-client-secret');

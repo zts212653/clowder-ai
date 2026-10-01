@@ -14,8 +14,8 @@ import {
   CONSUMED_COMPACTION_EVENT_LIMIT,
   type ContextEpochRecord,
   type IContextEpochStore,
-} from '../stores/ports/ContextEpochStore.js';
-import type { ContinuityDisposition } from '../types.js';
+} from '../../stores/ports/ContextEpochStore.js';
+import type { ContinuityDisposition } from '../../types.js';
 
 export interface ContextEpochScope {
   readonly userId: string;

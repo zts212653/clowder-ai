@@ -1,13 +1,13 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { prepareGitHubAppManifestSubmission } from '@cat-cafe/collective-client';
 import { afterEach, expect, it } from 'vitest';
 import { GitHubAppManifestSetup } from '../github-app-manifest-setup.js';
 import { ConfigurableGitHubHumanAuthProvider } from '../github-human-auth-provider.js';
 import { type RunningCollectiveServer, startCollectiveServer } from '../http-server.js';
 import { CollectiveServiceStore } from '../store.js';
+import { privateTestDirectory as mkdtemp } from './private-test-directory.js';
 
 let server: RunningCollectiveServer | undefined;
 let dataDirectory: string | undefined;

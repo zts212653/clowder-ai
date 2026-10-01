@@ -5,8 +5,8 @@ import {
   contextProjectionTierBytes,
   contextProjectionTierCount,
   contextProjectionTransitionTotal,
-} from '../../../../infrastructure/telemetry/instruments.js';
-import type { ContextContinuityHandshake } from '../types.js';
+} from '../../../../../infrastructure/telemetry/instruments.js';
+import type { ContextContinuityHandshake } from '../../types.js';
 import {
   type BoundedLedgerOutcome,
   type BoundedSourceTier,

@@ -1,6 +1,8 @@
-import { chmod, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { chmod, mkdtemp, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import {
   CollectiveServiceStore,
@@ -8,6 +10,7 @@ import {
   startCollectiveServer,
 } from '@cat-cafe/collective-service';
 import { collectiveEventSourceIdentity } from '@cat-cafe/shared';
+import { assertWindowsPrivatePath } from '@cat-cafe/shared/node-private-fs';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CollectiveConnector } from '../connector.js';
@@ -41,7 +44,7 @@ describe('official Collective Connector', () => {
     const projectionJson = JSON.stringify(await connector.getProjection(connection.connectionId));
     expect(projectionJson).not.toContain('endpointCredential');
     const connectorFile = join(fixture.connectorDirectory, 'collective-connector.json');
-    expect((await stat(connectorFile)).mode & 0o777).toBe(0o600);
+    await expectPrivateCredential(connectorFile);
 
     await connector.queueAgentMessage(connection.connectionId, {
       clientEventId: 'connector-agent-1',
@@ -193,18 +196,24 @@ describe('official Collective Connector', () => {
     });
     const stateFile = join(fixture.connectorDirectory, 'collective-connector.json');
 
-    await chmod(stateFile, 0o644);
+    await setFixturePermissions(stateFile, false);
     await expect(openConnector(fixture.connectorDirectory)).rejects.toThrow(/private|permission|mode/i);
 
-    await chmod(stateFile, 0o600);
+    await setFixturePermissions(stateFile, true);
     const stateTarget = join(fixture.connectorDirectory, 'collective-connector-target.json');
     await rename(stateFile, stateTarget);
-    await symlink(stateTarget, stateFile);
+    // Windows file symlinks require a host privilege. A directory junction at
+    // the credential path exercises native reparse refusal without changing it.
+    await symlink(
+      process.platform === 'win32' ? fixture.connectorDirectory : stateTarget,
+      stateFile,
+      process.platform === 'win32' ? 'junction' : 'file',
+    );
     await expect(openConnector(fixture.connectorDirectory)).rejects.toThrow(/private|regular file/i);
 
-    await rm(stateFile);
+    await unlink(stateFile);
     await rename(stateTarget, stateFile);
-    await chmod(fixture.connectorDirectory, 0o755);
+    await setFixturePermissions(fixture.connectorDirectory, false);
     await expect(openConnector(fixture.connectorDirectory)).rejects.toThrow(/private|permission|mode/i);
   });
 
@@ -250,176 +259,183 @@ describe('official Collective Connector', () => {
     ]);
   });
 
-  it('keeps two Human-bound Café endpoints isolated across canonical order, restart, and revoke', async () => {
-    const fixture = await createFixture();
-    const memberConnectorDirectory = await temporaryDirectory('collective-connector-member-');
-    const invite = await fixture.store.createInvite({
-      sessionToken: fixture.ownerSessionToken,
-      collectiveId: fixture.collectiveId,
-    });
-    const memberAttempt = await fixture.store.beginHumanAuth({
-      provider: 'github',
-      intent: { kind: 'accept_invite', inviteToken: invite.inviteToken },
-    });
-    const memberCompletion = await fixture.store.completeHumanAuth({
-      provider: 'github',
-      state: memberAttempt.state,
-      code: 'member-code',
-    });
-    const member = await fixture.store.exchangeHumanAuthCompletion(memberCompletion.completionToken);
-    const memberPairing = await fixture.store.createPairingIntent({
-      sessionToken: member.sessionToken,
-      collectiveId: fixture.collectiveId,
-      hostOrigin: 'http://localhost:5172',
-      nonce: 'member-connector-pairing-nonce-5678',
-    });
+  it(
+    'keeps two Human-bound Café endpoints isolated across canonical order, restart, and revoke',
+    async () => {
+      const fixture = await createFixture();
+      const memberConnectorDirectory = await temporaryDirectory('collective-connector-member-');
+      const invite = await fixture.store.createInvite({
+        sessionToken: fixture.ownerSessionToken,
+        collectiveId: fixture.collectiveId,
+      });
+      const memberAttempt = await fixture.store.beginHumanAuth({
+        provider: 'github',
+        intent: { kind: 'accept_invite', inviteToken: invite.inviteToken },
+      });
+      const memberCompletion = await fixture.store.completeHumanAuth({
+        provider: 'github',
+        state: memberAttempt.state,
+        code: 'member-code',
+      });
+      const member = await fixture.store.exchangeHumanAuthCompletion(memberCompletion.completionToken);
+      const memberPairing = await fixture.store.createPairingIntent({
+        sessionToken: member.sessionToken,
+        collectiveId: fixture.collectiveId,
+        hostOrigin: 'http://localhost:5172',
+        nonce: 'member-connector-pairing-nonce-5678',
+      });
 
-    const ownerConnector = await openConnector(fixture.connectorDirectory);
-    const memberConnector = await openConnector(memberConnectorDirectory);
-    const ownerConnection = await ownerConnector.pair({
-      serviceUrl: fixture.server.url,
-      intent: fixture.pairing,
-      endpointLabel: 'You Café',
-    });
-    const memberConnection = await memberConnector.pair({
-      serviceUrl: fixture.server.url,
-      intent: memberPairing,
-      endpointLabel: 'Member Café',
-    });
+      const ownerConnector = await openConnector(fixture.connectorDirectory);
+      const memberConnector = await openConnector(memberConnectorDirectory);
+      const ownerConnection = await ownerConnector.pair({
+        serviceUrl: fixture.server.url,
+        intent: fixture.pairing,
+        endpointLabel: 'You Café',
+      });
+      const memberConnection = await memberConnector.pair({
+        serviceUrl: fixture.server.url,
+        intent: memberPairing,
+        endpointLabel: 'Member Café',
+      });
 
-    expect(ownerConnection).toMatchObject({ authorizedHumanId: fixture.ownerHumanId });
-    expect(memberConnection).toMatchObject({ authorizedHumanId: member.human.humanId });
-    expect(memberConnection.authorizedHumanId).not.toBe(ownerConnection.authorizedHumanId);
-    expect(memberConnection.connectionId).not.toBe(ownerConnection.connectionId);
-    expect(memberConnection.endpointId).not.toBe(ownerConnection.endpointId);
-    expect((await stat(join(fixture.connectorDirectory, 'collective-connector.json'))).mode & 0o777).toBe(0o600);
-    expect((await stat(join(memberConnectorDirectory, 'collective-connector.json'))).mode & 0o777).toBe(0o600);
+      expect(ownerConnection).toMatchObject({ authorizedHumanId: fixture.ownerHumanId });
+      expect(memberConnection).toMatchObject({ authorizedHumanId: member.human.humanId });
+      expect(memberConnection.authorizedHumanId).not.toBe(ownerConnection.authorizedHumanId);
+      expect(memberConnection.connectionId).not.toBe(ownerConnection.connectionId);
+      expect(memberConnection.endpointId).not.toBe(ownerConnection.endpointId);
+      await expectPrivateCredential(join(fixture.connectorDirectory, 'collective-connector.json'));
+      await expectPrivateCredential(join(memberConnectorDirectory, 'collective-connector.json'));
 
-    await ownerConnector.queueAgentMessage(ownerConnection.connectionId, {
-      clientEventId: 'operator-cafe-agent-message',
-      agent: {
-        agentId: 'codex-sol',
-        displayName: 'Sol',
-        catId: 'codex-sol',
-        sessionRef: 'invocation:verified',
-      },
-      target: { kind: 'channel', channelId: 'general' },
-      body: 'You Café is online.',
-    });
-    await ownerConnector.sync(ownerConnection.connectionId);
-    await memberConnector.queueAgentMessage(memberConnection.connectionId, {
-      clientEventId: 'member-cafe-agent-message',
-      agent: {
-        agentId: 'codex-terra',
-        displayName: 'Terra',
-        catId: 'codex-terra',
-        sessionRef: 'invocation:member-verified',
-      },
-      target: { kind: 'channel', channelId: 'general' },
-      body: 'Member Café is online.',
-    });
-    await memberConnector.sync(memberConnection.connectionId);
-    await ownerConnector.sync(ownerConnection.connectionId);
+      await ownerConnector.queueAgentMessage(ownerConnection.connectionId, {
+        clientEventId: 'operator-cafe-agent-message',
+        agent: {
+          agentId: 'codex-sol',
+          displayName: 'Sol',
+          catId: 'codex-sol',
+          sessionRef: 'invocation:verified',
+        },
+        target: { kind: 'channel', channelId: 'general' },
+        body: 'You Café is online.',
+      });
+      await ownerConnector.sync(ownerConnection.connectionId);
+      await memberConnector.queueAgentMessage(memberConnection.connectionId, {
+        clientEventId: 'member-cafe-agent-message',
+        agent: {
+          agentId: 'codex-terra',
+          displayName: 'Terra',
+          catId: 'codex-terra',
+          sessionRef: 'invocation:member-verified',
+        },
+        target: { kind: 'channel', channelId: 'general' },
+        body: 'Member Café is online.',
+      });
+      await memberConnector.sync(memberConnection.connectionId);
+      await ownerConnector.sync(ownerConnection.connectionId);
 
-    await declareCat(memberConnector, memberConnection.connectionId, member.human.humanId, 'codex-terra', 'Terra');
-    await fixture.store.postHumanMessage(fixture.ownerSessionToken, {
-      serviceInstanceId: fixture.store.serviceInstanceId,
-      collectiveId: fixture.collectiveId,
-      clientEventId: 'owner-targets-member-agent',
-      location: { channelId: 'general' },
-      recipient: {
+      await declareCat(memberConnector, memberConnection.connectionId, member.human.humanId, 'codex-terra', 'Terra');
+      await fixture.store.postHumanMessage(fixture.ownerSessionToken, {
+        serviceInstanceId: fixture.store.serviceInstanceId,
+        collectiveId: fixture.collectiveId,
+        clientEventId: 'owner-targets-member-agent',
+        location: { channelId: 'general' },
+        recipient: {
+          kind: 'agent',
+          humanId: member.human.humanId,
+          agentId: 'codex-terra',
+          connectionId: memberConnection.connectionId,
+          participationRevision: 1,
+        },
+        target: { kind: 'agent', humanId: member.human.humanId, agentId: 'codex-terra' },
+        body: '@Terra please take this on the Member Café endpoint.',
+      });
+      await ownerConnector.sync(ownerConnection.connectionId);
+      await memberConnector.sync(memberConnection.connectionId);
+
+      const orderedEvents = await fixture.store.listEventsForHuman(fixture.ownerSessionToken, fixture.collectiveId);
+      expect(orderedEvents.map((event) => event.sequence)).toEqual([1, 2, 3]);
+      expect(orderedEvents[0]?.actor).toMatchObject({
+        kind: 'agent',
+        human: { humanId: fixture.ownerHumanId },
+        provenance: {
+          connectionId: ownerConnection.connectionId,
+          endpointId: ownerConnection.endpointId,
+          endpointLabel: 'You Café',
+        },
+      });
+      expect(orderedEvents[1]?.actor).toMatchObject({
+        kind: 'agent',
+        human: { humanId: member.human.humanId },
+        provenance: {
+          connectionId: memberConnection.connectionId,
+          endpointId: memberConnection.endpointId,
+          endpointLabel: 'Member Café',
+        },
+      });
+      expect(orderedEvents[2]?.target).toEqual({
         kind: 'agent',
         humanId: member.human.humanId,
         agentId: 'codex-terra',
-        connectionId: memberConnection.connectionId,
-        participationRevision: 1,
-      },
-      target: { kind: 'agent', humanId: member.human.humanId, agentId: 'codex-terra' },
-      body: '@Terra please take this on the Member Café endpoint.',
-    });
-    await ownerConnector.sync(ownerConnection.connectionId);
-    await memberConnector.sync(memberConnection.connectionId);
+      });
+      expect((await ownerConnector.listInbox(ownerConnection.connectionId)).map((item) => item.event.sequence)).toEqual(
+        [1, 2, 3],
+      );
+      expect(
+        (await memberConnector.listInbox(memberConnection.connectionId)).map((item) => item.event.sequence),
+      ).toEqual([1, 2, 3]);
 
-    const orderedEvents = await fixture.store.listEventsForHuman(fixture.ownerSessionToken, fixture.collectiveId);
-    expect(orderedEvents.map((event) => event.sequence)).toEqual([1, 2, 3]);
-    expect(orderedEvents[0]?.actor).toMatchObject({
-      kind: 'agent',
-      human: { humanId: fixture.ownerHumanId },
-      provenance: {
-        connectionId: ownerConnection.connectionId,
-        endpointId: ownerConnection.endpointId,
-        endpointLabel: 'You Café',
-      },
-    });
-    expect(orderedEvents[1]?.actor).toMatchObject({
-      kind: 'agent',
-      human: { humanId: member.human.humanId },
-      provenance: {
-        connectionId: memberConnection.connectionId,
-        endpointId: memberConnection.endpointId,
-        endpointLabel: 'Member Café',
-      },
-    });
-    expect(orderedEvents[2]?.target).toEqual({
-      kind: 'agent',
-      humanId: member.human.humanId,
-      agentId: 'codex-terra',
-    });
-    expect((await ownerConnector.listInbox(ownerConnection.connectionId)).map((item) => item.event.sequence)).toEqual([
-      1, 2, 3,
-    ]);
-    expect((await memberConnector.listInbox(memberConnection.connectionId)).map((item) => item.event.sequence)).toEqual(
-      [1, 2, 3],
-    );
+      const fixedPort = fixture.server.port;
+      await fixture.server.close();
+      servers.splice(servers.indexOf(fixture.server), 1);
+      await expect(ownerConnector.sync(ownerConnection.connectionId)).resolves.toMatchObject({ liveStatus: 'offline' });
+      await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({
+        liveStatus: 'offline',
+      });
 
-    const fixedPort = fixture.server.port;
-    await fixture.server.close();
-    servers.splice(servers.indexOf(fixture.server), 1);
-    await expect(ownerConnector.sync(ownerConnection.connectionId)).resolves.toMatchObject({ liveStatus: 'offline' });
-    await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({ liveStatus: 'offline' });
+      const restarted = await startCollectiveServer({
+        store: fixture.store,
+        host: '127.0.0.1',
+        port: fixedPort,
+        allowedHostOrigins: ['http://localhost:5172'],
+      });
+      servers.push(restarted);
+      await expect(ownerConnector.sync(ownerConnection.connectionId)).resolves.toMatchObject({
+        liveStatus: 'online',
+        lastAckedSequence: 3,
+      });
+      await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({
+        liveStatus: 'online',
+        lastAckedSequence: 3,
+      });
 
-    const restarted = await startCollectiveServer({
-      store: fixture.store,
-      host: '127.0.0.1',
-      port: fixedPort,
-      allowedHostOrigins: ['http://localhost:5172'],
-    });
-    servers.push(restarted);
-    await expect(ownerConnector.sync(ownerConnection.connectionId)).resolves.toMatchObject({
-      liveStatus: 'online',
-      lastAckedSequence: 3,
-    });
-    await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({
-      liveStatus: 'online',
-      lastAckedSequence: 3,
-    });
-
-    await expect(ownerConnector.revoke(ownerConnection.connectionId)).resolves.toMatchObject({
-      authorityStatus: 'revoked',
-      liveStatus: 'offline',
-    });
-    await memberConnector.queueAgentMessage(memberConnection.connectionId, {
-      clientEventId: 'member-cafe-after-owner-revoke',
-      agent: {
-        agentId: 'codex-terra',
-        displayName: 'Terra',
-        catId: 'codex-terra',
-        sessionRef: 'invocation:member-verified',
-      },
-      target: { kind: 'channel', channelId: 'general' },
-      body: 'Member Café remains connected.',
-    });
-    await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({
-      authorityStatus: 'connected',
-      liveStatus: 'online',
-      lastAckedSequence: 4,
-    });
-    expect(
-      (await fixture.store.listEventsForHuman(fixture.ownerSessionToken, fixture.collectiveId)).map(
-        (event) => event.sequence,
-      ),
-    ).toEqual([1, 2, 3, 4]);
-  });
+      await expect(ownerConnector.revoke(ownerConnection.connectionId)).resolves.toMatchObject({
+        authorityStatus: 'revoked',
+        liveStatus: 'offline',
+      });
+      await memberConnector.queueAgentMessage(memberConnection.connectionId, {
+        clientEventId: 'member-cafe-after-owner-revoke',
+        agent: {
+          agentId: 'codex-terra',
+          displayName: 'Terra',
+          catId: 'codex-terra',
+          sessionRef: 'invocation:member-verified',
+        },
+        target: { kind: 'channel', channelId: 'general' },
+        body: 'Member Café remains connected.',
+      });
+      await expect(memberConnector.sync(memberConnection.connectionId)).resolves.toMatchObject({
+        authorityStatus: 'connected',
+        liveStatus: 'online',
+        lastAckedSequence: 4,
+      });
+      expect(
+        (await fixture.store.listEventsForHuman(fixture.ownerSessionToken, fixture.collectiveId)).map(
+          (event) => event.sequence,
+        ),
+      ).toEqual([1, 2, 3, 4]);
+      // Measured ~114s with native ACL subprocesses; allow scheduling headroom.
+    },
+    process.platform === 'win32' ? 180_000 : 5_000,
+  );
 
   it('keeps outbox honest while offline, reconnects idempotently, and revokes endpoint authority', async () => {
     const fixture = await createFixture();
@@ -876,5 +892,20 @@ async function declareCat(
 async function temporaryDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   directories.push(directory);
-  return directory;
+  return join(directory, 'private');
+}
+
+async function setFixturePermissions(path: string, privateAccess: boolean): Promise<void> {
+  if (process.platform === 'win32') {
+    const args = privateAccess ? ['/remove:g', '*S-1-1-0'] : ['/grant', '*S-1-1-0:(R)'];
+    await promisify(execFile)('icacls.exe', [path, ...args], { windowsHide: true });
+    return;
+  }
+  const directory = (await stat(path)).isDirectory();
+  await chmod(path, directory ? (privateAccess ? 0o700 : 0o755) : privateAccess ? 0o600 : 0o644);
+}
+
+async function expectPrivateCredential(path: string): Promise<void> {
+  if (process.platform === 'win32') await assertWindowsPrivatePath(path, 'file');
+  else expect((await stat(path)).mode & 0o777).toBe(0o600);
 }

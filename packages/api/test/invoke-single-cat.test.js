@@ -18,7 +18,7 @@ const hasSourceStagingContent = existsSync(
 
 import { afterEach, before, beforeEach, describe, it, mock } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
-import { ContextEpochOwner } from '../dist/domains/cats/services/session/ContextEpochOwner.js';
+import { ContextEpochOwner } from '../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 
 function assertStagingPromptContract(prompt, mode) {

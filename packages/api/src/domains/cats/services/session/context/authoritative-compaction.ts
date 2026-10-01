@@ -1,5 +1,5 @@
 import type { SessionRecord } from '@cat-cafe/shared';
-import type { AgentContextCapability } from '../types.js';
+import type { AgentContextCapability } from '../../types.js';
 import type { AuthoritativeCompactionEvent } from './ContextEpochOwner.js';
 
 export type AuthoritativeCompactionEventSource =

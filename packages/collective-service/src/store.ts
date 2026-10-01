@@ -1,6 +1,7 @@
-import { access } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COLLECTIVE_CLIENT_BUILD_ID } from '@cat-cafe/collective-client';
+import { discardPendingBootstrapLink, stageBootstrapLink, validateStartupBootstrap } from './bootstrap-startup.js';
 import { CollectiveConnectionEventStore, type PairingExchangeInput } from './connection-event-store.js';
 import { CollectiveServiceError } from './errors.js';
 import type { HumanAuthProvider, HumanAuthProviderId } from './human-auth-provider.js';
@@ -21,6 +22,8 @@ export interface OpenCollectiveServiceStoreOptions {
   readonly bootstrapTtlMs?: number;
   readonly humanAuthProvider?: HumanAuthProvider;
   readonly humanAuthRedirectUri?: string;
+  /** Startup-only link persistence and validation. Never issues replacement credentials. */
+  readonly bootstrapUrl?: string;
 }
 
 export interface OpenedCollectiveServiceStore {
@@ -47,52 +50,76 @@ export class CollectiveServiceStore {
   static async open(options: OpenCollectiveServiceStoreOptions): Promise<OpenedCollectiveServiceStore> {
     const now = options.now ?? Date.now;
     const stateFile = join(options.dataDirectory, SERVICE_STATE_FILE);
+    let exists = true;
     try {
-      await access(stateFile);
-      const persistence = await PersistentServiceState.load(options.dataDirectory);
-      return {
-        store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
-      };
+      await lstat(stateFile);
     } catch (error) {
-      if (error instanceof CollectiveServiceError) throw error;
-      if (!isMissingFile(error)) {
+      if (!isMissingFile(error)) throw error;
+      exists = false;
+    }
+    if (exists) {
+      try {
+        const persistence = await PersistentServiceState.load(options.dataDirectory, async (state) => {
+          if (!options.bootstrapUrl) return;
+          await validateStartupBootstrap(state, {
+            dataDirectory: options.dataDirectory,
+            publicUrl: options.bootstrapUrl,
+          });
+        });
+        return {
+          store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
+        };
+      } catch (error) {
+        if (error instanceof CollectiveServiceError) throw error;
         throw new CollectiveServiceError(
           'STATE_CORRUPT',
           `Collective Service state could not be loaded: ${errorMessage(error)}`,
           500,
         );
       }
-      const bootstrapSecret = createSecret();
-      const createdAt = new Date(now()).toISOString();
-      const state: ServiceState = {
-        schemaVersion: 2,
-        serviceInstanceId: createStableId('svc_'),
-        createdAt,
-        bootstrap: {
-          tokenDigest: digestSecret(bootstrapSecret),
-          expiresAt: new Date(now() + (options.bootstrapTtlMs ?? 24 * 60 * 60 * 1_000)).toISOString(),
-        },
-        humans: {},
-        sessions: {},
-        humanAuthBindings: {},
-        humanAuthAttempts: {},
-        humanAuthCompletions: {},
-        collectives: {},
-        memberships: {},
-        invites: {},
-        pairingIntents: {},
-        connections: {},
-        events: {},
-        participations: {},
-        legacyEvents: {},
-        clientEventIndex: {},
-      };
-      const persistence = await PersistentServiceState.create(options.dataDirectory, state);
-      return {
-        store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
-        bootstrapSecret,
-      };
     }
+    const bootstrapSecret = createSecret();
+    const createdAt = new Date(now()).toISOString();
+    const state: ServiceState = {
+      schemaVersion: 2,
+      serviceInstanceId: createStableId('svc_'),
+      createdAt,
+      bootstrap: {
+        tokenDigest: digestSecret(bootstrapSecret),
+        expiresAt: new Date(now() + (options.bootstrapTtlMs ?? 24 * 60 * 60 * 1_000)).toISOString(),
+      },
+      humans: {},
+      sessions: {},
+      humanAuthBindings: {},
+      humanAuthAttempts: {},
+      humanAuthCompletions: {},
+      collectives: {},
+      memberships: {},
+      invites: {},
+      pairingIntents: {},
+      connections: {},
+      events: {},
+      participations: {},
+      legacyEvents: {},
+      clientEventIndex: {},
+    };
+    // Stage the original credential before the sole exclusive ownership commit.
+    // Failures may retain this private pending file for same-credential delivery.
+    const pendingLink = options.bootstrapUrl
+      ? await stageBootstrapLink(options.dataDirectory, options.bootstrapUrl, bootstrapSecret)
+      : undefined;
+    const persistence = await PersistentServiceState.create(options.dataDirectory, state);
+    if (!persistence) {
+      await discardPendingBootstrapLink(pendingLink);
+      return CollectiveServiceStore.open(options);
+    }
+    if (options.bootstrapUrl) {
+      await validateStartupBootstrap(state, { dataDirectory: options.dataDirectory, publicUrl: options.bootstrapUrl });
+    }
+    return {
+      store: new CollectiveServiceStore(persistence, now, options.humanAuthProvider, options.humanAuthRedirectUri),
+      bootstrapSecret,
+    };
   }
 
   get serviceInstanceId(): string {

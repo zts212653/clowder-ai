@@ -5,6 +5,7 @@ export default defineConfig({
     // Only vitest-runner tests. Most shared tests use node:test (import from 'node:test')
     // and run separately via `node --test`. Vitest tests import from 'vitest'.
     include: [
+      'test/node-private-fs.test.ts',
       'test/concierge-config.test.js',
       'test/pet-skin-projection.test.js',
       'src/__tests__/capability-tips.test.ts',

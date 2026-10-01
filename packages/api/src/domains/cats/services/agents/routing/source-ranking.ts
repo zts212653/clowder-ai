@@ -1,4 +1,4 @@
-import { type ContextPresentation, mapToPresentation } from '../../session/context-presentation.js';
+import { type ContextPresentation, mapToPresentation } from '../../session/context/context-presentation.js';
 import type { RecentArtifact } from './artifact-tracking.js';
 
 export interface ThreadMeta {

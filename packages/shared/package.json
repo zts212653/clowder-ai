@@ -6,6 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./node-private-fs": {
+      "import": "./dist/node-private-fs.js",
+      "types": "./dist/node-private-fs.d.ts"
+    },
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"

@@ -18,14 +18,14 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js');
+const { mapToPresentation } = await import('../dist/domains/cats/services/session/context/context-presentation.js');
 const { mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js');
 const {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
   PRESENTATION_DELIVERY_GUARANTEE,
   DEFAULT_RESERVATION_TTL_MS,
-} = await import('../dist/domains/cats/services/session/PresentationLedger.js');
+} = await import('../dist/domains/cats/services/session/context/PresentationLedger.js');
 
 const SCOPE = { scopeKey: 'user-1::opus5::thread-1', contextEpoch: 3 };
 const INVALIDATOR = { owner: 'task-store', ref: 'task-42' };

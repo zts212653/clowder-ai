@@ -5,14 +5,14 @@ import {
   type ContextPresentation,
   type ContextPresentationEnvelope,
   mapToPresentation,
-} from '../../session/context-presentation.js';
-import type { DeliveryReceipt } from '../../session/delivery-receipt.js';
+} from '../../session/context/context-presentation.js';
 import type {
   CommitOutcome,
   PresentationLedger,
   PresentationReservation,
   PresentationScope,
-} from '../../session/PresentationLedger.js';
+} from '../../session/context/PresentationLedger.js';
+import type { DeliveryReceipt } from '../../session/delivery-receipt.js';
 
 export type ProviderPromptPresentationEnvelope<TReceipt> = ContextPresentationEnvelope<TReceipt>;
 

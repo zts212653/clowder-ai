@@ -1,4 +1,4 @@
-import type { ContextCoordinate } from '../types.js';
+import type { ContextCoordinate } from '../../types.js';
 import type { ContextPresentation, SourceTier } from './context-presentation.js';
 
 export interface ContextModeProjection {

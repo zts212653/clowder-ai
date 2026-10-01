@@ -3,15 +3,15 @@ import { describe, test } from 'node:test';
 import Fastify from 'fastify';
 
 const { ContextEpochOwner, contextEpochScopeKey } = await import(
-  '../dist/domains/cats/services/session/ContextEpochOwner.js'
+  '../dist/domains/cats/services/session/context/ContextEpochOwner.js'
 );
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 const { SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js');
 const { SessionSealer } = await import('../dist/domains/cats/services/session/SessionSealer.js');
 const { sessionHooksRoutes } = await import('../dist/routes/session-hooks.js');
-const { mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js');
+const { mapToPresentation } = await import('../dist/domains/cats/services/session/context/context-presentation.js');
 const { InMemoryPresentationLedgerStore, PresentationLedger } = await import(
-  '../dist/domains/cats/services/session/PresentationLedger.js'
+  '../dist/domains/cats/services/session/context/PresentationLedger.js'
 );
 const { mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js');
 const { createPostCompactContextProjector } = await import(

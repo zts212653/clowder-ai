@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CatId } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply, FastifyRequest } from 'fastify';
 import type { AgentRegistry } from '../domains/cats/services/agents/registry/AgentRegistry.js';
-import type { ContextEpochOwner } from '../domains/cats/services/session/ContextEpochOwner.js';
+import type { ContextEpochOwner } from '../domains/cats/services/session/context/ContextEpochOwner.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';

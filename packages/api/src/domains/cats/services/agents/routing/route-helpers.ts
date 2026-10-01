@@ -32,14 +32,14 @@ import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
 import { isSameUserWaveSiblingReply } from '../../freshness/FreshnessRelevancePolicy.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
-import { mapToPresentation } from '../../session/context-presentation.js';
+import { mapToPresentation } from '../../session/context/context-presentation.js';
 import {
   type ContextModeProjection,
   type ContextSurfaceProjection,
   countPresentedTiers,
   projectContextMode,
   withSurfaceShape,
-} from '../../session/context-surface-projection.js';
+} from '../../session/context/context-surface-projection.js';
 import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';

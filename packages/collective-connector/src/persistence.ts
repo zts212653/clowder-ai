@@ -9,6 +9,7 @@ import {
   migrateConnectorState,
   parseConnectorState,
 } from './state.js';
+import { assertWindowsPrivatePath } from './windows-private-path.js';
 
 export const CONNECTOR_STATE_FILE = 'collective-connector.json';
 
@@ -24,8 +25,12 @@ export class ConnectorPersistence {
 
   static async open(dataDirectory: string): Promise<ConnectorPersistence> {
     const filePath = join(dataDirectory, CONNECTOR_STATE_FILE);
-    await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
-    await assertPrivateDirectory(dataDirectory);
+    if (process.platform === 'win32') {
+      await assertWindowsPrivatePath(dataDirectory, 'directory', true);
+    } else {
+      await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+      await assertPrivateDirectory(dataDirectory);
+    }
     try {
       const contents = await readPrivateRegularFile(filePath);
       const raw = JSON.parse(contents) as unknown;
@@ -74,12 +79,16 @@ export class ConnectorPersistence {
     const temporaryPath = `${this.filePath}.${process.pid}.${randomUUID()}.tmp`;
     const handle = await open(temporaryPath, 'wx', 0o600);
     try {
+      if (process.platform === 'win32') await assertWindowsPrivatePath(temporaryPath, 'file');
       await handle.writeFile(`${JSON.stringify(state, null, 2)}\n`, 'utf8');
       await handle.sync();
     } finally {
       await handle.close();
     }
     await rename(temporaryPath, this.filePath);
+    // Node cannot open Windows directories for fsync (EPERM). The credential
+    // file itself is still flushed before its same-directory atomic rename.
+    if (process.platform === 'win32') return;
     const directoryHandle = await open(dirname(this.filePath), 'r');
     try {
       await directoryHandle.sync();
@@ -99,6 +108,10 @@ async function assertPrivateDirectory(path: string): Promise<void> {
   if (!metadata.isDirectory()) {
     throw new Error(`Collective Connector data directory must be a private regular directory: ${path}`);
   }
+  if (process.platform === 'win32') {
+    await assertWindowsPrivatePath(path, 'directory');
+    return;
+  }
   if ((metadata.mode & 0o077) !== 0) {
     throw new Error(`Collective Connector data directory permissions must be private (mode 0700): ${path}`);
   }
@@ -109,13 +122,17 @@ async function readPrivateRegularFile(path: string): Promise<string> {
   if (!pathMetadata.isFile()) {
     throw new Error(`Collective Connector credential state must be a private regular file: ${path}`);
   }
+  if (process.platform === 'win32') await assertWindowsPrivatePath(path, 'file');
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile()) {
       throw new Error(`Collective Connector credential state must be a private regular file: ${path}`);
     }
-    if ((metadata.mode & 0o077) !== 0) {
+    if (metadata.dev !== pathMetadata.dev || metadata.ino !== pathMetadata.ino) {
+      throw new Error(`Collective Connector credential state changed during open: ${path}`);
+    }
+    if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) {
       throw new Error(`Collective Connector credential state permissions must be private (mode 0600): ${path}`);
     }
     return await handle.readFile('utf8');

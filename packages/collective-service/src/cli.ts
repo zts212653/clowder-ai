@@ -1,8 +1,9 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
+import { ensurePrivateDirectory, writeAtomicPrivate } from '@cat-cafe/shared/node-private-fs';
 
 import { resolveCollectivePublicUrl } from './cli-config.js';
+import { CollectiveServiceError } from './errors.js';
 import { GitHubAppManifestSetup } from './github-app-manifest-setup.js';
 import { ConfigurableGitHubHumanAuthProvider } from './github-human-auth-provider.js';
 import { startCollectiveServer } from './http-server.js';
@@ -18,14 +19,18 @@ async function main(): Promise<void> {
     clientId: process.env.COLLECTIVE_GITHUB_CLIENT_ID,
     clientSecret: process.env.COLLECTIVE_GITHUB_CLIENT_SECRET,
   });
-  await mkdir(dataDirectory, { recursive: true, mode: 0o700 });
+  if (port === 0) throw new Error('COLLECTIVE_SERVICE_PORT must be nonzero for a durable initialization URL');
+  await ensurePrivateDirectory(dataDirectory);
   const githubAppSetup = await GitHubAppManifestSetup.open({ dataDirectory, provider: humanAuthProvider });
   const opened = await CollectiveServiceStore.open({
     dataDirectory,
     humanAuthProvider,
     humanAuthRedirectUri: new URL('/api/auth/github/callback', publicUrl).toString(),
+    bootstrapUrl: publicUrl,
   });
-  const bootstrapLinkPath = opened.bootstrapSecret ? resolve(dataDirectory, 'owner-bootstrap.url') : undefined;
+  const bootstrapLinkPath = opened.store.getMetadata().bootstrapNeeded
+    ? resolve(dataDirectory, 'owner-bootstrap.url')
+    : undefined;
   const running = await startCollectiveServer({
     store: opened.store,
     host,
@@ -34,14 +39,6 @@ async function main(): Promise<void> {
     bootstrapLinkPath,
     githubAppSetup,
   });
-  if (bootstrapLinkPath && opened.bootstrapSecret) {
-    await writeFile(bootstrapLinkPath, `${running.url}/#bootstrap=${encodeURIComponent(opened.bootstrapSecret)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-    await chmod(bootstrapLinkPath, 0o600);
-  }
   process.stdout.write(
     `${JSON.stringify({
       event: 'collective-service-ready',
@@ -86,12 +83,34 @@ function parseOrigins(value: string | undefined): string[] {
     .filter((origin, index, all) => all.indexOf(origin) === index);
 }
 
-main().catch((error: unknown) => {
+main().catch(async (error: unknown) => {
   process.stderr.write(
     `${JSON.stringify({
       event: 'collective-service-failed',
       message: error instanceof Error ? error.message : String(error),
     })}\n`,
   );
+  // Secret-free, PID-fenced diagnostic for the Host that spawned this process.
+  // An ACL failure cannot write this file; Host checks that boundary before spawn.
+  const path = resolve(
+    resolveDataDirectory(process.env.COLLECTIVE_SERVICE_DATA_DIR),
+    'collective-service-startup.json',
+  );
+  try {
+    await writeAtomicPrivate(
+      path,
+      `${JSON.stringify({
+        pid: process.pid,
+        launchId: process.env.COLLECTIVE_SERVICE_LAUNCH_ID,
+        status: 'failed',
+        code:
+          error instanceof CollectiveServiceError && error.code === 'BOOTSTRAP_UNRECOVERABLE'
+            ? error.code
+            : 'STARTUP_FAILED',
+      })}\n`,
+    );
+  } catch {
+    // stderr remains the primary diagnostic when private storage is unavailable.
+  }
   process.exitCode = 1;
 });

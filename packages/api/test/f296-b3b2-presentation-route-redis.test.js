@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Redis from 'ioredis';
 import { invokeSingleCat } from '../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
-import { PresentationLedger } from '../dist/domains/cats/services/session/PresentationLedger.js';
+import { PresentationLedger } from '../dist/domains/cats/services/session/context/PresentationLedger.js';
 import { RedisPresentationLedgerStore } from '../dist/domains/cats/services/stores/redis/RedisPresentationLedgerStore.js';
 
 const TEST_REDIS_URL = 'redis://localhost:6398';
@@ -169,7 +169,7 @@ describe('F296 B3b-2 shared Redis ledger at the provider surface', () => {
       const { RedisContextEpochStore } = await import(
         '../dist/domains/cats/services/stores/redis/RedisContextEpochStore.js'
       );
-      const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+      const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
       const epochStore = new RedisContextEpochStore(redis);
       assert.equal(
         await epochStore.compareAndPut(

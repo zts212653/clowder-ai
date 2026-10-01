@@ -7,9 +7,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js');
+const { mapToPresentation } = await import('../dist/domains/cats/services/session/context/context-presentation.js');
 const { InMemoryPresentationLedgerStore, PresentationLedger, presentationLedgerKey, decodePresentationLedgerKey } =
-  await import('../dist/domains/cats/services/session/PresentationLedger.js');
+  await import('../dist/domains/cats/services/session/context/PresentationLedger.js');
 const { mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js');
 
 const VERSION = { kind: 'version', value: 'rev-1' };

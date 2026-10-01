@@ -1,11 +1,11 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it } from 'vitest';
 import { type RunningCollectiveServer, startCollectiveServer } from '../http-server.js';
 import type { HumanAuthProvider } from '../human-auth-provider.js';
 import { CollectiveServiceStore } from '../store.js';
+import { privateTestDirectory as mkdtemp } from './private-test-directory.js';
 
 const servers: RunningCollectiveServer[] = [];
 const directories: string[] = [];
