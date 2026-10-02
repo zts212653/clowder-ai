@@ -1,141 +1,42 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { HealthResult } from './health.js';
+import { HOOK_LOAD_CONTRACTS } from './hook-load-contracts.js';
+import {
+  inspectManagedHooks,
+  mergeManagedHooks,
+  readHookDocument,
+  renderManagedHooksDocument,
+} from './managed-hook-entries.js';
+import { managedHookCommands, type SyncOutcome } from './sync-targets.js';
 
-type JsonObject = Record<string, unknown>;
+const NAME = 'claude-settings';
 
-const MANAGED_HOOKS = {
-  SessionStart: 'session-start-recall.sh',
-  Stop: 'session-stop-check.sh',
-} as const;
-
-const MANAGED_HOOK_NAMES = new Set<string>(Object.values(MANAGED_HOOKS));
-
-function isJsonObject(value: unknown): value is JsonObject {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+function settingsPath(targetRoot: string): string {
+  return join(targetRoot, '.claude', 'settings.json');
 }
 
-function expectedClaudeCommand(targetRoot: string, eventName: keyof typeof MANAGED_HOOKS): string {
-  return join(targetRoot, '.claude', 'hooks', MANAGED_HOOKS[eventName]);
+function scope(targetRoot: string) {
+  return { targetRoot, commands: managedHookCommands('claude', targetRoot), contract: HOOK_LOAD_CONTRACTS.claude };
 }
 
-function stripWrappingShellQuotes(command: string): string {
-  const trimmed = command.trim();
-  if (trimmed.length < 2) return trimmed;
-  const first = trimmed[0];
-  const last = trimmed.at(-1);
-  return (first === '"' && last === '"') || (first === "'" && last === "'") ? trimmed.slice(1, -1) : trimmed;
-}
-
-function extractScriptPath(command: string): string {
-  const trimmed = command.trim();
-  const match = trimmed.match(/^bash\s+(.+)$/);
-  return match ? match[1] : trimmed;
-}
-
-function normalizeHookCommand(command: unknown, targetRoot: string): string | null {
-  if (typeof command !== 'string') return null;
-  const unquoted = stripWrappingShellQuotes(extractScriptPath(command));
-  const expanded = unquoted.startsWith('$HOME/')
-    ? join(targetRoot, unquoted.slice('$HOME/'.length))
-    : unquoted.startsWith('${HOME}/')
-      ? join(targetRoot, unquoted.slice('${HOME}/'.length))
-      : unquoted.startsWith('~/')
-        ? join(targetRoot, unquoted.slice('~/'.length))
-        : unquoted;
-  return expanded.replace(/\\/g, '/');
-}
-
-function commandBasename(command: unknown, targetRoot: string): string | null {
-  const normalized = normalizeHookCommand(command, targetRoot);
-  if (normalized === null) return null;
-  return normalized.slice(normalized.lastIndexOf('/') + 1);
-}
-
-function hasBashPrefix(command: unknown): boolean {
-  return typeof command === 'string' && /^bash\s/.test(command.trim());
-}
-
-function isManagedHookCommand(command: unknown, targetRoot: string): boolean {
-  const normalized = normalizeHookCommand(command, targetRoot);
-  if (normalized === null) return false;
-  const managedDir = join(targetRoot, '.claude', 'hooks').replace(/\\/g, '/');
-  if (!normalized.startsWith(`${managedDir}/`)) return false;
-  const basename = commandBasename(command, targetRoot);
-  return basename !== null && MANAGED_HOOK_NAMES.has(basename);
-}
-
-function eventEntries(settings: JsonObject, eventName: string): JsonObject[] {
-  const hooksRoot = settings.hooks;
-  if (!isJsonObject(hooksRoot)) return [];
-  const entries = (hooksRoot as JsonObject)[eventName];
-  return Array.isArray(entries) ? (entries.filter((entry) => entry && typeof entry === 'object') as JsonObject[]) : [];
-}
-
-function entryHooks(entry: JsonObject): JsonObject[] {
-  return Array.isArray(entry.hooks)
-    ? (entry.hooks.filter((hook) => hook && typeof hook === 'object') as JsonObject[])
-    : [];
-}
-
-function eventHasCommand(
-  settings: JsonObject,
-  eventName: keyof typeof MANAGED_HOOKS,
-  command: string,
-  targetRoot: string,
-): boolean {
-  const expected = normalizeHookCommand(command, targetRoot);
-  return eventEntries(settings, eventName).some((entry) =>
-    entryHooks(entry).some(
-      (hook) => hook.type === 'command' && normalizeHookCommand(hook.command, targetRoot) === expected,
-    ),
-  );
-}
-
-function eventHasStaleManagedCommand(
-  settings: JsonObject,
-  eventName: keyof typeof MANAGED_HOOKS,
-  expected: string,
-  targetRoot: string,
-): boolean {
-  const expectedCommand = normalizeHookCommand(expected, targetRoot);
-  return eventEntries(settings, eventName).some((entry) =>
-    entryHooks(entry).some(
-      (hook) =>
-        hook.type === 'command' &&
-        isManagedHookCommand(hook.command, targetRoot) &&
-        normalizeHookCommand(hook.command, targetRoot) !== expectedCommand,
-    ),
-  );
-}
-
-function managedCommandsAllHaveBashPrefix(settings: JsonObject, targetRoot: string): boolean {
-  for (const eventName of Object.keys(MANAGED_HOOKS) as Array<keyof typeof MANAGED_HOOKS>) {
-    for (const entry of eventEntries(settings, eventName)) {
-      for (const hook of entryHooks(entry)) {
-        if (hook.type === 'command' && isManagedHookCommand(hook.command, targetRoot) && !hasBashPrefix(hook.command)) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-function readJsonObject(path: string): JsonObject {
-  const parsed = JSON.parse(readFileSync(path, 'utf-8'));
-  if (!isJsonObject(parsed)) {
-    throw new Error(`${path} must contain a JSON object`);
-  }
-  return parsed;
+function stale(targetPath: string, reason: string, message: string): HealthResult {
+  return {
+    name: NAME,
+    drifted: true,
+    status: 'stale',
+    targetPath,
+    reason,
+    diff: { kind: 'json', message, fields: ['hooks'] },
+  };
 }
 
 export function claudeSettingsHealth(targetRoot: string): HealthResult {
-  const targetPath = join(targetRoot, '.claude', 'settings.json');
+  const targetPath = settingsPath(targetRoot);
   if (!existsSync(targetPath)) {
     return {
-      name: 'claude-settings',
+      name: NAME,
       drifted: true,
       status: 'missing',
       targetPath,
@@ -144,87 +45,67 @@ export function claudeSettingsHealth(targetRoot: string): HealthResult {
     };
   }
 
-  try {
-    const settings = readJsonObject(targetPath);
-    const startCommand = expectedClaudeCommand(targetRoot, 'SessionStart');
-    const stopCommand = expectedClaudeCommand(targetRoot, 'Stop');
-    const hasStart = eventHasCommand(settings, 'SessionStart', startCommand, targetRoot);
-    const hasStop = eventHasCommand(settings, 'Stop', stopCommand, targetRoot);
-    if (hasStart && hasStop) {
-      const allBash = managedCommandsAllHaveBashPrefix(settings, targetRoot);
-      if (allBash) {
-        return { name: 'claude-settings', drifted: false, status: 'configured', targetPath, reason: 'configured' };
-      }
-      return {
-        name: 'claude-settings',
-        drifted: true,
-        status: 'stale',
-        targetPath,
-        reason: 'Claude settings hook commands missing bash prefix for cross-platform support',
-        diff: { kind: 'json', message: 'managed hook commands need bash prefix', fields: ['hooks'] },
-      };
-    }
-    if (
-      eventHasStaleManagedCommand(settings, 'SessionStart', startCommand, targetRoot) ||
-      eventHasStaleManagedCommand(settings, 'Stop', stopCommand, targetRoot)
-    ) {
-      return {
-        name: 'claude-settings',
-        drifted: true,
-        status: 'stale',
-        targetPath,
-        reason: 'Claude settings has stale managed hook command entries',
-        diff: { kind: 'json', message: 'managed SessionStart/Stop command differs', fields: ['hooks'] },
-      };
-    }
+  const read = readHookDocument(targetPath);
+  const inspection = read.ok ? inspectManagedHooks(read.source, scope(targetRoot)) : undefined;
+  const invalid = read.ok ? inspection?.invalid : read.reason;
+  if (invalid !== undefined || !inspection) {
+    return { name: NAME, drifted: false, status: 'error', targetPath, reason: invalid ?? 'unreadable Claude settings' };
+  }
+  if (inspection.missingBash) {
+    return stale(
+      targetPath,
+      'Claude settings hook commands missing bash prefix for cross-platform support',
+      'managed hook commands need bash prefix',
+    );
+  }
+  if (inspection.duplicated.length > 0 || inspection.outdated.length > 0) {
+    return stale(
+      targetPath,
+      'Claude settings has stale managed hook command entries',
+      'managed SessionStart/Stop command differs',
+    );
+  }
+  if (inspection.missing.length > 0) {
     return {
-      name: 'claude-settings',
+      name: NAME,
       drifted: true,
       status: 'missing',
       targetPath,
       reason: 'Claude settings is missing managed SessionStart/Stop hook entries',
       diff: { kind: 'json', message: 'managed SessionStart/Stop hook entries are missing', fields: ['hooks'] },
     };
-  } catch (error) {
-    return {
-      name: 'claude-settings',
-      drifted: false,
-      status: 'error',
-      targetPath,
-      reason: error instanceof Error ? error.message : String(error),
-    };
   }
+  return { name: NAME, drifted: false, status: 'configured', targetPath, reason: 'configured' };
 }
 
-function readOptionalSettings(targetPath: string): JsonObject {
-  if (!existsSync(targetPath)) return {};
-  return readJsonObject(targetPath);
-}
-
-function withoutManagedHooks(entries: JsonObject[], targetRoot: string): JsonObject[] {
-  return entries.flatMap((entry) => {
-    if (!Array.isArray(entry.hooks)) return [entry];
-    const hooks = entryHooks(entry).filter((hook) => !isManagedHookCommand(hook.command, targetRoot));
-    return hooks.length > 0 ? [{ ...entry, hooks }] : [];
+/**
+ * Adds or updates only the Clowder-managed SessionStart/Stop entries. Every other setting and
+ * hook is preserved; an unreadable or structurally unexpected file is left untouched (#1566).
+ */
+export async function syncClaudeSettings(targetRoot: string): Promise<SyncOutcome> {
+  const targetPath = settingsPath(targetRoot);
+  const outcome = (action: SyncOutcome['action'], reason?: string): SyncOutcome => ({
+    name: NAME,
+    targetPath,
+    action,
+    ...(reason ? { reason } : {}),
   });
-}
-
-export async function syncClaudeSettings(targetRoot: string): Promise<void> {
-  const targetPath = join(targetRoot, '.claude', 'settings.json');
-  const settings = readOptionalSettings(targetPath);
-  const hooksRoot: JsonObject =
-    settings.hooks && typeof settings.hooks === 'object' && !Array.isArray(settings.hooks)
-      ? (settings.hooks as JsonObject)
-      : {};
-
-  for (const eventName of Object.keys(MANAGED_HOOKS) as Array<keyof typeof MANAGED_HOOKS>) {
-    const entries = withoutManagedHooks(eventEntries(settings, eventName), targetRoot);
-    const scriptPath = expectedClaudeCommand(targetRoot, eventName).replace(/\\/g, '/');
-    entries.push({ hooks: [{ type: 'command', command: `bash "${scriptPath}"` }] });
-    hooksRoot[eventName] = entries;
+  if (!existsSync(targetPath)) {
+    await mkdir(dirname(targetPath), { recursive: true });
+    writeFileSync(targetPath, renderManagedHooksDocument(scope(targetRoot).commands), 'utf-8');
+    return outcome('written');
   }
+  const read = readHookDocument(targetPath);
+  const result = read.ok
+    ? mergeManagedHooks(read.source, { ...scope(targetRoot), removeDuplicates: true })
+    : ({ kind: 'refused', reason: read.reason } as const);
+  if (result.kind === 'refused') {
+    console.warn(`skipped ${NAME}: ${result.reason} (${targetPath} left unchanged)`);
+    return outcome('refused', result.reason);
+  }
+  if (result.kind === 'unchanged') return outcome('unchanged');
 
-  settings.hooks = hooksRoot;
-  await mkdir(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
+  // writeFileSync follows symlinks, so dotfile-managed settings stay links.
+  writeFileSync(targetPath, result.text, 'utf-8');
+  return outcome('written');
 }
