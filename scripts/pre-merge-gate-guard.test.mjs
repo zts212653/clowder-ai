@@ -42,6 +42,8 @@ function runGuard(tempDir, args, env = {}) {
       CAT_CAFE_GATE_GUARD_REDIS_CONFIG_FIXTURE: redisConfigFixture,
       CAT_CAFE_GATE_GUARD_MEMORY_PRESSURE_FIXTURE: memoryPressureFixture,
       CAT_CAFE_REDIS_TEST_REGISTRY_DIR: path.join(tempDir, 'redis-test-registry'),
+      CAT_CAFE_REDIS_DEV_REGISTRY_DIR: path.join(tempDir, 'redis-dev-registry'),
+      CAT_CAFE_ALPHA_REDIS_REGISTRY_DIR: path.join(tempDir, 'alpha-redis-registry'),
       ...env,
     },
   });

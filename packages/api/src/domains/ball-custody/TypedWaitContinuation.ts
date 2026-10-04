@@ -1,3 +1,4 @@
+import type { TaskItem } from '@cat-cafe/shared';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStoreContract.js';
 import {
   isLiveTypedWaitRegistration,
@@ -11,6 +12,15 @@ type Resolution =
       readonly kind: 'reject';
       readonly reason: 'state_source_unavailable' | 'missing_identity' | 'no_candidate' | 'query_failed';
     };
+
+function hasActiveOwnedWait(task: TaskItem, input: { readonly userId: string; readonly catId: string }): boolean {
+  if (task.ownerCatId !== input.catId || task.userId !== input.userId || task.status === 'done') return false;
+  if (task.kind === 'work') return task.deploymentWait?.await !== undefined;
+  if (task.kind === 'pr_tracking' || task.kind === 'issue_tracking') {
+    return task.automationState?.await !== undefined;
+  }
+  return false;
+}
 
 /** A fresh exact-source lookup; old trackers and other invocations grant no authority. */
 export async function resolveTypedWaitContinuation(input: {
@@ -33,14 +43,7 @@ export async function resolveTypedWaitContinuation(input: {
   try {
     const tasks = await input.taskStore.listByThread(input.threadId);
     for (const task of tasks) {
-      if (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking') continue;
-      if (
-        task.ownerCatId !== input.catId ||
-        task.userId !== input.userId ||
-        task.status === 'done' ||
-        !task.automationState?.await
-      )
-        continue;
+      if (!hasActiveOwnedWait(task, input)) continue;
       const snapshot = await input.taskStore.getWaitRegistration(task.id);
       if (isLiveTypedWaitRegistration(snapshot, identity, input.now ?? Date.now()) && snapshot?.receipt) {
         return { kind: 'bypass', reference: { taskId: task.id, generation: snapshot.receipt.generation } };

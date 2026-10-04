@@ -1,4 +1,5 @@
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { createModuleLogger } from '../../infrastructure/logger.js';
 import type {
   ActionSubjectTerminalTruth,
   ActionSuccessorClaimStoreResult,
@@ -38,12 +39,48 @@ import {
   recordActionCompletionCandidate,
   recordActionSuccessorOutcome,
   recordActionSuccessorReturnDeliveryAttempt,
+  refreshHandledActionSuccessor,
   replaceActionSuccessor,
   retirePendingDispatchForFreshnessMismatch,
   returnActionSuccessorToPredecessor,
 } from './action-successor-state-machine.js';
 
 const MAX_CAS_ATTEMPTS = 20;
+const MAX_MALFORMED_CENSUS_SAMPLES = 5;
+const MALFORMED_CENSUS_REPORT_DEDUP_MS = 10_000;
+const log = createModuleLogger('ball-custody/action-successor-lease-store');
+
+interface MalformedCensusSample {
+  detailKey: string;
+  reason: string;
+}
+
+function parseCensusBatch(
+  keys: readonly string[],
+  raws: readonly (string | null)[],
+  predicate: (lease: ActionSuccessorLease | null) => lease is ActionSuccessorLease,
+): { matches: ActionSuccessorLease[]; malformedCount: number; malformedSamples: MalformedCensusSample[] } {
+  const matches: ActionSuccessorLease[] = [];
+  const malformedSamples: MalformedCensusSample[] = [];
+  let malformedCount = 0;
+  for (const [index, raw] of raws.entries()) {
+    const detailKey = keys[index];
+    if (!detailKey) throw new Error('ActionSuccessor recovery census received an unkeyed Redis value');
+    try {
+      const lease = parseActionSuccessorLease(raw);
+      if (predicate(lease)) matches.push(lease);
+    } catch (error) {
+      malformedCount += 1;
+      if (malformedSamples.length < MAX_MALFORMED_CENSUS_SAMPLES) {
+        malformedSamples.push({
+          detailKey,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+  return { matches, malformedCount, malformedSamples };
+}
 
 function isPendingReturn(lease: ActionSuccessorLease | null): lease is ActionSuccessorLease {
   return Boolean(
@@ -95,6 +132,8 @@ function validateFreshRevisionReplay(lease: ActionSuccessorLease, expected: Acti
 }
 
 export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore {
+  private lastMalformedCensusReport?: { signature: string; at: number };
+
   constructor(private readonly redis: RedisClient) {}
 
   async get(leaseId: string): Promise<ActionSuccessorLease | null> {
@@ -133,13 +172,43 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       .map((key) => (keyPrefix && key.startsWith(keyPrefix) ? key.slice(keyPrefix.length) : key))
       .sort();
     const matches: ActionSuccessorLease[] = [];
+    const malformedSamples: MalformedCensusSample[] = [];
+    let malformedCount = 0;
     const batchSize = 100;
     for (let offset = 0; offset < keys.length && matches.length < limit; offset += batchSize) {
       const batch = keys.slice(offset, offset + batchSize);
       const raws = await this.redis.mget(...batch);
-      matches.push(...raws.map(parseActionSuccessorLease).filter(predicate));
+      const parsed = parseCensusBatch(batch, raws, predicate);
+      matches.push(...parsed.matches);
+      malformedCount += parsed.malformedCount;
+      malformedSamples.push(
+        ...parsed.malformedSamples.slice(0, MAX_MALFORMED_CENSUS_SAMPLES - malformedSamples.length),
+      );
+    }
+    if (malformedCount > 0) {
+      this.reportMalformedCensus(label, malformedCount, malformedSamples);
     }
     return matches.slice(0, limit);
+  }
+
+  private reportMalformedCensus(
+    label: string,
+    malformedCount: number,
+    malformedSamples: MalformedCensusSample[],
+  ): void {
+    const signature = JSON.stringify({ malformedCount, malformedSamples });
+    const now = Date.now();
+    if (
+      this.lastMalformedCensusReport?.signature === signature &&
+      now - this.lastMalformedCensusReport.at < MALFORMED_CENSUS_REPORT_DEDUP_MS
+    ) {
+      return;
+    }
+    this.lastMalformedCensusReport = { signature, at: now };
+    log.warn(
+      { label, malformedCount, malformedSamples },
+      'ActionSuccessor recovery census skipped malformed persisted leases',
+    );
   }
 
   async claim(input: ClaimActionSuccessorInput): Promise<ActionSuccessorClaimStoreResult> {
@@ -306,6 +375,21 @@ export class RedisActionSuccessorLeaseStore implements ActionSuccessorLeaseStore
       if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
     }
     throw new Error(`action successor CAS exhausted: ${leaseId}`);
+  }
+
+  async refreshHandledCarrier(
+    leaseId: string,
+    input: Parameters<ActionSuccessorLeaseStore['refreshHandledCarrier']>[1],
+  ): ReturnType<ActionSuccessorLeaseStore['refreshHandledCarrier']> {
+    for (let attempt = 0; attempt < MAX_CAS_ATTEMPTS; attempt += 1) {
+      const current = await this.require(leaseId);
+      const result = refreshHandledActionSuccessor(current, input);
+      if (result.outcome !== 'refreshed') return result;
+      const committed = await this.compareAndSetUnlessSubjectTerminal(current, result.lease);
+      if (committed === 'written') return result;
+      if (committed === 'subject_terminal') return { outcome: 'subject_terminal', lease: current };
+    }
+    throw new Error(`action successor refresh CAS exhausted: ${leaseId}`);
   }
 
   async returnToPredecessor(

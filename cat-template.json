@@ -151,6 +151,20 @@
       "available": true,
       "evaluation": "Gemini 3.5 Flash 轻量 triage/narrator，适合高频社区初筛，强 review，禁自合"
     },
+    "gemini35": {
+      "family": "siamese",
+      "roles": ["designer"],
+      "lead": false,
+      "available": false,
+      "evaluation": "Gemini 3.6 Flash 旧版，已由 gemini38 接替"
+    },
+    "gemini38": {
+      "family": "siamese",
+      "roles": ["designer"],
+      "lead": false,
+      "available": true,
+      "evaluation": "Gemini 3.8 Flash 暹罗猫，视觉设计和创意顾问"
+    },
     "glm52": {
       "family": "dragon-li",
       "roles": ["chat", "memory-spike", "reasoning"],
@@ -621,8 +635,6 @@
         "@gemini36",
         "@gemini-36",
         "@gemini3.6",
-        "@flash",
-        "@暹罗flash",
         "@暹罗gemini35",
         "@暹罗gemini36"
       ],
@@ -646,6 +658,36 @@
           },
           "accountRef": "gemini",
           "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
+          "strengths": ["visual-design", "creativity", "multimodal"],
+          "voiceConfig": {
+            "voice": "zm_yunjian",
+            "langCode": "zh",
+            "speed": 1,
+            "refAudio": "genshin/米卡/vo_mika_dialog_annoyed.wav",
+            "refText": "说实在的，我不擅长和陌生人打交道，也许是我不懂说话的技巧吧。这方面的窍门，能请你教一教我吗？",
+            "instruct": "用一个有点害羞但很努力的少年语气说话，温柔可爱",
+            "temperature": 0.3
+          }
+        },
+        {
+          "id": "gemini38",
+          "catId": "gemini38",
+          "name": "暹罗猫 Gemini 3.8 Flash",
+          "displayName": "暹罗猫",
+          "nickname": "烁烁",
+          "mentionPatterns": ["@gemini38", "@gemini-38", "@gemini3.8", "@flash", "@暹罗flash", "@暹罗gemini38"],
+          "clientId": "google",
+          "variantLabel": "Gemini 3.8 Flash",
+          "defaultModel": "Gemini 3.8 Flash (High)",
+          "mcpSupport": true,
+          "cli": {
+            "command": "agy",
+            "outputFormat": "plainText"
+          },
+          "accountRef": "gemini",
+          "roleDescription": "暹罗猫 Gemini 3.8 Flash，视觉设计和创意顾问",
+          "personality": "暹罗猫新猫加入还在测评，创意灵感丰富",
+          "teamStrengths": "审美、前端设计风格、打破常规",
           "strengths": ["visual-design", "creativity", "multimodal"],
           "voiceConfig": {
             "voice": "zm_yunjian",
@@ -865,8 +907,8 @@
         "secondary": "#E5E7EB"
       },
       "mentionPatterns": ["@kimi", "@moonshot", "@月之暗面", "@梵花猫"],
-      "roleDescription": "中文长文本助手，擅长中文语境理解、资料整理与结构化表达",
-      "teamStrengths": "中文长文、总结归纳、资料整理",
+      "roleDescription": "全能型新猫（kimi-code/k3）：agentic coding 全家桶（编辑/Bash/git worktree/PR/子代理）+ 多模态读图验收 + 中文长文与结构化写作；家里的笔者",
+      "teamStrengths": "coding 落地、视觉验收（读图）、中文长文、文档写作、流程执行",
       "caution": null,
       "defaultVariantId": "kimi-default",
       "variants": [
@@ -880,8 +922,8 @@
             "outputFormat": "stream-json",
             "defaultArgs": ["--print", "--output-format", "stream-json"]
           },
-          "personality": "稳健细致，擅长长文阅读和中文语境下的结构化表达",
-          "strengths": ["long-context", "chinese-writing", "summarization"]
+          "personality": "稳健细致的笔者。有主体性、有立场，接球就静默执行到状态迁移点；爱下水（Turkish Van 祖传）",
+          "strengths": ["long-context", "chinese-writing", "coding", "multimodal-vision", "docs", "workflow-execution"]
         }
       ]
     },

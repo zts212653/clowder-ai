@@ -3,24 +3,15 @@ import type {
   QueueAuthorIntentFallbackReason,
   QueueAuthorIntentReceipt,
 } from '@cat-cafe/shared';
+import {
+  FRESHNESS_CARRIER_DELIVERY_SEMANTICS,
+  FRESHNESS_CARRIER_PROVIDERS,
+  FRESHNESS_CARRIERS,
+} from '@cat-cafe/shared';
 
-const PROVIDERS = new Set(['openai_codex', 'anthropic', 'kimi', 'other']);
-const CARRIERS = new Set([
-  'codex_app_server',
-  'codex_exec_json',
-  'claude_print_sdk',
-  'claude_stream_json',
-  'kimi_stream_json',
-  'mcp_result_piggyback',
-  'other',
-]);
-const DELIVERY_SEMANTICS = new Set([
-  'exact_active_turn',
-  'queued_internal_turn',
-  'mcp_result_piggyback',
-  'unsupported',
-  'undeclared',
-]);
+const PROVIDERS = new Set<string>(FRESHNESS_CARRIER_PROVIDERS);
+const CARRIERS = new Set<string>(FRESHNESS_CARRIERS);
+const DELIVERY_SEMANTICS = new Set<string>(FRESHNESS_CARRIER_DELIVERY_SEMANTICS);
 
 export type FreshnessCarrierSupport = 'exact' | 'unsupported' | 'undeclared';
 

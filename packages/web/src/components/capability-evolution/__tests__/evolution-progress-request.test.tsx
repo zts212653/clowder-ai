@@ -5,11 +5,15 @@ import { CapabilityEvolutionProgramDetail } from '../CapabilityEvolutionProgramD
 import type { EvolutionProgramProjection } from '../evolution-program-projection';
 import { useEvolutionReading } from '../evolution-reading-state';
 import { useEvolutionProgressRequests } from '../journey/evolution-progress-request';
+import { assetReviewFixture } from './evolution-asset-fixtures';
 import { programFixture } from './evolution-fixtures';
 
 const api = vi.hoisted(() => ({ fetch: vi.fn() }));
+const catData = vi.hoisted(() => ({
+  cats: [{ id: 'codex-sol', displayName: 'Sol' }] as { id: string; displayName?: string }[],
+}));
 vi.mock('@/utils/api-client', () => ({ apiFetch: api.fetch }));
-vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ cats: [{ id: 'codex-sol', displayName: 'Sol' }] }) }));
+vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ cats: catData.cats }) }));
 
 describe('operator can ask the initiating cat to advance the existing Program', () => {
   let host: HTMLDivElement;
@@ -20,6 +24,7 @@ describe('operator can ask the initiating cat to advance the existing Program', 
     localStorage.clear();
     useEvolutionProgressRequests.setState({ records: {}, pending: {}, errors: {} });
     useEvolutionReading.setState({ programs: {} });
+    catData.cats = [{ id: 'codex-sol', displayName: 'Sol' }];
     projection = programFixture('instrumenting');
     projection.origin = { threadId: 'thread-origin', title: '评估准备', createdByCatId: 'codex-sol' };
     api.fetch.mockReset().mockImplementation(async (path: string) => {
@@ -156,5 +161,39 @@ describe('operator can ask the initiating cat to advance the existing Program', 
     await act(async () => primary().click());
     expect(host.textContent).toContain('发起猫猫当前不可用');
     expect(api.fetch.mock.calls.some(([path]) => path === '/api/messages')).toBe(false);
+  });
+
+  it('does not leak the raw cat id when the roster entry has no display name', async () => {
+    catData.cats = [{ id: 'codex-sol' }];
+    await render();
+    expect(host.textContent).toContain('请在原发起对话「评估准备」中继续已有任务、补齐缺口。');
+    expect(host.textContent).not.toContain('交给发起猫猫 codex-sol');
+  });
+
+  it('keeps recorded version refs out of the default narrative and recoverable in named details', async () => {
+    await render();
+    const fallback = [...host.querySelectorAll('details')].find((item) =>
+      item.querySelector('summary')?.textContent?.includes('项目最近记录'),
+    );
+    expect(fallback, 'recorded refs stay recoverable in a named detail').toBeDefined();
+    expect(fallback?.open).toBe(false);
+    expect(fallback?.textContent).toContain('v1');
+    expect(host.textContent).not.toContain('项目最近记录：v1');
+  });
+
+  it('shows the adopted version by title and sinks the exact ref into a named detail', async () => {
+    api.fetch.mockImplementation(async (path: string) => {
+      if (path === '/api/cats') return Response.json({ cats: [{ id: 'codex-sol', displayName: 'Sol' }] });
+      if (path.includes('/asset-review')) return Response.json(assetReviewFixture('v2', 'v2'));
+      return Response.json(projection);
+    });
+    await render();
+    expect(host.textContent).toContain('补充边界示例');
+    const adoption = [...host.querySelectorAll('details')].find((item) =>
+      item.querySelector('summary')?.textContent?.includes('版本标识'),
+    );
+    expect(adoption, 'the exact adopted ref stays recoverable in a named detail').toBeDefined();
+    expect(adoption?.open).toBe(false);
+    expect(adoption?.textContent).toContain('v2');
   });
 });

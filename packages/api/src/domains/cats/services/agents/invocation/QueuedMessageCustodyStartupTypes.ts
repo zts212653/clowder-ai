@@ -10,6 +10,7 @@ export interface StartupCustodyLog {
 }
 
 export interface StartupCustodyDeps {
+  repairDispatchReceipts?: (messageId: string) => Promise<void>;
   messageStore: IMessageStore;
   invocationRecordStore: Pick<IInvocationRecordStore, 'get'>;
   turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;

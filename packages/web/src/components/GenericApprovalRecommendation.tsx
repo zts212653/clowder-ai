@@ -20,7 +20,7 @@ export function GenericApprovalRecommendation({
 }) {
   return (
     <div className="space-y-2 text-micro">
-      {item.sourceFeatureId === 'F128' && item.detail.reason != null && (
+      {item.sourceFeatureId === 'F128' && String(item.detail.reason ?? '').trim().length > 0 && (
         <CriticalText summary="审批理由" details={String(item.detail.reason)} tone="warning" />
       )}
       {item.sourceFeatureId === 'F225' && f225HandoffDetails && (
@@ -97,9 +97,6 @@ function DispatchRecommendation({
 function EntityRecommendation({ item }: { item: ApprovalHubItem }) {
   return (
     <div className="space-y-1">
-      <p data-testid="entity-proposal-identity">
-        提案 {item.proposalId} · 目标实体 {String(item.detail.entityId ?? '未指定')}
-      </p>
       {item.detail.canonicalName != null && (
         <p className="font-medium">
           {String(item.detail.canonicalName)} ({String(item.detail.entityType ?? 'entity')})
@@ -108,6 +105,11 @@ function EntityRecommendation({ item }: { item: ApprovalHubItem }) {
       {Array.isArray(item.detail.aliases) && item.detail.aliases.length > 0 && (
         <p className="truncate">别名: {item.detail.aliases.join(', ')}</p>
       )}
+      <details className="text-cafe-interactive/55" data-testid="entity-proposal-identity">
+        <summary className="cursor-pointer">提案标识</summary>
+        <p className="mt-1 break-all font-mono">提案 ID：{item.proposalId}</p>
+        <p className="mt-1 break-all font-mono">实体 ID：{String(item.detail.entityId ?? '未指定')}</p>
+      </details>
       {item.detail.rationale != null && (
         <CriticalText summary="登记理由" details={String(item.detail.rationale)} tone="info" />
       )}

@@ -70,16 +70,31 @@ export function isGitRepositoryObservation(raw) {
 }
 
 export function isRepositoryRefresh(raw) {
-  return refreshesRepository(gitCommandArgs(tokenizeSimpleShellCommand(raw)));
+  return refreshesRepository(gitCommandArgs(tokenizeSimpleShellCommand(stripHarmlessRedirections(raw))));
 }
 
+const FORCING_FETCH_OPTIONS = new Set(['--force', '-f', '--update-head-ok', '-u']);
+const FETCH_OPTIONS_WITH_VALUE = new Set(['--depth', '--deepen', '--jobs', '-j', '--upload-pack', '--refmap', '-o']);
+
+/**
+ * Git's own rule, not a list of shapes: a fetch only rewrites a ref when it is forced
+ * (`--force`, a `+` refspec) or writes outside `refs/remotes/` (`src:refs/heads/main`).
+ * Everything else updates FETCH_HEAD and remote-tracking refs. Until 2026-09-27 only
+ * `fetch origin main` and one pull-refspec shape counted as a refresh, so
+ * `git fetch origin feat/x main` was denied as a rewrite of main.
+ */
 function refreshesRepository(args) {
   if (!args || args[0] !== 'fetch') return false;
-  const fetchArgs = args.slice(1).filter((token) => !['--quiet', '-q', '--no-tags'].includes(token));
-  if (fetchArgs.length !== 2 || fetchArgs[0] !== 'origin') return false;
-  if (fetchArgs[1] === 'main') return true;
-  const pullRefspec = fetchArgs[1].match(/^(?:refs\/)?pull\/(\d+)\/head:refs\/remotes\/origin\/pr\/(\d+)$/);
-  return pullRefspec !== null && pullRefspec[1] === pullRefspec[2];
+  const rest = args.slice(1);
+  if (rest.some((token) => FORCING_FETCH_OPTIONS.has(token))) return false;
+  const positional = rest.filter(
+    (token, index) => !token.startsWith('-') && !FETCH_OPTIONS_WITH_VALUE.has(rest[index - 1]),
+  );
+  return positional.slice(1).every((refspec) => {
+    if (refspec.startsWith('+')) return false;
+    const colon = refspec.indexOf(':');
+    return colon < 0 || refspec.slice(colon + 1).startsWith('refs/remotes/');
+  });
 }
 
 /** Git's own selectors, peeled off an operand list to reach the subcommand. */

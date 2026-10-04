@@ -13,6 +13,18 @@ test('wakeWhen persists primary output when daemon PATH omits bundled rg', async
   const messages = [];
   const holdBallDeps = {
     registry,
+    holdQuotaStore: {
+      async tryAdmit() {
+        return { admitted: true, count: 1, eventId: `stub-${Date.now()}` };
+      },
+      async releaseByEventId() {
+        return true;
+      },
+      async getCount() {
+        return 0;
+      },
+      async close() {},
+    },
     taskRunner: {
       registerDynamic() {},
       unregister() {

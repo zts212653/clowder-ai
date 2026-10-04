@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/utils/api-client';
 
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
 vi.mock('@/utils/api-client', () => ({
   apiFetch: vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))),
 }));

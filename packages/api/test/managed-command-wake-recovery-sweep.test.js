@@ -154,6 +154,95 @@ async function loadSweep() {
 }
 
 describe('F167 S.1-c ManagedCommandWakeRecoverySweep', () => {
+  test('startup recovery consumes a resumable gate terminal with its executable continuation', async () => {
+    const { ManagedCommandWakeRecoverySweep } = await loadSweep();
+    const { createResumableDurableManagedGateJob } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-consumer.js'
+    );
+    const { initializeDurableManagedGateJob, settleDurableManagedGateJobFromRunner } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-job.js'
+    );
+    const { initializeDurableGateRecovery, synchronizeDurableGateFrozenIdentity } = await import(
+      '../dist/domains/ball-custody/durable-managed-gate-recovery.js'
+    );
+    const root = mkdtempSync(path.join(os.tmpdir(), 'managed-command-resumable-sweep-'));
+    const runId = '11111111-2222-4333-8444-555555555555';
+    const frozenIdentity = {
+      headSha: '1'.repeat(40),
+      treeSha: '2'.repeat(40),
+      baseSha: '3'.repeat(40),
+      route: 'full',
+      risk: 'contract',
+      mode: 'full',
+      fingerprint: '4'.repeat(64),
+      runnerFingerprint: '5'.repeat(64),
+      toolchainFingerprint: '6'.repeat(64),
+    };
+    const previousDataRoot = process.env.CAT_CAFE_DATA_DIR;
+    process.env.CAT_CAFE_DATA_DIR = root;
+    try {
+      const job = createResumableDurableManagedGateJob(
+        'hold-ball-task-1',
+        60_000,
+        { threadId: 'thread-1', catId: 'codex-sol', userId: 'user-1' },
+        root,
+      );
+      initializeDurableManagedGateJob(job, 1_000);
+      initializeDurableGateRecovery(job, { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' }, 1_000);
+      writeFileSync(
+        job.gateReceiptPath,
+        `${JSON.stringify({
+          version: 1,
+          jobId: job.jobId,
+          runId,
+          state: 'terminal',
+          terminalStatus: 'failed',
+          result: { exitCode: 1, timedOut: false, durationMs: 500 },
+          recovery: { protocolVersion: 2, frozenIdentity },
+        })}\n`,
+      );
+      synchronizeDurableGateFrozenIdentity(job, 1_001);
+      settleDurableManagedGateJobFromRunner(job, { exitCode: 1, timedOut: false, durationMs: 500 }, 1_500);
+      const task = makeTask({
+        params: {
+          message: 'fallback',
+          targetCatId: 'codex-sol',
+          triggerUserId: 'user-1',
+          holdLifecycle: {
+            mode: 'wake_when',
+            status: 'active',
+            wakeAt: 99_000,
+            createdBy: 'hold-ball:codex-sol',
+            managedCommand: {
+              state: 'command_running',
+              command: 'pnpm gate --risk contract',
+              startedAt: 1_000,
+              durableJob: job,
+            },
+          },
+        },
+      });
+      const h = makeHarness({ task });
+      const stats = await new ManagedCommandWakeRecoverySweep(h.deps).runOnce();
+      assert.equal(stats.scanned, 1);
+      assert.equal(stats.pending, 1, 'an enqueued invocation remains pending until its managed disposition');
+      assert.equal(
+        h.appended.some((message) => message.content.includes(`pnpm gate --risk contract --resume ${runId}`)),
+        true,
+        'restart delivery must preserve one executable continuation instead of a generic lost-gate message',
+      );
+      assert.equal(
+        h.appended.some((message) => message.content.includes(`pnpm gate --risk contract -- --resume ${runId}`)),
+        false,
+        'restart delivery must not invent a pnpm separator that changes the frozen invocation identity',
+      );
+    } finally {
+      if (previousDataRoot === undefined) delete process.env.CAT_CAFE_DATA_DIR;
+      else process.env.CAT_CAFE_DATA_DIR = previousDataRoot;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('dispatch restores strict owner auth from the durable private hold carrier', async () => {
     const { ManagedCommandWakeRecoverySweep } = await loadSweep();
     const h = makeHarness({ ownerAuthProvenance: 'strict' });

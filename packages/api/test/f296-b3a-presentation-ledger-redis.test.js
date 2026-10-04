@@ -72,10 +72,10 @@ describe('F296 B3a gate 4: RedisPresentationLedgerStore', () => {
     );
     epochStore = new RedisContextEpochStore(redis);
     ({ PresentationLedger, DEFAULT_RESERVATION_TTL_MS } = await import(
-      '../dist/domains/cats/services/session/PresentationLedger.js'
+      '../dist/domains/cats/services/session/context/PresentationLedger.js'
     ));
-    ({ mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/delivery-receipt.js'));
-    ({ mapToPresentation } = await import('../dist/domains/cats/services/session/context-presentation.js'));
+    ({ mintDeliveryReceipt } = await import('../dist/domains/cats/services/session/context/delivery-receipt.js'));
+    ({ mapToPresentation } = await import('../dist/domains/cats/services/session/context/context-presentation.js'));
 
     // Two independent store objects over one Redis == two API instances.
     makeLedger = (clock) => new PresentationLedger(new RedisPresentationLedgerStore(redis), { now: () => clock.nowMs });

@@ -37,7 +37,7 @@ export function RoutingPreferenceControls({
   const [preferCsv, setPreferCsv] = useState('');
   const [overCsv, setOverCsv] = useState('');
   const [rationale, setRationale] = useState('');
-  const [evidenceRef, setEvidenceRef] = useState('decision:F293');
+  const [evidenceRef, setEvidenceRef] = useState('');
   const [reviewDays, setReviewDays] = useState(30);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export function RoutingPreferenceControls({
     setPreferCsv(head.prefer.map(subjectLabel).join(', '));
     setOverCsv(head.over.map(subjectLabel).join(', '));
     setRationale(head.rationale);
-    setEvidenceRef(head.evidenceRefs[0] ?? 'decision:F293');
+    setEvidenceRef(head.evidenceRefs[0] ?? '');
     draftCommandId.current = null;
   }
 
@@ -62,6 +62,7 @@ export function RoutingPreferenceControls({
     setPreferCsv('');
     setOverCsv('');
     setRationale('');
+    setEvidenceRef('');
     draftCommandId.current = null;
   }
 
@@ -286,6 +287,7 @@ export function RoutingPreferenceControls({
               name="preference-evidence"
               required
               value={evidenceRef}
+              placeholder="例如：决策记录或讨论链接"
               onChange={(event) => {
                 draftCommandId.current = null;
                 setEvidenceRef(event.target.value);

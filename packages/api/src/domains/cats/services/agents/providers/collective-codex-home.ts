@@ -1,4 +1,4 @@
-import { mkdir, stat, symlink } from 'node:fs/promises';
+import { mkdir, realpath, stat, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,7 +20,13 @@ export async function prepareCollectiveCodexHome(
       throw Object.assign(new Error('Public participation requires an existing canonical Codex file login'), {
         code: 'PARTICIPATION_AUTH_UNAVAILABLE',
       });
-    await symlink(authFile, join(publicCodexHome, 'auth.json'));
+    const target = join(publicCodexHome, 'auth.json');
+    try {
+      await symlink(authFile, target);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || (await realpath(target)) !== (await realpath(authFile)))
+        throw error;
+    }
   }
   return {
     HOME: publicHome,

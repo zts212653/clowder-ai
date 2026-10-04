@@ -11,6 +11,7 @@ export interface OfficialPluginInstance {
   updatedAt: number;
   lastRuntimeError?: {
     code: string;
+    desktopReason?: string;
     exitCode: number | null;
     signal: string | null;
     occurredAt: number;

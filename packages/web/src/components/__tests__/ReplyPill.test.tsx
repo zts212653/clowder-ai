@@ -87,6 +87,30 @@ describe('ReplyPill', () => {
     expect(html).not.toContain('#9B7EBD');
   });
 
+  it('writes the co-creator pill text with the readable name role and tints it with the identity fill', () => {
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ senderCatId: null, content: '用户消息' }}
+        replyToId="msg-456"
+        getCatById={mockGetCatById}
+      />,
+    );
+    expect(html).toContain('color:var(--color-cocreator-text)');
+    expect(html).toContain('background-color:#D4A76A20');
+    expect(html).not.toMatch(/[^-]color:#D4A76A/);
+  });
+
+  it('keeps a cat pill in the cat colour', () => {
+    const html = renderToStaticMarkup(
+      <ReplyPill
+        replyPreview={{ senderCatId: 'opus', content: '内容' }}
+        replyToId="msg-1"
+        getCatById={mockGetCatById}
+      />,
+    );
+    expect(html).toMatch(/[^-]color:#8B5CF6/);
+  });
+
   it('uses fallback color for unknown cat', () => {
     const html = renderToStaticMarkup(
       <ReplyPill

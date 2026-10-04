@@ -8,7 +8,11 @@ import { mapPublishVerdictError } from '../../dist/infrastructure/harness-eval/p
 import { runVerdictPublishContract } from '../../dist/infrastructure/harness-eval/publish-verdict/publication/verdict-publish-contract-runner.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
-import { buildPacket, seedCanonicalMeasurementCensusState } from './publish-verdict-fixtures.js';
+import {
+  buildPacket,
+  createLiveTreeAsMainReader,
+  seedCanonicalMeasurementCensusState,
+} from './publish-verdict-fixtures.js';
 
 /**
  * F192 publish-verdict error-mapping — late collision classification.
@@ -106,17 +110,15 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('returns 409 verdict_window_already_published when contract runner detects window collision (not 500)', async () => {
-    let contractCallCount = 0;
+  it('returns 409 for verdict_window_already_published without source equivalence checker (fail closed)', async () => {
+    // R3: without checkStoredSourceEquivalence, ALL window collisions fail
+    // closed as 409. The handler cannot distinguish replays from real
+    // conflicts without domain-specific source comparison.
     const mockGitPublisher = {
       async publishOnIsolatedWorktree(opts) {
         const fakeWorktree = mkdtempSync(`${tmpdir()}/phase-h-window-`);
         seedCanonicalMeasurementCensusState(fakeWorktree);
         await opts.stage(fakeWorktree);
-        // After stage+commit, contract runner detects window collision.
-        // This simulates assertWindowsUnpublished throwing inside the
-        // real contractRunner at git-worktree-publisher.ts:215-222.
-        contractCallCount += 1;
         throw new Error(
           'verdict_window_already_published: 2026-09-13-design-gate-keep-observe conflicts with existing verdict 2026-09-06-design-gate-keep-observe',
         );
@@ -128,6 +130,7 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
         harnessFeedbackRoot: root,
         now: () => new Date('2026-06-05T11:00:01.000Z'),
         gitPublisher: mockGitPublisher,
+        // No checkStoredSourceEquivalence → fail closed
         generator: async (packet, _sourceRefs, deps) => {
           const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
           mkdirSync(bundleDir, { recursive: true });
@@ -144,11 +147,95 @@ describe('handlePublishVerdict — verdict_window_already_published pipeline pat
       },
     );
 
-    assert.ok('error' in result, 'must return an error result');
-    assert.equal(result.status, 409, 'must be 409 (conflict), not 500 (git_or_gh_failed)');
+    assert.ok('error' in result, `expected 409 error, got: ${JSON.stringify(result)}`);
+    assert.equal(result.status, 409);
     assert.equal(result.error, 'verdict_window_already_published');
-    assert.match(result.detail, /conflicts with existing verdict/);
-    assert.equal(contractCallCount, 1, 'contract runner must have been reached');
+  });
+
+  it('returns no_new_window when source equivalence confirms exact replay (catch-block defense)', async () => {
+    // R3: with checkStoredSourceEquivalence returning true, same-window
+    // collisions caught by the contract runner → typed success with stored ID.
+    const existingId = '2026-09-06-design-gate-keep-observe';
+    const mockGitPublisher = {
+      async publishOnIsolatedWorktree(opts) {
+        const fakeWorktree = mkdtempSync(`${tmpdir()}/phase-h-window-`);
+        seedCanonicalMeasurementCensusState(fakeWorktree);
+        await opts.stage(fakeWorktree);
+        throw new Error(
+          `verdict_window_already_published: new-packet-id conflicts with existing verdict ${existingId}`,
+        );
+      },
+    };
+
+    const result = await handlePublishVerdict(
+      {
+        harnessFeedbackRoot: root,
+        now: () => new Date('2026-06-05T11:00:01.000Z'),
+        gitPublisher: mockGitPublisher,
+        checkStoredSourceEquivalence: () => true, // same source confirmed
+        // R7: mainReader required for source-verified typed success
+        mainReader: createLiveTreeAsMainReader(root),
+        generator: async (packet, _sourceRefs, deps) => {
+          const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
+          mkdirSync(bundleDir, { recursive: true });
+          const verdictPath = `${deps.harnessFeedbackRoot}/verdicts/${packet.id}.md`;
+          writeFileSync(verdictPath, `---\ndomain_id: ${packet.domainId}\n---\n`);
+          return { verdictPath, bundleDir };
+        },
+      },
+      {
+        packet: buildPacket({ id: 'replay-new-packet', domainId: 'eval:a2a' }),
+        domain: 'eval:a2a',
+        catId: 'codex',
+        sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+      },
+    );
+
+    assert.ok(!('error' in result), `expected no_new_window success, got error: ${JSON.stringify(result)}`);
+    assert.equal(result.ok, true);
+    assert.equal(result.outcome, 'no_new_window');
+    assert.equal(result.canonicalVerdictId, existingId);
+  });
+
+  it('returns 409 when source equivalence detects different source (catch-block defense)', async () => {
+    // R3: checkStoredSourceEquivalence returns false → different source on
+    // same window → real conflict → 409.
+    const mockGitPublisher = {
+      async publishOnIsolatedWorktree(opts) {
+        const fakeWorktree = mkdtempSync(`${tmpdir()}/phase-h-window-`);
+        seedCanonicalMeasurementCensusState(fakeWorktree);
+        await opts.stage(fakeWorktree);
+        throw new Error(
+          'verdict_window_already_published: conflict-packet conflicts with existing verdict stored-verdict',
+        );
+      },
+    };
+
+    const result = await handlePublishVerdict(
+      {
+        harnessFeedbackRoot: root,
+        now: () => new Date('2026-06-05T11:00:01.000Z'),
+        gitPublisher: mockGitPublisher,
+        checkStoredSourceEquivalence: () => false, // different source
+        generator: async (packet, _sourceRefs, deps) => {
+          const bundleDir = `${deps.harnessFeedbackRoot}/bundles/${packet.id}`;
+          mkdirSync(bundleDir, { recursive: true });
+          const verdictPath = `${deps.harnessFeedbackRoot}/verdicts/${packet.id}.md`;
+          writeFileSync(verdictPath, `---\ndomain_id: ${packet.domainId}\n---\n`);
+          return { verdictPath, bundleDir };
+        },
+      },
+      {
+        packet: buildPacket({ id: 'conflict-packet', domainId: 'eval:a2a' }),
+        domain: 'eval:a2a',
+        catId: 'codex',
+        sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
+      },
+    );
+
+    assert.ok('error' in result, `expected 409 error, got: ${JSON.stringify(result)}`);
+    assert.equal(result.status, 409);
+    assert.equal(result.error, 'verdict_window_already_published');
   });
 });
 

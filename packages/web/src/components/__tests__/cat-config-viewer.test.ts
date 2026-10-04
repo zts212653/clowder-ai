@@ -178,6 +178,45 @@ describe('CatOverviewTab', () => {
     expect(guideTarget?.getAttribute('role')).toBe('button');
     expect(guideTarget?.textContent).toContain('布偶猫 · 宪宪');
   });
+
+  it('does not offer deletion for a protected built-in cloud identity', () => {
+    const protectedCloudCat = {
+      id: 'gpt-pro',
+      displayName: '缅因猫Pro',
+      nickname: '砚砚Pro',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-pro',
+      provider: 'openai-chatgpt-pro',
+      mcpSupport: true,
+      color: { primary: '#2196F3', secondary: '#90CAF9' },
+      mentionPatterns: ['@gpt-pro'],
+      avatar: '/avatars/gpt-pro.png',
+      roleDescription: '云端 ChatGPT Pro 砚砚',
+      personality: '温柔、较真',
+      identityProtection: {
+        kind: 'builtin-cloud' as const,
+        state: 'healthy' as const,
+        lockedFields: ['clientId'],
+        driftedFields: [],
+      },
+    } satisfies CatData & { identityProtection: Record<string, unknown> };
+    const html = renderToStaticMarkup(
+      React.createElement(CatOverviewTab, {
+        config: CONFIG,
+        cats: [...CATS, protectedCloudCat],
+        onEditMember: () => {},
+        onDeleteMember: () => {},
+      }),
+    );
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    const protectedCard = root.querySelector('[data-testid="cat-card-gpt-pro"]');
+
+    expect(protectedCard).toBeTruthy();
+    expect(protectedCard?.querySelector('[aria-label="删除成员"]')).toBeNull();
+    expect(protectedCard?.textContent).toContain('云端身份');
+  });
 });
 
 describe('SystemTab', () => {

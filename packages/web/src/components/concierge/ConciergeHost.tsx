@@ -29,10 +29,15 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import { Rnd } from 'react-rnd';
+import { useConciergeDesktopStore, watchConciergeDesktop } from '@/stores/conciergeDesktopStore';
 import { projectBallState, useConciergeStore } from '@/stores/conciergeStore';
+import { type BallPositionConstraints, resolveBallPosition } from './ball-position';
 import { ConciergeBall } from './ConciergeBall';
+import { ConciergeDesktopFallbackNotice } from './ConciergeDesktopFallbackNotice';
 import { ConciergePanel } from './ConciergePanel';
 import { ConciergeToolbar } from './ConciergeToolbar';
+import { useConciergeReservedRects } from './concierge-reserved-rects';
+import { useDismissDesktopLossNoticeOnClose } from './useDismissDesktopLossNoticeOnClose';
 import { usePetBehavior } from './usePetBehavior';
 
 /** Default margin from viewport edge — matches original Tailwind `bottom-6 right-6` (1.5rem = 24px) */
@@ -45,7 +50,18 @@ const TOOLBAR_BELOW_HEIGHT = 44;
  *  BUG-UX-5: root fix is removing pointerEvents:'none' (below); threshold stays at 5. */
 const DRAG_THRESHOLD = 5;
 
+function sameBallPosition(
+  left: { readonly x: number; readonly y: number },
+  right: { readonly x: number; readonly y: number },
+): boolean {
+  return left.x === right.x && left.y === right.y;
+}
+
 export function ConciergeHost() {
+  const desktopVisible = useConciergeDesktopStore((s) => s.visible);
+  const desktopLost = useConciergeDesktopStore((s) => s.desktopLost);
+  const lossNoticeVisible = useConciergeDesktopStore((s) => s.noticeVisible);
+  useEffect(watchConciergeDesktop, []);
   const fetchConfig = useConciergeStore((s) => s.fetchConfig);
 
   // Lazily load config once (INV-9: only one GET, guard inside fetchConfig)
@@ -73,12 +89,29 @@ export function ConciergeHost() {
   const behaviorEnabled = useConciergeStore((s) => s.behaviorEnabled);
   const lastMessageTimestamp = useConciergeStore((s) => s.lastMessageTimestamp);
 
+  useDismissDesktopLossNoticeOnClose(desktopLost, surfaceState, muted);
+
   // Ball position (PR-A3b INV-P1~P4) + size (E3)
   const ballPosition = useConciergeStore((s) => s.ballPosition);
   const ballSize = useConciergeStore((s) => s.ballSize);
   const setBallPosition = useConciergeStore((s) => s.setBallPosition);
   const setBallSize = useConciergeStore((s) => s.setBallSize);
   const setIsDragging = useConciergeStore((s) => s.setIsDragging);
+  const reservedRects = useConciergeReservedRects();
+
+  const positionConstraints = useMemo<BallPositionConstraints>(
+    () => ({
+      viewport: {
+        width: typeof window === 'undefined' ? 0 : window.innerWidth,
+        height: typeof window === 'undefined' ? 0 : window.innerHeight,
+      },
+      ballSize,
+      edgeMargin: EDGE_MARGIN,
+      toolbarBelow: TOOLBAR_BELOW_HEIGHT,
+      reservedRects,
+    }),
+    [ballSize, reservedRects],
+  );
 
   // INV-P1: drag threshold — track start position to compare with stop position
   const dragStartPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -87,11 +120,14 @@ export function ConciergeHost() {
   // E3: depends on ballSize so default position adapts to cat size
   const defaultPosition = useMemo(() => {
     if (typeof window === 'undefined') return { x: 0, y: 0 };
-    return {
-      x: window.innerWidth - ballSize - EDGE_MARGIN,
-      y: window.innerHeight - ballSize - TOOLBAR_BELOW_HEIGHT - EDGE_MARGIN,
-    };
-  }, [ballSize]);
+    return resolveBallPosition(
+      {
+        x: positionConstraints.viewport.width - ballSize - EDGE_MARGIN,
+        y: positionConstraints.viewport.height - ballSize - TOOLBAR_BELOW_HEIGHT - EDGE_MARGIN,
+      },
+      positionConstraints,
+    );
+  }, [ballSize, positionConstraints]);
 
   // INV-P2: clamp position to viewport on render (handles window resize / persisted
   // out-of-bounds values). Pure computation, no side effect.
@@ -99,12 +135,8 @@ export function ConciergeHost() {
   const clampedPosition = useMemo(() => {
     const raw = ballPosition ?? defaultPosition;
     if (typeof window === 'undefined') return raw;
-    return {
-      x: Math.max(0, Math.min(raw.x, window.innerWidth - ballSize)),
-      // BUG-UX-13 R2: clamp Y accounts for toolbar below the ball, not just ball size
-      y: Math.max(0, Math.min(raw.y, window.innerHeight - ballSize - TOOLBAR_BELOW_HEIGHT)),
-    };
-  }, [ballPosition, ballSize, defaultPosition]);
+    return resolveBallPosition(raw, positionConstraints);
+  }, [ballPosition, defaultPosition, positionConstraints]);
 
   // INV-P2: snap back on viewport resize (position may become out-of-bounds)
   // E3: uses ballSize from store instead of constant
@@ -112,18 +144,19 @@ export function ConciergeHost() {
     const handleResize = () => {
       const { ballPosition: pos, ballSize: size } = useConciergeStore.getState();
       if (!pos) return; // default position auto-adapts
-      const clamped = {
-        x: Math.max(0, Math.min(pos.x, window.innerWidth - size)),
-        // BUG-UX-13 R2: resize clamp also accounts for toolbar below
-        y: Math.max(0, Math.min(pos.y, window.innerHeight - size - TOOLBAR_BELOW_HEIGHT)),
-      };
-      if (clamped.x !== pos.x || clamped.y !== pos.y) {
+      const clamped = resolveBallPosition(pos, {
+        ...positionConstraints,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        ballSize: size,
+        reservedRects: [],
+      });
+      if (!sameBallPosition(clamped, pos)) {
         void setBallPosition(clamped);
       }
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [setBallPosition]);
+  }, [positionConstraints, setBallPosition]);
 
   const handleDragStart = useCallback(
     (_e: unknown, d: { x: number; y: number }) => {
@@ -145,7 +178,9 @@ export function ConciergeHost() {
         // mouseup handler. Without it, React 18 batches the Zustand update →
         // Rnd re-renders with old clampedPosition before the new position arrives
         // → ball visibly snaps back to origin then jumps to the correct position.
-        const pos = { x: d.x, y: d.y };
+        // Host reservations alter only the displayed position. Persist viewport
+        // clamping so leaving this route restores the user's chosen home.
+        const pos = resolveBallPosition({ x: d.x, y: d.y }, { ...positionConstraints, reservedRects: [] });
         flushSync(() => {
           useConciergeStore.setState({ ballPosition: pos });
         });
@@ -156,7 +191,29 @@ export function ConciergeHost() {
         setIsDragging(false);
       }
     },
-    [setBallPosition, setIsDragging],
+    [positionConstraints, setBallPosition, setIsDragging],
+  );
+
+  const handleResizeStop = useCallback(
+    (_e: unknown, _dir: unknown, ref: { readonly offsetWidth: number }) => {
+      const newSize = ref.offsetWidth;
+      const persisted = useConciergeStore.getState().ballPosition;
+      if (persisted) {
+        const viewportClamped = resolveBallPosition(persisted, {
+          ...positionConstraints,
+          ballSize: newSize,
+          reservedRects: [],
+        });
+        if (!sameBallPosition(viewportClamped, persisted)) {
+          flushSync(() => {
+            useConciergeStore.setState({ ballPosition: viewportClamped });
+          });
+          void setBallPosition(viewportClamped);
+        }
+      }
+      void setBallSize(newSize);
+    },
+    [positionConstraints, setBallPosition, setBallSize],
   );
 
   // Derive ball state for all code paths (needed by hook call below)
@@ -183,10 +240,13 @@ export function ConciergeHost() {
   // so force behaviorEnabled=false when hidden (even if user didn't mute).
   const petBehavior = usePetBehavior({
     ballState: effectiveBallState === 'hidden' ? 'idle' : effectiveBallState,
-    behaviorEnabled: behaviorEnabled && effectiveBallState !== 'hidden',
+    behaviorEnabled: behaviorEnabled && effectiveBallState !== 'hidden' && !desktopVisible,
     muted,
     ballPosition: clampedPosition,
     ballSize,
+    edgeMargin: EDGE_MARGIN,
+    toolbarBelow: TOOLBAR_BELOW_HEIGHT,
+    reservedRects,
     lastMessageTimestamp,
   });
 
@@ -201,16 +261,19 @@ export function ConciergeHost() {
       if (lastAppliedDeltaRef.current?.dx === delta.dx && lastAppliedDeltaRef.current?.dy === delta.dy) return;
       lastAppliedDeltaRef.current = delta;
       const current = useConciergeStore.getState().ballPosition ?? defaultPosition;
-      const newPos = {
-        x: Math.max(0, Math.min(window.innerWidth - ballSize, current.x + delta.dx)),
-        y: Math.max(0, Math.min(window.innerHeight - ballSize - TOOLBAR_BELOW_HEIGHT, current.y + delta.dy)),
-      };
+      const newPos = resolveBallPosition(
+        { x: current.x + delta.dx, y: current.y + delta.dy },
+        {
+          ...positionConstraints,
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+        },
+      );
       // Local-only update — no API persist (autonomous walk is transient)
       useConciergeStore.setState({ ballPosition: newPos });
     } else {
       lastAppliedDeltaRef.current = null;
     }
-  }, [petBehavior.positionDelta, petBehavior.isAutonomousActive, defaultPosition, ballSize]);
+  }, [petBehavior.positionDelta, petBehavior.isAutonomousActive, defaultPosition, positionConstraints]);
 
   // Wait for config before rendering — but if config fetch failed, render with optimistic
   // defaults so ball/panel are still accessible (rail toggle + retry) (P2 R5)
@@ -218,9 +281,12 @@ export function ConciergeHost() {
 
   // INV-3: hidden → zero DOM (no ball, no badge, no tooltip, no toolbar, no bubble)
   if (effectiveBallState === 'hidden') return null;
+  // The canonical conversation panel stays reachable; only the duplicate main body yields.
+  if (desktopVisible) return <ConciergePanel />;
 
   return (
     <>
+      {desktopLost && lossNoticeVisible && <ConciergeDesktopFallbackNotice />}
       {/* PR-A3b: Rnd wrapper replaces static `fixed bottom-6 right-6` div.
           - INV-P1: drag threshold ~5px (handleDragStart/handleDragStop above)
           - INV-P2: bounds="window" + clampedPosition keep ball in viewport
@@ -250,11 +316,7 @@ export function ConciergeHost() {
         bounds="window"
         onDragStart={handleDragStart}
         onDragStop={handleDragStop}
-        onResizeStop={(_e, _dir, ref) => {
-          // E3: persist new size after resize ends
-          const newSize = ref.offsetWidth;
-          void setBallSize(newSize);
-        }}
+        onResizeStop={handleResizeStop}
         style={{ position: 'fixed', zIndex: 30 }}
         // BUG-UX-5 fix: removed pointerEvents:'none' — it blocked react-rnd's
         // drag detection from receiving mousedown directly on the wrapper.

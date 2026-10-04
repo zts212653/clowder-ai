@@ -195,7 +195,8 @@ export type PluginManagerCapabilityKind =
   | 'connector'
   | 'service'
   | 'ui'
-  | 'content-editor-provider';
+  | 'content-editor-provider'
+  | 'desktop-window';
 
 export interface PluginManagerCapability {
   id: string;

@@ -36,11 +36,21 @@ export function resolveStartupCliConfigContext(
   };
 }
 
+/** Alpha may observe shared capabilities, but cannot persist implicit repairs. */
+export function allowsImplicitCapabilityWrites(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CAT_CAFE_DEPLOYMENT_ID?.trim() !== 'alpha';
+}
+
 export async function regenerateStartupCliConfigs(
   start = process.cwd(),
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<StartupCliConfigRegenerationResult> {
   const { projectRoot, paths } = resolveStartupCliConfigContext(start, env);
+  // Alpha verifies an isolated build; it has no authority to repoint shared
+  // workspace/HOME configurations to its transient MCP binaries.
+  if (!allowsImplicitCapabilityWrites(env)) {
+    return { projectRoot, generated: false, healed: false };
+  }
   return withCapabilityLock(projectRoot, async () => {
     let config = await readCapabilitiesConfig(projectRoot);
     if (!config) return { projectRoot, generated: false, healed: false };

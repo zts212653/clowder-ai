@@ -34,8 +34,8 @@ import { inferRoutingContextIntent } from '../../../../routing-context/RoutingDi
 import type { IntentResult } from '../../context/IntentParser.js';
 import { parseIntent, ROUTE_CONTROL_TAGS, stripIntentTags } from '../../context/IntentParser.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
-import type { ContextEpochOwner } from '../../session/ContextEpochOwner.js';
-import type { PresentationLedger } from '../../session/PresentationLedger.js';
+import type { ContextEpochOwner } from '../../session/context/ContextEpochOwner.js';
+import type { PresentationLedger } from '../../session/context/PresentationLedger.js';
 import { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptReader } from '../../session/TranscriptReader.js';
@@ -1734,6 +1734,7 @@ export class AgentRouter {
     targetCats: CatId[],
     intent: IntentResult,
     options: A2ASlotTrackingOptions & {
+      liveCompanion?: RouteOptions['liveCompanion'];
       /** Authentication-grade owner provenance; legacy/system producers pass unknown. */
       ownerAuthProvenance: NonNullable<RouteOptions['ownerAuthProvenance']>;
       /** F167 Phase T: turn-scoped protocol carrier for the structured stop gate. */
@@ -1886,6 +1887,7 @@ export class AgentRouter {
     const strategyDeps = this.getStrategyDeps();
     const routingContextIntent = inferRoutingContextIntent(cleanMessage);
     const routeOptions = {
+      ...(options.liveCompanion ? { liveCompanion: options.liveCompanion } : {}),
       routeIntent: projectAgentRouteIntent(intent),
       ...(routingContextIntent ? { routingContextIntent } : {}),
       ownerAuthProvenance: options.ownerAuthProvenance,

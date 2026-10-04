@@ -1,4 +1,4 @@
-import type { UnifiedAwaitStateV1 } from './github-wait.js';
+import type { UnifiedAwaitStateV1 } from './wait-contract.js';
 
 export const SCHEDULER_WAIT_PREDICATE_KINDS = ['timer_elapsed', 'managed_command_completed'] as const;
 

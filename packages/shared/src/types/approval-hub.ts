@@ -96,6 +96,12 @@ export interface ApprovalItem {
   expiresAt?: number;
   createdAt: number;
   entrustedWorkTaskRef?: EntrustedWorkTaskRefV1;
+  /** Read-only exact aliases issued by the canonical F292/F306 projection, never a writer revision. */
+  needsMeDecisionRefs?: {
+    producerId: 'f292.repair' | 'f306.runtime_interaction';
+    subjectRef: string;
+    revision: number;
+  }[];
 }
 
 /** Canonical renderer DTO. Legacy producer status words stop at the API registry boundary. */

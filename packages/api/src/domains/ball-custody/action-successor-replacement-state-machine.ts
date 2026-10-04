@@ -28,6 +28,8 @@ type ReplaceActionSuccessorInputBase = {
   terminalPredicate: CanonicalActionTerminalPredicate;
   evidenceRef: string;
   freshnessEvidenceRef?: string;
+  /** F167 × F322: proposal authority evidence from delegate standing. */
+  delegateEvidenceRef?: string;
   returnedHolderCatId?: string;
   returnedHolderThreadId?: string;
   returnProof?: ReturnedActionSuccessorProof;
@@ -92,6 +94,7 @@ function replaceReturnedActionSuccessor(
     terminalPredicate: input.terminalPredicate,
     evidenceRef: input.evidenceRef,
     freshnessEvidenceRef: input.freshnessEvidenceRef,
+    delegateEvidenceRef: input.delegateEvidenceRef,
     returnedHolderCatId: input.returnedHolderCatId ?? '',
     returnedHolderThreadId: input.returnedHolderThreadId ?? '',
     returnProof: input.returnProof,
@@ -154,12 +157,15 @@ export function replaceActionSuccessor(
       holderOutcomes: {},
       completionCandidates: {},
       evidenceRefs: [
-        ...new Set([
-          ...current.evidenceRefs,
-          current.issuerStandingEvidenceRef,
-          evidenceRef,
-          provenance.issuerStandingEvidenceRef,
-        ]),
+        ...new Set(
+          [
+            ...current.evidenceRefs,
+            current.issuerStandingEvidenceRef,
+            evidenceRef,
+            provenance.issuerStandingEvidenceRef,
+            input.delegateEvidenceRef,
+          ].filter((r): r is string => !!r),
+        ),
       ],
       returnDeliveryState: undefined,
       returnDeliveryEvidenceRef: undefined,

@@ -305,9 +305,19 @@ describe('cat-config-loader', () => {
       const catalog = validConfig();
       catalog.breeds[0].variants[0].clientId = 'google';
       catalog.breeds[0].variants[0].defaultModel = 'Gemini 3.5 Flash (High)';
+      const nativeCodingGrant = {
+        threadId: 'thread_pilot',
+        taskId: 'task-pilot',
+        workUnitRef: 'file:docs/plans/2026-09-29-f325-three-pr-execution.md#p2-first-coding',
+        acceptedRevision: 'a'.repeat(40),
+        workspaceRoot: '/runtime/pilot-worktree',
+        writableFiles: ['src/task.ts', 'src/task.test.mjs'],
+        testFile: 'src/task.test.mjs',
+      };
       catalog.breeds[0].variants[0].agyProfile = {
         enabled: true,
         homeRoot: '/runtime/agy-profiles',
+        nativeCodingGrant,
       };
       writeFileSync(join(runtimeDir, 'cat-catalog.json'), JSON.stringify(catalog));
 
@@ -319,6 +329,7 @@ describe('cat-config-loader', () => {
         assert.deepEqual(variant.agyProfile, {
           enabled: true,
           homeRoot: '/runtime/agy-profiles',
+          nativeCodingGrant,
         });
         assert.equal('model' in variant.agyProfile, false, 'base agyProfile.model must not leak through');
         assert.equal('trustedWorkspaces' in variant.agyProfile, false, 'base trustedWorkspaces must not leak through');
@@ -327,6 +338,7 @@ describe('cat-config-loader', () => {
         assert.deepEqual(cats.opus.agyProfile, {
           enabled: true,
           homeRoot: '/runtime/agy-profiles',
+          nativeCodingGrant,
         });
       } finally {
         if (saved === undefined) {
@@ -1170,14 +1182,14 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.deepEqual(fable.mentionPatterns, ['@fable5', '@fable-5', '@claude-fable-5', '@宪宪5', '@布偶猫5']);
   });
 
-  it('total cat count is 19 (opus + sonnet + opus-45 + opus-47 + fable-5 + codex + gpt52 + spark + codex-sol + gpt-pro + gemini + gemini25 + gemini35 + glm52 + kimi + antigravity + antig-opus + agy-opus + opencode)', () => {
+  it('total cat count is 20, including separate gemini35 and gemini38 cats', () => {
     // Use template directly to avoid catalog overlay pollution from earlier tests
     const templatePath =
       process.env.CAT_TEMPLATE_PATH ??
       resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
-    assert.equal(Object.keys(all).length, 19);
+    assert.equal(Object.keys(all).length, 20);
     assert.ok(all.opus);
     assert.ok(all.sonnet);
     assert.ok(all['opus-45']);
@@ -1190,7 +1202,8 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all['gpt-pro']); // F247: cloud pro cat added
     assert.ok(all.gemini);
     assert.ok(all.gemini25);
-    assert.ok(all.gemini35); // Gemini Flash standalone breed (current 3.6)
+    assert.ok(all.gemini35); // disabled Gemini 3.6 Flash identity
+    assert.ok(all.gemini38); // current Gemini 3.8 Flash identity
     assert.ok(all.glm52); // GLM 5.2 cat (Dragon Li)
     assert.ok(all.kimi); // Kimi CLI cat (moonshot)
     assert.ok(all.antigravity); // F061: Bengal cat (Antigravity CDP bridge)
@@ -1199,29 +1212,31 @@ describe('F32-b P4c: Sonnet variant in project config', () => {
     assert.ok(all.opencode); // F105: OpenCode external agent
   });
 
-  it('registers gemini35 as Gemini 3.6 Flash with backward-compatible routing aliases', () => {
+  it('keeps Gemini 3.6 disabled and registers Gemini 3.8 as a separate current cat', () => {
     const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../cat-template.json');
     const config = loadCatConfig(templatePath);
     const all = toAllCatConfigs(config);
     const gemini35 = all.gemini35;
+    const gemini38 = all.gemini38;
 
     assert.ok(gemini35, 'gemini35 cat config exists');
     assert.equal(gemini35.name, '暹罗猫 Gemini 3.6 Flash');
     assert.equal(gemini35.variantLabel, 'Gemini 3.6 Flash');
     assert.equal(gemini35.defaultModel, 'Gemini 3.6 Flash (High)');
-    for (const alias of [
-      '@gemini36',
-      '@gemini-36',
-      '@gemini3.6',
-      '@暹罗gemini36',
-      '@gemini35',
-      '@gemini-35',
-      '@gemini3.5',
-    ]) {
+    assert.equal(config.roster?.gemini35?.available, false);
+
+    assert.ok(gemini38, 'gemini38 cat config exists');
+    assert.equal(gemini38.name, '暹罗猫 Gemini 3.8 Flash');
+    assert.equal(gemini38.variantLabel, 'Gemini 3.8 Flash');
+    assert.equal(gemini38.defaultModel, 'Gemini 3.8 Flash (High)');
+    assert.equal(config.roster?.gemini38?.available, true);
+
+    for (const alias of ['@gemini35', '@gemini-35', '@gemini3.5', '@gemini36', '@gemini-36', '@gemini3.6']) {
       assert.ok(gemini35.mentionPatterns.includes(alias), `gemini35 mentionPatterns include ${alias}`);
     }
-    for (const alias of ['@gemini36', '@gemini-36', '@gemini3.6', '@暹罗gemini36']) {
-      assert.equal(findBreedByMention(config, `${alias} ping`)?.catId, 'gemini35', `${alias} routes to gemini35`);
+    for (const alias of ['@gemini38', '@gemini-38', '@gemini3.8', '@暹罗gemini38', '@flash']) {
+      assert.ok(gemini38.mentionPatterns.includes(alias), `gemini38 mentionPatterns include ${alias}`);
+      assert.equal(findBreedByMention(config, `${alias} ping`)?.catId, 'gemini38', `${alias} routes to gemini38`);
     }
   });
 

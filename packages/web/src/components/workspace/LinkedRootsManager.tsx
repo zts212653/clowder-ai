@@ -105,27 +105,56 @@ export function LinkedRootsManager({ onRootsChanged, compact = false }: LinkedRo
   );
 }
 
-export function LinkedRootRemoveButton({ id, onRemoved }: { id: string; onRemoved: () => void }) {
-  if (!id.startsWith('linked_')) return null;
+export function LinkedRootRemoveButton({
+  id,
+  expectedEpoch,
+  removable,
+  onRemoved,
+}: {
+  id: string;
+  expectedEpoch?: number;
+  removable?: boolean;
+  onRemoved: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!removable || expectedEpoch === undefined) return null;
   const handleRemove = async (e: React.MouseEvent) => {
     e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
     try {
-      const res = await apiFetch(`/api/workspace/linked-roots?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      });
+      const res = await apiFetch(
+        `/api/workspace/linked-roots?${new URLSearchParams({ id, expectedEpoch: String(expectedEpoch) })}`,
+        {
+          method: 'DELETE',
+        },
+      );
       if (res.ok) onRemoved();
+      else setError(res.status === 409 ? '连接已变化，请重新核对。' : '暂时无法核对移除结果，请重试。');
     } catch {
-      /* ignore */
+      setError('移除结果尚待核对，请重试；不会删除原文件。');
+    } finally {
+      setBusy(false);
     }
   };
   return (
-    <button
-      type="button"
-      onClick={handleRemove}
-      title="断开这个文件夹"
-      className="ml-1 text-xs text-conn-red-text/60 hover:text-conn-red-text transition-colors"
-    >
-      x
-    </button>
+    <span>
+      <button
+        type="button"
+        onClick={handleRemove}
+        disabled={busy}
+        title="移除此共享连接，保留原文件和讨论"
+        className="ml-1 text-xs text-conn-red-text/60 hover:text-conn-red-text transition-colors"
+      >
+        {busy ? '核对中…' : '移除共享连接'}
+      </button>
+      {error && (
+        <span role="alert" className="block text-xs text-conn-red-text">
+          {error}
+        </span>
+      )}
+    </span>
   );
 }

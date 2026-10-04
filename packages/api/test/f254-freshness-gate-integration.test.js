@@ -503,6 +503,40 @@ describe('F254 Freshness Gate Integration', async () => {
     assert.equal(result.reason, 'pagination_limit_uncertain');
   });
 
+  it('honors acknowledgeHeld when the bounded pagination scan cannot prove catch-up', async () => {
+    const cursorStore = makeMockCursorStore('0000000000-000000-start');
+    const allMessages = [];
+    for (let i = 1; i <= 100; i++) {
+      allMessages.push({
+        id: `0000000${String(i).padStart(3, '0')}-000001-hidden`,
+        catId: 'codex',
+        content: `Hidden message ${i}`,
+        threadId,
+      });
+    }
+    const messageStore = makePaginatingMessageStore(allMessages);
+
+    const result = await wireModule.checkFreshnessForPostMessage({
+      userId,
+      catId,
+      threadId,
+      invocationId,
+      toolName: 'post_message',
+      cursorStore,
+      messageStore,
+      messageFilter: () => false,
+      acknowledgeHeld: true,
+    });
+
+    assert.equal(result.decision, 'forward');
+    assert.equal(result.reason, 'acknowledge_held');
+    assert.equal(
+      messageStore.getByThreadAfter.mock.calls.length,
+      0,
+      'an explicit acknowledgement must not repeat the bounded scan that already held the prior attempt',
+    );
+  });
+
   // -- R2 P1 fix: deleted and briefing messages are excluded by messageFilter --
 
   it('messageFilter excludes deleted messages (prevents false holds on tombstones)', async () => {

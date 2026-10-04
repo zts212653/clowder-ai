@@ -34,6 +34,7 @@ const routingCandidateSnapshotV1Schema = z
       .object({ ownerAttemptAllowed: z.boolean(), automaticRetryAt: routingEpochMsSchema.optional() })
       .strict()
       .optional(),
+    /** Availability projection reasons only; capability context remains on profile.revision. */
     reasons: z.array(routingReasonV1Schema).max(32),
     matchedPreferences: z
       .array(
@@ -101,7 +102,13 @@ const routingPreflightTargetV1Schema = z
     disposition: z.enum(['allowed', 'warned', 'rejected']),
     ownerAttempt: z.literal(true).optional(),
     automaticRetryAt: routingEpochMsSchema.optional(),
+    /** Reasons that causally explain this target's disposition. */
     reasons: z.array(routingReasonV1Schema).max(32),
+    /**
+     * Stable capability/profile context for human or agent judgment. These signals
+     * never change disposition and never mandate rerouting or additional review.
+     */
+    contextualSignals: z.array(routingReasonV1Schema).max(16).optional(),
     alternatives: z
       .array(
         z

@@ -8,6 +8,8 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 source "$SCRIPT_DIR/lib/node-runtime-guard.sh"
 # shellcheck source=scripts/lib/quickstart-freshness.sh
 source "$SCRIPT_DIR/lib/quickstart-freshness.sh"
+# shellcheck source=scripts/lib/alpha-redis-identity.sh
+source "$SCRIPT_DIR/lib/alpha-redis-identity.sh"
 DEFAULT_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-alpha"
 DEFAULT_LEGACY_ALPHA_DIR="$(cd "$PROJECT_DIR/.." && pwd)/cat-cafe-main-test"
 DEFAULT_ALPHA_BRANCH="alpha/main-sync"
@@ -22,15 +24,21 @@ ENV_SOURCE_FILE="${CAT_CAFE_ALPHA_ENV_SOURCE:-${CAT_CAFE_MAIN_TEST_ENV_SOURCE:-$
 ALPHA_FRONTEND_PORT="${CAT_CAFE_ALPHA_FRONTEND_PORT:-${CAT_CAFE_MAIN_TEST_FRONTEND_PORT:-3011}}"
 ALPHA_API_PORT="${CAT_CAFE_ALPHA_API_PORT:-${CAT_CAFE_MAIN_TEST_API_PORT:-3012}}"
 ALPHA_PREVIEW_GATEWAY_PORT="${CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT:-${CAT_CAFE_MAIN_TEST_PREVIEW_GATEWAY_PORT:-4111}}"
-ALPHA_REDIS_PORT="${CAT_CAFE_ALPHA_REDIS_PORT:-${CAT_CAFE_MAIN_TEST_REDIS_PORT:-6398}}"
+ALPHA_REDIS_PORT="${CAT_CAFE_ALPHA_REDIS_PORT:-${CAT_CAFE_MAIN_TEST_REDIS_PORT:-6397}}"
 ALPHA_REDIS_PROFILE="${CAT_CAFE_ALPHA_REDIS_PROFILE:-${CAT_CAFE_MAIN_TEST_REDIS_PROFILE:-worktree}}"
 ALPHA_AUDIO_PORT="${CAT_CAFE_ALPHA_AUDIO_PORT:-9891}"
 FORCE=false
 RUN_INSTALL=true
 SYNC_BEFORE_START=true
 QUICK_START=true
+ALPHA_EMPTY_REDIS_ALLOWED=false
 START_ARGS=()
 SOURCE_ONLY=false
+NAMED_ALPHA_INSTANCE=""
+NAMED_ALPHA_PORTS=""
+NAMED_ALPHA_COORDINATES=""
+NAMED_ALPHA_DISALLOWED_OPTIONS=false
+ALPHA_COLLECTIVE_SERVICE_PORT=5211
 
 usage() {
   cat <<'EOF'
@@ -39,9 +47,10 @@ Clowder AI Alpha Worktree Manager
 Usage:
   ./scripts/alpha-worktree.sh init   [--dir PATH] [--branch NAME] [--remote NAME] [--no-install]
   ./scripts/alpha-worktree.sh sync   [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-install]
-  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--] [start-dev args...]
+  ./scripts/alpha-worktree.sh start  [--dir PATH] [--branch NAME] [--remote NAME] [--force] [--no-sync] [--no-install] [--no-quick] [--allow-empty-redis] [--] [start-dev args...]
   ./scripts/alpha-worktree.sh status [--dir PATH] [--branch NAME] [--remote NAME]
   ./scripts/alpha-worktree.sh stop   [--dir PATH]
+  ./scripts/alpha-worktree.sh init|start --instance NAME --ports WEB,API,PREVIEW,SERVICE,REDIS [--allow-empty-redis]
 
 Defaults:
   --dir    ../cat-cafe-alpha
@@ -52,11 +61,12 @@ Ports:
   frontend: 3011
   api:      3012
   preview:  4111
-  redis:    6398
+  redis:    6397 (dedicated Alpha instance and data directory)
+  collective Service: 5211 (loopback, provisioned on demand)
 
 Behavior:
   start auto-syncs origin/main with ff-only, reuses the root .env for secrets,
-  launches the isolated alpha stack with sidecars disabled, and auto-migrates
+  launches the isolated alpha stack with other sidecars disabled, and auto-migrates
   an existing ../cat-cafe-main-test worktree into ../cat-cafe-alpha.
 EOF
 }
@@ -170,14 +180,25 @@ ensure_alpha_branch() {
 }
 
 print_alpha_env_exports() {
+  local allow_empty=0
+  [ "$ALPHA_EMPTY_REDIS_ALLOWED" = "true" ] && allow_empty=1
   cat <<EOF
 export REDIS_PORT=$ALPHA_REDIS_PORT
 export REDIS_URL=redis://localhost:$ALPHA_REDIS_PORT
+export REDIS_KEY_PREFIX=cat-cafe:
+export REDIS_DATA_DIR=$ALPHA_DIR/.cat-cafe/redis
+export REDIS_BACKUP_DIR=$ALPHA_DIR/.cat-cafe/redis-backups
 export REDIS_PROFILE=$ALPHA_REDIS_PROFILE
+export CAT_CAFE_RESPECT_DOTENV_PORTS=0
+export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=$allow_empty
 export API_SERVER_PORT=$ALPHA_API_PORT
 export FRONTEND_PORT=$ALPHA_FRONTEND_PORT
 export PREVIEW_GATEWAY_PORT=$ALPHA_PREVIEW_GATEWAY_PORT
 export NEXT_PUBLIC_API_URL=http://localhost:$ALPHA_API_PORT
+export WORKTREE_PORT_OFFSET=0
+export CAT_CAFE_DATA_DIR=$ALPHA_DIR/.cat-cafe
+export COLLECTIVE_SERVICE_PORT=$ALPHA_COLLECTIVE_SERVICE_PORT
+export COLLECTIVE_SERVICE_DATA_DIR=$ALPHA_DIR/.cat-cafe/collective-service
 export ANTHROPIC_PROXY_ENABLED=0
 export ASR_ENABLED=0
 export TTS_ENABLED=0
@@ -246,13 +267,29 @@ apply_alpha_env() {
   export CAT_CAFE_WORKSPACE_ROOT="$PROJECT_DIR"
   export CAT_CAFE_DEPLOYMENT_ID=alpha
   export CAT_CAFE_MCP_SERVER_PATH="$ALPHA_DIR/packages/mcp-server/dist/index.js"
+  export CAT_CAFE_DATA_DIR="$ALPHA_DIR/.cat-cafe"
   export REDIS_PORT="$ALPHA_REDIS_PORT"
   export REDIS_URL="redis://localhost:$ALPHA_REDIS_PORT"
+  export REDIS_KEY_PREFIX=cat-cafe:
+  export REDIS_DATA_DIR="$ALPHA_DIR/.cat-cafe/redis"
+  export REDIS_BACKUP_DIR="$ALPHA_DIR/.cat-cafe/redis-backups"
   export REDIS_PROFILE="$ALPHA_REDIS_PROFILE"
+  export CAT_CAFE_RESPECT_DOTENV_PORTS=0
+  if [ "$ALPHA_EMPTY_REDIS_ALLOWED" = "true" ]; then
+    export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=1
+  else
+    export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=0
+  fi
   export API_SERVER_PORT="$ALPHA_API_PORT"
   export FRONTEND_PORT="$ALPHA_FRONTEND_PORT"
   export PREVIEW_GATEWAY_PORT="$ALPHA_PREVIEW_GATEWAY_PORT"
   export NEXT_PUBLIC_API_URL="http://localhost:$ALPHA_API_PORT"
+  # The independent Alpha Service has its own durable home and loopback port.
+  # The API manager pins the same coordinates and refuses arbitrary worktree overrides.
+  export WORKTREE_PORT_OFFSET=0
+  export COLLECTIVE_SERVICE_PORT=5211
+  export COLLECTIVE_SERVICE_DATA_DIR="$ALPHA_DIR/.cat-cafe/collective-service"
+  unset COLLECTIVE_GITHUB_CLIENT_ID COLLECTIVE_GITHUB_CLIENT_SECRET
   export ANTHROPIC_PROXY_ENABLED=0
   export ASR_ENABLED=0
   export TTS_ENABLED=0
@@ -263,10 +300,11 @@ apply_alpha_env() {
   export AUDIO_SERVICE_PORT="$ALPHA_AUDIO_PORT"
   export CONNECTOR_GATEWAY_AUTOSTART=0
   export CAT_CAFE_F247_CLOUD_AUTOSTART=0
-  # Alpha shares ~/.cat-cafe/services.json with runtime — persistent config
-  # overrides env-level EMBED_ENABLED=0 etc. Tell the API guard to block
-  # sidecar lifecycle mutations and auto-start reconciliation.
+  # Alpha owns an isolated services.json beneath its checkout-local data root.
+  # Keep the API guard too: persisted config must not re-enable sidecar
+  # lifecycle mutations or auto-start reconciliation during acceptance.
   export CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED=1
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then apply_named_alpha_environment; fi
 
   # Next.js dev only reads .env files relative to its own cwd (packages/web/),
   # not monorepo root .env, and does not always pick up exported NEXT_PUBLIC_*
@@ -295,6 +333,7 @@ migrate_legacy_alpha_worktree() {
 }
 
 init_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then init_named_alpha_worktree; return; fi
   require_git_repo
   ensure_remote_exists
 
@@ -338,6 +377,7 @@ init_alpha_worktree() {
 }
 
 sync_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then sync_named_alpha_worktree; return; fi
   require_git_repo
   ensure_remote_exists
   worktree_exists || die "alpha worktree not found at $ALPHA_DIR (run init first)"
@@ -404,18 +444,37 @@ status_alpha_worktree() {
   echo "api_port: $ALPHA_API_PORT"
   echo "preview_gateway_port: $ALPHA_PREVIEW_GATEWAY_PORT"
   echo "redis_port: $ALPHA_REDIS_PORT"
+  echo "redis_data_dir: $ALPHA_DIR/.cat-cafe/redis"
+  echo "collective_service_port: $ALPHA_COLLECTIVE_SERVICE_PORT"
+  echo "collective_service_data_dir: $ALPHA_DIR/.cat-cafe/collective-service"
   echo "env_source: $env_source_display"
 }
 
 stop_alpha_daemon() {
-  local root
+  local root daemon_state_path
   root="$(abs_path "$ALPHA_DIR")"
   [ -d "$root" ] || die "alpha root not found: $root"
   export CAT_CAFE_DEPLOYMENT_ID=alpha
-  node "$SCRIPT_DIR/daemon-state.mjs" stop \
+  daemon_state_path="$(node "$SCRIPT_DIR/daemon-state.mjs" path \
     --home "$HOME" \
     --project-root "$root" \
-    --deployment-id alpha
+    --deployment-id alpha)"
+  if [ -f "$daemon_state_path" ]; then
+    node "$SCRIPT_DIR/daemon-state.mjs" stop \
+      --home "$HOME" \
+      --project-root "$root" \
+      --deployment-id alpha
+  fi
+  # Managed Hub previews are the canonical cross-invocation Alpha launcher. Its
+  # ownership record proves the exact process group before anything is stopped.
+  node "$SCRIPT_DIR/preview-process.mjs" stop \
+    --port "$ALPHA_FRONTEND_PORT" --cwd "$PROJECT_DIR" --json
+  if is_api_running; then
+    die "Alpha API remains on $ALPHA_API_PORT without a proven managed owner"
+  fi
+  if lsof -nP -iTCP:"$ALPHA_COLLECTIVE_SERVICE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    die "Alpha Collective Service remains on $ALPHA_COLLECTIVE_SERVICE_PORT; refusing to claim it was stopped or kill an unverified process"
+  fi
 }
 
 # ADR-039-alpha: build-freshness gate for alpha worktree (mirrors runtime-worktree.sh Invariant 3).
@@ -455,6 +514,7 @@ build_alpha_stale_packages() {
 }
 
 start_alpha_worktree() {
+  if [ -n "$NAMED_ALPHA_COORDINATES" ]; then start_named_alpha_worktree; return; fi
   if ! worktree_exists && legacy_worktree_exists; then
     migrate_legacy_alpha_worktree
   fi
@@ -471,8 +531,26 @@ start_alpha_worktree() {
   ensure_alpha_dependencies
   build_alpha_stale_packages
 
+  # The secrets file may contain stale shell variables. Coordinates selected by
+  # the launcher/options are authoritative for the whole managed Alpha start.
+  local selected_project_dir="$PROJECT_DIR" selected_alpha_dir="$ALPHA_DIR"
+  local selected_frontend_port="$ALPHA_FRONTEND_PORT" selected_api_port="$ALPHA_API_PORT"
+  local selected_preview_port="$ALPHA_PREVIEW_GATEWAY_PORT" selected_redis_port="$ALPHA_REDIS_PORT"
+  local selected_redis_profile="$ALPHA_REDIS_PROFILE" selected_audio_port="$ALPHA_AUDIO_PORT"
+  local selected_allow_empty="$ALPHA_EMPTY_REDIS_ALLOWED"
   source_env_if_present
+  PROJECT_DIR="$selected_project_dir"
+  ALPHA_DIR="$selected_alpha_dir"
+  ALPHA_FRONTEND_PORT="$selected_frontend_port"
+  ALPHA_API_PORT="$selected_api_port"
+  ALPHA_PREVIEW_GATEWAY_PORT="$selected_preview_port"
+  ALPHA_REDIS_PORT="$selected_redis_port"
+  ALPHA_REDIS_PROFILE="$selected_redis_profile"
+  ALPHA_AUDIO_PORT="$selected_audio_port"
+  ALPHA_EMPTY_REDIS_ALLOWED="$selected_allow_empty"
   apply_alpha_env
+  assert_alpha_redis_isolated
+  assert_alpha_redis_seeded
 
   info "starting isolated alpha stack from worktree: $ALPHA_DIR"
   info "ports: frontend=$ALPHA_FRONTEND_PORT api=$ALPHA_API_PORT preview=$ALPHA_PREVIEW_GATEWAY_PORT redis=$ALPHA_REDIS_PORT"
@@ -497,43 +575,66 @@ fi
 
 while [ "$SOURCE_ONLY" != "true" ] && [ $# -gt 0 ]; do
   case "$1" in
+    --instance)
+      [ $# -ge 2 ] && [ -z "$NAMED_ALPHA_INSTANCE" ] || die "--instance requires one unique value"
+      NAMED_ALPHA_INSTANCE="$2"
+      shift 2
+      ;;
+    --ports)
+      [ $# -ge 2 ] && [ -z "$NAMED_ALPHA_PORTS" ] || die "--ports requires one unique tuple"
+      NAMED_ALPHA_PORTS="$2"
+      shift 2
+      ;;
     --dir)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       [ $# -ge 2 ] || die "--dir requires a path"
       ALPHA_DIR="$(abs_path "$2")"
       shift 2
       ;;
     --branch)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       [ $# -ge 2 ] || die "--branch requires a value"
       ALPHA_BRANCH="$2"
       shift 2
       ;;
     --remote)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       [ $# -ge 2 ] || die "--remote requires a value"
       REMOTE_NAME="$2"
       shift 2
       ;;
     --env-file)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       [ $# -ge 2 ] || die "--env-file requires a path"
       ENV_SOURCE_FILE="$(abs_path "$2")"
       shift 2
       ;;
     --force)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       FORCE=true
       shift
       ;;
     --no-install)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       RUN_INSTALL=false
       shift
       ;;
     --no-sync)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       SYNC_BEFORE_START=false
       shift
       ;;
     --no-quick)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       QUICK_START=false
       shift
       ;;
+    --allow-empty-redis)
+      ALPHA_EMPTY_REDIS_ALLOWED=true
+      shift
+      ;;
     --)
+      NAMED_ALPHA_DISALLOWED_OPTIONS=true
       shift
       START_ARGS=("$@")
       break
@@ -546,6 +647,11 @@ done
 
 if [ "$SOURCE_ONLY" = "true" ]; then
   return 0 2>/dev/null || exit 0
+fi
+
+if [ -n "$NAMED_ALPHA_INSTANCE" ] || [ -n "$NAMED_ALPHA_PORTS" ]; then
+  source "$SCRIPT_DIR/lib/alpha-named-launch.sh"
+  select_named_alpha
 fi
 
 case "$COMMAND" in

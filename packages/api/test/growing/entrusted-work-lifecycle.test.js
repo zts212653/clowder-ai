@@ -64,7 +64,7 @@ describe('F310 entrusted-work Task owner lifecycle', () => {
     assert.equal(tasks[0].entrustedWork.revision, 1);
   });
 
-  test('time hints cannot admit a Schedule-invisible Task without canonical source time', async () => {
+  test('time hints cannot stand in for canonical source-backed dates at admission', async () => {
     const store = new TaskStore();
     const lifecycle = new EntrustedWorkLifecycleService(store, { now: () => now });
     const result = await lifecycle.admitOrResume(
@@ -77,7 +77,7 @@ describe('F310 entrusted-work Task owner lifecycle', () => {
     );
 
     assert.equal(result.result, 'needs_clarification');
-    assert.match(result.clarificationReason, /canonical businessDeadline or reviewBy/i);
+    assert.match(result.clarificationReason, /canonical typed time fact/i);
     assert.equal(store.listByThread('thread-f310').length, 0);
   });
 

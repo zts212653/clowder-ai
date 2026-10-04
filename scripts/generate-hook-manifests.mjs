@@ -46,7 +46,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'opt-in-view',
     governanceTier: 'immutable',
     inputs: [],
-    userExplanation: '确保猫的基础能力不因自定义 prompt 而退化',
+    userExplanation: '外部 claim（数据/benchmark/因果）引用前先审来源——F218 source-audit 反射',
   },
   {
     id: 'L3',
@@ -111,7 +111,7 @@ const TIER1_HOOKS = [
     transparencyTier: 'visible-by-default',
     governanceTier: 'immutable',
     inputs: [],
-    userExplanation: '伙伴猫不是工具猫',
+    userExplanation: '代码哲学：愿景驱动 + 质量门禁 + TDD，不是最小改动',
   },
   {
     id: 'S1',

@@ -17,6 +17,7 @@ const callbackReadSchema = z
   .object({
     taskId: z.string().trim().min(1).max(1_000),
     observedRevision: z.number().int().positive().optional(),
+    includeCompleted: z.boolean().optional(),
   })
   .strict();
 
@@ -24,6 +25,10 @@ const webParamsSchema = z.object({ taskId: z.string().trim().min(1).max(1_000) }
 const webQuerySchema = z
   .object({
     observedRevision: z.coerce.number().int().positive().optional(),
+    includeCompleted: z
+      .enum(['true', 'false'])
+      .transform((value) => value === 'true')
+      .optional(),
   })
   .strict();
 
@@ -56,7 +61,15 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
       reply.status(401);
       return { error: 'Identity required' };
     }
-    return { ownerReads: await options.service.listForOwner(userId) };
+    const query = z
+      .object({ view: z.enum(['active', 'completed']).optional() })
+      .strict()
+      .safeParse(request.query);
+    if (!query.success) {
+      reply.status(400);
+      return { error: 'Invalid Schedule view' };
+    }
+    return { ownerReads: await options.service.listForOwner(userId, query.data.view) };
   });
 
   app.get('/api/entrusted-work/needs-me', async (request, reply) => {
@@ -65,7 +78,7 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
       reply.status(401);
       return { error: 'Identity required' };
     }
-    return { ownerReads: await options.service.listNeedsMeForOwner(userId) };
+    return { ownerReads: await options.service.listNeedsMeForOwner(userId), coverage: { state: 'complete' as const } };
   });
 
   app.get('/api/entrusted-work/:taskId/owner-read', async (request, reply) => {
@@ -83,6 +96,7 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
     try {
       const ownerRead = await options.service.read({
         taskId: params.data.taskId,
+        includeCompleted: query.data.includeCompleted,
         viewer: { surface: 'human', userId },
         ...(query.data.observedRevision ? { observedRevision: query.data.observedRevision } : {}),
       });
@@ -104,6 +118,7 @@ export function registerEntrustedWorkReadRoutes(app: FastifyInstance, options: E
     try {
       const ownerRead = await options.service.read({
         taskId: parsed.data.taskId,
+        includeCompleted: parsed.data.includeCompleted,
         viewer: { surface: 'cat', userId: actor.userId, threadId: actor.threadId, catId: actor.catId },
         ...(parsed.data.observedRevision ? { observedRevision: parsed.data.observedRevision } : {}),
       });

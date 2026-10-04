@@ -4,11 +4,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { describe, it } from 'node:test';
-
 import ts from 'typescript';
 import YAML from 'yaml';
-
 import { resolvePublicTestFiles } from '../packages/api/scripts/resolve-public-test-files.mjs';
+import { rootCheckChain } from './lib/root-check-chain.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const MANIFEST_PATH = resolve(ROOT, 'sync-manifest.yaml');
@@ -415,6 +414,35 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!excluded.has(absorbedScript), `${absorbedScript} must not be excluded from export`);
   });
 
+  it('keeps the public-test CI workflow and its launcher fixtures in one ownership lane', () => {
+    // clowder-ai#1483 moved public-test isolation into a launcher script that
+    // ci.yml invokes and that check-public-test-ci-contract.mjs reads. All three
+    // are one unit: ci.yml is target-owned (KD-4), so its fixtures must be too.
+    // Registering only some of them is the release-notes-template.md failure mode
+    // — rsync --delete silently removes the unregistered file on the next full
+    // sync, and the public CI loses the kernel boundary it advertises. The home
+    // repo cannot read ci.yml to discover these fixtures, so the pairing is
+    // asserted directly.
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+    const workflow = '.github/workflows/ci.yml';
+    const launcherFixtures = [
+      '.github/scripts/check-public-test-ci-contract.mjs',
+      '.github/scripts/run-public-test-distributable.sh',
+    ];
+    assert.ok(targetOwned.has(workflow), `${workflow} must stay target-owned per F308 KD-4`);
+    for (const fixture of launcherFixtures) {
+      assert.ok(
+        targetOwned.has(fixture),
+        `${fixture} is a fixture of ${workflow} and must share its target-owned lane, ` +
+          'otherwise a full sync deletes it from the public repository',
+      );
+      assert.ok(
+        !managedFiles.has(fixture),
+        `${fixture} must not also be source-exported; one owner per surviving surface`,
+      );
+    }
+  });
+
   it('owns the public site and target companions absorbed from clowder-ai#1405', () => {
     // clowder-ai#1405 introduced the public website as a community contribution.
     // A full sync uses rsync --delete, so every surviving surface needs one explicit
@@ -517,6 +545,25 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
+  it('exports shellcheck-declared local dependencies of public shell scripts', () => {
+    const missing = [];
+    for (const importer of managedScripts) {
+      if (!importer.endsWith('.sh')) continue;
+      const source = readFileSync(resolve(ROOT, importer), 'utf8');
+      for (const [, dependency] of source.matchAll(/^# shellcheck source=(scripts\/[^\s]+)$/gm)) {
+        assert.ok(existsSync(resolve(ROOT, dependency)), `${importer} declares missing source ${dependency}`);
+        if (!isExported(dependency) || excluded.has(dependency)) missing.push(`${importer} -> ${dependency}`);
+      }
+    }
+    assert.deepEqual(missing, [], `sync-manifest omits sourced shell dependencies:\n${missing.join('\n')}`);
+  });
+
+  it('exports the managed-stop consumer exercised by the public API producer contract', () => {
+    const dependency = 'scripts/lib/gate-execution-managed-stop.mjs';
+    assert.ok(isExported(dependency), `${dependency} must accompany its public producer test`);
+    assert.ok(!excluded.has(dependency), `${dependency} must not be excluded`);
+  });
+
   it('exports every direct local import of a selected public API test', async () => {
     const { selectedFiles } = await resolvePublicTestFiles();
     const missing = [];
@@ -576,6 +623,24 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!excluded.has(hook), `${hook} must not be excluded from the public filtered tree`);
   });
 
+  it('exports the packaged managed compaction carrier as source-owned runtime data', () => {
+    const planSource = readFileSync(
+      resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/claude-compaction-launch-plan.ts'),
+      'utf8',
+    );
+    const carrierName = planSource.match(/const CARRIER_SCRIPT_NAME = '([^']+)'/);
+    assert.ok(carrierName, 'the launch plan must declare its packaged carrier asset');
+    const carrierPath = `.claude/hooks/${carrierName[1]}`;
+    const desktop = JSON.parse(readFileSync(resolve(ROOT, 'desktop/package.json'), 'utf8'));
+    assert.ok(
+      desktop.build.extraResources.some((resource) => resource.from === `../${carrierPath}`),
+      'the runtime carrier must be the asset shipped by desktop packaging',
+    );
+    assert.ok(managedFiles.has(carrierPath), `${carrierPath} must survive the next source-owned full sync`);
+    assert.ok(!excluded.has(carrierPath), `${carrierPath} must not be excluded`);
+    assert.ok(!(manifest.target_owned_files ?? []).includes(carrierPath), 'the absorbed carrier is source-owned');
+  });
+
   it('exports every project hook read by the public F296 authentication contract', () => {
     const contract = 'packages/api/test/f296-session-hook-source-auth.test.js';
     const source = readFileSync(resolve(ROOT, contract), 'utf8');
@@ -616,6 +681,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       .filter(Boolean);
     const exportedClaudePaths = trackedClaudePaths.filter((repoPath) => isExported(repoPath)).sort();
     const expectedClaudePaths = [
+      '.claude/hooks/f24-compaction.mjs',
       '.claude/hooks/f24-post-compact-bootstrap.sh',
       '.claude/hooks/f24-pre-compact.sh',
       '.claude/hooks/sop-stage-bookmark.sh',
@@ -743,6 +809,36 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     );
   });
 
+  it('keeps private prompt and Claude-wrapper assertions strict at home and scoped publicly', () => {
+    for (const [consumer, privateRef] of [
+      ['packages/api/test/f254-freshness-instruction-surface.test.js', 'cat-cafe-skills/refs/l0-staging-content.md'],
+      [
+        'packages/api/test/f306-native-effect-target-guard-git-context.test.js',
+        '.claude/hooks/runtime-sanctuary-guard.sh',
+      ],
+      [
+        'packages/api/test/f306-native-effect-target-guard-unknown-allow.test.js',
+        '.claude/hooks/runtime-sanctuary-guard.sh',
+      ],
+    ]) {
+      assert.ok(existsSync(resolve(ROOT, privateRef)), `${privateRef} must exist in the source tree`);
+      assert.ok(!isExported(privateRef) || excluded.has(privateRef), `${privateRef} must stay private`);
+      const source = readFileSync(resolve(ROOT, consumer), 'utf8');
+      assert.match(
+        source,
+        /!existsSync[^\n]*sync-manifest\.yaml/,
+        `${consumer} must not silently skip a missing source file`,
+      );
+      assert.match(source, /skip:/, `${consumer} must isolate its private assertion`);
+      assert.ok(isExported(consumer) && !excluded.has(consumer), `${consumer} must keep public assertions runnable`);
+    }
+    const providerTest = readFileSync(
+      resolve(ROOT, 'packages/api/test/f306-native-effect-target-guard-git-context.test.js'),
+      'utf8',
+    );
+    assert.match(providerTest, /skip: provider === 'claude' && publicWithoutClaudeWrapper/);
+  });
+
   it('does not make public magic-word tests depend on private L0 staging content', () => {
     const stagingRef = 'cat-cafe-skills/refs/l0-staging-content.md';
     const magicWordTest = readFileSync(
@@ -857,7 +953,7 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
       'the boundary round-trip suite must run in that entry point',
     );
     assert.ok(
-      pkg.scripts.check.includes('check:outbound-sanitizer'),
+      rootCheckChain(pkg.scripts).includes('check:outbound-sanitizer'),
       'pnpm check must invoke check:outbound-sanitizer',
     );
   });

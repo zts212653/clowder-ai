@@ -255,13 +255,15 @@ export class ImageExporter {
 
   private async waitForHtmlWidgets(page: Page, operation: HtmlWidgetExportOperation, interval = 100): Promise<void> {
     const start = Date.now();
+    let pendingWidgetIds: string[] = [];
     while (true) {
-      assertBeforeHtmlWidgetExportDeadline(operation, 'widget readiness');
+      await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
       const { readiness } = await readHtmlWidgetExportLayoutSnapshot(page);
-      assertBeforeHtmlWidgetExportDeadline(operation, 'widget readiness');
+      pendingWidgetIds = readiness.widgetIds;
+      await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
       if (readiness.status === 'ready') {
         await refreshHtmlWidgetExportLayoutProof(page, operation);
-        assertBeforeHtmlWidgetExportDeadline(operation, 'widget readiness');
+        await this.assertHtmlWidgetReadinessDeadline(page, operation, pendingWidgetIds);
         log.info({ widgets: readiness.widgetIds.length, elapsed: Date.now() - start }, 'HTML widgets export-ready');
         return;
       }
@@ -270,6 +272,68 @@ export class ImageExporter {
       }
       const remainingWait = operation.deadlineAt - Date.now();
       await new Promise<void>((resolve) => setTimeout(resolve, Math.min(interval, remainingWait)));
+    }
+  }
+
+  private async assertHtmlWidgetReadinessDeadline(
+    page: Page,
+    operation: HtmlWidgetExportOperation,
+    pendingWidgetIds: readonly string[],
+  ): Promise<void> {
+    try {
+      assertBeforeHtmlWidgetExportDeadline(operation, 'widget readiness');
+    } catch (error) {
+      let diagnostics: unknown = undefined;
+      try {
+        diagnostics = await page.evaluate((ids) => {
+          const browserGlobal = globalThis as unknown as {
+            innerHeight: number;
+            innerWidth: number;
+            scrollY: number;
+            document: {
+              querySelectorAll(selector: string): ArrayLike<{
+                getAttribute(name: string): string | null;
+                getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+                querySelector(selector: string): {
+                  getBoundingClientRect(): { top: number; bottom: number; left: number; right: number };
+                } | null;
+              }>;
+            };
+          };
+          const pending = new Set(ids);
+          const widgets = Array.from(browserGlobal.document.querySelectorAll('[data-html-widget]'))
+            .filter((element) => pending.has(element.getAttribute('data-html-widget') ?? 'unknown'))
+            .map((element) => {
+              const rect = element.getBoundingClientRect();
+              const iframeRect = element.querySelector('iframe')?.getBoundingClientRect() ?? null;
+              return {
+                widgetId: element.getAttribute('data-html-widget') ?? 'unknown',
+                layoutState: element.getAttribute('data-html-widget-layout-state'),
+                expanded: element.getAttribute('data-html-widget-expanded') === 'true',
+                rect,
+                iframeRect,
+                inViewport: rect.bottom > 0 && rect.top < browserGlobal.innerHeight,
+              };
+            });
+          return {
+            scrollY: browserGlobal.scrollY,
+            viewport: { width: browserGlobal.innerWidth, height: browserGlobal.innerHeight },
+            widgets,
+          };
+        }, pendingWidgetIds);
+      } catch (diagnosticError) {
+        diagnostics = { diagnosticError: String(diagnosticError) };
+      }
+      log.warn(
+        {
+          operationElapsedMs: Date.now() - operation.startedAt,
+          pendingWidgetIds,
+          diagnostics,
+          error: String(error),
+        },
+        'HTML widget readiness deadline exceeded',
+      );
+      throw error;
     }
   }
 

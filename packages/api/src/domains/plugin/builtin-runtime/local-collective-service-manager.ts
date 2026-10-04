@@ -1,6 +1,15 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { NamedAlphaRuntimeBoundary } from '../../../config/alpha-coordinates.js';
+import {
+  collectiveServiceEnvironment,
+  isAlphaCollectiveEnvironment,
+  isManagedCollectiveServiceRecord,
+  isNonRuntimeCollectiveEnvironment,
+  isPinnedCollectiveAlpha,
+  validatedCollectiveBootstrapUrl,
+} from '../../../config/collective-alpha-boundary.js';
 
 import {
   configuredLocalCollectiveServiceUrl,
@@ -11,7 +20,7 @@ import {
   type LocalCollectiveServiceSpawnSpec,
   readGitHubProviderReady,
   resolveLocalCollectiveServiceCliPath,
-  spawnDetachedCollectiveService,
+  spawnLocalCollectiveService,
   validateLocalCollectiveServiceUrl,
 } from './local-collective-service-process.js';
 
@@ -42,6 +51,9 @@ export interface LocalCollectiveServiceLaunch {
 interface LocalCollectiveServiceManagerOptions {
   readonly env: NodeJS.ProcessEnv;
   readonly frontendBaseUrl: string;
+  /** Alpha may manage only the Service compiled in its own checkout and stored under that checkout. */
+  readonly alphaRoot?: string;
+  readonly namedAlphaBoundary?: NamedAlphaRuntimeBoundary;
   readonly dataDirectory?: string;
   readonly serviceUrl?: string;
   readonly cliPath?: string;
@@ -52,6 +64,8 @@ interface LocalCollectiveServiceManagerOptions {
 
 export class LocalCollectiveServiceManager {
   readonly #env: NodeJS.ProcessEnv;
+  readonly #alphaRoot?: string;
+  readonly #namedAlphaBoundary?: NamedAlphaRuntimeBoundary;
   readonly #frontendOrigin: string;
   readonly #dataDirectory: string;
   readonly #serviceUrl: string;
@@ -63,6 +77,8 @@ export class LocalCollectiveServiceManager {
 
   constructor(options: LocalCollectiveServiceManagerOptions) {
     this.#env = options.env;
+    this.#alphaRoot = options.alphaRoot ? resolve(options.alphaRoot) : undefined;
+    this.#namedAlphaBoundary = options.namedAlphaBoundary;
     this.#frontendOrigin = new URL(options.frontendBaseUrl).origin;
     this.#dataDirectory = resolve(
       options.dataDirectory ??
@@ -74,12 +90,20 @@ export class LocalCollectiveServiceManager {
     );
     this.#cliPath = options.cliPath ?? resolveLocalCollectiveServiceCliPath();
     this.#fetch = options.fetchImpl ?? fetch;
-    this.#spawnProcess = options.spawnProcess ?? spawnDetachedCollectiveService;
+    this.#spawnProcess = options.spawnProcess ?? spawnLocalCollectiveService;
     this.#wait =
       options.wait ?? ((milliseconds) => new Promise((resolveWait) => setTimeout(resolveWait, milliseconds)));
   }
 
   async status(): Promise<LocalCollectiveServiceStatus> {
+    if (this.#requiresAlphaBoundary() && !this.#isPinnedAlpha()) {
+      return {
+        state: 'error',
+        serviceUrl: this.#serviceUrl,
+        dataDirectory: this.#dataDirectory,
+        error: 'Alpha Collective Service configuration does not match its isolated runtime boundary',
+      };
+    }
     if (this.#startPromise) {
       return { state: 'starting', serviceUrl: this.#serviceUrl, dataDirectory: this.#dataDirectory };
     }
@@ -87,7 +111,7 @@ export class LocalCollectiveServiceManager {
   }
 
   async provision(): Promise<LocalCollectiveServiceLaunch> {
-    this.#assertRuntimeLifecycle();
+    this.#assertManagedLifecycle();
     if (this.#startPromise) return this.#startPromise;
     const current = await this.#inspect();
     if (current.state === 'ready' || current.state === 'setup_required') {
@@ -111,8 +135,9 @@ export class LocalCollectiveServiceManager {
   }
 
   async recover(): Promise<LocalCollectiveServiceStatus> {
+    if (this.#requiresAlphaBoundary() && !this.#isPinnedAlpha()) return this.status();
     const current = await this.#inspect();
-    if (current.state !== 'stopped' || this.#isNonRuntimeEnvironment() || !(await this.#isManagedService())) {
+    if (current.state !== 'stopped' || !this.#canManageLifecycle() || !(await this.#isManagedService())) {
       return current;
     }
     try {
@@ -130,11 +155,22 @@ export class LocalCollectiveServiceManager {
   async #startAndWait(): Promise<LocalCollectiveServiceLaunch> {
     await mkdir(this.#dataDirectory, { recursive: true, mode: 0o700 });
     await chmod(this.#dataDirectory, 0o700);
+    this.#assertManagedLifecycle();
+    const isolatedAlpha = this.#isPinnedAlpha();
     await this.#spawnProcess({
       command: process.execPath,
       args: [this.#cliPath],
-      env: this.#serviceEnvironment(),
+      env: collectiveServiceEnvironment({
+        env: this.#env,
+        serviceUrl: this.#serviceUrl,
+        dataDirectory: this.#dataDirectory,
+        frontendOrigin: this.#frontendOrigin,
+        isolatedAlpha,
+        namedAlpha: this.#namedAlphaBoundary,
+      }),
       logPath: join(this.#dataDirectory, SERVICE_LOG_FILE),
+      // Alpha shares its proven preview session; runtime retains its independent process group.
+      detached: !isolatedAlpha,
     });
     return this.#waitForLaunch();
   }
@@ -255,12 +291,7 @@ export class LocalCollectiveServiceManager {
   async #readLaunchUrl(requireBootstrap: boolean): Promise<string | undefined> {
     try {
       const candidate = (await readFile(join(this.#dataDirectory, BOOTSTRAP_LINK_FILE), 'utf8')).trim();
-      const url = new URL(candidate);
-      const bootstrapSecret = new URLSearchParams(url.hash.slice(1)).get('bootstrap');
-      if (url.origin !== new URL(this.#serviceUrl).origin || !bootstrapSecret) {
-        throw new Error('invalid bootstrap link');
-      }
-      return url.href;
+      return validatedCollectiveBootstrapUrl(candidate, this.#serviceUrl);
     } catch (error) {
       if (isMissingFile(error)) return requireBootstrap ? undefined : this.#serviceUrl;
       throw new Error('Local Collective Service bootstrap link is unreadable');
@@ -284,54 +315,35 @@ export class LocalCollectiveServiceManager {
   async #isManagedService(): Promise<boolean> {
     try {
       const marker = JSON.parse(await readFile(join(this.#dataDirectory, MANAGED_MARKER_FILE), 'utf8')) as unknown;
-      return (
-        Boolean(marker) &&
-        typeof marker === 'object' &&
-        !Array.isArray(marker) &&
-        (marker as Record<string, unknown>).version === 1 &&
-        (marker as Record<string, unknown>).serviceUrl === this.#serviceUrl
-      );
+      return isManagedCollectiveServiceRecord(marker, this.#serviceUrl);
     } catch {
       return false;
     }
   }
 
-  #serviceEnvironment(): Record<string, string> {
-    const environment: Record<string, string> = {};
-    for (const key of [
-      'HOME',
-      'PATH',
-      'USER',
-      'LOGNAME',
-      'TMPDIR',
-      'HTTP_PROXY',
-      'HTTPS_PROXY',
-      'NO_PROXY',
-      'SSL_CERT_FILE',
-      'SSL_CERT_DIR',
-      'NODE_EXTRA_CA_CERTS',
-      'COLLECTIVE_GITHUB_CLIENT_ID',
-      'COLLECTIVE_GITHUB_CLIENT_SECRET',
-    ]) {
-      const value = this.#env[key]?.trim();
-      if (value) environment[key] = value;
-    }
-    const url = new URL(this.#serviceUrl);
-    environment.COLLECTIVE_SERVICE_HOST = url.hostname;
-    environment.COLLECTIVE_SERVICE_PORT = url.port;
-    environment.COLLECTIVE_SERVICE_PUBLIC_URL = this.#serviceUrl;
-    environment.COLLECTIVE_SERVICE_DATA_DIR = this.#dataDirectory;
-    environment.COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS = this.#frontendOrigin;
-    return environment;
+  #isPinnedAlpha(): boolean {
+    return isPinnedCollectiveAlpha({
+      env: this.#env,
+      root: this.#alphaRoot,
+      frontendOrigin: this.#frontendOrigin,
+      dataDirectory: this.#dataDirectory,
+      serviceUrl: this.#serviceUrl,
+      cliPath: this.#cliPath,
+      namedAlpha: this.#namedAlphaBoundary,
+    });
   }
 
-  #isNonRuntimeEnvironment(): boolean {
-    const offset = this.#env.WORKTREE_PORT_OFFSET;
-    return (Boolean(offset) && offset !== '0') || this.#env.CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED === '1';
+  #requiresAlphaBoundary(): boolean {
+    return this.#namedAlphaBoundary !== undefined || isAlphaCollectiveEnvironment(this.#env);
   }
 
-  #assertRuntimeLifecycle(): void {
-    if (this.#isNonRuntimeEnvironment()) {
+  #canManageLifecycle(): boolean {
+    if (this.#namedAlphaBoundary && !this.#isPinnedAlpha()) return false;
+    return this.#isPinnedAlpha() || !isNonRuntimeCollectiveEnvironment(this.#env, this.#alphaRoot);
+  }
+
+  #assertManagedLifecycle(): void {
+    if (!this.#canManageLifecycle()) {
       throw new Error('Local Collective Service can only be created from the canonical runtime environment');
     }
   }

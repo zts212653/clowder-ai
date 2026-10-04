@@ -4,7 +4,8 @@ const postDescription =
   'Post a message to an owner-authorized thread as a persistent agent. ' +
   'Use for a proactive root collaboration or to return your complete final answer to a dispatched request. ' +
   'Agent-key-only registration requires threadId; agentKeyCatId selects your authenticated identity, not the recipient. ' +
-  'For a root message, omit replyTo and select intended recipients with targetCats after get_thread_cats. ' +
+  'To reply to the human in the thread, omit targetCats; no cat recipient is required. Use a line-start @co-creator in content to explicitly mention the human. ' +
+  'For a root message, omit replyTo; select targetCats after get_thread_cats only when intentionally waking cat teammates. ' +
   'For a gpt-pro return, copy replyTo=sourceMessageId and threadId from the runtime delta; authorization stays in the server grant. ' +
   'Output: a durable message and routing results. Only status ok/duplicate confirms success; queued/routed does not mean a teammate completed work. ' +
   'NOT for invocation-only structured action/coordination or replacing a provider final. ' +
@@ -34,6 +35,14 @@ export function projectAgentKeyCollaborationContract(
         ...supported,
         ...(name === 'cat_cafe_post_message'
           ? {
+              targetCats: z
+                .array(z.string().min(1))
+                .optional()
+                .describe(
+                  'Optional cat recipients to wake, not human recipients. Omit for a human-facing thread reply; ' +
+                    'mention the human with a line-start @co-creator in content, never targetCats=["operator"] or ["default-user"]. ' +
+                    'Line-start cat mentions also trigger routing; do not add a cat just to deliver a reply.',
+                ),
               streamDisposition: z
                 .literal('independent')
                 .optional()

@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture } from './fixtures/f309-artifact-review-media.mjs';
-import { selectMarkupTool, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+import { openReviewPanel, selectMarkupTool, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 
 const sharp = createRequire(new URL('../../../api/package.json', import.meta.url))('sharp');
 async function presentFrame(page, seconds) {
@@ -37,7 +37,7 @@ async function at(page, x, y) {
   // Target an actual media point. The stage can contain letterboxing after zoom/resize.
   return page
     .getByTestId('review-media-stage')
-    .locator('svg[aria-label="标注区域"]')
+    .locator('svg[aria-label="图片或视频上的批注"]')
     .evaluate(
       (svg, point) => {
         const matrix = svg.getScreenCTM();
@@ -90,7 +90,7 @@ test(
     await selectReviewMode(page, 'markup');
     await selectMarkupTool(page, '画笔');
     await drag(page, [0.25, 0.3], [0.45, 0.55]);
-    await page.getByRole('button', { name: '保存标记', exact: true }).click();
+    await page.getByRole('button', { name: '完成并保存', exact: true }).click();
     await page.getByTestId('review-saved-mark').waitFor();
     let view = await read();
     const drawing = view.review.rounds[0].visualMarks[0].drawing;
@@ -100,8 +100,9 @@ test(
     const point = await at(page, 0.65, 0.5);
     await page.mouse.click(point.x, point.y);
     await page.getByLabel('片段终点').fill('1.8');
-    await page.getByLabel('新增标注意见').fill('这一帧的动作 sentinel-video-point');
-    await page.getByRole('button', { name: '保存评论', exact: true }).click();
+    await page.getByLabel('评论内容').fill('这一帧的动作 sentinel-video-point');
+    await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await openReviewPanel(page, 'comments');
     await page.getByTestId('review-comment').filter({ hasText: 'sentinel-video-point' }).waitFor();
     view = await read();
     assert.equal(view.review.rounds[0].annotations[0].anchor.framePoint.tick, drawing.frame.tick);
@@ -115,7 +116,9 @@ test(
     await page.getByTestId('review-saved-mark').waitFor({ state: 'hidden' });
     await presentFrame(page, 0.4);
     await page.getByTestId('review-saved-mark').waitFor();
-    assert.equal(await page.getByLabel('调整比例', { exact: true }).count(), 0);
+    await page.getByRole('button', { name: '请猫修改', exact: true }).click();
+    await page.getByLabel('修改说明', { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('请求图片比例', { exact: true }).count(), 0);
     assert.deepEqual(errors, []);
   },
 );
@@ -128,7 +131,7 @@ test(
     await selectReviewMode(page, 'markup');
     await selectMarkupTool(page, '画笔');
     await drag(page, [0.3, 0.35], [0.5, 0.55]);
-    await page.getByRole('button', { name: '保存标记', exact: true }).click();
+    await page.getByRole('button', { name: '完成并保存', exact: true }).click();
     await page.getByTestId('review-saved-mark').waitFor();
     let view = await read();
     assert.equal(view.review.rounds[0].visualMarks.length, 1);
@@ -145,8 +148,9 @@ test(
     await selectReviewMode(page, 'comment');
     const point = await at(page, 0.6, 0.4);
     await page.mouse.click(point.x, point.y);
-    await page.getByLabel('新增标注意见').fill('灯光只调整这一处 sentinel-point');
-    await page.getByRole('button', { name: '保存评论', exact: true }).click();
+    await page.getByLabel('评论内容').fill('灯光只调整这一处 sentinel-point');
+    await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await openReviewPanel(page, 'comments');
     await page.getByTestId('review-comment').filter({ hasText: 'sentinel-point' }).waitFor();
     view = await read();
     assert.equal(view.review.rounds[0].annotations[0].anchor.kind, 'image-point');
@@ -154,16 +158,19 @@ test(
     const imageMedia = view.review.rounds[0].asset.media;
     assert.ok(Math.abs(pointAnchor.x - imageMedia.width * 0.6) < 2);
     assert.ok(Math.abs(pointAnchor.y - imageMedia.height * 0.4) < 2);
-    await page.getByRole('button', { name: '关闭审阅面板', exact: true }).click();
+    await page.getByRole('button', { name: '关闭讨论', exact: true }).click();
     await page.evaluate(() => {
       document.body.style.zoom = '1';
     });
     await selectReviewMode(page, 'view');
     await page.getByRole('button', { name: '圈选区域', exact: true }).click();
     await drag(page, [0.7, 0.25], [0.85, 0.45]);
-    await page.getByLabel('新增标注意见').fill('保留边缘的叶子 sentinel-erase');
-    await page.getByRole('button', { name: '让猫移除这里', exact: true }).click();
-    await page.getByTestId('review-return-state').filter({ hasText: '修改请求已交还' }).waitFor();
+    await page.getByRole('button', { name: '请猫修改', exact: true }).click();
+    await page.getByRole('button', { name: '移除圈选内容', exact: true }).click();
+    await page.getByText('将移除圈选区域并补全背景').waitFor();
+    await page.getByLabel('修改说明', { exact: true }).fill('保留边缘的叶子 sentinel-erase');
+    await page.getByTestId('content-modification-submit').click();
+    await page.getByTestId('review-return-state').filter({ hasText: '已交还原任务队列' }).waitFor();
     view = await read();
     assert.equal(view.review.rounds[0].annotations[1].imageEdit.kind, 'erase-region');
     assert.equal(view.review.rounds[0].annotations[1].author.actorId, 'operator');
@@ -173,6 +180,7 @@ test(
     await mediaFixture(root, 'png', 2);
     const publication = host.publish('review-response.png');
     const updated = await host.catCallback('respond', {
+      requestId: view.modificationRequest.requestId,
       reviewId,
       expectedRevision: view.review.revision,
       expectedTaskRevision: view.authority.taskRevision,
@@ -187,8 +195,8 @@ test(
       })),
     });
     assert.equal(updated.continuation.taskId, view.review.task.taskId);
-    await page.getByRole('button', { name: '刷新', exact: true }).click();
-    await page.getByRole('button', { name: '查看最新第 2 版', exact: true }).click();
+    await page.getByTestId('artifact-review-surface').getByRole('button', { name: '刷新', exact: true }).click();
+    await page.getByRole('button', { name: '查看最新版本', exact: true }).click();
     await page.getByTestId('review-saved-mark').waitFor({ state: 'hidden' });
     await page.getByLabel('审阅版本').selectOption('1');
     await page.getByTestId('review-saved-mark').waitFor();
@@ -203,13 +211,15 @@ test(
   async (t) => {
     const { root, host, page, errors, reviewId, read } = await fixture(t);
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.getByLabel('调整比例', { exact: true }).click();
-    const choice = page.getByRole('button', { name: '让猫调整为 9:16', exact: true });
+    await page.getByRole('button', { name: '请猫修改', exact: true }).click();
+    const choice = page.getByLabel('请求图片比例', { exact: true });
+    await choice.waitFor();
     const box = await choice.boundingBox();
     assert.ok(box && box.x >= 0 && box.x + box.width <= 390);
     const previous = (await read()).review.rounds[0].asset;
-    await choice.click();
-    await page.getByTestId('review-return-state').filter({ hasText: '修改请求已交还' }).waitFor();
+    await choice.selectOption('9:16');
+    await page.getByTestId('content-modification-submit').click();
+    await page.getByTestId('review-return-state').filter({ hasText: '已交还原任务队列' }).waitFor();
     let view = await read();
     assert.deepEqual(view.review.rounds[0].asset, previous);
     assert.deepEqual(view.review.rounds[0].annotations[0].imageEdit, { kind: 'aspect-ratio', ratio: '9:16' });
@@ -219,6 +229,7 @@ test(
       .toFile(path.join(root, 'review-response.png'));
     const publication = host.publish('review-response.png');
     await host.catCallback('respond', {
+      requestId: view.modificationRequest.requestId,
       reviewId,
       expectedRevision: view.review.revision,
       expectedTaskRevision: view.authority.taskRevision,
@@ -235,7 +246,7 @@ test(
       ],
     });
     await page.getByRole('button', { name: '刷新', exact: true }).click();
-    await page.getByRole('button', { name: '查看最新第 2 版', exact: true }).click();
+    await page.getByRole('button', { name: '查看最新版本', exact: true }).click();
     view = await read();
     assert.equal(view.review.rounds[1].asset.media.width / view.review.rounds[1].asset.media.height, 9 / 16);
     assert.deepEqual(errors, []);

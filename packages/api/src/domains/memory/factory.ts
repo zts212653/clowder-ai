@@ -78,7 +78,7 @@ export interface MemoryConfig {
   messageListFn?: MessageListFn;
   /** Callback returning thread IDs to exclude from session digest indexing (e.g. game threads) */
   excludeThreadIdsFn?: ExcludeThreadIdsFn;
-  /** F-4: path to global knowledge SQLite (default: ~/.cat-cafe/global_knowledge.sqlite) */
+  /** F-4: path to global knowledge SQLite (default: <dataDir>/global_knowledge.sqlite) */
   globalDbPath?: string;
   /** F-4: Skills root directory (default: ~/.claude/skills/) */
   skillsRoot?: string;
@@ -193,10 +193,7 @@ export async function createMemoryServices(config: MemoryConfig): Promise<Memory
   let globalStore: SqliteEvidenceStore | undefined;
   let personalStore: SqliteEvidenceStore | undefined;
   let globalIndexBuilder: GlobalIndexBuilder | undefined;
-  const globalPath =
-    config.globalDbPath ??
-    process.env['GLOBAL_KNOWLEDGE_DB'] ??
-    join(homedir(), '.cat-cafe', 'global_knowledge.sqlite');
+  const globalPath = config.globalDbPath ?? process.env.GLOBAL_KNOWLEDGE_DB ?? join(dataDir, 'global_knowledge.sqlite');
   try {
     mkdirSync(dirname(globalPath), { recursive: true });
     globalStore = new SqliteEvidenceStore(globalPath);

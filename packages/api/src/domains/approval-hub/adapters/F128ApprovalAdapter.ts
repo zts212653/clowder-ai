@@ -12,7 +12,7 @@
 
 import type { ApprovalItem, SettledApprovalItem, ThreadProposal } from '@cat-cafe/shared';
 import type { IProposalStore } from '../../cats/services/stores/ports/ProposalStore.js';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 const F128_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -23,7 +23,7 @@ export class F128ApprovalAdapter implements IApprovalAdapter {
   constructor(private readonly proposalStore: IProposalStore) {}
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
-    const result = this.proposalStore.listPending(userId);
+    const result = this.proposalStore.listPending(userId, ALL_PENDING_APPROVALS_LIMIT);
     if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
     return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
   }

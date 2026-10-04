@@ -141,3 +141,32 @@ test('F271 aborts a production Redis session-chain scan stream before starting a
   assert.deepEqual(retry, []);
   assert.equal(scanStarts, 2, 'an aborted legacy backfill must retry instead of trusting a partial index');
 });
+
+test('concurrent cold reads keep one Redis scan alive when only one reader cancels', async () => {
+  let scans = 0;
+  let destroyed = false;
+  const redis = {
+    options: { keyPrefix: '' },
+    scanStream: () => {
+      scans += 1;
+      const stream = new EventEmitter();
+      const timer = setTimeout(() => stream.emit('end'), 40);
+      stream.destroy = () => {
+        destroyed = true;
+        clearTimeout(timer);
+      };
+      return stream;
+    },
+    smembers: async () => [],
+  };
+  const store = new RedisSessionChainStore(redis);
+  const controller = new AbortController();
+  const canceled = store.getChainByThread('thread-a', { signal: controller.signal });
+  const surviving = store.getChainByThread('thread-b');
+  controller.abort(new Error('reader canceled'));
+
+  await assert.rejects(canceled, /reader canceled/);
+  assert.deepEqual(await surviving, []);
+  assert.equal(scans, 1);
+  assert.equal(destroyed, false);
+});

@@ -12,7 +12,7 @@
 
 import type { ApprovalItem, SessionHandoffProposal, SettledApprovalItem } from '@cat-cafe/shared';
 import type { ISessionHandoffProposalStore } from '../../cats/services/stores/ports/SessionHandoffProposalStore.js';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 const F225_STALE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -23,7 +23,7 @@ export class F225ApprovalAdapter implements IApprovalAdapter {
   constructor(private readonly store: ISessionHandoffProposalStore) {}
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
-    const result = this.store.listPendingByUser(userId);
+    const result = this.store.listPendingByUser(userId, ALL_PENDING_APPROVALS_LIMIT);
     if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
     return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
   }

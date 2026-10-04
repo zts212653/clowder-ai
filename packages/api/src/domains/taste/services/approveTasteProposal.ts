@@ -1,8 +1,16 @@
 import type { TasteProposal } from '@cat-cafe/shared';
 import type { SessionMutex } from '../../cats/services/agents/invocation/SessionMutex.js';
 import type { ITasteProposalStore } from '../stores/ports/TasteProposalStore.js';
+import type { TasteDecisionAuthorityFence } from './RedisTasteDecisionAuthority.js';
+import type { TasteDecisionSnapshot } from './taste-decision-snapshot.js';
 
 export type VignetteWriterFn = (proposal: TasteProposal) => Promise<{ slug: string; path: string }>;
+
+/** One process-wide coordinator for every route that may publish the same Taste repository. */
+export interface TasteApprovalCoordinator {
+  readonly lock: SessionMutex;
+  readonly lockKey: () => string;
+}
 
 export type ApproveTasteProposalResult =
   | { ok: true; proposal: TasteProposal; recovered: boolean }
@@ -18,6 +26,12 @@ export interface ApproveTasteProposalDeps {
   lock: SessionMutex;
   lockKey: () => string;
   writeVignette: VignetteWriterFn;
+  /** A new Host-confirmed decision must match one exact pending publication; legacy recovery omits this. */
+  expectedSnapshot?: TasteDecisionSnapshot;
+  /** F317 isolated candidate: Redis must consume this token inside the producer claim CAS. */
+  decisionFence?: TasteDecisionAuthorityFence;
+  /** F317 candidate: recheck a Host grant after the writer lock wait and before the producer CAS. */
+  isDecisionAuthorityCurrent?: () => boolean;
 }
 
 type PreparedApproval = { ok: true; proposal: TasteProposal; recovered: boolean };
@@ -40,6 +54,7 @@ export async function approveTasteProposal(
 ): Promise<ApproveTasteProposalResult> {
   const peek = await deps.store.get(proposalId);
   if (!peek) return { ok: false, reason: 'not_found' };
+  if (deps.expectedSnapshot && peek.status !== 'pending') return { ok: false, reason: 'claim_lost', proposal: peek };
   if (peek.status === 'approved') return { ok: true, proposal: peek, recovered: false };
   if (peek.status === 'rejected') return { ok: false, reason: 'rejected', proposal: peek };
 
@@ -63,8 +78,26 @@ async function approveInsideLock(
   approvedBy: string,
   deps: ApproveTasteProposalDeps,
 ): Promise<ApproveTasteProposalResult> {
-  const prepared = await prepareApproval(proposalId, approvedBy, deps.store);
+  const prepared = await prepareApproval(
+    proposalId,
+    approvedBy,
+    deps.store,
+    deps.expectedSnapshot,
+    deps.decisionFence,
+    deps.isDecisionAuthorityCurrent,
+  );
   if (!prepared.ok) return prepared.result;
+  if (deps.isDecisionAuthorityCurrent && !deps.isDecisionAuthorityCurrent()) {
+    if (prepared.recovered) return { ok: false, reason: 'claim_lost', proposal: prepared.proposal };
+    try {
+      const rolledBack = await deps.store.rollbackClaim(proposalId);
+      if (!rolledBack)
+        return { ok: false, reason: 'write_failed', error: 'Authority lost after claim; readback required' };
+      return { ok: false, reason: 'claim_lost', proposal: (await deps.store.get(proposalId)) ?? undefined };
+    } catch {
+      return { ok: false, reason: 'write_failed', error: 'Authority lost after claim; readback required' };
+    }
+  }
 
   const checkpointed = await ensureWriteCheckpoint(proposalId, prepared.proposal, deps);
   if (!checkpointed.ok) return checkpointed.result;
@@ -76,14 +109,28 @@ async function prepareApproval(
   proposalId: string,
   approvedBy: string,
   store: ITasteProposalStore,
+  expectedSnapshot?: TasteDecisionSnapshot,
+  decisionFence?: TasteDecisionAuthorityFence,
+  isDecisionAuthorityCurrent?: () => boolean,
 ): Promise<PreparedApproval | StageExit> {
   const proposal = await store.get(proposalId);
   if (!proposal) return exitStage({ ok: false, reason: 'not_found' });
+  if (expectedSnapshot && proposal.status !== 'pending')
+    return exitStage({ ok: false, reason: 'claim_lost', proposal });
   if (proposal.status === 'approved') return exitStage({ ok: true, proposal, recovered: false });
   if (proposal.status === 'rejected') return exitStage({ ok: false, reason: 'rejected', proposal });
   if (proposal.status === 'approving') return { ok: true, proposal, recovered: true };
 
-  const claimed = await store.claimForApproval(proposalId, approvedBy);
+  if (isDecisionAuthorityCurrent && !isDecisionAuthorityCurrent())
+    return exitStage({ ok: false, reason: 'claim_lost', proposal });
+  let claimed: TasteProposal | null;
+  if (decisionFence) {
+    if (!expectedSnapshot || !store.claimForApprovalFenced)
+      return exitStage({ ok: false, reason: 'claim_lost', error: 'Durable decision authority unavailable', proposal });
+    claimed = await store.claimForApprovalFenced(proposalId, approvedBy, expectedSnapshot, decisionFence);
+  } else {
+    claimed = await store.claimForApproval(proposalId, approvedBy, expectedSnapshot);
+  }
   if (!claimed) return exitStage({ ok: false, reason: 'claim_lost', proposal });
   return { ok: true, proposal: claimed, recovered: false };
 }

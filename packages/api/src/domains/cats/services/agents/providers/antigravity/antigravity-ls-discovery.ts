@@ -1,9 +1,16 @@
-import { execSync, spawnSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
 import http from 'node:http';
 import https from 'node:https';
 import { platform as osPlatform } from 'node:os';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { BridgeConnection } from './AntigravityBridge.js';
+import { listProcessesViaPs } from './antigravity-process-list.js';
+
+export { listProcessesViaPs } from './antigravity-process-list.js';
 
 const log = createModuleLogger('antigravity-discovery');
 
@@ -14,8 +21,8 @@ export interface LSProcessInfo {
 
 export interface DiscoveryDeps {
   platform?: NodeJS.Platform;
-  listProcesses?: () => LSProcessInfo[];
-  listListenPorts?: (pid: string) => number[];
+  listProcesses?: () => LSProcessInfo[] | Promise<LSProcessInfo[]>;
+  listListenPorts?: (pid: string) => number[] | Promise<number[]>;
   probe?: (conn: BridgeConnection) => Promise<void>;
 }
 
@@ -58,34 +65,16 @@ function defaultProbe(conn: BridgeConnection): Promise<void> {
   });
 }
 
-export function listProcessesViaPs(): LSProcessInfo[] {
+export async function listListenPortsViaLsof(pid: string): Promise<number[]> {
+  if (!/^\d+$/.test(pid)) return [];
   let out = '';
   try {
-    out = execSync('ps -eo pid,args 2>/dev/null | grep language_server | grep csrf_token | grep -v grep', {
-      encoding: 'utf8',
-      timeout: 5_000,
-    }).trim();
-  } catch (err) {
-    log.warn(`ps lookup failed: ${err instanceof Error ? err.message : String(err)}`);
-    return [];
-  }
-  if (!out) return [];
-
-  const result: LSProcessInfo[] = [];
-  for (const line of out.split('\n')) {
-    const m = line.match(/^\s*(\d+)\s+(.*)$/);
-    if (m) result.push({ pid: m[1], cmd: m[2] });
-  }
-  return result;
-}
-
-export function listListenPortsViaLsof(pid: string): number[] {
-  let out = '';
-  try {
-    out = execSync(`lsof -a -iTCP -sTCP:LISTEN -P -n -p ${pid} 2>/dev/null | grep LISTEN`, {
-      encoding: 'utf8',
-      timeout: 5_000,
-    }).trim();
+    out = (
+      await execFileAsync('lsof', ['-a', '-iTCP', '-sTCP:LISTEN', '-P', '-n', '-p', pid], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      })
+    ).stdout.trim();
   } catch (err) {
     log.warn(`lsof lookup failed for pid=${pid}: ${err instanceof Error ? err.message : String(err)}`);
     return [];
@@ -158,38 +147,32 @@ const PS_LIST_PROCESSES_SCRIPT = [
   'ConvertTo-Json -Compress',
 ].join(' | ');
 
-function runPowerShell(script: string): string | null {
-  // spawnSync with argv array bypasses cmd.exe entirely, avoiding the
-  // quoting hell that broke -Filter "Name LIKE '%x%'" via execSync.
-  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    encoding: 'utf8',
-    timeout: 10_000,
-    windowsHide: true,
-  });
-  if (result.error) {
-    log.warn(`PowerShell spawn failed: ${result.error.message}`);
+async function runPowerShell(script: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      windowsHide: true,
+    });
+    return stdout.trim();
+  } catch (error) {
+    log.warn(`PowerShell lookup failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
-  if (result.status !== 0) {
-    const stderr = (result.stderr ?? '').toString().trim();
-    log.warn(`PowerShell exited ${result.status}: ${stderr.slice(0, 200)}`);
-    return null;
-  }
-  return (result.stdout ?? '').toString().trim();
 }
 
-export function listProcessesViaPowerShell(): LSProcessInfo[] {
-  const out = runPowerShell(PS_LIST_PROCESSES_SCRIPT);
+export async function listProcessesViaPowerShell(): Promise<LSProcessInfo[]> {
+  const out = await runPowerShell(PS_LIST_PROCESSES_SCRIPT);
   return out ? parseProcessesJson(out) : [];
 }
 
-export function listListenPortsViaPowerShell(pid: string): number[] {
+export async function listListenPortsViaPowerShell(pid: string): Promise<number[]> {
   if (!/^\d+$/.test(pid)) {
     log.warn(`refusing to query ports for non-numeric pid=${pid}`);
     return [];
   }
   const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort | ConvertTo-Json -Compress`;
-  const out = runPowerShell(script);
+  const out = await runPowerShell(script);
   return out ? parsePortsJson(out) : [];
 }
 
@@ -220,7 +203,7 @@ async function probeBothTls(
 
 async function tryProcessConnection(
   proc: LSProcessInfo,
-  listListenPorts: (pid: string) => number[],
+  listListenPorts: (pid: string) => number[] | Promise<number[]>,
   probeFn: (conn: BridgeConnection) => Promise<void>,
 ): Promise<BridgeConnection | null> {
   const csrfMatch = proc.cmd.match(/--csrf_token\s+(\S+)/);
@@ -229,7 +212,7 @@ async function tryProcessConnection(
   const extPortMatch = proc.cmd.match(/--extension_server_port\s+(\d+)/);
   const extPort = extPortMatch ? Number(extPortMatch[1]) : 0;
 
-  for (const port of listListenPorts(proc.pid)) {
+  for (const port of await listListenPorts(proc.pid)) {
     if (port === extPort) continue;
     const conn = await probeBothTls(port, csrf, probeFn);
     if (conn) return conn;
@@ -237,7 +220,7 @@ async function tryProcessConnection(
   return null;
 }
 
-export async function discoverAntigravityLS(deps: DiscoveryDeps = {}): Promise<BridgeConnection> {
+async function runDiscovery(deps: DiscoveryDeps): Promise<BridgeConnection> {
   const envHit = readEnvShortcut();
   if (envHit) return envHit;
 
@@ -247,7 +230,7 @@ export async function discoverAntigravityLS(deps: DiscoveryDeps = {}): Promise<B
   const listListenPorts = deps.listListenPorts ?? (isWin ? listListenPortsViaPowerShell : listListenPortsViaLsof);
   const probeFn = deps.probe ?? defaultProbe;
 
-  const procs = listProcesses();
+  const procs = await listProcesses();
   if (procs.length === 0) {
     throw new Error(`No Antigravity Language Server process found (platform=${platform})`);
   }
@@ -260,4 +243,18 @@ export async function discoverAntigravityLS(deps: DiscoveryDeps = {}): Promise<B
     }
   }
   throw new Error('Could not discover Antigravity Language Server ConnectRPC port');
+}
+
+let discoveryInFlight: Promise<BridgeConnection> | undefined;
+
+export function discoverAntigravityLS(deps: DiscoveryDeps = {}): Promise<BridgeConnection> {
+  const envHit = readEnvShortcut();
+  if (envHit) return Promise.resolve(envHit);
+  if (Object.keys(deps).length > 0) return runDiscovery(deps);
+  if (discoveryInFlight) return discoveryInFlight;
+  const pending = runDiscovery(deps).finally(() => {
+    if (discoveryInFlight === pending) discoveryInFlight = undefined;
+  });
+  discoveryInFlight = pending;
+  return pending;
 }

@@ -112,6 +112,26 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it('keeps one mounted conversation surface and canonical composer when history becomes inert', async () => {
+    await act(async () => {
+      root.render(<ThreadChatSurface threadId="thread-parity" density="full" presentation="composer-only" />);
+    });
+
+    const surface = container.querySelector('[data-thread-chat-surface]');
+    const history = container.querySelector('[data-thread-chat-history]');
+    const firstMessage = container.querySelector('[data-thread-chat-message-id="u1"]');
+    expect(history?.getAttribute('aria-hidden')).toBe('true');
+    expect(history?.hasAttribute('inert')).toBe(true);
+    expect(container.querySelector('textarea[aria-label="composer-thread-parity"]')).not.toBeNull();
+
+    await act(async () => {
+      root.render(<ThreadChatSurface threadId="thread-parity" density="full" presentation="conversation" />);
+    });
+    expect(container.querySelector('[data-thread-chat-surface]')).toBe(surface);
+    expect(container.querySelector('[data-thread-chat-message-id="u1"]')).toBe(firstMessage);
+    expect(container.querySelector('[data-thread-chat-history]')?.hasAttribute('inert')).toBe(false);
+  });
+
   it('keeps the complete semantic message manifest and composer in both densities', async () => {
     const messageConfirmations = new Map<string, CardConfirmationEntry[]>([
       ['a1', [{ id: 'confirmation-1', messageId: 'a1', status: 'confirmed', action: { kind: 'confirm' } }]],

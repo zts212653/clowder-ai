@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 
 type CriticalTextTone = 'critical' | 'warning' | 'info';
 type CriticalTextAppearance = 'inline' | 'panel';
@@ -20,6 +20,8 @@ const inlineToneClasses: Record<CriticalTextTone, string> = {
 interface CriticalTextProps {
   summary: string;
   details?: string;
+  /** Extra actions rendered inside the expanded details area (e.g. copy full ID). */
+  detailsExtra?: ReactNode;
   tone?: CriticalTextTone;
   appearance?: CriticalTextAppearance;
   className?: string;
@@ -28,6 +30,7 @@ interface CriticalTextProps {
 export function CriticalText({
   summary,
   details,
+  detailsExtra,
   tone = 'critical',
   appearance = 'inline',
   className = '',
@@ -46,7 +49,7 @@ export function CriticalText({
       >
         {summary}
       </p>
-      {details && (
+      {(details || detailsExtra) && (
         <>
           <button
             type="button"
@@ -66,16 +69,20 @@ export function CriticalText({
             {expanded ? '收起技术详情' : '查看技术详情'}
           </button>
           {expanded && (
-            <pre
-              id={detailsId}
-              className={
-                panel
-                  ? 'mt-3 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--console-card-bg)] p-3 font-mono text-xs leading-5 text-cafe-secondary'
-                  : 'mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words border-l-2 border-current/20 pl-3 font-mono text-xs leading-5 text-cafe-secondary'
-              }
-            >
-              {details}
-            </pre>
+            <div id={detailsId}>
+              {details && (
+                <pre
+                  className={
+                    panel
+                      ? 'mt-3 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--console-card-bg)] p-3 font-mono text-xs leading-5 text-cafe-secondary'
+                      : 'mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words border-l-2 border-current/20 pl-3 font-mono text-xs leading-5 text-cafe-secondary'
+                  }
+                >
+                  {details}
+                </pre>
+              )}
+              {detailsExtra}
+            </div>
           )}
         </>
       )}

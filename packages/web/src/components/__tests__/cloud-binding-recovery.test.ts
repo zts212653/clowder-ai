@@ -83,8 +83,10 @@ describe('cloud binding recovery projection', () => {
   it.each([
     ['queued', 'sent'],
     ['queued', 'unknown'],
+    ['queued', 'failed'],
     ['failed', 'sent'],
     ['failed', 'unknown'],
+    ['failed', 'failed'],
   ] as const)('keeps %s authoritative until a %s receipt matches the current dispatch', (state, receiptStatus) => {
     const authored = source(state);
     const attempt = authored.extra!.queueReceipt!.targets[0]!.attempts![0]!;
@@ -115,6 +117,11 @@ describe('cloud binding recovery projection', () => {
     expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])?.deliveryStatus).toBe(
       receiptStatus,
     );
+    if (receiptStatus === 'failed') {
+      expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])?.attemptId).toBeUndefined();
+      (receiptNotice.source!.meta.cloudBridgeOutboundReceipt as { transport: string }).transport = 'none';
+      expect(projectCloudBindingRecovery(authored, [authored, notice(), receiptNotice])).toEqual(pendingProjection);
+    }
   });
 
   it('rejects forged or cross-source recovery metadata', () => {

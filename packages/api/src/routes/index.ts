@@ -12,6 +12,7 @@ export { registerCallbackReadProfileRoutes } from './callback-read-profile-route
 export { callbacksRoutes } from './callbacks.js';
 export { capabilitiesRoutes } from './capabilities.js';
 export { capabilityEvolutionProgramRoutes } from './capability-evolution-program-routes.js';
+export { capabilitySnapshotRoutes } from './capability-snapshot.js';
 export { catsRoutes } from './cats.js';
 export { claudeRescueRoutes } from './claude-rescue.js';
 export { commandsRoutes } from './commands.js';
@@ -25,6 +26,7 @@ export { connectorMediaRoutes } from './connector-media.js';
 export { connectorPluginRoutes } from './connector-plugins.js';
 export { registerCustodyOfferRoutes } from './custody-offer-routes.js';
 export { debugInvocationExportRoutes } from './debug-invocation-export.js';
+export { registerDeploymentWaitProjectionRoutes } from './deployment-wait-projection-routes.js';
 export { distillationOpportunityRoutes } from './distillation-opportunities.js';
 export { distillationRoutes } from './distillation-routes.js';
 export { dossierRoutes } from './dossier.js';

@@ -88,7 +88,8 @@ describe('F313 F266 Approval Hub card', () => {
       root.render(<ApprovalItemCard item={item({ resolution: 'open', materialization: { state: 'not_started' } })} />),
     );
 
-    expect(container.textContent).toContain('Eval repair');
+    expect(container.textContent).toContain('approval renderer vocabulary');
+    expect(container.textContent).not.toContain('Eval repair ·');
     const approve = container.querySelector<HTMLButtonElement>('[data-testid="approve-btn"]');
     expect(approve).not.toBeNull();
     await act(async () => approve?.click());

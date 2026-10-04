@@ -299,6 +299,7 @@ return 1
 export class RedisSessionChainStore implements ISessionChainStore {
   private readonly redis: RedisClient;
   private threadIndexReady = false;
+  private threadIndexBuild: { promise: Promise<void>; controller: AbortController; readers: number } | null = null;
 
   constructor(redis: RedisClient) {
     this.redis = redis;
@@ -658,19 +659,47 @@ export class RedisSessionChainStore implements ISessionChainStore {
    */
   private async ensureThreadIndex(options?: StoreReadOptions): Promise<void> {
     if (this.threadIndexReady) return;
-    const chainKeys = await this.scanKeys('session-chain:*', options);
-    const BATCH_SIZE = 500;
-    for (let i = 0; i < chainKeys.length; i += BATCH_SIZE) {
-      throwIfStoreReadAborted(options);
-      const pipeline = this.redis.pipeline();
-      for (const chainKey of chainKeys.slice(i, i + BATCH_SIZE)) {
-        const threadId = parseThreadIdFromChainKey(chainKey);
-        if (threadId) pipeline.sadd(SessionChainKeys.byThread(threadId), chainKey);
-      }
-      await awaitStoreRead(pipeline.exec(), options);
+    if (!this.threadIndexBuild) {
+      const controller = new AbortController();
+      const build = (async () => {
+        const chainKeys = await this.scanKeys('session-chain:*', { signal: controller.signal });
+        const BATCH_SIZE = 500;
+        for (let i = 0; i < chainKeys.length; i += BATCH_SIZE) {
+          controller.signal.throwIfAborted();
+          const pipeline = this.redis.pipeline();
+          for (const chainKey of chainKeys.slice(i, i + BATCH_SIZE)) {
+            const threadId = parseThreadIdFromChainKey(chainKey);
+            if (threadId) pipeline.sadd(SessionChainKeys.byThread(threadId), chainKey);
+          }
+          await pipeline.exec();
+        }
+        controller.signal.throwIfAborted();
+        this.threadIndexReady = true;
+      })();
+      const state = { promise: build, controller, readers: 0 };
+      this.threadIndexBuild = state;
+      // A canceled caller may have stopped waiting before the shared promise
+      // rejects. Observe that rejection and leave the next cold read free to retry.
+      void build.then(
+        () => {
+          if (this.threadIndexBuild === state) this.threadIndexBuild = null;
+        },
+        () => {
+          if (this.threadIndexBuild === state) this.threadIndexBuild = null;
+        },
+      );
     }
-    throwIfStoreReadAborted(options);
-    this.threadIndexReady = true;
+    const state = this.threadIndexBuild;
+    state.readers += 1;
+    try {
+      await awaitStoreRead(state.promise, options);
+    } finally {
+      state.readers -= 1;
+      if (state.readers === 0 && !this.threadIndexReady && !state.controller.signal.aborted) {
+        if (this.threadIndexBuild === state) this.threadIndexBuild = null;
+        state.controller.abort(options?.signal?.reason ?? new Error('Session index build has no active readers'));
+      }
+    }
   }
 
   async update(id: string, patch: SessionRecordPatch): Promise<SessionRecord | null> {

@@ -1,9 +1,14 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { access } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 export interface TasteRepository {
   canonicalRoot(): string;
+  canonicalRootAsync?(): Promise<string>;
   approvalLockKey(): string;
 }
 
@@ -17,7 +22,12 @@ interface GitWorktree {
 }
 
 function runGit(projectRoot: string, args: string[]): string {
-  return execFileSync('git', args, { cwd: projectRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  return execFileSync('git', args, {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 5000,
+  }).trim();
 }
 
 function parseWorktrees(raw: string): GitWorktree[] {
@@ -56,6 +66,7 @@ export class FileTasteRepository implements PublishableTasteRepository {
     const raw = execFileSync('git', ['worktree', 'list', '--porcelain', '-z'], {
       cwd: repositoryRoot,
       encoding: 'utf8',
+      timeout: 5000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const mainWorktree = parseWorktrees(raw).find((worktree) => worktree.branch === 'refs/heads/main');
@@ -63,6 +74,24 @@ export class FileTasteRepository implements PublishableTasteRepository {
     if (!mainWorktree || !existsSync(mainWorktree.path)) {
       throw new Error(`Taste repository cannot find a checked-out refs/heads/main worktree from "${this.projectRoot}"`);
     }
+    return resolve(mainWorktree.path);
+  }
+
+  async canonicalRootAsync(): Promise<string> {
+    const { stdout: repositoryRoot } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: this.projectRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain', '-z'], {
+      cwd: repositoryRoot.trim(),
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    const mainWorktree = parseWorktrees(stdout).find((worktree) => worktree.branch === 'refs/heads/main');
+    if (!mainWorktree)
+      throw new Error(`Taste repository cannot find a checked-out refs/heads/main worktree from "${this.projectRoot}"`);
+    await access(mainWorktree.path);
     return resolve(mainWorktree.path);
   }
 
@@ -75,4 +104,9 @@ export class FileTasteRepository implements PublishableTasteRepository {
     const commonDir = resolve(checkoutRoot, runGit(checkoutRoot, ['rev-parse', '--git-common-dir']));
     return join(commonDir, 'cat-cafe-taste-publication');
   }
+}
+
+/** Resolve afresh per operation; injected in-memory repositories remain compatible. */
+export function resolveCanonicalTasteRoot(repository: TasteRepository): Promise<string> {
+  return repository.canonicalRootAsync ? repository.canonicalRootAsync() : Promise.resolve(repository.canonicalRoot());
 }

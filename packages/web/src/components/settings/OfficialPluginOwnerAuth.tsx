@@ -12,6 +12,7 @@ export interface OwnerAuthState {
   userCode?: string;
   qrDataUrl?: string;
   error?: string;
+  code?: string;
 }
 
 const AUTH_REFRESH_MS = 2_500;
@@ -35,7 +36,8 @@ export function ownerAuthGuidance(auth: OwnerAuthState | null): string | undefin
 
 function actionLabel(auth: OwnerAuthState | null, busy: boolean): string {
   if (auth?.status === 'waiting') return '等待授权…';
-  if (busy) return '连接中…';
+  if (busy) return auth?.code === 'AUTH_STATUS_FAILED' ? '检查中…' : '连接中…';
+  if (auth?.status === 'failed' && auth.code === 'AUTH_STATUS_FAILED') return '重试检查';
   if (auth?.status === 'expired' || auth?.status === 'failed') return '重新连接';
   return '连接飞书';
 }
@@ -58,7 +60,14 @@ export function useOfficialPluginOwnerAuth({
     try {
       const response = await apiFetch(`/api/plugins/official/${authInstanceId}/auth`);
       const body = (await response.json().catch(() => ({}))) as OwnerAuthState & { error?: string };
-      if (!response.ok) throw new Error(body.error ?? `飞书认证状态读取失败 (${response.status})`);
+      if (!response.ok) {
+        setAuth({
+          status: 'failed',
+          error: body.error ?? `飞书认证状态读取失败 (${response.status})`,
+          ...(typeof body.code === 'string' ? { code: body.code } : {}),
+        });
+        return;
+      }
       setAuth(body);
       if (body.status === 'waiting') onWaiting();
     } catch (cause) {
@@ -84,8 +93,12 @@ export function useOfficialPluginOwnerAuth({
   const start = useCallback(async () => {
     if (!authInstanceId) return;
     setBusy(true);
-    onWaiting();
     try {
+      if (auth?.status === 'failed' && auth.code === 'AUTH_STATUS_FAILED') {
+        await read();
+        return;
+      }
+      onWaiting();
       const response = await apiFetch(`/api/plugins/official/${authInstanceId}/auth/start`, { method: 'POST' });
       const body = (await response.json().catch(() => ({}))) as OwnerAuthState & { error?: string };
       if (!response.ok) throw new Error(body.error ?? `飞书认证发起失败 (${response.status})`);
@@ -95,7 +108,7 @@ export function useOfficialPluginOwnerAuth({
     } finally {
       setBusy(false);
     }
-  }, [authInstanceId, onWaiting]);
+  }, [auth?.code, auth?.status, authInstanceId, onWaiting, read]);
 
   return {
     auth,

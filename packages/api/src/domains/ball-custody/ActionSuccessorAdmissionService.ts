@@ -20,6 +20,11 @@ import {
   canonicalizeActionTerminalPredicate,
 } from './ActionTerminalPredicateCatalog.js';
 import {
+  ActionSuccessorStandingError,
+  type ActionSuccessorStandingSnapshot,
+  assertActionSuccessorStanding,
+} from './action-successor-standing.js';
+import {
   type ActionSuccessorLease,
   type ClaimActionSuccessorInput,
   canonicalizeActionIdentity,
@@ -34,59 +39,17 @@ export type {
 } from './ActionSuccessorAdmissionContract.js';
 export { buildActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
 
-export type ActionSuccessorStandingMismatchDimension = 'owner' | 'target_thread' | 'tenant';
-
-export class ActionSuccessorStandingError extends Error {
-  constructor(
-    readonly status: 'mismatch' | 'insufficient',
-    readonly reason: string,
-    readonly mismatchDimensions: readonly ActionSuccessorStandingMismatchDimension[] = [],
-  ) {
-    super(`action successor freshness rejected: ${status}: ${reason}`);
-    this.name = 'ActionSuccessorStandingError';
-  }
-}
-
-export type ActionSuccessorStandingSnapshot = Pick<
-  ActionSuccessorAdmissionInput,
-  'holderCatIds' | 'targetThreadId' | 'tenantScope'
->;
+// Re-export standing symbols for backward compatibility.
+export {
+  ActionSuccessorStandingError,
+  type ActionSuccessorStandingMismatchDimension,
+  type ActionSuccessorStandingSnapshot,
+  actionSuccessorStandingMismatchDimensions,
+  assertActionSuccessorStanding,
+  type MatchedStandingAuthority,
+} from './action-successor-standing.js';
 
 type ActionSuccessorStandingInput = Pick<ActionSuccessorAdmissionInput, 'action'> & ActionSuccessorStandingSnapshot;
-
-export function actionSuccessorStandingMismatchDimensions(
-  input: ActionSuccessorStandingSnapshot,
-  freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
-): ActionSuccessorStandingMismatchDimension[] {
-  const mismatchDimensions: ActionSuccessorStandingMismatchDimension[] = [];
-  if (
-    freshness.ownerCatId !== undefined &&
-    (input.holderCatIds.length !== 1 || input.holderCatIds[0] !== freshness.ownerCatId)
-  ) {
-    mismatchDimensions.push('owner');
-  }
-  if (freshness.holderThreadId !== undefined && input.targetThreadId !== freshness.holderThreadId) {
-    mismatchDimensions.push('target_thread');
-  }
-  if (freshness.tenantScope !== undefined && input.tenantScope !== freshness.tenantScope) {
-    mismatchDimensions.push('tenant');
-  }
-  return mismatchDimensions;
-}
-
-export function assertActionSuccessorStanding(
-  input: ActionSuccessorStandingSnapshot,
-  freshness: Extract<ActionFreshnessResolution, { status: 'verified' }>,
-): void {
-  const mismatchDimensions = actionSuccessorStandingMismatchDimensions(input, freshness);
-  if (mismatchDimensions.length > 0) {
-    throw new ActionSuccessorStandingError(
-      'mismatch',
-      'task standing does not match the persisted owner, tenant, and task thread',
-      mismatchDimensions,
-    );
-  }
-}
 
 export class ActionSuccessorAdmissionService {
   constructor(
@@ -133,11 +96,8 @@ export class ActionSuccessorAdmissionService {
     );
   }
 
-  /**
-   * Read-only standing preflight for an initial structured transfer. F246 calls
-   * this before proposal persistence; F167 calls the same assertion again at
-   * lease admission so the approval window cannot weaken durable task truth.
-   */
+  /** Standing preflight for structured transfer. F246 calls before persistence;
+   * F167 re-asserts at lease admission to prevent approval-window weakening. */
   async preflightStructuredTransferStanding(
     input: ActionSuccessorStandingInput,
   ): Promise<Extract<ActionFreshnessResolution, { status: 'verified' }>> {
@@ -168,7 +128,7 @@ export class ActionSuccessorAdmissionService {
 
     const terminalPredicate = this.requireTerminalPredicate(input);
     const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
-    assertActionSuccessorStanding(input, freshness);
+    const standingAuthority = assertActionSuccessorStanding(input, freshness);
     const claimInput: ClaimActionSuccessorInput = {
       leaseId: randomUUID(),
       ...identity,
@@ -182,7 +142,11 @@ export class ActionSuccessorAdmissionService {
         ? { predecessorCatId: input.actorCatId, predecessorThreadId: input.sourceThreadId }
         : {}),
       issuerStandingEvidenceRef,
-      evidenceRefs: [input.evidenceRef, freshness.evidenceRef],
+      evidenceRefs: [
+        input.evidenceRef,
+        freshness.evidenceRef,
+        ...(standingAuthority.delegateEvidenceRef ? [standingAuthority.delegateEvidenceRef] : []),
+      ],
       terminalPredicate,
       now: input.now,
     };
@@ -234,6 +198,8 @@ export class ActionSuccessorAdmissionService {
     }
     const freshness = await this.resolveGenerationFreshness(terminalPredicate);
     if (freshness.status !== 'verified') return null;
+    // F167: re-check standing to capture delegate authority evidence for the new lease.
+    const standingAuthority = assertActionSuccessorStanding(input, freshness);
     const continued = await this.leaseStore.continueFreshRevision(lease.leaseId, {
       successorLeaseId: randomUUID(),
       expectedGeneration: lease.generation,
@@ -247,6 +213,7 @@ export class ActionSuccessorAdmissionService {
       dispatchId: input.dispatchId,
       issuerStandingEvidenceRef,
       evidenceRef: freshness.evidenceRef,
+      delegateEvidenceRef: standingAuthority.delegateEvidenceRef,
       now: input.now,
     });
     if (continued.outcome === 'continued') {
@@ -269,8 +236,12 @@ export class ActionSuccessorAdmissionService {
       resolveVerifiedPredicate: async (request) => {
         const terminalPredicate = this.requireTerminalPredicate(request);
         const freshness = await this.requireVerifiedGenerationFreshness(terminalPredicate);
-        assertActionSuccessorStanding(request, freshness);
-        return { terminalPredicate, freshnessEvidenceRef: freshness.evidenceRef };
+        const standingAuthority = assertActionSuccessorStanding(request, freshness);
+        return {
+          terminalPredicate,
+          freshnessEvidenceRef: freshness.evidenceRef,
+          delegateEvidenceRef: standingAuthority.delegateEvidenceRef,
+        };
       },
       admitted: (outcome, lease, dispatchId) => this.admitted(outcome, lease, dispatchId),
       resolveTerminalCas: (request) => this.resolveTerminalCas(request, 'replacement'),

@@ -1,4 +1,12 @@
 import {
+  assistantIsStreaming,
+  findSendButton,
+  requireIdleComposer,
+  SEND_BUTTON_SELECTORS,
+  sendButtonIsDisabled,
+  waitForSendButton,
+} from './chatgpt-composer-controls.mjs';
+import {
   composerSnapshot,
   composerTextResult,
   insertComposerText,
@@ -21,20 +29,10 @@ const COMPOSER_SELECTORS = [
   'div[contenteditable="true"][data-virtualkeyboard="true"]',
   'textarea[data-id="root"]',
 ];
-const SEND_BUTTON_SELECTORS = [
-  'button[data-testid="send-button"]',
-  'button[aria-label="Send prompt"]',
-  'button[aria-label="发送提示"]',
-];
 const USER_MESSAGE_SELECTOR = '[data-message-author-role="user"]';
 const ASSISTANT_MESSAGE_SELECTOR = '[data-message-author-role="assistant"]';
 const MESSAGE_TURN_SELECTOR = 'article[data-testid^="conversation-turn-"], article';
 const RENDERED_MESSAGE_CONTENT_SELECTOR = '.whitespace-pre-wrap';
-const STOP_BUTTON_SELECTORS = [
-  'button[data-testid="stop-button"]',
-  'button[aria-label="Stop generating"]',
-  'button[aria-label="停止生成"]',
-];
 const SAFE_TURN_ID = /^conversation-turn-[A-Za-z0-9._:-]+$/;
 const MAX_ASSISTANT_CONTENT_BYTES = 128 * 1024;
 
@@ -76,57 +74,6 @@ function renderedMessageHasExactText(message, expectedText) {
 }
 
 export { ChatGptPageAdapterError };
-
-function sendButtonIsDisabled(button) {
-  return button.disabled === true || button.getAttribute('aria-disabled') === 'true';
-}
-
-function waitForSendButton({ document, MutationObserver, timeoutMs }) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let sawDisabledButton = false;
-    const finish = (callback) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      observer.disconnect();
-      callback();
-    };
-    const scan = () => {
-      const button = firstMatch(document, SEND_BUTTON_SELECTORS);
-      if (!button) return;
-      if (typeof button.click !== 'function' || !button.isConnected) {
-        finish(() =>
-          reject(new ChatGptPageAdapterError('SEND_BUTTON_INVALID', 'ChatGPT send button is not safely clickable')),
-        );
-        return;
-      }
-      if (sendButtonIsDisabled(button)) {
-        sawDisabledButton = true;
-        return;
-      }
-      finish(() => resolve(button));
-    };
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['disabled', 'aria-disabled'],
-    });
-    const timer = setTimeout(() => {
-      finish(() =>
-        reject(
-          new ChatGptPageAdapterError(
-            sawDisabledButton ? 'SEND_BUTTON_DISABLED' : 'SEND_BUTTON_NOT_FOUND',
-            sawDisabledButton ? 'ChatGPT send button remained disabled' : 'ChatGPT send button was not found',
-          ),
-        ),
-      );
-    }, timeoutMs);
-    scan();
-  });
-}
 
 function observeHostMessage({ document, MutationObserver, existingIds, text, timeoutMs }) {
   return new Promise((resolve, reject) => {
@@ -182,10 +129,6 @@ function assistantContentStatus(message) {
   const content = typeof raw === 'string' ? raw.trim() : '';
   if (!content) return 'missing';
   return new TextEncoder().encode(content).byteLength > MAX_ASSISTANT_CONTENT_BYTES ? 'oversized' : 'present';
-}
-
-function assistantIsStreaming(document) {
-  return firstMatch(document, STOP_BUTTON_SELECTORS) !== null;
 }
 
 function causalAssistantCandidate(turn) {
@@ -417,6 +360,7 @@ function requireSafeSubmissionState({
   artifactRevision,
 }) {
   requireMatchingConversation(location, conversationId, 'bound conversation changed before ChatGPT submission');
+  requireIdleComposer(document);
   const current = composerTextResult(document, composer);
   if (current.status === 'unsupported') {
     throw unsupportedComposerError({
@@ -432,7 +376,11 @@ function requireSafeSubmissionState({
   if (current.text !== text) {
     throw new ChatGptPageAdapterError('COMPOSER_CHANGED_BEFORE_SUBMIT', 'ChatGPT composer changed before submission');
   }
-  if (!sendButton.isConnected || sendButtonIsDisabled(sendButton)) {
+  if (
+    !sendButton.isConnected ||
+    sendButtonIsDisabled(sendButton) ||
+    findSendButton(document, composer) !== sendButton
+  ) {
     throw new ChatGptPageAdapterError(
       sendButtonIsDisabled(sendButton) ? 'SEND_BUTTON_DISABLED' : 'SEND_BUTTON_INVALID',
       'ChatGPT send button changed before submission',
@@ -465,11 +413,17 @@ async function submitPageMessage({
   let clicked = false;
   let mutated = false;
   try {
+    requireIdleComposer(document);
     insertComposerText(document, composer, text, () => {
       mutated = true;
     });
     await onProgress('inserted', { requestId, conversationId, idempotencyKey });
-    const sendButton = await waitForSendButton({ document, MutationObserver, timeoutMs: sendButtonTimeoutMs });
+    const sendButton = await waitForSendButton({
+      document,
+      composer,
+      MutationObserver,
+      timeoutMs: sendButtonTimeoutMs,
+    });
     requireSafeSubmissionState({
       document,
       location,

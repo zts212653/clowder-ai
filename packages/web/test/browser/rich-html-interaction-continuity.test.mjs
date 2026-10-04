@@ -14,6 +14,153 @@ before(harness.start);
 after(harness.stop);
 registerScriptContentRegression(harness);
 
+async function sampleStableReadingTarget(page, expectedOffset = null) {
+  return page.evaluate(
+    (expectedOffset) =>
+      new Promise((resolve, reject) => {
+        const deadline = performance.now() + 10_000;
+        let previous;
+        let stableFrames = 0;
+        const read = () => {
+          const chat = document.querySelector('[data-thread-chat-density="full"] [data-chat-container]');
+          const rows = [...(chat?.querySelectorAll('[data-message-viewport-id]') ?? [])];
+          const targetIndex = rows.findIndex((row) => row.dataset.messageViewportId === 'continuity-filler-3');
+          const target = rows[targetIndex];
+          const deferredBeforeTarget = rows
+            .slice(0, targetIndex + 1)
+            .some((row) => row.hasAttribute('data-deferred-message-id'));
+          const saved = JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:rich-html-continuity-a') ?? '{}').state;
+          const sample = target
+            ? {
+                top: chat.scrollTop,
+                offset: target.getBoundingClientRect().top - chat.getBoundingClientRect().top,
+                saved,
+              }
+            : null;
+          return { sample, deferredBeforeTarget };
+        };
+        const tick = () => {
+          const { sample, deferredBeforeTarget } = read();
+          const saved = sample?.saved;
+          const offset = expectedOffset ?? saved?.messageAnchor?.viewportOffsetPx;
+          const ready =
+            sample &&
+            !deferredBeforeTarget &&
+            saved?.anchor === 'offset' &&
+            saved.messageAnchor?.messageId === 'continuity-filler-3' &&
+            saved.messageAnchor.viewportOffsetPx === offset &&
+            sample.offset === offset;
+          stableFrames =
+            ready && previous?.top === sample.top && previous?.offset === sample.offset ? stableFrames + 1 : 0;
+          previous = sample;
+          // Capture the assertion's values in the same frame that establishes readiness.
+          // A separate evaluate can land between a deferred mount and its correction RAF.
+          if (stableFrames >= 2) return resolve(sample);
+          if (performance.now() >= deadline) {
+            return reject(
+              new Error(
+                `Reading target did not settle: ${JSON.stringify({ expectedOffset, deferredBeforeTarget, sample })}`,
+              ),
+            );
+          }
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    expectedOffset,
+  );
+}
+
+test('real ThreadChatSurface navigator owns its reading target across thread return and refresh', async () => {
+  const page = await openFixture();
+  try {
+    console.info(`[author-preview] cwd=${process.cwd()} url=${page.url()} path=dot-jump→ThreadB→ThreadA→refresh`);
+    await page.locator('[data-message-navigator] button').nth(3).click();
+    const before = await sampleStableReadingTarget(page);
+    assert.equal(before.offset, before.saved.messageAnchor.viewportOffsetPx);
+    await page.getByTestId('switch-thread-b').click();
+    await page
+      .locator('[data-testid="rich-html-interaction-continuity-fixture"][data-active-thread="rich-html-continuity-b"]')
+      .waitFor();
+    await page.getByTestId('switch-thread-a').click();
+    assert.equal((await sampleStableReadingTarget(page, before.offset)).offset, before.offset);
+    await page.reload();
+    assert.equal((await sampleStableReadingTarget(page, before.offset)).offset, before.offset);
+  } finally {
+    await page.close();
+  }
+});
+
+test('real cat-ball navigation stays local while content below the main reading anchor grows', async () => {
+  const page = await openFixture({ query: '?independent=1' });
+  try {
+    console.info(
+      `[author-preview] cwd=${process.cwd()} url=${page.url()} path=main-jump+cat-ball-dot/background/wheel`,
+    );
+    const panel = page.getByRole('dialog', { name: '猫猫球 对话气泡', exact: true });
+    await panel.waitFor();
+    const main = page.locator('[data-thread-chat-density="full"]');
+    const panelScroll = panel.locator('[data-chat-container]');
+    await page.evaluate(() =>
+      localStorage.setItem(
+        'cat-cafe:thread-scroll:independent-ball',
+        JSON.stringify({ v: 1, state: { top: 777, anchor: 'offset' } }),
+      ),
+    );
+    await main.locator('[data-message-navigator] button').nth(3).click();
+    const panelBefore = await panelScroll.evaluate((el) => el.scrollTop);
+    await panel.locator('[data-message-navigator] button').nth(4).click();
+    await page.waitForFunction(
+      (top) => document.querySelector('[role="dialog"] [data-chat-container]').scrollTop > top,
+      panelBefore,
+    );
+    const geometryBefore = await sampleStableReadingTarget(page);
+    assert.equal(geometryBefore.saved.anchor, 'offset');
+    // Below-target growth must not invalidate the owned reading tuple. Total content
+    // height can change as offscreen content mounts, independently of panel input.
+    const heightBeforeGrowth = await page.evaluate(() => {
+      const chat = document.querySelector('[data-thread-chat-density="full"] [data-chat-container]');
+      const target = chat.querySelector('[data-message-viewport-id="continuity-filler-3"]');
+      const tail = chat.querySelector('[data-message-viewport-id="rich-html-widget-message"]');
+      if (!(target.compareDocumentPosition(tail) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+        throw new Error('controlled growth must be below the reading target');
+      }
+      const height = chat.scrollHeight;
+      const spacer = document.createElement('div');
+      spacer.style.height = '68px';
+      tail.append(spacer);
+      return height;
+    });
+    await page.waitForFunction(
+      (height) =>
+        document.querySelector('[data-thread-chat-density="full"] [data-chat-container]').scrollHeight > height,
+      heightBeforeGrowth,
+    );
+    const track = panel.locator('[data-message-navigator] .cursor-pointer');
+    await track.click({ position: { x: 15, y: 180 } });
+    await panelScroll.evaluate((el) => {
+      if (el.scrollHeight <= el.clientHeight) throw new Error('independent panel must overflow');
+    });
+    const clickedTop = await panelScroll.evaluate((el) => el.scrollTop);
+    assert(clickedTop > panelBefore, 'background click must move the independent panel');
+    await track.hover({ position: { x: 15, y: 100 } });
+    await page.mouse.wheel(0, -50);
+    await page.waitForFunction(
+      (top) => document.querySelector('[role="dialog"] [data-chat-container]').scrollTop < top,
+      clickedTop,
+    );
+    assert.deepEqual(
+      await page.evaluate(() => JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:independent-ball')).state),
+      { top: 777, anchor: 'offset' },
+    );
+    const geometryAfter = await sampleStableReadingTarget(page, geometryBefore.offset);
+    console.info('[cat-ball-layout-probe]', JSON.stringify({ before: geometryBefore, after: geometryAfter }));
+    assert.deepEqual(geometryAfter, geometryBefore);
+  } finally {
+    await page.close();
+  }
+});
+
 test('real ChatContainer keeps the reading viewport stable when HTML disclosure changes height', async () => {
   const page = await openFixture();
   try {

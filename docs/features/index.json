@@ -1040,8 +1040,8 @@
     },
     {
       "id": "F170",
-      "name": "Web Chinese Chess — 网页端中国象棋",
-      "status": "done (archived — interview demo delivered, implementation kept on feature branch) | **Owner**: Ragdoll | **Priority**: P2 | **Completed**: 2026-04-20",
+      "name": "Web Chinese Chess — 网页象棋、人猫对弈与复盘",
+      "status": "in-progress（插件基础已合入 clowder-ai-plugins#65；Astra 已验 packed MCP，Host 棋盘接入、真实对弈与 D4/E/F2–F3 仍开放） | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra；原 A/B owner：Ragdoll） | **Priority**: P2",
       "file": "F170-web-chinese-chess.md"
     },
     {
@@ -1226,8 +1226,8 @@
     },
     {
       "id": "F202",
-      "name": "Plugin Framework — local discovery, config, resource activation, and schedule resources",
-      "status": "in-progress (local Phase 1 merged; K-2A/K-2B merged; K-2D supervised stdio runtime composed dormant) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1",
+      "name": "Terminal Plugin Manager and Host-governed Plugin Framework",
+      "status": "in-progress (Train B direction accepted in",
       "file": "F202-plugin-framework.md"
     },
     {
@@ -1269,7 +1269,7 @@
     {
       "id": "F210",
       "name": "Gemini CLI to Antigravity CLI Migration",
-      "status": "in-progress | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1",
+      "status": "frozen (superseded-by F325; not completed) | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1",
       "file": "F210-antigravity-cli-migration.md"
     },
     {
@@ -1551,7 +1551,7 @@
     {
       "id": "F261",
       "name": "AGY Durable Execution & Recovery — 长任务不随回合或重启消失",
-      "status": "in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
+      "status": "frozen (superseded-by F325; not completed) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1",
       "file": "F261-agy-durable-execution-recovery.md"
     },
     {
@@ -1707,7 +1707,7 @@
     {
       "id": "F290",
       "name": "AI-native Collective — 多人·多 Agent 共同世界",
-      "status": "implementation / first-cat participation landed; 2026-09-18 usable-release candidate work active; real GitHub UAT and full Collective experience remain open",
+      "status": "2026-09-25 first-cat entry Design Gate approved for real Client implementation; rejected private-room prototype remains stopped; real first reply, two-Mac UAT and full Collective experience remain open",
       "file": "F290-ai-native-collective.md"
     },
     {
@@ -1719,7 +1719,7 @@
     {
       "id": "F292",
       "name": "Feishu Meeting Intake Plugin — 会后产物不再靠人搬运",
-      "status": "implementation / live alpha.8 plus the paired Host repair are activated; the owner-selected future-only recovery skipped 3 bounded candidates without replay, and a fresh successful observation verifies that automatic intake is running",
+      "status": "implementation / Phase D acceptance active; public alpha.10 and the paired Host auth-probe repair are landed, but live still has alpha.9 installed with its source consumer in the error state and not running. Runtime adoption, a fresh healthy observation, and one new source-bound real-meeting journey remain required",
       "file": "F292-feishu-meeting-intake-plugin.md"
     },
     {
@@ -1821,7 +1821,7 @@
     {
       "id": "F309",
       "name": "Collaborative Content Plane — 跨媒介内容协作平面",
-      "status": "in-progress / Phase R 工程基线已交付，作品标注/评论体验改版进行中；Office/video 两媒介 Admission Gate 仍开放",
+      "status": "in-progress / Phase R 历史有界交付保留；Phase U 部分实现已合入、父线程验收未通过。CVO517授权作品体验收口批次由新thread的Sol6实现、Sol5.6独立审查，合入后父Astra实看；Office/video Admission Gate仍开放",
       "file": "F309-collaborative-content-plane.md"
     },
     {
@@ -1863,8 +1863,56 @@
     {
       "id": "F317",
       "name": "Coactive Companion — 猫猫走进共同生活现场",
-      "status": "spec | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1",
+      "status": "in-progress | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1",
       "file": "F317-coactive-companion.md"
+    },
+    {
+      "id": "F318",
+      "name": "Claude Agent SDK Native Carrier — 对齐 Codex app-server 能力",
+      "status": "in-progress（Phase A ✅；Phase B 候选已合入（优先 F254 原生感知，默认关闭）；Phase C/D 未整体完成） | **Owner**: Ragdoll (@opus5, claude-opus-5) | **Priority**: P1",
+      "file": "F318-claude-agent-sdk-native-carrier.md"
+    },
+    {
+      "id": "F319",
+      "name": "Served Model Provenance｜请求的模型 vs 上游实际应答的模型",
+      "status": "**failed-close (partial-value-preserved) 2026-09-24** — 已合入的 Phase A–F（`servedModel` 落账、徽标、换模提示、猫能看到的 `⚠` 标记）保留、零成本继续运行；「可靠识别上游实际应答模型」这个目标做不到了：上游收掉了 `response.model`（改为回显）和 turn-state（改为加密令牌），剩下能用的信号全部由上游控制。operator 签字见 Close Summary | **Owner**: Ragdoll (fable-5 → opus55 收口) | **Priority**: P0",
+      "file": "F319-served-model-provenance.md"
+    },
+    {
+      "id": "F320",
+      "name": "Multi-OAuth Accounts｜同一厂商多个 OAuth 账号 + 按家族一键切换",
+      "status": "spec | **Owner**: Ragdoll (@opus55, claude-opus-5-5) | **Priority**: P1",
+      "file": "F320-multi-oauth-account-switching.md"
+    },
+    {
+      "id": "F321",
+      "name": "记忆星空与「经历 → 下一次」｜Memory Sky & Experience Loop",
+      "status": "in-progress | **Owner**: Ragdoll（@opus55, claude-opus-5-5）任指挥猫——编排、排序与验收，不写实现；各 Phase 执行猫另派 | **Priority**: P1",
+      "file": "F321-memory-sky-experience-loop.md"
+    },
+    {
+      "id": "F322",
+      "name": "Everyday Work Experience｜看得懂、找得到、接得上",
+      "status": "in-progress / 新壳#4947、图标#4950、catalog准入#4949、记忆导航#4952及待办S3-2a #4969已合；含修复的冻结cut bf0716ba5f已补full gate绿，默认classic、当前runtime激活未核；原八项输入映射已闭，记忆导航独立Alpha、滚动C、领域接线与整段验收仍开放 | **Owner**: 小星星·Maine Coon（@codex-astra, gpt-6-astra），指挥责任由本 thread Astra 与 Opus 5.5 共同承担 | **Priority**: P1",
+      "file": "F322-everyday-work-experience.md"
+    },
+    {
+      "id": "F323",
+      "name": "Runtime Restart Coordination｜等待登记、优雅重启与自动回访",
+      "status": "in-progress；Phase A 实现已合入 #4853（`3f39bc101b55`），runtime 尚未加载；真实合入等待登记（AC-A11）、Alpha/运行验收与后续 Phase 未完成 | **Owner**: 本 thread 指挥责任猫 Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5） | **Priority**: P1",
+      "file": "F323-runtime-restart-coordination.md"
+    },
+    {
+      "id": "F324",
+      "name": "Memory Delivery Reliability｜记忆交付可靠性与上下文成本收口",
+      "status": "in-progress（A/B 原 Task 已 satisfied；C 实收与仓内防复发已合入并完成 Alpha 切片，共享文件恢复待权限裁定，D 未启动） | **Owner**: Astra（@codex-astra, gpt-6-astra）与 Opus55（@opus55, claude-opus-5-5），本指挥 thread 全体猫共同负责驱动与愿景守护 | **Priority**: P1",
+      "file": "F324-memory-delivery-reliability.md"
+    },
+    {
+      "id": "F325",
+      "name": "Antigravity Native Parity｜Siamese的新猫爬架与旧接入收归",
+      "status": "spec | **Owner**: 小星星·Maine Coon (@codex-astra, gpt-6-astra) | **Priority**: P1",
+      "file": "F325-antigravity-native-parity.md"
     }
   ]
 }

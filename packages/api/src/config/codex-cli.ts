@@ -67,3 +67,23 @@ export function resolveCodexCarrierTruth(
 export function getCodexOAuthTransport(env: NodeJS.ProcessEnv = process.env): CodexOAuthTransport {
   return parseEnum(env.CAT_CAFE_CODEX_OAUTH_TRANSPORT, CODEX_OAUTH_TRANSPORTS, DEFAULT_CODEX_OAUTH_TRANSPORT);
 }
+
+export const CODEX_SERVED_MODEL_OBSERVATIONS = ['on', 'off'] as const;
+export type CodexServedModelObservation = (typeof CODEX_SERVED_MODEL_OBSERVATIONS)[number];
+export const DEFAULT_CODEX_SERVED_MODEL_OBSERVATION: CodexServedModelObservation = 'on';
+
+/**
+ * F319: record which model the upstream actually answered with. `on` adds the
+ * trace directives (websocket frames via tungstenite, HTTPS stream via the
+ * SSE trace) for every session without a custom base URL — which credential
+ * signs the request is Codex's own choice, not Clowder AI's auth label — and
+ * leaves the transport as the operator configured it; `off` restores the
+ * exact pre-F319 launch.
+ */
+export function getCodexServedModelObservation(env: NodeJS.ProcessEnv = process.env): CodexServedModelObservation {
+  return parseEnum(
+    env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION,
+    CODEX_SERVED_MODEL_OBSERVATIONS,
+    DEFAULT_CODEX_SERVED_MODEL_OBSERVATION,
+  );
+}

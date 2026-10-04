@@ -1,9 +1,10 @@
-export const LEGACY_GEMINI_CONSUMER_CAT_IDS = new Set(['gemini', 'gemini25', 'gemini35']);
+export const LEGACY_GEMINI_CONSUMER_CAT_IDS = new Set(['gemini', 'gemini25', 'gemini35', 'gemini38']);
 
 export const AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID = new Map([
   ['gemini', 'Gemini 3.1 Pro (High)'],
   ['gemini25', 'Gemini 3.5 Flash (High)'],
   ['gemini35', 'Gemini 3.6 Flash (High)'],
+  ['gemini38', 'Gemini 3.8 Flash (High)'],
 ]);
 
 export const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
@@ -16,13 +17,22 @@ export const AGY_GEMINI_MODEL_BY_LEGACY_MODEL_ID = new Map([
   ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro (High)'],
   ['gemini-3.5-flash', 'Gemini 3.5 Flash (High)'],
   ['gemini-3.6-flash', 'Gemini 3.6 Flash (High)'],
+  ['gemini-3.8-flash', 'Gemini 3.8 Flash (High)'],
 ]);
 
 export const GEMINI35_CAT_ID = 'gemini35';
-export const GEMINI35_OLD_DEFAULT_MODELS = new Set(['gemini-3.5-flash', 'Gemini 3.5 Flash (High)']);
-export const GEMINI35_OLD_NAME = '暹罗猫 Gemini 3.5 Flash';
-export const GEMINI35_OLD_ROLE_DESCRIPTION = '暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问';
-export const GEMINI35_OLD_VARIANT_LABEL = 'Gemini 3.5 Flash';
+export const GEMINI35_LEGACY_DEFAULT_MODELS = new Set([
+  'gemini-3.5-flash',
+  'Gemini 3.5 Flash (High)',
+  'gemini-3.8-flash',
+  'Gemini 3.8 Flash (High)',
+]);
+export const GEMINI35_LEGACY_NAMES = new Set(['暹罗猫 Gemini 3.5 Flash', '暹罗猫 Gemini 3.8 Flash']);
+export const GEMINI35_LEGACY_ROLE_DESCRIPTIONS = new Set([
+  '暹罗猫 Gemini 3.5 Flash，视觉设计和创意顾问',
+  '暹罗猫 Gemini 3.8 Flash，视觉设计和创意顾问',
+]);
+export const GEMINI35_LEGACY_VARIANT_LABELS = new Set(['Gemini 3.5 Flash', 'Gemini 3.8 Flash']);
 
 export function normalizeAgyGeminiModelSelector(model: string): string {
   const trimmed = model.trim();
@@ -31,7 +41,7 @@ export function normalizeAgyGeminiModelSelector(model: string): string {
 
 export function resolveAgyGeminiDefaultModel(resolvedCatId: string, defaultModel: unknown): string | undefined {
   const model = typeof defaultModel === 'string' ? defaultModel.trim() : '';
-  if (resolvedCatId === GEMINI35_CAT_ID && GEMINI35_OLD_DEFAULT_MODELS.has(model)) {
+  if (resolvedCatId === GEMINI35_CAT_ID && GEMINI35_LEGACY_DEFAULT_MODELS.has(model)) {
     return AGY_GEMINI_DEFAULT_MODEL_BY_CAT_ID.get(GEMINI35_CAT_ID);
   }
   if (!model.startsWith('gemini-')) return undefined;

@@ -1,7 +1,7 @@
 ---
 cell_id: dispatch
 title: Dispatch / Queue
-summary: Invocation queue、busy gate、fairness、priority、外部 wake 执行、durable per-child execution ledger、普通 queued user message 的 MessageStore-backed restart custody、append-only per-target attempt 与 F264 durable receipt、F254 legacy closure preflight / non-Queue supplement carrier、F167 action successor generation fence、F247 cloud-only terminal bridge、F280 wait continuation carrier，以及 F295 live/managed-command 的统一可取消 execution 投影。
+summary: Invocation queue、busy gate、fairness、priority、外部 wake 执行、durable per-child execution ledger、普通 queued user message 的 MessageStore-backed restart custody、append-only per-target attempt 与 F264 durable receipt、F254 legacy closure preflight / non-Queue supplement carrier、F167 action successor generation fence、F247 cloud-only terminal bridge、F280 wait continuation carrier、F295 live/managed-command 的统一可取消 execution 投影，以及由 ball-custody recovery fence 约束的 managed gate worker 消费路径。
 canonical_features: [F167, F175, F177, F185, F247, F254, F264, F280, F295]
 code_anchors:
   - packages/shared/src/types/active-execution.ts
@@ -20,12 +20,28 @@ code_anchors:
   - packages/api/src/domains/cats/services/agents/invocation/queue-entry-settlement.ts
   - packages/api/src/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.ts
   - packages/api/src/domains/ball-custody/ManagedCommandWakeRecoverySweep.ts
+  - packages/api/src/infrastructure/managed-runner-durable-worker.ts
+  - packages/api/src/infrastructure/managed-runner-durable-attempt.ts
+  - scripts/gate-terminal-receipt.mjs
+  - scripts/lib/gate-terminal-receipt.mjs
+  - scripts/lib/gate-execution-attempt-store.mjs
+  - scripts/lib/gate-execution-finalization.mjs
+  - scripts/lib/gate-execution-release-settlement.mjs
+  - scripts/lib/gate-execution-unit-settlement.mjs
+  - scripts/lib/gate-execution-runner.mjs
+  - scripts/lib/gate-resource-request-continuation.mjs
+  - scripts/pre-merge-check.sh
   - packages/api/src/domains/ball-custody/ActionSuccessorRecoverySweep.ts
   - packages/api/src/domains/ball-custody/turn-custody-wake-provenance.ts
   - packages/api/src/domains/ball-custody/wait-continuation-carrier.ts
   - packages/api/src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.ts
   - packages/api/src/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.ts
   - packages/api/src/domains/cats/services/agents/invocation/InvocationTracker.ts
+  - packages/api/src/domains/cats/services/agents/invocation/InvocationOwnerReaper.ts
+  - packages/api/src/domains/cats/services/agents/invocation/ExitedCliExecutionRecovery.ts
+  - packages/api/src/domains/cats/services/agents/invocation/RetireExitedChildExecutions.ts
+  - packages/api/src/domains/cats/services/agents/invocation/InvocationSettlementProjection.ts
+  - packages/api/src/utils/CliExecutionObservation.ts
   - packages/api/src/domains/cats/services/stores/ports/queued-message-custody.ts
   - packages/api/src/domains/cats/services/stores/ports/queued-message-receipt.ts
   - packages/shared/src/types/queue-receipt.ts
@@ -53,6 +69,7 @@ doc_anchors:
   - docs/features/F295-cancelable-execution-projection.md
   - docs/features/F177-harness-update.md
   - docs/features/F167-a2a-chain-quality.md
+  - feature-specs/2026-09-20-gate-feedback-time-delivery.md
   - feature-specs/2026-07-11-f167-phase-s-action-successor-single-flight.md
   - docs/features/F175-unified-message-queue.md
   - docs/features/F185-dispatch-busy-gate-unification.md
@@ -70,8 +87,9 @@ doc_anchors:
   - feature-specs/2026-08-12-1291-gate3-terminal-receipt-publication.md
   - feature-specs/2026-08-12-1291-gate4-wait-carrier-integration.md
   - feature-specs/2026-08-12-1291-gate5-retry-revalidation.md
-static_scan_hints: [TurnExecutionRecord, TurnExecutionStore, RedisTurnExecutionStore, TurnExecutionStartupReconciler, executionKind, auxiliaryTurnExecutions, InvocationQueue, QueueProcessor, InvocationRecordStore, RedisInvocationRecordStore, WaitContinuationCarrierV1, waitContinuationCarrier, queuedAttemptIdByCatId, QueueTargetAttempt, targetAttempts, resolveQueueEntrySettlement, QueueCustodyReplacementProof, CollaborationContinuityCapsule, dispatch_handled_continuation, QueuedMessageCustody, QueueBodyExposure, QueueMessageReceipt, QueueMessageReceiptProjection, messageReceipts, QueueReceiptTarget, QueueReminderAttempt, QueuedMessageCustodyCoordinator, QueuedMessageCustodyStartupReconciler, projectQueueReceipt, transitionQueueCustody, restoreDurableEntry, InvocationTracker, ConnectorInvokeTrigger, resolveThreadAccess, actionSuccessorFence, actionLeaseId, actionGeneration, freshnessClosureId, freshnessRequiredFrontierMessageId, freshnessSupplementId, readOnlyToolPolicy, busy, priority, autoExecute]
+static_scan_hints: [TurnExecutionRecord, TurnExecutionStore, RedisTurnExecutionStore, TurnExecutionStartupReconciler, executionKind, auxiliaryTurnExecutions, InvocationQueue, QueueProcessor, InvocationRecordStore, RedisInvocationRecordStore, WaitContinuationCarrierV1, waitContinuationCarrier, queuedAttemptIdByCatId, QueueTargetAttempt, targetAttempts, resolveQueueEntrySettlement, QueueCustodyReplacementProof, CollaborationContinuityCapsule, dispatch_handled_continuation, QueuedMessageCustody, QueueBodyExposure, QueueMessageReceipt, QueueMessageReceiptProjection, messageReceipts, QueueReceiptTarget, QueueReminderAttempt, QueuedMessageCustodyCoordinator, QueuedMessageCustodyStartupReconciler, projectQueueReceipt, transitionQueueCustody, restoreDurableEntry, InvocationTracker, ConnectorInvokeTrigger, DurableManagedGateJob, resumable_full_gate_v2, managed-runner-durable-worker, managed-runner-durable-attempt, CAT_CAFE_MANAGED_GATE_ATTEMPT_TOKEN, resolveThreadAccess, actionSuccessorFence, actionLeaseId, actionGeneration, freshnessClosureId, freshnessRequiredFrontierMessageId, freshnessSupplementId, readOnlyToolPolicy, busy, priority, autoExecute]
 cited_by:
+  - {feature: Gate-S3-sleep-recovery, date: 2026-09-24, delta: the existing managed gate runner consumes a ball-custody-owned frozen identity and pause fence; append-only unit attempts preserve raw outcomes, commit-time settlement jointly fences terminal intent, hard wall, owner generation and pause epoch, one stable logical resource request survives a proven-dead claimant replacement, and cleanup proof gates physical successors; a storage trigger rejects pre-v2 claim mutations before an opt-in job leaves queued}
   - {feature: issue-1371-direct-witness, date: 2026-09-06, delta: direct route consumers forward exact child and adopted wake witnesses through the shared terminal collector to existing Queue custody CAS; source projection reuses canonical managed-hold owner visibility}
   - {feature: F295-post-close-thread-admission, date: 2026-08-22, delta: active-execution read and exact-cancel reuse canonical owner/default/user-index/external-anchor thread admission before liveness lookup while retaining masked shared occupancy and execution-principal control fences}
   - {feature: F295, date: 2026-08-13, delta: one project-scoped read projection joins canonical live invocation truth with existing managed-command receipts; every displayed execution carries thread, kind, exact identity and an identity-fenced cancel target or an explicit non-cancelable reason}

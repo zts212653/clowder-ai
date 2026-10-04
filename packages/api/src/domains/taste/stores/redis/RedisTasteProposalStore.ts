@@ -24,6 +24,11 @@ import {
   hydrateApprovalPublication,
   serializeApprovalPublication,
 } from '../../../cats/services/stores/redis/RedisApprovalPublication.js';
+import {
+  matchesTasteDecisionSnapshot,
+  TASTE_DECISION_FIELDS,
+  type TasteDecisionSnapshot,
+} from '../../services/taste-decision-snapshot.js';
 import type {
   CreateTasteProposalInput,
   ITasteProposalStore,
@@ -36,6 +41,11 @@ const CAS_CLAIM_LUA = `
   local key = KEYS[1]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'pending' then return 0 end
+  if ARGV[1] == '1' then
+    for i = 2, #ARGV, 2 do
+      if (redis.call('HGET', key, ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
+    end
+  end
   redis.call('HSET', key, 'status', 'approving')
   return 1
 `;
@@ -85,6 +95,11 @@ const CAS_REJECT_LUA = `
   local settledKey = KEYS[3]
   local status = redis.call('HGET', key, 'status')
   if status ~= 'pending' then return 0 end
+  if ARGV[5] == '1' then
+    for i = 6, #ARGV, 2 do
+      if (redis.call('HGET', key, ARGV[i]) or '') ~= ARGV[i + 1] then return 0 end
+    end
+  end
   redis.call('HSET', key, 'status', 'rejected',
     'rejectedBy', ARGV[1],
     'rejectedAt', ARGV[2],
@@ -125,6 +140,7 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
       sourceMessageId: input.sourceMessageId,
       scene: input.scene,
       quote: input.quote,
+      ...(input.takeaway ? { takeaway: input.takeaway } : {}),
       tags: [...input.tags],
       dimension: input.dimension as TasteDimension,
       privacy: input.privacy as 'public' | 'sensitive',
@@ -177,9 +193,9 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
     return this.batchGet(ids, (p) => p.status === 'pending');
   }
 
-  async listActionable(userId: string): Promise<TasteProposal[]> {
+  async listActionable(userId: string, limit = 100): Promise<TasteProposal[]> {
     const pendingKey = TasteProposalKeys.userPending(userId);
-    const ids = await this.redis.zrevrange(pendingKey, 0, 99);
+    const ids = await this.redis.zrevrange(pendingKey, 0, limit - 1);
     if (!ids.length) return [];
     return this.batchGet(ids, (p) => p.status === 'pending' || p.status === 'approving');
   }
@@ -191,12 +207,13 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
     return this.batchGet(ids);
   }
 
-  async claimForApproval(id: string, _userId: string): Promise<TasteProposal | null> {
+  async claimForApproval(id: string, userId: string, expected?: TasteDecisionSnapshot): Promise<TasteProposal | null> {
     const proposal = await this.get(id);
     if (!proposal) return null;
+    if (expected && (userId !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected))) return null;
 
     const key = TasteProposalKeys.detail(id);
-    const result = await this.redis.eval(CAS_CLAIM_LUA, 1, key);
+    const result = await this.redis.eval(CAS_CLAIM_LUA, 1, key, ...snapshotArgs(expected));
     if (result === 0) return null;
 
     return { ...proposal, status: 'approving' };
@@ -260,9 +277,15 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
     return result === 1;
   }
 
-  async markRejected(id: string, reason: string, userId: string): Promise<TasteProposal | null> {
+  async markRejected(
+    id: string,
+    reason: string,
+    userId: string,
+    expected?: TasteDecisionSnapshot,
+  ): Promise<TasteProposal | null> {
     const proposal = await this.get(id);
     if (!proposal) return null;
+    if (expected && (userId !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected))) return null;
 
     const key = TasteProposalKeys.detail(id);
     const pendingKey = TasteProposalKeys.userPending(proposal.userId);
@@ -279,6 +302,7 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
       String(now),
       id,
       reason,
+      ...snapshotArgs(expected),
     );
     if (result === 0) return null;
 
@@ -368,6 +392,11 @@ export class RedisTasteProposalStore implements ITasteProposalStore, ApprovalPub
   }
 }
 
+function snapshotArgs(expected?: TasteDecisionSnapshot): string[] {
+  if (!expected) return ['0'];
+  return ['1', ...TASTE_DECISION_FIELDS.flatMap((field) => [field, expected.fields[field]])];
+}
+
 // ---- Serialize / Hydrate ----
 
 function serializeProposal(p: TasteProposal): string[] {
@@ -396,6 +425,7 @@ function serializeProposal(p: TasteProposal): string[] {
     String(p.createdAt),
   ];
   if (p.sourceMessageId) fields.push('sourceMessageId', p.sourceMessageId);
+  if (p.takeaway) fields.push('takeaway', p.takeaway);
   if (p.clientRequestId) fields.push('clientRequestId', p.clientRequestId);
   if (p.approvalOriginRef) fields.push('approvalOriginRef', JSON.stringify(p.approvalOriginRef));
   if (p.approvedBy) fields.push('approvedBy', p.approvedBy);
@@ -417,6 +447,7 @@ function hydrateProposal(raw: Record<string, string>): TasteProposal {
     threadId: raw.threadId,
     scene: raw.scene,
     quote: raw.quote,
+    ...(raw.takeaway ? { takeaway: raw.takeaway } : {}),
     tags: JSON.parse(raw.tags || '[]'),
     dimension: raw.dimension as TasteDimension,
     privacy: raw.privacy as 'public' | 'sensitive',

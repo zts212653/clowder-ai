@@ -36,6 +36,101 @@ function runSourceOnlySnippet(scriptPath, snippet, envOverrides = {}) {
   return result.stdout.trim();
 }
 
+test('runtime artifact proof is consumed before API children and scoped to its checkout', () => {
+  const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
+  const runtimeRoot = resolve(process.cwd(), '../..');
+  const probe = `PROD_WEB=true\nreuse_verified_runtime_artifacts\nprintf '%s|%s' "$QUICK_MODE" "\${CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED-unset}"`;
+
+  assert.equal(
+    runSourceOnlySnippet(scriptPath, probe, {
+      CAT_CAFE_DEPLOYMENT_ID: 'runtime',
+      CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
+      CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED: '1',
+    }),
+    'true|unset',
+  );
+  assert.equal(
+    runSourceOnlySnippet(scriptPath, probe, {
+      CAT_CAFE_DEPLOYMENT_ID: 'runtime',
+      CAT_CAFE_RUNTIME_ROOT: tmpdir(),
+      CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED: '1',
+    }),
+    'false|unset',
+  );
+  assert.equal(
+    runSourceOnlySnippet(scriptPath, probe, {
+      CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
+      CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED: '1',
+    }),
+    'false|unset',
+  );
+});
+
+test('dotenv cannot grant the launcher artifact proof', () => {
+  const tmp = createTempProject();
+  try {
+    writeFileSync(join(tmp, '.env.local'), 'CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1\n');
+    const output = runSourceOnlySnippet(
+      join(tmp, 'scripts', 'start-dev.sh'),
+      `PROD_WEB=true\nreuse_verified_runtime_artifacts\nprintf '%s|%s' "$QUICK_MODE" "\${CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED-unset}"`,
+      { CAT_CAFE_DEPLOYMENT_ID: 'runtime', CAT_CAFE_RUNTIME_ROOT: tmp },
+    );
+    assert.equal(output, 'false|unset');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('daemon re-exec keeps the artifact proof for its own verified checkout only', () => {
+  const tmp = createTempProject();
+  try {
+    const scriptPath = join(tmp, 'scripts', 'start-dev.sh');
+    const probePath = join(tmp, 'daemon-proof-probe.sh');
+    const logPath = join(tmp, 'daemon-proof.log');
+    writeFileSync(
+      probePath,
+      [
+        '#!/usr/bin/env bash',
+        `source "${scriptPath}" --source-only --prod-web >/dev/null 2>&1`,
+        'trap - EXIT INT TERM',
+        'reuse_verified_runtime_artifacts',
+        `printf 'QUICK=%s VERIFIED=%s\\n' "$QUICK_MODE" "\${CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED-unset}"`,
+        'printf "ARG=<%s>\\n" "$@"',
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+
+    for (const [runtimeRoot, expectedQuick] of [
+      [tmp, 'true'],
+      [tmpdir(), 'false'],
+    ]) {
+      const result = spawnSync(
+        'bash',
+        [
+          '-lc',
+          `set -e\nsource "${scriptPath}" --source-only --prod-web >/dev/null 2>&1\ntrap - EXIT INT TERM\nDAEMON_LOG_FILE="${logPath}"\nlaunch_daemon_child "${probePath}" proof-token "argument with spaces"\nwait "$DAEMON_PID"`,
+        ],
+        {
+          encoding: 'utf8',
+          env: baseShellEnv({
+            CAT_CAFE_DEPLOYMENT_ID: 'runtime',
+            CAT_CAFE_RUNTIME_ROOT: runtimeRoot,
+            CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED: '1',
+          }),
+        },
+      );
+      assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+      assert.equal(
+        readFileSync(logPath, 'utf8'),
+        `QUICK=${expectedQuick} VERIFIED=unset\nARG=<argument with spaces>\nARG=<--cat-cafe-daemon-token=proof-token>\n`,
+      );
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 function createBashOnlyPath(root) {
   const binDir = join(root, 'bin');
   mkdirSync(binDir, { recursive: true });
@@ -1409,6 +1504,7 @@ test('wait_for_port_or_exit fails fast when background process exits before bind
   const output = runSourceOnlySnippet(
     scriptPath,
     `
+port_is_listening() { return 1; }
 background_eval_with_null_stdin "exit 0"
 pid=$!
 if wait_for_port_or_exit 65534 "test-service" "$pid" 2 >/dev/null; then
@@ -1422,44 +1518,29 @@ fi
   assert.equal(output, 'failed-fast');
 });
 
-test('wait_for_port_or_exit falls back when lsof probe fails but the port is actually listening', () => {
+test('wait_for_port_or_exit falls back when lsof probe fails but the port is actually listening', async () => {
   const scriptPath = resolve(process.cwd(), '../../scripts/start-dev.sh');
-  const output = runSourceOnlySnippet(
-    scriptPath,
-    `
-tmp_dir=$(mktemp -d)
-trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true; rm -rf "$tmp_dir"' RETURN
-cat > "$tmp_dir/server.js" <<'EOF'
-const net = require('node:net');
-const server = net.createServer((socket) => {
-  socket.on('error', () => {});
-  socket.end();
-});
-server.on('error', (err) => {
-  console.error(err);
-  process.exit(1);
-});
-server.listen(65531, '127.0.0.1', () => {
-  setInterval(() => {}, 1000);
-});
-EOF
-node "$tmp_dir/server.js" >/dev/null 2>&1 &
-server_pid=$!
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  nc -z 127.0.0.1 65531 >/dev/null 2>&1 && break
-  sleep 0.1
-done
+  const server = await listenOnLoopback();
+
+  try {
+    const port = server.address().port;
+    const output = runSourceOnlySnippet(
+      scriptPath,
+      `
 lsof() { return 1; }
 ss() { return 127; }
-if wait_for_port_or_exit 65531 "test-service" "$server_pid" 2 >/dev/null; then
+if wait_for_port_or_exit ${port} "test-service" "$$" 2 >/dev/null; then
   printf 'fallback-ok'
 else
   printf 'fallback-failed'
 fi
 `,
-  );
+    );
 
-  assert.equal(output, 'fallback-ok');
+    assert.equal(output, 'fallback-ok');
+  } finally {
+    await new Promise((resolvePromise) => server.close(resolvePromise));
+  }
 });
 
 test('terminate_managed_pids kills tracked child process trees', () => {

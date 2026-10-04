@@ -1,4 +1,16 @@
-import type { WaitTerminationActor, WaitTerminationReason } from './wait-termination.js';
+import type { DeploymentWaitOutcomeV1 } from './deployment-wait.js';
+import type { UnifiedAwaitStateV1, WaitOutcomeBaseV1 } from './wait-contract.js';
+
+export {
+  createWaitContinuationCarrier,
+  parseWaitContinuationCarrier,
+  parseWaitOwnerFence,
+  type UnifiedAwaitStateV1,
+  type WaitContinuationCarrierV1,
+  type WaitOutcomeBaseV1,
+  type WaitOutcomeDelivery,
+  type WaitOwnerFence,
+} from './wait-contract.js';
 
 export const GITHUB_PR_WAIT_PREDICATE_KINDS = [
   'pr_head_changed',
@@ -475,52 +487,6 @@ export interface GitHubIssueWaitBaseline {
 export type GitHubWaitBaseline = GitHubPrWaitBaseline | GitHubIssueWaitBaseline;
 export type GitHubWaitSubjectRef = `pr:${string}#${number}` | `issue:${string}#${number}`;
 
-export type WaitOwnerFence =
-  | { readonly kind: 'containing_task'; readonly generation: number }
-  | {
-      readonly kind: 'action_successor';
-      readonly leaseId: string;
-      readonly generation: number;
-    };
-
-/**
- * Immutable transport projection for one canonical wait outcome.
- *
- * The containing task or action-successor lease remains authoritative. This
- * value only lets Message/Queue/Invocation retain which exact owner fence
- * authorized the one-shot continuation.
- */
-export interface WaitContinuationCarrierV1 {
-  readonly v: 1;
-  readonly waitId: string;
-  readonly outcomeId: string;
-  readonly ownerFence: WaitOwnerFence;
-}
-
-export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predicate> {
-  readonly v: 1;
-  readonly generation: number;
-  readonly subjectRef: SubjectRef;
-  readonly ownerFence: WaitOwnerFence;
-  readonly baseline: Baseline;
-  readonly continuation: {
-    readonly when: readonly Predicate[];
-    readonly then: string;
-  };
-  /**
-   * #1392 AC-2: optional absolute deadline. Omitted means no time-based termination. When
-   * supplied it is a loud terminal outcome and is not extended by renewal. Read it only through
-   * `isAwaitExpired` — see that function for why direct comparison is unsafe.
-   */
-  readonly expiresAt?: number;
-  /**
-   * #1392 AC-1: default true — after a match, this generation is consumed and the next one is
-   * installed in the same transition. `false` is the explicit single-fire opt-in.
-   */
-  readonly autoRenew?: boolean;
-  readonly createdAt: number;
-}
-
 type GitHubWaitProvenance = {
   readonly provenance?: 'explicit_registration' | 'legacy_migration_default';
 };
@@ -553,22 +519,12 @@ export interface GitHubWaitMatchedDelta {
   readonly identityUnknown?: true;
 }
 
-export type WaitOutcomeDelivery = 'pending' | 'delivered' | 'not_applicable' | 'legacy_unfenced';
-
-export interface WaitOutcomeV1 {
-  readonly v: 1;
-  readonly outcomeId: string;
-  readonly generation: number;
-  readonly subjectRef: GitHubWaitSubjectRef;
-  /** Exact owner fence consumed by this outcome; never reconstructed from mutable task fields. */
-  readonly ownerFence: WaitOwnerFence;
-  readonly reason: WaitTerminationReason;
-  readonly at: number;
-  readonly delivery: WaitOutcomeDelivery;
+/** GitHub-specific result fields stay quarantined from other F280 wait domains. */
+export interface GitHubWaitOutcomeV1 extends WaitOutcomeBaseV1<GitHubWaitSubjectRef> {
+  readonly domain?: 'github';
   readonly matched?: readonly GitHubWaitMatchedDelta[];
-  readonly nextStep?: string;
   readonly terminalSubjectState?: 'merged' | 'closed';
-  readonly actor?: WaitTerminationActor;
+  readonly deploymentMatch?: never;
   /**
    * #1392 AC-1: whether tracking continues after this outcome. `rearmed` means the next
    * generation was installed in the same transition; `rearm_failed` means the event is still
@@ -577,73 +533,5 @@ export interface WaitOutcomeV1 {
   readonly renewal?: 'rearmed' | 'rearm_failed';
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
-}
-
-export function parseWaitOwnerFence(value: unknown): WaitOwnerFence | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
-  if (
-    candidate.kind === 'containing_task' &&
-    hasExactKeys(candidate, ['kind', 'generation']) &&
-    Number.isSafeInteger(candidate.generation) &&
-    (candidate.generation as number) > 0
-  ) {
-    return Object.freeze({ kind: 'containing_task', generation: candidate.generation as number });
-  }
-  if (
-    candidate.kind === 'action_successor' &&
-    hasExactKeys(candidate, ['kind', 'leaseId', 'generation']) &&
-    typeof candidate.leaseId === 'string' &&
-    candidate.leaseId.length > 0 &&
-    Number.isSafeInteger(candidate.generation) &&
-    (candidate.generation as number) > 0
-  ) {
-    return Object.freeze({
-      kind: 'action_successor',
-      leaseId: candidate.leaseId,
-      generation: candidate.generation as number,
-    });
-  }
-  return null;
-}
-
-export function parseWaitContinuationCarrier(value: unknown): WaitContinuationCarrierV1 | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const candidate = value as Record<string, unknown>;
-  if (
-    !hasExactKeys(candidate, ['v', 'waitId', 'outcomeId', 'ownerFence']) ||
-    candidate.v !== 1 ||
-    typeof candidate.waitId !== 'string' ||
-    candidate.waitId.length === 0 ||
-    typeof candidate.outcomeId !== 'string' ||
-    candidate.outcomeId.length === 0
-  ) {
-    return null;
-  }
-  const ownerFence = parseWaitOwnerFence(candidate.ownerFence);
-  if (!ownerFence) return null;
-  return Object.freeze({
-    v: 1,
-    waitId: candidate.waitId,
-    outcomeId: candidate.outcomeId,
-    ownerFence,
-  });
-}
-
-export function createWaitContinuationCarrier(
-  waitId: string,
-  outcome: Pick<WaitOutcomeV1, 'outcomeId' | 'ownerFence'>,
-): WaitContinuationCarrierV1 {
-  const carrier = parseWaitContinuationCarrier({
-    v: 1,
-    waitId,
-    outcomeId: outcome.outcomeId,
-    ownerFence: outcome.ownerFence,
-  });
-  if (!carrier) throw new Error('canonical wait outcome cannot produce a valid continuation carrier');
-  return carrier;
-}
+/** Bounded F280 outcome union; each domain quarantines its own evidence fields. */
+export type WaitOutcomeV1 = GitHubWaitOutcomeV1 | DeploymentWaitOutcomeV1;

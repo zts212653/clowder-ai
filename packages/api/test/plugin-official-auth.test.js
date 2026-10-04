@@ -95,6 +95,14 @@ async function packageFixture(t) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 test('checks auth through the verified package runner with fixed status arguments', async (t) => {
   const fixture = await packageFixture(t);
   const calls = [];
@@ -129,6 +137,96 @@ test('accepts pretty-printed auth status after package preparation output', asyn
   });
 
   assert.deepEqual(await auth.status(target()), { status: 'connected' });
+  assert.deepEqual(fixture.counts(), { releases: 1, verifications: 1 });
+});
+
+test('coalesces concurrent auth status reads into one verified package command', async (t) => {
+  const fixture = await packageFixture(t);
+  const commandStarted = deferred();
+  const releaseCommand = deferred();
+  let commands = 0;
+  const auth = new OfficialPluginAuthService({
+    packages: fixture.packages,
+    run: async () => {
+      commands += 1;
+      commandStarted.resolve();
+      await releaseCommand.promise;
+      return { stdout: JSON.stringify({ identity: 'user', verified: true }), stderr: '' };
+    },
+  });
+
+  const first = auth.status(target());
+  await commandStarted.promise;
+  const second = auth.status(target());
+  const third = auth.status(target());
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(commands, 1, 'one instance may have only one in-flight remote auth probe');
+  releaseCommand.resolve();
+  assert.deepEqual(await Promise.all([first, second, third]), [
+    { status: 'connected' },
+    { status: 'connected' },
+    { status: 'connected' },
+  ]);
+  assert.deepEqual(fixture.counts(), { releases: 1, verifications: 1 });
+});
+
+test('distinguishes an unavailable auth probe from a verified logout', async (t) => {
+  const fixture = await packageFixture(t);
+  const auth = new OfficialPluginAuthService({
+    packages: fixture.packages,
+    run: async () => {
+      throw new Error('temporary provider failure');
+    },
+  });
+
+  assert.deepEqual(await auth.status(target()), {
+    status: 'failed',
+    failureKind: 'status_probe',
+    error: '飞书认证状态暂时无法验证，请稍后重试。',
+  });
+  assert.deepEqual(fixture.counts(), { releases: 1, verifications: 1 });
+});
+
+test('keeps a failed device login flow distinct from a transient status probe failure', async (t) => {
+  const fixture = await packageFixture(t);
+  const auth = new OfficialPluginAuthService({
+    packages: fixture.packages,
+    toQrDataUrl: async () => 'data:image/png;base64,qr',
+    run: async (spec) => {
+      if (spec.args.includes('--no-wait')) {
+        return {
+          stdout: JSON.stringify({
+            device_code: 'server-secret-device-code',
+            verification_url: 'https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=opaque',
+            expires_in: 600,
+          }),
+          stderr: '',
+        };
+      }
+      throw new Error('owner rejected device authorization');
+    },
+  });
+
+  assert.equal((await auth.start(target())).status, 'waiting');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(await auth.status(target()), {
+    status: 'failed',
+    verificationUrl: 'https://accounts.feishu.cn/oauth/v1/device/verify?flow_id=opaque',
+    qrDataUrl: 'data:image/png;base64,qr',
+    error: '飞书认证未完成，请重试。',
+  });
+  assert.deepEqual(fixture.counts(), { releases: 1, verifications: 1 });
+});
+
+test('keeps a successful negative verification as not connected', async (t) => {
+  const fixture = await packageFixture(t);
+  const auth = new OfficialPluginAuthService({
+    packages: fixture.packages,
+    run: async () => ({ stdout: JSON.stringify({ identity: null, verified: false }), stderr: '' }),
+  });
+
+  assert.deepEqual(await auth.status(target()), { status: 'not_connected' });
   assert.deepEqual(fixture.counts(), { releases: 1, verifications: 1 });
 });
 

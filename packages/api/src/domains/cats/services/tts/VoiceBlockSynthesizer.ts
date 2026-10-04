@@ -85,6 +85,7 @@ export class VoiceBlockSynthesizer {
   constructor(
     private readonly ttsRegistry: TtsRegistry,
     private readonly cacheDir: string,
+    private readonly retryDelayMs = RETRY_DELAY_MS,
   ) {}
 
   /**
@@ -166,8 +167,8 @@ export class VoiceBlockSynthesizer {
     } catch (err) {
       if (!isRetryableError(err)) throw err;
 
-      log.warn({ retryDelayMs: RETRY_DELAY_MS, error: err }, 'Transient error, retrying');
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      log.warn({ retryDelayMs: this.retryDelayMs, error: err }, 'Transient error, retrying');
+      await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
       return await this.synthesizeToFile(text, catId);
     }
   }

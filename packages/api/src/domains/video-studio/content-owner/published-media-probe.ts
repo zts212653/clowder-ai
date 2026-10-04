@@ -12,7 +12,12 @@ const videoStreamSchema = z.object({
   codec_name: z.string().min(1),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
-  sample_aspect_ratio: z.string(),
+  // ffprobe legitimately omits this for square-pixel MP4s (or emits N/A).
+  // Treat that absence as 1:1, while malformed explicit rationals still fail below.
+  sample_aspect_ratio: z
+    .string()
+    .optional()
+    .transform((value) => (value && value !== 'N/A' ? value : '1:1')),
   time_base: z.string(),
   start_pts: z.number().int().safe(),
   duration_ts: z.number().int().positive().safe(),

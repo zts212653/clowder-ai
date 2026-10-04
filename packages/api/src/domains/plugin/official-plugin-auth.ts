@@ -20,6 +20,7 @@ export type OfficialPluginAuthStatus = 'not_connected' | 'waiting' | 'connected'
 
 export interface OfficialPluginAuthProjection {
   readonly status: OfficialPluginAuthStatus;
+  readonly failureKind?: 'status_probe';
   readonly verificationUrl?: string;
   readonly userCode?: string;
   readonly qrDataUrl?: string;
@@ -140,6 +141,7 @@ export class OfficialPluginAuthService implements OfficialPluginAuthPort {
   private readonly toQrDataUrl: (verificationUrl: string) => Promise<string>;
   private readonly now: () => number;
   private readonly flows = new Map<string, PrivateAuthFlow>();
+  private readonly statuses = new Map<string, Promise<OfficialPluginAuthProjection>>();
   private readonly starts = new Map<string, Promise<OfficialPluginAuthProjection>>();
   private readonly completions = new Map<string, ActiveCompletion>();
 
@@ -149,34 +151,51 @@ export class OfficialPluginAuthService implements OfficialPluginAuthPort {
     this.now = options.now ?? Date.now;
   }
 
-  async status(target: OfficialPluginAuthTarget): Promise<OfficialPluginAuthProjection> {
+  status(target: OfficialPluginAuthTarget): Promise<OfficialPluginAuthProjection> {
     const active = this.flows.get(target.instance.pluginInstanceId);
     if (active?.status === 'waiting' && this.now() >= active.expiresAt) {
       active.abort.abort();
       const expired: PrivateAuthFlow = { ...active, status: 'expired', error: '认证链接已过期，请重新连接。' };
       this.flows.set(target.instance.pluginInstanceId, expired);
-      return projectFlow(expired);
+      return Promise.resolve(projectFlow(expired));
     }
     if (active?.status === 'connected') this.flows.delete(target.instance.pluginInstanceId);
-    else if (active) return projectFlow(active);
+    else if (active) return Promise.resolve(projectFlow(active));
 
-    const spec = authSpec(target.entry);
-    const pkg = await this.options.packages.resolveInstalledPackage(target.instance.packageDigest);
+    const statusKey = `${target.instance.pluginInstanceId}:${target.instance.packageDigest}`;
+    const pending = this.statuses.get(statusKey);
+    if (pending) return pending;
+    const status = this.readStatus(target).finally(() => {
+      if (this.statuses.get(statusKey) === status) this.statuses.delete(statusKey);
+    });
+    this.statuses.set(statusKey, status);
+    return status;
+  }
+
+  private async readStatus(target: OfficialPluginAuthTarget): Promise<OfficialPluginAuthProjection> {
     try {
-      const runnerPath = await verifiedRunner(pkg, spec.runnerPath);
-      const result = await this.run({
-        command: process.execPath,
-        args: [runnerPath, 'auth', 'status', '--json', '--verify'],
-        cwd: pkg.rootDir,
-        env: officialPluginAuthCommandEnvironment(),
-        timeoutMs: STATUS_TIMEOUT_MS,
-      });
-      const payload = parseLarkCliJson(result.stdout);
-      return { status: findValue(payload, ['verified']) === true ? 'connected' : 'not_connected' };
+      const spec = authSpec(target.entry);
+      const pkg = await this.options.packages.resolveInstalledPackage(target.instance.packageDigest);
+      try {
+        const runnerPath = await verifiedRunner(pkg, spec.runnerPath);
+        const result = await this.run({
+          command: process.execPath,
+          args: [runnerPath, 'auth', 'status', '--json', '--verify'],
+          cwd: pkg.rootDir,
+          env: officialPluginAuthCommandEnvironment(),
+          timeoutMs: STATUS_TIMEOUT_MS,
+        });
+        const payload = parseLarkCliJson(result.stdout);
+        return { status: findValue(payload, ['verified']) === true ? 'connected' : 'not_connected' };
+      } finally {
+        await pkg.release();
+      }
     } catch {
-      return { status: 'not_connected' };
-    } finally {
-      await pkg.release();
+      return {
+        status: 'failed',
+        failureKind: 'status_probe',
+        error: '飞书认证状态暂时无法验证，请稍后重试。',
+      };
     }
   }
 

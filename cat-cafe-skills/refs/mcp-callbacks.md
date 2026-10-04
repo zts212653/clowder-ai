@@ -34,6 +34,12 @@ HTTP callback route 是 MCP tool 的底层实现和维护者调试面，不是 s
 | 更新 workflow 告示牌 | `cat_cafe_update_workflow` | `POST /api/callbacks/update-workflow-sop` |
 | 开多猫 vote | `cat_cafe_start_vote` | `POST /api/callbacks/start-vote` |
 
+## Thread context read intent
+
+`readIntent="history"`（默认）浏览已发布历史，是否已读不影响集合；`responseMode="anchor" | "full"` 独立决定正文投影。
+Freshness 补读用 `readIntent="unread", responseMode="full"`，不加 catId/keyword/messageId/before/after；按原参数跟随 `nextCursor` 到 `hasMore=false`。
+Unread 从同一 user/cat/thread 的 seen 之后向前读，无 seen 时从头开始；全部消费后返回空集合。Anchor 与超大正文锚点不确认 freshness。换意图、limit、投影或其他 scope 参数时须去掉 cursor 开始新读。
+
 ## Tracking registration policy
 
 PR/issue tracking 注册一次，匹配后默认自动续代，不需要再注册。**普通注册只给对象**：PR 是 `repoFullName + prNumber`，issue 是 `repoFullName + issueNumber`。`when`、`goal`、`nextStep` 全部可选（#1392 AC-7）。

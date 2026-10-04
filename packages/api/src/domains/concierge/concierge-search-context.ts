@@ -16,6 +16,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { MessageSearchResponse } from '@cat-cafe/shared';
+import { buildConciergeMessageSearchContext, type ConciergeMessageSearch } from './concierge-message-search.js';
 
 // ---------------------------------------------------------------------------
 // Handle types (KD-23: moved from deleted ConciergeHandleMapStore.ts)
@@ -60,6 +62,7 @@ export interface ConciergeEvidenceItem {
 }
 
 export interface BuildConciergeSearchContextOptions {
+  messageSearch?: ConciergeMessageSearch;
   userMessage: string;
   threadId: string;
   evidenceStore?: ConciergeEvidenceStore;
@@ -67,6 +70,7 @@ export interface BuildConciergeSearchContextOptions {
 }
 
 export interface ConciergeSearchContextResult {
+  messageSearch?: MessageSearchResponse;
   /** Formatted context string for prompt injection. Empty if no results. */
   contextString: string;
   /** Number of handles in the table */
@@ -220,6 +224,14 @@ export async function buildConciergeSearchContext(
   options: BuildConciergeSearchContextOptions,
 ): Promise<ConciergeSearchContextResult> {
   const { userMessage, evidenceStore, maxResults = DEFAULT_MAX_RESULTS } = options;
+
+  if (options.messageSearch)
+    return buildConciergeMessageSearchContext(
+      userMessage,
+      options.messageSearch,
+      maxResults,
+      formatConciergeHandleBinding,
+    );
 
   if (!evidenceStore) {
     return { contextString: '', handleCount: 0, handles: [] };

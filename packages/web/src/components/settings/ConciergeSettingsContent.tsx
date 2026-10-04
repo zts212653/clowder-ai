@@ -14,7 +14,8 @@
 
 import { BALL_SIZE_DEFAULT, BALL_SIZE_MAX, BALL_SIZE_MIN } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { formatCatName, useCatData } from '@/hooks/useCatData';
+import { useCatData } from '@/hooks/useCatData';
+import { formatCompanionPartnerChoice } from '@/lib/companion-partner-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { RadioOption, RangeSlider, TextInput, ToggleSwitch } from './ConciergeSettingsParts';
@@ -180,7 +181,7 @@ export function ConciergeSettingsContent() {
       </SettingsSection>
 
       {/* Section 2: 皮肤 (E2: unlocked — was KD-14 locked in Phase A) */}
-      <SettingsSection title="皮肤" description="切换猫猫球的外观。">
+      <SettingsSection title="皮肤" description="只改变动画外观；所选陪伴者和头像保持不变。">
         <div className="space-y-3">
           <RadioOption
             name="skin"
@@ -204,15 +205,12 @@ export function ConciergeSettingsContent() {
       </SettingsSection>
 
       {/* Section 3: 身份与人设 (KD-6) */}
-      <SettingsSection title="身份与人设" description="自定义猫猫球的名字和性格基调。">
+      <SettingsSection title="身份与人设" description="伴随入口名称固定，性格基调仍可调整。">
         <div className="space-y-4">
-          <SettingsField label="显示名称" hint="猫猫球的名字，最多 50 字。">
-            <TextInput
-              value={state.displayName}
-              maxLength={50}
-              disabled={saving}
-              onCommit={(v) => updateConfig({ displayName: v })}
-            />
+          <SettingsField label="伴随入口名称" hint="猫猫球是固定的伴随入口名称。">
+            <SettingsText as="p" variant="sm">
+              猫猫球
+            </SettingsText>
           </SettingsField>
 
           <SettingsField label="人设基调" hint="一句话描述人设风格，会注入值班猫的 prompt。最多 200 字。">
@@ -226,10 +224,10 @@ export function ConciergeSettingsContent() {
         </div>
       </SettingsSection>
 
-      {/* Section 4: 值班猫 (KD-7) */}
-      <SettingsSection title="值班猫" description="选择哪只猫猫负责前台应答。Provider-agnostic，可配置任意已注册的猫。">
+      {/* Section 4: 陪伴者 (KD-7) */}
+      <SettingsSection title="陪伴者" description="选择与你一起出现、负责前台应答的猫；头像随这项选择改变。">
         <div className="space-y-4">
-          <SettingsField label="值班猫" hint="前台对话由这只猫处理。">
+          <SettingsField label="当前陪伴者" hint="前台对话由这只猫处理；单独换皮肤不会换陪伴者。">
             <select
               value={state.dutyCatProfileId}
               disabled={saving}
@@ -246,12 +244,12 @@ export function ConciergeSettingsContent() {
             >
               {staleDutyCat && (
                 <option key={staleDutyCat.id} value={staleDutyCat.id} disabled>
-                  {formatCatName(staleDutyCat)} · {staleDutyCat.id} — 不可用
+                  {formatCompanionPartnerChoice(staleDutyCat)} · {staleDutyCat.id} — 不可用
                 </option>
               )}
               {availableCats.map((cat) => (
                 <option key={cat.id} value={cat.id}>
-                  {formatCatName(cat)} · {cat.id}
+                  {formatCompanionPartnerChoice(cat)} · {cat.id}
                 </option>
               ))}
             </select>

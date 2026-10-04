@@ -191,7 +191,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
 
     expect(container.querySelectorAll('.cli-output-md').length).toBe(0);
     expect(container.textContent).not.toContain(THINKING_TEXT);
-    expect(container.textContent).toContain('Thinking: 恢复中');
+    expect(container.textContent).toContain('思考过程: 恢复中');
     expect(container.textContent).toContain('恢复中...');
 
     act(() => {
@@ -340,7 +340,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
 
-    const collapseButton = findBubbleToggleButton('Thinking', '折叠');
+    const collapseButton = findBubbleToggleButton('思考过程', '折叠');
     expect(collapseButton).toBeTruthy();
 
     await act(async () => {
@@ -409,7 +409,7 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
     expect(container.querySelectorAll('.cli-output-md').length).toBeGreaterThanOrEqual(1);
 
-    const collapseButton = findBubbleToggleButton('Thinking', '折叠');
+    const collapseButton = findBubbleToggleButton('思考过程', '折叠');
     expect(collapseButton).toBeTruthy();
 
     await act(async () => {

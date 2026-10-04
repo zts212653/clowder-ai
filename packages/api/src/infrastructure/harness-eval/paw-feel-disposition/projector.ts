@@ -1,6 +1,7 @@
 import type { PawFeelDispositionEvent, PawFeelDispositionProjection, PawFeelDispositionState } from '@cat-cafe/shared';
 import {
   assertBlockedResumeCondition,
+  preserveActiveRepairIdentity,
   transitionBlockerReopened,
   transitionRepairOutcome,
 } from './projection/projector-continuation-transitions.js';
@@ -157,8 +158,10 @@ function transitionBlocked(
 ): PawFeelDispositionProjection {
   requireActionableTransition(projection, event);
   assertBlockedResumeCondition(projection, event);
+  const repairIdentity = preserveActiveRepairIdentity(projection);
   return {
     ...clearPriorResponsibility(projection),
+    ...repairIdentity,
     state: 'blocked',
     blocker: { code: event.blockerCode, ref: event.blockerRef },
     ...(event.resumeCondition
@@ -284,7 +287,21 @@ function applyProjectedEvent(
   };
 }
 
-export function projectPawFeelDisposition(rawEvents: readonly PawFeelDispositionEvent[]): PawFeelDispositionProjection {
+export function projectPawFeelDisposition(
+  rawEvents: readonly PawFeelDispositionEvent[],
+  initial?: PawFeelDispositionProjection,
+): PawFeelDispositionProjection {
+  if (initial) {
+    let projection = initial;
+    for (const rawEvent of rawEvents) {
+      projection = applyProjectedEvent(
+        projection,
+        parsePawFeelDispositionEvent(rawEvent),
+        Date.parse(projection.lastTransitionAt),
+      ).projection;
+    }
+    return projection;
+  }
   if (rawEvents.length === 0) fail('discovered event is required');
   const events = rawEvents.map(parsePawFeelDispositionEvent);
   const opened = events[0];

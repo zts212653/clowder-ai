@@ -1,0 +1,229 @@
+{
+  "kind": "measurement_plan",
+  "summary": "56公开条件、两场live和18点校准已采集；PR4492与Terra413完成实现/原件/字幕的有限独立审阅，2026-09-16准备修订记录了31文件hash、56条件与18000轨迹tick复算一致。本次只收准对象边界和表述，未重跑比赛或上述归档复算；正式测量有效性不因实现审阅或内容修订升级。",
+  "gtSources": [
+    {
+      "sourceKey": "physical-record",
+      "category": "real_world_outcome",
+      "label": "实际执行的MuJoCo仿真原件（非真实硬件）",
+      "collection": {
+        "state": "collected",
+        "method": "渠道：实际MuJoCo仿真 + 自建公开场景benchmark。run.py保存manifest、200Hz事件、50Hz轨迹、观察与SIM/WALL录像；完整归档索引含56条件和两场live，校验只读原件不重跑比赛。",
+        "sourceRef": {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+        }
+      },
+      "validity": {
+        "state": "needs_review",
+        "detail": "Terra413已核26测试、31文件hash、56结果、18000轨迹tick与12个派生产物可重建；原生/观测器parity属有限实现证据。正式claim适用性、独立校准角色、完整协作/净收益及F267测量资格尚缺，继续待核，不把实现APPROVE写成正式有效。",
+        "proofRefs": [
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+          }
+        ]
+      },
+      "missingOrDisputed": [
+        "仿真不是硬件；sensor/state是不同局部观察与控制组合，不能单独归因给猫。",
+        "31hash等校验不证明统计足量、真机迁移或完整协作。",
+        "当前F307是否能解析每个Git历史引用以读面source状态为准，不能因本地可读就编造owner回执。"
+      ],
+      "cost": {
+        "payer": "本项目执行",
+        "detail": "M4 Max本地有界实验，无云端训练或新权重。"
+      }
+    },
+    {
+      "sourceKey": "placed-ball-calibration",
+      "category": "domain_precedent",
+      "label": "18个已知球位的接触正例与裁判反例",
+      "collection": {
+        "state": "collected",
+        "method": "渠道：自建摆球校准夹具 + MuJoCo接触事件；双脚各9个已知球位，与踢空、半球过线、门外/高球等反例分列。读取旧夹具原件，本轮不重跑。",
+        "sourceRef": {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+        }
+      },
+      "validity": {
+        "state": "needs_review",
+        "detail": "18/18正例及有限实现审阅已在；仅支持这些夹具中的指定脚接触和量具边界，不支持自主接近/协作成功率，未补正式独立校准证书。",
+        "proofRefs": [
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/calibrate.py"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_physics.py"
+          }
+        ]
+      },
+      "missingOrDisputed": ["摆球夹具不证明自主接近/协作。"],
+      "cost": {
+        "payer": "本项目执行",
+        "detail": "本地几秒量级，可复跑。"
+      }
+    },
+    {
+      "sourceKey": "viewer-feedback",
+      "category": "business_fact",
+      "label": "You及演示观看者的体验判断",
+      "collection": {
+        "state": "not_connected",
+        "method": "渠道：用户真实观看与业务反馈；34.5秒选段和完整120/240秒录像已交付，但尚未取得本次体验价值的真实判断。"
+      },
+      "validity": {
+        "state": "unknown",
+        "detail": "观看者体验判断仍未知；素材送达、UI设计放行、代码审阅均不替代满意或PREP5验收。"
+      },
+      "missingOrDisputed": ["不能代填有趣/满意/验收。"],
+      "cost": {
+        "payer": "You/观看者",
+        "detail": "34.5秒选段或完整120/240秒回合。"
+      }
+    }
+  ],
+  "conditions": [
+    {
+      "itemId": "version-freeze",
+      "label": "版本与观察域冻结",
+      "category": "实验条件",
+      "recommendation": {
+        "summary": "保持既有比较条件，明确候选实际改变哪些层。",
+        "reason": "身体执行、有限协议、场景与判定都是解释比较结果的条件；按316及720保留这些边界，可避免把多项同时变化误写成猫的独立收益。",
+        "basisRefs": [
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+          },
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789635982467-000720-8ada8be9"
+          },
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789709613092-000029-b97dfee1"
+          }
+        ]
+      },
+      "existingWork": {
+        "summary": "实际源码/模型/场景hash和56公开条件已归档；原始录像及字幕派生hash经独立核验。",
+        "sourceRefs": [
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+          },
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+          }
+        ]
+      },
+      "decision": {
+        "state": "fixed",
+        "reason": "沿316固定权重、身体执行配置、场景、现有事件判定与记录；有限协议沿720的拆分技术确认保持固定。保留sensor/state对照和原始失败，不新增训练或评估轮。",
+        "responsibility": {
+          "kind": "cat",
+          "basis": "technical"
+        },
+        "basisRefs": [
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+          },
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789635982467-000720-8ada8be9"
+          }
+        ]
+      },
+      "scope": "固定Lab54989dff、官方权重身份、身体执行配置、有限指令协议、球场、现有事件判定与记录链；sensor/state输入域及控制组合分列。原数据固定，仅可整理派生分析；局部控制或未来软战术方法变化另列实际干预版本。",
+      "why": "相同的比分或触球统计可能来自不同身体、观察域和执行条件；比较前必须说明保留了哪些条件、实际改变了哪个组合。",
+      "modifiability": {
+        "state": "modifiable",
+        "reason": "已有隔离候选准备权限保留；本轮选择固定比较条件，选择不扩权，不改旧原件或正式owner状态。",
+        "basisRefs": [
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789007417188-000793-aa0bfb94"
+          },
+          {
+            "ownerFeatureId": "F117",
+            "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+          },
+          {
+            "ownerFeatureId": "F311",
+            "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/README.md"
+          }
+        ]
+      },
+      "sourceRefs": [
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789373591565-000316-1350ca00"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/manifest.json"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789635982467-000720-8ada8be9"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789709613092-000029-b97dfee1"
+        }
+      ],
+      "nextAction": "后续候选明确列变量、原件与新结果；本轮已核现有事实，不因没有活跃实验把已有工作显示成未做。"
+    }
+  ],
+  "comparison": {
+    "unit": "完整场景/对局为单位",
+    "primaryVariable": "先比较局部sensor与state反馈组合；猫的独立战术收益另行对照。",
+    "controls": [
+      "同一Lab、官方动作权重与身体执行配置",
+      "同seed、同规则、每场60秒",
+      "两队使用同种局部技能",
+      "全部未尝试与失败保留",
+      "有限协议沿720保持现行边界；实际变更必须另列版本"
+    ],
+    "developmentEvidence": "seed793–800为公开探针；seed793用于候选诊断与live录像。",
+    "independentHoldout": "801–808在候选冻结后首次用于公开复验，但目前已公开且被用于诊断；不能再次充当未暴露promotion holdout。未来封存/新鲜独立样本、量与校准均未确定。",
+    "repeatability": "既有种子、场景、源码/模型hash和物理原件支持限定范围复核；字幕派生产物已有独立字节级重建。墙钟和LLM响应不保证确定重复，未宣称重跑比赛可逐tick复现。"
+  },
+  "unknowns": [
+    "原生感知与state候选不是单变量因果分解；猫净贡献尚未单独证明。",
+    "完整联赛样本量、传接规则与独立校准/正式证书仍缺。",
+    "新增训练资源、两猫比较方案和观看者真实反馈未决定或未取得。",
+    "GT来源category沿旧记录保留为来源分类；模拟器/benchmark/观看是渠道，verifiable/open_value等是逐claim的判定域，两者不可互换。",
+    "软战术方法尚未形成独立版本化资产；不能为后续比较预填方法版本或逐轮加载证据。依据原作者720与029。"
+  ],
+  "nextAction": "沿八项对象边界整理局部控制失败与指令时效证据，明确实际可比较的干预组合。采集事实、GT判定域、来源可读性与正式测量资格分别回读；未决的校准、协作量尺和观看反馈保持待核，本次不启动新实验。"
+}

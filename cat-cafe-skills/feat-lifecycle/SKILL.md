@@ -96,28 +96,36 @@ search_evidence("{topic}", scope="all")  # 找历史讨论 + thread
 
 5. **Commit**：`docs(F042): kickoff {名称} [{猫猫签名}]`，body 含 What/Why
 
-6. **创建毛线球任务**（F160 Phase C）：立项 commit 后，调用 `cat_cafe_create_task` 为当前 thread 创建跟踪任务：
-   - title: `完成 F{NNN}: {Feature 名称}`
-   - why: 从 spec Why 节摘 1 句核心痛点
-   - 不要为 trivial feature（≤1 file 改动、无 Phase 拆分）创建任务
+6. **接住已获准的开发工作**：立项已接受且用户授权开工，或回原线程继续一个 Phase 时，加载
+   `custody-recognition`，先用 `cat_cafe_resolve_development_work` 解析，再用 `cat_cafe_development_work` admit/resume/adopt/bind。
+   scope 来自已接受 Feature/Phase 的 committed revision；先复用原现场已有工作。已有 generic Task
+   用 owner 返回的快照 adopt，已有 entrusted Task 缺 scope 则 bind，保留原 id、来源和历史。
+   不再并行调用 `cat_cafe_create_task` 建一张 tracking 镜像。
 
-   **Gotcha**: 只在有 threadId 的会话中创建。operator在非 thread 环境立项（如 BACKLOG 批量整理）时跳过此步。
+   文档立项、BACKLOG 整理或讨论未来 Phase 本身不等于授权开工。无 Phase 的小改动/非 Feature
+   托付沿 `custody-recognition` 的通用入口，不能虚构 Phase。明确授权不再问一次“是否托付”；
+   typed receipt 返回后继续实际开发与材料交付。新 Phase 需自己的授权范围，不复活终态。
 
-### 立项愿景硬度自检（F216→F219 教训）🔴
+   **Gotcha**：责任留在原猫原线程；`scope_unavailable_here` 不能当作“没有 Task”再新建。
+   普通 Git URL 不自动成为 prepared Artifact；无业务时间不造 DDL，真实需要人判断才进入 Needs Me。
+
+### 把愿景写成可判断的目标（F216→F219 教训）
 
 > **为什么**：F216 立项 Why 写"降 complexity"，AC 却落成"修 bug + 可测性"，两者执行中悄悄分叉，直到 close 前愿景守护才发现 gap。根因是**立项时愿景表述不够硬 + 交接丢上下文**（operator 2026-06-02）。这是 LL-067（后半段被前半段工程量吃）/ LL-069（scope 跟"自我解读"走不跟 spec 走）在**立项时刻**的前置防线——审计时才抓分叉太晚，立项就钉死。
 
-Step 2 写完 spec，Why / 现状 / AC 逐条过这道自检：
+写 AC 前先判断目标是否足够清楚、是否在可承诺范围内。像“帮我赚一个小目标”要先澄清条件与合理工作范围，不能直接捏造一个可打勾的替代目标。已有明确 issue / 讨论结论则沿用，不重复采访。具体反例见[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)。
 
-| 维度 | 硬要求 | 反模式（F216 踩过） |
+Step 2 写完 spec，用 Why / 现状 / AC 检查理解有没有走样：
+
+| 维度 | 判断重点 | 反模式（F216 踩过） |
 |------|--------|--------------------|
 | **愿景 Why** | 用**价值**语言一句话说清要解决什么 | 用"技术动作"冒充愿景（"重构 X" ❌；"X 每加功能就 7 轮 review" ✅） |
 | **真实现状** | 带**实测证据**（complexity / 行数 / 复现 / hotfix 频次），不美化 | "感觉这块乱"（给数据不给感觉，`feedback_no_classifier`） |
-| **完成判据 AC** | 每条能 **trace 回 Why** + **非作者可复核**（命令/数字/截图） | 重构类 AC 落成"提了可测性就算"（F216 AC-B2：complexity 没降也宣布达成） |
+| **完成判据 AC** | 约定的使用结果与重要边界能由非作者结合实际路径、输出或实物判断；测试只证明其中可确定的行为 | 把接口/字段已增加当用户能力已交付，或把不可保证的业务结果硬写成二元 AC |
 
-**两条硬规则**：
-1. **AC↔Why 同源**——每条 AC 指得回 Why 的某诉求；指不回 = 删 AC 或补 Why。AC 覆盖不了 Why = 愿景虚高。
-2. **Handoff 重写愿景**——从别的 thread/feat 交接立项时，**用本 feat 自己的语言重写 Why**，不继承上游模糊表述（交接丢上下文是 F216 分叉直接成因）。
+这里需要猫的判断：AC 是否遗漏了原诉求，或反过来扩大了目标？不能为了迁就实现而改 Why。交接时用接手者能理解的语言解释已接受的目标，并保留原始来源；重新表述不能替代或缩小原约定。并非所有愿景都适合机械化成 AC，先解决真实歧义，再选择足以判断结果的表达。
+
+核实确属原诉求遗漏就补 AC；确属无依据的扩张就删去，或在确需改变目标时拿具体取舍与用户澄清，不能改写 Why 给已有实现找理由。
 
 承载点：现状写进模板 `## Current State / 现状基线` 段；AC↔Why 自检见模板 `## Acceptance Criteria` 段顶部 comment（均在 feature-doc-template「模板正文」内，随复制进入新 spec）。自检不过 → 回 Step 2 改 spec，不进 Step 3。
 
@@ -212,7 +220,7 @@ Clowder AI 产品壳，展示主旅程、默认状态与窄屏状态，并逐项
 
 若本轮声明已接入真实产品或具备成熟文档编辑能力，必须同时提交 `docs/design-gate-claims/<id>.json`。命令会消费该文件并核验真实入口→宿主→surface 的逐跳 import/mount；编辑器 claim 另核验 manifest 引擎依赖、adapter 的五项实现 token 与实际挂载，并拒绝原生输入框。没有 product/editor claim 的普通 demo 不需要为了过门补空 contract。
 
-**产品宿主与编辑器 claim 证据（同属现有 Design Gate）**：若交付声称已进入现有 Workspace / Collective，必须记录**真实产品宿主**的用户入口、目标组件路径与**宿主挂载证据**；单独 `/dev` route、自造导航或**独立复制壳**只能算组件实验，不能推进正式后端阶段。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full。若交付声称共同编辑文档、稳定选区批注、Agent patch 审阅或版本撤销，必须点名**成熟编辑器引擎**并覆盖 `human_edit / selection_anchor / annotation / patch_review / version_undo` 五项**编辑器适配契约**；原生 `textarea`、`contenteditable` 或分段输入框不能冒充文档编辑器。
+**产品宿主与编辑器 claim 证据（同属现有 Design Gate）**：若交付声称已进入现有 Workspace / Collective，必须记录**真实产品宿主**的用户入口、目标组件路径与**宿主挂载证据**；单独 `/dev` route、自造导航或**独立复制壳**只能算组件实验，不能推进正式后端阶段。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full（此处的 full 指不能只走文档校验；S2 #4669 起 canonical gate 按冻结 diff 生成 `VerificationPlan`——旅程文件或其宿主源码变化即把该 journey 列入 merge 前必跑的 `requiredUnitIds`，覆盖缺口退出码 3 不标绿；全套旅程留给显式 `test:browser` 的 Design Gate 验收与 alpha 逐 revision 验证，细则以 `merge-gate` skill「浏览器验证政策」为准）。若交付声称共同编辑文档、稳定选区批注、Agent patch 审阅或版本撤销，必须点名**成熟编辑器引擎**并覆盖 `human_edit / selection_anchor / annotation / patch_review / version_undo` 五项**编辑器适配契约**；原生 `textarea`、`contenteditable` 或分段输入框不能冒充文档编辑器。
 
 **架构归属一问（F191）🔴**：
 

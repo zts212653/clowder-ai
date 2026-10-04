@@ -45,11 +45,25 @@ export interface CatColor {
  */
 export interface AgyProfileConfig {
   readonly enabled?: boolean;
+  /** F325 staged migration: each profile has exactly one selected execution carrier. */
+  readonly carrier?: 'legacy' | 'native';
   readonly profileId?: string;
   readonly homeRoot?: string;
   readonly model?: string;
   readonly autoApprove?: boolean;
   readonly trustedWorkspaces?: readonly string[];
+  /** Operator-issued P1 coding grant bound to one durable entrusted Task and worktree. */
+  readonly nativeCodingGrant?: AgyNativeCodingGrantConfig;
+}
+
+export interface AgyNativeCodingGrantConfig {
+  readonly threadId: string;
+  readonly taskId: string;
+  readonly workUnitRef: string;
+  readonly acceptedRevision: string;
+  readonly workspaceRoot: string;
+  readonly writableFiles: readonly string[];
+  readonly testFile: string;
 }
 
 /**

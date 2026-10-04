@@ -29,12 +29,16 @@ describe('F293 Phase B ownership guard', () => {
     expect(definitions).toEqual(['src/components/routing-context/TeamWorkspacePanel.tsx']);
 
     const f284 = source('src/components/WorkspacePanel.tsx');
+    // F309 split the F307 shell: workspace destinations (Team included) render in their own owner file.
     const f307 = source('src/components/workbench/F307OwnerSurfaceRenderer.tsx');
+    const f307Destination = source('src/components/workbench/F307WorkspaceDestinationOwnerSurface.tsx');
     expect(f284).toContain("workspaceMode === 'team'");
     expect(f284).toContain('workspaceOpenRequest={workspaceOpenRequest}');
     expect(f284).not.toContain('<TeamWorkspacePanel');
-    expect(f307).toContain("surface.objectRef.id === 'mode:team'");
-    expect(f307).toContain('<TeamWorkspacePanel');
+    expect(f307).toContain('<WorkspaceDestinationOwnerSurface');
+    expect(f307).not.toContain('<TeamWorkspacePanel');
+    expect(f307Destination).toContain("surface.objectRef.id === 'mode:team'");
+    expect(f307Destination).toContain('<TeamWorkspacePanel');
   });
 
   it('keeps Settings ledger read-only and routes every writer to Team', () => {

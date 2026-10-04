@@ -21,6 +21,7 @@ import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { ApprovalDecisionCard, type ApprovalDecisionDetails } from './ApprovalDecisionCard';
 import { ApprovalFeatureBadge } from './ApprovalFeatureBadge';
+import { useApprovalHost, useGuardedWrite, useReportEditing } from './ApprovalHost';
 import { ApprovalTechnicalDetailContent } from './ApprovalTechnicalDetails';
 import { GenericApprovalDecisionActions } from './GenericApprovalDecisionActions';
 import { GenericApprovalRecommendation } from './GenericApprovalRecommendation';
@@ -62,9 +63,14 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
   const [feedbackDialogError, setFeedbackDialogError] = useState<string | null>(null);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  const guardedWrite = useGuardedWrite();
+  const { writesLocked } = useApprovalHost();
+  // A feedback dialog that is open is a decision in progress, whether or not a word has been typed yet.
+  useReportEditing('feedback-dialog', feedbackDialogOpen);
+
   const handleApprove = useCallback(() => {
-    void approveProposal(item.proposalId);
-  }, [approveProposal, item.proposalId]);
+    void guardedWrite('approve', () => approveProposal(item.proposalId));
+  }, [approveProposal, guardedWrite, item.proposalId]);
 
   const handleReject = useCallback(() => {
     if (usesFeedbackDialog) {
@@ -73,29 +79,33 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
       setFeedbackDialogOpen(true);
       return;
     }
-    void rejectProposal(item.proposalId);
-  }, [item.proposalId, rejectProposal, usesFeedbackDialog]);
+    void guardedWrite('reject', () => rejectProposal(item.proposalId));
+  }, [guardedWrite, item.proposalId, rejectProposal, usesFeedbackDialog]);
 
   const handleEntityResolution = useCallback(
     (resolution: EntityConflictResolutionRequest) => {
-      void resolveEntityConflict(item.proposalId, resolution);
+      void guardedWrite('entity-resolve', () => resolveEntityConflict(item.proposalId, resolution));
     },
-    [item.proposalId, resolveEntityConflict],
+    [guardedWrite, item.proposalId, resolveEntityConflict],
   );
 
   const submitReject = useCallback(
     async (feedback: HumanDispositionFeedbackInput | undefined) => {
-      setFeedbackSubmitted(true);
-      setFeedbackDialogError(null);
-      const success = await rejectProposal(item.proposalId, feedback);
-      if (success) {
+      // Refused by the host (writes are locked): nothing was sent, so the dialog stays as the user left it.
+      const written = await guardedWrite('reject-feedback', async () => {
+        setFeedbackSubmitted(true);
+        setFeedbackDialogError(null);
+        return rejectProposal(item.proposalId, feedback);
+      });
+      if (!written.sent) return;
+      if (written.value) {
         setFeedbackDialogOpen(false);
         setFeedbackSubmitted(false);
         return;
       }
       setFeedbackDialogError('拒绝失败，请检查提案状态后重试。');
     },
-    [item.proposalId, rejectProposal],
+    [guardedWrite, item.proposalId, rejectProposal],
   );
 
   const f225HandoffDetails =
@@ -108,6 +118,7 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
   const f221TasteEvidence =
     item.sourceFeatureId === 'F221'
       ? formatDetailLines([
+          ['猫的判断（假设）', item.detail.takeaway],
           ['场景', item.detail.scene],
           ['引用', item.detail.quote],
         ])
@@ -156,7 +167,7 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
       <ApprovalDecisionCard
         testId={`approval-item-${item.proposalId}`}
         header={header}
-        title={approvalDisplayTitle(item)}
+        title={approvalDisplayTitle(item, { resolveCatName })}
         actionReason={
           item.resolution === 'open' ? (
             <>由 {resolveCatName(item.requesterCatId)} 发起，需要你作出决定。</>
@@ -174,6 +185,7 @@ export function GenericApprovalItemCard({ item }: { item: ApprovalHubItem }) {
           reasonCodes={feedbackReasonCodes}
           subjectLabel={item.summary}
           submitting={decidingState === 'rejecting'}
+          submitLocked={writesLocked}
           error={feedbackSubmitted ? (feedbackDialogError ?? decisionError) : null}
           onCancel={() => {
             setFeedbackDialogOpen(false);

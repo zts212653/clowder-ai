@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useThemeStore } from '@/stores/themeStore';
+import { writeShellPresentation } from './shell/shell-presentation';
 
 export function PaletteIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
@@ -125,6 +126,19 @@ export function ThemeMenu({ onEditTheme }: Props) {
               </div>
             );
           })}
+          <div className="border-t border-[var(--console-border-soft)] pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                writeShellPresentation('v2');
+                setOpen(false);
+              }}
+              data-testid="try-new-shell"
+              className="w-full text-left px-2.5 py-1.5 text-cafe-muted hover:text-cafe rounded-md hover:bg-[var(--console-hover-bg)]"
+            >
+              试用新版界面
+            </button>
+          </div>
           {customCount < 2 && (
             <div className="border-t border-[var(--console-border-soft)] pt-1">
               <button

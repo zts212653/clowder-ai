@@ -6,15 +6,16 @@ import {
   collectiveClientHtml,
   resolveCollectiveClientAsset,
 } from '@cat-cafe/collective-client';
+import { routeCollaborationPost } from './collaboration-http-routes.js';
 import { CollectiveServiceError } from './errors.js';
 import type { GitHubAppManifestSetup } from './github-app-manifest-setup.js';
 import { routeGitHubAppSetupGet, routeGitHubAppSetupPost } from './github-app-setup-routes.js';
+import { routeCollectiveRead } from './http-read-routes.js';
 import {
   applySecurityHeaders,
   clearHumanAuthCompletionCookie,
   forbiddenOrigin,
   normalizedOrigin,
-  numberQuery,
   optionalBearer,
   parseHumanAuthIntent,
   readJsonBody,
@@ -127,51 +128,7 @@ async function routeGet(
     }
     return;
   }
-  if (url.pathname === '/api/me') {
-    writeJson(response, 200, await store.getHumanProjection(requireBearer(request)));
-    return;
-  }
-  if (url.pathname === '/api/events/human') {
-    const collectiveId = requiredQuery(url, 'collectiveId');
-    writeJson(response, 200, {
-      serviceInstanceId: store.serviceInstanceId,
-      collectiveId,
-      events: await store.listEventsForHuman(requireBearer(request), collectiveId),
-    });
-    return;
-  }
-  if (url.pathname === '/api/participants') {
-    writeJson(response, 200, {
-      participants: store.listParticipants(requireBearer(request), requiredQuery(url, 'collectiveId')),
-    });
-    return;
-  }
-  if (url.pathname === '/api/participation') {
-    writeJson(
-      response,
-      200,
-      store.readParticipationDeclaration(requireBearer(request), {
-        serviceInstanceId: requiredQuery(url, 'serviceInstanceId'),
-        collectiveId: requiredQuery(url, 'collectiveId'),
-        connectionId: requiredQuery(url, 'connectionId'),
-      }),
-    );
-    return;
-  }
-  if (url.pathname === '/api/events/endpoint') {
-    writeJson(
-      response,
-      200,
-      await store.pollEvents(requireBearer(request), {
-        serviceInstanceId: requiredQuery(url, 'serviceInstanceId'),
-        collectiveId: requiredQuery(url, 'collectiveId'),
-        connectionId: requiredQuery(url, 'connectionId'),
-        afterSequence: numberQuery(url, 'afterSequence', 0),
-        limit: numberQuery(url, 'limit', 100),
-      }),
-    );
-    return;
-  }
+  if (await routeCollectiveRead(store, url, request, response)) return;
   routeClientFallback(url, response);
 }
 
@@ -217,6 +174,7 @@ async function routePost(
   if (await routeGitHubAppSetupPost(store, githubAppSetup, url.pathname, request, response, body)) return;
   if (await routeIdentityPost(store, bootstrapLinkPath, url.pathname, request, response, body)) return;
   if (await routeConnectionPost(store, allowedOrigins, url.pathname, request, response, body)) return;
+  if (await routeCollaborationPost(store, url.pathname, request, response, body)) return;
   if (await routeEventPost(store, url.pathname, request, response, body)) return;
   writeJson(response, 404, { error: { code: 'NOT_FOUND', message: 'Route not found' } });
 }
@@ -253,6 +211,15 @@ async function routeIdentityPost(
     );
   } else if (pathname === '/api/join') {
     writeJson(response, 201, await store.joinInvite(requireFields(body, ['inviteToken', 'displayName'])));
+  } else if (pathname === '/api/memberships/self-leave') {
+    writeJson(
+      response,
+      200,
+      await store.leaveCollective({
+        sessionToken: requireBearer(request),
+        collectiveId: requiredString(body, 'collectiveId'),
+      }),
+    );
   } else if (pathname === '/api/auth/github/begin') {
     const result = await store.beginHumanAuth({
       provider: 'github',

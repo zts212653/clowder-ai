@@ -14,6 +14,7 @@
  */
 
 import type { CodexPetState, ConciergeBallState, PetBehaviorOutput } from '@cat-cafe/shared';
+import { type BallReservedRect, resolveBallPosition } from './ball-position';
 
 // ---------------------------------------------------------------------------
 // Timing constants (exported for test assertions)
@@ -150,6 +151,11 @@ export interface AmbientBehaviorInput {
   viewport: { width: number; height: number };
   /** current ball position */
   ballPosition: { x: number; y: number };
+  /** Host collision constraints; production supplies them as one contract. */
+  ballSize: number;
+  edgeMargin: number;
+  toolbarBelow: number;
+  reservedRects: readonly BallReservedRect[];
 }
 
 /**
@@ -285,11 +291,20 @@ function computeWalkDelta(input: AmbientBehaviorInput): { dx: number; dy: number
     }
   }
 
-  // Viewport boundary clamping — don't walk off-screen
-  const finalX = Math.max(0, Math.min(input.viewport.width, input.ballPosition.x + dx));
-  const finalY = Math.max(0, Math.min(input.viewport.height, input.ballPosition.y + dy));
-  dx = finalX - input.ballPosition.x;
-  dy = finalY - input.ballPosition.y;
+  // Production walks use the same viewport + Host reservation authority as
+  // default, drag, resize and render-time position resolution.
+  const resolved = resolveBallPosition(
+    { x: input.ballPosition.x + dx, y: input.ballPosition.y + dy },
+    {
+      viewport: input.viewport,
+      ballSize: input.ballSize,
+      edgeMargin: input.edgeMargin,
+      toolbarBelow: input.toolbarBelow,
+      reservedRects: input.reservedRects,
+    },
+  );
+  dx = resolved.x - input.ballPosition.x;
+  dy = resolved.y - input.ballPosition.y;
 
   // If clamping zeroed the delta, skip the walk
   if (dx === 0 && dy === 0) return null;

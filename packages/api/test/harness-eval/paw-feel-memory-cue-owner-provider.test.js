@@ -182,6 +182,7 @@ describe('F313/F287 concrete memory-cue direct-repair owner provider', () => {
       applyMigrations(db);
       const episodeStore = new MemoryCueEpisodeStore(db, { nowIso: () => '2026-09-09T00:00:03.000Z' });
       const sourceVerifier = new PawFeelDirectRepairSourceVerifier({
+        ownerUserId: OWNER_USER_ID,
         messageStore: messageStore(),
         classifyTool: defaultPawFeelSourceToolClassifier,
       });

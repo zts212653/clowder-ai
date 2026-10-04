@@ -181,6 +181,11 @@ export class ProjectContentOwnerService {
     return state.receipts.map((receipt) => ({ ...receipt, actor: { ...receipt.actor } }));
   }
 
+  /** Internal owner lookup; callers must reauthorize each resulting publication before exposing it. */
+  findSourcePublications(input: Parameters<ProjectContentOwnerStore['findSourcePublications']>[0]) {
+    return this.store.findSourcePublications(input);
+  }
+
   private async commit(input: {
     readonly contentRef: string;
     readonly previousState: ProjectContentStateV1 | undefined;

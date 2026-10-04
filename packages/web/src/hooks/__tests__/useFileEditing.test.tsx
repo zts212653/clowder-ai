@@ -85,4 +85,31 @@ describe('useFileEditing owner binding', () => {
     );
     expect(useChatStore.getState().workspaceEditToken).toBe('ambient-token');
   });
+  it('uses the draft base for CAS and returns only an actual matching file receipt', async () => {
+    await act(async () => root.render(<Harness />));
+    await act(async () => {
+      await editing?.handleToggleEdit();
+    });
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ path: 'src/owner.ts', sha256: 'b'.repeat(64) }),
+    });
+    let receipt: unknown;
+    await act(async () => {
+      receipt = await editing?.handleSave('draft text', { baseSha256: 'a'.repeat(64) });
+    });
+    const payload = JSON.parse(mocks.apiFetch.mock.calls.at(-1)![1].body);
+    expect(payload.baseSha256).toBe('a'.repeat(64));
+    expect(receipt).toEqual({ path: 'src/owner.ts', sha256: 'b'.repeat(64) });
+    expect(fetchFile).toHaveBeenCalledWith('src/owner.ts');
+    mocks.apiFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ path: 'other.ts', sha256: 'c'.repeat(64) }),
+    });
+    await act(async () => {
+      receipt = await editing?.handleSave('another edit', { baseSha256: 'b'.repeat(64) });
+    });
+    expect(receipt).toBeUndefined();
+    expect(editing?.saveError).toContain('回执尚未核验');
+  });
 });

@@ -1,9 +1,9 @@
 import type {
   AutomationState,
+  GitHubWaitOutcomeV1,
   IssueWaitAutomationState,
   PrAutomationState,
   TaskItem,
-  WaitOutcomeV1,
   WaitTerminationActor,
   WaitTerminationEventV1,
 } from '@cat-cafe/shared';
@@ -54,7 +54,7 @@ export interface GitHubWaitObservation {
 export interface GitHubWaitNotified {
   readonly kind: 'notified';
   readonly task: TaskItem;
-  readonly outcome: WaitOutcomeV1;
+  readonly outcome: GitHubWaitOutcomeV1;
   readonly messageId: string;
   readonly content: string;
 }
@@ -124,7 +124,7 @@ function mergeCollectorState(
   };
 }
 
-function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTerminationEventV1 {
+function lifecycleEvent(task: TaskItem, outcome: GitHubWaitOutcomeV1): WaitTerminationEventV1 {
   if (!task.userId || !task.ownerCatId) {
     throw new Error(`GitHub wait ${task.id} has no canonical owner identity`);
   }
@@ -145,7 +145,7 @@ function lifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): WaitTermination
   };
 }
 
-function pendingOutcome(task: TaskItem): WaitOutcomeV1 | null {
+function pendingOutcome(task: TaskItem): GitHubWaitOutcomeV1 | null {
   const outcome = task.automationState?.waitOutcome;
   return outcome?.delivery === 'pending' ? outcome : null;
 }
@@ -369,7 +369,7 @@ export class GitHubWaitLifecycleService {
     return flushed;
   }
 
-  async recordOutcomeEvent(task: TaskItem, outcome: WaitOutcomeV1): Promise<void> {
+  async recordOutcomeEvent(task: TaskItem, outcome: GitHubWaitOutcomeV1): Promise<void> {
     await this.appendLifecycleEvent(task, outcome);
   }
 
@@ -401,7 +401,7 @@ export class GitHubWaitLifecycleService {
     return { kind: 'deduped', reason: 'generation_changed_concurrently' };
   }
 
-  private async appendLifecycleEvent(task: TaskItem, outcome: WaitOutcomeV1): Promise<void> {
+  private async appendLifecycleEvent(task: TaskItem, outcome: GitHubWaitOutcomeV1): Promise<void> {
     if (!this.opts.eventLog) return;
     try {
       await this.opts.eventLog.append(lifecycleEvent(task, outcome));
@@ -412,7 +412,7 @@ export class GitHubWaitLifecycleService {
 
   private async publishPending(
     task: TaskItem,
-    outcome: WaitOutcomeV1,
+    outcome: GitHubWaitOutcomeV1,
     deliveryExtra?: ConnectorDeliveryInput['extra'],
   ): Promise<GitHubWaitLifecycleResult> {
     if (!parseWaitOwnerFence(outcome.ownerFence)) {
@@ -464,7 +464,7 @@ export class GitHubWaitLifecycleService {
 
   private async quarantineLegacyUnfencedOutcome(
     task: TaskItem,
-    outcome: WaitOutcomeV1,
+    outcome: GitHubWaitOutcomeV1,
   ): Promise<GitHubWaitLifecycleResult> {
     this.opts.log.warn(
       { taskId: task.id, outcomeId: outcome.outcomeId },

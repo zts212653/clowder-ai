@@ -55,13 +55,13 @@ function assertEvidenceOutputPath(repoRoot: string, requested: string, expectedF
   return output;
 }
 
-export function runF286McpSchemaDeliveryProbe(argv: readonly string[]): {
+export async function runF286McpSchemaDeliveryProbe(argv: readonly string[]): Promise<{
   readonly attestation: unknown;
   readonly digest?: string;
   readonly output?: string;
-} {
+}> {
   const args = parseArgs(argv);
-  const hostVersion = args['host-version'] ?? getMemoizedMcpHostVersion(args['host-command']);
+  const hostVersion = args['host-version'] ?? (await getMemoizedMcpHostVersion(args['host-command']));
   if (!hostVersion) throw new Error('f286_probe_host_version_unavailable');
   let config: unknown;
   try {
@@ -102,9 +102,9 @@ export function runF286McpSchemaDeliveryProbe(argv: readonly string[]): {
   return { attestation, digest: persisted.digest, output };
 }
 
-function main(): void {
-  const result = runF286McpSchemaDeliveryProbe(process.argv.slice(2));
+async function main(): Promise<void> {
+  const result = await runF286McpSchemaDeliveryProbe(process.argv.slice(2));
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) main();
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) await main();

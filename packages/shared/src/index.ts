@@ -20,8 +20,11 @@ export * from './cli-effort.js';
 export * from './cli-tool-label.js';
 // F291: OAuth Codex Standard/Fast semantic contract
 export * from './codex-speed.js';
+export * from './collective-participation-scope.js';
+export * from './collective-work-assignment.js';
 // Export command parser + core commands (F142 Phase B)
 export { parseCommand } from './command-parser.js';
+export * from './concierge/companion-identity.js';
 export type {
   AutonomousPetState,
   CodexPetState,
@@ -43,6 +46,7 @@ export * from './eval-metric-ref.js';
 export * from './explicit-stop-intent.js';
 // Export shared text helpers
 export * from './markdown-readable-text.js';
+export type { MessageSearchInput, MessageSearchResponse, MessageSearchResult } from './message-search.js';
 // Browser Preview Gateway request identity shared by API and Web.
 export * from './preview-gateway.js';
 export * from './preview-visible-page-admission.js';
@@ -64,8 +68,20 @@ export * from './types/artifact-review-drawing.js';
 // F255 runtime schemas are exported directly while their source remains grouped
 // with shared types; API and MCP must validate the same owner-free settlement shape.
 export * from './types/auto-dream.js';
+export * from './types/collective-appearance-bridge.js';
+export * from './types/collective-collaboration.js';
+export * from './types/collective-context-bridge.js';
+export * from './types/collective-members.js';
 export * from './types/collective-participation.js';
 export * from './types/collective-work.js';
+export * from './types/collective-work-acceptance.js';
+export * from './types/collective-work-matter.js';
+export * from './types/collective-work-policy.js';
+export * from './types/content-modification.js';
+export * from './types/content-modification-control.js';
+export * from './types/content-modification-view.js';
+export * from './types/deployment-wait.js';
+export * from './types/evolution-media-source.js';
 // F167 direct carriers expose only action identities backed by terminal producers.
 export * from './types/executable-action-successor.js';
 // F300: refs-only home-state contract (self facet + side-effect assessment).
@@ -74,7 +90,10 @@ export * from './types/home-state.js';
 export * from './types/index.js';
 // F314: one accepted-source contract shared by API persistence and MCP producers.
 export * from './types/local-review.js';
+export * from './types/media-publication-source.js';
 // F287 bounded opportunity/cue contract (kept explicit for API/MCP consumers).
 export * from './types/memory-cue.js';
+export * from './types/message-publication-landing.js';
+export * from './types/workspace-content-review.js';
 // Export subject key utilities (#320)
 export * from './utils/subject-key.js';

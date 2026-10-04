@@ -4,11 +4,11 @@ import { createHash } from 'node:crypto';
 import { describe, it } from 'node:test';
 import { resolveContextContinuity } from '../../dist/domains/cats/services/agents/invocation/context-continuity.js';
 import { invokeSingleCat } from '../../dist/domains/cats/services/agents/invocation/invoke-single-cat.js';
-import { ContextEpochOwner } from '../../dist/domains/cats/services/session/ContextEpochOwner.js';
+import { ContextEpochOwner } from '../../dist/domains/cats/services/session/context/ContextEpochOwner.js';
 import {
   InMemoryPresentationLedgerStore,
   PresentationLedger,
-} from '../../dist/domains/cats/services/session/PresentationLedger.js';
+} from '../../dist/domains/cats/services/session/context/PresentationLedger.js';
 import { InMemoryContextEpochStore } from '../../dist/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { MemoryContractTrialTraceBuffer } from '../../dist/domains/memory/people/AsrPersonMemoryContractTrial.js';
 import { AsrPersonMemoryOpportunityPromptService } from '../../dist/domains/memory/people/AsrPersonMemoryOpportunityPromptService.js';

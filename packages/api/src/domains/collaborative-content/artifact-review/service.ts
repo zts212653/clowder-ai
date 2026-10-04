@@ -1,18 +1,28 @@
-import { createHash } from 'node:crypto';
 import {
   type ArtifactReview,
   type ArtifactReviewReceipt,
   type ArtifactReviewView,
   artifactReviewCommandSchema,
+  type PrepareArtifactReview,
   prepareArtifactReviewSchema,
   respondWithMediaVersionSchema,
   type TaskItem,
 } from '@cat-cafe/shared';
 import { MediaOwnerError } from '../../video-studio/content-owner/media-errors.js';
-import type { MediaReviewPrincipal } from '../../video-studio/content-owner/published-media-access.js';
+import { type MediaReviewPrincipal, withContentTask } from '../../video-studio/content-owner/published-media-access.js';
 import type { PublishedMediaService } from '../../video-studio/content-owner/published-media-service.js';
 import { ArtifactReviewError } from './errors.js';
+import { commitReviewAction } from './linked-review-action.js';
+import { currentReviewModification } from './modification-request-reference.js';
 import { applyArtifactReviewAction } from './reducer.js';
+import {
+  isCurrentArtifactLinked,
+  isLineageLinked,
+  reviewAuthorityState,
+  reviewIdentity,
+  reviewRetainsArtifact,
+} from './review-authority.js';
+import { createReviewCandidate } from './review-candidate.js';
 import type { ArtifactReviewStore, ReviewMutation } from './store.js';
 import { ArtifactVersionResponseService } from './version-response-service.js';
 
@@ -32,6 +42,7 @@ export class ArtifactReviewService {
 
   async prepare(raw: unknown, principal: MediaReviewPrincipal): Promise<ArtifactReviewView> {
     const command = prepareArtifactReviewSchema.parse(raw);
+    principal = withContentTask(principal, command.taskId);
     const task = await this.deps.media.access.authorize(command.taskId, principal, {
       expectedRevision: command.expectedTaskRevision,
       // Existing history may reopen; media.prepare below still requires active Task admission.
@@ -55,26 +66,18 @@ export class ArtifactReviewService {
       return view;
     }
     if (!linked) throw new ArtifactReviewError('task_changed');
-    if (command.artifactRef.startsWith('content:')) throw new ArtifactReviewError('not_found');
-    const asset = await this.deps.media.prepare({ ...command, principal });
+    const publicationBinding = command.artifactRef.startsWith('content:');
+    const asset = await this.prepareAsset(command, principal, task);
     const now = this.now();
     const review = this.deps.store.create(
-      {
-        version: 1,
-        reviewId: reviewIdentity(task.id, asset.contentRef),
-        revision: 1,
-        title: task.title,
-        contentRef: asset.contentRef,
-        task: {
-          taskId: task.id,
-          threadId: task.threadId,
-          ownerUserId: principal.userId,
-          observedRevision: command.expectedTaskRevision,
-        },
-        rounds: [{ number: 1, asset, openedAt: now, state: 'draft', annotations: [], responses: [] }],
-        createdAt: now,
-        updatedAt: now,
-      },
+      createReviewCandidate({
+        task,
+        asset,
+        ownerUserId: principal.userId,
+        taskRevision: command.expectedTaskRevision,
+        now,
+        linkedLedger: publicationBinding,
+      }),
       { operationId: command.operationId, actor: principal.actor, now },
     );
     return this.read(review.reviewId, principal);
@@ -82,6 +85,7 @@ export class ArtifactReviewService {
 
   async read(reviewId: string, principal: MediaReviewPrincipal): Promise<ArtifactReviewView> {
     const review = this.requireReview(reviewId);
+    principal = withContentTask(principal, review.task.taskId);
     await this.authorizeReview(review, principal);
     if (this.deps.store.pendingVersion(reviewId)) {
       try {
@@ -96,15 +100,25 @@ export class ArtifactReviewService {
   /** Fresh authorized projection for read-only catalogs; never resumes an accepted write. */
   async readCurrent(reviewId: string, principal: MediaReviewPrincipal): Promise<ArtifactReviewView> {
     const review = this.requireReview(reviewId);
+    principal = withContentTask(principal, review.task.taskId);
     const task = await this.authorizeReview(review, principal);
     const currentOwnerRevision = await this.deps.media.currentRevision(review.contentRef, principal);
     const authorityState = reviewAuthorityState(review, task, currentOwnerRevision);
     const pendingVersion = this.deps.store.pendingVersion(reviewId) !== null;
     const revision = task.entrustedWork?.revision;
     const delivery = this.deps.store.returns.latest(reviewId);
+    const modification = currentReviewModification(this.deps.store, review);
     if (!revision) throw new ArtifactReviewError('access_denied');
     return {
       review,
+      ...(modification
+        ? {
+            modificationRequest: {
+              requestId: modification.requestId,
+              receiptRef: modification.progress.review!.receiptRef,
+            },
+          }
+        : {}),
       pendingVersion,
       authority: {
         state: authorityState,
@@ -139,6 +153,7 @@ export class ArtifactReviewService {
   ): Promise<{ view: ArtifactReviewView; receipt: ArtifactReviewReceipt }> {
     const command = artifactReviewCommandSchema.parse(raw);
     let review = this.requireReview(command.reviewId);
+    principal = withContentTask(principal, review.task.taskId);
     await this.authorizeReview(review, principal);
     const input: ReviewMutation = {
       reviewId: command.reviewId,
@@ -177,22 +192,27 @@ export class ArtifactReviewService {
         targetCatId: latestTask.ownerCatId,
         expectedTaskRevision: command.expectedTaskRevision,
       };
-    const committed = this.deps.store.mutate(input, (current, receiptRef) => {
-      const predecessor = structuredClone(current);
-      if (renewing && state !== 'current') {
-        predecessor.task.observedRevision = command.expectedTaskRevision;
-        const round = predecessor.rounds.at(-1);
-        if (round?.state === 'awaiting_human') round.attentionRetiredReason = 'task_changed';
-      }
-      return applyArtifactReviewAction(predecessor, {
-        action: command.action,
-        actor: principal.actor,
-        round: command.round,
-        ownerCatId: task.ownerCatId,
-        now: input.now,
-        receiptRef,
-      });
-    });
+    const committed = commitReviewAction(
+      this.deps.store,
+      input,
+      (current, receiptRef) => {
+        const predecessor = structuredClone(current);
+        if (renewing && state !== 'current') {
+          predecessor.task.observedRevision = command.expectedTaskRevision;
+          const round = predecessor.rounds.at(-1);
+          if (round?.state === 'awaiting_human') round.attentionRetiredReason = 'task_changed';
+        }
+        return applyArtifactReviewAction(predecessor, {
+          action: command.action,
+          actor: principal.actor,
+          round: command.round,
+          ownerCatId: task.ownerCatId,
+          now: input.now,
+          receiptRef,
+        });
+      },
+      command.expectedLedgerRevision,
+    );
     return { view: await this.read(command.reviewId, principal), receipt: committed.receipt };
   }
 
@@ -202,6 +222,7 @@ export class ArtifactReviewService {
   ): Promise<{ view: ArtifactReviewView; receipt: ArtifactReviewReceipt }> {
     const command = respondWithMediaVersionSchema.parse(raw);
     const review = this.requireReview(command.reviewId);
+    principal = withContentTask(principal, review.task.taskId);
     const task = await this.authorizeReview(review, principal);
     if (!isLineageLinked(task, review)) throw new ArtifactReviewError('task_changed');
     const committed = await this.versions.respond(command, principal, review);
@@ -216,6 +237,7 @@ export class ArtifactReviewService {
 
   async mediaBytes(reviewId: string, roundNumber: number, principal: MediaReviewPrincipal) {
     const view = await this.read(reviewId, principal);
+    principal = withContentTask(principal, view.review.task.taskId);
     const round = view.review.rounds.find((item) => item.number === roundNumber);
     if (!round) throw new ArtifactReviewError('not_found');
     const bytes = await this.deps.media.bytes(view.review.contentRef, round.asset.ownerRevision, principal);
@@ -224,17 +246,10 @@ export class ArtifactReviewService {
 
   async openMedia(reviewId: string, roundNumber: number, principal: MediaReviewPrincipal) {
     const view = await this.readCurrent(reviewId, principal);
+    principal = withContentTask(principal, view.review.task.taskId);
     const round = view.review.rounds.find((item) => item.number === roundNumber);
     if (!round) throw new ArtifactReviewError('not_found');
-    return this.deps.media.open(
-      round.asset,
-      {
-        ownerUserId: view.review.task.ownerUserId,
-        threadId: view.review.task.threadId,
-        taskId: view.review.task.taskId,
-      },
-      principal,
-    );
+    return this.deps.media.openAsset(round.asset, principal);
   }
 
   async listForTask(taskId: string, principal: MediaReviewPrincipal) {
@@ -252,6 +267,26 @@ export class ArtifactReviewService {
       });
     }
     return results;
+  }
+
+  private async prepareAsset(command: PrepareArtifactReview, principal: MediaReviewPrincipal, task: TaskItem) {
+    if (!command.artifactRef.startsWith('content:')) return this.deps.media.prepare({ ...command, principal });
+    const asset = await this.deps.media.read(
+      command.artifactRef.slice('content:'.length),
+      Number(command.expectedArtifactRevision),
+      principal,
+    );
+    if (
+      String(asset.ownerRevision) !== command.expectedArtifactRevision ||
+      (await this.deps.media.currentRevision(asset.contentRef, principal)) !== asset.ownerRevision
+    )
+      throw new ArtifactReviewError('asset_changed');
+    await this.deps.media.assertTaskAsset(
+      asset,
+      { ownerUserId: principal.userId, threadId: task.threadId, taskId: task.id },
+      principal,
+    );
+    return asset;
   }
 
   private findRetainedReview(taskId: string, artifactRef: string, ownerUserId: string) {
@@ -273,55 +308,9 @@ export class ArtifactReviewService {
   private async authorizeReview(review: ArtifactReview, principal: MediaReviewPrincipal): Promise<TaskItem> {
     const scope = { ownerUserId: review.task.ownerUserId, threadId: review.task.threadId, taskId: review.task.taskId };
     const task = await this.deps.media.access.authorizeScope(scope, principal);
-    for (const round of review.rounds) await this.deps.media.assertVisible(round.asset, scope, principal);
+    for (const round of review.rounds) await this.deps.media.assertTaskAsset(round.asset, scope, principal);
     return task;
   }
 }
 
-export function reviewIdentity(taskId: string, contentRef: string): string {
-  return `review-${createHash('sha256')
-    .update(JSON.stringify([taskId, contentRef]))
-    .digest('hex')}`;
-}
-
-export function reviewRetainsArtifact(review: ArtifactReview, artifactRef: string): boolean {
-  return (
-    artifactRef === `content:${review.contentRef}` ||
-    review.rounds.some((round) => round.asset.sourcePublication.artifactRef === artifactRef)
-  );
-}
-
-export function isCurrentArtifactLinked(task: TaskItem, review: ArtifactReview): boolean {
-  const refs = task.entrustedWork?.artifactRefs;
-  return (
-    refs?.length === 1 &&
-    (refs[0] === `content:${review.contentRef}` ||
-      refs[0] === review.rounds.at(-1)?.asset.sourcePublication.artifactRef)
-  );
-}
-
-function isLineageLinked(task: TaskItem, review: ArtifactReview): boolean {
-  const refs = task.entrustedWork?.artifactRefs;
-  return (
-    isCurrentArtifactLinked(task, review) ||
-    (refs?.length === 1 && refs[0] === review.rounds[0]?.asset.sourcePublication.artifactRef)
-  );
-}
-
-function reviewAuthorityState(
-  review: ArtifactReview,
-  task: TaskItem,
-  currentOwnerRevision: number,
-): ArtifactReviewView['authority']['state'] {
-  if (task.status === 'done' || task.entrustedWork?.closure.state !== 'open') return 'task_closed';
-  const round = review.rounds.at(-1);
-  if (
-    !task.ownerCatId ||
-    task.entrustedWork?.revision !== review.task.observedRevision ||
-    !isLineageLinked(task, review)
-  )
-    return 'task_changed';
-  if (round?.state === 'awaiting_human' && round.judgmentRequest?.requestedBy.actorId !== task.ownerCatId)
-    return 'task_changed';
-  return round?.asset.ownerRevision === currentOwnerRevision ? 'current' : 'asset_changed';
-}
+export { isCurrentArtifactLinked, reviewIdentity, reviewRetainsArtifact } from './review-authority.js';

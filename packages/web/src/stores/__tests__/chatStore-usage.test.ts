@@ -12,6 +12,35 @@ describe('F8: chatStore token usage', () => {
     useChatStore.getState().clearCatStatuses();
   });
 
+  it('F319 Phase E.1: mergeMessageServedFacts merges onto metadata that setMessageMetadata already wrote', () => {
+    const store = useChatStore.getState();
+    store.addMessage({
+      id: 'msg-sol',
+      type: 'assistant',
+      catId: 'codex-sol',
+      content: 'OK',
+      timestamp: 1,
+      metadata: { provider: 'openai', model: 'gpt-5.6-sol', usage: { inputTokens: 10 } },
+    });
+    store.setMessageMetadata('msg-sol', { provider: 'x', model: 'y' }); // first-write-wins: ignored
+    store.mergeMessageServedFacts('msg-sol', { servedModel: 'gpt-5.6-sol', upstreamTurnStateLength: 312 });
+    const meta = useChatStore.getState().messages.find((m) => m.id === 'msg-sol')?.metadata;
+    expect(meta).toEqual({
+      provider: 'openai',
+      model: 'gpt-5.6-sol',
+      usage: { inputTokens: 10 },
+      servedModel: 'gpt-5.6-sol',
+      upstreamTurnStateLength: 312,
+    });
+  });
+
+  it('F319 Phase E.1: mergeMessageServedFacts is a no-op on a message without metadata (never invents model/provider)', () => {
+    const store = useChatStore.getState();
+    store.addMessage({ id: 'msg-bare', type: 'assistant', catId: 'codex-sol', content: 'OK', timestamp: 1 });
+    store.mergeMessageServedFacts('msg-bare', { servedModel: 'gpt-5.6-sol' });
+    expect(useChatStore.getState().messages.find((m) => m.id === 'msg-bare')?.metadata).toBeUndefined();
+  });
+
   it('setCatInvocation stores usage data for a cat', () => {
     const store = useChatStore.getState();
     store.setCatInvocation('opus', {

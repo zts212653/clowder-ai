@@ -1,0 +1,80 @@
+.member-content {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+  color: var(--cafe-text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.member-section-label {
+  margin: 0 0 12px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 9px 4px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+}
+.member-row:hover,
+.member-row:focus-visible {
+  background: var(--console-hover-bg);
+}
+.member-row > span:last-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.member-row strong {
+  color: var(--cafe-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.member-row small {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.member-profile {
+  padding: 7px 0 16px;
+}
+.member-profile .avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+.member-profile h3 {
+  margin: 14px 0 2px;
+  color: var(--cafe-text);
+  font-size: 20px;
+  font-weight: 600;
+}
+.member-profile p {
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+}
+.member-facts {
+  margin: 0;
+}
+.member-facts dt {
+  margin-top: 15px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.member-facts dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+.empty-copy {
+  color: var(--cafe-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}

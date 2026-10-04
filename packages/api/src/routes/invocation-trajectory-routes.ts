@@ -1,6 +1,6 @@
+import type { InvocationTrajectorySummary } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { resolveCanonicalInvocationTrajectory } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
-import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
 import {
   projectRequestGenerationGaps,
   projectRequestGenerations,
@@ -18,14 +18,26 @@ import {
 import { resolveUserId } from '../utils/request-identity.js';
 import { strictParseTranscriptInteger } from './session-transcript-route-helpers.js';
 import type { ReadableSession, SessionTranscriptRouteOptions } from './session-transcript-route-types.js';
+import { withTranscriptReadSignal } from './transcript-read-cancellation.js';
 
 interface InvocationTrajectoryRouteDependencies {
   stores: Pick<
     SessionTranscriptRouteOptions,
     'invocationRecordStore' | 'turnExecutionStore' | 'sessionChainStore' | 'threadStore'
   >;
-  readSessionEvents: (session: ReadableSession) => Promise<TranscriptEvent[]>;
-  readInvocationEvents: (session: ReadableSession, invocationId: string) => Promise<TranscriptEvent[]>;
+  listInvocationSummaries: (
+    sessions: ReadableSession[],
+    limit: number,
+    signal?: AbortSignal,
+  ) => Promise<{
+    invocations: InvocationTrajectorySummary[];
+    total: number;
+  }>;
+  readInvocationEvents: (
+    sessions: ReadableSession[],
+    invocationId: string,
+    signal?: AbortSignal,
+  ) => Promise<ReadonlyMap<string, readonly TranscriptEvent[]>>;
   messageStore?: SessionTranscriptRouteOptions['messageStore'];
   keyedContentDigest?: (value: string) => Promise<string>;
   profileRepository?: SessionTranscriptRouteOptions['profileRepository'];
@@ -49,21 +61,24 @@ export function registerInvocationTrajectoryRoutes(
         .status(503)
         .send({ error: 'Invocation resolver unavailable', code: 'INVOCATION_RESOLVER_UNAVAILABLE' });
     }
-    const result = await resolveCanonicalInvocationTrajectory(
-      {
-        invocationId: request.params.invocationId,
-        userId,
-        threadIdHint: request.query.threadId,
-        sessionIdHint: request.query.sessionId,
-        callerCatId: request.headers['x-cat-id'] as string | undefined,
-      },
-      {
-        invocationRecordStore,
-        turnExecutionStore,
-        sessionChainStore,
-        threadStore,
-        readInvocationEvents: dependencies.readInvocationEvents,
-      },
+    const result = await withTranscriptReadSignal(request, reply, (signal) =>
+      resolveCanonicalInvocationTrajectory(
+        {
+          invocationId: request.params.invocationId,
+          userId,
+          threadIdHint: request.query.threadId,
+          sessionIdHint: request.query.sessionId,
+          callerCatId: request.headers['x-cat-id'] as string | undefined,
+          signal,
+        },
+        {
+          invocationRecordStore,
+          turnExecutionStore,
+          sessionChainStore,
+          threadStore,
+          readInvocationEvents: dependencies.readInvocationEvents,
+        },
+      ),
     );
     return reply.status(result.status).send(result.body);
   });
@@ -82,21 +97,24 @@ export function registerInvocationTrajectoryRoutes(
     if (request.query.reveal !== undefined && request.query.reveal !== 'exact') {
       return reply.status(400).send({ error: 'Invalid reveal mode', code: 'INVOCATION_GENERATION_REVEAL_INVALID' });
     }
-    const result = await resolveCanonicalInvocationTrajectory(
-      {
-        invocationId: request.params.invocationId,
-        userId,
-        threadIdHint: request.query.threadId,
-        sessionIdHint: request.query.sessionId,
-        callerCatId: request.headers['x-cat-id'] as string | undefined,
-      },
-      {
-        invocationRecordStore,
-        turnExecutionStore,
-        sessionChainStore,
-        threadStore,
-        readInvocationEvents: dependencies.readInvocationEvents,
-      },
+    const result = await withTranscriptReadSignal(request, reply, (signal) =>
+      resolveCanonicalInvocationTrajectory(
+        {
+          invocationId: request.params.invocationId,
+          userId,
+          threadIdHint: request.query.threadId,
+          sessionIdHint: request.query.sessionId,
+          callerCatId: request.headers['x-cat-id'] as string | undefined,
+          signal,
+        },
+        {
+          invocationRecordStore,
+          turnExecutionStore,
+          sessionChainStore,
+          threadStore,
+          readInvocationEvents: dependencies.readInvocationEvents,
+        },
+      ),
     );
     if (result.status !== 200) return reply.status(result.status).send(result.body);
     const sessionIds = result.body.sessionIds ?? [result.body.sessionId];
@@ -107,13 +125,10 @@ export function registerInvocationTrajectoryRoutes(
         .send({ error: 'Invocation session chain changed during read', code: 'INVOCATION_SESSION_CHAIN_CHANGED' });
     }
     try {
-      const events = (
-        await Promise.all(
-          sessions.map((session) =>
-            dependencies.readInvocationEvents(session as ReadableSession, request.params.invocationId),
-          ),
-        )
-      ).flat();
+      const bySession = await withTranscriptReadSignal(request, reply, (signal) =>
+        dependencies.readInvocationEvents(sessions as ReadableSession[], request.params.invocationId, signal),
+      );
+      const events = sessions.flatMap((session) => [...(bySession.get((session as ReadableSession).id) ?? [])]);
       const hidden = projectRequestGenerations(events);
       const gaps = projectRequestGenerationGaps(events);
       let generations = hidden;
@@ -176,18 +191,10 @@ export function registerInvocationTrajectoryRoutes(
     if (Number.isNaN(limitValue) || limitValue < 1) {
       return reply.status(400).send({ error: 'Invalid limit: must be a positive integer' });
     }
-    const projected = (
-      await Promise.all(
-        scopedSessions.map(async (session) =>
-          projectInvocationTrajectories(await dependencies.readSessionEvents(session), session),
-        ),
-      )
-    )
-      .flat()
-      .sort((left, right) => right.startedAt - left.startedAt || left.invocationId.localeCompare(right.invocationId));
-    return reply.send({
-      invocations: projected.slice(0, Math.min(limitValue, 500)),
-      total: projected.length,
-    });
+    return reply.send(
+      await withTranscriptReadSignal(request, reply, (signal) =>
+        dependencies.listInvocationSummaries(scopedSessions, Math.min(limitValue, 500), signal),
+      ),
+    );
   });
 }

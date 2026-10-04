@@ -1174,24 +1174,184 @@ export const communityIssueRoutes: FastifyPluginAsync<CommunityIssuesRoutesOptio
       //     (Cloud R6 P1-1)
       const ACTIVATABLE_STATES = new Set<string>(['in_progress', 'awaiting_external', 'routed']);
       if (!ACTIVATABLE_STATES.has(proj.state)) {
-        reply.status(409);
-        return {
-          error: 'invalid_transition',
-          currentState: proj.state,
-          detail: `case.awaiting_external requires state in {in_progress, awaiting_external, routed}, got: ${proj.state}`,
-        };
-      }
+        // Auto-reconciliation: GitHub-side triage (WELCOME/labels/Direction Card) may
+        // complete without emitting internal `case.routed`, leaving projection at `new`
+        // or `triaged`. When a cat with valid callback auth (catId + threadId) calls
+        // await-external, atomically advance to `routed` first, preserving the state
+        // machine gate while fixing the structural carrier gap.
+        // Spec: coord-fa957149 / friction:community-await-external-admission
+        const RECONCILABLE_STATES = new Set<string>(['new', 'triaged']);
+        const callerCatIdForReconcile = request.callbackAuth.catId as string | undefined;
+        const callerThreadIdForReconcile = (request.callbackAuth as { threadId?: string }).threadId;
 
-      // P1-B (R2): Ownership check — only the case owner can declare awaiting_external.
-      // ownerThreadId is set when the case is routed (case.routed event).
-      // null/undefined ownerThreadId (no owner assigned yet) → allow.
-      const callerThreadId = (request.callbackAuth as { threadId?: string }).threadId;
-      if (proj.ownerThreadId != null && callerThreadId !== undefined && callerThreadId !== proj.ownerThreadId) {
-        reply.status(403);
-        return {
-          error: 'forbidden',
-          detail: 'Only the case owner (ownerThreadId match) can declare awaiting_external',
-        };
+        // P1 fix (R1): enforce owner fence even for reconcilable states.
+        // If projection already has an owner and the caller is a different thread,
+        // reject — auto-reconciliation must not hijack ownership.
+        if (
+          RECONCILABLE_STATES.has(proj.state) &&
+          proj.ownerThreadId != null &&
+          callerThreadIdForReconcile !== undefined &&
+          callerThreadIdForReconcile !== proj.ownerThreadId
+        ) {
+          reply.status(403);
+          return {
+            error: 'forbidden',
+            detail: 'Only the case owner (ownerThreadId match) can declare awaiting_external',
+          };
+        }
+
+        // R2 P1 fix: Verify durable accepted-triage evidence before auto-reconciliation.
+        // Callback auth proves identity (catId/threadId) but NOT that triage was accepted.
+        // The original spec (coord-fa957149) says "accepted triage needs verifiable internal
+        // case.routed landing" — without CommunityIssueStore evidence, an arbitrary
+        // authenticated callback could claim ownership of any unowned case.
+        if (RECONCILABLE_STATES.has(proj.state) && callerCatIdForReconcile && callerThreadIdForReconcile) {
+          const parsedIssue = parseIssueSubjectKey(subjectKey);
+          if (parsedIssue) {
+            const issueRecord = await communityIssueStore.getByRepoAndNumber(
+              parsedIssue.repoFullName,
+              parsedIssue.issueNumber,
+            );
+            if (!issueRecord || issueRecord.state !== 'accepted') {
+              reply.status(409);
+              return {
+                error: 'invalid_transition',
+                currentState: proj.state,
+                detail: 'Auto-reconciliation requires durable accepted-triage evidence in CommunityIssueStore',
+                nextAction: {
+                  kind: 'accept_first',
+                  detail: 'Route and accept the case via /resolve before calling await-external',
+                },
+              };
+            }
+            // R3 P1 fix: null assignment = not assigned = no authority binding.
+            // Both assignedCatId AND assignedThreadId must be non-null for
+            // auto-reconciliation — otherwise any authenticated caller can
+            // mint ownership of an unassigned accepted issue.
+            if (!issueRecord.assignedCatId || !issueRecord.assignedThreadId) {
+              reply.status(409);
+              return {
+                error: 'invalid_transition',
+                currentState: proj.state,
+                detail:
+                  'Auto-reconciliation requires the accepted issue to have both assignedCatId and assignedThreadId',
+                nextAction: {
+                  kind: 'assign_first',
+                  detail: 'Assign the accepted issue to a specific cat and thread before calling await-external',
+                },
+              };
+            }
+            // Verify caller assignment matches the accepted record
+            if (issueRecord.assignedCatId !== callerCatIdForReconcile) {
+              reply.status(403);
+              return {
+                error: 'forbidden',
+                detail: `Caller catId (${callerCatIdForReconcile}) does not match assigned cat (${issueRecord.assignedCatId})`,
+              };
+            }
+            if (issueRecord.assignedThreadId !== callerThreadIdForReconcile) {
+              reply.status(403);
+              return {
+                error: 'forbidden',
+                detail: `Caller threadId does not match assigned thread for this issue`,
+              };
+            }
+          } else {
+            // R3 P1 fix: pr: subjects have no equivalent accepted/assignment
+            // authority in CommunityPrStore. Auto-reconciliation cannot verify
+            // durable authority for PRs — reject until an equivalent PR authority
+            // record exists. The invariant requires pre-existing authority binding
+            // both the subject and the caller's cat + thread.
+            reply.status(409);
+            return {
+              error: 'invalid_transition',
+              currentState: proj.state,
+              detail: 'Auto-reconciliation for pr: subjects is not supported — no durable PR authority record exists',
+              nextAction: {
+                kind: 'route_pr_first',
+                detail:
+                  'Route the PR via the canonical state machine path (emit case.routed) before calling await-external',
+              },
+            };
+          }
+        }
+
+        if (
+          RECONCILABLE_STATES.has(proj.state) &&
+          opts.eventLog &&
+          callerCatIdForReconcile &&
+          callerThreadIdForReconcile
+        ) {
+          // Emit case.routed to advance state before processing case.awaiting_external
+          const reconcileAt = Date.now();
+          const routedEvent: CommunityEvent = {
+            sourceEventId: `auto-reconcile-routed:${subjectKey}:${reconcileAt}`,
+            subjectKey,
+            kind: 'case.routed',
+            classification: 'state-changing',
+            payload: {
+              ownerThreadId: callerThreadIdForReconcile,
+              catId: callerCatIdForReconcile,
+              ownerRole: callerCatIdForReconcile,
+              relatedFeature: null,
+              routedAt: reconcileAt,
+              autoReconciled: true,
+            },
+            at: reconcileAt,
+          };
+          const { appended } = await opts.eventLog.append(routedEvent);
+          if (appended) {
+            if (opts.projector) {
+              try {
+                await opts.projector.apply(routedEvent);
+              } catch {
+                /* best-effort — projector failure does not block tracking */
+              }
+            }
+            // P1 fix (R1): mirror canonical routed-event writers —
+            // register tracking task so external responses can restore the case.
+            await registerRoutingTracking(routedEvent, opts.taskStore, {
+              fetchCommentCursor: opts.fetchIssueCommentCursor,
+              userId: resolveUserId(request, { defaultUserId: 'system' }) ?? 'system',
+            });
+          }
+          // Ownership is established by the case.routed event we just emitted,
+          // so skip the ownership check below — the caller IS the new owner.
+        } else {
+          // R2 P2 fix: include structured nextAction in 409 responses.
+          // Terminal states get kind='terminal'; non-terminal get actionable guidance.
+          const TERMINAL_STATES = new Set<string>(['declined', 'closed', 'fixed']);
+          const isTerminal = TERMINAL_STATES.has(proj.state);
+          reply.status(409);
+          return {
+            error: 'invalid_transition',
+            currentState: proj.state,
+            detail: `case.awaiting_external requires state in {in_progress, awaiting_external, routed}, got: ${proj.state}`,
+            nextAction: isTerminal
+              ? {
+                  kind: 'terminal',
+                  detail: `Case is in terminal state (${proj.state}); no further transitions available`,
+                }
+              : {
+                  kind: 'authenticate',
+                  detail: 'Ensure callback auth includes catId and threadId for auto-reconciliation',
+                },
+          };
+        }
+      } else {
+        // P1-B (R2): Ownership check — only the case owner can declare awaiting_external.
+        // ownerThreadId is set when the case is routed (case.routed event).
+        // null/undefined ownerThreadId (no owner assigned yet) → allow.
+        // Note: ownership check is only for already-activatable states; auto-reconciled
+        // cases skip this because the caller just established ownership via case.routed.
+        const callerThreadId = (request.callbackAuth as { threadId?: string }).threadId;
+        if (proj.ownerThreadId != null && callerThreadId !== undefined && callerThreadId !== proj.ownerThreadId) {
+          reply.status(403);
+          return {
+            error: 'forbidden',
+            detail: 'Only the case owner (ownerThreadId match) can declare awaiting_external',
+          };
+        }
       }
     }
 

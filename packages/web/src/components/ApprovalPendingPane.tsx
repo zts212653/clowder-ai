@@ -56,6 +56,7 @@ export function ApprovalPendingPane({
   const items = useApprovalHubStore((state) => state.items);
   const isLoading = useApprovalHubStore((state) => state.isLoading);
   const error = useApprovalHubStore((state) => state.error);
+  const fetchPending = useApprovalHubStore((state) => state.fetchPending);
   const selectedIds = useApprovalHubStore((state) => state.selectedIds);
   const selectAllInline = useApprovalHubStore((state) => state.selectAllInline);
   const clearSelection = useApprovalHubStore((state) => state.clearSelection);
@@ -197,21 +198,33 @@ export function ApprovalPendingPane({
           data-testid="approval-batch-results"
         >
           <span>{failedResults.length} 项操作失败</span>
-          <ul className="mt-1 space-y-0.5 text-xs">
-            {failedResults.map((result) => (
-              <li key={result.proposalId} data-testid={`batch-fail-${result.proposalId}`}>
-                {result.proposalId}: {result.error ?? '未知错误'}
-              </li>
-            ))}
-          </ul>
+          <details className="mt-1 text-xs">
+            <summary className="cursor-pointer">失败详情</summary>
+            <ul className="mt-1 space-y-0.5">
+              {failedResults.map((result) => (
+                <li key={result.proposalId} data-testid={`batch-fail-${result.proposalId}`} className="break-all">
+                  {result.proposalId}: {result.error ?? '未知错误'}
+                </li>
+              ))}
+            </ul>
+          </details>
         </div>
       )}
 
       <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-3">
         {isLoading && items.length === 0 && <PanelMessage>加载中...</PanelMessage>}
         {error && (
-          <div className="rounded-lg border border-[var(--semantic-critical)] p-3">
-            <p className="text-sm text-[var(--semantic-critical)]">请求失败: {error}</p>
+          <div className="rounded-lg border border-[var(--semantic-critical)] p-3" data-testid="approval-pending-error">
+            <p className="text-sm text-[var(--semantic-critical)]">
+              {items.length > 0 ? '暂时无法刷新，正在显示最近一次成功读取的内容。' : '暂时无法读取待审批列表。'}
+            </p>
+            <button type="button" className="mt-2 text-xs underline" onClick={() => void fetchPending()}>
+              重试
+            </button>
+            <details className="mt-2 text-xs text-cafe-muted">
+              <summary className="cursor-pointer">错误详情</summary>
+              <p className="mt-1 break-words">{error}</p>
+            </details>
           </div>
         )}
         {!isLoading && !error && items.length === 0 && (

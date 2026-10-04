@@ -79,6 +79,27 @@ const item: EvalHubItem = {
 };
 
 describe('HubEvalVerdictCard operator narrative', () => {
+  it('keeps the actual settings page and verdict card when opening its file', async ({ onTestFinished }) => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    onTestFinished(async () => {
+      await act(async () => root.unmount());
+      container.remove();
+    });
+    await act(async () =>
+      root.render(<HubEvalVerdictCard item={item} projectPath="/repo/cat-cafe" worktreeId="work" />),
+    );
+    const button = [...container.querySelectorAll('button')].find((node) => node.textContent === '结论文件')!;
+    await act(async () => button.click());
+    expect(storeMocks.setWorkspaceOpenFile).toHaveBeenLastCalledWith('verdict.md', null, 'work', 'thread-current', {
+      kind: 'settings',
+      href: '/settings?ops=observability&obs=eval',
+      anchorId: `eval:${item.id}`,
+      viewportOffsetPx: 0,
+    });
+    expect(storeMocks.routerPush).toHaveBeenLastCalledWith('/thread/thread-current');
+  });
   beforeAll(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });

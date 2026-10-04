@@ -594,6 +594,8 @@ describe('AntigravityAgentService (Bridge)', () => {
     assert.ok(sentPrompt.includes('limb_* 也同理'), 'should explain agentKeyCatId applies to limb server too');
     assert.doesNotMatch(sentPrompt, /当前没有原生 MCP 注入/, 'should not claim native MCP is absent');
     assert.ok(sentPrompt.includes('/api/callbacks/thread-context?invocationId=inv-123&callbackToken=tok-456'));
+    assert.ok(sentPrompt.includes('readIntent=unread&responseMode=full'));
+    assert.ok(sentPrompt.includes('nextCursor'));
     assert.ok(sentPrompt.includes('/api/callbacks/post-message'));
     assert.ok(sentPrompt.includes('/api/callbacks/instructions'));
     assert.ok(

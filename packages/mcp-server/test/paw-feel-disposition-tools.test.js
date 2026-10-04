@@ -72,8 +72,9 @@ describe('F278 MCP paw-feel tools', () => {
     assert.equal(result.isError, undefined);
     const url = new URL(requests[0].url);
     assert.equal(url.pathname, '/api/callbacks/paw-feel-legacy-blocker-census');
-    assert.equal(url.searchParams.get('limit'), '25');
-    assert.equal(url.searchParams.get('cursor'), 'signed-cursor');
+    assert.equal(url.search, '');
+    assert.equal(requests[0].init.method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0].init.body), { limit: 25, cursor: 'signed-cursor' });
     const tool = pawFeelDispositionTools.find(
       (candidate) => candidate.name === 'cat_cafe_census_legacy_paw_feel_blockers',
     );

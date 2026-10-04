@@ -12,6 +12,9 @@ import type { WorkspaceLauncherDestination } from '@/components/workspace/Worksp
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
 import type { TeamWorkspaceSubject } from '@/stores/chat-types';
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
+import { resolveEvolutionMediaTarget } from './evolution-media-surface';
+import { resolveMessagePublicationSource } from './message-publication-surface';
+import { resolvePublicationTarget } from './publication-surface';
 
 export const REAL_SURFACE_OWNERS = {
   agentRun: 'f299-invocation-trajectory',
@@ -56,6 +59,12 @@ function isCodePath(path: string): boolean {
 }
 
 export function isRealSurfaceOwnerAvailable(surface: WorkspaceSurfaceDescriptor): boolean {
+  if (
+    resolvePublicationTarget(surface) ||
+    resolveEvolutionMediaTarget(surface) ||
+    resolveMessagePublicationSource(surface)
+  )
+    return true;
   if (resolveArtifactReviewTarget(surface)) return true;
   return REAL_OWNER_IDS.has(surface.ownerStateRef.owner) || LEGACY_OWNER_IDS.has(surface.ownerStateRef.owner);
 }
@@ -68,6 +77,8 @@ export function createFileSurface(input: {
   worktreeId: string;
   path: string;
   scrollToLine?: number | null;
+  navigationOrigin?: WorkspaceSurfaceDescriptor['navigationOrigin'];
+  rootSelection?: WorkspaceSurfaceDescriptor['rootSelection'];
 }): WorkspaceSurfaceDescriptor {
   const code = isCodePath(input.path);
   const scrollToLine = normalizeFileScrollToLine(input.scrollToLine);
@@ -79,10 +90,13 @@ export function createFileSurface(input: {
     type: code ? 'code' : 'file',
     renderer: code ? 'code-editor' : 'file-preview',
     title: displayFileName(input.path),
-    context: `${input.worktreeId} · ${input.path}`,
+    // Header text for people: the path. The root id is identity and lives on the typed refs below.
+    context: input.path,
     objectRef: { kind: 'file', id: input.worktreeId },
     ownerStateRef: { owner: REAL_SURFACE_OWNERS.file, key: input.worktreeId },
     resultTargetRef: { owner: REAL_SURFACE_OWNERS.file, key: targetKey },
+    ...(input.navigationOrigin ? { navigationOrigin: input.navigationOrigin } : {}),
+    ...(input.rootSelection ? { rootSelection: input.rootSelection } : {}),
     capabilities: SURFACE_CAPABILITIES,
   };
 }
@@ -209,6 +223,12 @@ export function resolveEvolutionProgramId(surface: WorkspaceSurfaceDescriptor): 
 }
 
 export function artifactObjectId(artifact: ThreadArtifactDTO): string {
+  if (artifact.publicationItem) return encodedId([legacyArtifactObjectId(artifact), artifact.publicationItem]);
+  return legacyArtifactObjectId(artifact);
+}
+
+/** Old persisted F232 targets did not include the selector. Resolve only when uniquely matched. */
+export function legacyArtifactObjectId(artifact: ThreadArtifactDTO): string {
   return encodedId([
     artifact.type,
     artifact.ref ?? null,
@@ -222,6 +242,7 @@ export function artifactObjectId(artifact: ThreadArtifactDTO): string {
 export function createArtifactSurface(input: {
   threadId: string;
   artifact: ThreadArtifactDTO | GlobalArtifactDTO;
+  navigationOrigin?: WorkspaceSurfaceDescriptor['navigationOrigin'];
 }): WorkspaceSurfaceDescriptor {
   const ownerThreadId = 'threadId' in input.artifact ? input.artifact.threadId : input.threadId;
   const review = input.artifact.type === 'pr';
@@ -237,6 +258,7 @@ export function createArtifactSurface(input: {
     renderer: review ? 'review-summary' : 'artifact-view',
     title: input.artifact.name,
     context: review ? (input.artifact.ref ?? 'PR Review') : `Thread 产物 · ${input.artifact.type}`,
+    ...(input.navigationOrigin ? { navigationOrigin: input.navigationOrigin } : {}),
     objectRef: { kind: review ? 'review' : 'artifact', id: objectId },
     ownerStateRef: { owner: REAL_SURFACE_OWNERS.artifact, key: ownerThreadId },
     resultTargetRef,
@@ -328,7 +350,15 @@ export function createWorkspaceDestinationSurface(
   };
 }
 
-export function createFilesSurface(worktreeId: string): WorkspaceSurfaceDescriptor {
+export function createFilesSurface(
+  worktreeId: string,
+  options: {
+    reveal?: WorkspaceSurfaceDescriptor['filesReveal'];
+    navigationOrigin?: WorkspaceSurfaceDescriptor['navigationOrigin'];
+    /** The listing coordinate that minted `worktreeId`, when it is not the current chat's project. */
+    repoRoot?: string;
+  } = {},
+): WorkspaceSurfaceDescriptor {
   return {
     id: `workspace:surface:files:${worktreeId}`,
     type: 'workspace',
@@ -338,6 +368,9 @@ export function createFilesSurface(worktreeId: string): WorkspaceSurfaceDescript
     objectRef: { kind: 'workspace-destination', id: 'surface:files' },
     ownerStateRef: { owner: REAL_SURFACE_OWNERS.files, key: worktreeId },
     resultTargetRef: { owner: REAL_SURFACE_OWNERS.files, key: worktreeId },
+    ...(options.reveal ? { filesReveal: options.reveal } : {}),
+    ...(options.navigationOrigin ? { navigationOrigin: options.navigationOrigin } : {}),
+    ...(options.repoRoot ? { filesRepoRoot: options.repoRoot } : {}),
     capabilities: SURFACE_CAPABILITIES,
   };
 }
@@ -563,7 +596,9 @@ function resolveEntrustedWorkReturnTarget(
   return { threadId: decoded[0] === 'global' ? null : decoded[0], itemRef: decoded[1] };
 }
 
-export function resolveFilesTarget(surface: WorkspaceSurfaceDescriptor): { worktreeId: string } | null {
+export function resolveFilesTarget(
+  surface: WorkspaceSurfaceDescriptor,
+): { worktreeId: string; repoRoot?: string } | null {
   if (
     surface.renderer !== 'workspace-destination' ||
     surface.objectRef.kind !== 'workspace-destination' ||
@@ -576,7 +611,10 @@ export function resolveFilesTarget(surface: WorkspaceSurfaceDescriptor): { workt
   ) {
     return null;
   }
-  return { worktreeId: surface.ownerStateRef.key };
+  return {
+    worktreeId: surface.ownerStateRef.key,
+    ...(surface.filesRepoRoot ? { repoRoot: surface.filesRepoRoot } : {}),
+  };
 }
 
 export function resolveChangesTarget(

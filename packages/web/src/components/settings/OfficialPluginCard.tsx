@@ -7,6 +7,7 @@ import {
   settingsResourceCardClass,
   settingsResourceRowClass,
 } from '../SettingsResourceCard';
+import { DESKTOP_FAILURE_COPY, retainedCompanionDesktopLoss } from './companion-desktop-failure';
 import { OfficialPluginCatchUp, type OfficialPluginCatchUpAction } from './OfficialPluginCatchUp';
 import { OfficialPluginHistoryImport } from './OfficialPluginHistoryImport';
 import {
@@ -39,7 +40,6 @@ const MAINTENANCE_RESUME_FAILURES = new Set([
   'UPDATE_ROLLBACK_RESUME_FAILED',
   'CATCH_UP_RESUME_FAILED',
 ]);
-
 function maintenanceResumeFailure(plugin: OfficialPluginInfo): boolean {
   const code = plugin.instance?.lastRuntimeError?.code;
   return code !== undefined && MAINTENANCE_RESUME_FAILURES.has(code);
@@ -48,20 +48,24 @@ function maintenanceResumeFailure(plugin: OfficialPluginInfo): boolean {
 function status(plugin: OfficialPluginInfo): { label: string; tone: 'emerald' | 'amber' | 'slate' | 'red' } {
   const instance = plugin.instance;
   if (!instance) return { label: '未安装', tone: 'slate' };
-  if (plugin.updateAvailable) return { label: '可更新', tone: 'amber' };
-  if (plugin.intakeHealth?.warning?.code === 'CATCH_UP_BACKLOG') {
-    return { label: '缺口待处理', tone: 'red' };
-  }
-  if (plugin.intakeHealth?.warning) return { label: '接收有缺口', tone: 'amber' };
   if (
     instance.lastRuntimeError?.code === 'EVENT_BUS_CONFLICT' &&
     (instance.activationState === 'error' || instance.runtimeState === 'crashed')
   ) {
     return { label: '连接被占用', tone: 'red' };
   }
-  if (instance.activationState === 'error' || instance.runtimeState === 'crashed') {
+  if (
+    instance.activationState === 'error' ||
+    instance.runtimeState === 'crashed' ||
+    retainedCompanionDesktopLoss(plugin)
+  ) {
     return { label: '需修复', tone: 'red' };
   }
+  if (plugin.updateAvailable) return { label: '可更新', tone: 'amber' };
+  if (plugin.intakeHealth?.warning?.code === 'CATCH_UP_BACKLOG') {
+    return { label: '缺口待处理', tone: 'red' };
+  }
+  if (plugin.intakeHealth?.warning) return { label: '接收有缺口', tone: 'amber' };
   if (instance.runtimeState === 'healthy') return { label: '运行中', tone: 'emerald' };
   if (instance.runtimeState === 'degraded') return { label: '连接异常', tone: 'amber' };
   if (instance.activationState === 'enabled' || instance.activationState === 'enabling') {
@@ -72,6 +76,17 @@ function status(plugin: OfficialPluginInfo): { label: string; tone: 'emerald' | 
 
 function guidance(plugin: OfficialPluginInfo, auth: OwnerAuthState | null): string {
   const instance = plugin.instance;
+  if (plugin.catalogId === 'companion' && instance?.lastRuntimeError?.code === 'UPDATE_ROLLBACK_RESUME_FAILED') {
+    return '猫猫球旧版未能恢复运行；先点“重试恢复”，再更新 Clowder AI 宿主并重试新版。聊天记录和已安装版本仍保留。';
+  }
+  const retainedLoss = retainedCompanionDesktopLoss(plugin);
+  if (plugin.catalogId === 'companion' && (instance?.runtimeState === 'crashed' || retainedLoss)) {
+    const reason = instance?.lastRuntimeError?.desktopReason ?? '';
+    const cause = Object.hasOwn(DESKTOP_FAILURE_COPY, reason)
+      ? DESKTOP_FAILURE_COPY[reason]
+      : '桌面窗口失去运行状态，原因仍待确认';
+    return `${retainedLoss ? `上次${cause}，当前尚未恢复` : cause}。插件实例未更换，聊天记录仍保留；请查看状态后手动修复。`;
+  }
   if (plugin.catalogId === 'genoffice-docx') {
     if (!instance) return 'DOCX alpha：安装后手动启用，再从 Workspace 打开 .docx 文档。';
     if (plugin.updateAvailable)
@@ -171,7 +186,8 @@ export function OfficialPluginCard({
   });
   const pluginStatus = status(plugin);
   const activation = plugin.instance?.activationState;
-  const failed = activation === 'error' || plugin.instance?.runtimeState === 'crashed';
+  const failed =
+    activation === 'error' || plugin.instance?.runtimeState === 'crashed' || retainedCompanionDesktopLoss(plugin);
   const eventBusConflict = failed && plugin.instance?.lastRuntimeError?.code === 'EVENT_BUS_CONFLICT';
   const resumeFailed = failed && maintenanceResumeFailure(plugin);
   const transitioning =
@@ -233,7 +249,7 @@ export function OfficialPluginCard({
               onStart={() => void ownerAuth.start()}
             />
           )}
-          {plugin.instance && !canUpdate && ownerAuth.connected && failed && (
+          {plugin.instance && (!plugin.ownerAuthAvailable || ownerAuth.connected) && failed && (
             <SettingsSecondaryButton
               disabled={busy}
               onClick={() => onAction(eventBusConflict || resumeFailed ? 'enable' : 'repair')}

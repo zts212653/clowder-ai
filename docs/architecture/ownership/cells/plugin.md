@@ -18,6 +18,9 @@ code_anchors:
   - packages/api/src/domains/plugin/content-materializer-runtime/runtime.ts
   - packages/api/src/domains/plugin/content-materializer-runtime/browser-runner.ts
   - packages/api/src/domains/plugin/runtime-composition.ts
+  - packages/api/src/domains/plugin/desktop-window-runtime/runtime.ts
+  - packages/api/src/domains/plugin/desktop-window-runtime/desktop-component.ts
+  - packages/api/src/routes/concierge-desktop.ts
   - packages/api/src/domains/plugin/builtin-runtime/hybrid-supervisor.ts
   - packages/api/src/domains/plugin/plugin-manager-service.ts
   - packages/api/src/domains/plugin/plugin-manager-projection.ts
@@ -58,6 +61,21 @@ cited_by:
 ---
 
 # Plugin Framework
+
+## F317 Desktop Consumer
+
+The desktop companion is a verified declarative `desktop-window` contribution with
+an explicit `windows.create` grant. It uses existing inventory, Broker and static
+feature leases. The Host loads package HTML in a sandboxed Electron window; package
+code cannot supply an executable, preload, credentials or conversation identity.
+Explicit installation prepares the Host's pinned desktop component in a private
+cache. The installing API retains its owner cookie and invokes existing conversation
+routes through a closed bridge. Window creation does not grant media capture.
+
+Presence is an expiring observation of the actual window process under its current
+feature lease. The owner-local projection suppresses only the duplicate Hub body;
+the canonical chat panel remains available. Failed, expired or revoked observations
+restore the Hub entry without rewriting durable preferences or installation truth.
 
 ## Canonical Owner
 
@@ -189,6 +207,10 @@ close, or restore owner tabs/windows.
 - Keep generic update/repair out of public Console, Agent and canonical Manager
   surfaces. If later required, define typed release replacement or integrity
   recovery journeys with explicit data migration and revision fences.
+- Preserve F292's specialized official update path during Train B: static Host policy,
+  exact-release fencing, SemVer monotonicity, tarball/SHA512/provenance checks and
+  last-known-good metadata remain enforced. The new Manager does not replace these
+  controls or switch the default Settings journey; that is a separate C1 decision.
 - Bind package digest, installation instance, runtime session, grants, and
   resource identity from Host-owned state. External runtimes cannot choose or
   widen those identities through self-report.

@@ -223,4 +223,38 @@ describe('F310 prepared Artifact loading in real owner surfaces', () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    'product-schedule',
+    'needs-me',
+  ] as const)('%s names the opened review tab after the review the card already shows', async (projection) => {
+    // Real page 2026-09-23: "在 Workspace 打开" / "打开成果" opened the review as a generic "产物审阅" tab,
+    // overwriting the title another entry had given the same review.
+    const reviewId = `review-${'c'.repeat(64)}`;
+    const ownerRead = preparedOwnerRead();
+    if (!ownerRead.preparedArtifact) throw new Error('Expected a prepared owner coordinate');
+    ownerRead.preparedArtifact = {
+      ...ownerRead.preparedArtifact,
+      artifactRef: '/uploads/panel.png',
+      artifactRevision: '1',
+      previewRef: `content-review:${reviewId}:round:1`,
+      openInWorkspaceRef: `workspace:content-review:thread-source:${reviewId}`,
+    };
+    mocks.ownerReads = [ownerRead];
+    mocks.fetch.mockImplementation((path: string) => {
+      if (path === '/api/artifacts') return Promise.resolve(new Response(JSON.stringify({ artifacts: [] })));
+      if (path === `/api/artifact-reviews/${reviewId}`)
+        return Promise.resolve(new Response(JSON.stringify({ review: { reviewId, title: '判断产物面板按钮文案' } })));
+      if (path === `/api/artifact-reviews/${reviewId}/media/1`) return Promise.resolve(new Response(new Blob(['png'])));
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:thumb', revokeObjectURL: () => undefined }));
+    await render(projection);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() => button(projection === 'needs-me' ? 'needs-me-open-artifact' : 'product-schedule-open-artifact').click());
+    expect(open).toHaveBeenCalledOnce();
+    expect(open.mock.calls[0]?.[0].artifact.title).toBe('判断产物面板按钮文案');
+  });
 });

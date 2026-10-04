@@ -22,6 +22,13 @@ vi.mock('socket.io-client', () => ({
     disconnect: mocks.disconnect,
   }),
 }));
+vi.mock('../content-review/WorkspaceContentReviewSurface', () => ({
+  WorkspaceContentReviewSurface: ({ onOpenFileTools }: { onOpenFileTools: () => void }) => (
+    <button type="button" data-testid="open-file-tools" onClick={onOpenFileTools}>
+      文件工具
+    </button>
+  ),
+}));
 vi.mock('@/components/workspace/WorkspaceFileViewer', () => ({
   WorkspaceFileViewer: (props: {
     file: { content: string };
@@ -93,6 +100,7 @@ describe('F307 file owner continuity', () => {
   it('reuses one read, isolates worktrees, and never overwrites a dirty editor on external change', async () => {
     await renderOwner();
     expect(fileReads()).toHaveLength(1);
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="open-file-tools"]')?.click());
     const viewer = container.querySelector<HTMLElement>('[data-testid="file-owner-viewer"]');
     expect(viewer?.dataset.content).toBe('owner-a');
 

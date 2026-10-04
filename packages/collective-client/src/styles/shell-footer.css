@@ -1,0 +1,57 @@
+.destination-footer {
+  margin-top: auto;
+  padding: 12px 18px;
+}
+
+.steward-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.steward-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+}
+
+.destination-notice {
+  max-height: 70px;
+  margin: 0 0 10px;
+  overflow: auto;
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.connection-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+
+[data-status] {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--cafe-text-muted);
+}
+
+[data-status="online"] {
+  background: var(--semantic-success);
+}
+
+[data-status="offline"] {
+  background: var(--semantic-critical);
+}

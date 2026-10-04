@@ -4,14 +4,14 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { lazy, Suspense, useCallback, useState } from 'react';
 import { useApprovalHubSync } from '@/hooks/useApprovalHub';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
-import { useChatStore } from '@/stores/chatStore';
 import { AttentionRailButtons } from './attention/AttentionRailButtons';
 import { ConciergeRailToggle } from './concierge/ConciergeRailToggle';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { SETTINGS_SECTIONS } from './settings/settings-nav-config';
+import { resolveShellNavTarget } from './shell/shell-navigation';
+import { usePresentationRail } from './shell/use-presentation-rail';
 import { ThemeMenu } from './ThemeMenu';
-import { getThreadIdFromPathname } from './ThreadSidebar/thread-navigation';
 
 const OklchTuner = lazy(() => import('./dev/OklchTuner').then((m) => ({ default: m.OklchTuner })));
 
@@ -118,30 +118,6 @@ interface ActivityBarProps {
   className?: string;
 }
 
-function readFromParam(): string | null {
-  if (typeof window === 'undefined') return null;
-  return new URLSearchParams(window.location.search).get('from');
-}
-
-function getNavigationReferrer(pathname: string): string | null {
-  const threadId = getThreadIdFromPathname(pathname);
-  return threadId !== 'default' ? threadId : readFromParam();
-}
-
-function appendReferrer(path: string, referrer: string): string {
-  const sep = path.includes('?') ? '&' : '?';
-  return `${path}${sep}from=${encodeURIComponent(referrer)}`;
-}
-
-function resolveNavTarget(path: string, pathname: string): string {
-  if (path === '/') {
-    const fromParam = readFromParam();
-    return fromParam ? `/thread/${encodeURIComponent(fromParam)}` : '/';
-  }
-  const referrer = getNavigationReferrer(pathname);
-  return referrer ? appendReferrer(path, referrer) : path;
-}
-
 function PinnedSections({ pinned, onNav }: { pinned: readonly string[]; onNav: (path: string) => void }) {
   const searchParams = useSearchParams();
   const activeSection = searchParams?.get('s') ?? '';
@@ -204,7 +180,7 @@ function SettingsButton({ pathname, onNav }: { pathname: string; onNav: (path: s
   );
 }
 
-function ClapperboardIcon({ className = 'w-5 h-5' }: { className?: string }) {
+export function ClapperboardIcon({ className = 'w-5 h-5' }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className={className}>
       <title>演示浮窗</title>
@@ -222,20 +198,18 @@ function ClapperboardIcon({ className = 'w-5 h-5' }: { className?: string }) {
 /** F226: global presentation-surface toggle — visible across all routes so the
  *  float can be collapsed/recalled even from Memory Hub / Settings (spec Phase A). */
 function PresentationRailToggle() {
-  const surface = useChatStore((s) => s.presentationSurface);
-  const minimizeFloat = useChatStore((s) => s.minimizeFloat);
-  if (!surface) return null;
-  const minimized = surface.minimized;
+  const { visible, minimized, label, onClick } = usePresentationRail();
+  if (!visible) return null;
   return (
     <button
       type="button"
-      onClick={() => minimizeFloat(!minimized)}
+      onClick={onClick}
       className={`flex h-10 w-10 items-center justify-center rounded-lg transition-all ${
         minimized
           ? 'hover:bg-[var(--console-rail-item)] hover:shadow-[var(--console-rail-shadow)]'
           : 'bg-[var(--console-rail-active)] shadow-[var(--console-rail-shadow)]'
       }`}
-      title={minimized ? '召回演示浮窗（还原讲稿）' : '收起演示浮窗'}
+      title={label}
       data-testid="presentation-rail-toggle"
     >
       <ClapperboardIcon className="h-5 w-5" />
@@ -254,7 +228,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
 
   const handleNav = useCallback(
     (path: string) => {
-      router.push(resolveNavTarget(path, pathname));
+      router.push(resolveShellNavTarget(path, pathname));
     },
     [pathname, router],
   );

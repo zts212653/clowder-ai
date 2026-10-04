@@ -1,10 +1,13 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { jumpToApprovalAnchor } from '@/components/ApprovalProvenanceLinks';
 import { useEvolutionReading } from '../evolution-reading-state';
 import { EvolutionPreparationWorkspace } from '../preparation/EvolutionPreparationWorkspace';
 import { PROGRAM_ID, programFixture } from './evolution-fixtures';
 import { evolutionPreparationFixture } from './evolution-preparation-fixtures';
+
+vi.mock('@/components/ApprovalProvenanceLinks', () => ({ jumpToApprovalAnchor: vi.fn() }));
 
 function choiceProjection() {
   const preparation = evolutionPreparationFixture();
@@ -31,6 +34,7 @@ describe('preparation choice reading uses authored content', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
+    vi.clearAllMocks();
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
@@ -58,7 +62,83 @@ describe('preparation choice reading uses authored content', () => {
     expect(item.textContent).toContain('已记录三条失败路径');
     expect(item.textContent).toContain('codex-terra · 技术决定');
     expect(item.querySelectorAll('select,input,textarea')).toHaveLength(0);
-    expect(host.querySelector('[data-preparation-item="records"]')?.textContent).toContain('尚未提交建议');
+    expect(host.querySelector('[data-preparation-item="records"] > summary')?.textContent).not.toContain('猫的建议');
+  });
+  it('reads the concrete object first and accepts an omitted optional category', async () => {
+    const projection = choiceProjection();
+    const body = projection.preparation.sections.object_map.current!.submission!.body;
+    if (body.kind !== 'object_map') throw new Error('wrong fixture');
+    delete body.items[0]!.category;
+    await render(projection);
+    const summary = host.querySelector('[data-preparation-item="data"] > summary')!;
+    expect(summary.textContent).toMatch(/^跨地区材料转交 sentinel/u);
+    expect(summary.textContent).not.toContain('类别尚未提交');
+    expect(summary.textContent).toContain(body.items[0]!.why);
+    expect(summary.textContent).toContain('路由失败可以重放');
+    expect(summary.textContent).not.toContain('来源与范围');
+    expect(summary.textContent).toContain('查看依据与原件');
+    expect(host.querySelector('[data-preparation-item="records"] > summary')?.textContent).not.toContain('猫的建议');
+  });
+  it('does not turn an omitted recommendation into missing work or hide an explicitly undecided choice', async () => {
+    const projection = choiceProjection();
+    const body = projection.preparation.sections.object_map.current!.submission!.body;
+    if (body.kind !== 'object_map') throw new Error('wrong fixture');
+    const item = body.items[0]!;
+    delete item.recommendation;
+    item.decision = { state: 'undecided', reason: '实际加载的方法尚未核实', neededFrom: 'cat' };
+    item.nextAction = '回读这次调用实际加载的方法版本';
+    await render(projection);
+    const row = host.querySelector('[data-preparation-item="data"]')!;
+    expect(row.querySelector('summary')?.textContent).not.toContain('猫的建议');
+    expect(row.textContent).not.toMatch(/尚未提交建议|无须建议/u);
+    expect(row.textContent).toContain('实际加载的方法尚未核实');
+    expect(row.textContent).toContain(item.nextAction);
+    expect(row.textContent).toContain('未决定');
+  });
+  it('keeps an unconnected Git reference unverified and does not replace its version with a workspace file', async () => {
+    const projection = choiceProjection();
+    const body = projection.preparation.sections.object_map.current!.submission!.body;
+    if (body.kind !== 'object_map') throw new Error('wrong fixture');
+    body.items[0]!.sourceRefs = [{ ownerFeatureId: 'F311', ownerStateRef: `git:${'a'.repeat(40)}:method/old.md` }];
+    await render(projection);
+    const item = host.querySelector('[data-preparation-item="data"]')!;
+    expect(item.textContent).toContain('原件未核读');
+    expect(item.textContent).toContain(`git:${'a'.repeat(40)}:method/old.md`);
+    expect(item.querySelector('a[href*="old.md"]')).toBeNull();
+  });
+  it('opens only the exact resolved source and removes the entrance when that source is unavailable', async () => {
+    const projection = choiceProjection();
+    const current = projection.preparation.sections.object_map.current!;
+    const body = current.submission!.body;
+    if (body.kind !== 'object_map') throw new Error('wrong fixture');
+    const source = { ownerFeatureId: 'F117', ownerStateRef: 'message:original' };
+    body.items[0]!.sourceRefs = [source];
+    current.evidenceSources = [
+      {
+        sourceKey: 'data',
+        status: 'available',
+        refs: [
+          {
+            ref: { ...source, version: 'different-version' },
+            status: 'available',
+            threadId: 'source-thread',
+            messageId: 'original',
+          },
+        ],
+      },
+    ];
+    await render(projection);
+    expect(host.querySelector('.evolution-preparation-object-sources button')).toBeNull();
+    current.evidenceSources[0]!.refs[0]!.ref = source;
+    await render(projection);
+    const button = host.querySelector<HTMLButtonElement>('.evolution-preparation-object-sources button');
+    expect(button).not.toBeNull();
+    await act(async () => button?.click());
+    expect(jumpToApprovalAnchor).toHaveBeenCalledExactlyOnceWith('source-thread', 'original');
+    current.evidenceSources[0]!.refs[0]!.status = 'unavailable';
+    await render(projection);
+    expect(host.querySelector('.evolution-preparation-object-sources button')).toBeNull();
+    expect(host.querySelector('.evolution-preparation-object-sources')?.textContent).toContain('原件当前不可读');
   });
   it('does not show a human choice as confirmed when its exact input is missing', async () => {
     const projection = choiceProjection();

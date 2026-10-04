@@ -15,6 +15,7 @@ import {
   producerAttentionReceiptV1Schema,
 } from '@cat-cafe/shared';
 import type { ApprovalProducerRegistry } from '../approval-hub/ApprovalProducerRegistry.js';
+import { canonicalMeetings } from '../approval-hub/adapters/F292CanonicalMeetings.js';
 import type { RuntimeInteractionStore } from '../runtime-interaction/ports/RuntimeInteractionStore.js';
 import type { MeetingIntakeStore } from '../signal-intake/MeetingIntakeStore.js';
 
@@ -201,8 +202,8 @@ export class F292NeedsMeProducerAdapter implements NeedsMeProducerAdapter {
   constructor(private readonly store: Pick<MeetingIntakeStore, 'get' | 'list'>) {}
 
   async listCurrentReceipts(ownerUserId: string): Promise<ProducerAttentionReceiptV1[]> {
-    const intakes = await this.store.list();
-    return intakes.flatMap((intake) => {
+    const intakes = canonicalMeetings((await this.store.list()).filter((intake) => intake.ownerId === ownerUserId));
+    return intakes.flatMap(({ intake }) => {
       if (intake.ownerId !== ownerUserId || !intake.entrustedWorkTaskRef || !meetingIntakeNeedsAttention(intake)) {
         return [];
       }

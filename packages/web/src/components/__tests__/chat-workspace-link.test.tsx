@@ -101,7 +101,11 @@ describe('MarkdownContent chat document navigation', () => {
 
   function renderContent(content: string) {
     act(() => {
-      root.render(<MarkdownContent content={content} disableCommandPrefix />);
+      root.render(
+        <div data-message-id="message-origin">
+          <MarkdownContent content={content} disableCommandPrefix />
+        </div>,
+      );
     });
   }
 
@@ -150,6 +154,11 @@ describe('MarkdownContent chat document navigation', () => {
     expect(state.workspaceOpenFilePath).toBe('docs/features/F063-hub-workspace-explorer.md');
     expect(state.workspaceOpenFileLine).toBeNull();
     expect(state.rightPanelMode).toBe('workspace');
+    expect(state._workspaceFileSetAt.navigationOrigin).toEqual({
+      kind: 'chat-file-link',
+      threadId: 'default',
+      messageId: 'message-origin',
+    });
   });
 
   it('preserves a bare Markdown filename with a line suffix through the ReactMarkdown pipeline', () => {

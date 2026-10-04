@@ -29,3 +29,9 @@ handoffTargetResolver:
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 168
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "No consumer acts on it; its one actioned change is already a guard, and F275/F286 cut the key measure pipelines."
+  revivalPath: "Revive when F275 lands and a real Program names task delivery quality as its measure with a named consumer."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

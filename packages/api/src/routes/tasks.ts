@@ -26,6 +26,8 @@ import {
   EntrustedWorkLifecycleError,
   EntrustedWorkLifecycleService,
 } from '../domains/growing/EntrustedWorkLifecycleService.js';
+import type { PreparedArtifactReader } from '../domains/growing/EntrustedWorkOwnerReadService.js';
+import type { DeploymentWaitLifecycleService } from '../domains/runtime-deployment/DeploymentWaitLifecycleService.js';
 import { validateUrl } from '../infrastructure/scheduler/content-fetcher.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
@@ -33,7 +35,32 @@ import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js
 export interface TasksRoutesOptions {
   taskStore: ITaskStore;
   socketManager: SocketManager;
+  artifactReader?: PreparedArtifactReader;
   waitLifecycleHolder?: { current?: GitHubWaitLifecycleService };
+  deploymentWaitLifecycleHolder?: { current?: DeploymentWaitLifecycleService };
+}
+
+type WaitCancelLifecycle = {
+  cancel(taskId: string, actor: { readonly kind: 'user'; readonly userId: string }): Promise<unknown>;
+};
+
+type CancelWaitSelection =
+  | { readonly ok: true; readonly lifecycle: WaitCancelLifecycle }
+  | { readonly ok: false; readonly status: 403 | 409 | 503; readonly error: string };
+
+function selectCancelableWait(task: TaskItem, userId: string, options: TasksRoutesOptions): CancelWaitSelection {
+  if (!task.userId || task.userId !== userId) return { ok: false, status: 403, error: 'Not your wait' };
+  if (task.status === 'done' || (task.entrustedWork && task.entrustedWork.closure.state !== 'open')) {
+    return { ok: false, status: 409, error: 'Task has no active wait' };
+  }
+  const lifecycle =
+    task.kind === 'work' && (task.deploymentWait?.await || task.deploymentWait?.waitOutcome?.delivery === 'pending')
+      ? options.deploymentWaitLifecycleHolder?.current
+      : task.kind === 'pr_tracking' && task.automationState?.await
+        ? options.waitLifecycleHolder?.current
+        : null;
+  if (lifecycle === null) return { ok: false, status: 409, error: 'Task has no active wait' };
+  return lifecycle ? { ok: true, lifecycle } : { ok: false, status: 503, error: 'Wait lifecycle unavailable' };
 }
 
 const VALID_STATUSES = ['todo', 'doing', 'blocked', 'done'] as const;
@@ -116,6 +143,24 @@ function toUpdateInput(data: z.infer<typeof updateSchema>): UpdateTaskInput {
   return input;
 }
 
+async function terminalizeDeploymentWaitForPatch(
+  task: TaskItem | null,
+  patch: { readonly ownerCatId?: string | null; readonly status?: TaskItem['status'] },
+  holder: TasksRoutesOptions['deploymentWaitLifecycleHolder'],
+): Promise<void> {
+  if (
+    task?.kind !== 'work' ||
+    (!task.deploymentWait?.await && task.deploymentWait?.waitOutcome?.delivery !== 'pending')
+  ) {
+    return;
+  }
+  if (patch.ownerCatId !== undefined && patch.ownerCatId !== task.ownerCatId) {
+    await holder?.current?.ownerChanged(task.id);
+    return;
+  }
+  if (patch.status === 'done') await holder?.current?.taskCompleted(task.id);
+}
+
 function validateEntrustedWorkWebClose(
   task: TaskItem,
   userId: string,
@@ -140,6 +185,7 @@ function entrustedWorkLifecycleHttpStatus(error: EntrustedWorkLifecycleError): 4
 export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, opts) => {
   const { taskStore, socketManager } = opts;
   const entrustedWorkLifecycle = new EntrustedWorkLifecycleService(taskStore, {
+    ...(opts.artifactReader ? { artifactReader: opts.artifactReader } : {}),
     onChanged: (ownerUserId) =>
       socketManager.emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
   });
@@ -201,6 +247,7 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     ) {
       await opts.waitLifecycleHolder?.current?.ownerChanged(id);
     }
+    await terminalizeDeploymentWaitForPatch(before, result.data, opts.deploymentWaitLifecycleHolder);
     let updated: TaskItem | null;
     try {
       updated = await taskStore.update(id, toUpdateInput(result.data));
@@ -245,20 +292,12 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       reply.status(404);
       return { error: 'Task not found' };
     }
-    if (task.kind !== 'pr_tracking' || !task.automationState?.await) {
-      reply.status(409);
-      return { error: 'Task has no active PR wait' };
+    const selection = selectCancelableWait(task, userId, opts);
+    if (!selection.ok) {
+      reply.status(selection.status);
+      return { error: selection.error };
     }
-    if (!task.userId || task.userId !== userId) {
-      reply.status(403);
-      return { error: 'Not your wait' };
-    }
-    const lifecycle = opts.waitLifecycleHolder?.current;
-    if (!lifecycle) {
-      reply.status(503);
-      return { error: 'Wait lifecycle unavailable' };
-    }
-    const result = await lifecycle.cancel(task.id, { kind: 'user', userId });
+    const result = await selection.lifecycle.cancel(task.id, { kind: 'user', userId });
     const updated = await taskStore.get(task.id);
     if (updated) socketManager.broadcastToRoom(`thread:${updated.threadId}`, 'task_updated', updated);
     return { status: 'cancelled', result };

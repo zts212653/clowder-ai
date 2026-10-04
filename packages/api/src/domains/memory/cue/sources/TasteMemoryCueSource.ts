@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { TasteRepository } from '../../../taste/services/TasteRepository.js';
+import { resolveCanonicalTasteRoot, type TasteRepository } from '../../../taste/services/TasteRepository.js';
 import { TasteMemoryReader, type TasteMemoryReadResult } from '../../taste/TasteMemoryReader.js';
 import {
   EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX,
@@ -56,16 +56,21 @@ export type TasteMemoryCueReadResult =
   | { status: 'ok'; payload: unknown }
   | { status: 'not_available'; invalidationReason: 'source_corrected' | 'source_forgotten' };
 
-function listSourcePaths(root: string): string[] {
-  return [PUBLIC_DIRECTORY, PRIVATE_DIRECTORY].flatMap((directory) => {
+async function listSourcePaths(root: string): Promise<string[]> {
+  const paths: string[] = [];
+  for (const directory of [PUBLIC_DIRECTORY, PRIVATE_DIRECTORY]) {
     try {
-      return readdirSync(join(root, directory), { withFileTypes: true })
-        .filter((entry) => entry.isFile() || entry.isSymbolicLink())
-        .map((entry) => `${directory}/${entry.name}`);
+      const entries = await readdir(join(root, directory), { withFileTypes: true });
+      paths.push(
+        ...entries
+          .filter((entry) => entry.isFile() || entry.isSymbolicLink())
+          .map((entry) => `${directory}/${entry.name}`),
+      );
     } catch {
-      return [];
+      /* absent private directory is valid */
     }
-  });
+  }
+  return paths;
 }
 
 function boundedResults(results: TasteMemoryReadResult[], dimensions: readonly string[]): TasteMemoryReadResult[] {
@@ -98,7 +103,7 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     void input.stage;
     void input.featureId;
     if (input.ownerUserId !== this.ownerUserId) return null;
-    const snapshot = this.snapshot(input.ownerUserId, TASTE_SKILL_DIMENSIONS_V1[input.selectedSkill]);
+    const snapshot = await this.snapshot(input.ownerUserId, TASTE_SKILL_DIMENSIONS_V1[input.selectedSkill]);
     return snapshot
       ? { dimensions: snapshot.dimensions, revision: snapshot.revision, visibility: snapshot.visibility }
       : null;
@@ -113,12 +118,14 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     if (input.ownerUserId !== this.ownerUserId) return null;
     const definition = findTasteTaskBundle(input);
     if (!definition) return null;
-    const sources = definition.sourcePaths.flatMap((sourcePath) => {
-      const result = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath });
-      return result?.visibility === 'public'
-        ? [{ sourcePath: result.sourcePath, revision: result.revision, visibility: 'owner_public' as const }]
-        : [];
-    });
+    const root = await resolveCanonicalTasteRoot(this.repository);
+    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId);
+    const sources: TasteTaskBundleProjection['sources'] = [];
+    for (const sourcePath of definition.sourcePaths) {
+      const result = await reader.read({ ownerUserId: input.ownerUserId, sourcePath });
+      if (result?.visibility === 'public')
+        sources.push({ sourcePath: result.sourcePath, revision: result.revision, visibility: 'owner_public' });
+    }
     if (sources.length !== definition.sourcePaths.length) return null;
     return {
       bundleId: definition.bundleId,
@@ -145,7 +152,7 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     if (input.ownerUserId !== this.ownerUserId) return null;
     const trigger = getExplicitApprovedTasteTrigger(input.triggerKey);
     if (!trigger) return null;
-    const result = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: trigger.sourcePath });
+    const result = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: trigger.sourcePath });
     if (!result || !trigger.requiredTags.every((tag) => result.payload.tags.includes(tag))) return null;
     return {
       triggerKey: trigger.triggerKey,
@@ -176,7 +183,7 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     if (dimensions.length === 0 || dimensions.length > 6 || dimensions.some((value) => !KNOWN_DIMENSIONS.has(value))) {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
-    const snapshot = this.snapshot(input.ownerUserId, dimensions);
+    const snapshot = await this.snapshot(input.ownerUserId, dimensions);
     if (!snapshot) return { status: 'not_available', invalidationReason: 'source_forgotten' };
     if (snapshot.revision !== input.expectedRevision) {
       return { status: 'not_available', invalidationReason: 'source_corrected' };
@@ -191,14 +198,14 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     };
   }
 
-  private readTaskBundleItem(input: {
+  private async readTaskBundleItem(input: {
     ownerUserId: string;
     anchor: string;
     expectedRevision: string;
-  }): TasteMemoryCueReadResult {
+  }): Promise<TasteMemoryCueReadResult> {
     const coordinate = parseTasteTaskBundleAnchor(input.anchor);
     if (!coordinate) return { status: 'not_available', invalidationReason: 'source_forgotten' };
-    const current = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: coordinate.sourcePath });
+    const current = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath: coordinate.sourcePath });
     if (!current) return { status: 'not_available', invalidationReason: 'source_forgotten' };
     if (current.revision !== input.expectedRevision) {
       return { status: 'not_available', invalidationReason: 'source_corrected' };
@@ -213,15 +220,15 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     };
   }
 
-  private readExplicit(input: {
+  private async readExplicit(input: {
     ownerUserId: string;
     anchor: string;
     expectedRevision: string;
-  }): TasteMemoryCueReadResult {
+  }): Promise<TasteMemoryCueReadResult> {
     const sourcePath = input.anchor.slice(EXPLICIT_APPROVED_TASTE_SOURCE_ANCHOR_PREFIX.length);
     const trigger = getExplicitApprovedTasteTriggerBySourcePath(sourcePath);
     if (!trigger) return { status: 'not_available', invalidationReason: 'source_forgotten' };
-    const current = this.reader.read({ ownerUserId: input.ownerUserId, sourcePath });
+    const current = await this.reader.read({ ownerUserId: input.ownerUserId, sourcePath });
     if (!current) return { status: 'not_available', invalidationReason: 'source_forgotten' };
     if (
       current.revision !== input.expectedRevision ||
@@ -239,14 +246,15 @@ export class CanonicalTasteMemoryCueSource implements TasteDimensionMapSource {
     };
   }
 
-  private snapshot(ownerUserId: string, requestedDimensions: readonly string[]): TasteSnapshot | null {
+  private async snapshot(ownerUserId: string, requestedDimensions: readonly string[]): Promise<TasteSnapshot | null> {
     const dimensions = [...new Set(requestedDimensions)].sort();
-    const all = listSourcePaths(this.repository.canonicalRoot())
-      .sort()
-      .flatMap((sourcePath) => {
-        const result = this.reader.read({ ownerUserId, sourcePath });
-        return result?.payload.dimension && dimensions.includes(result.payload.dimension) ? [result] : [];
-      });
+    const root = await resolveCanonicalTasteRoot(this.repository);
+    const reader = new TasteMemoryReader({ canonicalRoot: () => root, approvalLockKey: () => root }, this.ownerUserId);
+    const all: TasteMemoryReadResult[] = [];
+    for (const sourcePath of (await listSourcePaths(root)).sort()) {
+      const result = await reader.read({ ownerUserId, sourcePath });
+      if (result?.payload.dimension && dimensions.includes(result.payload.dimension)) all.push(result);
+    }
     if (all.length === 0) return null;
     const availableDimensions = dimensions.filter((dimension) =>
       all.some((result) => result.payload.dimension === dimension),

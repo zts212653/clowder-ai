@@ -1,4 +1,5 @@
 import {
+  type CollectiveAgentMessageRequest,
   type CollectiveEventEnvelope,
   type CollectivePairingIntent,
   collectiveAckRequestSchema,
@@ -7,7 +8,9 @@ import {
   collectiveHumanMessageRequestSchema,
   collectivePollRequestSchema,
 } from '@cat-cafe/shared';
-
+import { requireAgentMessageParticipation } from './agent-message-participation.js';
+import { recordCollectiveWorkResult } from './collaboration-work.js';
+import { recordCollectiveWorkProgress } from './collaboration-work-progress.js';
 import {
   assertConnectionCoordinates,
   assertServiceCoordinates,
@@ -17,10 +20,8 @@ import {
   requireConnection,
 } from './connection-authority.js';
 import { CollectiveServiceError } from './errors.js';
-import { resolveEventAddress } from './event-location.js';
 import { appendEvent } from './event-log.js';
 import { requireHumanAuthBinding, requireMembership, requireSteward, resolveSession } from './identity-store.js';
-import { requireParticipant } from './participation-store.js';
 import {
   createSecret,
   createStableId,
@@ -28,7 +29,7 @@ import {
   type PersistentServiceState,
   secretMatches,
 } from './persistence.js';
-import type { ConnectionRecord } from './state.js';
+import type { ConnectionRecord, MutableServiceState } from './state.js';
 
 export interface PairingExchangeInput {
   readonly serviceInstanceId: string;
@@ -145,6 +146,7 @@ export class CollectiveConnectionEventStore {
           kind: 'human',
           humanId: auth.human.humanId,
           displayName: auth.human.displayName,
+          ...(auth.human.avatarUrl ? { avatarUrl: auth.human.avatarUrl } : {}),
         },
         now: this.now(),
       });
@@ -157,55 +159,42 @@ export class CollectiveConnectionEventStore {
       const connection = requireConnection(state, endpointCredential, input.connectionId);
       assertConnectionCoordinates(state, connection, input);
       const authorizedHuman = requireAuthorizedHuman(state, connection);
-      if (input.participationRevision !== undefined) {
-        const address = resolveEventAddress(state.events[input.collectiveId] ?? [], input);
-        const participant = requireParticipant(state, {
-          ...input,
-          catId: input.agent.catId,
+      const { authoritativeDisplayName, ...receipts } = requireAgentMessageParticipation(
+        state,
+        input,
+        connection,
+        authorizedHuman.humanId,
+        this.now(),
+      );
+      const { workResultIntent: _workResultIntent, workProgressIntent: _workProgressIntent, ...coordinates } = input;
+      const actor: Extract<CollectiveEventEnvelope['actor'], { kind: 'agent' }> = {
+        kind: 'agent',
+        human: {
           humanId: authorizedHuman.humanId,
-          channelId: address.location.channelId,
-          participationRevision: input.participationRevision,
-        });
-        const source = (state.events[input.collectiveId] ?? []).find((event) => event.eventId === input.replyToEventId);
-        if (
-          input.agent.agentId !== input.agent.catId ||
-          participant.displayName !== input.agent.displayName ||
-          source?.recipient?.kind !== 'agent' ||
-          source.recipient.connectionId !== connection.connectionId ||
-          source.recipient.agentId !== input.agent.catId ||
-          source.recipient.participationRevision !== input.participationRevision ||
-          address.recipient.kind !== 'channel'
-        ) {
-          throw new CollectiveServiceError(
-            'PARTICIPATION_REVOKED',
-            'Reply is not bound to the current participant source',
-            403,
-          );
-        }
-      }
-      return appendEvent(state, {
-        coordinates: input,
-        actorScope: `connection:${connection.connectionId}`,
-        actor: {
-          kind: 'agent',
-          human: {
-            humanId: authorizedHuman.humanId,
-            displayName: authorizedHuman.displayName,
-          },
-          agent: {
-            agentId: input.agent.agentId,
-            displayName: input.agent.displayName,
-          },
-          provenance: {
-            connectionId: connection.connectionId,
-            endpointId: connection.endpointId,
-            endpointLabel: connection.endpointLabel,
-            catId: input.agent.catId,
-            sessionRef: input.agent.sessionRef,
-          },
+          displayName: authorizedHuman.displayName,
         },
+        agent: {
+          agentId: input.agent.agentId,
+          displayName: authoritativeDisplayName ?? input.agent.displayName,
+        },
+        provenance: {
+          connectionId: connection.connectionId,
+          endpointId: connection.endpointId,
+          endpointLabel: connection.endpointLabel,
+          catId: input.agent.catId,
+          sessionRef: input.agent.sessionRef,
+        },
+      };
+      const event = appendEvent(state, {
+        coordinates: { ...coordinates, ...receipts },
+        actorScope: `connection:${connection.connectionId}`,
+        // Current participation names new events; exact retries retain history.
+        actor: authoritativeDisplayName === undefined ? actor : preserveAgentReplayActor(state, input, actor),
         now: this.now(),
       });
+      recordCollectiveWorkResult(state, event, this.now());
+      recordCollectiveWorkProgress(state, event);
+      return event;
     });
   }
 
@@ -304,4 +293,27 @@ export class CollectiveConnectionEventStore {
     }
     return projectConnection(connection, state.serviceInstanceId);
   }
+}
+
+function preserveAgentReplayActor(
+  state: MutableServiceState,
+  input: CollectiveAgentMessageRequest,
+  actor: Extract<CollectiveEventEnvelope['actor'], { kind: 'agent' }>,
+): CollectiveEventEnvelope['actor'] {
+  const existingId =
+    state.clientEventIndex[`${input.collectiveId}:connection:${input.connectionId}:${input.clientEventId}`];
+  const existing = existingId
+    ? state.events[input.collectiveId]?.find((event) => event.eventId === existingId)
+    : undefined;
+  if (existing?.actor.kind !== 'agent') return actor;
+  const original = existing.actor;
+  const sameIdentity =
+    original.human.humanId === actor.human.humanId &&
+    original.agent.agentId === actor.agent.agentId &&
+    original.provenance.connectionId === actor.provenance.connectionId &&
+    original.provenance.endpointId === actor.provenance.endpointId &&
+    original.provenance.catId === actor.provenance.catId &&
+    original.provenance.sessionRef === actor.provenance.sessionRef;
+  // appendEvent still verifies the complete body, source, address and receipt.
+  return sameIdentity ? original : actor;
 }

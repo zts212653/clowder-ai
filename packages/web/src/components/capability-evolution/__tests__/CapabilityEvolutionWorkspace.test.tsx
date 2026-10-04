@@ -3,8 +3,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CapabilityEvolutionWorkspace } from '../CapabilityEvolutionWorkspace';
 import { useEvolutionReading } from '../evolution-reading-state';
+import { assetReviewFixture } from './evolution-asset-fixtures';
+import { assetRef } from './evolution-fixtures';
 
-const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState } = vi.hoisted(() => ({
+const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState, assetReviewState } = vi.hoisted(() => ({
   apiFetchMock: vi.fn(),
   setPendingChatInsert: vi.fn(),
   onOpenProgram: vi.fn(),
@@ -15,11 +17,13 @@ const { apiFetchMock, setPendingChatInsert, onOpenProgram, chatStoreState } = vi
       { id: 'thread-other', title: '视频工作台' },
     ],
   },
+  assetReviewState: { body: '{}', status: 404 },
 }));
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: async (...args: unknown[]) => {
-    if (String(args[0]).includes('/asset-review')) return new Response('{}', { status: 404 });
+    if (String(args[0]).includes('/asset-review'))
+      return new Response(assetReviewState.body, { status: assetReviewState.status });
     const response = await apiFetchMock(...args);
     return response instanceof Response ? response.clone() : response;
   },
@@ -88,6 +92,8 @@ describe('F311 Capability Evolution Workspace', () => {
   beforeEach(() => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     apiFetchMock.mockReset();
+    assetReviewState.body = '{}';
+    assetReviewState.status = 404;
     useEvolutionReading.setState({ programs: {}, workspaceProgramIds: {} });
     setPendingChatInsert.mockReset();
     onOpenProgram.mockReset();
@@ -137,6 +143,10 @@ describe('F311 Capability Evolution Workspace', () => {
     expect(container.textContent).not.toContain('capability:f311-investor-roadshow-expression');
     expect(container.textContent).not.toContain('能力进化目标');
     expect(container.textContent).not.toContain('下一步：');
+
+    const viewProgress = [...container.querySelectorAll('button')].find((button) => button.textContent === '查看进展');
+    expect(viewProgress?.className).toContain('evolution-link');
+    expect(viewProgress?.className).not.toContain('evolution-primary');
 
     await act(async () => {
       container
@@ -327,6 +337,60 @@ describe('F311 Capability Evolution Workspace', () => {
     expect(rows[2]?.textContent).toContain('投资人路演效果');
     expect(rows[2]?.textContent).toContain('正在收集本轮证据');
     expect(container.textContent).not.toContain('三个阶段');
+  });
+
+  it('shows the empty-state guidance and a usable StartEvolution entry when no programs exist', async () => {
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('还没有进化记录。在下方写下想改进什么，由你从目标对话发送即可开始。');
+    const startDetails = [...container.querySelectorAll('details')].find((details) =>
+      details.textContent?.includes('提出新目标'),
+    );
+    expect(startDetails?.open).toBe(true);
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="capability-evolution-start-input"]');
+    expect(input).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.disabled).toBe(
+      true,
+    );
+    await act(async () => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, '让代码审阅更少返工');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="capability-evolution-start"]')?.disabled).toBe(
+      false,
+    );
+  });
+
+  it('shows the adopted version by its human title on the home focus card, never the exact SHA', async () => {
+    const sha = '3084ef09530e019d14bdf7e81043bbae6f4ab66b51b019005c42adb18d963285';
+    const catalog = assetReviewFixture(sha, sha);
+    catalog.objectRef = projection.program.objectRef;
+    catalog.versions = [{ versionRef: assetRef(sha), title: '官方 walking ONNX baseline', parentEdges: [] }];
+    assetReviewState.body = JSON.stringify(catalog);
+    assetReviewState.status = 200;
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('当前采用：官方 walking ONNX baseline');
+    expect(container.textContent).not.toContain(sha);
+  });
+
+  it('falls back to a count line when the adopted version has no human title, never the exact SHA', async () => {
+    const sha = '3084ef09530e019d14bdf7e81043bbae6f4ab66b51b019005c42adb18d963285';
+    const catalog = assetReviewFixture(sha, sha);
+    catalog.objectRef = projection.program.objectRef;
+    catalog.versions = [{ versionRef: assetRef(sha), parentEdges: [] }];
+    assetReviewState.body = JSON.stringify(catalog);
+    assetReviewState.status = 200;
+    apiFetchMock.mockResolvedValue(new Response(JSON.stringify({ programs: [projection] }), { status: 200 }));
+    await renderWorkspace();
+
+    expect(container.textContent).toContain('当前采用 1 个已记录版本');
+    expect(container.textContent).not.toContain(sha);
   });
 
   it('F305 contract: shows the bound destination, then confirms the draft handoff without mechanism copy', async () => {

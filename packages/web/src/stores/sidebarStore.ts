@@ -17,6 +17,11 @@ function readPersistedWidth(): number {
 
 interface SidebarState {
   isOpen: boolean;
+  /**
+   * Whether anything has opened or closed the sidebar yet in this page load. `isOpen` alone cannot tell "the user
+   * collapsed it" from "nothing has opened it yet" (the chat route opens it on mount; other routes never do).
+   */
+  initialized: boolean;
   width: number;
   open: () => void;
   close: () => void;
@@ -28,10 +33,11 @@ interface SidebarState {
 
 export const useSidebarStore = create<SidebarState>((set, get) => ({
   isOpen: false,
+  initialized: false,
   width: SIDEBAR_DEFAULT_WIDTH,
-  open: () => set({ isOpen: true }),
-  close: () => set({ isOpen: false }),
-  toggle: () => set((s) => ({ isOpen: !s.isOpen })),
+  open: () => set({ isOpen: true, initialized: true }),
+  close: () => set({ isOpen: false, initialized: true }),
+  toggle: () => set((s) => ({ isOpen: !s.isOpen, initialized: true })),
   setWidth: (w) => {
     const next = typeof w === 'function' ? w(get().width) : w;
     const clamped = Math.min(400, Math.max(160, next));

@@ -10,6 +10,7 @@ import styles from './TeamWorkspacePanel.module.css';
 import {
   countTeamMembers,
   filterTeamMembers,
+  providerDisplayName,
   type TeamMemberFilter,
   type TeamMemberRow,
 } from './team-member-projection';
@@ -84,7 +85,7 @@ function ProviderFold({
               data-testid={`team-provider-${providerId}`}
             >
               <span>
-                <span className="block text-xs font-semibold text-cafe-black">{providerId}</span>
+                <span className="block text-xs font-semibold text-cafe-black">{providerDisplayName(providerId)}</span>
                 <span className="mt-0.5 block text-micro text-cafe-muted">{cats.length} 位成员使用此服务</span>
               </span>
               <span className="text-micro font-semibold text-cafe-secondary">{status}</span>
@@ -186,7 +187,19 @@ export function TeamMemberRoster({
           {visible.length === 0 &&
             (rows.length === 0 ? (
               <div className="px-4 py-10 text-center text-xs text-cafe-secondary" data-testid="team-roster-empty">
-                当前目录还没有可展示的团队成员
+                <p>当前目录还没有可展示的团队成员</p>
+                <p className="mt-1">目录可能还没同步过来。可以先重新读取一次；还没有的话，到设置里接入第一位成员。</p>
+                <button
+                  type="button"
+                  onClick={() => void onChanged()}
+                  className="mt-2 font-semibold text-cafe-accent hover:underline"
+                  data-testid="team-roster-refresh"
+                >
+                  重新读取
+                </button>
+                <a href="/settings?s=members" className="ml-3 font-semibold text-cafe-accent hover:underline">
+                  去设置接入成员
+                </a>
               </div>
             ) : (
               <div className="px-4 py-10 text-center text-xs text-cafe-secondary" data-testid="team-search-empty">

@@ -8,6 +8,8 @@ code_anchors:
   - packages/api/src/infrastructure/enterprise/WeComCliExecutor.ts
   - packages/api/src/infrastructure/enterprise/LarkActionService.ts
   - packages/api/src/infrastructure/enterprise/LarkCliExecutor.ts
+  - packages/mcp-server/src/tools/native-task-test-runner.ts
+  - packages/mcp-server/src/tools/native-task-test-guardian.ts
   - packages/api/src/routes/callback-wecom-action-routes.ts
   - packages/api/src/routes/callback-lark-action-routes.ts
   - scripts/sync-to-opensource.sh
@@ -20,6 +22,7 @@ doc_anchors:
   - docs/features/F308-full-sync-durable-fast-train.md
 static_scan_hints: [ActionService, CliExecutor, callback-action, dry-run, audit, idempotency, resource handle, sync-to-opensource, publish-release-tag, full-sync-train, receipt, gate lease]
 cited_by:
+  - {feature: F325, date: 2026-09-29, delta: "P1 host-owned short test command has one ephemeral guardian-owned process lifetime; no durable job truth or generic action executor is added before P2"}
   - {feature: F191, date: 2026-05-07, delta: new cell}
 ---
 
@@ -28,6 +31,8 @@ cited_by:
 ## Canonical Owner
 
 ADR-029 owns the external tool integration strategy: typed `ActionService` is the governance boundary, execution backend is chosen below it, and callback/import/MCP exposure is chosen above it. F162 is the first concrete implementation for WeCom and Lark. F308 adds local maintainer release-train and release-publication executors: durable exact-cut receipts, single-flight leases, remote ref CAS and idempotent retry sit with the external action that may mutate the public target; they do not become a runtime API store or a second sync/release writer.
+
+F325 P1 consumes this execution boundary only for one host-selected test command bound to a live entrusted Task. The MCP runner launches an isolated guardian that owns the sandboxed test process, timeout and cleanup if its MCP parent dies while the guardian remains alive. Simultaneous hard termination of both processes can leave the sandboxed test running; P1 makes no recovery claim for that case. This is not a durable Action Plane job; F325 P2 remains responsible for general job identity, lease, recovery and terminal truth.
 
 ## Use This When
 

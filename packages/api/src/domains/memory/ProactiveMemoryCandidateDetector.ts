@@ -72,20 +72,22 @@ export class ProactiveMemoryCandidateDetector {
     messages: readonly StoredMessage[],
     ownerUserId: string,
   ): Promise<StoredMessage[]> {
+    const candidateMessages = messages.filter((message) => this.isEligibleMessageShape(message, ownerUserId));
+    const threadIds = [...new Set(candidateMessages.map((message) => message.threadId))];
     const privacyByThread = new Map<string, boolean>();
-    const eligible: StoredMessage[] = [];
-
-    for (const message of messages) {
-      if (!this.isEligibleMessageShape(message, ownerUserId)) continue;
-      let isPrivate = privacyByThread.get(message.threadId);
-      if (isPrivate === undefined) {
-        isPrivate = await this.resolvePrivateFailClosed(message.threadId);
-        privacyByThread.set(message.threadId, isPrivate);
+    const privacyReadConcurrency = 8;
+    let nextThread = 0;
+    const resolveNext = async (): Promise<void> => {
+      while (nextThread < threadIds.length) {
+        const threadId = threadIds[nextThread++];
+        if (threadId === undefined) return;
+        privacyByThread.set(threadId, await this.resolvePrivateFailClosed(threadId));
       }
-      if (!isPrivate) eligible.push(message);
-    }
-
-    return eligible;
+    };
+    await Promise.all(Array.from({ length: Math.min(privacyReadConcurrency, threadIds.length) }, () => resolveNext()));
+    return candidateMessages.filter(
+      (message) => this.isEligibleMessageShape(message, ownerUserId) && privacyByThread.get(message.threadId) === false,
+    );
   }
 
   private async isEligibleMessage(message: StoredMessage | null, ownerUserId: string): Promise<boolean> {

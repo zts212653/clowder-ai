@@ -3,14 +3,15 @@
 import { useCallback, useRef } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
-import { createQuoteContextAttachment } from '../chat-context-reference';
 import { FileContentRenderer } from './FileContentRenderer';
 import { FileIcon } from './FileIcons';
 import { type MarkdownSelectionAction, useMarkdownSelectionAction } from './useMarkdownSelectionAction';
 import { useWorkspaceListenMode } from './useWorkspaceListenMode';
+import { WorkspaceFilePreviewDraftNotice } from './WorkspaceFileDraftNotice';
 import type { WorkspaceFileViewerProps } from './WorkspaceFileViewer.types';
 import { WorkspaceListenActions } from './WorkspaceListenActions';
 import { WorkspaceToolbarButton as ToolbarBtn } from './WorkspaceToolbarButton';
+import { addWorkspaceFileQuoteToChat } from './workspace-file-quote';
 
 const CloseIcon = () => (
   <svg
@@ -49,6 +50,8 @@ export function WorkspaceFileViewer({
   onToggleMarkdownRendered,
   onToggleHtmlPreview,
   onToggleJsxPreview,
+  collaborationAvailable,
+  onOpenCollaboration,
   onSave,
   onDirtyChange,
   pendingExternalSha,
@@ -61,7 +64,6 @@ export function WorkspaceFileViewer({
   restoreKey,
   onScrollTopChange,
 }: WorkspaceFileViewerProps) {
-  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const mdContainerRef = useRef<HTMLDivElement>(null);
   const mdSelectionAction = useMarkdownSelectionAction(
@@ -73,33 +75,18 @@ export function WorkspaceFileViewer({
   const handleMdAddToChat = useCallback(
     (action: MarkdownSelectionAction, comment: string) => {
       if (!openFilePath) return;
-      setPendingChatInsert({
-        threadId: currentThreadId,
-        text: '',
-        contextAttachments: [
-          createQuoteContextAttachment(
-            action.text,
-            {
-              kind: 'workspace_file',
-              path: openFilePath,
-              ...(worktreeId ? { worktreeId } : {}),
-              ...(currentWorktree?.branch ? { branch: currentWorktree.branch } : {}),
-              language: 'markdown',
-            },
-            {
-              comment,
-              ...(action.selectionStart !== undefined && action.selectionEnd !== undefined
-                ? {
-                    selectionStart: action.selectionStart,
-                    selectionEnd: action.selectionEnd,
-                  }
-                : {}),
-            },
-          ),
-        ],
+      addWorkspaceFileQuoteToChat(currentThreadId, {
+        text: action.text,
+        comment,
+        path: openFilePath,
+        worktreeId,
+        branch: currentWorktree?.branch,
+        language: 'markdown',
+        selectionStart: action.selectionStart,
+        selectionEnd: action.selectionEnd,
       });
     },
-    [currentThreadId, currentWorktree, openFilePath, setPendingChatInsert, worktreeId],
+    [currentThreadId, currentWorktree, openFilePath, worktreeId],
   );
 
   const rawUrl = (path: string) =>
@@ -170,6 +157,16 @@ export function WorkspaceFileViewer({
               <span className="text-micro text-cafe-secondary font-mono flex-shrink-0">
                 {file.size < 1024 ? `${file.size}B` : `${Math.round(file.size / 1024)}KB`}
               </span>
+            )}
+            {/* The way back from 文件工具 to the landing stays first: in a narrow pane the rest scrolls. */}
+            {collaborationAvailable && onOpenCollaboration && (
+              <ToolbarBtn
+                onClick={onOpenCollaboration}
+                disabled={editMode}
+                title={editMode ? '请先保存或退出编辑，再进入协作批注' : '围绕这份内容保存协作批注'}
+              >
+                协作批注
+              </ToolbarBtn>
             )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
@@ -288,6 +285,14 @@ export function WorkspaceFileViewer({
       )}
 
       {/* File content */}
+      {!editMode && ((isMarkdown && markdownRendered) || (isHtml && htmlPreview) || (isJsx && jsxPreview)) && (
+        <WorkspaceFilePreviewDraftNotice
+          worktreeId={worktreeId}
+          path={file.path}
+          sha256={file.sha256}
+          content={file.content}
+        />
+      )}
       <FileContentRenderer
         file={file}
         openFilePath={openFilePath}

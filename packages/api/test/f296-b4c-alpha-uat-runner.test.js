@@ -18,7 +18,7 @@ import { runCompactionJourney } from '../../../scripts/lib/f296-alpha-uat-journe
 import {
   CONTEXT_PROJECTION_ENUMS,
   CONTEXT_PROJECTION_TELEMETRY_CONTRACT,
-} from '../dist/domains/cats/services/session/context-projection-telemetry-contract.js';
+} from '../dist/domains/cats/services/session/context/context-projection-telemetry-contract.js';
 
 const revision = 'a'.repeat(40);
 const traceId = 'b'.repeat(32);
@@ -113,19 +113,24 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
   });
 
   test('rejects live, random, malformed, and Redis sanctuary coordinates', () => {
-    assert.doesNotThrow(() => validateAlphaCoordinates('http://127.0.0.1:3012', 'redis://127.0.0.1:6398'));
+    assert.doesNotThrow(() => validateAlphaCoordinates('http://127.0.0.1:3012', 'redis://127.0.0.1:6397'));
     for (const api of [
       'http://127.0.0.1:3003',
       'http://127.0.0.1:3004',
       'http://127.0.0.1:3999',
       'http://localhost:3012',
     ]) {
-      throwsReason(() => validateAlphaCoordinates(api, 'redis://127.0.0.1:6398'), 'wrong_api_origin');
+      throwsReason(() => validateAlphaCoordinates(api, 'redis://127.0.0.1:6397'), 'wrong_api_origin');
     }
-    for (const redis of ['redis://127.0.0.1:6399', 'redis://127.0.0.1:7777', 'redis://remote:6398']) {
+    for (const redis of [
+      'redis://127.0.0.1:6398',
+      'redis://127.0.0.1:6399',
+      'redis://127.0.0.1:7777',
+      'redis://remote:6397',
+    ]) {
       throwsReason(() => validateAlphaCoordinates('http://127.0.0.1:3012', redis), 'wrong_redis_endpoint');
     }
-    for (const redis of ['rediss://127.0.0.1:6398', 'redis://user:secret@127.0.0.1:6398', 'redis://127.0.0.1:6398/1']) {
+    for (const redis of ['rediss://127.0.0.1:6397', 'redis://user:secret@127.0.0.1:6397', 'redis://127.0.0.1:6397/1']) {
       throwsReason(() => validateAlphaCoordinates('http://127.0.0.1:3012', redis), 'wrong_redis_endpoint');
     }
   });
@@ -243,7 +248,7 @@ describe('F296 B4c Alpha UAT runner red contracts', () => {
 
     const manifest = await runAlphaUat({
       apiUrl: 'http://127.0.0.1:3012',
-      redisUrl: 'redis://127.0.0.1:6398',
+      redisUrl: 'redis://127.0.0.1:6397',
       catId: 'codex',
       userId: 'f296-alpha-uat',
       timeoutMs: 1000,

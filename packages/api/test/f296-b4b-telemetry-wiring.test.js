@@ -23,7 +23,7 @@ after(async () => {
 });
 
 const { invokeSingleCat } = await import('../dist/domains/cats/services/agents/invocation/invoke-single-cat.js');
-const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
 function preflightService() {

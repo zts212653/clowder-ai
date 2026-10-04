@@ -34,6 +34,18 @@ describe('F167 gate-keeping guard: POST /api/callbacks/hold-ball', () => {
     };
     const deps = {
       registry,
+      holdQuotaStore: {
+        async tryAdmit() {
+          return { admitted: true, count: 1, eventId: `stub-${Date.now()}` };
+        },
+        async releaseByEventId() {
+          return true;
+        },
+        async getCount() {
+          return 0;
+        },
+        async close() {},
+      },
       taskRunner: {
         registerDynamic(spec, taskId) {
           registeredDynamic.push({ spec, taskId });

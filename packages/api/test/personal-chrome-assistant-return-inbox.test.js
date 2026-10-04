@@ -5,8 +5,8 @@ import { createAssistantReturnInbox } from '../src/plugins/cloud-cat-personal-ho
 
 const revisions = {
   helper: `sha512:${'0'.repeat(128)}`,
-  extension: '0.2.11',
-  pageAdapter: '2026-09-02.1',
+  extension: '0.2.12',
+  pageAdapter: '2026-09-19.1',
 };
 
 function observed(overrides = {}) {

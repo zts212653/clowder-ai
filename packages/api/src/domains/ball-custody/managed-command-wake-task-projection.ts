@@ -148,6 +148,8 @@ export function readHoldLifecycleProjection(task: DynamicTaskDef): Record<string
     lifecycle.status !== 'active' &&
     lifecycle.status !== 'retired_by_event' &&
     lifecycle.status !== 'retired_by_replacement' &&
+    lifecycle.status !== 'retired_expired' &&
+    lifecycle.status !== 'retired_invalid' &&
     lifecycle.status !== 'cancel_requested' &&
     lifecycle.status !== 'cancelled_by_user' &&
     lifecycle.status !== 'escalated' &&

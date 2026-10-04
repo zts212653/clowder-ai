@@ -2,9 +2,10 @@ import { lstat, readFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
-import { snapshotEditorAssets } from './content-editor-runtime/surface-assets.js';
+import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
+import { snapshotPluginSurfaceAssets } from './external-runtime/package-surface-assets.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
 import {
@@ -38,6 +39,7 @@ export interface OfficialPluginPackageInstallerOptions {
   readonly catalog?: readonly OfficialPluginCatalogEntry[];
   readonly catalogProvider?: OfficialPluginCatalogProvider;
   readonly fetchArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
+  readonly prepareDesktopComponent?: () => Promise<void>;
   readonly validateManifest?: PluginManifestValidator;
   readonly quarantine?: PluginPackageQuarantineRecorder;
 }
@@ -114,7 +116,15 @@ export class OfficialPluginPackageInstaller {
     const entry = await this.catalogEntry(catalogId);
     assertExpectedRelease(entry, expectedRelease);
     const existing = await this.existingExactInstall(entry);
-    if (existing) return existing;
+    if (existing) {
+      const snapshot = await this.options.inventory.store.snapshot();
+      const installed = snapshot.packages.find((pkg) => pkg.packageDigest === entry.packageDigest);
+      if (!installed || !desktopWindowContribution(installed.manifest) || !this.options.prepareDesktopComponent)
+        return existing;
+      // Explicit reinstall also repairs an absent Host desktop component, using
+      // the same verified archive and current catalog grant fence.
+      return this.withVerifiedPackage(entry, async () => existing);
+    }
 
     try {
       return await this.withVerifiedPackage(entry, async (candidate) => {
@@ -220,6 +230,18 @@ export class OfficialPluginPackageInstaller {
     }
   }
 
+  /** Verify immutable release bytes and Host compatibility before an enabled instance is stopped. */
+  async preflightUpdate(catalogId: string, expectedRelease: OfficialPluginReleaseFence): Promise<void> {
+    const entry = await this.catalogEntry(catalogId);
+    assertExpectedRelease(entry, expectedRelease);
+    try {
+      await this.withVerifiedPackage(entry, async () => undefined);
+    } catch (error) {
+      await this.recordQuarantine(entry, error);
+      throw error;
+    }
+  }
+
   private async recordQuarantine(entry: OfficialPluginCatalogEntry, error: unknown): Promise<void> {
     if (!this.options.quarantine || !(error instanceof OfficialPluginInstallError)) return;
     const quarantineCodes = new Set<PluginPackageQuarantineFailureCode>([
@@ -313,8 +335,17 @@ export class OfficialPluginPackageInstaller {
         located.manifest.features.some(
           (feature) => feature.contributions?.some((item) => item.type === 'content-editor-provider') === true,
         );
-      if (declaresStaticEditor) {
-        if (staticEditors.length === 0 || entry.effectiveGrants.length !== 0) {
+      const desktopWindow = desktopWindowContribution(located.manifest);
+      const declaresDesktopWindow =
+        located.manifest.contributions?.some((item) => item.type === 'desktop-window') === true ||
+        located.manifest.features.some(
+          (feature) => feature.contributions?.some((item) => item.type === 'desktop-window') === true,
+        );
+      if (declaresStaticEditor || declaresDesktopWindow) {
+        const admitted = declaresDesktopWindow
+          ? desktopWindow !== undefined && entry.effectiveGrants.every((grant) => grant === 'windows.create')
+          : staticEditors.length > 0 && entry.effectiveGrants.length === 0;
+        if (!admitted) {
           throw new OfficialPluginInstallError(
             'UNSUPPORTED_TRANSPORT',
             'content editor package has no supported Host runtime',
@@ -322,7 +353,18 @@ export class OfficialPluginPackageInstaller {
         }
         // Static builtin admission still consumes the exact archive and public
         // manifest. Validate renderer bytes now; admission never starts a server.
-        await snapshotEditorAssets(located, staticEditors);
+        await snapshotPluginSurfaceAssets(located, desktopWindow ? [desktopWindow] : staticEditors);
+        if (desktopWindow && entry.effectiveGrants.includes('windows.create')) {
+          try {
+            await this.options.prepareDesktopComponent?.();
+          } catch (error) {
+            throw new OfficialPluginInstallError(
+              'HOST_COMPONENT_UNAVAILABLE',
+              'Host desktop component preparation failed',
+              { cause: error },
+            );
+          }
+        }
       }
       const signalSchemas = await readDeclaredSignalSchemas(located.rootDir, located.manifest);
       await publishPluginPackageArchive(this.packagesRoot, entry.packageDigest, bytes);

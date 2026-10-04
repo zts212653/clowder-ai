@@ -222,6 +222,92 @@ describe('F168 external review projector integration', () => {
     );
   });
 
+  it('projects ownerThreadId and ownerRole from case.external_review_assigned', async () => {
+    // Regression: clowder-ai#1511 (case mua8zwyi3sg4ds97). Coordinator-admitted
+    // cases emit case.external_review_assigned which carries reviewerCatId and
+    // reviewerThreadId. These must be projected as top-level ownerRole and
+    // ownerThreadId so that verdict bootstrap Case 1 can verify caller authority
+    // against durable projection fields — not just the externalReview sub-aggregate.
+    const eventLog = new MemoryEventLog();
+    const objectStore = new MemoryObjectStore();
+    const projector = new CommunityProjector(eventLog, objectStore);
+
+    const event = makeEvent(
+      'assign-ownership',
+      'case.external_review_assigned',
+      {
+        mode: 'maintainer_review',
+        cloudPolicy: 'required',
+        reviewerCatId: 'codex-sol',
+        reviewerThreadId: 'thread-f168',
+      },
+      1_000,
+    );
+    await eventLog.append(event);
+    await projector.apply(event);
+
+    const projection = await objectStore.get(subjectKey);
+    assert.ok(projection, 'projection must exist after case.external_review_assigned');
+    assert.equal(projection.ownerThreadId, 'thread-f168', 'ownerThreadId must be set from reviewerThreadId');
+    assert.equal(projection.ownerRole, 'codex-sol', 'ownerRole must be set from reviewerCatId');
+
+    // Verify ownership survives rebuild
+    await projector.rebuild(subjectKey);
+    const rebuilt = await objectStore.get(subjectKey);
+    assert.equal(rebuilt.ownerThreadId, 'thread-f168', 'ownerThreadId must survive rebuild');
+    assert.equal(rebuilt.ownerRole, 'codex-sol', 'ownerRole must survive rebuild');
+  });
+
+  it('case.external_review_assigned ownership does not regress existing case.routed ownership', async () => {
+    // When a case goes through normal routing AND later gets coordinator-admitted,
+    // the coordinator's reviewer identity should update ownership (last writer wins,
+    // matching the aggregate's reviewer identity).
+    const eventLog = new MemoryEventLog();
+    const objectStore = new MemoryObjectStore();
+    const projector = new CommunityProjector(eventLog, objectStore);
+
+    // Case first routed to one owner
+    const routedEvent = {
+      sourceEventId: 'routed-first',
+      subjectKey,
+      kind: 'case.routed',
+      classification: 'state-changing',
+      payload: { ownerThreadId: 'thread-original', ownerRole: 'opus' },
+      at: 1_000,
+    };
+    await eventLog.append(routedEvent);
+    await projector.apply(routedEvent);
+
+    const afterRoute = await objectStore.get(subjectKey);
+    assert.equal(afterRoute.ownerThreadId, 'thread-original');
+    assert.equal(afterRoute.ownerRole, 'opus');
+
+    // Coordinator re-assigns to a different reviewer
+    const assignEvent = makeEvent(
+      'assign-override',
+      'case.external_review_assigned',
+      {
+        mode: 'maintainer_review',
+        cloudPolicy: 'optional',
+        reviewerCatId: 'codex-sol',
+        reviewerThreadId: 'thread-new-reviewer',
+      },
+      2_000,
+    );
+    await eventLog.append(assignEvent);
+    await projector.apply(assignEvent);
+
+    const afterAssign = await objectStore.get(subjectKey);
+    assert.equal(afterAssign.ownerThreadId, 'thread-new-reviewer', 'coordinator must update ownerThreadId');
+    assert.equal(afterAssign.ownerRole, 'codex-sol', 'coordinator must update ownerRole');
+
+    // Verify rebuild preserves the latest ownership
+    await projector.rebuild(subjectKey);
+    const rebuilt = await objectStore.get(subjectKey);
+    assert.equal(rebuilt.ownerThreadId, 'thread-new-reviewer');
+    assert.equal(rebuilt.ownerRole, 'codex-sol');
+  });
+
   it('projects PR terminal facts into both generic state and the external-review aggregate', async () => {
     for (const [kind, expectedState] of [
       ['pr.merged', 'fixed'],

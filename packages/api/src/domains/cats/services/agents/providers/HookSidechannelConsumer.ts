@@ -22,6 +22,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage } from '../../types.js';
+import { claudePostToolFileEvidence } from './native-file-result-evidence.js';
 
 export interface HookConsumerOptions {
   catId: CatId;
@@ -55,6 +56,7 @@ export function hookEntriesToAgentMessages(entries: unknown[], options: HookCons
 
     if (hookName === 'PostToolUse') {
       if (typeof entry.tool_name !== 'string') continue;
+      const fileResultEvidence = claudePostToolFileEvidence(entry);
       out.push({
         type: 'tool_use',
         catId,
@@ -63,6 +65,7 @@ export function hookEntriesToAgentMessages(entries: unknown[], options: HookCons
           ? entry.tool_input
           : {}) as Record<string, unknown>,
         toolUseId: typeof entry.tool_use_id === 'string' ? entry.tool_use_id : undefined,
+        ...(fileResultEvidence ? { fileResultEvidence } : {}),
         timestamp: Date.now(),
       });
     }

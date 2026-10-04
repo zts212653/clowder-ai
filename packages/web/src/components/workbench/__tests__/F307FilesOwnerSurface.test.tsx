@@ -124,6 +124,8 @@ describe('F307 Files owner surface', () => {
                 id: 'worktree-owner',
                 canonicalId: 'cat-cafe',
                 root: '/repo/cat-cafe',
+                resolvedRoot: '/repo/cat-cafe',
+                rootEpoch: 0,
                 branch: 'main',
                 head: 'abc123',
               },
@@ -169,6 +171,58 @@ describe('F307 Files owner surface', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+  });
+
+  it('carries the actual selected directory into the file entrance rather than the ambient worktree', async () => {
+    const onOpenSurface = vi.fn();
+    await act(async () =>
+      root.render(<F307FilesOwnerSurface surface={createFilesSurface()} onOpenSurface={onOpenSurface} />),
+    );
+    act(() => container.querySelector<HTMLButtonElement>('[data-testid="select-owner-file"]')!.click());
+    expect(onOpenSurface.mock.calls.at(-1)?.[0].rootSelection).toEqual({
+      root: '/repo/cat-cafe',
+      branch: 'main',
+      expectedEpoch: 0,
+    });
+  });
+
+  it('removes the selected shared connection without silently switching to another remaining worktree', async () => {
+    const original = mocks.apiFetch.getMockImplementation()!;
+    let removed = false;
+    mocks.apiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        removed = true;
+        return { ok: true };
+      }
+      const response = await original(url, init);
+      if (!url.startsWith('/api/workspace/worktrees')) return response;
+      const payload = await response.json();
+      payload.worktrees[0].removable = true;
+      payload.worktrees[0].connectionEpoch = 7;
+      if (removed) payload.worktrees.shift();
+      return { ok: true, json: async () => payload };
+    });
+    const onOpenSurface = vi.fn();
+    await act(async () =>
+      root.render(<F307FilesOwnerSurface surface={createFilesSurface()} onOpenSurface={onOpenSurface} />),
+    );
+    await act(async () =>
+      [...container.querySelectorAll('button')].find((button) => button.textContent === '移除共享连接')!.click(),
+    );
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/workspace/linked-roots?id=worktree-owner&expectedEpoch=7', {
+      method: 'DELETE',
+    });
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="f307-files-worktree-select"]')?.value).toBe(
+      'worktree-owner',
+    );
+    // The removed root is no longer listed: that is said plainly, never turned into "choose a workspace".
+    expect(
+      container
+        .querySelector('[data-testid="f307-files-worktree-identity-status"]')
+        ?.getAttribute('data-identity-state'),
+    ).toBe('unlisted');
+    expect(container.textContent).not.toContain('请选择工作区');
+    expect(onOpenSurface).not.toHaveBeenCalled();
   });
 
   it('restores inline search and exposes the exact worktree branch and root', async () => {

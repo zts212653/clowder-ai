@@ -1,21 +1,46 @@
 ---
 feature_ids: [F317]
-related_features: [F229, F258, F195, F202, F306, F309]
+related_features: [F229, F258, F195, F202, F246, F295, F306, F309, F310]
 topics: [coactive, realtime, desktop-companion, gpt-live]
 doc_kind: spec
 created: 2026-09-15
+updated: 2026-09-28
 description: "让具名家猫通过实时感知与交谈、持续深思和行动，陪人跨应用共看、共听、互相指点，并接续共同经历。"
 description_source: model
 description_author: codex-astra
 description_updated_at: 2026-09-15T08:29:30Z
-tips_exempt: "Phase A remains an unaccepted design candidate; the desktop entry and shared-perception journeys are not delivered. Add user tips only when those real entries ship, as specified in Tips Contribution."
+tips_exempt: "The installed desktop entry and media boundary landed in #4611; real household, non-GPT and shared-perception acceptance remains open. Add product tips with the accepted user journey, not the synthetic fixture."
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F317-coactive-companion.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F317-coactive-companion.md"
+    toolName: cat_cafe_get_running_work
+    resourceFamily: active-execution
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F317-coactive-companion.md"
+    toolName: cat_cafe_get_pending_decisions
+    resourceFamily: approval-index
+    boundaryKind: resource-entry
+    decision: accepted
 ---
 
 # F317: Coactive Companion — 猫猫走进共同生活现场
 
-> **Status**: spec | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1
+> **Status**: in-progress | **Owner**: 小星星·Maine Coon（@codex-astra / gpt-6-astra） | **Priority**: P1
 
-Owner thread：`[thread-id]`；总任务沿用 `private-source-id`（按 `relatedFeatureId=F317` 查询）。当前为 Phase A 设计候选；workflow 已同步实际线程。原任务属于源线程，本线程更新 why 被403拒绝，未重复建任务。
+Owner thread：`[thread-id]`；总任务沿用 `private-source-id`（按 `relatedFeatureId=F317` 查询）。正式安装入口与 Host 媒体边界已随 #4611 合入；第一批真实资料、非 GPT 深思及完整组合体验仍未验收，Phase/AC 不因工程合入提前关闭。workflow 沿用原记录；原任务属于源线程，未重复建任务。
+
+**2026-09-28 六线开工授权**：operator source `[thread-id]#private-source-id`
+A 桌面/通话由原 Sol6 现场续办，B 身体由原 Sol5.6 现场续办；新建 C 收件/长对话（Astra）、
+D 身份/恢复界面、E 会议接入、F 页面操作（三者 Sol6）。会议与操作分别使用新 F317 执行现场，
+原 F195/Jev 是来源，不冒称研究已产品化。今日 review 选 Kimi 或非作者Maine Coon，不排 fable-5。
+主名「猫猫球」，伴随头像跟随用户明确选择的伙伴，技术载体分层披露，历史保留当时身份。
+共享 Host/renderer 单写、接口先交、独立模块并行、集成与真人验收按依赖安排；原 #4753/U1/F221
+和 I1–I8/F229 迁移仍逐项兑现。本次授权开发与隔离验证，不自动授予日常重启、实际采集或真实 writer。
+线程和派发状态以新计划回执为准，不能把作者排班写成已接手。
+
+猫身交互与独立打字竖切已完成：#4661 于 2026-09-22 合入 `2da5a63b4296f8deb3dc70132604d59fbed7860c`。默认只驻留猫，点猫按需展开菜单，Host 依据可用空间放置面板；语音关闭时可打字和查看既有对话历史。公开插件 #55 已发布 contract beta.17、SDK beta.13、companion alpha.3，实际 registry 包字节已核对。operator 在隔离原生候选上确认拖动和打字发送正常（本 thread `private-source-id`）；桥接记录收到真实文字，未触发开麦。47/47 浏览器检查、原生内核与真实 Electron 检查、最终连续性检查及 Terra 独立审查构成[该竖切的交付证据](https://github.com/zts212653/clowder-ai/pull/4661#issuecomment-5781296446)。机器全量回执仍为 partial，独立原生证据另列；该测试会话不代表真实模型/媒体组合验收，日常 runtime 未因本次合入自动激活。
 
 ## Why
 
@@ -25,16 +50,50 @@ Owner thread：`[thread-id]`；总任务沿用 `private-source-id`（按 `relate
 
 | 已有事实 | 证据与边界 |
 |---|---|
+| 正式插件入口与手势约束媒体边界已合入 main | #4611 `dca811516dd48cfa04f52ce35b49186e13131ab2`（2026-09-19 13:49Z）；公开 contract beta.16、SDK beta.11、companion alpha.2 已发布并核对真实包字节。完整 frozen-base gate 通过，最终 HEAD 定向检查 82 项通过，真实 Electron 合成音频旅程通过；Terra/Opus5 的既有独立判断按连续性保留。仅证明安装入口、身份/媒体边界与合成交互；真实家内资料、非 GPT 深思、F128/S5、F229 全迁移仍欠验收，日常 runtime 未激活。 |
 | 思考中持续追加截图、ASR 并继续交流，是实际使用过的能力 | operator source `[thread-id]#private-source-id`（引用附件正文）；会议原记录及 [F167 Case E23](F167-a2a-chain-quality.md)。不能再把基础 `turn/steer` 可行性列为下一轮 spike。 |
 | 已有猫猫球共享主 Chat 的对话设施 | [F229](F229-cat-ball-concierge.md) M1–M4 已收敛到 `thread-chat-surface`；新伴随入口须消费既有身份、消息和任务真相。 |
 | 已有 F306 文字 Realtime consumer | [F306](F306-codex-app-capability-parity.md) 固定 text/WebSocket/V2，AC-RT1–RT3 尚未完整验收。旧 API-key blocker 仅证明该分支；不能外推为已实测成功的 V3/WebRTC 也不支持 ChatGPT 登录。 |
 | 完整桌面产品未交付 | spike 使用固定合成输入、隔离新建原生 thread，未证明产品内同一猫/会话持续配合、真实麦克风回声处理、自动屏幕取得、指点层、跨应用恢复、插件安装体验或长时稳定性。 |
+| 语音猫猫球已有人实际交谈，长时稳定性仍待修验 | 实现 `2c36d004aa`：原生透明猫/直接聊聊/轻量语音条/按需文字；Codex0.154.0 + ChatGPT登录 + V3/WebRTC。合成输入真实调用只读工具并播回随机短语；operator 05:44 source `private-source-id` 确认正在语音，随后报间歇掉线。已修逐字排版、连接前静音竞态、短暂断线即结束与文字只补上下文不执行；当前25项检查通过。尚不能声称随机掉线全部解决；未用屏幕、未接Host消息/custody或插件安装，完整F317 AC均未勾选。 |
+| 资料授权、实际读取和语音返回已在同一原生会话验证 | 07:06原生确认；07:12工具库存connected。随后operator source `private-source-id` 明确批准F317第1–26行测试，CUA成功发送；修正文字提交后，12:38真实 `cat_cafe_read_file_slice` completed，原生Astra及Live返回正确标题“F317: Coactive Companion — 猫猫走进共同生活现场”。回执随`2c36d004aa`保存。资料范围限功能/F317讨论文档，全局记忆、其他聊天与跨线程协作尚未接通；不需要再次索要这一相同测试授权。 |
 
 ## What
 
-### 与现有猫猫球的关系：替代必须完整承接
+### 岗位与连续性
 
-operator 于 `[thread-id]#private-source-id` 明确：“如果要代替人家猫猫球 那你得有猫猫球完整的功能呀”。F317 增加桌面常驻、实时交流和跨应用共同现场；若统一或替代现有猫猫球入口，必须完整承接该入口的已有能力、记录与偏好。轻量语音主入口不等于删掉文字、历史、操作卡和结果阅读；这些能力可以按需展开。未完成能力对账与迁移验收前，不撤销现有入口。
+operator source `[thread-id]#private-source-id` 接续上一轮职责讨论，要求“先更新一下我们的f317 明确我们需要接入的完整的范围”“看到桌面能查记忆 能更加有效真实的互动”，并在引用附件中点名 `search_evidence`。本节明确产品范围；具体实现与新增权限执行仍由相应 owner 契约和真实体验确认约束。
+
+具名家猫在桌面承担随身伙伴与小管家职责：陪伴交谈、记忆导航、功能求助、协作接续、进展查询与适时提醒。秘书能力属于这份职责；项目 PM 职责按具体托付取得，不因占据前台而获得全家指挥权。快端与具名深思端持续配合组成完整猫，话题变化时不逐句切人格或重新路由。
+
+采用一个稳定的伴随主 thread 接住日常交流；已有工作仍归对应工作 thread 与 owner，新工作经现有 F128 提案/责任机制承接。这里的“一个”是产品默认，不是宣称 provider 只能创建一个 thread。消息、工作引用和已接受记忆由 Host 持久化，模型当前工作集可按需读取；断线或压缩不得新建影子历史。跨线程仍要读源，不能把同 catId 当成共享上下文。
+
+### 完整接入范围（逐项兑现，不能以工具库存代替体验）
+
+| 范围 ID | 人能直接做什么 | 必须接入的能力 | Live 现状 / 对应 AC |
+|---|---|---|---|
+| I1 交谈与身份 | 点猫就聊，插话、打字、传图，深思时继续补充 | 原生实时语音与同猫深思、真实 Host thread/message、F229 共享对话与历史 | #4661 已接既有 owner concierge thread 的独立打字与有界历史；语音局部通过，完整共享对话/图片等仍待验收；B1–B3、D4 |
+| I2 桌面现场 | “看这里”，猫取得当时画面、声音和指向并能指回来 | 获准桌面/窗口共享、应用声音与麦克风分别控制、时间/来源/坐标、跨应用连续性 | 屏幕与互指未接；C1–C4 |
+| I3 共同记忆 | 用模糊线索找过去，查原话/执行依据，原地看或准确跳转 | `search_evidence` / `graph_resolve` / `list_recent`、thread/文档原文、session 深查、获准资料库和人物关系读取 | 仅受限 `read_file_slice` 通过；B4、D4 |
+| I4 家内协作 | 找到负责猫、递交原话/现场依据、接回追问和结果 | thread/cat/feature 定位、post/cross-post、F128、真实入站回流及来源/去重/恢复 | 未接；B3、B5 |
+| I5 托付与进展 | “这件事帮我接住”“现在怎样了”，得到真实承接与结果 | 查询 task/entrusted work、按授权接纳和更新自己责任、typed closure、现有 attention/待判断事项 | 未接；B5、D5 |
+| I6 求助与可操作结果 | 问新功能、使用引导、看资料、处理确认和结果 | feature/guide、富内容、peek/teleport、既有 triage/investigation 与取消/回执 | F229 已有部分，Live 未接；B4、D4 |
+| I7 经历延续与记忆治理 | 回来接着聊，明确“记住/纠正/忘掉”能走到真实结果 | Host 历史与工作引用、原有记忆写入/提案/纠正/撤回入口及状态回读 | 未接；B4、D1、D5 |
+| I8 插件与恢复 | 安装启用后有入口；能暂停、恢复、升级或卸载 | F202 安装/授权/监督、真实连接健康、状态持久化、F229 配置/皮肤/记录迁移 | 当前为隔离实验壳；D1–D5 |
+
+日历、邮件、外部 IM 等日常安排属于按需连接的扩展：使用既有服务与各自授权，不作为本次“完整”必须新造的连接器。通用桌面操作也按具体托付另取执行授权；共享屏幕不等于批准点击、修改或外发。
+
+### 权限与工具消费原则
+
+- **身份、数据、动作分别验证**：Live 以自己的具名猫/owner/Host thread 身份运行；可见资料域与允许动作由 Host 校验。工具声明、`readonly` 标记、ChatGPT 登录均不能代替家内授权，也不能继承作者 invocation 凭据。
+- **完整能力按职责提供**：常用检索/交流能力可直接发现，低频深查/写入按需发现或交由同猫受治理执行面。能力缺失须诚实说明并回到产品内恢复；不把几百个 MCP 全量塞进快端提示，也不把裁剪当成删掉 I1–I8。
+- **域内自然使用**：已有授权范围内不逐句重复询问；扩大数据来源、采集范围或外部副作用时消费既有确认。语音表达可成为明确意图，但必须落为相应产品的可验证授权事实；尚未映射前不绕过 F229/F128 的确认。
+- **现场输入保留来源**：人的直接指令与视频/会议/屏幕中的话区分；第三方画面与转写只作观察，不能提升权限。暂停共享立即止住对应采集；静音扬声器、隐藏猫、停止采集是不同动作。
+- **保留与删除有真相源**：用户可见消息、任务及已保存批注默认持久；原始音视频采样/保留须明确告知并按 OQ-2 设计落实。临时画面与长期记忆不混同，关系提案未接受不得变成事实；资料库重建、源记录删除和生产运维不因岗位自动获权。
+
+### 与现有猫猫球的关系：以插件整体承接
+
+operator 于 `[thread-id]#private-source-id` 明确替代必须完整承接；随后 `private-source-id` 明确终态：F317 以插件形式整体承接 F229 猫猫球，安装完成后提供入口，直接开始语音交流，不先选择应用或“和我一起干什么”。功能、记录与偏好须完整迁移；轻量语音主入口保留文字、历史、操作卡和结果阅读的按需入口。未完成能力对账与迁移验收前，不撤销现有入口，也不提前关闭 F229。
 
 | 必须承接的能力基线 | 当前可回查来源 | 替代时的验收关注点 |
 |---|---|---|
@@ -48,6 +107,10 @@ operator 于 `[thread-id]#private-source-id` 明确：“如果要代替人家�
 此表是2026-09-16的规格与源码基线，不是新桌面组合已实测通过的声明。实施前按当时实际入口补全逐项清单，交付时走真实旧旅程对照。F229 未验收的完整语音 loop、快速档与 M5 跨线程 attention 不冒充既有完成项；其责任与状态沿原 owner，F317 不自动关闭旧 AC。
 
 ### Phase A: 产品定义与真实现场设计
+
+**已确认并交付的交互竖切**：operator source `private-source-id` 批准猫身入口与按需菜单；#4661 已实现，2026-09-22 真人拖动/打字发送验收通过。此局部设计从候选推进为已交付；跨应用共感知、指点与完整暂停/恢复设计仍按下方 AC-A1–A4 验收。
+
+**当前获准的首个竖切 spike**（上述03:12 UTC source）：把已验证的 GPT-Live V3/WebRTC 接成猫猫球，用户点击后能真实说话并调用家里的工具；具体意图在交流中表达，看到哪里按需明确。沿用既有登录与原生快深配合，先给真实可用的局部体验；不再做纯状态模拟面板，也不重跑已证的基础 steer 可行性。spike 的语音/工具结果与真实采集范围单独留证；它不冒充插件完整安装生命周期、全部旧功能迁移或长期产品验收。
 
 把已接受的价值、身份关系与实际基线接成可判断的桌面旅程。明确从哪里呼唤、正在陪伴的是谁、猫能看到/听到什么、如何互指、深思时怎样继续交谈、结果怎样回到当前现场、暂停与恢复怎样表现。用真实宿主中的体验稿做 Design Gate；桌面场景必须出现真实外部应用，Hub 内页面不能独自代表全部体验。
 
@@ -92,6 +155,21 @@ operator 于 `[thread-id]#private-source-id` 明确：“如果要代替人家�
 | S2 | 自由漫谈 | operator与猫 | 呼唤 → 共看或随口聊 → 需要时深想、无需时安静 → 自然结束 | 无须创建任务也能完成；是否承接工作由人实际表达决定 |
 | S3 | 中断与恢复 | operator与猫 | 断网/关闭伴随端 → 可辨状态 → 恢复连接 → 接回猫、上下文及未完工作 | 原身份和任务记录持续可查；没有重复执行或另建影子历史 |
 | S4 | 统一或替代猫猫球入口时的既有旅程 | operator与猫 | 从同一入口问功能/找旧讨论 → 原地看或准确跳转 → 经既有确认传话或调查 → 回到同一交流读取结果；按需打开文字与历史 | 对照上方能力基线与实际旧入口逐项验收，包含原记录、配置及刷新恢复 |
+| S5 | 桌面、记忆与协作的一段完整经历 | operator与当前具名猫 | 点猫直接语音 → 说“看这里”并共享明确桌面/窗口 → 问“这和上次的方案哪里不一样” → 猫用真实记忆搜索并回读原文，关联当前画面解释 → 人继续说/指并纠正 → 需要时把原话和来源送到已有 owner thread，接回追问/结果 → 暂停或断线后回到同一交流和未完工作 | 用户不用手工截屏搬运、找 thread 或转述；实际屏幕来源/时间、检索参数与源锚点、工具回执、跨线程原文及真实可听回复可对账；只讨论而不派工也可结束 |
+
+### 2026-09-24 现场反馈：三部分整合交付
+
+operator 在 source076 授权继续完整交付和拆分执行现场。本节回填现场期望；具体原生布局、主动代收策略与新增语音授权合同仍沿相应设计/权限边界确认，不将本次组织授权当作全部设计签字。反馈编号来自本 thread 的14项核对卡（`private-source-id`）。
+
+| 工作单元 | 反馈覆盖 | 人能实际完成的旅程 | 验收边界 |
+|---|---|---|---|
+| U1 可靠的连续对话 | 01连接可辨；02切屏/看聊天不误结束、停因明确；04工具中可打断/补充/改向 | 点语音→看见连接中与已连接→在查询中继续说并换目标→旧结果不覆盖新意图→断线/重连后接续但不重执行旧话 | voice-origin与typed-origin均测；停声、转写、原生接纳、取消和迟到结果分别举证。切屏/失焦与显式结束、锁屏、撤权的处理清楚。 |
+| U2 在桌面上活起来的同一只猫 | 03全屏/多屏可见；05短气泡；06通话中独立历史；07共享入口；08真实忙闲；09动作库；10新素材/抠图；11身份真实；12稳定名称/历史 | 猫跟随使用现场→短气泡看当前话→语音中翻旧历史而不被字幕拉走→清楚选屏/停止共享→动作表达真实状态→再次回来仍是原历史与偏好 | 核原生入口、全屏Space、多屏和恢复；动作逐项核源/触发/可打断性，不以通用忙动画代替已有库。人格、快端、carrier与具名深思来源真实可查。 |
+| U3 前台小管家 | 13真实工作总览；14语音代收与决定回原处 | 问谁在忙→得到真实线程/猫/活动→走路或健身时听待决事项解释→口头表达决定→猫确认原意→原owner接收→听到真实决定/执行回执 | 运行数不混成doing Task数；覆盖范围诚实；不扫描全部聊天找审批、不把普通@当授权；按producer精确来源/版本与受信确认写回，原thread责任不迁移。 |
+
+本轮 MCP resource-entry 只承接 U3 已授权的**只读**范围：`cat_cafe_get_running_work` 读 F295 同一 coordinator 的当前 Host 项目；`cat_cafe_get_pending_decisions` 读 owner 范围内已登记 F246 pending 与 F310 Needs Me 关联。来源为 operator 三部分交付授权 `[thread-id]#private-source-id`。完整只读链已由独立 [#4829](https://github.com/zts212653/clowder-ai/pull/4829) 合入 main `5c29599b6395df050bb58d5fd2a839e0d7371526`。这两项不授予决定、打断、producer 写回或 F221 单提案预览权限；代码合入也不等于插件激活、真实日常数据验证或完整 U3 验收。
+
+U3 的 Push/Pull/Hybrid 仍需比较；当前技术基线只支持按需读取设计，typed紧急事实和Host语音确认凭据尚缺。先可查不等于完整U3交付。三部分完成也仍须对照原 I1–I8、S1–S5、AC-A1–D5 收口，不默默放弃跨应用共看、共听、指点、非GPT协作或旧入口完整承接。
 
 ## Acceptance Criteria
 
@@ -99,22 +177,27 @@ operator 于 `[thread-id]#private-source-id` 明确：“如果要代替人家�
 - [ ] AC-A1: 产品定义、身份关系和上述三类场景形成可回查设计；operator 在真实宿主体验稿上确认主旅程、默认/暂停/恢复状态及适用的窗口尺寸。
 - [ ] AC-A2: 明确各现有 owner 的消费边界、F306 旧文字 consumer 与新语音路径的衔接处置、首批桌面支持范围；经独立架构观察后完成所需设计确认。
 - [ ] AC-A3: 统一或替代猫猫球入口的设计须列出完整已有能力与用户记录/偏好继承清单，对照真实旧入口说明每项在新入口如何使用；轻量语音条不能替代全部交互设计。
+- [ ] AC-A4: I1–I8 对应的 MCP/宿主能力、身份与数据/动作授权、入站回流、留存/恢复及 owner 缺口逐项明确；当前不支持的 runtime profile/契约须有真实接入方案，不借其他猫凭据或伪装 runtime 越过。
 
 ### Phase B（全双工与持续配合）
 - [ ] AC-B1: 产品入口使用真实麦克风/播放设备完成自然双向交流和插话；保存可听证据与对应事件，且不以音频字节数冒充听感验收。
 - [ ] AC-B2: 产品内当前具名猫的快端与深思端持续双向传递上下文、追问与判断；追加输入、目标修正和回话归属可追溯，失效的旧答案不会继续当作当前结论播出。这是新组合路径验收，不重做已有 steer 可行性实验。
-- [ ] AC-B3: 实际工作走既有身份、权限、消息与任务责任；断连恢复后可查承接与结果，未因快端另建一套对话/记忆真相。
+- [ ] AC-B3: Live 自身作为具名猫绑定其猫咖 thread；实际工作走既有身份、权限、消息与任务责任，找其他 thread 的猫复用 F128 跨线程通信。断连恢复后可查承接与结果，未因快端另建一套对话/记忆真相或专用快慢猫通信系统。
+- [ ] AC-B4: Live 实际完成模糊历史检索、精确锚点/近期检索、原文回读及按需 session/资料库/人物记忆读取；答案带真实来源，支持原地看/跳转。共享经历可恢复，明确记忆写入/纠正/忘记请求由既有 owner 接纳并回读状态；越域、失效源或撤回不泄漏、不伪造成功。详见接入清单 M1–M6。
+- [ ] AC-B5: 完成 Live 发起→正确 owner 接收→中途追问/追加→原文结果返回→同段语音可听的双向旅程；送达不冒充承接/完成，任务查询与本人责任操作沿既有契约；重复投递和重连不重复派工，其他猫的签字与用户价值判断不由 Live 代办。
 
 ### Phase C（共感知与互指）
 - [ ] AC-C1: Hub 不在前台时，人可在获准的 B 站与 Blender 现场共看、共听；指代与当时画面/位置对应，切应用仍接得上共同目标。
 - [ ] AC-C2: 双方可互相指点且人能纠正错误定位；持久批注在后续回来时可找回证据，目标变化或无法定位时有诚实反馈。
 - [ ] AC-C3: 人可清楚控制共享范围与暂停/结束；现场内容只作为观察输入，环境发言不越权成为执行授权。
+- [ ] AC-C4: 真实桌面观察同时送达当前猫的实时/深思工作，带来源、时间和稳定指向；新画面与用户纠正能使过时指点/回答失效。失去窗口、权限撤回、锁屏/断连时停止相应采集并诚实反馈，不拿旧截图当当前桌面。
 
 ### Phase D（产品收口）
 - [ ] AC-D1: 通过插件正常安装/启用入口使用并恢复；已安装、已启用、正在共享、连接故障和深思任务状态与运行事实一致。
 - [ ] AC-D2: Primary Journey、S1–S3 取得独立可复核的真实使用记录；交付证据列出运行版本、实际平台/应用支持及局限，获得 operator 体验验收。
 - [ ] AC-D3: 实现、合入、获准激活与真实体验逐项对账，任务/Feature/线程记录一致并回报源 thread；第一阶段或 spike 完成不关闭整个 F317。
 - [ ] AC-D4: 在任何现有猫猫球入口被替代前，S4 与 AC-A3 清单逐项完成真实使用对照，能力、记录、确认状态和用户偏好均无丢失并获 operator 体验确认；未达成不撤销旧入口。不以保留一个无法接续当前交流的旧页面代替完整承接。
+- [ ] AC-D5: S5 在真实桌面完成，并证明“看现场—查记忆—持续互动—按需协作—恢复”同路径成立；其证据与 I1–I8 逐项对账。插件发布物从干净 consumer 安装、升级/卸载后的配置与持久记录处置可验证；长时运行记录断连原因/恢复与响应耗时，不以单次握手或库存成功通过。
 
 ## 需求点 Checklist
 
@@ -128,6 +211,9 @@ operator 于 `[thread-id]#private-source-id` 明确：“如果要代替人家�
 | R6 | 思维漫谈/会议/差异思考：`private-source-id` | AC-A1, AC-D2 | 真实场景与无任务漫谈 | [ ] |
 | R7 | 新 Feature、新 thread 跟踪完成：`private-source-id` | AC-D3 | 持久任务、专属线程及最终回流 | [ ] |
 | R8 | 若替代猫猫球，必须有其完整功能：`[thread-id]#private-source-id` | AC-A3, AC-D4 | 既有能力/记录/偏好清单与 S4 真实对照 | [ ] |
+| R9 | Live 自身是thread里的猫；协作工具接入后用F128跨线程找其他猫：owner thread `private-source-id`、`private-source-id` | AC-B2, AC-B3 | Live所在Host thread发起真实跨线程请求→目标猫响应→结果回同一语音，保留消息来源/回执与恢复 | [ ] |
+| R10 | 先完整梳理职责、MCP 和权限，消费既有快猫/F229：owner thread `private-source-id`（引用附件），`private-source-id` | AC-A4, AC-B4, AC-B5 | I1–I8 与 M1–M6 对账；区分家内能力和 Live 实际接入 | [ ] |
+| R11 | “看到桌面能查记忆 能更加有效真实的互动”，附件点名 search evidence：owner thread `private-source-id` | AC-B2, AC-B4, AC-C4, AC-D5 | S5 实际屏幕+记忆+持续交谈+可选协作及恢复 | [ ] |
 
 ## Dependencies
 
@@ -155,10 +241,14 @@ Why: 本 Feature 的新增责任是跨应用持续在场的产品整合与验收
 | KD-1 | 独立产品 Feature，GPT-Live 为首条已验证的实时实现线索 | operator 要从接口实验走向跨应用完整猫并长期跟踪 | 2026-09-15 |
 | KD-2 | 快端与具名深思端共同组成猫 | 消费 operator 9月9日明确修正；不另造代言全家的前台人格 | 2026-09-09 |
 | KD-3 | 持续追加截图/ASR 是已用基线 | operator 纠正 + 实际会议记录，不能因新 spike 范围窄而重置 | 2026-09-09 |
+| KD-4 | F317 最终以插件整体承接 F229 猫猫球；先做真实 GPT-Live 猫猫球 spike | operator 03:12 明确要求装好即有入口、直接语音交流、工具可用；完整迁移达标前保留旧入口 | 2026-09-16 |
+| KD-5 | Live 自身是thread里的猫；找其他猫直接复用F128跨线程通信 | operator纠正作者将“找我”讲成额外快慢专线的偏差；thread/身份/协作机制沿现有Host，不能让人搬运消息 | 2026-09-16 |
+| KD-6 | 先明确 I1–I8 完整范围；下一段按 S5 验证桌面、完整记忆读取与连续互动 | operator 接续职责讨论要求更新规格；工具接通数不能冒充整体体验；本次范围更新不代表全部设计/生产启用签字 | 2026-09-17 |
+| KD-7 | 本owner thread转指挥/验收，独立执行现场由Sol6主责、Sol5.6独立review，Kimi为允许备选；三部分整合、多commit而非14个PR | operator source `private-source-id`；保持原总任务和完整Feature范围，执行遇实质取舍回Astra，日常SOP自治 | 2026-09-24 |
 
 ## Review Gate
 
-立项记录按 docs-only 做源证据与范围核对；产品设计尚未通过。Phase A 需要真实体验共创与独立架构观察；实现按实际行为/数据/安全/契约风险选择检查。只为已改的接入契约补测试，运行健康用 logs/metrics；本次立项不自动创建 Eval 项目。
+立项记录按 docs-only 做源证据与范围核对；猫身入口、菜单和独立打字的局部设计已获 operator 确认，并随 #4661 完成交付。完整产品设计与 Phase A 仍需真实体验共创和独立架构观察；实现按实际行为/数据/安全/契约风险选择检查。只为已改的接入契约补测试，运行健康用 logs/metrics；本次立项不自动创建 Eval 项目。
 
 ## Tips Contribution（F244）
 

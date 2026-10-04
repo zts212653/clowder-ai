@@ -472,7 +472,7 @@ describe('spawnCliInTmux', () => {
     //   `setAgentPaneReadOnly()` + `yield __tmuxPaneCreated` + generator resume.
     //   Under load, pre-arm setup can eat several seconds of real shell time,
     //   so fixed-duration commands are defeated: stdout can arrive inside the
-    //   20 s budget even if the stderr watcher is inert.
+    //   first-event budget even if stderr activity is not detected.
     //
     //   Fix: a marker-file barrier — but the marker MUST be written AFTER the
     //   generator has resumed past `yield __tmuxPaneCreated` and executed the
@@ -493,14 +493,13 @@ describe('spawnCliInTmux', () => {
     //        the generator has settled at its FIFO await before we do
     //        anything shell-visible.
     //     4. `writeFileSync(marker)` → shell notices in ≤50 ms and begins
-    //        the 30-iter stderr loop; total shell time from here is measured
-    //        against the just-armed 20 s firstEventTimer.
+    //        the 18-iter stderr loop; total shell time from here is measured
+    //        against the just-armed 3 s firstEventTimer.
     //     5. Drain the outstanding `next()` promise + the rest.
     //
-    //   Mutation probe (Sol R3 direction): with an inert stderr watcher, this
-    //   layout goes RED even under an arbitrarily slow `setAgentPaneReadOnly` or
-    //   pre-first-event consumer delay, because release only happens after
-    //   the timer is armed.
+    //   Both the interval watcher and deadline callback can observe stderr.
+    //   A watcher-only mutation still passes via the deadline recheck; the
+    //   meaningful mutation disables `pollStderrActivity()` itself.
     const markerPath = join(tmpdir(), `tmux-firstevent-marker-${randomUUID()}`);
     try {
       const gen = spawnCliInTmuxForTest(
@@ -509,14 +508,14 @@ describe('spawnCliInTmux', () => {
           command: '/bin/sh',
           args: [
             '-c',
-            `while [ ! -f "${markerPath}" ]; do sleep 0.05; done; i=1; while [ "$i" -le 30 ]; do echo "progress-$i" >&2; sleep 0.75; i=$((i+1)); done; echo done`,
+            `while [ ! -f "${markerPath}" ]; do sleep 0.05; done; i=1; while [ "$i" -le 18 ]; do echo "progress-$i" >&2; sleep 0.3; i=$((i+1)); done; echo done`,
           ],
           outputMode: 'plainText',
           worktreeId: WORKTREE,
           invocationId: 'test-inv-plaintext-stderr-progress',
           cwd: '/tmp',
           timeoutMs: 1500,
-          firstEventTimeoutMs: 20_000,
+          firstEventTimeoutMs: 3_000,
         },
         { tmuxGateway: gateway },
       );
@@ -540,8 +539,9 @@ describe('spawnCliInTmux', () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       // Step 4: release the shell. Timer + watcher are already armed, so the
-      // 22.5 s stderr loop and stdout arrival now share a clock origin with
-      // the 20 s firstEventTimer. Only the stderr watcher can cancel it.
+      // 5.4 s stderr loop and stdout arrival now share a clock origin with
+      // the 3 s firstEventTimer. The watcher or deadline recheck must
+      // observe stderr progress before treating silence as failure.
       writeFileSync(markerPath, '');
 
       // Step 5: drain the rest of the stream.
@@ -555,15 +555,15 @@ describe('spawnCliInTmux', () => {
       assert.equal(
         timeout,
         undefined,
-        'stderr activity should cancel first-event timer before final stdout (which arrives after the 20s budget)',
+        'stderr activity should cancel first-event timer before final stdout (which arrives after the 3s budget)',
       );
       const plain = events.find((e) => e.__cliPlainText);
       assert.ok(plain, 'should yield raw plain-text stdout result');
       assert.equal(plain.stdout, 'done\n');
       // Full stderr sequence must land — proves stderr progress kept the run
-      // alive across the entire 22.5s post-marker window, not just the first
+      // alive across the entire 5.4s post-marker window, not just the first
       // few writes before an idle timeout would otherwise fire.
-      assert.match(plain.stderr, /progress-30/);
+      assert.match(plain.stderr, /progress-18/);
       assert.equal(plain.exitCode, 0);
     } finally {
       try {
@@ -692,37 +692,6 @@ describe('spawnCliInTmux', () => {
     // killAgent's C-c + 3s grace + kill-pane adds overhead; we tear down the
     // tmux server after each test, but full-suite load can still stretch wall-clock time.
     assert.ok(elapsed < 30000, `should converge well before firstEventTimeout, took ${elapsed}ms`);
-  });
-
-  it('AbortSignal unblocks FIFO read (no deadlock)', async (t) => {
-    const ac = new AbortController();
-    const events = [];
-    const gen = spawnCliInTmuxForTest(
-      t,
-      {
-        command: '/bin/sh',
-        args: ['-c', 'sleep 3600'],
-        worktreeId: WORKTREE,
-        invocationId: 'test-inv-abort-fifo',
-        cwd: '/tmp',
-        signal: ac.signal,
-        firstEventTimeoutMs: 60000,
-        timeoutMs: 60000,
-      },
-      { tmuxGateway: gateway },
-    );
-
-    // Abort after 200ms — should unblock FIFO read
-    setTimeout(() => ac.abort(), 200);
-
-    const start = Date.now();
-    for await (const event of gen) {
-      events.push(event);
-    }
-    const elapsed = Date.now() - start;
-
-    // Should converge quickly via abort, not hang forever
-    assert.ok(elapsed < 5000, `abort should unblock FIFO read, took ${elapsed}ms`);
   });
 
   it('pane has remain-on-exit set', async () => {

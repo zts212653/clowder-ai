@@ -1,6 +1,6 @@
 ---
 feature_ids: [F269]
-related_features: [F056, F255]
+related_features: [F056, F255, F322]
 topics: [frontend, ux, content-overflow, accessibility, design-system]
 doc_kind: spec
 created: 2026-07-18
@@ -8,7 +8,7 @@ description: "Audit every user-visible text truncation and establish a recoverab
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-07-23T03:32:00Z
-tips_exempt: "Overflow recovery is a contextual inline affordance that appears beside the affected content only when measurement proves overflow; it is not a separate user-invokable capability, and its visible buttons must remain discoverable without a tip"
+tips_exempt: "Renewed 2026-10-02: the F322 delivery backlink adds no action; existing overflow recovery remains an inline affordance beside affected content and must explain itself there."
 ---
 
 # F269: Recoverable Content Overflow — 前端截断审计与全文可达契约

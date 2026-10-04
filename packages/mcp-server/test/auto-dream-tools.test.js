@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 
 describe('F255 auto-dream MCP tools', () => {
   let originalEnv;
   let originalFetch;
+  let outboxDir;
 
   beforeEach(() => {
     originalEnv = { ...process.env };
@@ -11,6 +15,11 @@ describe('F255 auto-dream MCP tools', () => {
     process.env.CAT_CAFE_API_URL = 'http://127.0.0.1:1';
     process.env.CAT_CAFE_INVOCATION_ID = 'inv-present-loop';
     process.env.CAT_CAFE_CALLBACK_TOKEN = 'callback-token';
+    // The real rich-block transport flushes its outbox before sending. Keep
+    // each mocked preview away from caller-owned persisted callback entries.
+    outboxDir = mkdtempSync(join(tmpdir(), 'cat-cafe-auto-dream-outbox-test-'));
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outboxDir;
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_ENABLED = 'true';
   });
 
   afterEach(() => {
@@ -19,6 +28,7 @@ describe('F255 auto-dream MCP tools', () => {
     }
     Object.assign(process.env, originalEnv);
     globalThis.fetch = originalFetch;
+    rmSync(outboxDir, { recursive: true, force: true });
   });
 
   test('registers settle/read/list/settings-preview with owner identity absent from every public schema', async () => {

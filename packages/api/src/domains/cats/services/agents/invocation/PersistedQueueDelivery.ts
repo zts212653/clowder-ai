@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { createCatId } from '@cat-cafe/shared';
+import { type OwnerAuthProvenance, requireOwnerAuthProvenance } from '../../owner-auth-provenance.js';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { InvocationQueue } from './InvocationQueue.js';
 import {
@@ -11,12 +12,15 @@ import { carrierEntryId } from './QueuedMessageCustodyCarrierProjection.js';
 import { createInitialQueuedMessageCustody } from './QueuedMessageCustodyCoordinator.js';
 
 export interface PersistedQueueDeliveryInput {
+  ownerAuthProvenance: OwnerAuthProvenance;
   ownerUserId: string;
   threadId: string;
   targetCatId: string;
   idempotencyKey: string;
   content: string;
   source: NonNullable<StoredMessage['source']>;
+  /** Each producer explicitly declares its stop-gate classification. */
+  sourceCategory?: 'producer_return';
 }
 
 export interface PersistedQueueDeliveryPort {
@@ -42,6 +46,7 @@ export class PersistedQueueDelivery implements PersistedQueueDeliveryPort {
   ) {}
 
   async deliver(input: PersistedQueueDeliveryInput) {
+    requireOwnerAuthProvenance(input.ownerAuthProvenance);
     let message = await this.deps.messages.getByIdempotencyKey(input.ownerUserId, input.threadId, input.idempotencyKey);
     if (!message) message = await this.admit(input);
     if (
@@ -82,11 +87,12 @@ export class PersistedQueueDelivery implements PersistedQueueDeliveryPort {
     const queued = this.deps.queue.enqueue({
       threadId: input.threadId,
       userId: input.ownerUserId,
-      ownerAuthProvenance: 'strict',
+      ownerAuthProvenance: input.ownerAuthProvenance,
       idempotencyKey: input.idempotencyKey,
       queueCustodyAdmissionId: `producer:${input.idempotencyKey}`,
       content: input.content,
       source: 'connector',
+      ...(input.sourceCategory ? { sourceCategory: input.sourceCategory } : {}),
       targetCats: [targetCat],
       intent: 'execute',
     });

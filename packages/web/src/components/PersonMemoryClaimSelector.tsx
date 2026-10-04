@@ -12,6 +12,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { z } from 'zod';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
+import { useApprovalHost, useGuardedWrite, useReportEditing } from './ApprovalHost';
 import { jumpToApprovalAnchor } from './ApprovalProvenanceLinks';
 
 interface PersonMemoryDraftView {
@@ -206,10 +207,24 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
   const notNowPersonMemory = useApprovalHubStore((state) => state.notNowPersonMemory);
   const withdrawPersonMemory = useApprovalHubStore((state) => state.withdrawPersonMemory);
   const deciding = useApprovalHubStore((state) => state.deciding[item.proposalId]);
+  const guardedWrite = useGuardedWrite();
+  // A host that has locked writes keeps the picking available (it is the user's work) and holds the four producer buttons.
+  const { writesLocked } = useApprovalHost();
+  const writeBlocked = Boolean(deciding) || writesLocked;
 
+  // Start over only when the drafts that remain are not the ones that were shown. A refreshed copy of the same proposal
+  // (a new object with the same drafts) must keep what the user already picked.
+  const draftSignature = draftIds.join('\u0000');
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draftSignature stands for draftIds
   useEffect(() => {
     setSelectedDraftIds(new Set(draftIds));
-  }, [draftIds]);
+  }, [draftSignature]);
+
+  // A pick that differs from "everything" is work in progress.
+  useReportEditing(
+    'person-memory-selection',
+    selectedDraftIds.size !== draftIds.length || draftIds.some((draftId) => !selectedDraftIds.has(draftId)),
+  );
 
   const toggleDraft = (draftId: string) => {
     setSelectedDraftIds((current) => {
@@ -222,7 +237,8 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
 
   const approveSelected = () => {
     const selected = drafts.filter((draft) => selectedDraftIds.has(draft.draftId)).map((draft) => draft.draftId);
-    if (selected.length > 0) void approvePersonMemory(item.proposalId, selected);
+    if (selected.length > 0)
+      void guardedWrite('person-memory-approve', () => approvePersonMemory(item.proposalId, selected));
   };
 
   return (
@@ -272,7 +288,7 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
         <button
           type="button"
           onClick={approveSelected}
-          disabled={Boolean(deciding) || selectedDraftIds.size === 0}
+          disabled={writeBlocked || selectedDraftIds.size === 0}
           className="px-3 py-1 text-micro font-medium rounded-md text-[var(--cafe-accent-foreground)] disabled:opacity-50"
           style={{ backgroundColor: 'var(--semantic-success, #22c55e)' }}
           data-testid="person-memory-approve-selected"
@@ -281,8 +297,8 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
         </button>
         <button
           type="button"
-          onClick={() => void notNowPersonMemory(item.proposalId)}
-          disabled={Boolean(deciding)}
+          onClick={() => void guardedWrite('person-memory-defer', () => notNowPersonMemory(item.proposalId))}
+          disabled={writeBlocked}
           className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] disabled:opacity-50"
           data-testid="person-memory-not-now"
         >
@@ -290,8 +306,8 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
         </button>
         <button
           type="button"
-          onClick={() => void withdrawPersonMemory(item.proposalId)}
-          disabled={Boolean(deciding)}
+          onClick={() => void guardedWrite('person-memory-withdraw', () => withdrawPersonMemory(item.proposalId))}
+          disabled={writeBlocked}
           className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] disabled:opacity-50"
           data-testid="person-memory-withdraw"
         >
@@ -300,7 +316,7 @@ export function PersonMemoryClaimSelector({ item, onReject }: { item: ApprovalHu
         <button
           type="button"
           onClick={onReject}
-          disabled={Boolean(deciding)}
+          disabled={writeBlocked}
           className="px-3 py-1 text-micro font-medium rounded-md border border-[var(--cafe-border)] hover:bg-[var(--semantic-error,#ef4444)] hover:text-[var(--cafe-accent-foreground)] disabled:opacity-50"
           data-testid="person-memory-reject"
         >

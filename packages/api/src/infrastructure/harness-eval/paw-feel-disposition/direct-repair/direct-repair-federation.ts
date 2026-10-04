@@ -48,7 +48,8 @@ function validSourceToolRoute(candidate: SourceToolRouteRefV1): boolean {
     candidate.ownerFeatureId === candidate.ownerFeatureId.trim() &&
     candidate.ownerFeatureId.length > 0 &&
     candidate.ownerStateRef === candidate.ownerStateRef.trim() &&
-    /^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/u.test(candidate.ownerStateRef) &&
+    // biome-ignore lint/complexity/noUselessEscapeInRegex: Keep the owner-ref pattern portable and aligned with serialized MCP validators.
+    /^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/u.test(candidate.ownerStateRef) &&
     (candidate.match === 'exact' || candidate.match === 'prefix')
   );
 }

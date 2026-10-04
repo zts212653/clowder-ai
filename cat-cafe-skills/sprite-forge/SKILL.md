@@ -1,5 +1,6 @@
 ---
 name: sprite-forge
+tips_exempt: "2026-09-23：截帧加工的执行猫改为按 F293 信号与 dossier antiSignals 选，只改猫间路由；未新增用户可直接发起的操作。"
 description: >
   角色动态 sprite / 桌宠皮肤 / atlas 状态行生产线：母图锚身份 → Frame A 首帧 →
   AI 视频生成（人工环节）→ 截帧确定性加工 → atlas row + 三道闸。
@@ -27,7 +28,7 @@ imagegen 逐帧独立生图 = 体型漂移、风格跳变、帧间无时序关�
 | 1 锚身份 | 取角色设定母图（KD-21 视觉 canon） | — | 母图库=`docs/videos/cucu-pr-flow/assets/references/character-sheets/`（按角色名对应 `*-r0N.png` 四足设定图） |
 | 2 生成首尾帧 | imagegen 出 **Frame A + Frame B 两张**（1024×1024 纯白底）：A=基准姿态，B=同姿态仅微小差异（"Only differences: ... Everything else IDENTICAL"句式） | 生图猫（须原生 imagegen；prompt 可由更贵的猫代写） | 强 2D 风格锚；母图作 reference image 传入；**每次只做一个状态**；B 帧锁不住（缩放/构图漂移）→ 降级单图 i2v 只用 A 帧 |
 | 3 拍视频 | AI 视频工具生成 2-3s 循环：**首尾帧模式（A+B，更可控）优先；单图 i2v（只喂 A，更稳）备选** | **人工（operator / 云端 Gemini）** | 16:9 横屏 / 低运动强度 / 2D 锚 + 反 3D negative（模板见真相源 §3） |
-| 4 截帧加工 | ffmpeg 截帧 → 抠图 → 缩放 → 拼 row | **廉价猫（sonnet 级）即可**——纯确定性命令活，别烧贵猫 | 确定性工具链，命令见下 |
+| 4 截帧加工 | ffmpeg 截帧 → 抠图 → 缩放 → 拼 row | **廉价确定性执行猫即可**（按 F293 实时供给/成本信号选，并避开 dossier `antiSignals` 标了机械活的猫）——纯确定性命令活，别烧贵猫 | 确定性工具链，命令见下 |
 | 5 验收 | 三道闸 + 分批审 | 主审猫 + **operator identity veto 终审** | 每批过了才做下一批（2-2-3 批次制先例） |
 
 ## 截帧加工命令（Step 4 速查）

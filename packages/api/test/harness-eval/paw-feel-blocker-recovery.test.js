@@ -5,8 +5,11 @@ import {
   censusLegacyPawFeelBlockers,
   executeLegacyPawFeelBlockerRecovery,
 } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/legacy-blocker-recovery.js';
+import { PawFeelCanonicalResumeConditionResolver } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/resume-condition-owner.js';
+import { projectPawFeelDisposition } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/projector.js';
 import { PawFeelDispositionService } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/service.js';
 import {
+  createPawFeelServiceHarness,
   MemoryPawFeelEventLog,
   pawFeelCandidate,
   pawFeelCommand,
@@ -121,9 +124,8 @@ describe('F313 recoverable blocker conditions', () => {
     assert.equal((await first.reconcile()).counts.reopened, 0, 'restart replay must be a no-op');
   });
 
-  it('reopens a bounded wait only when its server time is due', async () => {
+  it('rejects a pure time blocker with no named repair dependency', async () => {
     const eventLog = new MemoryPawFeelEventLog();
-    let now = '2026-09-07T00:00:00.000Z';
     const conditionResolver = {
       async resolve(selector) {
         return {
@@ -138,25 +140,164 @@ describe('F313 recoverable blocker conditions', () => {
     const service = new PawFeelDispositionService({
       eventLog,
       resumeConditionResolver: conditionResolver,
-      now: () => now,
+      now: () => '2026-09-07T00:00:00.000Z',
     });
     const source = pawFeelCandidate();
     await service.discover(source, { backfilled: false });
-    await service.execute(
+    await assert.rejects(
+      service.execute(
+        { kind: 'cat', id: 'opus' },
+        pawFeelCommand('mark_blocked', source.signalId, 1, {
+          blockerCode: 'bounded_wait',
+          blockerRef: 'clock:next-check',
+          resume: { kind: 'bounded_time', recheckAt: '2026-09-07T02:00:00.000Z' },
+        }),
+      ),
+      /active repair task/u,
+    );
+    assert.equal((await eventLog.read(source.signalId)).length, 1);
+  });
+
+  it('keeps a due repair blocked until its retained task completes, then resumes the same fix', async () => {
+    const task = { id: 'task-1', ownerCatId: 'opus', threadId: 'thread-repair', status: 'doing', updatedAt: 1 };
+    const resumeConditionResolver = new PawFeelCanonicalResumeConditionResolver({
+      async get(taskId) {
+        return taskId === task.id ? task : null;
+      },
+    });
+    const { eventLog, service } = createPawFeelServiceHarness({ resumeConditionResolver });
+    const source = pawFeelCandidate();
+    await service.discover(source, { backfilled: false });
+    const fixed = await service.execute(
       { kind: 'cat', id: 'opus' },
-      pawFeelCommand('mark_blocked', source.signalId, 1, {
+      pawFeelCommand('mark_fix', source.signalId, 1, {
+        leaseId: 'lease-active',
+        actionRef: 'fixture-action',
+      }),
+    );
+    assert.equal(fixed.projection.state, 'fix');
+
+    const blocked = await service.execute(
+      { kind: 'cat', id: 'opus' },
+      pawFeelCommand('mark_blocked', source.signalId, 2, {
         blockerCode: 'bounded_wait',
         blockerRef: 'clock:next-check',
-        resume: { kind: 'bounded_time', recheckAt: '2026-09-07T02:00:00.000Z' },
+        resume: { kind: 'bounded_time', recheckAt: '2026-07-26T00:00:03.000Z' },
+      }),
+    );
+    assert.equal(blocked.projection.state, 'blocked');
+    assert.equal(blocked.projection.taskId, 'task-1');
+    assert.equal(blocked.projection.actionLeaseRef?.leaseId, 'lease-active');
+    assert.ok(blocked.projection.directRepairBinding);
+    assert.deepEqual(blocked.projection.blocker?.resumeCondition?.selector, {
+      kind: 'bounded_time',
+      recheckAt: '2026-07-26T00:00:03.000Z',
+      dependencyRef: taskRef,
+    });
+
+    const due = await new PawFeelBlockerReconciler({ service }).reconcile();
+    assert.equal(due.counts.deferred, 1);
+    assert.equal(due.counts.reopened, 0);
+    const stillBlocked = projectPawFeelDisposition(await eventLog.read(source.signalId));
+    assert.equal(stillBlocked.state, 'blocked');
+    assert.equal(stillBlocked.taskId, 'task-1');
+    assert.equal(stillBlocked.actionLeaseRef?.leaseId, 'lease-active');
+    assert.ok(stillBlocked.directRepairBinding);
+
+    task.status = 'done';
+    task.updatedAt = 2;
+    const completed = await new PawFeelBlockerReconciler({ service }).reconcile();
+    assert.equal(completed.counts.reopened, 1);
+    const resumed = projectPawFeelDisposition(await eventLog.read(source.signalId));
+    assert.equal(resumed.state, 'fix');
+    assert.equal(resumed.taskId, 'task-1');
+    assert.equal(resumed.actionLeaseRef?.leaseId, 'lease-active');
+    assert.ok(resumed.directRepairBinding);
+  });
+
+  it('keeps repair provenance through blocker revisions and resumes it after evidence changes', async () => {
+    let taskVersion = 'task:1:doing';
+    const resumeConditionResolver = {
+      async resolve(selector) {
+        return {
+          normalizedSelector: selector,
+          state: 'doing',
+          version: taskVersion,
+          satisfied: false,
+          evidenceRefs: [{ ...selector.ref, version: taskVersion }],
+        };
+      },
+    };
+    const { eventLog, service } = createPawFeelServiceHarness({ resumeConditionResolver });
+    const source = pawFeelCandidate({ messageId: 'revised-blocker', digest: 'd'.repeat(64) });
+    await service.discover(source, { backfilled: false });
+    const fixed = await service.execute(
+      { kind: 'cat', id: 'opus' },
+      pawFeelCommand('mark_fix', source.signalId, 1, { leaseId: 'lease-active', actionRef: 'fixture-action' }),
+    );
+    const block = (sequence, blockerRef) =>
+      service.execute(
+        { kind: 'cat', id: 'opus' },
+        pawFeelCommand('mark_blocked', source.signalId, sequence, {
+          blockerCode: 'task_wait',
+          blockerRef,
+          resume: { kind: 'task', ref: taskRef },
+        }),
+      );
+    await block(2, 'task:item:task-1');
+    const revised = await block(3, 'task:item:task-1:updated-reason');
+    assert.equal(revised.projection.taskId, fixed.projection.taskId);
+    assert.equal(revised.projection.actionLeaseRef?.leaseId, 'lease-active');
+    assert.deepEqual(revised.projection.directRepairBinding, fixed.projection.directRepairBinding);
+
+    taskVersion = 'task:2:done';
+    const changed = await new PawFeelBlockerReconciler({ service }).reconcile();
+    assert.equal(changed.counts.reopened, 1);
+    const resumed = projectPawFeelDisposition(await eventLog.read(source.signalId));
+    assert.equal(resumed.state, 'fix');
+    assert.equal(resumed.taskId, fixed.projection.taskId);
+  });
+
+  it('resumes the same repair only after its canonical task evidence changes', async () => {
+    let taskVersion = 'task:1:doing';
+    const resumeConditionResolver = {
+      async resolve(selector) {
+        return {
+          normalizedSelector: selector,
+          state: 'doing',
+          version: taskVersion,
+          satisfied: false,
+          evidenceRefs: [{ ...selector.ref, version: taskVersion }],
+        };
+      },
+    };
+    const { eventLog, service } = createPawFeelServiceHarness({ resumeConditionResolver });
+    const source = pawFeelCandidate({ messageId: 'task-backed-repair', digest: 'c'.repeat(64) });
+    await service.discover(source, { backfilled: false });
+    await service.execute(
+      { kind: 'cat', id: 'opus' },
+      pawFeelCommand('mark_fix', source.signalId, 1, {
+        leaseId: 'lease-active',
+        actionRef: 'fixture-action',
+      }),
+    );
+    await service.execute(
+      { kind: 'cat', id: 'opus' },
+      pawFeelCommand('mark_blocked', source.signalId, 2, {
+        blockerCode: 'task_wait',
+        blockerRef: 'task:item:task-1',
+        resume: { kind: 'task', ref: taskRef },
       }),
     );
 
-    now = '2026-09-07T01:59:59.000Z';
-    const early = new PawFeelBlockerReconciler({ service });
-    assert.equal((await early.reconcile()).counts.stable, 1);
-    now = '2026-09-07T02:00:00.000Z';
-    const due = new PawFeelBlockerReconciler({ service });
-    assert.equal((await due.reconcile()).counts.reopened, 1);
+    taskVersion = 'task:2:doing';
+    const changed = await new PawFeelBlockerReconciler({ service }).reconcile();
+    assert.equal(changed.counts.reopened, 1);
+    const resumed = projectPawFeelDisposition(await eventLog.read(source.signalId));
+    assert.equal(resumed.state, 'fix');
+    assert.equal(resumed.taskId, 'task-1');
+    assert.equal(resumed.actionLeaseRef?.leaseId, 'lease-active');
+    assert.ok(resumed.directRepairBinding);
   });
 
   it('does not starve a changed blocker behind stable or non-blocked signals at the write limit', async () => {

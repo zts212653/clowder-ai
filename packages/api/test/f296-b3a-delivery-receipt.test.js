@@ -17,7 +17,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const receiptModule = await import('../dist/domains/cats/services/session/delivery-receipt.js');
+const receiptModule = await import('../dist/domains/cats/services/session/context/delivery-receipt.js');
 const { mintDeliveryReceipt, isProviderMintedReceipt } = receiptModule;
 
 const RECEIPT_INPUT = Object.freeze({

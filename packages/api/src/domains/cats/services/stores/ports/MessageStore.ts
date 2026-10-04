@@ -28,6 +28,7 @@ import type {
 import {
   collectiveOwnerAdmissionV1Schema,
   collectiveSourceIdentitySchema,
+  collectiveWorkDelegationV1Schema,
   collectiveWorkInvocationV1Schema,
   custodyOfferV1Schema,
   evolutionPreparationSubmissionV1Schema,
@@ -255,9 +256,34 @@ export interface StoredMessage {
   metadata?: MessageMetadata;
   /** F022+F052+F098-C1+F153-F: Extensible extra data (rich blocks, stream metadata, cross-post origin, explicit targets, tracing pointers) */
   extra?: {
+    /** F309: a confirmed human request; technical coordinates resolve through the request ref. */
+    contentModificationRequestV1?: import('@cat-cafe/shared').ContentModificationSourceMessageV1;
+    /** F317: Host-persisted typed input or provider-committed speech/result. Never a task grant. */
+    liveCompanion?: {
+      callId: string;
+      /** Display identity frozen when this Live call began; author/source remain on the message. */
+      identity?: import('@cat-cafe/shared').CompanionIdentitySnapshotV1;
+    } & (
+      | {
+          modality: 'typed';
+          role: 'user';
+          clientMessageId: string;
+        }
+      | {
+          nativeThreadId: string;
+          realtimeSessionId: string;
+          nativeItemId: string;
+          modality: 'voice' | 'result';
+          /** Explicit source role; legacy records without it remain in complete chat. */
+          role?: 'user' | 'assistant';
+          nativeTurnId?: string;
+        }
+    );
     /** F290: canonical owner receipt and exact Task execution trigger; written by owner admission routes only. */
     collectiveOwnerAdmissionV1?: import('@cat-cafe/shared').CollectiveOwnerAdmissionV1;
     collectiveWorkInvocationV1?: import('@cat-cafe/shared').CollectiveWorkInvocationV1;
+    /** F290: authenticated Task owner explicitly names home Cats allowed to continue this private Work. */
+    collectiveWorkDelegationV1?: import('@cat-cafe/shared').CollectiveWorkDelegationV1;
     collectiveAuthorizationInvalid?: true;
     /** F306 durable provider-neutral event; native wire vocabulary is never stored here. */
     semanticEvent?: ProviderSemanticEvent;
@@ -682,11 +708,27 @@ export function assertValidAppendMessageInput(msg: AppendMessageInput): void {
   assertValidStoredMessageTimestamp(msg.timestamp);
   const ownerAdmission = msg.extra?.collectiveOwnerAdmissionV1;
   const workInvocation = msg.extra?.collectiveWorkInvocationV1;
+  const workDelegation = msg.extra?.collectiveWorkDelegationV1;
+  if (workDelegation !== undefined && (ownerAdmission !== undefined || workInvocation !== undefined)) {
+    throw new TypeError('Collective Work Message cannot combine Host authority and home delegation carriers');
+  }
   if (ownerAdmission !== undefined || workInvocation !== undefined) {
     if (msg.catId !== null || msg.source || msg.extra?.collectiveAuthorizationInvalid)
       throw new TypeError('Collective owner receipts require a Host-owned user Message');
     if (ownerAdmission !== undefined) collectiveOwnerAdmissionV1Schema.parse(ownerAdmission);
     if (workInvocation !== undefined) collectiveWorkInvocationV1Schema.parse(workInvocation);
+  }
+  if (workDelegation !== undefined) {
+    const parsed = collectiveWorkDelegationV1Schema.parse(workDelegation);
+    if (
+      msg.catId !== parsed.ownerCatId ||
+      msg.source ||
+      msg.origin !== 'callback' ||
+      msg.extra?.collectiveAuthorizationInvalid ||
+      JSON.stringify([...msg.mentions].sort()) !== JSON.stringify([...parsed.targetCatIds].sort())
+    ) {
+      throw new TypeError('Collective Work delegation requires an exact authenticated owner callback Message');
+    }
   }
   if (msg.queueCustody?.executionScope === 'collective-participation') {
     const source = collectiveSourceIdentitySchema.safeParse(msg.source?.meta?.participation);
@@ -884,6 +926,7 @@ export function mergeMessageExtra(
     deliveryBoundary: _stripBoundary,
     collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
     collectiveWorkInvocationV1: _stripCollectiveInvocation,
+    collectiveWorkDelegationV1: _stripCollectiveDelegation,
     collectiveAuthorizationInvalid: _stripCollectiveInvalid,
     ...incomingHost
   } = incoming ?? {};
@@ -2154,6 +2197,7 @@ export class MessageStore {
       deliveryBoundary: _stripBoundary,
       collectiveOwnerAdmissionV1: _stripCollectiveAdmission,
       collectiveWorkInvocationV1: _stripCollectiveInvocation,
+      collectiveWorkDelegationV1: _stripCollectiveDelegation,
       collectiveAuthorizationInvalid: _stripCollectiveInvalid,
       ...hostOnly
     } = extra as Record<string, unknown>;

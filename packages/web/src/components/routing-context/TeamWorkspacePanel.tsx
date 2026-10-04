@@ -12,7 +12,12 @@ import { TeamMemberDetail } from './TeamMemberDetail';
 import { TeamMemberRoster } from './TeamMemberRoster';
 import { TeamStaleReadNotice } from './TeamStaleReadNotice';
 import styles from './TeamWorkspacePanel.module.css';
-import { readTeamAvailability, type TeamMemberRow, toTeamMemberRow } from './team-member-projection';
+import {
+  providerDisplayName,
+  readTeamAvailability,
+  type TeamMemberRow,
+  toTeamMemberRow,
+} from './team-member-projection';
 import { resolveTeamWorkspaceSubject } from './team-navigation';
 import { DEFAULT_TEAM_READING, readTeamReading, useTeamReading } from './team-reading-state';
 import { useRoutingContext } from './useRoutingContext';
@@ -42,7 +47,7 @@ function ProviderDetail({
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-lg font-semibold text-cafe-black">{providerId}</h3>
+        <h3 className="text-lg font-semibold text-cafe-black">{providerDisplayName(providerId)}</h3>
         <p className="text-xs text-cafe-muted">{candidates.length} 位成员使用此服务</p>
       </div>
       {candidates.map((candidate) => {

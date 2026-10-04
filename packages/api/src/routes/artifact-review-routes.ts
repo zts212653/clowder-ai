@@ -5,6 +5,7 @@ import type { ArtifactReviewService } from '../domains/collaborative-content/art
 import type { MediaReviewPrincipal } from '../domains/video-studio/content-owner/published-media-access.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
 import { replyArtifactReviewError } from './artifact-review-route-errors.js';
+import { sendPublishedMedia } from './published-media-response.js';
 
 const paramsSchema = z.object({ reviewId: z.string().min(1).max(128) }).strict();
 export interface ArtifactReviewRoutesDeps {
@@ -113,30 +114,7 @@ export function registerArtifactReviewRoutes(app: FastifyInstance, deps: Artifac
         .extend({ round: z.coerce.number().int().positive() })
         .parse(request.params);
       const media = await deps.reviews.openMedia(reviewId, round, principal);
-      reply
-        .header('Content-Type', media.mediaType)
-        .header('X-Content-Type-Options', 'nosniff')
-        .header('Accept-Ranges', 'bytes');
-      try {
-        const range = request.headers.range;
-        if (!range)
-          return reply
-            .header('Content-Length', media.byteLength)
-            .send(media.handle.createReadStream({ autoClose: true }));
-        const parsed = parseRange(range, media.byteLength);
-        if (!parsed) {
-          await media.handle.close();
-          return reply.code(416).header('Content-Range', `bytes */${media.byteLength}`).send();
-        }
-        return reply
-          .code(206)
-          .header('Content-Range', `bytes ${parsed.start}-${parsed.end}/${media.byteLength}`)
-          .header('Content-Length', parsed.end - parsed.start + 1)
-          .send(media.handle.createReadStream({ ...parsed, autoClose: true }));
-      } catch (error) {
-        await media.handle.close();
-        throw error;
-      }
+      return await sendPublishedMedia(request, reply, media);
     } catch (error) {
       return replyArtifactReviewError(reply, error);
     }
@@ -152,20 +130,4 @@ function humanPrincipal(request: FastifyRequest): MediaReviewPrincipal | null {
     return null;
   const userId = resolveStrictUserId(request);
   return userId ? { userId, actor: { kind: 'human', actorId: userId } } : null;
-}
-
-function parseRange(value: string, length: number): { start: number; end: number } | null {
-  const match = /^bytes=(\d*)-(\d*)$/.exec(value);
-  if (!match || (!match[1] && !match[2])) return null;
-  const suffix = !match[1];
-  const first = Number(match[1] || match[2]);
-  const end = suffix || !match[2] ? length - 1 : Math.min(Number(match[2]), length - 1);
-  const start = suffix ? Math.max(0, length - first) : first;
-  return Number.isSafeInteger(first) &&
-    Number.isSafeInteger(end) &&
-    (!suffix || first > 0) &&
-    start <= end &&
-    start < length
-    ? { start, end }
-    : null;
 }

@@ -20,7 +20,7 @@ export function F307WorkbenchSidecar({
   const bodyVisible = visible && (isDesktop || expandedOnNarrow);
   return (
     <aside
-      className={`${visible ? 'flex' : 'hidden'} max-h-[45%] min-h-0 w-full shrink-0 flex-col border-t border-cafe-subtle bg-cafe-surface md:max-h-none md:w-72 md:border-l md:border-t-0`}
+      className={`${visible ? 'flex' : 'hidden'} max-h-[35%] min-h-0 w-full shrink-0 flex-col border-t border-cafe-subtle bg-cafe-surface md:max-h-none md:w-72 md:border-l md:border-t-0`}
       data-testid="f307-sidecar"
       aria-hidden={!visible}
     >

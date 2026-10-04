@@ -49,6 +49,8 @@ export interface CatVariant {
   readonly id: string; // 'opus-4.6', 'codex-default'
   /** Override breed-level catId to register as an independent cat (F32-b) */
   readonly catId?: string;
+  /** Independent relationship persona; breed membership must not migrate a primer. */
+  readonly relationshipKey?: string;
   /** Override breed-level name for this independent member */
   readonly name?: string;
   /** Override breed-level displayName (F32-b) */

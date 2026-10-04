@@ -164,4 +164,23 @@ describe('F313/F287 owner outcome negatives', () => {
       );
     }
   });
+
+  it('links a fresh owner event when the repair was already loaded before the binding', async () => {
+    const canonicalBinding = await binding();
+    const goodEvent = event();
+    const ownerOutcomeRef = {
+      ownerFeatureId: 'F287',
+      ownerStateRef: `memory-cue-consumption:${goodEvent.eventId}`,
+      version: goodEvent.createdAt,
+    };
+
+    const outcome = await provider({ event: goodEvent, git: gitTruth() }).verifyOutcome({
+      binding: canonicalBinding,
+      ownerOutcomeRef,
+      ...terminals,
+    });
+
+    assert.equal(outcome.disposition, 'verified_changed');
+    assert.ok(outcome.verificationRefs.some((ref) => ref.ownerStateRef.startsWith('loaded-runtime:')));
+  });
 });

@@ -87,6 +87,7 @@ export function createPawFeelServiceHarness({
     };
   },
   assertBundleSnapshot = async () => {},
+  resumeConditionResolver,
 } = {}) {
   let tick = 0;
   const eventLog = new MemoryPawFeelEventLog();
@@ -130,7 +131,7 @@ export function createPawFeelServiceHarness({
         };
       },
     },
-    resumeConditionResolver: {
+    resumeConditionResolver: resumeConditionResolver ?? {
       async resolve(selector) {
         return {
           normalizedSelector: selector,

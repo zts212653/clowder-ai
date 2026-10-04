@@ -1,5 +1,6 @@
 import type { ManagedWorkBinding, TaskItem } from '@cat-cafe/shared';
 import { isTrackingKind } from '@cat-cafe/shared';
+import { reconcileDeploymentWaitTaskMutation } from './TaskDeploymentWaitState.js';
 import { createManagedWorkBindingConflict } from './TaskManagedWorkBinding.js';
 import type { ReplaceAutomationStateIfGenerationInput } from './TaskStoreContract.js';
 import { assertSubjectUpdateOwnership } from './TaskSubjectOwnership.js';
@@ -57,7 +58,7 @@ export function buildTaskWaitReplacement(
 ): TaskItem {
   assertTrackingRegistration(existing, input, currentBinding);
   const registration = input.trackingRegistration;
-  return {
+  return reconcileDeploymentWaitTaskMutation(existing, {
     ...existing,
     ...(registration
       ? {
@@ -73,5 +74,5 @@ export function buildTaskWaitReplacement(
     ...(input.why !== undefined ? { why: input.why } : {}),
     ...(input.status !== undefined ? { status: input.status } : {}),
     updatedAt: Date.now(),
-  };
+  });
 }

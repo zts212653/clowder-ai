@@ -56,6 +56,15 @@
   background: var(--cafe-surface);
   color: var(--cafe-text);
 }
+.exploration-discuss {
+  display: block;
+  margin: 6px 0 0 auto;
+  padding: 4px 8px;
+  border-radius: 8px;
+  color: var(--cafe-accent);
+  font-size: var(--console-font-xs);
+  font-weight: 600;
+}
 .exploration-media video {
   display: block;
   width: 100%;

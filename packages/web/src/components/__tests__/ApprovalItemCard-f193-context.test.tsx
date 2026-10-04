@@ -130,6 +130,32 @@ describe('F246 Bug 1: F193 card context + jump button', () => {
     expect(card!.textContent).toContain(TARGET_THREAD_TITLE);
   });
 
+  it('F193 card keeps the readable task line in the default title', async () => {
+    await act(async () => {
+      root.render(React.createElement(ApprovalItemCard, { item: F193_ITEM }));
+    });
+
+    const card = container.querySelector('[data-testid="approval-item-ctx-f193-1"]');
+    expect(card!.textContent).toContain('派给');
+    expect(card!.textContent).toContain('请帮忙调研 F246 下一步方向');
+  });
+
+  it('F193 settled card keeps the same readable task line', async () => {
+    const { SettledHistoryCard } = await import('../SettledHistoryCard');
+    const settledItem = {
+      ...F193_ITEM,
+      resolution: 'accepted' as const,
+      decidedAt: Date.now() - 60_000,
+      decidedBy: 'user-operator',
+    };
+    await act(async () => {
+      root.render(React.createElement(SettledHistoryCard, { item: settledItem }));
+    });
+
+    expect(container.textContent).toContain('派给');
+    expect(container.textContent).toContain('请帮忙调研 F246 下一步方向');
+  });
+
   it('F193 card shows source thread ID as fallback when not in chatStore', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F193_ITEM_NO_THREAD_IN_STORE }));

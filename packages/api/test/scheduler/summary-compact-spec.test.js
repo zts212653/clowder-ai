@@ -26,6 +26,51 @@ describe('SummaryCompactionTaskSpec', () => {
     assert.equal(result.run, false);
   });
 
+  it('an eligible thread remains protected against the summary task own emission', async () => {
+    const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
+    const { executeTaskPipeline } = await import('../../dist/infrastructure/scheduler/execute-pipeline.js');
+    const { RunLedger } = await import('../../dist/infrastructure/scheduler/RunLedger.js');
+    const { EmissionStore } = await import('../../dist/infrastructure/scheduler/EmissionStore.js');
+    db.prepare(
+      `INSERT INTO summary_state (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('test-thread', 25, 2000, 0, 'concat');
+    let executions = 0;
+    const logger = { info() {}, error() {} };
+    const task = createSummaryCompactionTaskSpec({
+      db,
+      enabled: () => true,
+      getThreadLastActivity: async () => ({ threadId: 'test-thread', lastMessageAt: Date.now() - 20 * 60_000 }),
+      getMessagesAfterWatermark: async () => {
+        executions++;
+        return [];
+      },
+      generateAbstractive: async () => null,
+      logger,
+    });
+    const admitted = await task.admission.gate({ taskId: task.id, lastRunAt: null, tickCount: 1 });
+    assert.equal(admitted.run, true, 'real thread activity makes this gate eligible');
+    const emissionStore = new EmissionStore(db);
+    emissionStore.record({
+      originTaskId: task.id,
+      threadId: 'test-thread',
+      messageId: 'own-message',
+      suppressionMs: 60_000,
+    });
+    const ledger = new RunLedger(db);
+    await executeTaskPipeline({
+      task,
+      ledger,
+      emissionStore,
+      logger,
+      running: new Map(),
+      tickCounts: new Map(),
+      lastRunAt: new Map(),
+    });
+    assert.equal(executions, 0);
+    assert.equal(ledger.query(task.id, 1)[0].outcome, 'SKIP_SELF_ECHO');
+  });
+
   it('finishes candidate derivation after the canonical summary commit boundary', async () => {
     const { createSummaryCompactionTaskSpec } = await import('../../dist/domains/memory/SummaryCompactionTaskSpec.js');
     db.prepare(

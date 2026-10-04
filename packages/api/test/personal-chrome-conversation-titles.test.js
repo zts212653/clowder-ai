@@ -55,7 +55,7 @@ test('real worker backfills authorized open-tab titles through Native persistenc
         },
       }),
       onMessage: { addListener() {} },
-      getManifest: () => ({ version: '0.2.11' }),
+      getManifest: () => ({ version: '0.2.12' }),
     },
     alarms: { create() {}, onAlarm: { addListener() {} } },
     action: { onClicked: { addListener() {} }, setBadgeText() {}, setTitle() {} },

@@ -9,6 +9,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { CapabilitiesConfig } from '@cat-cafe/shared';
 import { parse as parseYaml } from 'yaml';
 import { readCapabilitiesConfig, resolveRequiredMcpStatus } from '../config/capabilities/capability-orchestrator.js';
 
@@ -30,9 +31,41 @@ export interface SkillMcpDependency {
  *   'Triggers on "X", "Y", "Z"' or '触发词："X"、"Y"'
  */
 export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
+  const state = await readSkillMetaState(skillDir);
+  return state.kind === 'present' ? state.meta : {};
+}
+
+/**
+ * What reading a skill's metadata found. Unlike `readSkillMeta` (which answers
+ * `{}` for every failure), a file that exists but cannot be read or parsed is
+ * `unreadable`, not "this skill has no description".
+ */
+export type SkillMetaReadState =
+  | { readonly kind: 'present'; readonly meta: SkillMeta }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly path: string; readonly errno?: string };
+
+const ABSENT_CODES = new Set(['ENOENT', 'ENOTDIR']);
+
+export async function readSkillMetaState(skillDir: string): Promise<SkillMetaReadState> {
   const skillMdPath = join(skillDir, 'SKILL.md');
+  let content: string;
   try {
-    const content = await readFile(skillMdPath, 'utf-8');
+    content = await readFile(skillMdPath, 'utf-8');
+  } catch (error) {
+    const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errno && ABSENT_CODES.has(errno)) return { kind: 'absent' };
+    return { kind: 'unreadable', path: skillMdPath, ...(errno ? { errno } : {}) };
+  }
+  try {
+    return { kind: 'present', meta: parseSkillMetaContent(content) };
+  } catch {
+    return { kind: 'unreadable', path: skillMdPath, errno: 'EPARSE' };
+  }
+}
+
+function parseSkillMetaContent(content: string): SkillMeta {
+  {
     const match = content.match(/^---\n([\s\S]*?)\n---/);
     if (!match) return {};
     const fm = parseYaml(match[1]!) as { description?: unknown; triggers?: unknown } | null;
@@ -90,8 +123,6 @@ export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
     const result: SkillMeta = { description: cleanDesc };
     if (triggers.length > 0) result.triggers = triggers;
     return result;
-  } catch {
-    return {};
   }
 }
 
@@ -101,10 +132,36 @@ export async function readSkillMeta(skillDir: string): Promise<SkillMeta> {
  * F228: category moved from BOOTSTRAP.md to manifest.yaml.
  */
 export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<string, SkillMeta>> {
-  const result = new Map<string, SkillMeta>();
+  const state = await parseManifestSkillMetaState(skillsSrcDir);
+  return state.kind === 'present' ? state.meta : new Map();
+}
+
+/** As `readSkillMetaState`, for the manifest: missing ≠ present-but-unreadable. */
+export type ManifestMetaReadState =
+  | { readonly kind: 'present'; readonly meta: Map<string, SkillMeta> }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unreadable'; readonly path: string; readonly errno?: string };
+
+export async function parseManifestSkillMetaState(skillsSrcDir: string): Promise<ManifestMetaReadState> {
   const manifestPath = join(skillsSrcDir, 'manifest.yaml');
+  let content: string;
   try {
-    const content = await readFile(manifestPath, 'utf-8');
+    content = await readFile(manifestPath, 'utf-8');
+  } catch (error) {
+    const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errno && ABSENT_CODES.has(errno)) return { kind: 'absent' };
+    return { kind: 'unreadable', path: manifestPath, ...(errno ? { errno } : {}) };
+  }
+  try {
+    return { kind: 'present', meta: parseManifestContent(content) };
+  } catch {
+    return { kind: 'unreadable', path: manifestPath, errno: 'EPARSE' };
+  }
+}
+
+function parseManifestContent(content: string): Map<string, SkillMeta> {
+  const result = new Map<string, SkillMeta>();
+  {
     const parsed = parseYaml(content) as {
       skills?: Record<
         string,
@@ -138,8 +195,6 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
         });
       }
     }
-  } catch {
-    // manifest missing or invalid — fallback to SKILL.md metadata
   }
   return result;
 }
@@ -150,8 +205,14 @@ export async function parseManifestSkillMeta(skillsSrcDir: string): Promise<Map<
 export async function resolveSkillMcpStatuses(
   projectRoot: string,
   manifestMeta: Map<string, SkillMeta>,
+  /**
+   * The config the caller already read. Passing it keeps these statuses on the
+   * same bytes as the rest of the caller's answer, not on a second read that may
+   * see a different file.
+   */
+  loadedConfig?: CapabilitiesConfig | null,
 ): Promise<Map<string, SkillMcpDependency>> {
-  const capabilities = await readCapabilitiesConfig(projectRoot);
+  const capabilities = loadedConfig !== undefined ? loadedConfig : await readCapabilitiesConfig(projectRoot);
   const requiredIds = new Set<string>();
   for (const meta of manifestMeta.values()) {
     for (const id of meta.requiresMcp ?? []) requiredIds.add(id);

@@ -98,7 +98,9 @@ describe('F311 exact version reading in shared owner surfaces', () => {
     current = 'v3';
     await act(async () => window.dispatchEvent(new Event('focus')));
     expect(program().textContent).toContain('v3当前采用');
-    expect(host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent).toContain('v3');
+    const workspaceHome = host.querySelector('[data-testid="capability-evolution-workspace"]')?.textContent;
+    expect(workspaceHome).toContain('当前采用：保留的另一个候选');
+    expect(workspaceHome).not.toContain('当前采用：v3');
     expect(useEvolutionReading.getState().programs[PROGRAM_ID]?.selectedVersionRef?.version).toBe('v1');
     expect(program().scrollTop).toBe(180);
     await act(async () => window.dispatchEvent(new Event('pagehide')));
@@ -131,6 +133,7 @@ describe('F311 exact version reading in shared owner surfaces', () => {
   it('clears live current claims on loss of owner read authorization across every consumer', async () => {
     await render();
     await click('探索进化', program());
+    await click('改动与依据', program());
     expect(program().querySelector('[aria-label="当前沿用"]')?.textContent).toContain('补充边界示例');
     unavailable = true;
     await act(async () => window.dispatchEvent(new Event('focus')));

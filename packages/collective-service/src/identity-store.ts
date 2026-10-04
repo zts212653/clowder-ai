@@ -9,6 +9,7 @@ import {
   validateInvite,
   validatePendingAttempt,
 } from './human-auth-transitions.js';
+import { requireMembership, requireSteward } from './membership-authority.js';
 import {
   createSecret,
   createStableId,
@@ -21,11 +22,12 @@ import {
   type CollectiveRecord,
   type HumanAuthIntent,
   type HumanRecord,
-  type MembershipRecord,
   membershipKey,
   type ServiceState,
   type SessionRecord,
 } from './state.js';
+
+export { requireMembership, requireSteward };
 
 export interface AuthenticatedHuman {
   readonly human: HumanRecord;
@@ -102,6 +104,9 @@ export class CollectiveIdentityStore {
         humanId: human.humanId,
         role: 'steward',
         joinedAt: collective.createdAt,
+        status: 'active',
+        revision: 1,
+        history: [{ revision: 1, action: 'joined', at: collective.createdAt, role: 'steward' }],
       };
       state.events[collective.collectiveId] = [];
       return collective;
@@ -113,7 +118,7 @@ export class CollectiveIdentityStore {
     const { human } = resolveSession(state, sessionToken);
     requireHumanAuthBinding(state, human.humanId);
     const collectiveIds = Object.values(state.memberships)
-      .filter((membership) => membership.humanId === human.humanId)
+      .filter((membership) => membership.humanId === human.humanId && membership.status === 'active')
       .map((membership) => membership.collectiveId);
     return collectiveIds
       .map((collectiveId) => state.collectives[collectiveId])
@@ -125,7 +130,7 @@ export class CollectiveIdentityStore {
     const { human } = resolveSession(state, sessionToken);
     const binding = findHumanAuthBinding(state, human.humanId);
     const collectives = Object.values(state.memberships)
-      .filter((membership) => membership.humanId === human.humanId)
+      .filter((membership) => membership.humanId === human.humanId && membership.status === 'active')
       .map((membership) => ({
         ...state.collectives[membership.collectiveId],
         role: membership.role,
@@ -316,25 +321,6 @@ export function requireHumanAuthBinding(state: ServiceState, humanId: string) {
 
 function findHumanAuthBinding(state: ServiceState, humanId: string) {
   return Object.values(state.humanAuthBindings).find((binding) => binding.humanId === humanId);
-}
-
-export function requireMembership(state: ServiceState, collectiveId: string, humanId: string): MembershipRecord {
-  if (!state.collectives[collectiveId]) {
-    throw new CollectiveServiceError('COLLECTIVE_NOT_FOUND', 'Collective was not found', 404);
-  }
-  const membership = state.memberships[membershipKey(collectiveId, humanId)];
-  if (!membership) {
-    throw new CollectiveServiceError('FORBIDDEN', 'Collective membership is required', 403);
-  }
-  return membership;
-}
-
-export function requireSteward(state: ServiceState, collectiveId: string, humanId: string): MembershipRecord {
-  const membership = requireMembership(state, collectiveId, humanId);
-  if (membership.role !== 'steward') {
-    throw new CollectiveServiceError('FORBIDDEN', 'Collective steward authority is required', 403);
-  }
-  return membership;
 }
 
 function resolveAuthIntent(

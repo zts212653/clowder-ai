@@ -25,21 +25,69 @@ function buildPublicRiskRanks(registry: EvalDomainRegistryEntry[]): Map<string, 
   const activeDomainIds = registry
     .filter((domain) => classifyMeasurementBundleDomain(domain) === 'active_decision_bearing')
     .map((domain) => domain.domainId);
-  if (!activeDomainIds.includes(PUBLIC_FIRST_MIGRATION_DOMAIN_ID)) {
-    throw new Error(`public measurement census requires active ${PUBLIC_FIRST_MIGRATION_DOMAIN_ID}`);
-  }
-  const riskOrder = [
-    PUBLIC_FIRST_MIGRATION_DOMAIN_ID,
-    ...activeDomainIds.filter((domainId) => domainId !== PUBLIC_FIRST_MIGRATION_DOMAIN_ID),
-  ];
+  // eval:memory leads the public migration order while it is active. A dormant
+  // memory gets no coordinate here; the batch-1 rule then keeps the instance
+  // locked until memory is revived, instead of reassigning batch 1.
+  const riskOrder = activeDomainIds.includes(PUBLIC_FIRST_MIGRATION_DOMAIN_ID)
+    ? [
+        PUBLIC_FIRST_MIGRATION_DOMAIN_ID,
+        ...activeDomainIds.filter((domainId) => domainId !== PUBLIC_FIRST_MIGRATION_DOMAIN_ID),
+      ]
+    : activeDomainIds;
   return new Map(riskOrder.map((domainId, index) => [domainId, index + 1]));
+}
+
+const DORMANT_HARD_BLOCK_PREFIX = 'is dormant:';
+
+/**
+ * Activation never reopens actions and never reads validity off the coordinate
+ * axis: an existing status and its evidence refs survive; a missing coordinate
+ * takes the next historical rank; only an uncertified gated/nonoperational
+ * record initialises to unmigrated. Lifecycle text left by dormancy is replaced.
+ */
+function reviveMigration(
+  migration: CensusEntry['validityMigration'],
+  domainId: string,
+  nextRank: () => number,
+): CensusEntry['validityMigration'] {
+  const initialising = migration.status === 'gated' || migration.status === 'nonoperational';
+  const staleLifecycle = migration.hardBlockReason?.includes(DORMANT_HARD_BLOCK_PREFIX) ?? false;
+  if (migration.riskRank !== null && !initialising && !staleLifecycle) return migration;
+  return {
+    ...migration,
+    riskRank: migration.riskRank ?? nextRank(),
+    ...(initialising ? { status: 'unmigrated' as const } : {}),
+    actionGate: 'keep_observe_only',
+    hardBlockReason:
+      initialising || staleLifecycle || migration.hardBlockReason === null
+        ? `Domain ${domainId} is active again; awaiting a fresh F267 judgment before any action.`
+        : migration.hardBlockReason,
+  };
+}
+
+function dormantHardBlockReason(domain: EvalDomainRegistryEntry): string {
+  return `Domain ${domain.domainId} ${DORMANT_HARD_BLOCK_PREFIX} ${domain.dormancy?.reason ?? 'scheduling stopped by its owner'}`;
 }
 
 function defaultMigration(
   classification: CensusEntry['classification'],
-  domainId: string,
+  domain: EvalDomainRegistryEntry,
   riskRank: number | null,
 ): CensusEntry['validityMigration'] {
+  const domainId = domain.domainId;
+  if (classification === 'dormant') {
+    const operational = hasEvalDomainInstructions(domainId) && hasEvalDomainPublishInstructions(domainId);
+    return {
+      riskRank: null,
+      batch: null,
+      status: operational ? 'unmigrated' : 'nonoperational',
+      certificateRef: null,
+      resultRef: null,
+      replayRef: null,
+      actionGate: 'keep_observe_only',
+      hardBlockReason: dormantHardBlockReason(domain),
+    };
+  }
   if (classification === 'active_decision_bearing') {
     return {
       riskRank,
@@ -85,7 +133,7 @@ function buildEntry(domain: EvalDomainRegistryEntry, verdictCount: number, riskR
       domainInstructions: hasEvalDomainInstructions(domain.domainId),
       publishInstructions: hasEvalDomainPublishInstructions(domain.domainId),
     },
-    validityMigration: defaultMigration(classification, domain.domainId, riskRank),
+    validityMigration: defaultMigration(classification, domain, riskRank),
   };
 }
 
@@ -137,10 +185,25 @@ export function reconcilePublicMeasurementBundleCensus(
       const entry = buildEntry(domain, corpus.counts.get(domain.domainId) ?? 0, null);
       const existing = currentByDomain.get(entry.domainId);
       if (existing) {
+        let validityMigration = existing.validityMigration;
+        if (entry.classification === 'dormant' && validityMigration.actionGate !== 'keep_observe_only') {
+          // Going dormant closes the current authorization but keeps the evidence chain.
+          validityMigration = {
+            ...validityMigration,
+            actionGate: 'keep_observe_only',
+            hardBlockReason: dormantHardBlockReason(domain),
+          };
+        }
+        if (entry.classification === 'active_decision_bearing') {
+          validityMigration = reviveMigration(validityMigration, domain.domainId, () => {
+            nextRiskRank += 1;
+            return nextRiskRank;
+          });
+        }
         return {
           ...entry,
           functionalEquivalents: existing.functionalEquivalents,
-          validityMigration: existing.validityMigration,
+          validityMigration,
         };
       }
       if (entry.classification !== 'active_decision_bearing') return entry;

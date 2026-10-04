@@ -89,6 +89,7 @@ export interface StartupReconcilerDeps {
   invocationQueue?: InvocationQueue;
   /** F298: exact A2A replacement fence shared with live Queue admission. */
   a2aDispatchDispositionService?: Pick<A2ADispatchDispositionService, 'inspectHandoff'>;
+  repairDispatchReceipts?: (messageId: string) => Promise<void>;
   /** F254: natural next-spawn hook, invoked once for each newly restored queue scope. */
   resumeQueue?: (threadId: string, userId: string) => Promise<unknown>;
   /** Resume a durable exact-group retirement before any later entry in that scope may dispatch. */
@@ -408,6 +409,7 @@ export class StartupReconciler {
       return null;
     }
     const reconciler = new QueuedMessageCustodyStartupReconciler({
+      ...(this.deps.repairDispatchReceipts ? { repairDispatchReceipts: this.deps.repairDispatchReceipts } : {}),
       invocationRecordStore: this.deps.invocationRecordStore,
       ...(this.deps.turnExecutionStore ? { turnExecutionStore: this.deps.turnExecutionStore } : {}),
       ...(this.deps.a2aDispatchDispositionService
@@ -439,8 +441,9 @@ export class StartupReconciler {
 
     let recovered = 0;
     try {
-      const scannedIds = await messageStore.scanByDeliveryStatus('queued');
-      const queuedIds = onlyMessageIds ? scannedIds.filter((id) => onlyMessageIds.has(id)) : scannedIds;
+      // Custody reconciliation has already scanned the queued keyspace. Its
+      // legacy fallback IDs are exact, so a second full scan adds no evidence.
+      const queuedIds = onlyMessageIds ? [...onlyMessageIds] : await messageStore.scanByDeliveryStatus('queued');
       if (queuedIds.length === 0) return 0;
 
       this.deps.log.info(`[startup-reconciler] Found ${queuedIds.length} orphaned queued message(s) — recovering`);

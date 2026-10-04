@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { applyContinuityToEpoch, ContextEpochOwner, contextEpochScopeKey } = await import(
-  '../dist/domains/cats/services/session/ContextEpochOwner.js'
+  '../dist/domains/cats/services/session/context/ContextEpochOwner.js'
 );
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 

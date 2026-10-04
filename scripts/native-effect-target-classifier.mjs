@@ -1,4 +1,7 @@
-import { matchesGlob } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, matchesGlob, resolve } from 'node:path';
+import { kernelPath, unfoldedJoin } from './lib/shell-directory.mjs';
+import { shellWords } from './native-effect-shell-tokenizer.mjs';
 
 const RUNTIME_COMPONENT = /(^|[/\s'"=])cat-cafe-runtime(?:\/|[\s'";&|()<>{}\n]|$)/i;
 const RUNTIME_BRANCH = /(^|[\s'"=:/])runtime\/main-sync(?:[\s'";&|()<>{}]|$)/i;
@@ -8,7 +11,9 @@ const REDIS_6399 =
 export function classifyNativeTarget(raw, cwd, effect, ordinaryValueFallback) {
   const combined = `${cwd ?? ''}\n${raw}`;
   if (isBroadRootTarget(raw, cwd, effect)) return { kind: 'broad_root', value: broadRootValue(raw, cwd) };
-  if (RUNTIME_COMPONENT.test(combined) || containsRuntimeComponentGlob(combined)) {
+  // A wildcard can select the runtime only for an effect we recognised. For a command we
+  // could not read, `**/test/**` is a pathspec, not evidence of a runtime target.
+  if (RUNTIME_COMPONENT.test(combined) || (effect !== 'unknown' && containsRuntimeComponentGlob(raw, cwd))) {
     return { kind: 'runtime_sanctuary', value: firstProtectedValue(raw, cwd) };
   }
   if (REDIS_6399.test(combined)) return { kind: 'redis_sanctuary', value: 'redis://127.0.0.1:6399' };
@@ -25,18 +30,34 @@ export function namesRuntimeBranch(raw) {
   return RUNTIME_BRANCH.test(raw) || containsRuntimeBranchGlob(raw);
 }
 
+// Only a recognised destructive effect can make a root the target. An unrecognised command
+// that merely mentions `/`, `~` or the main checkout (a `cd`, a document body) is not one:
+// on 2026-09-26 that rule produced the largest share of every guard denial across threads.
 function isBroadRootTarget(raw, cwd, effect) {
-  if (!['delete', 'repository_rewrite', 'process_control', 'service_mutation', 'unknown'].includes(effect)) {
+  if (!['delete', 'repository_rewrite', 'process_control', 'service_mutation'].includes(effect)) {
     return false;
   }
   if (shellTargetTokens(raw).some(isBroadRootSelector)) return true;
 
   const broadCwd = typeof cwd === 'string' && isBroadRootSelector(cwd);
-  return broadCwd && /\b(?:find|rm|trash|unlink|rmdir|mv)\b[^;&|]*(?:^|\s)(?:\.|\.\/|\*)(?=$|[\s;&|])/i.test(raw);
+  if (broadCwd && /\b(?:find|rm|trash|unlink|rmdir|mv)\b[^;&|]*(?:^|\s)(?:\.|\.\/|\*)(?=$|[\s;&|])/i.test(raw)) {
+    return true;
+  }
+  // `git reset --hard` (without -C) rewrites the checkout it runs in; in the shared main
+  // checkout that discards other cats' uncommitted work.
+  return effect === 'repository_rewrite' && insideMainCheckout(cwd) && /^\s*git\s+reset\s+--hard\b/i.test(raw);
+}
+
+function insideMainCheckout(cwd) {
+  return typeof cwd === 'string' && /\/projects\/relay-station\/cat-cafe(?:\/|$)/i.test(cwd);
 }
 
 function shellTargetTokens(raw) {
-  return raw.match(/"[^"]*"|'[^']*'|[^\s;&|]+/g)?.map((token) => token.replace(/^(['"])(.*)\1$/, '$2')) ?? [];
+  return (
+    shellWords(raw)?.map((word) => word.value) ??
+    raw.match(/"[^"]*"|'[^']*'|[^\s;&|]+/g)?.map((token) => token.replace(/^(['"])(.*)\1$/, '$2')) ??
+    []
+  );
 }
 
 /** Normalize only selectors that still denote a protected root; ordinary descendants remain ordinary. */
@@ -44,7 +65,7 @@ function isBroadRootSelector(rawToken) {
   const token = rawToken.trim();
   if (!token) return false;
   if (token.startsWith('/') && /^[./*]*$/.test(token.slice(1))) return true;
-  for (const home of ['~', '$HOME', '$' + '{HOME}']) {
+  for (const home of ['~', '$HOME', '$' + '{HOME}', homedir()]) {
     if (token === home || (token.startsWith(`${home}/`) && /^[./*]*$/.test(token.slice(home.length + 1)))) {
       return true;
     }
@@ -52,10 +73,36 @@ function isBroadRootSelector(rawToken) {
   return /\/projects\/relay-station(?:\/cat-cafe)?[./*]*$/i.test(token);
 }
 
-function containsRuntimeComponentGlob(raw) {
-  return shellTargetTokens(raw).some((token) =>
-    token.split('/').some((segment) => globCanSelectLiteral(segment, 'cat-cafe-runtime')),
-  );
+function containsRuntimeComponentGlob(raw, cwd) {
+  const tokens = shellTargetTokens(raw);
+  // Locate the installation independently of the wildcard. Its parent cwd is
+  // already a coordinate, even with no checkout component. Conversely, an
+  // operand /tmp/cat-cafe-* does not invent a second protected installation.
+  const roots = [cwd, ...tokens.filter(isAbsolute)].flatMap((value) => {
+    const coordinate = value === cwd ? (kernelPath(value ?? '') ?? value) : value;
+    const parent =
+      coordinate?.match(/^(.*\/projects\/relay-station)(?:\/|$)/)?.[1] ??
+      (value === cwd ? coordinate?.match(/^(.*)\/cat-cafe[^/]*(?:\/|$)/)?.[1] : undefined);
+    if (!parent || /[$*?[{]/.test(parent) || (!isAbsolute(parent) && !cwd)) return [];
+    const joined = unfoldedJoin(cwd ?? '/', `${parent}/cat-cafe-runtime`);
+    return [kernelPath(joined) ?? resolve(joined)];
+  });
+  return tokens.some((token) => {
+    const wildcard = token.search(/[*?[{]/);
+    if (wildcard < 0 || /[$`]/.test(token)) return false;
+    const slash = token.lastIndexOf('/', wildcard);
+    const parent = slash < 0 ? '.' : token.slice(0, slash + 1);
+    if (!isAbsolute(parent) && !cwd) return false;
+    const joined = unfoldedJoin(cwd ?? '/', parent);
+    const physicalParent = kernelPath(joined) ?? resolve(joined);
+    const pattern = `${physicalParent}/${token.slice(slash + 1)}`;
+    return roots.some((root) => {
+      for (let candidate = root; candidate !== '/'; candidate = dirname(candidate)) {
+        if (matchesGlob(candidate, pattern)) return true;
+      }
+      return false;
+    });
+  });
 }
 
 function containsRuntimeBranchGlob(raw) {

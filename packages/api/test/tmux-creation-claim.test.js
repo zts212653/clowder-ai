@@ -62,6 +62,10 @@ for (const existing of [false, true]) {
         );
         const proxy = join(dir, 'tmux.cjs');
         writeFileSync(
+          join(dir, 'atomic-witness.cjs'),
+          readFileSync(new URL('./fixtures/atomic-witness.cjs', import.meta.url), 'utf8'),
+        );
+        writeFileSync(
           proxy,
           `#!${process.execPath}\n${readFileSync(new URL('./fixtures/tmux-claim-barrier-proxy.cjs', import.meta.url), 'utf8')}`,
           { mode: 0o700 },
@@ -83,7 +87,13 @@ for (const existing of [false, true]) {
         assert.ok(original);
         assert.equal(alive(witness.panePid), true);
         if (mode === 'before-claim') {
-          await until(() => existsSync(barrier), 'launcher must stop before the publish syscall');
+          await until(() => {
+            try {
+              return readFileSync(barrier, 'utf8').length > 0;
+            } catch {
+              return false;
+            }
+          }, 'launcher must stop before the publish syscall');
           assert.equal(existsSync(started), false, 'agent cannot exec before publishing');
           assert.throws(() => readlinkSync(join(witness.gate, 'claim')), { code: 'ENOENT' });
           abort.abort();
@@ -110,8 +120,13 @@ for (const existing of [false, true]) {
           assert.notEqual(successorPid, witness.panePid);
           assert.equal(successor.split('|')[3], original.split('|')[3], 'no command means identical stored argv');
           if (mode === 'successor-race') {
-            await until(() => existsSync(barrier), 'successor must receive EEXIST before abort closes the gate');
-            assert.equal(readFileSync(barrier, 'utf8'), `${witness.paneId}.${successorPid}`);
+            await until(() => {
+              try {
+                return readFileSync(barrier, 'utf8') === `${witness.paneId}.${successorPid}`;
+              } catch {
+                return false;
+              }
+            }, 'successor barrier must contain the EEXIST-path claim identity');
             assert.equal(
               readlinkSync(join(witness.gate, 'claim')),
               firstClaim,

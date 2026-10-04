@@ -7,7 +7,12 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
-import { invalidateArtifactReviewAccess, REVIEW_ACCESS_REVOKED } from './review-access-invalidation';
+import {
+  invalidateArtifactReviewAccess,
+  REVIEW_ACCESS_REVOKED,
+  restoreArtifactReviewAccess,
+  reviewDraftPrefix,
+} from './review-access-invalidation';
 import { clearCommittedReviewDraft } from './review-draft-commit';
 import { clearReviewRetryRecord, readReviewRetryRecord } from './review-retry-storage';
 
@@ -20,9 +25,7 @@ const messages: Record<string, string> = {
   operation_reused: '这个保存编号已用于另一项操作，尚未提交当前草稿。',
 };
 
-export function reviewDraftPrefix(userId: string, reviewId: string): string {
-  return `cat-cafe:review:${userId}:${reviewId}:`;
-}
+export { reviewDraftPrefix } from './review-access-invalidation';
 export function useArtifactReview(reviewId: string) {
   const [view, setView] = useState<ArtifactReviewView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,18 +50,10 @@ export function useArtifactReview(reviewId: string) {
     current.current = candidate;
     setView(candidate);
   }, []);
+  // The denial already cleared what the browser kept (review-access-invalidation); this resets memory.
   const clearRevoked = useCallback(() => {
     generation.current += 1;
     controllerRef.current?.abort();
-    const previous = current.current;
-    try {
-      if (previous) {
-        const prefix = reviewDraftPrefix(previous.review.task.ownerUserId, reviewId);
-        for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);
-      }
-    } catch {
-      /* Browser storage may be blocked; fresh authority still fences every future mount. */
-    }
     pendingRef.current = null;
     settledOperation.current = null;
     setPending(null);
@@ -67,7 +62,7 @@ export function useArtifactReview(reviewId: string) {
     setLoading(false);
     setSaving(false);
     setError('这份内容现在不可访问，旧预览已关闭。');
-  }, [reviewId]);
+  }, []);
   const revokeAccess = useCallback(() => invalidateArtifactReviewAccess(reviewId), [reviewId]);
 
   const refresh = useCallback(async () => {
@@ -91,6 +86,7 @@ export function useArtifactReview(reviewId: string) {
       }
       const next = (await response.json()) as ArtifactReviewView;
       if (controller.signal.aborted || scope !== generation.current) return;
+      restoreArtifactReviewAccess(reviewId);
       install(next);
       setError(null);
       const key = `${reviewDraftPrefix(next.review.task.ownerUserId, reviewId)}pending`;
@@ -222,6 +218,9 @@ export function useArtifactReview(reviewId: string) {
         return false;
       }
       return send({
+        ...(latest.review.rounds.find((item) => item.number === round)?.ledgerRef
+          ? { expectedLedgerRevision: latest.review.rounds.find((item) => item.number === round)?.ledgerRevision }
+          : {}),
         reviewId,
         expectedRevision: latest.review.revision,
         expectedTaskRevision: latest.authority.taskRevision,

@@ -57,7 +57,12 @@ describe('F296 B3b production context infrastructure wiring', () => {
   it('production composition chooses Redis persistence and supplies the owner to AgentRouter', () => {
     const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 
-    assert.match(source, /new ContextEpochOwner\(new RedisContextEpochStore\(redis\)\)/);
+    assert.match(source, /if \(redis\) \{\s*contextEpochStore = new RedisContextEpochStore\(redis\);/);
+    assert.match(
+      source,
+      /const contextEpochOwner = new ContextEpochOwner\(contextEpochStore\);/,
+      'the Redis-backed store must reach the owner through the shared composition binding',
+    );
     assert.match(
       source,
       /^\s*contextEpochOwner,\s*$/m,
@@ -80,7 +85,7 @@ describe('F296 B3b production context infrastructure wiring', () => {
     assert.match(source, /new PresentationLedger\(new RedisPresentationLedgerStore\(redis\)\)/);
     assert.match(
       source,
-      /new InMemoryPresentationLedgerStore\(contextEpochStore\)/,
+      /const memoryEpochStore = new InMemoryContextEpochStore\(\);\s*contextEpochStore = memoryEpochStore;\s*presentationLedger = new PresentationLedger\(new InMemoryPresentationLedgerStore\(memoryEpochStore\)\);/,
       'the no-Redis fallback must share the same epoch owner so its write fence cannot diverge',
     );
     assert.match(

@@ -1,10 +1,12 @@
 {
   "fontSize": {
+    "display-sm": ["22px", { "lineHeight": "1.25" }],
     "micro": ["10px", { "lineHeight": "14px" }],
     "label": ["11px", { "lineHeight": "16px" }],
     "compact": ["13px", { "lineHeight": "20px" }]
   },
   "fontSizePx": {
+    "display-sm": 22,
     "micro": 10,
     "label": 11,
     "xs": 12,

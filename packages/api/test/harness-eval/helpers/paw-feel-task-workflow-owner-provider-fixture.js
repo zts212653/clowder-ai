@@ -8,7 +8,7 @@ import {
   PawFeelDirectRepairSourceVerifier,
 } from '../../../dist/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-source.js';
 import {
-  F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+  f160ListTasksFeatureFilterRepairAction,
   TASK_WORKFLOW_PAW_FEEL_PROVIDER_ROUTE,
   TaskWorkflowPawFeelDirectRepairOwnerProvider,
 } from '../../../dist/infrastructure/harness-eval/paw-feel-disposition/providers/task-workflow-owner-provider.js';
@@ -176,6 +176,7 @@ export function provider(fixture, git = gitTruth()) {
 
 export function sourceVerifier(messageStore) {
   return new PawFeelDirectRepairSourceVerifier({
+    ownerUserId: OWNER_USER_ID,
     messageStore,
     classifyTool: defaultPawFeelSourceToolClassifier,
   });
@@ -183,6 +184,8 @@ export function sourceVerifier(messageStore) {
 
 export function providerSource() {
   return {
+    sourceMessageId: SOURCE_MESSAGE.id,
+    sourceThreadId: SOURCE_MESSAGE.threadId,
     sourceSignalRef: {
       ownerFeatureId: 'F278',
       ownerStateRef: `paw-feel-signal:${sourceCandidate.signalId}`,
@@ -204,7 +207,10 @@ export function providerCustody(fixture) {
   };
 }
 
-export async function resolveBinding(fixture) {
+export async function resolveBinding(
+  fixture,
+  { projection = sourceProjection(), actionRef = f160ListTasksFeatureFilterRepairAction('F299') } = {},
+) {
   const resolver = new PawFeelDirectRepairResolver({
     sourceVerifier: sourceVerifier(fixture.messageStore),
     federation: new PawFeelDirectRepairFederation([
@@ -222,9 +228,9 @@ export async function resolveBinding(fixture) {
     },
   });
   const result = await resolver.resolve({
-    projection: sourceProjection(),
+    projection,
     leaseId: 'lease-1',
-    actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+    actionRef,
   });
   assert.equal(result.status, 'authorized');
   return result.binding;

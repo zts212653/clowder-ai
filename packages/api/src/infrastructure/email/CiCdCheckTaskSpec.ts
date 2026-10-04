@@ -130,13 +130,16 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
-      async gate() {
+      async gate(ctx) {
+        const gateSignal = ctx?.signal;
+        gateSignal?.throwIfAborted();
         // #320: Read from unified TaskStore — exclude done tasks after CI lifecycle is complete.
         // Review feedback can observe terminal PR state first; keep those done tasks
         // reachable until CiCdRouter delivers/records the CI lifecycle marker.
         const allTasks = await opts.taskStore.listByKind('pr_tracking');
         const workItems: { signal: CiCdCheckSignal; subjectKey: string }[] = [];
         for (const task of allTasks) {
+          gateSignal?.throwIfAborted();
           const subjectKey = task.subjectKey;
           if (!subjectKey) continue;
           const parsed = parsePrSubjectKey(subjectKey);
@@ -148,6 +151,7 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
           });
         }
 
+        gateSignal?.throwIfAborted();
         if (workItems.length === 0) {
           return { run: false, reason: 'no parseable PR tasks' };
         }
@@ -159,13 +163,15 @@ export function createCiCdCheckTaskSpec(opts: CiCdCheckTaskSpecOptions): TaskSpe
             repoFullName: signal.repoFullName,
             prNumber: signal.prNumber,
           }));
-          const results = await fetchPrStatuses(targets);
+          const results = await fetchPrStatuses(targets, gateSignal);
+          gateSignal?.throwIfAborted();
           for (const workItem of workItems) {
             workItem.signal.pollResult =
               results.get(ciStatusTargetKey(workItem.signal.repoFullName, workItem.signal.prNumber)) ?? null;
           }
         }
 
+        gateSignal?.throwIfAborted();
         return { run: true, workItems };
       },
     },

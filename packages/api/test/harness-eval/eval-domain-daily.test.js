@@ -1,12 +1,33 @@
 import assert from 'node:assert/strict';
-import { describe, it, mock } from 'node:test';
+import { rmSync } from 'node:fs';
+import { after, describe, it, mock } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   createEvalDomainDailySpec,
   createEvalDomainWeeklySpec,
 } from '../../dist/infrastructure/harness-eval/domain/eval-domain-daily.js';
 
-const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+import { createActiveEraHarnessFeedback } from './measurement-census-active-era.js';
+
+const realHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+// Gate-logic tests run on the active-era registry (before the 2026-10-01 dormancy batch).
+const activeEra = await createActiveEraHarnessFeedback();
+after(() => rmSync(activeEra.repoRoot, { recursive: true, force: true }));
+const repoHarnessFeedbackRoot = activeEra.harnessFeedbackRoot;
+
+describe('eval domain gates on the real registry after the 2026-10-01 dormancy batch', () => {
+  it('schedules only the domains that stayed active', async () => {
+    const daily = await createEvalDomainDailySpec({ harnessFeedbackRoot: realHarnessFeedbackRoot }).admission.gate();
+    const weekly = await createEvalDomainWeeklySpec({ harnessFeedbackRoot: realHarnessFeedbackRoot }).admission.gate();
+    assert.deepEqual(daily.workItems.map((item) => item.subjectKey).sort(), ['eval:a2a']);
+    // eval:capability-evolution stays enabled: F311's Program trigger bridge requires it.
+    assert.deepEqual(weekly.workItems.map((item) => item.subjectKey).sort(), [
+      'eval:capability-evolution',
+      'eval:capability-wakeup',
+      'eval:freshness',
+    ]);
+  });
+});
 
 describe('eval-domain-daily task spec', () => {
   it('returns a valid TaskSpec_P1 with expected id, trigger, and display', () => {

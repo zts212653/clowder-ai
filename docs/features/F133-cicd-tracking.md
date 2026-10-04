@@ -4,6 +4,7 @@ related_features: [F280]
 topics: [github, ci-cd, connector, opensource]
 doc_kind: spec
 created: 2026-03-23
+tips_exempt: "2026-09-24 clowder-ai#1521 intake corrects the existing CI tracking verdict: an empty rollup stays pending. It adds no new user-invokable action or discovery surface; a proactive capability tip would not teach a distinct action and could imply that absence of CI evidence can be treated as success."
 ---
 
 # F133: GitHub CI/CD Tracking — 已注册 PR 的 CI/CD 执行结果自动追踪

@@ -1,7 +1,44 @@
+import { createHash } from 'node:crypto';
+
 export const THREAD_ID = 'thread-f307-real-surface-adapters';
 export const OTHER_THREAD_ID = 'thread-f307-owner-b';
 export const WORKTREE_ID = 'worktree-f307-phase-c';
 export const OTHER_WORKTREE_ID = 'worktree-f307-owner-b';
+
+/**
+ * The durable F063 root id `/api/workspace/resolve-file-source` returns for a worktree alias.
+ * Production hashes the realpath of the root; the fixture hashes the alias so every alias has
+ * exactly one stable id in the same `f063_root_v1_<sha256>` shape.
+ */
+export function canonicalWorktreeId(alias) {
+  return `f063_root_v1_${createHash('sha256').update(alias).digest('hex')}`;
+}
+
+/** File reads keyed by a durable id still belong to the alias owner; fixture text names that owner. */
+export function worktreeAliasFor(worktreeId, knownAliases) {
+  return knownAliases.find((alias) => canonicalWorktreeId(alias) === worktreeId) ?? worktreeId;
+}
+
+/**
+ * Mirrors the production contract of POST /api/workspace/resolve-file-source for a relative path
+ * inside a known worktree alias: `{ worktreeId: <durable id>, path, kind: 'file' }`. Anything the
+ * fixture cannot honestly resolve fails as the owner would, never as a guessed success.
+ */
+export function resolveFileSourceResponse(request, knownAliases) {
+  let body = null;
+  try {
+    body = JSON.parse(request.postData() ?? 'null');
+  } catch {
+    body = null;
+  }
+  if (!body || typeof body.path !== 'string' || body.path.length === 0) {
+    return { status: 400, body: { error: { code: 'absolute_file_path_required' } } };
+  }
+  if (typeof body.worktreeId === 'string' && knownAliases.includes(body.worktreeId)) {
+    return { body: { worktreeId: canonicalWorktreeId(body.worktreeId), path: body.path, kind: 'file' } };
+  }
+  return { status: 404, body: { error: { code: 'not_found' } } };
+}
 export const FILE_PATH = 'docs/features/F307-composable-workbench.md';
 export const INVOCATION_ID = 'inv-f307-real-run';
 export const SESSION_ID = 'session-f307-real-run';
@@ -365,6 +402,30 @@ function executionResponse(pathname, exposeBackgroundRun) {
   }
 }
 
+/**
+ * The F309 collaboration owner is not part of the F307 kernel fixture (it is covered by
+ * f309-ordinary-workspace-journey); answer as the owner does when it cannot provide the source.
+ */
+export function collaborationOwnerOutOfScopeResponse() {
+  return { status: 409, body: { error: { code: 'source_unavailable' } } };
+}
+
+const KNOWN_WORKTREE_ALIASES = [WORKTREE_ID, OTHER_WORKTREE_ID];
+
+function fileSourceResponse(url, request) {
+  if (url.pathname === '/api/workspace/content-reviews/prepare' && request.method() === 'POST') {
+    return collaborationOwnerOutOfScopeResponse();
+  }
+  // Only Playwright requests carry the body this route needs; bodyless adapters keep their old fallback.
+  if (
+    url.pathname === '/api/workspace/resolve-file-source' &&
+    request.method() === 'POST' &&
+    typeof request.postData === 'function'
+  ) {
+    return resolveFileSourceResponse(request, KNOWN_WORKTREE_ALIASES);
+  }
+}
+
 function workspaceResponse(url, method) {
   if (url.pathname === '/api/workspace/worktrees') {
     const ownerB = url.searchParams.get('repoRoot') === '/project/cat-cafe-b';
@@ -415,7 +476,7 @@ function workspaceResponse(url, method) {
     };
   }
   if (url.pathname === '/api/workspace/file') {
-    const worktreeId = url.searchParams.get('worktreeId') ?? WORKTREE_ID;
+    const worktreeId = worktreeAliasFor(url.searchParams.get('worktreeId') ?? WORKTREE_ID, KNOWN_WORKTREE_ALIASES);
     const requestedPath = url.searchParams.get('path') ?? FILE_PATH;
     const ownerLine = ['Owner file: ', worktreeId].join('');
     const code = requestedPath.endsWith('.ts');
@@ -438,7 +499,7 @@ function workspaceResponse(url, method) {
     };
   }
   if (url.pathname === '/api/workspace/diff') {
-    const worktreeId = url.searchParams.get('worktreeId') ?? WORKTREE_ID;
+    const worktreeId = worktreeAliasFor(url.searchParams.get('worktreeId') ?? WORKTREE_ID, KNOWN_WORKTREE_ALIASES);
     const path = `src/${worktreeId}.ts`;
     return {
       body: {
@@ -459,6 +520,9 @@ function workspaceResponse(url, method) {
 
 function fallbackResponse(pathname) {
   if (pathname === '/api/debug/callback-auth') return { body: { error: 'forbidden' }, status: 403 };
+  if (pathname === '/api/runtime-deployment/waits') {
+    return { body: { projectPath: '/project/cat-cafe', items: [], candidate: null } };
+  }
   const fixed = fixedFixture(pathname);
   if (fixed !== undefined) return { body: fixed };
   if (pathname.endsWith('/task-progress')) return { body: { taskProgress: {} } };
@@ -471,6 +535,7 @@ export function realSurfaceApiResponse(request, exposeBackgroundRun) {
   const url = new URL(request.url());
   return (
     executionResponse(url.pathname, exposeBackgroundRun) ??
+    fileSourceResponse(url, request) ??
     workspaceResponse(url, request.method()) ??
     fallbackResponse(url.pathname)
   );

@@ -4,12 +4,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { applyMigrations, SCHEMA_V5 } from '../../dist/domains/memory/schema.js';
+import { applyMigrations, SCHEMA_V5, SCHEMA_V8_DYNAMIC_TASKS } from '../../dist/domains/memory/schema.js';
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
+import { installV43CueLedgerSchemaFixture } from '../helpers/v43-memory-cue-ledger-fixture.js';
 
 function legacyDatabase(path = ':memory:') {
   const db = new Database(path);
   db.exec(SCHEMA_V5);
+  db.exec(SCHEMA_V8_DYNAMIC_TASKS);
+  installV43CueLedgerSchemaFixture(db);
+  db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN entrusted_work_reevaluation_json TEXT');
+  db.exec('ALTER TABLE dynamic_task_defs ADD COLUMN owner_auth_provenance TEXT');
   db.exec(`
     CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
     INSERT INTO schema_version VALUES (44, '2026-09-08T00:00:00Z');
@@ -141,7 +146,7 @@ test('a rewound V45 marker rebuilds existing counters without double counts or p
   insert(db, 'retained', 'RUN_FAILED');
   const before = db.prepare('SELECT * FROM task_run_ledger ORDER BY id').all();
   db.exec(`INSERT INTO task_run_stats VALUES ('stale-projection', 1, 1, 0, 0);
-    DELETE FROM schema_version WHERE version = 45;`);
+    DELETE FROM schema_version WHERE version >= 45;`);
   applyMigrations(db);
   const ledger = new RunLedger(db);
   assert.deepEqual(ledger.stats('retained'), canonicalStats(db, 'retained'));

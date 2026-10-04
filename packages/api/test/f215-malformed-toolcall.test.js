@@ -162,7 +162,7 @@ describe('F215 AC-B1: malformed detection (form A thinking-only)', () => {
     })();
 
     // Emit: system/init → thinking-only assistant → result/success
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-thinking-only' },
       makeThinkingOnlyAssistantEvent('ses-thinking-only'),
       { type: 'result', subtype: 'success', result: '' },
@@ -208,7 +208,7 @@ describe('F215 AC-B1: malformed detection (form A thinking-only)', () => {
       }
     })();
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-thinking-only-2' },
       makeThinkingOnlyAssistantEvent('ses-thinking-only-2'),
       { type: 'result', subtype: 'success', result: '' },
@@ -246,7 +246,7 @@ describe('F215 AC-B3: regression guard — normal text completion not malformed'
       }
     })();
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-normal-text' },
       makeAssistantWithText('ses-normal-text'),
       { type: 'result', subtype: 'success' },
@@ -290,7 +290,7 @@ describe('F215 AC-B3: pure tool_use invocation not falsely malformed', () => {
       }
     })();
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-tool-use' },
       makeAssistantWithToolUse('ses-tool-use'),
       { type: 'result', subtype: 'success' },
@@ -355,7 +355,7 @@ describe('F215 AC-B5 (P1 fix): streaming mode — text before assistant event no
     // Streaming mode: message_start → text_delta (text event, textEventsSinceLastAssistant++) →
     // assistant event (content has text block; transformClaudeEvent skipFinalText=true → NO new text events,
     // OLD code resets textEventsSinceLastAssistant=0 → false malformed!)
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-streaming-text' },
       makeStreamEventMessageStart(MSG_ID), // starts message_start tracking
       makeStreamEventTextDelta('Hello streaming!', MSG_ID), // text_delta → text event
@@ -414,7 +414,7 @@ describe('F215 AC-B4 (P1 fix): multi-turn thinking-only malformed after tool_use
 
     // Turn 1: valid tool_use (would set hasToolUseBlock=true in old global tracking)
     // Turn 2: thinking-only malformed (should STILL be detected — per-last-turn tracking)
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-multi-turn-malformed' },
       makeAssistantWithToolUse('ses-multi-turn-malformed'), // Turn 1: tool_use
       makeThinkingOnlyAssistantEvent('ses-multi-turn-malformed'), // Turn 2: malformed
@@ -465,7 +465,7 @@ describe('F215 AC-D1: final failure has explicit error message', () => {
       }
     })();
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-malformed-final' },
       makeThinkingOnlyAssistantEvent('ses-malformed-final'),
       { type: 'result', subtype: 'success', result: '' },

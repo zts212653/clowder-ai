@@ -1,8 +1,11 @@
+import type { CollectiveSourceIdentity } from '@cat-cafe/shared';
 import { participationDeclaration, requireParticipation } from './participation-custody.js';
 import { ConnectorPersistence } from './persistence.js';
 import { type ConnectorProjection, projectConnection } from './projection.js';
 import { CollectiveServiceClient, ConnectorTransportError } from './service-client.js';
 import type { ConnectorConnectionState } from './state.js';
+import type { ConnectorWorkAcceptanceCustody } from './work-acceptance-custody.js';
+import { revalidateQueuedWork, workOutboundIntent, workOutboundReceipt } from './work-outbound-authority.js';
 
 export interface ConnectorSyncHooks {
   readonly afterInboxPersist?: () => void | Promise<void>;
@@ -15,6 +18,9 @@ export class ConnectorSynchronization {
     private readonly persistence: ConnectorPersistence,
     private readonly service: CollectiveServiceClient,
     private readonly now: () => number,
+    private readonly currentWorkGrant?: (
+      source: CollectiveSourceIdentity,
+    ) => ReturnType<ConnectorWorkAcceptanceCustody['resolveGrant']>,
   ) {}
 
   sync(connectionId: string, hooks: ConnectorSyncHooks = {}): Promise<ConnectorProjection> {
@@ -53,7 +59,7 @@ export class ConnectorSynchronization {
         );
       } catch (error) {
         if (!(error instanceof ConnectorTransportError)) throw error;
-        return this.markOffline(connectionId, error.message, error.causeCode);
+        return this.recordTransportFailure(connectionId, error);
       }
     }
     if (initial.pendingAckSequence !== undefined) {
@@ -61,7 +67,7 @@ export class ConnectorSynchronization {
         await this.finishPendingAck(connectionId);
       } catch (error) {
         if (!(error instanceof ConnectorTransportError)) throw error;
-        return this.markOffline(connectionId, error.message, error.causeCode);
+        return this.recordTransportFailure(connectionId, error);
       }
     }
     const hadPendingOutbox = initial.outbox.some((item) => item.status === 'queued' || item.status === 'sending');
@@ -97,7 +103,7 @@ export class ConnectorSynchronization {
       return await this.acknowledgeContiguous(connectionId);
     } catch (error) {
       if (!(error instanceof ConnectorTransportError)) throw error;
-      return this.markOffline(connectionId, error.message, error.causeCode);
+      return this.recordTransportFailure(connectionId, error);
     }
   }
 
@@ -111,13 +117,14 @@ export class ConnectorSynchronization {
       if (pending.replySource) {
         try {
           requireParticipation(this.persistence.snapshot(), pending.replySource);
-          await this.service.readParticipationContext(
+          const context = await this.service.readParticipationContext(
             snapshot.serviceUrl,
             requireCredential(snapshot),
             pending.replySource,
             0,
             1,
           );
+          await revalidateQueuedWork(this.service, snapshot, pending, context.source, this.currentWorkGrant);
           requireParticipation(this.persistence.snapshot(), pending.replySource);
         } catch (error) {
           const code =
@@ -130,7 +137,11 @@ export class ConnectorSynchronization {
             code === 'PARTICIPATION_REVOKED' ||
             code === 'CONNECTION_REVOKED' ||
             code === 'RETURN_UNAVAILABLE' ||
-            code === 'FORBIDDEN'
+            code === 'FORBIDDEN' ||
+            code === 'WORK_EXECUTION_NOT_CURRENT' ||
+            code === 'WORK_DELEGATION_UNAVAILABLE' ||
+            code === 'WORK_ADMISSION_NOT_CURRENT' ||
+            code === 'WORK_RESULT_NOT_CURRENT'
           ) {
             await this.persistence.transaction((state) => {
               const item = state.connections[connectionId]?.outbox.find(
@@ -141,6 +152,7 @@ export class ConnectorSynchronization {
                 item.failureCode = code;
               }
             });
+            if (code === 'CONNECTION_REVOKED') return this.markServiceRevoked(connectionId);
             continue;
           }
           return this.markOffline(
@@ -168,14 +180,17 @@ export class ConnectorSynchronization {
           ...(pending.location ? { location: pending.location, recipient: { kind: 'channel' as const } } : {}),
           ...(pending.replySource ? { participationRevision: pending.replySource.participationRevision } : {}),
           ...(pending.replyToEventId ? { replyToEventId: pending.replyToEventId } : {}),
+          ...workOutboundIntent(pending),
           body: pending.body,
         });
+        const receipt = workOutboundReceipt(event, pending);
         await this.persistence.transaction((state) => {
           const connection = requireConnection(state.connections[connectionId]);
           const item = connection.outbox.find((candidate) => candidate.outboxId === pending.outboxId);
           if (item) {
             item.status = 'accepted';
             item.acceptedEventId = event.eventId;
+            if (item.workPurpose && receipt) item.workPurpose.workId = receipt.workId;
           }
           connection.liveStatus = 'online';
           delete connection.lastError;
@@ -183,12 +198,25 @@ export class ConnectorSynchronization {
         });
       } catch (error) {
         if (!(error instanceof ConnectorTransportError)) throw error;
+        const refused = [
+          'WORK_EXECUTION_NOT_CURRENT',
+          'WORK_DELEGATION_UNAVAILABLE',
+          'WORK_ADMISSION_NOT_CURRENT',
+          'WORK_RESULT_NOT_CURRENT',
+          'PARTICIPATION_REVOKED',
+          'RETURN_UNAVAILABLE',
+        ].includes(error.causeCode ?? '');
         await this.persistence.transaction((state) => {
-          const connection = requireConnection(state.connections[connectionId]);
-          const item = connection.outbox.find((candidate) => candidate.outboxId === pending.outboxId);
-          if (item) item.status = 'queued';
+          const item = requireConnection(state.connections[connectionId]).outbox.find(
+            (candidate) => candidate.outboxId === pending.outboxId,
+          );
+          if (item) {
+            item.status = refused ? 'blocked' : 'queued';
+            if (refused) item.failureCode = error.causeCode;
+          }
         });
-        return this.markOffline(connectionId, error.message, error.causeCode);
+        if (refused) continue;
+        return this.recordTransportFailure(connectionId, error);
       }
     }
   }
@@ -275,6 +303,31 @@ export class ConnectorSynchronization {
       connection.lastError = message;
       if (errorCode) connection.lastErrorCode = errorCode;
       else delete connection.lastErrorCode;
+      return projectConnection(connection, state.hostRoutes[connection.connectionId]);
+    });
+  }
+
+  private recordTransportFailure(connectionId: string, error: ConnectorTransportError): Promise<ConnectorProjection> {
+    return error.causeCode === 'CONNECTION_REVOKED'
+      ? this.markServiceRevoked(connectionId)
+      : this.markOffline(connectionId, error.message, error.causeCode);
+  }
+
+  private markServiceRevoked(connectionId: string): Promise<ConnectorProjection> {
+    return this.persistence.transaction((state) => {
+      const connection = requireConnection(state.connections[connectionId]);
+      connection.authorityStatus = 'revoked';
+      connection.revocationReason = 'service_revoked';
+      connection.liveStatus = 'offline';
+      delete connection.endpointCredential;
+      delete connection.pendingAckSequence;
+      delete connection.lastError;
+      delete connection.lastErrorCode;
+      for (const item of connection.outbox) {
+        if (item.status !== 'queued' && item.status !== 'sending') continue;
+        item.status = 'blocked';
+        item.failureCode = 'CONNECTION_REVOKED';
+      }
       return projectConnection(connection, state.hostRoutes[connection.connectionId]);
     });
   }

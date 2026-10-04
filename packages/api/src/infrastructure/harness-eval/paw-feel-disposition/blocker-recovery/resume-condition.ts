@@ -51,17 +51,35 @@ export function normalizePawFeelResumeSnapshot(snapshot: PawFeelResumeResolverSn
 
 export function samePawFeelResumeSelector(left: PawFeelResumeSelectorV1, right: PawFeelResumeSelectorV1): boolean {
   if (left.kind !== right.kind) return false;
-  if (left.kind === 'bounded_time' && right.kind === 'bounded_time') return left.recheckAt === right.recheckAt;
+  if (left.kind === 'bounded_time' && right.kind === 'bounded_time') {
+    const leftDependency = left.dependencyRef;
+    const rightDependency = right.dependencyRef;
+    const sameDependency =
+      !leftDependency && !rightDependency
+        ? true
+        : Boolean(leftDependency && rightDependency && refIdentity(leftDependency) === refIdentity(rightDependency));
+    return left.recheckAt === right.recheckAt && sameDependency;
+  }
   if (left.kind === 'bounded_time' || right.kind === 'bounded_time') return false;
   return left.ref.ownerFeatureId === right.ref.ownerFeatureId && left.ref.ownerStateRef === right.ref.ownerStateRef;
+}
+
+export function matchesPawFeelResumeSelectorRequest(
+  stored: PawFeelResumeSelectorV1,
+  requested: PawFeelResumeSelectorV1,
+): boolean {
+  if (stored.kind === 'bounded_time' && requested.kind === 'bounded_time' && !requested.dependencyRef) {
+    return stored.recheckAt === requested.recheckAt;
+  }
+  return samePawFeelResumeSelector(stored, requested);
 }
 
 export function digestPawFeelResumeSnapshot(snapshot: PawFeelResumeResolverSnapshot): string {
   return digest('paw-feel-resume-snapshot:v1', normalizePawFeelResumeSnapshot(snapshot));
 }
 
-export function derivePawFeelResumeVersion(snapshot: PawFeelResumeResolverSnapshot, dueAt?: string): string {
-  return dueAt ? digest('paw-feel-resume-snapshot:v1', `due:${dueAt}`) : digestPawFeelResumeSnapshot(snapshot);
+export function derivePawFeelResumeVersion(snapshot: PawFeelResumeResolverSnapshot): string {
+  return digestPawFeelResumeSnapshot(snapshot);
 }
 
 export function derivePawFeelBlockerReopenEventId(input: {

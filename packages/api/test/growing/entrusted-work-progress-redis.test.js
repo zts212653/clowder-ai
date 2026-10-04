@@ -22,7 +22,7 @@ describe('F310 typed progress Redis atomicity', { skip: redisIsolationSkipReason
     ({ EntrustedWorkLifecycleService: Lifecycle } = await import(
       '../../dist/domains/growing/EntrustedWorkLifecycleService.js'
     ));
-    redis = createRedisClient({ url: redisUrl, keyPrefix: 'f310-progress:' });
+    redis = createRedisClient({ url: redisUrl, keyPrefix: `f310-progress:${process.pid}:` });
     await redis.ping();
   });
   after(async () => {
@@ -127,6 +127,23 @@ describe('F310 typed progress Redis atomicity', { skip: redisIsolationSkipReason
     );
   });
 
+  test('progress text and distinct dates survive reconstruction without becoming a deadline', async () => {
+    const { service, taskId } = await admit('calendar-progress');
+    const sourceRef = 'message:calendar-progress';
+    const progress = { summary: '正在制作工作日历', nextStep: '检查手机体验', sourceRef };
+    const time = {
+      actualStart: { value: 1789889606286, sourceRef },
+      estimatedCompletion: { value: 1789976006286, sourceRef },
+    };
+    await service.update({ taskId, expectedRevision: 1, status: 'doing', progress, time });
+    const restored = await new RedisTaskStore(redis).get(taskId);
+    assert.deepEqual(restored.entrustedWork.progress, progress);
+    assert.deepEqual(restored.entrustedWork.time, time);
+    assert.equal(restored.entrustedWork.time.businessDeadline, undefined);
+    assert.equal(restored.entrustedWork.revision, 2);
+    assert.equal(await redis.ttl(`task:${taskId}`), -1);
+  });
+
   test('progress racing closure never overwrites a terminal snapshot or revives it after restart', async () => {
     const { service, taskId, events } = await admit('progress-close');
     const other = createLifecycle(events);
@@ -160,6 +177,48 @@ describe('F310 typed progress Redis atomicity', { skip: redisIsolationSkipReason
       events.map((event) => event.kind),
       progressWon ? ['task.blocked', 'task.done'] : ['task.done'],
     );
+  });
+
+  test('completion seals owner-issued material once and survives store reconstruction', async () => {
+    const { service, taskId } = await admit('sealed-completion');
+    await service.update({ taskId, expectedRevision: 1, artifactRefs: ['artifact:delivered'] });
+    const snapshot = {
+      artifactRef: 'artifact:delivered',
+      artifactRevision: '700',
+      completenessRef: 'publication:700',
+      previewRef: 'preview:700',
+      openInWorkspaceRef: 'workspace:700',
+    };
+    const closer = new Lifecycle(new RedisTaskStore(redis), {
+      artifactReader: {
+        async readPreparedArtifact() {
+          return snapshot;
+        },
+      },
+    });
+    const before = Date.now();
+    await closer.close({
+      taskId,
+      expectedRevision: 2,
+      closure: { ...closure, state: 'satisfied', evidenceRefs: ['artifact:approved'] },
+    });
+    const restored = await new RedisTaskStore(redis).get(taskId);
+    assert.equal(restored.status, 'done');
+    assert.equal(restored.entrustedWork.revision, 3);
+    assert.ok(restored.entrustedWork.completion.recordedAt >= before);
+    assert.deepEqual(restored.entrustedWork.completion.artifactSnapshot, snapshot);
+    const bytes = await redis.hgetall(`task:${taskId}`);
+    snapshot.artifactRevision = '900';
+    await assert.rejects(
+      closer.close({
+        taskId,
+        expectedRevision: 3,
+        closure: { ...closure, state: 'satisfied', evidenceRefs: ['artifact:approved'] },
+      }),
+      (error) => error.code === 'ENTRUSTED_WORK_ALREADY_CLOSED',
+    );
+    assert.deepEqual(await redis.hgetall(`task:${taskId}`), bytes);
+    assert.equal(await redis.ttl(`task:${taskId}`), -1);
   });
 
   test('rejected and non-status updates do not invent another blocked episode', async () => {

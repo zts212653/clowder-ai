@@ -6,6 +6,8 @@
  */
 
 export const TaskKeys = {
+  /** Disposable index; development scope itself is in the canonical Task hash. */
+  developmentScope: (digest: string) => `tasks:development-scope:${digest}`,
   /** Hash with task details: task:{taskId} */
   detail: (id: string) => `task:${id}`,
 

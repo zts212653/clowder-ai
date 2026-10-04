@@ -20,6 +20,7 @@ function mockExecFile(pages) {
   const calls = [];
   const fn = async (_file, args, opts) => {
     calls.push({ args, opts });
+    if (/\/comments\/\d+$/.test(args[1])) throw new Error('HTTP 404 Not Found');
     const pageData = pages[callCount++] ?? [];
     const stdout = pageData.map((item) => JSON.stringify(item)).join('\n');
     return { stdout: stdout || '' };

@@ -2,11 +2,8 @@ import type { ReviewedMediaAsset } from '@cat-cafe/shared';
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ReviewMedia } from '../ReviewMedia';
+import { WorkspaceContentReviewMedia } from '@/components/workbench/content-review/WorkspaceContentReviewMedia';
 
-vi.mock('../useReviewMediaSource', () => ({
-  useReviewMediaSource: () => ({ src: 'blob:image', error: null, setError: vi.fn() }),
-}));
 const asset: ReviewedMediaAsset = {
   contentRef: 'cover',
   ownerRevision: 1,
@@ -34,22 +31,28 @@ afterEach(async () => {
 async function render() {
   await act(async () =>
     root.render(
-      createElement(ReviewMedia, {
+      createElement(WorkspaceContentReviewMedia, {
         reviewId: 'review',
-        round: 1,
-        asset,
+        sourceRevision: asset.blobDigest,
+        src: 'blob:image',
+        media: asset.media,
         annotations: [],
+        annotationResolutions: [],
+        visualMarks: [],
+        visualMarkResolutions: [],
         selected: null,
-        focusRequest: null,
-        canAnnotate: true,
-        onSelect: select,
-        onActive: vi.fn(),
-        mode: 'comment',
-        selectionKey: 'one',
-        onUnavailable: vi.fn(),
+        composer: null,
+        activeAnnotationId: null,
+        canWrite: true,
+        onAnchorSelected: select,
+        onAnnotationActive: vi.fn(),
+        onSaveVisualMarks: vi.fn(),
+        onDeleteVisualMark: vi.fn(),
+        onOpenDiscussion: vi.fn(),
       }),
     ),
   );
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-mode="comment"]')?.click());
   const stage = host.querySelector<HTMLDivElement>('[data-testid="review-media-stage"]')!;
   vi.spyOn(stage, 'getBoundingClientRect').mockReturnValue({
     x: 10,
@@ -62,7 +65,7 @@ async function render() {
     height: 300,
     toJSON: () => ({}),
   });
-  const svg = host.querySelector<SVGSVGElement>('[aria-label="标注区域"]')!;
+  const svg = host.querySelector<SVGSVGElement>('[aria-label="图片或视频上的批注"]')!;
   svg.setPointerCapture = vi.fn();
   svg.hasPointerCapture = () => false;
   svg.releasePointerCapture = vi.fn();

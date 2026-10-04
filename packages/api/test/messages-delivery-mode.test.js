@@ -29,10 +29,16 @@ function deferred() {
 /** Build a complete deps object for messagesRoutes */
 function buildDeps(overrides = {}) {
   const invocationQueue = new InvocationQueue();
+  const appendedMessages = new Map();
   return {
     registry: new InvocationRegistry(),
     messageStore: {
-      append: mock.fn(async (msg) => ({ id: `msg-${Date.now()}`, ...msg })),
+      append: mock.fn(async (msg) => {
+        const stored = { id: `msg-${Date.now()}-${appendedMessages.size}`, ...msg };
+        appendedMessages.set(stored.id, stored);
+        return stored;
+      }),
+      getById: mock.fn(async (id) => appendedMessages.get(id) ?? null),
       getByThread: mock.fn(async () => []),
       getByThreadBefore: mock.fn(async () => []),
       // Whole-message selection resolves the canonical bubble group, so the timeline this double
@@ -174,6 +180,11 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(queuedWrite.queueCustody.entryId, body.entryId);
     assert.equal(queuedWrite.queueCustody.status, 'queued');
     assert.deepEqual(queuedWrite.queueCustody.pendingTargetCats, ['opus']);
+    assert.deepEqual(
+      body.userMessage,
+      { id: body.userMessageId, timestamp: queuedWrite.timestamp },
+      'the sender learns the stored time of its queued message',
+    );
 
     // Should have emitted queue_updated to user
     const emitCalls = deps.socketManager.emitToUser.mock.calls;
@@ -223,6 +234,8 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1, 'replay should not add a new queue row');
     assert.equal(replayBody.entryId, firstBody.entryId, 'replay should point to existing queue entry');
     assert.equal(replayBody.userMessageId, firstBody.userMessageId, 'replay should reuse original user message');
+    assert.ok(firstBody.userMessage, 'the first send returns the durable receipt');
+    assert.deepEqual(replayBody.userMessage, firstBody.userMessage, 'a replay returns the same durable receipt');
   });
 
   it('F294 admits one refs-only Bundle message and routes only the explicit cats', async () => {
@@ -1000,6 +1013,12 @@ describe('POST /api/messages deliveryMode', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.status, 'processing');
     assert.match(body.userMessageId, /^msg-/);
+    const storedWrite = deps.messageStore.append.mock.calls[0].arguments[0];
+    assert.deepEqual(
+      body.userMessage,
+      { id: body.userMessageId, timestamp: storedWrite.timestamp },
+      'the sender learns the stored time of its message',
+    );
 
     // Should go through normal path
     assert.ok(deps.invocationRecordStore.create.mock.calls.length > 0);
@@ -1151,6 +1170,55 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1, 'leftover queue must not grow');
   });
 
+  it("an immediate replay returns the durable receipt only for the requester's own message", async () => {
+    let createCount = 0;
+    let recordedUserMessageId;
+    deps.invocationRecordStore.create = mock.fn(async () => ({
+      outcome: createCount++ === 0 ? 'created' : 'duplicate',
+      invocationId: 'inv-replay',
+    }));
+    deps.invocationRecordStore.update = mock.fn(async (_invocationId, patch) => {
+      if (patch.userMessageId) recordedUserMessageId = patch.userMessageId;
+    });
+    deps.invocationRecordStore.get = mock.fn(async () => ({
+      invocationId: 'inv-replay',
+      userMessageId: recordedUserMessageId,
+    }));
+    const send = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/messages',
+        headers: { 'x-cat-cafe-user': 'user-1', 'content-type': 'application/json' },
+        payload: {
+          content: '重放',
+          threadId: 'thread-1',
+          deliveryMode: 'immediate',
+          idempotencyKey: '55555555-5555-4555-8555-555555555555',
+        },
+      });
+
+    const first = await send();
+    await new Promise((resolve) => setImmediate(resolve));
+    const replay = await send();
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(replay.statusCode, 200, replay.body);
+    const firstBody = JSON.parse(first.body);
+    const replayBody = JSON.parse(replay.body);
+    assert.equal(replayBody.status, 'duplicate');
+    assert.ok(firstBody.userMessage, 'the first send returns the durable receipt');
+    assert.deepEqual(replayBody.userMessage, firstBody.userMessage, 'a replay returns the same durable receipt');
+
+    recordedUserMessageId = 'foreign-message';
+    deps.messageStore.getById = mock.fn(async (id) =>
+      id === 'foreign-message'
+        ? { id, userId: 'user-2', threadId: 'thread-1', catId: null, content: 'not yours', mentions: [], timestamp: 5 }
+        : null,
+    );
+    const foreign = JSON.parse((await send()).body);
+    assert.equal(foreign.status, 'duplicate');
+    assert.equal(foreign.userMessage, undefined, "another user's message is never disclosed in a receipt");
+  });
+
   it('TOCTOU degrade-to-queue replay with same idempotencyKey does not append duplicate message', async () => {
     deps.invocationTracker.has.mock.mockImplementation(() => false);
     deps.invocationTracker.tryStartThreadAll.mock.mockImplementation(() => null);
@@ -1187,6 +1255,8 @@ describe('POST /api/messages deliveryMode', () => {
     assert.equal(deps.invocationQueue.list('thread-1', 'user-1').length, 1, 'replay should not add a new queue row');
     assert.equal(replayBody.entryId, firstBody.entryId, 'replay should point to existing queue entry');
     assert.equal(replayBody.userMessageId, firstBody.userMessageId, 'replay should reuse original user message');
+    assert.ok(firstBody.userMessage, 'the first send returns the durable receipt');
+    assert.deepEqual(replayBody.userMessage, firstBody.userMessage, 'a replay returns the same durable receipt');
   });
 
   it('aborted invocation does not emit spawn_started after stop wins the race', async () => {

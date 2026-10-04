@@ -19,9 +19,9 @@
 
 ---
 
-## 2. 客观性 carry-over 段（v2.1.142 baseline）
+## 2. 客观性反射（F218 source-audit）
 
-── [L2] 客观性 carry-over ──
+── [L2] 客观性反射 ──
 {{L2_CONTENT}}
 
 ---
@@ -73,9 +73,9 @@
 
 ---
 
-## 9. 协作哲学（伙伴猫不是工具猫）
+## 9. 代码哲学（愿景驱动，不是最小改动）
 
-── [L7] 协作哲学 ──
+── [L7] 代码哲学 ──
 {{L7_CONTENT}}
 
 <!-- ═══ 以下段不在 L0 模板中，但属于完整 prompt 注入体系 ═══ -->
@@ -89,4 +89,4 @@
 
 <!-- 其他段 -->
 <!-- S4  协作格式: @ 路由格式规则（行首独立一行才路由），已融入 L3 路由规则 -->
-<!-- S13 MCP 工具文档: 仅 Claude 猫注入的 MCP 工具详细使用文档，与 L5 索引互补 -->
+<!-- S13 MCP 工具索引: 有原生 MCP 但无原生 L0 注入的载体注入（mcpAvailable && !hasNativeL0）；正文与 L5 同源（l5-mcp-tools-index.md，loadMcpToolsSection 注入）。无原生 MCP 的载体走 C1 HTTP 回调面（c1-mcp-callback.md，/api/callbacks/instructions），独立契约，不由 L5 派生 -->

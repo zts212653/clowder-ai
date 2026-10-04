@@ -354,19 +354,22 @@ export default function HtmlWidgetResponsiveExportFixture() {
     <main data-export-root data-export-ready="true" className="mx-auto min-h-screen max-w-4xl p-4">
       <h1 className="mb-4 text-lg font-semibold text-cafe-primary">F294 HTML widget responsive export fixture</h1>
       {selected ? (
-        <article data-message-id={HTML_WIDGET_EXPORT_FIXTURE_MESSAGE_ID}>
-          <HtmlWidgetBlock
-            block={{
-              id: fixture.id,
-              kind: 'html_widget',
-              v: 1,
-              title: fixture.title,
-              height: fixture.height,
-              html: fixture.html,
-            }}
-          />
-          {unstableExport ? <div data-unstable-export-spacer style={{ height: `${unstableHeight}px` }} /> : null}
-        </article>
+        <>
+          {fixtureMode === 'offscreen' ? <div data-offscreen-export-spacer style={{ height: '5000px' }} /> : null}
+          <article data-message-id={HTML_WIDGET_EXPORT_FIXTURE_MESSAGE_ID}>
+            <HtmlWidgetBlock
+              block={{
+                id: fixture.id,
+                kind: 'html_widget',
+                v: 1,
+                title: fixture.title,
+                height: fixture.height,
+                html: fixture.html,
+              }}
+            />
+            {unstableExport ? <div data-unstable-export-spacer style={{ height: `${unstableHeight}px` }} /> : null}
+          </article>
+        </>
       ) : null}
     </main>
   );

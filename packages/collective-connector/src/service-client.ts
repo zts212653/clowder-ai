@@ -1,13 +1,18 @@
 import {
   type CollectiveAgentMessageRequest,
+  type CollectiveAgentWorkProposalRequest,
   type CollectiveEventEnvelope,
   type CollectivePairingIntent,
   type CollectiveParticipationDeclaration,
   type CollectiveSourceIdentity,
   collectiveEventEnvelopeSchema,
+  collectiveEventIdSchema,
   collectiveParticipationDeclarationSchema,
+  collectiveWorkIdSchema,
+  collectiveWorkProjectionSchema,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { CollectiveWorkAuthorityClient } from './work-authority-client.js';
 
 const connectionResponseSchema = z
   .object({
@@ -41,6 +46,11 @@ export type ServiceConnectionResponse = z.infer<typeof connectionResponseSchema>
 export type ServicePollResponse = z.infer<typeof pollResponseSchema>;
 
 export class ConnectorTransportError extends Error {
+  get retryable(): boolean {
+    return (
+      this.statusCode === undefined || this.statusCode === 408 || this.statusCode === 429 || this.statusCode >= 500
+    );
+  }
   get code(): string {
     return this.causeCode ?? 'COLLECTIVE_SERVICE_UNAVAILABLE';
   }
@@ -55,6 +65,7 @@ export class ConnectorTransportError extends Error {
 }
 
 export class CollectiveServiceClient {
+  readonly workAuthority = new CollectiveWorkAuthorityClient((url, path, options) => this.request(url, path, options));
   constructor(
     private readonly fetchImpl: typeof fetch = fetch,
     private readonly timeoutMs = 10_000,
@@ -100,6 +111,57 @@ export class CollectiveServiceClient {
       body: input,
     });
     return collectiveEventEnvelopeSchema.parse(payload);
+  }
+
+  async proposeWork(serviceUrl: string, endpointCredential: string, input: CollectiveAgentWorkProposalRequest) {
+    const payload = await this.request(serviceUrl, '/api/collaboration/work/propose-agent', {
+      method: 'POST',
+      credential: endpointCredential,
+      body: input,
+    });
+    return collectiveWorkProjectionSchema.parse(payload);
+  }
+
+  async readAssignedWork(
+    serviceUrl: string,
+    endpointCredential: string,
+    input: {
+      serviceInstanceId: string;
+      collectiveId: string;
+      connectionId: string;
+      workId: string;
+    },
+  ) {
+    const query = new URLSearchParams(input);
+    const payload = await this.request(serviceUrl, `/api/collaboration/work/assigned?${query}`, {
+      credential: endpointCredential,
+    });
+    const work = collectiveWorkProjectionSchema.parse(payload);
+    if (work.workId !== collectiveWorkIdSchema.parse(input.workId)) {
+      throw new ConnectorTransportError('Assigned Work response does not match the requested Work');
+    }
+    return work;
+  }
+
+  async readAssignedWorkByAssignment(
+    serviceUrl: string,
+    endpointCredential: string,
+    input: {
+      serviceInstanceId: string;
+      collectiveId: string;
+      connectionId: string;
+      assignmentEventId: string;
+    },
+  ) {
+    const query = new URLSearchParams(input);
+    const payload = await this.request(serviceUrl, `/api/collaboration/work/assigned-by-assignment?${query}`, {
+      credential: endpointCredential,
+    });
+    const work = collectiveWorkProjectionSchema.parse(payload);
+    if (work.assignmentEventId !== collectiveEventIdSchema.parse(input.assignmentEventId)) {
+      throw new ConnectorTransportError('Assigned Work response does not match the requested assignment');
+    }
+    return work;
   }
 
   async poll(

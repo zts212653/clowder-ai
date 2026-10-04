@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, watch } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, watch } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ const appGlobalCssFiles = [
   'console-shell.css',
   'console-controls.css',
   'console-tokens.css',
+  'shell-v2.css',
   'connector-tokens.css',
   'theme-extras.css',
   'werewolf-theme.css',
@@ -41,9 +42,18 @@ function resolvePackageDir(pkgName) {
   }
 }
 
-function copyAsset(src, dest) {
+export function copyAsset(src, dest) {
   ensureDir(dirname(dest));
-  copyFileSync(src, dest);
+  // Publish one complete file on the same filesystem. Concurrent readers keep
+  // either the previous inode or the new one; writers never truncate public URLs.
+  const stagingDir = mkdtempSync(resolve(dirname(dest), '.vendor-sync-'));
+  try {
+    const staged = resolve(stagingDir, 'asset');
+    copyFileSync(src, staged);
+    renameSync(staged, dest);
+  } finally {
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
   console.log(`[sync-vendor-assets] ${src} -> ${dest}`);
 }
 
@@ -199,14 +209,16 @@ function parseArgs(argv) {
   };
 }
 
-try {
-  const { watchMode, commandArgs } = parseArgs(process.argv.slice(2));
-  if (watchMode) {
-    runWatchMode(commandArgs);
-  } else {
-    syncVendorAssets();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const { watchMode, commandArgs } = parseArgs(process.argv.slice(2));
+    if (watchMode) {
+      runWatchMode(commandArgs);
+    } else {
+      syncVendorAssets();
+    }
+  } catch (error) {
+    console.error('[sync-vendor-assets] failed:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
   }
-} catch (error) {
-  console.error('[sync-vendor-assets] failed:', error instanceof Error ? error.message : String(error));
-  process.exit(1);
 }

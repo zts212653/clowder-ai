@@ -11,6 +11,7 @@ import type { TurnAbsorptionItem, TurnAbsorptionProjection } from './turn-absorp
 const KIND_LABEL: Record<TurnAbsorptionItem['kind'], string> = {
   responded: '明确回应',
   completed_with_turn: '随本轮完成',
+  dispatch_disposition: '已明确处置',
   actionable: '仍待处理',
   withdrawn_after_exposure: '已撤回（曾读取）',
 };
@@ -46,7 +47,10 @@ function handlerStatus(item: TurnAbsorptionItem, getCatLabel: (catId: string) =>
 }
 
 function outcomeStatus(item: TurnAbsorptionItem): string {
-  const terminalMark = item.kind === 'responded' || item.kind === 'completed_with_turn' ? '✓ ' : '';
+  const terminalMark =
+    item.kind === 'responded' || item.kind === 'completed_with_turn' || item.kind === 'dispatch_disposition'
+      ? '✓ '
+      : '';
   const timestamp = typeof item.outcomeAt === 'number' ? ` · ${formatClock(item.outcomeAt)}` : '';
   const label =
     item.kind === 'completed_with_turn' && item.receiptScope === 'cross_thread_delivery'
@@ -68,6 +72,7 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
     (item) => item.kind === 'completed_with_turn' && item.receiptScope === 'cross_thread_delivery',
   ).length;
   const sameThreadCompletedWithTurn = counts.completedWithTurn - crossThreadConsumed;
+  const explicitlyDisposed = projection.items.filter((item) => item.kind === 'dispatch_disposition').length;
   return (
     <details
       open={projection.defaultExpanded}
@@ -81,6 +86,7 @@ export function TurnAbsorptionDock({ projection, messages, getCatLabel, sourceAu
       <div className="mt-1.5 ml-1 border-l-2 border-cafe pl-3">
         <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-micro text-cafe-muted">
           <span>{`${counts.responded} 条明确回应`}</span>
+          {explicitlyDisposed > 0 && <span>{`${explicitlyDisposed} 条明确处置`}</span>}
           {sameThreadCompletedWithTurn > 0 && <span>{`${sameThreadCompletedWithTurn} 条随本轮完成`}</span>}
           {crossThreadConsumed > 0 && <span>{`${crossThreadConsumed} 条跨线程正文已消费`}</span>}
           <span>{`${counts.actionable} 条仍待处理`}</span>

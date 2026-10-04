@@ -1,3 +1,4 @@
+import type { SessionStatus } from '@cat-cafe/shared';
 import type { FastifyPluginOptions } from 'fastify';
 import type { FileProfileRepository } from '../domains/cats/services/profile/ProfileRepository.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
@@ -27,5 +28,5 @@ export interface ReadableSession {
   catId: string;
   cliSessionId?: string;
   seq: number;
-  status: string;
+  status: SessionStatus;
 }

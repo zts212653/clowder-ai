@@ -4,7 +4,7 @@ related_features: [F102, F188, F200, F192, F208, F211]
 topics: [memory, evidence-recall, passage-vector, entity-anchor, drill-down, perspective, eval]
 doc_kind: spec
 created: 2026-05-21
-tips_exempt: "2026-09-02 public identity and feature-history projection only; evidence-recall behavior and its existing memory-search entry surface are unchanged."
+tips_exempt: "2026-09-28 F324 Phase B narrows residual-term relevance in the existing alias search path; it adds no new user action or memory capability."
 ---
 
 # F209: Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤
@@ -103,6 +103,12 @@ Phase B 隐私模型：entity registry 跟随所属 evidence store / collection 
 - [x] AC-B4: entity 与 project/global/library/collection 联邦检索兼容。
 - [x] AC-B5: 隐私实体默认受 scope 控制，不跨域泄漏。
 - [x] AC-B6: **transferred to F208 AC-A5** (2026-05-23 post-Phase-C reflection). F209 不再阻塞此 AC；F208 spec 持有对偶 AC `cat-dossier consumes F209 entity_id; no parallel namespace`。这是 ownership cleanup，不是新决策——47 / Maine Coon owner 对齐即可，不需 ping operator。
+
+#### 2026-09-28 F324 Phase B：多词 query 的实体相关性边界
+
+Alias expansion 只能满足 query 中由该 alias 表达的实体约束，不能顺手吞掉其余查询词。纯 alias query（如 `operator`）继续允许跨 alias 找到只写“operator”的证据；多词 query（如 `Sol 命名`）中的 entity mention 候选与 entity-aware substring backfill 还必须满足 alias 之外的 residual terms，不能让所有“曾提过 Sol”的文档占满 top-k。summary 候选可由 doc metadata，或同一条同时命中实体与 residual terms 的 source passage 证明，且 relevance filter 必须发生在 mention pool limit 之前；alias 周围的逗号等边界标点不算 residual term。无实体 query 的检索路径及原 semantic/hybrid、scope/privacy、A 的 24k envelope 与 source drill 均保持。
+
+回归：`entity-alias-search.test.js` 同时锁住纯 alias expansion、`Sol 命名` passage-only summary、filter-before-limit 与 `operator, 命名` 标点反例。
 
 ## Phase B.1: Minimal Entity Seed Follow-up
 

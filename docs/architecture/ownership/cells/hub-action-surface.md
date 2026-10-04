@@ -14,6 +14,8 @@ code_anchors:
   - packages/api/src/routes/callback-skill-consumption-routes.ts
   - packages/api/src/domains/cats/services/tool-usage/SkillConsumptionReceiptService.ts
   - packages/web/src/hooks/useWorkspaceNavigate.ts
+  - packages/web/src/components/workbench/experience-workbench-store.ts
+  - packages/web/src/components/workbench/artifact-work-presentation.ts
   - packages/api/src/routes/preview.ts
   - packages/web/src/components/__tests__/preview-auto-open-store.test.ts
   - packages/web/src/components/__tests__/workspace-navigate-store.test.ts
@@ -50,6 +52,7 @@ cited_by:
   - {feature: F290, date: 2026-08-26, delta: boundary — Collective owns lineage, permissions and result targets but no Workspace mode or layout persistence}
   - {feature: F299, date: 2026-08-26, delta: update — invocation and Agent Run records/lifecycle remain source-owned while Workbench consumes typed descriptors}
   - {feature: F307, date: 2026-08-26, delta: update — application-level working-set, typed tab/split/sidecar topology and restore owner}
+  - {feature: F307, date: 2026-10-02, delta: update — generation-fenced Artifact split/full-window presentation and owner-scoped opaque return references remain transient inside the single F307 store}
   - {feature: F306, date: 2026-08-27, delta: "Phase B in-context runtime interaction card — approval/question/elicitation share one canonical thread surface; Approval Hub is navigation-only and stale controls are inert."}
   - {feature: F310, date: 2026-08-31, delta: "Phase A boundary — global Needs Me and product Schedule are sibling read projections over producer-owned truth; this cell owns projection/dedupe/exact-return only, never custody lifecycle, business eligibility, or a second store."}
 ---
@@ -62,7 +65,7 @@ F223 owns the cross-cutting capability surface registry. This cell owns first-pa
 
 This cell is separate from `action-plane`: action-plane owns external/vendor resource mutations such as Lark/WeCom docs, tasks, meetings, dry-run, idempotency, and resource handles. Hub action surface owns first-party UI state and display side effects.
 
-F307 owns the application-level Composable Workbench contract: working-set identity, typed tabs, active/split state, sidecar promotion, order, pin and restore validation. F284 owns the existing contextual right-side Workspace v1—stable entry, launcher, current focus, Activity and deterministic reveal—and is a migration source/consumer of F307, not a second layout owner. F290 supplies descriptors for Collective-owned Channel, Artifact, Topic, Roadmap and Review objects, including lineage, permission projection, Collective-scoped result targets and provenance. Invocation and Agent Run records/lifecycle remain owned by runtime/F299 and enter F307 through their own descriptors. Product records do not leak into the generic Workbench reducer, while product adapters do not persist a second tab/split truth.
+F307 owns the application-level Composable Workbench contract: working-set identity, typed tabs, active/split state, sidecar promotion, order, pin and restore validation. Its Artifact work presentation is a generation-fenced transient projection in the same F307 store: default split and explicit full-window geometry carry only owner-scoped return references, never copied Host, Chat-reading or Client state. F284 owns the existing contextual right-side Workspace v1—stable entry, launcher, current focus, Activity and deterministic reveal—and is a migration source/consumer of F307, not a second layout owner. F290 supplies descriptors for Collective-owned Channel, Artifact, Topic, Roadmap and Review objects, including lineage, permission projection, Collective-scoped result targets and provenance. Invocation and Agent Run records/lifecycle remain owned by runtime/F299 and enter F307 through their own descriptors. Product records do not leak into the generic Workbench reducer, while product adapters do not persist a second tab/split truth.
 
 F306 adds one in-context `RuntimeInteractionCard` to the existing thread rich-block surface. The card renders approval, question, and elicitation from a provider-neutral canonical record, resolves actions through a strictly owner-authenticated route, and becomes inert when the record is stale or terminal. Long descriptions and provider paths preserve line breaks and wrap inside narrow cards; URL elicitations render links only for `http|https`. Approval Hub may recall and navigate to an approval-kind card, but neither F223/F284 nor the Hub owns interaction lifecycle or a second decision endpoint.
 

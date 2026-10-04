@@ -284,7 +284,7 @@ export const connectorPluginRoutes: FastifyPluginAsync = async (app) => {
       const clearConfig = req.query.clearConfig === 'true';
 
       const projectRoot = resolveActiveProjectRoot();
-      const result = uninstallPlugin(projectRoot, id, { clearConfig });
+      const result = await uninstallPlugin(projectRoot, id, { clearConfig });
 
       if ('code' in result) {
         return reply.status(404).send({ error: result.message, code: result.code });

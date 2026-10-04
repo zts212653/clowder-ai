@@ -4,8 +4,10 @@ import type { ListenPlaybackRate } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
 import { documentListenController } from '@/services/DocumentListenController';
 import { useChatStore } from '@/stores/chatStore';
-import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
+import { LISTEN_RETURN_DOCUMENT_EVENT, listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { HubIcon } from '../hub-icons';
+import { useF307ExperienceWorkbenchStore } from '../workbench/experience-workbench-store';
+import { resolveFileTarget } from '../workbench/real-surface-adapters';
 import { ListenCachePopover } from './ListenCachePopover';
 import styles from './ListenModePlayer.module.css';
 
@@ -74,6 +76,10 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
   const openWorktreeId = useChatStore((state) => state.workspaceWorktreeId);
   const workspaceSurface = useChatStore((state) => state.workspaceSurface);
   const rightPanelMode = useChatStore((state) => state.rightPanelMode);
+  const hostHydrated = useF307ExperienceWorkbenchStore((state) => state.hydrated);
+  const activeSurface = useF307ExperienceWorkbenchStore((state) =>
+    state.layout.surfaces.find((surface) => surface.id === state.layout.activeSurfaceId),
+  );
   const [cacheOpen, setCacheOpen] = useState(false);
   const cacheRegionRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +105,10 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
   const currentPosition = session.currentIndex + 1;
   const progress = session.duration > 0 ? Math.min(100, (session.currentTime / session.duration) * 100) : 0;
   const away =
+    (hostHydrated &&
+      (!activeSurface ||
+        resolveFileTarget(activeSurface)?.path !== session.identity.relativePath ||
+        resolveFileTarget(activeSurface)?.worktreeId !== session.worktreeId)) ||
     currentProjectPath !== session.identity.projectPath ||
     openFilePath !== session.identity.relativePath ||
     openWorktreeId !== session.worktreeId ||
@@ -111,6 +121,14 @@ export function ListenModePlayer({ variant = 'workspace', workspaceVisible = fal
     const store = useChatStore.getState();
     store.setCurrentProject(session.identity.projectPath);
     store.setWorkspaceOpenFile(session.identity.relativePath, null, session.worktreeId);
+    window.dispatchEvent(
+      new CustomEvent(LISTEN_RETURN_DOCUMENT_EVENT, {
+        detail: {
+          cacheKey: listenDocumentCacheKey(session.identity),
+          worktreeId: session.worktreeId,
+        },
+      }),
+    );
   };
 
   if (variant === 'mini') {

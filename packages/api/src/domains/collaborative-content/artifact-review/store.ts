@@ -3,14 +3,37 @@ import { dirname } from 'node:path';
 import {
   type ArtifactReview,
   type ArtifactReviewActor,
-  type ArtifactReviewAuditActor,
   type ArtifactReviewAuditEntry,
   type ArtifactReviewReceipt,
   artifactReviewSchema,
+  respondWithMediaVersionSchema,
+  type WorkspaceContentReview,
 } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
+import { ContentAcceptanceStore } from '../modification/acceptance-store.js';
+import { ContentModificationJournal } from '../modification/journal.js';
+import { ModificationTextStore } from '../modification/text/text-store.js';
+import { WorkspaceContentReviewError } from '../workspace-review/errors.js';
+import {
+  WorkspaceContentReviewStore,
+  type WorkspaceReviewMutation,
+  type WorkspaceReviewMutationResult,
+} from '../workspace-review/store.js';
+import { ArtifactReviewAuditStore } from './audit-store.js';
+import {
+  bindExistingPublicationLedgers,
+  ensureRoundLedgers,
+  projectLinkedReview,
+  serializeLinkedReview,
+} from './canonical-ledger.js';
 import { ArtifactReviewError } from './errors.js';
-import { ArtifactReviewReturnStore, type ReviewReturnTarget } from './return-store.js';
+import { assertModificationResponseReference } from './modification-request-reference.js';
+import { ArtifactReviewReturnStore } from './return-store.js';
+import type { PendingReviewVersion, ReviewMutation, ReviewMutationResult } from './store-contract.js';
+
+export type { PendingReviewVersion, ReviewMutation, ReviewMutationResult } from './store-contract.js';
+
+import { ArtifactReviewDirectory } from './review-directory.js';
 import {
   assertReservation,
   assertReviewSuccessor,
@@ -23,38 +46,20 @@ import {
 interface ReviewRow {
   body: string;
 }
-interface OperationRow {
-  fingerprint: string;
-  receipt: string;
-  round: number;
-  kind: string;
-  detail: string;
-}
-export interface ReviewMutation {
-  reviewId: string;
-  expectedRevision: number;
-  operationId: string;
-  actor: ArtifactReviewAuditActor;
-  now: string;
-  round: number;
-  kind: string;
-  request: unknown;
-  returnTarget?: ReviewReturnTarget;
-}
-export interface ReviewMutationResult {
-  review: ArtifactReview;
-  receipt: ArtifactReviewReceipt;
-  replayed: boolean;
-}
-export interface PendingReviewVersion {
-  input: ReviewMutation;
-  payload: unknown;
-}
 
 /** One permanent owner database; atomic CAS + audit + intent receipt, with no TTL or shadow work state. */
 export class ArtifactReviewStore {
+  reviewReceipt(reviewId: string, receiptRef: string): ArtifactReviewReceipt | null {
+    return this.audit.receiptByRef(reviewId, receiptRef);
+  }
   private readonly database: Database.Database;
+  private readonly audit: ArtifactReviewAuditStore;
   readonly returns: ArtifactReviewReturnStore;
+  readonly ledgers: WorkspaceContentReviewStore;
+  readonly directory: ArtifactReviewDirectory;
+  readonly requests: ContentModificationJournal;
+  readonly text: ModificationTextStore;
+  readonly acceptances: ContentAcceptanceStore;
 
   constructor(path: string) {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -81,44 +86,41 @@ export class ArtifactReviewStore {
         review_id TEXT PRIMARY KEY REFERENCES artifact_reviews(review_id), body TEXT NOT NULL
       );
     `);
+    this.audit = new ArtifactReviewAuditStore(this.database);
     this.returns = new ArtifactReviewReturnStore(this.database);
+    this.ledgers = new WorkspaceContentReviewStore(
+      this.database,
+      (reviewId) => this.assertLedgerWritable(reviewId),
+      (review) => this.directory.assertNewLedger(review),
+    );
+    this.directory = new ArtifactReviewDirectory(this.database, this.ledgers);
+    this.requests = new ContentModificationJournal(this.database);
+    this.text = new ModificationTextStore(this.database);
+    this.acceptances = new ContentAcceptanceStore(this.database);
   }
 
   close(): void {
-    this.database.close();
+    if (this.database.open) this.database.close();
   }
 
   get(reviewId: string): ArtifactReview | null {
     const row = this.database.prepare('SELECT body FROM artifact_reviews WHERE review_id = ?').get(reviewId) as
       | ReviewRow
       | undefined;
-    return row ? artifactReviewSchema.parse(JSON.parse(row.body)) : null;
+    return row ? projectLinkedReview(artifactReviewSchema.parse(JSON.parse(row.body)), this.ledgers) : null;
   }
 
   listForOwner(ownerUserId: string): ArtifactReview[] {
-    const rows = this.database
-      .prepare('SELECT body FROM artifact_reviews WHERE owner_user_id = ? ORDER BY review_id')
-      .all(ownerUserId) as ReviewRow[];
-    return rows.map((row) => artifactReviewSchema.parse(JSON.parse(row.body)));
+    return this.directory.forOwner(ownerUserId);
   }
 
   /** Uses the existing owner/task/content unique index; unrelated review bodies are never loaded. */
   listForTask(ownerUserId: string, taskId: string): ArtifactReview[] {
-    const rows = this.database
-      .prepare('SELECT body FROM artifact_reviews WHERE owner_user_id = ? AND task_id = ? ORDER BY review_id')
-      .all(ownerUserId, taskId) as ReviewRow[];
-    return rows.map((row) => artifactReviewSchema.parse(JSON.parse(row.body)));
+    return this.directory.forTask(ownerUserId, taskId);
   }
 
   listReviewIds(ownerUserId?: string): string[] {
-    const rows = (
-      ownerUserId === undefined
-        ? this.database.prepare('SELECT review_id FROM artifact_reviews ORDER BY review_id').all()
-        : this.database
-            .prepare('SELECT review_id FROM artifact_reviews WHERE owner_user_id = ? ORDER BY review_id')
-            .all(ownerUserId)
-    ) as { review_id: string }[];
-    return rows.map((row) => row.review_id);
+    return this.directory.ids(ownerUserId);
   }
 
   create(
@@ -141,6 +143,9 @@ export class ArtifactReviewStore {
           return existing;
         }
         if (initial.revision !== 1) throw new ArtifactReviewError('invalid_action');
+        const canonical = bindExistingPublicationLedgers(initial, this.ledgers);
+        ensureRoundLedgers(this.ledgers, canonical, context.actor);
+        const projected = projectLinkedReview(canonical, this.ledgers);
         this.database
           .prepare(
             'INSERT INTO artifact_reviews (review_id, owner_user_id, task_id, content_ref, revision, body) VALUES (?, ?, ?, ?, ?, ?)',
@@ -151,9 +156,9 @@ export class ArtifactReviewStore {
             initial.task.taskId,
             initial.contentRef,
             1,
-            JSON.stringify(initial),
+            serializeLinkedReview(projected, this.ledgers),
           );
-        this.writeOperation(
+        this.audit.writeOperation(
           {
             reviewId: initial.reviewId,
             expectedRevision: 0,
@@ -166,14 +171,14 @@ export class ArtifactReviewStore {
           },
           1,
         );
-        return initial;
+        return projected;
       })
       .immediate();
   }
 
   /** A lookup never skips authorization: the service authorizes before requesting or returning a replay. */
   replay(input: ReviewMutation): ReviewMutationResult | null {
-    const row = this.operation(input.reviewId, input.operationId);
+    const row = this.audit.operation(input.reviewId, input.operationId);
     if (!row) return null;
     if (row.fingerprint !== fingerprint(input)) throw new ArtifactReviewError('operation_reused');
     const review = this.get(input.reviewId);
@@ -186,6 +191,39 @@ export class ArtifactReviewStore {
     transition: (review: ArtifactReview, receiptRef: string) => ArtifactReview,
   ): ReviewMutationResult {
     return this.commitMutation(input, transition, false, 'applied');
+  }
+
+  /** The ledger and return receipt share one connection; nested mutations use SQLite savepoints. */
+  mutateWithLedger(
+    input: ReviewMutation,
+    ledgerInput: WorkspaceReviewMutation,
+    transition: {
+      ledger: (ledger: WorkspaceContentReview) => WorkspaceContentReview;
+      review: (review: ArtifactReview, receiptRef: string) => ArtifactReview;
+    },
+  ): { review: ReviewMutationResult; ledger: WorkspaceReviewMutationResult } {
+    if (
+      input.operationId !== ledgerInput.operationId ||
+      input.actor.kind !== ledgerInput.actor.kind ||
+      input.actor.actorId !== ledgerInput.actor.actorId
+    )
+      throw new ArtifactReviewError('operation_reused');
+    return this.database
+      .transaction(() => {
+        const priorReview = this.replay(input);
+        const priorLedger = this.ledgers.replay(ledgerInput);
+        if (priorReview || priorLedger) {
+          if (!priorReview || !priorLedger) throw new ArtifactReviewError('operation_reused');
+          return { review: priorReview, ledger: priorLedger };
+        }
+        const before = this.get(input.reviewId);
+        if (!before) throw new ArtifactReviewError('not_found');
+        const predecessor = () => auditPredecessor(before, input);
+        const ledger = this.ledgers.mutate(ledgerInput, transition.ledger);
+        const review = this.commitMutation(input, transition.review, false, 'applied', predecessor);
+        return { review, ledger };
+      })
+      .immediate();
   }
 
   pendingVersion(reviewId: string): PendingReviewVersion | null {
@@ -201,11 +239,21 @@ export class ArtifactReviewStore {
         if (this.replay(input)) return;
         const current = this.get(input.reviewId);
         if (!current) throw new ArtifactReviewError('not_found');
+        const requestId =
+          payload !== null && typeof payload === 'object' && 'requestId' in payload ? payload.requestId : undefined;
+        assertModificationResponseReference(this, current, { requestId }, input.actor);
         if (current.revision !== input.expectedRevision) throw new ArtifactReviewError('revision_conflict');
         const pending = this.pendingVersion(input.reviewId);
         if (pending) {
           assertSameReservation(pending, input);
           return;
+        }
+        const round = current.rounds.at(-1);
+        if (round?.ledgerRef) {
+          this.assertLedgerWritable(round.ledgerRef);
+          const command = respondWithMediaVersionSchema.parse(payload);
+          if (command.expectedLedgerRevision !== round.ledgerRevision)
+            throw new ArtifactReviewError('revision_conflict');
         }
         const body = JSON.stringify({ input, payload });
         if (Buffer.byteLength(body) > 5 * 1024 * 1024) throw new ArtifactReviewError('limit_reached');
@@ -237,6 +285,7 @@ export class ArtifactReviewStore {
     transition: (review: ArtifactReview, receiptRef: string) => ArtifactReview,
     finishPending: boolean,
     outcome: ArtifactReviewReceipt['outcome'],
+    predecessor: (review: ArtifactReview) => unknown = (review) => auditPredecessor(review, input),
   ): ReviewMutationResult {
     return this.database
       .transaction(() => {
@@ -248,15 +297,19 @@ export class ArtifactReviewStore {
         if (!current) throw new ArtifactReviewError('not_found');
         if (current.revision !== input.expectedRevision) throw new ArtifactReviewError('revision_conflict');
         const receiptRef = receiptReference(input.reviewId, input.operationId);
-        const next = artifactReviewSchema.parse(transition(current, receiptRef));
+        let next = artifactReviewSchema.parse(transition(current, receiptRef));
         assertReviewSuccessor(current, next);
-        const body = JSON.stringify(next);
+        if (finishPending) {
+          ensureRoundLedgers(this.ledgers, next, input.actor);
+          next = projectLinkedReview(next, this.ledgers);
+        }
+        const body = serializeLinkedReview(next, this.ledgers);
         if (Buffer.byteLength(body) > 16 * 1024 * 1024) throw new ArtifactReviewError('limit_reached');
         const changed = this.database
           .prepare('UPDATE artifact_reviews SET revision = ?, body = ? WHERE review_id = ? AND revision = ?')
           .run(next.revision, body, next.reviewId, current.revision);
         if (changed.changes !== 1) throw new ArtifactReviewError('revision_conflict');
-        const receipt = this.writeOperation(input, next.revision, auditPredecessor(current, input), outcome);
+        const receipt = this.audit.writeOperation(input, next.revision, predecessor(current), outcome);
         this.returns.record(next, receipt, input);
         if (finishPending)
           this.database.prepare('DELETE FROM artifact_review_pending_versions WHERE review_id = ?').run(input.reviewId);
@@ -266,65 +319,18 @@ export class ArtifactReviewStore {
   }
 
   history(reviewId: string, afterRevision = 0, limit = 100): ArtifactReviewAuditEntry[] {
-    if (
-      !Number.isSafeInteger(afterRevision) ||
-      afterRevision < 0 ||
-      !Number.isInteger(limit) ||
-      limit < 1 ||
-      limit > 200
-    ) {
-      throw new ArtifactReviewError('invalid_action');
-    }
-    const rows = this.database
-      .prepare(
-        'SELECT fingerprint, receipt, round, kind, detail FROM artifact_review_operations WHERE review_id = ? AND revision > ? ORDER BY revision LIMIT ?',
-      )
-      .all(reviewId, afterRevision, limit) as OperationRow[];
-    return rows.map((row) => ({
-      receipt: JSON.parse(row.receipt) as ArtifactReviewReceipt,
-      round: row.round,
-      kind: row.kind,
-      detail: JSON.parse(row.detail) as unknown,
-    }));
+    return this.audit.history(reviewId, afterRevision, limit);
   }
 
-  private operation(reviewId: string, operationId: string): OperationRow | undefined {
-    return this.database
-      .prepare(
-        'SELECT fingerprint, receipt, round, kind, detail FROM artifact_review_operations WHERE review_id = ? AND operation_id = ?',
-      )
-      .get(reviewId, operationId) as OperationRow | undefined;
-  }
-
-  private writeOperation(
-    input: ReviewMutation,
-    revision: number,
-    predecessor?: unknown,
-    outcome: ArtifactReviewReceipt['outcome'] = 'applied',
-  ): ArtifactReviewReceipt {
-    const receipt: ArtifactReviewReceipt = {
-      receiptRef: receiptReference(input.reviewId, input.operationId),
-      reviewId: input.reviewId,
-      operationId: input.operationId,
-      revision,
-      actor: input.actor,
-      createdAt: input.now,
-      outcome,
-    };
-    this.database
-      .prepare(
-        'INSERT INTO artifact_review_operations (review_id, operation_id, fingerprint, revision, receipt, round, kind, detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      )
-      .run(
-        input.reviewId,
-        input.operationId,
-        fingerprint(input),
-        revision,
-        JSON.stringify(receipt),
-        input.round,
-        input.kind,
-        JSON.stringify({ request: input.request, ...(predecessor !== undefined ? { predecessor } : {}) }),
-      );
-    return receipt;
+  private assertLedgerWritable(ledgerRef: string): void {
+    const pending = this.database
+      .prepare(`
+      SELECT 1 FROM artifact_review_pending_versions AS pending
+      JOIN artifact_reviews AS review ON review.review_id = pending.review_id,
+      json_each(review.body, '$.rounds') AS round
+      WHERE json_extract(round.value, '$.ledgerRef') = ? LIMIT 1
+    `)
+      .get(ledgerRef);
+    if (pending) throw new WorkspaceContentReviewError('version_pending');
   }
 }

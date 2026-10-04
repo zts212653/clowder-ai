@@ -1,21 +1,20 @@
 import type { ReactNode } from 'react';
-
 import type { CollectiveMembership } from './client-types.js';
 
-function HomeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m4 11 8-7 8 7v8a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1Z" />
-    </svg>
-  );
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
-    </svg>
-  );
+function connectionLabel(
+  connection: 'online' | 'offline',
+  embedded: boolean,
+  canPair: boolean,
+  cafeConnection?: { readonly catCount?: number },
+): string {
+  if (connection === 'offline') return '暂时离线 · 发送失败后可以重试';
+  if (!embedded) return '共同家园在线';
+  if (cafeConnection) {
+    return cafeConnection.catCount === undefined
+      ? '这台 Café 已连接 · 正在读取伙伴'
+      : `这台 Café 已连接 · ${cafeConnection.catCount} 位猫猫在场`;
+  }
+  return canPair ? '共同家园在线 · 这台 Café 还没连接' : '共同家园在线';
 }
 
 export function ProductShell({
@@ -26,12 +25,18 @@ export function ProductShell({
   connection,
   canSteward,
   canPair,
+  cafeConnection,
+  pairNudge = false,
+  canLeave = false,
   notice,
   onInvite,
   onPair,
+  onLeave,
   destinations,
-  experienceGate,
+  headerMeta,
   children,
+  navigationOpen = false,
+  onCloseNavigation,
 }: {
   readonly embedded: boolean;
   readonly collective?: CollectiveMembership;
@@ -40,84 +45,68 @@ export function ProductShell({
   readonly connection: 'online' | 'offline';
   readonly canSteward: boolean;
   readonly canPair: boolean;
+  readonly cafeConnection?: { readonly catCount?: number };
+  readonly pairNudge?: boolean;
+  readonly canLeave?: boolean;
   readonly notice?: string;
   readonly onInvite: () => void;
   readonly onPair: () => void;
+  readonly onLeave?: () => void;
   readonly destinations?: ReactNode;
-  readonly experienceGate?: 'f290-assembly';
+  readonly headerMeta?: ReactNode;
+  readonly navigationOpen?: boolean;
+  readonly onCloseNavigation?: () => void;
   readonly children: ReactNode;
 }) {
+  const hasWorldRail = !embedded && Boolean(collectives?.length);
   return (
     <main
       className="collective-shell"
-      data-embedded={embedded ? 'true' : 'false'}
-      data-experience-gate={experienceGate}
+      data-testid="collective-product-shell"
+      data-embedded={embedded}
+      data-world-rail={hasWorldRail}
+      data-navigation-open={navigationOpen}
     >
-      {!embedded && (
-        <aside className="global-rail" data-spatial-role="global-rail" aria-label="世界切换">
+      {hasWorldRail && (
+        <aside className="global-rail" data-spatial-role="global-rail" aria-label="选择共同家园">
           <div className="brand-mark" role="img" aria-label="Clowder AI Collective">
             C
           </div>
           <nav>
-            <button type="button" className="rail-button" disabled title="回到我的 Café 需要从 Clowder AI 打开">
-              <HomeIcon />
-              <span>我的 Café</span>
-            </button>
-            <button type="button" className="rail-button rail-button-active" aria-current="page">
-              <span className="world-mark">共</span>
-              <span>Collective</span>
-            </button>
+            {collectives?.map((item) => (
+              <button
+                key={item.collectiveId}
+                type="button"
+                className={`rail-button ${item.collectiveId === collective?.collectiveId ? 'rail-button-active' : ''}`}
+                aria-label={item.name}
+                aria-current={item.collectiveId === collective?.collectiveId ? 'page' : undefined}
+                onClick={() => onSelectCollective?.(item.collectiveId)}
+              >
+                <span className="world-mark">{item.name.slice(0, 1)}</span>
+                <span>{item.name}</span>
+              </button>
+            ))}
           </nav>
-          <button type="button" className="rail-button rail-tail" disabled>
-            <BellIcon />
-            <span>Needs Me</span>
-          </button>
         </aside>
       )}
-
-      <aside className="destination-pane" data-spatial-role="destination-pane">
+      {navigationOpen && (
+        <button type="button" className="navigation-scrim" aria-label="关闭频道导航" onClick={onCloseNavigation} />
+      )}
+      <aside className="destination-pane" data-spatial-role="destination-pane" aria-label="共同家园导航">
         <header className="destination-header">
-          <span>COLLECTIVE</span>
           <h1>{collective?.name ?? '共同家园'}</h1>
-          {collectives && collectives.length > 1 && (
-            <label className="world-selector">
-              共同家园
-              <select
-                aria-label="选择 Collective"
-                value={collective?.collectiveId ?? ''}
-                onChange={(event) => onSelectCollective?.(event.target.value)}
-              >
-                <option value="" disabled>
-                  选择要进入的家园
-                </option>
-                {collectives.map((item) => (
-                  <option key={item.collectiveId} value={item.collectiveId}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+          {headerMeta ? (
+            <p>{headerMeta}</p>
+          ) : (
+            <p>{connection === 'offline' ? '暂时离线，正在等待恢复' : '人和猫一起交流的地方'}</p>
           )}
-          <p>{connection === 'online' ? '共同现场已连接' : '暂时离线，正在等待恢复'}</p>
+          <button type="button" className="navigation-close" aria-label="收起频道导航" onClick={onCloseNavigation}>
+            ×
+          </button>
         </header>
-        <label className="destination-search">
-          <span aria-hidden="true">⌕</span>
-          <input type="search" placeholder="搜索这个 Collective" disabled />
-        </label>
-        {destinations ?? (
-          <nav className="destination-list" aria-label="Collective 目的地">
-            <p>频道</p>
-            <button type="button" className="destination-item destination-item-active" aria-current="page">
-              <span className="destination-symbol">#</span>
-              <span>
-                <strong>general</strong>
-                <small>共同讨论与回应</small>
-              </span>
-            </button>
-          </nav>
-        )}
+        {destinations}
         <footer className="destination-footer">
-          {(canSteward || (embedded && canPair)) && (
+          {(canSteward || (embedded && canPair) || canLeave) && (
             <div className="steward-actions">
               {canSteward && (
                 <button type="button" onClick={onInvite}>
@@ -125,8 +114,13 @@ export function ProductShell({
                 </button>
               )}
               {embedded && canPair && (
-                <button type="button" onClick={onPair}>
+                <button type="button" className={pairNudge ? 'pair-nudge' : undefined} data-guide-pair onClick={onPair}>
                   连接此 Café
+                </button>
+              )}
+              {canLeave && onLeave && (
+                <button type="button" onClick={onLeave}>
+                  退出共同家园
                 </button>
               )}
             </div>
@@ -134,11 +128,10 @@ export function ProductShell({
           {notice && <p className="destination-notice">{notice}</p>}
           <p className="connection-line">
             <span data-status={connection} />
-            {connection === 'online' ? '消息来自同一共同现场' : '离线期间不会冒充已送达'}
+            {connectionLabel(connection, embedded, canPair, cafeConnection)}
           </p>
         </footer>
       </aside>
-
       <section className="primary-scene" data-spatial-role="primary-scene">
         {children}
       </section>

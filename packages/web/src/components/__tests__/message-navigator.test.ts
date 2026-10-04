@@ -25,7 +25,14 @@ function makeMsg(id: string, type: 'user' | 'assistant' | 'system', catId?: stri
 const nullRef = { current: null };
 
 function render(messages: ChatMessageData[]): string {
-  return renderToStaticMarkup(React.createElement(MessageNavigator, { messages, scrollContainerRef: nullRef }));
+  return renderToStaticMarkup(
+    React.createElement(MessageNavigator, {
+      messages,
+      scrollContainerRef: nullRef,
+      onJumpToMessage: () => false,
+      beginUserScroll: () => null,
+    }),
+  );
 }
 
 describe('MessageNavigator', () => {

@@ -9,7 +9,7 @@ import type {
   ProviderNativeFreshnessToolSurface,
   ProviderProtocolItemObservedEvent,
 } from './FreshnessAttentionEventLog.js';
-import type { UnseenResult } from './FreshnessNoticeService.js';
+import type { UnseenScanResult } from './FreshnessNoticeService.js';
 
 export interface ProviderNativeSafeBoundary {
   threadId: string;
@@ -38,7 +38,19 @@ export interface PreparedFreshnessNotice {
   deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
 }
 
+export type PreparedIdleFreshnessNotice = Omit<PreparedFreshnessNotice, 'expectedTurnId' | 'boundary'> & {
+  boundary: { threadId: string; toolSurface: ProviderNativeFreshnessToolSurface };
+};
+type PreparedProviderNotice = PreparedFreshnessNotice | PreparedIdleFreshnessNotice;
+export interface IdleFreshnessController {
+  prepare(): Promise<PreparedIdleFreshnessNotice | null>;
+  commitDelivered(notice: PreparedIdleFreshnessNotice, result: { acceptedTurnId: string }): Promise<void>;
+  defer(notice: PreparedIdleFreshnessNotice): void;
+  markMissed(notice: PreparedIdleFreshnessNotice, reason: ProviderNativeFreshnessMissReason): Promise<void>;
+}
+
 export interface ActiveInvocationFreshnessController {
+  readonly idle?: IdleFreshnessController;
   prepare(boundary: ProviderNativeSafeBoundary): Promise<PreparedFreshnessNotice | null>;
   commitDelivered(notice: PreparedFreshnessNotice, result: { acceptedTurnId: string }): Promise<void>;
   markMissed(notice: PreparedFreshnessNotice, reason: ProviderNativeFreshnessMissReason): Promise<void>;
@@ -53,7 +65,7 @@ export interface ActiveInvocationFreshnessController {
 
 interface FreshnessNoticeBrokerDeps {
   context: { invocationId: string; threadId: string; catId: CatId };
-  checkUnseen: () => Promise<UnseenResult | null>;
+  checkUnseen: () => Promise<UnseenScanResult | null>;
   appendEvent: (event: FreshnessAttentionEvent) => Promise<void>;
   now?: () => number;
 }
@@ -61,13 +73,13 @@ interface FreshnessNoticeBrokerDeps {
 export function createContentFreeFreshnessNotice(input: { threadId: string; unseenCount: number }): string {
   return (
     `📬 freshness notice：当前 thread 有 ${input.unseenCount} 条新消息。` +
-    `请在自然工具断点调用 cat_cafe_get_thread_context({ threadId: "${input.threadId}", responseMode: "full" }) ` +
+    `请在自然工具断点调用 cat_cafe_get_thread_context({ threadId: "${input.threadId}", readIntent: "unread", responseMode: "full" }) ` +
     '无过滤精确读取；本提醒不含消息正文。'
   );
 }
 
 export class FreshnessNoticeBroker {
-  private inFlight: PreparedFreshnessNotice | null = null;
+  private inFlight: PreparedProviderNotice | null = null;
   private lastAttemptedFrontier: string | null = null;
   private readonly attemptedNoticeDedupKeys = new Set<string>();
   private sequence = 0;
@@ -78,10 +90,14 @@ export class FreshnessNoticeBroker {
     this.now = deps.now ?? Date.now;
   }
 
-  async prepare(input: PrepareProviderNativeNoticeInput): Promise<PreparedFreshnessNotice | null> {
+  prepare(input: PrepareProviderNativeNoticeInput): Promise<PreparedFreshnessNotice | null>;
+  prepare(input: Omit<PrepareProviderNativeNoticeInput, 'turnId'>): Promise<PreparedIdleFreshnessNotice | null>;
+  async prepare(
+    input: Omit<PrepareProviderNativeNoticeInput, 'turnId'> & { turnId?: string },
+  ): Promise<PreparedProviderNotice | null> {
     if (this.inFlight) return null;
     const unseen = await this.deps.checkUnseen();
-    if (!unseen || unseen.count === 0) return null;
+    if (!unseen || 'kind' in unseen || unseen.count === 0) return null;
     if (unseen.noticeDedupKey !== undefined) {
       if (this.attemptedNoticeDedupKeys.has(unseen.noticeDedupKey)) return null;
     } else if (this.lastAttemptedFrontier && unseen.maxMessageId <= this.lastAttemptedFrontier) {
@@ -91,34 +107,16 @@ export class FreshnessNoticeBroker {
     const noticeId = `provider-notice-${this.deps.context.invocationId}-${this.now()}-${++this.sequence}`;
     const correlationMessageIds =
       unseen.correlationMessageIds === undefined ? [unseen.maxMessageId] : [...new Set(unseen.correlationMessageIds)];
-    const base = {
-      threadId: this.deps.context.threadId,
-      catId: this.deps.context.catId,
-      invocationId: this.deps.context.invocationId,
-      timestamp: this.now(),
-      noticeId,
-      frontier: unseen.maxMessageId,
-      correlationMessageIds,
-      provider: input.provider,
-      carrier: input.carrier,
-      deliverySemantics: input.deliverySemantics,
-      toolSurface: input.toolSurface,
-      expectedTurnId: input.turnId,
-    } as const;
-
-    await this.deps.appendEvent({ kind: 'provider_notice_opportunity', ...base });
-    freshnessProviderNotice.add(1, this.metricAttributes(input, 'opportunity'));
-
-    const prepared: PreparedFreshnessNotice = {
+    const prepared: PreparedProviderNotice = {
       noticeId,
       frontier: unseen.maxMessageId,
       noticeDedupKey: unseen.noticeDedupKey,
       correlationMessageIds,
-      expectedTurnId: input.turnId,
+      ...(input.turnId ? { expectedTurnId: input.turnId } : {}),
       text: createContentFreeFreshnessNotice({ threadId: this.deps.context.threadId, unseenCount: unseen.count }),
       boundary: {
         threadId: this.deps.context.threadId,
-        turnId: input.turnId,
+        ...(input.turnId ? { turnId: input.turnId } : {}),
         toolSurface: input.toolSurface,
       },
       provider: input.provider,
@@ -126,27 +124,39 @@ export class FreshnessNoticeBroker {
       deliverySemantics: input.deliverySemantics,
     };
     this.inFlight = prepared;
-    await this.deps.appendEvent({ kind: 'provider_notice_prepared', ...base });
+    const base = this.eventBase(prepared);
+    try {
+      await this.deps.appendEvent({ kind: 'provider_notice_opportunity', ...base });
+      freshnessProviderNotice.add(1, this.noticeMetricAttributes(prepared, 'opportunity'));
+      await this.deps.appendEvent({ kind: 'provider_notice_prepared', ...base });
+    } catch (error) {
+      this.inFlight = null;
+      throw error;
+    }
     return prepared;
   }
 
-  async commitDelivered(notice: PreparedFreshnessNotice, result: { acceptedTurnId: string }): Promise<void> {
+  async commitDelivered(notice: PreparedProviderNotice, result: { acceptedTurnId: string }): Promise<void> {
     if (!this.matchesInFlight(notice)) return;
-    if (result.acceptedTurnId !== notice.expectedTurnId) {
+    if (!result.acceptedTurnId || ('expectedTurnId' in notice && result.acceptedTurnId !== notice.expectedTurnId)) {
       await this.markMissed(notice, 'turn_mismatch');
       return;
     }
+    this.recordAttempt(notice);
+    this.inFlight = null;
     await this.deps.appendEvent({
       kind: 'provider_notice_delivered',
       ...this.eventBase(notice),
       acceptedTurnId: result.acceptedTurnId,
     });
     freshnessProviderNotice.add(1, this.noticeMetricAttributes(notice, 'delivered'));
-    this.recordAttempt(notice);
-    this.inFlight = null;
   }
 
-  async markMissed(notice: PreparedFreshnessNotice, reason: ProviderNativeFreshnessMissReason): Promise<void> {
+  defer(notice: PreparedIdleFreshnessNotice): void {
+    if (this.matchesInFlight(notice)) this.inFlight = null;
+  }
+
+  async markMissed(notice: PreparedProviderNotice, reason: ProviderNativeFreshnessMissReason): Promise<void> {
     if (!this.matchesInFlight(notice)) return;
     await this.deps.appendEvent({ kind: 'provider_notice_missed', ...this.eventBase(notice), missReason: reason });
     freshnessProviderNotice.add(1, { ...this.noticeMetricAttributes(notice, 'missed'), miss_reason: reason });
@@ -180,18 +190,18 @@ export class FreshnessNoticeBroker {
     });
   }
 
-  private recordAttempt(notice: PreparedFreshnessNotice): void {
+  private recordAttempt(notice: PreparedProviderNotice): void {
     this.lastAttemptedFrontier = notice.frontier;
     if (notice.noticeDedupKey !== undefined) {
       this.attemptedNoticeDedupKeys.add(notice.noticeDedupKey);
     }
   }
 
-  private matchesInFlight(notice: PreparedFreshnessNotice): boolean {
+  private matchesInFlight(notice: PreparedProviderNotice): boolean {
     return this.inFlight?.noticeId === notice.noticeId;
   }
 
-  private eventBase(notice: PreparedFreshnessNotice) {
+  private eventBase(notice: PreparedProviderNotice) {
     return {
       threadId: this.deps.context.threadId,
       catId: this.deps.context.catId,
@@ -204,21 +214,13 @@ export class FreshnessNoticeBroker {
       carrier: notice.carrier,
       deliverySemantics: notice.deliverySemantics,
       toolSurface: notice.boundary.toolSurface,
-      expectedTurnId: notice.expectedTurnId,
+      ...('expectedTurnId' in notice
+        ? { expectedTurnId: notice.expectedTurnId }
+        : { boundaryKind: 'idle_start' as const }),
     } as const;
   }
 
-  private metricAttributes(input: PrepareProviderNativeNoticeInput, outcome: 'opportunity') {
-    return {
-      provider: input.provider,
-      carrier: input.carrier,
-      delivery_semantics: input.deliverySemantics,
-      tool_surface: input.toolSurface,
-      outcome,
-    };
-  }
-
-  private noticeMetricAttributes(notice: PreparedFreshnessNotice, outcome: 'delivered' | 'missed') {
+  private noticeMetricAttributes(notice: PreparedProviderNotice, outcome: 'opportunity' | 'delivered' | 'missed') {
     return {
       provider: notice.provider,
       carrier: notice.carrier,
@@ -238,6 +240,12 @@ export function bindFreshnessNoticeBroker(
   },
 ): ActiveInvocationFreshnessController {
   return {
+    idle: {
+      prepare: () => broker.prepare({ ...capability, deliverySemantics: 'queued_internal_turn', toolSurface: 'other' }),
+      commitDelivered: (notice, result) => broker.commitDelivered(notice, result),
+      defer: (notice) => broker.defer(notice),
+      markMissed: (notice, reason) => broker.markMissed(notice, reason),
+    },
     prepare: (boundary) =>
       broker.prepare({
         ...capability,

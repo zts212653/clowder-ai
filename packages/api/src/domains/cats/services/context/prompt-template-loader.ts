@@ -118,9 +118,23 @@ export function loadWorkflowTriggers(): Record<string, string> {
 // ── S13: MCP Tools Section (allowLocalOverride: true) ────────
 
 /**
- * Load MCP tools section markdown template.
+ * Load the L5 MCP tool index body (native L0 §7 source file).
+ * Shared with S13 so carriers without native L0 injection read the SAME
+ * index as native cats — one tool index, two carriers, no drift.
+ */
+export function loadL5McpToolsIndex(): string {
+  const filePath = templatePath('l5-mcp-tools-index.md');
+  if (!existsSync(filePath)) {
+    console.warn('[prompt-template] l5-mcp-tools-index.md not found, returning empty');
+    return '';
+  }
+  return stripComments(readFileSync(filePath, 'utf-8'));
+}
+
+/**
+ * Load MCP tools section markdown template (S13, non-native carriers only).
  * Checks for mcp-tools.local.md overlay first.
- * Caller provides RICH_BLOCK_SHORT for substitution.
+ * Caller provides RICH_BLOCK_SHORT; the index body comes from L5.
  */
 export function loadMcpToolsSection(vars: { RICH_BLOCK_SHORT: string }): string {
   const { path: filePath } = resolveWithOverlay('mcp-tools.md', 'mcp-tools.local.md');
@@ -129,7 +143,7 @@ export function loadMcpToolsSection(vars: { RICH_BLOCK_SHORT: string }): string 
     return '';
   }
   const raw = readFileSync(filePath, 'utf-8');
-  return renderTemplate(stripComments(raw), vars);
+  return renderTemplate(stripComments(raw), { ...vars, L5_MCP_TOOLS_INDEX: loadL5McpToolsIndex() });
 }
 
 // ── D8: A2A Ball Check (allowLocalOverride: false — no overlay) ──

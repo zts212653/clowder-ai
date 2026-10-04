@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -11,6 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const alphaScriptSource = join(__dirname, '..', '..', '..', 'scripts', 'alpha-worktree.sh');
 const nodeRuntimeGuardSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'node-runtime-guard.sh');
 const quickstartFreshnessSource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'quickstart-freshness.sh');
+const alphaRedisIdentitySource = join(__dirname, '..', '..', '..', 'scripts', 'lib', 'alpha-redis-identity.sh');
 const tempDirs = [];
 
 process.env.CAT_CAFE_SKIP_NODE_RUNTIME_GUARD = '1';
@@ -43,9 +44,18 @@ function createTempProject(name) {
       mode: 0o644,
     },
   );
-  writeFileSync(join(projectDir, 'scripts', 'start-dev.sh'), '#!/bin/sh\nprintf "ALPHA-STARTED:%s\\n" "$PWD"\n', {
-    mode: 0o755,
-  });
+  writeFileSync(
+    join(projectDir, 'scripts', 'lib', 'alpha-redis-identity.sh'),
+    readFileSync(alphaRedisIdentitySource, 'utf8'),
+    { mode: 0o644 },
+  );
+  writeFileSync(
+    join(projectDir, 'scripts', 'start-dev.sh'),
+    '#!/bin/sh\nprintf "ALPHA-STARTED:%s REDIS_PORT=%s REDIS_DATA_DIR=%s REDIS_KEY_PREFIX=%s\\n" "$PWD" "$REDIS_PORT" "$REDIS_DATA_DIR" "$REDIS_KEY_PREFIX"\n',
+    {
+      mode: 0o755,
+    },
+  );
   writeFileSync(join(projectDir, 'packages', 'web', 'package.json'), '{}\n', 'utf8');
   writeFileSync(join(projectDir, 'packages', 'api', 'package.json'), '{}\n', 'utf8');
   writeFileSync(join(projectDir, 'packages', 'mcp-server', 'package.json'), '{}\n', 'utf8');
@@ -116,8 +126,27 @@ function initProjectWithAlphaWorktree(projectDir) {
   return realpathSync(alphaDir);
 }
 
-function runAlpha(projectDir, alphaDir, extraArgs = []) {
+function runAlpha(projectDir, alphaDir, extraArgs = [], options = {}) {
   const { binDir, logFile } = createPnpmStub(projectDir);
+  if (options.redisCliScript) {
+    writeFileSync(join(binDir, 'redis-cli'), options.redisCliScript, { mode: 0o755 });
+  }
+  if (options.lsofScript) {
+    writeFileSync(join(binDir, 'lsof'), options.lsofScript, { mode: 0o755 });
+  }
+  const childEnv = {
+    ...process.env,
+    PATH: `${binDir}:${process.env.PATH}`,
+    ALPHA_TEST_PNPM_LOG: logFile,
+    CAT_CAFE_ALPHA_FRONTEND_PORT: '19511',
+    CAT_CAFE_ALPHA_API_PORT: '19512',
+    CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT: '19513',
+    CAT_CAFE_ALPHA_REDIS_PORT: '19514',
+    ...options.env,
+  };
+  for (const [key, value] of Object.entries(childEnv)) {
+    if (value === undefined) delete childEnv[key];
+  }
   const result = spawnSync(
     'bash',
     [
@@ -132,15 +161,7 @@ function runAlpha(projectDir, alphaDir, extraArgs = []) {
     {
       cwd: projectDir,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH}`,
-        ALPHA_TEST_PNPM_LOG: logFile,
-        CAT_CAFE_ALPHA_FRONTEND_PORT: '19511',
-        CAT_CAFE_ALPHA_API_PORT: '19512',
-        CAT_CAFE_ALPHA_PREVIEW_GATEWAY_PORT: '19513',
-        CAT_CAFE_ALPHA_REDIS_PORT: '19514',
-      },
+      env: childEnv,
     },
   );
 
@@ -154,6 +175,24 @@ afterEach(async () => {
 });
 
 describe('alpha-worktree.sh', () => {
+  it('pins dedicated Redis coordinates inside the child when launcher env is lost', () => {
+    const projectDir = createTempProject('alpha-lost-launcher-env');
+    writeFileSync(join(projectDir, '.env'), 'REDIS_KEY_PREFIX=cat-cafe:alpha:f317-upgrade:\n');
+    const alphaDir = initProjectWithAlphaWorktree(projectDir);
+    const unavailable = '#!/bin/sh\nexit 1\n';
+
+    const result = runAlpha(projectDir, alphaDir, [], {
+      redisCliScript: unavailable,
+      lsofScript: unavailable,
+      env: { HOME: projectDir, CAT_CAFE_ALPHA_REDIS_PORT: undefined, REDIS_KEY_PREFIX: undefined },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /REDIS_PORT=6397/);
+    assert.match(result.stdout, new RegExp(`REDIS_DATA_DIR=${alphaDir}/.cat-cafe/redis`));
+    assert.match(result.stdout, /REDIS_KEY_PREFIX=cat-cafe:\s*$/m);
+  });
+
   it('auto-installs when node_modules exists but dependency markers are incomplete', () => {
     const projectDir = createTempProject('alpha-self-heal-install');
     const alphaDir = initProjectWithAlphaWorktree(projectDir);
@@ -178,6 +217,70 @@ describe('alpha-worktree.sh', () => {
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /alpha prerequisites missing/);
     assert.match(result.stderr, /install --frozen-lockfile/);
+    assert.doesNotMatch(result.stdout, /ALPHA-STARTED:/);
+  });
+
+  it('refuses a live Redis endpoint whose data directory belongs to another stack', () => {
+    const projectDir = createTempProject('alpha-foreign-redis');
+    const alphaDir = initProjectWithAlphaWorktree(projectDir);
+    const foreignDir = join(projectDir, 'foreign-redis');
+    mkdirSync(foreignDir);
+    const redisCliScript = `#!/bin/sh
+case "$*" in
+  *" ping") printf 'PONG\\n' ;;
+  *" config get dir") printf 'dir\\n${foreignDir}\\n' ;;
+  *) exit 1 ;;
+esac
+`;
+
+    const result = runAlpha(projectDir, alphaDir, [], { redisCliScript });
+
+    assert.notEqual(result.status, 0, 'foreign Redis must block Alpha before start-dev');
+    assert.match(result.stderr, /Redis data directory mismatch/);
+    assert.doesNotMatch(result.stdout, /ALPHA-STARTED:/);
+    assert.equal(
+      existsSync(join(alphaDir, '.cat-cafe', 'redis')),
+      false,
+      'failed preflight must not seed an empty target',
+    );
+  });
+
+  it('requires an explicit decision before replacing legacy Alpha data with an empty instance', () => {
+    const projectDir = createTempProject('alpha-migration-required');
+    writeFileSync(join(projectDir, '.env'), 'ALPHA_EMPTY_REDIS_ALLOWED=true\nALPHA_REDIS_PORT=19514\n');
+    const alphaDir = initProjectWithAlphaWorktree(projectDir);
+    const redisCliScript = `#!/bin/sh
+case "$*" in
+  *"-p 6397 ping") exit 1 ;;
+  *"-p 6398 ping") printf 'PONG\\n' ;;
+  *"-p 6398 dbsize") printf '8215\\n' ;;
+  *) exit 1 ;;
+esac
+`;
+    const options = {
+      redisCliScript,
+      lsofScript: '#!/bin/sh\nexit 1\n',
+      env: { CAT_CAFE_ALPHA_REDIS_PORT: undefined },
+    };
+
+    const blocked = runAlpha(projectDir, alphaDir, [], options);
+    assert.notEqual(blocked.status, 0);
+    assert.match(blocked.stderr, /Alpha Redis migration required/);
+    assert.equal(existsSync(join(alphaDir, '.cat-cafe', 'redis')), false);
+
+    const explicitEmpty = runAlpha(projectDir, alphaDir, ['--allow-empty-redis'], options);
+    assert.equal(explicitEmpty.status, 0, explicitEmpty.stderr);
+    assert.match(explicitEmpty.stdout, /REDIS_PORT=6397/);
+  });
+
+  it('refuses the legacy shared worktree Redis port even when it is idle', () => {
+    const projectDir = createTempProject('alpha-shared-redis-port');
+    const alphaDir = initProjectWithAlphaWorktree(projectDir);
+
+    const result = runAlpha(projectDir, alphaDir, [], { env: { CAT_CAFE_ALPHA_REDIS_PORT: '6398' } });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /shared Redis port 6398/);
     assert.doesNotMatch(result.stdout, /ALPHA-STARTED:/);
   });
 });

@@ -144,6 +144,7 @@ describe('F307 canonical Home destination admission', () => {
       onReset: vi.fn(),
       onOpenResult,
       onViewAll: vi.fn(),
+      fileNavigationOrigin: () => ({ kind: 'workspace-home-search', query: 'F307 search' }),
     });
 
     await act(async () => {
@@ -156,6 +157,10 @@ describe('F307 canonical Home destination admission', () => {
       worktreeId: 'worktree-a',
       path: 'src/F307-search-result.ts',
       scrollToLine: 120,
+    });
+    expect(onSelectSurface.mock.calls[0][0].navigationOrigin).toEqual({
+      kind: 'workspace-home-search',
+      query: 'F307 search',
     });
   });
 

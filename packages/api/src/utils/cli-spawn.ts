@@ -12,6 +12,8 @@ import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
+import { observeCliExecutionProcess } from './CliExecutionObservation.js';
+import { CliExitOutputDrain } from './CliExitOutputDrain.js';
 import {
   CliTerminationController,
   type CliTerminationGraces,
@@ -25,7 +27,11 @@ import {
   type CliTimeoutTerminalContext,
   formatCliStderrForLog,
 } from './cli-diagnostics.js';
-import { CLI_EXECUTION_ID_ENV, CLI_EXECUTION_OWNER_BINDING_ENV } from './cli-process-ownership.js';
+import {
+  CLI_EXECUTION_ID_ENV,
+  CLI_EXECUTION_OWNER_BINDING_ENV,
+  cliExecutionOwnerRefFromEnvironment,
+} from './cli-process-ownership.js';
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
@@ -36,7 +42,9 @@ export { resolveCliSupervisorNodeArgs } from './cli-supervised-process.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
+import { RUNTIME_ONLY_LIFECYCLE_ENV_KEYS } from './runtime-only-env.js';
 import { sanitizeCliStderr } from './sanitize-cli-stderr.js';
+import { createStderrTail } from './stderr-tail.js';
 
 const log = createModuleLogger('cli-spawn');
 
@@ -214,11 +222,15 @@ export const TERMINATION_STDIO_DRAIN_GRACE_MS = 100;
 
 /** Grace period after semantic completion before force-killing a lingering process */
 export const SEMANTIC_COMPLETION_GRACE_MS = 5_000;
+/** F319: stderr kept for exit diagnostics is a bounded tail, not the whole stream. */
+export const STDERR_BUFFER_MAX_CHARS = 64 * 1024;
 
 /**
  * Options for spawnCli (dependency injection for testing)
  */
 export interface CliSpawnerDeps {
+  /** Bound inherited stdio after the actual child has exited; never a running-task deadline. */
+  exitDrainGraceMs?: number;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
   /** Short grace windows for lifecycle tests; production uses the exported constants. */
@@ -234,8 +246,7 @@ const ENV_VARS_TO_STRIP: ReadonlySet<string> = new Set([
   // Runtime-only lifecycle capabilities must stop at the API process boundary.
   // Agent CLIs and terminal shells may launch commands inside feature worktrees;
   // forwarding either value would let a raw dev command act like the runtime owner.
-  'CONNECTOR_GATEWAY_AUTOSTART',
-  'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+  ...RUNTIME_ONLY_LIFECYCLE_ENV_KEYS,
   // Legacy F296 process-scoped bearer. Session hooks authenticate with the
   // invocation-bound callback pair; never leak a stale operator token to any child.
   'CAT_CAFE_HOOK_TOKEN',
@@ -297,13 +308,15 @@ async function waitForIteratorUntil<T>(
 
 export function buildChildEnv(
   overrides?: Record<string, string | null>,
-  options: { bindExecutionOwner?: boolean; workingDirectory?: string } = {},
+  options: { bindExecutionOwner?: boolean; workingDirectory?: string; inheritParentEnv?: boolean } = {},
 ): NodeJS.ProcessEnv {
   // Clone process.env but strip known bloated vars to avoid E2BIG (ARG_MAX exceeded).
   const merged: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (ENV_VARS_TO_STRIP.has(key)) continue;
-    merged[key] = value;
+  if (options.inheritParentEnv !== false) {
+    for (const [key, value] of Object.entries(process.env)) {
+      if (ENV_VARS_TO_STRIP.has(key)) continue;
+      merged[key] = value;
+    }
   }
   if (overrides) {
     for (const [key, value] of Object.entries(overrides)) {
@@ -360,18 +373,29 @@ export async function* spawnCli(
     '[cli-spawn] Spawning CLI process',
   );
 
+  const childEnv = buildChildEnv(options.env, {
+    bindExecutionOwner: options.bindExecutionOwner !== false,
+    workingDirectory: options.cwd,
+    inheritParentEnv: options.inheritParentEnv,
+  });
   const child = doSpawn(options.command, options.args, {
     cwd: options.cwd,
-    env: buildChildEnv(options.env, {
-      bindExecutionOwner: options.bindExecutionOwner !== false,
-      workingDirectory: options.cwd,
-    }),
+    env: childEnv,
     // Incident 2026-05-29 (cross-thread-context-contamination): when stdinInput is
     // provided, open stdin as a pipe so the prompt can be streamed off the command
     // line. Otherwise keep 'ignore' (unchanged for providers not using stdin).
     stdio: [options.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     bindExecutionOwner: options.bindExecutionOwner !== false,
   });
+  if (options.bindExecutionOwner !== false) {
+    const executionOwner = cliExecutionOwnerRefFromEnvironment({
+      ...childEnv,
+      [CLI_EXECUTION_OWNER_BINDING_ENV]: '1',
+    });
+    if (options.invocationId && executionOwner?.invocationId === options.invocationId) {
+      observeCliExecutionProcess(child, executionOwner);
+    }
+  }
 
   // Incident 2026-05-29: feed prompt via stdin instead of argv to prevent
   // cross-process prompt leakage (`ps -o command=` / /proc/<pid>/cmdline can read
@@ -414,8 +438,15 @@ export async function* spawnCli(
     );
   }
 
-  // Buffer stderr for error reporting (handler attached after resetTimeout is defined)
-  let stderrBuffer = '';
+  // Buffer stderr for error reporting (handler attached after resetTimeout is defined).
+  // F319: bounded to a tail — trace-level provider logging can emit megabytes per turn,
+  // and exit diagnostics (F212) only ever read the last few hundred characters.
+  const stderrTail = createStderrTail({
+    maxChars: STDERR_BUFFER_MAX_CHARS,
+    ...(options.onStderrLine ? { onLine: options.onStderrLine } : {}),
+  });
+  const appendStderr = (text: string): void => stderrTail.append(text);
+  const flushStderrLineCarry = (): void => stderrTail.flush();
 
   // F212 AC-A8: collect NDJSON stream error event payloads alongside stderr
   const streamErrorTexts: string[] = [];
@@ -437,6 +468,22 @@ export async function* spawnCli(
       resolve();
     };
   });
+  const stdoutDrain = child.stdout ? new CliExitOutputDrain(child.stdout) : undefined;
+  let exitDrainTimer: ReturnType<typeof setTimeout> | undefined;
+  let exitObserved = false;
+  let resolveExitDrain!: () => void;
+  const exitDrainComplete = new Promise<void>((resolve) => {
+    resolveExitDrain = resolve;
+  });
+  const observeProcessExit = (): void => {
+    if (exitObserved) return;
+    exitObserved = true;
+    stdoutDrain?.start();
+    exitDrainTimer = setTimeout(() => {
+      stdoutDrain?.finish();
+      resolveExitDrain();
+    }, deps?.exitDrainGraceMs ?? 1_000);
+  };
 
   let killed = false;
   let timedOut = false;
@@ -477,6 +524,7 @@ export async function* spawnCli(
     childExited = true;
     exitCode = code;
     exitSignal = signal;
+    observeProcessExit();
     terminationController.markExited();
     log.debug({ pid: child.pid, command: options.command, exitCode: code, signal }, 'CLI process exited');
   });
@@ -489,6 +537,7 @@ export async function* spawnCli(
     }
     terminationController.markExited();
     log.debug({ pid: child.pid, command: options.command, exitCode, signal: exitSignal }, 'CLI process stdio closed');
+    observeProcessExit();
     resolveCloseWait();
   });
 
@@ -554,9 +603,30 @@ export async function* spawnCli(
   // timeout on stderr was the root cause of the 30-min stall bug: chatter kept
   // resetting the timer so the callback never fired and the probe never reached
   // suspected_stall. Silence tracking (probe) is also not reset here.
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderrBuffer += chunk.toString();
-  });
+  const onStderrData = (chunk: Buffer | string): void => {
+    appendStderr(chunk.toString());
+  };
+  child.stderr?.on('data', onStderrData);
+  child.stderr?.once('end', flushStderrLineCarry);
+  // F319: on any generator exit (including semantic completion, which returns
+  // before the child exits) hand observers whatever the child already wrote.
+  // `read()` returns buffered chunks even when flowing; the data listener is
+  // detached first so nothing is appended twice.
+  const drainBufferedStderr = (): void => {
+    const stream = child.stderr;
+    if (!stream) return;
+    stream.off('data', onStderrData);
+    if (stream.destroyed) {
+      flushStderrLineCarry();
+      return;
+    }
+    let chunk: Buffer | string | null = stream.read();
+    while (chunk !== null) {
+      appendStderr(chunk.toString());
+      chunk = stream.read();
+    }
+    flushStderrLineCarry();
+  };
 
   // AbortSignal
   const abortHandler = (): void => killChild('terminate-first', 'abort');
@@ -622,7 +692,7 @@ export async function* spawnCli(
   });
 
   try {
-    if (!child.stdout) {
+    if (!stdoutDrain) {
       throw new Error(`CLI process ${options.command} has no stdout`);
     }
 
@@ -635,7 +705,7 @@ export async function* spawnCli(
 
     if (options.outputMode === 'plainText') {
       const stdoutChunks: string[] = [];
-      const plaintext = (child.stdout as AsyncIterable<Buffer | string>)[Symbol.asyncIterator]();
+      const plaintext = (stdoutDrain.stream as AsyncIterable<Buffer | string>)[Symbol.asyncIterator]();
       let pendingNext = plaintext.next();
 
       // Keep plainText providers protected by the same liveness fast-fail path
@@ -709,7 +779,7 @@ export async function* spawnCli(
       }
       plainTextResult = { stdout: stdoutChunks.join('') };
     } else {
-      const ndjson = parseNDJSON(child.stdout)[Symbol.asyncIterator]();
+      const ndjson = parseNDJSON(stdoutDrain.stream)[Symbol.asyncIterator]();
       let pendingNext = ndjson.next();
 
       // #774 R2: Deferred stall-kill — only execute when probe timer wins the race,
@@ -850,7 +920,7 @@ export async function* spawnCli(
         }
       } else {
         // Healthy completion still waits for close so trailing stderr is not truncated.
-        await closePromise;
+        await Promise.race([closePromise, exitDrainComplete]);
       }
     } else if (!childClosed) {
       // Grace period: give the process time to exit naturally before force-killing.
@@ -861,11 +931,11 @@ export async function* spawnCli(
     // F212 AC-A7 / OQ-2 (砚砚 review BLOCKED P1-1): successful exit stderr also gated by
     // LOG_CLI_STDERR + sanitized via shared helper. Previously this branch wrote raw stderr unconditionally.
     if (exitCode === 0 && exitSignal === null) {
-      const stderrForLog = formatCliStderrForLog(stderrBuffer);
-      const stderrTrimmed = stderrBuffer.trim();
+      const stderrForLog = formatCliStderrForLog(stderrTail.value);
+      const stderrTrimmed = stderrTail.value.trim();
       options.onSuccessfulExitStderr?.({
         stderrPresent: stderrTrimmed.length > 0,
-        ...(stderrTrimmed ? { stderrExcerpt: sanitizeCliStderr(stderrBuffer).slice(-500) } : {}),
+        ...(stderrTrimmed ? { stderrExcerpt: sanitizeCliStderr(stderrTail.value).slice(-500) } : {}),
       });
       if (stderrForLog) {
         log.debug(
@@ -883,7 +953,7 @@ export async function* spawnCli(
       yield {
         __cliPlainText: true,
         stdout: plainTextResult.stdout,
-        stderr: stderrBuffer,
+        stderr: stderrTail.value,
         exitCode,
         signal: exitSignal,
         command: options.command,
@@ -913,10 +983,10 @@ export async function* spawnCli(
     if (!finalSemanticDone && !killed && !isWindowsLibuvCrash && (exitCode !== 0 || exitSignal !== null)) {
       // F212 AC-A1 + AC-A8: build structured diagnostics from BOTH stderr and stream error events.
       // Stream errors (NDJSON `{type:"error"}`) often carry the real semantic (Codex code 1 case).
-      const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
+      const rawText = [...streamErrorTexts, stderrTail.value].filter(Boolean).join('\n');
       // F212 Phase F (AC-F4/F5): pass stderrEmpty so buildCliDiagnostics can pick the
       // honest unknown-fallback hint (empty → "no stderr produced" vs non-empty → env-summary).
-      const stderrTrimLen = stderrBuffer.trim().length;
+      const stderrTrimLen = stderrTail.value.trim().length;
       const cliDiagnostics: CliDiagnostics = buildCliDiagnostics({
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
@@ -957,7 +1027,7 @@ export async function* spawnCli(
       // F212 AC-A7 + OQ-2 + Phase F AC-F3: stderr log gated + sanitized via shared helper.
       // AC-F3 adds invocationId to the payload so frontend debugRef.invocationId can be used
       // to grep the corresponding stderr log line (previously the field was missing).
-      const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      const stderrForLog = formatCliStderrForLog(stderrTail.value);
       if (stderrForLog) {
         diagLog.error(
           {
@@ -971,8 +1041,8 @@ export async function* spawnCli(
       }
       // Diagnostic: always log sanitized stderr summary when reasonCode is unknown
       // (the actual root cause is invisible otherwise). Safe: uses sanitizer, capped length.
-      if (!cliDiagnostics.reasonCode && stderrBuffer.trim()) {
-        const sanitized = sanitizeCliStderr(stderrBuffer).slice(-500);
+      if (!cliDiagnostics.reasonCode && stderrTail.value.trim()) {
+        const sanitized = sanitizeCliStderr(stderrTail.value).slice(-500);
         log.info(
           {
             command: options.command,
@@ -1003,8 +1073,8 @@ export async function* spawnCli(
       // the timeout before projecting diagnostics so a cooperative exit=0 cannot overwrite
       // the user-visible reason with "CLI exited".
       timeoutTerminalContext = snapshotTimeoutTerminalContext();
-      const rawText = [...streamErrorTexts, stderrBuffer].filter(Boolean).join('\n');
-      const timeoutStderrTrimLen = stderrBuffer.trim().length;
+      const rawText = [...streamErrorTexts, stderrTail.value].filter(Boolean).join('\n');
+      const timeoutStderrTrimLen = stderrTail.value.trim().length;
       const cliDiagnostics: CliDiagnostics = buildCliDiagnostics({
         rawText,
         structuredErrorText: structuredErrorTexts.filter(Boolean).join('\n'),
@@ -1038,7 +1108,7 @@ export async function* spawnCli(
       // on timeout' — the post-merge R2 review caught that the timeout branch was still hard-
       // using module `log`, so the diagnosticLogger stub couldn't verify the contract. Reuse
       // `diagLog = options.diagnosticLogger ?? log` so AC-F3 spec line is actually testable.
-      const stderrForLog = formatCliStderrForLog(stderrBuffer);
+      const stderrForLog = formatCliStderrForLog(stderrTail.value);
       if (stderrForLog) {
         timeoutDiagLog.error(
           {
@@ -1073,6 +1143,13 @@ export async function* spawnCli(
       };
     }
   } finally {
+    if (exitDrainTimer) clearTimeout(exitDrainTimer);
+    stdoutDrain?.dispose();
+    drainBufferedStderr();
+    if (childExited && !childClosed) {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+    }
     if (timeoutTimer) clearTimeout(timeoutTimer);
     if (options.signal) {
       options.signal.removeEventListener('abort', abortHandler);

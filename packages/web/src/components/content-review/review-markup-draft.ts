@@ -62,6 +62,18 @@ export function removeMarkupMark(history: ReviewMarkupHistory, id: string): Revi
   );
 }
 
+export function updateMarkupMark(
+  history: ReviewMarkupHistory,
+  next: ReviewMarkupMark,
+  media: ImmutableMedia,
+): ReviewMarkupHistory {
+  if (!markSchema.safeParse(next).success || !markupMarkFitsMedia(next, media)) return history;
+  return record(
+    history,
+    history.current.map((mark) => (mark.id === next.id ? next : mark)),
+  );
+}
+
 export function undoMarkup(history: ReviewMarkupHistory): ReviewMarkupHistory {
   const previous = history.past.at(-1);
   return previous === undefined
@@ -116,16 +128,29 @@ export function useReviewMarkupDraft(
   useEffect(() => {
     if (!canEdit || !confirmed.length) return;
     const committed = new Map(confirmed.map((mark) => [mark.id, JSON.stringify(markSchema.parse(mark))]));
+    const forkIds = new Map<string, string>();
+    for (const mark of marks) {
+      const savedSnapshot = committed.get(mark.id);
+      if (savedSnapshot !== undefined && savedSnapshot !== JSON.stringify(markSchema.parse(mark)))
+        forkIds.set(mark.id, crypto.randomUUID());
+    }
     setDraft((current) => {
       if (current.key !== key || !current.readable) return current;
-      const remaining = current.history.current.filter(
-        (mark) => committed.get(mark.id) !== JSON.stringify(markSchema.parse(mark)),
-      );
-      return remaining.length === current.history.current.length
+      const remaining = current.history.current.flatMap((mark) => {
+        const savedSnapshot = committed.get(mark.id);
+        if (savedSnapshot === undefined) return [mark];
+        if (savedSnapshot === JSON.stringify(markSchema.parse(mark))) return [];
+        // The owner ledger keeps the submitted mark immutable. A later local edit
+        // becomes a fresh draft so it stays visible and can be saved separately.
+        const forkId = forkIds.get(mark.id);
+        return forkId ? [{ ...mark, id: forkId }] : [mark];
+      });
+      return remaining.length === current.history.current.length &&
+        remaining.every((mark, index) => mark === current.history.current[index])
         ? current
         : { ...current, history: emptyMarkupHistory(remaining) };
     });
-  }, [canEdit, key, confirmed]);
+  }, [canEdit, key, confirmed, marks]);
   useEffect(() => {
     if (!canEdit) return;
     try {
@@ -153,6 +178,7 @@ export function useReviewMarkupDraft(
     canRedo: draft.history.future.length > 0,
     add: (mark: ReviewMarkupMark) => update((current) => addMarkupMark(current, mark, media)),
     remove: (id: string) => update((current) => removeMarkupMark(current, id)),
+    replace: (mark: ReviewMarkupMark) => update((current) => updateMarkupMark(current, mark, media)),
     undo: () => update(undoMarkup),
     redo: () => update(redoMarkup),
     select: (id: string | null) => setSelectedId(id && marks.some((mark) => mark.id === id) ? id : null),

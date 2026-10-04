@@ -21,7 +21,16 @@ function steerFailureMessage(status: number, code: unknown, error: unknown): str
   return typeof error === 'string' ? error : 'Steer 失败，请重试';
 }
 
-export function useQueueActionConvergence(threadId: string) {
+export interface QueueActionConvergenceOptions {
+  /**
+   * New-shell (v2) consumers only. When true, a force-reset that went through is reported as done even if the
+   * follow-up queue re-read throws (the queue's own updates converge). Default false = the classic behaviour, unchanged.
+   */
+  resetDoneSurvivesRereadFailure?: boolean;
+}
+
+export function useQueueActionConvergence(threadId: string, options: QueueActionConvergenceOptions = {}) {
+  const { resetDoneSurvivesRereadFailure = false } = options;
   const setQueue = useChatStore((state) => state.setQueue);
   const setQueuePaused = useChatStore((state) => state.setQueuePaused);
   const addToast = useToastStore((state) => state.addToast);
@@ -120,7 +129,17 @@ export function useQueueActionConvergence(threadId: string) {
         });
         return;
       }
-      await refreshQueue();
+      if (resetDoneSurvivesRereadFailure) {
+        // The reset itself went through. Re-reading is best effort: if it throws, the queue's own updates converge, and
+        // a done reset must not be reported as failed (or left open for the user to confirm a second time).
+        try {
+          await refreshQueue();
+        } catch {
+          // converges on the next queue update
+        }
+      } else {
+        await refreshQueue();
+      }
       addToast({ type: 'success', title: '已恢复', message: '卡住的处理已解除', threadId, duration: 3000 });
       setForceResetAction(null);
     } catch {
@@ -132,7 +151,7 @@ export function useQueueActionConvergence(threadId: string) {
         return next;
       });
     }
-  }, [addToast, forceResetAction, refreshQueue, threadId]);
+  }, [addToast, forceResetAction, refreshQueue, resetDoneSurvivesRereadFailure, threadId]);
 
   return {
     steerEntryId: steerAction?.entryId ?? null,

@@ -71,6 +71,11 @@ function evidenceRefs(definitions: readonly McpToolDefinition[]): readonly Evide
       .forEach((path) => {
         refs.add(path.enforcementRef);
       });
+    if (definition.operation.kind === 'single') {
+      definition.operation.closedSelectors?.forEach((selector) => {
+        refs.add(selector.evidenceRef);
+      });
+    }
     refs.add(definition.policy.schemaDelivery.evidenceRef);
     refs.add(definition.policy.owner.domainCell);
     const reason = definition.policy.standaloneReason;

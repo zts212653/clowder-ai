@@ -15,13 +15,18 @@ import type { OfficialPluginAuthPort } from '../domains/plugin/official-plugin-a
 import type { OfficialPluginHistoryImportPort } from '../domains/plugin/official-plugin-history-import.js';
 import type { OfficialPluginMeetingIntakePort } from '../domains/plugin/official-plugin-meeting-intake-port.js';
 import { pluginAccessError, requirePluginReadAccess, requirePluginWriteAccess } from './plugin-access-guards.js';
+import {
+  checkOfficialPluginConnectedAuth,
+  isOfficialPluginAuthStatusFailure,
+  officialPluginAuthStatusFailure,
+} from './plugin-official-auth-guard.js';
 import { registerOfficialPluginHistoryRoutes } from './plugin-official-history-routes.js';
 import { registerOfficialPluginMeetingIntakeRoutes } from './plugin-official-meeting-intake-routes.js';
 import { projectOfficialPlugin } from './plugin-official-projection.js';
 
 interface OfficialPluginRouteOptions {
   readonly inventory: PluginInventoryStore;
-  readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'update'>;
+  readonly installer: Pick<OfficialPluginPackageInstaller, 'install' | 'update' | 'preflightUpdate'>;
   readonly lifecycle: Pick<
     ExternalPluginLifecycleService,
     'prepare' | 'enable' | 'disable' | 'repair' | 'uninstall' | 'runWithRuntimeSuspended'
@@ -220,6 +225,10 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
         expectedRevision: revision,
         stopReason: 'package_update',
         resumeFailureCode: 'UPDATE_RESUME_FAILED',
+        preflight: () =>
+          resolved.instance.packageDigest === resolved.entry.packageDigest
+            ? Promise.resolve()
+            : options.installer.preflightUpdate(resolved.entry.catalogId, expectedRelease),
         operation: (stopped) =>
           options.installer.update(
             resolved.entry.catalogId,
@@ -252,12 +261,13 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
       return reply.status(404).send({ error: 'Official plugin authentication is unavailable' });
     }
     try {
-      return await options.auth.status(resolved);
+      const projection = await options.auth.status(resolved);
+      if (!isOfficialPluginAuthStatusFailure(projection)) return projection;
+      const failure = officialPluginAuthStatusFailure(projection);
+      return reply.status(failure.statusCode).send(failure.body);
     } catch {
-      return reply.status(502).send({
-        error: 'Unable to read official plugin authentication',
-        code: 'AUTH_STATUS_FAILED',
-      });
+      const failure = officialPluginAuthStatusFailure();
+      return reply.status(failure.statusCode).send(failure.body);
     }
   });
 
@@ -305,18 +315,13 @@ export function registerOfficialPluginRoutes(app: FastifyInstance, options: Offi
       try {
         const startsRuntime = action === 'enable' || action === 'repair';
         if (startsRuntime && resolved.entry.ownerAuth) {
-          if (!options.auth) {
-            return reply.status(503).send({
-              error: 'Official plugin authentication is unavailable',
-              code: 'AUTH_UNAVAILABLE',
-            });
-          }
-          const auth = await options.auth.status(resolved);
-          if (auth.status !== 'connected') {
-            return reply.status(409).send({
-              error: 'Connect the owner Feishu account before starting meeting intake',
-              code: 'AUTH_REQUIRED',
-            });
+          const auth = await checkOfficialPluginConnectedAuth(
+            options.auth,
+            resolved,
+            'Connect the owner Feishu account before starting meeting intake',
+          );
+          if (!auth.connected) {
+            return reply.status(auth.failure.statusCode).send(auth.failure.body);
           }
         }
         if (startsRuntime && options.meetingIntake) {

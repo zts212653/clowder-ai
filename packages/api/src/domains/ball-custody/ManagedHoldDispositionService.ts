@@ -8,6 +8,9 @@ import {
   buildHoldDispositionEvent,
   holdDispositionEventSourceId,
   type ManagedHoldDisposition,
+  type ManagedHoldRetiredReason,
+  managedHoldRetiredReason,
+  retiredReasonField,
 } from './ball-custody-events.js';
 import { ManagedHoldReceiptError, type ManagedHoldReceiptService } from './ManagedHoldReceiptService.js';
 import {
@@ -18,7 +21,9 @@ import {
 } from './ManagedHoldSourceSelection.js';
 import type { ManagedCommandWakeDynamicTaskStore } from './managed-command-wake-lifecycle.js';
 import { parseManagedCommandWakeTask } from './managed-command-wake-lifecycle.js';
-import { classifyManagedHoldWake, findWakeTerminal } from './managed-hold-supersession.js';
+import { type ManagedHoldReplayMismatchBranch, managedHoldStoredTerminalOf } from './managed-hold-replay-mismatch.js';
+import { classifyManagedHoldRetirement } from './managed-hold-retirement.js';
+import { findWakeTerminal } from './managed-hold-supersession.js';
 import { ManagedHoldHeartbeatConflict, recordManagedHoldDisposition } from './record-managed-hold-disposition.js';
 import { turnCustodyAdoptionRegistry } from './TurnCustodyAdoptionRegistry.js';
 
@@ -32,6 +37,8 @@ export interface ManagedHoldDispositionResult {
   readonly taskId: string;
   /** The wake reached a terminal but was no longer the subject's live wake. */
   readonly retired: boolean;
+  /** Present exactly when `retired`: why the wake was no longer live. */
+  readonly retiredReason?: ManagedHoldRetiredReason;
 }
 
 interface ManagedHoldDispositionDeps {
@@ -48,6 +55,22 @@ interface ManagedHoldDispositionDeps {
 }
 
 /** Invocation-bound terminal producer for an exact managed hold wake. */
+/**
+ * The replay-mismatch error. `branch` says how a terminal that WAS found disagrees with the request; when no
+ * terminal is on the log at all there is nothing to disagree with, and it is always `read_back_missing`.
+ */
+function replayMismatch(
+  event: BallCustodyEvent | undefined,
+  branch: ManagedHoldReplayMismatchBranch,
+): ManagedHoldDispositionError {
+  const existingTerminal = managedHoldStoredTerminalOf(event);
+  return new ManagedHoldDispositionError(
+    'managed_hold_disposition_replay_mismatch',
+    undefined,
+    existingTerminal ? { branch, existingTerminal } : { branch: 'read_back_missing' },
+  );
+}
+
 export class ManagedHoldDispositionService {
   private readonly now: () => number;
 
@@ -122,32 +145,33 @@ export class ManagedHoldDispositionService {
         sourceMessageId,
         taskId,
         retired: prior.payload.retired === true,
+        ...retiredReasonField(managedHoldRetiredReason(prior.payload)),
       };
     }
 
     // clowder-ai#1366: a late or superseded wake still needs a deterministic
     // terminal. Refusing it (the old behaviour) left no `ball.hold_dispositioned`
     // for the stop gate to recognize, so the same wake was reinjected forever.
-    const supersession = classifyManagedHoldWake(events, {
-      catId: auth.catId,
-      sourceMessageId,
-      taskId,
-    });
-    if (supersession.kind === 'wake_missing') {
+    //
+    // Retire or settle is decided from custody alone, replayed from the SAME snapshot the
+    // append below is fenced on (never from the projection store, which can trail the log,
+    // and never from the command carrier: a terminal carrier explains why a callback arrived
+    // late, it does not mean something else took the ball. Sol REQUEST_CHANGES P1: deriving it
+    // from the carrier made a still-live wake write a subject-inert terminal, so the Queue
+    // receipt closed while `ball:thread:X` leaked in `active` forever).
+    // A retired terminal is inert on the subject plane, so it need not own the ball; a settlement
+    // that DOES advance the subject is attempted only while the wake cat still holds it, i.e.
+    // exactly when the state machine would accept it. Nothing here can answer 409 holder_mismatch.
+    const retirement = classifyManagedHoldRetirement(events, { catId: auth.catId, sourceMessageId, taskId });
+    if (retirement.kind === 'wake_missing') {
       throw new ManagedHoldDispositionError('managed_hold_disposition_wake_missing');
     }
-    // `retired` is derived ONLY from custody supersession — never from the command
-    // carrier. A terminal carrier explains why a callback arrived late; it does not
-    // mean something else took the ball. Sol REQUEST_CHANGES P1: deriving it from
-    // the carrier made a still-live wake write a subject-inert terminal, so the
-    // Queue receipt closed while `ball:thread:X` leaked in `active` forever.
-    const retired = supersession.kind === 'superseded';
-    // Retired terminals are inert on the subject plane, so they need not own the
-    // ball. Any disposition that DOES advance the subject still must.
-    if (!retired) await this.assertCurrentHolder(subjectKey, auth.catId);
+    const retiredReason: ManagedHoldRetiredReason | undefined =
+      retirement.kind === 'retired' ? retirement.reason : undefined;
+    const retired = retiredReason !== undefined;
 
     await this.assertLatestInvocation(auth.invocationId);
-    await recordManagedHoldDisposition(
+    const projectionOutcome = await recordManagedHoldDisposition(
       this.deps,
       buildHoldDispositionEvent({
         threadId: auth.threadId,
@@ -157,19 +181,37 @@ export class ManagedHoldDispositionService {
         taskId,
         disposition,
         retired,
+        ...(retiredReason ? { retiredReason } : {}),
         at: this.now(),
       }),
       events.length,
     );
-    const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
-      (event) => event.sourceEventId === eventSourceId,
-    );
+    const after = await this.deps.ballCustodyEventLog.read(subjectKey);
+    const committed = after.find((event) => event.sourceEventId === eventSourceId);
     this.assertMatchingDispositionEvent(committed, auth, sourceMessageId, taskId, disposition);
+    // The decision above is authorised by the log, but ingest applies the event to the projection cache,
+    // which can lag the log (an earlier event's save failed). The projector then REJECTS the exact terminal
+    // without throwing, so the append-failure repair never runs, and once the receipt closes nothing replays
+    // this wake to repair it. The write itself reports what the projection did with the terminal, because
+    // that cannot be read back later: the cache's rejection marker is overwritten by any later accepted
+    // event (a heartbeat, a successor). The log authorised it, so a refusal means the cache lags the log:
+    // converge from the log, on the ingest chain, before the receipt is consumed. When the ingest could
+    // not say, fall back to the replay path's conservative check.
+    if (projectionOutcome === 'rejected') await this.deps.repairProjection?.(subjectKey);
+    else if (projectionOutcome === 'unknown') await this.repairProjectionIfNeeded(subjectKey, after, committed);
     // Consume F264 only after the append-only custody truth is durable. If the
     // receipt write fails, replay repairs it from the exact event; the inverse
     // ordering could delete the only Queue carrier before any terminal event exists.
     await this.completeReceipt(auth, sourceMessageId, taskId);
-    return { outcome: 'applied', disposition, invocationId: auth.invocationId, sourceMessageId, taskId, retired };
+    return {
+      outcome: 'applied',
+      disposition,
+      invocationId: auth.invocationId,
+      sourceMessageId,
+      taskId,
+      retired,
+      ...retiredReasonField(retiredReason),
+    };
   }
 
   private async assertLatestInvocation(invocationId: string): Promise<void> {
@@ -210,13 +252,6 @@ export class ManagedHoldDispositionService {
     }
   }
 
-  private async assertCurrentHolder(subjectKey: string, catId: string): Promise<void> {
-    const projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
-    if ((projection?.state !== 'active' && projection?.state !== 'blocked') || projection.holder !== catId) {
-      throw new ManagedHoldDispositionError('managed_hold_disposition_holder_mismatch');
-    }
-  }
-
   /**
    * Validate an existing terminal for this exact wake and return its canonical
    * disposition.
@@ -246,10 +281,10 @@ export class ManagedHoldDispositionService {
       prior.payload.taskId !== taskId ||
       (recorded !== 'handled' && recorded !== 'completed')
     ) {
-      throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
+      throw replayMismatch(prior, 'existing_terminal_other_identity');
     }
     if (prior.payload.invocationId === auth.invocationId && recorded !== requested) {
-      throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
+      throw replayMismatch(prior, 'existing_terminal');
     }
     return recorded;
   }
@@ -260,7 +295,7 @@ export class ManagedHoldDispositionService {
     sourceMessageId: string,
     taskId: string,
     disposition: ManagedHoldDisposition,
-  ): void {
+  ): asserts event is BallCustodyEvent {
     if (
       !event ||
       event.kind !== 'ball.hold_dispositioned' ||
@@ -269,7 +304,7 @@ export class ManagedHoldDispositionService {
       event.payload.sourceMessageId !== sourceMessageId ||
       event.payload.taskId !== taskId
     ) {
-      throw new ManagedHoldDispositionError('managed_hold_disposition_replay_mismatch');
+      throw replayMismatch(event, 'existing_terminal');
     }
   }
 
@@ -284,7 +319,15 @@ export class ManagedHoldDispositionService {
       .slice(dispositionIndex + 1)
       .some((event) => event.kind === 'ball.handed' || event.kind === 'ball.held');
     const projection = await this.deps.ballCustodyProjectionStore.get(subjectKey);
-    if (!reopenedAfterDisposition && projection?.state !== 'resolved') {
+    // Retired terminals leave the successor's state intact. A healthy active
+    // projection is not evidence of a failed retirement; rebuilding it can
+    // overwrite a successor transition that races the receipt retry.
+    const rejectedDisposition = projection?.lastRejectedEvent?.sourceEventId === dispositionEvent.sourceEventId;
+    if (
+      !projection ||
+      rejectedDisposition ||
+      (dispositionEvent.payload.retired !== true && !reopenedAfterDisposition && projection.state !== 'resolved')
+    ) {
       await this.deps.repairProjection(subjectKey);
     }
   }

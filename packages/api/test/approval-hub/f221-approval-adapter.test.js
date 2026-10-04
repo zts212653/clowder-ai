@@ -106,6 +106,15 @@ describe('F221ApprovalAdapter', () => {
     assert.deepEqual(item.detail.tags, ['authentic-expression', '活人感']);
   });
 
+  it('shows the takeaway hypothesis in the approval item before the owner decides', async () => {
+    const proposal = createAnchored({ takeaway: '我们以为 You 喜欢带情景的手账。' });
+    const [item] = await adapter.listPending('user-1');
+    assert.equal(item.detail.takeaway, '我们以为 You 喜欢带情景的手账。');
+    assert.match(item.summary, /我们以为 You 喜欢带情景的手账/);
+    const { buildTasteProposalCardBlock } = await import('../../dist/routes/taste-proposal-card-block.js');
+    assert.match(buildTasteProposalCardBlock(proposal).bodyMarkdown, /猫的判断（假设）：/);
+  });
+
   it('summary includes dimension and truncated quote', async () => {
     createAnchored();
     const [item] = await adapter.listPending('user-1');

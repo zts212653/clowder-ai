@@ -1,12 +1,19 @@
 'use client';
 
 import type { ApprovalHubItem, MeetingIntakeOutput } from '@cat-cafe/shared';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';
 import type { Thread } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { ApprovalDecisionCard } from './ApprovalDecisionCard';
+import {
+  useAuthorizeWrite,
+  useGuardedWrite,
+  useReportEditing,
+  useWriteBlocked,
+  type WriteEvidence,
+} from './ApprovalHost';
 import { MeetingIntakeDismissAction } from './MeetingIntakeDismissAction';
 import { MEETING_OUTPUTS, MeetingIntakeForm } from './MeetingIntakeForm';
 import { MeetingIntakeRepairActions } from './MeetingIntakeRepairActions';
@@ -22,6 +29,139 @@ import {
   parseMeetingSpeakers,
   userMeetingThreads,
 } from './meeting-intake-utils';
+
+interface MeetingFormValues {
+  speakers: string;
+  context: string;
+  destination: string;
+  outputs: readonly MeetingIntakeOutput[];
+}
+
+/** Anything the user changed from what the proposal arrived with (or a manual reference typed) is work in progress. */
+function meetingFormChanged(
+  current: MeetingFormValues & { manualReference: string },
+  initial: MeetingFormValues,
+): boolean {
+  return (
+    current.speakers !== initial.speakers ||
+    current.context !== initial.context ||
+    current.destination !== initial.destination ||
+    current.manualReference !== '' ||
+    current.outputs.length !== initial.outputs.length ||
+    current.outputs.some((output) => !initial.outputs.includes(output))
+  );
+}
+
+interface MeetingRequestOutcome {
+  /** The response body when the producer accepted the request; null otherwise. */
+  body: Record<string, unknown> | null;
+  /** What the request itself saw of the response, when it can say so. */
+  evidence?: WriteEvidence;
+  error: string | null;
+  /** A 409 or an accepted request means the proposal on screen is out of date. */
+  refresh: boolean;
+}
+
+/** One POST to the producer's own endpoint, mapped to what the card shows and what a host is told. */
+async function postMeetingAction(
+  proposalId: string,
+  name: string,
+  payload: Record<string, unknown>,
+): Promise<MeetingRequestOutcome> {
+  try {
+    const response = await apiFetch(`/api/meeting-intakes/${proposalId}/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        body: null,
+        evidence: { outcome: 'http-error', status: response.status },
+        error: meetingErrorMessage(body, response.status),
+        refresh: response.status === 409,
+      };
+    }
+    return { body: meetingRecord(body), error: null, refresh: true };
+  } catch (cause) {
+    return {
+      body: null,
+      evidence: { outcome: 'network-error' },
+      error: cause instanceof Error ? cause.message : '操作失败',
+      refresh: false,
+    };
+  }
+}
+
+/** The two-step repair (save the destination's cat, then retry delivery), mapped the same way as a single request. */
+async function bindCatAndRetryOutcome(
+  input: Parameters<typeof bindMeetingDestinationCatAndRetry>[0],
+): Promise<MeetingRequestOutcome> {
+  try {
+    const result = await bindMeetingDestinationCatAndRetry(input);
+    if (result.ok) return { body: null, error: null, refresh: true };
+    // Stopped on purpose between the two requests: nothing was answered, so there is no status to report and no
+    // reason to refresh. The host re-reads when the write ends.
+    if ('stopped' in result) return { body: null, error: result.message, refresh: false };
+    return {
+      body: null,
+      evidence: { outcome: 'http-error', status: result.status },
+      error: result.message,
+      refresh: result.status === 409,
+    };
+  } catch (cause) {
+    return {
+      body: null,
+      evidence: { outcome: 'network-error' },
+      error: cause instanceof Error ? cause.message : '保存负责猫猫失败',
+      refresh: false,
+    };
+  }
+}
+
+/**
+ * Whether the edit form is open, and whether the user is working in it. Opening the form or putting the cursor in it is the
+ * start of work in progress and needs no changed character; a form that is open only because the proposal arrived
+ * incomplete is not, until the user touches it. A changed form is work in progress however it is shown. Told to a host as
+ * one editor, so it can keep the card (and the cursor) where they are.
+ */
+function useMeetingEditForm(initialOpen: () => boolean, formChanged: boolean) {
+  const [editOpen, setEditOpen] = useState(initialOpen);
+  const [touched, setTouched] = useState(false);
+  useReportEditing('meeting-form', formChanged || (editOpen && touched));
+  const touch = useCallback(() => setTouched(true), []);
+  const toggle = useCallback(() => {
+    setEditOpen((current) => !current);
+    setTouched(true);
+  }, []);
+  return { editOpen, toggle, touch };
+}
+
+/** One producer request behind the host's guard; busy and error are the card's own, as before. */
+function useMeetingRequest(
+  setBusy: (busy: boolean) => void,
+  setError: (message: string | null) => void,
+  refresh: () => Promise<void>,
+) {
+  const guardedWrite = useGuardedWrite();
+  return async (request: () => Promise<MeetingRequestOutcome>): Promise<Record<string, unknown> | null> => {
+    const written = await guardedWrite('meeting-intake', async (reportEvidence) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const outcome = await request();
+        if (outcome.evidence) reportEvidence(outcome.evidence);
+        if (outcome.error) setError(outcome.error);
+        if (outcome.refresh) await refresh();
+        return outcome.body;
+      } finally {
+        setBusy(false);
+      }
+    });
+    return written.sent ? written.value : null;
+  };
+}
 
 export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
   const fetchPending = useApprovalHubStore((state) => state.fetchPending);
@@ -49,40 +189,32 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
   const [context, setContext] = useState(initialContext);
   const [destination, setDestination] = useState(initialDestination);
   const [outputs, setOutputs] = useState<MeetingIntakeOutput[]>(initialOutputs);
-  const [editOpen, setEditOpen] = useState(
-    () =>
-      !(parseMeetingSpeakers(initialSpeakers) && initialContext.trim() && initialDestination && initialOutputs.length),
-  );
   const [manualReference, setManualReference] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const parsedSpeakers = parseMeetingSpeakers(speakers);
-  const canConfirm = Boolean(parsedSpeakers && context.trim() && destination && outputs.length > 0 && !busy);
+  // A host that has locked writes keeps the form editable; nothing is sent until it unlocks.
+  const writeBlocked = useWriteBlocked(busy);
+  const canConfirm = Boolean(parsedSpeakers && context.trim() && destination && outputs.length > 0 && !writeBlocked);
 
-  async function action(name: string, payload: Record<string, unknown>): Promise<Record<string, unknown> | null> {
-    setBusy(true);
-    setError(null);
-    try {
-      const response = await apiFetch(`/api/meeting-intakes/${item.proposalId}/${name}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const body: unknown = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setError(meetingErrorMessage(body, response.status));
-        if (response.status === 409) await fetchPending();
-        return null;
-      }
-      await fetchPending();
-      return meetingRecord(body);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '操作失败');
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }
+  const formChanged = meetingFormChanged(
+    { speakers, context, destination, outputs, manualReference },
+    { speakers: initialSpeakers, context: initialContext, destination: initialDestination, outputs: initialOutputs },
+  );
+  const {
+    editOpen,
+    toggle: toggleEdit,
+    touch: touchForm,
+  } = useMeetingEditForm(
+    () =>
+      !(parseMeetingSpeakers(initialSpeakers) && initialContext.trim() && initialDestination && initialOutputs.length),
+    formChanged,
+  );
+
+  const perform = useMeetingRequest(setBusy, setError, fetchPending);
+  const authorizeWrite = useAuthorizeWrite();
+  const action = (name: string, payload: Record<string, unknown>) =>
+    perform(() => postMeetingAction(item.proposalId, name, payload));
 
   async function confirm(): Promise<void> {
     if (!parsedSpeakers || !canConfirm) return;
@@ -94,26 +226,15 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
 
   async function bindDestinationCatAndRetry(threadId: string, catId: string): Promise<void> {
     if (!catId || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await bindMeetingDestinationCatAndRetry({
+    await perform(() =>
+      bindCatAndRetryOutcome({
         threadId,
         catId,
         proposalId: item.proposalId,
         revision,
-      });
-      if (!result.ok) {
-        setError(result.message);
-        if (result.status === 409) await fetchPending();
-        return;
-      }
-      await fetchPending();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '保存负责猫猫失败');
-    } finally {
-      setBusy(false);
-    }
+        mayRetry: () => authorizeWrite('meeting-intake'),
+      }),
+    );
   }
 
   const currentDecision = (
@@ -122,7 +243,7 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
         <MeetingIntakeRepairActions
           repair={repair}
           manualReference={manualReference}
-          busy={busy}
+          busy={writeBlocked}
           revision={revision}
           routeCatRepair={routeCatRepairThread ? { threadId: routeCatRepairThread } : undefined}
           onBindCatAndRetry={(threadId, catId) => void bindDestinationCatAndRetry(threadId, catId)}
@@ -135,7 +256,7 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
             <button
               type="button"
-              onClick={() => setEditOpen((current) => !current)}
+              onClick={toggleEdit}
               className="rounded-md border border-cafe px-3 py-1.5 text-micro font-medium hover:bg-cafe-muted sm:mr-auto"
               aria-expanded={editOpen}
               data-testid="meeting-edit-toggle"
@@ -153,21 +274,23 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
             </button>
           </div>
           {editOpen && (
-            <MeetingIntakeForm
-              speakers={speakers}
-              context={context}
-              destination={destination}
-              outputs={outputs}
-              threads={threads}
-              suggestedTitle={typeof metadata.title === 'string' ? metadata.title : '会议跟进'}
-              projectPath={currentProjectPath}
-              loadingThreads={isLoadingThreads}
-              disabled={busy}
-              onSpeakersChange={setSpeakers}
-              onContextChange={setContext}
-              onDestinationChange={setDestination}
-              onOutputsChange={setOutputs}
-            />
+            <div className="contents" onFocusCapture={touchForm}>
+              <MeetingIntakeForm
+                speakers={speakers}
+                context={context}
+                destination={destination}
+                outputs={outputs}
+                threads={threads}
+                suggestedTitle={typeof metadata.title === 'string' ? metadata.title : '会议跟进'}
+                projectPath={currentProjectPath}
+                loadingThreads={isLoadingThreads}
+                disabled={busy}
+                onSpeakersChange={setSpeakers}
+                onContextChange={setContext}
+                onDestinationChange={setDestination}
+                onOutputsChange={setOutputs}
+              />
+            </div>
           )}
         </>
       )}
@@ -175,7 +298,7 @@ export function MeetingIntakeCard({ item }: { item: ApprovalHubItem }) {
         <MeetingIntakeDismissAction
           judgmentState={detail.judgmentState}
           executionState={detail.executionState}
-          busy={busy}
+          busy={writeBlocked}
           onDismiss={() => void action('dismiss', { expectedRevision: revision })}
         />
         {error && <p className="text-micro text-[var(--semantic-error)]">{error}</p>}

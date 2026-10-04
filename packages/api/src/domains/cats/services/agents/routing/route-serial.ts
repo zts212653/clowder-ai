@@ -101,6 +101,7 @@ import {
   buildInvocationStartedEvent,
   buildVoidPassEvent,
 } from '../../../../ball-custody/ball-custody-events.js';
+import { readManagedHoldReceiptState } from '../../../../ball-custody/ManagedHoldReceiptService.js';
 import { turnCustodyAdoptionRegistry } from '../../../../ball-custody/TurnCustodyAdoptionRegistry.js';
 import {
   compareTurnCustodyShadow,
@@ -114,6 +115,7 @@ import {
   turnCustodyWakeSourceCategory,
 } from '../../../../ball-custody/turn-custody-wake-provenance.js';
 import { conciergeContextForCat, prepareConciergeContext } from '../../../../concierge/ConciergeRoutingInterceptor.js';
+import { createConciergeMessageSearch } from '../../../../concierge/concierge-message-search.js';
 import {
   buildConciergeActions,
   extractTriagePlanIdsFromActions,
@@ -160,7 +162,7 @@ import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOut
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { AuditEventTypes, getEventAuditLog } from '../../orchestration/EventAuditLog.js';
-import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
+import { mergePresentationCounts, type PresentationCounts } from '../../session/context/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
 import {
@@ -249,6 +251,7 @@ import {
   routeContentBlocksForCat,
   sanitizeInjectedContent,
   shouldPersistContextBriefing,
+  storedMessageTimestamp,
   subjectSeenCueSeeds,
   toStoredToolEvent,
   upsertMaxBoundary,
@@ -858,12 +861,19 @@ export async function* routeSerial(
   // No shared storage — cross-turn overwrites impossible by construction.
   let conciergeSearchContextString = '';
   let conciergeHandles: HandleEntry[] = [];
-  if ('conciergeConfig' in conciergeCtx) {
+  if (!options.liveCompanion && 'conciergeConfig' in conciergeCtx) {
     try {
       const searchResult = await buildConciergeSearchContext({
         userMessage: message,
         threadId,
         evidenceStore: deps.evidenceStore,
+        messageSearch: createConciergeMessageSearch({
+          evidenceStore: deps.evidenceStore,
+          threadStore: deps.invocationDeps.threadStore,
+          messageStore: deps.messageStore,
+          userId,
+          ...(currentUserMessageId ? { source: { threadId, messageId: currentUserMessageId } } : {}),
+        }),
       });
       conciergeSearchContextString = searchResult.contextString;
       conciergeHandles = searchResult.handles;
@@ -1140,6 +1150,15 @@ export async function* routeSerial(
       const activeA2ATriggerMessageId = worklistEntry.a2aTriggerMessageId.get(catId);
       const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
+      const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
+      const collectiveBoundTurn =
+        options.executionScope === 'collective-work' ||
+        options.executionScope === 'collective-participation' ||
+        turnTriggerMessage?.source?.connector === 'collective' ||
+        Boolean(
+          turnTriggerMessage?.extra?.collectiveWorkInvocationV1 ||
+            turnTriggerMessage?.extra?.collectiveWorkDelegationV1,
+        );
       const streamReplyPreview = streamReplyTo
         ? await hydrateReplyPreview(deps.messageStore, streamReplyTo)
         : undefined;
@@ -1149,6 +1168,16 @@ export async function* routeSerial(
       const activeA2ATriggerContent =
         activeA2ATriggerMessage && !activeA2ATriggerMessage.deletedAt && !activeA2ATriggerMessage._tombstone
           ? activeA2ATriggerMessage.content
+          : undefined;
+      // The original request's provenance belongs only to its original targets.
+      // A downstream cloud turn must carry the persisted cat handoff, not the
+      // human message that started this serial chain.
+      const initialCloudProvenance = isOriginalTarget ? options.cloudDispatchProvenance : undefined;
+      const cloudA2AContent =
+        activeA2ATriggerMessage?.threadId === threadId &&
+        activeA2ATriggerMessage.userId === userId &&
+        activeA2ATriggerMessage.catId === directMessageFrom
+          ? activeA2ATriggerContent
           : undefined;
       const exactA2ATriggerPromptMessage = incrementalMode
         ? await hydrateVisibleA2ATriggerPromptMessage(deps, streamReplyTo, threadId, catId, thinkingMode)
@@ -1459,6 +1488,14 @@ export async function* routeSerial(
           threadId,
           ...(worldContext ? { worldContext } : {}),
           ...catConciergeContext,
+          ...(options.liveCompanion && index === 0
+            ? {
+                liveCompanion: {
+                  householdToolsEnabled: options.liveCompanion.householdToolsEnabled === true,
+                  compositionInstructions: options.liveCompanion.compositionInstructions,
+                },
+              }
+            : {}),
         }),
         personMemoryProposalStatusContext,
       ]
@@ -2240,6 +2277,7 @@ export async function* routeSerial(
       // occurrence of the same cat in this parent chain.
       setWorklistCallerAdmissionOpen(worklistEntry, true);
       for await (const msg of invokeSingleCat(deps.invocationDeps, {
+        ...(options.liveCompanion && index === 0 ? { liveCompanion: options.liveCompanion } : {}),
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
         ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
         ...(routingDispatchPreflightDecision ? { routingDispatchPreflightDecision } : {}),
@@ -2270,13 +2308,10 @@ export async function* routeSerial(
         ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: initialExecutionKind,
         executionCausal: {
-          ...((options.cloudDispatchProvenance?.sourceMessageId ??
-          streamReplyTo ??
-          currentUserMessageId ??
-          a2aTriggerMessageId)
+          ...((initialCloudProvenance?.sourceMessageId ?? streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId)
             ? {
                 triggerMessageId:
-                  options.cloudDispatchProvenance?.sourceMessageId ??
+                  initialCloudProvenance?.sourceMessageId ??
                   streamReplyTo ??
                   currentUserMessageId ??
                   a2aTriggerMessageId,
@@ -2300,13 +2335,11 @@ export async function* routeSerial(
         // - mentionContent: the raw user/cat message (NOT the orchestrated prompt with system context)
         // - mentioningCatId: A2A → the cat that @ mentioned; user-initiated → userId as fallback
         //   so the cloud cat knows "who called" (gpt52 R1 P1-2 contract: calledBy ≠ thread owner)
-        mentionContent: options.cloudDispatchProvenance?.intent ?? message,
+        mentionContent: isOriginalTarget ? (initialCloudProvenance?.intent ?? message) : cloudA2AContent,
         mentioningCatId:
-          options.cloudDispatchProvenance?.calledByCatId ??
-          ((directMessageFrom ?? userId) as import('@cat-cafe/shared').CatId),
-        ...(isOriginalTarget && options.cloudDispatchProvenance
-          ? { cloudDispatchProvenance: options.cloudDispatchProvenance }
-          : {}),
+          initialCloudProvenance?.calledByCatId ??
+          (isOriginalTarget ? ((directMessageFrom ?? userId) as import('@cat-cafe/shared').CatId) : directMessageFrom),
+        ...(initialCloudProvenance ? { cloudDispatchProvenance: initialCloudProvenance } : {}),
         ...(isOriginalTarget && options.requiresExactCloudDispatchProvenance
           ? { requiresExactCloudDispatchProvenance: true }
           : {}),
@@ -2805,40 +2838,51 @@ export async function* routeSerial(
           const rawDecision = await deps.turnCustodyProjectionService!.close(projection);
           const primaryHold =
             turnCustodyWake.kind === 'structured' && turnCustodyWake.protocol === 'hold' ? turnCustodyWake : undefined;
-          const verifiedEventWait =
-            rawDecision.state === 'covered_active' && !rawDecision.transitionObserved
-              ? await readVerifiedWaitContinuation(
-                  primaryHold?.sourceMessageId ?? turnTriggerMessageId ?? options.currentUserMessageId,
-                  primaryHold?.taskId,
-                )
-              : undefined;
-          const newDecision =
-            verifiedEventWait && rawDecision.state === 'covered_active'
-              ? {
-                  ...rawDecision,
-                  shouldBlock: false,
-                  transitionObserved: true,
-                  evidenceRefs: [...rawDecision.evidenceRefs, 'event_wait:verified'],
-                }
-              : rawDecision;
-          if (
-            turnCustodyWake.kind === 'structured' &&
-            turnCustodyWake.protocol === 'hold' &&
-            newDecision.transitionObserved &&
-            newDecision.structuredTransitionKind !== 'hold_dispositioned'
-          ) {
-            const transition = verifiedEventWait
-              ? 'event_wait'
-              : newDecision.structuredTransitionKind === 'held'
-                ? 'reheld'
-                : newDecision.structuredTransitionKind === 'handed'
-                  ? 'transferred'
-                  : undefined;
+          const primaryReceiptState = primaryHold
+            ? await readManagedHoldReceiptState(deps.messageStore, {
+                threadId,
+                userId,
+                catId,
+                invocationId: ownInvocationId ?? '',
+                sourceMessageId: primaryHold.sourceMessageId,
+                taskId: primaryHold.taskId,
+              })
+            : undefined;
+          const primaryTransition = rawDecision.transitionObserved
+            ? rawDecision.structuredTransitionKind === 'held'
+              ? 'reheld'
+              : rawDecision.structuredTransitionKind === 'handed'
+                ? 'transferred'
+                : undefined
+            : undefined;
+          const needsPrimaryContinuation = primaryHold
+            ? primaryReceiptState !== 'settled' && !primaryTransition
+            : !rawDecision.transitionObserved && rawDecision.state === 'covered_active';
+          const verifiedEventWait = needsPrimaryContinuation
+            ? await readVerifiedWaitContinuation(
+                primaryHold?.sourceMessageId ?? turnTriggerMessageId ?? options.currentUserMessageId,
+                primaryHold?.taskId,
+              )
+            : undefined;
+          const newDecision = verifiedEventWait
+            ? {
+                ...rawDecision,
+                shouldBlock: false,
+                transitionObserved: true,
+                evidenceRefs: [...rawDecision.evidenceRefs, 'event_wait:verified'],
+              }
+            : rawDecision;
+          const primaryContinuation = verifiedEventWait ? 'event_wait' : primaryTransition;
+          const primaryDispositionBlocked = primaryHold
+            ? primaryReceiptState !== 'settled' && !primaryContinuation
+            : newDecision.shouldBlock;
+          if (primaryHold && primaryReceiptState !== 'settled') {
+            const transition = primaryContinuation;
             if (transition) {
               recordTurnCustodyTerminalWitness({
                 kind: 'managed_hold_continued',
-                sourceMessageId: turnCustodyWake.sourceMessageId,
-                taskId: turnCustodyWake.taskId,
+                sourceMessageId: primaryHold.sourceMessageId,
+                taskId: primaryHold.taskId,
                 transition,
                 ...(transition === 'event_wait' && verifiedEventWait ? { waitRegistration: verifiedEventWait } : {}),
               });
@@ -2951,8 +2995,23 @@ export async function* routeSerial(
           let adoptedStructuredDispositionBlocked = false;
           for (const adopted of adoptedTurnCustodyProjections) {
             const rawAdoptedDecision = await deps.turnCustodyProjectionService!.close(adopted.projection);
+            const receiptState = await readManagedHoldReceiptState(deps.messageStore, {
+              threadId,
+              userId,
+              catId,
+              invocationId: ownInvocationId ?? '',
+              sourceMessageId: adopted.wake.sourceMessageId,
+              taskId: adopted.wake.taskId,
+            });
+            const adoptedTransition = rawAdoptedDecision.transitionObserved
+              ? rawAdoptedDecision.structuredTransitionKind === 'held'
+                ? 'reheld'
+                : rawAdoptedDecision.structuredTransitionKind === 'handed'
+                  ? 'transferred'
+                  : undefined
+              : undefined;
             const adoptedWait =
-              rawAdoptedDecision.state === 'covered_active' && !rawAdoptedDecision.transitionObserved
+              receiptState !== 'settled' && !adoptedTransition
                 ? await readVerifiedWaitContinuation(adopted.wake.sourceMessageId, adopted.wake.taskId)
                 : undefined;
             const adoptedDecision = adoptedWait
@@ -2963,14 +3022,8 @@ export async function* routeSerial(
                   evidenceRefs: [...rawAdoptedDecision.evidenceRefs, 'event_wait:verified'],
                 }
               : rawAdoptedDecision;
-            const transition = adoptedWait
-              ? 'event_wait'
-              : adoptedDecision.structuredTransitionKind === 'held'
-                ? 'reheld'
-                : adoptedDecision.structuredTransitionKind === 'handed'
-                  ? 'transferred'
-                  : undefined;
-            if (adoptedDecision.transitionObserved && transition) {
+            const transition = adoptedWait ? 'event_wait' : adoptedTransition;
+            if (receiptState !== 'settled' && transition) {
               recordTurnCustodyTerminalWitness({
                 kind: 'managed_hold_continued',
                 sourceMessageId: adopted.wake.sourceMessageId,
@@ -2979,7 +3032,8 @@ export async function* routeSerial(
                 ...(transition === 'event_wait' && adoptedWait ? { waitRegistration: adoptedWait } : {}),
               });
             }
-            adoptedStructuredDispositionBlocked = adoptedDecision.shouldBlock || adoptedStructuredDispositionBlocked;
+            adoptedStructuredDispositionBlocked =
+              (receiptState !== 'settled' && !transition) || adoptedStructuredDispositionBlocked;
             log.info(
               {
                 threadId,
@@ -2989,6 +3043,7 @@ export async function* routeSerial(
                 state: adoptedDecision.state,
                 closeCheckpoint,
                 transitionObserved: adoptedDecision.transitionObserved,
+                receiptState,
                 evidenceRefs: adoptedDecision.evidenceRefs,
               },
               'F167 adopted managed-hold stop-gate verdict',
@@ -2996,7 +3051,7 @@ export async function* routeSerial(
           }
 
           if (
-            (!newDecision.shouldBlock && !adoptedStructuredDispositionBlocked) ||
+            (!primaryDispositionBlocked && !adoptedStructuredDispositionBlocked) ||
             hadError ||
             !actionOutputCommitAllowed ||
             isFreshnessSupplement ||
@@ -3011,7 +3066,8 @@ export async function* routeSerial(
           // instead of letting a second invocation impersonate its disposition.
           if (
             turnCustodyWake.kind === 'structured' &&
-            (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch')
+            (turnCustodyWake.protocol === 'hold' || turnCustodyWake.protocol === 'dispatch') &&
+            primaryDispositionBlocked
           ) {
             stopGateRemedialAttempted = true;
             structuredDispositionMissingCode =
@@ -3671,7 +3727,8 @@ export async function* routeSerial(
 
         // A2A mention detection (缅因猫 P1-3: only after full text accumulated)
         // Line-start @mention = always actionable (no keyword gate)
-        a2aMentions = isFreshnessSupplement ? [] : parseA2AMentions(storedContent, catId);
+        // Collective relay uses the authenticated post-message carrier. Plain prose cannot mint an unscoped queue item.
+        a2aMentions = isFreshnessSupplement || collectiveBoundTurn ? [] : parseA2AMentions(storedContent, catId);
 
         // clowder-ai#489: baseline counter — line-start mentions
         if (a2aMentions.length > 0) {
@@ -4885,11 +4942,18 @@ export async function* routeSerial(
           Boolean(renderThinkingChunks(thinkingChunks).trim().length > 0);
         const shouldPersistNoTextMessage = !callbackAlreadyStored && hasNoTextStreamPayload;
         const isFreshnessClosureSuccessor = Boolean(options.freshnessClosureRequiredMessageIds?.length);
+        // F167 T9: a covered-empty terminal release has its own typed done witness.
+        // The generic no-text notice would turn an intentional clean stop into a ghost bubble.
+        const isCoveredTerminalCleanStop =
+          turnCustodyWake.kind === 'non_obligation' &&
+          turnCustodyWake.source === 'coordination_terminal' &&
+          turnCustodyProjection?.state === 'covered_empty';
         const shouldEmitSilentCompletion =
           !callbackAlreadyStored &&
           collectedToolEvents.length > 0 &&
           !hasRichBlocks &&
           !sawUserFacingSystemInfo &&
+          !isCoveredTerminalCleanStop &&
           !isFreshnessClosureSuccessor;
 
         log.debug(
@@ -5093,7 +5157,7 @@ export async function* routeSerial(
         }
 
         if (!shouldPersistNoTextMessage && !callbackAlreadyStored) {
-          if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
+          if (!sawUserFacingSystemInfo && !isCoveredTerminalCleanStop && !isFreshnessClosureSuccessor) {
             yield {
               type: 'system_info' as AgentMessageType,
               catId,
@@ -5559,6 +5623,7 @@ export async function* routeSerial(
           ...ownStampedDone,
           ...(persistedDoneContent !== undefined ? { content: persistedDoneContent } : {}),
           ...(turnStoredMessageId ? { messageId: turnStoredMessageId } : {}),
+          ...(await storedMessageTimestamp(deps.messageStore, turnStoredMessageId)),
           ...(mentionsUser ? { mentionsUser } : {}),
           ...(turnCustodyTerminalWitnesses[0] ? { turnCustodyTerminalWitness: turnCustodyTerminalWitnesses[0] } : {}),
           ...(turnCustodyTerminalWitnesses.length > 0 ? { turnCustodyTerminalWitnesses } : {}),

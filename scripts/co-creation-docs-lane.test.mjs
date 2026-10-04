@@ -79,6 +79,22 @@ describe('classifyCoCreationDocsLane', () => {
     assert.deepEqual(result.governanceFiles, ['docs/SOP.md']);
   });
 
+  it('routes prompt-input docs (the cat dossier feeds both prompt planes) to a PR with the prompt-budget guard', () => {
+    const result = classifyCoCreationDocsLane({
+      changedFiles: ['docs/team/cat-dossier.md'],
+      conflict: 'none',
+      reversibility: 'one_commit',
+    });
+
+    assert.equal(result.lane, 'co_creation_docs');
+    assert.equal(result.delivery, 'pull_request');
+    assert.deepEqual(result.promptInputFiles, ['docs/team/cat-dossier.md']);
+    assert.ok(result.reasons.includes('prompt_input_budget_guard'));
+    // One command covers both planes: native L0 tokens and the builder-prompt char budget.
+    assert.ok(result.validation.includes('pnpm check:prompt-budget'));
+    assert.ok(!result.validation.some((command) => command.includes('check:l0-budget')));
+  });
+
   it('fails closed to PR when reversibility is unknown', () => {
     const result = classifyCoCreationDocsLane({
       changedFiles: ['docs/architecture/overview.md'],

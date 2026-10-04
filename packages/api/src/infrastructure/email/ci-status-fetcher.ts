@@ -2,9 +2,7 @@
  * #320: Standalone CI status fetcher (pure gh CLI calls — no store dependency).
  * Single source of truth for CI bucket/state interpretation, consumed by CiCdCheckTaskSpec.
  */
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { buildGhCliEnv, withHiddenGhCliWindow } from '../github/gh-cli-env.js';
+import { executeGitHubRequest, GitHubRateLimitError } from '../github/request-budget.js';
 import type { CiBucket, CiCheckDetail, CiPollResult } from './ci-cd-contract.js';
 import { enrichGitHubExecutionFailures } from './ci-execution-failure.js';
 
@@ -12,9 +10,6 @@ export {
   classifyGitHubExecutionFailure,
   type GitHubExecutionFailureEvidence,
 } from './ci-execution-failure.js';
-
-const execFileAsync = promisify(execFile);
-const GH_TIMEOUT_MS = 15_000;
 
 export type GhExecFileAsync = (file: string, args: readonly string[], options: unknown) => Promise<{ stdout: string }>;
 
@@ -32,17 +27,7 @@ type MinimalLog = {
 };
 
 export async function executeGh(args: readonly string[], options: FetchPrCiStatusOptions): Promise<{ stdout: string }> {
-  options.signal?.throwIfAborted();
-  const execute = options.execFileAsync ?? (execFileAsync as unknown as GhExecFileAsync);
-  return execute(
-    'gh',
-    args,
-    withHiddenGhCliWindow({
-      timeout: GH_TIMEOUT_MS,
-      env: buildGhCliEnv({ token: options.ghToken }),
-      signal: options.signal,
-    }),
-  );
+  return executeGitHubRequest([...args], options);
 }
 
 export async function fetchPrCiStatus(
@@ -68,6 +53,7 @@ export async function fetchPrCiStatus(
     prViewJson = stdout;
   } catch (err) {
     options.signal?.throwIfAborted();
+    if (err instanceof GitHubRateLimitError) throw err;
     log.warn(`[ci-status] gh pr view failed for ${repoFullName}#${prNumber}: ${String(err)}`);
     return null;
   }
@@ -131,12 +117,14 @@ async function fetchCheckDetails(
       checks = await fetchGhCheckDetails(repoFullName, prNumber, false, options);
     } catch (err) {
       options.signal?.throwIfAborted();
+      if (err instanceof GitHubRateLimitError) throw err;
       log.warn(`[ci-status] gh pr checks failed for ${repoFullName}#${prNumber}: ${String(err)}`);
       return [];
     }
   }
 
   return enrichGitHubExecutionFailures({
+    signal: options.signal,
     repoFullName,
     headSha,
     checks,
@@ -187,8 +175,9 @@ export async function fetchRequiredFailingChecks(
   try {
     const checks = await fetchGhCheckDetails(repoFullName, prNumber, true, options);
     return checks.some((check) => check.bucket === 'fail') ? checks : null;
-  } catch {
+  } catch (error) {
     options.signal?.throwIfAborted();
+    if (error instanceof GitHubRateLimitError) throw error;
     return null;
   }
 }

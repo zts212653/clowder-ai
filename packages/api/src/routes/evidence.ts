@@ -32,6 +32,7 @@ import type {
   SearchOptions,
 } from '../domains/memory/interfaces.js';
 import type { LibraryCatalog } from '../domains/memory/LibraryCatalog.js';
+import type { MessageSearchService } from '../domains/memory/MessageSearchService.js';
 import type { RebuildJobTracker } from '../domains/memory/RebuildJobTracker.js';
 import { resolveDirectLocalAuthorizationUserId } from '../utils/request-identity.js';
 import { buildThreadCrossPostSuggestion, extractThreadIdFromEvidenceResult } from './cross-thread-affordance.js';
@@ -41,10 +42,14 @@ import {
   mapKindToSourceType,
   sanitizeEvidenceDrillDown,
 } from './evidence-helpers.js';
+import { boundTopkSearchResponse } from './evidence-topk-budget.js';
+import { executeMessageSearch, messageSearchQuerySchema, toMessageSearchInput } from './message-search-handler.js';
 
 /** Accepted query parameters — Phase D: scope/mode/depth added */
 const searchSchema = z.object({
   q: z.string().min(1).max(2_000),
+  resultUnit: z.enum(['document', 'message']).optional(),
+  messageSort: z.enum(['time', 'relevance']).optional(),
   limit: z.coerce.number().int().min(1).max(20).optional(),
   scope: z.enum(['docs', 'memory', 'threads', 'sessions', 'all']).optional(),
   mode: z.enum(['lexical', 'semantic', 'hybrid']).optional(),
@@ -114,9 +119,19 @@ export interface EvidenceSearchResponse {
   }>;
   /** F256 Wave 1b: versioned expansion health funnel for the natural top-k cohort. */
   expansionMeta?: ExpansionFunnelMeta;
+  response?: {
+    budgetChars: number;
+    serializedChars: number;
+    truncated: boolean;
+    omittedEntityMatches: number;
+    omittedPassages: number;
+    omittedExpansionHints: number;
+    detailContinuation: 'unavailable';
+  };
 }
 
 export interface EvidenceRoutesOptions {
+  messageSearchService?: MessageSearchService;
   docsRoot?: string;
   /** F256 Phase C: repo root for L0 convention graph adapter (reads compiler file) */
   repoRoot?: string;
@@ -168,6 +183,22 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
       return { error: 'Invalid query parameters', details: parseResult.error.issues };
     }
 
+    if (parseResult.data.resultUnit === 'message') {
+      const messageQuery = messageSearchQuerySchema.safeParse(request.query);
+      if (!messageQuery.success)
+        return reply
+          .status(400)
+          .send({ error: 'Invalid message search parameters', details: messageQuery.error.issues });
+      const userId = resolveDirectLocalAuthorizationUserId(request);
+      if (!userId) return reply.status(401).send({ error: 'Message search identity required' });
+      return executeMessageSearch(
+        opts.messageSearchService,
+        toMessageSearchInput(messageQuery.data),
+        { userId, viewer: { type: 'user' } },
+        reply,
+      );
+    }
+
     const {
       q,
       limit,
@@ -215,6 +246,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         coverageAbort.abort(new DOMException('Coverage HTTP client disconnected', 'AbortError'));
       };
       request.raw.once('aborted', abortOnDisconnect);
+      reply.raw.once('close', abortOnDisconnect);
       try {
         const { CoverageSearchService } = await import('../domains/memory/CoverageSearchService.js');
         const l0Adapter = await getL0Adapter();
@@ -253,9 +285,22 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         return { error: 'Coverage search failed', details: message };
       } finally {
         request.raw.removeListener('aborted', abortOnDisconnect);
+        reply.raw.removeListener('close', abortOnDisconnect);
       }
     }
 
+    const searchAbort = new AbortController();
+    const searchDeadlineAt = Date.now() + 15_000;
+    const searchTimeout = setTimeout(
+      () => searchAbort.abort(new DOMException('Evidence search deadline exceeded', 'TimeoutError')),
+      15_000,
+    );
+    const abortTopk = () => {
+      if (!reply.raw.writableEnded)
+        searchAbort.abort(new DOMException('Evidence HTTP client disconnected', 'AbortError'));
+    };
+    request.raw.once('aborted', abortTopk);
+    reply.raw.once('close', abortTopk);
     const effectiveLimit = limit ?? 5;
     // F163: freeze flags once per request, compute variant ID
     const f163Flags = freezeFlags();
@@ -301,6 +346,8 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         authorizedCollections: authorizedCollections ?? [],
         explain,
         includePullOnly: true,
+        signal: searchAbort.signal,
+        deadlineAt: searchDeadlineAt,
       };
       let searchMeta: SearchExecutionMeta = { degraded: false };
       // F-4: Use KnowledgeResolver for federated project + global search
@@ -350,7 +397,17 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         try {
           const { TopkExpansionService } = await import('../domains/memory/TopkExpansionService.js');
           const l0Adapter = await getL0Adapter();
-          const expansionService = new TopkExpansionService(opts.evidenceStore, l0Adapter);
+          const expansionService = new TopkExpansionService(
+            {
+              searchWithMeta: (query, options) =>
+                opts.evidenceStore.searchWithMeta!(query, {
+                  ...options,
+                  signal: searchAbort.signal,
+                  deadlineAt: searchDeadlineAt,
+                }),
+            },
+            l0Adapter,
+          );
           const expandResult = await expansionService.expandWithMeta(items, q);
           expansionHints = expandResult.hints;
           expansionMeta = successfulExpansionHealth(expandResult.funnel, expandResult.hints);
@@ -495,7 +552,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
           }
         : undefined;
 
-      return {
+      return boundTopkSearchResponse({
         results,
         degraded: searchMeta.degraded,
         variantId,
@@ -507,7 +564,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         ...(expansionHints && expansionHints.length > 0 ? { expansionHints } : {}),
         ...(expansionMeta ? { expansionMeta } : {}),
         ...(filterExecution ? { filterExecution } : {}),
-      } satisfies Partial<EvidenceSearchResponse>;
+      } satisfies EvidenceSearchResponse);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const errStack = err instanceof Error ? err.stack : undefined;
@@ -543,6 +600,10 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
             }
           : {}),
       } satisfies Partial<EvidenceSearchResponse>;
+    } finally {
+      clearTimeout(searchTimeout);
+      request.raw.removeListener('aborted', abortTopk);
+      reply.raw.removeListener('close', abortTopk);
     }
   });
 
@@ -573,8 +634,13 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         db.prepare("SELECT count(*) AS c FROM evidence_docs WHERE kind = 'thread'").get() as { c: number }
       ).c;
       const edgeCount = (db.prepare('SELECT count(*) AS c FROM edges').get() as { c: number }).c;
-      // Prefer the explicit rebuild stamp written by IndexBuilder; fall back to
-      // MAX(evidence_docs.updated_at) for old databases that predate the stamp.
+      // Document freshness is not an indexing clock. Current IndexBuilder does not write a rebuild stamp.
+      const lastDocumentUpdated = (
+        db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as {
+          t: string | null;
+        }
+      ).t;
+      // Preserve the legacy field for existing consumers, including manually stamped databases.
       let lastUpdated: string | null = null;
       try {
         const stampRow = db.prepare("SELECT value FROM embedding_meta WHERE key = 'last_rebuild_at'").get() as
@@ -585,7 +651,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         /* embedding_meta may not exist in very old schemas */
       }
       if (!lastUpdated) {
-        lastUpdated = (db.prepare('SELECT max(updated_at) AS t FROM evidence_docs').get() as { t: string | null }).t;
+        lastUpdated = lastDocumentUpdated;
       }
 
       // Passages count (may not exist in older schemas)
@@ -664,6 +730,7 @@ export const evidenceRoutes: FastifyPluginAsync<EvidenceRoutesOptions> = async (
         edges_count: edgeCount,
         vectors_count: vectorsCount,
         last_rebuild_at: lastUpdated,
+        last_document_updated_at: lastDocumentUpdated,
         embedding_model: embeddingModel,
         // F188 Phase K (AC-K1/K3): config health surface.
         functionalStatus,
