@@ -117,7 +117,7 @@ if (isVerdictPrCreate()) {
   const expectedRepo =
     process.env.CAT_CAFE_VERDICT_REPO_FULL_NAME ??
     process.env.CAT_CAFE_REPO_FULL_NAME ??
-    'zts212653/cat-cafe';
+    'zts212653/clowder-ai';
   const explicitRepos = optionValues('repository');
   if (explicitRepos.length === 0) {
     fail('verdict_publish_missing_repo_scope', `verdict PR creation requires --repo ${expectedRepo}`);
@@ -136,6 +136,25 @@ if (isVerdictPrCreate()) {
   }
   const repoRoot = gitOutput(['rev-parse', '--show-toplevel']);
   if (!repoRoot) fail('verdict_publish_guard_unavailable', 'current directory is not a git repository');
+
+  // Verify --head branch matches local HEAD. If they diverge, guards would
+  // validate the wrong tree (e.g. caller on main but --head points to verdict branch).
+  const headBranch = optionValue('head');
+  if (headBranch) {
+    const headRef = gitOutput(['rev-parse', '--verify', headBranch]);
+    const localHead = gitOutput(['rev-parse', 'HEAD']);
+    if (!headRef) {
+      fail('verdict_publish_head_unresolvable', `--head '${headBranch}' does not resolve to a local ref`);
+    }
+    if (headRef !== localHead) {
+      fail(
+        'verdict_publish_head_mismatch',
+        `--head '${headBranch}' resolves to ${headRef.slice(0, 11)} but local HEAD is ` +
+          `${localHead.slice(0, 11)} — run from the proposed branch so guards validate correct evidence`,
+      );
+    }
+  }
+
   const baseBranch = optionValue('base') ?? 'main';
   const guard = spawnSync(
     process.execPath,
@@ -157,6 +176,46 @@ if (isVerdictPrCreate()) {
   if (guard.status !== 0) {
     process.stderr.write(guard.stderr || 'verdict_publish_guard_failed\n');
     process.exit(guard.status ?? 1);
+  }
+
+  // Fail closed on dirty/untracked evidence — working tree might not match committed HEAD.
+  // The evidence guard uses readFileSync; dirty overlays could mask committed defects.
+  const dirtyEvidence = gitOutput(['diff', '--name-only', 'HEAD', '--', 'docs/harness-feedback/']);
+  const untrackedEvidence = gitOutput([
+    'ls-files', '--others', '--exclude-standard', '--', 'docs/harness-feedback/',
+  ]);
+  if (dirtyEvidence || untrackedEvidence) {
+    const files = [
+      ...(dirtyEvidence ? dirtyEvidence.split('\n') : []),
+      ...(untrackedEvidence ? untrackedEvidence.split('\n') : []),
+    ].filter(Boolean);
+    fail(
+      'verdict_publish_dirty_evidence',
+      `evidence files are dirty or untracked (${files.slice(0, 3).join(', ')}` +
+        `${files.length > 3 ? ', ...' : ''}); ` +
+        'commit or stash them so the guard validates committed bytes',
+    );
+  }
+
+  // Evidence contract: validate lifecycle-root + snapshot + provenance structure
+  // before evidence reaches the delegated `gh pr create`. Mirrors the contract
+  // runner's post-commit evidence call (verdict-publish-contract-runner.ts:65-84).
+  const evidenceGuard = spawnSync(
+    process.execPath,
+    [
+      resolve(guardRoot, 'scripts/check-verdict-evidence-contract.mjs'),
+      '--candidate-root',
+      repoRoot,
+      '--api-dist-root',
+      resolve(guardRoot, 'packages/api/dist'),
+      '--git-root',
+      repoRoot,
+    ],
+    { encoding: 'utf8', cwd: guardRoot },
+  );
+  if (evidenceGuard.status !== 0) {
+    process.stderr.write(evidenceGuard.stderr || 'verdict_evidence_guard_failed\n');
+    process.exit(evidenceGuard.status ?? 1);
   }
 }
 

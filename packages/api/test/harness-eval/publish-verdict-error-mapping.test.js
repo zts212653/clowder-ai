@@ -49,6 +49,16 @@ describe('mapPublishVerdictError', () => {
     assert.equal(result.error, 'verdict_already_exists');
   });
 
+  it('maps WINDOW_COLLISION to 409 window_collision', () => {
+    const result = mapPublishVerdictError(
+      "WINDOW_COLLISION: bundles 'a-2026' and 'b-2026' have the same domain+window (eval:a2a:5000:6000)",
+    );
+    assert.ok(result, 'must not return null — null falls through to 500');
+    assert.equal(result.status, 409);
+    assert.equal(result.error, 'window_collision');
+    assert.match(result.detail, /same domain\+window/);
+  });
+
   it('returns null for unknown error prefixes (fallthrough to 500)', () => {
     assert.equal(mapPublishVerdictError('some_unknown_error: details'), null);
   });
@@ -60,6 +70,7 @@ describe('mapPublishVerdictError', () => {
       'verdict_already_exists_on_main',
       'verdict_window_already_published',
       'verdict_window_duplicated_in_candidate',
+      'WINDOW_COLLISION',
       'invalid_source_ref',
       'evidence_not_found',
       'session_not_found',

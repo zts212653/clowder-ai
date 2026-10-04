@@ -230,7 +230,7 @@ cloud 不再是默认步骤，因此没有“先默认、再申请跳过”：
 7. **PR body 模式匹配**：body 含字符串 `Verdict published via cat_cafe_publish_verdict MCP tool` —— 防止被滥用为通用 cat-merge 绕道
 8. **作者 ≠ merger**：保留 cross-individual 原则（生成方猫 = 发起 publish 的 eval cat；merger = 任一非生成方猫）
 9. **`evidence-only` label 必须 present**（cloud R6 P2 — 锁住 policy 判断）：PR 必须有 `evidence-only` label。`computePublishPolicy` 只对 `keep_observe` verdict 应用该 label；`fix` / `build` / `delete_sunset` verdict policy 返回 `regular_pr`（无 evidence-only label） → 必须走 regular merge-gate（owner action required）。**关键**：title 含 `verdict(` 前缀和 body 含 `cat_cafe_publish_verdict` 字符串只能证明 PR 是 publish-verdict 自动生成的，**不能证明该 PR 不需要 owner action**。`evidence-only` label 是 policy 显式判断"这条 verdict 无 actionable 内容"的唯一信号；缺失 → 必须走 regular merge-gate（哪怕 PR 是自动生成的）。
-10. **Eval glossary check 必须成功**：GitHub check/status `Eval Metric Glossary Coverage` 必须为 `SUCCESS`。`cat_cafe_publish_verdict` 在任何 branch/commit/PR 副作用前验证 packet 的 glossary refs；candidate commit 生成后、push 前再运行全 production glossary 与 F267 measurement evidence contract，全部通过才推送 exact commit、写入该 GitHub status，随后创建 PR。check 缺失、pending 或失败都不能走 artifact-only merge。旧的 Actions workflow 因组织级 minutes 成本按 operator 决定退役，不再是此门禁的执行载体。
+10. **Eval evidence contract check 必须成功**：GitHub check/status `Eval Evidence Structural Contract` 必须为 `SUCCESS`。`cat_cafe_publish_verdict` 在任何 branch/commit/PR 副作用前验证 packet 的 evidence structure（lifecycle-root schema、snapshot integrity、provenance content、transport identity、census continuity）；candidate commit 生成后、push 前再运行 evidence + transport contract，全部通过才推送 exact commit、写入该 GitHub status，随后创建 PR。check 缺失、pending 或失败都不能走 artifact-only merge。Production glossary 与 F267 measurement coverage 是独立的验证维度，应由各自独立的 status/check 覆盖。旧的 Actions workflow 因组织级 minutes 成本按 operator 决定退役，不再是此门禁的执行载体。
 
 #### 工作流
 
@@ -250,11 +250,11 @@ PR_NUMBER=N node scripts/check-hotfix-pattern.mjs N | jq -r '.hotfix'  # must be
 # fix/build/delete_sunset verdicts intentionally lack this label → must walk regular gate)
 gh pr view N --json labels --jq '.labels[].name' | rg -q '^evidence-only$' \
   || echo "FAIL #9: no evidence-only label — verdict has actionable verdict severity; walk regular merge-gate"
-# Condition #10: the publisher's exact-commit glossary status must pass.
-gh pr checks N | rg -q '^Eval Metric Glossary Coverage.*pass' \
-  || echo "FAIL #10: Eval Metric Glossary Coverage is missing, pending, or failing"
-# Local reproduction when the status is red:
-pnpm check:eval-metric-glossary
+# Condition #10: the publisher's exact-commit evidence contract status must pass.
+gh pr checks N | rg -q '^Eval Evidence Structural Contract.*pass' \
+  || echo "FAIL #10: Eval Evidence Structural Contract is missing, pending, or failing"
+# Local reproduction when the structural contract status is red:
+pnpm check:verdict-publish-contract
 
 # 3. If all 10 pass: squash merge
 gh pr merge N --squash --delete-branch

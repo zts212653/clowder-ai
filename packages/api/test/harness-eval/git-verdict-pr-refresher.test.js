@@ -192,9 +192,9 @@ describe('git verdict PR refresher', () => {
         headSha: newHead,
         statuses: [
           {
-            context: 'Eval Metric Glossary Coverage',
+            context: 'Eval Evidence Structural Contract',
             state: 'success',
-            description: 'Candidate glossary, measurement, and publication contracts passed',
+            description: 'Candidate lifecycle-root, snapshot, provenance, and publication identity contracts passed',
           },
         ],
       });

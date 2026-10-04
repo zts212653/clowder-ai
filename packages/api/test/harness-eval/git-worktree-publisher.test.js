@@ -105,9 +105,10 @@ exit 97
               prBody: 'status failure regression',
               statusChecks: [
                 {
-                  context: 'Eval Metric Glossary Coverage',
+                  context: 'Eval Evidence Structural Contract',
                   state: 'success',
-                  description: 'Candidate glossary, measurement, and publication contracts passed',
+                  description:
+                    'Candidate lifecycle-root, snapshot, provenance, and publication identity contracts passed',
                 },
               ],
             };
@@ -236,9 +237,10 @@ exit 97
               prBody: 'regression test for 砚砚 [爪感差] hook leak',
               statusChecks: [
                 {
-                  context: 'Eval Metric Glossary Coverage',
+                  context: 'Eval Evidence Structural Contract',
                   state: 'success',
-                  description: 'Candidate glossary, measurement, and publication contracts passed',
+                  description:
+                    'Candidate lifecycle-root, snapshot, provenance, and publication identity contracts passed',
                 },
               ],
             };
@@ -265,9 +267,9 @@ exit 97
           headSha: remoteBranchSha,
           statuses: [
             {
-              context: 'Eval Metric Glossary Coverage',
+              context: 'Eval Evidence Structural Contract',
               state: 'success',
-              description: 'Candidate glossary, measurement, and publication contracts passed',
+              description: 'Candidate lifecycle-root, snapshot, provenance, and publication identity contracts passed',
             },
           ],
         },
