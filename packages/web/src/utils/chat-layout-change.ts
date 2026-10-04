@@ -1,6 +1,7 @@
 export const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
 export interface ChatLayoutViewportAnchor {
+  container: HTMLElement;
   element: Element;
   viewportTop: number;
   fallbackScrollTop: number;
@@ -23,6 +24,7 @@ export function readChatLayoutViewportAnchor(event: Event): ChatLayoutViewportAn
   const candidate = (event as CustomEvent<ChatLayoutChangeDetail>).detail?.viewportAnchor;
   if (
     !candidate ||
+    !(candidate.container instanceof HTMLElement) ||
     !(candidate.element instanceof Element) ||
     !Number.isFinite(candidate.viewportTop) ||
     !Number.isFinite(candidate.fallbackScrollTop)

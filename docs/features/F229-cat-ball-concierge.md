@@ -320,7 +320,9 @@ petState = compose(
 - [ ] AC-D2: escalation 传原始对话不传小模型总结（测试断言，KD-8 合规）→ R7
 - [ ] AC-D3: 小模型不可用时自动降级全走值班大猫（测试）→ R7
 
-### operator UX 遗留 Bug（operator 2026-06-18/06-21 多次反馈，跨 Phase 修）
+### operator UX 遗留 Bug（operator 多次反馈，跨 Phase 修）
+- [x] BUG-UX-14: 猫猫球「到最新」无效、追加消息不自动跟随，打开球还会覆盖主界面的滚动记录。operator 2026-09-29 报告。F229 M3 共用 `ThreadChatSurface` 后，`useChatHistory` 仍以全局 `currentThreadId` 和平铺消息判断滚动；现按 surface 的 `threadId` 取消息、保存和恢复对应滚动状态，并保留主界面 remount 恢复测试。
+- [ ] BUG-UX-16（后续观察）：`isOfflineSnapshot` 仍是全局字段；目前猫猫球流程未触发 cross-post / teleport 离线判断，后续若支持这类动作，须改为按 thread 判断，避免读取主界面离线状态。
 - [x] BUG-UX-1: Maine Coon桌宠"狗皮膏药"——球按钮底色 `var(--cafe-surface-elevated)` 实心不透明方块，应为透明底浮在页面上。operator 2026-06-18 + 2026-06-21 两次报告。**已修复**：PR #2474 merged 2026-06-21，移除实心 `backgroundColor` + `boxShadow`，改为透明 `drop-shadow` filter
 - [x] BUG-UX-2: 调查报告 anchor 列表可读性崩溃——InvestigationReportCard 内文字一个字一个字竖排，列宽塌缩到单字符宽度。operator 2026-06-21 截图。**已修复**：PR #2474 merged 2026-06-21，flex 容器加 `min-w-0` + title span 加 `truncate`
 - [x] BUG-UX-3: 面板不可拉伸/不可发现——width/height resize 分别由 PR #2474/#2481 接通，但 clowder-ai#1265 复审确认仅有 1.5px 隐形边缘，功能存在却发现不了。2026-08-08 follow-up 增加可见角落拖拽柄，以及一键放大到安全 viewport / 恢复手动尺寸；原 localStorage 尺寸持久化保持不变

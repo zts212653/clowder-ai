@@ -63,6 +63,7 @@ function resolveMeasuredViewportAnchor({
   const chat = widget.closest('[data-chat-container]');
   if (!(chat instanceof HTMLElement)) return null;
   return {
+    container: chat,
     element: widget,
     viewportTop: widget.getBoundingClientRect().top,
     fallbackScrollTop: chat.scrollTop,
@@ -189,6 +190,7 @@ export function HtmlWidgetBlock({ block, disclosureKey }: { block: RichHtmlWidge
     const anchor = expanded ? disclosureButtonRef.current : widgetRef.current;
     if (chat instanceof HTMLElement && anchor) {
       pendingViewportAnchorRef.current = {
+        container: chat,
         element: anchor,
         viewportTop: anchor.getBoundingClientRect().top,
         fallbackScrollTop: chat.scrollTop,
