@@ -5,7 +5,11 @@ import { fileURLToPath } from 'node:url';
 
 const launcher = fileURLToPath(new URL('./run-public-test-distributable.sh', import.meta.url));
 const requiresRootLinux = process.platform !== 'linux' || process.getuid() !== 0;
-const args = (code) => [launcher, '1000', '1000', process.env.PATH, process.execPath, '-e', code];
+// Match the actual checkout owner on hosted runners; a made-up uid cannot
+// traverse runner-private parent directories after setpriv.
+const runnerUid = process.env.SUDO_UID ?? '1000';
+const runnerGid = process.env.SUDO_GID ?? '1000';
+const args = (code) => [launcher, runnerUid, runnerGid, process.env.PATH, process.execPath, '-e', code];
 const run = (code, { isolated = true } = {}) =>
   spawnSync(isolated ? 'unshare' : launcher, isolated ? ['--net', '--', ...args(code)] : args(code).slice(1), {
     encoding: 'utf8',
