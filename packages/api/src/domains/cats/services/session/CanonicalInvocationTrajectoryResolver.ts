@@ -1,10 +1,53 @@
+import type { InvocationTrajectoryStatus, InvocationTrajectorySummary } from '@cat-cafe/shared';
 import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordStore.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import type { ITurnExecutionStore } from '../stores/ports/TurnExecutionStore.js';
+import { projectInvocationTerminalEvidence } from './InvocationTrajectoryProjector.js';
 import { projectRequestGenerations } from './RequestGenerationProjector.js';
 import type { TranscriptEvent } from './TranscriptReader.js';
 import { filterThreadRecords, resolveThreadAccess, threadAccessDeniedBody } from './thread-access-policy.js';
+
+/** Transcript content stays immutable; matching durable terminals supply lifecycle truth. */
+export async function resolveCanonicalInvocationSummaries(
+  summaries: InvocationTrajectorySummary[],
+  userId: string,
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>,
+): Promise<InvocationTrajectorySummary[]> {
+  if (!turnExecutionStore) return summaries;
+  return Promise.all(
+    summaries.map(async (summary) => {
+      const execution = await turnExecutionStore.get(summary.invocationId);
+      if (
+        !execution ||
+        execution.status === 'running' ||
+        execution.invocationId !== summary.invocationId ||
+        execution.userId !== userId ||
+        execution.threadId !== summary.threadId ||
+        execution.catId !== summary.catId
+      ) {
+        return summary;
+      }
+      if (execution.endedAt === undefined) throw new Error('Terminal execution is missing endedAt');
+      const status: InvocationTrajectoryStatus =
+        execution.status === 'succeeded'
+          ? 'done'
+          : execution.status === 'canceled'
+            ? 'cancelled'
+            : (projectInvocationTerminalEvidence({ type: 'error', errorCode: execution.terminalReason })?.status ??
+              'error');
+      const { terminalReason: _transcriptReason, ...content } = summary;
+      return {
+        ...content,
+        status,
+        startedAt: execution.startedAt,
+        endedAt: execution.endedAt,
+        durationMs: Math.max(0, execution.endedAt - execution.startedAt),
+        ...(execution.terminalReason !== undefined ? { terminalReason: execution.terminalReason } : {}),
+      };
+    }),
+  );
+}
 
 interface InvocationSession {
   id: string;

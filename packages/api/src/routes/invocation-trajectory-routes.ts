@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { resolveCanonicalInvocationTrajectory } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
+import {
+  resolveCanonicalInvocationSummaries,
+  resolveCanonicalInvocationTrajectory,
+} from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
 import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
 import {
   projectRequestGenerationGaps,
@@ -186,7 +189,11 @@ export function registerInvocationTrajectoryRoutes(
       .flat()
       .sort((left, right) => right.startedAt - left.startedAt || left.invocationId.localeCompare(right.invocationId));
     return reply.send({
-      invocations: projected.slice(0, Math.min(limitValue, 500)),
+      invocations: await resolveCanonicalInvocationSummaries(
+        projected.slice(0, Math.min(limitValue, 500)),
+        userId,
+        turnExecutionStore,
+      ),
       total: projected.length,
     });
   });

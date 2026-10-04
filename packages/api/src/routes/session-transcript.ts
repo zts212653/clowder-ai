@@ -9,6 +9,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { resolveCanonicalInvocationSummaries } from '../domains/cats/services/session/CanonicalInvocationTrajectoryResolver.js';
 import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
 import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
 import { mergeTranscriptEventSources } from '../domains/cats/services/session/TranscriptEventEnvelope.js';
@@ -254,7 +255,11 @@ export async function sessionTranscriptRoutes(
     const events = await readInvocationEvents(session, invocationId);
     if (events.length === 0) return reply.status(404).send({ error: 'Invocation not found' });
 
-    const summary = projectInvocationTrajectories(events, session)[0];
+    const [summary] = await resolveCanonicalInvocationSummaries(
+      projectInvocationTrajectories(events, session),
+      userId,
+      turnExecutionStore,
+    );
     const promptInput = await projectInvocationPromptInput(
       { messageStore, turnExecutionStore },
       session,

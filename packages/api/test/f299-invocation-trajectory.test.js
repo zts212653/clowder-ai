@@ -1042,6 +1042,182 @@ describe('F299 active and sealed invocation routes', () => {
     assert.equal(detail.json().summary.sealReason, 'threshold');
   });
 
+  it('uses durable restart terminal truth in both history and detail without manufacturing transcript events', async () => {
+    const stores = await setup();
+    const { invocationId } = await createCanonicalExecution(stores, 'thread-f299');
+    const record = await stores.sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-restart',
+    });
+    await writeTranscriptFile(record, 'events.live.jsonl', [
+      envelope(record, invocationId, 0, { type: 'session_init' }, 1_100),
+    ]);
+    await stores.turnExecutionStore.interruptRunningBefore(1_500, {
+      endedAt: 2_000,
+      terminalReason: 'process_restart',
+    });
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-f299/invocations',
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/invocations/${invocationId}`,
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    assert.equal(list.statusCode, 200);
+    assert.equal(detail.statusCode, 200);
+    for (const summary of [list.json().invocations[0], detail.json().summary]) {
+      assert.equal(summary.status, 'error');
+      assert.equal(summary.terminalReason, 'process_restart');
+      assert.equal(summary.startedAt, 1_000);
+      assert.equal(summary.endedAt, 2_000);
+      assert.equal(summary.durationMs, 1_000);
+      assert.equal(summary.eventCount, 1);
+      assert.equal(summary.errorCount, 0);
+    }
+    assert.deepEqual(
+      detail.json().events.map((item) => item.event.type),
+      ['session_init'],
+    );
+  });
+
+  for (const [terminalStatus, reason, expectedStatus] of [
+    ['failed', 'provider_error', 'error'],
+    ['failed', 'cli_timeout', 'timeout'],
+    ['canceled', 'operator_cancelled', 'cancelled'],
+    ['succeeded', undefined, 'done'],
+  ]) {
+    it(`keeps list and detail consistent with durable ${terminalStatus}/${reason} despite conflicting transcript terminal`, async () => {
+      const stores = await setup();
+      const { invocationId } = await createCanonicalExecution(stores, 'thread-f299');
+      const record = await stores.sessionChainStore.create({
+        threadId: 'thread-f299',
+        catId: 'codex-sol',
+        userId: 'user-f299',
+        cliSessionId: 'cli-terminal',
+      });
+      await writeTranscriptFile(record, 'events.live.jsonl', [
+        envelope(
+          record,
+          invocationId,
+          0,
+          terminalStatus === 'succeeded' ? { type: 'error', error: 'earlier failure' } : { type: 'done' },
+          1_100,
+        ),
+      ]);
+      await stores.turnExecutionStore.transitionTerminal(invocationId, {
+        status: terminalStatus,
+        endedAt: 2_000,
+        ...(reason ? { terminalReason: reason } : {}),
+      });
+      const headers = { 'x-cat-cafe-user': 'user-f299' };
+      const list = await app.inject({ method: 'GET', url: '/api/threads/thread-f299/invocations', headers });
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/api/sessions/${record.id}/invocations/${invocationId}`,
+        headers,
+      });
+      assert.equal(list.statusCode, 200);
+      assert.equal(detail.statusCode, 200);
+      for (const summary of [list.json().invocations[0], detail.json().summary]) {
+        assert.equal(summary.status, expectedStatus);
+        assert.equal(summary.terminalReason, reason);
+        assert.equal(summary.endedAt, 2_000);
+      }
+    });
+  }
+
+  it('does not expose mismatched durable identity or replace transcript evidence for legacy/running rows', async () => {
+    const stores = await setup();
+    const { invocationId } = await createCanonicalExecution(stores, 'thread-f299');
+    const record = await stores.sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-scoped-terminal',
+    });
+    await writeTranscriptFile(record, 'events.live.jsonl', [
+      envelope(record, invocationId, 0, { type: 'session_init' }, 1_100),
+    ]);
+    const own = await stores.turnExecutionStore.get(invocationId);
+    for (const changes of [
+      { userId: 'other-user' },
+      { threadId: 'other-thread' },
+      { catId: 'other-cat' },
+      { invocationId: 'other-execution' },
+    ]) {
+      stores.turnExecutionStore.get = async () => ({
+        ...own,
+        status: 'interrupted',
+        endedAt: 2_000,
+        terminalReason: 'private_reason',
+        ...changes,
+      });
+      const list = await app.inject({
+        method: 'GET',
+        url: '/api/threads/thread-f299/invocations',
+        headers: { 'x-cat-cafe-user': 'user-f299' },
+      });
+      assert.equal(list.json().invocations[0].status, 'running');
+      assert.equal(list.json().invocations[0].terminalReason, undefined);
+      const detail = await app.inject({
+        method: 'GET',
+        url: `/api/sessions/${record.id}/invocations/${invocationId}`,
+        headers: { 'x-cat-cafe-user': 'user-f299' },
+      });
+      assert.equal(detail.json().summary.status, 'running');
+      assert.equal(detail.json().summary.terminalReason, undefined);
+    }
+    for (const execution of [null, own]) {
+      stores.turnExecutionStore.get = async () => execution;
+      const list = await app.inject({
+        method: 'GET',
+        url: '/api/threads/thread-f299/invocations',
+        headers: { 'x-cat-cafe-user': 'user-f299' },
+      });
+      assert.equal(list.json().invocations[0].status, 'running');
+    }
+  });
+
+  it('bounds durable reads to returned history rows and preserves caller cat filtering', async () => {
+    const stores = await setup();
+    const record = await stores.sessionChainStore.create({
+      threadId: 'thread-f299',
+      catId: 'codex-sol',
+      userId: 'user-f299',
+      cliSessionId: 'cli-paged-terminal',
+    });
+    await writeTranscriptFile(record, 'events.live.jsonl', [
+      envelope(record, 'legacy-old', 0, { type: 'session_init' }, 1_100),
+      envelope(record, 'legacy-new', 1, { type: 'session_init' }, 2_100),
+    ]);
+    const lookedUp = [];
+    stores.turnExecutionStore.get = async (id) => {
+      lookedUp.push(id);
+      return null;
+    };
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-f299/invocations?limit=1',
+      headers: { 'x-cat-cafe-user': 'user-f299' },
+    });
+    assert.equal(list.statusCode, 200);
+    assert.equal(list.json().total, 2);
+    assert.deepEqual(lookedUp, ['legacy-new']);
+    lookedUp.length = 0;
+    const filtered = await app.inject({
+      method: 'GET',
+      url: '/api/threads/thread-f299/invocations',
+      headers: { 'x-cat-cafe-user': 'user-f299', 'x-cat-id': 'other-cat' },
+    });
+    assert.deepEqual(filtered.json().invocations, []);
+    assert.deepEqual(lookedUp, []);
+  });
+
   it('skips a syntactically valid active envelope whose event payload is invalid', async () => {
     const { sessionChainStore } = await setup();
     const record = await sessionChainStore.create({
