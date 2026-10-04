@@ -1,6 +1,11 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import {
+  messagePublicationSource,
+  type PublishedMessageCoordinate,
+  usePublishedContent,
+} from '@/components/content-review/usePublishedContent';
 import { CopyButton, Lightbox } from '@/components/Lightbox';
 import type { RichMediaGalleryBlock } from '@/stores/chat-types';
 import { API_URL } from '@/utils/api-client';
@@ -17,10 +22,17 @@ function resolveMediaUrl(url: string): string {
   return trimmed;
 }
 
-export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
+export function MediaGalleryBlock({
+  block,
+  publication,
+}: {
+  block: RichMediaGalleryBlock;
+  publication?: PublishedMessageCoordinate;
+}) {
   const items = Array.isArray(block.items) ? block.items : [];
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [failedIndices, setFailedIndices] = useState<Set<number>>(new Set());
+  const published = usePublishedContent();
 
   const handleImgError = useCallback((index: number) => {
     setFailedIndices((prev) => {
@@ -38,6 +50,11 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
           {items.map((item, i) => {
             const src = resolveMediaUrl(item.url);
             const failed = failedIndices.has(i);
+            const source = messagePublicationSource(
+              publication,
+              { kind: 'media-gallery', blockId: block.id, itemIndex: i },
+              item.url,
+            );
             return (
               // biome-ignore lint/suspicious/noArrayIndexKey: gallery items have no stable id
               <figure key={i} className="relative group space-y-1">
@@ -55,9 +72,16 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setLightboxIndex(i)}
+                    disabled={published.busy}
+                    onClick={() =>
+                      source
+                        ? void published.open(source, item.caption ?? item.alt ?? block.title ?? '作品')
+                        : setLightboxIndex(i)
+                    }
                     className="block w-full rounded focus:outline-2 focus:outline-[var(--semantic-info)]"
-                    aria-label={`Enlarge ${item.alt ?? 'image'}`}
+                    aria-label={
+                      source ? `打开作品 ${item.alt ?? block.title ?? '图片'}` : `Enlarge ${item.alt ?? 'image'}`
+                    }
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     {/* biome-ignore lint/performance/noImgElement: data URIs from MCP cannot use next/image */}
@@ -75,6 +99,16 @@ export function MediaGalleryBlock({ block }: { block: RichMediaGalleryBlock }) {
             );
           })}
         </div>
+        {published.busy ? (
+          <p role="status" className="mt-2 text-xs text-cafe-muted">
+            正在打开作品…
+          </p>
+        ) : null}
+        {published.error ? (
+          <p role="alert" className="mt-2 text-xs text-cafe-error">
+            {published.error}
+          </p>
+        ) : null}
       </div>
       {lightboxIndex !== null && items[lightboxIndex] && !failedIndices.has(lightboxIndex) && (
         <Lightbox

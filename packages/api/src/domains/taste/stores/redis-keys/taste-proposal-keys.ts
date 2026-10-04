@@ -6,4 +6,6 @@ export const TasteProposalKeys = {
   userPending: (userId: string) => `taste-proposal-user-pending:${userId}`,
   userSettled: (userId: string) => `taste-proposal-user-settled:${userId}`,
   dedup: (userId: string, clientRequestId: string) => `taste-proposal-dedup:${userId}::${clientRequestId}`,
+  decisionAuthority: (userId: string, proposalId: string) =>
+    `taste-proposal-decision-authority:${userId}:${proposalId}`,
 } as const;

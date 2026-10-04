@@ -15,7 +15,9 @@ test('start-dev daemon lifecycle uses namespaced, identity-checked state', () =>
   assert.match(startDev, /DAEMON_STATE_HELPER="\$SCRIPT_DIR\/daemon-state\.mjs"/);
   assert.match(startDev, /daemon_state stop/);
   assert.match(startDev, /daemon_state write[\s\S]*--launch-token "\$DAEMON_LAUNCH_TOKEN"/);
-  assert.match(startDev, /--cat-cafe-daemon-token="\$DAEMON_LAUNCH_TOKEN"/);
+  assert.match(startDev, /launch_daemon_child "\$0" "\$DAEMON_LAUNCH_TOKEN" "\$\{RESTART_ARGS\[@\]\}"/);
+  assert.match(startDev, /local launch_token=\$2/);
+  assert.match(startDev, /--cat-cafe-daemon-token="\$launch_token"/);
   assert.doesNotMatch(startDev, /kill -TERM "\$DAEMON_PID"/);
   assert.doesNotMatch(startDev, /DAEMON_PID_FILE="\$\{DAEMON_STATE_DIR\}\/daemon\.pid"/);
 });

@@ -64,6 +64,20 @@ const evalDomainTriggerPolicySchema = z.discriminatedUnion('mode', [
 
 export type EvalDomainTriggerPolicy = z.infer<typeof evalDomainTriggerPolicySchema>;
 
+/**
+ * F267 dormancy (owner decision 2026-10-01): a reversible lifecycle stop that
+ * keeps history. Present ⇒ the domain must be `enabled: false` and the census
+ * classifies it `dormant`; `enabled: false` without this block keeps the older
+ * `gated` meaning. Revival is explicit: remove the block and set `enabled: true`.
+ */
+const evalDomainDormancySchema = z
+  .object({
+    reason: z.string().min(1, 'dormancy.reason is required'),
+    revivalPath: z.string().min(1, 'dormancy.revivalPath is required'),
+    decisionRef: z.string().min(1, 'dormancy.decisionRef is required'),
+  })
+  .strict();
+
 export function detectionDelayHoursForFrequency(frequency: string): number {
   if (frequency === 'daily') return 24;
   if (frequency === 'weekly') return 168;
@@ -146,8 +160,16 @@ const evalDomainRegistryEntrySchema = z
      * those gaps are closed.
      */
     enabled: z.boolean().default(true),
+    dormancy: evalDomainDormancySchema.optional(),
   })
   .superRefine((entry, ctx) => {
+    if (entry.dormancy && entry.enabled !== false) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dormancy'],
+        message: 'dormancy requires enabled: false',
+      });
+    }
     if (entry.triggerPolicy?.mode === 'threshold_or_time' && !['daily', 'weekly'].includes(entry.frequency)) {
       ctx.addIssue({
         code: 'custom',

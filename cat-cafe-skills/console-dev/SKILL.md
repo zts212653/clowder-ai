@@ -1,6 +1,6 @@
 ---
 name: console-dev
-tips_exempt: "2026-09-10：补齐前端设计与实物对照的内部交付路径，不新增可向用户推荐的产品操作。"
+tips_exempt: "Renewed 2026-10-03: author-owned frontend delivery now reuses established design evidence and selects sufficient targeted verification. This is internal implementation guidance, with no new end-user operation to advertise."
 description: >
   Console 前端交付范式：4 道门禁驱动的前端开发流程。Use when:
   新增前端能力、settings section 迁移、新增页面、重构布局、或 F190/Console 级前端流程需要 Product/Design/Implementation/Verification gate。
@@ -11,6 +11,8 @@ description: >
 # Console-Dev
 
 Console 前端开发先定入口和状态，再写组件。这个 skill 不替代 `tdd` / `quality-gate`，它补齐前端特有的产品路径、设计 token、交互状态和视觉证明。
+
+方向已确认且符合 `docs/SOP.md` 产品快车道时，下面四项由同一作者随实现自检，不是四轮 A2A 或新审批：第一小时先争取挂上真实入口，自己走关键交互、对照原约定并贴截图，再跑受影响检查；不等 review/full 才首次打开。复用已成立的设计证据，只验证本次变化涉及的状态；用户不承担首轮 QA。
 
 ## Gate 1: Product Gate
 

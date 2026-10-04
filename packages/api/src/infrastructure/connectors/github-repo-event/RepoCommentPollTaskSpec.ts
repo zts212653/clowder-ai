@@ -45,6 +45,8 @@ import {
   classifyIssueComment,
   type IssueCommentClassification,
 } from '../../../domains/community/issue-analysis/issue-comment-classifier.js';
+import { gitHubAdmissionCanContinue } from '../../github/admission-budget.js';
+import { GitHubRateLimitError } from '../../github/request-budget.js';
 import type { GateResult, TaskSpec_P1 } from '../../scheduler/types.js';
 
 /** Minimal projector interface — only apply() is needed here. */
@@ -83,7 +85,7 @@ export interface RepoCommentPollTaskSpecOptions {
    * observed so far); implementations pass it through to the GitHub `since` query
    * parameter to bound the listing.
    */
-  readonly fetchRepoComments: (repo: string, sinceIso?: string) => Promise<RepoIssueComment[]>;
+  readonly fetchRepoComments: (repo: string, sinceIso?: string, signal?: AbortSignal) => Promise<RepoIssueComment[]>;
   readonly repoAllowlist: string[];
   /** Per-repo collection cursor read (max comment updatedAt, or undefined on first poll). */
   readonly readCursor: (repo: string) => Promise<string | undefined>;
@@ -106,8 +108,10 @@ export interface RepoCommentPollTaskSpecOptions {
  * Extracted from the gate loop so gate() cognitive complexity stays bounded.
  * First poll (no cursor) baselines instead of backfilling — see INV-9b / cloud P1-2.
  */
-async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string): Promise<void> {
+async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const since = await opts.readCursor(repo);
+  signal?.throwIfAborted();
   if (since === undefined) {
     // P1-2 (cloud review): baseline the first poll instead of backfilling. With no cursor
     // (first enable / new repo / lost cursor), fetching with no `since` would pull the
@@ -126,9 +130,11 @@ async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string
   // and let dedup by issueCommentEventId absorb the re-fetched overlap. The cursor below
   // still stores the exact max, so it advances normally (no stuck / regression).
   const sinceWithOverlap = new Date(Date.parse(since) - 1000).toISOString();
-  const comments = await opts.fetchRepoComments(repo, sinceWithOverlap);
+  const comments = await opts.fetchRepoComments(repo, sinceWithOverlap, signal);
+  signal?.throwIfAborted();
   let maxCursor = since;
   for (const c of comments) {
+    signal?.throwIfAborted();
     // PR conversation comments are surfaced by the repo-level endpoint (PRs are issues in
     // GitHub) but belong to the ReviewFeedbackTaskSpec track — do NOT append/project them
     // here. They still advance the cursor below, so a repo with PR activity but no new issue
@@ -170,22 +176,34 @@ async function pollSingleRepo(opts: RepoCommentPollTaskSpecOptions, repo: string
     }
   }
 
+  signal?.throwIfAborted();
   if (maxCursor !== undefined && maxCursor !== since) {
     await opts.writeCursor(repo, maxCursor);
   }
 }
 
 export function repoCommentPollTaskSpec(opts: RepoCommentPollTaskSpecOptions): TaskSpec_P1 {
+  let nextRepoIndex = 0;
   return {
     id: opts.id ?? 'repo-comment-poll',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 60_000 },
     admission: {
-      async gate(): Promise<GateResult> {
-        for (const repo of opts.repoAllowlist) {
+      async gate(ctx): Promise<GateResult> {
+        const signal = ctx?.signal;
+        signal?.throwIfAborted();
+        const startIndex = nextRepoIndex % Math.max(1, opts.repoAllowlist.length);
+        for (let step = 0; step < opts.repoAllowlist.length; step++) {
+          signal?.throwIfAborted();
+          if (step > 0 && !gitHubAdmissionCanContinue(ctx)) break;
+          const index = (startIndex + step) % opts.repoAllowlist.length;
+          const repo = opts.repoAllowlist[index]!;
+          nextRepoIndex = (index + 1) % opts.repoAllowlist.length;
           try {
-            await pollSingleRepo(opts, repo);
+            await pollSingleRepo(opts, repo, signal);
           } catch (e) {
+            signal?.throwIfAborted();
+            if (e instanceof GitHubRateLimitError) continue;
             // fail-open: one repo's fetch/append failure must not block the others.
             // The cursor is not advanced for this repo, so the next poll retries.
             opts.log.warn(`[repo-comment-poll] failed to poll ${repo}, will retry next tick`, e);
@@ -195,6 +213,7 @@ export function repoCommentPollTaskSpec(opts: RepoCommentPollTaskSpecOptions): T
         // Collection-only: all work (append + project) happened above. There is no
         // delivery signal to execute — un-routed issues have no owner thread, and
         // delivery is the downstream router's responsibility.
+        signal?.throwIfAborted();
         return { run: false, reason: 'repo-comment poll: collection-only' };
       },
     },

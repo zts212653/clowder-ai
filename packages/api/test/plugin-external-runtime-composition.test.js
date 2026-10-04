@@ -248,8 +248,27 @@ test('production composition constructs and recovers K-2D but exposes no startup
   const runtimeBinding = source.match(/const\s+([A-Za-z_$][\w$]*)\s*=\s*createDormantPluginRuntimeComposition\(\{/);
   assert.ok(runtimeBinding, 'production must bind the dormant plugin runtime composition');
   const runtimeName = runtimeBinding[1];
-  const recoveryIndex = source.indexOf(`await ${runtimeName}.recoverAfterRestart()`);
-  assert.match(source, new RegExp(`await ${runtimeName}\\.recoverAfterRestart\\(\\)`));
+  const recoveryCall = source.match(
+    new RegExp(
+      `await ${runtimeName}\\.recoverAfterRestart\\(\\{\\s*desktopWindowsAfter:\\s*([A-Za-z_$][\\w$]*)\\s*\\}\\)`,
+    ),
+  );
+  assert.ok(recoveryCall, 'restart recovery must hold desktop windows behind the Host listening gate');
+  const recoveryIndex = recoveryCall.index;
+  const gate = source.match(
+    new RegExp(
+      `const\\s+${recoveryCall[1]}\\s*=\\s*new Promise<void>\\(\\(resolve\\)\\s*=>\\s*\\{\\s*([A-Za-z_$][\\w$]*)\\s*=\\s*resolve;?\\s*\\}\\)`,
+    ),
+  );
+  assert.ok(gate, 'the desktop resume gate must be a Host-owned deferred promise');
+  assert.match(
+    source,
+    new RegExp(
+      `listen:\\s*async\\s*\\(\\)\\s*=>\\s*\\{\\s*const\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*await app\\.listen\\(\\{ port: PORT, host: HOST \\}\\);\\s*${gate[1]}\\(\\);\\s*return\\s+\\1;\\s*\\}`,
+    ),
+    'desktop windows may app.inject; the gate opens only once app.listen has booted Fastify',
+  );
+  assert.equal(source.split(`${gate[1]}()`).length - 1, 1, 'the gate has a single release point');
   assert.match(source, /new FilesystemBuiltinPluginPackageMaterializer\(\{/);
   assert.match(source, /builtinContributions:\s*\{/);
   assert.ok(

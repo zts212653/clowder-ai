@@ -1,3 +1,5 @@
+import { awaitGitHubCaller } from './abortable-wait.js';
+
 export interface GitHubSelfLoginResolverOptions {
   readonly getConfiguredLogin?: () => string | undefined;
   readonly getTokenFingerprint: () => string | undefined;
@@ -6,7 +8,7 @@ export interface GitHubSelfLoginResolverOptions {
 
 export interface GitHubSelfLoginResolver {
   readonly getCurrent: () => string | undefined;
-  readonly refreshIfNeeded: () => Promise<string | undefined>;
+  readonly refreshIfNeeded: (signal?: AbortSignal) => Promise<string | undefined>;
 }
 
 function cleanLogin(value: string | undefined | null): string | undefined {
@@ -31,7 +33,8 @@ export function createGitHubSelfLoginResolver(opts: GitHubSelfLoginResolverOptio
 
   const getCurrent = (): string | undefined => getConfiguredLogin() ?? cachedLogin;
 
-  const refreshIfNeeded = async (): Promise<string | undefined> => {
+  const refreshIfNeeded = async (signal?: AbortSignal): Promise<string | undefined> => {
+    signal?.throwIfAborted();
     const configuredLogin = getConfiguredLogin();
     if (configuredLogin) {
       cachedLogin = configuredLogin;
@@ -46,12 +49,12 @@ export function createGitHubSelfLoginResolver(opts: GitHubSelfLoginResolverOptio
     }
 
     if (inFlight && inFlightTokenFingerprint === tokenFingerprint) {
-      return inFlight;
+      return awaitGitHubCaller(inFlight, signal);
     }
 
     const resolvingTokenFingerprint = tokenFingerprint;
     inFlightTokenFingerprint = resolvingTokenFingerprint;
-    inFlight = (async () => {
+    const resolving = (async () => {
       try {
         const resolvedLogin = cleanLogin(await opts.resolveLogin());
         const configuredLogin = getConfiguredLogin();
@@ -74,6 +77,7 @@ export function createGitHubSelfLoginResolver(opts: GitHubSelfLoginResolverOptio
         }
         return cachedLogin;
       } catch {
+        if (cleanFingerprint(opts.getTokenFingerprint()) !== resolvingTokenFingerprint) return getCurrent();
         cachedLogin = undefined;
         cachedTokenFingerprint = undefined;
         hasCachedTokenFingerprint = false;
@@ -81,14 +85,14 @@ export function createGitHubSelfLoginResolver(opts: GitHubSelfLoginResolverOptio
       }
     })();
 
-    try {
-      return await inFlight;
-    } finally {
-      if (inFlightTokenFingerprint === resolvingTokenFingerprint) {
+    const owned = resolving.finally(() => {
+      if (inFlight === owned) {
         inFlight = undefined;
         inFlightTokenFingerprint = undefined;
       }
-    }
+    });
+    inFlight = owned;
+    return awaitGitHubCaller(owned, signal);
   };
 
   return { getCurrent, refreshIfNeeded };

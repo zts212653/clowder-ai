@@ -141,7 +141,7 @@ test(
       await selectReviewMode(page, 'view');
       await page.getByRole('button', { name: '圈选区域', exact: true }).click();
       await selectReviewMode(page, 'markup');
-      await page.getByRole('alert').filter({ hasText: '未覆盖原记录' }).waitFor();
+      await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
       const before = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
       const start = await canvasPoint(page, 400, 100, media);
       const end = await canvasPoint(page, 600, 230, media);
@@ -173,7 +173,7 @@ test(
       await page.mouse.move(end.x, end.y, { steps: 3 });
       await page.evaluate(({ x, y }) => {
         document
-          .querySelector('[aria-label="标注区域"]')
+          .querySelector('[aria-label="图片或视频上的批注"]')
           ?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 999 }));
       }, end);
       assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), null);
@@ -182,7 +182,7 @@ test(
       const saved = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
       await page.evaluate(({ x, y }) => {
         document
-          .querySelector('[aria-label="标注区域"]')
+          .querySelector('[aria-label="图片或视频上的批注"]')
           ?.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 999 }));
       }, end);
       assert.equal(await page.evaluate((key) => localStorage.getItem(key), annotationKey), saved);
@@ -223,7 +223,7 @@ test(
       }, key);
       await page.reload();
       await selectReviewMode(page, 'markup');
-      await page.getByRole('alert').filter({ hasText: '未覆盖原记录' }).waitFor();
+      await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), original);
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), annotationKey), commentDraft);
       await page.getByRole('button', { name: '重新读取草稿', exact: true }).click();
@@ -237,7 +237,7 @@ test(
       });
       await page.reload();
       await selectReviewMode(page, 'markup');
-      await page.getByRole('alert').filter({ hasText: '未覆盖原记录' }).waitFor();
+      await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), unsupported);
       const incompatible = JSON.stringify({
         v: 1,
@@ -251,7 +251,7 @@ test(
       });
       await page.reload();
       await selectReviewMode(page, 'markup');
-      await page.getByRole('alert').filter({ hasText: '未覆盖原记录' }).waitFor();
+      await page.getByRole('alert').filter({ hasText: '原记录保留' }).waitFor();
       assert.equal(await page.evaluate((storedKey) => localStorage.getItem(storedKey), key), incompatible);
     });
   },

@@ -68,6 +68,7 @@ it('allocates one durable reply slot across concurrent resolvers and process res
   const [first, second] = await Promise.all([outbox.prepareReplyOperation(f), outbox.prepareReplyOperation(f)]);
   expect(first.outboxId).toBe(second.outboxId);
   expect(first.status).toBe('prepared');
+  expect(first.operationKey).toBe(JSON.stringify([f.sourceRef, source.catId, f.resultKey]));
   const reopened = await ConnectorPersistence.open(f.dir);
   expect(await outbox.prepareReplyOperation({ ...f, persistence: reopened })).toEqual(first);
   expect(reopened.snapshot().connections[source.connectionId]?.outbox).toHaveLength(1);
@@ -91,4 +92,117 @@ it('freezes body and original named author; a later invocation recovers instead 
   });
   await expect(outbox.submitReplyOperation(input)).rejects.toMatchObject({ code: 'PARTICIPATION_REVOKED' });
   expect(f.persistence.snapshot().connections[source.connectionId]?.outbox).toHaveLength(1);
+});
+
+it('seals one owner-derived prepared Artifact on the current private Task revision', async () => {
+  const f = { ...(await fixture()), resultKey: 'work:canonical-task', workRevision: 2 };
+  const first = await outbox.prepareReplyOperation(f);
+  const operation = await outbox.prepareReplyOperation({ ...f, workRevision: 3 });
+  expect(operation).toMatchObject({
+    outboxId: first.outboxId,
+    workPurpose: { taskRef: 'task:work:canonical-task', admittedRevision: 3, resultRevision: 1 },
+  });
+  const artifactSnapshot = {
+    taskRef: 'task:work:canonical-task',
+    taskRevision: 3,
+    artifactRef: 'artifact:result',
+    artifactRevision: '7',
+    completenessRef: 'artifact:result#complete:7',
+    previewRef: 'artifact:result#preview:7',
+    openInWorkspaceRef: 'workspace:artifact:thread-result:7:artifact:result',
+  };
+  const agent = { catId: 'opus', agentId: 'opus', displayName: 'Opus', sessionRef: 'invocation-result' };
+  const queued = await outbox.submitReplyOperation({
+    ...f,
+    workRevision: 3,
+    operationId: operation.outboxId,
+    body: 'Prepared result',
+    agent,
+    verifyAgent: async () => true,
+    artifactSnapshot,
+  });
+  expect(queued.workPurpose).toEqual({
+    taskRef: 'task:work:canonical-task',
+    admittedRevision: 3,
+    resultRevision: 1,
+    artifactSnapshot,
+  });
+  await expect(
+    outbox.submitReplyOperation({
+      ...f,
+      workRevision: 3,
+      operationId: operation.outboxId,
+      body: 'Prepared result',
+      agent,
+      verifyAgent: async () => true,
+      artifactSnapshot: { ...artifactSnapshot, artifactRevision: '8' },
+    }),
+  ).rejects.toMatchObject({ code: 'REPLY_PAYLOAD_CONFLICT' });
+});
+
+it('allocates a distinct durable reply operation for each result revision of the same Work', async () => {
+  const firstRound = { ...(await fixture()), resultKey: 'work:canonical-task', workRevision: 2, resultRevision: 1 };
+  const first = await outbox.prepareReplyOperation(firstRound);
+  const second = await outbox.prepareReplyOperation({ ...firstRound, resultRevision: 2 });
+
+  expect(second.outboxId).not.toBe(first.outboxId);
+  expect(first.workPurpose?.resultRevision).toBe(1);
+  expect(second.workPurpose?.resultRevision).toBe(2);
+  expect(firstRound.persistence.snapshot().connections[source.connectionId]?.outbox).toHaveLength(2);
+});
+
+it('keeps the assigned source while a verified current home Cat returns the admitted Work result', async () => {
+  const f = { ...(await fixture()), resultKey: 'work:canonical-task', workRevision: 2 };
+  await f.persistence.transaction((state) => {
+    const route = state.hostRoutes[source.connectionId];
+    if (!route) throw new Error('fixture Host route missing');
+    route.agentRoutes['human_aaaaaaaa:codex-sol'] = {
+      catId: 'codex-sol',
+      threadId: 'private-work',
+      participation: { displayName: 'Sol', channelIds: ['a'] },
+    };
+  });
+  const operation = await outbox.prepareReplyOperation(f);
+  const agent = {
+    catId: 'codex-sol',
+    agentId: 'codex-sol',
+    displayName: 'Sol',
+    sessionRef: 'invocation-home-delegate',
+  };
+
+  const queued = await outbox.submitReplyOperation({
+    ...f,
+    operationId: operation.outboxId,
+    body: 'Result from the delegated home Cat',
+    agent,
+    verifyAgent: async () => true,
+  });
+
+  expect(queued).toMatchObject({
+    status: 'queued',
+    replySource: { catId: 'opus', eventId: source.eventId },
+    agent: { catId: 'codex-sol', agentId: 'codex-sol', displayName: 'Sol' },
+    workPurpose: { taskRef: 'task:work:canonical-task', admittedRevision: 2 },
+  });
+
+  const ordinary = { ...(await fixture()), sourceRef: 'message:ordinary', resultKey: 'request' };
+  await ordinary.persistence.transaction((state) => {
+    const route = state.hostRoutes[source.connectionId];
+    if (!route) throw new Error('fixture Host route missing');
+    route.agentRoutes['human_aaaaaaaa:codex-sol'] = {
+      catId: 'codex-sol',
+      threadId: 'private-work',
+      participation: { displayName: 'Sol', channelIds: ['a'] },
+    };
+  });
+  const ordinaryOperation = await outbox.prepareReplyOperation(ordinary);
+  await expect(
+    outbox.submitReplyOperation({
+      ...ordinary,
+      operationId: ordinaryOperation.outboxId,
+      body: 'A delegated Cat cannot take over an ordinary public reply',
+      agent,
+      verifyAgent: async () => true,
+    }),
+  ).rejects.toMatchObject({ code: 'AGENT_PROVENANCE_UNVERIFIED' });
 });

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "canvas": { "width": 512, "height": 512 },
+  "format": "png",
+  "background": "transparent",
+  "outline": "white die-cut sticker border",
+  "states": {
+    "applied": { "label": "证据确凿", "meaning": "这条记忆被用上了" },
+    "drilled": { "label": "查证中", "meaning": "这条记忆被翻出来看过" },
+    "invalidated": { "label": "被推翻", "meaning": "这条记忆被更正或已失效" },
+    "dormant": { "label": "困困", "meaning": "这条记忆很久没被想起" }
+  },
+  "families": {
+    "xianxian": { "name": "宪宪", "species": "Ragdoll" },
+    "yanyan": { "name": "砚砚", "species": "Maine Coon" },
+    "shuoshuo": { "name": "烁烁", "species": "Siamese" },
+    "momo": { "name": "墨墨", "species": "Van-pattern" }
+  },
+  "stickers": [
+    { "family": "xianxian", "state": "applied", "path": "xianxian-applied.png" },
+    { "family": "xianxian", "state": "drilled", "path": "xianxian-drilled.png" },
+    { "family": "xianxian", "state": "invalidated", "path": "xianxian-invalidated.png" },
+    { "family": "xianxian", "state": "dormant", "path": "xianxian-dormant.png" },
+    { "family": "yanyan", "state": "applied", "path": "yanyan-applied.png" },
+    { "family": "yanyan", "state": "drilled", "path": "yanyan-drilled.png" },
+    { "family": "yanyan", "state": "invalidated", "path": "yanyan-invalidated.png" },
+    { "family": "yanyan", "state": "dormant", "path": "yanyan-dormant.png" },
+    { "family": "shuoshuo", "state": "applied", "path": "shuoshuo-applied.png" },
+    { "family": "shuoshuo", "state": "drilled", "path": "shuoshuo-drilled.png" },
+    { "family": "shuoshuo", "state": "invalidated", "path": "shuoshuo-invalidated.png" },
+    { "family": "shuoshuo", "state": "dormant", "path": "shuoshuo-dormant.png" },
+    { "family": "momo", "state": "applied", "path": "momo-applied.png" },
+    { "family": "momo", "state": "drilled", "path": "momo-drilled.png" },
+    { "family": "momo", "state": "invalidated", "path": "momo-invalidated.png" },
+    { "family": "momo", "state": "dormant", "path": "momo-dormant.png" }
+  ]
+}

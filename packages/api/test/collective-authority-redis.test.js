@@ -54,6 +54,7 @@ test(
         v: 1,
         taskId: 'work',
         observedRevision: 3,
+        resultRevision: 2,
         sourceRef: 'message:source-A',
         authorityRef: 'message:owner-receipt',
       };
@@ -65,7 +66,7 @@ test(
         undefined,
         undefined,
         'work-trigger',
-        'strict',
+        'unknown',
         undefined,
         undefined,
         workBinding,
@@ -81,6 +82,25 @@ test(
         timestamp: 1,
         extra: { collectiveOwnerAdmissionV1: receipt },
       });
+      const delegation = {
+        v: 1,
+        taskId: 'work',
+        observedRevision: 3,
+        resultRevision: 2,
+        ownerCatId: source.catId,
+        targetCatIds: ['codex-sol'],
+      };
+      const restoredDelegation = { ...delegation, executionRevision: 1 };
+      const delegatedMessage = await messages.append({
+        userId: 'owner',
+        threadId: 'private',
+        catId: source.catId,
+        content: '@codex-sol continue this private Work',
+        mentions: ['codex-sol'],
+        origin: 'callback',
+        timestamp: 2,
+        extra: { isExplicitPost: true, collectiveWorkDelegationV1: delegation },
+      });
       await first.quit();
 
       const restarted = new InvocationRegistry({ backend: new RedisAuthInvocationBackend(second) });
@@ -91,16 +111,27 @@ test(
       assert.deepEqual(publicResult.record.toolExecutionPolicy, { mode: 'collective_participation' });
       const privateResult = await restarted.verify(privateAuth.invocationId, privateAuth.callbackToken);
       assert.equal(privateResult.ok, true);
-      assert.equal(privateResult.record.ownerAuthProvenance, 'strict');
-      assert.deepEqual(privateResult.record.collectiveWorkBinding, workBinding);
+      assert.equal(privateResult.record.ownerAuthProvenance, 'unknown');
+      assert.deepEqual(privateResult.record.collectiveWorkBinding, { ...workBinding, executionRevision: 1 });
       assert.equal(privateResult.record.executionGrant, undefined);
 
       const restoredMessages = new RedisMessageStore(second);
       assert.deepEqual((await restoredMessages.getById(ownerMessage.id)).extra.collectiveOwnerAdmissionV1, receipt);
+      assert.deepEqual(
+        (await restoredMessages.getById(delegatedMessage.id)).extra.collectiveWorkDelegationV1,
+        restoredDelegation,
+      );
       await restoredMessages.updateExtra(ownerMessage.id, {
         collectiveOwnerAdmissionV1: { ...receipt, sourceRef: 'message:forged' },
       });
       assert.deepEqual((await restoredMessages.getById(ownerMessage.id)).extra.collectiveOwnerAdmissionV1, receipt);
+      await restoredMessages.updateExtra(delegatedMessage.id, {
+        collectiveWorkDelegationV1: { ...delegation, targetCatIds: ['opus'] },
+      });
+      assert.deepEqual(
+        (await restoredMessages.getById(delegatedMessage.id)).extra.collectiveWorkDelegationV1,
+        restoredDelegation,
+      );
     } finally {
       if (first.status !== 'end') await first.quit();
       await cleanupClientKeyspace(second);

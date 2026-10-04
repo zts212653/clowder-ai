@@ -23,9 +23,9 @@ export function hasNextPage(pageCount: number, pageSize: number = EVENTS_PAGE_SI
 export async function loadEventsPage(offset: number): Promise<{ events: StoredEventMemory[]; hasMore: boolean }> {
   const res = await apiFetch(`/api/memory/events?limit=${EVENTS_PAGE_SIZE}&offset=${offset}`);
   if (!res?.ok) throw new Error('events fetch failed');
-  const data = (await res.json()) as { events: StoredEventMemory[]; meta?: { count: number } };
+  const data = (await res.json()) as { events: StoredEventMemory[]; meta?: { count: number; hasMore?: boolean } };
   const events = data.events ?? [];
-  return { events, hasMore: hasNextPage(data.meta?.count ?? events.length) };
+  return { events, hasMore: data.meta?.hasMore ?? hasNextPage(data.meta?.count ?? events.length) };
 }
 
 /** Fetch the L0 magic-word meaning table (AC-A5); soft-fails to empty on error. */

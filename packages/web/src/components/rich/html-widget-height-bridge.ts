@@ -17,6 +17,7 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
   const blockId = ${escapeInlineScriptValue(blockId)};
   const instanceId = ${escapeInlineScriptValue(instanceId)};
   let scheduled = false;
+  let scheduleToken = 0;
   let lastSample = '';
   let pendingCause = null;
   let lastMeasuredViewportHeight = null;
@@ -132,11 +133,24 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
       }, '*');
     }
   };
-  const schedule = (cause) => {
-    postPending(cause);
+  const scheduleMeasurement = () => {
     if (scheduled) return;
     scheduled = true;
-    requestAnimationFrame(() => requestAnimationFrame(measure));
+    const token = ++scheduleToken;
+    const runMeasurement = () => {
+      if (!scheduled || token !== scheduleToken) return;
+      scheduled = false;
+      measure();
+    };
+    requestAnimationFrame(() => requestAnimationFrame(runMeasurement));
+    // Chromium may suspend RAF callbacks for sandboxed iframes outside the
+    // viewport (the export page starts at scrollY=0). Keep readiness bounded
+    // without making export depend on the widget being visible.
+    window.setTimeout(runMeasurement, 100);
+  };
+  const schedule = (cause) => {
+    postPending(cause);
+    scheduleMeasurement();
   };
   const scheduleContent = () => schedule('content');
   const scheduleViewport = () => schedule('viewport');
@@ -170,9 +184,7 @@ export function addHtmlWidgetHeightBridge(html: string, blockId: string, instanc
       !/^[A-Za-z0-9:_-]+$/.test(proofRequestId)
     ) return;
     pendingProofRequestId = proofRequestId;
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => requestAnimationFrame(measure));
+    scheduleMeasurement();
   });
   document.addEventListener('load', scheduleContent, true);
   document.addEventListener('error', scheduleContent, true);

@@ -4,7 +4,7 @@ import { basename, isAbsolute, relative, resolve } from 'node:path';
 import type { EntityConflictContext, EntityConflictResolutionRequest } from '@cat-cafe/shared';
 import Database from 'better-sqlite3';
 import { computeConsumptionPrior } from './consumption-prior.js';
-import { type EntityMentionPassageHit, EntityRegistryStore } from './EntityRegistry.js';
+import { type EntityMentionPassageHit, EntityRegistryStore, normalizeEntityAlias } from './EntityRegistry.js';
 import { EvidenceWriteQueue } from './evidence-write-queue.js';
 import { ContradictionDetector } from './f163-contradiction-detector.js';
 import { type F163Authority, freezeFlags, pathToAuthority } from './f163-types.js';
@@ -29,12 +29,20 @@ import {
   rankLexicalBackfillRows,
   splitLexicalBackfillWords,
 } from './lexical-backfill.js';
+import { runMemoryRead } from './MemoryProcess.js';
+import type { EmbeddingSnapshot } from './memory-process-protocol.js';
+import { searchMessagePassages } from './message-passage-search.js';
+import type { MessagePassageSearchExecution, MessagePassageSearchOptions } from './message-passage-search-types.js';
+import { readMessagePassageState } from './message-passage-state.js';
+import { normalizeMessageSearchDates } from './message-search-dates.js';
 import { applyMMR } from './mmr.js';
 import { type PassageVectorStore, parsePassageVectorKey, passageVectorKey } from './PassageVectorStore.js';
+import { publishEntityMentions, recoverEntityMentionProjections } from './publish-entity-mentions.js';
 import { applyPullOnlyDownrank } from './pull-only-ranking.js';
 import { computeRecencyDecay } from './recency-decay.js';
 import { applyMigrations } from './schema.js';
 import type { VectorStore } from './VectorStore.js';
+import { writeEvidenceItems } from './write-evidence-items.js';
 
 // DF-8: asymmetric RRF weight for CJK queries — BM25/FTS5 has poor recall
 // for Chinese text, so boost NN contributions to prevent suppression.
@@ -121,6 +129,8 @@ export interface EmbedDeps {
 export interface SqliteEvidenceStoreOptions {
   sourceRoot?: string;
   sourceRef?: string;
+  /** @internal A child opens an existing schema without migrating or recursively dispatching. */
+  workerMode?: 'read';
 }
 
 interface SearchFilterContext {
@@ -164,6 +174,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private db: Database.Database | null = null;
   private readonly dbPath: string;
   private embedDeps?: EmbedDeps;
+  private readonly workerMode?: 'read';
   private sourceRoot?: string;
   private sourceRef?: string;
   private entityRegistry?: EntityRegistryStore;
@@ -171,7 +182,8 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   private readonly writeQueue = new EvidenceWriteQueue();
 
   constructor(dbPath: string, embedDeps?: EmbedDeps, options?: SqliteEvidenceStoreOptions) {
-    this.dbPath = dbPath;
+    this.dbPath = dbPath === ':memory:' ? dbPath : resolve(dbPath);
+    this.workerMode = options?.workerMode;
     this.embedDeps = embedDeps;
     this.sourceRoot = options?.sourceRoot ? resolve(options.sourceRoot) : undefined;
     this.sourceRef = options?.sourceRoot ? options.sourceRef : undefined;
@@ -189,21 +201,35 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   async initialize(): Promise<void> {
-    this.db = new Database(this.dbPath);
-    this.db.pragma('journal_mode = WAL');
+    this.db = new Database(this.dbPath, {
+      readonly: this.workerMode === 'read',
+      fileMustExist: Boolean(this.workerMode),
+    });
+    if (!this.workerMode) this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
 
-    applyMigrations(this.db);
+    if (!this.workerMode) applyMigrations(this.db);
     this.entityRegistry = new EntityRegistryStore(this.db);
+    if (!this.workerMode) {
+      await recoverEntityMentionProjections(this.db);
+      const pending = this.db.prepare('SELECT doc_anchor FROM entity_mention_pending_docs').all() as {
+        doc_anchor: string;
+      }[];
+      if (pending.length) await this.refreshEntityMentions(pending.map((row) => row.doc_anchor));
+    }
   }
 
   async upsertEntities(entities: EntityRecord[], context: EntityMutationContext = { source: 'system' }): Promise<void> {
-    return this.writeQueue.enqueue(() => {
+    return this.writeQueue.enqueue(async () => {
       this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(this.getDb(), this.dbPath, { operation: 'entities', entities, context }, () => {
+          this.entityRegistry!.upsert(entities, context);
+        });
       const tx = this.db?.transaction(() => {
         const changed = this.entityRegistry?.upsert(entities, context) ?? false;
-        if (changed) this.entityRegistry?.refreshMentions();
+        if (changed) this.entityRegistry?.refreshMentionsForEntities(entities.map(({ entityId }) => entityId));
       });
       tx?.();
     });
@@ -224,8 +250,17 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     resolution: EntityConflictResolutionRequest,
     context: EntityMutationContext,
   ): Promise<void> {
-    return this.writeQueue.enqueue(() => {
+    return this.writeQueue.enqueue(async () => {
       this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(
+          this.getDb(),
+          this.dbPath,
+          { operation: 'resolve-entity', incoming, resolution, context },
+          () => {
+            this.entityRegistry!.resolveConflict(incoming, resolution, context);
+          },
+        );
       const tx = this.db?.transaction(() => {
         const result = this.entityRegistry?.resolveConflict(incoming, resolution, context);
         if (result?.changed) this.entityRegistry?.refreshMentionsForEntities(result.affectedEntityIds);
@@ -240,14 +275,50 @@ export class SqliteEvidenceStore implements IEvidenceStore {
   }
 
   async refreshEntityMentions(docAnchors?: string[]): Promise<void> {
-    return this.writeQueue.enqueue(() => {
+    return this.writeQueue.enqueue(async () => {
       this.ensureOpen();
+      if (this.usesIsolatedProcesses())
+        return publishEntityMentions(this.getDb(), this.dbPath, { operation: 'mentions', docAnchors }, () => {});
       this.entityRegistry?.refreshMentions(docAnchors);
     });
   }
 
   async search(query: string, options?: SearchOptions): Promise<EvidenceItem[]> {
     return (await this.searchWithMeta(query, options)).items;
+  }
+
+  readMessagePassageState(candidate: import('./message-passage-search-types.js').MessagePassageCandidate) {
+    this.ensureOpen();
+    return readMessagePassageState(this.getDb(), candidate);
+  }
+
+  async searchMessagePassages(
+    query: string,
+    options: MessagePassageSearchOptions,
+  ): Promise<MessagePassageSearchExecution> {
+    this.ensureOpen();
+    const normalized = normalizeMessageSearchDates(options);
+    if (this.usesIsolatedProcesses()) {
+      const { signal, ...serialized } = normalized;
+      serialized.deadlineAt ??= Date.now() + 15_000;
+      return runMemoryRead<MessagePassageSearchExecution>(
+        {
+          kind: 'message-search',
+          dbPath: this.dbPath,
+          query,
+          options: serialized,
+          embedding: this.processEmbeddingSnapshot(),
+          flags: memorySearchFlags(),
+        },
+        { signal, deadlineAt: serialized.deadlineAt, embedding: this.embedDeps?.embedding },
+      );
+    }
+    return searchMessagePassages(query, normalized, {
+      db: this.getDb(),
+      isEmbeddingAvailable: () => this.isPassageEmbeddingAvailable(normalized),
+      semanticSearch: (limit) => this.semanticPassageNNSearch(query, limit, normalized),
+      hybridSearch: (lexical, limit, accept) => this.hybridPassageRRFSearch(query, lexical, limit, normalized, accept),
+    });
   }
 
   private buildSearchFilters(options: SearchOptions | undefined, suppressBackstop = false): SearchFilterContext {
@@ -347,6 +418,34 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
   async searchWithMeta(query: string, options?: SearchOptions): Promise<EvidenceSearchExecution> {
     this.ensureOpen();
+    if (this.usesIsolatedProcesses()) {
+      throwIfSearchCancelled(options);
+      const { signal, ...serialized } = options ?? {};
+      const flags = memorySearchFlags();
+      const execution = await runMemoryRead<{
+        result: EvidenceSearchExecution;
+        shadow: Array<{ anchor: string; shadowRank: number }> | null;
+      }>(
+        {
+          kind: 'search',
+          dbPath: this.dbPath,
+          query,
+          options: serialized,
+          sourceRoot: this.sourceRoot,
+          sourceRef: this.sourceRef,
+          flags,
+          embedding: this.processEmbeddingSnapshot(),
+        },
+        { signal, deadlineAt: options?.deadlineAt, embedding: this.embedDeps?.embedding },
+      );
+      if (execution.shadow)
+        storeShadowRanking(
+          execution.result.items.map((item) => item.anchor),
+          execution.shadow,
+        );
+      return execution.result;
+    }
+
     const limit = options?.limit ?? 10;
     // P2 fix (砚砚): hybrid needs a wider BM25 candidate pool for meaningful RRF
     const bm25Pool = options?.mode === 'hybrid' ? Math.min(Math.max(limit * 4, 20), 100) : limit;
@@ -355,6 +454,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     await coverageSearchCheckpoint(options);
     const lexicalBackfillWords = splitLexicalBackfillWords(trimmed);
     const queryEntityMatches = this.entityRegistry?.resolveQuery(trimmed) ?? [];
+    const residualEntityTerms = entityResidualQueryTerms(trimmed, queryEntityMatches);
 
     // Phase D: resolve scope → kind filter
     // scope='threads' → kind='thread' (P1 fix: was incorrectly mapped to 'session')
@@ -574,7 +674,9 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         containsSql += " AND activation != 'pull_only'";
       }
       try {
-        const containsRows = this.db?.prepare(containsSql).all(...containsParams) as RowShape[];
+        const containsRows = (this.db?.prepare(containsSql).all(...containsParams) as RowShape[]).filter((row) =>
+          evidenceRowMatchesAllTerms(row, residualEntityTerms),
+        );
         const { rows: rankedRows, signals } = rankLexicalBackfillRows(containsRows, lexicalBackfillWords);
         for (const row of rankedRows) {
           if (!seenAnchors.has(row.anchor)) {
@@ -591,7 +693,13 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     }
     await coverageSearchCheckpoint(options);
 
-    const entityMentionDocs = this.hydrateEntityMentionDocs(queryEntityMatches, options, bm25Pool, filters);
+    const entityMentionDocs = this.hydrateEntityMentionDocs(
+      queryEntityMatches,
+      options,
+      bm25Pool,
+      filters,
+      residualEntityTerms,
+    );
     for (const item of entityMentionDocs.items) {
       if (!seenAnchors.has(item.anchor)) {
         results.push(item);
@@ -609,6 +717,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         filters,
         queryEntityMatches,
         entityMentionDocs.matchesByAnchor,
+        residualEntityTerms,
       );
       return {
         items: this.enrichWithDrillDown(rawResult.items, undefined, options, trimmed),
@@ -749,6 +858,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     filters: SearchFilterContext,
     queryEntityMatches: QueryEntityMatch[],
     entityMatchesByAnchor: Map<string, EntityMatch[]>,
+    residualEntityTerms: string[],
   ): Promise<EvidenceSearchExecution> {
     if (options.scope && !['all', 'threads', 'docs', 'memory', 'sessions'].includes(options.scope)) {
       return {
@@ -814,9 +924,16 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       threadId: options.threadId,
       dateFrom: options.dateFrom,
       dateTo: options.dateTo,
+      residualTerms: residualEntityTerms,
     });
-    const entityPassages = entityPassageHits?.passages.map((p) => this.entityHitToPassageResult(p)) ?? [];
-    const mergedEntityMatches = mergeEntityMatchMaps(entityMatchesByAnchor, entityPassageHits?.matchesByAnchor);
+    const eligibleEntityPassages =
+      entityPassageHits?.passages.filter((passage) => textMatchesAllTerms(passage.content, residualEntityTerms)) ?? [];
+    const entityPassages = eligibleEntityPassages.map((passage) => this.entityHitToPassageResult(passage));
+    const eligibleEntityAnchors = new Set(eligibleEntityPassages.map((passage) => passage.docAnchor));
+    const mergedEntityMatches = mergeEntityMatchMaps(
+      entityMatchesByAnchor,
+      filterEntityMatchMap(entityPassageHits?.matchesByAnchor, eligibleEntityAnchors),
+    );
     const mergedPassages = mergePassageResults(entityPassages, passages);
     return {
       items: this.attachEntityMatches(
@@ -832,6 +949,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     options: SearchOptions | undefined,
     limit: number,
     filters: SearchFilterContext,
+    residualEntityTerms: string[],
   ): { items: EvidenceItem[]; matchesByAnchor: Map<string, EntityMatch[]> } {
     const mentionHits = this.entityRegistry?.findMentionAnchors(queryEntityMatches, limit, {
       kind: filters.effectiveKind,
@@ -846,6 +964,7 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       sceneId: options?.sceneId,
       provenanceTier: options?.provenanceTier,
       suppressBackstop: filters.suppressBackstop,
+      residualTerms: residualEntityTerms,
     });
     if (!mentionHits || mentionHits.anchors.length === 0 || !this.db) {
       return { items: [], matchesByAnchor: new Map() };
@@ -910,7 +1029,10 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       .map((anchor) => rowMap.get(anchor))
       .filter((row): row is RowShape => Boolean(row))
       .map((row) => rowToItem(row));
-    return { items, matchesByAnchor: mentionHits.matchesByAnchor };
+    return {
+      items,
+      matchesByAnchor: filterEntityMatchMap(mentionHits.matchesByAnchor, new Set(items.map((item) => item.anchor))),
+    };
   }
 
   private attachEntityMatches(items: EvidenceItem[], matchesByAnchor: Map<string, EntityMatch[]>): EvidenceItem[] {
@@ -997,8 +1119,11 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     lexicalPassages: PassageResult[],
     limit: number,
     options?: SearchOptions,
+    accept?: (passage: PassageResult) => boolean,
   ): Promise<PassageResult[]> {
-    const semanticPassages = await this.semanticPassageNNSearch(query, limit, options);
+    const semanticPassages = (await this.semanticPassageNNSearch(query, limit, options)).filter(
+      (passage) => !accept || accept(passage),
+    );
     const rrfK = 60;
     const nnWeight = hasCJKCharacters(query) ? CJK_NN_WEIGHT : 1.0;
     const scores = new Map<string, number>();
@@ -1463,7 +1588,20 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     return items.slice(0, limit);
   }
 
-  async upsert(items: EvidenceItem[]): Promise<void> {
+  upsert(items: EvidenceItem[], canWrite?: () => boolean): Promise<void> {
+    return this.upsertWithMentionPolicy(items, true, canWrite);
+  }
+
+  /** IndexBuilder batches its derived mention publication after doc/passages writes. */
+  upsertForDocumentIndex(item: EvidenceItem): Promise<void> {
+    return this.upsertWithMentionPolicy([item], false);
+  }
+
+  private async upsertWithMentionPolicy(
+    items: EvidenceItem[],
+    refreshMentions: boolean,
+    canWrite?: () => boolean,
+  ): Promise<void> {
     return this.writeQueue.enqueue(async () => {
       this.ensureOpen();
       const db = this.db;
@@ -1509,84 +1647,14 @@ export class SqliteEvidenceStore implements IEvidenceStore {
         }
       }
 
-      // F152 Phase C fix: ON CONFLICT preserves user annotations (generalizable)
-      // and first_indexed_at through index rebuilds, instead of DELETE+INSERT.
-      const stmt = db.prepare(`
-				INSERT INTO evidence_docs
-				(anchor, kind, status, title, summary, keywords, source_path, source_hash,
-				 superseded_by, materialized_from, updated_at, pack_id, provenance_tier, provenance_source, generalizable,
-				 authority, activation, verified_at,
-				 source_ids, summary_of_anchor, compression_rationale,
-				 contradicts, invalid_at, review_cycle_days,
-				 world_id, scene_id, first_indexed_at, drill_down_json)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-				ON CONFLICT(anchor) DO UPDATE SET
-				 kind = excluded.kind,
-				 status = excluded.status,
-				 title = excluded.title,
-				 summary = excluded.summary,
-				 keywords = excluded.keywords,
-				 source_path = excluded.source_path,
-				 source_hash = excluded.source_hash,
-				 superseded_by = excluded.superseded_by,
-				 materialized_from = excluded.materialized_from,
-				 updated_at = excluded.updated_at,
-				 pack_id = excluded.pack_id,
-				 provenance_tier = excluded.provenance_tier,
-				 provenance_source = excluded.provenance_source,
-				 generalizable = COALESCE(excluded.generalizable, evidence_docs.generalizable),
-				 authority = excluded.authority,
-				 activation = excluded.activation,
-				 verified_at = excluded.verified_at,
-				 source_ids = excluded.source_ids,
-				 summary_of_anchor = excluded.summary_of_anchor,
-				 compression_rationale = excluded.compression_rationale,
-				 contradicts = excluded.contradicts,
-				 invalid_at = excluded.invalid_at,
-				 review_cycle_days = excluded.review_cycle_days,
-				 world_id = excluded.world_id,
-				 scene_id = excluded.scene_id,
-				 first_indexed_at = evidence_docs.first_indexed_at,
-				 drill_down_json = excluded.drill_down_json
-			`);
-
-      const tx = db.transaction((items: EvidenceItem[]) => {
-        for (const item of items) {
-          stmt.run(
-            item.anchor,
-            item.kind,
-            item.status,
-            item.title,
-            item.summary ?? null,
-            item.keywords ? JSON.stringify(item.keywords) : null,
-            item.sourcePath ?? null,
-            item.sourceHash ?? null,
-            item.supersededBy ?? null,
-            item.materializedFrom ?? null,
-            item.updatedAt,
-            item.packId ?? null,
-            item.provenance?.tier ?? null,
-            item.provenance?.source ?? null,
-            item.generalizable == null ? null : item.generalizable ? 1 : 0,
-            item.authority ?? pathToAuthority(item.sourcePath ?? item.anchor),
-            item.activation ?? 'query',
-            item.verifiedAt ?? null,
-            item.sourceIds ? JSON.stringify(item.sourceIds) : null,
-            item.summaryOfAnchor ?? null,
-            item.compressionRationale ?? null,
-            item.contradicts ? JSON.stringify(item.contradicts) : null,
-            item.invalidAt ?? null,
-            item.reviewCycleDays ?? null,
-            item.worldId ?? null,
-            item.sceneId ?? null,
-            Date.now(),
-            item.drillDown ? JSON.stringify(item.drillDown) : null,
-          );
-        }
-      });
-
-      tx(items);
-      this.entityRegistry?.refreshMentions(items.map((item) => item.anchor));
+      // Recheck projections after asynchronous detection, inside the writer queue.
+      if (canWrite && !canWrite()) return;
+      writeEvidenceItems(db, items);
+      if (!refreshMentions) return;
+      const docAnchors = items.map((item) => item.anchor);
+      if (this.usesIsolatedProcesses())
+        await publishEntityMentions(db, this.dbPath, { operation: 'mentions', docAnchors }, () => {});
+      else this.entityRegistry?.refreshMentions(docAnchors);
     });
   }
 
@@ -1672,6 +1740,23 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     } catch {
       return false;
     }
+  }
+
+  private processEmbeddingSnapshot(): EmbeddingSnapshot | undefined {
+    const deps = this.embedDeps;
+    return deps
+      ? {
+          ready: deps.embedding.isReady(),
+          model: deps.embedding.getModelInfo(),
+          mode: deps.mode,
+          passages: Boolean(deps.passageVectorStore),
+        }
+      : undefined;
+  }
+
+  /** File-backed runtime stores isolate native work; :memory: retains the same algorithm locally. */
+  usesIsolatedProcesses(): boolean {
+    return this.dbPath !== ':memory:' && !this.workerMode;
   }
 
   /** Expose db for IndexBuilder and other internal consumers */
@@ -1894,24 +1979,26 @@ export class SqliteEvidenceStore implements IEvidenceStore {
 
     for (const ftsQuery of passageFtsQueries) {
       try {
-        let sql = `SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at,
-                    bm25(passage_fts) AS rank
-             FROM passage_fts f
-             JOIN evidence_passages p ON p.rowid = f.rowid
-             WHERE passage_fts MATCH ?`;
+        // Ask FTS5 for its ordered rowids first. Hydrate large passage bodies only
+        // after LIMIT; its hidden rank column enables FTS5's optimized BM25 order.
+        let candidates = `SELECT f.rowid, f.rank FROM passage_fts f WHERE passage_fts MATCH ?`;
         const params: unknown[] = [ftsQuery];
-
+        const dates: string[] = [];
         if (timeFilter?.dateFrom) {
-          sql += ' AND p.created_at >= ?';
+          dates.push('dated.created_at >= ?');
           params.push(timeFilter.dateFrom);
         }
         if (timeFilter?.dateTo) {
-          sql += ' AND p.created_at <= ?';
+          dates.push('dated.created_at <= ?');
           params.push(timeFilter.dateTo.length === 10 ? `${timeFilter.dateTo}T23:59:59` : timeFilter.dateTo);
         }
-
-        sql += ' ORDER BY rank LIMIT ?';
+        if (dates.length)
+          candidates += ` AND EXISTS (SELECT 1 FROM evidence_passages dated WHERE dated.rowid = f.rowid AND ${dates.join(' AND ')})`;
+        candidates += ' ORDER BY f.rank LIMIT ?';
         params.push(limit);
+        const sql = `WITH hits AS MATERIALIZED (${candidates})
+          SELECT p.doc_anchor, p.passage_id, p.content, p.speaker, p.position, p.created_at, hits.rank
+          FROM hits JOIN evidence_passages p ON p.rowid = hits.rowid ORDER BY hits.rank`;
 
         const rows = this.db?.prepare(sql).all(...params) as Array<{
           doc_anchor: string;
@@ -1987,6 +2074,42 @@ export class SqliteEvidenceStore implements IEvidenceStore {
       throw new Error('SqliteEvidenceStore not initialized — call initialize() first');
     }
   }
+}
+
+function entityResidualQueryTerms(query: string, matches: QueryEntityMatch[]): string[] {
+  if (matches.length === 0) return [];
+  const residualQuery = matches
+    .flatMap((match) => [match.matchedAlias, match.canonicalName])
+    .reduce(removeEntitySurface, normalizeEntityAlias(query));
+  return splitLexicalBackfillWords(residualQuery)
+    .map((term) => term.replace(/^[^\p{L}\p{N}_@-]+|[^\p{L}\p{N}_@-]+$/gu, ''))
+    .filter(Boolean);
+}
+
+function removeEntitySurface(query: string, surface: string): string {
+  const normalizedSurface = normalizeEntityAlias(surface);
+  if (!normalizedSurface) return query;
+  if (hasCJKCharacters(normalizedSurface)) return query.split(normalizedSurface).join(' ');
+  const escaped = normalizedSurface.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return query.replace(new RegExp(`(^|[^\\p{L}\\p{N}_@-])${escaped}(?=$|[^\\p{L}\\p{N}_@-])`, 'gu'), '$1 ');
+}
+
+function textMatchesAllTerms(text: string, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const normalized = normalizeEntityAlias(text);
+  return terms.every((term) => normalized.includes(term));
+}
+
+function evidenceRowMatchesAllTerms(row: RowShape, terms: string[]): boolean {
+  return textMatchesAllTerms([row.anchor, row.title, row.summary ?? '', row.keywords ?? ''].join('\n'), terms);
+}
+
+function filterEntityMatchMap(
+  matchesByAnchor: Map<string, EntityMatch[]> | undefined,
+  allowedAnchors: Set<string>,
+): Map<string, EntityMatch[]> {
+  if (!matchesByAnchor || matchesByAnchor.size === 0) return new Map();
+  return new Map([...matchesByAnchor].filter(([anchor]) => allowedAnchors.has(anchor)));
 }
 
 function mergeEntityMatchMaps(
@@ -2359,4 +2482,12 @@ function annotateMatchReasons(results: EvidenceItem[], query: string, explain?: 
       item.rankingFactors = { bm25Score: results.indexOf(item) + 1 };
     }
   }
+}
+
+function memorySearchFlags(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([key, value]) => value != null && (key.startsWith('F163_') || key.startsWith('F200_')),
+    ),
+  ) as Record<string, string>;
 }

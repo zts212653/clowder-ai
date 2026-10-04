@@ -134,6 +134,52 @@ describe('ThreadIndicator inline title editing', () => {
     expect(projectChip?.textContent).not.toContain('clowder-ai');
   });
 
+  it('reads the exact opened thread title when the sidebar omits a concierge carrier', async () => {
+    mockStore.threads = [];
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 'thread_concierge',
+        title: '砚砚喵Live F317 - 猫猫球线程',
+        threadKind: 'concierge',
+        projectPath: 'default',
+      }),
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_concierge' }));
+      await flushSubmitRename();
+    });
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/threads/thread_concierge');
+    expect(titleControl()?.textContent).toBe('砚砚喵Live F317 - 猫猫球线程');
+  });
+
+  it('does not let a late exact read replace the newly opened thread', async () => {
+    mockStore.threads = [];
+    const reads = new Map<string, (value: { ok: boolean; json: () => Promise<unknown> }) => void>();
+    mockApiFetch.mockImplementation(
+      (path: string) =>
+        new Promise((resolve) => {
+          reads.set(path, resolve);
+        }),
+    );
+    root = createRoot(container);
+    await act(async () => root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_old' })));
+    await act(async () => root?.render(React.createElement(ThreadIndicator, { threadId: 'thread_new' })));
+    await act(async () => {
+      reads.get('/api/threads/thread_new')?.({
+        ok: true,
+        json: async () => ({ id: 'thread_new', title: '新对话', projectPath: 'default' }),
+      });
+      reads.get('/api/threads/thread_old')?.({
+        ok: true,
+        json: async () => ({ id: 'thread_old', title: '旧对话', projectPath: 'default' }),
+      });
+      await flushSubmitRename();
+    });
+    expect(titleControl()?.textContent).toBe('新对话');
+  });
+
   it('enters edit mode on double-click', async () => {
     await render();
     expect(editInput()).toBeNull();

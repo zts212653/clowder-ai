@@ -1,4 +1,5 @@
 /** F304: batched GitHub GraphQL reader for one cicd-check tick. */
+import { GitHubRateLimitError } from '../github/request-budget.js';
 import type { CiCheckDetail, CiPollResult } from './ci-cd-contract.js';
 import { enrichGitHubExecutionFailures } from './ci-execution-failure.js';
 import {
@@ -197,6 +198,7 @@ async function graphQlPrToPollResult(
   if (aggregateBucket === 'fail') {
     checks = (await fetchRequiredFailingChecks(ref.repoFullName, ref.prNumber, options)) ?? checks;
     checks = await enrichGitHubExecutionFailures({
+      signal: options.signal,
       repoFullName: ref.repoFullName,
       headSha: pr.headRefOid,
       checks,
@@ -237,6 +239,7 @@ export async function fetchPrCiStatuses(
     parsed = parseBatchGraphQlResponse(stdout);
   } catch (error) {
     options.signal?.throwIfAborted();
+    if (error instanceof GitHubRateLimitError) throw error;
     parsed = parseBatchGraphQlResponse(stdoutFromExecError(error) ?? '');
     if (!parsed?.data) {
       log.warn(`[ci-status] batched GraphQL poll failed for ${refs.length} PRs: ${String(error)}`);

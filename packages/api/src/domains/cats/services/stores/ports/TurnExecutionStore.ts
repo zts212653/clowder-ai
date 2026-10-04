@@ -97,6 +97,9 @@ export function assertCreateTurnExecutionInput(input: CreateTurnExecutionInput):
     throw new Error(`invalid executionKind: ${String(input.executionKind)}`);
   }
   assertTimestamp(input.startedAt, 'startedAt');
+  if (input.queueCompletionPolicy !== undefined && input.queueCompletionPolicy !== 'explicit_source') {
+    throw new Error('invalid queueCompletionPolicy');
+  }
   if (input.causal?.triggerMessageId !== undefined) assertNonEmpty(input.causal.triggerMessageId, 'triggerMessageId');
   if (input.causal?.freshnessSupplementId !== undefined) {
     assertNonEmpty(input.causal.freshnessSupplementId, 'freshnessSupplementId');
@@ -136,6 +139,7 @@ export function cloneTurnExecutionRecord(record: TurnExecutionRecord): TurnExecu
     userId: record.userId,
     catId: record.catId,
     executionKind: record.executionKind,
+    ...(record.queueCompletionPolicy ? { queueCompletionPolicy: record.queueCompletionPolicy } : {}),
     startedAt: record.startedAt,
     ...(record.causal
       ? {
@@ -169,6 +173,7 @@ export function serializeTurnExecutionIdentity(input: CreateTurnExecutionInput):
     userId: input.userId,
     catId: input.catId,
     executionKind: input.executionKind,
+    ...(input.queueCompletionPolicy ? { queueCompletionPolicy: input.queueCompletionPolicy } : {}),
     startedAt: input.startedAt,
     causal: canonicalCausalRefs(input.causal),
   });

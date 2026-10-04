@@ -72,6 +72,7 @@ export function formatVignette(proposal: TasteProposal): string {
     `when: ${when}`,
     'quotes:',
     quotesYaml,
+    ...(proposal.takeaway ? [`takeaway: "${escapeYamlDoubleQuoted(proposal.takeaway)}"`] : []),
     `scene: ${sceneYaml}`,
     `tags: ${tagsYaml}`,
     `dimension: ${proposal.dimension}`,

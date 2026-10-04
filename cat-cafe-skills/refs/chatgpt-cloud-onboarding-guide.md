@@ -7,7 +7,7 @@ purpose: |
   operator说"Ragdoll/X 帮我接入 gpt-pro"或"在新机器上把云端 ChatGPT Pro Maine Coon接进来"
   → 接球猫按本指南从头操作，全程不要让operator点 CF dashboard（已经有过 4 次互相猜路径都猜错的教训）。
 related_features: [F247, F178]
-status: stable (B1a verified 2026-06-21 05:14 UTC — Path A no-CF-Access, ChatGPT 不支持 custom headers / service token)
+status: legacy-owner-operator-evidence (use docs/guides/chatgpt-cloud-cat-onboarding.md for new onboarding)
 revision_history:
   v1 (2026-06-21 04:57 UTC): 初稿 — Path B service token + CF Access App
   v2 (2026-06-21 05:14 UTC): 改 Path A — OpenAI 官方文档实锤 ChatGPT MCP 不支持 custom headers / machine-to-machine grants，Path B 走不通，B1a 简化为公网 + spike ?token= 单防线
@@ -18,7 +18,11 @@ trigger_phrases:
   - "云端猫 onboarding"
 ---
 
-# ChatGPT 云端猫接入指南（猫读 SOP）
+# ChatGPT 云端猫接入指南（历史 owner 运维证据）
+
+> **⛔ 新接入、社区用户或“让猫帮我配置”不要从本文件开始。**
+> 这份文档复现 2026-06 的单 owner B1a dogfood，包含环境特有的 Cloudflare/tunnel 假设和历史 token 形态；其中的账号、固定 ID、域名与命令不能复制给其他用户。
+> 当前入口是 `docs/guides/chatgpt-cloud-cat-onboarding.md`，用户页面是 `chatgpt-cloud-cat-onboarding.html`。
 
 > **接球前先读完整本 SOP**——里面踩坑的 dashboard UI 迷雾 + token scope 残缺
 > 都是 2026-06-21 那个晚上实测出来的，CF SaaS UI 还在频繁改组，**先信文不信
@@ -46,8 +50,8 @@ trigger_phrases:
 ## 1. 前置物料清单（不齐就先去补）
 
 ### 1.1 operator账号
-- Cloudflare account: `Lysanderlucianosu@gmail.com` (account_id `63e41eacd8c1597363fa363adb57b6ae`)
-- DNS zone: `clowder-ai.com` (zone_id `8646136dcb88ec90035de478749e0ad8`)
+- Cloudflare account: `owner@example.invalid` (account_id `<account-id>`)
+- DNS zone: `your-domain.example` (zone_id `<zone-id>`)
 - ChatGPT Pro 订阅（必需 Developer Mode 才有 Custom MCP Connector 功能）
 
 ### 1.2 本机文件（旧机器复用 / 新机器初始化必须有）
@@ -179,7 +183,7 @@ print('gpt-pro present:', 'gpt-pro' in ids)
 "
 ```
 
-Avatar 现暂用 `/avatars/gpt52.png` fallback。Phase C @gemini 设计真头像后 PATCH update。
+Avatar 现暂用 `/avatars/gpt52.png` fallback。Phase C 由设计/审美席位（查 dossier 常驻索引）设计真头像后 PATCH update。
 
 ### 2.3 (deprecated) breeds[].variants[] — 不需要做
 

@@ -235,7 +235,7 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           implementationExport: 'handleRecallPersonRelationship',
           action: 'read',
           risk: { level: 'read', openWorld: false },
-          runtimeProfiles: ['full', 'agent-key'],
+          runtimeProfiles: ['full', 'agent-key', 'desktop:live-companion'],
         },
       }),
       defineTool({
@@ -248,7 +248,7 @@ export function createPersonMemoryLifecycleTools(callbackPost: CallbackPost, cal
           implementationExport: 'handleDrillPersonMemory',
           action: 'read',
           risk: { level: 'read', openWorld: false },
-          runtimeProfiles: ['full', 'agent-key'],
+          runtimeProfiles: ['full', 'agent-key', 'desktop:live-companion'],
         },
       }),
       defineTool({

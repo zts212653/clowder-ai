@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
@@ -66,33 +66,58 @@ async function countMagentaPixels(png) {
   return matches;
 }
 
+// Share the read-only fixture compilation; each case owns its exporter/pages.
+let server;
+let nextDev;
+let url;
+before(async () => {
+  const port = await findFreePort();
+  const output = [];
+  nextDev = await createNextDevTestEnvironment('html-widget-responsive');
+  server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+    cwd: WEB_ROOT,
+    env: nextDev.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  server.stdout.on('data', (chunk) => output.push(chunk.toString()));
+  server.stderr.on('data', (chunk) => output.push(chunk.toString()));
+  url = `http://127.0.0.1:${port}/dev/f294-html-widget-responsive-export`;
+  await waitForPage(url, server, output);
+});
+after(async () => {
+  try {
+    if (server) await stopServer(server);
+  } finally {
+    await nextDev?.cleanup();
+  }
+});
+
+test('html_widget export measures a widget below the initial viewport', { timeout: 120_000 }, async () => {
+  const exporter = new ImageExporter();
+  try {
+    const png = await exporter.capture(`${url}?fixture=offscreen`, 'browser-test-user', {
+      selectionMessageIds: [FIXTURE_MESSAGE_ID],
+    });
+    assert.ok(png.length > 0, 'offscreen HTML widget must still produce a PNG');
+  } finally {
+    await exporter.close();
+  }
+});
+
 test(
   'html_widget remeasures across desktop and 360px layouts, then exports the bottom sentinel',
   { timeout: 120_000 },
   async (t) => {
-    const port = await findFreePort();
-    const output = [];
-    const nextDev = await createNextDevTestEnvironment('html-widget-responsive');
-    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
-      cwd: WEB_ROOT,
-      env: nextDev.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    server.stdout.on('data', (chunk) => output.push(chunk.toString()));
-    server.stderr.on('data', (chunk) => output.push(chunk.toString()));
-
     let browser;
     const exporter = new ImageExporter();
     try {
-      const url = `http://127.0.0.1:${port}/dev/f294-html-widget-responsive-export`;
-      await waitForPage(url, server, output);
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
       await page.goto(url, { waitUntil: 'networkidle' });
 
       await t.test('live 14KB message mounts and refreshes without ever committing an empty iframe', async () => {
         const livePage = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        const liveUrl = `http://127.0.0.1:${port}/dev/f294-html-widget-live-message`;
+        const liveUrl = new URL('/dev/f294-html-widget-live-message', url).href;
         const assertVisibleLiveWidget = async () => {
           const liveWidget = await waitForWidgetMeasurement(livePage);
           assert.equal(
@@ -363,8 +388,6 @@ test(
     } finally {
       await exporter.close();
       if (browser) await browser.close();
-      await stopServer(server);
-      await nextDev.cleanup();
     }
   },
 );

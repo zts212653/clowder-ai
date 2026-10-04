@@ -9,6 +9,7 @@ import {
   type StaleProcessingOwnerLease,
 } from './InvocationOwnerLeaseCandidates.js';
 import { DEFAULT_INVOCATION_SLOT_TTL_MS } from './InvocationTracker.js';
+import { type ExitedChildRecovery, retireExitedChildExecutions } from './RetireExitedChildExecutions.js';
 import type { ReconcileZombieResult } from './reconcileZombies.js';
 
 interface InvocationOwnerReaperLog {
@@ -16,13 +17,10 @@ interface InvocationOwnerReaperLog {
   warn(obj: unknown, message?: string): void;
 }
 
-export interface InvocationOwnerReaperOptions {
+export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   invocationTracker: InvocationOwnerTrackerLike;
   invocationRecordStore: {
     get(id: string): InvocationRecord | null | Promise<InvocationRecord | null>;
-  };
-  turnExecutionStore: {
-    listByParent(parentInvocationId: string): TurnExecutionRecord[] | Promise<TurnExecutionRecord[]>;
   };
   getProviderLifecycle(
     threadId: string,
@@ -136,7 +134,7 @@ export class InvocationOwnerReaper {
       return;
     }
 
-    const probe = await this.probeCandidate(candidate, now);
+    let probe = await this.probeCandidate(candidate, now);
     if (!probe) {
       result.deferredUnknown += 1;
       result.errors += 1;
@@ -152,6 +150,36 @@ export class InvocationOwnerReaper {
       return;
     }
     if (probe.verdict === 'active') {
+      if (
+        probe.children.some((child) => child.status === 'running') &&
+        !probe.providerSnapshots.some((snapshot) => !PROVIDER_TERMINAL_STAGES.has(snapshot.stage))
+      ) {
+        try {
+          if (await retireExitedChildExecutions(candidate, this.options, now)) {
+            probe = await this.probeCandidate(candidate, now);
+            if (!probe) {
+              result.deferredUnknown += 1;
+              return;
+            }
+            if (probe.verdict === 'unknown') {
+              result.deferredUnknown += 1;
+              return;
+            }
+            if (probe.verdict === 'terminal') {
+              await this.reconcileCandidate(candidate, probe, result);
+              return;
+            }
+          }
+        } catch (err) {
+          result.deferredUnknown += 1;
+          this.warnUnknown({
+            executionId: candidate.executionId,
+            reason: 'exited_child_recovery_failed',
+            err: formatError(err),
+          });
+          return;
+        }
+      }
       this.recordActiveCandidate(candidate, probe, now, result);
       return;
     }

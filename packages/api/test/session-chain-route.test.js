@@ -284,6 +284,22 @@ describe('Session Chain Routes', () => {
     assert.equal(body.sessions.length, 2);
   });
 
+  it('F324: session chain exposes a real offset for bounded MCP pages', async () => {
+    const store = await setup();
+    for (let index = 0; index < 25; index += 1) {
+      store.create({ cliSessionId: `cli-${index}`, threadId: 'thread-1', catId: 'opus', userId: 'user-1' });
+    }
+    const headers = { 'x-cat-cafe-user': 'user-1', 'x-cat-id': 'opus' };
+    const first = await app.inject({ method: 'GET', url: '/api/threads/thread-1/sessions?limit=10&offset=0', headers });
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.json().sessions.length, 10);
+    assert.equal(first.json().hasMore, true);
+    assert.equal(first.json().nextOffset, 10);
+    const last = await app.inject({ method: 'GET', url: '/api/threads/thread-1/sessions?limit=10&offset=20', headers });
+    assert.equal(last.json().sessions.length, 5);
+    assert.equal(last.json().hasMore, false);
+  });
+
   it('GET /api/threads/:threadId/sessions includes runtime sidecar summaries when present', async () => {
     const { RuntimeSessionStore } = await import(
       '../dist/domains/cats/services/runtime-session/RuntimeSessionStore.js'

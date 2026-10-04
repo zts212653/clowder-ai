@@ -79,6 +79,11 @@ test('rotation and non-square pixels retain transform evidence; ambiguous stream
     parseVideoProbe({ ...probe, streams: [{ ...stream, side_data_list: [], sample_aspect_ratio: '4:3' }] }).width,
     2560,
   );
+  assert.equal(
+    parseVideoProbe({ ...probe, streams: [{ ...stream, side_data_list: [], sample_aspect_ratio: undefined }] }).width,
+    1920,
+    'ordinary MP4s may omit sample_aspect_ratio; that means square pixels rather than an invalid source',
+  );
   assert.throws(() => parseVideoProbe({ ...probe, streams: [stream, { ...stream, index: 1 }] }), /invalid_media/);
   assert.throws(() => parseVideoProbe({ ...probe, streams: [{ ...stream, duration_ts: undefined }] }), /invalid_media/);
 });

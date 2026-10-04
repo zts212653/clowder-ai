@@ -25,7 +25,11 @@ export type HostCloseReason =
   | 'shutdown'
   | 'warm_cap';
 
-export type HostRetirementReason = 'launch_signature_mismatch' | 'legacy_multi_affinity' | 'owner_unavailable';
+export type HostRetirementReason =
+  | 'launch_signature_mismatch'
+  | 'legacy_multi_affinity'
+  | 'owner_unavailable'
+  | 'direct_session_migration';
 
 export interface HostResolution {
   entry: HostEntry | undefined;
@@ -226,4 +230,22 @@ function normalizeSessionId(sessionId: string | undefined): string | null {
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error('Codex host retirement wait aborted');
+}
+
+/** Idle housekeeping never retires a host with an active lease or attachment. */
+export function armCodexHostIdleTimer(entry: HostEntry, ttlMs: number, close: () => Promise<void>): NodeJS.Timeout {
+  const timer = setTimeout(
+    () => {
+      if (!entry.lease && entry.attachmentCount === 0 && entry.state === 'ready') void close();
+    },
+    Math.max(0, ttlMs),
+  );
+  timer.unref?.();
+  return timer;
+}
+
+export function clearCodexHostIdleTimer(entry: HostEntry): void {
+  if (!entry.idleTimer) return;
+  clearTimeout(entry.idleTimer);
+  entry.idleTimer = null;
 }

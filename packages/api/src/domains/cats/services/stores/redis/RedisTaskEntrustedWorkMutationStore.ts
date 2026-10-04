@@ -1,6 +1,8 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { developmentScopeKey } from '../ports/DevelopmentWorkTransition.js';
 import { prepareEntrustedWorkUpdate } from '../ports/EntrustedWorkContractUpdate.js';
+import { reconcileDeploymentWaitTaskMutation } from '../ports/TaskDeploymentWaitState.js';
 import type {
   CloseEntrustedWorkStoreInput,
   CloseEntrustedWorkStoreResult,
@@ -21,7 +23,12 @@ end
 if current ~= ARGV[1] then
   return 0
 end
+if (redis.call('HGET', KEYS[1], 'deploymentWait') or '') ~= ARGV[5] then
+  return 0
+end
 redis.call('HSET', KEYS[1], 'status', 'done', 'entrustedWork', ARGV[2], 'updatedAt', ARGV[3])
+if ARGV[6] ~= '' then redis.call('HSET', KEYS[1], 'deploymentWait', ARGV[6]) end
+if #KEYS > 1 and redis.call('GET', KEYS[2]) == ARGV[4] then redis.call('DEL', KEYS[2]) end
 return 1
 `;
 
@@ -58,24 +65,34 @@ export class RedisTaskEntrustedWorkMutationStore {
         return { kind: 'revision_conflict', task: existing };
       }
 
-      const updated: TaskItem = {
+      const updated: TaskItem = reconcileDeploymentWaitTaskMutation(existing, {
         ...existing,
         status: 'done',
         entrustedWork: {
           ...existing.entrustedWork,
           revision: existing.entrustedWork.revision + 1,
           closure: input.closure,
+          completion: {
+            recordedAt: Date.now(),
+            ...(input.artifactSnapshot ? { artifactSnapshot: input.artifactSnapshot } : {}),
+          },
         },
         updatedAt: Date.now(),
-      };
+      });
       const serialized = serializeTask(updated);
       const result = await this.redis.eval(
         CLOSE_ENTRUSTED_WORK_LUA,
-        1,
+        existing.entrustedWork.developmentScope && existing.userId ? 2 : 1,
         key,
+        ...(existing.entrustedWork.developmentScope && existing.userId
+          ? [TaskKeys.developmentScope(developmentScopeKey(existing.userId, existing.entrustedWork.developmentScope))]
+          : []),
         data.entrustedWork,
         serialized.entrustedWork,
         serialized.updatedAt,
+        existing.id,
+        data.deploymentWait ?? '',
+        serialized.deploymentWait ?? '',
       );
       if (result === 1) {
         await this.applyTtl(updated);

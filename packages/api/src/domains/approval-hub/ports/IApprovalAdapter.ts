@@ -13,9 +13,12 @@ export interface ListSettledOpts {
   limit?: number;
 }
 
+/** Pending aggregation has no source page. Read the full representable owner index before paging the union. */
+export const ALL_PENDING_APPROVALS_LIMIT = Number.MAX_SAFE_INTEGER;
+
 export interface IApprovalAdapter {
   readonly featureId: ApprovalProducerId;
-  /** Fetch pending proposals for this user from the canonical store and map to ApprovalItems. */
+  /** Fetch ALL legal pending proposals for this user; canonical store default page limits must not truncate this read. */
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]>;
   /**
    * F246 Phase F: Fetch settled (approved|rejected) proposals for history view.

@@ -12,8 +12,11 @@ import {
 import {
   commandName,
   stripHarmlessRedirections,
+  stripShellComments,
   tokenizeSimpleShellCommand,
+  unquotedShellText,
 } from './native-effect-shell-tokenizer.mjs';
+import { fileProgramEffect, redisEffect } from './native-effect-write-effects.mjs';
 
 export {
   constrainedGhPullRequestOperation,
@@ -33,8 +36,8 @@ export const SHELL_EFFECT_PRIORITY = new Map([
 ]);
 
 export function classifyShellSegment(raw) {
-  const command = stripHarmlessRedirections(raw);
-  if (isRedisMutation(command)) return 'service_mutation';
+  const command = stripHarmlessRedirections(stripShellComments(raw));
+  if (redisEffect(command) === 'service_mutation') return 'service_mutation';
   if (isUnsafeDateOperation(command) || isUnconstrainedHttpOperation(command)) return 'service_mutation';
   if (/\b(kill|pkill|killall)\b/i.test(command)) return 'process_control';
   if (isRepositoryRefresh(command)) return 'repository_refresh';
@@ -72,11 +75,16 @@ export function destructiveInvocationEffect({ name, operands = [] } = {}) {
 
 /** Split real pipelines and command lines without mistaking quoted or escaped separators for execution. */
 export function splitShellExecutionSegments(raw) {
+  return splitShellSegments(raw, true).map((segment) => segment.text);
+}
+
+/** The same split, keeping the separator in front of each segment (`&&`, `||`, `;`, `&`, `|`, newline). */
+export function splitShellExecutionSegmentsWithSeparators(raw) {
   return splitShellSegments(raw, true);
 }
 
 export function splitPipelineSegments(raw) {
-  return splitShellSegments(raw, false);
+  return splitShellSegments(raw, false).map((segment) => segment.text);
 }
 
 export function isDataDrivenPipelineConsumer(raw) {
@@ -86,22 +94,32 @@ export function isDataDrivenPipelineConsumer(raw) {
 }
 
 function splitShellSegments(raw, includeLineBoundaries) {
+  raw = stripShellComments(raw);
   const segments = [];
   let start = 0;
   let quote = null;
   let escaped = false;
+  let separator = null;
+  // `start`/`end` delimit the untrimmed span in `raw` (a here-document finds its command by it).
+  const push = (end, next) => {
+    const trimmed = raw.slice(start, end).trim();
+    // `a &&\n b`: the empty piece between `&&` and the newline carries the conditional.
+    if (trimmed) segments.push({ text: trimmed, separator, start, end });
+    separator = !trimmed && (separator === '&&' || separator === '||') ? separator : next;
+  };
   for (let index = 0; index < raw.length; index += 1) {
     const scanned = scanShellCharacter(raw, index, quote, escaped, includeLineBoundaries);
     quote = scanned.quote;
     escaped = scanned.escaped;
     if (scanned.boundaryLength === 0) continue;
     if (scanned.boundaryKind === 'line' && !includeLineBoundaries) continue;
-    segments.push(raw.slice(start, index));
+    const boundary = raw.slice(index, index + scanned.boundaryLength);
+    push(index, scanned.boundaryKind === 'line' ? '\n' : boundary);
     start = index + scanned.boundaryLength;
     index += scanned.boundaryLength - 1;
   }
-  segments.push(raw.slice(start));
-  return segments.map((segment) => segment.trim()).filter(Boolean);
+  push(raw.length, null);
+  return segments;
 }
 
 function scanShellCharacter(raw, index, quote, escaped, includeExecutionBoundaries) {
@@ -110,6 +128,9 @@ function scanShellCharacter(raw, index, quote, escaped, includeExecutionBoundari
   if (char === '\\' && quote !== "'") return { quote, escaped: true, boundaryLength: 0 };
   if (quote) return { quote: char === quote ? null : quote, escaped: false, boundaryLength: 0 };
   if (char === "'" || char === '"') return { quote: char, escaped: false, boundaryLength: 0 };
+  // Only unquoted operator pairs own the next marker. An escaped/literal `>` before
+  // a real pipe must not hide that pipe (`printf \\>| cat`).
+  if (/^(?:[<>]&|>\||&>)/.test(raw.slice(index))) return { quote, escaped: true, boundaryLength: 0 };
   const boundary = shellBoundaryAt(raw, index, includeExecutionBoundaries);
   return {
     quote: null,
@@ -125,7 +146,7 @@ function shellBoundaryAt(raw, index, includeExecutionBoundaries) {
   if (includeExecutionBoundaries && char === '&' && raw[index + 1] === '&') {
     return { kind: 'execution', length: 2 };
   }
-  if (includeExecutionBoundaries && char === '&' && raw[index - 1] !== '>') {
+  if (includeExecutionBoundaries && char === '&') {
     return { kind: 'execution', length: 1 };
   }
   if (includeExecutionBoundaries && char === '|' && raw[index + 1] === '|') {
@@ -149,16 +170,12 @@ function isDeleteOperation(raw) {
   return /\s-(?:exec|execdir|ok|okdir)\b[^;&|\n]*(?:^|\s)(?:sudo\s+)?(?:rm|trash|unlink|rmdir)\b/i.test(raw);
 }
 
-function isRedisMutation(raw) {
-  return /\bredis-cli\b[^\n;&|]*\b(shutdown|flushall|flushdb|set|del|unlink|rename|restore|migrate|save|bgsave)\b/i.test(
-    raw,
-  );
-}
-
 function isWriteOperation(raw) {
   return (
+    fileProgramEffect(raw) === 'write' ||
     /(?:^|[;&|]\s*)\s*(?:touch|mkdir|cp|mv|tee|install)\b/i.test(raw) ||
-    /(?:^|[^<])>{1,2}(?!=)/.test(raw) ||
+    // Quoted `>` is text (`stat -f '%N -> %Y'`, `rg 'a > b'`), not a redirection.
+    /(?:^|[^<])>{1,2}(?!=)|<>/.test(unquotedShellText(raw)) ||
     isGitWriteOperation(raw)
   );
 }
@@ -174,13 +191,11 @@ function isReadOperation(raw) {
     isConstrainedHttpRead(raw) ||
     isLocalObservation(raw) ||
     /^\s*cd\b[^;&|]*$/i.test(raw) ||
-    /^\s*redis-cli\b[^\n;&|]*\b(?:ping|info|get|scan|keys|exists|ttl|pttl|type|dbsize|role)\b/i.test(raw) ||
+    redisEffect(raw) === 'read' ||
     /^\s*cd\b[^;&|]*&&\s*git\s+(?:status|log|diff|show|branch(?:\s+--show-current)?)\b/i.test(raw) ||
-    /^\s*(?:cat|ls|pwd|rg|grep|find|head|tail|sed\b(?![^\n]*\s-i\b)|echo|printf|git\s+(?:status|log|diff|show|branch))\b/i.test(
-      raw,
-    ) ||
+    /^\s*(?:cat|ls|pwd|rg|grep|find|head|tail|echo|printf|git\s+(?:status|log|diff|show|branch))\b/i.test(raw) ||
     /^\s*(?:wc|uniq|cut|tr|column|jq)\b/i.test(raw) ||
-    /^\s*sort\b(?![^\n]*(?:\s-o\b|\s--output(?:=|\s)))/i.test(raw)
+    fileProgramEffect(raw) === 'read'
   );
 }
 

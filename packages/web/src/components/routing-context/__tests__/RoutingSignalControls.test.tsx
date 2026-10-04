@@ -8,6 +8,9 @@ vi.mock('../routing-context-client', () => ({
   markRoutingSignal: (...args: unknown[]) => mocks.mark(...args),
   closeRoutingSignal: vi.fn(),
 }));
+vi.mock('@/hooks/useCatData', () => ({
+  useCatData: () => ({ cats: [{ id: 'codex-sol', displayName: '小太阳·砚砚' }] }),
+}));
 
 describe('F293 RoutingSignalControls', () => {
   let container: HTMLDivElement;
@@ -43,7 +46,8 @@ describe('F293 RoutingSignalControls', () => {
     const form = container.querySelector<HTMLFormElement>('form');
     if (!reason) throw new Error('signal reason input was not rendered');
     act(() => Simulate.change(reason, { target: { value: 'owner-maintenance' } } as never));
-    expect(container.textContent).toContain('影响 1 位成员：codex-sol');
+    expect(container.textContent).toContain('影响 1 位成员：小太阳·砚砚');
+    expect(container.textContent).not.toContain('影响 1 位成员：codex-sol');
     await act(async () => form?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
     expect(container.textContent).toContain('写入失败');
@@ -97,6 +101,73 @@ describe('F293 RoutingSignalControls', () => {
     expect(onChanged).toHaveBeenCalledOnce();
   });
 
+  it('renders an open assertion with human labels instead of raw state and reason code', async () => {
+    const { RoutingSignalControls } = await import('../RoutingSignalControls');
+    await act(async () =>
+      root.render(
+        <RoutingSignalControls
+          subjectRef={{ type: 'cat', catId: 'codex-sol' }}
+          affectedCatIds={['codex-sol']}
+          signalEvents={[
+            {
+              v: 1,
+              eventId: 'signal-open',
+              commandId: 'command-open',
+              ownerId: 'owner-1',
+              subjectRef: { type: 'cat', catId: 'codex-sol' },
+              reasonCode: 'quota-window',
+              source: 'manual_cvo',
+              observedAt: Date.now(),
+              validUntil: Date.now() + 3_600_000,
+              evidenceRef: 'command:command-open',
+              eventType: 'asserted',
+              state: 'scarce',
+            },
+          ]}
+          onChanged={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('供给偏紧');
+    expect(container.textContent).toContain('额度周期限制');
+    expect(container.textContent).not.toContain('scarce · quota-window');
+    expect(container.textContent).toContain('原因');
+    expect(container.textContent).not.toContain('原因代码');
+  });
+
+  it('keeps an unknown reason code as stored instead of inventing a translation', async () => {
+    const { RoutingSignalControls } = await import('../RoutingSignalControls');
+    await act(async () =>
+      root.render(
+        <RoutingSignalControls
+          subjectRef={{ type: 'cat', catId: 'codex-sol' }}
+          affectedCatIds={['codex-sol']}
+          signalEvents={[
+            {
+              v: 1,
+              eventId: 'signal-unknown',
+              commandId: 'command-unknown',
+              ownerId: 'owner-1',
+              subjectRef: { type: 'cat', catId: 'codex-sol' },
+              reasonCode: 'some-future-code',
+              source: 'manual_cvo',
+              observedAt: Date.now(),
+              validUntil: Date.now() + 3_600_000,
+              evidenceRef: 'command:command-unknown',
+              eventType: 'asserted',
+              state: 'unavailable',
+            },
+          ]}
+          onChanged={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('暂不可用');
+    expect(container.textContent).toContain('some-future-code');
+  });
+
   it('labels an elapsed assertion as expired instead of presenting it as current', async () => {
     const { RoutingSignalControls } = await import('../RoutingSignalControls');
     await act(async () =>
@@ -127,5 +198,64 @@ describe('F293 RoutingSignalControls', () => {
 
     expect(container.textContent).toContain('已过期（等待确认）');
     expect(container.textContent).not.toContain('unavailable · owner-maintenance');
+  });
+
+  it('labels canonical dispatch failure codes in human language', async () => {
+    const { RoutingSignalControls } = await import('../RoutingSignalControls');
+    const assertion = (eventId: string, reasonCode: string) => ({
+      v: 1 as const,
+      eventId,
+      commandId: `command-${eventId}`,
+      ownerId: 'owner-1',
+      subjectRef: { type: 'cat' as const, catId: 'codex-sol' },
+      reasonCode,
+      source: 'manual_cvo' as const,
+      observedAt: Date.now(),
+      validUntil: Date.now() + 3_600_000,
+      evidenceRef: `command:command-${eventId}`,
+      eventType: 'asserted' as const,
+      state: 'unavailable' as const,
+    });
+    await act(async () =>
+      root.render(
+        <RoutingSignalControls
+          subjectRef={{ type: 'cat', catId: 'codex-sol' }}
+          affectedCatIds={['codex-sol']}
+          signalEvents={[
+            assertion('signal-quota', 'quota_exhausted'),
+            assertion('signal-auth', 'authentication_rejected'),
+            assertion('signal-unreachable', 'provider_unreachable'),
+            assertion('signal-timeout', 'provider_timeout'),
+          ]}
+          onChanged={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('额度已用尽');
+    expect(container.textContent).toContain('鉴权被拒绝');
+    expect(container.textContent).toContain('服务暂时不可达');
+    expect(container.textContent).toContain('服务响应超时');
+    expect(container.textContent).not.toContain('quota_exhausted');
+    expect(container.textContent).not.toContain('authentication_rejected');
+    expect(container.textContent).not.toContain('provider_unreachable');
+    expect(container.textContent).not.toContain('provider_timeout');
+  });
+
+  it('keeps members outside the catalog honest without leaking their raw cat id', async () => {
+    const { RoutingSignalControls } = await import('../RoutingSignalControls');
+    await act(async () =>
+      root.render(
+        <RoutingSignalControls
+          subjectRef={{ type: 'cat', catId: 'codex-sol' }}
+          affectedCatIds={['codex-sol', 'ghost-cat']}
+          signalEvents={[]}
+          onChanged={vi.fn()}
+        />,
+      ),
+    );
+
+    expect(container.textContent).toContain('影响 2 位成员：小太阳·砚砚；1 位目录外成员');
+    expect(container.textContent).not.toContain('ghost-cat');
   });
 });

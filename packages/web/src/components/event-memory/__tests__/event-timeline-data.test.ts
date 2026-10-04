@@ -51,6 +51,16 @@ describe('loadEventsPage', () => {
     expect(page.events).toHaveLength(1);
   });
 
+  it('F324: a short byte-bounded page follows server hasMore instead of inferring completion', async () => {
+    mockApiFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ events: [{ eventId: 'e1' }], meta: { count: 1, hasMore: true, nextOffset: 1 } }),
+    } as Response);
+    const page = await loadEventsPage(0);
+    expect(page.events).toHaveLength(1);
+    expect(page.hasMore).toBe(true);
+  });
+
   it('throws on a non-ok response so the caller keeps the load-more affordance', async () => {
     mockApiFetch.mockResolvedValue({ ok: false } as Response);
     await expect(loadEventsPage(0)).rejects.toThrow();

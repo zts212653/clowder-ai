@@ -4,6 +4,8 @@ import { inspectPawFeelMessage } from '../../friction/paw-feel-source.js';
 import { PawFeelDirectRepairError } from './direct-repair-errors.js';
 
 export interface VerifiedPawFeelDirectRepairSourceContext {
+  sourceMessageId: string;
+  sourceThreadId: string;
   sourceSignalRef: OwnerTruthRefV1;
   sourceToolRef: OwnerTruthRefV1;
   markerDigest: string;
@@ -12,6 +14,8 @@ export interface VerifiedPawFeelDirectRepairSourceContext {
 }
 
 export interface VerifiedPawFeelSourceIdentityContext {
+  sourceMessageId: string;
+  sourceThreadId: string;
   sourceSignalRef: OwnerTruthRefV1;
   markerDigest: string;
   sameDigestOrdinal: number;
@@ -20,6 +24,7 @@ export interface VerifiedPawFeelSourceIdentityContext {
 }
 
 export interface PawFeelDirectRepairSourceVerifierOptions {
+  ownerUserId: string;
   messageStore: Pick<IMessageStore, 'getById'>;
   classifyTool(tool: string): OwnerTruthRefV1 | null | Promise<OwnerTruthRefV1 | null>;
 }
@@ -54,7 +59,9 @@ export function defaultPawFeelSourceToolClassifier(tool: string): OwnerTruthRefV
 }
 
 export class PawFeelDirectRepairSourceVerifier {
-  constructor(private readonly options: PawFeelDirectRepairSourceVerifierOptions) {}
+  constructor(private readonly options: PawFeelDirectRepairSourceVerifierOptions) {
+    if (!options.ownerUserId.trim()) throw new Error('direct-repair source owner user must be non-empty');
+  }
 
   async verifyIdentity(projection: PawFeelDispositionProjection): Promise<VerifiedPawFeelSourceIdentityContext> {
     let message: StoredMessage | null;
@@ -70,6 +77,7 @@ export class PawFeelDirectRepairSourceVerifier {
     if (
       message.id !== projection.sourceMessageId ||
       message.threadId !== projection.sourceThreadId ||
+      message.userId !== this.options.ownerUserId ||
       message.catId !== projection.sourceCatId
     ) {
       throw new PawFeelDirectRepairError('source_mismatch', 'canonical source identity changed');
@@ -93,6 +101,8 @@ export class PawFeelDirectRepairSourceVerifier {
     }
     const tool = candidate.marker.tool?.trim();
     return {
+      sourceMessageId: projection.sourceMessageId,
+      sourceThreadId: projection.sourceThreadId,
       sourceSignalRef: derivePawFeelSourceSignalRef(projection),
       markerDigest: projection.markerDigest,
       sameDigestOrdinal: projection.sameDigestOrdinal,
@@ -116,6 +126,8 @@ export class PawFeelDirectRepairSourceVerifier {
     }
     if (!classified) throw new PawFeelDirectRepairError('source_tool_unclassified', 'source tool route is unknown');
     return {
+      sourceMessageId: identity.sourceMessageId,
+      sourceThreadId: identity.sourceThreadId,
       sourceSignalRef: identity.sourceSignalRef,
       sourceToolRef: ownerTruthRefV1Schema.parse(classified),
       markerDigest: identity.markerDigest,

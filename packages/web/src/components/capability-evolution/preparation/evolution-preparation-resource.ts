@@ -71,7 +71,7 @@ const submissionProjectionSchema = z
                   })
                   .strict(),
               )
-              .max(17),
+              .max(32),
           })
           .strict(),
       )

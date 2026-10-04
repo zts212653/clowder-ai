@@ -90,6 +90,11 @@ describe('F293 TeamWorkspacePanel presentation', () => {
     expect(fit?.textContent).toContain('跨仓状态机');
     expect(cautions?.textContent).toContain('只有几行机械修改时不值得请他');
     expect(fit?.textContent).not.toContain('只有几行机械修改时不值得请他');
+    // Fit and watch-out lists lead with a count and a semantic dot, not a bare gray marker.
+    expect(fit?.querySelector('h4')?.textContent).toBe('适合的任务 1');
+    expect(cautions?.querySelector('h4')?.textContent).toBe('协作时留意 1');
+    expect(fit?.querySelector('[aria-hidden="true"]')?.className).toContain('text-conn-green-text');
+    expect(cautions?.querySelector('[aria-hidden="true"]')?.className).toContain('text-conn-amber-text');
 
     const evidence = container.querySelector<HTMLDetailsElement>('[data-testid="team-detail-evidence"]');
     expect(evidence).not.toBeNull();
@@ -229,5 +234,45 @@ describe('F293 TeamWorkspacePanel presentation', () => {
     expect(back).not.toBeNull();
     act(() => back?.click());
     expect(onSubjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it('offers a re-read and a real settings destination when the directory itself is empty', async () => {
+    const emptyModel = structuredClone(model) as RoutingContextReadModelV1;
+    if (emptyModel.resolution.state !== 'fresh') throw new Error('expected fresh fixture');
+    emptyModel.resolution.snapshot.candidates = [];
+    const refresh = vi.fn().mockResolvedValue(true);
+    mocks.useRoutingContext.mockReturnValue({ data: emptyModel, loading: false, error: null, refresh });
+    const { TeamWorkspacePanel } = await import('../TeamWorkspacePanel');
+    await act(async () => root.render(<TeamWorkspacePanel subject={null} onSubjectChange={vi.fn()} />));
+
+    const empty = container.querySelector('[data-testid="team-roster-empty"]');
+    expect(empty?.textContent).toContain('当前目录还没有可展示的团队成员');
+    expect(empty?.textContent).toContain('重新读取');
+    expect(empty?.querySelector('a')?.getAttribute('href')).toBe('/settings?s=members');
+    const reread = container.querySelector<HTMLButtonElement>('[data-testid="team-roster-refresh"]');
+    await act(async () => reread?.click());
+    expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it('names provider groups and the provider detail with vendor display names', async () => {
+    mocks.useRoutingContext.mockReturnValue({ data: rosterModel, loading: false, error: null, refresh: mocks.refresh });
+    const { TeamWorkspacePanel } = await import('../TeamWorkspacePanel');
+    await act(async () => root.render(<TeamWorkspacePanel subject={null} onSubjectChange={vi.fn()} />));
+
+    const fold = [...container.querySelectorAll('details')].find((item) =>
+      item.textContent?.includes('按运行服务查看'),
+    );
+    expect(fold).toBeDefined();
+    const openaiButton = fold?.querySelector('[data-testid="team-provider-openai"]');
+    expect(openaiButton?.textContent).toContain('OpenAI');
+    expect(openaiButton?.textContent).not.toContain('openai');
+    expect(fold?.querySelector('[data-testid="team-provider-anthropic"]')?.textContent).toContain('Anthropic');
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await act(async () =>
+      root.render(<TeamWorkspacePanel subject={{ type: 'provider', id: 'openai' }} onSubjectChange={vi.fn()} />),
+    );
+    expect(container.querySelector('h3')?.textContent).toBe('OpenAI');
   });
 });

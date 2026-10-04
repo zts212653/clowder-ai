@@ -79,4 +79,23 @@ describe('Collective onboarding scene', () => {
     expect(html).not.toContain('请联系 Service 管理者');
     expect(html).not.toContain('disabled');
   });
+
+  it('does not call an authenticated Human a first-time owner after they leave their last Collective', () => {
+    const html = renderToStaticMarkup(
+      <OnboardingScene
+        phase="create-collective"
+        mode="missing"
+        providers={[githubReady]}
+        hasAuthenticatedHuman
+        onBootstrap={noop}
+        onAuthenticate={noop}
+        onConfigureProvider={noop}
+        onCreateCollective={noop}
+      />,
+    );
+
+    expect(html).toContain('建立新的共同家园');
+    expect(html).toContain('从新的邀请链接加入');
+    expect(html).not.toContain('第一次建立 Collective');
+  });
 });

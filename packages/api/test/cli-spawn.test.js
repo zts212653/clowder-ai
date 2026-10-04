@@ -643,12 +643,16 @@ test('spawnCli defaults to manual-cancel-only when CLI_TIMEOUT_MS is unset', asy
   try {
     const promise = collect(spawnCli({ command: 'test-cli', args: [] }, { spawnFn }));
 
+    assert.deepEqual(delays, [], 'a running CLI must not acquire a response deadline by default');
     proc.stdout.end();
     proc._emitter.emit('exit', 0, null);
     await promise;
 
     assert.equal(DEFAULT_CLI_TIMEOUT_MS, 0, 'automatic CLI timeout must be opt-in');
-    assert.deepEqual(delays, [], 'unset CLI_TIMEOUT_MS must not arm an automatic response timeout');
+    assert.ok(
+      delays.every((delay) => delay <= 1_000),
+      'only the post-exit stdio drain may be bounded',
+    );
     assert.equal(proc.kill.mock.callCount(), 0, 'manual-cancel-only default must not signal the process');
   } finally {
     global.setTimeout = originalSetTimeout;
@@ -794,6 +798,54 @@ test('spawnCli removes inherited env vars when override is null', async () => {
 
   if (saved === undefined) delete process.env.SPAWN_DELETE_ME;
   else process.env.SPAWN_DELETE_ME = saved;
+});
+
+test('explicit CLI environment does not inherit unrelated runtime credentials', () => {
+  const saved = process.env.F325_AMBIENT_SECRET;
+  try {
+    process.env.F325_AMBIENT_SECRET = 'fake-runtime-secret';
+    const childEnv = buildChildEnv(
+      { HOME: '/tmp/f325-isolated-home', PATH: '/usr/bin:/bin', CAT_CAFE_CALLBACK_TOKEN: null },
+      { inheritParentEnv: false, workingDirectory: '/tmp/f325-workspace' },
+    );
+    assert.equal(childEnv.F325_AMBIENT_SECRET, undefined);
+    assert.equal(childEnv.CAT_CAFE_CALLBACK_TOKEN, undefined);
+    assert.equal(childEnv.HOME, '/tmp/f325-isolated-home');
+    assert.equal(childEnv.PWD, '/tmp/f325-workspace');
+  } finally {
+    if (saved === undefined) delete process.env.F325_AMBIENT_SECRET;
+    else process.env.F325_AMBIENT_SECRET = saved;
+  }
+});
+
+test('spawnCli applies an explicit environment at the process boundary', async () => {
+  const saved = process.env.F325_AMBIENT_SECRET;
+  process.env.F325_AMBIENT_SECRET = 'fake-runtime-secret';
+  try {
+    const proc = createMockProcess();
+    const spawnFn = createMockSpawnFn(proc);
+    const pending = collect(
+      spawnCli(
+        {
+          command: 'agy',
+          args: [],
+          cwd: '/tmp/f325-workspace',
+          inheritParentEnv: false,
+          env: { PATH: '/usr/bin:/bin' },
+        },
+        { spawnFn },
+      ),
+    );
+    proc.stdout.end();
+    proc._emitter.emit('exit', 0, null);
+    await pending;
+    const childEnv = spawnFn.mock.calls[0].arguments[2].env;
+    assert.equal(childEnv.F325_AMBIENT_SECRET, undefined);
+    assert.equal(childEnv.PATH.includes('/usr/bin:/bin'), true);
+  } finally {
+    if (saved === undefined) delete process.env.F325_AMBIENT_SECRET;
+    else process.env.F325_AMBIENT_SECRET = saved;
+  }
 });
 
 test('buildChildEnv never forwards runtime-only lifecycle capabilities to agent shells', () => {

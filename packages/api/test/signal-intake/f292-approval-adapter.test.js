@@ -138,6 +138,8 @@ describe('F292 Needs Me projection', () => {
       ['intake-1'],
     );
 
+    assert.deepEqual(pending[0].needsMeDecisionRefs.map((ref) => ref.subjectRef).sort(), ['intake-1', 'intake-1-note']);
+
     const current = await admission.intakes.get('intake-1');
     await admission.intakes.compareAndSet('intake-1', current.revision, {
       ...current,

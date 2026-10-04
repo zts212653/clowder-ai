@@ -5,6 +5,8 @@
 @import "./exploration-actions.css";
 @import "./exploration-conditions.css";
 @import "./exploration-host.css";
+@import "./exploration-navigation.css";
+@import "./exploration-decision.css";
 
 .exploration-workspace {
   min-width: 0;
@@ -138,7 +140,7 @@
 }
 .exploration-navigation {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 24px;
   padding: 18px;
@@ -151,8 +153,8 @@
   min-width: 0;
 }
 .exploration-selected {
-  padding-left: 22px;
-  border-left: 1px solid var(--cafe-border-subtle);
+  padding-top: 18px;
+  border-top: 1px solid var(--cafe-border-subtle);
 }
 .exploration-changes {
   margin: 8px 0 14px;
@@ -160,13 +162,17 @@
 }
 .exploration-changes summary {
   cursor: pointer;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+  color: var(--evolution-focus-text);
 }
-.exploration-changes[open] summary {
-  -webkit-line-clamp: unset;
+.exploration-version-summary {
+  margin-block: 10px;
+  max-width: 76em;
+  overflow-wrap: anywhere;
+}
+.exploration-experiment-caption {
+  margin: 8px 0 0;
+  color: var(--cafe-text-secondary);
+  overflow-wrap: anywhere;
 }
 .exploration-changes p {
   margin-top: 10px;

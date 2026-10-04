@@ -1,15 +1,17 @@
 ---
 feature_ids: [F178]
-related_features: [F061, F174, F077, F086, F098, F193]
+related_features: [F061, F174, F077, F086, F098, F193, F325]
 topics: [auth, mcp, agent-key, persistent-credential, antigravity, infrastructure]
 doc_kind: spec
 created: 2026-04-26
-tips_exempt: renewed for the legacy generic-permission sunset truth sync; Remote MCP discovery is unchanged and no new user-invokable action shipped
+tips_exempt: "Renewed 2026-10-02: the F325 consolidation note preserves existing persistent-principal and Remote MCP ownership; it introduces no new credential setup or user action."
 ---
 
 # F178: Persistent MCP Agent-Key Auth — 跨 invocation 写权限
 
 > **Status**: in-progress | **Owner**: Ragdoll（Ragdoll） | **Reviewer**: Maine Coon（Maine Coon） | **Priority**: P1
+
+**2026-09-29 AGY consolidation boundary**：本 F 的 persistent principal、Remote MCP、sidecar 与 Phase E 继续由原 owner 持有，不随旧 IDE 退役而冻结。[F325](F325-antigravity-native-parity.md) B6/D4 负责 AGY 身份接入、旧 IDE 专属配置清理和共享鉴权回归；不另建 key registry、不撤销其他消费者。
 
 Architecture cell: callback-auth
 Map delta: updated 2026-08-08

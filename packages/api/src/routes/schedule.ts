@@ -14,11 +14,15 @@
  * DELETE /api/schedule/control/tasks/:id → remove task override (AC-D1)
  */
 
-import { type ProducerAttentionReevaluationLinkV1, producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
+import {
+  DEVELOPMENT_RETURN_TEMPLATE_ID,
+  type ProducerAttentionReevaluationLinkV1,
+  producerAttentionReevaluationLinkV1Schema,
+} from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID } from '../domains/growing/ProducerAttentionReevaluationTaskSpec.js';
 import { f255ConfigRequired, isF255ConfigOnlyTemplate } from '../infrastructure/scheduler/f255-template-boundary.js';
-import type { TriggerSpec } from '../infrastructure/scheduler/types.js';
+import type { ScheduleTaskSummary, TriggerSpec } from '../infrastructure/scheduler/types.js';
 import { registerCallbackAuthHook } from './callback-auth-prehandler.js';
 import { governanceRoutes } from './schedule-governance.js';
 import { scheduleMutationRoutes } from './schedule-mutation-routes.js';
@@ -93,15 +97,15 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     // P1-2 fix: don't rely solely on lastRun — query ledger for ANY matching run.
     // Also include tasks whose subjectKind matches active thread task kinds.
     const ledger = taskRunner.getLedger();
+    const matchesDirectly = (s: ScheduleTaskSummary) =>
+      s.deliveryThreadId === threadId || !!(s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key));
+    const historicalMatches = ledger.findTaskIdsBySubjects(
+      summaries.filter((s) => !matchesDirectly(s)).map((s) => s.id),
+      [...threadSubjectKeys],
+    );
     const filtered = summaries.flatMap((s) => {
-      if (s.deliveryThreadId === threadId) return [s];
-      // Quick path: if lastRun matches, include immediately
-      if (s.lastRun && threadSubjectKeys.has(s.lastRun.subject_key)) return [s];
-      // Slow path: check if ANY run for this task matches thread's subject keys
-      for (const sk of threadSubjectKeys) {
-        const runs = ledger.queryBySubject(s.id, sk, 1);
-        if (runs.length > 0) return [s];
-      }
+      if (matchesDirectly(s)) return [s];
+      if (historicalMatches.has(s.id)) return [s];
       // Kind-match path (#320 P1): thread has active task of matching kind → include,
       // but scrub run metadata that belongs to other threads/PRs.
       if (s.display?.subjectKind && activeThreadSubjectKinds.has(s.display.subjectKind)) {
@@ -121,11 +125,18 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
   app.get('/api/schedule/tasks/:id/runs', async (request, reply) => {
     const { id } = request.params as { id: string };
     const { threadId, limit } = request.query as { threadId?: string; limit?: string };
-    const maxRows = Math.min(Number(limit) || 50, 200);
+    const requestedLimit = limit === undefined ? 50 : Number(limit);
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      return reply.status(400).send({ error: 'Invalid limit: must be a positive integer' });
+    }
+    const maxRows = Math.min(requestedLimit, 200);
 
     const registered = taskRunner.getRegisteredTasks();
     const dynamicDef = dynamicTaskStore?.getById(id);
-    if (!registered.includes(id) && !isVisibleDynamicTaskDef(dynamicDef)) {
+    if (
+      dynamicDef?.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID ||
+      (!registered.includes(id) && !isVisibleDynamicTaskDef(dynamicDef))
+    ) {
       reply.status(404);
       return { error: 'Task not found' };
     }
@@ -169,7 +180,7 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
       return f255ManagedTask();
     }
     const registered = taskRunner.getRegisteredTasks();
-    if (!registered.includes(id)) {
+    if (dynamicDef?.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID || !registered.includes(id)) {
       reply.status(404);
       return { error: 'Task not found' };
     }
@@ -188,7 +199,11 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     return {
       templates: templateRegistry
         .list()
-        .filter((template) => !isF255ConfigOnlyTemplate(template.templateId, packTemplateStore))
+        .filter(
+          (template) =>
+            template.templateId !== DEVELOPMENT_RETURN_TEMPLATE_ID &&
+            !isF255ConfigOnlyTemplate(template.templateId, packTemplateStore),
+        )
         .map((t) => ({
           templateId: t.templateId,
           label: t.label,
@@ -219,6 +234,9 @@ export const scheduleRoutes: FastifyPluginAsync<ScheduleRoutesOptions> = async (
     if (!body.templateId) {
       reply.status(400);
       return { error: 'Missing templateId' };
+    }
+    if (body.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID) {
+      return reply.code(409).send({ error: 'Use the authenticated development-return owner action' });
     }
     if (isF255ConfigOnlyTemplate(body.templateId, packTemplateStore)) {
       reply.status(409);

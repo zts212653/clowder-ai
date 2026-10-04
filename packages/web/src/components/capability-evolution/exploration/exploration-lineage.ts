@@ -2,8 +2,16 @@ import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
 
 export const LINEAGE_NODE_SIZE = { width: 176, height: 112 };
 
+export function lineageDetailLevel(zoom: number) {
+  return zoom < 0.6 ? 'points' : zoom < 1.15 ? 'compact' : 'detail';
+}
+
 /** Topological, stable source order. Neither outcomes nor selection move a version into a better place. */
-export function layoutExplorationLineage(nodes: EvolutionExplorationNodeV1[], collapsed: string[]) {
+export function layoutExplorationLineage(
+  nodes: EvolutionExplorationNodeV1[],
+  collapsed: string[],
+  direction: 'map' | 'vertical' = 'map',
+) {
   const byKey = new Map(nodes.map((node) => [refIdentity(node.nodeRef), node]));
   const levels = new Map<string, number>();
   const visiting = new Set<string>();
@@ -21,21 +29,30 @@ export function layoutExplorationLineage(nodes: EvolutionExplorationNodeV1[], co
     return depth;
   };
   for (const key of byKey.keys()) level(key);
+  const visible = nodes.filter((node) => !hidden.has(refIdentity(node.nodeRef)));
+  const generationSizes = new Map<number, number>();
+  for (const node of visible) {
+    const depth = levels.get(refIdentity(node.nodeRef)) ?? 0;
+    generationSizes.set(depth, (generationSizes.get(depth) ?? 0) + 1);
+  }
+  const breadth = Math.max(1, ...generationSizes.values());
+  const depthCount = Math.max(1, ...generationSizes.keys());
+  // Wide generations need room between layers; grades and the selected node never influence geometry.
+  const layerGap = breadth >= 8 ? Math.max(208, (breadth * 144 * 3) / depthCount) : 208;
   const rows = new Map<number, number>();
-  const placed = nodes
-    .filter((node) => !hidden.has(refIdentity(node.nodeRef)))
-    .map((node) => {
-      const key = refIdentity(node.nodeRef);
-      const depth = levels.get(key) ?? 0;
-      const row = rows.get(depth) ?? 0;
-      rows.set(depth, row + 1);
-      return {
-        node,
-        key,
-        x: 24 + depth * (LINEAGE_NODE_SIZE.width + 32),
-        y: 24 + row * (LINEAGE_NODE_SIZE.height + 32),
-      };
-    });
+  const placed = visible.map((node) => {
+    const key = refIdentity(node.nodeRef);
+    const depth = levels.get(key) ?? 0;
+    const row = rows.get(depth) ?? 0;
+    rows.set(depth, row + 1);
+    const position = ((row + 0.5) * breadth) / (generationSizes.get(depth) ?? 1) - 0.5;
+    return {
+      node,
+      key,
+      x: 24 + (direction === 'vertical' ? position * 208 : depth * layerGap),
+      y: 24 + (direction === 'vertical' ? depth : position) * 144,
+    };
+  });
   return {
     nodes: placed,
     width: Math.max(240, ...placed.map((node) => node.x + LINEAGE_NODE_SIZE.width + 24)),

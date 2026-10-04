@@ -12,6 +12,7 @@ import type {
   TranscriptLine,
 } from './audio-transcript-contract';
 import { FloatingTranscriptWindow } from './FloatingTranscriptWindow';
+import { revokeMeetingShareBeforeCapture } from './revokeMeetingShareBeforeCapture';
 
 interface InterventionAdvisory {
   type: 'intervention_advisory';
@@ -169,6 +170,7 @@ export function FloatingTranscriptContainer() {
 
   const handleStop = useCallback(async () => {
     try {
+      await revokeMeetingShareBeforeCapture();
       const resp = await apiFetch('/api/audio/stop', { method: 'POST' });
       if (resp.ok) {
         const data = (await resp.json()) as {
@@ -188,6 +190,7 @@ export function FloatingTranscriptContainer() {
 
   const handlePause = useCallback(async () => {
     try {
+      await revokeMeetingShareBeforeCapture();
       const resp = await apiFetch('/api/audio/pause', { method: 'POST' });
       if (resp.ok) setStatus((prev) => ({ ...prev, paused: true }));
     } catch {}

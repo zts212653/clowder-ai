@@ -11,6 +11,9 @@ vi.mock('@/hooks/useCatData', () => ({
       catId === 'codex-sol' ? { displayName: '砚砚' } : catId === 'kimi' ? { displayName: '墨墨' } : undefined,
   }),
 }));
+vi.mock('@/hooks/useDeploymentWaitProjection', () => ({
+  useDeploymentWaitProjection: () => ({ projection: null, hydration: 'idle', error: null, retry: vi.fn() }),
+}));
 
 import { WorkspaceNowSurface } from '../WorkspaceNowSurface';
 

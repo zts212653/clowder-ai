@@ -6,16 +6,14 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorState } from '@codemirror/state';
 import { basicSetup, EditorView } from 'codemirror';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useWorkspaceSurfaceVisibility } from '@/components/workbench/WorkspaceSurfaceVisibility';
 import { useChatStore } from '@/stores/chatStore';
-import { createQuoteContextAttachment } from '../chat-context-reference';
 import { SelectionAnnotationAction } from '../SelectionAnnotationAction';
-import {
-  type FloatingSelectionPosition,
-  positionSelectionActionForAnchors,
-  type RectLike,
-  selectionAnchorPositionsForRows,
-  selectionOffsetInRange,
-} from './selection-action-position';
+import { type CodeSelectionAction, selectionActionForView } from './code-viewer-selection';
+import { useWorkspaceFileDraft } from './useWorkspaceFileDraft';
+import { WorkspaceFileDraftNotice } from './WorkspaceFileDraftNotice';
+import type { WorkspaceFileSave } from './workspace-file-draft';
+import { addWorkspaceFileQuoteToChat } from './workspace-file-quote';
 
 const cafeTheme = EditorView.theme(
   {
@@ -48,66 +46,6 @@ function getLanguageExtension(mime: string, path: string) {
   return javascript({ typescript: true });
 }
 
-function getSelectionInfo(view: EditorView) {
-  const { from, to } = view.state.selection.main;
-  if (from === to) return null;
-  const text = view.state.sliceDoc(from, to);
-  if (!text.trim()) return null;
-  const startLine = view.state.doc.lineAt(from).number;
-  const endLine = view.state.doc.lineAt(to).number;
-  return { text, startLine, endLine, selectionStart: from, selectionEnd: to };
-}
-
-interface CodeSelectionAction {
-  position: FloatingSelectionPosition;
-  text: string;
-  startLine: number;
-  endLine: number;
-  selectionStart: number;
-  selectionEnd: number;
-}
-
-function collectSelectionAnchors(view: EditorView): RectLike[] {
-  const mainSelection = view.state.selection.main;
-  const offsets = selectionAnchorPositionsForRows(mainSelection, view.viewportLineBlocks);
-  const editorRect = view.dom.getBoundingClientRect();
-  const anchorOffsets = new Set<number>();
-  const anchors: RectLike[] = [];
-  const addAnchor = (offset: number) => {
-    if (anchorOffsets.has(offset)) return null;
-    anchorOffsets.add(offset);
-    const coords = view.coordsAtPos(offset);
-    if (!coords) return null;
-    anchors.push({ ...coords, width: coords.right - coords.left, height: coords.bottom - coords.top });
-    return coords;
-  };
-
-  for (const offset of offsets) {
-    const coords = addAnchor(offset);
-    if (!coords) continue;
-    const visibleTop = Math.max(coords.top, editorRect.top);
-    const visibleBottom = Math.min(coords.bottom, editorRect.bottom);
-    if (visibleTop >= visibleBottom) continue;
-    const y = (visibleTop + visibleBottom) / 2;
-    const left = view.posAtCoords({ x: editorRect.left + 1, y });
-    const right = view.posAtCoords({ x: editorRect.right - 1, y });
-    if (left === null || right === null) continue;
-    const visibleOffset = selectionOffsetInRange(mainSelection, {
-      from: Math.min(left, right),
-      to: Math.max(left, right),
-    });
-    if (visibleOffset !== null) addAnchor(visibleOffset);
-  }
-  return anchors;
-}
-
-function selectionActionForView(view: EditorView, shell: HTMLDivElement | null): CodeSelectionAction | null {
-  const selection = getSelectionInfo(view);
-  if (!shell || !selection) return null;
-  const position = positionSelectionActionForAnchors(collectSelectionAnchors(view), shell.getBoundingClientRect());
-  return position ? { position, ...selection } : null;
-}
-
 export function CodeViewer({
   content,
   mime,
@@ -118,6 +56,7 @@ export function CodeViewer({
   onDirtyChange,
   branch,
   worktreeId,
+  baseSha256,
   restoreScrollTop,
   restoreKey,
   onScrollTopChange,
@@ -127,10 +66,11 @@ export function CodeViewer({
   path: string;
   scrollToLine: number | null;
   editable?: boolean;
-  onSave?: (newContent: string) => Promise<void>;
+  onSave?: WorkspaceFileSave;
   onDirtyChange?: (dirty: boolean) => void;
   branch?: string;
   worktreeId?: string | null;
+  baseSha256?: string;
   restoreScrollTop?: number | null;
   restoreKey?: string;
   onScrollTopChange?: (scrollTop: number) => void;
@@ -141,7 +81,11 @@ export function CodeViewer({
   const [selectionAction, setSelectionAction] = useState<CodeSelectionAction | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
-  const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
+  const draft = useWorkspaceFileDraft(worktreeId, path, baseSha256);
+  const draftAccess = useRef(draft);
+  draftAccess.current = draft;
+  const visible = useWorkspaceSurfaceVisibility();
+  const canEdit = editable && draft.supported && draft.ready && !draft.drifted;
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const baseContentRef = useRef(content);
   const onDirtyChangeRef = useRef(onDirtyChange);
@@ -152,8 +96,9 @@ export function CodeViewer({
   useEffect(() => {
     if (!editorContainerRef.current) return;
     setSelectionAction(null);
-    setIsDirty(false);
-    onDirtyChangeRef.current?.(false);
+    const text = editable ? (draftAccess.current.snapshot().draft?.text ?? content) : content;
+    setIsDirty(text !== content);
+    onDirtyChangeRef.current?.(text !== content);
     baseContentRef.current = content;
     viewRef.current?.destroy();
 
@@ -162,17 +107,18 @@ export function CodeViewer({
       setSelectionAction(selectionActionForView(targetView, shellRef.current));
 
     const state = EditorState.create({
-      doc: content,
+      doc: text,
       extensions: [
         basicSetup,
         lang,
         cafeTheme,
-        EditorView.editable.of(editable),
-        EditorState.readOnly.of(!editable),
+        EditorView.editable.of(canEdit),
+        EditorState.readOnly.of(!canEdit),
         EditorView.updateListener.of((update) => {
           if (update.selectionSet || update.geometryChanged) syncSelectionAction(update.view);
-          if (update.docChanged && editable) {
+          if (update.docChanged && canEdit) {
             const current = update.state.doc.toString();
+            draftAccess.current.update(current);
             const dirty = current !== baseContentRef.current;
             setIsDirty(dirty);
             onDirtyChangeRef.current?.(dirty);
@@ -210,7 +156,7 @@ export function CodeViewer({
       }
       view.destroy();
     };
-  }, [content, mime, path, scrollToLine, editable]);
+  }, [content, mime, path, scrollToLine, editable, canEdit, worktreeId, baseSha256, draft.generation]);
 
   const restoreScrollTopRef = useRef(restoreScrollTop);
   restoreScrollTopRef.current = restoreScrollTop;
@@ -229,65 +175,66 @@ export function CodeViewer({
 
   const handleSave = useCallback(async () => {
     const view = viewRef.current;
-    if (!view || !onSave || saving) return;
+    if (!view || !onSave || saving || !canEdit) return;
     const newContent = view.state.doc.toString();
     if (newContent === baseContentRef.current) return;
     setSaving(true);
+    const sent = draftAccess.current.snapshot();
     try {
-      await onSave(newContent);
+      const receipt = await onSave(newContent, sent.draft ? { baseSha256: sent.draft.baseSha256 } : undefined);
+      if (receipt && receipt.path === path && /^[a-f0-9]{64}$/.test(receipt.sha256)) {
+        draftAccess.current.saved(sent, receipt.sha256);
+        if (viewRef.current === view) {
+          baseContentRef.current = newContent;
+          const dirty = view.state.doc.toString() !== newContent;
+          setIsDirty(dirty);
+          onDirtyChangeRef.current?.(dirty);
+        }
+      }
     } finally {
       setSaving(false);
     }
-  }, [onSave, saving]);
+  }, [onSave, saving, canEdit, path]);
 
   // Cmd/Ctrl+S keyboard shortcut
   useEffect(() => {
-    if (!editable || !onSave) return;
+    if (!canEdit || !onSave || !visible) return;
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's' && shellRef.current?.contains(document.activeElement)) {
         e.preventDefault();
         handleSave();
       }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [editable, onSave, handleSave]);
+  }, [canEdit, onSave, handleSave, visible]);
 
   const handleAddToChat = useCallback(
     (comment: string) => {
       if (!selectionAction) return;
-      setPendingChatInsert({
-        threadId: currentThreadId,
-        text: '',
-        contextAttachments: [
-          createQuoteContextAttachment(
-            selectionAction.text,
-            {
-              kind: 'workspace_file',
-              path,
-              ...(worktreeId ? { worktreeId } : {}),
-              ...(branch ? { branch } : {}),
-              ...(mime ? { language: mime } : {}),
-              lineStart: selectionAction.startLine,
-              lineEnd: selectionAction.endLine,
-            },
-            {
-              comment,
-              selectionStart: selectionAction.selectionStart,
-              selectionEnd: selectionAction.selectionEnd,
-            },
-          ),
-        ],
+      addWorkspaceFileQuoteToChat(currentThreadId, {
+        text: selectionAction.text,
+        comment,
+        path,
+        worktreeId,
+        branch,
+        language: mime,
+        lineStart: selectionAction.startLine,
+        lineEnd: selectionAction.endLine,
+        selectionStart: selectionAction.selectionStart,
+        selectionEnd: selectionAction.selectionEnd,
       });
     },
-    [path, branch, worktreeId, mime, setPendingChatInsert, currentThreadId, selectionAction],
+    [path, branch, worktreeId, mime, currentThreadId, selectionAction],
   );
 
   return (
-    <div ref={shellRef} className="relative flex-1 min-h-0 text-sm">
-      <div className="h-full overflow-auto" ref={editorContainerRef} />
+    <div ref={shellRef} className="relative flex flex-1 min-h-0 flex-col text-sm">
+      <WorkspaceFileDraftNotice draft={draft} currentContent={content} saving={saving} editing={editable} />
+      {editable && !draft.supported && <p role="alert">文件版本尚未核验，编辑尚未开启。</p>}
+      <div className="min-h-0 flex-1 overflow-auto" ref={editorContainerRef} />
       {/* Floating action buttons — positioned over scroll area */}
-      {editable && isDirty && (
+      {canEdit && isDirty && (
         <button
           type="button"
           onClick={handleSave}

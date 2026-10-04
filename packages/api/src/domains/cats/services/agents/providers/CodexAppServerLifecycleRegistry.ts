@@ -2,6 +2,7 @@ import type { CodexAppServerLifecycleSnapshot } from './CodexAppServerLifecycle.
 
 interface LifecycleRecord {
   lifecycle: CodexAppServerLifecycleSnapshot;
+  childInvocationId?: string;
 }
 
 const MAX_RECORD_AGE_MS = 12 * 60 * 60 * 1_000;
@@ -23,11 +24,13 @@ export function recordCodexAppServerLifecycle(input: {
   threadId: string;
   catId: string;
   invocationId: string;
+  childInvocationId?: string;
   lifecycle: CodexAppServerLifecycleSnapshot;
 }): void {
   pruneExpired(input.lifecycle.lastActivityAt);
   lifecycleByExecution.set(key(input.threadId, input.catId, input.invocationId), {
     lifecycle: { ...input.lifecycle },
+    ...(input.childInvocationId ? { childInvocationId: input.childInvocationId } : {}),
   });
 }
 
@@ -49,4 +52,14 @@ export function getCodexAppServerLifecycle(
 
 export function clearCodexAppServerLifecycle(threadId: string, catId: string, invocationId: string): void {
   lifecycleByExecution.delete(key(threadId, catId, invocationId));
+}
+
+export function getCodexChildLifecycle(
+  threadId: string,
+  catId: string,
+  parentId: string,
+  childId: string,
+): CodexAppServerLifecycleSnapshot | undefined {
+  const record = lifecycleByExecution.get(key(threadId, catId, parentId));
+  return record?.childInvocationId === childId ? getCodexAppServerLifecycle(threadId, catId, parentId) : undefined;
 }

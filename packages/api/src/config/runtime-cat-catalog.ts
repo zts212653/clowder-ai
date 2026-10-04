@@ -54,6 +54,8 @@ export interface RuntimeCatInput {
 }
 
 export interface RuntimeCatUpdate {
+  /** Move this member into an existing breed without changing its catId. */
+  breedId?: string;
   name?: string;
   displayName?: string;
   variantLabel?: string | null;
@@ -321,16 +323,37 @@ export function createRuntimeCat(projectRoot: string, input: RuntimeCatInput): C
     throw new Error(`Cat "${input.catId}" already exists in runtime catalog`);
   }
   const nextBreed = createBreedFromInput(input) as unknown as Record<string, any>;
-  catalog.breeds = [...catalog.breeds, nextBreed];
+  const targetBreedId = input.breedId?.trim();
+  if (targetBreedId && targetBreedId !== input.catId) {
+    const targetBreed = catalog.breeds.find((breed: { id: string }) => breed.id === targetBreedId);
+    if (!targetBreed) throw new Error(`Unknown breedId "${targetBreedId}"; choose an existing breed`);
+    const variant = nextBreed.variants[0];
+    if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+      throw new Error(`Variant "${variant.id}" already exists in breed "${targetBreedId}"`);
+    }
+    targetBreed.variants.push({
+      ...variant,
+      catId: input.catId,
+      relationshipKey: input.catId,
+      name: input.name,
+      displayName: input.displayName,
+      nickname: input.nickname?.trim() || null,
+      avatar: input.avatar,
+      color: input.color,
+      mentionPatterns: normalizeMentionPatterns(input.catId, input.mentionPatterns),
+      roleDescription: input.roleDescription,
+      ...(input.sessionChain !== undefined ? { sessionChain: input.sessionChain } : {}),
+    });
+  } else {
+    if (catalog.breeds.some((breed: { id: string }) => breed.id === nextBreed.id)) {
+      throw new Error(`Breed "${nextBreed.id}" already exists in runtime catalog`);
+    }
+    catalog.breeds = [...catalog.breeds, nextBreed];
+  }
   if (catalog.version === 2) {
     catalog.roster = {
       ...catalog.roster,
-      [input.catId]: buildDefaultRuntimeRosterEntry(
-        input.catId,
-        String(nextBreed.id ?? input.catId),
-        String(nextBreed.displayName ?? nextBreed.name ?? input.catId),
-        true,
-      ),
+      [input.catId]: buildDefaultRuntimeRosterEntry(input.catId, targetBreedId || input.catId, input.displayName, true),
     };
   }
   return writeAndValidateCatalog(projectRoot, catalog);
@@ -539,6 +562,56 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
             patch.available,
           ),
     };
+  }
+
+  if (patch.breedId !== undefined && patch.breedId !== breed.id) {
+    const targetBreed = catalog.breeds.find((candidate: { id: string }) => candidate.id === patch.breedId);
+    if (!targetBreed) throw new Error(`Unknown breedId "${patch.breedId}"; choose an existing breed`);
+    if (located.isDefaultVariant && breed.variants.length > 1) {
+      throw new Error(`Cannot move default member "${catId}" from a multi-member breed`);
+    }
+    if (targetBreed.variants.some((member: { id: string }) => member.id === variant.id)) {
+      throw new Error(`Variant "${variant.id}" already exists in breed "${patch.breedId}"`);
+    }
+
+    // A standalone cat stores its identity at breed level. Snapshot the resolved
+    // member before moving so target-breed defaults cannot silently rename it or
+    // replace its avatar, aliases, role, or session behavior.
+    const resolved = toAllCatConfigs(catalog as unknown as CatCafeConfig)[catId];
+    if (!resolved.relationshipKey) {
+      throw new Error(`Cat "${catId}" has no relationshipKey; refusing breed move`);
+    }
+    const movingVariant = {
+      ...variant,
+      catId,
+      relationshipKey: resolved.relationshipKey,
+      name: resolved.name,
+      displayName: resolved.displayName,
+      nickname: resolved.nickname ?? null,
+      avatar: resolved.avatar,
+      color: resolved.color,
+      mentionPatterns: [...resolved.mentionPatterns],
+      roleDescription: resolved.roleDescription,
+      personality: resolved.personality,
+      teamStrengths: resolved.teamStrengths ?? '',
+      caution: resolved.caution ?? null,
+      restrictions: resolved.restrictions ?? [],
+      sessionChain: resolved.sessionChain ?? true,
+      ...((variant.sessionStrategy ?? breed.features?.sessionStrategy)
+        ? { sessionStrategy: variant.sessionStrategy ?? breed.features.sessionStrategy }
+        : {}),
+    };
+    breed.variants.splice(located.variantIndex, 1);
+    if (breed.variants.length === 0) {
+      catalog.breeds.splice(located.breedIndex, 1);
+    }
+    targetBreed.variants.push(movingVariant);
+    if (catalog.version === 2) {
+      const existingEntry = catalog.roster[catId];
+      catalog.roster[catId] = existingEntry
+        ? { ...existingEntry, family: patch.breedId }
+        : buildDefaultRuntimeRosterEntry(catId, patch.breedId, resolved.displayName, true);
+    }
   }
 
   return writeAndValidateCatalog(projectRoot, catalog);

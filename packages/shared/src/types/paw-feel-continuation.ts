@@ -6,7 +6,7 @@ export type PawFeelIssueResolution = (typeof PAW_FEEL_ISSUE_RESOLUTIONS)[number]
 export type PawFeelResumeSelectorV1 =
   | { kind: 'task'; ref: OwnerTruthRefV1 }
   | { kind: 'owner_event'; ref: OwnerTruthRefV1 }
-  | { kind: 'bounded_time'; recheckAt: string };
+  | { kind: 'bounded_time'; recheckAt: string; dependencyRef?: OwnerTruthRefV1 };
 
 export interface PawFeelResumeConditionV1 {
   schemaVersion: 1;
@@ -30,6 +30,8 @@ export interface PawFeelDirectRepairOwnerRouteV1 {
 }
 
 export interface VerifiedPawFeelDirectRepairSourceV1 {
+  sourceMessageId: string;
+  sourceThreadId: string;
   sourceSignalRef: OwnerTruthRefV1;
   sourceToolRef: OwnerTruthRefV1;
   markerDigest: string;

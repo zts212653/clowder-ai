@@ -286,6 +286,25 @@ path_policies:
 
   # ── Legacy patterns migrated from hardcoded intake case statement (F238 Phase C review) ──
 
+  # Exact sources from sync-manifest.yaml; unregistered lookalikes remain protected.
+  - pattern: "README.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public README sources intentionally contain Clowder AI copy; port community README changes here instead of treating the public brand as contamination."
+
+  - pattern: "README.zh-CN.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical Chinese public README source registered in sync-manifest.yaml."
+
+  - pattern: "README.opensource.ja-JP.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical Japanese public README source registered in sync-manifest.yaml."
+
   - pattern: "README.md"
     outbound: sanitize
     inbound: manual-port
@@ -297,6 +316,36 @@ path_policies:
     inbound: manual-port
     risk: P1
     reason: "Localized READMEs are generated from README.opensource sources."
+
+  - pattern: "SETUP.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public setup documentation intentionally uses public branding."
+
+  - pattern: "SETUP.zh-CN.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical Chinese public setup source registered in sync-manifest.yaml."
+
+  - pattern: "CONTRIBUTING.md"
+    outbound: sanitize
+    inbound: public-source
+    risk: P1
+    reason: "Canonical public contribution documentation intentionally uses public branding."
+
+  - pattern: "SETUP*.md"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Public setup changes must be ported to the mapped source, not skipped as generated output."
+
+  - pattern: "CONTRIBUTING.md"
+    outbound: sanitize
+    inbound: manual-port
+    risk: P1
+    reason: "Public contribution changes must be ported to CONTRIBUTING.md."
 
   - pattern: "docs/ops/opensource-intake-ledger.json"
     outbound: pass-through

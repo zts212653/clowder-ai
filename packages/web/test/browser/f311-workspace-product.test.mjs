@@ -10,7 +10,10 @@ import {
   verifyMicroduckPreparationReading,
 } from './f311-workspace-owner-reading.journey.mjs';
 import { verifyJourneyProgress } from './f311-workspace-progress.journey.mjs';
-import { verifyUnnamedWorkspaceReadability } from './f311-workspace-readability.journey.mjs';
+import {
+  verifyThreeProgramsSideBySide,
+  verifyUnnamedWorkspaceReadability,
+} from './f311-workspace-readability.journey.mjs';
 import { verifyWorkspaceSidecarReturn } from './f311-workspace-sidecar.journey.mjs';
 import { verifyRichVersionReview } from './f311-workspace-version-review.journey.mjs';
 
@@ -154,6 +157,29 @@ test('unnamed project context and next steps remain readable in the real shell',
   }
 });
 
+test('three named Programs share one home anatomy side by side in the real shell', { timeout: 90_000 }, async () => {
+  const { page, context } = await authenticatedPage();
+  try {
+    report.measurements.threePrograms = await verifyThreeProgramsSideBySide({
+      page,
+      base,
+      threadId,
+      programFixture,
+      navigateShell,
+      capture,
+      assertContained,
+    });
+    report.claims.push(
+      'Named contract fixtures 研发协作改进 / Microduck 行走稳定性 / 投资人路演效果 share one home anatomy with stage-specific states at 1440/390; not owner truth or Alpha outcome.',
+    );
+  } catch (error) {
+    await capture(page, 'three-programs-failure');
+    throw error;
+  } finally {
+    await context.close();
+  }
+});
+
 test(
   `${liveAlpha ? 'real Alpha' : 'isolated contract'} Program traverses the actual rail, main review, history and close return`,
   { timeout: 90_000 },
@@ -179,7 +205,12 @@ test(
       if (liveAlpha) await detail.getByText('当前采用尚待资产来源确认。', { exact: true }).waitFor();
       else {
         await detail.getByText('官方 walking ONNX baseline', { exact: true }).waitFor();
-        await detail.getByText(MICRODUCK_BASELINE_VERSION, { exact: true }).waitFor();
+        const versionFold = detail.locator('details', { hasText: '版本标识' }).first();
+        const adoptedSha = versionFold.getByText(MICRODUCK_BASELINE_VERSION);
+        assert.equal(await adoptedSha.count(), 1, 'exact adopted version stays recoverable in the named detail');
+        assert.equal(await adoptedSha.isVisible(), false, 'exact version is not visible in the default narrative');
+        await versionFold.locator('summary').first().click();
+        await adoptedSha.waitFor();
       }
       await capture(page, 'live-detail');
       await workspace.getByRole('button', { name: '展开阅读 →', exact: true }).click();
@@ -328,6 +359,9 @@ test(
       await navigateShell(page, targetUrl('history', 'v1'));
       const program = page.getByTestId('evolution-program-surface');
       await program.getByText('v1 comparison_baseline', { exact: true }).waitFor();
+      const projectContext = program.locator('details.exploration-project-context');
+      assert.equal(await projectContext.getAttribute('open'), null);
+      await projectContext.locator(':scope > summary').click();
       await program.getByText('修改项目名称', { exact: true }).click();
       await program.getByLabel('项目名称', { exact: true }).fill('契约样本 · 清晰讲解');
       await program.getByRole('button', { name: '保存名称', exact: true }).click();

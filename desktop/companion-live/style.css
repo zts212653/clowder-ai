@@ -1,0 +1,304 @@
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+body {
+  font:
+    13px -apple-system,
+    BlinkMacSystemFont,
+    "PingFang SC",
+    sans-serif;
+  color: var(--cafe-text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 10px;
+}
+[hidden] {
+  display: none !important;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  border: 0;
+  color: inherit;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 3px;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+#pet {
+  width: 96px;
+  height: 104px;
+  flex-shrink: 0;
+  background: url("/pet.webp") 0 0 / 768px 936px;
+  animation: idle 4.8s steps(6) infinite;
+  -webkit-app-region: drag;
+  filter: drop-shadow(0 4px 5px #0003);
+}
+@keyframes idle {
+  to {
+    background-position-x: -576px;
+  }
+}
+#dock {
+  width: 100%;
+  flex-shrink: 0;
+  padding: 11px 12px 10px;
+  background: var(--cafe-surface-elevated);
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 20px;
+  box-shadow: 0 4px 16px #0002;
+}
+.voice-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 25px;
+}
+#orb {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--cafe-text-muted);
+}
+body.connecting #orb {
+  background: var(--semantic-warning);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+body.connected #orb {
+  background: var(--semantic-success);
+  animation: pulse 3.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+#status {
+  margin: 0;
+  line-height: 1.45;
+  text-align: center;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#idle {
+  padding: 7px 0 4px;
+}
+#begin {
+  width: 100%;
+  border-radius: 12px;
+  padding: 10px 20px;
+  font-weight: 600;
+  background: var(--accent-100);
+}
+#begin:hover {
+  background: var(--accent-200);
+}
+#controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  padding: 6px 0 9px;
+}
+#controls button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 51px;
+  border-radius: 11px;
+  background: transparent;
+  font-size: 11px;
+  white-space: nowrap;
+}
+#controls button:hover {
+  background: var(--cafe-surface);
+}
+#controls button[aria-pressed="true"],
+#controls button[aria-expanded="true"] {
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+#controls #end {
+  color: var(--semantic-critical);
+}
+#controls #end:hover {
+  background: var(--semantic-critical-surface);
+}
+#controls svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+#access {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--cafe-border-subtle);
+}
+#share {
+  flex: 1;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font-weight: 600;
+  background: var(--accent-100);
+  color: var(--accent-700);
+}
+#share:hover {
+  background: var(--accent-200);
+}
+#share[aria-pressed="true"] {
+  background: var(--semantic-success-surface);
+  color: var(--semantic-success);
+}
+#documents {
+  background: transparent;
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+  padding: 7px 3px;
+  border-radius: 6px;
+}
+#documents:hover {
+  background: var(--cafe-surface);
+}
+#screen-status {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  background: var(--semantic-warning-surface);
+  color: var(--cafe-text-secondary);
+}
+#screen-status[data-state="sharing"] {
+  background: var(--semantic-success-surface);
+}
+#connection-scope {
+  margin: 7px 0 0;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--cafe-text-muted);
+}
+#details {
+  align-self: stretch;
+  min-height: 0;
+  flex: 1;
+  margin-bottom: 5px;
+  background: var(--cafe-surface-elevated);
+  border: 1px solid var(--cafe-border-subtle);
+  border-radius: 18px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 3px 16px #0002;
+}
+#details header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--cafe-border-subtle);
+}
+#details header span {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+  flex: 1;
+}
+#collapse {
+  background: transparent;
+  font-size: 12px;
+  padding: 4px;
+  color: var(--cafe-text-secondary);
+}
+#transcript {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 14px;
+  line-height: 1.65;
+}
+#transcript p {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#transcript .user {
+  color: var(--cafe-text-secondary);
+}
+#transcript .user::before,
+#transcript .assistant::before {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 10px;
+  color: var(--cafe-text-muted);
+}
+#transcript .user::before {
+  content: "你";
+}
+#transcript .assistant::before {
+  content: "砚砚";
+}
+#transcript .tool {
+  font-size: 11px;
+  color: var(--cafe-text-secondary);
+}
+.empty {
+  color: var(--cafe-text-muted);
+}
+#compose {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--cafe-border-subtle);
+  padding: 9px;
+}
+#message {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 5px 3px;
+  background: transparent;
+  color: inherit;
+}
+#compose button {
+  border-radius: 50%;
+  background: var(--accent-100);
+  min-width: 30px;
+  height: 30px;
+}
+@media (prefers-reduced-motion: reduce) {
+  #pet,
+  body.connecting #orb,
+  body.connected #orb {
+    animation: none;
+  }
+}

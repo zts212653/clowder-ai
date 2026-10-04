@@ -14,6 +14,7 @@ import { PawFeelContinuingResponsibilityResolver } from './continuation/follow-u
 import type { IPawFeelReconciliationCoverageStore } from './coverage-store.js';
 import type { PawFeelDutySignalSummary } from './duty-notice.js';
 import type { IPawFeelDispositionEventLog } from './event-log.js';
+import { awaitPawFeelRead, mapPawFeelReads } from './projection/bounded-reads.js';
 import { loadPawFeelEventMap } from './projection/read-model-events.js';
 import { countPawFeelIssues, emptyPawFeelIssueCounts } from './projection/read-model-issue.js';
 import { buildPawFeelInboxItem } from './projection/read-model-item.js';
@@ -43,6 +44,7 @@ import {
 import { derivePawFeelCoverageHealth } from './reconciler.js';
 
 export interface PawFeelInboxQuery {
+  signal?: AbortSignal;
   states?: readonly PawFeelDispositionState[];
   sourceCatId?: string;
   /** Exact identity lookup. Returned aggregates are scoped to this source before applying the other filters. */
@@ -81,23 +83,26 @@ export class PawFeelDispositionReadModel {
   }
 
   async list(query: PawFeelInboxQuery = {}): Promise<PawFeelInboxPage> {
+    query.signal?.throwIfAborted();
     const generatedAt = this.now();
     const nowMs = Date.parse(generatedAt);
     if (!Number.isFinite(nowMs)) throw new Error(`invalid read-model time: ${generatedAt}`);
-    const degraded = await this.resolveDegraded();
+    const degraded = await awaitPawFeelRead(this.resolveDegraded(), query.signal);
     let coverage: PawFeelReconciliationCoverage | undefined;
     try {
-      const storedCoverage = await this.options.coverageStore?.read();
+      const { eventLog, messageStore } = this.options;
+      const storedCoverage = await awaitPawFeelRead(this.options.coverageStore?.read(), query.signal);
       if (storedCoverage) coverage = derivePawFeelCoverageHealth(storedCoverage, nowMs);
       const readScope = query.sourceMessageId
-        ? await loadPawFeelSourceReadScope(this.options.eventLog, this.options.messageStore, query.sourceMessageId)
-        : await this.loadGlobalReadScope();
+        ? await loadPawFeelSourceReadScope(eventLog, messageStore, query.sourceMessageId, query.signal)
+        : await this.loadGlobalReadScope(query.signal);
       const { projections, contextProjections, sourceSnapshots } = readScope;
       const projectionsBySignalId = new Map(contextProjections.map((projection) => [projection.signalId, projection]));
       const sourceIdentitiesBySignalId = pawFeelSourceIdentityMap(sourceSnapshots);
       const followUpResolver = this.followUpResolver.snapshot?.() ?? this.followUpResolver;
-      const resolvedItems = await Promise.all(
-        projections.map((projection) =>
+      const resolvedItems = await mapPawFeelReads(
+        projections,
+        (projection) =>
           this.resolveItem(
             projection,
             projectionsBySignalId,
@@ -106,7 +111,7 @@ export class PawFeelDispositionReadModel {
             nowMs,
             followUpResolver,
           ),
-        ),
+        query.signal,
       );
       const counts = {
         ...countPawFeelProjections(projections, nowMs),
@@ -142,6 +147,7 @@ export class PawFeelDispositionReadModel {
         ...(coverage ? { coverage } : {}),
       };
     } catch (error) {
+      query.signal?.throwIfAborted();
       return {
         generatedAt,
         projectionStatus: 'unavailable',
@@ -166,16 +172,14 @@ export class PawFeelDispositionReadModel {
     const sourceSnapshots = await loadPawFeelReadSourceSnapshots(this.options.messageStore, projections);
     const sourceIdentitiesBySignalId = pawFeelSourceIdentityMap(sourceSnapshots);
     const followUpResolver = this.followUpResolver.snapshot?.() ?? this.followUpResolver;
-    const items = await Promise.all(
-      projections.map((projection) =>
-        this.resolveItem(
-          projection,
-          projectionsBySignalId,
-          sourceIdentitiesBySignalId,
-          sourceSnapshots.get(projection.signalId),
-          nowMs,
-          followUpResolver,
-        ),
+    const items = await mapPawFeelReads(projections, (projection) =>
+      this.resolveItem(
+        projection,
+        projectionsBySignalId,
+        sourceIdentitiesBySignalId,
+        sourceSnapshots.get(projection.signalId),
+        nowMs,
+        followUpResolver,
       ),
     );
     const bundleKeyBySignal = new Map<string, string>();
@@ -223,9 +227,18 @@ export class PawFeelDispositionReadModel {
     );
   }
 
-  private async loadProjections(): Promise<PawFeelDispositionProjection[]> {
-    const signalIds = await this.options.eventLog.listSignalIds();
-    const eventMap = await loadPawFeelEventMap(this.options.eventLog, signalIds);
+  private async loadProjections(signal?: AbortSignal): Promise<PawFeelDispositionProjection[]> {
+    const signalIds = await awaitPawFeelRead(this.options.eventLog.listSignalIds(signal), signal);
+    signal?.throwIfAborted();
+    if (this.options.eventLog.readProjections) {
+      const projected = await awaitPawFeelRead(this.options.eventLog.readProjections(signalIds, signal), signal);
+      return signalIds.map((id) => {
+        const projection = projected.get(id);
+        if (!projection) throw new Error(`signal ${id} has no durable events`);
+        return projection;
+      });
+    }
+    const eventMap = await loadPawFeelEventMap(this.options.eventLog, signalIds, signal);
     return signalIds.map((signalId) => {
       const events = eventMap.get(signalId);
       if (!events || events.length === 0) throw new Error(`signal ${signalId} has no durable events`);
@@ -233,12 +246,13 @@ export class PawFeelDispositionReadModel {
     });
   }
 
-  private async loadGlobalReadScope(): Promise<PawFeelReadScope> {
-    const projections = await this.loadProjections();
+  private async loadGlobalReadScope(signal?: AbortSignal): Promise<PawFeelReadScope> {
+    const projections = await this.loadProjections(signal);
+    signal?.throwIfAborted();
     return {
       projections,
       contextProjections: projections,
-      sourceSnapshots: await loadPawFeelReadSourceSnapshots(this.options.messageStore, projections),
+      sourceSnapshots: await loadPawFeelReadSourceSnapshots(this.options.messageStore, projections, signal),
     };
   }
 

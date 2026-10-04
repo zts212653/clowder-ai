@@ -31,7 +31,7 @@ export function EvolutionProgressAction({
   if (!label) return null;
   if (!origin?.createdByCatId)
     return <p className="evolution-empty mt-4">尚未找到可联系的发起猫猫，请回到发起对话确认接手者。</p>;
-  const contact = cats.find((cat) => cat.id === origin.createdByCatId)?.displayName ?? origin.createdByCatId;
+  const contact = cats.find((cat) => cat.id === origin.createdByCatId)?.displayName;
   return (
     <section
       aria-label="推进项目"
@@ -40,7 +40,9 @@ export function EvolutionProgressAction({
       <p className="text-sm font-semibold text-cafe">{compact ? '项目推进' : '交给猫猫推进'}</p>
       {!compact && (
         <p className="evolution-empty">
-          交给发起猫猫 {contact}，在「{origin.title}」中继续已有任务、补齐缺口。
+          {contact
+            ? `交给发起猫猫 ${contact}，在「${origin.title}」中继续已有任务、补齐缺口。`
+            : `请在原发起对话「${origin.title}」中继续已有任务、补齐缺口。`}
         </p>
       )}
       {receipt ? (

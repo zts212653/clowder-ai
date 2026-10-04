@@ -83,26 +83,26 @@ describe('environment detector — Rosetta regression (#1061)', () => {
   });
 });
 
-describe('environment detector — cache', () => {
-  test('getEnvironmentProfile caches within TTL', () => {
+describe('environment detector — cache', async () => {
+  test('getEnvironmentProfile caches within TTL', async () => {
     clearEnvironmentCache();
-    const a = getEnvironmentProfile();
-    const b = getEnvironmentProfile();
+    const a = await getEnvironmentProfile();
+    const b = await getEnvironmentProfile();
     assert.equal(a.detectedAt, b.detectedAt);
   });
 
   test('forceRefresh re-runs detection', async () => {
-    const a = getEnvironmentProfile();
+    const a = await getEnvironmentProfile();
     await new Promise((r) => setTimeout(r, 10));
-    const b = getEnvironmentProfile(true);
+    const b = await getEnvironmentProfile(true);
     assert.notEqual(a.detectedAt, b.detectedAt);
   });
 
   test('clearEnvironmentCache forces fresh detection', async () => {
-    const a = getEnvironmentProfile();
+    const a = await getEnvironmentProfile();
     clearEnvironmentCache();
     await new Promise((r) => setTimeout(r, 10));
-    const b = getEnvironmentProfile();
+    const b = await getEnvironmentProfile();
     assert.notEqual(a.detectedAt, b.detectedAt);
   });
 });

@@ -10,6 +10,7 @@ import {
   type OfficialPluginMeetingIntakePort,
 } from '../domains/plugin/official-plugin-meeting-intake-port.js';
 import { pluginAccessError, requirePluginWriteAccess } from './plugin-access-guards.js';
+import { checkOfficialPluginConnectedAuth } from './plugin-official-auth-guard.js';
 
 interface ResolvedOfficialInstance {
   readonly entry: OfficialPluginCatalogEntry;
@@ -77,18 +78,14 @@ async function requireConnectedAuth(
   resolved: ResolvedOfficialInstance,
 ) {
   if (!resolved.entry.ownerAuth) return true;
-  if (!auth) {
-    reply.status(503).send({ error: 'Official plugin authentication is unavailable', code: 'AUTH_UNAVAILABLE' });
-    return false;
-  }
-  if ((await auth.status(resolved)).status !== 'connected') {
-    reply.status(409).send({
-      error: 'Connect the owner Feishu account before inspecting or enabling meeting intake',
-      code: 'AUTH_REQUIRED',
-    });
-    return false;
-  }
-  return true;
+  const result = await checkOfficialPluginConnectedAuth(
+    auth,
+    resolved,
+    'Connect the owner Feishu account before inspecting or enabling meeting intake',
+  );
+  if (result.connected) return true;
+  reply.status(result.failure.statusCode).send(result.failure.body);
+  return false;
 }
 
 export function registerOfficialPluginMeetingIntakeRoutes(

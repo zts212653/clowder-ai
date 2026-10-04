@@ -143,6 +143,8 @@ export interface RichInteractiveBlock extends RichBlockBase {
   messageTemplate?: string;
   disabled?: boolean;
   selectedIds?: string[];
+  /** Set false when adjacent blocks belong to separate producer items and must submit independently. */
+  autoGroup?: boolean;
   /** Phase C: blocks sharing the same groupId are submitted together */
   groupId?: string;
 }
@@ -326,6 +328,7 @@ function isValidInteractiveBlock(obj: Record<string, unknown>): boolean {
     hasOptionalBoolean(obj, 'allowRandom') &&
     hasOptionalString(obj, 'messageTemplate') &&
     hasOptionalBoolean(obj, 'disabled') &&
+    hasOptionalBoolean(obj, 'autoGroup') &&
     (!('selectedIds' in obj) || Array.isArray(obj.selectedIds)) &&
     (!('groupId' in obj) || isNonEmptyString(obj.groupId))
   );

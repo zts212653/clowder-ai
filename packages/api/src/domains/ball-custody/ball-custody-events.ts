@@ -163,7 +163,36 @@ export function buildWakeConditionMetEvent(input: WakeConditionMetEventInput): B
   };
 }
 
-export type ManagedHoldDisposition = 'handled' | 'completed';
+/** The closed set of codes a managed-hold terminal may carry. The type derives from it, so a reader cannot drift. */
+export const MANAGED_HOLD_DISPOSITIONS = ['handled', 'completed'] as const;
+export type ManagedHoldDisposition = (typeof MANAGED_HOLD_DISPOSITIONS)[number];
+
+/**
+ * Why a wake reached a terminal without owning the subject (`retired`):
+ *  - `superseded`: custody moved on (a newer hold, a hand-off away from the wake cat, a operator hand-off);
+ *  - `subject_resolved`: nothing moved, the thread subject itself ended after the wake fired
+ *    (task.done, ball.frozen / degraded / abandoned), so there is no ball left to hold;
+ *  - `ball_not_held`: the wake cat no longer holds the ball for any other reason (void, parked, zombie,
+ *    dead, or another cat holds it). Which one is readable from the projection, not split into reasons.
+ * Terminals written before this field existed carry only `retired: true`; the only way they could be
+ * retired was supersession, so a missing reason on a retired payload reads as `superseded`.
+ */
+export const MANAGED_HOLD_RETIRED_REASONS = ['superseded', 'subject_resolved', 'ball_not_held'] as const;
+export type ManagedHoldRetiredReason = (typeof MANAGED_HOLD_RETIRED_REASONS)[number];
+
+/** Spread-ready `{ retiredReason }`, or nothing when the terminal was not retired. */
+export function retiredReasonField(reason: ManagedHoldRetiredReason | undefined): {
+  retiredReason?: ManagedHoldRetiredReason;
+} {
+  return reason ? { retiredReason: reason } : {};
+}
+
+/** The reason a recorded hold terminal was retired, or `undefined` when it was not retired. */
+export function managedHoldRetiredReason(payload: BallCustodyEvent['payload']): ManagedHoldRetiredReason | undefined {
+  if (payload.retired !== true) return undefined;
+  const reason = payload.retiredReason;
+  return reason === 'subject_resolved' || reason === 'ball_not_held' ? reason : 'superseded';
+}
 
 export interface HoldDispositionEventInput {
   threadId: string;
@@ -180,6 +209,8 @@ export interface HoldDispositionEventInput {
    * settling an old wake would silently kill a newer active hold.
    */
   retired?: boolean;
+  /** Only meaningful with `retired`; see {@link ManagedHoldRetiredReason}. */
+  retiredReason?: ManagedHoldRetiredReason;
   at: number;
 }
 
@@ -205,12 +236,18 @@ export function buildHoldDispositionEvent(input: HoldDispositionEventInput): Bal
       taskId: input.taskId,
       disposition: input.disposition,
       ...(input.retired ? { retired: true } : {}),
+      ...(input.retired && input.retiredReason ? { retiredReason: input.retiredReason } : {}),
     },
     at: input.at,
   };
 }
 
-export type A2ADispatchDisposition = 'handled' | 'completed';
+export const A2A_DISPATCH_DISPOSITIONS = ['handled', 'completed'] as const;
+export type A2ADispatchDisposition = (typeof A2A_DISPATCH_DISPOSITIONS)[number];
+
+/** Who wrote a dispatch terminal: the holder's own completion, or the consumed terminal coordination message. */
+export const DISPATCH_TERMINAL_VIAS = ['direct', 'coordination_terminal'] as const;
+export type DispatchTerminalVia = (typeof DISPATCH_TERMINAL_VIAS)[number];
 
 export interface DispatchDispositionEventInput {
   threadId: string;
@@ -221,6 +258,17 @@ export interface DispatchDispositionEventInput {
   disposition: A2ADispatchDisposition;
   /** The exact child completed after unrelated custody replaced the thread-level holder. */
   retired?: boolean;
+  /**
+   * Who wrote this terminal: the holder's own completion, or the consumed terminal coordination message. Additive:
+   * events written before it carry none, and a reader reports those as unknown rather than guessing.
+   */
+  via?: DispatchTerminalVia;
+  /** Exact read provenance. The original Live shape remains readable after restart. */
+  adopted?: {
+    adoptedSourceMessageId: string;
+    witnessTimestamp: number;
+    readEvidenceKind: string;
+  } & ({ liveInvocationId: string } | { carrierKind: 'ordinary'; invocationId: string });
   at: number;
 }
 
@@ -242,6 +290,8 @@ export function buildDispatchDispositionEvent(input: DispatchDispositionEventInp
       sourceMessageId: input.sourceMessageId,
       disposition: input.disposition,
       ...(input.retired ? { retired: true } : {}),
+      ...(input.via ? { via: input.via } : {}),
+      ...(input.adopted ? { adopted: input.adopted } : {}),
     },
     at: input.at,
   };

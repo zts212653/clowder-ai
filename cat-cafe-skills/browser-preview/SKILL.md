@@ -28,8 +28,10 @@ Hub 内置了嵌入式浏览器面板（F120），可以直接预览运行中的
 ## 工作流
 
 ### 基础流程（端口发现 → 预览）
-1. **启动 dev server**：交互 Terminal 可直接前台跑；要把页面交给operator跨回合查看时，猫的 invocation/`-p` 会话必须用仓库的 managed launcher：
-   `pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]`
+1. **启动 dev server**：交互 Terminal 可直接前台跑；要把 Clowder AI feature worktree 的标准服务交给operator跨回合查看时，猫的 invocation/`-p` 会话必须用仓库的 managed launcher：
+   `pnpm --dir /absolute/cat-cafe-feature-worktree preview:process start --port PORT --cwd /absolute/cat-cafe-feature-worktree -- env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION CAT_CAFE_WORKSPACE_ROOT=/absolute/cat-cafe CAT_CAFE_RUNTIME_ROOT=/absolute/cat-cafe-feature-worktree pnpm dev:direct`
+   outer `--dir` 与 inner `--cwd` 必须解析为同一个物理 worktree。不要用 tool 的 per-call workdir 隐式代替这个坐标：provider hook 可能只看到 turn cwd。outer form 只识别这条受约束的 `dev:direct` child；它不是任意 `COMMAND` 的通行证。
+   自定义 child 或外部项目的 **start** 仍用 ordinary form：从实际包含 `preview:process` package script 的 Clowder AI checkout 作为 tool cwd，执行 `pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]`，不加 outer `--dir`。这条启动命令走 ordinary policy，不获得 typed worktree authority。后续 status/stop 按目标 `--cwd` 的身份选 grammar，而不是照抄 start：目标是 `cat-cafe-*` worktree 时必须用 bounded outer `--dir`；其他项目目标才继续用 ordinary form。
    macOS 上它会把目标直接注册为一次性 user LaunchAgent；普通 detached child、`nohup`、`setsid` 或 PTY 都不算独立托管。托管预览默认 8 小时自动到期（可用 `--lifetime-seconds N` 缩短，最长 24 小时），避免遗留 watcher 持续制造文件事件。
 2. **Hub 自动检测端口** → 弹出 toast 提示"检测到 localhost:xxxx 启动"
 3. **点击 Open Preview** → 自动打开 browser panel 并加载页面
@@ -47,8 +49,13 @@ operator说过："别手动让我输入，你最好打开浏览器，把页面�
 ```
 Step 1: 确认目标服务器在跑
   若由猫启动，先用 managed launcher 启动/查状态：
-  pnpm preview:process start --port PORT --cwd /absolute/project/path -- COMMAND [ARGS...]
-  pnpm preview:process status --port PORT --cwd /absolute/project/path --json
+  pnpm --dir /absolute/cat-cafe-feature-worktree preview:process start --port PORT --cwd /absolute/cat-cafe-feature-worktree -- env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION CAT_CAFE_WORKSPACE_ROOT=/absolute/cat-cafe CAT_CAFE_RUNTIME_ROOT=/absolute/cat-cafe-feature-worktree pnpm dev:direct
+  pnpm --dir /absolute/cat-cafe-feature-worktree preview:process status --port PORT --cwd /absolute/cat-cafe-feature-worktree --json
+  自定义 child（tool cwd 必须是含 preview:process script 的 Clowder AI checkout）：
+  pnpm preview:process start --port PORT --cwd /absolute/cat-cafe-feature-worktree -- COMMAND [ARGS...]
+  pnpm --dir /absolute/cat-cafe-feature-worktree preview:process status --port PORT --cwd /absolute/cat-cafe-feature-worktree --json
+  外部项目目标（非 cat-cafe-* worktree）才用 ordinary status：
+  pnpm preview:process status --port PORT --cwd /absolute/external-project --json
   → 只有 status=running 才进入下步；unavailable/unmanaged/stopped 必须如实报告
   → macOS 跨回合展示还必须有 origin=launchd；origin=detached 只证明 launcher 已退出，
     没证明脱离 invocation supervisor，不得承诺“回复后还会活着”
@@ -94,7 +101,7 @@ Step 3: 读返回的 deliveryStatus，再决定怎么报告
 |------|------|------|
 | 右侧无反应 | 目标服务器没在跑 / 未认证或 thread 归属不对 / MCP callback 未配置 | 先 `curl localhost:PORT` 确认目标服务，再读工具返回的 `deliveryStatus` / 错误（401=未认证，400/403=thread scope） |
 | `{"error":"Proxy error","message":"socket hang up"}` | 目标服务器已退出 | 重启服务器，再刷新 Browser panel |
-| 猫回复后页面立刻 stopped | 服务仍在 invocation 的 PTY/进程监督域；`detached`/PPID=1 也可能被 supervisor 按 coalition 回收 | macOS 用 `pnpm preview:process start ...` 并确认 `status=running, origin=launchd`；结束展示时用同一 cwd/port 执行 `stop` |
+| 猫回复后页面立刻 stopped | 服务仍在 invocation 的 PTY/进程监督域；`detached`/PPID=1 也可能被 supervisor 按 coalition 回收 | macOS 用 managed launcher 并确认 `status=running, origin=launchd`；`cat-cafe-*` 目标的 status/stop 始终带相同 bounded outer `--dir` 与 inner `--cwd` |
 | 打开了系统 Chrome | 用了 Playwright/Chrome MCP 等外部工具 | **不要用外部浏览器工具！** auto-open 是 Hub 内嵌预览，不是系统浏览器 |
 | 两个重复 tab | React Strict Mode（已修复） | 升级到最新代码 |
 
@@ -133,7 +140,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 - operator说"看看效果"/"给我看看" → 主动打开 browser panel 展示
 - dev server 已在 Terminal 跑着 → 主动打开浏览器，不要只提示
 - invocation/`-p` 中启动的 dev server → 必须走 `preview:process`，并在报告中同时给出 status 与 origin；不能把 `running/detached` 写成跨回合已存活
-- 跨回合展示 → 同时检查 `expiresAt`；任务结束或不再展示时执行同一 cwd/port 的 `preview:process stop`
+- 跨回合展示 → 同时检查 `expiresAt`；status/stop 按目标 cwd 身份选择，不按启动命令族选择：`cat-cafe-*` worktree 一律使用相同 bounded outer `--dir` + inner `--cwd` + port，非 worktree 项目才使用 ordinary form
 - 简单可视化（图表/动画） → 用 `html_widget` rich block 内联渲染
 - Console 有报错 → browser panel 下方 Console 面板自动展开，可以看
 - 需要截图 → browser panel 工具栏一键截图；默认先存到 `${TMPDIR}/cat-cafe-evidence/...`，不要落仓库根目录（见 `../.cat-cafe-shared-refs/evidence-output-contract.md`）
@@ -142,6 +149,7 @@ operator拍板："简单的用富文本，复杂的用猫主动打开浏览器�
 
 - **不要跳过 Step 1（验证服务器）直接调 `cat_cafe_preview_open`** — 服务器没跑 = proxy error
 - **不要用普通后台 shell/PTY、`nohup`、`setsid` 或普通 detached child 冒充长期托管** — PPID=1 仍可能被 invocation supervisor 按进程族回收
+- **不要给 self-identifying `pnpm --dir … preview:process` 拼 global pnpm options、wrapper 或任意 child** — native guard 只承认 exact package/target 坐标与受约束的 Clowder AI `dev:direct` child；自定义 child 用 Step 1 已列的 ordinary form，不改写或包装 bounded form 绕过
 - **不要用 `launchctl submit` 包裹会立即退出的 launcher** — inferred keepalive 会反复重启 launcher 形成自旋；macOS 直接用 `preview:process` 生成的一次性 LaunchAgent
 - **不要用 Playwright / Chrome MCP / `open` 命令打开系统浏览器** — F120 是 Hub 内嵌预览，走 iframe，不走系统浏览器
 - **不要手写 `/api/preview/auto-open` 的 `curl`** — 主路径是 `cat_cafe_preview_open`

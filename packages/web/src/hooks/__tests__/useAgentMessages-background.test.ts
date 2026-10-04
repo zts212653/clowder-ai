@@ -1699,6 +1699,38 @@ describe('background thread socket handling', () => {
       });
     });
 
+    it('F319 Phase E.1: served facts on invocation_usage land on the bg bubble live, merged into existing metadata', () => {
+      const now = Date.now();
+      simulateBackgroundMessage({
+        type: 'text',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        content: 'OK',
+        metadata: { provider: 'openai', model: 'gpt-5.6-sol' },
+        timestamp: now,
+      });
+      simulateBackgroundMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        threadId: 'thread-bg',
+        content: JSON.stringify({
+          type: 'invocation_usage',
+          catId: 'codex-sol',
+          usage: { inputTokens: 10, outputTokens: 2 },
+          model: 'gpt-5.6-sol',
+          provider: 'openai',
+          served: { servedModel: 'gpt-5.6-sol', servedModelSource: 'ws_response_object', upstreamTurnStateLength: 312 },
+        }),
+        timestamp: now + 1000,
+      });
+      const meta = useChatStore.getState().getThreadState('thread-bg').messages[0]?.metadata;
+      expect(meta?.model).toBe('gpt-5.6-sol');
+      expect(meta?.servedModel).toBe('gpt-5.6-sol');
+      expect(meta?.servedModelSource).toBe('ws_response_object');
+      expect(meta?.upstreamTurnStateLength).toBe(312);
+      expect(meta?.usage).toMatchObject({ outputTokens: 2 });
+    });
+
     it('bg-carrier regression: existing metadata model/provider not corrupted by invocation_usage (F230)', () => {
       const now = Date.now();
       // Normal bg carrier: text WITH metadata (model/provider already set)

@@ -130,6 +130,39 @@ describe('F307 real surface adapters', () => {
     expect(restoreWorkbenchState(createInitialWorkbenchState([searchMatch])).surfaces).toEqual([searchMatch]);
   });
 
+  it('keeps a typed ordinary-entry origin separate from the file target and Task return edge', () => {
+    const surface = createFileSurface({
+      worktreeId: 'worktree-main',
+      path: 'docs/guide.md',
+      navigationOrigin: { kind: 'workspace-home-search', query: 'collaboration' },
+    });
+
+    expect(surface.navigationOrigin).toEqual({ kind: 'workspace-home-search', query: 'collaboration' });
+    expect(surface.returnTargetRef).toBeUndefined();
+    expect(restoreWorkbenchState(createInitialWorkbenchState([surface])).surfaces).toEqual([surface]);
+
+    const malformed = {
+      ...surface,
+      navigationOrigin: { kind: 'chat-file-link' as const, threadId: 'thread\u0000forged', messageId: 'message-a' },
+    };
+    expect(restoreWorkbenchState(createInitialWorkbenchState([malformed])).surfaces).toEqual([]);
+  });
+
+  it('restores an explicit directory choice and its connection epoch without treating it as an owner grant', () => {
+    const surface = createFileSurface({
+      worktreeId: 'old-display-alias',
+      path: 'notes.txt',
+      rootSelection: { root: '/chosen/A', branch: 'feature-A', expectedEpoch: 4 },
+    });
+    const restored = restoreWorkbenchState(JSON.parse(JSON.stringify(createInitialWorkbenchState([surface]))));
+    expect(restored.surfaces).toEqual([surface]);
+    expect(restored.surfaces[0]?.ownerStateRef).toEqual(surface.ownerStateRef);
+    const incomplete = { ...surface, rootSelection: { root: '/chosen/A', branch: 'feature-A' } };
+    expect(
+      restoreWorkbenchState({ ...createInitialWorkbenchState([surface]), surfaces: [incomplete] }).surfaces,
+    ).toEqual([]);
+  });
+
   it('keeps Browser and Terminal lifecycle keyed to their real owners', () => {
     const browser = createBrowserSurface({ ownerKey: 'worktree-main', port: 4173, path: '/settings' });
     const terminal = createTerminalSurface({ worktreeId: 'worktree-main' });

@@ -42,6 +42,15 @@ export type McpActionBoundary = {
   risk: McpRisk;
 };
 
+export type McpClosedSelector = { field: string; role: 'read-strategy'; evidenceRef: EvidenceRef };
+export type DerivedMcpClosedSelector = McpClosedSelector & { literals: readonly string[] };
+export type ResolvedSelectorClaim = {
+  ref: EvidenceRef;
+  subject: { toolName: string; resourceFamily: string; field: string; role: 'read-strategy' };
+  decision: 'accepted';
+  sourceDigest: string;
+};
+
 export type McpOperationContract =
   | {
       kind: 'single';
@@ -49,6 +58,7 @@ export type McpOperationContract =
       inputSchema: Record<string, unknown>;
       boundary: McpActionBoundary;
       customDiscriminators?: readonly string[];
+      closedSelectors?: readonly McpClosedSelector[];
     }
   | {
       kind: 'discriminated';
@@ -66,7 +76,9 @@ export type McpRuntimeProfile =
   | 'agent-key'
   | 'desktop:fable-phase0'
   | 'desktop:cloud-pro-phase0'
-  | 'collective-participation';
+  | 'desktop:live-companion'
+  | 'collective-participation'
+  | 'collective-work';
 
 export type McpSchemaDeliveryPolicy = {
   policy: 'host-default' | 'always-visible' | 'discoverable';
@@ -107,6 +119,7 @@ export type ResolvedAdmissionClaim = {
 export type ResolvedEvidenceCatalog = Readonly<{
   existingRefs: ReadonlySet<EvidenceRef>;
   admissionClaims: ReadonlyMap<EvidenceRef, NonEmptyReadonlyArray<ResolvedAdmissionClaim>>;
+  selectorClaims?: ReadonlyMap<EvidenceRef, readonly ResolvedSelectorClaim[]>;
 }>;
 
 export const implementationBindingBrand: unique symbol = Symbol('McpImplementationBinding');
@@ -197,6 +210,7 @@ export type GovernanceFinding = {
     | 'unresolved-implementation-binding'
     | 'protected-base-drift'
     | 'hidden-operation-discriminator'
+    | 'invalid-closed-selector'
     | 'invalid-policy';
   toolName?: string;
   message: string;
@@ -205,6 +219,13 @@ export type GovernanceFinding = {
 export type ToolRegistryDelta = {
   addedNames: readonly string[];
   removedNames: readonly string[];
+  closedSelectorChanges: readonly {
+    name: string;
+    field: string;
+    role: 'read-strategy';
+    added: readonly string[];
+    removed: readonly string[];
+  }[];
   resourceActionChanges: readonly {
     resourceFamily: string;
     added: readonly string[];

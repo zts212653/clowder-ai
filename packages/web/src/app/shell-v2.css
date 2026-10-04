@@ -1,0 +1,151 @@
+/*
+ * F322 Stage 1 — Café 1.6 shell role tokens.
+ *
+ * Scope: [data-shell="v2"] is set on <html> only while the new presentation is on,
+ * so classic UI is untouched when the switch is off (DESIGN.md / roadmap "同一开关").
+ *
+ * These are ROLE aliases onto the existing theme tokens. The active theme
+ * (themeStore → ThemeApplier → buildCSS, built-in light/dark + custom themes)
+ * keeps driving every value; nothing here hard-codes the T1 sample HEX.
+ *
+ * Light: 外框 (rail + sidebar) < 工作面 (chat) < 纸面 (cards / inputs); 选中 = 最深一档。
+ * Dark follows the DESIGN.md "Dark mode" rule: map by light/dark relationship, not by token name
+ * (外框最暗 → 工作面 → 纸面 → 选中最亮).
+ */
+[data-shell="v2"] {
+  --shell-paper: var(--cafe-surface-canvas);
+  --shell-work: var(--cafe-surface-elevated);
+  --shell-frame: var(--cafe-surface);
+  --shell-selected: var(--cafe-surface-sunken);
+  --shell-hairline: var(--cafe-border-subtle);
+  --shell-hairline-strong: var(--cafe-border);
+  --shell-ink: var(--cafe-text);
+  /* Three text levels that all stay ≥4.5:1 on the frame / work / paper surfaces in light, dark and custom themes.
+   * The runtime --cafe-text-muted (neutral-500) measured 4.05:1 on the frame in light, so small secondary text
+   * (times, counts, notes) steps one neutral darker. Measured 2026-09-30 (see F322 Stage 1 evidence). */
+  --shell-body: var(--neutral-700);
+  --shell-muted: var(--neutral-600);
+  --shell-primary: var(--cafe-accent);
+  --shell-primary-on: var(--cafe-accent-foreground);
+  --shell-primary-text: var(--accent-700);
+  --shell-primary-soft: color-mix(in srgb, var(--cafe-accent) 12%, var(--shell-paper) 88%);
+  --shell-critical: var(--semantic-warning);
+  /* Danger for state marks (the rail's "!" badge). Light and dark come from --semantic-critical's own theme values. */
+  --shell-danger: var(--semantic-critical);
+  --shell-tip-bg: var(--cafe-text);
+  --shell-tip-fg: var(--cafe-surface-canvas);
+  --shell-tip-shadow: 0 4px 10px rgb(20 20 19 / 0.1);
+}
+
+/*
+ * F322 B segment 1 (human message). People are cocoa (DESIGN.md「对话」: primary #6B5443, light #E9DCCF, OKLCH hue 58 /
+ * chroma 0.04) until the config says otherwise: CoCreatorHueInjector replaces these two numbers with the configured colour's.
+ * Every --color-cocreator-* role is still derived from them in cat-persona-tokens.css, with the Tuner's lightness steps and
+ * the light / dark split on top, exactly as for the cats. Scoped to the new presentation: the classic UI keeps its own.
+ */
+html[data-shell="v2"] {
+  --cocreator-hue: 58;
+  --cocreator-chroma: 0.04;
+}
+
+[data-theme="dark"][data-shell="v2"] {
+  --shell-frame: var(--cafe-surface-elevated);
+  --shell-work: var(--cafe-surface-canvas);
+  --shell-paper: var(--cafe-surface);
+  --shell-selected: var(--cafe-surface-sunken);
+  --shell-primary-text: var(--accent-700);
+  --shell-tip-shadow: 0 0 0 1px rgb(255 255 255 / 0.1) inset, 0 4px 10px rgb(0 0 0 / 0.35);
+}
+
+/* One focus ring for every shell control: external 2px solid ring + 2px gap (DESIGN.md Elevation). */
+[data-shell="v2"] .shell-focusable:focus-visible {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+[data-shell="v2"] .shell-rail-item {
+  transition: background-color 120ms ease;
+}
+
+[data-shell="v2"] .shell-rail-item:hover:not([aria-current="page"]):not([data-selected="true"]) {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+[data-shell="v2"] .shell-nav-row:hover:not([data-selected="true"]) {
+  background: color-mix(in srgb, var(--shell-selected) 55%, transparent);
+}
+
+@keyframes shell-slide-in {
+  from {
+    transform: translateX(-12px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* A panel that docks beside the rail (待办): it eases out of the rail instead of appearing. */
+[data-shell="v2"] .shell-slide-in {
+  animation: shell-slide-in 140ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shell="v2"] .shell-rail-item {
+    transition: none;
+  }
+
+  [data-shell="v2"] .shell-slide-in {
+    animation: none;
+  }
+}
+
+/*
+ * Composer (ChatInput) — presentation only. The row becomes ONE paper card centred on the reading column;
+ * every control inside keeps its handler, draft, focus and shortcut behaviour (nothing here touches ChatInput logic).
+ * The card takes the focus ring so keyboard focus on the field stays visible after the textarea's own ring is dropped.
+ */
+[data-shell="v2"] div:has(> [data-testid="chat-input-composer-row"]) {
+  background: var(--shell-work);
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] {
+  width: calc(100% - 32px);
+  max-width: 720px;
+  margin: 0 auto 16px;
+  padding: 6px 8px;
+  align-items: flex-end;
+  background: var(--shell-paper);
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 16px;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"]:focus-within {
+  outline: 2px solid var(--cafe-accent);
+  outline-offset: 2px;
+}
+
+/*
+ * The one execution row (F322 original-B) — presentation only. Same column as the composer card below it
+ * (centred, 720px max), so the row, its ■ and the panel that pops up from it line up with the field.
+ */
+[data-shell="v2"] [data-testid="execution-row"] {
+  width: calc(100% - 32px);
+  max-width: 720px;
+  margin: 8px auto 0;
+  background: var(--shell-paper);
+  border: 1px solid var(--shell-hairline-strong);
+  border-radius: 12px;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] textarea {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+[data-shell="v2"] [data-testid="chat-input-composer-row"] textarea:focus {
+  background: transparent;
+  box-shadow: none;
+}

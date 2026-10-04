@@ -43,6 +43,11 @@ const restoreSessionSchema = z
     expectedActiveSessionId: z.string().min(1).max(200).nullable().optional(),
   })
   .strict();
+const listSessionPageSchema = z.object({
+  catId: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
 
 type RestoreSessionBody = z.infer<typeof restoreSessionSchema>;
 
@@ -306,7 +311,7 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
 
   app.get<{
     Params: { threadId: string };
-    Querystring: { catId?: string };
+    Querystring: { catId?: string; limit?: string; offset?: string };
   }>('/api/threads/:threadId/sessions', async (request, reply) => {
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
@@ -326,12 +331,28 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
       return reply.status(403).send(threadAccessDeniedBody(access));
     }
 
-    const { catId } = request.query;
+    const parsedPage = listSessionPageSchema.safeParse(request.query);
+    if (!parsedPage.success) return reply.status(400).send({ error: 'Invalid session list page' });
+    const { catId, limit, offset } = parsedPage.data;
     const callerCatId = request.headers['x-cat-id'] as string | undefined;
 
     // When caller identifies as a specific cat (MCP tool), restrict to own sessions only.
     // Query param `catId` is ignored when it differs from caller — prevents cross-cat enumeration.
     const effectiveCatId = callerCatId ?? catId;
+    const sendSessions = async (visibleSessions: SessionRecord[]) => {
+      if (limit === undefined && offset === undefined) {
+        return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
+      }
+      const pageLimit = limit ?? 20;
+      const pageOffset = offset ?? 0;
+      const selected = visibleSessions.slice(pageOffset, pageOffset + pageLimit);
+      const hasMore = pageOffset + selected.length < visibleSessions.length;
+      return reply.send({
+        sessions: await attachRuntimeSessionSummaries(selected, runtimeSessionStore),
+        hasMore,
+        ...(hasMore ? { nextOffset: pageOffset + selected.length } : {}),
+      });
+    };
 
     if (effectiveCatId) {
       if (callerCatId && catId && catId !== callerCatId) {
@@ -344,13 +365,13 @@ export async function sessionChainRoutes(app: FastifyInstance, opts: SessionChai
         access.scope === 'user' ? userId : undefined,
       );
       const visibleSessions = filterThreadRecords(access, sessions);
-      return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
+      return sendSessions(visibleSessions);
     }
 
     // No catId filter at all (hub UI god-view) — shared system threads stay user-scoped.
     const sessions = await sessionChainStore.getChainByThread(threadId);
     const visibleSessions = filterThreadRecords(access, sessions);
-    return reply.send({ sessions: await attachRuntimeSessionSummaries(visibleSessions, runtimeSessionStore) });
+    return sendSessions(visibleSessions);
   });
 
   app.get<{

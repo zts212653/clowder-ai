@@ -55,7 +55,10 @@ function parseStep(raw: Record<string, unknown>): ConnectorStepDef {
 }
 
 export function parseConnectorManifest(yamlPath: string): ConnectorManifest {
-  const content = readFileSync(yamlPath, 'utf-8');
+  return parseConnectorManifestContent(readFileSync(yamlPath, 'utf-8'), yamlPath);
+}
+
+export function parseConnectorManifestContent(content: string, yamlPath = 'connector.yaml'): ConnectorManifest {
   const raw = parseYaml(content) as Record<string, unknown>;
 
   const id = String(raw.id ?? '');

@@ -15,6 +15,7 @@ import {
 } from '../../dist/infrastructure/harness-eval/measurement/measurement-bundle-census-file.js';
 import { handlePublishVerdict } from '../../dist/infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { setupHarnessFeedback } from './eval-manual-trigger-fixtures.js';
+import { reviveActiveEraDomainFile, reviveActiveEraRegistry } from './measurement-census-active-era.js';
 import { buildPacket } from './publish-verdict-fixtures.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../../..');
@@ -30,6 +31,9 @@ function seedPublicRepo(options = {}) {
     if (options.withoutDomainFile === entry.name) continue;
     cpSync(resolve(repoRoot, domainDirRef, entry.name), resolve(domainDir, entry.name));
   }
+  // These tests exercise the active-era public migration flow; dormancy is
+  // covered separately in measurement-bundle-dormancy.test.js.
+  reviveActiveEraRegistry(domainDir);
   mkdirSync(resolve(root, 'docs/harness-feedback/verdicts'), { recursive: true });
   return root;
 }
@@ -123,6 +127,7 @@ describe('public measurement census bootstrap', () => {
       a2a.functionalEquivalents = ['target-owned public calibration note'];
       writeFileSync(resolve(root, censusRef), stringify(before));
       cpSync(resolve(repoRoot, domainDirRef, designGateFile), resolve(root, domainDirRef, designGateFile));
+      reviveActiveEraDomainFile(resolve(root, domainDirRef, designGateFile));
 
       const result = ensureMeasurementBundleCensusFile(root, '2026-08-25T00:00:00.000Z');
       const after = loadCensus(root);

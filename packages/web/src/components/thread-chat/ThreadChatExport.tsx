@@ -7,7 +7,7 @@ import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSel
 import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { ChatMessage } from '../ChatMessage';
 import { loadExportThreadTitle, selectMessagesForExport } from '../message-export-selection';
-import { collectExactLiveInvocationIds } from '../queue-receipt-projection';
+import { collectExactLiveInvocationIds, collectSettlingInvocationIds } from '../queue-receipt-projection';
 
 export function ThreadChatExport({ threadId, messageIds }: { threadId: string; messageIds: string[] }) {
   const messages = useThreadMessages(threadId);
@@ -16,6 +16,10 @@ export function ThreadChatExport({ threadId, messageIds }: { threadId: string; m
   const { getCatById, isLoading } = useCatData();
   const [threadTitle, setThreadTitle] = useState<string | null | undefined>(undefined);
   const cliDedupMap = useMemo(() => computeCliDiagnosticsDedup(messages), [messages]);
+  const settlingInvocationIds = useMemo(
+    () => collectSettlingInvocationIds(activeInvocations, catInvocations),
+    [activeInvocations, catInvocations],
+  );
   const activeInvocationIds = useMemo(
     () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
     [activeInvocations, catInvocations],
@@ -58,6 +62,7 @@ export function ThreadChatExport({ threadId, messageIds }: { threadId: string; m
               key={message.id}
               message={message}
               threadId={threadId}
+              settlingInvocationIds={message.extra?.queueReceipt ? settlingInvocationIds : undefined}
               activeInvocationIds={activeInvocationIds}
               getCatById={getCatById}
               hideDiagnosticsPanel={dedupInfo?.hideDiagnosticsPanel}

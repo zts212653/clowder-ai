@@ -70,6 +70,28 @@ const AVAILABILITY_READINGS: Record<Availability, AvailabilityCopy> = {
 /** Impact copy for an automatically unavailable target a trusted owner may still try. */
 const OWNER_ATTEMPT_IMPACT = '自动协作会跳过他。你仍然可以带着告警亲自尝试一次，成功与否都会留下回执。';
 
+/** Human label for a stored availability state; unknown values stay as stored. */
+export function availabilityStateLabel(availability: string): string {
+  return AVAILABILITY_READINGS[availability as Availability]?.label ?? availability;
+}
+
+/** Display names for vendor providers this surface has ever grouped; anything else stays as stored. */
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic',
+  antigravity: 'Antigravity',
+  google: 'Google',
+  kimi: 'Kimi',
+  openai: 'OpenAI',
+  'openai-chatgpt-pro': 'ChatGPT Pro',
+  opencode: 'OpenCode',
+  zhipu: '智谱',
+};
+
+/** Human display name for a provider id; unknown ids stay as stored. */
+export function providerDisplayName(providerId: string): string {
+  return PROVIDER_LABELS[providerId] ?? providerId;
+}
+
 export function readTeamAvailability(
   availability: Availability,
   dispatch?: Candidate['dispatch'],

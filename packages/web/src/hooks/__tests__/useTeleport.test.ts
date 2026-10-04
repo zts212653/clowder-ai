@@ -54,4 +54,42 @@ describe('handleTeleportEvent (F227)', () => {
     expect(scrollToMessage).not.toHaveBeenCalled();
     expect(pushThreadRoute).not.toHaveBeenCalled();
   });
+
+  it('opens an exact rich block through the existing source-action resolver', () => {
+    const openSourceAction = vi.fn(() => true);
+    const scrollToMessage = vi.fn(),
+      pushThreadRoute = vi.fn();
+    expect(
+      handleTeleportEvent({ threadId: 'thread_a', messageId: 'm1', blockId: 'card' }, 'thread_a', {
+        openSourceAction,
+        scrollToMessage,
+        pushThreadRoute,
+      }),
+    ).toBe('navigated');
+    expect(openSourceAction).toHaveBeenCalledWith('message:thread_a:m1#card');
+    expect(scrollToMessage).not.toHaveBeenCalled();
+    expect(
+      handleTeleportEvent({ threadId: 'thread_a', messageId: 'm1', blockId: '../foreign' }, 'thread_a', {
+        openSourceAction,
+        scrollToMessage,
+        pushThreadRoute,
+      }),
+    ).toBe('ignored');
+    expect(openSourceAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('Host decision coordinates use the page-aware source resolver even without a rich block', () => {
+    const openSourceAction = vi.fn(() => true);
+    const pushThreadRoute = vi.fn(),
+      scrollToMessage = vi.fn();
+    expect(
+      handleTeleportEvent(
+        { threadId: 'remembered-thread', messageId: 'source', source: 'companion-decision' },
+        'remembered-thread',
+        { openSourceAction, pushThreadRoute, scrollToMessage },
+      ),
+    ).toBe('navigated');
+    expect(openSourceAction).toHaveBeenCalledWith('message:remembered-thread:source');
+    expect(scrollToMessage).not.toHaveBeenCalled();
+  });
 });

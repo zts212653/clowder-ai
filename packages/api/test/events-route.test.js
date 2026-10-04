@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
@@ -62,8 +63,73 @@ describe('GET /api/memory/events (F227 PR-1)', () => {
     assert.equal(body.events.length, 2);
     assert.equal(body.events[0].timestamp, 200);
     assert.equal(body.meta.count, 2);
-    assert.equal(body.meta.limit, null);
+    assert.equal(body.meta.limit, 50);
     assert.equal(body.meta.offset, 0);
+  });
+
+  it('F324: an omitted limit returns a bounded first page with a real offset', async () => {
+    for (let index = 0; index < 250; index += 1) {
+      mark(baseRecord({ timestamp: index + 1, messageId: `event-${index}` }));
+    }
+    const first = (await app.inject({ method: 'GET', url: '/api/memory/events' })).json();
+    assert.equal(first.events.length, 50);
+    assert.equal(first.meta.limit, 50);
+    assert.equal(first.meta.hasMore, true);
+    assert.equal(first.meta.nextOffset, 50);
+    const second = (
+      await app.inject({ method: 'GET', url: `/api/memory/events?offset=${first.meta.nextOffset}` })
+    ).json();
+    assert.equal(second.events.length, 50);
+    assert.equal(second.events[0].messageId, 'event-199');
+  });
+
+  it('F324: 200 requested events are byte bounded and a giant record can be read exactly', async () => {
+    const large = mark(baseRecord({ timestamp: 1_000, messageId: 'giant', summary: 'z'.repeat(250_000) })).event;
+    for (let index = 0; index < 100; index += 1) {
+      mark(baseRecord({ timestamp: 2_000 + index, messageId: `medium-${index}`, summary: 'x'.repeat(1_000) }));
+    }
+    const first = await app.inject({ method: 'GET', url: '/api/memory/events?limit=200' });
+    assert.equal(first.statusCode, 200);
+    assert.ok(first.body.length <= 24_000, `event list used ${first.body.length} chars`);
+    assert.equal(first.json().meta.hasMore, true);
+    assert.ok(first.json().meta.nextOffset > 0 && first.json().meta.nextOffset < 101);
+    const giantPage = await app.inject({
+      method: 'GET',
+      url: `/api/memory/events?limit=1&offset=100`,
+    });
+    assert.equal(giantPage.json().events[0].eventId, large.eventId);
+    assert.equal(giantPage.json().events[0].summaryTruncated, true);
+    assert.deepEqual(giantPage.json().events[0].drillDown?.tool, 'cat_cafe_list_events');
+    assert.deepEqual(giantPage.json().events[0].drillDown?.args, { eventId: large.eventId, charOffset: 0 });
+    const detail = await app.inject({ method: 'GET', url: `/api/memory/events/${large.eventId}` });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(detail.json().oversized, true);
+    let offset = 0;
+    let recovered = '';
+    for (let page = 0; page < 40; page += 1) {
+      const slice = await app.inject({
+        method: 'GET',
+        url: `/api/memory/events/${large.eventId}?charOffset=${offset}`,
+      });
+      assert.equal(slice.statusCode, 200);
+      assert.ok(slice.body.length <= 24_000);
+      recovered += slice.json().eventSlice;
+      if (slice.json().nextCharOffset === undefined) break;
+      offset = slice.json().nextCharOffset;
+    }
+    const expected = JSON.stringify(large);
+    assert.equal(recovered.length, expected.length);
+    assert.equal(
+      createHash('sha256').update(recovered).digest('hex'),
+      createHash('sha256').update(expected).digest('hex'),
+    );
+  });
+
+  it('F324: exact event continuation keeps the existing owner boundary', async () => {
+    const foreign = store.markEvent(baseRecord({ messageId: 'foreign' }), 'other-owner').event;
+    const response = await app.inject({ method: 'GET', url: `/api/memory/events/${foreign.eventId}?charOffset=0` });
+    assert.equal(response.statusCode, 404);
+    assert.equal(response.body.includes('foreign'), false);
   });
 
   it('filters by trigger query param', async () => {
@@ -257,6 +323,36 @@ describe('Event Memory routes — auth gate (F227 砚砚 P1)', () => {
       headers: { 'x-invocation-id': 'inv-1', 'x-callback-token': 'good-token' },
     });
     assert.equal(res.statusCode, 200);
+    await cbApp.close();
+  });
+
+  it('F324: callback-authenticated detail slices keep the caller owner boundary', async () => {
+    const store = new EventMemoryStore(':memory:');
+    await store.initialize();
+    const own = store.markEvent(baseRecord({ messageId: 'own-large', summary: 'a'.repeat(250_000) }), 'u').event;
+    const foreign = store.markEvent(
+      baseRecord({ messageId: 'foreign-large', summary: 'secret'.repeat(40_000) }),
+      'v',
+    ).event;
+    const cbApp = Fastify();
+    await cbApp.register(eventsRoutes, { eventMemoryStore: store, callbackRegistry: fakeCallbackRegistry });
+    await cbApp.ready();
+    const headers = { 'x-invocation-id': 'inv-1', 'x-callback-token': 'good-token' };
+    const ownSlice = await cbApp.inject({
+      method: 'GET',
+      url: `/api/memory/events/${own.eventId}?charOffset=0`,
+      headers,
+    });
+    assert.equal(ownSlice.statusCode, 200);
+    assert.equal(ownSlice.json().charOffset, 0);
+    assert.ok(ownSlice.json().nextCharOffset > 0);
+    const foreignSlice = await cbApp.inject({
+      method: 'GET',
+      url: `/api/memory/events/${foreign.eventId}?charOffset=0`,
+      headers,
+    });
+    assert.equal(foreignSlice.statusCode, 404);
+    assert.equal(foreignSlice.body.includes('secret'), false);
     await cbApp.close();
   });
 

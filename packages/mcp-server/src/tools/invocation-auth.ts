@@ -1,8 +1,16 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync } from 'node:fs';
 
 export interface InvocationCredentialValues {
   invocationId: string | undefined;
   callbackToken: string | undefined;
+}
+
+const requestCredentials = new AsyncLocalStorage<InvocationCredentialValues>();
+
+/** Native carriers bind credentials per runtime turn, never by mutating process.env. */
+export function withInvocationCredentials<T>(credentials: InvocationCredentialValues, run: () => T): T {
+  return requestCredentials.run(credentials, run);
 }
 
 function readCredentialFile(): { invocationId: string; callbackToken: string } | null {
@@ -24,6 +32,11 @@ function readCredentialFile(): { invocationId: string; callbackToken: string } |
  * to their launch environment.
  */
 export function resolveInvocationCredentials(): InvocationCredentialValues {
+  const scoped = requestCredentials.getStore();
+  if (scoped) return scoped;
+  if (process.env.CAT_CAFE_NATIVE_TURN_CREDENTIAL_FILE) {
+    return { invocationId: undefined, callbackToken: undefined };
+  }
   const fileCreds = readCredentialFile();
   return {
     invocationId: fileCreds?.invocationId ?? process.env.CAT_CAFE_INVOCATION_ID,

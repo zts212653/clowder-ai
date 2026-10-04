@@ -9,6 +9,7 @@ import {
   type OfficialPluginHistoryImportPort,
 } from '../domains/plugin/official-plugin-history-import.js';
 import { pluginAccessError, requirePluginWriteAccess } from './plugin-access-guards.js';
+import { checkOfficialPluginConnectedAuth } from './plugin-official-auth-guard.js';
 
 interface OfficialPluginHistoryRouteOptions {
   readonly inventory: PluginInventoryStore;
@@ -121,13 +122,13 @@ async function assertOwnerAuthConnected(
   auth: OfficialPluginAuthPort | undefined,
   target: HistoryImportTarget,
 ): Promise<void> {
-  if (!auth) {
-    throw new HistoryImportRouteError(503, 'AUTH_UNAVAILABLE', 'Official plugin authentication is unavailable');
-  }
-  const status = await auth.status({ entry: target.entry, instance: target.instance });
-  if (status.status !== 'connected') {
-    throw new HistoryImportRouteError(409, 'AUTH_REQUIRED', 'Connect the owner Feishu account before importing');
-  }
+  const result = await checkOfficialPluginConnectedAuth(
+    auth,
+    { entry: target.entry, instance: target.instance },
+    'Connect the owner Feishu account before importing',
+  );
+  if (result.connected) return;
+  throw new HistoryImportRouteError(result.failure.statusCode, result.failure.body.code, result.failure.body.error);
 }
 
 function historyImportServiceStatus(code: OfficialPluginHistoryImportError['code']): number {

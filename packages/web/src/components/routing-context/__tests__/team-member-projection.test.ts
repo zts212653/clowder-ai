@@ -4,6 +4,7 @@ import {
   buildTeamMemberIdentity,
   countTeamMembers,
   filterTeamMembers,
+  providerDisplayName,
   readTeamAvailability,
   readTeamCapability,
   toTeamMemberRow,
@@ -198,5 +199,17 @@ describe('F293 team member projection', () => {
       'codex-sol',
     ]);
     expect(filterTeamMembers(rows, { query: '不存在的猫', filter: 'all' })).toEqual([]);
+  });
+
+  it('names every provider the current catalog produces and keeps unknown ids as stored', () => {
+    expect(providerDisplayName('anthropic')).toBe('Anthropic');
+    expect(providerDisplayName('antigravity')).toBe('Antigravity');
+    expect(providerDisplayName('google')).toBe('Google');
+    expect(providerDisplayName('kimi')).toBe('Kimi');
+    expect(providerDisplayName('openai')).toBe('OpenAI');
+    expect(providerDisplayName('openai-chatgpt-pro')).toBe('ChatGPT Pro');
+    expect(providerDisplayName('opencode')).toBe('OpenCode');
+    expect(providerDisplayName('zhipu')).toBe('智谱');
+    expect(providerDisplayName('some-future-provider')).toBe('some-future-provider');
   });
 });

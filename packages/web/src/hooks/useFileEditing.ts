@@ -79,7 +79,7 @@ export function useFileEditing(deps: {
   }, [editMode, isTokenValid, setEditToken, worktreeId]);
 
   const handleSave = useCallback(
-    async (newContent: string) => {
+    async (newContent: string, options?: { baseSha256: string }) => {
       if (!worktreeId || !openFilePath || !file) return;
       if (!editToken) {
         setSaveError('编辑会话过期，请点击「编辑」按钮刷新权限后重试保存');
@@ -94,7 +94,7 @@ export function useFileEditing(deps: {
             worktreeId,
             path: openFilePath,
             content: newContent,
-            baseSha256: file.sha256,
+            baseSha256: options?.baseSha256 ?? file.sha256,
             editSessionToken: editToken,
           }),
         });
@@ -112,7 +112,17 @@ export function useFileEditing(deps: {
           setSaveError(data.error || '保存失败');
           return;
         }
+        const receipt = (await res.json()) as { path?: unknown; sha256?: unknown };
+        if (
+          receipt.path !== openFilePath ||
+          typeof receipt.sha256 !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(receipt.sha256)
+        ) {
+          setSaveError('保存回执尚未核验，编辑草稿已保留。');
+          return;
+        }
         await fetchFile(openFilePath);
+        return { path: receipt.path, sha256: receipt.sha256 };
       } catch {
         setSaveError('网络错误');
       }

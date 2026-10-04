@@ -3,7 +3,7 @@
 import { type PointerEvent, useEffect, useState } from 'react';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { CafeIcon } from '../rich/CafeIcons';
-import { ConciergePetSprite } from './ConciergeBall';
+import { CompanionAvatar } from './CompanionMessageIdentity';
 
 type InvocationStatus = 'idle' | 'pending' | 'in_progress' | 'error';
 
@@ -46,6 +46,8 @@ function TooltipAction({ id, label, icon, onClick }: { id: string; label: string
 
 export function ConciergePanelHeader({
   title,
+  partnerCatId,
+  partnerName,
   invocationStatus,
   muted,
   isExpanded,
@@ -54,6 +56,8 @@ export function ConciergePanelHeader({
   onClose,
 }: {
   title: string;
+  partnerCatId: string;
+  partnerName?: string;
   invocationStatus: InvocationStatus;
   muted: boolean;
   isExpanded: boolean;
@@ -61,7 +65,6 @@ export function ConciergePanelHeader({
   onToggleExpanded: () => void;
   onClose: () => void;
 }) {
-  const skin = useConciergeStore((s) => s.skin);
   const lastMessageTimestamp = useConciergeStore((s) => s.lastMessageTimestamp);
   const [hasFreshReply, setHasFreshReply] = useState(false);
 
@@ -87,15 +90,20 @@ export function ConciergePanelHeader({
     >
       <span
         data-testid="concierge-status-avatar"
+        data-companion-cat-id={partnerCatId}
         data-pet-state={petState}
-        role="img"
-        aria-label={`值班猫状态：${petState}`}
-        className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--cafe-surface-elevated)]"
+        className={`flex h-9 w-9 shrink-0 items-center justify-center ${petState === 'jumping' ? 'motion-safe:animate-bounce' : ''}`}
       >
-        <ConciergePetSprite state={petState} skin={skin} size={36} />
+        <CompanionAvatar
+          catId={partnerCatId}
+          partnerName={partnerName}
+          size={36}
+          status={petState === 'failed' ? 'error' : petState === 'running' ? 'streaming' : undefined}
+        />
       </span>
-      <span style={{ color: 'var(--cafe-text)' }} className="min-w-0 flex-1 truncate text-sm font-semibold">
-        {title}
+      <span style={{ color: 'var(--cafe-text)' }} className="min-w-0 flex-1 text-sm">
+        <strong className="block truncate font-semibold">{title}</strong>
+        {partnerName && <small className="block truncate text-micro text-cafe-muted">{partnerName}陪伴中</small>}
       </span>
       {invocationStatus === 'error' && (
         <output style={{ color: 'var(--semantic-critical)' }} className="text-xs">

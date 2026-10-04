@@ -14,7 +14,7 @@
  */
 
 import type { ApprovalItem, EntityConflictContext, EntityProposal, SettledApprovalItem } from '@cat-cafe/shared';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 import type { IEntityProposalStore } from '../stores/ports/IEntityProposalStore.js';
 
@@ -32,7 +32,7 @@ export class F260ApprovalAdapter implements IApprovalAdapter {
   ) {}
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
-    const result = this.store.listPending(userId);
+    const result = this.store.listPending(userId, ALL_PENDING_APPROVALS_LIMIT);
     const inspectConflict = this.inspectConflict;
     if (!inspectConflict) {
       if (Array.isArray(result)) return compactApprovalProjections(result.map((proposal) => toItem(proposal)));

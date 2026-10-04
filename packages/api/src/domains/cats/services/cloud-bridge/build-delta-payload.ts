@@ -51,7 +51,7 @@ const TRUNCATE_SUFFIX = '...[truncated]';
  * primary return path instead of relying on the browser observer fallback.
  */
 const SOURCE_BOUND_MCP_RETURN_CONTRACT = `<cat-cafe-return-contract v=1>
-To complete this request, call cat_cafe_post_message with agentKeyCatId="gpt-pro", threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
+To complete this request, call cat_cafe_post_message with agentKeyCatId="gpt-pro", threadId from thread-runtime, replyTo=sourceMessageId from thread-runtime, and content equal to your complete final answer. To reply to the human, omit targetCats; optionally mention @co-creator at line start in content. targetCats contains only cats you intend to wake, never a human ID. A visible ChatGPT answer alone does not complete this request. Treat callback status "ok" or "duplicate" as success; do not invent identifiers or retry an authorization rejection.
 </cat-cafe-return-contract>`;
 
 function assertExactSourceMessageId(sourceMessageId: string): void {

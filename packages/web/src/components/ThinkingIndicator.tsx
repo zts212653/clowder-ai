@@ -7,6 +7,7 @@ import { resolveCatDisplayName } from '@/lib/cat-display-name';
 import { useActiveExecutionStore } from '@/stores/activeExecutionStore';
 import type { CatStatusType, LivenessWarningSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
+import { useShellPresentation } from './shell/shell-presentation';
 
 function formatDuration(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -139,6 +140,7 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
   const { catStatuses, catStatusDetails, catInvocations } = useThreadLiveness(effectiveThreadId);
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
   const { getCatById } = useCatData();
+  const shellV2 = useShellPresentation() === 'v2';
 
   const executions = useMemo(
     () =>
@@ -147,6 +149,10 @@ export function ThinkingIndicator({ onCancel, threadId }: ThinkingIndicatorProps
       ),
     [effectiveThreadId, executionsByKey],
   );
+  // New shell (v2) only: the one execution row above the composer already says who is running, for how long and how to
+  // stop it, and it carries the silent/stalled state (same isStreamingTipSuppressed signal) with 强制重置. A second
+  // "replying…" line at the top of the conversation would say the same thing twice. Classic is unchanged.
+  if (shellV2) return null;
   if (executions.length !== 1) return null;
   const execution = executions[0];
   if (!execution) return null;

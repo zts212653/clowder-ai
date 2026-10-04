@@ -42,6 +42,31 @@ function sourceMessage(
 const seen = { catId: 'codex', state: 'seen' as const, invocationId: 'child-1', seenAt: 100 };
 
 describe('F264 AC-42/43 exact-child turn absorption projection', () => {
+  it('counts an explicit dispatch receipt without relabeling it as whole-turn completion', () => {
+    const message = sourceMessage('source-9', {
+      ...seen,
+      state: 'handled',
+      outcome: {
+        invocationId: 'child-1',
+        disposition: 'dispatch_disposition',
+        handledAt: 200,
+        evidenceRef: {
+          kind: 'dispatch_disposition',
+          invocationId: 'child-1',
+          sourceMessageId: 'source-9',
+          handoffEventId: 'route:source-9:codex',
+          dispositionEventId: 'dispatch-disposition:child-1:source-9',
+          disposition: 'handled',
+          dispositionAt: 200,
+        },
+      },
+    });
+    const projection = projectTurnAbsorptionSummary([message], 'child-1');
+    expect(projection?.counts.handled).toBe(1);
+    expect(projection?.counts.completedWithTurn).toBe(0);
+    expect(projection?.items[0]?.kind).toBe('dispatch_disposition');
+    expect(shouldFoldSourceBody(message)).toBe(true);
+  });
   it('keeps the four truths distinct and satisfies the exact denominator equation', () => {
     const messages: ChatMessage[] = [
       sourceMessage('m1', {

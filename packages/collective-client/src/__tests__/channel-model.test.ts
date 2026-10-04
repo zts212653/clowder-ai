@@ -47,7 +47,7 @@ describe('canonical Channel projection', () => {
           },
         },
       }),
-    ).toBe('You · You 的工作空间 (345678) · 猫');
+    ).toBe('You 的工作空间 · 猫');
   });
 
   it('projects nested replies by the canonical location root, including directed requests', () => {

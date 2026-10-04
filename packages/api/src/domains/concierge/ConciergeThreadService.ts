@@ -7,8 +7,8 @@
  * - 对话载体 = 普通 thread（消息/invocation/记忆全复用现有设施）
  * - 创建者为 userId（P1 fix：每个用户的 concierge thread 在自己的 Redis user index 下，
  *   无跨用户泄漏风险）
- * - thread.threadKind = 'concierge' — route 层通过此字段过滤，默认不出现在 sidebar；
- *   GET /api/threads?includeConcierge=true 时暴露（threadStore.list(userId) 会返回）
+ * - thread.threadKind = 'concierge' — route 层只把 key owner 的 canonical 载体放进
+ *   默认列表和搜索；includeConcierge=true 可额外读到该 owner 的同类旧载体
  * - 懒创建：第一次 getOrCreate 时建立，后续调用幂等返回相同 threadId
  *
  * 存储方式：
@@ -21,6 +21,8 @@ import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { IThreadStore } from '../cats/services/stores/ports/ThreadStore.js';
 import type { IConciergeConfigStore } from './ConciergeConfigStore.js';
 import { ConciergeKeys } from './concierge-keys.js';
+
+export const CONCIERGE_THREAD_TITLE = '猫猫球 · 伴随对话';
 
 // ---------------------------------------------------------------------------
 // Service
@@ -68,6 +70,14 @@ export class ConciergeThreadService {
     return promise;
   }
 
+  /** Read-only check for a call that must still belong to this owner's canonical thread. */
+  async isCurrent(userId: string, threadId: string): Promise<boolean> {
+    if ((await this.getStoredThreadId(userId)) !== threadId) return false;
+    const thread = await this.threadStore.get(threadId);
+    // The per-user index is the authority. Legacy carriers may predate userId in createdBy.
+    return !!thread && !thread.deletedAt && thread.threadKind === 'concierge';
+  }
+
   private async _doGetOrCreate(userId: string): Promise<string> {
     // 1. Check stored threadId
     const stored = await this.getStoredThreadId(userId);
@@ -113,6 +123,8 @@ export class ConciergeThreadService {
       threadId = await this.createThread(userId);
     }
 
+    await this.repairGeneratedTitle(userId, threadId);
+
     // F229 P1 routing fix: sync preferredCats = [dutyCatProfileId] so routing targets the
     // duty cat on messages without @mention (standard AgentRouter preferredCats fallback path).
     // Called on every getOrCreate so config changes stay in sync.
@@ -128,8 +140,8 @@ export class ConciergeThreadService {
 
   private async createThread(userId: string): Promise<string> {
     // createdBy = userId: thread is per-user indexed; threadKind='concierge' is the
-    // route-layer signal for default filtering (hidden unless includeConcierge=true).
-    const thread = await this.threadStore.create(userId, `前台猫·${userId}`, undefined);
+    // route-layer signal for canonical owner-scoped discovery.
+    const thread = await this.threadStore.create(userId, CONCIERGE_THREAD_TITLE, undefined);
     // R18 P2 (crash-atomicity): claim the canonical key BEFORE setting threadKind.
     // If the process crashes between create() and storeThreadId(), the orphan is a
     // plain thread (no threadKind) — visible in sidebar but single-canonical-carrier
@@ -155,15 +167,27 @@ export class ConciergeThreadService {
 
   /**
    * Return the stored concierge threadId without creating one.
-   * Used by threads route (includeConcierge=true) to surface the thread to the caller.
-   * Returns null if the thread has not been created yet or was deleted.
+   * Used by threads route to surface the exact stored carrier to its key owner.
+   * Returns null if the thread has not been created yet or was deleted. A
+   * generated title or missing kind may be repaired, but no thread is created.
    */
   async findThreadId(userId: string): Promise<string | null> {
     const stored = await this.getStoredThreadId(userId);
     if (!stored) return null;
     const thread = await this.threadStore.get(stored);
     // Treat soft-deleted threads as not found — caller should not surface tombstoned threads
-    return thread && !thread.deletedAt ? stored : null;
+    if (!thread || thread.deletedAt) return null;
+    if (thread.threadKind !== 'concierge') await this.threadStore.updateThreadKind(stored, 'concierge');
+    await this.repairGeneratedTitle(userId, stored);
+    return stored;
+  }
+
+  private async repairGeneratedTitle(userId: string, threadId: string): Promise<void> {
+    const current = await this.threadStore.get(threadId);
+    // Blank and the former user-id template are generated states. Literal titles,
+    // including a user-chosen "未命名对话", belong to the existing conversation.
+    if (current && (!current.title?.trim() || current.title === `前台猫·${userId}`))
+      await this.threadStore.updateTitle(threadId, CONCIERGE_THREAD_TITLE);
   }
 
   /**

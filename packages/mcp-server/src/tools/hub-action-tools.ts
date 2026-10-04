@@ -168,7 +168,7 @@ export const hubActionTools = [
       implementationExport: 'handleWorkspaceNavigate',
       action: 'command',
       risk: { level: 'write', openWorld: false },
-      runtimeProfiles: ['full', 'agent-key'],
+      runtimeProfiles: ['full', 'agent-key', 'desktop:live-companion'],
     },
   }),
   defineCanonicalTool({

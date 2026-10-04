@@ -94,6 +94,10 @@ test('cloud schema distinguishes root sends from returns and rejects invocation-
   }
   assert.match(post.description, /proactive|root/i);
   assert.match(post.description, /complete.*answer|final.*answer/i);
+  assert.match(post.description, /reply to the human.*omit targetCats/i);
+  assert.match(post.description, /@co-creator/);
+  assert.match(post.inputSchema.properties.targetCats.description, /not.*human|human.*not/i);
+  assert.ok(!post.inputSchema.required?.includes('targetCats'));
   assert.doesNotMatch(post.description, /Do NOT use this for routine replies/i);
   assert.ok(post.inputSchema.properties.localReviewVerdict, 'agent-key review facts remain available');
   const bodies = [];
@@ -129,4 +133,26 @@ test('cloud schema distinguishes root sends from returns and rejects invocation-
     assert.equal((await client.callTool({ name: cross.name, arguments: { ...root, ...extra } })).isError, true);
   }
   assert.equal(bodies.length, 3, 'invalid cross-thread transfer must fail before transport');
+});
+
+test('human replies keep the exact source without inventing a cat recipient', async (t) => {
+  const client = await cloudClient(t);
+  const bodies = [];
+  globalThis.fetch = async (_url, init) => {
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ status: 'ok', messageId: `human-${bodies.length}`, routed: [] }));
+  };
+  for (const content of ['在呢，You。', '@co-creator\n在呢。']) {
+    const result = await client.callTool({
+      name: 'cat_cafe_post_message',
+      arguments: { agentKeyCatId: 'gpt-pro', threadId: 'owned', replyTo: 'human-source', content },
+    });
+    assert.equal(result.isError, undefined, JSON.stringify(result));
+  }
+  assert.equal(bodies.length, 2);
+  for (const body of bodies) {
+    assert.equal(body.threadId, 'owned');
+    assert.equal(body.replyTo, 'human-source');
+    assert.equal(body.targetCats, undefined);
+  }
 });

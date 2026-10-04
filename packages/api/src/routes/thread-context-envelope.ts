@@ -14,17 +14,25 @@ export interface ThreadContextCursorScope {
   readonly filterCatId?: string;
   readonly keyword?: string;
   readonly responseMode: 'anchor' | 'full';
+  readonly readIntent: 'history' | 'unread';
 }
 
 export type ThreadContextSelection =
   | { readonly kind: 'history' }
-  | { readonly kind: 'unread'; readonly afterCursor: string };
+  | { readonly kind: 'unread'; readonly afterCursor?: string };
 
 interface ThreadContextCursorV1 {
   readonly v: 1;
   readonly scopeHash: string;
   readonly lastItemId: string;
   readonly selection: ThreadContextSelection;
+  /**
+   * The previous page exhausted its bounded unread candidate window and moved
+   * `selection.afterCursor` to the last returned storage item. The next page
+   * therefore starts at index zero of a newly selected window instead of
+   * looking for `lastItemId` inside that window.
+   */
+  readonly resumeFromStart?: true;
 }
 
 export interface ThreadContextEnvelopeCandidate<TProjection extends Record<string, unknown>> {
@@ -86,7 +94,10 @@ export function decodeThreadContextCursor(
       !parsed.selection ||
       (parsed.selection.kind !== 'history' && parsed.selection.kind !== 'unread') ||
       (parsed.selection.kind === 'unread' &&
-        (typeof parsed.selection.afterCursor !== 'string' || parsed.selection.afterCursor.length === 0))
+        parsed.selection.afterCursor !== undefined &&
+        (typeof parsed.selection.afterCursor !== 'string' || parsed.selection.afterCursor.length === 0)) ||
+      (parsed.resumeFromStart !== undefined && parsed.resumeFromStart !== true) ||
+      (parsed.resumeFromStart === true && parsed.selection.kind !== 'unread')
     ) {
       throw new Error('cursor scope mismatch');
     }
@@ -122,6 +133,7 @@ function cursorAfterCandidate(
   scopeHash: string,
   candidateId: string,
   selection: ThreadContextSelection,
+  resumeFromStart = false,
 ): string | undefined {
   if (!hasMore) return undefined;
   return encodeThreadContextCursor({
@@ -129,10 +141,26 @@ function cursorAfterCandidate(
     scopeHash,
     lastItemId: candidateId,
     selection,
+    ...(resumeFromStart ? { resumeFromStart: true } : {}),
   });
 }
 
 type CandidateFit = 'full' | 'oversized' | 'stop' | 'unbounded';
+
+function continuationAfterCandidate(input: {
+  readonly candidateIndex: number;
+  readonly candidateCount: number;
+  readonly selection: ThreadContextSelection;
+  readonly tailContinuationSelection?: ThreadContextSelection;
+}): { readonly hasMore: boolean; readonly selection: ThreadContextSelection; readonly resumeFromStart: boolean } {
+  if (input.candidateIndex + 1 < input.candidateCount) {
+    return { hasMore: true, selection: input.selection, resumeFromStart: false };
+  }
+  if (input.tailContinuationSelection) {
+    return { hasMore: true, selection: input.tailContinuationSelection, resumeFromStart: true };
+  }
+  return { hasMore: false, selection: input.selection, resumeFromStart: false };
+}
 
 function fitCandidate<TProjection extends Record<string, unknown>>(input: {
   readonly base: ThreadContextEnvelopeBase;
@@ -172,6 +200,7 @@ function tryBuildPage<TProjection extends Record<string, unknown>>(input: {
   readonly startIndex: number;
   readonly scopeHash: string;
   readonly selection: ThreadContextSelection;
+  readonly tailContinuationSelection?: ThreadContextSelection;
   readonly maxBytes: number;
 }): BuiltThreadContextEnvelopePage<TProjection> | undefined {
   const selected: ThreadContextEnvelopeCandidate<TProjection>[] = [];
@@ -179,9 +208,20 @@ function tryBuildPage<TProjection extends Record<string, unknown>>(input: {
   for (let index = input.startIndex; index < input.allCandidates.length; index += 1) {
     const candidate = input.allCandidates[index];
     if (!candidate) continue;
-    const hasMore = index + 1 < input.allCandidates.length;
-    const nextCursor = cursorAfterCandidate(hasMore, input.scopeHash, candidate.id, input.selection);
-    const fit = fitCandidate({ ...input, selected, candidate, hasMore, nextCursor });
+    const continuation = continuationAfterCandidate({
+      candidateIndex: index,
+      candidateCount: input.allCandidates.length,
+      selection: input.selection,
+      tailContinuationSelection: input.tailContinuationSelection,
+    });
+    const nextCursor = cursorAfterCandidate(
+      continuation.hasMore,
+      input.scopeHash,
+      candidate.id,
+      continuation.selection,
+      continuation.resumeFromStart,
+    );
+    const fit = fitCandidate({ ...input, selected, candidate, hasMore: continuation.hasMore, nextCursor });
     if (fit === 'full') {
       selected.push(candidate);
       completeCandidateCount += 1;
@@ -199,14 +239,27 @@ function tryBuildPage<TProjection extends Record<string, unknown>>(input: {
   const consumedThrough = lastSelected
     ? input.allCandidates.findIndex((candidate) => candidate.id === lastSelected.id) + 1
     : input.startIndex;
-  const hasMore = consumedThrough < input.allCandidates.length;
+  const continuation = lastSelected
+    ? continuationAfterCandidate({
+        candidateIndex: consumedThrough - 1,
+        candidateCount: input.allCandidates.length,
+        selection: input.selection,
+        tailContinuationSelection: input.tailContinuationSelection,
+      })
+    : { hasMore: false, selection: input.selection, resumeFromStart: false };
   const nextCursor = lastSelected
-    ? cursorAfterCandidate(hasMore, input.scopeHash, lastSelected.id, input.selection)
+    ? cursorAfterCandidate(
+        continuation.hasMore,
+        input.scopeHash,
+        lastSelected.id,
+        continuation.selection,
+        continuation.resumeFromStart,
+      )
     : undefined;
   const payload = buildPayload(
     input.base,
     selected.map((candidate) => candidate.projection),
-    hasMore,
+    continuation.hasMore,
     nextCursor,
   );
   return serializedBytes(payload) <= input.maxBytes
@@ -231,11 +284,13 @@ export function pageThreadContextEnvelope<TProjection extends Record<string, unk
   readonly cursor: ThreadContextCursorV1 | undefined;
   readonly scopeHash: string;
   readonly selection: ThreadContextSelection;
+  /** Known unread storage continuation after `allCandidates` is exhausted. */
+  readonly tailContinuationSelection?: ThreadContextSelection;
   readonly maxBytes?: number;
 }): ThreadContextEnvelopePage<TProjection> {
   const maxBytes = input.maxBytes ?? THREAD_CONTEXT_RESPONSE_MAX_BYTES;
   let startIndex = 0;
-  if (input.cursor) {
+  if (input.cursor && !input.cursor.resumeFromStart) {
     const lastIndex = input.allCandidates.findIndex((candidate) => candidate.id === input.cursor?.lastItemId);
     if (lastIndex < 0) throw new InvalidThreadContextCursorError('cursor resume point is no longer available');
     startIndex = lastIndex + 1;
@@ -248,6 +303,7 @@ export function pageThreadContextEnvelope<TProjection extends Record<string, unk
       startIndex,
       scopeHash: input.scopeHash,
       selection: input.selection,
+      tailContinuationSelection: input.tailContinuationSelection,
       maxBytes,
     });
 

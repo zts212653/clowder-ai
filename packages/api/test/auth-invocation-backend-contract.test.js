@@ -7,6 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
 
 const backends = [
   [
@@ -33,17 +34,20 @@ if (_redisUrl && !_redisUrl.includes(':6399')) {
       const { RedisAuthInvocationBackend } = await import(
         '../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js'
       );
-      const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: 'cat-cafe-test:' });
-      // Wipe test keyspace before each test (keyPrefix isolates from shared 6398 data)
-      const keys = await redis.keys('cat-cafe-test:auth:*');
-      if (keys.length > 0) {
-        const stripped = keys.map((k) => k.replace('cat-cafe-test:', ''));
-        await redis.del(...stripped);
-      }
+      // A namespace unique to this suite and process. The previous code took
+      // the shared `cat-cafe-test:` prefix and wiped `cat-cafe-test:auth:*`
+      // before every Redis variant, which under `--test-concurrency=4` could
+      // delete a record auth-invocation-restart.test.js had just written.
+      const namespace = createAuthTestNamespace('auth-contract');
+      const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: namespace });
       return {
         backend: new RedisAuthInvocationBackend(redis),
         cleanup: async () => {
-          await redis.quit();
+          try {
+            await clearAuthTestNamespace(redis, namespace);
+          } finally {
+            await redis.quit();
+          }
         },
       };
     },

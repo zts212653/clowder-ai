@@ -23,7 +23,11 @@ beforeEach(() => {
     .mockImplementation(
       async () =>
         new Response(
-          JSON.stringify({ contentRef: 'doc', sessionRef: `session-${vi.mocked(apiFetch).mock.calls.length}` }),
+          JSON.stringify({
+            contentRef: 'doc',
+            sessionRef: `session-${vi.mocked(apiFetch).mock.calls.length}`,
+            ownerRevision: 7,
+          }),
         ),
     );
 });
@@ -41,6 +45,7 @@ function button(label: string): HTMLButtonElement {
 
 it('keeps local edits on cancelled reopen and discards them only after the explicit saved-version choice', async () => {
   await act(async () => root.render(<WorkspaceOfficeSurface worktreeId="wt" path="sample.docx" />));
+  expect(container.textContent).toContain('打开时为第 7 版');
   const editor = container.querySelector('textarea');
   expect(editor).not.toBeNull();
   if (!editor) throw new Error('editor missing');

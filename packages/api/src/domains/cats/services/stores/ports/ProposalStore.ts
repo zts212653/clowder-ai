@@ -9,6 +9,7 @@ import type {
   ApprovalPublication,
   CatId,
   DeclaredWorkMode,
+  DevelopmentScopeV1,
   ProposalApproveOverrides,
   ReportingMode,
   ThreadProposal,
@@ -37,6 +38,22 @@ export interface CreateProposalInput {
    * the proposal, ensuring losers in a concurrent retry never produce orphan records.
    */
   proposalId?: string;
+  /**
+   * F167 × F322: Server-validated task binding. When set, the proposal is bound to
+   * this exact task — only delegation claims for this task can consume the approval.
+   * Must be validated by the route handler against the task store before persisting.
+   */
+  subjectTaskId?: string;
+  /**
+   * F167 R4: Immutable snapshot of the task title at creation time, derived by the
+   * server from the validated task. Displayed on the operator approval card + audit trail.
+   */
+  subjectTaskTitle?: string;
+  /**
+   * F167 R5: Immutable scope snapshot from `task.entrustedWork.developmentScope`,
+   * derived by the server at creation time. Never caller-supplied.
+   */
+  approvedDevelopmentScope?: DevelopmentScopeV1;
 }
 
 export interface ClaimForApprovalInput {
@@ -154,6 +171,9 @@ export class InMemoryProposalStore implements IProposalStore {
       ...(input.initialMessage ? { initialMessage: input.initialMessage } : {}),
       ...(input.reportingMode ? { reportingMode: input.reportingMode } : {}),
       ...(input.declaredWorkMode ? { declaredWorkMode: input.declaredWorkMode } : {}),
+      ...(input.subjectTaskId ? { subjectTaskId: input.subjectTaskId } : {}),
+      ...(input.subjectTaskTitle ? { subjectTaskTitle: input.subjectTaskTitle } : {}),
+      ...(input.approvedDevelopmentScope ? { approvedDevelopmentScope: { ...input.approvedDevelopmentScope } } : {}),
     };
     this.proposals.set(proposal.proposalId, proposal);
     return cloneProposal(proposal);
@@ -313,5 +333,10 @@ function cloneProposal(proposal: ThreadProposal): ThreadProposal {
     ...proposal,
     preferredCats: [...proposal.preferredCats],
     ...(proposal.publication ? { publication: structuredClone(proposal.publication) } : {}),
+    // F167 R5: approvedDevelopmentScope is an authorization snapshot — must be isolated
+    // from the store's internal copy. All fields are primitives, so spread suffices.
+    ...(proposal.approvedDevelopmentScope
+      ? { approvedDevelopmentScope: { ...proposal.approvedDevelopmentScope } }
+      : {}),
   };
 }

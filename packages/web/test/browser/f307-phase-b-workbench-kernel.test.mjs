@@ -8,6 +8,11 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import {
+  canonicalWorktreeId,
+  collaborationOwnerOutOfScopeResponse,
+  resolveFileSourceResponse,
+} from './f307-real-surface-fixtures.mjs';
 import { ensureWorkspaceOpen } from './f307-workspace-open.mjs';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -15,6 +20,8 @@ const NEXT_BIN = path.resolve(WEB_ROOT, '../../node_modules/next/dist/bin/next')
 const PRODUCTION_BUILD_ID_PATH = path.join(WEB_ROOT, '.next', 'BUILD_ID');
 const THREAD_ID = 'thread-f307-phase-b-kernel';
 const WORKTREE_ID = 'worktree-f307-kernel';
+// F309 AC-U3: the file surface is keyed by the durable F063 root its alias resolves to.
+const FILE_OWNER_WORKTREE_ID = canonicalWorktreeId(WORKTREE_ID);
 const FILE_PATH = 'docs/features/F307-composable-workbench.md';
 
 async function findFreePort() {
@@ -227,6 +234,14 @@ test(
     await page.route('**/api/**', (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === '/api/debug/callback-auth') return json(route, { error: 'forbidden' }, 403);
+      if (url.pathname === '/api/workspace/resolve-file-source' && route.request().method() === 'POST') {
+        const response = resolveFileSourceResponse(route.request(), [WORKTREE_ID]);
+        return json(route, response.body, response.status);
+      }
+      if (url.pathname === '/api/workspace/content-reviews/prepare' && route.request().method() === 'POST') {
+        const response = collaborationOwnerOutOfScopeResponse();
+        return json(route, response.body, response.status);
+      }
       return json(route, fixtureForApi(url));
     });
 
@@ -255,6 +270,13 @@ test(
       );
       await home.getByTestId('workspace-launcher-search').fill('F307');
       await home.getByTestId('workspace-launcher-file-result').first().click();
+      // F309 AC-U1 (docs/features/F309-collaborative-content-plane.md:701) and the Phase U plan
+      // (docs/plans/2026-09-19-f309-phase-u-step1-packet.md:30): an ordinary file lands in its
+      // collaboration surface; the file viewer stays reachable through the explicit 文件工具 action.
+      await workbench
+        .locator(`[data-surface-id="file-owner:${FILE_OWNER_WORKTREE_ID}"]`)
+        .getByRole('button', { name: '文件工具', exact: true })
+        .click();
       await page.getByTestId('workspace-file-viewer').waitFor();
 
       assert.equal(await workbench.getAttribute('data-surface-count'), '1');
@@ -284,12 +306,12 @@ test(
       assert.equal(await workbench.getAttribute('data-pinned-surfaces'), `browser-owner:${WORKTREE_ID}`);
       assert.equal(
         await workbench.getAttribute('data-surface-order'),
-        `browser-owner:${WORKTREE_ID},file-owner:${WORKTREE_ID}`,
+        `browser-owner:${WORKTREE_ID},file-owner:${FILE_OWNER_WORKTREE_ID}`,
       );
 
       await workbench.getByTestId('f307-split').click();
       assert.equal(await workbench.getAttribute('data-split-primary'), `browser-owner:${WORKTREE_ID}`);
-      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${WORKTREE_ID}`);
+      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${FILE_OWNER_WORKTREE_ID}`);
 
       const persisted = await page.evaluate(() =>
         JSON.parse(window.localStorage.getItem('cat-cafe:workbench-layout-v2') ?? 'null'),
@@ -308,7 +330,7 @@ test(
         await workbench.getAttribute('data-surface-order'),
         persisted.surfaces.map((surface) => surface.id).join(','),
       );
-      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${WORKTREE_ID}`);
+      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${FILE_OWNER_WORKTREE_ID}`);
 
       await page.setViewportSize({ width: 390, height: 844 });
       await page.waitForFunction(
@@ -317,7 +339,7 @@ test(
           'stack',
       );
       assert.equal(await workbench.getAttribute('data-split-primary'), `browser-owner:${WORKTREE_ID}`);
-      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${WORKTREE_ID}`);
+      assert.equal(await workbench.getAttribute('data-split-secondary'), `file-owner:${FILE_OWNER_WORKTREE_ID}`);
       assert.equal(await workbench.getAttribute('data-pinned-surfaces'), `browser-owner:${WORKTREE_ID}`);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
       assert.deepEqual(pageErrors, []);

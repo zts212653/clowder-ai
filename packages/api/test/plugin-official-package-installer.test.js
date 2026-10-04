@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +11,7 @@ import {
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
   OfficialPluginPackageInstaller,
+  PLUGIN_CONTRACT_PACKAGE_VERSION,
   packageDirectoryName,
 } from '../dist/domains/plugin/index.js';
 import {
@@ -20,6 +22,8 @@ import {
   packageArchive,
   releaseFence,
 } from './plugin-official-package-installer.fixture.js';
+
+const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 test('installs only the exact catalog artifact and admits schemas from those bytes', async () => {
   const archive = await packageArchive();
@@ -52,14 +56,16 @@ test('installs only the exact catalog artifact and admits schemas from those byt
 });
 
 test('installs a package built against the exact consumed prerelease contract', async () => {
-  const packageManifest = manifest({ contractVersion: '0.1.0-beta.13' });
+  const packageManifest = manifest({
+    contractVersion: packageJson.dependencies['@clowder-ai/plugin-contract'],
+  });
   const archive = await packageArchive({ packageManifest });
   const entry = catalogEntry(archive.integrity);
   const { store, installer } = await harness(archive, entry);
 
   await installer.install(entry.catalogId, releaseFence(entry));
 
-  assert.equal((await store.snapshot()).packages[0].contractVersion, '0.1.0-beta.13');
+  assert.equal((await store.snapshot()).packages[0].contractVersion, PLUGIN_CONTRACT_PACKAGE_VERSION);
 });
 
 test('quarantines a catalog package rejected by the Host contract allowlist', async () => {

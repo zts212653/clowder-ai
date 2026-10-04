@@ -1,6 +1,9 @@
 'use client';
-import type { ArtifactReviewAnnotation, ReviewedMediaAsset } from '@cat-cafe/shared';
+import type { ArtifactReviewAnchor, ImmutableMedia } from '@cat-cafe/shared';
+import type { ReactNode } from 'react';
 import { anchorBounds, tickToBrowserTime } from './review-geometry';
+
+type CanvasAnnotation = { readonly id: string; readonly anchor: ArtifactReviewAnchor };
 
 export function ReviewCanvasAnnotations({
   annotations,
@@ -10,8 +13,8 @@ export function ReviewCanvasAnnotations({
   interactive = true,
   onActive,
 }: {
-  annotations: ArtifactReviewAnnotation[];
-  media: ReviewedMediaAsset['media'];
+  annotations: readonly CanvasAnnotation[];
+  media: ImmutableMedia;
   activeId: string | null;
   seconds: number;
   interactive?: boolean;
@@ -44,26 +47,58 @@ function AnnotationMark({
   interactive,
   onActive,
 }: {
-  annotation: ArtifactReviewAnnotation;
+  annotation: CanvasAnnotation;
   index: number;
-  media: ReviewedMediaAsset['media'];
+  media: ImmutableMedia;
   activeId: string | null;
   seconds: number;
   interactive: boolean;
   onActive: (annotationId: string) => void;
 }) {
-  const anchor = annotation.anchor;
+  const projection = projectAnnotation(annotation.anchor, media, seconds);
+  if (!projection) return null;
+  const graphic = <AnnotationGraphic {...projection} active={activeId === annotation.id} index={index} media={media} />;
+  const attributes = {
+    'data-testid': 'review-canvas-annotation-mark',
+    'data-annotation-id': annotation.id,
+    opacity: activeId && activeId !== annotation.id ? 0.35 : 1,
+  };
+  if (!interactive) return <g {...attributes}>{graphic}</g>;
+  return (
+    <InteractiveAnnotationMark attributes={attributes} index={index} annotationId={annotation.id} onActive={onActive}>
+      {graphic}
+    </InteractiveAnnotationMark>
+  );
+}
+
+function projectAnnotation(anchor: ArtifactReviewAnchor, media: ImmutableMedia, seconds: number) {
   const box = anchorBounds(anchor);
-  const isPoint = anchor.kind === 'image-point' || (anchor.kind === 'video-range' && !!anchor.framePoint);
-  const visible =
-    !!box &&
-    !(
-      media.kind === 'video' &&
-      anchor.kind === 'video-range' &&
-      (seconds < tickToBrowserTime(anchor.startTick, media) || seconds >= tickToBrowserTime(anchor.endTick, media))
-    );
-  if (!box || !visible) return null;
-  const graphic = (
+  if (!box || !isVisibleAtFrame(anchor, media, seconds)) return null;
+  return {
+    box,
+    isPoint: anchor.kind === 'image-point' || (anchor.kind === 'video-range' && !!anchor.framePoint),
+  };
+}
+
+function isVisibleAtFrame(anchor: ArtifactReviewAnchor, media: ImmutableMedia, seconds: number) {
+  if (media.kind !== 'video' || anchor.kind !== 'video-range') return true;
+  return seconds >= tickToBrowserTime(anchor.startTick, media) && seconds < tickToBrowserTime(anchor.endTick, media);
+}
+
+function AnnotationGraphic({
+  box,
+  isPoint,
+  active,
+  index,
+  media,
+}: {
+  box: NonNullable<ReturnType<typeof anchorBounds>>;
+  isPoint: boolean;
+  active: boolean;
+  index: number;
+  media: ImmutableMedia;
+}) {
+  return (
     <>
       {isPoint ? (
         <circle
@@ -84,7 +119,7 @@ function AnnotationMark({
           fill="var(--cafe-accent)"
           fillOpacity={0.07}
           stroke="var(--cafe-accent)"
-          strokeWidth={activeId === annotation.id ? 3 : 1.5}
+          strokeWidth={active ? 3 : 1.5}
           vectorEffect="non-scaling-stroke"
         />
       )}
@@ -100,13 +135,22 @@ function AnnotationMark({
       </text>
     </>
   );
-  const attributes = {
-    'data-testid': 'review-canvas-annotation-mark',
-    'data-annotation-id': annotation.id,
-    opacity: activeId && activeId !== annotation.id ? 0.35 : 1,
-  };
-  if (!interactive) return <g {...attributes}>{graphic}</g>;
-  const open = () => onActive(annotation.id);
+}
+
+function InteractiveAnnotationMark({
+  attributes,
+  index,
+  annotationId,
+  onActive,
+  children,
+}: {
+  attributes: Record<string, string | number | undefined>;
+  index: number;
+  annotationId: string;
+  onActive: (annotationId: string) => void;
+  children: ReactNode;
+}) {
+  const open = () => onActive(annotationId);
   return (
     // biome-ignore lint/a11y/useSemanticElements: SVG groups preserve original-media coordinates; HTML buttons cannot represent an SVG region.
     <g
@@ -122,7 +166,7 @@ function AnnotationMark({
         open();
       }}
     >
-      {graphic}
+      {children}
     </g>
   );
 }

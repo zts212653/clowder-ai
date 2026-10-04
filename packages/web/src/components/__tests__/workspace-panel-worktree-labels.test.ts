@@ -17,6 +17,13 @@ describe('clowder-ai#1117: worktree selector labels', () => {
     );
   });
 
+  // Sol #4749 R3 P2: `git worktree list` names no HEAD for a bare repository; say so instead of "()".
+  it('names a missing HEAD instead of leaving empty parentheses', () => {
+    expect(worktreeLabel({ head: '', root: '/workspace/project.git', branch: 'HEAD' })).toBe(
+      'project.git — HEAD (无 HEAD)',
+    );
+  });
+
   it('handles Windows-style paths', () => {
     expect(worktreeLabel({ head: 'linked', root: 'C:\\Users\\dev\\project', branch: 'dev-project' })).toBe(
       '📂 project — dev-project',

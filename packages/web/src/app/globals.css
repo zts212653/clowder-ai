@@ -3,7 +3,12 @@
 @tailwind utilities;
 
 [data-lineage-focus="true"] {
-  outline: 2px solid var(--color-cocreator-primary);
+  /* The human's hue and chroma (cocoa, or the config's colour), at the lightness the theme floors at 3:1 (F322). */
+  outline: 2px solid
+    oklch(
+      var(--cat-lineage-l, var(--cat-bubble-l, 0.62)) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 1))
+        var(--cocreator-hue)
+    );
   outline-offset: 3px;
   border-radius: 0.75rem;
   transition: outline-color 160ms ease;

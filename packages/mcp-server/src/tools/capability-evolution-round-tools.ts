@@ -32,7 +32,8 @@ const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
     ownerFeatureId: bounded(120),
-    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/),
+    // biome-ignore lint/complexity/noUselessEscapeInRegex: Serialized MCP patterns also reach engines with nested character classes.
+    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/),
     version: bounded(240).optional(),
   })
   .strict();

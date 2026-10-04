@@ -33,6 +33,8 @@ export type HoldLifecycleStatus =
   | 'active'
   | 'retired_by_event'
   | 'retired_by_replacement'
+  | 'retired_expired'
+  | 'retired_invalid'
   | 'cancel_requested'
   | 'cancelled_by_user'
   | 'escalated'
@@ -198,6 +200,15 @@ export function findCancelableHoldBallTask(
 
 export function executeHoldCancel(task: DynamicTaskDef, deps: HoldBallCancelDeps): void {
   deps.taskRunner.unregister(task.id);
+  const lifecycle = readHoldLifecycle(task);
+  if (lifecycle && deps.dynamicTaskStore.updateParams && deps.dynamicTaskStore.setEnabled) {
+    deps.dynamicTaskStore.updateParams(task.id, {
+      ...task.params,
+      holdLifecycle: { ...lifecycle, status: 'cancelled_by_user', retiredAt: Date.now() },
+    });
+    deps.dynamicTaskStore.setEnabled(task.id, false);
+    return;
+  }
   deps.dynamicTaskStore.remove(task.id);
 }
 
@@ -227,7 +238,16 @@ export function cancelPendingHoldsForThread(threadId: string, deps: HoldBallCanc
 
     deps.taskRunner.unregister(task.id);
     cancelled.push(task);
-    deps.dynamicTaskStore.remove(task.id);
+    const lifecycle = readHoldLifecycle(task);
+    if (lifecycle && deps.dynamicTaskStore.updateParams && deps.dynamicTaskStore.setEnabled) {
+      deps.dynamicTaskStore.updateParams(task.id, {
+        ...task.params,
+        holdLifecycle: { ...lifecycle, status: 'cancelled_by_user', retiredAt: Date.now() },
+      });
+      deps.dynamicTaskStore.setEnabled(task.id, false);
+    } else {
+      deps.dynamicTaskStore.remove(task.id);
+    }
   }
   if (cancelled.length > 0) c1HoldCancelCount.add(cancelled.length);
   return cancelled;

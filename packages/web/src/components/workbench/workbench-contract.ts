@@ -1,3 +1,7 @@
+import type { MessageMediaPublicationSource } from '@cat-cafe/shared';
+import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
+import type { ArtifactFileEntrance } from './artifact-file-source';
+
 export type WorkbenchSurfaceType =
   | 'agent-run'
   | 'artifact'
@@ -52,6 +56,26 @@ export interface WorkspaceSurfaceDescriptor {
     owner: string;
     key: string;
   };
+  /**
+   * The ordinary user entry that opened an F063 file surface. Kept apart from
+   * the content target and the Task-only entrusted-work return target.
+   */
+  navigationOrigin?: WorkspaceFileNavigationOrigin;
+  /** Exact F232 entrance for explicit location recovery; never a file grant. */
+  artifactFileSource?: ArtifactFileEntrance;
+  /** Exact current directory selection for first connection; not an authorization. */
+  rootSelection?: import('./workspace-root-selection').WorkspaceRootSelection;
+  /** Reading state of the original artifact list, independent of content identity. */
+  artifactListView?: import('@/components/artifacts/artifact-list-state').ArtifactListView;
+  /** Files surface only: the path one explicit request asked to show in the tree. Never a grant. */
+  filesReveal?: import('./files-tree').FilesRevealTarget;
+  /**
+   * Files surface only: the `/api/workspace/worktrees?repoRoot=` coordinate that minted its worktree id, when that
+   * is not the current chat's project. Identity (branch/HEAD) is read through it; never a grant.
+   */
+  filesRepoRoot?: string;
+  /** Exact original message item for explicit publication reselection; reauthorized by the resolver, never a grant. */
+  messagePublicationSource?: MessageMediaPublicationSource;
   /** Navigation edge captured when this Artifact is opened from one exact entrusted-work item. */
   returnTargetRef?: { owner: string; key: string };
   capabilities: {
@@ -99,6 +123,7 @@ export interface FocusEntitlement {
     | 'open-from-chat'
     | 'owner-background'
     | 'recently-closed'
+    | 'return-origin'
     | 'review-ready'
     | 'sidecar-action'
     | 'surface-tab'
@@ -112,6 +137,7 @@ interface EntitledAction {
 export type WorkbenchAction =
   | ({ type: 'open-surface'; surface: WorkspaceSurfaceDescriptor } & EntitledAction)
   | { type: 'refresh-surface'; surface: WorkspaceSurfaceDescriptor }
+  | { type: 'resolve-content-surface'; sourceSurfaceId: string; surface: WorkspaceSurfaceDescriptor }
   | ({ type: 'activate-surface'; surfaceId: string } & EntitledAction)
   | ({ type: 'reorder-surface'; surfaceId: string; toIndex: number } & EntitledAction)
   | ({ type: 'pin-surface'; surfaceId: string; pinned: boolean } & EntitledAction)

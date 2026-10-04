@@ -25,13 +25,19 @@ afterEach(async () => {
   Object.assign(process.env, originalEnv);
 });
 
-async function createHarness({ failEnqueueAttempts = 0 } = {}) {
+async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = false } = {}) {
   const { InvocationRegistry } = await import('../dist/domains/cats/services/agents/invocation/InvocationRegistry.js');
   const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
   const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
   const { callbacksRoutes } = await import('../dist/routes/callbacks.js');
   const { handlePostMessage } = await import('../../mcp-server/dist/tools/callback-tools.js');
+  const { MemoryRequestReviewOwnerLedger } = await import(
+    '../dist/infrastructure/capability-evolution/adapters/request-review/request-review-owner-ledger.js'
+  );
+  const { RequestReviewUseReceiptService } = await import(
+    '../dist/infrastructure/capability-evolution/adapters/request-review/request-review-use-receipt.js'
+  );
 
   const registry = new InvocationRegistry();
   const invocationQueue = new InvocationQueue();
@@ -45,6 +51,13 @@ async function createHarness({ failEnqueueAttempts = 0 } = {}) {
     return originalEnqueue(input);
   };
   const messageStore = new MessageStore();
+  const useLedger = new MemoryRequestReviewOwnerLedger();
+  const useReceipts = new RequestReviewUseReceiptService({
+    ledger: useLedger,
+    messageStore,
+    invocationRegistry: registry,
+    versionAttestor: { deliver: async () => ({ status: 'unconfirmed' }) },
+  });
   const threadStore = new ThreadStore();
   const thread = await threadStore.create('user-1', 'Local review durable fact');
   const auth = await registry.create('user-1', 'opus', thread.id);
@@ -85,6 +98,7 @@ async function createHarness({ failEnqueueAttempts = 0 } = {}) {
         throw new Error('local review must not enter ActionSuccessor admission');
       },
     },
+    ...(measurementRoutes ? { skillConsumptionDeps: { receipts: {}, requestReviewReceipts: useReceipts } } : {}),
   });
 
   const apiUrl = await app.listen({ host: '127.0.0.1', port: 0 });
@@ -93,7 +107,18 @@ async function createHarness({ failEnqueueAttempts = 0 } = {}) {
   process.env.CAT_CAFE_CALLBACK_TOKEN = auth.callbackToken;
   process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
 
-  return { admissionCalls, autoExecuteCalls, auth, handlePostMessage, invocationQueue, messageStore, thread };
+  return {
+    admissionCalls,
+    autoExecuteCalls,
+    auth,
+    apiUrl,
+    handlePostMessage,
+    invocationQueue,
+    messageStore,
+    registry,
+    thread,
+    useLedger,
+  };
 }
 
 function toolJson(result) {
@@ -106,6 +131,87 @@ const REVIEW_ANCHOR = {
   acceptedSourceRef: 'docs/features/F314-development-episode-alignment-experiment.md',
   acceptedRevision: '1'.repeat(40),
 };
+
+test('ordinary request, one typed reply, and author HTTP reads need no F100 measurement handle', async () => {
+  const harness = await createHarness({ measurementRoutes: true });
+  const author = await harness.registry.create('user-1', 'codex', harness.thread.id);
+  const authorHeaders = {
+    'x-invocation-id': author.invocationId,
+    'x-callback-token': author.callbackToken,
+  };
+  const request = await fetch(`${harness.apiUrl}/api/callbacks/post-message`, {
+    method: 'POST',
+    headers: { ...authorHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      content: '@opus\n\nPlease review this exact PR HEAD.',
+      targetCats: ['opus'],
+    }),
+  });
+  assert.equal(request.status, 200);
+
+  const verdict = toolJson(
+    await harness.handlePostMessage({
+      content: '@codex\n\nApproved after checking the accepted source and final HEAD.',
+      targetCats: ['codex'],
+      clientMessageId: 'single-review-no-measurement-handle',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
+      ...REVIEW_ANCHOR,
+    }),
+  );
+  assert.equal(verdict.status, 'ok');
+  assert.equal(harness.admissionCalls.length, 0);
+  const staleReceipt = await fetch(`${harness.apiUrl}/api/callbacks/request-review-consumption/record`, {
+    method: 'POST',
+    headers: { ...authorHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({ handle: 'stale-or-missing-handle', reviewMessageId: verdict.messageId }),
+  });
+  assert.equal(staleReceipt.status, 409);
+  assert.equal((await staleReceipt.json()).error, 'reservation_not_found');
+  assert.deepEqual(await harness.useLedger.read(), []);
+  const replay = toolJson(
+    await harness.handlePostMessage({
+      content: '@codex\n\nApproved after checking the accepted source and final HEAD.',
+      targetCats: ['codex'],
+      clientMessageId: 'single-review-no-measurement-handle',
+      localReviewVerdict: 'approved',
+      reviewedHeadSha: 'a'.repeat(40),
+      ...REVIEW_ANCHOR,
+    }),
+  );
+  assert.equal(replay.status, 'duplicate');
+  assert.equal(replay.messageId, verdict.messageId);
+  const authorEntries = harness.invocationQueue
+    .list(harness.thread.id, 'user-1')
+    .filter((entry) => entry.targetCats.includes('codex'));
+  assert.equal(authorEntries.length, 1);
+  // This harness has no Queue worker; settle its one carrier before testing
+  // the author's normal durable read surface.
+  harness.messageStore.markDelivered(verdict.messageId, Date.now());
+  harness.invocationQueue.remove(harness.thread.id, 'user-1', authorEntries[0].id);
+
+  const single = await fetch(`${harness.apiUrl}/api/callbacks/get-message?messageId=${verdict.messageId}&mode=full`, {
+    headers: authorHeaders,
+  });
+  assert.equal(single.status, 200);
+  const fact = (await single.json()).message.localReviewFact;
+  assert.equal(fact.verdict, 'approved');
+  assert.equal(fact.reviewedHeadSha, 'a'.repeat(40));
+  assert.equal(fact.acceptedSourceRef, REVIEW_ANCHOR.acceptedSourceRef);
+
+  const window = await fetch(
+    `${harness.apiUrl}/api/callbacks/thread-context?messageId=${verdict.messageId}&before=0&after=0&responseMode=full`,
+    { headers: authorHeaders },
+  );
+  assert.equal(window.status, 200);
+  assert.deepEqual((await window.json()).messages[0].localReviewFact, fact);
+  assert.equal(
+    harness.messageStore
+      .getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')
+      .filter((message) => message.extra.localReviewVerdict).length,
+    1,
+  );
+});
 
 test('typed local review fact needs no action lease or inherited coordination to wake the named author once', async () => {
   const harness = await createHarness();

@@ -9,6 +9,8 @@ export function MarkupShape({
   opacity = 1,
   onInteract,
   saved = false,
+  mediaWidth,
+  mediaHeight,
 }: {
   mark: ReviewMarkupMark;
   active: boolean;
@@ -16,8 +18,11 @@ export function MarkupShape({
   opacity?: number;
   onInteract?: () => void;
   saved?: boolean;
+  mediaWidth: number;
+  mediaHeight: number;
 }) {
-  const bounds = active ? shapeBounds(mark) : null;
+  const textLayout = mark.kind === 'text' ? layoutArtworkText(mark, mediaWidth, mediaHeight) : null;
+  const bounds = active ? shapeBounds(mark, textLayout) : null;
   const content = (
     <>
       {mark.kind === 'stroke' ? <Stroke {...mark} /> : null}
@@ -36,11 +41,7 @@ export function MarkupShape({
         />
       ) : null}
       {mark.kind === 'arrow' ? <Arrow {...mark} /> : null}
-      {mark.kind === 'text' ? (
-        <text x={mark.at.x} y={mark.at.y} fill={mark.color} fontSize={mark.fontSize}>
-          {mark.text}
-        </text>
-      ) : null}
+      {mark.kind === 'text' && textLayout ? <MarkupText mark={mark} layout={textLayout} /> : null}
       {bounds ? (
         <rect
           x={bounds.x}
@@ -83,6 +84,107 @@ export function MarkupShape({
       {content}
     </g>
   );
+}
+
+function MarkupText({
+  mark,
+  layout,
+}: {
+  mark: Extract<ReviewMarkupMark, { kind: 'text' }>;
+  layout: ArtworkTextLayout;
+}) {
+  return (
+    <text
+      x={layout.x}
+      y={layout.y}
+      fill={mark.color}
+      fontSize={layout.fontSize}
+      stroke="var(--cafe-surface-canvas)"
+      strokeWidth={Math.max(1, layout.fontSize * 0.15)}
+      paintOrder="stroke fill"
+      style={{ pointerEvents: 'visiblePainted' }}
+    >
+      {layout.lines.map((line, index) => (
+        <tspan key={index} x={layout.x} dy={index ? layout.fontSize * 1.25 : 0}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  );
+}
+
+type ArtworkTextLayout = {
+  lines: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+};
+
+function layoutArtworkText(
+  mark: Extract<ReviewMarkupMark, { kind: 'text' }>,
+  mediaWidth: number,
+  mediaHeight: number,
+): ArtworkTextLayout {
+  const margin = Math.min(mark.fontSize / 2, mediaWidth / 40, mediaHeight / 40);
+  const maxWidth = mediaWidth - margin * 2;
+  const maxHeight = mediaHeight - margin * 2;
+  let fontSize = Math.min(mark.fontSize, maxWidth);
+  let available = Math.min(maxWidth, Math.max(mediaWidth * 0.85, mediaWidth - mark.at.x - margin));
+  // Reserve most of a narrow portrait instead of stacking text into a tall
+  // column. The line may start left of its anchor near the right edge.
+  const characterWidth = (character: string) => fontSize * (/[^\u0000-\u00ff]/.test(character) ? 1 : 0.85);
+  const wrap = () => wrapArtworkText(mark.text, available, characterWidth);
+  let lines = wrap();
+  while (lines.length * fontSize * 1.25 > maxHeight && available < maxWidth) {
+    available = Math.min(maxWidth, Math.max(available * 1.25, available + fontSize));
+    lines = wrap();
+  }
+  if (lines.length * fontSize * 1.25 > maxHeight) {
+    fontSize = Math.min(fontSize, maxHeight / (lines.length * 1.25));
+    lines = wrap();
+  }
+  const width = Math.max(
+    fontSize,
+    ...lines.map((line) => Array.from(line).reduce((sum, character) => sum + characterWidth(character), 0)),
+  );
+  const height = (lines.length - 1) * fontSize * 1.25 + fontSize * 1.25;
+  const x = Math.max(margin, Math.min(mark.at.x, mediaWidth - margin - width));
+  const y = Math.max(margin + fontSize, Math.min(mark.at.y, mediaHeight - margin - height + fontSize));
+  return { lines, x, y, width, height, fontSize };
+}
+
+function wrapArtworkText(text: string, available: number, characterWidth: (character: string) => number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    let line = '',
+      width = 0;
+    const nextLine = () => {
+      lines.push(line.trimEnd());
+      line = '';
+      width = 0;
+    };
+    for (const token of paragraph.match(/[A-Za-z0-9]+[ \t]*|./gu) ?? []) {
+      const segment = line ? token : token.trimStart();
+      const segmentWidth = Array.from(segment).reduce((sum, character) => sum + characterWidth(character), 0);
+      if (line && width + segmentWidth > available) nextLine();
+      if (segmentWidth > available) {
+        for (const character of segment.trimStart()) {
+          const size = characterWidth(character);
+          if (line && width + size > available) nextLine();
+          line += character;
+          width += size;
+        }
+      } else {
+        const addition = line ? segment : segment.trimStart();
+        line += addition;
+        width += Array.from(addition).reduce((sum, character) => sum + characterWidth(character), 0);
+      }
+    }
+    nextLine();
+  }
+  return lines;
 }
 
 export function Stroke({
@@ -132,7 +234,7 @@ function Arrow({ from, to, color, strokeWidth }: Extract<ReviewMarkupMark, { kin
   );
 }
 
-function shapeBounds(mark: ReviewMarkupMark) {
+function shapeBounds(mark: ReviewMarkupMark, textLayout: ArtworkTextLayout | null) {
   switch (mark.kind) {
     case 'rectangle':
     case 'ellipse':
@@ -156,10 +258,10 @@ function shapeBounds(mark: ReviewMarkupMark) {
       };
     case 'text':
       return {
-        x: mark.at.x,
-        y: mark.at.y - mark.fontSize,
-        width: Math.max(mark.text.length * mark.fontSize * 0.6, 1),
-        height: mark.fontSize,
+        x: textLayout?.x ?? mark.at.x,
+        y: textLayout ? textLayout.y - textLayout.fontSize : mark.at.y - mark.fontSize,
+        width: textLayout?.width ?? 1,
+        height: textLayout?.height ?? mark.fontSize,
       };
   }
 }

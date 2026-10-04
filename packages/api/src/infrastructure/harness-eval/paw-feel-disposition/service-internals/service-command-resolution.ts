@@ -3,8 +3,11 @@ import type {
   PawFeelDirectRepairOutcomeV1,
   PawFeelDispositionEvent,
   PawFeelDispositionProjection,
+  PawFeelResumeSelectorV1,
 } from '@cat-cafe/shared';
+import { ownerTruthRefV1Schema } from '@cat-cafe/shared';
 import {
+  matchesPawFeelResumeSelectorRequest,
   type PawFeelResumeConditionResolver,
   preparePawFeelResumeCondition,
 } from '../blocker-recovery/resume-condition.js';
@@ -119,9 +122,19 @@ async function resolveRepairOutcome(input: WriteContextInput, context: PawFeelRe
 
 async function resolveBlocker(input: WriteContextInput, context: PawFeelResolvedCommandContext): Promise<void> {
   if (input.command.type !== 'mark_blocked') return;
+  const selector: PawFeelResumeSelectorV1 =
+    input.command.resume.kind === 'bounded_time'
+      ? {
+          ...input.command.resume,
+          dependencyRef: ownerTruthRefV1Schema.parse({
+            ownerFeatureId: 'F310',
+            ownerStateRef: `task:item:${requireRepairTaskId(input.projection)}`,
+          }),
+        }
+      : input.command.resume;
   const replay = input.existing?.type === 'blocked' ? input.existing.resumeCondition : undefined;
   if (replay) {
-    if (JSON.stringify(replay.selector) !== JSON.stringify(input.command.resume)) {
+    if (!matchesPawFeelResumeSelectorRequest(replay.selector, selector)) {
       throw new PawFeelDispositionServiceError(
         'idempotency_collision',
         `idempotency collision: blocker selector changed for ${input.command.eventId}`,
@@ -141,7 +154,7 @@ async function resolveBlocker(input: WriteContextInput, context: PawFeelResolved
     context.resumeCondition = await preparePawFeelResumeCondition({
       signalId: input.command.signalId,
       blockingSequence: input.command.expectedSequence + 1,
-      selector: input.command.resume,
+      selector,
       resolver,
       now: input.occurredAt,
     });
@@ -151,6 +164,16 @@ async function resolveBlocker(input: WriteContextInput, context: PawFeelResolved
       `resume condition is invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+function requireRepairTaskId(projection: PawFeelDispositionProjection): string {
+  if ((projection.state !== 'fix' && projection.state !== 'blocked') || !projection.taskId) {
+    throw new PawFeelDispositionServiceError(
+      'resume_condition_invalid',
+      'bounded-time blocker requires an active repair task; use an exact task or owner-event condition',
+    );
+  }
+  return projection.taskId;
 }
 
 export async function resolvePawFeelWriteContext(

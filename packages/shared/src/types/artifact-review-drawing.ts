@@ -16,7 +16,8 @@ const style = z
   .object({
     id: z.string().trim().min(1).max(128),
     color: z.enum(REVIEW_MARK_COLORS),
-    strokeWidth: z.union([z.literal(2), z.literal(4), z.literal(8)]),
+    // The tool's 2/4/8 px choices are converted to stable media pixels at creation time.
+    strokeWidth: z.number().int().min(1).max(1024),
     frame: z
       .object({ streamId: z.string().trim().min(1).max(128), tick: z.number().int().safe() })
       .strict()
@@ -34,7 +35,7 @@ export const artifactReviewDrawingSchema = z.discriminatedUnion('kind', [
     kind: z.literal('text'),
     at: point,
     text: z.string().trim().min(1).max(240),
-    fontSize: z.number().int().min(12).max(48),
+    fontSize: z.number().int().min(1).max(2048),
   }),
 ]);
 export type ArtifactReviewDrawing = z.infer<typeof artifactReviewDrawingSchema>;

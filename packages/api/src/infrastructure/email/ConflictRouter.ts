@@ -1,4 +1,4 @@
-import type { WaitOutcomeV1 } from '@cat-cafe/shared';
+import type { GitHubWaitOutcomeV1 } from '@cat-cafe/shared';
 import { prSubjectKey } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
@@ -24,7 +24,7 @@ export type ConflictRouteResult =
        * "notified". A consumer that writes to a repository has to know WHICH condition matched: an
        * expiry and a conflict are both deliveries, and only one of them is a conflict.
        */
-      readonly outcome: WaitOutcomeV1;
+      readonly outcome: GitHubWaitOutcomeV1;
     }
   | { readonly kind: 'deduped' | 'skipped'; readonly reason: string };
 

@@ -78,6 +78,29 @@ plan.planFingerprint = createHash('sha256')
   .update(JSON.stringify(stable(plan)))
   .digest('hex');
 
+// Lane sequencing is exercised with a stubbed executeFile: no test process is
+// spawned. There is no environment opt-out for the isolation preflight, by
+// design, so these inject the probes a loopback-only namespace produces.
+const verifiedBoundaryProbe = {
+  platform: 'linux',
+  readRouteTable: () => 'Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n',
+  readIpv6RouteTable: () => '',
+  // Empty route tables alone do not prove isolation, so the lane also requires
+  // the launcher seal: a netns distinct from PID 1, unprivileged, no_new_privs,
+  // every capability set empty.
+  readNamespaceProof: () => 'verified',
+  readSelfStatus: () =>
+    [
+      'Uid:\t1001\t1001\t1001\t1001',
+      'NoNewPrivs:\t1',
+      'CapInh:\t0000000000000000',
+      'CapPrm:\t0000000000000000',
+      'CapEff:\t0000000000000000',
+      'CapBnd:\t0000000000000000',
+      'CapAmb:\t0000000000000000',
+    ].join('\n'),
+};
+
 describe('F308 public-test shard runner', () => {
   it('runs each lane serially, stops at its first failure, and keeps typed per-file facts', async () => {
     const calls = [];
@@ -86,6 +109,7 @@ describe('F308 public-test shard runner', () => {
       lane: 'distributable-1',
       packageRoot: process.cwd(),
       manifest,
+      isolationProbe: verifiedBoundaryProbe,
       resolveProvenance,
       executeFile: async ({ file, resourceScope }) => {
         calls.push(file);
@@ -129,6 +153,7 @@ describe('F308 public-test shard runner', () => {
       lane: 'distributable-1',
       packageRoot: process.cwd(),
       manifest,
+      isolationProbe: verifiedBoundaryProbe,
       resolveProvenance,
       executeFile: async ({ file }) => {
         calls.push(file);

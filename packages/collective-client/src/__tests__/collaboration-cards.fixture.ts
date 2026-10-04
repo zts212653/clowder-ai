@@ -1,0 +1,52 @@
+import type { CollectiveParticipant, CollectiveRoadmapRecord, CollectiveWorkProjection } from '../client-types.js';
+
+export const participant: CollectiveParticipant = {
+  serviceInstanceId: 'svc_aaaaaaaa',
+  collectiveId: 'col_aaaaaaaa',
+  connectionId: 'con_aaaaaaaa',
+  endpointId: 'ep_aaaaaaaa',
+  endpointLabel: 'You 的 Café',
+  humanId: 'human_aaaaaaaa',
+  humanDisplayName: 'You',
+  catId: 'codex-sol',
+  displayName: '小太阳 · 砚砚',
+  participationRevision: 1,
+  channelIds: ['general'],
+  availability: 'declared',
+};
+const actor = { kind: 'human' as const, humanId: participant.humanId, displayName: 'You' };
+export const work: CollectiveWorkProjection = {
+  v: 1,
+  serviceInstanceId: participant.serviceInstanceId,
+  collectiveId: participant.collectiveId,
+  workId: 'work_aaaaaaaa',
+  sourceEventId: 'evt_aaaaaaaa',
+  sourceLocation: { channelId: 'general' },
+  title: '接通真实首页',
+  intendedOutcome: '默认页面使用真实频道与成员。',
+  proposedBy: actor,
+  dependencyWorkIds: [],
+  lifecycle: 'proposed',
+  status: 'proposed',
+  revision: 1,
+  createdAt: '2026-09-11T00:00:00.000Z',
+  updatedAt: '2026-09-11T00:00:00.000Z',
+  history: [{ revision: 1, action: 'proposed', actor, at: '2026-09-11T00:00:00.000Z' }],
+};
+export const roadmap: CollectiveRoadmapRecord = {
+  v: 1,
+  serviceInstanceId: participant.serviceInstanceId,
+  collectiveId: participant.collectiveId,
+  roadmapId: 'roadmap_aaaaaaaa',
+  sourceEventId: work.sourceEventId,
+  sourceLocation: work.sourceLocation,
+  title: '可用版本路线',
+  purpose: '让共同讨论变成可追溯的完成路径。',
+  accountableHumanId: participant.humanId,
+  workIds: [work.workId, 'work_bbbbbbbb'],
+  status: 'active',
+  revision: 1,
+  createdAt: work.createdAt,
+  updatedAt: work.updatedAt,
+  history: [{ revision: 1, action: 'created', actor, at: work.createdAt }],
+};

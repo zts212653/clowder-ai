@@ -18,6 +18,8 @@ export interface ChatMessage {
 
 export interface HandoffInvocationSummary {
   invocationId: string;
+  /** Exact first raw event number when this is returned by the paged reader. */
+  startEventNo?: number;
   eventCount: number;
   toolCalls: string[];
   errors: number;

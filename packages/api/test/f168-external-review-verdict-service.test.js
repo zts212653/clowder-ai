@@ -1139,6 +1139,533 @@ describe('F168 ExternalReviewVerdictService', () => {
     await assert.rejects(() => service.record(deliveredInput()), errorCode('head_not_ready'));
     assert.equal(eventLog.events.length, 0);
   });
+
+  it('bootstraps aggregate for retro-triaged PR with no externalReview projection', async () => {
+    // Simulate a retro-triaged PR: projection exists from canonical routing
+    // events but externalReview is null because ExternalReviewCoordinator
+    // .initialize() was never called (CI poller hasn't run for this PR yet).
+    // Seed through canonical events so rebuild reconstructs proper ownership.
+    objectStore.values.clear();
+    await eventLog.append({
+      sourceEventId: `routed:${subjectKey}:${principal.threadId}`,
+      subjectKey,
+      kind: 'case.routed',
+      classification: 'state-changing',
+      payload: {
+        ownerThreadId: principal.threadId,
+        ownerRole: principal.catId,
+      },
+      at: 1,
+    });
+
+    // Should bootstrap the aggregate (emit initialization events) and accept
+    // the verdict as pending_verification (CI not yet observed)
+    const result = await service.record(deliveredInput());
+
+    assert.equal(result.subjectKey, subjectKey);
+    assert.equal(result.headSha, headSha);
+    assert.equal(result.verdict, 'approved');
+    // After bootstrap, CI hasn't been observed yet, so lifecycle must be
+    // exactly pending_verification (ci_not_observed) — accepting 'delivered'
+    // would mask a premature-delivery regression.
+    assert.equal(result.lifecycle, 'pending_verification');
+
+    // Exact verification contract: pending with ci_not_observed at service now()
+    assert.deepStrictEqual(result.verification, {
+      status: 'pending',
+      reason: 'ci_not_observed',
+      submittedAt: 10_000,
+    });
+
+    // Verify generic case state preserved after bootstrap: ownership fields
+    // AND state must survive the bootstrap event emission (not reset to null
+    // or 'new'). case.routed transitions to 'routed'; a future rebuild/reset
+    // regression would produce 'new' with null ownership.
+    const afterBootstrap = await objectStore.get(subjectKey);
+    assert.equal(afterBootstrap.state, 'routed');
+    assert.equal(afterBootstrap.ownerThreadId, principal.threadId);
+    assert.equal(afterBootstrap.ownerRole, principal.catId);
+  });
+
+  it('bootstrap fails closed when no projection exists at all', async () => {
+    // No projection = no ownerThreadId to verify caller against → fail closed.
+    // This is the no-durable-authority case: bootstrap must not mint reviewer
+    // identity from the submitter's own principal.
+    objectStore.values.clear();
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+    // No events should be appended when failing closed before bootstrap
+    assert.equal(eventLog.events.length, 0);
+  });
+
+  it('bootstrap rejects caller with different ownerThreadId', async () => {
+    // Canonical routing event assigns ownership to a different thread/cat →
+    // caller is not the case owner → wrong_principal. Seeded through events
+    // so rebuild reconstructs the correct canonical ownership.
+    objectStore.values.clear();
+    await eventLog.append({
+      sourceEventId: `routed:${subjectKey}:thread-other`,
+      subjectKey,
+      kind: 'case.routed',
+      classification: 'state-changing',
+      payload: { ownerThreadId: 'thread-other', ownerRole: 'other-cat' },
+      at: 1,
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('wrong_principal'));
+    // Only the seeded routed event — no bootstrap events should be appended
+    assert.equal(eventLog.events.length, 1);
+  });
+
+  it('bootstrap rejects caller when projection ownerThreadId is null', async () => {
+    // Projection exists (from triage) but ownerThreadId/ownerRole are null
+    // (ownership not yet established by routing) → no durable authority to
+    // verify against → fail closed. Seeded through case.triaged event which
+    // creates the projection without setting ownership fields.
+    objectStore.values.clear();
+    await eventLog.append({
+      sourceEventId: `triaged:${subjectKey}`,
+      subjectKey,
+      kind: 'case.triaged',
+      classification: 'state-changing',
+      payload: { threadId: 'thread-triage', dispatchedAt: 1 },
+      at: 1,
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+    // Only the seeded triaged event — no bootstrap events should be appended
+    assert.equal(eventLog.events.length, 1);
+  });
+
+  it('bootstrap rejects same owner thread with different catId', async () => {
+    // Reproduction P1-R2a: ownerRole stores the assigned catId. A different cat
+    // on the same thread must not be accepted — checking only ownerThreadId
+    // is insufficient. ownerRole must also match input.principal.catId.
+    // Seeded through canonical events so rebuild reconstructs ownership.
+    objectStore.values.clear();
+    await eventLog.append({
+      sourceEventId: `routed:${subjectKey}:same-thread-diff-cat`,
+      subjectKey,
+      kind: 'case.routed',
+      classification: 'state-changing',
+      payload: { ownerThreadId: principal.threadId, ownerRole: 'other-cat' },
+      at: 1,
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('wrong_principal'));
+    // Only the seeded routed event — no bootstrap events should be appended
+    assert.equal(eventLog.events.length, 1);
+  });
+
+  it('bootstrap rejects stale pre-rebuild owner after ownership change', async () => {
+    // Reproduction P1-R2b: pre-rebuild projection names principal as owner,
+    // but event log records that ownership was transferred to a different cat.
+    // Rebuild replays the routed event, producing a projection with the new
+    // owner. Using pre-rebuild data would incorrectly accept the old caller.
+    // Direct-save projection is stale cache; canonical event is the truth.
+    await objectStore.save({
+      repo: 'acme/widgets',
+      type: 'pr',
+      number: 7,
+      subjectKey,
+      state: 'in_progress',
+      ownerThreadId: principal.threadId,
+      ownerRole: principal.catId,
+      nextOwner: 'none',
+      lastExternalActivityAt: null,
+      lastPublicCommentAt: null,
+      linkedIssues: [],
+      linkedPrs: [],
+      closureWaiver: null,
+      appliedEventCount: 2,
+      lastRejectedEvent: null,
+      deliveryCursor: null,
+      createdAt: 1,
+      updatedAt: 2,
+      externalReview: null,
+    });
+    // Canonical event records ownership transferred to a different cat —
+    // rebuild will replay this, producing new owner on the projection.
+    await eventLog.append({
+      sourceEventId: `routed:${subjectKey}:new-owner`,
+      subjectKey,
+      kind: 'case.routed',
+      classification: 'state-changing',
+      payload: { ownerThreadId: 'thread-new-owner', ownerRole: 'new-cat' },
+      at: 100,
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('wrong_principal'));
+    // Only the seeded routed event — no bootstrap events should be appended
+    assert.equal(eventLog.events.length, 1);
+  });
+
+  it('bootstrap computes correct generation for stale HEAD at g2', async () => {
+    // Events produce an aggregate at g2 with an old SHA. Bootstrap should
+    // compute generation 3 for the new HEAD, not hardcode g=1 (which would
+    // be rejected as stale by applyHeadObserved monotonicity enforcement).
+    const oldHeadSha = 'b'.repeat(40);
+    const secondOldHeadSha = 'c'.repeat(40);
+
+    // Seed canonical events in the event log so Phase 1 rebuild can reconstruct
+    await eventLog.append({
+      sourceEventId: `f168:external-review-assigned:${subjectKey}:1`,
+      subjectKey,
+      kind: 'case.external_review_assigned',
+      classification: 'informational',
+      payload: {
+        mode: 'maintainer_review',
+        cloudPolicy: 'required',
+        reviewerCatId: principal.catId,
+        reviewerThreadId: principal.threadId,
+      },
+      at: 1000,
+    });
+    await eventLog.append({
+      sourceEventId: `f168:head:${subjectKey}:g1:${oldHeadSha}`,
+      subjectKey,
+      kind: 'case.head_observed',
+      classification: 'informational',
+      payload: { headSha: oldHeadSha, headGeneration: 1 },
+      at: 1001,
+    });
+    await eventLog.append({
+      sourceEventId: `f168:head:${subjectKey}:g2:${secondOldHeadSha}`,
+      subjectKey,
+      kind: 'case.head_observed',
+      classification: 'informational',
+      payload: { headSha: secondOldHeadSha, headGeneration: 2 },
+      at: 1002,
+    });
+
+    // Seed projection at g2 (stale relative to current GitHub HEAD)
+    await objectStore.save({
+      repo: 'acme/widgets',
+      type: 'pr',
+      number: 7,
+      subjectKey,
+      state: 'in_progress',
+      ownerThreadId: principal.threadId,
+      ownerRole: null,
+      nextOwner: 'none',
+      lastExternalActivityAt: null,
+      lastPublicCommentAt: null,
+      linkedIssues: [],
+      linkedPrs: [],
+      closureWaiver: null,
+      appliedEventCount: 3,
+      lastRejectedEvent: null,
+      deliveryCursor: null,
+      createdAt: 1,
+      updatedAt: 1002,
+      externalReview: {
+        mode: 'maintainer_review',
+        cloudPolicy: 'required',
+        lifecycle: 'awaiting_ci',
+        currentHeadSha: secondOldHeadSha,
+        headGeneration: 2,
+        currentHeadObservedAt: 1002,
+        lastReviewedHeadSha: null,
+        lastReviewedHeadGeneration: null,
+        lastDeliveredHeadSha: null,
+        lastDeliveredHeadGeneration: null,
+        ci: null,
+        cloud: null,
+        wake: null,
+        delivery: null,
+        verdictSubmissionEpoch: 0,
+        pendingVerdict: null,
+        reviewerCatId: principal.catId,
+        reviewerThreadId: principal.threadId,
+        actionLeaseRef: null,
+      },
+    });
+
+    const result = await service.record(deliveredInput());
+
+    assert.equal(result.subjectKey, subjectKey);
+    assert.equal(result.headSha, headSha);
+    assert.equal(result.verdict, 'approved');
+    assert.equal(result.lifecycle, 'pending_verification');
+
+    // Verify the head event was appended at g3, not g1
+    const headEvents = eventLog.events.filter((e) => e.kind === 'case.head_observed' && e.payload.headSha === headSha);
+    assert.equal(headEvents.length, 1);
+    assert.equal(headEvents[0].payload.headGeneration, 3);
+  });
+
+  it('coordinator-admitted case succeeds without case.routed (projector ownership path)', async () => {
+    // When the coordinator HAS run, case.external_review_assigned is in the event log.
+    // The projector fix projects ownerThreadId/ownerRole from that event, enabling
+    // verdict bootstrap Case 1 to verify caller authority from durable projection fields.
+    objectStore.values.clear();
+
+    // Seed ONLY case.external_review_assigned — no case.routed, no case.triaged.
+    await eventLog.append({
+      sourceEventId: `f168:external-review-assigned:${subjectKey}:${config.updatedAt}`,
+      subjectKey,
+      kind: 'case.external_review_assigned',
+      classification: 'informational',
+      payload: {
+        mode: 'maintainer_review',
+        cloudPolicy: config.cloudReviewPolicy,
+        reviewerCatId: principal.catId,
+        reviewerThreadId: principal.threadId,
+      },
+      at: 1,
+    });
+
+    const result = await service.record(deliveredInput());
+
+    assert.equal(result.subjectKey, subjectKey);
+    assert.equal(result.headSha, headSha);
+    assert.equal(result.verdict, 'approved');
+    assert.equal(result.lifecycle, 'pending_verification');
+
+    // Verify ownership was projected from case.external_review_assigned
+    const afterVerdict = await objectStore.get(subjectKey);
+    assert.equal(afterVerdict.ownerThreadId, principal.threadId);
+    assert.equal(afterVerdict.ownerRole, principal.catId);
+  });
+
+  it('tracker-admitted case succeeds without coordinator initialization (clowder-ai#1511 regression)', async () => {
+    // Regression: clowder-ai#1511, case mua8zwyi3sg4ds97.
+    //
+    // Root cause: PR subjects never receive case.routed or case.bootstrap events
+    // (both are issue-only). When the ExternalReviewCoordinator has not yet run
+    // (no case.external_review_assigned in the event log), rebuild produces no
+    // aggregate, and bootstrap Case 1 finds no ownerThreadId/ownerRole on the
+    // projection → 503 projection_unavailable.
+    //
+    // The cat registered a bounded tracker via register-pr-tracking (callback-auth
+    // verified), polled CI to terminal-green, did a GitHub review, and called
+    // record_external_review_verdict. The coordinator's recordCi() was either not
+    // wired or failed silently, so no community events exist for this subject.
+    //
+    // Fix: bootstrap Case 1 tier 2 verifies authority from the durable tracker
+    // task when projection-level ownership is absent.
+    //
+    // Shape: empty event log + matching tracker admission → verdict accepted as
+    // pending_verification without a duplicate GitHub review.
+    objectStore.values.clear();
+
+    // Empty event log — NO case.external_review_assigned, NO case.routed, NO case.bootstrap.
+    // This is the actual #1511 state: the coordinator never ran for this PR.
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    // Configure tracker-based authority verification (simulates a matching PR tracker
+    // registered via callback-auth-verified register-pr-tracking).
+    service = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async (leaseId, generation, catId, predicateDigest) => {
+        preflightCalls.push({ leaseId, generation, catId, terminalPredicateDigest: predicateDigest });
+        return preflightResult;
+      },
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return completionResult;
+      },
+      recordUserNudgeRequired: () => {
+        userNudgeCount += 1;
+      },
+      verifyDurableReviewerAdmission: async (sk, catId, threadId) => {
+        // Simulate: tracker task exists for this subject with matching cat/thread
+        return sk === subjectKey && catId === principal.catId && threadId === principal.threadId;
+      },
+    });
+
+    const result = await service.record(deliveredInput());
+
+    assert.equal(result.subjectKey, subjectKey);
+    assert.equal(result.headSha, headSha);
+    assert.equal(result.verdict, 'approved');
+    // No CI observed (coordinator never ran), so lifecycle is pending_verification
+    assert.equal(result.lifecycle, 'pending_verification');
+
+    // Verify the bootstrap emitted case.external_review_assigned to the event log
+    const assignmentEvents = eventLog.events.filter((e) => e.kind === 'case.external_review_assigned');
+    assert.equal(assignmentEvents.length, 1, 'bootstrap must emit assignment event');
+    assert.equal(assignmentEvents[0].payload.reviewerCatId, principal.catId);
+    assert.equal(assignmentEvents[0].payload.reviewerThreadId, principal.threadId);
+
+    // Verify ownership is projected after bootstrap
+    const afterVerdict = await objectStore.get(subjectKey);
+    assert.equal(
+      afterVerdict.ownerThreadId,
+      principal.threadId,
+      'ownerThreadId must be projected from bootstrap assignment',
+    );
+    assert.equal(afterVerdict.ownerRole, principal.catId, 'ownerRole must be projected from bootstrap assignment');
+  });
+
+  it('bootstrap Case 1 rejects mismatched tracker admission (fail-closed #1511)', async () => {
+    // Same scenario as #1511 but the tracker is owned by a different cat.
+    // Must fail with projection_unavailable (fail-closed).
+    objectStore.values.clear();
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    service = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => preflightResult,
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return completionResult;
+      },
+      verifyDurableReviewerAdmission: async (sk, catId, threadId) => {
+        // Tracker exists but owned by a different cat
+        return sk === subjectKey && catId === 'other-cat' && threadId === 'other-thread';
+      },
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+  });
+
+  it('bootstrap Case 1 rejects when no tracker exists (fail-closed #1511)', async () => {
+    // No tracker, no projection ownership — must fail with projection_unavailable.
+    objectStore.values.clear();
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    service = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => preflightResult,
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return completionResult;
+      },
+      verifyDurableReviewerAdmission: async () => false, // No matching tracker
+    });
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+  });
+
+  it('bootstrap Case 1 rejects when verifyDurableReviewerAdmission not configured (fail-closed)', async () => {
+    // Backward compatibility: when verifyDurableReviewerAdmission is not provided,
+    // the existing 503 behavior must be preserved for PR subjects without ownership.
+    objectStore.values.clear();
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    // Use the default service (no verifyDurableReviewerAdmission)
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+  });
+
+  it('bootstrap Case 1 rejects generic work task with matching subject (authority-minting guard #1511)', async () => {
+    // A generic 'work' task can legitimately own a pr: subject (entrusted work),
+    // but was never admitted by register-pr-tracking's callback auth.
+    // It MUST NOT pass Tier 2 — otherwise a non-callback-authorized task would
+    // mint reviewer authority and reopen the Case 1 authority gap.
+    objectStore.values.clear();
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    // Simulate the FIXED runtime wiring: taskStore returns a matching 'work' task,
+    // but the kind filter rejects it.
+    const mockTaskStore = {
+      task: {
+        kind: 'work', // NOT pr_tracking — this is the attack vector
+        ownerCatId: principal.catId,
+        threadId: principal.threadId,
+        subject: subjectKey,
+      },
+    };
+
+    service = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async () => preflightResult,
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return completionResult;
+      },
+      verifyDurableReviewerAdmission: async (sk, catId, threadId) => {
+        // Reproduces the fixed runtime wiring from index.ts:
+        // Only pr_tracking tasks constitute durable admission.
+        const task = sk === subjectKey ? mockTaskStore.task : null;
+        return task !== null && task.kind === 'pr_tracking' && task.ownerCatId === catId && task.threadId === threadId;
+      },
+    });
+
+    // Must fail: generic work task cannot mint reviewer authority
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('projection_unavailable'));
+  });
+
+  it('bootstrap Case 1 accepts pr_tracking task with matching subject (#1511 happy path)', async () => {
+    // A pr_tracking task registered via callback-auth register-pr-tracking
+    // is the legitimate durable admission source for Tier 2.
+    objectStore.values.clear();
+    assert.equal(eventLog.events.length, 0, 'precondition: event log must be empty');
+
+    const mockTaskStore = {
+      task: {
+        kind: 'pr_tracking', // callback-auth-verified admission
+        ownerCatId: principal.catId,
+        threadId: principal.threadId,
+        subject: subjectKey,
+      },
+    };
+
+    service = new ExternalReviewVerdictService({
+      repoConfigStore: { getByRepo: async () => config },
+      eventLog,
+      projector,
+      objectStore,
+      fetchCurrentHead: async () => currentHead,
+      preflightLease: async (leaseId, generation, catId, predicateDigest) => {
+        preflightCalls.push({ leaseId, generation, catId, terminalPredicateDigest: predicateDigest });
+        return preflightResult;
+      },
+      completeActionLease: async (input) => {
+        completions.push(input);
+        return completionResult;
+      },
+      recordUserNudgeRequired: () => {
+        userNudgeCount += 1;
+      },
+      verifyDurableReviewerAdmission: async (sk, catId, threadId) => {
+        // Reproduces the fixed runtime wiring from index.ts:
+        const task = sk === subjectKey ? mockTaskStore.task : null;
+        return task !== null && task.kind === 'pr_tracking' && task.ownerCatId === catId && task.threadId === threadId;
+      },
+    });
+
+    const result = await service.record(deliveredInput());
+
+    assert.equal(result.subjectKey, subjectKey);
+    assert.equal(result.lifecycle, 'pending_verification');
+
+    // Verify bootstrap emitted assignment
+    const assignmentEvents = eventLog.events.filter((e) => e.kind === 'case.external_review_assigned');
+    assert.equal(assignmentEvents.length, 1, 'bootstrap must emit assignment event');
+  });
+
+  it('bootstrap preserves fail-closed for unconfigured repos', async () => {
+    // No repo config at all — should still fail with not_configured
+    config = null;
+    objectStore.values.clear();
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('not_configured'));
+  });
+
+  it('bootstrap preserves fail-closed for stale HEAD', async () => {
+    // Projection has no externalReview, but GitHub HEAD doesn't match
+    objectStore.values.clear();
+    currentHead = 'b'.repeat(40);
+
+    await assert.rejects(() => service.record(deliveredInput()), errorCode('stale_head'));
+  });
 });
 
 function errorCode(code) {

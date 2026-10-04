@@ -323,6 +323,7 @@ describe('contentBlocks in GET /api/messages', () => {
 describe('multipart image target routing', () => {
   let app;
   let uploadDir;
+  let messageStore;
   const routeExecutionCalls = [];
   const broadcastedAgentMessages = [];
 
@@ -340,7 +341,7 @@ describe('multipart image target routing', () => {
     );
     const { messagesRoutes } = await import('../dist/routes/messages.js');
 
-    const messageStore = new MessageStore();
+    messageStore = new MessageStore();
     const mockRouter = {
       async resolveTargetsAndIntent() {
         return {
@@ -382,7 +383,7 @@ describe('multipart image target routing', () => {
     if (uploadDir) await rm(uploadDir, { recursive: true, force: true });
   });
 
-  it('routes multipart image messages to the mentioned cat (not forced to codex)', async () => {
+  const sendImageMessage = () => {
     const boundary = '----cat-cafe-test-boundary';
     const payload = Buffer.concat([
       Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="content"\r\n\r\n请看图\r\n`),
@@ -391,8 +392,7 @@ describe('multipart image target routing', () => {
       ),
       Buffer.from(`--${boundary}--\r\n`),
     ]);
-
-    const res = await app.inject({
+    return app.inject({
       method: 'POST',
       url: '/api/messages',
       headers: {
@@ -401,6 +401,30 @@ describe('multipart image target routing', () => {
       },
       payload,
     });
+  };
+
+  it('returns the stored upload URLs and time so the sender can replace its local preview', async () => {
+    const res = await sendImageMessage();
+
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    const stored = messageStore.getById(body.userMessageId);
+    assert.ok(stored, 'the user message is stored');
+    assert.deepEqual(body.userMessage, {
+      id: stored.id,
+      timestamp: stored.timestamp,
+      contentBlocks: stored.contentBlocks,
+    });
+    assert.ok(
+      body.userMessage.contentBlocks.some(
+        (block) => block.type === 'image' && /^\/uploads\/[^/]+\.png$/.test(block.url),
+      ),
+      'the receipt carries the stored upload URL, not a client-local one',
+    );
+  });
+
+  it('routes multipart image messages to the mentioned cat (not forced to codex)', async () => {
+    const res = await sendImageMessage();
 
     assert.equal(res.statusCode, 200);
     await new Promise((resolve) => setTimeout(resolve, 20));

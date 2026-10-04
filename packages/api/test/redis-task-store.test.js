@@ -208,7 +208,10 @@ class FakeRedisForTaskStore {
   }
 
   async watch(...keys) {
-    this.watchedVersions = new Map(keys.map((key) => [key, this.getVersion(key)]));
+    this.watchedVersions ??= new Map();
+    for (const key of keys) {
+      if (!this.watchedVersions.has(key)) this.watchedVersions.set(key, this.getVersion(key));
+    }
     return 'OK';
   }
 
@@ -252,6 +255,14 @@ class FakeRedisForTaskStore {
         ops.push(() => this.del(key));
         return pipeline;
       },
+      persist: (key) => {
+        ops.push(() => this.persist(key));
+        return pipeline;
+      },
+      expire: (key, ttl) => {
+        ops.push(() => this.expire(key, ttl));
+        return pipeline;
+      },
       exec: async () => {
         if (this.watchedVersions) {
           for (const [key, version] of this.watchedVersions.entries()) {
@@ -271,6 +282,30 @@ class FakeRedisForTaskStore {
     };
     return pipeline;
   }
+}
+
+function repairSubjectBeforeNextTransaction(redis, subjectKey, taskId) {
+  const duplicate = redis.duplicate.bind(redis);
+  let repaired = false;
+  redis.duplicate = () => {
+    const session = duplicate();
+    const multi = session.multi.bind(session);
+    session.multi = () => {
+      const tx = multi();
+      const exec = tx.exec.bind(tx);
+      tx.exec = async () => {
+        // Redis cannot interleave a competing writer between MULTI commands.
+        // Race before EXEC instead, so WATCH must observe the repaired binding.
+        if (!repaired) {
+          repaired = true;
+          await redis.set(subjectKey, taskId);
+        }
+        return exec();
+      };
+      return tx;
+    };
+    return session;
+  };
 }
 
 describe('RedisTaskStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
@@ -1099,15 +1134,7 @@ describe('RedisTaskStore unit behavior', () => {
       userId: '',
     });
 
-    const originalDel = redis.del.bind(redis);
-    let repaired = false;
-    redis.del = async (key) => {
-      if (key === TaskKeys.detail(staleTask.id) && !repaired) {
-        repaired = true;
-        redis.strings.set(TaskKeys.subject('pr:owner/repo#500'), freshTaskId);
-      }
-      return originalDel(key);
-    };
+    repairSubjectBeforeNextTransaction(redis, TaskKeys.subject('pr:owner/repo#500'), freshTaskId);
 
     const deleted = await store.delete(staleTask.id);
     assert.equal(deleted, true);
@@ -1147,15 +1174,7 @@ describe('RedisTaskStore unit behavior', () => {
       userId: '',
     });
 
-    const originalDel = redis.del.bind(redis);
-    let repaired = false;
-    redis.del = async (key) => {
-      if (key === TaskKeys.detail(staleTask.id) && !repaired) {
-        repaired = true;
-        redis.strings.set(TaskKeys.subject('pr:owner/repo#700'), freshTaskId);
-      }
-      return originalDel(key);
-    };
+    repairSubjectBeforeNextTransaction(redis, TaskKeys.subject('pr:owner/repo#700'), freshTaskId);
 
     const deleted = await store.deleteByThread('thread-delete-by-thread');
     assert.equal(deleted, 1);

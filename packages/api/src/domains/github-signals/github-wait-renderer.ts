@@ -1,4 +1,4 @@
-import type { WaitOutcomeV1 } from '@cat-cafe/shared';
+import type { GitHubWaitOutcomeV1 } from '@cat-cafe/shared';
 
 export const REVIEW_LOOP_BRAKE_NEXT_STEP = '[review-loop-brake]';
 export const REVIEW_LOOP_HISTORY_WARN_NEXT_STEP = '[review-loop-history-unavailable] ';
@@ -25,7 +25,7 @@ export function classifyGitHubReviewLoopBrake(
     : { kind: 'continue', formalChangesRequested: formalChangesRequested.length };
 }
 
-export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
+export function renderGitHubWaitOutcome(outcome: GitHubWaitOutcomeV1): string {
   const isIssue = outcome.subjectRef.startsWith('issue:');
   const subject = outcome.subjectRef.slice(isIssue ? 'issue:'.length : 'pr:'.length);
   const kind = isIssue ? 'Issue' : 'PR';
@@ -91,7 +91,7 @@ export function renderGitHubWaitOutcome(outcome: WaitOutcomeV1): string {
  * were all silent about exactly this. A failed rearm is stated as a failure and never phrased so
  * that it could be read as "still watching".
  */
-function trackingStatusLine(outcome: WaitOutcomeV1): string {
+function trackingStatusLine(outcome: GitHubWaitOutcomeV1): string {
   if (outcome.renewal === 'rearmed') return '_Tracking continues — watching for the next event._';
   if (outcome.renewal === 'rearm_failed') {
     return '⚠ **Event delivered; tracking not rearmed.** Nothing is watching this subject now — register again to keep tracking.';

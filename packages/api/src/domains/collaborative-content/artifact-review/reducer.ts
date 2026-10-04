@@ -8,7 +8,8 @@ import {
   type ReviewedMediaAsset,
 } from '@cat-cafe/shared';
 import { annotate, editAnnotationBody, replyToAnnotation, setAnnotationState } from './annotation-actions.js';
-import { addVisualMarks, deleteVisualMark, requestImageEdit } from './artwork-actions.js';
+import { addVisualMarks, deleteVisualMark, requestImageEdit, requestMediaEdit } from './artwork-actions.js';
+import { publicationLedgerId } from './canonical-ledger.js';
 import { ArtifactReviewError } from './errors.js';
 
 interface ReviewActionContext {
@@ -39,22 +40,28 @@ export function applyArtifactReviewAction(current: ArtifactReview, context: Revi
   switch (action.kind) {
     case 'add_visual_marks':
       addVisualMarks(round, action, context);
-      next.version = 2;
+      next.version = artworkVersion(next.version);
       break;
     case 'delete_visual_mark':
       deleteVisualMark(round, action, context);
-      next.version = 2;
+      next.version = artworkVersion(next.version);
       break;
     case 'request_image_edit': {
       const explanation = requestImageEdit(next, round, action, context);
       decideRound(round, { kind: 'submit_feedback', explanation }, context);
-      next.version = 2;
+      next.version = artworkVersion(next.version);
+      break;
+    }
+    case 'request_media_edit': {
+      const explanation = requestMediaEdit(next, round, action, context);
+      decideRound(round, { kind: 'submit_feedback', explanation }, context);
+      next.version = artworkVersion(next.version);
       break;
     }
     case 'annotate':
       annotate(next, round, action, context);
       if (action.anchor.kind === 'image-point' || (action.anchor.kind === 'video-range' && action.anchor.framePoint))
-        next.version = 2;
+        next.version = artworkVersion(next.version);
       break;
     case 'reply':
       replyToAnnotation(round, action, context);
@@ -155,6 +162,7 @@ export function appendRespondedVersion(
   assertVersionResponses(previous, input.responses);
   if (previous.state !== 'approved' && previous.state !== 'changes_requested') previous.state = 'superseded';
   next.rounds.push({
+    ...(previous.ledgerRef ? { ledgerRef: publicationLedgerId(current.task.ownerUserId, input.asset) } : {}),
     number: previous.number + 1,
     asset: input.asset,
     openedAt: input.now,
@@ -178,4 +186,8 @@ export function assertVersionResponses(previous: ArtifactReviewRound, responses:
     previous.annotations.some((item) => item.state === 'open' && !responseIds.has(item.id))
   )
     throw new ArtifactReviewError('invalid_action');
+}
+
+function artworkVersion(version: ArtifactReview['version']): 2 | 3 {
+  return version === 3 ? 3 : 2;
 }

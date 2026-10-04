@@ -79,8 +79,8 @@ const ACTIVE_STAGE_STATUS: Record<EvolutionProgramStage, EvolutionProgramProduct
 export function evolutionProgramPresentation(
   program: EvolutionProgramV1,
   origin?: EvolutionProgramOriginV1,
-): { eyebrow: string; title: string } {
-  return { eyebrow: program.objectRef.ownerFeatureId, title: evolutionProgramTitle(program, origin) };
+): { title: string } {
+  return { title: evolutionProgramTitle(program, origin) };
 }
 
 export function productStatus(projection: EvolutionProgramPresentationProjection): EvolutionProgramProductStatus {

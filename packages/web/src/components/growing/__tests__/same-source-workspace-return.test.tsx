@@ -77,6 +77,31 @@ describe('F310 same-source Workspace return', () => {
       proposalId: 'intake-1',
     });
     expect(resolveEntrustedWorkActionTarget('/api/tasks/task-1')).toBeNull();
+    expect(
+      resolveEntrustedWorkActionTarget(
+        '/collective?connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&resultEventId=evt_result0000&resultRevision=2',
+      ),
+    ).toEqual({
+      kind: 'collective-work',
+      connectionId: 'con_aaaaaaaa',
+      workId: 'work_aaaaaaaa',
+      workRevision: 4,
+      channelId: 'general',
+      resultEventId: 'evt_result0000',
+      resultRevision: 2,
+      actionRef:
+        '/collective?connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&resultEventId=evt_result0000&resultRevision=2',
+    });
+    expect(
+      resolveEntrustedWorkActionTarget(
+        '/collective?connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&resultEventId=evt_result0000',
+      ),
+    ).toMatchObject({ resultRevision: 1 });
+    expect(
+      resolveEntrustedWorkActionTarget(
+        '/collective?connectionId=con_aaaaaaaa&workId=work_aaaaaaaa&workRevision=4&channelId=general&resultEventId=evt_result0000&resultRevision=2&taskId=private',
+      ),
+    ).toBeNull();
   });
 
   it('keeps the exact Needs Me item as desktop sidecar and promotes it on Artifact close', () => {

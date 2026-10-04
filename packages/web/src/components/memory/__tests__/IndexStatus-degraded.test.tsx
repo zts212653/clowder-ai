@@ -38,6 +38,7 @@ function makeStatus(overrides: Partial<IndexStatusData> = {}): IndexStatusData {
     passageWarmupActive: false,
     edgesCount: 0,
     lastRebuildAt: null,
+    lastDocumentUpdatedAt: null,
     embeddingModel: 'cl100k_base',
     reason: undefined,
     functionalStatus: 'degraded',

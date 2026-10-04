@@ -646,6 +646,34 @@ describe('consumeBackgroundSystemInfo rich_block placeholder', () => {
     expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'target-msg', block);
   });
 
+  it('passes turn identity when a definitive background callback claims a stream preview', () => {
+    const options = createMockOptions({
+      getThreadState: vi.fn(() => ({
+        messages: [{ id: 'callback-owner', type: 'assistant', catId: 'opus', origin: 'callback', content: 'stored' }],
+        catStatuses: {},
+        catInvocations: {},
+      })),
+    });
+    const block = { id: 'background-preview', kind: 'card', v: 1, title: 'Moved' };
+    const msg = {
+      type: 'system_info',
+      catId: 'opus',
+      threadId: 'thread-1',
+      content: JSON.stringify({ type: 'rich_block', block, messageId: 'callback-owner' }),
+      invocationId: 'parent-1',
+      turnInvocationId: 'turn-1',
+      timestamp: Date.now(),
+    };
+
+    consumeBackgroundSystemInfo(msg, undefined, options);
+
+    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'callback-owner', block, {
+      catId: 'opus',
+      invocationId: 'parent-1',
+      turnInvocationId: 'turn-1',
+    });
+  });
+
   it('keeps an identity-bound rich block on the current background stream after an independent callback', () => {
     const parentInvocationId = 'parent-independent';
     const turnInvocationId = 'turn-independent';

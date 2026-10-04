@@ -336,6 +336,7 @@ describe('InteractiveBlock direct callback actions', () => {
     ) as HTMLButtonElement | undefined;
     expect(startBtnAfterPreview).toBeTruthy();
     expect(startBtnAfterPreview?.disabled).toBe(false);
+    expect(container.querySelector('[data-message-navigation-response="interactive"]')).not.toBeNull();
     expect(apiFetchMock.mock.calls.some(([url]) => url === '/api/guide-actions/start')).toBe(false);
     expect(useGuideStore.getState().pendingStart).toBeNull();
 
@@ -352,6 +353,7 @@ describe('InteractiveBlock direct callback actions', () => {
 
     expect(apiFetchMock).toHaveBeenCalledWith('/api/guide-actions/start', expect.objectContaining({ method: 'POST' }));
     expect(useGuideStore.getState().pendingStart).toEqual({ guideId: 'add-member', threadId: 'thread-1' });
+    expect(container.querySelector('[data-message-navigation-response]')).toBeNull();
   });
 
   it('keeps ordinary non-callback interactive blocks one-shot', async () => {
@@ -372,6 +374,7 @@ describe('InteractiveBlock direct callback actions', () => {
       root.render(React.createElement(InteractiveBlock, { block: oneShotBlock, messageId: 'message-4' }));
     });
 
+    expect(container.querySelector('[data-message-navigation-response="interactive"]')).not.toBeNull();
     const optionBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes('A'));
     expect(optionBtn).toBeTruthy();
     await act(async () => {
@@ -392,5 +395,6 @@ describe('InteractiveBlock direct callback actions', () => {
     ) as HTMLButtonElement[];
     expect(optionBtnsAfterSubmit).toHaveLength(2);
     expect(optionBtnsAfterSubmit.every((btn) => btn.disabled)).toBe(true);
+    expect(container.querySelector('[data-message-navigation-response]')).toBeNull();
   });
 });

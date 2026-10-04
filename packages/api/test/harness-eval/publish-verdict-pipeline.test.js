@@ -339,48 +339,7 @@ describe('handlePublishVerdict — AC-H2 pipeline', () => {
       assert.match(result.detail, /branch.*already exists/);
     });
 
-    // 砚砚 R3 P1 #2 cloud: live-tree dup-check is NOT authoritative. If origin/main
-    // has the verdict already but live tree is stale, isolated worktree (created
-    // from origin/main) WILL have the file. Stage callback re-checks and aborts
-    // with verdict_already_exists_on_main → handler surfaces 409 not 500.
-    it('returns 409 verdict_already_exists when verdict file pre-exists in isolated worktree (live tree was stale)', async () => {
-      const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
-      const { tmpdir } = await import('node:os');
-      const { resolve } = await import('node:path');
-
-      const mockGitPublisher = {
-        async publishOnIsolatedWorktree(opts) {
-          // Simulate: isolated worktree was checked out from origin/main, which
-          // already has verdicts/stale-test.md (committed by parallel publish)
-          const fakeWorktree = mkdtempSync(`${tmpdir()}/phase-h-stale-`);
-          const verdictsDir = resolve(fakeWorktree, 'docs/harness-feedback/verdicts');
-          mkdirSync(verdictsDir, { recursive: true });
-          writeFileSync(resolve(verdictsDir, 'stale-test.md'), '# Already on main\n');
-          // Now invoke stage — handler's authoritative re-check should throw
-          await opts.stage(fakeWorktree);
-          // If we reach here, the re-check didn't fire → test fails
-          return { commitSha: 'should-not-reach', prUrl: 'should-not-reach' };
-        },
-      };
-      const result = await handlePublishVerdict(
-        {
-          harnessFeedbackRoot: root,
-          gitPublisher: mockGitPublisher,
-          generator: async () => {
-            throw new Error('generator should not be called when dup detected on main');
-          },
-        },
-        {
-          packet: buildPacket({ id: 'stale-test', domainId: 'eval:a2a' }),
-          domain: 'eval:a2a',
-          catId: 'codex',
-          sourceRefs: { snapshotName: 'snap.yaml', attributionName: 'attr.yaml' },
-        },
-      );
-      assert.ok('error' in result);
-      assert.equal(result.status, 409, 'must be 409 not 500');
-      assert.equal(result.error, 'verdict_already_exists');
-      assert.match(result.detail, /already exists on origin\/main|live tree was stale/);
-    });
+    // R3 P1 #2 stale live-tree dup test moved to publish-verdict-canonical-replay.test.js
+    // per 350-line hard limit.
   });
 });

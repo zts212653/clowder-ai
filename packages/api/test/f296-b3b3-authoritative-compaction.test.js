@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 const { resolveAuthoritativeCompactionSupport } = await import(
-  '../dist/domains/cats/services/session/authoritative-compaction.js'
+  '../dist/domains/cats/services/session/context/authoritative-compaction.js'
 );
 
 const SCOPE = { userId: 'user-1', catId: 'opus', threadId: 'thread-1' };

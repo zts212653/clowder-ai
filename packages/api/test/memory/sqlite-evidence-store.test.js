@@ -96,6 +96,8 @@ describe('SqliteEvidenceStore', () => {
     const results = await store.search('prompt engineering');
     assert.ok(results.length >= 1);
     assert.equal(results[0].anchor, 'F042');
+    assert.equal(results[0].kind, 'feature');
+    assert.equal(results[0].title, 'Prompt Engineering Audit');
   });
 
   it('indexes keywords into evidence_fts for keyword-only discovery', async () => {

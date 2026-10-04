@@ -1,6 +1,6 @@
 ---
 name: cross-thread-sync
-tips_exempt: "This revision only aligns the cross-cat handoff reference with optional templates; cross-thread tools and user actions are unchanged."
+tips_exempt: "2026-09-23：`targetCats` / `@` 调用示例改为占位符并指向 get_thread_cats 查 catId；未新增用户可直接发起的操作。"
 description: "跨 thread 协同：通知、归属核验、争用与责任处置。Use when: 平行 session 通知或共享文件争用。Not for: 跨猫交接或新建 thread。Output: routed cross-post + disposition。GOTCHA: ACTION/BLOCKING 不转移球权。"
 triggers:
   - "通知另一个 session"
@@ -26,7 +26,7 @@ triggers:
 
 > **⚠️ 路由铁律**：cross-post 消息如果**没有 @mention 也没有 targetCats**，消息会到达目标 thread 但**不会触发任何猫 session**——消息静默躺在那里，直到operator手动 @ 某只猫。**必须**用以下任一方式触发目标猫：
 > 1. 在 content 末尾另起一行写 `@句柄`（如 `@目标猫句柄`）
-> 2. 传 `targetCats` 参数（如 `targetCats: ["opus"]`）
+> 2. 传 `targetCats` 参数（如 `targetCats: ["<目标猫 catId>"]`，catId 用 `cat_cafe_get_thread_cats` 查）
 
 ## Step 1: 发现（谁在平行工作？）
 
@@ -119,8 +119,8 @@ Action Needed 必须标注级别。**这些标签只描述期望/紧急度，不
 ```
 → cat_cafe_cross_post_message(
     threadId: "<target_thread_id>",
-    targetCats: ["opus"],
-    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@opus"
+    targetCats: ["<目标猫 catId>"],
+    content: "## 🔄 Cross-Thread Sync\n\n### What Changed\n...\n\n### Impact on You\n...\n\n### Action Needed\n[ACTION] ...\n\n@<目标猫句柄>"
   )
 ```
 

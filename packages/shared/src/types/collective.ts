@@ -1,4 +1,16 @@
 import { z } from 'zod';
+import {
+  collectiveWorkAcceptanceNoticeSchema,
+  collectiveWorkExecutionNoticeSchema,
+} from './collective-work-acceptance.js';
+import {
+  collectiveWorkProgressIntentSchema,
+  collectiveWorkProgressReceiptSchema,
+  collectiveWorkResultIntentSchema,
+  collectiveWorkResultReceiptSchema,
+} from './collective-work-return.js';
+
+export * from './collective-work-return.js';
 
 const stableId = (prefix: string) =>
   z
@@ -95,6 +107,20 @@ export const collectiveRecipientSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
+export const collectiveAttentionRequestSchema = z.literal('response_requested');
+
+/** Service-issued pointer carried by a Human feedback event for the same Work. */
+export const collectiveWorkRevisionNoticeSchema = z
+  .object({
+    v: z.literal(1),
+    workId: stableId('work_'),
+    workRevision: z.number().int().positive(),
+    assignmentEventId: collectiveEventIdSchema,
+    resultEventId: collectiveEventIdSchema,
+    resultRevision: z.number().int().positive(),
+  })
+  .strict();
+
 export const collectiveTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('channel'), channelId: z.string().trim().min(1).max(160) }).strict(),
   z.object({ kind: z.literal('message'), eventId: collectiveEventIdSchema }).strict(),
@@ -119,11 +145,53 @@ export const collectiveEventEnvelopeSchema = collectiveCoordinatesSchema
     location: collectiveLocationSchema.optional(),
     recipient: collectiveRecipientSchema.optional(),
     replyToEventId: collectiveEventIdSchema.optional(),
-    workRequest: z.literal('entrust').optional(),
+    attentionRequest: collectiveAttentionRequestSchema.optional(),
+    workRequest: z.enum(['entrust', 'revise', 'continue']).optional(),
+    workRevisionNotice: collectiveWorkRevisionNoticeSchema.optional(),
+    workAcceptanceNotice: collectiveWorkAcceptanceNoticeSchema.optional(),
+    workExecutionNotice: collectiveWorkExecutionNoticeSchema.optional(),
+    workResultReceipt: collectiveWorkResultReceiptSchema.optional(),
+    workProgressReceipt: collectiveWorkProgressReceiptSchema.optional(),
     body: z.string().trim().min(1).max(32_000),
     acceptedAt: z.string().datetime(),
   })
-  .strict();
+  .strict()
+  .superRefine((event, context) => {
+    if (event.workProgressReceipt && (event.actor.kind !== 'agent' || event.workResultReceipt)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workProgressReceipt'],
+        message: 'Progress needs a named Agent and cannot also be a result',
+      });
+    }
+    if (
+      (event.workRequest === 'continue') !== Boolean(event.workExecutionNotice) ||
+      (event.workExecutionNotice && (event.actor.kind !== 'agent' || event.recipient?.kind !== 'agent'))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workExecutionNotice'],
+        message: 'Continuation requires a Service-issued current execution notice',
+      });
+    }
+    if (
+      event.workAcceptanceNotice &&
+      (event.workRequest !== 'entrust' || event.actor.kind !== 'agent' || event.recipient?.kind !== 'agent')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workAcceptanceNotice'],
+        message: 'Cat acceptance requires an exact Service-issued assignment',
+      });
+    }
+    if ((event.workRequest === 'revise') !== Boolean(event.workRevisionNotice)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workRevisionNotice'],
+        message: 'Work revision feedback requires one Service-issued revision notice',
+      });
+    }
+  });
 
 export const collectivePairingIntentSchema = collectiveCoordinatesSchema
   .extend({
@@ -180,86 +248,6 @@ export const collectivePairingHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('collective:request-pairing-status') }).strict(),
 ]);
 
-// F290's experience candidate uses a deliberately reference-only Host seam. It is
-// not a pairing extension or a transport path: origin/source checks stay at each
-// iframe boundary, while this schema makes it impossible to smuggle a private
-// Thread id, message body, credential, or owner-admission payload through it.
-export const collectiveF290ExperienceWorkRefSchema = z
-  .string()
-  .regex(/^work_demo_[A-Za-z0-9_-]+$/)
-  .min('work_demo_'.length + 1)
-  .max(160);
-
-export type CollectiveF290ExperienceWorkRef = z.infer<typeof collectiveF290ExperienceWorkRefSchema>;
-
-export const collectiveF290ExperienceWorks = [
-  { ref: 'work_demo_product-brief', title: '共同空间首页', cat: '砚砚', channelId: 'product-direction' },
-  { ref: 'work_demo_architecture-check', title: '接收端装配查漏', cat: '宪宪', channelId: 'product-direction' },
-] as const satisfies readonly {
-  readonly ref: CollectiveF290ExperienceWorkRef;
-  readonly title: string;
-  readonly cat: string;
-  readonly channelId: 'product-direction' | 'community';
-}[];
-
-export function findCollectiveF290ExperienceWork(workRef: CollectiveF290ExperienceWorkRef) {
-  return collectiveF290ExperienceWorks.find((work) => work.ref === workRef);
-}
-
-export const collectiveF290ExperienceHostRequestSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('collective:f290-experience-open-cafe') }).strict(),
-  z
-    .object({
-      type: z.literal('collective:f290-experience-open-work'),
-      workRef: collectiveF290ExperienceWorkRefSchema,
-    })
-    .strict(),
-  z.object({ type: z.literal('collective:f290-experience-close-cafe') }).strict(),
-]);
-
-export const collectiveF290ExperienceHostResultSchema = z
-  .object({
-    type: z.literal('collective:f290-experience-result-ready'),
-    workRef: collectiveF290ExperienceWorkRefSchema,
-  })
-  .strict();
-
-export const collectiveF290ExperienceResultRejectionReasonSchema = z.enum([
-  'connection_offline',
-  'participation_revoked',
-  'unknown_work',
-]);
-
-// The Client receipt lets the Host keep its private panel honest: a Host
-// result is only complete once the exact embedded Client accepted it. These
-// messages deliberately contain only the public Work reference and a bounded
-// rejection reason, never private Host data.
-export const collectiveF290ExperienceHostResultReceiptSchema = z.discriminatedUnion('type', [
-  z
-    .object({
-      type: z.literal('collective:f290-experience-result-accepted'),
-      workRef: collectiveF290ExperienceWorkRefSchema,
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal('collective:f290-experience-result-rejected'),
-      workRef: collectiveF290ExperienceWorkRefSchema,
-      reason: collectiveF290ExperienceResultRejectionReasonSchema,
-    })
-    .strict(),
-]);
-
-export const collectiveF290ExperienceHostInboundMessageSchema = z.discriminatedUnion('type', [
-  ...collectiveF290ExperienceHostRequestSchema.options,
-  ...collectiveF290ExperienceHostResultReceiptSchema.options,
-]);
-
-export const collectiveF290ExperienceHostMessageSchema = z.discriminatedUnion('type', [
-  ...collectiveF290ExperienceHostInboundMessageSchema.options,
-  collectiveF290ExperienceHostResultSchema,
-]);
-
 export const collectivePairingExchangeRequestSchema = collectivePairingIntentSchema
   .pick({
     serviceInstanceId: true,
@@ -291,6 +279,7 @@ export const collectiveHumanMessageRequestSchema = collectiveCoordinatesSchema
     location: collectiveLocationSchema.optional(),
     recipient: collectiveRecipientSchema.optional(),
     replyToEventId: collectiveEventIdSchema.optional(),
+    attentionRequest: collectiveAttentionRequestSchema.optional(),
     workRequest: z.literal('entrust').optional(),
     body: z.string().trim().min(1).max(32_000),
   })
@@ -312,9 +301,14 @@ export const collectiveAgentMessageRequestSchema = collectiveConnectionCoordinat
     recipient: collectiveRecipientSchema.optional(),
     participationRevision: z.number().int().positive().optional(),
     replyToEventId: collectiveEventIdSchema.optional(),
+    workResultIntent: collectiveWorkResultIntentSchema.optional(),
+    workProgressIntent: collectiveWorkProgressIntentSchema.optional(),
     body: z.string().trim().min(1).max(32_000),
   })
-  .strict();
+  .strict()
+  .refine((input) => !(input.workResultIntent && input.workProgressIntent), {
+    message: 'Choose result or progress, not both',
+  });
 
 export type CollectiveCoordinates = z.infer<typeof collectiveCoordinatesSchema>;
 export type CollectiveConnectionCoordinates = z.infer<typeof collectiveConnectionCoordinatesSchema>;
@@ -322,6 +316,8 @@ export type CollectiveClientAnchor = z.infer<typeof collectiveClientAnchorSchema
 export type CollectiveHumanActor = z.infer<typeof collectiveHumanActorSchema>;
 export type CollectiveAgentActor = z.infer<typeof collectiveAgentActorSchema>;
 export type CollectiveActor = z.infer<typeof collectiveActorSchema>;
+export type CollectiveAttentionRequest = z.infer<typeof collectiveAttentionRequestSchema>;
+export type CollectiveWorkRevisionNotice = z.infer<typeof collectiveWorkRevisionNoticeSchema>;
 export type CollectiveTarget = z.infer<typeof collectiveTargetSchema>;
 export type CollectiveLocation = z.infer<typeof collectiveLocationSchema>;
 export type CollectiveRecipient = z.infer<typeof collectiveRecipientSchema>;
@@ -332,16 +328,6 @@ export type CollectivePairingBridgeErrorCode = z.infer<typeof collectivePairingB
 export type CollectivePairingBridgeMessage = z.infer<typeof collectivePairingBridgeMessageSchema>;
 export type CollectivePairingMessage = z.infer<typeof collectivePairingMessageSchema>;
 export type CollectivePairingHostRequest = z.infer<typeof collectivePairingHostRequestSchema>;
-export type CollectiveF290ExperienceHostRequest = z.infer<typeof collectiveF290ExperienceHostRequestSchema>;
-export type CollectiveF290ExperienceHostResult = z.infer<typeof collectiveF290ExperienceHostResultSchema>;
-export type CollectiveF290ExperienceResultRejectionReason = z.infer<
-  typeof collectiveF290ExperienceResultRejectionReasonSchema
->;
-export type CollectiveF290ExperienceHostResultReceipt = z.infer<typeof collectiveF290ExperienceHostResultReceiptSchema>;
-export type CollectiveF290ExperienceHostInboundMessage = z.infer<
-  typeof collectiveF290ExperienceHostInboundMessageSchema
->;
-export type CollectiveF290ExperienceHostMessage = z.infer<typeof collectiveF290ExperienceHostMessageSchema>;
 export type CollectivePairingExchangeRequest = z.infer<typeof collectivePairingExchangeRequestSchema>;
 export type CollectiveAckRequest = z.infer<typeof collectiveAckRequestSchema>;
 export type CollectivePollRequest = z.infer<typeof collectivePollRequestSchema>;

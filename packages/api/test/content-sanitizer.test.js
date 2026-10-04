@@ -838,12 +838,12 @@ describe('sanitizeStoryExport', () => {
   });
 
   // ─── R7: coCreator identity redaction ─────────────────────
-  // Co-creator name/aliases (You, L.S., Lysander) must be redacted
+  // Co-creator name/aliases (You, L.S., you) must be redacted
 
   test('coCreator identity is redacted in export', async () => {
     const { sanitizeStoryExport, buildCatIdentityAliases } = await import('../dist/domains/story/content-sanitizer.js');
     const breeds = [{ catId: 'opus', name: '布偶猫', displayName: '布偶猫', mentionPatterns: ['@opus'], variants: [] }];
-    const coCreator = { name: 'You', aliases: ['L.S.', 'Lysander'], mentionPatterns: ['@co-creator', '@co-creator'] };
+    const coCreator = { name: 'You', aliases: ['L.S.', 'you'], mentionPatterns: ['@co-creator', '@co-creator'] };
     const aliases = buildCatIdentityAliases(breeds, coCreator);
 
     const events = [
@@ -851,7 +851,7 @@ describe('sanitizeStoryExport', () => {
         id: 'e1',
         at: 1000,
         kind: 'text',
-        content: '@co-creator co-creator说 You 觉得没问题，Lysander approved',
+        content: '@co-creator co-creator说 You 觉得没问题，you approved',
         catId: 'opus',
       },
     ];
@@ -861,7 +861,7 @@ describe('sanitizeStoryExport', () => {
     // Even though short (5 chars), it's not in AMBIGUOUS_COMMON_WORDS, so
     // Phase 2 uses full standalone detection and redaction.
     assert.ok(!pack.events[0].content.includes('You'), 'Leaked coCreator name');
-    assert.ok(!pack.events[0].content.includes('Lysander'), 'Leaked coCreator alias');
+    assert.ok(!pack.events[0].content.includes('you'), 'Leaked coCreator alias');
     assert.ok(!pack.events[0].content.includes('operator'), 'Leaked coCreator mention');
   });
 
@@ -957,14 +957,14 @@ describe('sanitizeStoryExport', () => {
         variants: [],
       },
     ];
-    const coCreator = { name: 'You', aliases: ['Lysander'], mentionPatterns: ['@co-creator'] };
+    const coCreator = { name: 'You', aliases: ['you'], mentionPatterns: ['@co-creator'] };
     const aliases = buildCatIdentityAliases(breeds, coCreator);
 
-    // Only opus is event author — Lysander only appears in the title
+    // Only opus is event author — you only appears in the title
     const events = [{ id: 'e1', at: 1000, kind: 'text', content: 'hello', catId: 'opus' }];
-    const pack = sanitizeStoryExport('s1', 'Lysander review session', events, [], aliases);
+    const pack = sanitizeStoryExport('s1', 'you review session', events, [], aliases);
 
-    assert.ok(!pack.manifest.title.includes('Lysander'), `Title leaked Lysander: ${pack.manifest.title}`);
+    assert.ok(!pack.manifest.title.includes('you'), `Title leaked you: ${pack.manifest.title}`);
     assert.ok(pack.manifest.title.includes('Participant'), 'Title should have Participant label');
   });
 

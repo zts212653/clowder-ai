@@ -1,3 +1,4 @@
+import { DEVELOPMENT_RETURN_TEMPLATE_ID } from '@cat-cafe/shared';
 import type { FastifyRequest } from 'fastify';
 import type { ApprovalIngress } from '../domains/approval-hub/ApprovalIngress.js';
 import type {
@@ -115,7 +116,9 @@ export function mergeUnregisteredDynamicTasks(
 ): ScheduleTaskSummary[] {
   if (!dynamicTaskStore) return summaries;
   const dynamicDefs = dynamicTaskStore.getAll();
-  const hiddenDynamicIds = new Set(dynamicDefs.filter(isRetiredHoldBallTombstone).map((def) => def.id));
+  const hiddenDynamicIds = new Set(
+    dynamicDefs.filter((def): boolean => !isVisibleDynamicTaskDef(def)).map((def) => def.id),
+  );
   const visibleDynamicDefs = dynamicDefs.filter((def) => !hiddenDynamicIds.has(def.id));
   const defsById = new Map(visibleDynamicDefs.map((def) => [def.id, def]));
   const summariesWithDynamicScope = summaries
@@ -133,7 +136,7 @@ export function mergeUnregisteredDynamicTasks(
 }
 
 export function isVisibleDynamicTaskDef(def: DynamicTaskDef | null | undefined): def is DynamicTaskDef {
-  return !!def && !isRetiredHoldBallTombstone(def);
+  return !!def && def.templateId !== DEVELOPMENT_RETURN_TEMPLATE_ID && !isRetiredHoldBallTombstone(def);
 }
 
 export function isF255ManagedTask(def: DynamicTaskDef): boolean {

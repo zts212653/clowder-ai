@@ -65,6 +65,7 @@ import {
   type SidebarPresenceSource,
 } from './sidebar-presence-projection.js';
 import { sendCanonicalSidebarSnapshot } from './sidebar-snapshot-http.js';
+import { createThreadProjectPathResolver, mapThreadList } from './thread-list-project-migration.js';
 
 const log = createModuleLogger('routes/threads');
 const WRITE_OPS = new Set(['edit', 'create', 'delete']);
@@ -415,7 +416,7 @@ export interface ThreadsRoutesOptions {
   /**
    * F229: Reserved — no longer used by GET /api/threads.
    * createdBy=userId (P1 fix) means threadStore.list(userId) already returns concierge threads;
-   * threadKind='concierge' filter handles default exclusion / includeConcierge=true inclusion.
+   * threadKind='concierge' filter keeps only the owner's canonical carrier in the default list.
    */
   conciergeThreadService?: import('../domains/concierge/ConciergeThreadService.js').ConciergeThreadService;
 }
@@ -515,7 +516,7 @@ const listThreadsSchema = z.object({
   /** F095 Phase D: When true, list soft-deleted threads (trash bin) instead of active threads. */
   deleted: z.union([z.boolean(), z.string().trim().min(1).max(8)]).optional(),
   /**
-   * F229: When true, include concierge threads in the list (default: excluded).
+   * F229/F317: When true, include the owner's extra concierge threads; the canonical one is visible by default.
    * Used by the concierge surface to load the per-user concierge thread.
    */
   includeConcierge: z.union([z.boolean(), z.string().trim().min(1).max(8)]).optional(),
@@ -592,12 +593,16 @@ function projectThreadForListView(
   return { ...summary, presence: presence ?? { status: 'idle' } };
 }
 
-async function migrateRuntimeProjectPath(thread: Thread, threadStore: IThreadStore): Promise<Thread> {
+async function migrateRuntimeProjectPath(
+  thread: Thread,
+  threadStore: IThreadStore,
+  resolvePath = migrateStoredProjectPath,
+): Promise<Thread> {
   if (!thread.projectPath || thread.projectPath === 'default' || thread.projectPath.startsWith('games/')) {
     return thread;
   }
   const previousProjectPath = thread.projectPath;
-  const migratedProjectPath = await migrateStoredProjectPath(previousProjectPath);
+  const migratedProjectPath = await resolvePath(previousProjectPath);
   if (migratedProjectPath === previousProjectPath) return thread;
   const projectPath = migratedProjectPath ?? 'default';
 
@@ -804,13 +809,12 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     const sidebarCompositionStartedAt = isCanonicalSidebarSnapshot ? performance.now() : null;
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) return { threads: [] };
+    const resolveListProjectPath = createThreadProjectPathResolver();
 
     // F095 Phase D: Return soft-deleted threads when deleted=true
     if (showDeleted) {
-      let deletedThreads = await Promise.all(
-        (await threadStore.listDeleted(userId)).map(async (thread) =>
-          sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId),
-        ),
+      let deletedThreads = await mapThreadList(await threadStore.listDeleted(userId), async (thread) =>
+        sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore, resolveListProjectPath), userId),
       );
       // F229: Apply the same concierge exclusion to the trash view.
       // Without this, a soft-deleted concierge thread appears in the default trash list;
@@ -822,7 +826,10 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { threads: deletedThreads.map((thread) => projectThreadForListView(thread, view)) };
     }
 
-    const migratedProjectPath = projectPath ? await migrateStoredProjectPath(projectPath) : undefined;
+    // Resolve the owner's one canonical concierge carrier before reading the
+    // list. This also repairs a generated blank title without creating a thread.
+    const canonicalConciergeId = await opts.conciergeThreadService?.findThreadId(userId);
+    const migratedProjectPath = projectPath ? await resolveListProjectPath(projectPath) : undefined;
     if (projectPath && migratedProjectPath === null) return { threads: [] };
     const projectPathMatches =
       projectPath && migratedProjectPath
@@ -833,19 +840,27 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     let threads = projectPathMatches
       ? [...new Map(projectPathMatches.flat().map((thread) => [thread.id, thread] as const)).values()]
       : await threadStore.list(userId);
-    threads = await Promise.all(
-      threads.map(async (thread) =>
-        sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId),
-      ),
+    if (canonicalConciergeId && !threads.some((thread) => thread.id === canonicalConciergeId)) {
+      const canonical = await threadStore.get(canonicalConciergeId);
+      if (
+        canonical &&
+        !canonical.deletedAt &&
+        (!projectPath || canonical.projectPath === migratedProjectPath || canonical.projectPath === projectPath)
+      )
+        threads.push(canonical);
+    }
+    threads = await mapThreadList(threads, async (thread) =>
+      sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore, resolveListProjectPath), userId),
     );
 
-    // F229: Exclude concierge threads from default sidebar listing.
-    // createdBy=userId (P1 fix) means threadStore.list(userId) includes concierge threads;
-    // threadKind='concierge' is the filter signal at this route layer.
-    // includeConcierge=true opt-in exposes them (used by the concierge surface itself).
-    if (!includeConcierge) {
-      threads = threads.filter((t) => !isConciergeThread(t));
-    }
+    // Keep only this owner's canonical concierge carrier discoverable. Stale
+    // same-kind orphans cannot become duplicate history entries.
+    threads = threads.filter(
+      (thread) =>
+        !isConciergeThread(thread) ||
+        thread.id === canonicalConciergeId ||
+        (includeConcierge && thread.createdBy === userId),
+    );
 
     // F058 Phase G: Match threads by feature IDs in titles
     if (featureIds) {
@@ -976,7 +991,17 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       return { error: 'Thread not found' };
     }
     const userId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
-    return sanitizeThreadForResponse(await migrateRuntimeProjectPath(thread, threadStore), userId);
+    if (isConciergeThread(thread)) {
+      const canonicalId = await opts.conciergeThreadService?.findThreadId(userId);
+      if (thread.createdBy !== userId && canonicalId !== id) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
+    }
+    return sanitizeThreadForResponse(
+      await migrateRuntimeProjectPath((await threadStore.get(id)) ?? thread, threadStore),
+      userId,
+    );
   });
 
   // F254 Phase E: rebuildable Hub projection for F5/reconnect recovery.
@@ -1077,6 +1102,14 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     if (!thread || thread.deletedAt) {
       reply.status(404);
       return { error: 'Thread not found' };
+    }
+    const ownerUserId = resolveUserId(request, { defaultUserId: 'default-user' }) ?? 'default-user';
+    if (isConciergeThread(thread) && thread.createdBy !== ownerUserId) {
+      const canonicalId = await opts.conciergeThreadService?.findThreadId(ownerUserId);
+      if (canonicalId !== id) {
+        reply.status(404);
+        return { error: 'Thread not found' };
+      }
     }
 
     const {

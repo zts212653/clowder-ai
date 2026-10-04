@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, describe, it } from 'node:test';
+import { after, describe, it, test } from 'node:test';
 
 const guard = await import('../../../scripts/native-effect-target-guard.mjs');
 const facetModule = await import('../../../scripts/lib/self-host-facet.mjs');
@@ -27,8 +30,15 @@ function exactFacet() {
   };
 }
 
-function decide(command, { cwd = '/tmp', selfHost = exactFacet } = {}) {
-  return guard.decideNativeHookPayload({ tool_name: 'Bash', tool_input: { command }, cwd }, { selfHost });
+function fixtureObserver(facet) {
+  return facetModule.createHostProcessObserver(facet, {
+    observerPid: 9000,
+    run: (command) => (command === 'ps' ? '1 0\n2622 1\n9000 2622\n9999 9000\n' : '2622\n'),
+  });
+}
+
+function decide(command, { cwd = '/tmp', selfHost = exactFacet, observeHost = fixtureObserver } = {}) {
+  return guard.decideNativeHookPayload({ tool_name: 'Bash', tool_input: { command }, cwd }, { selfHost, observeHost });
 }
 
 describe('F300 Task 1.3: self-host policy on the native guard boundary', () => {
@@ -88,6 +98,109 @@ describe('F300 Task 1.3: self-host policy on the native guard boundary', () => {
     // file. If it ever needs `ps`, it stops being safe to run per tool call.
     assert.equal(typeof facetModule.readSelfHostFacet, 'function');
   });
+
+  it('protects the hook executor but allows its unrelated feature child', () => {
+    assert.equal(decide('kill -TERM 9000').reasonCode, 'self_host_stop');
+    assert.equal(decide('kill -TERM 9999').decision, 'allow');
+  });
+});
+
+describe('F300 INV-7: lazy bounded process observations', () => {
+  it('samples listeners and the parent table only once per decision', () => {
+    const calls = [];
+    const observation = facetModule.createHostProcessObserver(exactFacet().facet, {
+      observerPid: 9000,
+      run: (command, args, options) => {
+        calls.push({ command, args });
+        assert.equal(options.timeout, 1000);
+        assert.equal(options.maxBuffer, 1024 * 1024);
+        return command === 'lsof' ? '2622\n2622\n' : '1 0\n2622 1\n9000 2622\n9999 9000\n';
+      },
+    });
+    assert.equal(calls.length, 0);
+    assert.deepEqual(observation.readHostPids(), { pids: [2622], complete: true });
+    assert.deepEqual(observation.readHostPids(), { pids: [2622], complete: true });
+    assert.equal(observation.isHostDescendant(9000, 2622), true);
+    assert.equal(observation.isHostDescendant(9000, 9999), false);
+    assert.deepEqual(calls, [
+      { command: 'lsof', args: ['-nP', '-iTCP:18080', '-sTCP:LISTEN', '-t'] },
+      { command: 'ps', args: ['-e', '-o', 'pid=,ppid='] },
+    ]);
+  });
+
+  it('keeps empty listener searches distinct from failed or malformed observations', () => {
+    const read = (run) => facetModule.createHostProcessObserver(exactFacet().facet, { run }).readHostPids();
+    assert.deepEqual(
+      read(() => {
+        throw Object.assign(new Error(), { status: 1, stdout: '', stderr: '' });
+      }),
+      { pids: [], complete: true },
+    );
+    for (const result of ['2622\ninvalid\n', '', '0\n', '1e3\n']) {
+      assert.deepEqual(
+        read(() => result),
+        { pids: [], complete: false },
+      );
+    }
+    for (const failure of [{ status: 2 }, { code: 'ETIMEDOUT' }, { status: 1, stderr: 'permission denied' }]) {
+      assert.deepEqual(
+        read(() => {
+          throw Object.assign(new Error(), failure);
+        }),
+        { pids: [], complete: false },
+      );
+    }
+  });
+
+  it('never turns an incomplete parent table into proof of non-dependence', () => {
+    for (const value of ['garbage', '2622 1\n2622 20\n', '42 1\n', '2622 2630\n2630 2622\n']) {
+      const observation = facetModule.createHostProcessObserver(exactFacet().facet, { run: () => value });
+      assert.equal(observation.isHostDescendant(2622, 9999), undefined);
+    }
+    const observation = facetModule.createHostProcessObserver(exactFacet().facet, {
+      run: () => {
+        throw new Error('ps unavailable');
+      },
+    });
+    assert.equal(observation.isHostDescendant(2622, 9999), undefined);
+  });
+});
+
+test('real listener and ancestry observations distinguish a host from its feature child', async (t) => {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const child = spawn(process.execPath, ['-e', 'process.send("ready"); setInterval(() => {}, 1000)'], {
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  });
+  t.after(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = once(child, 'exit');
+    child.kill('SIGTERM');
+    await exited;
+  });
+  await once(child, 'message');
+  const facet = exactFacet().facet;
+  facet.runtime = { launcherPid: process.pid, apiPort: server.address().port, sourceRef: SELF_REF };
+  facet.hostDependencies = [{ kind: 'api', port: server.address().port, identityRef: SELF_REF }];
+  const payload = (pid) => ({ tool_name: 'Bash', tool_input: { command: `kill -TERM ${pid}` }, cwd: '/tmp' });
+  // The payload is classified, never executed. Only our isolated child is
+  // signalled during cleanup, after all real process observations finish.
+  assert.equal(
+    guard.decideNativeHookPayload(payload(child.pid), { selfHost: () => ({ confidence: 'exact', facet }) }).decision,
+    'allow',
+  );
+  assert.equal(
+    guard.decideNativeHookPayload(payload(process.pid), { selfHost: () => ({ confidence: 'exact', facet }) })
+      .reasonCode,
+    'self_host_stop',
+  );
+  assert.equal(
+    guard.decideNativeHookPayload(payload(process.ppid), { selfHost: () => ({ confidence: 'exact', facet }) })
+      .reasonCode,
+    'self_host_stop',
+  );
 });
 
 describe('F300 Task 1.3: reading the self facet from daemon state', () => {

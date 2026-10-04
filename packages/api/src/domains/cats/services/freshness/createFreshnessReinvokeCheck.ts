@@ -47,7 +47,7 @@ function quotaKey(catId: string, threadId: string): string {
 export function buildFreshnessReinvokePrompt(threadId: string, senders: string[], noticeCount: number): string {
   return (
     `你上一轮 turn 中有来自 ${senders.join(', ')} 的 ${noticeCount} 条未读消息，` +
-    `请调用 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤读取并回应。`
+    `请调用 cat_cafe_get_thread_context({ threadId: "${threadId}", readIntent: "unread", responseMode: "full" }) 无过滤读取并回应。`
   );
 }
 

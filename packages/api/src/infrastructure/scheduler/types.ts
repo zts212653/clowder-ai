@@ -23,6 +23,8 @@ export interface GateCtx {
   taskId: string;
   lastRunAt: number | null;
   tickCount: number;
+  signal?: AbortSignal;
+  deadlineMs?: number;
 }
 
 /** Task profile presets (ADR-022 KD-1) */
@@ -180,7 +182,23 @@ export interface TaskSpec_P1<Signal = unknown> {
   trigger: TriggerSpec;
   /** F167 Phase M: optional pre-fire defer policy (busy thread → re-arm instead of fire) */
   firePolicy?: FirePolicy;
+  /** Code-owned recovery policy; never accepted from public dynamic-task params. */
+  onceLifecycle?: {
+    recoverMissed: boolean;
+    retire: () => void;
+    retryUntil: number;
+    /** Original planned fireAt retained across defer/restart for truthful lateness. */
+    scheduledAt?: number;
+  };
   admission: {
+    /** Whole gate budget, including upstream collection. Defaults to 30 seconds. */
+    timeoutMs?: number;
+    /**
+     * Whether thread activity can admit work. Only code-owned gates proven
+     * independent of thread messages should set false; omitted retains the
+     * legacy self-echo guard for existing tasks and Pack executors.
+     */
+    dependsOnThreadActivity?: boolean;
     gate: (ctx: GateCtx) => Promise<GateResult<Signal>>;
   };
   run: {

@@ -20,12 +20,14 @@ interface MountedEditorAdmission extends EditorAdmission {
 
 export function ContentEditorOwnerSurface({
   target,
+  title = '协作文档',
   apiBase = API_URL,
   fetchImpl = fetch,
   handshakeTimeoutMs = 10_000,
   onRetry,
 }: {
   readonly target: ContentEditorTarget;
+  readonly title?: string;
   readonly apiBase?: string;
   readonly fetchImpl?: typeof fetch;
   readonly handshakeTimeoutMs?: number;
@@ -192,7 +194,7 @@ export function ContentEditorOwnerSurface({
       <iframe
         ref={iframeRef}
         src={rendererSrc(admission)}
-        title={`DOCX editor · ${target.contentRef}`}
+        title={title}
         sandbox="allow-scripts allow-same-origin"
         referrerPolicy="no-referrer"
         className="h-full min-h-0 w-full border-0"

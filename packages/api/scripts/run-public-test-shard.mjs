@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validatePublicTestShardPlan } from './plan-public-test-shards.mjs';
 import { normalizePublicTestCliArgv } from './public-test-cli-args.mjs';
+import { assertPublicTestIsolation, denySanctuaryEndpoints } from './public-test-isolation-preflight.mjs';
 import { currentPublicTestProvenance, samePublicTestProvenance } from './public-test-provenance.mjs';
 import {
   atomicPublicTestJsonWrite,
@@ -39,6 +40,15 @@ export function categorizePublicTestFailure({ exitCode, signal, output = '' }) {
 }
 
 export async function runNodePublicTestFile({ file, packageRoot, resourceScope, env = process.env }) {
+  // A verified route table does not prove this loopback is isolated from the
+  // host, so the child's REDIS_URL is rewritten to a deny endpoint rather than
+  // inherited. See denySanctuaryEndpoints for why that endpoint is port 0.
+  const { env: childEnv, redirected } = denySanctuaryEndpoints(env);
+  if (redirected.reason === 'sanctuary_endpoint') {
+    process.stderr.write(
+      `[public-test] REDIS_URL redirected away from the sanctuary: ${redirected.from} -> ${redirected.to}\n`,
+    );
+  }
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const outputHash = createHash('sha256');
@@ -56,7 +66,7 @@ export async function runNodePublicTestFile({ file, packageRoot, resourceScope, 
     ],
     {
       cwd: packageRoot,
-      env: { ...env, CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE: resourceScope },
+      env: { ...childEnv, CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE: resourceScope },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -93,6 +103,7 @@ export async function runPublicTestLane({
   packageRoot,
   manifest,
   executeFile = runNodePublicTestFile,
+  isolationProbe = {},
   resolveProvenance = currentPublicTestProvenance,
 }) {
   validatePublicTestShardPlan(plan, manifest.selectedFiles);
@@ -117,6 +128,10 @@ export async function runPublicTestLane({
   }
   const files = filesForPublicTestLane(plan, lane);
   const resourceScope = lane === plan.sharedSerialLane.id ? 'shared' : 'distributable';
+  // Verify the isolation evidence this lane's classification claims, before any
+  // test process is spawned. Distributable lanes rest on a kernel network
+  // boundary that only target CI provides.
+  const { attestation } = assertPublicTestIsolation({ resourceScope, ...isolationProbe });
   const startedAt = new Date().toISOString();
   const startedMs = Date.now();
   const results = [];
@@ -141,6 +156,9 @@ export async function runPublicTestLane({
     finishedAt,
     elapsedMs: Date.now() - startedMs,
     provenance,
+    // Persisted so downstream evidence cannot launder a lane that never proved
+    // its kernel boundary into target-grade measurement history.
+    isolation: attestation,
     ...(firstHardFailure
       ? {
           firstHardFailure: {

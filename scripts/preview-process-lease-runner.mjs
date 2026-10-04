@@ -49,6 +49,7 @@ async function main() {
   const child = spawn(command[0], command.slice(1), {
     detached: process.platform !== 'win32',
     stdio: 'inherit',
+    env: { ...process.env, CAT_CAFE_PREVIEW_EXPIRES_AT: new Date(expiresAt).toISOString() },
   });
   let shuttingDown = false;
   const shutdown = async (reason) => {

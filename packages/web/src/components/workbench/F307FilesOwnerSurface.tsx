@@ -4,64 +4,32 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createFileContextAttachment } from '@/components/chat-context-reference';
 import { useConfirm } from '@/components/useConfirm';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
+import { LinkedRootRemoveButton } from '@/components/workspace/LinkedRootsManager';
 import { WorkspaceFilesSearch } from '@/components/workspace/WorkspaceFilesSearch';
 import { type TreeCallbacks, WorkspaceTree } from '@/components/workspace/WorkspaceTree';
 import { useFileManagement } from '@/hooks/useFileManagement';
-import type { TreeNode, WorktreeEntry } from '@/hooks/useWorkspace';
+import type { TreeNode } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
-import { apiFetch } from '@/utils/api-client';
-import { worktreeLabel } from '@/utils/worktree-label';
+import { worktreeHeadLabel, worktreeLabel } from '@/utils/worktree-label';
+import { F307FilesRevealStatus } from './F307FilesRevealStatus';
+import { findNode, mergeSubtree, requestTree, type SubtreeLoad, TreeRequestError, useFilesReveal } from './files-tree';
 import { createFileSurface, createFilesSurface, resolveFilesTarget } from './real-surface-adapters';
-
-function mergeSubtree(nodes: TreeNode[], targetPath: string, children: TreeNode[]): TreeNode[] {
-  return nodes.map((node) => {
-    if (node.path === targetPath && node.type === 'directory') return { ...node, children };
-    if (!node.children || !targetPath.startsWith(`${node.path}/`)) return node;
-    return { ...node, children: mergeSubtree(node.children, targetPath, children) };
-  });
-}
-
-function findNode(nodes: TreeNode[], path: string): TreeNode | undefined {
-  for (const node of nodes) {
-    if (node.path === path) return node;
-    if (node.children) {
-      const found = findNode(node.children, path);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
-async function requestTree(worktreeId: string, path?: string): Promise<TreeNode[]> {
-  const params = new URLSearchParams({ worktreeId, depth: '3' });
-  if (path) params.set('path', path);
-  const response = await apiFetch(`/api/workspace/tree?${params}`);
-  if (!response.ok) throw new Error(`workspace tree owner unavailable: ${response.status}`);
-  const payload = (await response.json()) as { tree?: TreeNode[] };
-  return payload.tree ?? [];
-}
-
-async function requestWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
-  const params = new URLSearchParams();
-  if (projectPath && projectPath !== 'default') params.set('repoRoot', projectPath);
-  const query = params.toString();
-  const response = await apiFetch(`/api/workspace/worktrees${query ? `?${query}` : ''}`);
-  if (!response.ok) throw new Error(`worktree identity unavailable: ${response.status}`);
-  const payload = (await response.json()) as { worktrees?: WorktreeEntry[] };
-  if (!Array.isArray(payload.worktrees)) return [];
-  return payload.worktrees;
-}
-
-function ownsWorktreeIdentity(entry: WorktreeEntry, worktreeId: string): boolean {
-  return entry.id === worktreeId || entry.canonicalId === worktreeId;
-}
+import {
+  IDENTITY_PLACEHOLDER,
+  IDENTITY_STATUS,
+  matchesWorktreeIdentity,
+  useFilesWorktreeIdentity,
+} from './useFilesWorktreeIdentity';
 
 export function F307FilesOwnerSurface({
   surface,
   onOpenSurface,
+  onReturnToNavigationOrigin,
 }: {
   surface: WorkspaceSurfaceDescriptor;
   onOpenSurface: (surface: WorkspaceSurfaceDescriptor) => void;
+  /** Present when this tree was opened from an entry (e.g. Settings) the person can go back to. */
+  onReturnToNavigationOrigin?: () => void;
 }) {
   const target = resolveFilesTarget(surface);
   const worktreeId = target?.worktreeId ?? null;
@@ -71,8 +39,16 @@ export function F307FilesOwnerSurface({
   const setPendingChatInsert = useChatStore((state) => state.setPendingChatInsert);
   const confirm = useConfirm();
   const { createFile, createDir, deleteItem, renameItem, uploadFile } = useFileManagement(worktreeId);
-  const [worktrees, setWorktrees] = useState<WorktreeEntry[]>([]);
-  const [identity, setIdentity] = useState<WorktreeEntry | null>(null);
+  // Identity is read through the coordinate that minted this id, never through whichever chat is current.
+  const identityRoot = target?.repoRoot ?? projectPath;
+  // An id minted under an explicit root is that exact entry; aliases only serve pre-coordinate descriptors.
+  const exactIdentity = Boolean(target?.repoRoot);
+  const {
+    worktrees,
+    identity: identityState,
+    reread: rereadIdentity,
+  } = useFilesWorktreeIdentity(worktreeId, identityRoot, exactIdentity);
+  const identity = identityState.state === 'known' ? identityState.entry : null;
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -92,13 +68,16 @@ export function F307FilesOwnerSurface({
   }, [worktreeId]);
 
   const fetchSubtree = useCallback(
-    async (path: string) => {
-      if (!worktreeId) return;
+    async (path: string): Promise<SubtreeLoad> => {
+      if (!worktreeId) return { ok: false, status: null };
       try {
         const children = await requestTree(worktreeId, path);
-        setTree((current) => mergeSubtree(current, path, children));
-      } catch {
-        // The existing tree remains usable if one lazy subtree is unavailable.
+        // '' is the worktree root: a fresh root listing replaces the tree instead of merging under a node.
+        setTree((current) => (path ? mergeSubtree(current, path, children) : children));
+        return { ok: true };
+      } catch (cause) {
+        // The existing tree remains usable if one lazy subtree is unavailable; a reveal reports why.
+        return { ok: false, status: cause instanceof TreeRequestError ? cause.status : null };
       }
     },
     [worktreeId],
@@ -108,46 +87,63 @@ export function F307FilesOwnerSurface({
     void fetchRootTree();
   }, [fetchRootTree]);
 
+  const expandRevealed = useCallback((paths: readonly string[]) => {
+    setExpandedPaths((current) => new Set([...current, ...paths]));
+  }, []);
+  const reveal = useFilesReveal({
+    worktreeId,
+    target: surface.filesReveal,
+    tree,
+    rootState: error ? 'failed' : loading ? 'loading' : 'loaded',
+    loadSubtree: fetchSubtree,
+    expand: expandRevealed,
+  });
+  const revealedPath = reveal.status === 'revealed' ? reveal.selected : null;
+  // A revealed directory shows its contents too; its listing loads the same way a click would load it.
   useEffect(() => {
-    if (!worktreeId) {
-      setWorktrees([]);
-      setIdentity(null);
-      return;
-    }
-    let active = true;
-    void requestWorktrees(projectPath)
-      .then((nextWorktrees) => {
-        if (!active) return;
-        setWorktrees(nextWorktrees);
-        setIdentity(nextWorktrees.find((entry) => ownsWorktreeIdentity(entry, worktreeId)) ?? null);
-      })
-      .catch(() => {
-        if (!active) return;
-        setWorktrees([]);
-        setIdentity(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [projectPath, worktreeId]);
+    if (!revealedPath) return;
+    const node = findNode(tree, revealedPath);
+    if (node?.type === 'directory' && node.children === undefined) void fetchSubtree(revealedPath);
+  }, [fetchSubtree, revealedPath, tree]);
 
   const selectWorktree = useCallback(
     (nextWorktreeId: string) => {
-      const selected = worktrees.find((entry) => ownsWorktreeIdentity(entry, nextWorktreeId));
+      const selected = worktrees.find((entry) => matchesWorktreeIdentity(entry, nextWorktreeId, exactIdentity));
       if (!selected) return;
       if (selected.id === target?.worktreeId) return;
       setWorkspaceWorktreeId(selected.id);
-      onOpenSurface(createFilesSurface(selected.id));
+      // The choices were listed through this tree's coordinate, so the next tree keeps it.
+      onOpenSurface(createFilesSurface(selected.id, target?.repoRoot ? { repoRoot: target.repoRoot } : {}));
     },
-    [onOpenSurface, setWorkspaceWorktreeId, target?.worktreeId, worktrees],
+    [exactIdentity, onOpenSurface, setWorkspaceWorktreeId, target?.repoRoot, target?.worktreeId, worktrees],
   );
 
   const openFile = useCallback(
     (path: string, scrollToLine?: number | null) => {
       if (!target) return;
-      onOpenSurface(createFileSurface({ worktreeId: target.worktreeId, path, scrollToLine }));
+      onOpenSurface(
+        createFileSurface({
+          worktreeId: target.worktreeId,
+          path,
+          scrollToLine,
+          navigationOrigin: {
+            kind: 'file-tree',
+            worktreeId: target.worktreeId,
+            ...(target.repoRoot ? { repoRoot: target.repoRoot } : {}),
+          },
+          ...(identity?.resolvedRoot && identity.rootEpoch !== undefined
+            ? {
+                rootSelection: {
+                  root: identity.resolvedRoot,
+                  branch: identity.branch,
+                  expectedEpoch: identity.rootEpoch,
+                },
+              }
+            : {}),
+        }),
+      );
     },
-    [onOpenSurface, target],
+    [onOpenSurface, target, identity],
   );
 
   const treeCallbacks = useMemo<TreeCallbacks>(
@@ -234,6 +230,15 @@ export function F307FilesOwnerSurface({
         data-testid="f307-files-worktree-identity"
       >
         <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+          {onReturnToNavigationOrigin && (
+            <button
+              type="button"
+              onClick={onReturnToNavigationOrigin}
+              className="shrink-0 rounded-md px-1.5 py-1 font-semibold text-cafe-accent hover:bg-cafe-surface-sunken"
+            >
+              返回来源
+            </button>
+          )}
           <label className="flex min-w-0 flex-1 items-center gap-2">
             <span className="shrink-0 text-cafe-interactive/55">工作区</span>
             <select
@@ -244,32 +249,55 @@ export function F307FilesOwnerSurface({
               aria-label="当前工作区"
               data-testid="f307-files-worktree-select"
             >
-              {worktrees.length === 0 ? (
-                <option value={target.worktreeId}>{identity ? worktreeLabel(identity) : target.worktreeId}</option>
-              ) : (
-                worktrees.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {worktreeLabel(entry)}
-                  </option>
-                ))
-              )}
+              {/* The tree already names its worktree; an unconfirmed identity is shown as that id, never "choose". */}
+              {!identity && <option value={target.worktreeId}>{target.worktreeId}</option>}
+              {worktrees.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  {worktreeLabel(entry)}
+                </option>
+              ))}
             </select>
           </label>
+          {identity && (
+            <LinkedRootRemoveButton
+              id={identity.id}
+              expectedEpoch={identity.connectionEpoch}
+              removable={identity.removable}
+              onRemoved={() => {
+                setTree([]);
+                setError(true);
+                rereadIdentity();
+              }}
+            />
+          )}
           <span className="text-cafe-interactive/45">branch</span>
           <code className="max-w-[32%] truncate rounded bg-cafe-surface-sunken px-1.5 py-0.5 text-micro text-cafe-interactive">
-            {identity?.branch ?? '读取中…'}
+            {identity?.branch ?? IDENTITY_PLACEHOLDER[identityState.state]}
           </code>
           <span className="text-cafe-interactive/45">HEAD</span>
           <code
             className="max-w-[24%] truncate rounded bg-cafe-surface-sunken px-1.5 py-0.5 text-micro text-cafe-interactive"
             data-testid="f307-files-worktree-head"
           >
-            {identity?.head ?? '读取中…'}
+            {identity ? worktreeHeadLabel(identity.head) : IDENTITY_PLACEHOLDER[identityState.state]}
           </code>
         </div>
         <div className="mt-1 truncate font-mono text-micro text-cafe-interactive/50" title={rootLabel}>
           {rootLabel}
         </div>
+        {IDENTITY_STATUS[identityState.state] ? (
+          <p
+            role="status"
+            className="mt-1 text-micro text-cafe-muted"
+            data-testid="f307-files-worktree-identity-status"
+            data-identity-state={identityState.state}
+          >
+            {IDENTITY_STATUS[identityState.state]}
+            <button type="button" onClick={rereadIdentity} className="ml-2 font-semibold text-cafe-accent">
+              重新读取
+            </button>
+          </p>
+        ) : null}
       </div>
       <WorkspaceFilesSearch
         worktreeId={target.worktreeId}
@@ -281,6 +309,7 @@ export function F307FilesOwnerSurface({
           Failed to load file tree
         </div>
       )}
+      <F307FilesRevealStatus reveal={reveal} />
       <WorkspaceTree
         tree={tree}
         loading={loading}
@@ -300,7 +329,7 @@ export function F307FilesOwnerSurface({
         }}
         onSelect={openFile}
         onCite={handleCite}
-        selectedPath={null}
+        selectedPath={revealedPath}
         hasFile={false}
         callbacks={treeCallbacks}
         emptyTitle="这个工作区还没有文件"

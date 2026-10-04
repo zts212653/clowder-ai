@@ -35,9 +35,14 @@ function rows(bin, socket) {
   }
 }
 
-for (const existing of [false, true]) {
+for (const [existing, pausedQuery] of [
+  [false, false],
+  [true, false],
+  [false, true],
+  [true, true],
+]) {
   test(
-    `${existing ? 'existing' : 'fresh'} early receipt cannot bypass waiting for a pre-claim successor`,
+    `${existing ? 'existing' : 'fresh'} early receipt waits for pre-claim successor (${pausedQuery ? 'queued query' : 'natural query'})`,
     { timeout: 15000 },
     async () => {
       const gateway = new TmuxGateway();
@@ -50,6 +55,8 @@ for (const existing of [false, true]) {
       const witnessPath = join(dir, 'witness');
       const clientClosed = join(dir, 'native-client-closed');
       const started = join(dir, 'agent-started');
+      const trace = join(dir, 'client-trace.jsonl');
+      const queryEntered = pausedQuery ? join(dir, 'query-entered') : undefined;
       const abort = new AbortController();
       let outcome;
       let witness;
@@ -59,9 +66,13 @@ for (const existing of [false, true]) {
         const siblings = rows(bin, socket);
         writeFileSync(
           join(dir, 'control.json'),
-          JSON.stringify({ bin, socket, barrier, release, clientClosed, witness: witnessPath }),
+          JSON.stringify({ bin, socket, barrier, release, clientClosed, witness: witnessPath, trace, queryEntered }),
         );
         const proxy = join(dir, 'tmux.cjs');
+        writeFileSync(
+          join(dir, 'atomic-witness.cjs'),
+          readFileSync(new URL('./fixtures/atomic-witness.cjs', import.meta.url), 'utf8'),
+        );
         writeFileSync(
           proxy,
           `#!${process.execPath}\n${readFileSync(new URL('./fixtures/tmux-early-receipt-proxy.cjs', import.meta.url), 'utf8')}`,
@@ -110,9 +121,24 @@ for (const existing of [false, true]) {
         assert.equal(alive(successorPid), true, 'successor stays at the barrier until explicitly released');
         assert.equal(settled, false, 'cancellation must wait while the pre-claim successor remains alive');
         assert.deepEqual(rows(bin, socket), [...siblings, successor]);
+        if (pausedQuery)
+          await until(() => existsSync(queryEntered), 'native liveness query must be queued before teardown');
         writeFileSync(release, '');
+        if (pausedQuery && existing) {
+          await until(() => !alive(successorPid), 'unclaimed successor must finish self cleanup');
+          execFileSync(bin, ['-L', socket, 'wait-for', '-S', 'diagnosis-release-query']);
+        }
         const result = await outcome;
-        assert.equal(result.error?.name, 'AbortError');
+        assert.equal(
+          result.error?.name,
+          'AbortError',
+          JSON.stringify({
+            error: Object.fromEntries(
+              ['name', 'message', 'stack', 'code', 'signal', 'stderr'].map((key) => [key, result.error?.[key] ?? null]),
+            ),
+            trace: existsSync(trace) ? readFileSync(trace, 'utf8') : null,
+          }),
+        );
         assert.equal(alive(witness.panePid), false);
         assert.equal(alive(successorPid), false, 'successor must have exited when cancellation returns');
         assert.deepEqual(rows(bin, socket), siblings, 'no unclaimed pane may remain when cancellation returns');

@@ -17,19 +17,16 @@ import { cursorFor, parseCursor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
 import {
   type FreshnessMessageReader,
+  type FreshnessReadableMessage,
   getFreshnessSenderLabel,
   getQueuedFreshnessSenderLabel,
   isExpectedA2AReplyForCat,
   isFreshnessRoutableMessage,
   type QueuedMessageChecker,
 } from './checkFreshnessForPostMessage.js';
-import type { UnseenChecker, UnseenResult } from './FreshnessNoticeService.js';
+import type { UnseenChecker, UnseenResult, UnseenScanResult } from './FreshnessNoticeService.js';
 import { isFreshnessSelfSourceMessage, isFreshnessSelfSourceQueueEntry } from './FreshnessSourcePolicy.js';
 
-// Raised from 20 to 50 to reduce false-negative edge case where the first
-// batch contains only filtered messages (deleted/briefing/play-hidden).
-// Full pagination is overkill for an advisory notice — Phase A's critical
-// hold-decision path already paginates. (Cloud review R2 P2-R2-3)
 const UNSEEN_FETCH_LIMIT = 50;
 
 interface ThreadUnseenCheckerDeps {
@@ -38,6 +35,13 @@ interface ThreadUnseenCheckerDeps {
   messageStore: FreshnessMessageReader;
   /** Optional visibility filter — must match Phase A's messageFilter (P0: no hidden message leaks) */
   messageFilter?: (msg: Record<string, unknown>) => boolean;
+  /** Exact Host/provider exposure; this does not reclassify real user ASR as self-source. */
+  exposureReason?: (message: FreshnessReadableMessage) => 'same_live_call_exposure' | null;
+  /** An attached Live conversation waits for these results; ordinary A2A handoffs remain quiet. */
+  includeExpectedA2AReplies?: boolean;
+  maxScanPages?: number;
+  /** SDK result confirmation is delayed; exact read joins need message IDs, not cursor tokens. */
+  includeExactMessageIds?: boolean;
   /**
    * Optional queue checker — detects messages queued by F117 but not yet
    * delivered (invisible to messageStore due to isDelivered() filter).
@@ -48,9 +52,10 @@ interface ThreadUnseenCheckerDeps {
 }
 
 export class ThreadUnseenChecker implements UnseenChecker {
+  private continuation?: { scope: string; seenCursor: string; cursor: string };
   constructor(private readonly deps: ThreadUnseenCheckerDeps) {}
 
-  async checkUnseen(params: { threadId: string; catId: CatId }): Promise<UnseenResult | null> {
+  async checkUnseen(params: { threadId: string; catId: CatId }): Promise<UnseenScanResult | null> {
     const { threadId, catId } = params;
     const { userId, cursorStore, messageStore, messageFilter } = this.deps;
 
@@ -58,50 +63,60 @@ export class ThreadUnseenChecker implements UnseenChecker {
     const seenCursor = await cursorStore.getSeenCursor(userId, catId, threadId);
     if (seenCursor == null) return null;
 
-    // Fetch messages after seenCursor (single batch — notice doesn't need precise count)
-    const batch = await messageStore.getByThreadAfter(threadId, seenCursor, UNSEEN_FETCH_LIMIT, userId, {
-      unresolvedCursorPolicy: 'empty',
-    });
-
-    // If no delivered messages, check queue as fallback (F254 queue-aware gate)
-    if (!batch || batch.length === 0) {
-      return this.checkQueueFallback(threadId, catId, seenCursor);
+    const scope = `${threadId}:${catId}`;
+    let cursor =
+      this.continuation?.scope === scope && this.continuation.seenCursor === seenCursor
+        ? this.continuation.cursor
+        : seenCursor;
+    const paginated = Boolean(this.deps.exposureReason);
+    const maxPages = paginated ? Math.max(1, Math.min(8, this.deps.maxScanPages ?? 4)) : 1;
+    let scanned = 0;
+    for (let page = 0; page < maxPages; page++) {
+      const batch = await messageStore.getByThreadAfter(threadId, cursor, UNSEEN_FETCH_LIMIT, userId, {
+        unresolvedCursorPolicy: 'empty',
+      });
+      scanned += batch?.length ?? 0;
+      const qualifying = [];
+      for (const msg of batch ?? []) {
+        if (!isFreshnessRoutableMessage(msg)) continue;
+        if (messageFilter && !messageFilter(msg as unknown as Record<string, unknown>)) continue;
+        if (this.deps.exposureReason?.(msg) === 'same_live_call_exposure') continue;
+        if (isFreshnessSelfSourceMessage(msg, catId, threadId)) continue;
+        if (!this.deps.includeExpectedA2AReplies && (await isExpectedA2AReplyForCat(msg, catId, messageStore)))
+          continue;
+        qualifying.push(msg);
+      }
+      if (qualifying.length) {
+        // Keep this batch eligible until a real read advances seenCursor.
+        this.continuation = paginated ? { scope, seenCursor, cursor } : undefined;
+        return {
+          count: qualifying.length,
+          senders: [...new Set(qualifying.map(getFreshnessSenderLabel))],
+          maxMessageId: cursorFor(qualifying[qualifying.length - 1]),
+          ...(paginated || this.deps.includeExactMessageIds
+            ? { correlationMessageIds: qualifying.map((message) => message.id) }
+            : {}),
+        };
+      }
+      if (!paginated || !batch || batch.length < UNSEEN_FETCH_LIMIT) {
+        this.continuation = paginated
+          ? { scope, seenCursor, cursor: batch?.length ? cursorFor(batch[batch.length - 1]) : cursor }
+          : undefined;
+        return this.checkQueueFallback(threadId, catId, seenCursor);
+      }
+      const next = cursorFor(batch[batch.length - 1]);
+      if (next === cursor) break;
+      cursor = next;
     }
-
-    // Apply visibility filter (P0: must reuse Phase A's messageFilter)
-    const routable = batch.filter(isFreshnessRoutableMessage);
-    const visible = messageFilter
-      ? routable.filter((msg) => messageFilter(msg as unknown as Record<string, unknown>))
-      : routable;
-    if (visible.length === 0) {
-      return this.checkQueueFallback(threadId, catId, seenCursor);
-    }
-
-    // Filter out self-messages (consistent with Phase A) and expected A2A replies
-    // to this cat's own route handoff.
-    const nonSelf: typeof visible = [];
-    for (const msg of visible) {
-      if (isFreshnessSelfSourceMessage(msg, catId, threadId)) continue;
-      if (await isExpectedA2AReplyForCat(msg, catId, messageStore)) continue;
-      nonSelf.push(msg);
-    }
-    if (nonSelf.length === 0) {
-      return this.checkQueueFallback(threadId, catId, seenCursor);
-    }
-
-    // Extract unique senders (content-free — no message body)
-    const senderSet = new Set(nonSelf.map((msg) => getFreshnessSenderLabel(msg)));
-    const senders = [...senderSet];
-
-    // #1200 §8.7: maxMessageId as v2 cursor for seen-cursor domain comparison.
-    // Messages from getByThreadAfter carry visibilitySeq → cursorFor produces v2.
-    const maxMessageId = cursorFor(nonSelf[nonSelf.length - 1]);
-
-    return {
-      count: nonSelf.length,
-      senders,
-      maxMessageId,
-    };
+    // Scanner progress is not a seen/read receipt. Resume at the next idle boundary.
+    this.continuation = { scope, seenCursor, cursor };
+    return (
+      (await this.checkQueueFallback(threadId, catId, seenCursor)) ?? {
+        kind: 'incomplete',
+        reason: 'scan_cap',
+        scanned,
+      }
+    );
   }
 
   /**

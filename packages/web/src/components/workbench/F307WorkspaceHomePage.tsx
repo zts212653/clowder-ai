@@ -27,7 +27,9 @@ export function F307WorkspaceHomePage({
   openFilePath,
   preview,
   repository,
+  rootSelection,
   workspaceSearch,
+  workspaceSearchQuery,
 }: {
   threadId?: string;
   defaultCatId: string;
@@ -39,7 +41,10 @@ export function F307WorkspaceHomePage({
   openFilePath: string | null;
   preview: { port?: number; path: string };
   repository?: { name: string; branch: string };
+  rootSelection?: WorkspaceSurfaceDescriptor['rootSelection'];
   workspaceSearch?: LauncherWorkspaceSearch;
+  /** F307 host restores this transient value after an ordinary Home-origin return. */
+  workspaceSearchQuery?: string;
 }) {
   const [pendingDestination, setPendingDestination] = useState<WorkspaceLauncherDestination | null>(null);
   const [destinationMessage, setDestinationMessage] = useState<string | null>(null);
@@ -121,6 +126,7 @@ export function F307WorkspaceHomePage({
       <WorkspaceLauncher
         threadId={threadId}
         defaultCatId={defaultCatId}
+        initialSearchQuery={workspaceSearchQuery}
         onSelectDevSurface={onSelectDevSurface}
         workspaceSearch={
           workspaceSearch
@@ -128,7 +134,16 @@ export function F307WorkspaceHomePage({
                 ...workspaceSearch,
                 onOpenResult: (path, line) => {
                   workspaceSearch.onOpenResult(path, line);
-                  if (worktreeId) onSelectSurface(createFileSurface({ worktreeId, path, scrollToLine: line }));
+                  if (worktreeId)
+                    onSelectSurface(
+                      createFileSurface({
+                        worktreeId,
+                        path,
+                        scrollToLine: line,
+                        navigationOrigin: workspaceSearch.fileNavigationOrigin?.(),
+                        ...(rootSelection ? { rootSelection } : {}),
+                      }),
+                    );
                 },
               }
             : undefined

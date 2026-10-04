@@ -94,8 +94,8 @@ export interface WorkspaceFilePreview {
   mime: string;
 }
 
-function hashUtf8(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
+function hashBytes(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 /**
@@ -120,8 +120,14 @@ async function readPrefix(absPath: string, byteCount: number): Promise<Buffer> {
  * is the same rule git uses and reliably catches video/image/audio/compiled
  * blobs even when the file extension is unknown.
  */
-function looksBinary(buf: Buffer): boolean {
-  return buf.includes(0);
+function looksBinary(buf: Buffer, truncated = false): boolean {
+  if (buf.includes(0)) return true;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(buf, { stream: truncated });
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -145,14 +151,14 @@ export async function readWorkspaceFilePreview(
   const truncated = size > maxBytes;
   const prefix = await readPrefix(absPath, Math.min(size, maxBytes));
 
-  if (looksBinary(prefix)) {
+  if (looksBinary(prefix, truncated)) {
     return { content: '', sha256: '', size, truncated: false, binary: true, mime };
   }
 
   const content = prefix.toString('utf-8');
   return {
     content,
-    sha256: truncated ? '' : hashUtf8(content),
+    sha256: truncated ? '' : hashBytes(prefix),
     size,
     truncated,
     binary: false,
@@ -183,7 +189,7 @@ export async function computeWorkspaceFileSha256(
     if (isKnownBinaryPath(absPath)) return '';
     const prefix = await readPrefix(absPath, Math.min(size, maxBytes));
     if (looksBinary(prefix)) return '';
-    return hashUtf8(prefix.toString('utf-8'));
+    return hashBytes(prefix);
   } catch {
     return null;
   }

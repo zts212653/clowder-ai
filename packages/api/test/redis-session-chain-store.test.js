@@ -715,13 +715,16 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     };
     try {
       const freshStore = new RedisSessionChainStore(redis);
-      const legacy = await freshStore.getChainByThread('legacy-thread');
-      const missing = await freshStore.getChainByThread('missing-thread');
+      const [legacy, missing] = await Promise.all([
+        freshStore.getChainByThread('legacy-thread'),
+        freshStore.getChainByThread('missing-thread'),
+        ...Array.from({ length: 6 }, () => freshStore.getChainByThread('missing-thread')),
+      ]);
 
       assert.equal(legacy.length, 1);
       assert.equal(legacy[0].id, legacyId);
       assert.deepEqual(missing, []);
-      assert.equal(globalScans, 1, 'all later thread reads must use the index instead of scanning Redis again');
+      assert.equal(globalScans, 1, 'concurrent cold reads must share one index build');
       assert.deepEqual(await redis.smembers('session-chain-by-thread:legacy-thread'), [
         'session-chain:opus:legacy-thread',
       ]);

@@ -23,7 +23,7 @@ export const RESUMED_LARGE_CONTENT = `${'context-token '.repeat(5500)}\nReply wi
 function parseArgs(argv) {
   const options = {
     apiUrl: ALPHA_API_ORIGIN,
-    redisUrl: 'redis://127.0.0.1:6398',
+    redisUrl: 'redis://127.0.0.1:6397',
     catId: 'codex',
     userId: 'f296-alpha-uat',
     timeoutMs: 300000,

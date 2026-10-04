@@ -13,8 +13,12 @@ import { CatAvatar } from '../CatAvatar';
 import { ExportButton } from '../ExportButton';
 import { HubIcon } from '../icons/HubIcon';
 import { PawIcon } from '../icons/PawIcon';
+import { knownCatName, UNKNOWN_CAT_NAME } from '../shell/ShellCatAvatar';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { ThreadCatStatus } from '../ThreadCatStatus';
 import { useSidebarDraftDecoration } from './sidebar-draft-decoration';
+import { ThreadRowSignals } from './ThreadRowSignals';
+import { RowTip, RowTitleTip } from './ThreadRowTips';
 import { ThreadSettingsPanel } from './ThreadSettingsPanel';
 import { formatRelativeTime, formatSidebarStatusTime } from './thread-utils';
 
@@ -76,6 +80,8 @@ function ThreadItemComponent({
   onReplay,
 }: ThreadItemProps) {
   const hasDraftDecoration = useSidebarDraftDecoration(id);
+  // F322 v2: one soft selection fill (no accent tint); the empty-participants note only matters as a hover fact.
+  const isV2 = useShellPresentation() === 'v2';
   const { getCatById } = useCatData();
   const canDelete = id !== 'default' && onDelete;
   const canRename = id !== 'default' && onRename;
@@ -162,6 +168,15 @@ function ThreadItemComponent({
   if (projectPath && projectPath !== 'default') tooltipLines.push(`路径: ${projectPath}`);
   tooltipLines.push(formatRelativeTime(lastActiveAt, false));
   const tooltip = tooltipLines.join('\n');
+  // v2: same facts as the old native title, but unknown cats never show their raw id.
+  const v2TipLines: string[] = [];
+  if (participants.length > 0) {
+    v2TipLines.push(
+      `参与：${participants.map((catId) => knownCatName(catId, getCatById) ?? UNKNOWN_CAT_NAME).join('、')}`,
+    );
+  }
+  if (projectPath && projectPath !== 'default') v2TipLines.push(`路径：${projectPath}`);
+  v2TipLines.push(formatRelativeTime(lastActiveAt, false));
   const hasMoreActions = id !== 'default' && !isEditing;
   const compactStatusTime = formatSidebarStatusTime(presence, lastActiveAt);
 
@@ -202,8 +217,14 @@ function ThreadItemComponent({
     <div
       data-thread-id={id}
       aria-current={isActive ? 'page' : undefined}
-      className={`group relative mx-2 rounded-xl ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
-        isActive ? 'bg-[var(--console-active-bg)]' : 'hover:bg-[var(--console-hover-bg)]'
+      className={`group relative mx-2 ${isV2 ? 'rounded-lg' : 'rounded-xl'} ${indented ? 'pl-5 pr-3' : 'px-3'} py-2.5 transition-colors cursor-pointer ${
+        isV2
+          ? isActive
+            ? 'bg-[var(--shell-selected)]'
+            : 'hover:bg-[color-mix(in_srgb,var(--shell-selected)_55%,transparent)]'
+          : isActive
+            ? 'bg-[var(--console-active-bg)]'
+            : 'hover:bg-[var(--console-hover-bg)]'
       }`}
       onClick={(event) => {
         if (
@@ -216,7 +237,7 @@ function ThreadItemComponent({
       }}
     >
       {/* Title row */}
-      <div className="mb-1.5 flex items-start justify-between gap-1">
+      <div className={`${isV2 ? '' : 'mb-1.5 '}flex items-start justify-between gap-1`}>
         {isEditing ? (
           <input
             ref={inputRef}
@@ -246,23 +267,25 @@ function ThreadItemComponent({
         ) : (
           <span className="flex min-w-0 flex-1 items-center gap-1">
             {canPin && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void onTogglePin(id, !isPinned);
-                }}
-                className={`inline-flex flex-shrink-0 p-0.5 rounded transition-all hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
-                  isPinned
-                    ? 'text-cafe-accent'
-                    : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-cafe-muted hover:text-cafe-accent'
-                }`}
-                aria-label={isPinned ? `取消置顶 ${displayTitle}` : `置顶 ${displayTitle}`}
-                title={isPinned ? '取消置顶' : '置顶'}
-                data-testid="thread-pin-button"
-              >
-                <PinIcon />
-              </button>
+              <RowTip enabled={isV2} label={isPinned ? '取消置顶' : '置顶'}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onTogglePin(id, !isPinned);
+                  }}
+                  className={`inline-flex flex-shrink-0 p-0.5 rounded transition-all hover:bg-[var(--console-hover-bg)] hover:text-cafe-interactive ${
+                    isPinned
+                      ? 'text-cafe-accent'
+                      : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-cafe-muted hover:text-cafe-accent'
+                  } ${isV2 && !isPinned ? 'absolute left-0.5 top-2.5' : ''}`}
+                  aria-label={isPinned ? `取消置顶 ${displayTitle}` : `置顶 ${displayTitle}`}
+                  title={isV2 ? undefined : isPinned ? '取消置顶' : '置顶'}
+                  data-testid="thread-pin-button"
+                >
+                  <PinIcon />
+                </button>
+              </RowTip>
             )}
             {isPinned && !canPin && (
               <span className="inline-flex flex-shrink-0 text-cafe-accent" role="img" aria-label="已置顶">
@@ -283,42 +306,65 @@ function ThreadItemComponent({
             {systemKind === 'cat_bedroom' && (
               <span
                 className="inline-flex shrink-0 items-center rounded-full border border-cafe-subtle bg-cafe-surface-elevated px-1.5 py-0.5 text-micro leading-none text-cafe-accent"
-                title="猫的私人卧室"
+                title={isV2 ? undefined : '猫的私人卧室'}
                 data-testid="thread-system-kind"
               >
                 猫卧室
               </span>
             )}
-            <span
-              title={tooltip}
-              className={`min-w-0 flex-1 line-clamp-2 text-sm leading-normal ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'}`}
-            >
-              {title ?? (id === 'default' ? '大厅' : '未命名对话')}
-            </span>
+            <RowTitleTip enabled={isV2} title={displayTitle} lines={v2TipLines}>
+              <span
+                title={isV2 ? undefined : tooltip}
+                // v2: a keyboard stop that reveals the full title / roster and opens the conversation on Enter.
+                role={isV2 ? 'link' : undefined}
+                tabIndex={isV2 ? 0 : undefined}
+                onKeyDown={
+                  isV2
+                    ? (event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          onSelect(id);
+                        }
+                      }
+                    : undefined
+                }
+                className={`min-w-0 flex-1 line-clamp-2 text-sm leading-normal ${isActive ? 'font-medium text-cafe-black' : 'text-cafe-secondary'} ${isV2 ? 'shell-focusable rounded-sm' : ''}`}
+              >
+                {title ?? (id === 'default' ? '大厅' : '未命名对话')}
+              </span>
+            </RowTitleTip>
           </span>
         )}
         <div className="flex items-center gap-0.5 flex-shrink-0 mt-0.5">
+          {isV2 && !isEditing && (
+            <span className="pr-0.5 text-label leading-5 tabular-nums" style={{ color: 'var(--shell-muted)' }}>
+              {formatRelativeTime(lastActiveAt, true)}
+            </span>
+          )}
           {hasMoreActions && (
             <div className="relative">
-              <button
-                type="button"
-                ref={moreButtonRef}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsSettingsOpen(false);
-                  setIsMoreOpen((open) => !open);
-                }}
-                className={`p-0.5 rounded transition-all ${
-                  isMoreOpen
-                    ? 'text-cafe-secondary bg-cafe-surface-elevated'
-                    : 'text-cafe-muted hover:text-cafe-secondary'
-                }`}
-                title="更多操作"
-                aria-haspopup="menu"
-                aria-expanded={isMoreOpen}
-              >
-                <MoreVerticalIcon />
-              </button>
+              <RowTip enabled={isV2} label="更多操作">
+                <button
+                  type="button"
+                  ref={moreButtonRef}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsSettingsOpen(false);
+                    setIsMoreOpen((open) => !open);
+                  }}
+                  className={`p-0.5 rounded transition-all ${
+                    isMoreOpen
+                      ? 'text-cafe-secondary bg-cafe-surface-elevated'
+                      : 'text-cafe-muted hover:text-cafe-secondary'
+                  } ${isV2 && !isMoreOpen ? 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100' : ''}`}
+                  title={isV2 ? undefined : '更多操作'}
+                  aria-label="更多操作"
+                  aria-haspopup="menu"
+                  aria-expanded={isMoreOpen}
+                >
+                  <MoreVerticalIcon />
+                </button>
+              </RowTip>
               {isMoreOpen && (
                 <div
                   ref={moreMenuRef}
@@ -364,57 +410,68 @@ function ThreadItemComponent({
           )}
         </div>
       </div>
-      {/* Bottom row: avatars + status + compact time */}
-      <div className="flex min-w-0 items-center justify-between">
-        <div className="flex min-w-0 items-center gap-1">
-          {/* ring-2 paints 2px beyond each avatar box; keep that paint inside the horizontal clip boundary. */}
-          <div
-            data-testid="thread-participant-metadata"
-            className="flex min-w-0 items-center gap-1 overflow-x-clip overflow-y-visible px-0.5"
-          >
-            {participants.length > 0 ? (
-              participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
-            ) : id !== 'default' ? (
-              <>
-                <PawIcon className="text-xs" />
-                <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
-              </>
-            ) : null}
-            {preferredCats && preferredCats.length > 0 && (
+      {isV2 ? (
+        <ThreadRowSignals
+          presence={presence}
+          unreadCount={unreadCount}
+          hasUserMention={hasUserMention}
+          hasDraft={hasDraft}
+        />
+      ) : (
+        <>
+          {/* Bottom row: avatars + status + compact time */}
+          <div className="flex min-w-0 items-center justify-between">
+            <div className="flex min-w-0 items-center gap-1">
+              {/* ring-2 paints 2px beyond each avatar box; keep that paint inside the horizontal clip boundary. */}
               <div
-                className="ml-1 flex items-center gap-0.5"
-                title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
+                data-testid="thread-participant-metadata"
+                className="flex min-w-0 items-center gap-1 overflow-x-clip overflow-y-visible px-0.5"
               >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-2.5 w-2.5 shrink-0 text-cafe-muted"
-                >
-                  <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
-                </svg>
-                {preferredCats.map((catId) => (
-                  <span
-                    key={catId}
-                    className="inline-block h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: catColorVar(catId, 'primary') }}
-                  />
-                ))}
+                {participants.length > 0 ? (
+                  participants.map((catId) => <CatAvatar key={catId} catId={catId} size={16} />)
+                ) : id !== 'default' && !isV2 ? (
+                  <>
+                    <PawIcon className="text-xs" />
+                    <span className="text-micro text-cafe-muted">还没有猫猫加入</span>
+                  </>
+                ) : null}
+                {preferredCats && preferredCats.length > 0 && (
+                  <div
+                    className="ml-1 flex items-center gap-0.5"
+                    title={`默认: ${preferredCats.map((id) => resolveCatDisplayName(id, getCatById)).join(', ')}`}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-2.5 w-2.5 shrink-0 text-cafe-muted"
+                    >
+                      <path d="M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+                    </svg>
+                    {preferredCats.map((catId) => (
+                      <span
+                        key={catId}
+                        className="inline-block h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: catColorVar(catId, 'primary') }}
+                      />
+                    ))}
+                  </div>
+                )}
+                <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
               </div>
-            )}
-            <LabelDots labels={threadLabels ? [...threadLabels] : undefined} />
+              <ThreadCatStatus presence={presence} unreadCount={unreadCount} hasUserMention={hasUserMention} />
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
+              <span className="text-micro text-cafe-muted">{compactStatusTime}</span>
+            </div>
           </div>
-          <ThreadCatStatus presence={presence} unreadCount={unreadCount} hasUserMention={hasUserMention} />
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {hasDraft && <span className="text-micro font-medium text-conn-red-text">[草稿]</span>}
-          <span className="text-micro text-cafe-muted">{compactStatusTime}</span>
-        </div>
-      </div>
+        </>
+      )}
       <ThreadSettingsPanel
         open={isSettingsOpen}
         threadId={id}

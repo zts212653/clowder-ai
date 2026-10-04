@@ -19,6 +19,8 @@ function fixture(count = 8, onExec) {
     ]),
   );
   const batches = [];
+  const pipelineBatches = [];
+  const projectMembers = new Map();
   const reads = { direct: 0, index: 0 };
   const members = ['opus', 'codex-astra'];
   const redis = {
@@ -32,9 +34,43 @@ function fixture(count = 8, onExec) {
       reads.direct += 1;
       return hashes.get(key) ?? {};
     },
-    smembers: async () => {
+    smembers: async (key) => {
       reads.direct += 1;
+      if (key.startsWith('threads:project:')) return [...(projectMembers.get(key) ?? [])];
       return [...members];
+    },
+    pipeline() {
+      const commands = [];
+      const pipeline = {
+        hmget(key, ...fields) {
+          commands.push(() => fields.map((field) => hashes.get(key)?.[field] ?? null));
+          return pipeline;
+        },
+        zscore(key, id) {
+          assert.equal(key, 'threads:user:alice');
+          commands.push(() => (ids.includes(id) ? '1' : null));
+          return pipeline;
+        },
+        eval(_script, keyCount, detailKey, projectKey, id, owner, project) {
+          assert.equal(keyCount, 2);
+          assert.ok(projectKey.startsWith('threads:project:'));
+          // Model the conditional backfill write, not arbitrary Lua commands.
+          commands.push(() => {
+            const hash = hashes.get(detailKey);
+            if (hash?.id !== id || hash.createdBy !== owner || (hash.projectPath ?? 'default') !== project) return 0;
+            const set = projectMembers.get(projectKey) ?? new Set();
+            set.add(id);
+            projectMembers.set(projectKey, set);
+            return 1;
+          });
+          return pipeline;
+        },
+        async exec() {
+          pipelineBatches.push(commands.length);
+          return commands.map((command) => [null, command()]);
+        },
+      };
+      return pipeline;
     },
     multi() {
       const commands = [];
@@ -59,7 +95,7 @@ function fixture(count = 8, onExec) {
       return batch;
     },
   };
-  return { store: new RedisThreadStore(redis), ids, hashes, batches, reads, members };
+  return { store: new RedisThreadStore(redis), ids, hashes, batches, pipelineBatches, reads, members };
 }
 
 test('2,048-thread navigation stays within a bounded Redis round-trip budget', async (t) => {
@@ -80,7 +116,7 @@ test('2,048-thread navigation stays within a bounded Redis round-trip budget', a
 });
 
 test('batched list preserves canonical hydration, participant sets, filtering and project selection', async () => {
-  const { store, ids, hashes, members } = fixture(260);
+  const { store, ids, hashes, pipelineBatches, members } = fixture(260);
   hashes.get('thread:thread_0').deletedAt = '100';
   hashes.get('thread:thread_1').externalRuntimeAnchorState = JSON.stringify({
     v: 1,
@@ -109,6 +145,11 @@ test('batched list preserves canonical hydration, participant sets, filtering an
   assert.deepEqual(
     await store.listByProject('alice', '/project/a'),
     expected.filter((t) => t.projectPath === '/project/a'),
+  );
+  assert.ok(pipelineBatches.length > 0, 'legacy project membership must be backfilled');
+  assert.ok(
+    pipelineBatches.every((size) => size <= 128),
+    'backfill and visibility reads must stay bounded',
   );
   assert.deepEqual(expected.find((t) => t.id === 'thread_2').participants, members);
   assert.equal(expected.find((t) => t.id === 'thread_2').metadata, undefined);

@@ -125,6 +125,96 @@ describe('HumanDispositionFeedbackDialog', () => {
     expect(container.querySelector<HTMLButtonElement>('[data-testid="feedback-cancel"]')?.disabled).toBe(true);
   });
 
+  describe('what the user already picked and typed outlives a background refresh of the same question', () => {
+    const pickOtherAndType = async (text: string) => {
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="other"]')?.click());
+      const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="feedback-other-detail"]');
+      if (!textarea) throw new Error('picking "other" should have opened the detail field');
+      await act(async () => {
+        textarea.focus();
+        setTextareaValue(textarea, text);
+      });
+      return textarea;
+    };
+
+    it('keeps the reason, the text and the focus when the same reasons come back as a fresh array', async () => {
+      await render();
+      const textarea = await pickOtherAndType('不是他本人说的');
+      expect(document.activeElement).toBe(textarea);
+
+      await render({ reasonCodes: [...REASON_CODES] });
+
+      expect(container.querySelector<HTMLInputElement>('input[value="other"]')?.checked).toBe(true);
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="feedback-other-detail"]')?.value).toBe(
+        '不是他本人说的',
+      );
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="feedback-other-detail"]'));
+    });
+
+    it('keeps what was typed when the subject line is refreshed under the open dialog, and shows the new line', async () => {
+      await render();
+      await pickOtherAndType('先写在这里');
+
+      await render({ subjectLabel: '记住人物：黄挺（已更新）' });
+
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="feedback-other-detail"]')?.value).toBe(
+        '先写在这里',
+      );
+      expect(container.querySelector('[role="dialog"]')?.textContent).toContain('记住人物：黄挺（已更新）');
+    });
+
+    it('drops a picked reason that is no longer offered, so it cannot be submitted, and keeps the text', async () => {
+      await render();
+      await pickOtherAndType('保留这句话');
+
+      await render({ reasonCodes: ['not_important', 'wrong'] });
+
+      expect(container.querySelector('input[value="other"]')).toBeNull();
+      expect([...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].some((r) => r.checked)).toBe(
+        false,
+      );
+      expect(container.querySelector<HTMLButtonElement>('[data-testid="feedback-submit"]')?.disabled).toBe(true);
+      await render({ reasonCodes: REASON_CODES });
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="other"]')?.click());
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="feedback-other-detail"]')?.value).toBe(
+        '保留这句话',
+      );
+    });
+
+    it('still starts clean every time it is opened', async () => {
+      await render();
+      await pickOtherAndType('上一次写的');
+      await render({ open: false });
+      await render();
+      expect([...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].every((r) => !r.checked)).toBe(
+        true,
+      );
+      await act(async () => container.querySelector<HTMLInputElement>('input[value="other"]')?.click());
+      expect(container.querySelector<HTMLTextAreaElement>('[data-testid="feedback-other-detail"]')?.value).toBe('');
+      expect(document.activeElement).toBe(container.querySelector('input[type="radio"]'));
+    });
+  });
+
+  describe('a card that its host has hidden or made inert stops reacting to the keyboard', () => {
+    const pressEscape = () =>
+      act(async () => {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      });
+
+    it.each([
+      'hidden',
+      'inert',
+    ])('ignores Escape while an ancestor is %s, and works again once it is back', async (attribute) => {
+      await render();
+      container.setAttribute(attribute, '');
+      await pressEscape();
+      expect(onCancel).not.toHaveBeenCalled();
+      container.removeAttribute(attribute);
+      await pressEscape();
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('keeps an actionable route error visible in the dialog', async () => {
     await render({ error: '拒绝失败：提案状态已变化' });
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('提案状态已变化');

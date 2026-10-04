@@ -172,9 +172,9 @@ describe('F308 public-test external resource guard', () => {
     const childScript = [
       'const { spawnSync } = await import("node:child_process");',
       'const nestedCode = [',
-      '  "if (process.env.CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE !== \\\"distributable\\\") process.exit(3);",',
-      '  "if (process.env.GIT_ALLOW_PROTOCOL !== \\\"file\\\") process.exit(4);",',
-      '  "await fetch(\\\"https://example.com/should-not-run\\\");",',
+      '  "if (process.env.CAT_CAFE_PUBLIC_TEST_RESOURCE_SCOPE !== \\"distributable\\") process.exit(3);",',
+      '  "if (process.env.GIT_ALLOW_PROTOCOL !== \\"file\\") process.exit(4);",',
+      '  "await fetch(\\"https://example.com/should-not-run\\");",',
       '].join("");',
       'const nested = spawnSync(process.execPath, ["--eval", nestedCode], {',
       '  encoding: "utf8",',

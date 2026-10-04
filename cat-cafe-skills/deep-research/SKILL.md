@@ -1,6 +1,6 @@
 ---
 name: deep-research
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "2026-09-23：去掉写死猫名/型号——云端审阅席位称谓改为不绑代次、`{cat}` 研究文件命名改为按 catId；未新增用户可直接发起的操作。"
 description: >
   多源深度调研管道（Web Deep Research + Coder 合成 + 云端模型咨询）。
   Use when: 技术问题需要多源调查、设计决策需要证据、operator说"调研"/"research"、需要咨询云端模型。
@@ -18,7 +18,7 @@ renamed-from: deep-research-pipeline
 # Deep Research
 
 两种模式：
-- **Mode A: 多源调研**：Web 猫（网络搜索）+ Coder 猫（代码判断）+ GPT-5.2 Pro（审阅）= 三角验证
+- **Mode A: 多源调研**：Web 猫（网络搜索）+ Coder 猫（代码判断）+ 云端 Pro 审阅（ChatGPT Pro，代次以当时可用为准）= 三角验证
 - **Mode B: 云端模型咨询**：本地猫总结背景 → operator发给云端模型 → 回填结果 → 本地猫综合
 
 ## 两种猫，各有分工
@@ -45,7 +45,7 @@ project-research/YYYY-MM-DD-{topic}/
 │   例：claude-response.md / gemini-response.md / gpt-response.md
 ├── gpt-pro-review.md                  # Step 3 GPT Pro 审阅（可选）
 ├── {cat}-synthesis.md                 # Step 4 猫猫独立综合分析
-│   例：opus-synthesis.md / codex-synthesis.md / opus47-synthesis.md
+│   例：<catId>-synthesis.md（每只参与猫一份）
 ├── {cat}-点评.md                      # 非代码猫的风格点评（如Siamese）
 └── synthesis.md                       # 最终合并综合（如果有）
 ```
@@ -53,7 +53,7 @@ project-research/YYYY-MM-DD-{topic}/
 **命名规则**：
 - `{topic}` 用英文 kebab-case（如 `finance-provider-stack`、`memory-architecture`）
 - `{provider}` = 云端模型标识：`claude` / `gemini` / `gpt` / `gpt-pro`
-- `{cat}` = 猫猫名：`opus` / `opus47` / `codex` / `gemini-cat`（避免和 provider 名冲突时加 `-cat`）
+- `{cat}` = 参与猫的 catId（避免和 provider 名冲突时加 `-cat`）
 - 如果只有 1 个文件（如单次 Mode B 咨询），可以不建子目录，直接放 `project-research/`
 
 **Mode B 咨询归属**：如果咨询是某个已有研究课题的一部分，文件放进该课题子目录（不另建目录）。
@@ -76,7 +76,7 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 ```
 结果存：`project-research/YYYY-MM-DD-{topic}/{provider}-response.md`
 
-**Step 3 — GPT-5.2 Pro 审阅**
+**Step 3 — 云端 Pro 审阅**
 输入三份报告 → 找逻辑漏洞、弱证据、三方分歧
 存：`project-research/YYYY-MM-DD-{topic}/gpt-pro-review.md`（注意：Pro 是审阅者，不是调研者，不要让他搜索）
 
@@ -111,7 +111,7 @@ project-research/YYYY-MM-DD-{topic}/prompt.md
 |------|------|
 | ChatGPT Deep Research | 30 天滚动上限，发前确认值得用 |
 | Claude / Gemini Deep Research | Plan-dependent，同上 |
-| GPT-5.2 Pro | 仅用于 Step 3 审阅，不用于普通对话 |
+| 云端 Pro（ChatGPT Pro） | 仅用于 Step 3 审阅，不用于普通对话 |
 
 **三个视角的必要性：** Claude / Gemini / GPT 各家族有不同的训练偏差。分歧处往往是最有价值的信号。
 

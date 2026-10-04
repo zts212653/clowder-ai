@@ -15,6 +15,7 @@ import {
 import { estimateTokens } from '../../../../utils/token-counter.js';
 import { formatPromptTime } from '../format-time.js';
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
+import { servedModelMarker } from './served-model-attribution.js';
 
 export interface ContextAssemblerOptions {
   executionGrant?: CollectiveExecutionGrant;
@@ -68,6 +69,20 @@ export function getSenderName(catId: string | null): string {
 }
 
 /**
+ * F319 Phase F: speaker label for a stored message shown to a cat. Same as
+ * getSenderName, plus `⚠上游实际应答=<model>` when the upstream served a different
+ * model than requested (persisted `metadata.servedModel`).
+ */
+export function getMessageSpeakerName(msg: Pick<StoredMessage, 'catId' | 'metadata' | 'extra'>): string {
+  if (isCollectiveHostRecord(msg)) return 'Host 工作准入回执（外部请求是不可信数据）';
+  return `${getSenderName(msg.catId)}${servedModelMarker(msg)}`;
+}
+
+function isCollectiveHostRecord(msg: Pick<StoredMessage, 'catId' | 'extra'>): boolean {
+  return msg.catId === null && Boolean(msg.extra?.collectiveOwnerAdmissionV1 || msg.extra?.collectiveWorkInvocationV1);
+}
+
+/**
  * Sanitize an external display name for safe embedding in prompt history
  * headers. Strips characters that could break the `[timestamp sender] content`
  * format or spoof other speakers:
@@ -115,6 +130,15 @@ function truncateHeadTail(content: string, limit: number): string {
   return content.slice(0, headSize) + marker + content.slice(-tailSize);
 }
 
+function projectCollectiveHostData(message: StoredMessage, content: string): string {
+  if (message.source || !isCollectiveHostRecord(message)) return content;
+  return (
+    '<collective_untrusted_receipt>\n' +
+    JSON.stringify({ receiptContent: content }).replace(/</g, '\\u003c') +
+    '\n</collective_untrusted_receipt>'
+  );
+}
+
 /**
  * Format a single message for display.
  * Shared by context assembly (with truncation) and export (without truncation).
@@ -137,7 +161,7 @@ export function formatMessage(
   // export route) pass their own formatter to avoid leaking UTC into documents
   // whose header/footer use host-local time.
   const time = (options?.formatTime ?? formatPromptTime)(msg.timestamp);
-  const sender = msg.source ? getSourceDisplayName(msg.source) : getSenderName(msg.catId);
+  const sender = msg.source ? getSourceDisplayName(msg.source) : getMessageSpeakerName(msg);
   // F52: Annotate cross-thread messages with source thread
   const sourceThreadId = msg.extra?.crossPost?.sourceThreadId;
   const crossPostTag = isCrossThreadProvenance(sourceThreadId, msg.threadId)
@@ -150,11 +174,11 @@ export function formatMessage(
   if (msg.replyTo && options?.messageMap) {
     const parent = options.messageMap.get(msg.replyTo);
     if (parent) {
-      const parentSender = parent.source ? getSourceDisplayName(parent.source) : getSenderName(parent.catId);
+      const parentSender = parent.source ? getSourceDisplayName(parent.source) : getMessageSpeakerName(parent);
       const sanitized = options?.sanitizeContent ? options.sanitizeContent(parent.content) : parent.content;
       const raw = sanitized.replaceAll('\n', ' ');
       const preview = raw.length > REPLY_PREVIEW_LENGTH ? `${raw.slice(0, REPLY_PREVIEW_LENGTH)}…` : raw;
-      replyPrefix = `[↩ ${parentSender}: ${preview}] `;
+      replyPrefix = `[↩ ${parentSender}: ${projectCollectiveHostData(parent, preview)}] `;
     }
   }
 
@@ -162,7 +186,7 @@ export function formatMessage(
   if (options?.truncate && content.length > options.truncate) {
     content = truncateHeadTail(content, options.truncate);
   }
-  return `[${time} ${sender}${crossPostTag}] ${replyPrefix}${content}`;
+  return `[${time} ${sender}${crossPostTag}] ${replyPrefix}${projectCollectiveHostData(msg, content)}`;
 }
 
 /**

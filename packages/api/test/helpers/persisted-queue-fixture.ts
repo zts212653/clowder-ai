@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { InvocationQueue } from '../../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationTracker } from '../../src/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { PersistedQueueDelivery } from '../../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { QueuedMessageCustodyCoordinator } from '../../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../../src/domains/cats/services/agents/invocation/QueueProcessor.js';
+import { InMemoryTurnExecutionStore } from '../../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../../src/domains/cats/services/stores/ports/InvocationRecordStore.js';
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 
@@ -12,6 +14,7 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
   const queue = new InvocationQueue();
   const tracker = new InvocationTracker();
   const records = new InvocationRecordStore();
+  const turns = new InMemoryTurnExecutionStore();
   const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages });
   const starts: { threadId: string; userId: string; invocationId: string }[] = [];
   const completed: Promise<void>[] = [];
@@ -21,6 +24,7 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
     invocationTracker: tracker,
     messageStore: messages,
     queueCustodyCoordinator: coordinator,
+    turnExecutionStore: turns,
     invocationRecordStore: {
       async create(input) {
         return records.create(input as Parameters<InvocationRecordStore['create']>[0]);
@@ -34,17 +38,33 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
     log: { info() {}, warn() {}, error() {} },
     router: {
       async *routeExecution(userId, _content, threadId, _messageId, targets, _intent, options) {
-        const invocationId = String(options?.parentInvocationId);
+        const parentInvocationId = String(options?.parentInvocationId);
+        const invocationId = randomUUID();
         const catId = targets[0]!;
         starts.push({ threadId, userId, invocationId });
         const startedAt = Date.now();
+        turns.createRunning({
+          invocationId,
+          parentInvocationId,
+          threadId,
+          userId,
+          catId,
+          startedAt,
+          executionKind: 'ordinary',
+          causal: {
+            triggerMessageId: _messageId,
+            ...(options?.persistedPromptMessageIds?.length
+              ? { coveredMessageIds: options.persistedPromptMessageIds }
+              : {}),
+          },
+        });
         yield {
           type: 'system_info',
           catId,
           turnInvocationId: invocationId,
           turnExecutionStartedAt: startedAt,
           timestamp: startedAt,
-          extra: { turnExecution: { executionKind: 'ordinary', invocationId, parentInvocationId: invocationId } },
+          extra: { turnExecution: { executionKind: 'ordinary', invocationId, parentInvocationId } },
         };
         const exposed = options?.onPromptMessagesExposed;
         assert.equal(typeof exposed, 'function');
@@ -65,6 +85,12 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
         await new Promise<void>((resolve) => releases.push(resolve));
         // Release the fixture's provider without fabricating a successful work/Task verdict.
         try {
+          if (turns.get(invocationId)?.status === 'running')
+            turns.transitionTerminal(invocationId, {
+              status: 'failed',
+              terminalReason: 'fixture_provider_released',
+              endedAt: Date.now(),
+            });
           yield { type: 'done', catId, invocationId, timestamp: Date.now(), isError: true };
         } finally {
           finish();
@@ -84,7 +110,9 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
       const catId = message?.mentions[0];
       const id = catId && message?.queueCustody?.awakenedInvocationIdByCatId?.[catId];
       if (id) {
-        assert.ok(records.get(id));
+        const turn = turns.get(id);
+        assert.ok(turn);
+        assert.ok(records.get(turn.parentInvocationId));
         return id;
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -95,5 +123,17 @@ export function createPersistedQueueFixture(messages = new MessageStore()) {
     releases.splice(0).forEach((release) => release());
     await Promise.all(completed);
   }
-  return { queue, tracker, records, coordinator, processor, delivery, messages, starts, waitForAwakening, close };
+  return {
+    queue,
+    tracker,
+    records,
+    turns,
+    coordinator,
+    processor,
+    delivery,
+    messages,
+    starts,
+    waitForAwakening,
+    close,
+  };
 }

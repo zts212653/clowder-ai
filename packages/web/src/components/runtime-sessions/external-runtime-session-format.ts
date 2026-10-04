@@ -91,10 +91,41 @@ export function formatRuntimeSessionTitle(
 ): string {
   const title = session.title?.trim();
   if (title) return title;
-  return `${resolveCatName(session.catId)} · ${session.model ?? shortRuntimeId(session.runtimeSessionId)}`;
+  if (session.model) return `${resolveCatName(session.catId)} · ${session.model}`;
+  // No title and no model is a real legal state — say so in human words.
+  // The full runtimeSessionId stays recoverable in the row's 会话标识 details.
+  return `${resolveCatName(session.catId)} · 未命名会话`;
 }
 
-export function shortRuntimeId(id: string): string {
-  if (id.length <= 22) return id;
-  return `${id.slice(0, 11)}…${id.slice(-8)}`;
+/** Human labels for session policy strategies; unknown values stay as stored. */
+const POLICY_STRATEGY_LABELS: Record<string, string> = {
+  handoff: '接力',
+  compress: '压缩',
+  hybrid: '混合',
+};
+
+/** Human labels for session policy execution states; unknown values stay as stored. */
+const POLICY_STATUS_LABELS: Record<string, string> = {
+  active: '生效中',
+  degraded: '降级',
+  unavailable: '不可用',
+};
+
+const CAPABILITY_LABELS: Record<string, string> = {
+  compression_signal: '压缩信号',
+  managed_invocation_boundary: '托管调用边界',
+};
+
+export function formatPolicyStrategy(strategy: string): string {
+  return POLICY_STRATEGY_LABELS[strategy] ?? strategy;
+}
+
+export function formatPolicyStatus(status: string): string {
+  return POLICY_STATUS_LABELS[status] ?? status;
+}
+
+export function formatMissingCapabilities(missing: readonly string[]): string | null {
+  if (missing.length === 0) return null;
+  const labels = missing.map((capability) => CAPABILITY_LABELS[capability] ?? capability);
+  return `缺少：${labels.join('、')}`;
 }

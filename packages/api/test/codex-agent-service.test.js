@@ -2632,12 +2632,16 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     assert.ok(!args.includes('model_provider="custom"'), 'must not set model_provider when no custom URL');
   });
 
-  test('oauth default provider preserves the built-in OpenAI transport', async () => {
+  test('oauth default provider preserves the built-in OpenAI transport (F319 observation off)', async () => {
     const proc = createMockProcess();
     const spawnFn = createMockSpawnFn(proc);
     const service = new CodexAgentService({ l0CompilerFn: fakeL0Compiler, spawnFn, model: 'gpt-5.3-codex' });
 
     const originalTransport = process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
+    // F319: served-model observation (default on) rides HTTPS; this test pins the
+    // pre-F319 transport contract that `off` must restore exactly.
+    const originalObservation = process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION;
+    process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION = 'off';
     try {
       delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
       const promise = collect(service.invoke('test oauth transport'));
@@ -2664,6 +2668,8 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     } finally {
       if (originalTransport === undefined) delete process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT;
       else process.env.CAT_CAFE_CODEX_OAUTH_TRANSPORT = originalTransport;
+      if (originalObservation === undefined) delete process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION;
+      else process.env.CAT_CAFE_CODEX_SERVED_MODEL_OBSERVATION = originalObservation;
     }
   });
 
@@ -3343,7 +3349,10 @@ describe('CodexAgentService Tests (CLI mode)', { concurrency: false }, () => {
     const spawnOpts = spawnFn.mock.calls[0].arguments[2];
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.equal(spawnOpts.env.OPENAI_API_KEY, 'sk-test-api-mode');
-    assert.ok(!args.includes('model_provider="openai_https"'), 'api_key mode must not force OpenAI OAuth provider');
+    // F319 B.1: the observed HTTPS provider follows the wire (no custom base
+    // URL), not the auth label. The on/off transport contract for api_key
+    // sessions is pinned in codex-agent-service-f319-served-model.test.js.
+    assert.ok(!args.includes('model_provider="custom"'), 'api_key mode without a base URL is not the custom provider');
   });
 
   test('callbackEnv auth mode overrides process default when launching codex child env', async () => {

@@ -1,3 +1,5 @@
+import { compareClosedSelectors, deriveClosedSelectors } from './tool-governance-selectors.js';
+import { normalizeMcpInputSchema } from './tool-governance-snapshot.js';
 import type {
   McpRuntimeProfile,
   McpSchemaDeliveryPolicy,
@@ -69,6 +71,16 @@ export function compareToolRegistries(
     addedNames: setDelta(beforeNames, afterNames),
     removedNames: setDelta(afterNames, beforeNames),
     resourceActionChanges,
+    closedSelectorChanges: compareClosedSelectors(
+      before.map((d) => ({
+        name: d.name,
+        closedSelectors: deriveClosedSelectors(d, normalizeMcpInputSchema(d.inputSchema)),
+      })),
+      after.map((d) => ({
+        name: d.name,
+        closedSelectors: deriveClosedSelectors(d, normalizeMcpInputSchema(d.inputSchema)),
+      })),
+    ),
     profileChanges,
     schemaDeliveryChanges,
   };

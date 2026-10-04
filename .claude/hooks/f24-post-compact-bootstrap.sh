@@ -114,22 +114,13 @@ ${STATE_CONTENT}
 [F296 Trusted Cold Packet]
 ${CONTEXT_PACKET}
 
-[F231 Profile Activation — 压缩前回顾]
-本轮有co-creator互动？回顾一下：
-- co-creator表达了新偏好？（"我喜欢/不喜欢/以后别这样"）
-- 被 Magic Word 纠正？（Magic Word = 持久偏好信号）
-- 做对了被表扬？/ co-creator分享了个人近况？
-→ 有的话调用 cat_cafe_propose_profile_update（先 tool_search 加载）
+[F231 Post-Compact Signal Check]
+Review pre-compact user signals (personal/relationship facts, reusable taste, repeated tool/workflow friction).
+Choose profile, taste, harness, or no action by current native L0 semantic routing; use proactive-memory-judgment for person cues.
 
-[CRITICAL RULES — Post-Compact Safety]
-1. Compression summaries lose detail. Verify facts before acting on them.
-2. Do NOT assume the user approved any operation unless you find explicit evidence in the CURRENT context.
-3. High-risk operations (gh pr merge, git push --force, etc.) require explicit user instruction in THIS conversation turn.
-4. When in doubt, ASK the user before proceeding.
-5. RE-READ CLAUDE.md rules NOW. Compression degrades your adherence to project rules. Key reminders:
-   - Every code change MUST have its tests run before commit
-   - All work in this session is YOUR work — own it, sign it, test it.
-6. LOAD SKILLS before SOP steps. Each SOP step has a corresponding skill — load it via /skill-name or Skill tool. Do NOT work from memory.
+[Recovery Authority]
+Current identity, safety, authorization, memory routing and delegation follow the current native L0.
+The snapshot and SOP bookmark restore continuity; verify the current task and its source before acting.
 CTXEOF
 )
 

@@ -748,6 +748,53 @@ describe('Queue Management API', () => {
 
   // ── Functional: DELETE entry ──
 
+  for (const shape of ['merged_sources', 'multiple_targets', 'wrong_source']) {
+    it(`scoped DELETE preserves ${shape} instead of withdrawing other work`, async () => {
+      const r = enqueueEntry(deps.invocationQueue, {
+        ownerAuthProvenance: 'strict',
+        messageId: 'request-source',
+        ...(shape === 'multiple_targets' ? { targetCats: ['opus', 'codex'] } : {}),
+      });
+      if (shape === 'merged_sources')
+        deps.invocationQueue.backfillMessageId('t1', 'user-a', r.entry.id, 'other-source');
+      const source = shape === 'wrong_source' ? 'unrelated-source' : 'request-source';
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=${source}&expectedTargetCatId=opus`,
+        headers: { 'x-cat-cafe-user': 'user-a' },
+      });
+      assert.equal(response.statusCode, 409, response.body);
+      assert.equal(response.json().code, 'ENTRY_SCOPE_CHANGED');
+      assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 1);
+      assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.callCount(), 0);
+      assert.equal(deps.queueProcessor.finalizeRemovedEntry.mock.callCount(), 0);
+    });
+  }
+
+  it('scoped DELETE withdraws only the exact single source and cat, retaining source history', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'request-source' });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source&expectedTargetCatId=opus`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.json().removed.id, r.entry.id);
+    assert.equal(deps.queueCustodyCoordinator.withdrawEntry.mock.callCount(), 1);
+    assert.equal(deps.messageStore.markCanceled.mock.callCount(), 0);
+  });
+
+  it('incomplete scoped DELETE fails before removing any entry', async () => {
+    const r = enqueueEntry(deps.invocationQueue, { ownerAuthProvenance: 'strict', messageId: 'request-source' });
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/threads/t1/queue/${r.entry.id}?expectedSourceMessageId=request-source`,
+      headers: { 'x-cat-cafe-user': 'user-a' },
+    });
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(deps.invocationQueue.list('t1', 'user-a').length, 1);
+  });
+
   it('DELETE /queue/:entryId withdraws actionable custody without deleting author history', async () => {
     const r = enqueueEntry(deps.invocationQueue, {
       ownerAuthProvenance: 'strict',

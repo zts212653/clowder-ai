@@ -5,7 +5,7 @@ export const { SessionChainStore } = await import('../../dist/domains/cats/servi
 const { InMemoryContextEpochStore } = await import(
   '../../dist/domains/cats/services/stores/ports/ContextEpochStore.js'
 );
-const { ContextEpochOwner } = await import('../../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { ContextEpochOwner } = await import('../../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { logger } = await import('../../dist/infrastructure/logger.js');
 
 export const SERIAL_DEGRADED_MESSAGE =

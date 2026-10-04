@@ -5,7 +5,7 @@ import {
   projectDeliveredWriteOpportunityRecord,
 } from '@cat-cafe/shared';
 import { supportsWriteOpportunityPresentationHandshake } from '../../cats/services/agents/invocation/context-continuity.js';
-import type { ContextPresentationEnvelope } from '../../cats/services/session/context-presentation.js';
+import type { ContextPresentationEnvelope } from '../../cats/services/session/context/context-presentation.js';
 import type { ContextContinuityHandshake } from '../../cats/services/types.js';
 import {
   AsrPersonMemoryContractTrial,

@@ -47,15 +47,17 @@ export function EvolutionPreparationChoice({
     <div className="evolution-preparation-choice">
       {historical && <p className="evolution-preparation-alert">历史准备选择 · 不代表本轮当前决定</p>}
       <dl className="evolution-preparation-facts">
-        <div>
-          <dt>猫的建议</dt>
-          <dd>{item.recommendation?.summary ?? '尚未提交建议'}</dd>
-        </div>
         {item.recommendation && (
-          <div>
-            <dt>建议依据</dt>
-            <dd>{item.recommendation.reason}</dd>
-          </div>
+          <>
+            <div>
+              <dt>猫的建议</dt>
+              <dd>{item.recommendation.summary}</dd>
+            </div>
+            <div>
+              <dt>建议依据</dt>
+              <dd>{item.recommendation.reason}</dd>
+            </div>
+          </>
         )}
         <div>
           <dt>{historical ? '当时的选择' : '本轮决定'}</dt>

@@ -41,7 +41,7 @@ test('F153: PromptCaptureStore captures and reads back', async () => {
   const capture = makeCapture();
   store.captureSync(capture);
 
-  const result = store.read(capture.captureId);
+  const result = await store.read(capture.captureId);
   assert.ok(result);
   assert.equal(result.catId, 'opus');
   assert.equal(result.effectivePrompt, capture.effectivePrompt);
@@ -53,7 +53,7 @@ test('F153: read returns null for missing capture', async () => {
   const dir = join(testDir, 'missing');
   const store = new PromptCaptureStore({ baseDir: dir });
 
-  const result = store.read('nonexistent');
+  const result = await store.read('nonexistent');
   assert.equal(result, null);
 });
 
@@ -66,7 +66,7 @@ test('F153: listByInvocation filters correctly', async () => {
   store.captureSync(makeCapture({ invocationId: 'inv-B' }));
   store.captureSync(makeCapture({ invocationId: 'inv-A' }));
 
-  const results = store.listByInvocation('inv-A');
+  const results = await store.listByInvocation('inv-A');
   assert.equal(results.length, 2);
 });
 
@@ -79,21 +79,21 @@ test('F153: listByThread filters correctly', async () => {
   store.captureSync(makeCapture({ threadId: 'thread-2' }));
   store.captureSync(makeCapture({ threadId: 'thread-1' }));
 
-  const results = store.listByThread('thread-1');
+  const results = await store.listByThread('thread-1');
   assert.equal(results.length, 2);
 });
 
 test('F153: prune removes expired entries', async () => {
   const { PromptCaptureStore } = await import('../dist/infrastructure/debug/prompt-capture-store.js');
   const dir = join(testDir, 'prune');
-  const store = new PromptCaptureStore({ baseDir: dir, ttlMs: 100 });
+  const store = new PromptCaptureStore({ baseDir: dir, ttlMs: 10_000 });
 
-  store.captureSync(makeCapture({ capturedAt: Date.now() - 5000 }));
+  store.captureSync(makeCapture({ capturedAt: Date.now() - 20_000 }));
   store.captureSync(makeCapture({ capturedAt: Date.now() }));
 
-  const removed = store.prune();
+  const removed = await store.prune();
   assert.equal(removed, 1);
-  assert.equal(store.stats().entries, 1);
+  assert.equal((await store.stats()).entries, 1);
 });
 
 test('F153: prune enforces maxEntries', async () => {
@@ -105,8 +105,8 @@ test('F153: prune enforces maxEntries', async () => {
     store.captureSync(makeCapture());
   }
 
-  store.prune();
-  assert.ok(store.stats().entries <= 3);
+  await store.prune();
+  assert.ok((await store.stats()).entries <= 3);
 });
 
 test('F153: gzip compression actually compresses', async () => {
@@ -166,10 +166,10 @@ test('F153: read returns null for cross-user access', async () => {
   const capture = makeCapture({ userId: 'owner-123' });
   store.captureSync(capture);
 
-  const resultOwner = store.read(capture.captureId, 'owner-123');
+  const resultOwner = await store.read(capture.captureId, 'owner-123');
   assert.ok(resultOwner, 'Owner should be able to read their own capture');
 
-  const resultOther = store.read(capture.captureId, 'other-456');
+  const resultOther = await store.read(capture.captureId, 'other-456');
   assert.equal(resultOther, null, 'Other user should not be able to read capture');
 });
 
@@ -182,10 +182,10 @@ test('F153: pre-fix captures without userId are denied (fail-closed)', async () 
   delete capture.userId;
   store.captureSync(capture);
 
-  const resultNoFilter = store.read(capture.captureId);
+  const resultNoFilter = await store.read(capture.captureId);
   assert.ok(resultNoFilter, 'Read without userId filter should succeed');
 
-  const resultWithUser = store.read(capture.captureId, 'any-user');
+  const resultWithUser = await store.read(capture.captureId, 'any-user');
   assert.equal(resultWithUser, null, 'Pre-fix capture without userId must be denied when userId filter is set');
 });
 
@@ -198,10 +198,10 @@ test('F153: listByThread filters by userId', async () => {
   store.captureSync(makeCapture({ threadId: 'shared-thread', userId: 'bob' }));
   store.captureSync(makeCapture({ threadId: 'shared-thread', userId: 'alice' }));
 
-  const aliceResults = store.listByThread('shared-thread', 20, 'alice');
+  const aliceResults = await store.listByThread('shared-thread', 20, 'alice');
   assert.equal(aliceResults.length, 2, 'Alice should only see her captures');
 
-  const bobResults = store.listByThread('shared-thread', 20, 'bob');
+  const bobResults = await store.listByThread('shared-thread', 20, 'bob');
   assert.equal(bobResults.length, 1, 'Bob should only see his captures');
 });
 
@@ -238,7 +238,7 @@ test('AC-G10: PromptCapture without native L0 fields round-trips (backward compa
   // totalTokenEstimate / captureDiagnostics. Must still load cleanly.
   const capture = makeCapture();
   store.captureSync(capture);
-  const result = store.read(capture.captureId);
+  const result = await store.read(capture.captureId);
   assert.ok(result);
   assert.equal(result.nativeSystemPrompt, undefined, 'legacy capture must not invent native fields');
   assert.equal(result.totalTokenEstimate, undefined);
@@ -257,7 +257,7 @@ test('AC-G10: PromptCapture with native L0 fields persists + reads back', async 
     totalTokenEstimate: 1234 + 12, // nativeEst + msg tokenEstimate from makeCapture
   });
   store.captureSync(capture);
-  const result = store.read(capture.captureId);
+  const result = await store.read(capture.captureId);
   assert.ok(result);
   assert.equal(result.nativeSystemPrompt, 'COMPILED-L0-IDENTITY-RULES-GO-HERE');
   assert.equal(result.nativeSystemPromptSource, 'f203-l0');
@@ -296,10 +296,10 @@ test('AC-G10: capture bridge stamps nativeSystemPrompt when nativeL0Provider=tru
     let captures = [];
     for (let i = 0; i < 50 && captures.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 20));
-      captures = _store.listByInvocation(invocationId);
+      captures = await _store.listByInvocation(invocationId);
     }
     assert.equal(captures.length, 1, 'capture must be persisted within poll window');
-    const detail = _store.read(captures[0].captureId);
+    const detail = await _store.read(captures[0].captureId);
     assert.ok(detail);
     assert.equal(detail.nativeSystemPrompt, 'TEST-COMPILED-L0');
     assert.equal(detail.nativeSystemPromptSource, 'f203-l0');
@@ -339,10 +339,10 @@ test('AC-G10: capture bridge records captureDiagnostics when native L0 fetcher r
     let captures = [];
     for (let i = 0; i < 50 && captures.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 20));
-      captures = _store.listByInvocation(invocationId);
+      captures = await _store.listByInvocation(invocationId);
     }
     assert.equal(captures.length, 1, 'capture must be persisted even when native fetch fails');
-    const detail = _store.read(captures[0].captureId);
+    const detail = await _store.read(captures[0].captureId);
     assert.ok(detail);
     assert.equal(detail.nativeSystemPrompt, undefined, 'native fetch failure must not invent prompt');
     assert.ok(detail.captureDiagnostics);
@@ -378,10 +378,10 @@ test('AC-G10: nativeL0Provider=false (non-F203 provider) — native fields stay 
     let captures = [];
     for (let i = 0; i < 50 && captures.length === 0; i++) {
       await new Promise((r) => setTimeout(r, 20));
-      captures = _store.listByInvocation(invocationId);
+      captures = await _store.listByInvocation(invocationId);
     }
     assert.equal(captures.length, 1);
-    const detail = _store.read(captures[0].captureId);
+    const detail = await _store.read(captures[0].captureId);
     assert.ok(detail);
     assert.equal(detail.nativeSystemPrompt, undefined);
     assert.equal(detail.nativeSystemPromptSource, undefined);

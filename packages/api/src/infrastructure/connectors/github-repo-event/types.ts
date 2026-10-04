@@ -23,6 +23,7 @@ export interface RepoInboxSignal {
 export interface GitHubRepoInboxConfig {
   readonly webhookSecret: string;
   readonly repoAllowlist: string[];
+  /** Startup-required compatibility fallback; canonical registered-repo owner is CommunityRepoConfig.guardCatId. */
   readonly inboxCatId: string;
   readonly defaultUserId: string;
 }

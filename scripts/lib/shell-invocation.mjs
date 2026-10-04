@@ -190,7 +190,10 @@ function scriptFileInvocation(operands, stage, cwd) {
  */
 function inlineExecution({ script, name, stage, depth, cwd, nested, complete }) {
   const stageInvocation = invocation(name, [], stage, cwd);
-  if (!script || unreadableProgram(script)) {
+  // An unknown operand does not hide a known executable: `kill "$PID"`
+  // still identifies a signal operation. The nested parser decides which
+  // program names it can read, including a wholly unknown `$COMMAND`.
+  if (!script || script === SUBSTITUTION) {
     return { invocation: stageInvocation, nested, complete: false };
   }
   const result = nestedFrom(unquote(script) ?? '', depth, cwd);

@@ -8,6 +8,8 @@ import { currentEvalDueAt } from './eval-lifecycle-display';
 import { HubEvalFrictionSections } from './HubEvalFrictionSections';
 import { HubEvalLifecycleSummary } from './HubEvalLifecycleSummary';
 import { type EvalHubItem, type EvalMetricGlossary, VERDICT_LABELS } from './HubEvalTypes';
+import { captureFileCardOrigin } from './workbench/file-card-origin';
+import { useFileCardReturn } from './workbench/useFileCardReturn';
 import { invocationIdFromEvidenceRef } from './workspace/trajectory/invocation-evidence-ref';
 import {
   findEvalWorkspaceEvent,
@@ -37,6 +39,7 @@ export function HubEvalVerdictCard({
   const setWorkspaceOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
   const pathname = usePathname();
   const router = useRouter();
+  const originRef = useFileCardReturn<HTMLElement>(`eval:${item.id}`, currentThreadId);
   const openWorkspaceFile = useCallback(
     (path: string) => {
       const shouldReturnToCurrentThread =
@@ -51,7 +54,13 @@ export function HubEvalVerdictCard({
       if (projectPath) {
         setCurrentProject(projectPath);
       }
-      setWorkspaceOpenFile(path, null, worktreeId ?? null);
+      setWorkspaceOpenFile(
+        path,
+        null,
+        worktreeId ?? null,
+        pathname?.startsWith('/settings') && routeTarget === '/' ? 'default' : currentThreadId,
+        captureFileCardOrigin(originRef.current, `eval:${item.id}`, currentThreadId, 'eval'),
+      );
       if (pathname?.startsWith('/settings')) {
         router.push(routeTarget);
       }
@@ -66,6 +75,8 @@ export function HubEvalVerdictCard({
       setCurrentProject,
       setWorkspaceOpenFile,
       worktreeId,
+      item.id,
+      originRef,
     ],
   );
   const openTrajectoryEvidence = useCallback(
@@ -93,7 +104,12 @@ export function HubEvalVerdictCard({
   );
 
   return (
-    <section className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={item.id} tabIndex={-1}>
+    <section
+      ref={originRef}
+      className="rounded-lg bg-cafe-surface-elevated p-4"
+      data-eval-event-id={item.id}
+      tabIndex={-1}
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-cafe-muted">

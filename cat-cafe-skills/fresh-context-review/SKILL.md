@@ -1,6 +1,6 @@
 ---
 name: fresh-context-review
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "2026-09-23：同族复核对象改为按 roster 选在役个体，只改猫间路由；未新增用户可直接发起的操作。"
 description: >
   Author-triggered fresh-context scan of PR diff before formal review.
   Finding generator, NOT approval authority.
@@ -94,7 +94,7 @@ Plan: `feature-specs/YYYY-MM-DD-xxx.md`
 ```
 
 优先跨 family（Ragdoll写的 → @ Maine Coon扫）。
-同 family 不同个体也可（opus 写的 → @ sonnet 扫）。
+同 family 不同个体也可（作者以外的同族在役个体，以 runtime roster 为准）。
 
 **方式 B: Author 自己的新 session（降级方案）**
 

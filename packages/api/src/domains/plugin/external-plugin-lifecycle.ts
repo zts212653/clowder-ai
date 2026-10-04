@@ -1,3 +1,4 @@
+import { hasRetainedDesktopLoss } from './desktop-window-runtime/desktop-loss.js';
 import {
   type ExternalPluginLifecycleServiceOptions,
   PluginLifecycleError,
@@ -14,6 +15,13 @@ export * from './external-plugin-lifecycle-types.js';
 export interface ExternalPluginRestartRecovery {
   readonly recoveredInstances: number;
   readonly resumeRequested: number;
+}
+
+export interface ExternalPluginRestartRecoveryOptions {
+  /** Holds an instance's resume until the returned gate settles; undefined resumes it
+   * at once. A held instance takes no runtime authority while waiting, and a gate that
+   * never opens or fails leaves its enabled intent for the next boot. */
+  readonly resumeGate?: (instance: PluginInstanceRecord) => PromiseLike<unknown> | undefined;
 }
 
 class InstanceOperationQueue {
@@ -99,9 +107,11 @@ export class ExternalPluginLifecycleService {
     return this.queue.run(instanceId, async () => {
       const current = await this.readCurrent(instanceId);
       assertRevision(current, expectedRevision);
+      const retainedCompanionLoss = current.pluginId === 'official.companion' && hasRetainedDesktopLoss(current);
       if (
         current.activationState !== 'error' &&
-        !(current.activationState === 'enabled' && current.runtimeState === 'crashed')
+        !(current.activationState === 'enabled' && current.runtimeState === 'crashed') &&
+        !retainedCompanionLoss
       ) {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'repair is not valid from the current plugin state');
       }
@@ -143,6 +153,7 @@ export class ExternalPluginLifecycleService {
       if (!shouldResume && !['stopped', 'crashed'].includes(initial.runtimeState)) {
         throw new PluginLifecycleError('INVALID_TRANSITION', 'dormant plugin maintenance requires a stopped runtime');
       }
+      await input.preflight?.();
       let stopped = initial;
       if (!['stopped', 'crashed'].includes(initial.runtimeState)) {
         await this.stopOrFail(input.instanceId, initial.lifecycleRevision, input.stopReason);
@@ -184,7 +195,9 @@ export class ExternalPluginLifecycleService {
     });
   }
 
-  async recoverAfterRestart(): Promise<ExternalPluginRestartRecovery> {
+  async recoverAfterRestart(
+    options: ExternalPluginRestartRecoveryOptions = {},
+  ): Promise<ExternalPluginRestartRecovery> {
     const recovery = await this.options.store.transaction((transaction) => {
       let recoveredInstances = 0;
       for (const instance of transaction.instances.list()) {
@@ -193,7 +206,7 @@ export class ExternalPluginLifecycleService {
         transaction.instances.put(recovered);
         recoveredInstances += 1;
       }
-      const resumableInstanceIds = transaction.instances
+      const resumable = transaction.instances
         .list()
         .filter(
           (instance) =>
@@ -202,16 +215,18 @@ export class ExternalPluginLifecycleService {
             instance.configReadiness === 'ready' &&
             instance.activationState === 'enabled' &&
             instance.runtimeState === 'stopped',
-        )
-        .map((instance) => instance.pluginInstanceId);
-      return { recoveredInstances, resumableInstanceIds };
+        );
+      return { recoveredInstances, resumable };
     });
-    for (const instanceId of recovery.resumableInstanceIds) {
-      void this.resumeAfterRestart(instanceId).catch(() => undefined);
+    for (const instance of recovery.resumable) {
+      const resume = () => this.resumeAfterRestart(instance.pluginInstanceId).catch(() => undefined);
+      const gate = options.resumeGate?.(instance);
+      if (gate === undefined) void resume();
+      else void Promise.resolve(gate).then(resume, () => undefined);
     }
     return {
       recoveredInstances: recovery.recoveredInstances,
-      resumeRequested: recovery.resumableInstanceIds.length,
+      resumeRequested: recovery.resumable.length,
     };
   }
 

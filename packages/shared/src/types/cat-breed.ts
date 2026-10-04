@@ -49,6 +49,8 @@ export interface CatVariant {
   readonly id: string; // 'opus-4.6', 'codex-default'
   /** Override breed-level catId to register as an independent cat (F32-b) */
   readonly catId?: string;
+  /** Independent relationship persona; breed membership must not migrate a primer. */
+  readonly relationshipKey?: string;
   /** Override breed-level name for this independent member */
   readonly name?: string;
   /** Override breed-level displayName (F32-b) */
@@ -259,7 +261,7 @@ export interface CatCafeConfigV1 {
 export interface CoCreatorConfig {
   /** Primary display name (e.g. "You") */
   readonly name: string;
-  /** Alternative names cats may use (e.g. ["L.S.", "Lysander"]) */
+  /** Alternative names cats may use (e.g. ["L.S.", "you"]) */
   readonly aliases: readonly string[];
   /** Line-start mention patterns for routing detection (e.g. ["@co-creator", "@co-creator"]) */
   readonly mentionPatterns: readonly string[];

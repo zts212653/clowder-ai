@@ -11,6 +11,7 @@ const paths = {
   compare: 'M3 7h16M15 3l4 4-4 4M21 17H5M9 13l-4 4 4 4',
   work: 'M5 4h14v12H9l-4 4zM8 8h8M8 12h5',
   focus: 'M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5M8 12h8M12 8v8',
+  expand: 'M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5M3 3l6 6M21 3l-6 6M21 21l-6-6M3 21l6-6',
   plus: 'M5 12h14M12 5v14',
   minus: 'M5 12h14',
   chevron: 'M8 4l8 8-8 8',

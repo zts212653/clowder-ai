@@ -24,6 +24,8 @@ interface ReplacementAdmissionDeps {
   resolveVerifiedPredicate(input: ActionSuccessorAdmissionInput): Promise<{
     terminalPredicate: CanonicalActionTerminalPredicate;
     freshnessEvidenceRef: string;
+    /** F167 × F322: delegate authority evidence for lease auditability. */
+    delegateEvidenceRef?: string;
   }>;
   admitted(
     outcome: 'replaced' | 'reattached',
@@ -109,7 +111,7 @@ export async function admitActionSuccessorReplacement(
     return { admit: false, outcome: 'return_proof_required', lease: current };
   }
   if (returnedReplacement.kind === 'ordinary') assertOrdinaryReplacementRoute(current, input, claimOrigin);
-  const { terminalPredicate, freshnessEvidenceRef } = await deps.resolveVerifiedPredicate(input);
+  const { terminalPredicate, freshnessEvidenceRef, delegateEvidenceRef } = await deps.resolveVerifiedPredicate(input);
   const replacementInput = {
     expectedGeneration: replacement.expectedGeneration,
     holderCatIds: input.holderCatIds,
@@ -117,6 +119,7 @@ export async function admitActionSuccessorReplacement(
     dispatchId: input.dispatchId,
     terminalPredicate,
     evidenceRef: input.evidenceRef,
+    ...(delegateEvidenceRef ? { delegateEvidenceRef } : {}),
     now: input.now,
   };
   const result = await deps.leaseStore.replace(

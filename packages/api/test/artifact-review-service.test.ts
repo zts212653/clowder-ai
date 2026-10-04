@@ -48,6 +48,26 @@ function command(view: ArtifactReviewView, action: ArtifactReviewAction): Artifa
   };
 }
 
+test('a human public reopen keeps its original decision and single-outbox semantics on an unbound legacy review', async (t) => {
+  const f = await fixture(t);
+  const initial = await f.service.prepare(f.prepareRequest, reviewHuman);
+  const decided = await f.service.act(
+    command(initial, { kind: 'submit_feedback', explanation: '请继续调整。' }),
+    reviewHuman,
+  );
+  const reopen = command(decided.view, { kind: 'reopen', explanation: '重新核对这一轮。' });
+  const result = await f.service.act(reopen, reviewHuman);
+  assert.equal(result.view.review.rounds[0]?.state, 'draft');
+  assert.equal(result.view.review.rounds[0]?.decision, undefined);
+  assert.equal(result.view.modificationRequest, undefined);
+  const intent = f.store.returns.get(result.receipt.receiptRef);
+  assert.equal(intent?.kind, 'reopen');
+  assert.equal(intent?.requestId, undefined);
+  const count = f.store.returns.pending().length;
+  assert.equal((await f.service.act(reopen, reviewHuman)).receipt.receiptRef, result.receipt.receiptRef);
+  assert.equal(f.store.returns.pending().length, count);
+});
+
 async function annotate(
   service: ArtifactReviewService,
   view: ArtifactReviewView,

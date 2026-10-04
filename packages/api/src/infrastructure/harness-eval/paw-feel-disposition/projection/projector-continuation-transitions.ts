@@ -5,6 +5,19 @@ function fail(message: string): never {
   throw new Error(`paw-feel projection: ${message}`);
 }
 
+function activeRepairIdentity(projection: PawFeelDispositionProjection) {
+  if (!projection.ownerCatId || !projection.taskId || !projection.actionLeaseRef || !projection.custodyEvidenceRef) {
+    return undefined;
+  }
+  return {
+    ownerCatId: projection.ownerCatId,
+    taskId: projection.taskId,
+    actionLeaseRef: projection.actionLeaseRef,
+    custodyEvidenceRef: projection.custodyEvidenceRef,
+    ...(projection.directRepairBinding ? { directRepairBinding: projection.directRepairBinding } : {}),
+  };
+}
+
 export function assertBlockedResumeCondition(
   projection: PawFeelDispositionProjection,
   event: Extract<PawFeelDispositionEvent, { type: 'blocked' }>,
@@ -58,5 +71,24 @@ export function transitionBlockerReopened(
     fail('legacy blocker reopen does not match the blocking sequence');
   }
   const { blocker: _blocker, ...reopened } = projection;
-  return { ...reopened, state: 'seen' };
+  return { ...reopened, state: activeRepairIdentity(projection) ? 'fix' : 'seen' };
+}
+
+export function preserveActiveRepairIdentity(projection: PawFeelDispositionProjection) {
+  if (projection.state !== 'fix' && projection.state !== 'blocked') return {};
+  const identity = activeRepairIdentity(projection);
+  if (!identity) {
+    const hasPartialIdentity = [
+      projection.ownerCatId,
+      projection.taskId,
+      projection.actionLeaseRef,
+      projection.custodyEvidenceRef,
+      projection.directRepairBinding,
+    ].some(Boolean);
+    if (projection.state === 'fix' || hasPartialIdentity) {
+      fail(`${projection.state} state has an incomplete active repair identity`);
+    }
+    return {};
+  }
+  return identity;
 }

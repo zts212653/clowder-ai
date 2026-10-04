@@ -1,4 +1,8 @@
-import { type ProducerAttentionReevaluationLinkV1, producerAttentionReevaluationLinkV1Schema } from '@cat-cafe/shared';
+import {
+  DEVELOPMENT_RETURN_TEMPLATE_ID,
+  type ProducerAttentionReevaluationLinkV1,
+  producerAttentionReevaluationLinkV1Schema,
+} from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import {
   ENTRUSTED_WORK_REEVALUATION_TEMPLATE_ID,
@@ -74,6 +78,9 @@ export function registerScheduleTaskCreateRoute(app: FastifyInstance, opts: Sche
     if (!body.templateId) {
       reply.status(400);
       return { error: 'Missing templateId' };
+    }
+    if (body.templateId === DEVELOPMENT_RETURN_TEMPLATE_ID) {
+      return reply.code(409).send({ error: 'Use the authenticated development-return owner action' });
     }
     if (isF255ConfigOnlyTemplate(body.templateId, packTemplateStore)) {
       reply.status(409);

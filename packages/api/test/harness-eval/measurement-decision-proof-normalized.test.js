@@ -76,7 +76,8 @@ describe('F267 normalized measurement decision projection', () => {
     assert.equal(normalized.evaluationCohortRef.ownerStateRef, `measurement-cohort:${result.cohort.sha256}`);
     for (const ref of Object.values(normalized).filter((value) => value?.ownerStateRef)) {
       assert.ok(!ref.ownerStateRef.includes('/'), `${ref.ownerStateRef} is still a repository path`);
-      assert.match(ref.ownerStateRef, /^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/);
+      // biome-ignore lint/complexity/noUselessEscapeInRegex: Mirror the portable owner-ref contract used by MCP.
+      assert.match(ref.ownerStateRef, /^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/);
     }
 
     // `verified` is about the evidence chain. The measurement verdict is carried through unchanged,

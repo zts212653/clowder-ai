@@ -2,10 +2,15 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   type CollectivePairingIntent,
   type CollectiveSourceIdentity,
+  type CollectiveWorkHostAdmissionRequest,
+  type CollectiveWorkProjection,
   collectivePairingIntentSchema,
 } from '@cat-cafe/shared';
-
+import { type StandingInterestInput, setStandingInterest } from './attention-custody.js';
+import { type ChannelListeningInput, setChannelListening } from './channel-listening-custody.js';
+import type { CollectiveConnectorOptions } from './connector-options.js';
 import { type ConnectorSyncHooks, ConnectorSynchronization } from './connector-synchronization.js';
+import { desiredParticipationSchema } from './host-route-state.js';
 import { prepareReplyOperation, queueVerifiedAgentMessage, submitReplyOperation } from './outbox-custody.js';
 import { participationDeclaration, requireParticipation } from './participation-custody.js';
 import { ConnectorPersistence } from './persistence.js';
@@ -27,19 +32,46 @@ import {
   type HostRouteConfig,
   type SetHostRouteInput,
   type VerifiedAgent,
+  type WorkResultArtifactSnapshot,
 } from './state.js';
-
-export interface CollectiveConnectorOptions {
-  readonly dataDirectory: string;
-  readonly verifyAgent: (agent: VerifiedAgent) => Promise<boolean>;
-  readonly fetchImpl?: typeof fetch;
-  readonly now?: () => number;
-}
+import { type CollectiveWorkAcceptanceInput, ConnectorWorkAcceptanceCustody } from './work-acceptance-custody.js';
+import { type CollectiveWorkContinuationInput, ConnectorWorkContinuationCustody } from './work-continuation-custody.js';
+import { ConnectorWorkPolicyCustody, workCoordinates } from './work-policy-custody.js';
+import {
+  type CollectiveProgressPurpose,
+  prepareProgressOperation,
+  submitProgressOperation,
+} from './work-progress-custody.js';
+import { proposeVerifiedCollectiveWork } from './work-proposal.js';
+import {
+  prepareWorkReconsideration,
+  type WorkReconsiderationAuthorityScope,
+  type WorkReconsiderationInput,
+} from './work-reconsideration.js';
+import {
+  type CollectiveWorkResultPublication,
+  type CollectiveWorkResultPublicationCandidate,
+  projectWorkResultPublications,
+} from './work-result-publication.js';
 
 export type { ConnectorSyncHooks } from './connector-synchronization.js';
 
+export interface AssignedWorkAuthorityScope {
+  readonly connection: ConnectorProjection;
+  readonly hostRoute?: HostRouteConfig;
+  readonly inbox: readonly ConnectorInboxItem[];
+  readonly work: CollectiveWorkProjection;
+  readonly resultPublications: readonly CollectiveWorkResultPublication[];
+  readonly recordHostAdmission: (
+    input: Omit<CollectiveWorkHostAdmissionRequest, 'serviceInstanceId' | 'collectiveId' | 'connectionId'>,
+  ) => Promise<void>;
+}
+
 export class CollectiveConnector {
   private readonly synchronization: ConnectorSynchronization;
+  private readonly workPolicy: ConnectorWorkPolicyCustody;
+  private readonly workAcceptance: ConnectorWorkAcceptanceCustody;
+  private readonly workContinuation: ConnectorWorkContinuationCustody;
   private readonly authorityTails = new Map<string, Promise<void>>();
 
   private constructor(
@@ -48,7 +80,18 @@ export class CollectiveConnector {
     private readonly verifyAgent: (agent: VerifiedAgent) => Promise<boolean>,
     private readonly now: () => number,
   ) {
-    this.synchronization = new ConnectorSynchronization(persistence, service, now);
+    this.synchronization = new ConnectorSynchronization(persistence, service, now, (source) =>
+      this.workAcceptance.resolveGrant(source),
+    );
+    this.workPolicy = new ConnectorWorkPolicyCustody(persistence, service.workAuthority, now);
+    this.workAcceptance = new ConnectorWorkAcceptanceCustody(persistence, service, this.workPolicy, verifyAgent, now);
+    this.workContinuation = new ConnectorWorkContinuationCustody(
+      persistence,
+      service,
+      this.workPolicy,
+      verifyAgent,
+      now,
+    );
   }
 
   static async open(options: CollectiveConnectorOptions): Promise<CollectiveConnector> {
@@ -64,38 +107,54 @@ export class CollectiveConnector {
     serviceUrl: string;
     intent: CollectivePairingIntent;
     endpointLabel: string;
+    initialExcludedCatIds?: readonly string[];
   }): Promise<ConnectorProjection> {
     const intent = collectivePairingIntentSchema.parse(input.intent);
     const serviceUrl = new URL(input.serviceUrl).origin;
-    const metadata = await this.service.readMetadata(serviceUrl);
-    if (metadata.serviceInstanceId !== intent.serviceInstanceId) {
-      throw new Error('Pairing intent belongs to another Collective Service');
-    }
-    const paired = await this.service.exchangePairing(serviceUrl, intent, input.endpointLabel);
-    if (paired.serviceInstanceId !== intent.serviceInstanceId || paired.collectiveId !== intent.collectiveId) {
-      throw new Error('Pairing response coordinates do not match the intent');
-    }
-    const connection: ConnectorConnectionState = {
-      serviceUrl,
-      clientBuildId: metadata.clientBuildId,
-      serviceInstanceId: paired.serviceInstanceId,
-      collectiveId: paired.collectiveId,
-      connectionId: paired.connectionId,
-      endpointId: paired.endpointId,
-      authorizedHumanId: paired.authorizedHumanId,
-      endpointLabel: input.endpointLabel.trim(),
-      endpointCredential: paired.endpointCredential,
-      authorityStatus: 'connected',
-      liveStatus: 'online',
-      lastAckedSequence: 0,
-      outbox: [],
-      inbox: [],
-      createdAt: new Date(this.now()).toISOString(),
-    };
-    await this.persistence.transaction((state) => {
-      state.connections[connection.connectionId] = connection;
+    const initialExcludedCatIds = desiredParticipationSchema.parse({
+      defaultMode: 'include',
+      excludedCatIds: input.initialExcludedCatIds ?? [],
+      channelOverrides: {},
+    }).excludedCatIds;
+    return this.withAuthority(`pair:${intent.serviceInstanceId}:${intent.collectiveId}`, async () => {
+      const metadata = await this.service.readMetadata(serviceUrl);
+      if (metadata.serviceInstanceId !== intent.serviceInstanceId) {
+        throw new Error('Pairing intent belongs to another Collective Service');
+      }
+      const alreadyConnected = Object.values(this.persistence.snapshot().connections).some(
+        (connection) =>
+          connection.serviceInstanceId === intent.serviceInstanceId &&
+          connection.collectiveId === intent.collectiveId &&
+          connection.authorityStatus !== 'revoked',
+      );
+      if (alreadyConnected) throw new Error('This Café is already connected to this Collective');
+      const paired = await this.service.exchangePairing(serviceUrl, intent, input.endpointLabel);
+      if (paired.serviceInstanceId !== intent.serviceInstanceId || paired.collectiveId !== intent.collectiveId) {
+        throw new Error('Pairing response coordinates do not match the intent');
+      }
+      const connection: ConnectorConnectionState = {
+        serviceUrl,
+        clientBuildId: metadata.clientBuildId,
+        serviceInstanceId: paired.serviceInstanceId,
+        collectiveId: paired.collectiveId,
+        connectionId: paired.connectionId,
+        endpointId: paired.endpointId,
+        authorizedHumanId: paired.authorizedHumanId,
+        endpointLabel: input.endpointLabel.trim(),
+        endpointCredential: paired.endpointCredential,
+        ...(initialExcludedCatIds.length ? { initialExcludedCatIds: [...new Set(initialExcludedCatIds)].sort() } : {}),
+        authorityStatus: 'connected',
+        liveStatus: 'online',
+        lastAckedSequence: 0,
+        outbox: [],
+        inbox: [],
+        createdAt: new Date(this.now()).toISOString(),
+      };
+      await this.persistence.transaction((state) => {
+        state.connections[connection.connectionId] = connection;
+      });
+      return projectConnection(connection);
     });
-    return projectConnection(connection);
   }
 
   async queueAgentMessage(connectionId: string, unsafeInput: unknown): Promise<ConnectorProjection> {
@@ -109,7 +168,117 @@ export class CollectiveConnector {
   }
 
   sync(connectionId: string, hooks: ConnectorSyncHooks = {}): Promise<ConnectorProjection> {
-    return this.withAuthority(connectionId, () => this.synchronization.sync(connectionId, hooks));
+    return this.withAuthority(connectionId, async () => {
+      const projection = await this.synchronization.sync(connectionId, hooks);
+      if (projection.authorityStatus === 'connected' && projection.liveStatus === 'online') {
+        await this.workPolicy.flushRevocations(connectionId, true);
+        await this.workAcceptance.recover(connectionId);
+        await this.workContinuation.recover(connectionId);
+      }
+      return this.getProjection(connectionId);
+    });
+  }
+
+  setChannelListening(connectionId: string, ownerUserId: string, input: ChannelListeningInput) {
+    return this.withAuthority(connectionId, () =>
+      setChannelListening({
+        persistence: this.persistence,
+        now: this.now,
+        connectionId,
+        ownerUserId,
+        unsafeInput: input,
+      }),
+    );
+  }
+  readWorkPolicy(connectionId: string) {
+    return this.withAuthority(connectionId, () => this.workPolicy.read(connectionId));
+  }
+  readWorkPolicyStatus(connectionId: string) {
+    return this.withAuthority(connectionId, () => this.workPolicy.status(connectionId));
+  }
+  currentWorkDecision(source: CollectiveSourceIdentity) {
+    return this.withAuthority(source.connectionId, () => this.workPolicy.decision(source));
+  }
+  /** One local owner effect fence for a source that has not yet acquired private Work custody. */
+  withWorkReconsiderationAuthority<T>(
+    connectionId: string,
+    ownerUserId: string,
+    request: WorkReconsiderationInput,
+    consume: (scope: WorkReconsiderationAuthorityScope) => Promise<T>,
+  ) {
+    return this.withAuthority(connectionId, async () =>
+      consume(
+        await prepareWorkReconsideration({
+          persistence: this.persistence,
+          policy: this.workPolicy,
+          connectionId,
+          ownerUserId,
+          request,
+          readContext: (source, before, limit) => this.readParticipationContext(source, before, limit),
+        }),
+      ),
+    );
+  }
+  adoptWorkPolicy(connectionId: string, ownerUserId: string, expectedPolicyRevision: number) {
+    return this.withAuthority(connectionId, () =>
+      this.workPolicy.adopt(connectionId, ownerUserId, expectedPolicyRevision),
+    );
+  }
+  revokeWorkGrants(connectionId: string, ownerUserId: string, grantRefs: string[]) {
+    return this.withAuthority(connectionId, () => this.workPolicy.revoke(connectionId, ownerUserId, grantRefs));
+  }
+  acceptWork(source: CollectiveSourceIdentity, agent: VerifiedAgent, input: CollectiveWorkAcceptanceInput) {
+    return this.withAuthority(source.connectionId, () => this.workAcceptance.accept(source, agent, input));
+  }
+  continueWork(source: CollectiveSourceIdentity, agent: VerifiedAgent, input: CollectiveWorkContinuationInput) {
+    return this.withAuthority(source.connectionId, () => this.workContinuation.continue(source, agent, input));
+  }
+  readWorkSourceContext(source: CollectiveSourceIdentity) {
+    return this.withAuthority(source.connectionId, async () => {
+      const { connection, credential } = requireParticipation(this.persistence.snapshot(), source);
+      await this.readParticipationContext(source, 0, 1);
+      const context = await this.service.workAuthority.readSourceContext(connection.serviceUrl, credential, {
+        ...workCoordinates(connection),
+        sourceEventId: source.eventId,
+        catId: source.catId,
+        participationRevision: source.participationRevision,
+      });
+      requireParticipation(this.persistence.snapshot(), source);
+      if (context.sourceEventId !== source.eventId) throw new Error('Collective matter source identity changed');
+      return context;
+    });
+  }
+  readWorkRoutingContext(connectionId: string, sourceEventId: string) {
+    return this.withAuthority(connectionId, async () => {
+      const snapshot = this.persistence.snapshot();
+      const connection = requireConnection(snapshot.connections[connectionId]);
+      const credential = requireCredential(connection);
+      const route = snapshot.hostRoutes[connectionId];
+      if (!route?.localOwnerUserId) throw new Error('Host owner routing relationship is unavailable');
+      const context = await this.service.workAuthority.readRoutingContext(connection.serviceUrl, credential, {
+        ...workCoordinates(connection),
+        sourceEventId,
+      });
+      const after = this.persistence.snapshot();
+      if (
+        after.connections[connectionId]?.authorityStatus !== 'connected' ||
+        after.connections[connectionId]?.endpointCredential !== credential ||
+        after.hostRoutes[connectionId]?.localOwnerUserId !== route.localOwnerUserId ||
+        context.sourceEventId !== sourceEventId
+      )
+        throw new Error('Current Work routing authority changed');
+      return context;
+    });
+  }
+  /** The enclosing consumer fence, when needed, belongs to withAssignedWorkAuthority. */
+  resolveAcceptedWorkGrant(source: CollectiveSourceIdentity) {
+    return this.workAcceptance.resolveGrant(source);
+  }
+  recordHostAdmission(
+    connectionId: string,
+    input: Omit<CollectiveWorkHostAdmissionRequest, 'serviceInstanceId' | 'collectiveId' | 'connectionId'>,
+  ) {
+    return this.withAuthority(connectionId, () => this.workAcceptance.recordHostAdmission(connectionId, input));
   }
 
   async revoke(connectionId: string): Promise<ConnectorProjection> {
@@ -133,6 +302,17 @@ export class CollectiveConnector {
     return structuredClone(connection.inbox);
   }
 
+  async listWorkResultPublicationCandidates(): Promise<CollectiveWorkResultPublicationCandidate[]> {
+    const snapshot = this.persistence.snapshot();
+    return Object.values(snapshot.connections).flatMap((connection) =>
+      projectWorkResultPublications(connection, snapshot.hostRoutes[connection.connectionId]).map((publication) => ({
+        connectionId: publication.connectionId,
+        workId: publication.workId,
+        taskRef: publication.taskRef,
+      })),
+    );
+  }
+
   async setHostRoute(
     connectionId: string,
     unsafeInput: SetHostRouteInput,
@@ -145,6 +325,22 @@ export class CollectiveConnector {
         connectionId,
         unsafeInput,
         ...(expectedRevision !== undefined ? { expectedRevision } : {}),
+      }),
+    );
+  }
+
+  async setStandingInterest(
+    connectionId: string,
+    input: StandingInterestInput,
+    expectedRevision: number,
+  ): Promise<HostRouteConfig> {
+    return this.withAuthority(connectionId, () =>
+      setStandingInterest({
+        persistence: this.persistence,
+        now: this.now,
+        connectionId,
+        unsafeInput: input,
+        expectedRevision,
       }),
     );
   }
@@ -222,7 +418,14 @@ export class CollectiveConnector {
     return context;
   }
 
-  prepareReply(source: CollectiveSourceIdentity, sourceRef: string, resultKey: string, workRevision?: number) {
+  prepareReply(
+    source: CollectiveSourceIdentity,
+    sourceRef: string,
+    resultKey: string,
+    workRevision?: number,
+    resultRevision?: number,
+    execution?: { readonly revision: number; readonly assignmentEventId: string },
+  ) {
     return prepareReplyOperation({
       persistence: this.persistence,
       now: this.now,
@@ -230,6 +433,8 @@ export class CollectiveConnector {
       sourceRef,
       resultKey,
       ...(workRevision ? { workRevision } : {}),
+      ...(resultRevision ? { resultRevision } : {}),
+      ...(execution ? { execution } : {}),
     });
   }
 
@@ -240,6 +445,9 @@ export class CollectiveConnector {
     operationId: string,
     body: string,
     agent: VerifiedAgent,
+    artifactSnapshot?: WorkResultArtifactSnapshot,
+    resultRevision?: number,
+    execution?: { readonly revision: number; readonly assignmentEventId: string },
   ) {
     await this.readParticipationContext(source, 0, 1);
     return submitReplyOperation({
@@ -251,7 +459,84 @@ export class CollectiveConnector {
       operationId,
       body,
       agent,
+      ...(artifactSnapshot ? { artifactSnapshot } : {}),
+      ...(resultRevision ? { resultRevision } : {}),
       verifyAgent: this.verifyAgent,
+      ...(execution ? { execution } : {}),
+    });
+  }
+
+  prepareProgress(purpose: CollectiveProgressPurpose) {
+    return prepareProgressOperation(this.persistence, this.now, purpose);
+  }
+  async submitProgress(purpose: CollectiveProgressPurpose, operationId: string, agent: VerifiedAgent) {
+    await this.readParticipationContext(purpose.source, 0, 1);
+    return submitProgressOperation({
+      persistence: this.persistence,
+      now: this.now,
+      purpose,
+      operationId,
+      agent,
+      verifyAgent: this.verifyAgent,
+    });
+  }
+
+  async proposeWork(
+    source: CollectiveSourceIdentity,
+    requestId: string,
+    agent: VerifiedAgent,
+    input: { readonly title?: string; readonly intendedOutcome?: string; readonly requestKind?: string } = {},
+  ) {
+    return this.withAuthority(source.connectionId, async () => {
+      await this.readParticipationContext(source, 0, 1);
+      return proposeVerifiedCollectiveWork({
+        persistence: this.persistence,
+        service: this.service,
+        verifyAgent: this.verifyAgent,
+        source,
+        requestId,
+        agent,
+        proposal: input,
+      });
+    });
+  }
+
+  async readAssignedWork(connectionId: string, workId: string) {
+    return this.withAuthority(connectionId, () => this.readAssignedWorkWithinAuthority(connectionId, workId));
+  }
+  async readAssignedWorkByAssignment(connectionId: string, assignmentEventId: string) {
+    return this.withAuthority(connectionId, () =>
+      this.readAssignedWorkByAssignmentWithinAuthority(connectionId, assignmentEventId),
+    );
+  }
+
+  /** Keeps the endpoint credential, Host route, inbox source, and caller-owned
+   * effect under the same connection fence as revoke/rebind. The consumer may
+   * mutate only its own owner; Connector state remains private to this scope.
+   */
+  async withAssignedWorkAuthority<T>(
+    connectionId: string,
+    workId: string,
+    consume: (scope: AssignedWorkAuthorityScope) => Promise<T>,
+  ): Promise<T> {
+    return this.withAuthority(connectionId, async () => {
+      const work = await this.readAssignedWorkWithinAuthority(connectionId, workId);
+      return consume(this.assignedWorkAuthorityScope(connectionId, work));
+    });
+  }
+
+  /** Pulls the latest endpoint events and resolves the Service Work from the
+   * immutable assignment event before admitting a local continuation.
+   */
+  async withSynchronizedAssignedWorkAuthority<T>(
+    connectionId: string,
+    assignmentEventId: string,
+    consume: (scope: AssignedWorkAuthorityScope) => Promise<T>,
+  ): Promise<T> {
+    return this.withAuthority(connectionId, async () => {
+      await this.synchronization.sync(connectionId);
+      const work = await this.readAssignedWorkByAssignmentWithinAuthority(connectionId, assignmentEventId);
+      return consume(this.assignedWorkAuthorityScope(connectionId, work));
     });
   }
 
@@ -307,6 +592,71 @@ export class CollectiveConnector {
       failure,
     });
   }
+
+  private async readAssignedWorkWithinAuthority(
+    connectionId: string,
+    workId: string,
+  ): Promise<CollectiveWorkProjection> {
+    const before = requireConnection(this.persistence.snapshot().connections[connectionId]);
+    const credential = requireCredential(before);
+    const work = await this.service.readAssignedWork(before.serviceUrl, credential, {
+      serviceInstanceId: before.serviceInstanceId,
+      collectiveId: before.collectiveId,
+      connectionId: before.connectionId,
+      workId,
+    });
+    const after = requireConnection(this.persistence.snapshot().connections[connectionId]);
+    if (
+      after.authorityStatus !== 'connected' ||
+      after.endpointCredential !== credential ||
+      work.serviceInstanceId !== after.serviceInstanceId ||
+      work.collectiveId !== after.collectiveId ||
+      work.assignment?.connectionId !== after.connectionId
+    ) {
+      throw new Error('Assigned Work authority changed while it was being read');
+    }
+    return work;
+  }
+
+  private async readAssignedWorkByAssignmentWithinAuthority(
+    connectionId: string,
+    assignmentEventId: string,
+  ): Promise<CollectiveWorkProjection> {
+    const before = requireConnection(this.persistence.snapshot().connections[connectionId]);
+    const credential = requireCredential(before);
+    const work = await this.service.readAssignedWorkByAssignment(before.serviceUrl, credential, {
+      serviceInstanceId: before.serviceInstanceId,
+      collectiveId: before.collectiveId,
+      connectionId: before.connectionId,
+      assignmentEventId,
+    });
+    const after = requireConnection(this.persistence.snapshot().connections[connectionId]);
+    if (
+      after.authorityStatus !== 'connected' ||
+      after.endpointCredential !== credential ||
+      work.serviceInstanceId !== after.serviceInstanceId ||
+      work.collectiveId !== after.collectiveId ||
+      work.assignmentEventId !== assignmentEventId ||
+      work.assignment?.connectionId !== after.connectionId
+    ) {
+      throw new Error('Assigned Work authority changed while it was being read');
+    }
+    return work;
+  }
+
+  private assignedWorkAuthorityScope(connectionId: string, work: CollectiveWorkProjection): AssignedWorkAuthorityScope {
+    const snapshot = this.persistence.snapshot();
+    const connection = requireConnection(snapshot.connections[connectionId]);
+    const hostRoute = snapshot.hostRoutes[connectionId];
+    return {
+      connection: projectConnection(connection, hostRoute),
+      ...(hostRoute ? { hostRoute: structuredClone(hostRoute) } : {}),
+      inbox: structuredClone(connection.inbox),
+      work,
+      resultPublications: projectWorkResultPublications(connection, hostRoute, work.workId),
+      recordHostAdmission: (input) => this.workAcceptance.recordHostAdmission(connectionId, input),
+    };
+  }
 }
 
 function requireConnection<Connection extends ConnectorConnectionState>(
@@ -314,4 +664,11 @@ function requireConnection<Connection extends ConnectorConnectionState>(
 ): Connection {
   if (!connection) throw new Error('Collective connection was not found');
   return connection;
+}
+
+function requireCredential(connection: ConnectorConnectionState): string {
+  if (connection.authorityStatus !== 'connected' || !connection.endpointCredential) {
+    throw new Error('Collective endpoint credential is unavailable');
+  }
+  return connection.endpointCredential;
 }

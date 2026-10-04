@@ -19,7 +19,14 @@ import type {
   ReviewPolicy,
   Roster,
 } from '@cat-cafe/shared';
-import { type ClientId, catRegistry, createCatId, normalizeCliEffortForProvider } from '@cat-cafe/shared';
+import {
+  type ClientId,
+  catRegistry,
+  createCatId,
+  developmentPlanRefSchema,
+  developmentRevisionSchema,
+  normalizeCliEffortForProvider,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { bootstrapCatCatalog, type CatCatalogReadOptions, readCatCatalogRaw } from './cat-catalog-store.js';
@@ -71,11 +78,24 @@ const cliConfigSchema = z.object({
 const agyProfileSchema = z
   .object({
     enabled: z.boolean().optional(),
+    carrier: z.enum(['legacy', 'native']).optional(),
     profileId: z.string().min(1).optional(),
     homeRoot: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     autoApprove: z.boolean().optional(),
     trustedWorkspaces: z.array(z.string().min(1)).optional(),
+    nativeCodingGrant: z
+      .object({
+        threadId: z.string().min(1).max(160),
+        taskId: z.string().min(1).max(160),
+        workUnitRef: developmentPlanRefSchema,
+        acceptedRevision: developmentRevisionSchema,
+        workspaceRoot: z.string().min(1),
+        writableFiles: z.array(z.string().min(1)).min(1).max(8),
+        testFile: z.string().min(1),
+      })
+      .strict()
+      .optional(),
   })
   .optional();
 
@@ -120,6 +140,10 @@ const catVariantSchema = z
     sessionChain: z.boolean().optional(), // F127 review fix: allow variant-scoped sessionChain override
     // #1329: explicit member intent outranks breed policy and the legacy byte.
     sessionStrategy: z.lazy(() => sessionStrategySchema),
+    relationshipKey: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, 'relationshipKey must be a safe profile path segment')
+      .optional(),
     personality: z.string().optional(),
     strengths: z.array(z.string()).optional(),
     avatar: z.string().min(1).optional(), // F32-b P4c: override breed avatar
@@ -654,7 +678,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         roleDescription: variant.roleDescription ?? breed.roleDescription,
         personality: variant.personality ?? defaultVariant?.personality ?? '',
         breedId: breed.id,
-        relationshipKey: breed.relationshipKey ?? breed.id,
+        relationshipKey: variant.relationshipKey ?? breed.relationshipKey ?? breed.id,
         breedDisplayName: breed.displayName,
         ...(variant.variantLabel != null ? { variantLabel: variant.variantLabel } : {}),
         isDefaultVariant: isDefault,

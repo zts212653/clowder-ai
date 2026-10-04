@@ -83,17 +83,22 @@ export function findAddedUiPictographs(diffText) {
   return findings;
 }
 
-function runGit(args) {
+// A long-lived branch diff easily exceeds Node's 1 MiB default and would fail closed as "unreadable".
+export const GIT_MAX_BUFFER = 64 * 1024 * 1024;
+
+export function runGit(args, { cwd = REPO_ROOT, maxBuffer = GIT_MAX_BUFFER } = {}) {
   try {
     return execFileSync('git', args, {
-      cwd: REPO_ROOT,
+      cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 10_000,
+      maxBuffer,
     });
   } catch (error) {
     const stderr = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr ?? '').trim() : '';
-    throw new Error(`git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`, { cause: error });
+    const code = error && typeof error === 'object' && 'code' in error && error.code ? ` (${error.code})` : '';
+    throw new Error(`git ${args.join(' ')} failed${code}${stderr ? `: ${stderr}` : ''}`, { cause: error });
   }
 }
 

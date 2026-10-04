@@ -15,6 +15,7 @@ import Fastify from 'fastify';
 describe('Thread API', () => {
   let app;
   let threadStore;
+  let conciergeThreadService;
   let tmpRoots = [];
   let originalWorkspaceRoot;
   let originalRuntimeRoot;
@@ -25,11 +26,13 @@ describe('Thread API', () => {
     tmpRoots = [];
 
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { ConciergeThreadService } = await import('../dist/domains/concierge/ConciergeThreadService.js');
     const { threadsRoutes } = await import('../dist/routes/threads.js');
 
     threadStore = new ThreadStore();
+    conciergeThreadService = new ConciergeThreadService({ threadStore });
     app = Fastify();
-    await app.register(threadsRoutes, { threadStore });
+    await app.register(threadsRoutes, { threadStore, conciergeThreadService });
     await app.ready();
   });
 
@@ -612,6 +615,77 @@ describe('Thread API', () => {
     const body = JSON.parse(res.body);
     assert.equal(body.id, thread.id);
     assert.equal(body.title, 'Details Test');
+  });
+
+  it('the owner can find the one canonical concierge carrier by title or ID and open its exact detail', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    await threadStore.updateTitle(threadId, '砚砚喵Live F317 - 猫猫球线程');
+    const orphan = threadStore.create('alice', 'old concierge orphan');
+    threadStore.updateThreadKind(orphan.id, 'concierge');
+
+    for (const url of ['/api/threads?view=sidebar', '/api/threads?q=砚砚喵Live', `/api/threads?q=${threadId}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'alice' } });
+      assert.equal(res.statusCode, 200);
+      const ids = JSON.parse(res.body).threads.map((thread) => thread.id);
+      assert.ok(ids.includes(threadId), `canonical carrier missing from ${url}`);
+      assert.ok(!ids.includes(orphan.id), `orphan must not become another entry in ${url}`);
+    }
+
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(detail.statusCode, 200);
+    assert.equal(JSON.parse(detail.body).title, '砚砚喵Live F317 - 猫猫球线程');
+    assert.equal(JSON.parse(detail.body).threadKind, 'concierge');
+  });
+
+  it('another owner cannot discover or rename the canonical concierge carrier', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    for (const url of ['/api/threads?view=sidebar', `/api/threads?q=${threadId}`]) {
+      const res = await app.inject({ method: 'GET', url, headers: { 'x-cat-cafe-user': 'bob' } });
+      assert.ok(!JSON.parse(res.body).threads.some((thread) => thread.id === threadId));
+    }
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+    });
+    assert.equal(detail.statusCode, 404);
+    const rename = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+      payload: { title: 'stolen title' },
+    });
+    assert.equal(rename.statusCode, 404);
+  });
+
+  it('shows the stored legacy concierge carrier to its key owner without exposing it to others', async () => {
+    const threadId = await conciergeThreadService.getOrCreate('alice');
+    const thread = await threadStore.get(threadId);
+    thread.createdBy = 'concierge-system';
+    thread.title = null;
+    const ownerList = await app.inject({
+      method: 'GET',
+      url: '/api/threads?view=sidebar',
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    const canonical = JSON.parse(ownerList.body).threads.find((entry) => entry.id === threadId);
+    assert.equal(canonical?.title, '猫猫球 · 伴随对话');
+    const ownerDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'alice' },
+    });
+    assert.equal(ownerDetail.statusCode, 200);
+    const foreignDetail = await app.inject({
+      method: 'GET',
+      url: `/api/threads/${threadId}`,
+      headers: { 'x-cat-cafe-user': 'bob' },
+    });
+    assert.equal(foreignDetail.statusCode, 404);
   });
 
   it('GET /api/threads/:id migrates and persists a legacy runtime projectPath', async () => {

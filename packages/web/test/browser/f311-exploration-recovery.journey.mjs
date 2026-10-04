@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { refIdentity } from '@cat-cafe/shared';
+import { chooseExplorationComparison } from './f311-exploration-accessible-reading.journey.mjs';
 
 export async function verifySameRunGuard({ work, runs, chooseRun }) {
   await chooseRun(work, runs[0]);
   const comparison = work.getByLabel('选择对照实验', { exact: true });
-  await comparison.selectOption(refIdentity(runs[1].experimentRef));
+  await chooseExplorationComparison(work, refIdentity(runs[1].experimentRef));
   await chooseRun(work, runs[1]);
   assert.equal(await comparison.inputValue(), '', 'changing the primary run clears the previous comparison');
   assert.equal(await work.getByRole('region', { name: '所选实验对照' }).count(), 0);
@@ -12,6 +13,8 @@ export async function verifySameRunGuard({ work, runs, chooseRun }) {
 
 export async function verifyInvalidRecordRecovery({ page, work, fixture, run, oldMediaUrl, capture }) {
   const input = work.getByLabel('继续探索的想法');
+  const draft = work.locator('.exploration-next-step');
+  if ((await draft.getAttribute('open')) === null) await draft.locator('summary').click();
   await input.fill('保留这个反例，核对原件后再继续');
   const selection = await work.getByLabel('选择本版实验', { exact: true }).inputValue();
   try {
@@ -31,6 +34,7 @@ export async function verifyInvalidRecordRecovery({ page, work, fixture, run, ol
     fixture.corruptExperiment(undefined);
     await work.getByRole('button', { name: '核对后重读本轮记录', exact: true }).click();
     await work.getByRole('region', { name: '所选案例结果' }).waitFor();
+    await work.locator('.exploration-result .exploration-outcome > details > summary').click();
     assert.equal(await work.getByLabel('选择本版实验', { exact: true }).inputValue(), selection);
     assert.equal(await input.inputValue(), '保留这个反例，核对原件后再继续');
   } finally {

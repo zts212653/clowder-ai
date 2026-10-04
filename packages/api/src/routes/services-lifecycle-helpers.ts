@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { clearEnvironmentCache } from '../domains/services/environment-detector.js';
 import type { ServiceLifecycleRunner, ServiceLifecycleRunResult } from '../domains/services/service-lifecycle.js';
 import { isValidModelId } from '../domains/services/service-lifecycle.js';
 import { MODEL_ENV_VARS, PORT_ENV_VARS } from '../domains/services/service-manifest.js';
@@ -86,11 +87,14 @@ export async function runWithTimeout(
   // The outer timer covers injected or custom runners; execFile.timeout still kills real child processes.
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let runnerSettled = false;
+  const changesEnvironment = input.action === 'install' || input.action === 'uninstall';
+  if (changesEnvironment) clearEnvironmentCache();
   const runnerPromise = Promise.resolve()
     .then(() => runner(input))
     .catch((): ServiceLifecycleRunResult => ({ code: null, output: '', runnerError: true }))
     .finally(() => {
       runnerSettled = true;
+      if (changesEnvironment) clearEnvironmentCache();
     });
   const settlement = runnerPromise.then(
     () => undefined,

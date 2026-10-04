@@ -36,7 +36,8 @@ export function assertReviewSuccessor(current: ArtifactReview, next: ArtifactRev
     next.contentRef !== current.contentRef ||
     next.task.ownerUserId !== current.task.ownerUserId ||
     next.task.threadId !== current.task.threadId ||
-    next.task.taskId !== current.task.taskId
+    next.task.taskId !== current.task.taskId ||
+    current.rounds.some((round, index) => next.rounds[index]?.ledgerRef !== round.ledgerRef)
   ) {
     throw new ArtifactReviewError('invalid_action');
   }
@@ -47,7 +48,7 @@ export function auditPredecessor(review: ArtifactReview, input: ReviewMutation):
   if (!round) return undefined;
   const request = input.request as { action?: { annotationId?: string; replyId?: string } } | null;
   const action = request?.action;
-  if (action?.annotationId) {
+  if (input.kind !== 'supersede_request' && action?.annotationId) {
     const annotation = round.annotations.find((item) => item.id === action.annotationId);
     if (action.replyId) return annotation?.replies.find((item) => item.id === action.replyId);
     return annotation;

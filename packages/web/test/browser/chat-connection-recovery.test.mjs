@@ -4,6 +4,8 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
+import { registerNavigationOwnerJourneys } from './chat-navigation-owner.journey.mjs';
+import { registerReadingLandingJourneys } from './chat-reading-landing.journey.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const origin = 'https://chat-recovery.test';
@@ -34,6 +36,10 @@ before(async () => {
   browser = await chromium.launch({ headless: true });
 });
 after(async () => browser?.close());
+
+registerNavigationOwnerJourneys({ origin, browser: () => browser, bundle: () => bundle.code });
+
+registerReadingLandingJourneys({ origin, threadId, browser: () => browser, bundle: () => bundle.code });
 
 function fixtureApiBody(pathname, state) {
   if (pathname === '/api/messages') {
@@ -170,6 +176,126 @@ test('returning to a connected quiet page fetches the missed reply without a soc
     assert.equal(state.documentLoads, 1);
     assert.deepEqual(errors, []);
     assert.deepEqual(writes, []);
+  } finally {
+    await page.close();
+  }
+});
+
+test('long deferred history retains its exact reading offset across Back and cold reload beyond the latest page', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const errors = [],
+    cursors = [];
+  const records = Array.from({ length: 80 }, (_, index) => ({
+    id: `scroll-${index + 1}`,
+    type: 'assistant',
+    catId: 'codex-astra',
+    timestamp: index + 1,
+    extra: { stream: { turnInvocationId: `reading-turn-${index + 1}` } },
+    isDraft: index === 4,
+    content: `Reading message ${index + 1}\n${'Long conversation evidence. '.repeat(40)}`,
+  }));
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    assert.equal(url.origin, origin);
+    if (url.pathname === '/proof.js') return route.fulfill({ contentType: 'text/javascript', body: bundle.code });
+    if (url.pathname.startsWith('/api/')) {
+      let body = { userId: 'fixture-owner', tasks: [], cats: [], activeInvocations: [], queue: [] };
+      if (url.pathname === '/api/messages') {
+        const before = url.searchParams.get('before');
+        cursors.push(before);
+        body =
+          url.searchParams.get('threadId') === 'chat-other'
+            ? { messages: [{ ...records[0], id: 'other' }], hasMore: false }
+            : { messages: before ? records.slice(0, 30) : records.slice(30), hasMore: !before };
+      }
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+    }
+    return route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><style>[data-message-viewport-boundary]{content-visibility:auto}article{box-sizing:border-box}</style><div id="root"></div><script type="module" src="/proof.js"></script>',
+    });
+  });
+  const sample = () =>
+    page.locator('[data-scroll-chat]').evaluate((el) => {
+      const viewport = el.getBoundingClientRect();
+      const node = [...el.querySelectorAll('[data-message-viewport-id]')].find(
+        (node) => node.getBoundingClientRect().bottom > viewport.top,
+      );
+      return {
+        id: node?.dataset.messageViewportId,
+        offset: node?.getBoundingClientRect().top - viewport.top,
+        top: el.scrollTop,
+      };
+    });
+  try {
+    await page.goto(`${origin}/${threadId}?scroll=1`);
+    await page.locator('[data-message-id="scroll-80"]').waitFor();
+    const chat = page.locator('[data-scroll-chat]');
+    await chat.hover();
+    await page.mouse.wheel(0, -100000);
+    await page.locator('[data-message-id="scroll-5"]').waitFor();
+    await page.waitForTimeout(750);
+    // A wheel-backed reading intent, with a signed offset inside an older message.
+    await chat.evaluate((el) => {
+      el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+      const target = el.querySelector('[data-message-viewport-id="scroll-5"]');
+      el.scrollTop += target.getBoundingClientRect().top - el.getBoundingClientRect().top + 27;
+    });
+    await page.waitForTimeout(100);
+    const before = await sample();
+    assert.equal(before.id, 'scroll-5');
+    await page.getByRole('button', { name: 'Finalize reading message', exact: true }).click();
+    records[4].id = 'settled-reading';
+    records[4].isDraft = false;
+    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.waitForTimeout(100);
+    const rekeyed = await sample();
+    assert.equal(rekeyed.id, 'settled-reading');
+    assert.ok(Math.abs(rekeyed.offset - before.offset) <= 1, JSON.stringify({ before, rekeyed }));
+    before.id = rekeyed.id;
+    await page.getByRole('button', { name: 'Other thread', exact: true }).click();
+    await page.locator('[data-message-id="other"]').waitFor();
+    await page.goBack();
+    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.waitForTimeout(750);
+    const back = await sample();
+    assert.equal(back.id, before.id);
+    assert.ok(Math.abs(back.offset - before.offset) <= 1, JSON.stringify({ before, back }));
+    // A decoded image above the reading row changes layout without navigation.
+    await chat.evaluate((el) => {
+      const predecessor = el.querySelector('[data-message-id="scroll-4"]');
+      const image = document.createElement('img');
+      image.width = 400;
+      image.height = 300;
+      image.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"/>';
+      predecessor.append(image);
+    });
+    await page.waitForTimeout(100);
+    const imageLoaded = await sample();
+    assert.equal(imageLoaded.id, before.id);
+    assert.ok(Math.abs(imageLoaded.offset - before.offset) <= 1, JSON.stringify({ before, imageLoaded }));
+    const priorCursors = cursors.length;
+    await page.reload();
+    await page.locator('[data-message-id="settled-reading"]').waitFor();
+    await page.waitForTimeout(750);
+    const reload = await sample();
+    assert.equal(reload.id, before.id);
+    assert.ok(Math.abs(reload.offset - before.offset) <= 1, JSON.stringify({ before, reload }));
+    assert.ok(cursors.slice(priorCursors).some(Boolean), 'cold page must page back to its saved anchor');
+
+    await chat.click({ position: { x: 700, y: 300 } });
+    await page.keyboard.press('End');
+    await page.waitForTimeout(750);
+    const followed = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('cat-cafe:thread-scroll:chat-recovery')),
+    );
+    assert.equal(followed.state.anchor, 'bottom', JSON.stringify(followed));
+    await page.getByRole('button', { name: 'Latest', exact: true }).click();
+    await page.waitForTimeout(750);
+    const bottomGap = await chat.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+    assert.ok(bottomGap <= 1, `explicit Latest must beat reading memory: ${bottomGap}`);
+    assert.deepEqual(errors, []);
   } finally {
     await page.close();
   }

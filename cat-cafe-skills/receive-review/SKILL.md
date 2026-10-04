@@ -1,6 +1,6 @@
 ---
 name: receive-review
-tips_exempt: "This revision clarifies evidence-based feedback handling and optional templates within the existing review workflow; no new user-facing operation or configuration is added."
+tips_exempt: "Renewed 2026-10-02: feedback handling now checks original delivery intent and approval scope; this is internal author/reviewer guidance, with no new end-user operation or configuration."
 description: "处理 reviewer 反馈：Red→Green 修复 + 按 engagement mode 收口。Use when: 收到 review 结果或 P1/P2。Not for: 发 review 请求、自检。Output: 按 iterative / one-shot 契约闭环。"
 triggers:
   - "review 结果"
@@ -16,6 +16,8 @@ triggers:
 # Receive Review
 
 处理反馈要形成有依据的判断、修复与真实闭环。历史教训是顺从照改、点修不查同类，以及把修完误当已通过审查。
+
+先分清反馈是在说整体结果偏了，还是其中一个实现问题。整体偏差应一直对照原约定与实物处理，不能拆成几条技术修复后就忘了最初的坏结果；参考[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)。收到批准也要理解其覆盖范围：局部修复获准不等于整张 PR 已兑现原需求。此前完整判断仍适用时直接复用，只核实本次变化，不机械重走全部验收。
 
 ## 必须做到
 
@@ -43,7 +45,7 @@ triggers:
 
 1. 读取通知内容，识别 review decision 类型
 2. `CHANGES_REQUESTED` → 直接进入下方 Red→Green 流程
-3. `APPROVED` → 不需要 receive-review，检查是否可以走 merge-gate
+3. `APPROVED` → 核对批准覆盖的内容，连同仍适用的既有判断检查是否可以走 merge-gate；不能把只覆盖局部修复的结论当成原目标已经验收
 4. `COMMENTED` → 判断是否需要代码修改，需要则进入 Red→Green 流程
 5. 处理完成后通知operator结果（KD-13: 事后通知）
 

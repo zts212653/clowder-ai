@@ -2,17 +2,18 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readNamedAlphaRedisLeases } from './lib/alpha-redis-leases.mjs';
 import { classifyFseventsdPressure, fseventsdAdvisoryRssKb } from './lib/fseventsd-pressure.mjs';
 import { cleanupRedisGateOwnership, inspectExpectedProcess } from './lib/redis-test-leases.mjs';
 
 // Backward-compatible advisory ceiling. The legacy env var keeps its name, but
 // RSS alone no longer proves active pressure and therefore does not hard-block.
 const DEFAULT_FSEVENTSD_RSS_ADVISORY_KB = 4 * 1024 * 1024;
-// 6099=fork runtime sanctuary / 6398=worktree dev /
+// 6099=fork runtime sanctuary / 6397=dedicated Alpha / 6398=worktree dev /
 // 6399=runtime sanctuary / 6401=user-redis persistent user data.
 // 6401 must be protected too — flagging it as a killable orphan led to it being murdered
 // alongside 6399 (CAFE-INCIDENT-20260527).
-const PROTECTED_REDIS_PORTS = new Set([6099, 6398, 6399, 6401]);
+const PROTECTED_REDIS_PORTS = new Set([6099, 6397, 6398, 6399, 6401]);
 const ALLOWED_LOCAL_REDIS_PORTS = new Set([6379, ...PROTECTED_REDIS_PORTS]);
 // Compatibility detection for another gate / pre-merge-check process. Canonical
 // current gates use Git-common-dir phase permits around heavy stages and reserve
@@ -170,10 +171,11 @@ function leaseMatchesRedis(lease) {
     });
 }
 
-function findRedisOrphans(liveLeases = []) {
+function findRedisOrphans(liveLeases = [], namedAlphaLeases = []) {
   const uniqueListeners = [...new Map(readRedisListeners().map((listener) => [listener.port, listener])).values()];
   return uniqueListeners.filter(({ port, pid }) => {
     if (port < 6300 || port > 65535 || ALLOWED_LOCAL_REDIS_PORTS.has(port)) return false;
+    if (namedAlphaLeases.some((lease) => lease.port === port && lease.pid === pid)) return false;
     return !liveLeases.some((lease) => lease.port === port && lease.redis?.pid === pid && leaseMatchesRedis(lease));
   });
 }
@@ -194,19 +196,19 @@ function findMatchingProcesses(rows, holderPid, patterns) {
 
 function collectRedisOrphanFailures(readOwnership) {
   let ownership = readOwnership();
-  let orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live]);
+  let orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live], readNamedAlphaRedisLeases().live);
   if (orphans.length > 0) {
     spawnSync('sleep', ['3'], { stdio: 'ignore' });
     // Refresh after grace: a concurrent runner may bind before atomically leasing.
     ownership = readOwnership();
-    orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live]);
+    orphans = findRedisOrphans([...ownership.test.live, ...ownership.dev.live], readNamedAlphaRedisLeases().live);
   }
   return {
     failures: orphans.map(
       (orphan) =>
         `unmanaged redis-server listener on port ${orphan.port}; ` +
-        `clean stale isolated Redis before gate. ` +
-        `Use 'kill <PID>' after confirming non-sanctuary, or 'pnpm process:cleanup'. ` +
+        `ownership could not be proven; inspect its lifecycle owner and use the owner's normal stop. ` +
+        `This check alone does not authorize killing the listener. ` +
         `NEVER 'lsof -ti tcp:<range> | kill' — CAFE-INCIDENT-20260527.`,
     ),
     leaseCleanup: ownership.test,

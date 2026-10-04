@@ -6,6 +6,10 @@ export const MESSAGE_VIEWPORT_MOUNTED_EVENT = 'cat-cafe:message-viewport-mounted
 export interface MessageScrollAnchor {
   messageId: string;
   viewportOffsetPx: number;
+  /** Existing bubble-owner identity; temporary DOM ids may change on finalization. */
+  bubbleKey?: string;
+  /** Existing timeline-owner score bounds history lookup without retaining a body. */
+  timelineOrderAt?: number;
 }
 
 function messageBoundaries(root: ParentNode): HTMLElement[] {
@@ -74,8 +78,11 @@ export function restoreMessageScrollAnchor(container: HTMLElement, anchor: Messa
   if (!target) return false;
   const boundary = target.closest<HTMLElement>('[data-message-viewport-id]') ?? target;
   const currentOffset = boundary.getBoundingClientRect().top - container.getBoundingClientRect().top;
-  container.scrollTop = Math.max(0, container.scrollTop + currentOffset - anchor.viewportOffsetPx);
-  return true;
+  const targetTop = Math.max(0, container.scrollTop + currentOffset - anchor.viewportOffsetPx);
+  container.scrollTop = targetTop;
+  // A mounted row can still sit behind a temporarily short layout. Do not
+  // declare restoration complete when the browser clamps the requested offset.
+  return Math.abs(container.scrollTop - targetTop) <= 1;
 }
 
 /**
@@ -83,8 +90,8 @@ export function restoreMessageScrollAnchor(container: HTMLElement, anchor: Messa
  * Returns true when the target element was found (so callers can retry on a
  * raf loop until the message DOM has rendered after a thread switch).
  */
-export function scrollToMessage(messageId: string): boolean {
-  const el = resolveMessageElements([messageId])[0];
+export function scrollToMessage(messageId: string, root: ParentNode = document): boolean {
+  const el = resolveMessageElements([messageId], root)[0];
   if (!el) return false;
 
   revealFoldedSourceAnchor(el);

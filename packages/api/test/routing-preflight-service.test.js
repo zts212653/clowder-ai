@@ -142,6 +142,33 @@ describe('RoutingPreflightService', () => {
     assert.equal(decision.targets[1].disposition, 'allowed');
   });
 
+  it('keeps non-causal capability context separate from disposition reasons', async () => {
+    const opus = candidate('opus');
+    opus.profile.revision.relevantSignals = [
+      {
+        kind: 'anti_signal',
+        summary: 'Independent review should be paired with a cross-family reviewer',
+        evidenceRefs: ['dossier:opus:review-risk'],
+      },
+    ];
+    const service = new RoutingPreflightService({
+      resolver: { resolve: async () => freshResolution([opus]) },
+    });
+
+    const decision = await service.preflight(input(['opus']));
+
+    assert.equal(decision.targets[0].disposition, 'allowed');
+    assert.deepEqual(decision.targets[0].reasons, []);
+    assert.deepEqual(decision.targets[0].contextualSignals, [
+      {
+        code: 'capability_anti_signal',
+        summary: 'Independent review should be paired with a cross-family reviewer',
+        sourceRefs: ['dossier:opus', 'dossier:opus:review-risk'],
+      },
+    ]);
+    assert.deepEqual(decision.targets[0].alternatives, []);
+  });
+
   it('turns typed resolver degradation into warned fail-open without changing target order', async () => {
     const audits = [];
     const service = new RoutingPreflightService({

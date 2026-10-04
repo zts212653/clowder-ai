@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -51,6 +51,26 @@ describe('preview-process managed lifecycle', () => {
       });
     }
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects duplicate recognized options before resolving a lifecycle target', () => {
+    const runtimeFixture = join(root, ['cat-cafe', 'runtime'].join('-'));
+    const aliasParent = join(root, 'duplicate-option-aliases');
+    const mainAlias = join(aliasParent, 'cat-cafe');
+    mkdirSync(runtimeFixture, { recursive: true });
+    mkdirSync(aliasParent, { recursive: true });
+    symlinkSync(runtimeFixture, mainAlias, 'dir');
+
+    for (const args of [
+      ['status', '--port', '3511', '--port', '3512', '--cwd', root],
+      ['status', '--port', '3511', '--cwd', mainAlias, '--cwd', mainAlias],
+      ['status', '--port', '3511', '--cwd', root, '--lifetime-seconds', '1', '--lifetime-seconds', '2'],
+      ['status', '--port', '3511', '--cwd', root, '--json', '--json'],
+    ]) {
+      const result = spawnSync(process.execPath, [SCRIPT_PATH, ...args], { env, encoding: 'utf8', timeout: 2_000 });
+      assert.equal(result.status, 1, result.stderr);
+      assert.match(result.stderr, /duplicate argument:/);
+    }
   });
 
   it('keeps a preview server alive after start exits and reports exact status until stop', () => {

@@ -109,6 +109,7 @@ describe('F286 deterministic MCP surface snapshot', () => {
       addedNames: [],
       removedNames: [],
       resourceActionChanges: [{ resourceFamily: 'subject', added: ['inspect'], removed: ['read'] }],
+      closedSelectorChanges: [],
       profileChanges: [{ name: 'cat_cafe_subject_read', added: [], removed: ['readonly'] }],
       schemaDeliveryChanges: [],
     });

@@ -96,7 +96,7 @@ export const meetingArtifactTools = [
       implementationExport: 'handleReadMeetingArtifact',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly', 'agent-key'],
+      runtimeProfiles: ['full', 'readonly', 'agent-key', 'desktop:live-companion'],
       standaloneReason: {
         disposition: 'accepted-boundary',
         kind: 'resource-entry',

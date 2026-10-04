@@ -25,6 +25,10 @@ describe('F310 entrusted-work MCP owner actions', () => {
     const { handleUpdateEntrustedWork } = await import('../dist/tools/callback-tools.js');
     await handleUpdateEntrustedWork({ taskId: 'task-1', expectedRevision: 3, status: 'blocked' });
     assert.deepEqual(forwarded, { taskId: 'task-1', expectedRevision: 3, status: 'blocked' });
+    const progress = { summary: 'Working on the calendar', nextStep: 'Verify mobile', sourceRef: 'message:work' };
+    const time = { actualStart: { value: 1789889606286, sourceRef: 'message:work' }, estimatedCompletion: null };
+    await handleUpdateEntrustedWork({ taskId: 'task-1', expectedRevision: 4, status: 'doing', progress, time });
+    assert.deepEqual(forwarded, { taskId: 'task-1', expectedRevision: 4, status: 'doing', progress, time });
   });
   test('registers typed admission and closure tools over the shared contract', async () => {
     const {
@@ -43,7 +47,9 @@ describe('F310 entrusted-work MCP owner actions', () => {
     assert.equal(admitTool.handler.name, 'handleAdmitEntrustedWork');
     assert.equal(closeTool.handler.name, 'handleCloseEntrustedWork');
     assert.equal(updateTool.handler.name, 'handleUpdateEntrustedWork');
-    assert.deepEqual(updateTool.policy.runtimeProfiles, ['full']);
+    assert.deepEqual(updateTool.policy.runtimeProfiles, ['collective-work', 'full']);
+    assert.deepEqual(admitTool.policy.runtimeProfiles, ['full'], 'private Work cannot create owner admissions');
+    assert.deepEqual(closeTool.policy.runtimeProfiles, ['full'], 'private Work cannot close owner responsibility');
 
     const admit = z.object(admitEntrustedWorkInputSchema).safeParse({
       title: 'Prepare tomorrow presentation',

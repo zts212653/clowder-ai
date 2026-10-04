@@ -1,32 +1,72 @@
 [
   {
+    "id": "capability-find-earlier-message-query",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "docs/features/F322-everyday-work-experience.md",
+      "anchor": "AC-C6"
+    },
+    "structureSource": {
+      "path": "packages/mcp-server/src/tools/evidence-tools.ts",
+      "anchor": "MESSAGE CONTRACT"
+    },
+    "bodySource": {
+      "path": "packages/mcp-server/src/tools/evidence-tools.ts",
+      "anchor": "MESSAGE CONTRACT"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "记得以前聊过什么，却找不到消息？告诉猫大致意思和查找范围，它可以按消息检索原文片段与来源，并说明语义检索是否可用、索引覆盖和新鲜度是否已知。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "找以前聊过的消息",
+      "draftPrompt": "请用消息检索帮我找以前聊过的内容，先确认当前对话或全局范围；列出多处原文片段、消息来源和时间，并说明索引覆盖及新鲜度的限制。"
+    },
+    "owner": "codex61-sol"
+  },
+  {
     "id": "capability-cloud-pro-root-collaboration",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md", "anchor": "核验三个真实入口" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md",
+      "anchor": "核验三个真实入口"
+    },
     "structureSource": {
       "path": "packages/mcp-server/src/tools/callback-tools.ts",
       "anchor": "getThreadCatsInputSchema"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md", "anchor": "主动 root" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md",
+      "anchor": "主动 root"
+    },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo"],
     "body": "想让云端猫主动找本地猫协作？告诉它目标会话和队友，它会先查可路由名单，再发送；不必等本地猫先叫它。",
     "action": {
       "type": "open_source",
       "label": "查看云端协作指令",
-      "sourceRef": { "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md", "anchor": "核验三个真实入口" }
+      "sourceRef": {
+        "path": "cat-cafe-skills/refs/gpt-pro-custom-instructions.md",
+        "anchor": "核验三个真实入口"
+      }
     },
     "owner": "codex-astra"
   },
   {
     "id": "capability-routing-human-recovery",
     "kind": "capability",
-    "sourceRef": { "path": "docs/features/F293-live-routing-context.md", "anchor": "AC-B4" },
+    "sourceRef": {
+      "path": "docs/features/F293-live-routing-context.md",
+      "anchor": "AC-B4"
+    },
     "structureSource": {
       "path": "packages/web/src/components/routing-context/RoutingPreflightActions.tsx",
       "anchor": "RoutingPreflightActions"
     },
-    "bodySource": { "path": "docs/features/F293-live-routing-context.md", "anchor": "AC-C6" },
+    "bodySource": {
+      "path": "docs/features/F293-live-routing-context.md",
+      "anchor": "AC-C6"
+    },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["cvo"],
     "body": "猫猫近期遇到额度限制时，你主动发送仍会尝试。旧请求被拦后可点「重试这条」；一处成功会解除同猫的相关旧限制，其他会话不会自动重放。",
@@ -40,150 +80,282 @@
   {
     "id": "magic-word-scaffold",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「脚手架」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「脚手架」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「脚手架」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「脚手架」"
+    },
     "contexts": ["thinking", "feature_dev", "review"],
     "audience": ["cvo"],
     "body": "觉得猫猫在做临时方案？试试说「脚手架」，它会停下来重新审视是不是终态设计。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "magic-word-detour",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「绕路了」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「绕路了」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「绕路了」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「绕路了」"
+    },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["cvo"],
     "body": "觉得猫猫在绕远路？说一声「绕路了」，它会停下来找最直线的路径。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-meow-pact",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「喵约」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「喵约」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「喵约」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「喵约」"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
     "body": "猫猫好像忘了约定？说「喵约」，它会重新对照家规逐条检查自己的行为。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-star-jar",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「星星罐子」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「星星罐子」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「星星罐子」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「星星罐子」"
+    },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["cvo"],
     "body": "发现不可逆风险？说「星星罐子」——猫猫会立即冻结一切操作，等你指示。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-first-principles",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「第一性原理」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「第一性原理」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「第一性原理」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「第一性原理」"
+    },
     "contexts": ["thinking", "feature_dev", "review"],
     "audience": ["cvo"],
     "body": "方案太复杂？说「第一性原理」或「数学之美」，猫猫会砍掉多余的层只留必需的。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-next-time-for-sure",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「下次一定」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「下次一定」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「下次一定」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「下次一定」"
+    },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["cvo"],
     "body": "猫猫在说「已规划」但其实没做？说「下次一定」——要么现在做，要么明确说做不了。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-i-can-guess",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「我能猜出来」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「我能猜出来」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「我能猜出来」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「我能猜出来」"
+    },
     "contexts": ["thinking", "long_running", "review"],
     "audience": ["cvo"],
     "body": "猫猫在推理而不是查文件？说「我能猜出来」，它会停下去读源文件而不是凭记忆猜。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-enough-fragments",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「碎片够了」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「碎片够了」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「碎片够了」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「碎片够了」"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
     "body": "猫猫找到一条线索就下结论了？说「碎片够了」，它会多搜几轮不同角度再判断。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "magic-word-tinker",
     "kind": "magic_word",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「补锅匠」" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Magic Words" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "「补锅匠」" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「补锅匠」"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Magic Words"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "「补锅匠」"
+    },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["cvo"],
     "body": "猫猫在逐个修补却不看全局？说「补锅匠」，它会停下来做全面审查找同类问题。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "capability-rich-messaging",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "rich-messaging" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "rich-messaging"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "rich-messaging"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "rich-messaging" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "rich-messaging"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "想对比几个方案？跟猫猫说「做个对比表」或「列个清单」，它会用卡片和表格展示——比纯文字清晰得多。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-browser-preview",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/browser-preview/SKILL.md", "anchor": "browser-preview" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/browser-preview/SKILL.md",
+      "anchor": "browser-preview"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "browser-preview"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`browser-preview`" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "`browser-preview`"
+    },
     "contexts": ["thinking", "long_running", "feature_dev"],
     "audience": ["all"],
     "body": "改完前端想看效果？可以让猫猫直接在 Hub 里打开浏览器预览。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-image-generation",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/image-generation/SKILL.md", "anchor": "Codex 原生能力校准" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/image-generation/SKILL.md",
+      "anchor": "Codex 原生能力校准"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "image-generation"
     },
-    "bodySource": { "path": "cat-cafe-skills/image-generation/SKILL.md", "anchor": "解释型漫画、信息图" },
+    "bodySource": {
+      "path": "cat-cafe-skills/image-generation/SKILL.md",
+      "anchor": "解释型漫画、信息图"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["all"],
     "body": "想用一张图讲清一个机制？告诉猫猫读者是谁、要讲清什么，它会把动作和变化组织成解释型漫画或信息图；已有分镜可以直接制作。",
@@ -197,106 +369,169 @@
   {
     "id": "capability-workspace-navigator",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/workspace-navigator/SKILL.md", "anchor": "workspace-navigator" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/workspace-navigator/SKILL.md",
+      "anchor": "workspace-navigator"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "workspace-navigator"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`workspace-navigator`" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "`workspace-navigator`"
+    },
     "contexts": ["thinking", "feature_dev", "review"],
     "audience": ["all"],
     "body": "想看某个文件但不想自己翻目录？跟猫猫说一声，它直接帮你打开到工作区。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-pencil-design",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "pencil-design" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "pencil-design"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "pencil-design"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`pencil-design`" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "`pencil-design`"
+    },
     "contexts": ["feature_dev"],
     "audience": ["developer", "cvo"],
     "body": "想先看 UI 设计再动手写？让猫猫用 Pencil 出一个可视化设计稿。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-guide-interaction",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "guide-interaction" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "guide-interaction"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "guide-interaction"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`guide-interaction`" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "`guide-interaction`"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "不确定怎么用或怎么配？问猫猫——它会做成一步步交互引导，跟着走就行。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-expert-panel",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "expert-panel" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "expert-panel"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "expert-panel"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "`expert-panel`" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "`expert-panel`"
+    },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo", "developer"],
     "body": "重要决策拿不准？让多只猫各自独立判断再收敛——跟猫说「开个专家讨论」就行。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-propose-thread",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "cat_cafe_propose_thread" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "cat_cafe_propose_thread"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "propose-thread"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "提议创建新 thread" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "提议创建新 thread"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "聊天太长了？猫猫可以提议开个新 thread，填好卡片让你一键确认。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-external-runtime-sessions",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "外部 runtime session" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "外部 runtime session"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "external-runtime-sessions"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "外部 runtime session" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "外部 runtime session"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "猫猫的外部执行像掉线了？它可以帮你查会话记录定位问题——不用你截图发给它。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-cli-diagnostics",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "F212 CLI 错误诊断" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "F212 CLI 错误诊断"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "cli-diagnostics"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "CLI 错误诊断" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "CLI 错误诊断"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "CLI 只显示「退出了」？让猫猫读诊断信息帮你定位，不用自己翻日志。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
@@ -310,11 +545,17 @@
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "eval-verdict"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "Eval Hub" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "Eval Hub"
+    },
     "contexts": ["review", "merge_gate"],
     "audience": ["developer", "maintainer"],
     "body": "改 harness 后要有 verdict/eval 闭环，不能只说「修了」。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
@@ -328,60 +569,93 @@
       "path": "cat-cafe-skills/convention-graph-discovery/SKILL.md",
       "anchor": "Discovery Protocol"
     },
-    "bodySource": { "path": "cat-cafe-skills/convention-graph-discovery/SKILL.md", "anchor": "When to Use" },
+    "bodySource": {
+      "path": "cat-cafe-skills/convention-graph-discovery/SKILL.md",
+      "anchor": "When to Use"
+    },
     "contexts": ["feature_dev", "review"],
     "audience": ["developer", "maintainer"],
     "body": "改注册名、manifest 或 route 前，用约定图发现先找约定层消费方。",
     "action": {
       "type": "open_source",
       "label": "打开 skill",
-      "sourceRef": { "path": "cat-cafe-skills/convention-graph-discovery/SKILL.md", "anchor": "Discovery Protocol" }
+      "sourceRef": {
+        "path": "cat-cafe-skills/convention-graph-discovery/SKILL.md",
+        "anchor": "Discovery Protocol"
+      }
     },
     "owner": "codex"
   },
   {
     "id": "capability-update-workflow",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "cat_cafe_update_workflow" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "cat_cafe_update_workflow"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "update-workflow"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "推 SOP 告示牌" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "推 SOP 告示牌"
+    },
     "contexts": ["feature_dev", "long_running"],
     "audience": ["all"],
     "body": "等猫猫干活等了好久？看看 Hub 看板——多步任务的实时进度都在那儿，不用追着问「到哪了」。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "capability-context-self-management",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "context-self-management" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "context-self-management"
+    },
     "structureSource": {
       "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
       "anchor": "context-self-management"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "context 自管理" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "context 自管理"
+    },
     "contexts": ["long_running"],
     "audience": ["all"],
     "body": "猫猫聊着聊着突然总结？别慌——它在管理上下文窗口，会自动交接给下一只猫或冲刺完成，不会丢你的进度。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "workflow-memory-recall",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/refs/memory-routing-partial.md", "anchor": "search_evidence" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/memory-routing-partial.md",
+      "anchor": "search_evidence"
+    },
     "structureSource": {
       "path": "packages/api/src/infrastructure/harness-eval/capability-wakeup/capability-wakeup-rules.ts",
       "anchor": "memory-drilldown"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/memory-routing-partial.md", "anchor": "graph_resolve" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/memory-routing-partial.md",
+      "anchor": "graph_resolve"
+    },
     "contexts": ["thinking", "review"],
     "audience": ["all"],
     "body": "猫猫忘了之前约定？说「我们不是定了 X 吗」——它会搜长期记忆找到原始决策。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
@@ -412,13 +686,25 @@
   {
     "id": "workflow-alpha-validation",
     "kind": "workflow",
-    "sourceRef": { "path": "docs/SOP.md", "anchor": "pnpm alpha:start" },
-    "structureSource": { "path": "docs/SOP.md", "anchor": "Alpha 验收通道" },
-    "bodySource": { "path": "docs/SOP.md", "anchor": "3011/3012/4111/6398" },
+    "sourceRef": {
+      "path": "docs/SOP.md",
+      "anchor": "pnpm alpha:start"
+    },
+    "structureSource": {
+      "path": "docs/SOP.md",
+      "anchor": "Alpha 验收通道"
+    },
+    "bodySource": {
+      "path": "docs/SOP.md",
+      "anchor": "专属 Redis 6397"
+    },
     "contexts": ["review", "merge_gate"],
     "audience": ["developer", "maintainer"],
     "body": "已合入 main 的改动用 alpha 验收，不拿 runtime 端口冒充证据。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
@@ -434,7 +720,7 @@
     },
     "bodySource": {
       "path": "cat-cafe-skills/merge-gate/SKILL.md",
-      "anchor": "禁止仅因 main 又前进而重跑 full gate"
+      "anchor": "昂贵 gate 连续性"
     },
     "contexts": ["merge_gate", "review"],
     "audience": ["developer", "maintainer"],
@@ -474,25 +760,49 @@
   {
     "id": "workflow-feature-tips-contribution",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/feat-lifecycle/SKILL.md", "anchor": "F244 Tips Contribution" },
-    "structureSource": { "path": "cat-cafe-skills/feat-lifecycle/SKILL.md", "anchor": "不是数量门" },
-    "bodySource": { "path": "cat-cafe-skills/feat-lifecycle/SKILL.md", "anchor": "sourceRef" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/feat-lifecycle/SKILL.md",
+      "anchor": "F244 Tips Contribution"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/feat-lifecycle/SKILL.md",
+      "anchor": "不是数量门"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/feat-lifecycle/SKILL.md",
+      "anchor": "sourceRef"
+    },
     "contexts": ["feature_dev"],
     "audience": ["developer", "maintainer"],
     "body": "新功能要写 Tips Contribution；纯重构用 tips_exempt 豁免。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "workflow-quality-gate-tips-check",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/quality-gate/SKILL.md", "anchor": "F244 Tips Contribution" },
-    "structureSource": { "path": "cat-cafe-skills/quality-gate/SKILL.md", "anchor": "pnpm check:capability-tips" },
-    "bodySource": { "path": "cat-cafe-skills/quality-gate/SKILL.md", "anchor": "CI 只证明结构" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/quality-gate/SKILL.md",
+      "anchor": "F244 Tips Contribution"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/quality-gate/SKILL.md",
+      "anchor": "pnpm check:capability-tips"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/quality-gate/SKILL.md",
+      "anchor": "CI 只证明结构"
+    },
     "contexts": ["feature_dev", "review", "merge_gate"],
     "audience": ["developer", "maintainer"],
     "body": "提 review 前跑 pnpm check:capability-tips 验证。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
@@ -516,7 +826,10 @@
     "action": {
       "type": "open_source",
       "label": "查看 opensource-ops skill",
-      "sourceRef": { "path": "cat-cafe-skills/opensource-ops/SKILL.md", "anchor": "Open-Source Ops" }
+      "sourceRef": {
+        "path": "cat-cafe-skills/opensource-ops/SKILL.md",
+        "anchor": "Open-Source Ops"
+      }
     },
     "owner": "codex"
   },
@@ -551,8 +864,14 @@
   {
     "id": "workflow-thread-orchestration-community",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/thread-orchestration/SKILL.md", "anchor": "社区 PR / issue 分发" },
-    "structureSource": { "path": "cat-cafe-skills/thread-orchestration/SKILL.md", "anchor": "社区 PR / issue 分发" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/thread-orchestration/SKILL.md",
+      "anchor": "社区 PR / issue 分发"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/thread-orchestration/SKILL.md",
+      "anchor": "社区 PR / issue 分发"
+    },
     "bodySource": {
       "path": "cat-cafe-skills/thread-orchestration/SKILL.md",
       "anchor": "主动加载 `opensource-ops` skill"
@@ -563,14 +882,48 @@
     "action": {
       "type": "open_source",
       "label": "查看 thread-orchestration 指引",
-      "sourceRef": { "path": "cat-cafe-skills/thread-orchestration/SKILL.md", "anchor": "社区 PR / issue 分发" }
+      "sourceRef": {
+        "path": "cat-cafe-skills/thread-orchestration/SKILL.md",
+        "anchor": "社区 PR / issue 分发"
+      }
     },
     "owner": "codex"
   },
   {
+    "id": "feature-f323-deployment-waits",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F323-runtime-restart-coordination.md",
+      "anchor": "在“正在发生”附近提供“等待更新 / 可以接回”"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workspace/WorkspaceDeploymentWaits.tsx",
+      "anchor": "WorkspaceDeploymentWaits"
+    },
+    "bodySource": {
+      "path": "docs/features/F323-runtime-restart-coordination.md",
+      "anchor": "按当前候选版本预计可满足 K 项"
+    },
+    "contexts": ["long_running", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "打开 Workspace，可同时查看等待更新、可以接回，以及当前候选版本预计能满足的事项，不必自己记住逐个叫猫。",
+    "action": {
+      "type": "open_source",
+      "label": "查看等待与接回说明",
+      "sourceRef": {
+        "path": "docs/features/F323-runtime-restart-coordination.md",
+        "anchor": "Phase A: 记住谁在等，生效后自动叫回"
+      }
+    },
+    "owner": "codex-sol"
+  },
+  {
     "id": "feature-f210-agy-gemini-default",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F210-antigravity-cli-migration.md", "anchor": "AGY model-flag refresh" },
+    "sourceRef": {
+      "path": "docs/features/F210-antigravity-cli-migration.md",
+      "anchor": "AGY model-flag refresh"
+    },
     "structureSource": {
       "path": "docs/features/F210-antigravity-cli-migration.md",
       "anchor": "Current local Antigravity CLI exposes `--model`"
@@ -585,54 +938,90 @@
     "action": {
       "type": "open_source",
       "label": "打开 F210",
-      "sourceRef": { "path": "docs/features/F210-antigravity-cli-migration.md", "anchor": "AGY model-flag refresh" }
+      "sourceRef": {
+        "path": "docs/features/F210-antigravity-cli-migration.md",
+        "anchor": "AGY model-flag refresh"
+      }
     },
     "owner": "codex"
   },
   {
     "id": "feature-f242-convention-graph",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F242-code-graph-layer-spike.md", "anchor": "Code Graph Layer Spike" },
-    "structureSource": { "path": "docs/features/F242-code-graph-layer-spike.md", "anchor": "Phase A" },
-    "bodySource": { "path": "docs/features/F242-code-graph-layer-spike.md", "anchor": "约定层关联" },
+    "sourceRef": {
+      "path": "docs/features/F242-code-graph-layer-spike.md",
+      "anchor": "Code Graph Layer Spike"
+    },
+    "structureSource": {
+      "path": "docs/features/F242-code-graph-layer-spike.md",
+      "anchor": "Phase A"
+    },
+    "bodySource": {
+      "path": "docs/features/F242-code-graph-layer-spike.md",
+      "anchor": "约定层关联"
+    },
     "contexts": ["feature_dev", "review"],
     "audience": ["developer", "maintainer"],
     "body": "改 MCP tool、skill manifest 或 route 时，先用约定图查真实消费方。",
     "action": {
       "type": "open_source",
       "label": "打开 spec",
-      "sourceRef": { "path": "docs/features/F242-code-graph-layer-spike.md", "anchor": "Code Graph Layer Spike" }
+      "sourceRef": {
+        "path": "docs/features/F242-code-graph-layer-spike.md",
+        "anchor": "Code Graph Layer Spike"
+      }
     },
     "owner": "codex"
   },
   {
     "id": "feature-f244-capability-tips",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F244-capability-tips-system.md", "anchor": "Capability Tips System" },
-    "structureSource": { "path": "docs/features/F244-capability-tips-system.md", "anchor": "CapabilityTip" },
-    "bodySource": { "path": "docs/features/F244-capability-tips-system.md", "anchor": "open_concierge_draft" },
+    "sourceRef": {
+      "path": "docs/features/F244-capability-tips-system.md",
+      "anchor": "Capability Tips System"
+    },
+    "structureSource": {
+      "path": "docs/features/F244-capability-tips-system.md",
+      "anchor": "CapabilityTip"
+    },
+    "bodySource": {
+      "path": "docs/features/F244-capability-tips-system.md",
+      "anchor": "open_concierge_draft"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["all"],
     "body": "好奇这条 tip 背后的功能？点「了解更多」——猫猫会在 Concierge 展开讲解背景和用法。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "codex"
   },
   {
     "id": "feature-f258-visible-cafe",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "F258: 看得见的猫咖 Visible Café" },
+    "sourceRef": {
+      "path": "docs/features/F258-visible-cafe.md",
+      "anchor": "F258: 看得见的猫咖 Visible Café"
+    },
     "structureSource": {
       "path": "docs/features/F258-visible-cafe.md",
       "anchor": "Primary Journey: 把家放在次屏上，看一晚"
     },
-    "bodySource": { "path": "docs/features/F258-visible-cafe.md", "anchor": "Entry" },
+    "bodySource": {
+      "path": "docs/features/F258-visible-cafe.md",
+      "anchor": "Entry"
+    },
     "contexts": ["thinking", "concierge_idle"],
     "audience": ["cvo"],
     "body": "想看看猫猫在各自星球里做什么？点左侧主导航的「猫猫星球」；半透明打盹表示数据断流，不是猫不在了。",
     "action": {
       "type": "open_source",
       "label": "打开 F258",
-      "sourceRef": { "path": "docs/features/F258-visible-cafe.md", "anchor": "User Journey" }
+      "sourceRef": {
+        "path": "docs/features/F258-visible-cafe.md",
+        "anchor": "User Journey"
+      }
     },
     "owner": "codex-sol"
   },
@@ -675,7 +1064,10 @@
       "path": "docs/features/F237-prompt-injection-visibility.md",
       "anchor": "Three-Segment Overlay Editor"
     },
-    "bodySource": { "path": "docs/features/F237-prompt-injection-visibility.md", "anchor": "Trust Model" },
+    "bodySource": {
+      "path": "docs/features/F237-prompt-injection-visibility.md",
+      "anchor": "Trust Model"
+    },
     "contexts": ["thinking", "feature_dev", "review"],
     "audience": ["developer", "maintainer"],
     "body": "想知道猫猫这轮到底被注入了什么？去设置里的协作与规则看 Prompt Injection，可查看分段、预览编译结果，也能编辑安全开放的覆盖层。",
@@ -700,11 +1092,17 @@
       "path": "docs/features/F188-library-stewardship.md",
       "anchor": "EvidenceStatusSignals 输入契约"
     },
-    "bodySource": { "path": "docs/features/F188-library-stewardship.md", "anchor": "Warning codes" },
+    "bodySource": {
+      "path": "docs/features/F188-library-stewardship.md",
+      "anchor": "Warning codes"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["all"],
     "body": "搜不到之前聊过的东西？去 Memory Center 看健康面板——可能是配置问题，面板会帮你诊断。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-47"
   },
   {
@@ -738,13 +1136,25 @@
   {
     "id": "feature-f246-approval-hub",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F246-approval-hub.md", "anchor": "Phase A" },
-    "structureSource": { "path": "docs/features/F246-approval-hub.md", "anchor": "AC-A3" },
-    "bodySource": { "path": "docs/features/F246-approval-hub.md", "anchor": "统一审批中心底座" },
+    "sourceRef": {
+      "path": "docs/features/F246-approval-hub.md",
+      "anchor": "Phase A"
+    },
+    "structureSource": {
+      "path": "docs/features/F246-approval-hub.md",
+      "anchor": "AC-A3"
+    },
+    "bodySource": {
+      "path": "docs/features/F246-approval-hub.md",
+      "anchor": "统一审批中心底座"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
     "body": "有提案等你拍板？点左侧铃铛打开审批中心——待审项一目了然。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
@@ -800,12 +1210,18 @@
   {
     "id": "feature-f255-present-loop",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F255-auto-dream.md", "anchor": "Phase A.1：猫猫星球“生活与作息”配置面" },
+    "sourceRef": {
+      "path": "docs/features/F255-auto-dream.md",
+      "anchor": "Phase A.1：猫猫星球“生活与作息”配置面"
+    },
     "structureSource": {
       "path": "docs/features/F255-auto-dream.md",
       "anchor": "产品配置面：猫的家，不是 Schedule Panel"
     },
-    "bodySource": { "path": "docs/features/F255-auto-dream.md", "anchor": "配置旅程" },
+    "bodySource": {
+      "path": "docs/features/F255-auto-dream.md",
+      "anchor": "配置旅程"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo"],
     "body": "想给一只猫一段不用交作业的私人时间？去猫猫星球 `/starry` 点它，打开「生活与作息」；还能在同一个房间翻它愿意留下的日记。",
@@ -819,37 +1235,73 @@
   {
     "id": "feature-voice-interaction",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F020-voice-input-suite.md", "anchor": "语音输入" },
-    "structureSource": { "path": "docs/features/F034-voice-message.md", "anchor": "Voice Block" },
-    "bodySource": { "path": "docs/features/F066-voice-pipeline-upgrade.md", "anchor": "Voice Pipeline" },
+    "sourceRef": {
+      "path": "docs/features/F020-voice-input-suite.md",
+      "anchor": "语音输入"
+    },
+    "structureSource": {
+      "path": "docs/features/F034-voice-message.md",
+      "anchor": "Voice Block"
+    },
+    "bodySource": {
+      "path": "docs/features/F066-voice-pipeline-upgrade.md",
+      "anchor": "Voice Pipeline"
+    },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
     "body": "想边干别的边和猫猫聊？跟它说「用语音」——它会语音回复你，每只猫还有自己独立的声线。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "feature-ppt-forge",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F144-ppt-forge.md", "anchor": "PPT Forge" },
-    "structureSource": { "path": "docs/features/F144-ppt-forge.md", "anchor": "PPT Forge" },
-    "bodySource": { "path": "docs/features/F144-ppt-forge.md", "anchor": "PPT Forge" },
+    "sourceRef": {
+      "path": "docs/features/F144-ppt-forge.md",
+      "anchor": "PPT Forge"
+    },
+    "structureSource": {
+      "path": "docs/features/F144-ppt-forge.md",
+      "anchor": "PPT Forge"
+    },
+    "bodySource": {
+      "path": "docs/features/F144-ppt-forge.md",
+      "anchor": "PPT Forge"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "需要做 PPT？告诉猫猫主题和要点，它可以直接生成演示文稿——还支持自定义模板。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "feature-export-conversation",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F017-export-dialog-image.md", "anchor": "导出对话长图" },
-    "structureSource": { "path": "docs/features/F017-export-dialog-image.md", "anchor": "导出对话长图" },
-    "bodySource": { "path": "docs/features/F017-export-dialog-image.md", "anchor": "导出对话长图" },
+    "sourceRef": {
+      "path": "docs/features/F017-export-dialog-image.md",
+      "anchor": "导出对话长图"
+    },
+    "structureSource": {
+      "path": "docs/features/F017-export-dialog-image.md",
+      "anchor": "导出对话长图"
+    },
+    "bodySource": {
+      "path": "docs/features/F017-export-dialog-image.md",
+      "anchor": "导出对话长图"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "想保存精彩对话？猫猫可以帮你导出成一张长图——方便分享或归档。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
@@ -880,24 +1332,42 @@
   {
     "id": "feature-thread-labels",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
-    "structureSource": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
-    "bodySource": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
+    "sourceRef": {
+      "path": "docs/features/F187-thread-labels.md",
+      "anchor": "Thread Labels"
+    },
+    "structureSource": {
+      "path": "docs/features/F187-thread-labels.md",
+      "anchor": "Thread Labels"
+    },
+    "bodySource": {
+      "path": "docs/features/F187-thread-labels.md",
+      "anchor": "Thread Labels"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "对话太多找不到？给 Thread 打标签（比如「重要」「待办」），方便在侧边栏筛选。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "feature-f277-search-group",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "sourceRef": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Search Group Organizing"
+    },
     "structureSource": {
       "path": "docs/features/F277-thread-attention-navigation.md",
       "anchor": "Search Group Organizing"
     },
-    "bodySource": { "path": "docs/features/F277-thread-attention-navigation.md", "anchor": "Search Group Organizing" },
+    "bodySource": {
+      "path": "docs/features/F277-thread-attention-navigation.md",
+      "anchor": "Search Group Organizing"
+    },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
     "body": "搜索后点「整理全部」，未置顶的匹配对话也能一起收进 Group。",
@@ -939,28 +1409,46 @@
   {
     "id": "feature-f127-native-cli-effort",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
-    "structureSource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "遗留项" },
-    "bodySource": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" },
+    "sourceRef": {
+      "path": "docs/features/F127-cat-instance-management.md",
+      "anchor": "R-11"
+    },
+    "structureSource": {
+      "path": "docs/features/F127-cat-instance-management.md",
+      "anchor": "遗留项"
+    },
+    "bodySource": {
+      "path": "docs/features/F127-cat-instance-management.md",
+      "anchor": "R-11"
+    },
     "contexts": ["concierge_open", "feature_dev"],
     "audience": ["cvo", "developer"],
     "body": "成员的 CLI Effort 可从维护建议里选择，也可输入 provider 新增的原生值；保存后从下一次调用生效，最终由 CLI 校验。",
     "action": {
       "type": "open_source",
       "label": "查看成员配置说明",
-      "sourceRef": { "path": "docs/features/F127-cat-instance-management.md", "anchor": "R-11" }
+      "sourceRef": {
+        "path": "docs/features/F127-cat-instance-management.md",
+        "anchor": "R-11"
+      }
     },
     "owner": "codex-sol"
   },
   {
     "id": "feature-thread-effort-overrides",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F262-per-thread-cat-effort-overrides.md", "anchor": "User Journey" },
+    "sourceRef": {
+      "path": "docs/features/F262-per-thread-cat-effort-overrides.md",
+      "anchor": "User Journey"
+    },
     "structureSource": {
       "path": "docs/features/F262-per-thread-cat-effort-overrides.md",
       "anchor": "Primary Journey: 给当前对话里的猫选择思考档位"
     },
-    "bodySource": { "path": "docs/features/F262-per-thread-cat-effort-overrides.md", "anchor": "Why" },
+    "bodySource": {
+      "path": "docs/features/F262-per-thread-cat-effort-overrides.md",
+      "anchor": "Why"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo", "developer"],
     "body": "同一只猫在不同对话想得深浅不同？打开目标对话的 ⋮ → 思考档位，可按猫设置本对话专属额度。",
@@ -974,12 +1462,18 @@
   {
     "id": "feature-codex-oauth-speed",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F291-codex-oauth-fast-mode.md", "anchor": "User Journey" },
+    "sourceRef": {
+      "path": "docs/features/F291-codex-oauth-fast-mode.md",
+      "anchor": "User Journey"
+    },
     "structureSource": {
       "path": "docs/features/F291-codex-oauth-fast-mode.md",
       "anchor": "Primary Journey: 为成员设置默认速度，再为单个对话覆盖"
     },
-    "bodySource": { "path": "docs/features/F291-codex-oauth-fast-mode.md", "anchor": "Why" },
+    "bodySource": {
+      "path": "docs/features/F291-codex-oauth-fast-mode.md",
+      "anchor": "Why"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["cvo", "developer"],
     "body": "Codex OAuth 猫可在成员配置设置 Standard / Fast 默认档位，也可从目标对话的 ⋮ → 速度档位单独覆盖；两处都从下一次回复生效。",
@@ -1043,49 +1537,97 @@
   {
     "id": "feature-voting",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F079-voting-system.md", "anchor": "Voting System" },
-    "structureSource": { "path": "docs/features/F079-voting-system.md", "anchor": "Voting System" },
-    "bodySource": { "path": "docs/features/F079-voting-system.md", "anchor": "Voting System" },
+    "sourceRef": {
+      "path": "docs/features/F079-voting-system.md",
+      "anchor": "Voting System"
+    },
+    "structureSource": {
+      "path": "docs/features/F079-voting-system.md",
+      "anchor": "Voting System"
+    },
+    "bodySource": {
+      "path": "docs/features/F079-voting-system.md",
+      "anchor": "Voting System"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "多只猫讨论一个问题？可以发起投票让它们各自表态，高效收敛共识。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "feature-multi-platform",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F088-multi-platform-chat-gateway.md", "anchor": "Multi-Platform Chat" },
-    "structureSource": { "path": "docs/features/F088-multi-platform-chat-gateway.md", "anchor": "Multi-Platform Chat" },
-    "bodySource": { "path": "docs/features/F088-multi-platform-chat-gateway.md", "anchor": "Multi-Platform Chat" },
+    "sourceRef": {
+      "path": "docs/features/F088-multi-platform-chat-gateway.md",
+      "anchor": "Multi-Platform Chat"
+    },
+    "structureSource": {
+      "path": "docs/features/F088-multi-platform-chat-gateway.md",
+      "anchor": "Multi-Platform Chat"
+    },
+    "bodySource": {
+      "path": "docs/features/F088-multi-platform-chat-gateway.md",
+      "anchor": "Multi-Platform Chat"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "不想开 Hub？猫猫也在飞书和 Telegram——哪里方便就在哪里聊，消息和对话都是互通的。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "basics-memory-system",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F186-library-memory-architecture.md", "anchor": "图书馆记忆架构" },
-    "structureSource": { "path": "docs/features/F102-memory-adapter-refactor.md", "anchor": "记忆组件 Adapter" },
-    "bodySource": { "path": "docs/features/F188-library-stewardship.md", "anchor": "Memory Center Config Health" },
+    "sourceRef": {
+      "path": "docs/features/F186-library-memory-architecture.md",
+      "anchor": "图书馆记忆架构"
+    },
+    "structureSource": {
+      "path": "docs/features/F102-memory-adapter-refactor.md",
+      "anchor": "记忆组件 Adapter"
+    },
+    "bodySource": {
+      "path": "docs/features/F188-library-stewardship.md",
+      "anchor": "Memory Center Config Health"
+    },
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
     "body": "之前聊的忘了？说「翻一下上次聊的 X」——猫有长期记忆，会搜到之前的决策。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "basics-thread-organization",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F006-thread-title-editor.md", "anchor": "Thread 名字编辑" },
-    "structureSource": { "path": "docs/features/F128-cat-create-thread.md", "anchor": "猫猫提议创建 Thread" },
-    "bodySource": { "path": "docs/features/F187-thread-labels.md", "anchor": "Thread Labels" },
+    "sourceRef": {
+      "path": "docs/features/F006-thread-title-editor.md",
+      "anchor": "Thread 名字编辑"
+    },
+    "structureSource": {
+      "path": "docs/features/F128-cat-create-thread.md",
+      "anchor": "猫猫提议创建 Thread"
+    },
+    "bodySource": {
+      "path": "docs/features/F187-thread-labels.md",
+      "anchor": "Thread Labels"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "换话题？点左侧「+」开新 Thread，独立互不干扰。双击标题改名。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
@@ -1095,7 +1637,10 @@
       "path": "docs/team/cat-dossier.md",
       "anchor": "Clowder AI 能力画像档案 (Cat Dossier)"
     },
-    "structureSource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
+    "structureSource": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
     "bodySource": {
       "path": "docs/team/cat-dossier.md",
       "anchor": "四主力猫 L1 画像"
@@ -1103,124 +1648,226 @@
     "contexts": ["thinking", "long_running", "concierge_open"],
     "audience": ["all"],
     "body": "不确定找哪只？布偶猫擅长分析，缅因猫找 bug，暹罗猫审美——@ 名字就行。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "basics-at-routing",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
-    "structureSource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
-    "bodySource": { "path": "docs/features/F108-side-dispatch-concurrent-invocation.md", "anchor": "Side-Dispatch" },
+    "sourceRef": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
+    "structureSource": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
+    "bodySource": {
+      "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
+      "anchor": "Side-Dispatch"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "不 @ 任何猫？上次聊的那只会继续接话。想找特定猫就 @ 它名字。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "basics-concurrent-at",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F108-side-dispatch-concurrent-invocation.md", "anchor": "Side-Dispatch" },
+    "sourceRef": {
+      "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
+      "anchor": "Side-Dispatch"
+    },
     "structureSource": {
       "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
       "anchor": "Side-Dispatch"
     },
-    "bodySource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
+    "bodySource": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
     "contexts": ["thinking", "concierge_open"],
     "audience": ["all"],
     "body": "同时 @ 多只猫？它们各自独立回你、不互相传球。想接力就等回复后再点名。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "basics-knowledge-feed",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F188-library-stewardship.md", "anchor": "Memory Center Config Health" },
-    "structureSource": { "path": "docs/features/F186-library-memory-architecture.md", "anchor": "图书馆记忆架构" },
-    "bodySource": { "path": "docs/features/F102-memory-adapter-refactor.md", "anchor": "记忆组件 Adapter" },
+    "sourceRef": {
+      "path": "docs/features/F188-library-stewardship.md",
+      "anchor": "Memory Center Config Health"
+    },
+    "structureSource": {
+      "path": "docs/features/F186-library-memory-architecture.md",
+      "anchor": "图书馆记忆架构"
+    },
+    "bodySource": {
+      "path": "docs/features/F102-memory-adapter-refactor.md",
+      "anchor": "记忆组件 Adapter"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "猫越来越懂你的项目了？有价值知识会自动沉淀——不用标记，决策不会白做。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "recovery-wrong-answer",
     "kind": "capability",
-    "sourceRef": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
+    "sourceRef": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
     "structureSource": {
       "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
       "anchor": "Side-Dispatch"
     },
-    "bodySource": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "context-self-management" },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "context-self-management"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "猫答非所问？换个角度重新描述你的需求，或者 @ 另一只猫换个思路——不同猫的理解方式不一样。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "recovery-stuck-loop",
     "kind": "capability",
-    "sourceRef": { "path": "cat-cafe-skills/refs/capability-wakeup-index.md", "anchor": "context-self-management" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/capability-wakeup-index.md",
+      "anchor": "context-self-management"
+    },
     "structureSource": {
       "path": "docs/features/F108-side-dispatch-concurrent-invocation.md",
       "anchor": "Side-Dispatch"
     },
-    "bodySource": { "path": "docs/features/F078-smart-routing-group-mentions.md", "anchor": "Smart Routing" },
+    "bodySource": {
+      "path": "docs/features/F078-smart-routing-group-mentions.md",
+      "anchor": "Smart Routing"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["all"],
     "body": "猫卡住反复修不好？停下来说「换个方法」——或 @ 另一只猫从头诊断。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "collab-sop-development",
     "kind": "workflow",
-    "sourceRef": { "path": "docs/SOP.md", "anchor": "完整流程（5 步）" },
-    "structureSource": { "path": "docs/SOP.md", "anchor": "愿景驱动（核心原则）" },
-    "bodySource": { "path": "docs/SOP.md", "anchor": "完整流程（5 步）" },
+    "sourceRef": {
+      "path": "docs/SOP.md",
+      "anchor": "完整流程（5 步）"
+    },
+    "structureSource": {
+      "path": "docs/SOP.md",
+      "anchor": "愿景驱动（核心原则）"
+    },
+    "bodySource": {
+      "path": "docs/SOP.md",
+      "anchor": "完整流程（5 步）"
+    },
     "contexts": ["feature_dev", "thinking", "long_running"],
     "audience": ["cvo"],
     "body": "想做完整功能？说「按 SOP 开发」——猫会自走立项到合并，你只拍板关键点。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
     "id": "collab-vision-driven",
     "kind": "workflow",
-    "sourceRef": { "path": "docs/VISION.md", "anchor": "我们养的不是工具，是团队" },
-    "structureSource": { "path": "docs/SOP.md", "anchor": "愿景驱动（核心原则）" },
-    "bodySource": { "path": "docs/VISION.md", "anchor": "我们养的不是工具，是团队" },
+    "sourceRef": {
+      "path": "docs/VISION.md",
+      "anchor": "我们养的不是工具，是团队"
+    },
+    "structureSource": {
+      "path": "docs/SOP.md",
+      "anchor": "愿景驱动（核心原则）"
+    },
+    "bodySource": {
+      "path": "docs/VISION.md",
+      "anchor": "我们养的不是工具，是团队"
+    },
     "contexts": ["feature_dev", "thinking"],
     "audience": ["cvo"],
     "body": "新功能别急着说「怎么写」。跟猫说「走愿景驱动开发」——它会先对齐愿景再动手，少走弯路少返工。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
     "id": "collab-give-goals-not-steps",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "W3. 用户是 operator" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "P2. 共创伙伴" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "W1. 猫猫是 Agent" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "W3. 用户是 operator"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "P2. 共创伙伴"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "W1. 猫猫是 Agent"
+    },
     "contexts": ["feature_dev", "thinking", "long_running"],
     "audience": ["cvo"],
     "body": "想让猫做什么？直接说目标就好。它们会自己传球接力——同时 @ 多只是各干各的哦。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
     "id": "collab-cross-review",
     "kind": "workflow",
-    "sourceRef": { "path": "docs/SOP.md", "anchor": "Reviewer 配对规则" },
-    "structureSource": { "path": "docs/SOP.md", "anchor": "Reviewer 配对规则" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "P5. 可验证才算完成" },
+    "sourceRef": {
+      "path": "docs/SOP.md",
+      "anchor": "Reviewer 配对规则"
+    },
+    "structureSource": {
+      "path": "docs/SOP.md",
+      "anchor": "Reviewer 配对规则"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "P5. 可验证才算完成"
+    },
     "contexts": ["review", "feature_dev"],
     "audience": ["cvo"],
     "body": "看到两只猫在互相挑毛病？别担心——写完代码必须另一只 review 才能合入，那是质量门。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
@@ -1254,25 +1901,49 @@
   {
     "id": "collab-cats-ask-for-help",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "P2. 共创伙伴" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "P2. 共创伙伴" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "判断力的行使" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "P2. 共创伙伴"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "P2. 共创伙伴"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "判断力的行使"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
     "body": "猫卡住时会自己 @ 队友一起想，或在关键决策点找你——不会闷头死磕，也不会假装搞定。给它一点空间。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
     "id": "collab-reversible-autonomy",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "判断力的行使" },
-    "structureSource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "Rule 0" },
-    "bodySource": { "path": "cat-cafe-skills/refs/shared-rules.md", "anchor": "判断力的行使" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "判断力的行使"
+    },
+    "structureSource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "Rule 0"
+    },
+    "bodySource": {
+      "path": "cat-cafe-skills/refs/shared-rules.md",
+      "anchor": "判断力的行使"
+    },
     "contexts": ["feature_dev", "thinking"],
     "audience": ["cvo"],
     "body": "猫自己做了个决定没问你？那多半是可回滚的小事——不可逆的它一定会来确认。觉得管太松就跟它说。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus-48"
   },
   {
@@ -1306,16 +1977,28 @@
   {
     "id": "feature-f245-friction-eval-rollup",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" },
-    "structureSource": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Phase D" },
-    "bodySource": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Why" },
+    "sourceRef": {
+      "path": "docs/features/F245-friction-signal-eval.md",
+      "anchor": "Friction Signal Eval"
+    },
+    "structureSource": {
+      "path": "docs/features/F245-friction-signal-eval.md",
+      "anchor": "Phase D"
+    },
+    "bodySource": {
+      "path": "docs/features/F245-friction-signal-eval.md",
+      "anchor": "Why"
+    },
     "contexts": ["thinking", "feature_dev"],
     "audience": ["cvo"],
     "body": "觉得某个地方用着别扭？Eval Hub 会把爪感差、cancel、反馈汇成周期报告；标「建议修复」的是待判断线索，不会自动给猫派活。",
     "action": {
       "type": "open_source",
       "label": "打开 spec",
-      "sourceRef": { "path": "docs/features/F245-friction-signal-eval.md", "anchor": "Friction Signal Eval" }
+      "sourceRef": {
+        "path": "docs/features/F245-friction-signal-eval.md",
+        "anchor": "Friction Signal Eval"
+      }
     },
     "owner": "gpt52"
   },
@@ -1431,44 +2114,80 @@
   {
     "id": "feature-f205-video-plugins",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
-    "structureSource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "What" },
-    "bodySource": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" },
+    "sourceRef": {
+      "path": "docs/features/F205-video-provider-plugins.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F205-video-provider-plugins.md",
+      "anchor": "What"
+    },
+    "bodySource": {
+      "path": "docs/features/F205-video-provider-plugins.md",
+      "anchor": "User Journey"
+    },
     "contexts": ["feature_dev"],
     "audience": ["cvo", "developer"],
     "body": "视频插件已就绪：设置 → 插件 → video-gen / video-analysis → 配置 provider 凭据（API Key 或 Access Key + Secret Key）并启用。生成结果可在对话中内联播放，分析结果直接返回文本。",
     "action": {
       "type": "open_source",
       "label": "打开 F205 spec",
-      "sourceRef": { "path": "docs/features/F205-video-provider-plugins.md", "anchor": "User Journey" }
+      "sourceRef": {
+        "path": "docs/features/F205-video-provider-plugins.md",
+        "anchor": "User Journey"
+      }
     },
     "owner": "opus"
   },
   {
     "id": "feature-f204-weixin-mp-plugin",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "User Journey" },
-    "structureSource": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "What" },
-    "bodySource": { "path": "docs/features/F204-weixin-mp-publisher-plugin.md", "anchor": "User Journey" },
+    "sourceRef": {
+      "path": "docs/features/F204-weixin-mp-publisher-plugin.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F204-weixin-mp-publisher-plugin.md",
+      "anchor": "What"
+    },
+    "bodySource": {
+      "path": "docs/features/F204-weixin-mp-publisher-plugin.md",
+      "anchor": "User Journey"
+    },
     "contexts": ["thinking", "long_running"],
     "audience": ["cvo"],
     "body": "微信公众号插件已就绪：设置 → 插件 → weixin-mp → 配置 App ID 和 App Secret 并启用。猫猫可以帮你把 Markdown 转成微信格式、上传图片、创建草稿、一键发布文章。",
-    "action": { "type": "open_concierge_draft", "label": "了解更多" },
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "了解更多"
+    },
     "owner": "opus"
   },
   {
     "id": "feature-f273-desktop-in-app-update",
     "kind": "feature",
-    "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" },
-    "structureSource": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "What — 架构设计" },
-    "bodySource": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "Why" },
+    "sourceRef": {
+      "path": "docs/features/F273-desktop-in-app-update.md",
+      "anchor": "User Journey"
+    },
+    "structureSource": {
+      "path": "docs/features/F273-desktop-in-app-update.md",
+      "anchor": "What — 架构设计"
+    },
+    "bodySource": {
+      "path": "docs/features/F273-desktop-in-app-update.md",
+      "anchor": "Why"
+    },
     "contexts": ["feature_dev"],
     "audience": ["all"],
     "body": "桌面版会在启动或重新登录时检查更新，也可从托盘手动检查。Windows 安装版在用户确认下载与安装后校验文件并请求一次 UAC；macOS 只下载、校验并打开未签名 DMG，引导用户手动拖拽替换。用户数据保存在安装目录外。",
     "action": {
       "type": "open_source",
       "label": "打开 F273 spec",
-      "sourceRef": { "path": "docs/features/F273-desktop-in-app-update.md", "anchor": "User Journey" }
+      "sourceRef": {
+        "path": "docs/features/F273-desktop-in-app-update.md",
+        "anchor": "User Journey"
+      }
     },
     "owner": "opus"
   },
@@ -1811,8 +2530,8 @@
       "anchor": "Collective Entry and Host Contract"
     },
     "structureSource": {
-      "path": "packages/web/src/components/collective/CollectiveLaunchSurface.tsx",
-      "anchor": "CollectiveLaunchSurface"
+      "path": "packages/web/src/components/collective/CollectiveParticipationPanel.tsx",
+      "anchor": "CollectiveParticipationContent"
     },
     "bodySource": {
       "path": "docs/features/F290-ai-native-collective.md",
@@ -1820,7 +2539,7 @@
     },
     "contexts": ["thinking", "feature_dev", "concierge_open"],
     "audience": ["cvo", "developer"],
-    "body": "需要跨真人、跨 Café 协作？用 Human 身份进入 Collective，配对后在 Café 的“带猫加入”里选择猫和公开频道。成员可以请求它回应；持续私人执行由猫的主人另行授权。浏览器直达与 Café 内入口打开同一个世界。",
+    "body": "先自己带猫进入 Collective：用本人身份登入，点击连接这台 Café。确认前先看清登记的头像与介绍，取消勾选不想带的猫，再确认连接。获准伙伴进入频道成员栏后，在“我的 Café”管理参与；回到频道点名，以接收状态和具名回复确认它真的接住了。",
     "action": {
       "type": "open_capability_surface",
       "label": "进入 Collective",
@@ -1831,7 +2550,10 @@
   {
     "id": "workflow-collective-result-return",
     "kind": "workflow",
-    "sourceRef": { "path": "cat-cafe-skills/collective-participation/SKILL.md", "anchor": "恢复与真实状态" },
+    "sourceRef": {
+      "path": "cat-cafe-skills/collective-participation/SKILL.md",
+      "anchor": "恢复与真实状态"
+    },
     "structureSource": {
       "path": "packages/web/src/components/collective/CollectiveWorkRequests.tsx",
       "anchor": "CollectiveWorkRequests"
@@ -1842,9 +2564,38 @@
     },
     "contexts": ["long_running", "concierge_open"],
     "audience": ["all"],
-    "body": "Collective 私人工作中断后，在“带猫加入 → 收到的请求与私人工作”中继续原工作。猫会恢复原来源再回流，不需要重新发起一份委托；回复送达与工作完成会分别记录。",
-    "action": { "type": "open_capability_surface", "label": "查看 Collective 工作", "surfaceId": "collective" },
+    "body": "Collective 私人工作中断后，在“我的 Café → 这段讨论带回的工作”中继续原工作。猫会恢复原来源再回流，不需要重新发起一份委托；回复送达与工作完成会分别记录。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "查看 Collective 工作",
+      "surfaceId": "collective"
+    },
     "owner": "codex-astra"
+  },
+  {
+    "id": "workflow-collective-result-revision",
+    "kind": "workflow",
+    "sourceRef": {
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "Work 结果反馈与修订"
+    },
+    "structureSource": {
+      "path": "packages/collective-client/src/CollectiveWorkCard.tsx",
+      "anchor": "WorkResultReview"
+    },
+    "bodySource": {
+      "path": "docs/features/F290-ai-native-collective.md",
+      "anchor": "Work 结果反馈与修订"
+    },
+    "contexts": ["thinking", "long_running", "concierge_open"],
+    "audience": ["all"],
+    "body": "结果待确认时，负责人可在原 Work 卡填写反馈并点“退回修改”。在当前授权与家内执行条件仍有效时，修订沿原工作继续，旧结果与反馈保留；新版回来后再确认当前结果，无需另开工作。",
+    "action": {
+      "type": "open_capability_surface",
+      "label": "查看 Collective 工作",
+      "surfaceId": "collective"
+    },
+    "owner": "codex-sol"
   },
   {
     "id": "capability-self-evolution",
@@ -2031,6 +2782,34 @@
     "owner": "codex-astra"
   },
   {
+    "id": "feature-f309-workspace-content-review",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F309-collaborative-content-plane.md",
+      "anchor": "### Phase U: Unified Content Experience — 从任意日常入口进入同一协作现场"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/workbench/F307FileOwnerSurface.tsx",
+      "anchor": "WorkspaceContentReviewSurface"
+    },
+    "bodySource": {
+      "path": "docs/features/F309-collaborative-content-plane.md",
+      "anchor": "### Phase U: Unified Content Experience — 从任意日常入口进入同一协作现场"
+    },
+    "contexts": ["concierge_open", "pet_waiting_for_user"],
+    "audience": ["all"],
+    "body": "在 Workspace 打开 Markdown 或代码，选中文字后加入当前聊天，发送后猫可读到引用；PNG/MP4 可在“标注”里画线、形状或文字，也可在“评论”里定位讨论。保存标记不会直接改写原文件。",
+    "action": {
+      "type": "open_source",
+      "label": "查看 Workspace 协作说明",
+      "sourceRef": {
+        "path": "docs/features/F309-collaborative-content-plane.md",
+        "anchor": "### Phase U: Unified Content Experience — 从任意日常入口进入同一协作现场"
+      }
+    },
+    "owner": "codex-terra"
+  },
+  {
     "id": "capability-co-creation-storytelling",
     "kind": "capability",
     "sourceRef": {
@@ -2054,5 +2833,30 @@
       "draftPrompt": "请把已有经历材料整理成清楚的一页或短讲故事稿，保留各方行动、事实来源和真实变化。"
     },
     "owner": "codex-astra"
+  },
+  {
+    "id": "feature-served-model-provenance",
+    "kind": "feature",
+    "sourceRef": {
+      "path": "docs/features/F319-served-model-provenance.md",
+      "anchor": "Primary Journey: 看出这条回复是谁答的"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/MetadataBadge.tsx",
+      "anchor": "ModelLabel"
+    },
+    "bodySource": {
+      "path": "docs/features/F319-served-model-provenance.md",
+      "anchor": "Why"
+    },
+    "contexts": ["thinking", "review", "concierge_open"],
+    "audience": ["cvo"],
+    "body": "Codex 猫回复底部的徽标如果出现「A → B（上游应答）」，说明这条回复实际由 B 模型作答，签名不变但 review 意见请按 B 看待；点开徽标可看 response id，向供应商查询时直接引用。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "查这条回复是谁答的",
+      "draftPrompt": "请解释回复徽标里「请求模型 → 上游应答模型」的含义，并帮我找出最近哪些 Codex 回复被替换成了别的模型。"
+    },
+    "owner": "fable-5"
   }
 ]

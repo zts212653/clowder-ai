@@ -1,6 +1,6 @@
 ---
 feature_ids: [F294]
-related_features: [F017, F052, F063, F193, F264, F290]
+related_features: [F017, F052, F063, F193, F264, F290, F322]
 topics: [message-selection, quote-selection, context-attachments, message-bundle, export, rich-message, cross-thread, lineage]
 doc_kind: spec
 created: 2026-08-11

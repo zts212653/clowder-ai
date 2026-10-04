@@ -123,6 +123,7 @@ export function resolveChatWorkspaceDocumentHref(
 
 export function ChatWorkspaceLink({ href, children }: { href?: string; children: ReactNode }) {
   const projectRoot = useChatStore((s) => s.currentProjectPath);
+  const currentThreadId = useChatStore((s) => s.currentThreadId);
   const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const workspaceTarget = resolveChatWorkspaceDocumentHref(href, projectRoot);
@@ -131,6 +132,7 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
   const threadTarget = resolveChatThreadHref(href);
   const [resolveState, setResolveState] = useState<'idle' | 'resolving' | 'error'>('idle');
   const resolutionClaimRef = useRef<WorkspaceDocumentResolutionClaim | null>(null);
+  const linkRef = useRef<HTMLButtonElement>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -144,13 +146,19 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
   const handleWorkspaceClick = async () => {
     cancelActiveWorkspaceDocumentResolution();
     setResolveState('idle');
+    const originThreadId = currentThreadId;
+    const originMessageId = linkRef.current?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId;
+    const navigationOrigin =
+      originThreadId && originMessageId
+        ? { kind: 'chat-file-link' as const, threadId: originThreadId, messageId: originMessageId }
+        : undefined;
     if (workspaceTarget && !requiresServerResolution) {
       setWorkspaceMode('dev');
-      setOpenFile(workspaceTarget.path, workspaceTarget.line);
+      setOpenFile(workspaceTarget.path, workspaceTarget.line, undefined, originThreadId, navigationOrigin);
       return;
     }
     if (!href) return;
-    const claim = claimWorkspaceDocumentResolution(useChatStore.getState().currentThreadId, () => {
+    const claim = claimWorkspaceDocumentResolution(originThreadId, () => {
       if (mountedRef.current) setResolveState('idle');
     });
     resolutionClaimRef.current = claim;
@@ -159,7 +167,7 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
       const target = await resolveAbsoluteDocumentTarget(parseMarkdownHrefPathname(href).pathname);
       if (claim.cancelled) return;
       setWorkspaceMode('dev');
-      setOpenFile(target.path, target.line, target.worktreeId);
+      setOpenFile(target.path, target.line, target.worktreeId, originThreadId, navigationOrigin);
       setResolveState('idle');
     } catch {
       if (claim.cancelled) return;
@@ -194,6 +202,7 @@ export function ChatWorkspaceLink({ href, children }: { href?: string; children:
     return (
       <span>
         <button
+          ref={linkRef}
           type="button"
           disabled={resolveState === 'resolving'}
           onClick={async (event) => {

@@ -1,16 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
+import { resolveQueueTurnCustodyWake } from '../src/domains/ball-custody/turn-custody-wake-provenance.js';
 import { ensurePersistedCarrierOwnedAndScheduled } from '../src/domains/cats/services/agents/invocation/PersistedQueueCarrier.js';
 import { PersistedQueueDelivery } from '../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import {
   createInitialCrossThreadQueuedMessageCustody,
   createInitialQueuedMessageCustody,
 } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import { buildQueueEntry } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupQueueEntry.js';
+import { parseQueuedMessageCustody } from '../src/domains/cats/services/stores/ports/queued-message-custody.js';
 import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.js';
 import './helpers/setup-cat-registry.js';
 
 const input = {
+  ownerAuthProvenance: 'strict' as const,
   ownerUserId: 'operator',
   threadId: 't-review',
   targetCatId: 'codex',
@@ -18,6 +22,12 @@ const input = {
   content: 'continue the entrusted Task',
   source: { connector: 'content-review', label: 'Review', icon: 'cat-cafe', meta: { reviewReceiptRef: 'receipt:1' } },
 };
+
+test('producer delivery preserves an explicit unknown owner proof without promoting it to strict', async (t) => {
+  const f = fixture(t);
+  const result = await f.delivery.deliver({ ...input, ownerAuthProvenance: 'unknown' });
+  assert.equal(result.message?.queueCustody?.ownerAuthProvenance, 'unknown');
+});
 
 function fixture(t: { after: (close: () => Promise<void>) => void }) {
   const f = createPersistedQueueFixture();
@@ -338,4 +348,74 @@ test('fanout recovery derives the target carrier from custody and retains the ot
   assert.equal(f.queue.getEntrySnapshot(input.threadId, input.ownerUserId, entries[0]!.id)?.sourceCategory, 'a2a');
   assert.deepEqual(f.queue.getEntrySnapshot(input.threadId, input.ownerUserId, entries[1]!.id), entries[1]);
   assert.equal(f.records.size, 0);
+});
+
+test('producer sourceCategory survives admission, JSON round-trip, and startup rebuild', async (t) => {
+  const f = fixture(t);
+  const queued = f.queue.enqueue({
+    threadId: input.threadId,
+    userId: input.ownerUserId,
+    ownerAuthProvenance: 'strict',
+    content: input.content,
+    source: 'connector',
+    sourceCategory: 'producer_return',
+    targetCats: [input.targetCatId],
+    intent: 'execute',
+    idempotencyKey: 'producer-category',
+  });
+  assert.ok(queued.entry);
+  const message = f.messages.append({
+    userId: input.ownerUserId,
+    threadId: input.threadId,
+    catId: null,
+    content: input.content,
+    mentions: [createCatId(input.targetCatId)],
+    timestamp: queued.entry.createdAt,
+    deliveryStatus: 'queued',
+    source: input.source,
+    queueCustody: createInitialQueuedMessageCustody(queued.entry),
+    idempotencyKey: 'producer-category',
+  });
+  const custody = message.queueCustody!;
+  assert.equal(custody.sourceCategory, 'producer_return');
+  const roundTripped = parseQueuedMessageCustody(JSON.stringify(custody))!;
+  assert.equal(roundTripped.sourceCategory, 'producer_return');
+  const rebuilt = buildQueueEntry([{ ...structuredClone(message), queueCustody: roundTripped }], custody.entryId);
+  assert.equal(rebuilt.sourceCategory, 'producer_return');
+  const wake = await resolveQueueTurnCustodyWake(rebuilt as never, { getById: async () => null } as never);
+  assert.equal(wake.kind, 'unstructured');
+});
+
+test('admission without sourceCategory falls back to legacy classification after rebuild', async (t) => {
+  const f = fixture(t);
+  const queued = f.queue.enqueue({
+    threadId: input.threadId,
+    userId: input.ownerUserId,
+    ownerAuthProvenance: 'strict',
+    content: input.content,
+    source: 'connector',
+    targetCats: [input.targetCatId],
+    intent: 'execute',
+    idempotencyKey: 'no-category',
+  });
+  assert.ok(queued.entry);
+  const message = f.messages.append({
+    userId: input.ownerUserId,
+    threadId: input.threadId,
+    catId: null,
+    content: input.content,
+    mentions: [createCatId(input.targetCatId)],
+    timestamp: queued.entry.createdAt,
+    deliveryStatus: 'queued',
+    source: input.source,
+    queueCustody: createInitialQueuedMessageCustody(queued.entry),
+    idempotencyKey: 'no-category',
+  });
+  const custody = message.queueCustody!;
+  assert.equal(custody.sourceCategory, undefined);
+  const roundTripped = parseQueuedMessageCustody(JSON.stringify(custody))!;
+  const rebuilt = buildQueueEntry([{ ...structuredClone(message), queueCustody: roundTripped }], custody.entryId);
+  assert.equal(rebuilt.sourceCategory, undefined);
+  const wake = await resolveQueueTurnCustodyWake(rebuilt as never, { getById: async () => null } as never);
+  assert.equal(wake.kind, 'legacy');
 });

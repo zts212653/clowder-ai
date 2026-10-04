@@ -16,8 +16,8 @@ import { dirname, join, resolve } from 'node:path';
 import {
   captureProcessIdentity,
   captureReadableIdentity,
-  compareStoredIdentity,
   identityInspectionIsUnreadable,
+  inspectProcessIdentity,
   observeProcessIdentity,
   spawnedIdentityRefusal,
   waitUntilIdentityGone,
@@ -177,20 +177,7 @@ export function inspectDaemonState({
     return { kind: 'mismatch', reason: 'state-owner-mismatch', state };
   }
 
-  const observed = observeProcessIdentity(state.pid, captureIdentity);
-  if (observed.status === 'absent') {
-    return { kind: 'stale', reason: 'process-not-running', state };
-  }
-  if (observed.status === 'unknown') {
-    return { kind: 'mismatch', reason: 'process-identity-unreadable', state, error: observed.error };
-  }
-  const identity = observed.identity;
-  const comparison = compareStoredIdentity(state, identity);
-  if (comparison !== 'match') {
-    const reason = comparison === 'unknown' ? 'process-argv-unavailable' : 'process-identity-mismatch';
-    return { kind: 'mismatch', reason, state, identity };
-  }
-  return { kind: 'running', state, identity };
+  return inspectProcessIdentity(state, captureIdentity);
 }
 
 export function refusalFromInspection(inspection) {

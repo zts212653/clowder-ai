@@ -3,6 +3,7 @@ import type { ArtifactReviewAction, ArtifactReviewAnnotation, ArtifactReviewRoun
 import { useEffect, useRef, useState } from 'react';
 import { ReviewActor } from './ReviewActor';
 import { ReviewReply } from './ReviewReply';
+import { clearCommittedDraft } from './review-draft-commit';
 import { anchorLabel } from './review-geometry';
 import { useReviewDraft } from './useReviewDraft';
 
@@ -136,7 +137,7 @@ function CommentThread({
             void act({ kind: 'edit', annotationId: annotation.id, body: edit.draft.body }, round.number).then((ok) => {
               if (ok) {
                 setEditing(false);
-                edit.clear();
+                clearCommittedDraft(`${draftPrefix}edit:${annotation.id}`, edit.draft.body);
               }
             });
           }}
@@ -230,7 +231,7 @@ function CommentThread({
               { kind: 'reply', annotationId: annotation.id, replyId: crypto.randomUUID(), body: reply.draft.body },
               round.number,
             ).then((ok) => {
-              if (ok) reply.clear();
+              if (ok) clearCommittedDraft(`${draftPrefix}reply:${annotation.id}`, reply.draft.body);
             });
           }}
         >

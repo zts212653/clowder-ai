@@ -8,11 +8,18 @@ interface BindAndRetryInput {
   readonly catId: string;
   readonly proposalId: string;
   readonly revision: number;
+  /**
+   * Asked after the destination's cat is saved and before delivery is retried. `false` stops here: the cat stays saved,
+   * nothing is retried. Absent means no one is asking (the Approval Hub), and the retry always goes out.
+   */
+  readonly mayRetry?: () => boolean;
 }
 
 export type BindAndRetryResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly status: number; readonly message: string };
+  | { readonly ok: false; readonly status: number; readonly message: string }
+  /** The cat was saved and the retry was deliberately not sent. No response was seen, so there is no status. */
+  | { readonly ok: false; readonly stopped: true; readonly message: string };
 
 async function readResponseBody(response: Response): Promise<unknown> {
   return response.json().catch(() => ({}));
@@ -35,6 +42,7 @@ export async function bindMeetingDestinationCatAndRetry({
   catId,
   proposalId,
   revision,
+  mayRetry,
 }: BindAndRetryInput): Promise<BindAndRetryResult> {
   const patchResponse = await apiFetch(`/api/threads/${threadId}`, {
     method: 'PATCH',
@@ -48,6 +56,10 @@ export async function bindMeetingDestinationCatAndRetry({
       status: patchResponse.status,
       message: `没能保存负责猫猫：${meetingErrorMessage(patchBody, patchResponse.status)}`,
     };
+  }
+
+  if (mayRetry && !mayRetry()) {
+    return { ok: false, stopped: true, message: '负责猫猫已经保存，但这条事项暂时不能写入，没有重新投递。' };
   }
 
   const retryResponse = await apiFetch(`/api/meeting-intakes/${proposalId}/retry`, {

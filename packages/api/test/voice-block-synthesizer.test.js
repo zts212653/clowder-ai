@@ -590,6 +590,10 @@ describe('VoiceBlockSynthesizer — cache hit', () => {
 // F066 Phase 4: TTS Resilience Enhancement — retry on transient errors
 // ---------------------------------------------------------------------------
 
+function newFastSynthesizer(registry, cacheDir) {
+  return new VoiceBlockSynthesizer(registry, cacheDir, 0);
+}
+
 describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', () => {
   it('retries once on ECONNREFUSED and succeeds', async () => {
     let callCount = 0;
@@ -613,12 +617,14 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', ()
     const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
 
     const block = { id: 'r1', kind: 'audio', v: 1, text: 'retry me' };
+    const startedAt = Date.now();
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
 
     assert.equal(result.length, 1);
     assert.equal(result[0].kind, 'audio', 'synthesis succeeded after retry');
     assert.ok(result[0].url.startsWith('/api/tts/audio/'), 'url populated');
     assert.equal(callCount, 2, 'synthesize called twice (1 fail + 1 retry)');
+    assert.ok(Date.now() - startedAt >= 1_900, 'default retry keeps the production backoff');
   });
 
   it('retries once on ETIMEDOUT and succeeds', async () => {
@@ -640,7 +646,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', ()
     });
     cleanTmpDir('vbs-test-retry-timeout');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-retry-timeout');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'r2', kind: 'audio', v: 1, text: 'timeout retry' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -666,7 +672,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', ()
     });
     cleanTmpDir('vbs-test-retry-5xx');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-retry-5xx');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'r3', kind: 'audio', v: 1, text: '5xx retry' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -685,7 +691,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', ()
     });
     cleanTmpDir('vbs-test-no-retry-4xx');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-no-retry-4xx');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'r4', kind: 'audio', v: 1, text: 'bad request' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -706,7 +712,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: retry on transient errors', ()
     });
     cleanTmpDir('vbs-test-retry-fails');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-retry-fails');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'r5', kind: 'audio', v: 1, text: 'both fail' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -731,7 +737,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: error classification in degrad
     });
     cleanTmpDir('vbs-test-err-connrefused');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-err-connrefused');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'e1', kind: 'audio', v: 1, text: 'test error' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -751,7 +757,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: error classification in degrad
     });
     cleanTmpDir('vbs-test-err-timeout');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-err-timeout');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'e2', kind: 'audio', v: 1, text: 'timeout test' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -768,7 +774,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: error classification in degrad
     });
     cleanTmpDir('vbs-test-err-5xx');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-err-5xx');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'e3', kind: 'audio', v: 1, text: '500 test' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -785,7 +791,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: error classification in degrad
     });
     cleanTmpDir('vbs-test-err-unknown');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-err-unknown');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'e4', kind: 'audio', v: 1, text: 'unknown error' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -821,7 +827,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: real fetch error shape (cause 
     });
     cleanTmpDir('vbs-test-real-fetch-connrefused');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-real-fetch-connrefused');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'rf1', kind: 'audio', v: 1, text: 'real fetch retry' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -840,7 +846,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: real fetch error shape (cause 
     });
     cleanTmpDir('vbs-test-real-fetch-classify');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-real-fetch-classify');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'rf2', kind: 'audio', v: 1, text: 'classify real fetch' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -868,7 +874,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4: real fetch error shape (cause 
     });
     cleanTmpDir('vbs-test-real-fetch-timeout');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-real-fetch-timeout');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'rf3', kind: 'audio', v: 1, text: 'real fetch timeout' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -891,7 +897,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4 AC-10: resynthesize', () => {
     });
     cleanTmpDir('vbs-test-resynth-action');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-resynth-action');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'a1', kind: 'audio', v: 1, text: '需要重新合成的文本' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -913,7 +919,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4 AC-10: resynthesize', () => {
     });
     cleanTmpDir('vbs-test-resynth-speaker');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-resynth-speaker');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const block = { id: 'a2', kind: 'audio', v: 1, text: 'speaker override', speaker: 'gemini' };
     const result = await synthesizer.resolveVoiceBlocks([block], 'opus');
@@ -936,7 +942,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4 AC-10: resynthesize', () => {
     });
     cleanTmpDir('vbs-test-resynth-method');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-resynth-method');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const result = await synthesizer.resynthesize('重新合成', 'opus');
 
@@ -964,7 +970,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4 AC-10: resynthesize', () => {
     });
     cleanTmpDir('vbs-test-resynth-retry');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-resynth-retry');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     const result = await synthesizer.resynthesize('retry test', 'opus');
 
@@ -980,7 +986,7 @@ describe('VoiceBlockSynthesizer — F066 Phase 4 AC-10: resynthesize', () => {
     });
     cleanTmpDir('vbs-test-resynth-throws');
     const cacheDir = path.join(os.tmpdir(), 'vbs-test-resynth-throws');
-    const synthesizer = new VoiceBlockSynthesizer(registry, cacheDir);
+    const synthesizer = newFastSynthesizer(registry, cacheDir);
 
     await assert.rejects(
       () => synthesizer.resynthesize('will fail', 'opus'),

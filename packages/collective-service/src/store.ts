@@ -1,10 +1,15 @@
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { COLLECTIVE_CLIENT_BUILD_ID } from '@cat-cafe/collective-client';
+import { CollectiveBindingVoteStore } from './collaboration-binding-vote-store.js';
+import { CollectiveReactionStore } from './collaboration-reaction-store.js';
+import { CollectiveCollaborationStore } from './collaboration-store.js';
 import { CollectiveConnectionEventStore, type PairingExchangeInput } from './connection-event-store.js';
 import { CollectiveServiceError } from './errors.js';
 import type { HumanAuthProvider, HumanAuthProviderId } from './human-auth-provider.js';
 import { CollectiveIdentityStore } from './identity-store.js';
+import { readMemberDirectory } from './member-directory.js';
+import { leaveCollectiveMembership } from './membership-lifecycle.js';
 import { CollectiveParticipationStore } from './participation-store.js';
 import {
   createSecret,
@@ -14,6 +19,7 @@ import {
   SERVICE_STATE_FILE,
 } from './persistence.js';
 import type { ServiceState } from './state.js';
+import { CollectiveWorkPolicyStore } from './work-policy-store.js';
 
 export interface OpenCollectiveServiceStoreOptions {
   readonly dataDirectory: string;
@@ -32,16 +38,24 @@ export class CollectiveServiceStore {
   readonly #identity: CollectiveIdentityStore;
   readonly #connections: CollectiveConnectionEventStore;
   readonly #participation: CollectiveParticipationStore;
+  readonly #collaboration: CollectiveCollaborationStore;
+  readonly #bindingVotes: CollectiveBindingVoteStore;
+  readonly #reactions: CollectiveReactionStore;
+  readonly #workPolicy: CollectiveWorkPolicyStore;
 
   private constructor(
     private readonly persistence: PersistentServiceState,
-    now: () => number,
+    private readonly now: () => number,
     humanAuthProvider?: HumanAuthProvider,
     humanAuthRedirectUri?: string,
   ) {
     this.#identity = new CollectiveIdentityStore(persistence, now, humanAuthProvider, humanAuthRedirectUri);
     this.#connections = new CollectiveConnectionEventStore(persistence, now);
     this.#participation = new CollectiveParticipationStore(persistence, now);
+    this.#collaboration = new CollectiveCollaborationStore(persistence, now);
+    this.#bindingVotes = new CollectiveBindingVoteStore(persistence, now);
+    this.#reactions = new CollectiveReactionStore(persistence, now);
+    this.#workPolicy = new CollectiveWorkPolicyStore(persistence, now);
   }
 
   static async open(options: OpenCollectiveServiceStoreOptions): Promise<OpenedCollectiveServiceStore> {
@@ -84,6 +98,13 @@ export class CollectiveServiceStore {
         connections: {},
         events: {},
         participations: {},
+        works: {},
+        roadmaps: {},
+        votes: {},
+        bindingVotes: {},
+        decisions: {},
+        reactions: {},
+        collaborationOperations: {},
         legacyEvents: {},
         clientEventIndex: {},
       };
@@ -167,6 +188,10 @@ export class CollectiveServiceStore {
     return this.#identity.joinInvite(input);
   }
 
+  leaveCollective(input: { sessionToken: string; collectiveId: string }) {
+    return leaveCollectiveMembership(this.persistence, this.now, input);
+  }
+
   createPairingIntent(input: {
     sessionToken: string;
     collectiveId: string;
@@ -222,8 +247,132 @@ export class CollectiveServiceStore {
   listParticipants(sessionToken: string, collectiveId: string) {
     return this.#participation.list(sessionToken, collectiveId);
   }
+
+  listMembers(sessionToken: string, collectiveId: string) {
+    return readMemberDirectory(this.persistence.snapshot(), sessionToken, collectiveId);
+  }
   readParticipationContext(endpointCredential: string, input: unknown) {
     return this.#participation.readContext(endpointCredential, input);
+  }
+
+  proposeCollectiveWork(sessionToken: string, input: unknown) {
+    return this.#collaboration.proposeHumanWork(sessionToken, input);
+  }
+
+  readAssignedWork(endpointCredential: string, input: unknown) {
+    return this.#collaboration.readAssignedWork(endpointCredential, input);
+  }
+
+  readAssignedWorkByAssignment(endpointCredential: string, input: unknown) {
+    return this.#collaboration.readAssignedWorkByAssignment(endpointCredential, input);
+  }
+
+  proposeCollectiveWorkAsAgent(endpointCredential: string, input: unknown) {
+    return this.#collaboration.proposeAgentWork(endpointCredential, input);
+  }
+
+  commitCollectiveWork(sessionToken: string, input: unknown) {
+    return this.#collaboration.commitWork(sessionToken, input);
+  }
+
+  setCollectiveWorkDependencies(sessionToken: string, input: unknown) {
+    return this.#collaboration.setWorkDependencies(sessionToken, input);
+  }
+
+  declineCollectiveWork(sessionToken: string, input: unknown) {
+    return this.#collaboration.declineWork(sessionToken, input);
+  }
+
+  acceptCollectiveWorkResult(sessionToken: string, input: unknown) {
+    return this.#collaboration.acceptWorkResult(sessionToken, input);
+  }
+
+  requestCollectiveWorkRevision(sessionToken: string, input: unknown) {
+    return this.#collaboration.requestWorkRevision(sessionToken, input);
+  }
+
+  completeCollectiveWork(sessionToken: string, input: unknown) {
+    return this.#collaboration.completeWork(sessionToken, input);
+  }
+
+  createCollectiveRoadmap(sessionToken: string, input: unknown) {
+    return this.#collaboration.createRoadmap(sessionToken, input);
+  }
+
+  setCollectiveRoadmapWorks(sessionToken: string, input: unknown) {
+    return this.#collaboration.setRoadmapWorks(sessionToken, input);
+  }
+
+  setCollectiveRoadmapStatus(sessionToken: string, input: unknown) {
+    return this.#collaboration.setRoadmapStatus(sessionToken, input);
+  }
+
+  createCollectiveVote(sessionToken: string, input: unknown) {
+    return this.#collaboration.createVote(sessionToken, input);
+  }
+
+  castCollectiveVote(sessionToken: string, input: unknown) {
+    return this.#collaboration.castVote(sessionToken, input);
+  }
+
+  closeCollectiveVote(sessionToken: string, input: unknown) {
+    return this.#collaboration.closeVote(sessionToken, input);
+  }
+
+  createCollectiveBindingVote(sessionToken: string, input: unknown) {
+    return this.#bindingVotes.create(sessionToken, input);
+  }
+
+  castCollectiveBindingVote(sessionToken: string, input: unknown) {
+    return this.#bindingVotes.cast(sessionToken, input);
+  }
+
+  withdrawCollectiveBindingVote(sessionToken: string, input: unknown) {
+    return this.#bindingVotes.withdraw(sessionToken, input);
+  }
+
+  settleCollectiveBindingVote(sessionToken: string, input: unknown) {
+    return this.#bindingVotes.settle(sessionToken, input);
+  }
+
+  setCollectiveReaction(sessionToken: string, input: unknown) {
+    return this.#reactions.set(sessionToken, input);
+  }
+
+  registerCollectiveWorkPolicy(sessionToken: string, input: unknown) {
+    return this.#workPolicy.register(sessionToken, input);
+  }
+  readCollectiveWorkPolicy(endpointCredential: string, input: unknown) {
+    return this.#workPolicy.read(endpointCredential, input);
+  }
+  readOwnerCollectiveWorkPolicy(sessionToken: string, input: unknown) {
+    return this.#workPolicy.readOwner(sessionToken, input);
+  }
+  revokeCollectiveWorkPolicy(endpointCredential: string, input: unknown) {
+    return this.#workPolicy.revoke(endpointCredential, input);
+  }
+  acceptCollectiveWorkAsAgent(endpointCredential: string, input: unknown) {
+    return this.#collaboration.acceptAgentWork(endpointCredential, input);
+  }
+  continueCollectiveWorkAsAgent(endpointCredential: string, input: unknown) {
+    return this.#collaboration.continueAgentWork(endpointCredential, input);
+  }
+  readCollectiveWorkSourceContext(endpointCredential: string, input: unknown) {
+    return this.#collaboration.readSourceContext(endpointCredential, input);
+  }
+  readCollectiveWorkRoutingContext(endpointCredential: string, input: unknown) {
+    return this.#collaboration.readRoutingContext(endpointCredential, input);
+  }
+  recordCollectiveWorkHostAdmission(endpointCredential: string, input: unknown) {
+    return this.#collaboration.recordHostAdmission(endpointCredential, input);
+  }
+
+  listCollectiveCollaboration(sessionToken: string, collectiveId: string) {
+    return {
+      ...this.#collaboration.list(sessionToken, collectiveId),
+      ...this.#bindingVotes.list(sessionToken, collectiveId),
+      reactions: this.#reactions.list(sessionToken, collectiveId),
+    };
   }
 }
 

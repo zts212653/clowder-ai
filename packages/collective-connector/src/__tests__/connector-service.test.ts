@@ -21,6 +21,31 @@ afterEach(async () => {
 });
 
 describe('official Collective Connector', () => {
+  it('keeps the reviewed entry exclusions and refuses a second live endpoint for the same Café and Collective', async () => {
+    const fixture = await createFixture();
+    const connector = await openConnector(fixture.connectorDirectory);
+    const first = await connector.pair({
+      serviceUrl: fixture.server.url,
+      intent: fixture.pairing,
+      endpointLabel: 'Owner Café',
+      initialExcludedCatIds: ['codex-sol'],
+    });
+    expect(first.initialExcludedCatIds).toEqual(['codex-sol']);
+    const reopened = await openConnector(fixture.connectorDirectory);
+    expect((await reopened.getProjection(first.connectionId)).initialExcludedCatIds).toEqual(['codex-sol']);
+
+    const duplicateIntent = await fixture.store.createPairingIntent({
+      sessionToken: fixture.ownerSessionToken,
+      collectiveId: fixture.collectiveId,
+      hostOrigin: 'http://localhost:5172',
+      nonce: 'connector-second-intent-1234',
+    });
+    await expect(
+      connector.pair({ serviceUrl: fixture.server.url, intent: duplicateIntent, endpointLabel: 'Owner Café again' }),
+    ).rejects.toThrow(/already connected/i);
+    expect(await connector.listConnections()).toHaveLength(1);
+  });
+
   it('pairs under Host custody and round-trips verified Agent/human signals with ACK', async () => {
     const fixture = await createFixture();
     const connector = await openConnector(fixture.connectorDirectory);
@@ -524,6 +549,7 @@ describe('official Collective Connector', () => {
       collectiveId: fixture.collectiveId,
       clientEventId: 'human-needs-host-route',
       target: { kind: 'channel', channelId: 'general' },
+      attentionRequest: 'response_requested',
       body: 'Persist and ACK before Host routing.',
     });
     await connector.sync(connection.connectionId);
@@ -573,6 +599,7 @@ describe('official Collective Connector', () => {
       kind: 'thread_message',
       threadId: 'thread_ingress',
       messageId: 'msg_1',
+      attention: { request: 'response_requested', state: 'unclaimed' },
     });
     const reopened = await openConnector(fixture.connectorDirectory);
     expect(await reopened.listInboxForRouting(connection.connectionId)).toEqual([]);
@@ -580,13 +607,191 @@ describe('official Collective Connector', () => {
       {
         disposition: 'routed',
         routeConfigRevision: routeV2.revision,
-        routeReceipt: { kind: 'thread_message', threadId: 'thread_ingress', messageId: 'msg_1' },
+        routeReceipt: {
+          kind: 'thread_message',
+          threadId: 'thread_ingress',
+          messageId: 'msg_1',
+          attention: { request: 'response_requested', state: 'unclaimed' },
+        },
       },
     ]);
     expect(await reopened.getProjection(connection.connectionId)).toMatchObject({
       route: { configured: true, revision: routeV2.revision },
       inbox: { persisted: 1, pending: 0, routed: 1, failed: 0 },
     });
+  });
+
+  it('retries a transient Service refusal at the same Host route revision without retrying revoked participation', async () => {
+    const fixture = await createFixture();
+    const connector = await openConnector(fixture.connectorDirectory);
+    const connection = await connector.pair({
+      serviceUrl: fixture.server.url,
+      intent: fixture.pairing,
+      endpointLabel: 'Transient routing endpoint',
+    });
+    for (const [clientEventId, body] of [
+      ['transient-service-refusal', 'Retry this exact request after Service recovery.'],
+      ['revoked-participation', 'Keep this request blocked.'],
+    ]) {
+      await fixture.store.postHumanMessage(fixture.ownerSessionToken, {
+        serviceInstanceId: fixture.store.serviceInstanceId,
+        collectiveId: fixture.collectiveId,
+        clientEventId,
+        target: { kind: 'channel', channelId: 'general' },
+        body,
+      });
+    }
+    await connector.sync(connection.connectionId);
+    const route = await connector.setHostRoute(connection.connectionId, {
+      localOwnerUserId: 'owner_1',
+      defaultIngressThreadId: 'thread_ingress',
+      humanNotificationThreadId: 'thread_notice',
+      agentRoutes: {},
+    });
+    const [transient, revoked] = await connector.listInboxForRouting(connection.connectionId);
+    if (!transient || !revoked) throw new Error('Expected both durable Service events');
+
+    await connector.beginInboxRouting(connection.connectionId, transient.event.eventId, route.revision);
+    await connector.failInboxRouting(connection.connectionId, transient.event.eventId, route.revision, {
+      code: 'ECONNREFUSED',
+      message: 'Collective Service is unreachable',
+    });
+    await connector.beginInboxRouting(connection.connectionId, revoked.event.eventId, route.revision);
+    await connector.failInboxRouting(connection.connectionId, revoked.event.eventId, route.revision, {
+      code: 'PARTICIPATION_REVOKED',
+      message: 'Exact participation was withdrawn',
+    });
+
+    const reopened = await openConnector(fixture.connectorDirectory);
+    expect((await reopened.listInboxForRouting(connection.connectionId)).map((item) => item.event.eventId)).toEqual([
+      transient.event.eventId,
+    ]);
+    await reopened.beginInboxRouting(connection.connectionId, transient.event.eventId, route.revision);
+    await reopened.completeInboxRouting(connection.connectionId, transient.event.eventId, route.revision, {
+      kind: 'thread_message',
+      threadId: 'thread_ingress',
+      messageId: 'msg_recovered',
+    });
+    expect(await reopened.listInboxForRouting(connection.connectionId)).toEqual([]);
+    expect(await reopened.listInbox(connection.connectionId)).toMatchObject([
+      { disposition: 'routed', routeReceipt: { messageId: 'msg_recovered' } },
+      { disposition: 'route_failed', routeFailure: { code: 'PARTICIPATION_REVOKED' } },
+    ]);
+  });
+
+  it('persists desired policy, observed eligibility, and shared Channel materialization across restart', async () => {
+    const fixture = await createFixture();
+    const connector = await openConnector(fixture.connectorDirectory);
+    const connection = await connector.pair({
+      serviceUrl: fixture.server.url,
+      intent: fixture.pairing,
+      endpointLabel: 'Reconciled Café endpoint',
+    });
+    const route = await connector.setHostRoute(
+      connection.connectionId,
+      {
+        localOwnerUserId: 'owner_1',
+        defaultIngressThreadId: 'thread_general',
+        humanNotificationThreadId: 'thread_general',
+        agentRoutes: {},
+        desiredParticipation: {
+          defaultMode: 'include',
+          excludedCatIds: ['opus'],
+          channelOverrides: { private: { excludedCatIds: ['codex-terra'] } },
+        },
+        observedEligibility: {
+          'codex-sol': { displayName: 'Sol', configured: true, eligible: true },
+          'codex-terra': { displayName: 'Terra', configured: true, eligible: true },
+          opus: { displayName: 'Opus', configured: true, eligible: false },
+        },
+        channelRoutes: {
+          general: {
+            channelId: 'general',
+            threadId: 'thread_general',
+            participants: {
+              'codex-sol': { displayName: 'Sol' },
+              'codex-terra': { displayName: 'Terra' },
+            },
+          },
+          private: {
+            channelId: 'private',
+            threadId: 'thread_private',
+            participants: { 'codex-sol': { displayName: 'Sol' } },
+          },
+        },
+      },
+      0,
+    );
+    await connector.publishParticipation(connection.connectionId);
+    expect(await connector.isParticipationPublished(connection.connectionId)).toBe(true);
+
+    const reopened = await openConnector(fixture.connectorDirectory);
+    expect(await reopened.getHostRoute(connection.connectionId)).toEqual(route);
+    expect(await reopened.isParticipationPublished(connection.connectionId)).toBe(true);
+  });
+
+  it('keeps Cat-authored standing interest on a separate CAS from public participation revision', async () => {
+    const fixture = await createFixture();
+    const connector = await openConnector(fixture.connectorDirectory);
+    const connection = await connector.pair({
+      serviceUrl: fixture.server.url,
+      intent: fixture.pairing,
+      endpointLabel: 'Bounded attention endpoint',
+    });
+    const route = await connector.setHostRoute(
+      connection.connectionId,
+      {
+        localOwnerUserId: 'owner_1',
+        defaultIngressThreadId: 'thread_general',
+        humanNotificationThreadId: 'thread_general',
+        agentRoutes: {},
+        channelRoutes: {
+          general: {
+            channelId: 'general',
+            threadId: 'thread_general',
+            participants: { 'codex-sol': { displayName: 'Sol' } },
+          },
+        },
+      },
+      0,
+    );
+    await connector.publishParticipation(connection.connectionId);
+    const listened = await connector.setStandingInterest(
+      connection.connectionId,
+      { catId: 'codex-sol', channelId: 'general', state: 'listen' },
+      0,
+    );
+    expect(listened.revision).toBe(route.revision);
+    expect(listened.attentionRevision).toBe(1);
+    expect(listened.standingInterests.general?.['codex-sol']).toMatchObject({
+      status: 'active',
+      kind: 'response_requests',
+      revision: 1,
+    });
+    expect(await connector.isParticipationPublished(connection.connectionId)).toBe(true);
+    await expect(
+      connector.setStandingInterest(
+        connection.connectionId,
+        { catId: 'codex-terra', channelId: 'general', state: 'listen' },
+        1,
+      ),
+    ).rejects.toMatchObject({ code: 'PARTICIPATION_REVOKED' });
+    await expect(
+      connector.setStandingInterest(
+        connection.connectionId,
+        { catId: 'codex-sol', channelId: 'general', state: 'withdraw' },
+        0,
+      ),
+    ).rejects.toMatchObject({ code: 'ATTENTION_REVISION_CONFLICT' });
+    const withdrawn = await connector.setStandingInterest(
+      connection.connectionId,
+      { catId: 'codex-sol', channelId: 'general', state: 'withdraw' },
+      1,
+    );
+    expect(withdrawn.revision).toBe(route.revision);
+    expect(withdrawn.standingInterests.general?.['codex-sol']).toMatchObject({ status: 'withdrawn', revision: 2 });
+    const reopened = await openConnector(fixture.connectorDirectory);
+    expect(await reopened.getHostRoute(connection.connectionId)).toEqual(withdrawn);
   });
 
   it('retries transient Host routing failures without requiring a route edit', async () => {
@@ -677,40 +882,120 @@ it('recovers an accepted reply after response loss and restart without duplicati
   const connection = await connector.pair({ serviceUrl: f.server.url, intent: f.pairing, endpointLabel: 'Same name' });
   await declareCat(connector, connection.connectionId, f.ownerHumanId, 'codex-sol', 'Sol');
   expect(await connector.isParticipationPublished(connection.connectionId)).toBe(true);
-  const event = await f.store.postHumanMessage(f.ownerSessionToken, {
+  const request = await f.store.postHumanMessage(f.ownerSessionToken, {
     serviceInstanceId: f.store.serviceInstanceId,
     collectiveId: f.collectiveId,
-    clientEventId: 'source',
+    clientEventId: 'work-result-source',
     location: { channelId: 'general' },
-    recipient: {
-      kind: 'agent',
-      humanId: f.ownerHumanId,
-      agentId: 'codex-sol',
-      connectionId: connection.connectionId,
-      participationRevision: 1,
-    },
-    body: 'A useful request',
+    recipient: { kind: 'channel' },
+    body: 'A useful Work request',
   });
-  const source = collectiveEventSourceIdentity(event)!;
+  const proposed = await f.store.proposeCollectiveWork(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    sourceEventId: request.eventId,
+    requestId: 'work-result-proposal',
+  });
+  const committed = await f.store.commitCollectiveWork(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    workId: proposed.workId,
+    expectedRevision: proposed.revision,
+    requestId: 'work-result-commit',
+    assignment: { connectionId: connection.connectionId, catId: 'codex-sol', participationRevision: 1 },
+  });
+  const assignment = (await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).find(
+    (event) => event.eventId === committed.assignmentEventId,
+  );
+  if (!assignment) throw new Error('Expected an exact public Work assignment source');
+  const source = collectiveEventSourceIdentity(assignment);
+  if (!source) throw new Error('Expected the assignment to preserve exact participation identity');
   const operation = await connector.prepareReply(source, 'message:source', 'work:canonical-task', 1);
-  await connector.submitReply(source, 'message:source', 'work:canonical-task', operation.outboxId, 'A named answer', {
-    catId: 'codex-sol',
-    agentId: 'codex-sol',
-    displayName: 'Sol',
-    sessionRef: 'invocation:verified',
-  });
+  const artifactSnapshot = {
+    taskRef: 'task:work:canonical-task',
+    taskRevision: 1,
+    artifactRef: 'artifact:result',
+    artifactRevision: '7',
+    completenessRef: 'artifact:result#complete:7',
+    previewRef: 'artifact:result#preview:7',
+    openInWorkspaceRef: 'workspace:artifact:thread-result:7:artifact:result',
+  };
+  await connector.submitReply(
+    source,
+    'message:source',
+    'work:canonical-task',
+    operation.outboxId,
+    'A named answer',
+    {
+      catId: 'codex-sol',
+      agentId: 'codex-sol',
+      displayName: 'Sol',
+      sessionRef: 'invocation:verified',
+    },
+    artifactSnapshot,
+  );
   expect(await connector.sync(connection.connectionId)).toMatchObject({ liveStatus: 'offline' });
   const before = await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId);
-  expect(before).toHaveLength(2);
+  expect(before).toHaveLength(3);
+  const resultEvent = before[2];
+  if (!resultEvent) throw new Error('Expected the exact Work result to be accepted');
+  expect(resultEvent).toMatchObject({
+    workResultReceipt: {
+      assignmentEventId: assignment.eventId,
+      connectionId: connection.connectionId,
+      humanId: f.ownerHumanId,
+      catId: 'codex-sol',
+      participationRevision: 1,
+      resultRevision: 1,
+    },
+  });
+  expect(
+    f.store
+      .listCollectiveCollaboration(f.ownerSessionToken, f.collectiveId)
+      .works.find((work) => work.workId === committed.workId),
+  ).toMatchObject({ lifecycle: 'result_ready', resultEventId: resultEvent.eventId });
   const reopened = await openConnector(f.connectorDirectory);
   await reopened.sync(connection.connectionId);
   const recovered = await reopened.prepareReply(source, 'message:source', 'work:canonical-task', 2);
   expect(recovered).toMatchObject({
     status: 'accepted',
     clientEventId: operation.clientEventId,
-    acceptedEventId: before[1]!.eventId,
+    acceptedEventId: resultEvent.eventId,
     agent: { sessionRef: 'invocation:verified' },
-    workPurpose: { taskRef: 'task:work:canonical-task', admittedRevision: 1, resultRevision: 1 },
+    workPurpose: {
+      taskRef: 'task:work:canonical-task',
+      admittedRevision: 1,
+      resultRevision: 1,
+      workId: committed.workId,
+      artifactSnapshot,
+    },
+  });
+  expect(await reopened.listWorkResultPublicationCandidates()).toEqual([
+    {
+      connectionId: connection.connectionId,
+      workId: committed.workId,
+      taskRef: 'task:work:canonical-task',
+    },
+  ]);
+  await reopened.withAssignedWorkAuthority(connection.connectionId, committed.workId, async (scope) => {
+    expect(scope.resultPublications).toEqual([
+      {
+        serviceInstanceId: f.store.serviceInstanceId,
+        collectiveId: f.collectiveId,
+        connectionId: connection.connectionId,
+        authorizedHumanId: f.ownerHumanId,
+        localOwnerUserId: 'owner',
+        assignmentEventId: assignment.eventId,
+        channelId: 'general',
+        catId: 'codex-sol',
+        taskRef: 'task:work:canonical-task',
+        taskRevision: 1,
+        workId: committed.workId,
+        resultEventId: resultEvent.eventId,
+        resultRevision: 1,
+        artifactSnapshot,
+      },
+    ]);
   });
   expect(await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).toEqual(before);
   await expect(
@@ -721,6 +1006,216 @@ it('recovers an accepted reply after response loss and restart without duplicati
       sessionRef: 'invocation:verified',
     }),
   ).rejects.toMatchObject({ code: 'REPLY_PAYLOAD_CONFLICT' });
+});
+
+it('returns an assigned Work through the real Service as the verified delegated home Cat', async () => {
+  const f = await createFixture();
+  const connector = await openConnector(f.connectorDirectory);
+  const connection = await connector.pair({ serviceUrl: f.server.url, intent: f.pairing, endpointLabel: 'Home Café' });
+  await connector.setHostRoute(
+    connection.connectionId,
+    {
+      localOwnerUserId: 'owner',
+      defaultIngressThreadId: 'public',
+      humanNotificationThreadId: 'public',
+      agentRoutes: {
+        [`${f.ownerHumanId}:codex-sol`]: {
+          catId: 'codex-sol',
+          threadId: 'private-work',
+          participation: { displayName: 'Sol', channelIds: ['general'] },
+        },
+        [`${f.ownerHumanId}:codex-terra`]: {
+          catId: 'codex-terra',
+          threadId: 'private-work',
+          participation: { displayName: 'Terra', channelIds: ['general'] },
+        },
+      },
+    },
+    0,
+  );
+  await connector.publishParticipation(connection.connectionId);
+  const request = await f.store.postHumanMessage(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    clientEventId: 'delegated-work-source',
+    location: { channelId: 'general' },
+    recipient: { kind: 'channel' },
+    body: 'Return this through the Cat who actually performed the delegated work.',
+  });
+  const proposed = await f.store.proposeCollectiveWork(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    sourceEventId: request.eventId,
+    requestId: 'delegated-work-proposal',
+  });
+  const committed = await f.store.commitCollectiveWork(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    workId: proposed.workId,
+    expectedRevision: proposed.revision,
+    requestId: 'delegated-work-commit',
+    assignment: { connectionId: connection.connectionId, catId: 'codex-sol', participationRevision: 1 },
+  });
+  const assignment = (await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).find(
+    (event) => event.eventId === committed.assignmentEventId,
+  );
+  if (!assignment) throw new Error('Expected an exact public Work assignment source');
+  const source = collectiveEventSourceIdentity(assignment);
+  if (!source) throw new Error('Expected the assignment to preserve exact participation identity');
+  const operation = await connector.prepareReply(source, 'message:delegated-source', 'work:delegated-task', 1);
+
+  await connector.submitReply(
+    source,
+    'message:delegated-source',
+    'work:delegated-task',
+    operation.outboxId,
+    'Result from the actual delegated Cat.',
+    {
+      catId: 'codex-terra',
+      agentId: 'codex-terra',
+      displayName: 'Terra',
+      sessionRef: 'invocation:member-verified',
+    },
+  );
+  await connector.sync(connection.connectionId);
+
+  const events = await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId);
+  const result = events.find((event) => event.workResultReceipt?.workId === committed.workId);
+  expect(result).toMatchObject({
+    actor: { kind: 'agent', agent: { agentId: 'codex-terra', displayName: 'Terra' } },
+    replyToEventId: assignment.eventId,
+    workResultReceipt: {
+      assignmentEventId: assignment.eventId,
+      assignmentCatId: 'codex-sol',
+      catId: 'codex-terra',
+      connectionId: connection.connectionId,
+    },
+  });
+  const returned = f.store
+    .listCollectiveCollaboration(f.ownerSessionToken, f.collectiveId)
+    .works.find((work) => work.workId === committed.workId);
+  expect(returned).toMatchObject({
+    lifecycle: 'result_ready',
+    assignment: { catId: 'codex-sol' },
+  });
+  expect(returned?.history).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        action: 'result_returned',
+        actor: expect.objectContaining({ kind: 'agent', catId: 'codex-terra', displayName: 'Terra' }),
+        resultRevision: 1,
+      }),
+    ]),
+  );
+
+  if (!result || !returned) throw new Error('Expected the first delegated result to be current');
+  await f.store.requestCollectiveWorkRevision(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    workId: committed.workId,
+    expectedRevision: returned.revision,
+    resultEventId: result.eventId,
+    resultRevision: 1,
+    feedback: 'Please add the restart evidence and return a new version.',
+    requestId: 'delegated-work-revision-v2',
+  });
+  await connector.withSynchronizedAssignedWorkAuthority(connection.connectionId, assignment.eventId, async (scope) => {
+    expect(scope.work).toMatchObject({
+      workId: committed.workId,
+      assignmentEventId: assignment.eventId,
+      lifecycle: 'in_progress',
+      resultEventId: result.eventId,
+      resultRevision: 1,
+    });
+    expect(scope.inbox).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: expect.objectContaining({
+            workRequest: 'revise',
+            workRevisionNotice: expect.objectContaining({ workId: committed.workId, resultRevision: 1 }),
+          }),
+        }),
+      ]),
+    );
+  });
+  expect(await connector.listInbox(connection.connectionId)).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        event: expect.objectContaining({
+          workRequest: 'revise',
+          body: 'Please add the restart evidence and return a new version.',
+          workRevisionNotice: expect.objectContaining({
+            workId: committed.workId,
+            resultEventId: result.eventId,
+            resultRevision: 1,
+          }),
+        }),
+      }),
+    ]),
+  );
+
+  const secondOperation = await connector.prepareReply(source, 'message:delegated-source', 'work:delegated-task', 1, 2);
+  expect(secondOperation.outboxId).not.toBe(operation.outboxId);
+  await connector.submitReply(
+    source,
+    'message:delegated-source',
+    'work:delegated-task',
+    secondOperation.outboxId,
+    'Revised result from the actual delegated Cat, with restart evidence.',
+    {
+      catId: 'codex-terra',
+      agentId: 'codex-terra',
+      displayName: 'Terra',
+      sessionRef: 'invocation:member-verified',
+    },
+    undefined,
+    2,
+  );
+  await connector.sync(connection.connectionId);
+
+  const revisedEvents = await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId);
+  const revisedResult = revisedEvents.find(
+    (event) => event.workResultReceipt?.workId === committed.workId && event.workResultReceipt.resultRevision === 2,
+  );
+  expect(revisedResult).toMatchObject({
+    actor: { kind: 'agent', agent: { agentId: 'codex-terra', displayName: 'Terra' } },
+    workResultReceipt: {
+      assignmentEventId: assignment.eventId,
+      assignmentCatId: 'codex-sol',
+      catId: 'codex-terra',
+      resultRevision: 2,
+    },
+  });
+  const revised = f.store
+    .listCollectiveCollaboration(f.ownerSessionToken, f.collectiveId)
+    .works.find((work) => work.workId === committed.workId);
+  expect(revised).toMatchObject({
+    lifecycle: 'result_ready',
+    assignment: { catId: 'codex-sol' },
+    resultEventId: revisedResult?.eventId,
+    resultRevision: 2,
+    history: expect.arrayContaining([
+      expect.objectContaining({ action: 'result_returned', eventId: result.eventId, resultRevision: 1 }),
+      expect.objectContaining({
+        action: 'revision_requested',
+        eventId: result.eventId,
+        resultRevision: 1,
+        note: 'Please add the restart evidence and return a new version.',
+      }),
+      expect.objectContaining({ action: 'result_returned', eventId: revisedResult?.eventId, resultRevision: 2 }),
+    ]),
+  });
+  if (!revisedResult || !revised) throw new Error('Expected the revised result to become current');
+  const accepted = await f.store.acceptCollectiveWorkResult(f.ownerSessionToken, {
+    serviceInstanceId: f.store.serviceInstanceId,
+    collectiveId: f.collectiveId,
+    workId: committed.workId,
+    expectedRevision: revised.revision,
+    resultEventId: revisedResult.eventId,
+    resultRevision: 2,
+    requestId: 'accept-delegated-work-revision-v2',
+  });
+  expect(accepted).toMatchObject({ lifecycle: 'completed', resultEventId: revisedResult.eventId, resultRevision: 2 });
 });
 
 it('a committed participation revocation blocks an already queued reply, preserves history and cannot be resurrected on restart', async () => {
@@ -742,7 +1237,8 @@ it('a committed participation revocation blocks an already queued reply, preserv
     },
     body: 'Keep this request',
   });
-  const source = collectiveEventSourceIdentity(event)!;
+  const source = collectiveEventSourceIdentity(event);
+  if (!source) throw new Error('Expected the addressed event to preserve exact participation identity');
   const op = await connector.prepareReply(source, 'message:source', 'request');
   await connector.submitReply(source, 'message:source', 'request', op.outboxId, 'Must not be sent', {
     catId: 'codex-sol',
@@ -750,7 +1246,8 @@ it('a committed participation revocation blocks an already queued reply, preserv
     displayName: 'Sol',
     sessionRef: 'invocation:verified',
   });
-  const route = (await connector.getHostRoute(connection.connectionId))!;
+  const route = await connector.getHostRoute(connection.connectionId);
+  if (!route) throw new Error('Expected the published route before removing participation');
   await connector.setHostRoute(
     connection.connectionId,
     {
@@ -773,6 +1270,78 @@ it('a committed participation revocation blocks an already queued reply, preserv
   expect(persisted.connections[connection.connectionId].outbox).toMatchObject([
     { status: 'blocked', failureCode: 'PARTICIPATION_REVOKED', body: 'Must not be sent' },
   ]);
+});
+
+it('keeps a generic same-Cat callback from returning old Work after route removal and restart', async () => {
+  const f = await createFixture();
+  const connector = await openConnector(f.connectorDirectory);
+  const connection = await connector.pair({
+    serviceUrl: f.server.url,
+    intent: f.pairing,
+    endpointLabel: 'Revoked Work result endpoint',
+  });
+  await declareCat(connector, connection.connectionId, f.ownerHumanId, 'codex-sol', 'Sol');
+  const coordinates = { serviceInstanceId: f.store.serviceInstanceId, collectiveId: f.collectiveId };
+  const source = await f.store.postHumanMessage(f.ownerSessionToken, {
+    ...coordinates,
+    clientEventId: 'generic-result-source',
+    location: { channelId: 'general' },
+    recipient: { kind: 'channel' },
+    body: 'Complete this exact Work, then return its result here.',
+  });
+  const proposed = await f.store.proposeCollectiveWork(f.ownerSessionToken, {
+    ...coordinates,
+    sourceEventId: source.eventId,
+    requestId: 'generic-result-proposal',
+  });
+  const committed = await f.store.commitCollectiveWork(f.ownerSessionToken, {
+    ...coordinates,
+    workId: proposed.workId,
+    expectedRevision: proposed.revision,
+    requestId: 'generic-result-commit',
+    assignment: { connectionId: connection.connectionId, catId: 'codex-sol', participationRevision: 1 },
+  });
+
+  const route = await connector.getHostRoute(connection.connectionId);
+  if (!route) throw new Error('Expected the published route before removing participation');
+  await connector.setHostRoute(
+    connection.connectionId,
+    {
+      localOwnerUserId: route.localOwnerUserId,
+      defaultIngressThreadId: route.defaultIngressThreadId,
+      humanNotificationThreadId: route.humanNotificationThreadId,
+      agentRoutes: {},
+    },
+    route.revision,
+  );
+  await connector.publishParticipation(connection.connectionId);
+
+  const reopened = await openConnector(f.connectorDirectory);
+  await reopened.queueAgentMessage(connection.connectionId, {
+    clientEventId: 'generic-result-after-revoke',
+    agent: {
+      agentId: 'codex-sol',
+      catId: 'codex-sol',
+      displayName: 'Sol',
+      sessionRef: 'invocation:verified',
+    },
+    target: { kind: 'message', eventId: source.eventId },
+    replyToEventId: committed.assignmentEventId,
+    body: 'A normal callback must not become the old Work result.',
+  });
+  await reopened.sync(connection.connectionId);
+
+  expect(
+    f.store
+      .listCollectiveCollaboration(f.ownerSessionToken, f.collectiveId)
+      .works.find((work) => work.workId === committed.workId),
+  ).toMatchObject({ lifecycle: 'committed', status: 'ready', revision: committed.revision });
+  expect(await f.store.listEventsForHuman(f.ownerSessionToken, f.collectiveId)).toContainEqual(
+    expect.objectContaining({
+      clientEventId: 'generic-result-after-revoke',
+      replyToEventId: committed.assignmentEventId,
+    }),
+  );
 });
 
 async function createFixture() {

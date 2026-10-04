@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MEMORY_BOOK_STAR_PATH } from '@/components/shell/memory-book-star-path';
 import { WORKSPACE_MODES } from '@/lib/workspace-modes';
 
 const mocks = vi.hoisted(() => ({
@@ -384,6 +385,20 @@ describe('F284 WorkspaceLauncher', () => {
     expect(mocks.setWorkspaceMode).toHaveBeenCalledWith('dev');
     expect(onSelectDevSurface).toHaveBeenCalledWith('browser');
     expect(container.querySelector('[data-testid="workspace-dev-mode-tabs"]')).toBeNull();
+  });
+
+  it('draws the 记忆 tile with the one decided memory icon and leaves its neighbours alone', async () => {
+    await renderLauncher();
+
+    const recall = container.querySelector('[data-testid="workspace-launcher-recall"] svg');
+    expect(recall?.getAttribute('aria-hidden')).toBe('true');
+    expect(recall?.getAttribute('class')).toContain('h-5 w-5');
+    expect(recall?.querySelector('path')?.getAttribute('d')).toBe(MEMORY_BOOK_STAR_PATH);
+
+    const tasks = container.querySelector('[data-testid="workspace-launcher-tasks"] svg');
+    expect(tasks?.getAttribute('stroke')).toBe('currentColor');
+    expect(tasks?.querySelector('path, circle')).not.toBeNull();
+    expect(tasks?.innerHTML).not.toContain(MEMORY_BOOK_STAR_PATH);
   });
 
   it('recalls the latest three invocations with abnormal ones first', async () => {

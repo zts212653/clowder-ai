@@ -630,7 +630,10 @@ export function InteractiveBlock({
   );
 
   return (
-    <div className="rounded-2xl border border-cafe p-4">
+    <div
+      className="rounded-2xl border border-cafe p-4"
+      data-message-navigation-response={isDisabled ? undefined : 'interactive'}
+    >
       {block.title && <div className="font-semibold text-sm mb-1">{block.title}</div>}
       {block.description && <div className="text-xs text-cafe-secondary mb-3">{block.description}</div>}
       {block.interactiveType === 'select' && (

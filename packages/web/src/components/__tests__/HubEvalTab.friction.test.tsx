@@ -201,6 +201,14 @@ describe('HubEvalTab friction view', () => {
       'docs/harness-feedback/bundles/2026-06-22-eval-friction-test/raw/rollup-report.json',
       null,
       null,
+      'default',
+      {
+        kind: 'workspace-card',
+        destination: 'eval',
+        anchorId: 'eval:2026-06-22-eval-friction-test',
+        threadId: 'thread-eval-friction',
+        viewportOffsetPx: 0,
+      },
     );
 
     await act(async () => {

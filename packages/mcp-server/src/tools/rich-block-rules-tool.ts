@@ -53,7 +53,7 @@ export const richBlockRulesTools = [
       implementationExport: 'handleGetRichBlockRules',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly'],
+      runtimeProfiles: ['collective-work', 'full', 'readonly', 'desktop:live-companion'],
     },
   }),
 ] as const;

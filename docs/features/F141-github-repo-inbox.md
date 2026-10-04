@@ -3,7 +3,9 @@ feature_ids: [F141]
 related_features: [F140, F133, F139]
 topics: [github, webhook, repo-inbox, issue-discovery, pr-discovery, opensource]
 doc_kind: spec
+tips_exempt: Internal Repo Inbox routing correctness; no new user-invocable capability.
 created: 2026-03-26
+updated: 2026-09-30
 ---
 
 # F141: GitHub Repo Inbox — 仓库事件自动发现
@@ -19,6 +21,12 @@ created: 2026-03-26
 ```
 
 **产品域命名**：GitHub Automation > GitHub Repo Inbox > F141
+
+## Architecture Ownership
+
+Architecture cell: `community-ops`
+Map delta: none
+Why: `CommunityRepoConfigStore` is already the owned per-repo routing authority; this fix removes duplicated static owner reads from the existing webhook and reconciliation consumers without creating a new cell or writer.
 
 ## Why
 
@@ -63,8 +71,9 @@ GitHub webhook POST → /api/connectors/github-repo-event/webhook
   → Redis delivery id claim（SET NX EX）
   → 归一化 RepoInboxSignal
   → ConnectorThreadBindingStore 查 per-repo inbox thread（无则创建）
-  → deliverConnectorMessage()（mention GITHUB_REPO_INBOX_CAT_ID）
-  → invokeTrigger.trigger()（唤醒猫执行 triage，KD-17）
+  → CommunityRepoConfigStore.getByRepo(repo).guardCatId（每次投递动态解析）
+  → deliverConnectorMessage()（mention 当前 guard；未登记仓库回退 env）
+  → invokeTrigger.trigger()（用同一个已解析 guard 唤醒 triage，KD-17）
   → Redis delivery id confirm
   → 猫收到通知 → 主人翁五问 triage → 认领 → register_pr_tracking → F140
 ```
@@ -82,8 +91,10 @@ GitHub webhook POST → /api/connectors/github-repo-event/webhook
 - thread owner = 真实 maintainer userId（不造 system thread）
 
 **6. Cat Mention**
-- Phase A：`GITHUB_REPO_INBOX_CAT_ID` 环境变量指定收件猫（KD-16）
-- 单点收件，triage 后在 thread 内 handoff
+- 当前仓库负责人以 `CommunityRepoConfigStore.guardCatId` 为 canonical truth，并在每次 webhook / reconciliation 投递前重新读取；负责人切换无需重建 schedule 或 gateway。
+- `GITHUB_REPO_INBOX_CAT_ID` 仍是 Repo Inbox 启动必填项，但仅在 repo 尚未登记时作为兼容 fallback；实际 fallback 会写 warn（KD-21）。
+- 单次投递的 message mention 与 `invokeTrigger` 共用同一个解析结果，避免消息给新负责人、wake 仍落旧负责人的 split-brain。
+- 单点收件，triage 后在 thread 内 handoff。
 
 **7. Skill/SOP 更新**
 - `opensource-ops` SKILL.md：maintainer 收到 Repo Inbox 通知后的 triage 流程
@@ -164,11 +175,12 @@ GitHub webhook POST → /api/connectors/github-repo-event/webhook
 | KD-13 | delivery id 去重用 Redis SET NX EX + claim/confirm/rollback 语义 | Maine Coon P1：内存 Map fire-and-forget 会在投递失败时毒死 GitHub retry | 2026-03-26 |
 | KD-14 | per-repo inbox thread 用 ConnectorThreadBindingStore 持久绑定 | Maine Coon P2：不能靠标题猜线程，重启后会长垃圾 thread | 2026-03-26 |
 | KD-15 | transport dedup（delivery id）和 business dedup（Phase B reconciliation）分开存储和 key | Maine Coon安全审查：两个问题域，不该复用 | 2026-03-26 |
-| KD-16 | Phase A cat mention 用配置 `GITHUB_REPO_INBOX_CAT_ID`，不做 actor.role 解析 | Maine Coon建议：先单点收件，triage thread 里再 handoff | 2026-03-26 |
+| KD-16 | Phase A cat mention 用配置 `GITHUB_REPO_INBOX_CAT_ID`，不做 actor.role 解析 | Maine Coon建议：先单点收件，triage thread 里再 handoff；该静态 owner 语义由 KD-21 supersede，启动必填兼容性保留 | 2026-03-26 |
 | KD-17 | deliver 后必须 `invokeTrigger.trigger()` 触发猫执行 | Maine Coon(codex) P1：deliverConnectorMessage 只落消息+广播，不触发猫调用；不加 trigger = 通知沉没 | 2026-03-26 |
 | KD-18 | `github-repo-event` 必须注册到 shared connector registry + env-registry.ts | Maine Coon(codex) P1+P2：未注册会被 404 拦；env vars 注册后运营可见 | 2026-03-26 |
 | KD-19 | ConnectorBubble 前端需新增 `github-repo-event` 图标分支 | Maine Coon(codex) P2：否则显示成文本 fallback | 2026-03-26 |
 | KD-20 | 首次事件并发创建 inbox thread 需加 repo 级短锁（compare-and-bind） | Maine Coon(codex) P2：防并发重复创建线程 | 2026-03-26 |
+| KD-21 | 每次投递从 Community Repo `guardCatId` 动态解析单点收件猫；`GITHUB_REPO_INBOX_CAT_ID` 仅作未登记 repo 的 fallback | Supersedes KD-16 的静态 owner 语义：负责人迁移只改 canonical repo config；message mention 与 wake 共用一次解析，且 fallback 显式告警 | 2026-09-30 |
 
 ## Review Gate
 

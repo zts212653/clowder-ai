@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode, Ref } from 'react';
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -22,18 +22,41 @@ import { MessageNavigator } from '../MessageNavigator';
 import { MessageSelectionToolbar } from '../MessageSelectionToolbar';
 import { messageMountPolicy } from '../message-mount-policy';
 import { isMessageSelectableForBundle, MAX_SELECTED_MESSAGES } from '../message-selection';
-import { QueuePanel } from '../QueuePanel';
-import { collectExactLiveInvocationIds } from '../queue-receipt-projection';
+import { collectExactLiveInvocationIds, collectSettlingInvocationIds } from '../queue-receipt-projection';
 import type { CardConfirmationEntry } from '../rich/CardBlock';
 import { ScrollToBottomButton } from '../ScrollToBottomButton';
-import { ThreadExecutionBar } from '../ThreadExecutionBar';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { TransferTargetPicker } from '../TransferTargetPicker';
 import { VoteActiveBar } from '../VoteActiveBar';
 import { ThreadChatPendingMembers } from './ThreadChatPendingMembers';
 import { useThreadChatRuntime } from './ThreadChatRuntimeProvider';
+import { ThreadExecutionLayer } from './ThreadExecutionLayer';
 import { useThreadChatSelection } from './useThreadChatSelection';
 
 export type ThreadChatDensity = 'full' | 'compact';
+export type ThreadChatPresentation = 'conversation' | 'composer-only';
+
+function useThreadChatHistoryPresentation(presentation: ThreadChatPresentation) {
+  const historyHostRef = useRef<HTMLDivElement>(null);
+  const composerOnly = presentation === 'composer-only';
+  useEffect(() => {
+    const historyHost = historyHostRef.current;
+    if (!historyHost) return;
+    if (composerOnly) historyHost.setAttribute('inert', '');
+    else historyHost.removeAttribute('inert');
+  }, [composerOnly]);
+  return { historyHostRef, composerOnly };
+}
+
+function historyHostClassName(composerOnly: boolean): string {
+  return `relative min-h-0 flex-1 overflow-hidden ${composerOnly ? 'invisible pointer-events-none' : ''}`;
+}
+
+function footerClassName(compact: boolean, composerOnly: boolean): string | undefined {
+  return compact || composerOnly
+    ? 'relative z-10 border-t border-cafe-divider bg-cafe-surface pointer-events-auto'
+    : undefined;
+}
 
 export type ThreadChatActivity = {
   threadId: string;
@@ -44,6 +67,7 @@ export type ThreadChatActivity = {
 export interface ThreadChatSurfaceProps {
   threadId: string;
   density: ThreadChatDensity;
+  presentation?: ThreadChatPresentation;
   emptyState?: ReactNode;
   timelineLead?: ReactNode;
   footerLead?: ReactNode;
@@ -61,6 +85,7 @@ export interface ThreadChatSurfaceProps {
 export function ThreadChatSurface({
   threadId,
   density,
+  presentation = 'conversation',
   emptyState,
   timelineLead,
   footerLead,
@@ -74,12 +99,22 @@ export function ThreadChatSurface({
   onComposerFocusChange,
   onActivity,
 }: ThreadChatSurfaceProps) {
+  // The composer is told it is hosted with the one execution row only in the new shell (see ChatInput `presentation`).
+  const composerPresentation = useShellPresentation();
   const messages = useThreadMessages(threadId);
   const liveness = useThreadLiveness(threadId);
   const { hasActive: hasActiveInvocation, activeInvocations, catInvocations } = liveness;
   const { socketConnected } = useThreadChatRuntime([threadId]);
-  const { handleScroll, jumpToLatest, scrollContainerRef, messagesEndRef, isLoadingHistory, hasMore } =
-    useChatHistory(threadId);
+  const {
+    handleScroll,
+    jumpToLatest,
+    jumpToMessage,
+    beginUserScroll,
+    scrollContainerRef,
+    messagesEndRef,
+    isLoadingHistory,
+    hasMore,
+  } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
   const { getCatById, refresh: refreshCats } = useCatData();
@@ -90,7 +125,12 @@ export function ThreadChatSurface({
   const connectionStatus = useConnectionStatus(socketConnected);
   const uiThinkingExpandedByDefault = useChatStore((state) => state.uiThinkingExpandedByDefault);
   const isOfflineSnapshot = useChatStore((state) => state.isOfflineSnapshot);
+  const { historyHostRef, composerOnly } = useThreadChatHistoryPresentation(presentation);
 
+  const settlingInvocationIds = useMemo(
+    () => collectSettlingInvocationIds(activeInvocations, catInvocations),
+    [activeInvocations, catInvocations],
+  );
   const activeInvocationIds = useMemo(
     () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
     [activeInvocations, catInvocations],
@@ -141,7 +181,12 @@ export function ThreadChatSurface({
       data-thread-chat-density={density}
       data-thread-id={threadId}
     >
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div
+        ref={historyHostRef}
+        className={historyHostClassName(composerOnly)}
+        aria-hidden={composerOnly || undefined}
+        data-thread-chat-history
+      >
         <main
           ref={scrollContainerRef}
           onScroll={handleScroll}
@@ -177,8 +222,10 @@ export function ThreadChatSurface({
                   <ChatMessageRow
                     key={message.id}
                     message={message}
+                    compact={compact}
                     threadId={threadId}
                     timelineMessages={timelineProjectionMessages}
+                    settlingInvocationIds={message.extra?.queueReceipt ? settlingInvocationIds : undefined}
                     activeInvocationIds={message.extra?.queueReceipt ? activeInvocationIds : undefined}
                     getCatById={getCatById}
                     onEditCat={handleEditCat}
@@ -208,12 +255,18 @@ export function ThreadChatSurface({
           recomputeSignal={computeScrollRecomputeSignal(threadId, messages, uiThinkingExpandedByDefault ? 1 : 0)}
           observerKey={`${threadId}:${density}`}
         />
-        {messages.length > 5 && <MessageNavigator messages={messages} scrollContainerRef={scrollContainerRef} />}
+        {messages.length > 5 && (
+          <MessageNavigator
+            messages={messages}
+            scrollContainerRef={scrollContainerRef}
+            onJumpToMessage={jumpToMessage}
+            beginUserScroll={beginUserScroll}
+          />
+        )}
       </div>
 
-      <div ref={footerRef} className={compact ? 'border-t border-cafe-divider bg-cafe-surface' : undefined}>
-        <ThreadExecutionBar threadId={threadId} />
-        <QueuePanel threadId={threadId} />
+      <div ref={footerRef} className={footerClassName(compact, composerOnly)} data-thread-chat-footer>
+        <ThreadExecutionLayer threadId={threadId} />
         <VoteActiveBar threadId={threadId} onEnd={() => {}} />
         {footerLead}
         {selection.selectionMode ? (
@@ -229,6 +282,7 @@ export function ThreadChatSurface({
           <div className={composerClassName}>
             <ChatInput
               key={threadId}
+              presentation={composerPresentation}
               threadId={threadId}
               onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
                 handleSend(

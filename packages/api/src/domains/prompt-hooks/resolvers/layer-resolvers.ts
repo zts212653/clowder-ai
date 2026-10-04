@@ -19,7 +19,7 @@ export class L1Resolver implements HookResolver {
   }
 }
 
-/** L2 — 客观性 carry-over 段 (Objectivity Baseline) */
+/** L2 — 客观性反射 (F218 source-audit reflex) */
 export class L2Resolver implements HookResolver {
   resolve(_input: AssemblerInput): ResolveResult {
     return { status: 'fired', vars: {} };
@@ -54,7 +54,7 @@ export class L6Resolver implements HookResolver {
   }
 }
 
-/** L7 — 协作哲学 (Collaboration Philosophy) */
+/** L7 — 代码哲学 (Code Philosophy: vision-driven, not minimal-fix) */
 export class L7Resolver implements HookResolver {
   resolve(_input: AssemblerInput): ResolveResult {
     return { status: 'fired', vars: {} };

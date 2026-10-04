@@ -249,4 +249,52 @@ describe('direct action carrier restart recovery', () => {
       clientMessageId: 'review-4058-admitted-uncommitted',
     });
   });
+
+  describe('a replacement carrier whose delivery fails is restored by retrying the same clientMessageId', () => {
+    const recoveryKey = () => `action-carrier-recovery:${lease.leaseId}:${lease.generation}`;
+    const replacement = () => messageStore.getByIdempotencyKey('user-1', target.id, recoveryKey());
+
+    test('consecutive failures keep the replacement queued, and the first healthy retry delivers exactly one entry', async () => {
+      appendCarrier(messageStore, lease, 'interrupted');
+      const healthyAdmission = messageStore.initializeQueueCustodyAdmission.bind(messageStore);
+      messageStore.initializeQueueCustodyAdmission = () => {
+        throw new Error('admission store unavailable');
+      };
+
+      const first = await post('review-4058-retry');
+      const second = await post('review-4058-retry');
+
+      assert.equal(first.statusCode, 503, first.body);
+      assert.equal(second.statusCode, 503, 'a retry that could not deliver is pending, not a handled duplicate');
+      assert.equal(second.json().messageId, first.json().messageId);
+      assert.equal(replacement().deliveryStatus, 'queued', 'a failed retry must not mark the carrier delivered');
+      assert.equal(invocationQueue.list(target.id, 'user-1').length, 0);
+
+      messageStore.initializeQueueCustodyAdmission = healthyAdmission;
+      const third = await post('review-4058-retry');
+      assert.equal(third.statusCode, 200, third.body);
+      const queued = invocationQueue.list(target.id, 'user-1');
+      assert.equal(queued.length, 1);
+      assert.equal(queued[0].messageId, first.json().messageId);
+
+      const again = await post('review-4058-retry');
+      assert.equal(again.statusCode, 200, again.body);
+      assert.equal(invocationQueue.list(target.id, 'user-1').length, 1, 'and exactly one');
+    });
+
+    test('a failure BEFORE durable admission is not promised to startup reconciliation', async () => {
+      appendCarrier(messageStore, lease, 'interrupted');
+      messageStore.initializeQueueCustodyAdmission = () => {
+        throw new Error('admission write unavailable');
+      };
+
+      const response = await post('review-4058-no-admission');
+
+      assert.equal(response.statusCode, 503, response.body);
+      assert.equal(response.json().kind, 'action_carrier_retry_required');
+      assert.equal(response.json().admission, 'not_persisted');
+      assert.doesNotMatch(response.json().message, /startup/i);
+      assert.equal(replacement().queueCustodyAdmission, undefined);
+    });
+  });
 });

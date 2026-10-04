@@ -9,7 +9,7 @@ import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { catRegistry } from '@cat-cafe/shared';
 
-const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
 const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
 const SMALL_CONTEXT_OPUS = 'small-context-opus';
@@ -72,8 +72,11 @@ function createCapturingService(catId, text = 'hello') {
 
 function createVerifiedThreadLookupService(catId, targetThreadId, targetMessageId, text) {
   const toolName = 'mcp:cat-cafe-collab/cat_cafe_get_thread_context';
+  const calls = [];
   return {
-    async *invoke() {
+    calls,
+    async *invoke(prompt) {
+      calls.push(prompt);
       yield {
         type: 'tool_use',
         catId,
@@ -1281,11 +1284,11 @@ describe('incremental current-message fallback integration', () => {
     const appendCalls = [];
     const targetEntry = {
       label: 'R1',
-      anchor: { threadId: 'thread_target', title: 'Target Thread', type: 'thread' },
+      anchor: { threadId: 'thread_target', messageId: 'message-target', title: 'Target Thread', type: 'thread' },
     };
     const otherEntry = {
       label: 'R2',
-      anchor: { threadId: 'thread_other', title: 'Other Thread', type: 'thread' },
+      anchor: { threadId: 'thread_other', messageId: 'message-other', title: 'Other Thread', type: 'thread' },
     };
     const targetBinding = formatConciergeHandleBinding(targetEntry.label, targetEntry.anchor);
     const otherBinding = formatConciergeHandleBinding(otherEntry.label, otherEntry.anchor);
@@ -1306,20 +1309,52 @@ describe('incremental current-message fallback integration', () => {
       visibleMarkerWithDanglingHiddenTriage,
       visibleMarkerWithDanglingHiddenTriage,
     ]);
-    const currentUserMessageId = '0000000000000001-000001-concierge';
+    const currentUserMessageId = '0000000000000001-000001-c011cafe';
     const currentText = '这个 PR 在哪个 thread 提的？';
-    const deps = createMockDeps({ opus: captureService, codex: hiddenMentionService }, appendCalls, {
-      async get() {
-        return {
-          id: 'thread-concierge',
-          title: '猫猫球',
+    const timestamp = Date.now();
+    const threads = new Map(
+      [
+        ['thread-concierge', { title: '猫猫球', threadKind: 'concierge' }],
+        ['thread_target', { title: 'Target Thread' }],
+        ['thread_other', { title: 'Other Thread' }],
+      ].map(([id, details]) => [
+        id,
+        {
+          id,
+          ...details,
           createdBy: 'user1',
           participants: [],
-          lastActiveAt: Date.now(),
-          createdAt: Date.now(),
+          lastActiveAt: timestamp,
+          createdAt: timestamp,
           projectPath: 'default',
-          threadKind: 'concierge',
-        };
+        },
+      ]),
+    );
+    const messages = new Map(
+      [
+        { id: currentUserMessageId, threadId: 'thread-concierge', catId: null, content: currentText },
+        {
+          id: 'message-target',
+          threadId: 'thread_target',
+          catId: 'opus',
+          timestamp: timestamp - 2000,
+          content: 'The canonical PR discussion thread.',
+        },
+        {
+          id: 'message-other',
+          threadId: 'thread_other',
+          catId: 'opus',
+          timestamp: timestamp - 1000,
+          content: 'A different valid result used for mismatch protection.',
+        },
+      ].map((message) => [message.id, { timestamp, ...message, userId: 'user1', mentions: [] }]),
+    );
+    const deps = createMockDeps({ opus: captureService, codex: hiddenMentionService }, appendCalls, {
+      async get(id) {
+        return threads.get(id) ?? null;
+      },
+      async list(userId) {
+        return [...threads.values()].filter((thread) => thread.createdBy === userId);
       },
       async getParticipantsWithActivity() {
         return [];
@@ -1333,38 +1368,47 @@ describe('incremental current-message fallback integration', () => {
     };
     deps.evidenceStore = {
       async search() {
-        return [
-          {
-            anchor: 'thread-thread_target',
-            title: 'Target Thread',
-            kind: 'thread',
-            summary: 'The canonical PR discussion thread.',
+        assert.fail('foreground message mode must not use legacy thread aggregation');
+      },
+      readMessagePassageState() {
+        return { current: true, suppressThreadTitle: false };
+      },
+      async searchMessagePassages(query, options) {
+        assert.equal(query, currentText);
+        assert.deepEqual(options.excludeSource, { threadId: 'thread-concierge', messageId: currentUserMessageId });
+        assert.deepEqual(options.visibleThreadIds, [...threads.keys()]);
+        return {
+          passages: ['message-target', 'message-other'].map((id) => {
+            const message = messages.get(id);
+            return {
+              docAnchor: `thread-${message.threadId}`,
+              passageId: `msg-${id}`,
+              threadId: message.threadId,
+              messageId: id,
+              content: message.content,
+              match: 'lexical',
+            };
+          }),
+          meta: {
+            sort: 'time',
+            candidateLimit: 2000,
+            truncated: false,
+            semanticCandidatesLimited: false,
+            sourceCoverage: 'unknown',
+            freshness: 'unknown',
+            degraded: true,
+            effectiveMode: 'lexical',
           },
-          {
-            anchor: 'thread-thread_other',
-            title: 'Other Thread',
-            kind: 'thread',
-            summary: 'A different valid result used for mismatch protection.',
-          },
-        ];
+        };
       },
     };
+    deps.messageStore.getById = async (id) => messages.get(id) ?? null;
     deps.deliveryCursorStore = {
       getCursor: async () => undefined,
       ackCursor: async () => {},
       ackSeenCursor: async () => {},
     };
-    deps.messageStore.getByThreadAfter = async () => [
-      {
-        id: currentUserMessageId,
-        threadId: 'thread-concierge',
-        userId: 'user1',
-        catId: null,
-        content: currentText,
-        mentions: [],
-        timestamp: Date.now(),
-      },
-    ];
+    deps.messageStore.getByThreadAfter = async () => [messages.get(currentUserMessageId)];
 
     for await (const _ of routeSerial(deps, ['opus'], currentText, 'user1', 'thread-concierge', {
       currentUserMessageId,
@@ -1373,11 +1417,11 @@ describe('incremental current-message fallback integration', () => {
 
     const prompt = captureService.calls[0];
     assert.equal(
-      (prompt.match(/\*\*搜索结果（复制完整标记；/g) || []).length,
+      (prompt.match(/\*\*消息检索候选（复制对应完整标记；/g) || []).length,
       1,
       'the final incremental prompt should include the handle table exactly once',
     );
-    assert.match(prompt, /R1: 《Target Thread》/);
+    assert.match(prompt, /R1: opus · .*《Target Thread》/);
     assert.ok(prompt.includes(`[跳过去 ${targetBinding}]`));
 
     const storedReply = appendCalls.find((msg) => msg.catId === 'opus');
@@ -1386,6 +1430,7 @@ describe('incremental current-message fallback integration', () => {
       .find((candidate) => candidate.payload?.threadId === 'thread_target');
     assert.ok(action, 'the persisted reply should contain the action resolved from the injected R1 table');
     assert.equal(action.action, 'concierge_teleport');
+    assert.equal(action.payload.messageId, 'message-target');
     assert.equal(action.label, '跳过去：Target Thread');
 
     captureService.calls.length = 0;
@@ -1397,17 +1442,18 @@ describe('incremental current-message fallback integration', () => {
 
     const parallelPrompt = captureService.calls[0];
     assert.equal(
-      (parallelPrompt.match(/\*\*搜索结果（复制完整标记；/g) || []).length,
+      (parallelPrompt.match(/\*\*消息检索候选（复制对应完整标记；/g) || []).length,
       1,
       'the final parallel prompt should include the handle table exactly once',
     );
-    assert.match(parallelPrompt, /R1: 《Target Thread》/);
+    assert.match(parallelPrompt, /R1: opus · .*《Target Thread》/);
     assert.ok(parallelPrompt.includes(`[跳过去 ${targetBinding}]`));
     const parallelAction = appendCalls
       .find((msg) => msg.catId === 'opus')
       ?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? [])
       .find((candidate) => candidate.payload?.threadId === 'thread_target');
     assert.ok(parallelAction, 'parallel action resolution should use the same injected R1 table');
+    assert.equal(parallelAction.payload.messageId, 'message-target');
 
     captureService.calls.length = 0;
     appendCalls.length = 0;
@@ -1505,6 +1551,7 @@ describe('incremental current-message fallback integration', () => {
     const targetThreadId = 'thread_mrf6uzhogk1y3p30';
     const targetMessageId = '0001784218043549-000203-0e050c94';
     const targetTitle = '「eval系统决策厅」如何建立度量系统';
+    const unrelatedTitle = '仅仅是预取候选，不是最终选择';
     const service = createVerifiedThreadLookupService(
       'opus',
       targetThreadId,
@@ -1513,29 +1560,50 @@ describe('incremental current-message fallback integration', () => {
     );
     const currentUserMessageId = '0001784244122044-000002-d22e5ff3';
     const currentText = 'https://github.com/zts212653/clowder-ai/pull/3017 哪个thread的啊';
-    const deps = createMockDeps({ opus: service }, appendCalls, {
-      async get(threadId) {
-        if (threadId === targetThreadId) {
-          return {
-            id: targetThreadId,
-            title: targetTitle,
-            createdBy: 'user1',
-            participants: [],
-            lastActiveAt: Date.now(),
-            createdAt: Date.now(),
-            projectPath: 'default',
-          };
-        }
-        return {
-          id: 'thread-concierge',
-          title: '猫猫球',
+    const timestamp = Date.now();
+    const candidate = {
+      id: 'message-prefetch-candidate',
+      threadId: 'thread_prefetch_candidate',
+      userId: 'user1',
+      catId: 'opus',
+      content: 'This candidate must never become the action target.',
+      mentions: [],
+      timestamp,
+    };
+    const source = {
+      id: currentUserMessageId,
+      threadId: 'thread-concierge',
+      userId: 'user1',
+      catId: null,
+      content: currentText,
+      mentions: [],
+      timestamp,
+    };
+    const threads = new Map(
+      [
+        ['thread-concierge', '猫猫球'],
+        [targetThreadId, targetTitle],
+        [candidate.threadId, unrelatedTitle],
+      ].map(([id, title]) => [
+        id,
+        {
+          id,
+          title,
           createdBy: 'user1',
           participants: [],
-          lastActiveAt: Date.now(),
-          createdAt: Date.now(),
+          lastActiveAt: timestamp,
+          createdAt: timestamp,
           projectPath: 'default',
-          threadKind: 'concierge',
-        };
+          ...(id === source.threadId ? { threadKind: 'concierge' } : {}),
+        },
+      ]),
+    );
+    const deps = createMockDeps({ opus: service }, appendCalls, {
+      async get(id) {
+        return threads.get(id) ?? null;
+      },
+      async list(userId) {
+        return [...threads.values()].filter((thread) => thread.createdBy === userId);
       },
       async getParticipantsWithActivity() {
         return [];
@@ -1549,34 +1617,52 @@ describe('incremental current-message fallback integration', () => {
     };
     deps.evidenceStore = {
       async search() {
-        return [
-          {
-            anchor: 'thread-thread_prefetch_candidate',
-            title: '仅仅是预取候选，不是最终选择',
-            kind: 'thread',
-            summary: 'This candidate must never become the action target.',
+        assert.fail('ordinary prefetch must not use legacy thread aggregation');
+      },
+      readMessagePassageState() {
+        return { current: true, suppressThreadTitle: false };
+      },
+      async searchMessagePassages(query, options) {
+        assert.equal(query, currentText);
+        assert.deepEqual(options.excludeSource, { threadId: source.threadId, messageId: source.id });
+        assert.deepEqual(options.visibleThreadIds, [...threads.keys()]);
+        return {
+          passages: [
+            {
+              docAnchor: `thread-${candidate.threadId}`,
+              passageId: `msg-${candidate.id}`,
+              threadId: candidate.threadId,
+              messageId: candidate.id,
+              content: candidate.content,
+              match: 'lexical',
+            },
+          ],
+          meta: {
+            effectiveMode: 'lexical',
+            degraded: true,
+            sort: 'time',
+            candidateLimit: 2000,
+            truncated: false,
+            semanticCandidatesLimited: false,
+            sourceCoverage: 'unknown',
+            freshness: 'unknown',
           },
-        ];
+        };
       },
     };
+    deps.messageStore.getById = async (id) => (id === source.id ? source : id === candidate.id ? candidate : null);
     deps.deliveryCursorStore = {
       getCursor: async () => undefined,
       ackCursor: async () => {},
       ackSeenCursor: async () => {},
     };
-    deps.messageStore.getByThreadAfter = async () => [
-      {
-        id: currentUserMessageId,
-        threadId: 'thread-concierge',
-        userId: 'user1',
-        catId: null,
-        content: currentText,
-        mentions: [],
-        timestamp: Date.now(),
-      },
-    ];
+    deps.messageStore.getByThreadAfter = async () => [source];
 
     const assertVerifiedAction = (mode) => {
+      assert.ok(
+        service.calls.at(-1).includes(unrelatedTitle),
+        `${mode} must receive a real unrelated prefetch candidate before rejecting it as the action target`,
+      );
       const actions =
         appendCalls.find((msg) => msg.catId === 'opus')?.extra?.rich?.blocks?.flatMap((block) => block.actions ?? []) ??
         [];
@@ -4474,6 +4560,11 @@ describe('routeSerial: done-only (no text, no error)', () => {
     const doneMsgs = messages.filter((m) => m.type === 'done');
     assert.equal(doneMsgs.length, 1, 'silent cat should still produce one done event');
     assert.equal(doneMsgs[0].isFinal, true, 'silent single-cat run should mark done as final');
+    assert.equal(
+      messages.some((m) => m.type === 'system_info' && m.content?.includes('silent_completion')),
+      true,
+      'ordinary silent turns still need a visible diagnostic',
+    );
     const catAppends = appendCalls.filter((c) => c.catId === 'codex');
     assert.equal(catAppends.length, 0, 'silent cat should not persist blank content');
   });

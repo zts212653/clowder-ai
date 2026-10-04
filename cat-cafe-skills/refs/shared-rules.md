@@ -149,11 +149,11 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 | 「碎片够了」 | 你满足于第一个高置信度命中就开始推理 | 停，至少再搜一轮不同角度，命中的 doc anchor 全部 Read 原文 |
 | 「补锅匠」 | 你在逐点修补不审视同类（战术勤劳掩饰战略懒惰） | 停，做 failure-mode audit（§16e） |
 
-### 47 自检协议（F177 Phase B — 反向治理）
+### 包装未做自检协议（F177 Phase B — 反向治理）
 
-> **设计原则**：47 承认错误的能力 ≥ 改正错误的能力，因此不让 47 自我评分。用外部信号（AC 矩阵 ❌→deferred 自动阻塞）+ 对家猫盲审，不用 47 的自评。
+> **设计原则**：认错能力 ≥ 改错能力的猫，不能靠自评放行。用外部信号（AC 矩阵 ❌→deferred 自动阻塞）+ 非作者盲审，不用作者自评。（来源：F177 针对一只已退役猫的反向治理。）
 
-当 **opus-47** 处于以下 7 个时刻时，必须触发自检——"我是不是在把未做包装成已规划"：
+**适用对象**：dossier「翻车熔断信号」写有「包装未做 / 过早收口」类失败模式的猫（原规则只针对单只猫，本协议不扩大到全家；其他猫可作参考）。适用猫处于以下 7 个时刻时，必须触发自检——"我是不是在把未做包装成已规划"：
 
 1. **写 spec 时**：把"未做"包装成"未来 phase / Phase 2+ / future enhancement"
 2. **拆 Phase 时**：AC 分成"Phase 1 必做 / Phase 2 next time" → "Phase 2 的东西是真的该分阶段还是我懒得做"
@@ -163,7 +163,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 6. **跨猫 handoff 时**：把"做不完的"包装成"协作分工" / "我闭嘴执行" → "这是反向治理还是甩责"
 7. **OQ 留白时**：标记为 Open Question 的条目 → "这是真正需要探索的开放问题，还是我在用 OQ 当合法 follow-up 容器"
 
-**盲审机制**：47 的 close PR 必须由对家猫跑 quality-gate。审核者由 reviewer/系统按 roster 与角色词动态指定，47 无选择权。
+**盲审机制**：适用猫的 feat close PR 由非作者猫重跑 quality-gate，跨族优先。审核者由 reviewer/系统按 roster 与角色词动态指定，作者无选择权。
 
 ### 46 hotfix 标签 + 跨猫升级 review（F177 Phase E — 止血治理）
 
@@ -179,8 +179,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 - merge-gate 检测到 `hotfix` label → 强制校验 reviewer ≠ author
 - 无 review 放行 → merge-gate BLOCKED
 
-**quality-gate 自检禁止**：检测到 hotfix 模式时，作者不得自行通过 quality-gate（必须由另一只猫执行 quality-gate）。
-- 原因：hotfix 心态容易自我说服"够用了"，跨猫审视打破惯性
+**自检 + 跨个体 review，不再另买一轮**：hotfix 的"自我说服"风险由上面的跨猫 review 铁律承接；作者照常跑 quality-gate 自检，不再额外安排另一只猫重跑 quality-gate（2026-09-21 收窄：重复检查只增加成本，不增加发现）。
 
 **2 周升级 review（cron）**：hotfix 合入 2 周后自动触发升级 review。三选一处置：
 1. **升级正式修复**：开 feat 彻底解决根因
@@ -191,7 +190,7 @@ AI agent 100x 执行速度下，**方向正确性**的价值远大于**启动便
 
 > **设计原则**：Ragdoll家族的"碎片→全局"架构能力在检索任务上是反模式。检索的核心是诚实查证，不是聪明推理。竞赛模式不输 QA 审查猫，日常模式搜索偏浅——差的不是能力，是默认行为模式。
 
-**适用对象**：Ragdoll家族全体（46 / 47 / 4.5 / Sonnet），不限个体。
+**适用对象**：Ragdoll家族全体在役个体（以 runtime roster 为准），不限个体。
 
 **三条护栏**：
 
@@ -317,6 +316,13 @@ commit body 补一行 `Why:` 说明决策理由。
 
 跨 thread / 跨 feature 调查产生的 commit 或 stash，按 `refs/commit-signatures.md` 追加 `Thread-Context: threadId=<threadId> invocationId=<invocationId> catId=<catId>` footer；拿不到字段就省略，不猜、不用 hook 自动改写。
 
+**Git 身份（强制，per-commit）**：家里多只猫共用同一个 repo 级 git config，谁 commit 谁就覆盖 `user.name` / `user.email`——repo config 是可变共享态，不能当身份真相源（2026-09-21 实证：一只猫的 commit 挂上了另外两只猫的身份，被跨族 review 两次点名）。约定四条：
+
+- 真实 commit 必须使用本次 commit 的一次性身份覆盖：`git -c user.name="<昵称-型号>" -c user.email="<catId>@cat-cafe.local" commit ...`（或等价的 `GIT_AUTHOR_*` / `GIT_COMMITTER_*` 环境变量）
+- 共享 repo / worktree 中禁止用 `git config --local user.name/email` 持久切换猫身份；repo config 只能视为默认值，不能视为 provenance
+- commit 后立即核验：`git show -s --format='%an <%ae> / %cn <%ce>' HEAD`，author/committer 必须与当前 runtime identity 一致
+- Git metadata 和 commit body 的 `[昵称/模型🐾]` 签名分别证明两层归因，不能互相替代——两层都要对
+
 ## 6. 技术债务与 P3 处置
 
 - 发现新债务 → 登记 `docs/TECH-DEBT.md`（不是 BACKLOG！）
@@ -342,7 +348,7 @@ commit body 补一行 `Why:` 说明决策理由。
 
 ## 8. 讨论收敛后三件套检查
 
-每次讨论收敛后必须过清单：
+形成需要留存的决定、规则或否决理由时，沿已有授权和真相源考虑以下去向；纯探索或当前对话已足够时，不要求产出材料：
 1. 否决理由 → 写回 ADR
 2. 踩坑教训 → public-lessons.md
 3. 操作规则 → 对应猫猫指引文件
@@ -395,7 +401,7 @@ commit body 补一行 `Why:` 说明决策理由。
 **SOP 链条确认**（决定下一棒是哪只猫）：
 - review 完 → **必须** @ author 告知结果（不传球 = 假终局）
 - 修完 → 按 review engagement 收口：`iterative` 回原 reviewer；`one-shot` 自证，必要时转日常 reviewer
-- merge 完 → @ 非作者非 reviewer 的猫做愿景守护
+- merge 完 → 停；只有 feature close 且用户可见/愿景变化时才 @ 非作者非 reviewer 的猫做愿景守护（SOP 按需车道，不是每个 PR 的第三棒）
 - 分析/方案/建议完成 → @ 提问者（而非反射式 @operator）
 
 ### §10.4 @operator 三硬条件（F167 Phase D KD-19）

@@ -164,10 +164,11 @@ test('F221 owner-prescribed Taste authority, index, and readable anchors stay se
   const { TasteMemoryReader } = await import('../../dist/domains/memory/taste/TasteMemoryReader.js');
   const repository = { canonicalRoot: () => ROOT };
   const reader = new TasteMemoryReader(repository, 'f221-authority-guard');
-  const readable = authorityPaths.flatMap((sourcePath) => {
-    const result = reader.read({ ownerUserId: 'f221-authority-guard', sourcePath });
-    return result ? [result] : [];
-  });
+  const readable = [];
+  for (const sourcePath of authorityPaths) {
+    const result = await reader.read({ ownerUserId: 'f221-authority-guard', sourcePath });
+    if (result) readable.push(result);
+  }
   assert.ok(readable.every((result) => /^sha256:[0-9a-f]{64}$/.test(result.revision)));
   assertClosedWorldSetEquality({
     authorityPaths: authorityAnchors,

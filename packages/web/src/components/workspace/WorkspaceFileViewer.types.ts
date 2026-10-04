@@ -1,4 +1,5 @@
 import type { FileData, WorktreeEntry } from '@/hooks/useWorkspace';
+import type { WorkspaceFileSave } from './workspace-file-draft';
 
 export interface WorkspaceFileViewerProps {
   file: FileData;
@@ -23,7 +24,9 @@ export interface WorkspaceFileViewerProps {
   onToggleMarkdownRendered: () => void;
   onToggleHtmlPreview: () => void;
   onToggleJsxPreview: () => void;
-  onSave: (content: string) => Promise<void>;
+  collaborationAvailable?: boolean;
+  onOpenCollaboration?: () => void;
+  onSave: WorkspaceFileSave;
   onDirtyChange?: (dirty: boolean) => void;
   pendingExternalSha?: string | null;
   onApplyExternalChange?: () => void;

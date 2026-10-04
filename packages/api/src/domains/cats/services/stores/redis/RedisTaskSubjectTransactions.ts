@@ -1,5 +1,6 @@
 import type { TaskItem } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { createEntrustedWorkTerminalActionRequiredError } from '../ports/TaskStoreContract.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { serializeTask } from './RedisTaskCodec.js';
 
@@ -9,7 +10,10 @@ const ATOMIC_OWNED_WRITE_LUA = `
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then
   return 0
 end
-redis.call('HSET', KEYS[2], unpack(ARGV, 3, #ARGV))
+if redis.call('HEXISTS', KEYS[2], 'entrustedWork') == 1 then return -1 end
+if redis.call('HGET', KEYS[2], 'updatedAt') ~= ARGV[3] then return -2 end
+if (redis.call('HGET', KEYS[2], 'deploymentWait') or '') ~= ARGV[4] then return -2 end
+redis.call('HSET', KEYS[2], unpack(ARGV, 5, #ARGV))
 redis.call('ZADD', KEYS[3], ARGV[2], ARGV[1])
 redis.call('ZADD', KEYS[4], ARGV[2], ARGV[1])
 return 1
@@ -53,7 +57,22 @@ export async function tryCreateTaskWithAtomicSubject(
   return result === -1 ? 'task_id_exists' : 'subject_exists';
 }
 
-export async function writeTaskForSubjectOwner(redis: RedisClient, task: TaskItem): Promise<boolean> {
-  const result = await redis.eval(ATOMIC_OWNED_WRITE_LUA, 4, ...subjectTransactionArguments(task));
-  return result === 1;
+export async function writeTaskForSubjectOwner(
+  redis: RedisClient,
+  existing: TaskItem,
+  task: TaskItem,
+): Promise<'written' | 'subject_mismatch' | 'stale'> {
+  const args = subjectTransactionArguments(task);
+  const expectedDeploymentWait = serializeTask(existing).deploymentWait ?? '';
+  const result = await redis.eval(
+    ATOMIC_OWNED_WRITE_LUA,
+    4,
+    ...args.slice(0, 6),
+    String(existing.updatedAt),
+    expectedDeploymentWait,
+    ...args.slice(6),
+  );
+  if (result === -1) throw createEntrustedWorkTerminalActionRequiredError(task.id);
+  if (result === 1) return 'written';
+  return result === -2 ? 'stale' : 'subject_mismatch';
 }

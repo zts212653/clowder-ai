@@ -8,6 +8,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { apiFetch } from '@/utils/api-client';
 import { CatTokenUsage } from './CatTokenUsage';
 import { PlanBoardPanel } from './PlanBoardPanel';
+import { SessionIdTag } from './SessionChainInputs';
 import { SessionChainPanel } from './SessionChainPanel';
 import { settingsResourceCardClass } from './SettingsResourceCard';
 import {
@@ -19,7 +20,9 @@ import {
   statusLabel,
   statusTone,
 } from './status-helpers';
-import { CatInvocationTime, CollapsibleIds } from './status-panel-parts';
+import { CatInvocationTime, InvocationIds } from './status-panel-parts';
+import { captureFileCardOrigin } from './workbench/file-card-origin';
+import { useFileCardReturn } from './workbench/useFileCardReturn';
 
 export interface RightStatusPanelProps {
   intentMode: IntentMode;
@@ -43,17 +46,7 @@ export interface RightStatusPanelProps {
 }
 
 /* ── Cat invocation card (shared between active/history) ──── */
-function CatInvocationCard({
-  catId,
-  inv,
-  onCopy,
-  isActive,
-}: {
-  catId: string;
-  inv: CatInvocationInfo;
-  onCopy: (v: string) => void;
-  isActive: boolean;
-}) {
+function CatInvocationCard({ catId, inv, isActive }: { catId: string; inv: CatInvocationInfo; isActive: boolean }) {
   const { getCatById } = useCatData();
   const cat = getCatById(catId);
   const dotColor = catColorVar(cat?.id, 'primary');
@@ -75,7 +68,7 @@ function CatInvocationCard({
             title={inv.sessionSealed ? `会话 #${inv.sessionSeq} 已封存` : `会话 #${inv.sessionSeq}`}
           >
             S#{inv.sessionSeq}
-            {inv.sessionSealed ? ' sealed' : ''}
+            {inv.sessionSealed ? ' 已封存' : ''}
           </span>
         )}
         <CatInvocationTime invocation={inv} />
@@ -86,7 +79,7 @@ function CatInvocationCard({
         </div>
       )}
       {(inv.sessionId || inv.invocationId) && (
-        <CollapsibleIds sessionId={inv.sessionId} invocationId={inv.invocationId} onCopy={onCopy} />
+        <InvocationIds sessionId={inv.sessionId} invocationId={inv.invocationId} />
       )}
     </div>
   );
@@ -292,8 +285,9 @@ function parseLogFilename(name: string): { date: string; seq: number } | null {
   return { date: m[1], seq: Number(m[2]) };
 }
 
-function RuntimeLogsButton() {
-  const setRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
+/** Exported for tests; rendered inside RightStatusPanel. */
+export function RuntimeLogsButton({ threadId }: { threadId: string }) {
+  const originRef = useFileCardReturn<HTMLElement>('runtime-logs', threadId);
   const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
 
   const handleClick = useCallback(async () => {
@@ -301,7 +295,7 @@ function RuntimeLogsButton() {
     // workspace stamps attribute actions to the correct thread
     // even if the user switches threads during the async gap.
     const originThreadId = useChatStore.getState().currentThreadId;
-    setRevealPath(LOGS_DIR, originThreadId);
+    const navigationOrigin = captureFileCardOrigin(originRef.current, 'runtime-logs', originThreadId, 'status');
 
     try {
       const wtRes = await apiFetch('/api/workspace/worktrees');
@@ -310,10 +304,18 @@ function RuntimeLogsButton() {
       const wtData = await wtRes.json();
       const wId = (wtData.worktrees ?? [])[0]?.id;
       if (!wId) return;
+      // Without a log file to open, show the logs directory itself; the file tree says why if it cannot.
+      const revealLogsDir = () =>
+        useChatStore
+          .getState()
+          .openWorkspacePath(originThreadId, { kind: 'reveal', worktreeId: wId, path: LOGS_DIR, navigationOrigin });
 
       const params = new URLSearchParams({ worktreeId: wId, path: LOGS_DIR, depth: '1' });
       const res = await apiFetch(`/api/workspace/tree?${params}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        revealLogsDir();
+        return;
+      }
       const data = await res.json();
       if (useChatStore.getState().currentThreadId !== originThreadId) return;
       const entries: { name: string; type: string }[] = Array.isArray(data.tree)
@@ -328,15 +330,17 @@ function RuntimeLogsButton() {
           return dc !== 0 ? dc : b.parsed.seq - a.parsed.seq;
         });
       if (logFiles.length > 0) {
-        setOpenFile(`${LOGS_DIR}/${logFiles[0].name}`, null, wId, originThreadId);
+        setOpenFile(`${LOGS_DIR}/${logFiles[0].name}`, null, wId, originThreadId, navigationOrigin);
+      } else {
+        revealLogsDir();
       }
     } catch {
-      // Directory revealed; file open is best-effort
+      // Network loss before anything was recorded; the button stays usable for a retry.
     }
-  }, [setRevealPath, setOpenFile]);
+  }, [setOpenFile, originRef]);
 
   return (
-    <section className={`${SIDEBAR_CARD} flex items-center justify-between px-3 py-2`}>
+    <section ref={originRef} tabIndex={-1} className={`${SIDEBAR_CARD} flex items-center justify-between px-3 py-2`}>
       <h3 className="text-label font-bold text-cafe">运行日志</h3>
       <button
         onClick={handleClick}
@@ -376,14 +380,12 @@ export function RightStatusPanel({
 
   const { getCatById } = useCatData();
   const [historyOpen, setHistoryOpen] = useState(initialHistoryOpen);
-  const copyText = useCallback((value: string) => {
-    void navigator.clipboard.writeText(value);
-  }, []);
 
   return (
     <aside
       className="flex flex-col gap-3 overflow-y-auto px-4 py-[18px]"
       data-console-panel="status"
+      data-file-origin-scroll
       style={{
         width: width ?? 304,
         flexShrink: 0,
@@ -412,7 +414,7 @@ export function RightStatusPanel({
                     </div>
                     <span className={`text-xs font-medium ${statusTone(status)}`}>{statusLabel(status)}</span>
                   </div>
-                  {inv && <CatInvocationCard catId={catId} inv={inv} onCopy={copyText} isActive />}
+                  {inv && <CatInvocationCard catId={catId} inv={inv} isActive />}
                 </div>
               );
             })
@@ -455,7 +457,7 @@ export function RightStatusPanel({
                     </div>
                   );
                 }
-                return <CatInvocationCard key={catId} catId={catId} inv={inv} onCopy={copyText} isActive={false} />;
+                return <CatInvocationCard key={catId} catId={catId} inv={inv} isActive={false} />;
               })}
             </div>
           )}
@@ -469,9 +471,9 @@ export function RightStatusPanel({
             总数 {messageSummary.total} 猫猫消息 {messageSummary.assistant}
           </div>
           <div>
-            系统消息 {messageSummary.system} Evidence {messageSummary.evidence}
+            系统消息 {messageSummary.system} 证据 {messageSummary.evidence}
           </div>
-          <div>Follow-up {messageSummary.followup}</div>
+          <div>跟进 {messageSummary.followup}</div>
         </div>
       </section>
 
@@ -483,23 +485,17 @@ export function RightStatusPanel({
         <h3 className="text-label font-bold text-cafe mb-2">对话信息</h3>
         <div className="console-list-card rounded-xl p-2.5 text-label text-cafe-secondary space-y-1.5">
           <div className="flex items-baseline gap-1 min-w-0">
-            <span className="shrink-0">Thread:</span>
-            <button
-              className="truncate min-w-0 text-cafe-secondary font-mono hover:text-cafe cursor-pointer transition-colors"
-              title={`点击复制: ${threadId}`}
-              onClick={() => copyText(threadId)}
-            >
-              {threadId}
-            </button>
+            <span className="shrink-0">对话 ID：</span>
+            <SessionIdTag id={threadId} label="对话 ID" />
           </div>
-          <BubbleDisplayToggle threadId={threadId} label="Thinking" field="bubbleThinking" />
-          <BubbleDisplayToggle threadId={threadId} label="CLI 气泡" field="bubbleCli" />
+          <BubbleDisplayToggle threadId={threadId} label="思考过程" field="bubbleThinking" />
+          <BubbleDisplayToggle threadId={threadId} label="命令行气泡" field="bubbleCli" />
           <ThinkingModeToggle threadId={threadId} />
           <RevealWhispersButton threadId={threadId} />
         </div>
       </section>
 
-      <RuntimeLogsButton />
+      <RuntimeLogsButton threadId={threadId} />
     </aside>
   );
 }

@@ -4,9 +4,8 @@
  * when the command is not in the Node.js process's PATH.
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
-import { resolve, win32 } from 'node:path';
+import { accessSync, constants, existsSync, readdirSync, statSync } from 'node:fs';
+import { delimiter, isAbsolute, resolve, win32 } from 'node:path';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -132,20 +131,10 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
   // #894: caller can skip this when PATH was already probed (e.g. client-detection
   // does its own `command -v`; repeating `which` is redundant + slower).
   if (!opts?.skipPathProbe) {
-    try {
-      const which = IS_WINDOWS ? `where ${command}` : `which ${command}`;
-      const result = execSync(which, { timeout: 5000, encoding: 'utf-8' }).trim();
-      if (result) {
-        const lines = result
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean);
-        const resolved = (IS_WINDOWS && selectWindowsPathEntry(lines)) || lines[0];
-        resolvedCache.set(command, resolved);
-        return resolved;
-      }
-    } catch {
-      // fall through to manual search
+    const pathHit = findOnPath(command);
+    if (pathHit) {
+      resolvedCache.set(command, pathHit);
+      return pathHit;
     }
   }
 
@@ -196,6 +185,34 @@ export function resolveCliCommand(command: string, opts?: { skipPathProbe?: bool
     }
   }
 
+  return null;
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    if (!statSync(path).isFile()) return false;
+    accessSync(path, IS_WINDOWS ? constants.F_OK : constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Match PATH directory precedence without starting a shell or which/where. */
+function findOnPath(command: string): string | null {
+  const hasPath = isAbsolute(command) || /[\\/]/.test(command);
+  const searchPath = process.env.PATH ?? process.env.Path ?? (IS_WINDOWS ? '' : '/usr/bin:/bin');
+  const directories = hasPath ? [''] : searchPath.split(delimiter);
+  const extensions =
+    IS_WINDOWS && !/\.[^\\/]+$/.test(command)
+      ? ['', ...(process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';')]
+      : [''];
+  for (const directory of directories) {
+    const hits = extensions
+      .map((extension) => resolve(directory.replace(/^"|"$/g, ''), `${command}${extension}`))
+      .filter(isExecutableFile);
+    if (hits.length) return IS_WINDOWS ? selectWindowsPathEntry(hits) : hits[0];
+  }
   return null;
 }
 

@@ -23,8 +23,9 @@ const lease = z
     activationRevision: revision,
     lifecycleRevision: revision,
     grantRevision: revision,
-    // Static editor admission grants no effect APIs to package code.
-    grantedCapabilities: z.tuple([]),
+    // Closed Host admission classes: existing zero-effect editors, or a companion window.
+    // This records the grant; it never grants media capture or general package execution.
+    grantedCapabilities: z.union([z.tuple([]), z.tuple([z.literal('windows.create')])]),
     connectionId: id,
     brokerSessionId: id,
     runtimeLeaseId: id,

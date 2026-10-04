@@ -109,10 +109,43 @@ describe('MCP audio client contract', () => {
     const stopped = await handleAudioCaptureStop();
     assert.equal(stopped.isError, undefined, stopped.content[0].text);
     assert.match(calls.at(-1).url, /\/api\/audio\/stop$/);
-    assert.equal(calls.at(-1).body, undefined);
+    assert.deepEqual(calls.at(-1).body, {});
     assert.match(stopped.content[0].text, /Recording \(primary\): \/tmp\/primary\.mp3/);
     assert.match(stopped.content[0].text, /Recording \(comment\): \/tmp\/comment\.mp3/);
   });
+
+  it('sends valid JSON to stop instead of an empty JSON request', async () => {
+    globalThis.fetch = async (_url, init) => {
+      if (init.headers['Content-Type'] === 'application/json' && !init.body) {
+        return new Response(JSON.stringify({ message: 'Body cannot be empty when content-type is application/json' }), {
+          status: 400,
+        });
+      }
+      assert.deepEqual(JSON.parse(init.body), {});
+      return new Response(JSON.stringify({ summary: { chunks: 0, duration_s: 1 } }));
+    };
+    const result = await handleAudioCaptureStop();
+    assert.equal(result.isError, undefined, result.content[0].text);
+  });
+
+  for (const [body, reason] of [
+    [
+      { error: 'Bad Request', message: 'Body cannot be empty when content-type is application/json' },
+      'Body cannot be empty',
+    ],
+    [{ error: 'No audio capture lease is owned by this runtime' }, 'No audio capture lease'],
+    ['upstream gateway unavailable', 'upstream gateway unavailable'],
+  ]) {
+    it(`preserves the stop error: ${reason}`, async () => {
+      globalThis.fetch = async () =>
+        new Response(typeof body === 'string' ? body : JSON.stringify(body), { status: 400 });
+      const result = await handleAudioCaptureStop();
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /Stop failed: 400/);
+      assert.ok(result.content[0].text.includes(reason), result.content[0].text);
+      assert.doesNotMatch(result.content[0].text, /Cannot reach Clowder AI API/);
+    });
+  }
 
   it('does not stop capture when the MCP invocation shuts down', async () => {
     const calls = [];
@@ -193,6 +226,37 @@ describe('MCP audio client contract', () => {
     assert.match(result.content[0].text, /speaker_separation=degraded \(model unavailable\)/);
     assert.match(result.content[0].text, /Speaker clusters: 2 confirmed; 1 learning/);
     assert.match(result.content[0].text, /My mic: failed.*device unplugged/);
+  });
+
+  it('shows silent PCM independently of ready models and a running input', async () => {
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          running: true,
+          duration_s: 55,
+          chunk_count: 0,
+          health: { asr: { state: 'ready' } },
+          inputs: [
+            {
+              id: 'primary',
+              source: 'app',
+              state: 'running',
+              chunk_count: 0,
+              signal: {
+                state: 'silent',
+                pcm_bytes: 96000,
+                peak_abs: 0,
+                pcm_silence_s: 3,
+                reason: 'Only all-zero PCM received',
+              },
+            },
+          ],
+        }),
+      );
+    const result = await handleAudioCaptureStatus();
+    assert.match(result.content[0].text, /signal=silent/);
+    assert.match(result.content[0].text, /pcm=96000 bytes/);
+    assert.match(result.content[0].text, /Only all-zero PCM received/);
   });
 
   it('keeps input source and speaker evidence in text and MeetingContextBlock output', async () => {

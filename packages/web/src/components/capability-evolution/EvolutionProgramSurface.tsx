@@ -196,10 +196,7 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
       data-reading-view={reviewing ? reading.view : 'detail'}
       onScroll={(event) => onScroll(event.currentTarget.scrollTop)}
     >
-      <div
-        className="evolution-content"
-        data-exploration-focus={reviewing && moment === 2 && reading.view === 'judgment'}
-      >
+      <div className="evolution-content" data-exploration-focus={reviewing && moment === 2}>
         {!reviewing ? (
           <CapabilityEvolutionProgramDetail
             projection={projection}
@@ -216,17 +213,32 @@ export function EvolutionProgramSurface({ programId }: { programId: string }) {
                 </button>
                 {controls}
               </div>
-              <p className="evolution-eyebrow">
+              <p className={moment === 2 ? 'sr-only' : 'evolution-eyebrow'}>
                 能力进化 · 第 {projection.program.cycle} 轮 · {status.label}
               </p>
               <h1 className="evolution-title mt-2">
                 {evolutionProgramPresentation(projection.program, projection.origin).title}
               </h1>
-              <EvolutionProgramOrigin projection={projection} />
-              <EvolutionProgramName projection={projection} />
-              <EvolutionJourney projection={projection} />
+              {moment === 2 ? (
+                <details className="exploration-project-context">
+                  <summary>项目详情与推进</summary>
+                  <p>
+                    第 {projection.program.cycle} 轮 · {status.label}
+                  </p>
+                  <EvolutionProgramOrigin projection={projection} />
+                  <EvolutionProgramName projection={projection} />
+                  <EvolutionProgressAction projection={projection} compact />
+                  <EvolutionJourney projection={projection} />
+                </details>
+              ) : (
+                <>
+                  <EvolutionProgramOrigin projection={projection} />
+                  <EvolutionProgramName projection={projection} />
+                </>
+              )}
+              {moment !== 2 && <EvolutionJourney projection={projection} />}
             </header>
-            <EvolutionProgressAction projection={projection} compact={moment === 2} />
+            {moment !== 2 && <EvolutionProgressAction projection={projection} />}
             <div role="tablist" aria-label="项目阅读内容" className="evolution-tabs">
               {(['judgment', 'history'] as const).map((view) => (
                 <button

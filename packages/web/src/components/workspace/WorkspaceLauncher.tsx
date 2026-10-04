@@ -1,6 +1,6 @@
 'use client';
 
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { ChatVoiceFeatureControls } from '@/components/ChatVoiceFeatureControls';
 import { openTheaterReplay } from '@/components/ThreadSidebar/theater-navigation';
 import { WORKSPACE_MODE_META, type WorkspaceMode } from '@/lib/workspace-modes';
@@ -99,7 +99,7 @@ const THREAD_DESTINATIONS: WorkspaceLauncherDestination[] = [
     kind: 'host',
     id: 'status',
     label: '状态与会话',
-    description: '查看 Session、Thread ID 与运行详情',
+    description: '查看会话、对话标识与运行详情',
     searchTerms: 'status activity session thread id diagnostics 状态 状态栏 当前动态 会话 诊断',
   },
   {
@@ -178,6 +178,7 @@ export function WorkspaceLauncher({
   defaultCatId = 'opus',
   actions,
   workspaceSearch,
+  initialSearchQuery,
 }: {
   onSelectDevSurface?: (surface: WorkspaceDevSurface) => void;
   onSelectDestination?: (destination: WorkspaceLauncherDestination) => void;
@@ -186,10 +187,13 @@ export function WorkspaceLauncher({
   defaultCatId?: string;
   actions?: ReactNode;
   workspaceSearch?: LauncherWorkspaceSearch;
+  /** Host-owned transient query used when Home is reconstructed from a typed return origin. */
+  initialSearchQuery?: string;
 }) {
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
   const openTeamSubject = useChatStore((state) => state.openTeamSubject);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialSearchQuery ?? '');
+  useEffect(() => setQuery(initialSearchQuery ?? ''), [initialSearchQuery]);
   const normalizedQuery = query.trim().toLocaleLowerCase();
 
   const visibleGroups = useMemo(() => {

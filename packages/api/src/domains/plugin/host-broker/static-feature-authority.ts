@@ -4,6 +4,12 @@ import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-i
 import type { HostBrokerControlPlane } from './control-plane.js';
 import type { HostBrokerStore, HostBrokerTransaction } from './ports.js';
 import { containStaticFeatureEpoch, revokeStaticFeatures, type StaticFeatureLease } from './static-feature-ledger.js';
+import {
+  matchesStaticFeatureGrants,
+  type StaticFeatureAdmission,
+  staticFeatureDeclarations,
+  staticFeatureGrants,
+} from './static-feature-policy.js';
 import type { BrokerCallContext } from './types.js';
 import { HostBrokerError } from './types.js';
 
@@ -14,6 +20,8 @@ interface Options {
   /** The runtime owns the verified, private tree; candidates cannot supply this verifier. */
   readonly verifyActivePackage: (pluginInstanceId: string, packageDigest: string) => Promise<void>;
   readonly now?: () => number;
+  /** Chosen by the trusted Host consumer, never by package or renderer input. */
+  readonly admission?: StaticFeatureAdmission;
 }
 
 type Decision<T> = { value: T } | { error: HostBrokerError };
@@ -25,12 +33,17 @@ const denied = (message: string) => new HostBrokerError('AUTHORITY_CHANGED', mes
  */
 export class StaticFeatureAuthority {
   private readonly now: () => number;
+  private readonly admission: StaticFeatureAdmission;
   constructor(private readonly options: Options) {
     this.now = options.now ?? Date.now;
+    this.admission = options.admission ?? 'content-editor';
   }
 
   async begin(pluginInstanceId: string, featureId: string): Promise<StaticFeatureLease> {
-    const binding = await this.options.broker.authorizeStaticFeature(pluginInstanceId);
+    const binding =
+      this.admission === 'desktop-companion'
+        ? await this.options.broker.authorizeHostCall(pluginInstanceId, 'windows.create')
+        : await this.options.broker.authorizeStaticFeature(pluginInstanceId);
     const decision = await this.options.store.transaction((tx) =>
       this.options.inventory.transaction(async (inventory): Promise<Decision<StaticFeatureLease>> => {
         const { instance, manifest } = this.current(tx, inventory, binding);
@@ -85,7 +98,7 @@ export class StaticFeatureAuthority {
             Math.max(0, ...previous.filter((r) => r.featureId === featureId).map((r) => r.activationRevision)) + 1,
           lifecycleRevision: instance.lifecycleRevision,
           grantRevision: binding.grantRevision,
-          grantedCapabilities: [],
+          grantedCapabilities: staticFeatureGrants(this.admission),
           connectionId: binding.connectionId,
           brokerSessionId: binding.brokerSessionId,
           runtimeLeaseId: binding.runtimeLeaseId,
@@ -170,6 +183,20 @@ export class StaticFeatureAuthority {
     phase: 'provisioning' | 'active',
     work: (lease: StaticFeatureLease, tx: HostBrokerTransaction, inventory: PluginInventoryTransaction) => Promise<T>,
   ): Promise<T> {
+    // Package IO must not hold the shared Broker/inventory locks: a slow scan
+    // otherwise starves renewal and owner revocation. Recheck all authority
+    // inside the transaction after the scan, including the current clock.
+    const candidate = (await this.options.store.snapshot()).staticFeatures?.leases.find(
+      (r) => r.executionLease === executionLease,
+    );
+    if (!candidate || candidate.state === 'revoked') throw denied('feature lease is revoked or unknown');
+    if (candidate.state !== phase) throw denied(`feature lease is not ${phase}`);
+    let packageTrusted = true;
+    try {
+      await this.options.verifyActivePackage(candidate.pluginInstanceId, candidate.packageRevision);
+    } catch {
+      packageTrusted = false;
+    }
     const decision = await this.options.store.transaction((tx) =>
       this.options.inventory.transaction(async (inventory): Promise<Decision<T>> => {
         const ledger = tx.staticFeatures.get();
@@ -177,10 +204,13 @@ export class StaticFeatureAuthority {
         if (!record || record.state === 'revoked') return { error: denied('feature lease is revoked or unknown') };
         if (record.state !== phase) return { error: denied(`feature lease is not ${phase}`) };
         try {
-          const { instance } = this.current(tx, inventory, {
+          const { instance, manifest } = this.current(tx, inventory, {
             ...record,
             packageDigest: record.packageRevision,
           });
+          this.declarations(manifest, record.featureId);
+          if (!matchesStaticFeatureGrants(this.admission, record.grantedCapabilities))
+            throw denied('feature belongs to a different Host admission class');
           const desired = ledger.preferences.find(
             (r) => r.pluginInstanceId === record.pluginInstanceId && r.featureId === record.featureId,
           );
@@ -198,9 +228,7 @@ export class StaticFeatureAuthority {
           tx.staticFeatures.put(revokeStaticFeatures(ledger, (r) => r.executionLease === executionLease, this.now()));
           return { error: error instanceof HostBrokerError ? error : denied('feature authority changed') };
         }
-        try {
-          await this.options.verifyActivePackage(record.pluginInstanceId, record.packageRevision);
-        } catch {
+        if (!packageTrusted) {
           tx.staticFeatures.put(
             containStaticFeatureEpoch(ledger, record.pluginInstanceId, record.integrityEpoch, this.now()),
           );
@@ -252,7 +280,7 @@ export class StaticFeatureAuthority {
       instance.packageDigest !== binding.packageDigest ||
       pkg?.packageState !== 'installed' ||
       grants?.grantRevision !== binding.grantRevision ||
-      grants.effectiveGrants.length !== 0
+      !matchesStaticFeatureGrants(this.admission, grants.effectiveGrants)
     ) {
       throw denied('static feature has no current Host authority');
     }
@@ -260,13 +288,6 @@ export class StaticFeatureAuthority {
   }
 
   private declarations(manifest: PluginManifest, featureId: string): string[] {
-    const feature = manifest.features.find((r) => r.id === featureId);
-    if (!feature || feature.resources.length !== 0 || feature.capabilities.length !== 0) {
-      throw denied('feature is not a declared zero-capability static feature');
-    }
-    const references = feature.contributions ?? [];
-    if (references.some((r) => r.type !== 'content-editor-provider'))
-      throw denied('unsupported static feature contribution');
-    return references.map((r) => r.id);
+    return staticFeatureDeclarations(this.admission, manifest, featureId);
   }
 }

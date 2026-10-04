@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -70,6 +70,7 @@ test('provisions the local Service and returns its one-time bootstrap link only 
   assert.equal(starts.length, 1);
   assert.equal(starts[0].command, process.execPath);
   assert.deepEqual(starts[0].args, ['/app/collective-service/cli.js']);
+  assert.equal(starts[0].detached, true, 'runtime Service keeps its independent process group');
   assert.equal(starts[0].env.COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS, 'http://localhost:3003');
   assert.equal(JSON.stringify(await manager.status()).includes('one-time-owner-secret'), false);
 });
@@ -171,6 +172,154 @@ test('never starts a persistent Service from a development or alpha worktree', a
       },
     });
     await assert.rejects(() => manager.provision(), /runtime environment/i);
+  }
+});
+
+test('isolated Alpha provisions and recovers only its own Service without inherited OAuth credentials', async () => {
+  const alphaRoot = await mkdtemp(join(tmpdir(), 'collective-service-alpha-'));
+  const dataDirectory = join(alphaRoot, '.cat-cafe', 'collective-service');
+  const starts = [];
+  let onlineInstance;
+  const manager = new LocalCollectiveServiceManager({
+    env: {
+      CAT_CAFE_DEPLOYMENT_ID: 'alpha',
+      CAT_CAFE_RUNTIME_ROOT: alphaRoot,
+      CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED: '1',
+      WORKTREE_PORT_OFFSET: '0',
+      FRONTEND_PORT: '3011',
+      API_SERVER_PORT: '3012',
+      COLLECTIVE_GITHUB_CLIENT_ID: 'runtime-client',
+      COLLECTIVE_GITHUB_CLIENT_SECRET: 'runtime-secret',
+    },
+    alphaRoot,
+    dataDirectory,
+    frontendBaseUrl: 'http://localhost:3011',
+    serviceUrl: 'http://127.0.0.1:5211',
+    cliPath: join(alphaRoot, 'packages', 'collective-service', 'dist', 'cli.js'),
+    fetchImpl: async (input) => {
+      if (!onlineInstance) return offlineFetch();
+      return String(input).endsWith('/api/health')
+        ? Response.json({
+            ok: true,
+            serviceInstanceId: onlineInstance,
+            bootstrapNeeded: true,
+            onboardingComplete: false,
+          })
+        : Response.json({ providers: [{ id: 'github', ready: false, setupSupported: true }] });
+    },
+    spawnProcess: async (spec) => {
+      starts.push(spec);
+      await mkdir(dataDirectory, { recursive: true });
+      await writeFile(join(dataDirectory, 'collective-service.json'), '{"serviceInstanceId":"svc_alpha"}\n');
+      await writeFile(
+        join(dataDirectory, 'owner-bootstrap.url'),
+        'http://127.0.0.1:5211/#bootstrap=alpha-only-secret\n',
+      );
+      onlineInstance = 'svc_alpha';
+      return { pid: 41011 };
+    },
+    wait: async () => undefined,
+  });
+
+  try {
+    assert.equal((await manager.status()).state, 'not_created');
+    const first = await manager.provision();
+    assert.equal(first.service.serviceInstanceId, 'svc_alpha');
+    assert.equal(first.service.state, 'setup_required');
+    assert.match(first.launchUrl, /#bootstrap=alpha-only-secret$/);
+    assert.equal(starts[0].env.COLLECTIVE_SERVICE_PORT, '5211');
+    assert.equal(starts[0].detached, false, 'Alpha Service must exit with its managed preview session');
+    assert.equal(starts[0].env.COLLECTIVE_SERVICE_DATA_DIR, dataDirectory);
+    assert.equal(starts[0].env.COLLECTIVE_SERVICE_ALLOWED_HOST_ORIGINS, 'http://localhost:3011,http://127.0.0.1:3011');
+    assert.equal(starts[0].env.COLLECTIVE_GITHUB_CLIENT_ID, undefined);
+    assert.equal(starts[0].env.COLLECTIVE_GITHUB_CLIENT_SECRET, undefined);
+
+    onlineInstance = undefined;
+    assert.equal((await manager.status()).state, 'stopped');
+    const recovered = await manager.recover();
+    assert.equal(recovered.serviceInstanceId, 'svc_alpha');
+    assert.equal(starts.length, 2);
+
+    onlineInstance = 'svc_foreign';
+    assert.equal((await manager.status()).state, 'error');
+    await assert.rejects(() => manager.provision(), /different Collective Service/i);
+    assert.equal(starts.length, 2);
+  } finally {
+    await rm(alphaRoot, { recursive: true, force: true });
+  }
+});
+
+test('an Alpha label alone cannot grant local Service lifecycle authority', async () => {
+  const alphaRoot = await mkdtemp(join(tmpdir(), 'collective-service-alpha-guard-'));
+  const safeDirectory = join(alphaRoot, '.cat-cafe', 'collective-service');
+  const safeEnv = {
+    CAT_CAFE_DEPLOYMENT_ID: 'alpha',
+    CAT_CAFE_RUNTIME_ROOT: alphaRoot,
+    CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED: '1',
+    WORKTREE_PORT_OFFSET: '0',
+    FRONTEND_PORT: '3011',
+    API_SERVER_PORT: '3012',
+  };
+  try {
+    for (const overrides of [
+      { env: { ...safeEnv, CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED: '0' } },
+      { env: { ...safeEnv, WORKTREE_PORT_OFFSET: undefined } },
+      { env: { ...safeEnv, WORKTREE_PORT_OFFSET: '-10' } },
+      { dataDirectory: join(alphaRoot, 'runtime-data') },
+      { serviceUrl: 'http://127.0.0.1:5201' },
+      { frontendBaseUrl: 'http://localhost:3003' },
+    ]) {
+      const manager = new LocalCollectiveServiceManager({
+        env: safeEnv,
+        alphaRoot,
+        dataDirectory: safeDirectory,
+        frontendBaseUrl: 'http://localhost:3011',
+        serviceUrl: 'http://127.0.0.1:5211',
+        cliPath: join(alphaRoot, 'packages', 'collective-service', 'dist', 'cli.js'),
+        fetchImpl: async () => offlineFetch(),
+        spawnProcess: async () => {
+          throw new Error('must not start');
+        },
+        ...overrides,
+      });
+      assert.equal((await manager.status()).state, 'error');
+      assert.equal((await manager.recover()).state, 'error');
+      await assert.rejects(() => manager.provision(), /runtime environment/i);
+    }
+  } finally {
+    await rm(alphaRoot, { recursive: true, force: true });
+  }
+});
+
+test('Alpha refuses a Service data path symlinked to another home', async () => {
+  const alphaRoot = await mkdtemp(join(tmpdir(), 'collective-service-alpha-symlink-'));
+  const otherHome = await mkdtemp(join(tmpdir(), 'collective-service-other-home-'));
+  await symlink(otherHome, join(alphaRoot, '.cat-cafe'));
+  const manager = new LocalCollectiveServiceManager({
+    env: {
+      CAT_CAFE_DEPLOYMENT_ID: 'alpha',
+      CAT_CAFE_RUNTIME_ROOT: alphaRoot,
+      CAT_CAFE_SIDECAR_LIFECYCLE_DISABLED: '1',
+      WORKTREE_PORT_OFFSET: '0',
+      FRONTEND_PORT: '3011',
+      API_SERVER_PORT: '3012',
+    },
+    alphaRoot,
+    dataDirectory: join(alphaRoot, '.cat-cafe', 'collective-service'),
+    frontendBaseUrl: 'http://localhost:3011',
+    serviceUrl: 'http://127.0.0.1:5211',
+    cliPath: join(alphaRoot, 'packages', 'collective-service', 'dist', 'cli.js'),
+    fetchImpl: async () => offlineFetch(),
+    spawnProcess: async () => {
+      throw new Error('must not start');
+    },
+  });
+  try {
+    assert.equal((await manager.status()).state, 'error');
+    await assert.rejects(() => manager.provision(), /runtime environment/i);
+  } finally {
+    await rm(alphaRoot, { recursive: true, force: true });
+    await rm(otherHome, { recursive: true, force: true });
   }
 });
 

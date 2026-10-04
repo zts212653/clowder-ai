@@ -66,6 +66,10 @@ import { type AgentMessage, mergeTokenUsage, type TokenUsage } from '../../domai
 import type { MemoryCueOpportunitySeed } from '../../domains/memory/cue/MemoryCueInvocationPromptService.js';
 import { readTrustedConnectorMemoryCueSeeds } from '../../domains/memory/cue/MemoryCueTrustedConnector.js';
 import { bindAsrPersonMemoryReentryFromSchedulerMessage } from '../../domains/memory/people/AsrPersonMemoryReentryCarrier.js';
+import {
+  checkDeploymentWaitStart,
+  type DeploymentWaitStartGuard,
+} from '../../domains/runtime-deployment/DeploymentWaitStartGuard.js';
 import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
@@ -170,6 +174,7 @@ export interface ConnectorInvokeTriggerOptions {
   readonly messageStore?: IMessageStore;
   /** Canonical owner used to validate a managed-command wake's frozen action generation. */
   readonly actionSuccessorLeaseStore?: Pick<ActionSuccessorLeaseStore, 'get'>;
+  readonly deploymentWaitStartGuard?: Pick<DeploymentWaitStartGuard, 'check'>;
   readonly log: FastifyBaseLogger;
 }
 
@@ -363,6 +368,11 @@ export class ConnectorInvokeTrigger {
 
     let admission: DirectInvocationAdmission;
     try {
+      const decision = await checkDeploymentWaitStart(
+        { messageId, threadId, userId, catId, expectedDeploymentWait: policy?.reason === 'deployment_wait_satisfied' },
+        { guard: this.opts.deploymentWaitStartGuard, messageStore: this.opts.messageStore },
+      );
+      if (!decision.ok) throw new Error(`deployment wait continuation ${decision.reason}`);
       admission = await this.admitDirectInvocation(threadId, catId, userId, messageId);
     } catch (err) {
       rejectDirectAdmission();
@@ -396,6 +406,7 @@ export class ConnectorInvokeTrigger {
       sender,
       controller,
       executionStartReceipt,
+      policy?.reason === 'deployment_wait_satisfied',
     ).catch((err) => {
       executionStartReceipt.reject(err);
       this.opts.log.error(`[ConnectorInvokeTrigger] Unhandled: ${err instanceof Error ? err.message : String(err)}`);
@@ -763,6 +774,7 @@ export class ConnectorInvokeTrigger {
     sender?: { id: string; name?: string },
     preAcquiredController?: AbortController,
     executionStartReceipt?: ExecutionStartReceipt,
+    expectedDeploymentWait = false,
   ): Promise<void> {
     const { router, socketManager, invocationRecordStore, invocationTracker, invocationQueue, log } = this.opts;
     const targetCats: CatId[] = [catId];
@@ -920,6 +932,19 @@ export class ConnectorInvokeTrigger {
         } catch (err) {
           log.warn({ err, threadId, messageId }, '[F276] direct connector re-entry carrier read failed closed');
         }
+      }
+
+      const deploymentDecision = await checkDeploymentWaitStart(
+        { messageId, threadId, userId, catId, expectedDeploymentWait },
+        { guard: this.opts.deploymentWaitStartGuard, messageStore: this.opts.messageStore },
+      );
+      if (!deploymentDecision.ok) {
+        finalStatus = deploymentDecision.reason === 'evidence_stale' ? 'failed' : 'canceled';
+        await invocationRecordStore.update(invocationId, { status: finalStatus, expectedStatus: 'running' });
+        executionStartReceipt?.reject(
+          new Error(`deployment wait continuation ${deploymentDecision.reason} before execution`),
+        );
+        return;
       }
 
       for await (const msg of router.routeExecution(userId, message, threadId, messageId, targetCats, intent, {

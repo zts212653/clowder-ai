@@ -323,11 +323,16 @@ describe('F167 Phase T TurnCustodyProjectionService', () => {
     });
     assert.deepEqual(holdOpened, {
       state: 'covered_empty',
-      evidenceRefs: [
-        'hold:ball:thread:thread-1',
-        'route:message-1:codex-sol',
-        'released:route:successor-message:codex-terra',
-      ],
+      evidenceRefs: ['hold:ball:thread:thread-1', 'superseded:route:successor-message:codex-terra'],
+      baseline: {
+        kind: 'structured',
+        subjectKey: 'ball:thread:thread-1',
+        holderCatId: 'codex-sol',
+        fromSequence: 3,
+        protocol: 'hold',
+        sourceMessageId: 'message-1',
+        taskId: 'task-1',
+      },
     });
     assert.equal((await hold.service.close(holdOpened)).shouldBlock, false);
   });

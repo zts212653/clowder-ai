@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { inspectPawFeelMessage } from '../../dist/infrastructure/harness-eval/friction/paw-feel-source.js';
+import { derivePawFeelResumeConditionId } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/resume-condition.js';
 import { PawFeelContinuingResponsibilityResolver } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/continuation/follow-up-resolver.js';
 import { PawFeelDispositionReadModel } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/read-model.js';
 
@@ -99,6 +100,61 @@ describe('F313 continuing responsibility projection', () => {
     assert.equal(page.bundles[0].issue.resolution, 'open');
     assert.deepEqual(page.issueCounts, { open: 1, resolved: 0, overdue: 1 });
     assert.equal((await model.list({ resolution: 'open', issueOverdueOnly: true })).items.length, 1);
+  });
+
+  it('keeps the original repair task visible while its blocker remains open', async () => {
+    const message = sourceMessage('message-repair-blocked');
+    const blocked = lifecycle(message, [
+      {
+        type: 'fix',
+        ownerCatId: 'opus',
+        taskId: 'task-1',
+        leaseId: 'lease-1',
+        leaseGeneration: 3,
+        custodyEvidenceRef: 'action-lease:lease-1:generation:3',
+      },
+      { type: 'blocked', blockerCode: 'dependency_wait', blockerRef: 'task:item:task-1' },
+    ]);
+
+    const item = (await readModel([{ message, lifecycle: blocked }]).list()).items[0];
+    assert.equal(item.issue.resolution, 'open');
+    assert.equal(item.issue.continuation.kind, 'legacy_blocker_unbound');
+    assert.equal(item.issue.continuation.ownerCatId, 'opus');
+    assert.equal(item.issue.continuation.taskId, 'task-1');
+    assert.equal(item.issue.continuation.leaseId, 'lease-1');
+    assert.ok(item.issue.continuation.evidenceRefs.includes('task-1'));
+    assert.ok(item.issue.continuation.evidenceRefs.includes('lease-1'));
+  });
+
+  it('shows a legacy pure-time blocker as unbound debt instead of a recoverable wait', async () => {
+    const message = sourceMessage('message-legacy-time-blocked');
+    const inspection = inspectPawFeelMessage(message);
+    assert.equal(inspection.kind, 'canonical');
+    const signalId = inspection.candidates[0].signalId;
+    const selector = { kind: 'bounded_time', recheckAt: '2026-09-07T10:00:00.000Z' };
+    const blockedEpisode = {
+      ownerFeatureId: 'F278',
+      ownerStateRef: `paw-feel-blocked:${signalId}`,
+      version: '2',
+    };
+    const blocked = lifecycle(message, [
+      {
+        type: 'blocked',
+        blockerCode: 'legacy_time_wait',
+        blockerRef: 'clock:legacy-wait',
+        resumeCondition: {
+          schemaVersion: 1,
+          blockedEpisode,
+          selector,
+          conditionId: derivePawFeelResumeConditionId(blockedEpisode, selector),
+          blockedVersion: 'a'.repeat(64),
+        },
+      },
+    ]);
+
+    const item = (await readModel([{ message, lifecycle: blocked }]).list()).items[0];
+    assert.equal(item.issue.continuation.kind, 'legacy_blocker_unbound');
+    assert.equal(item.issue.resumeAt, selector.recheckAt);
   });
 
   it('resolves a reasoned no-action without changing duty receipt semantics', async () => {

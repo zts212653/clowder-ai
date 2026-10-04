@@ -2,6 +2,9 @@
 // Phase C adds: embedding_meta (V2) + evidence_vectors (vec0, decoupled)
 
 import type Database from 'better-sqlite3';
+import { addDevelopmentReturnColumn } from '../../infrastructure/scheduler/development-return/development-return-schema.js';
+import { MANAGED_COMMAND_CANDIDATE_INDEX } from '../../infrastructure/scheduler/managed-command-candidate-schema.js';
+import { migrateEntityMentionProjections } from './entity-mention-projection-schema.js';
 import { RUN_LEDGER_STATS_SCHEMA } from './run-ledger-stats-schema.js';
 
 export const EVIDENCE_FTS_SCHEMA = `
@@ -71,7 +74,7 @@ END`,
 END`,
 ];
 
-export const CURRENT_SCHEMA_VERSION = 45;
+export const CURRENT_SCHEMA_VERSION = 52;
 
 function memoryCueLedgerHasConsumerBinding(db: Database.Database): boolean {
   return (db.prepare('PRAGMA table_info(memory_cue_events)').all() as Array<{ name: string }>).some(
@@ -1443,6 +1446,75 @@ export function applyMigrations(db: Database.Database): void {
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(45, new Date().toISOString());
     })();
   }
+
+  // V46: keep the owner's continuation association out of public/legacy schedule params.
+  if (currentVersion < 46) {
+    db.transaction(() => {
+      addDevelopmentReturnColumn(db);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(46, new Date().toISOString());
+    })();
+  }
+  // V47: reviewed returns remain durable but invisible to pre-lineage executors.
+  // Their old private blob is NULL and the legacy executable projection stays off.
+  if (currentVersion < 47) {
+    db.transaction(() => {
+      const columns = db.prepare('PRAGMA table_info(dynamic_task_defs)').all() as { name: string }[];
+      if (!columns.some((column) => column.name === 'reviewed_development_return_json')) {
+        db.exec(`ALTER TABLE dynamic_task_defs ADD COLUMN reviewed_development_return_json TEXT
+        CHECK (reviewed_development_return_json IS NULL OR
+          (development_return_json IS NULL AND enabled = 0 AND template_id = 'development-terminal-return'))`);
+      }
+      db.exec(`CREATE TRIGGER IF NOT EXISTS reviewed_development_return_no_delete
+        BEFORE DELETE ON dynamic_task_defs WHEN OLD.reviewed_development_return_json IS NOT NULL
+        BEGIN SELECT RAISE(ABORT, 'Reviewed execution return requires its typed owner transition'); END`);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(47, new Date().toISOString());
+    })();
+  }
+  // V48: bounded owner/source lookup for the F321 A1b observatory read model.
+  if (currentVersion < 48) {
+    db.transaction(() => {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_memory_cue_events_source
+        ON memory_cue_events(owner_user_id, resolver_family, source_anchor, occurred_at)`);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(48, new Date().toISOString());
+    })();
+  }
+
+  // V49: restart-safe incremental transcript and document-vector catch-up.
+  // A checkpoint is written only after its derived data has been committed.
+  if (currentVersion < 49) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS transcript_backfill_files (
+          file_path TEXT PRIMARY KEY,
+          fingerprint TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS document_vector_sources (
+          anchor TEXT PRIMARY KEY,
+          source_hash TEXT NOT NULL
+        );
+      `);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(49, new Date().toISOString());
+    })();
+  }
+  // V50: task + subject probes must not scan other tasks sharing the subject.
+  // The rowid suffix also supplies the existing id DESC history order.
+  // Keep idx_run_ledger_task: task-wide newest-run reads need id ordering across
+  // all subjects, which the compound index's subject-first ordering cannot supply.
+  if (currentVersion < 50) {
+    db.transaction(() => {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_run_ledger_task_subject
+        ON task_run_ledger(task_id, subject_key)`);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(50, new Date().toISOString());
+    })();
+  }
+  // V51: polling/recovery reads only unsettled managed execution definitions.
+  if (currentVersion < 51) {
+    db.transaction(() => {
+      db.exec(MANAGED_COMMAND_CANDIDATE_INDEX);
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(51, new Date().toISOString());
+    })();
+  }
+  if (currentVersion < 52) migrateEntityMentionProjections(db);
 }
 
 /**
