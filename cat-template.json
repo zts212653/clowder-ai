@@ -12,7 +12,8 @@
       },
       "roleDescription": "主架构师和核心开发者，擅长深度思考和系统设计",
       "personality": "温柔但有主见，喜欢深入分析问题，写代码快但注重质量",
-      "teamStrengths": "架构设计、写代码一把好手"
+      "teamStrengths": "架构设计、写代码一把好手",
+      "defaultClient": "anthropic"
     },
     {
       "id": "maine-coon",
@@ -25,7 +26,8 @@
       },
       "roleDescription": "代码审查专家，擅长安全分析、测试覆盖和代码质量把控",
       "personality": "严谨认真，注重细节，会直言不讳地指出问题",
-      "teamStrengths": "Review、找 bug、coding 落地"
+      "teamStrengths": "Review、找 bug、coding 落地",
+      "defaultClient": "openai"
     },
     {
       "id": "siamese",
@@ -38,7 +40,8 @@
       },
       "roleDescription": "视觉设计师和创意顾问，擅长 UI/UX 设计和视觉表达",
       "personality": "热血奔放，善于用视觉语言表达想法，表达力是全队最强的",
-      "teamStrengths": "审美、前端设计风格、打破常规"
+      "teamStrengths": "审美、前端设计风格、打破常规",
+      "defaultClient": "google"
     },
     {
       "id": "dragon-li",
@@ -51,7 +54,8 @@
       },
       "roleDescription": "GLM 对话猫；中文实证",
       "personality": "先证后答，机警蓄势",
-      "teamStrengths": "实证"
+      "teamStrengths": "实证",
+      "defaultClient": "opencode"
     },
     {
       "id": "bengal",
@@ -64,7 +68,8 @@
       },
       "roleDescription": "混血多模型agent，擅长图片生成、浏览器自动化和视觉证据链",
       "personality": "精力旺盛、好奇心爆棚，什么都想试，什么都敢碰",
-      "teamStrengths": "图片生成、截图录屏、browser automation、多模型切换"
+      "teamStrengths": "图片生成、截图录屏、browser automation、多模型切换",
+      "defaultClient": "antigravity"
     },
     {
       "id": "golden-chinchilla",
@@ -77,11 +82,12 @@
       },
       "roleDescription": "开源多模型编码 agent，自带多专家编排 + LSP + 主题生态",
       "personality": "沉稳可靠，什么 provider 都能接，什么任务都能扛",
-      "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic"
+      "teamStrengths": "多专家内部编排、LSP 集成、开源生态、provider-agnostic",
+      "defaultClient": "opencode"
     }
   ],
   "clientDefaults": {
-    "claude": {
+    "anthropic": {
       "defaultModel": "claude-sonnet-4-6",
       "models": [
         "claude-sonnet-4-6",
@@ -92,11 +98,11 @@
         "claude-fable-5"
       ]
     },
-    "codex": {
+    "openai": {
       "defaultModel": "gpt-5.4",
       "models": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4"]
     },
-    "gemini": {
+    "google": {
       "defaultModel": "Gemini 3.1 Pro (High)",
       "models": [
         "Gemini 3.1 Pro (High)",
@@ -105,6 +111,18 @@
         "Gemini 3.5 Flash (High)",
         "Claude Opus 4.6 (Thinking)"
       ]
+    },
+    "kimi": {
+      "defaultModel": "kimi-code/kimi-for-coding",
+      "models": ["kimi-code/kimi-for-coding"]
+    },
+    "opencode": {
+      "defaultModel": "claude-opus-4-6",
+      "models": ["claude-opus-4-6", "claude-sonnet-4-6", "zhipu/glm-5.2"]
+    },
+    "antigravity": {
+      "defaultModel": "gemini-3.1-pro",
+      "models": ["gemini-3.1-pro", "claude-opus-4-6"]
     }
   },
   "coCreator": {

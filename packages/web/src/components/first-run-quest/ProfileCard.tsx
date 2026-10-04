@@ -9,6 +9,12 @@ interface ProfileCardProps {
   isSelected: boolean;
   isExpanded: boolean;
   selectedModel: string;
+  /**
+   * #768: models the role template offers for this client. Rendered only while the
+   * account publishes none of its own, so a model-less account still shows what it is
+   * about to be created with instead of a selection with nothing on screen behind it.
+   */
+  suggestedModels?: readonly string[];
   testing: boolean;
   testResult: { ok: boolean; message?: string } | null;
   onSelect: () => void;
@@ -29,6 +35,7 @@ export function ProfileCard({
   isSelected,
   isExpanded,
   selectedModel,
+  suggestedModels = [],
   testing,
   testResult,
   onSelect,
@@ -41,6 +48,9 @@ export function ProfileCard({
   const [newModel, setNewModel] = useState('');
 
   const models = profile.models?.map((m) => m.trim()).filter(Boolean) ?? [];
+  // The template's menu is a fallback, never an override: an account with a catalog owns
+  // its own list, and these entries are not stored on the account, so they carry no delete.
+  const suggested = models.length > 0 ? [] : suggestedModels.map((m) => m.trim()).filter(Boolean);
 
   const borderClass = !isSelected
     ? 'border-[var(--console-border-soft)] hover:border-conn-amber-ring'
@@ -164,6 +174,22 @@ export function ProfileCard({
                   </span>
                 </button>
               ))}
+              {suggested.map((m) => (
+                <button
+                  key={`suggested-${m}`}
+                  type="button"
+                  onClick={() => onModelSelect(m)}
+                  title="角色模板默认模型"
+                  className={`flex items-center gap-1 rounded-lg border border-dashed px-2.5 py-1 text-xs font-medium transition ${
+                    selectedModel === m
+                      ? 'border-[var(--color-cafe-accent)] bg-[var(--accent-50)] text-[var(--color-cafe-accent)]'
+                      : 'border-[var(--console-border-soft)] text-cafe-muted hover:border-[var(--color-cafe-accent)]'
+                  }`}
+                >
+                  {m}
+                  <span className="text-cafe-muted">模板默认</span>
+                </button>
+              ))}
               {addingModel ? (
                 <span className="flex items-center gap-1">
                   <input
@@ -201,8 +227,13 @@ export function ProfileCard({
                 </button>
               )}
             </div>
-            {models.length === 0 && !addingModel && (
+            {models.length === 0 && suggested.length === 0 && !addingModel && (
               <p className="mt-1 text-xs text-cafe-muted">{'暂无模型，请点击"+ 添加"后测试'}</p>
+            )}
+            {suggested.length > 0 && (
+              <p className="mt-1 text-xs text-cafe-muted">
+                这个账号没有提供模型列表，已改用角色模板为该客户端配置的默认模型。
+              </p>
             )}
             {modelError && <p className="mt-1 text-xs text-conn-red-text">{modelError}</p>}
           </div>

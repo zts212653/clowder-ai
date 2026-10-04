@@ -14,6 +14,7 @@ export interface TemplateCard {
   roleDescription: string;
   personality: string;
   teamStrengths?: string;
+  defaultClient?: string;
 }
 
 interface TemplateStepProps {

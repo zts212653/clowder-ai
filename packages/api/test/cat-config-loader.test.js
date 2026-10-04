@@ -2167,3 +2167,68 @@ describe('#772: template breeds must not leak into runtime', () => {
     }
   });
 });
+
+describe('#768: template default backfill (roleTemplates.defaultClient + clientDefaults)', () => {
+  /** The ClientId union in packages/shared/src/types/cat.ts — shipped template data must stay inside it. */
+  const VALID_CLIENT_IDS = new Set([
+    'anthropic',
+    'openai',
+    'google',
+    'kimi',
+    'antigravity',
+    'opencode',
+    'a2a',
+    'catagent',
+    'acp',
+  ]);
+
+  function readShippedTemplate() {
+    const templatePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../..', 'cat-template.json');
+    return JSON.parse(readFileSync(templatePath, 'utf-8'));
+  }
+
+  it('every roleTemplate binds a client through defaultClient', () => {
+    const raw = readShippedTemplate();
+    assert.ok(Array.isArray(raw.roleTemplates), 'roleTemplates should be an array');
+    assert.ok(raw.roleTemplates.length > 0, 'roleTemplates should not be empty');
+    for (const t of raw.roleTemplates) {
+      assert.ok(typeof t.defaultClient === 'string', `template ${t.id} should have defaultClient`);
+      assert.ok(
+        VALID_CLIENT_IDS.has(t.defaultClient),
+        `template ${t.id} defaultClient "${t.defaultClient}" should be a valid ClientId`,
+      );
+    }
+  });
+
+  it('clientDefaults is keyed by ClientId, not by CLI/product name', () => {
+    const raw = readShippedTemplate();
+    const keys = Object.keys(raw.clientDefaults ?? {});
+    assert.ok(keys.length > 0, 'clientDefaults should not be empty');
+    for (const key of keys) {
+      assert.ok(VALID_CLIENT_IDS.has(key), `clientDefaults key "${key}" should be a ClientId (not a CLI name)`);
+    }
+  });
+
+  it('every template defaultClient resolves to a clientDefaults entry', () => {
+    const raw = readShippedTemplate();
+    for (const t of raw.roleTemplates) {
+      const entry = raw.clientDefaults?.[t.defaultClient];
+      assert.ok(entry, `template ${t.id} recommends "${t.defaultClient}" but clientDefaults has no entry for it`);
+      assert.ok(
+        typeof entry.defaultModel === 'string' && entry.defaultModel.length > 0,
+        `clientDefaults["${t.defaultClient}"].defaultModel should be a non-empty string`,
+      );
+    }
+  });
+
+  it('each clientDefaults entry offers its own defaultModel in models', () => {
+    const raw = readShippedTemplate();
+    for (const [client, entry] of Object.entries(raw.clientDefaults ?? {})) {
+      assert.ok(Array.isArray(entry.models) && entry.models.length > 0, `clientDefaults["${client}"] needs models`);
+      assert.ok(
+        entry.models.includes(entry.defaultModel),
+        `clientDefaults["${client}"].defaultModel "${entry.defaultModel}" should be listed in models`,
+      );
+    }
+  });
+});
