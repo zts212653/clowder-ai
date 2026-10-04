@@ -60,6 +60,7 @@ describe('ConciergeSettingsContent behavior controls', () => {
     });
 
     expect(container.textContent).toContain('隐藏猫猫球');
+    expect(container.textContent).toContain('隐藏后可随时回到这里重新显示');
     expect(container.textContent).not.toContain('静音模式');
     expect(container.textContent).toContain('猫猫自主活动');
 

@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * F229 PR-A2: ConciergeRailToggle — ActivityBar re-entry toggle
+ * Dormant legacy F229 ActivityBar re-entry toggle. ActivityBar no longer mounts
+ * this component; Settings → 猫猫球 is the canonical hidden-ball recovery path.
  *
- * INV-3: when ball is hidden (muted=true), this is the ONLY wake path back to the concierge.
  * P2 R6: gated on configLoaded/configFailed — prevents panelOpen race during startup
  *        (store starts enabled=true optimistically; we must not let users click before we
  *        know their persisted preference, or an opted-out panel can remain open).

@@ -1,5 +1,11 @@
 'use client';
 
+/**
+ * Dormant legacy rail presentation. ActivityBar no longer mounts this component;
+ * Approval and Needs Me are canonical Workspace launcher destinations. Kept only
+ * while their interaction adapter coverage is migrated to the launcher surfaces.
+ */
+
 import { useCallback, useMemo } from 'react';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
 import { useApprovalHubStore } from '@/stores/approvalHubStore';

@@ -66,7 +66,7 @@ async function parseError(response: Response): Promise<string> {
   }
 }
 
-export function MissionControlPage() {
+export function MissionControlPage({ variant = 'page' }: { variant?: 'page' | 'settings' }) {
   const threadSituationRequestSeq = useRef(0);
   const [selfClaimScopes, setSelfClaimScopes] = useState<Record<string, MissionHubSelfClaimScope>>({});
   const [selfClaimPolicyBlocker, setSelfClaimPolicyBlocker] = useState<SelfClaimPolicyBlocker>(null);
@@ -435,13 +435,21 @@ export function MissionControlPage() {
     setActiveProjectId(activeProject?.id ?? null);
   }, [activeProject, setActiveProjectId]);
 
+  const embedded = variant === 'settings';
+
   return (
-    <div className="flex h-screen bg-[var(--console-panel-bg)]">
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className={`${CONTENT_SURFACE_CLASS} flex min-h-full flex-col`} data-testid="mission-content-surface">
+    <div
+      className={embedded ? 'flex min-h-0 flex-col' : 'flex h-screen bg-[var(--console-panel-bg)]'}
+      data-testid={embedded ? 'mission-settings-body' : undefined}
+    >
+      <main className={embedded ? 'min-w-0' : 'min-w-0 flex-1 overflow-y-auto'}>
+        <div
+          className={embedded ? 'flex min-h-0 flex-col' : `${CONTENT_SURFACE_CLASS} flex min-h-full flex-col`}
+          data-testid="mission-content-surface"
+        >
           <header className="flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-xl font-bold text-cafe">Mission Hub</h1>
-            <div className="flex items-center gap-2">
+            {!embedded && <h1 className="text-xl font-bold text-cafe">Mission Hub</h1>}
+            <div className={`flex items-center gap-2 ${embedded ? 'ml-auto' : ''}`}>
               <button
                 type="button"
                 onClick={() => void handleImportFromDocs()}

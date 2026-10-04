@@ -49,7 +49,13 @@ function toSignalTier(value: string | undefined): SignalTier | undefined {
   return parsed as SignalTier;
 }
 
-export function SignalInboxView({ initialReferrerThread = null }: { initialReferrerThread?: string | null }) {
+export function SignalInboxView({
+  initialReferrerThread = null,
+  variant = 'page',
+}: {
+  initialReferrerThread?: string | null;
+  variant?: 'page' | 'settings';
+}) {
   const ime = useIMEGuard();
   const searchParams = useSearchParams();
   const deepLinkHandled = useRef(false);
@@ -279,17 +285,28 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
     }
   }, []);
 
+  const embedded = variant === 'settings';
+
   return (
-    <div className="flex h-full flex-col bg-[var(--console-panel-bg)]">
-      <main className="flex min-h-0 flex-1">
+    <div
+      className={embedded ? 'flex min-h-0 flex-col' : 'flex h-full flex-col bg-[var(--console-panel-bg)]'}
+      data-testid={embedded ? 'signal-settings-body' : undefined}
+    >
+      <main className={embedded ? 'min-h-0' : 'flex min-h-0 flex-1'}>
         <div
-          className={`flex min-h-0 flex-1 flex-col gap-4 overflow-hidden ${CONTENT_SURFACE_CLASS}`}
+          className={
+            embedded
+              ? 'flex min-h-0 flex-col gap-4'
+              : `flex min-h-0 flex-1 flex-col gap-4 overflow-hidden ${CONTENT_SURFACE_CLASS}`
+          }
           data-testid="signal-inbox-content-surface"
         >
-          <div>
-            <h1 className="text-xl font-bold text-cafe">信号</h1>
-            <p className="mt-0.5 text-xs text-cafe-secondary">浏览、筛选和研读信号文章</p>
-          </div>
+          {!embedded && (
+            <div>
+              <h1 className="text-xl font-bold text-cafe">信号</h1>
+              <p className="mt-0.5 text-xs text-cafe-secondary">浏览、筛选和研读信号文章</p>
+            </div>
+          )}
           <SignalNav active="signals" initialReferrerThread={initialReferrerThread} />
           <SignalStatsCards stats={stats} />
 
@@ -299,8 +316,18 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 gap-4">
-            <div className="flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto pr-4">
+          <div
+            className={embedded ? 'flex min-h-0 flex-1 flex-col gap-4 xl:flex-row' : 'flex min-h-0 flex-1 gap-4'}
+            data-testid="signal-inbox-layout"
+          >
+            <div
+              className={
+                embedded
+                  ? 'flex w-full flex-col gap-1 xl:w-[420px] xl:shrink-0 xl:pr-4'
+                  : 'flex w-[420px] shrink-0 flex-col gap-1 overflow-y-auto pr-4'
+              }
+              data-testid="signal-list-pane"
+            >
               <SignalFilterBar
                 filters={filters}
                 onFilterChange={(patch) => setFilters((cur) => ({ ...cur, ...patch }))}
@@ -328,7 +355,12 @@ export function SignalInboxView({ initialReferrerThread = null }: { initialRefer
                 onToggleSelect={toggleBatchSelect}
               />
             </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto">
+            <div
+              className={
+                embedded ? 'flex min-w-0 flex-1 flex-col gap-4' : 'flex min-w-0 flex-1 flex-col gap-4 overflow-y-auto'
+              }
+              data-testid="signal-detail-pane"
+            >
               <SignalArticleDetailPanel
                 article={selectedArticle}
                 isLoading={detailLoading}

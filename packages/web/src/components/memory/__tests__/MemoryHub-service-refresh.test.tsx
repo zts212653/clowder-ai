@@ -91,4 +91,18 @@ describe('MemoryHub service status refresh', () => {
     expect(container.querySelector('[data-testid="index-status"]')?.getAttribute('data-refresh-token')).toBe('1');
     expect(serviceFetchCount).toBe(1);
   });
+
+  it('renders the Settings body without a nested page shell or duplicate heading', async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+
+    await act(async () => {
+      root.render(<MemoryHub variant="settings" />);
+    });
+
+    const body = container.querySelector('[data-testid="memory-settings-body"]');
+    expect(body).not.toBeNull();
+    expect(body?.className).not.toContain('h-full');
+    expect(container.querySelector('[data-testid="memory-content-surface"]')).toBeNull();
+    expect(container.querySelector('h1')).toBeNull();
+  });
 });
