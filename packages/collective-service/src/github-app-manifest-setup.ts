@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, stat } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-
+import { join } from 'node:path';
 import type { GitHubAppManifestBeginResult } from '@cat-cafe/collective-client';
+import { ensurePrivateDirectory, readPrivateFile, writeAtomicPrivate } from '@cat-cafe/shared/node-private-fs';
 import { z } from 'zod';
 
 import { CollectiveServiceError } from './errors.js';
@@ -85,7 +84,7 @@ export class GitHubAppManifestSetup {
   }
 
   static async open(options: GitHubAppManifestSetupOptions): Promise<GitHubAppManifestSetup> {
-    await mkdir(options.dataDirectory, { recursive: true, mode: 0o700 });
+    await ensurePrivateDirectory(options.dataDirectory);
     const savedCredentials = await readPrivateJson(join(options.dataDirectory, CREDENTIAL_FILE), credentialSchema);
     if (savedCredentials && !options.provider.readiness.ready) {
       options.provider.configure({
@@ -196,11 +195,7 @@ function setupError(
 
 async function readPrivateJson<Output>(path: string, schema: z.ZodType<Output>): Promise<Output | undefined> {
   try {
-    const file = await stat(path);
-    if (!file.isFile() || (file.mode & 0o077) !== 0) {
-      throw new Error(`Collective Service secret state must be a private regular file: ${path}`);
-    }
-    return schema.parse(JSON.parse(await readFile(path, 'utf8')));
+    return schema.parse(JSON.parse(await readPrivateFile(path)));
   } catch (error) {
     if (isMissingFile(error)) return undefined;
     throw error;
@@ -208,22 +203,7 @@ async function readPrivateJson<Output>(path: string, schema: z.ZodType<Output>):
 }
 
 async function writePrivateJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  const handle = await open(temporaryPath, 'wx', 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  await rename(temporaryPath, path);
-  const directory = await open(dirname(path), 'r');
-  try {
-    await directory.sync();
-  } finally {
-    await directory.close();
-  }
+  await writeAtomicPrivate(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function isMissingFile(error: unknown): boolean {

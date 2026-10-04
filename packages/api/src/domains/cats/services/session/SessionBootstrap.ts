@@ -18,12 +18,12 @@ import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { mapToPresentation } from './context-presentation.js';
+import { mapToPresentation } from './context/context-presentation.js';
 import {
   type ContextModeProjection,
   countPresentedTiers,
   type PresentationCounts,
-} from './context-surface-projection.js';
+} from './context/context-surface-projection.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';

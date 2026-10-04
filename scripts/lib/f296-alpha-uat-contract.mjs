@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   CONTEXT_PROJECTION_ENUMS,
   CONTEXT_PROJECTION_TELEMETRY_CONTRACT,
-} from '../../packages/api/dist/domains/cats/services/session/context-projection-telemetry-contract.js';
+} from '../../packages/api/dist/domains/cats/services/session/context/context-projection-telemetry-contract.js';
 
 export const ALPHA_API_ORIGIN = 'http://127.0.0.1:3012';
 export const ALPHA_REDIS_PORT = 6398;

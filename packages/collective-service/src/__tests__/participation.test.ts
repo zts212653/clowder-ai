@@ -1,9 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { CollectiveServiceStore } from '../store.js';
 import { participationFixture } from './participation-fixture.js';
+import { privateTestDirectory as mkdtemp } from './private-test-directory.js';
 
 const directories: string[] = [];
 afterEach(async () => {

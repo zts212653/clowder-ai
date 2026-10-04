@@ -31,13 +31,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { IPresentationLedgerStore, PresentationLedgerAddress } from '../stores/ports/PresentationLedgerStore.js';
+import type {
+  IPresentationLedgerStore,
+  PresentationLedgerAddress,
+} from '../../stores/ports/PresentationLedgerStore.js';
+import { type DeliveryReceipt, isProviderMintedReceipt } from '../delivery-receipt.js';
 import type { ContextPresentation } from './context-presentation.js';
-import { type DeliveryReceipt, isProviderMintedReceipt } from './delivery-receipt.js';
 import { presentationLedgerEntryField, presentationLedgerScopeKey } from './ledger-key.js';
 
-export type { IPresentationLedgerStore } from '../stores/ports/PresentationLedgerStore.js';
-export { InMemoryPresentationLedgerStore } from '../stores/ports/PresentationLedgerStore.js';
+export type { IPresentationLedgerStore } from '../../stores/ports/PresentationLedgerStore.js';
+export { InMemoryPresentationLedgerStore } from '../../stores/ports/PresentationLedgerStore.js';
 export {
   decodePresentationLedgerKey,
   type PresentationLedgerKey,

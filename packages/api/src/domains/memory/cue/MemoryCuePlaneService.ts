@@ -7,7 +7,7 @@ import {
   type RecallResolverFamily,
   type RecallScopeV1,
 } from '@cat-cafe/shared';
-import type { ContextPresentationEnvelope } from '../../cats/services/session/context-presentation.js';
+import type { ContextPresentationEnvelope } from '../../cats/services/session/context/context-presentation.js';
 import { formatMemoryCues, renderMemoryCuePointer } from './format-memory-cues.js';
 import type { MemoryCueEventInput } from './MemoryCueEpisodeStore.js';
 import type { CreateMemoryCueDrillHandleInput, MemoryCueResolverRegistry } from './MemoryCueResolverRegistry.js';

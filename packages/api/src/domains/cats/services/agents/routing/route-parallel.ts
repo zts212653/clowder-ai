@@ -66,7 +66,7 @@ import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
 import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
 import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
-import { mergePresentationCounts, type PresentationCounts } from '../../session/context-surface-projection.js';
+import { mergePresentationCounts, type PresentationCounts } from '../../session/context/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';

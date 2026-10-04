@@ -18,7 +18,7 @@ import { runCompactionJourney } from '../../../scripts/lib/f296-alpha-uat-journe
 import {
   CONTEXT_PROJECTION_ENUMS,
   CONTEXT_PROJECTION_TELEMETRY_CONTRACT,
-} from '../dist/domains/cats/services/session/context-projection-telemetry-contract.js';
+} from '../dist/domains/cats/services/session/context/context-projection-telemetry-contract.js';
 
 const revision = 'a'.repeat(40);
 const traceId = 'b'.repeat(32);

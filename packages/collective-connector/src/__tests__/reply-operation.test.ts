@@ -21,8 +21,9 @@ const source: CollectiveSourceIdentity = {
   actor: { kind: 'human', humanId: 'human_bbbbbbbb', displayName: 'Member' },
 };
 async function fixture() {
-  const dir = await mkdtemp(join(tmpdir(), 'collective-reply-operation-'));
-  dirs.push(dir);
+  const parent = await mkdtemp(join(tmpdir(), 'collective-reply-operation-'));
+  dirs.push(parent);
+  const dir = join(parent, 'private');
   const persistence = await ConnectorPersistence.open(dir);
   await persistence.transaction((state) => {
     state.connections[source.connectionId] = {

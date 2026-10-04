@@ -24,6 +24,9 @@ code_anchors:
   - packages/web/src/components/ThreadSidebar/ThreadSpeedSettings.tsx
   - packages/web/src/debug/bubbleIdentity.ts
   - packages/api/src/domains/cats/services/stores/ports/SessionChainStore.ts
+  - packages/api/src/domains/cats/services/session/context/ContextEpochOwner.ts
+  - packages/api/src/domains/cats/services/session/context/PresentationLedger.ts
+  - packages/api/src/domains/cats/services/session/context/context-presentation.ts
   - packages/api/src/domains/cats/services/session/thread-access-policy.ts
   - packages/api/src/domains/cats/services/session/CanonicalInvocationTrajectoryResolver.ts
   - packages/api/src/domains/cats/services/session/RequestGenerationProjector.ts

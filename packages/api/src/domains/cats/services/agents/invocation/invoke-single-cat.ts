@@ -121,13 +121,13 @@ import {
   authenticatedCompactionSequenceForInvocation,
   authoritativeCompactionEventFromSession,
   resolveAuthoritativeCompactionSupport,
-} from '../../session/authoritative-compaction.js';
+} from '../../session/context/authoritative-compaction.js';
 import {
   ledgerOutcomeFromCommits,
   recordContextProjectionDeliveryLatency,
   recordContextProjectionFinalGeneration,
   recordContextProjectionLedgerOutcome,
-} from '../../session/context-continuity-telemetry.js';
+} from '../../session/context/context-continuity-telemetry.js';
 import {
   CAT_CAFE_SYSTEM_PROMPT_SOURCE_REF,
   encodeMemoryCueSourceRef,
@@ -564,9 +564,9 @@ import type {
   RuntimeSessionUnexpectedRuntimeSessionSwitch,
 } from '../../runtime-session/RuntimeSessionMetadata.js';
 import type { IRuntimeSessionStore } from '../../runtime-session/RuntimeSessionStore.js';
-import type { AuthoritativeCompactionEvent, ContextEpochOwner } from '../../session/ContextEpochOwner.js';
+import type { AuthoritativeCompactionEvent, ContextEpochOwner } from '../../session/context/ContextEpochOwner.js';
+import type { PresentationLedger } from '../../session/context/PresentationLedger.js';
 import { mintDeliveryReceipt } from '../../session/delivery-receipt.js';
-import type { PresentationLedger } from '../../session/PresentationLedger.js';
 import type { SessionManager } from '../../session/SessionManager.js';
 import type { ISessionSealer } from '../../session/SessionSealer.js';
 import type { TranscriptSessionInfo, TranscriptWriter } from '../../session/TranscriptWriter.js';
@@ -1249,7 +1249,7 @@ export interface InvocationParams {
     readonly prompt: string;
     readonly promptMessageIds?: readonly string[];
     /** Existing F296 surface shape; telemetry forwards it without recomputing delta size. */
-    readonly deltaSize?: import('../../session/context-surface-projection.js').ContextSurfaceProjection['deltaSize'];
+    readonly deltaSize?: import('../../session/context/context-surface-projection.js').ContextSurfaceProjection['deltaSize'];
   }>;
   /** Rebuild route-owned context when a late native binding turns a resume into a fresh session. */
   readonly rebuildPromptAfterSessionSeal?: () => Promise<string>;

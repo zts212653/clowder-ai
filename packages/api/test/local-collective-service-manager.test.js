@@ -1,15 +1,23 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { ensurePrivateDirectory } from '@cat-cafe/shared/node-private-fs';
 
 import { LocalCollectiveServiceManager } from '../dist/domains/plugin/builtin-runtime/local-collective-service-manager.js';
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+
+async function mkdtemp(prefix) {
+  const path = `${prefix}${randomUUID()}`;
+  await ensurePrivateDirectory(path);
+  return path;
+}
 
 function offlineFetch() {
   throw new TypeError('fetch failed');
@@ -189,6 +197,7 @@ test('starts the real Service process and recovers the same durable home after p
       const child = spawn(spec.command, [...spec.args], {
         env: { ...spec.env },
         stdio: 'ignore',
+        windowsHide: true,
       });
       await new Promise((resolveSpawn, rejectSpawn) => {
         child.once('spawn', resolveSpawn);
