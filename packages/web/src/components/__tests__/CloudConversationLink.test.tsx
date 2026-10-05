@@ -81,7 +81,7 @@ describe('CloudConversationLink', () => {
     await flushEffects();
 
     expect(container.textContent).toContain('未绑定');
-    expect(container.textContent).toContain('ChatGPT Conversation');
+    expect(container.textContent).toContain('ChatGPT 对话');
     expect(container.textContent).toContain('先在目标会话点击扩展的「授权此会话」');
     expect(container.querySelector('a[href="https://chatgpt.com/"]')).not.toBeNull();
     expect(container.querySelector('a[href^="/settings"]')?.getAttribute('href')).toBe(

@@ -185,7 +185,7 @@ describe('F306 scheduled-eval native guard closure', () => {
     }
   });
 
-  test('allows bounded detached temporary worktree lifecycle without treating the source checkout as the target', () => {
+  test('allows bounded detached temporary worktree creation without treating the source checkout as the target', () => {
     const head = 'a184c713be9d1b1a7db7c22754d3608d9706647c';
     for (const { command, effect } of [
       {
@@ -208,10 +208,6 @@ describe('F306 scheduled-eval native guard closure', () => {
         command: `git -C ${runtimeRoot} worktree add --detach /private/tmp/cat-cafe-pr4369 origin/main`,
         effect: 'write',
       },
-      {
-        command: 'git worktree remove /tmp/cat-cafe-pr4369',
-        effect: 'repository_rewrite',
-      },
     ]) {
       const verdict = decide(command);
       assert.equal(verdict.effect, effect, command);
@@ -221,6 +217,7 @@ describe('F306 scheduled-eval native guard closure', () => {
     }
   });
 
+  // Removal needs observed paths, covered by the temporary-ancestor fixture matrix.
   test('leaves unmatched ordinary-target mutations to sandbox and permission policy', () => {
     for (const { command, effect } of [
       { command: 'gh pr merge 4368 --merge', effect: 'unknown' },
@@ -243,6 +240,16 @@ describe('F306 scheduled-eval native guard closure', () => {
     }
   });
 
+  // Slice 2b (2026-09-27): this compound used to sit in the fail-closed list below, but its
+  // only denying step was `tee /tmp/f306-worktree.log` judged as a write into the runtime cwd.
+  // tee writes its operand, not its cwd, and the git step is the admitted exact-SHA /tmp shape
+  // -- so, like any compound whose every step is admitted on its own, it is admitted.
+  test('admits the admitted worktree shape piped into a /tmp log', () => {
+    const command =
+      'git worktree add --detach /tmp/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c | tee /tmp/f306-worktree.log';
+    assert.equal(decide(command).decision, 'allow', command);
+  });
+
   test('keeps unsupported mutations fail-closed when the invocation target is protected', () => {
     for (const command of [
       'date 010100002026',
@@ -250,7 +257,6 @@ describe('F306 scheduled-eval native guard closure', () => {
       'node /tmp/eval-memory-metrics.mjs',
       'git fetch origin +main:main',
       'git fetch origin +pull/4369/head:refs/remotes/origin/pr/4369',
-      'git fetch origin pull/4369/head:refs/remotes/origin/pr/4370',
       'git fetch origin pull/4369/head:refs/heads/main',
       `git -C ${runtimeRoot} reset --hard origin/main`,
       'git fetch --force origin main',
@@ -263,10 +269,6 @@ describe('F306 scheduled-eval native guard closure', () => {
       'git worktree add --detach /tmp/nested/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c',
       'git worktree add --detach /tmp/. a184c713be9d1b1a7db7c22754d3608d9706647c',
       `git worktree add --detach ${runtimeRoot} a184c713be9d1b1a7db7c22754d3608d9706647c`,
-      'git worktree add --detach /tmp/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c; echo done',
-      'git worktree add --detach /tmp/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c && git worktree remove /tmp/cat-cafe-pr4369',
-      'git worktree add --detach /tmp/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c | tee /tmp/f306-worktree.log',
-      'git worktree remove --force /tmp/cat-cafe-pr4369',
       'gh pr merge 4368 --delete-branch',
       'gh pr merge 4368 --merge --delete-branch',
       'gh pr merge 4368 --rebase --delete-branch',
@@ -277,7 +279,6 @@ describe('F306 scheduled-eval native guard closure', () => {
       'gh pr merge 4368 --squash --match-head-commit deadbeef',
       'gh pr merge main --squash',
       'gh pr merge https://github.com/zts212653/clowder-ai/pull/4368 --squash',
-      'gh pr merge 4368 --squash --delete-branch && echo merged',
       'gh pr merge 4368 --squash -s',
       'gh pr close 0',
       'gh pr close 004404',
@@ -288,7 +289,6 @@ describe('F306 scheduled-eval native guard closure', () => {
       'gh pr close 4404 --delete-branch',
       'gh pr close 4404 -d',
       'gh pr close 4404 --repo zts212653/cat-cafe --unknown',
-      'gh pr close 4404 && echo closed',
       'gh pr list --limit 0',
       'gh pr list --web',
       '/tmp/gh pr merge 4368 --squash --delete-branch',
@@ -315,15 +315,33 @@ describe('F306 scheduled-eval native guard closure', () => {
     }
   });
 
-  test('keeps protected targets attached to compound mutations after segment inspection', () => {
-    const verdict = decide(
-      'printf cat-cafe-runtime >/dev/null; printf UNGUARDED > /tmp/f306-protected-sentinel',
-      '/tmp/work',
-    );
+  // Until 2026-09-27 a compound was re-judged by pairing its strongest effect with any
+  // protected word anywhere in the text, so each of these was denied although every step on
+  // its own is admitted. Each segment is now judged against its own target, in the
+  // directories it can run in (see f306-native-effect-target-guard-segment-location.test.js).
+  test('admits a compound whose every step is admitted on its own', () => {
+    for (const [command, cwd] of [
+      ['git worktree add --detach /tmp/cat-cafe-pr4369 a184c713be9d1b1a7db7c22754d3608d9706647c; echo done'],
+      ['gh pr merge 4368 --squash --delete-branch && echo merged'],
+      ['gh pr close 4404 && echo closed'],
+      ['printf cat-cafe-runtime >/dev/null; printf UNGUARDED > /tmp/f306-protected-sentinel', '/tmp/work'],
+    ]) {
+      assert.equal(decide(command, cwd).decision, 'allow', command);
+    }
+  });
 
-    assert.equal(verdict.effect, 'write');
-    assert.equal(verdict.target.kind, 'runtime_sanctuary');
-    assert.equal(verdict.decision, 'deny');
+  // Git's rule: without `--force`, a `+` refspec or a destination outside refs/remotes/, a
+  // fetch only updates FETCH_HEAD and remote-tracking refs.
+  test('treats an unforced fetch into remote-tracking refs as a refresh', () => {
+    for (const command of [
+      'git fetch origin pull/4369/head:refs/remotes/origin/pr/4370',
+      'git fetch origin feat/x main',
+      'git fetch -q origin main fix/y 2>&1',
+    ]) {
+      const verdict = decide(command);
+      assert.equal(verdict.effect, 'repository_refresh', command);
+      assert.equal(verdict.decision, 'allow', command);
+    }
   });
 
   test('recognizes protected ref rewrites through git repository selectors', () => {

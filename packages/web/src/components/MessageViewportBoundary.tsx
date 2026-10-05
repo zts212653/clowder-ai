@@ -30,6 +30,8 @@ interface MessageViewportBoundaryProps {
   messageId?: string;
   eager?: boolean;
   backgroundMountDelayMs?: number;
+  /** Readonly message-owner signal; independent of whether the body is mounted. */
+  navigationError?: boolean;
 }
 
 export function MessageViewportBoundary({
@@ -37,6 +39,7 @@ export function MessageViewportBoundary({
   messageId,
   eager = false,
   backgroundMountDelayMs,
+  navigationError,
 }: MessageViewportBoundaryProps) {
   const boundaryRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(eager || !messageId);
@@ -97,6 +100,7 @@ export function MessageViewportBoundary({
       ref={boundaryRef}
       data-message-viewport-boundary
       data-message-viewport-id={messageId}
+      data-message-navigation-error={navigationError || undefined}
       className={CONTENT_VISIBILITY_CLASS}
       {...(!mounted && messageId ? { 'data-deferred-message-id': messageId } : {})}
       style={mounted ? OFFSCREEN_MESSAGE_STYLE : { ...OFFSCREEN_MESSAGE_STYLE, minHeight: '240px' }}

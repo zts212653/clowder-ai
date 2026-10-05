@@ -14,6 +14,10 @@ export const CO_CREATION_DOC_INCLUDE_GLOBS = ['docs/*.md', 'docs/**/*.md'];
 const GOVERNANCE_PATHS = new Set(['docs/SOP.md', 'docs/VISION.md', 'docs/lessons-learned.md']);
 const GOVERNANCE_PREFIXES = ['docs/architecture/ownership/', 'docs/canon/', 'docs/decisions/'];
 const DIRECT_MAIN_SHARED_STATE_PATHS = new Set(['docs/BACKLOG.md']);
+// Prompt inputs that happen to live under docs/: every cat's native L0 roster is compiled
+// from them, so they take the PR lane and run the L0 token-budget guard. 2026-09-21: a
+// direct-pushed dossier rewrite added +45 tokens to every cat's L0 and nobody saw it.
+const PROMPT_INPUT_DOC_PATHS = new Set(['docs/team/cat-dossier.md']);
 
 function normalizedPaths(paths) {
   const normalized = paths
@@ -34,6 +38,10 @@ export function isGovernanceDocPath(path) {
 
 export function isDirectMainSharedStatePath(path) {
   return DIRECT_MAIN_SHARED_STATE_PATHS.has(path);
+}
+
+export function isPromptInputDocPath(path) {
+  return PROMPT_INPUT_DOC_PATHS.has(path);
 }
 
 export function classifyCoCreationDocsLane({ changedFiles, conflict, reversibility }) {
@@ -71,6 +79,14 @@ export function classifyCoCreationDocsLane({ changedFiles, conflict, reversibili
 
   const reasons = [];
   if (governanceFiles.length > 0) reasons.push('governance_risk');
+  const promptInputFiles = files.filter((path) => isPromptInputDocPath(path));
+  if (promptInputFiles.length > 0) {
+    // Both prompt planes pay for a dossier edit: native L0 tokens (compile-l0 test) AND the
+    // builder-prompt char budget (api system-prompt-builder test) — the 2026-09-21 incident
+    // surfaced on the builder plane, so the lane must run both, not just the L0 guard.
+    reasons.push('prompt_input_budget_guard');
+    validation.push('pnpm check:prompt-budget');
+  }
   if (conflict === 'detected') reasons.push('conflict_detected');
   if (conflict === 'unknown') reasons.push('conflict_unknown');
   if (reversibility === 'high') reasons.push('reversibility_high');
@@ -85,6 +101,7 @@ export function classifyCoCreationDocsLane({ changedFiles, conflict, reversibili
     nonDocFiles,
     governanceFiles,
     directMainSharedStateFiles,
+    promptInputFiles,
     validation,
     reasons,
   };

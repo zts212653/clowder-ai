@@ -19,6 +19,8 @@ export interface CreateTurnExecutionInput {
   userId: string;
   catId: CatId;
   executionKind: TurnExecutionKind;
+  /** A long-lived carrier ending does not complete the sources it read. */
+  queueCompletionPolicy?: 'explicit_source';
   startedAt: number;
   causal?: TurnExecutionCausalRefs;
 }

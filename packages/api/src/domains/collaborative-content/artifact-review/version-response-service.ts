@@ -10,6 +10,7 @@ import type { PublishedMediaService } from '../../video-studio/content-owner/pub
 import { ContentOwnerConflictError, ContentOwnerIdempotencyError } from '../../video-studio/content-owner/service.js';
 import type { ContentSettlementReceiptV1 } from '../../video-studio/content-owner/types.js';
 import { ArtifactReviewError } from './errors.js';
+import { assertModificationResponseReference } from './modification-request-reference.js';
 import { appendRespondedVersion, assertVersionResponses } from './reducer.js';
 import type { ArtifactReviewStore, ReviewMutation, ReviewMutationResult } from './store.js';
 
@@ -23,11 +24,12 @@ export class ArtifactVersionResponseService {
   constructor(private readonly deps: { store: ArtifactReviewStore; media: MediaOwner; now: () => string }) {}
 
   mutation(
-    command: RespondWithMediaVersion,
+    raw: RespondWithMediaVersion,
     actor: ArtifactReviewActor,
     round: number,
     now = this.deps.now(),
   ): ReviewMutation {
+    const command = respondWithMediaVersionSchema.parse(raw);
     return {
       reviewId: command.reviewId,
       expectedRevision: command.expectedRevision,
@@ -58,6 +60,7 @@ export class ArtifactVersionResponseService {
     });
     if (principal.actor.kind !== 'cat' || task.ownerCatId !== principal.actor.actorId)
       throw new ArtifactReviewError('owner_required');
+    assertModificationResponseReference(this.deps.store, review, command, principal.actor);
     if (review.revision !== command.expectedRevision) throw new ArtifactReviewError('revision_conflict');
     if (last.asset.ownerRevision !== command.expectedOwnerRevision) throw new ArtifactReviewError('asset_changed');
     const currentRevision = await this.deps.media.currentRevision(review.contentRef, principal);
@@ -88,6 +91,7 @@ export class ArtifactVersionResponseService {
     const original: MediaReviewPrincipal = {
       userId: review.task.ownerUserId,
       threadId: review.task.threadId,
+      contentTaskId: review.task.taskId,
       actor: { kind: 'cat', actorId: pending.input.actor.actorId },
     };
     return this.resume(review, pending.input, command, original);

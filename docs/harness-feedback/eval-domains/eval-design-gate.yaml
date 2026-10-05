@@ -38,4 +38,9 @@ fixtures:
     featureId: F303
     path: docs/harness-feedback/design-gate/source-maps/f303-phase-c-pr3901.yaml
     signal: complete canonical eligible episode
-enabled: true
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "To become a measure inside a real F311 Program; independent scheduling paused until bound."
+  revivalPath: "Revive when bound to an E0-qualified F311 Program with an F267 certificate."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

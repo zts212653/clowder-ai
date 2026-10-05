@@ -17,7 +17,7 @@ import { freshnessGateForward, freshnessGateHeld } from '../../../../infrastruct
 import { getSourceDisplayName } from '../context/ContextAssembler.js';
 import { cursorFor } from '../stores/cursor.js';
 import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js';
-import type { ThreadMessageReadOptions } from '../stores/ports/MessageStore.js';
+import type { StoredMessage, ThreadMessageReadOptions } from '../stores/ports/MessageStore.js';
 import type { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
 import { type FreshnessDecision, FreshnessGateService, type UnseenMessage } from './FreshnessGateService.js';
 import { decideFreshnessRelevance, type FreshnessRelevanceReason } from './FreshnessRelevancePolicy.js';
@@ -39,6 +39,7 @@ export interface FreshnessReadableMessage {
   userId?: string;
   contentBlocks?: readonly unknown[];
   extra?: {
+    liveCompanion?: NonNullable<StoredMessage['extra']>['liveCompanion'];
     systemKind?: string;
     rich?: { blocks?: readonly unknown[] };
     stream?: { parallelBatchId?: string };
@@ -150,6 +151,7 @@ export function createQueueChecker(
 }
 
 export interface CheckFreshnessInput {
+  exposureReason?: (message: FreshnessReadableMessage) => 'same_live_call_exposure' | null;
   userId: string;
   catId: CatId;
   threadId: string;
@@ -326,6 +328,24 @@ export async function checkFreshnessForPostMessage(input: CheckFreshnessInput): 
   const relevanceSuppressions: Partial<Record<FreshnessRelevanceReason, number>> = {};
   const recordDecision = (decision: FreshnessDecision) => recordFreshnessEvent(input, decision, relevanceSuppressions);
 
+  // AC-A5 is an explicit escape hatch for the whole freshness gate, including
+  // uncertainty produced by the bounded pagination scan. Running that scan
+  // again before consulting acknowledgeHeld traps callers in the exact
+  // HELD/0 retry loop the acknowledgement is meant to break.
+  if (acknowledgeHeld) {
+    const acknowledged = await gate.checkFreshness({
+      userId,
+      catId,
+      threadId,
+      latestMessageId: '',
+      toolName,
+      acknowledgeHeld: true,
+      invocationId,
+    });
+    await recordDecision(acknowledged);
+    return acknowledged;
+  }
+
   // Get seenCursor — FreshnessGateService handles undefined (fail-open)
   const seenCursor = await cursorStore.getSeenCursor(userId, catId, threadId);
 
@@ -374,6 +394,7 @@ export async function checkFreshnessForPostMessage(input: CheckFreshnessInput): 
     const relevantBatch: RawMsg[] = [];
     for (const msg of visibleBatch) {
       const relevance = decideFreshnessRelevance(msg, {
+        sameLiveCallExposure: input.exposureReason?.(msg) === 'same_live_call_exposure',
         catId,
         coveredTriggerMessageIds: coveredMessageIds,
       });

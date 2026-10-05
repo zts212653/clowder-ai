@@ -106,6 +106,10 @@ async function initializeHumanSession(context: AuthBootContext): Promise<void> {
     me,
     collective: selectedCollective(me),
     phase: me ? phaseForHuman(me) : 'entry',
+    events: [],
+    collaboration: undefined,
+    participants: undefined,
+    members: undefined,
     error: authError,
   }));
 }
@@ -159,6 +163,10 @@ export function useHumanAuthSession(snapshot: ClientSnapshot, setSnapshot: Dispa
         phase: phaseForHuman(me),
         me,
         collective: selectedCollective(me),
+        events: [],
+        collaboration: undefined,
+        participants: undefined,
+        members: undefined,
         error: undefined,
       }));
     },

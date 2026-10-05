@@ -10,9 +10,11 @@ import type { CardConfirmationEntry } from './rich/CardBlock';
 
 interface ChatMessageRowProps {
   message: ChatMessageData;
+  compact?: boolean;
   threadId: string;
   timelineMessages: readonly ChatMessageData[];
   activeInvocationIds?: ReadonlySet<string>;
+  settlingInvocationIds?: ReadonlySet<string>;
   getCatById: (id: string) => CatData | undefined;
   onEditCat: (catId: string) => void;
   onEditCoCreator: () => void;
@@ -38,9 +40,11 @@ interface ChatMessageRowProps {
  */
 export const ChatMessageRow = memo(function ChatMessageRow({
   message,
+  compact = false,
   threadId,
   timelineMessages,
   activeInvocationIds,
+  settlingInvocationIds,
   getCatById,
   onEditCat,
   onEditCoCreator,
@@ -58,7 +62,12 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   confirmations,
 }: ChatMessageRowProps) {
   return (
-    <MessageViewportBoundary messageId={message.id} eager={eager} backgroundMountDelayMs={backgroundMountDelayMs}>
+    <MessageViewportBoundary
+      messageId={message.id}
+      eager={eager}
+      backgroundMountDelayMs={backgroundMountDelayMs}
+      navigationError={message.variant === 'error'}
+    >
       <MessageActions
         message={message}
         threadId={threadId}
@@ -71,9 +80,11 @@ export const ChatMessageRow = memo(function ChatMessageRow({
       >
         <ChatMessage
           message={message}
+          compact={compact}
           threadId={threadId}
           timelineMessages={timelineMessages}
           activeInvocationIds={activeInvocationIds}
+          settlingInvocationIds={settlingInvocationIds}
           getCatById={getCatById}
           onEditCat={onEditCat}
           onEditCoCreator={onEditCoCreator}

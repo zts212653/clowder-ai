@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type { SearchResult } from '@/hooks/useWorkspace';
+import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { FileIcon } from './FileIcons';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -16,6 +17,8 @@ export interface LauncherWorkspaceSearch {
   onReset: () => void;
   onOpenResult: (path: string, line: number) => void;
   onViewAll: (query: string) => void;
+  /** Reconstruct the current Home query at the exact time a result is opened. */
+  fileNavigationOrigin?: () => WorkspaceFileNavigationOrigin | undefined;
 }
 
 function FileSearchResult({ result, onOpen }: { result: SearchResult; onOpen: (path: string, line: number) => void }) {

@@ -52,6 +52,8 @@ export interface PassageEmbedPipelineContext {
   passages: PassageEmbeddingRow[];
   embedding: IEmbeddingService;
   passageVectorStore: PassageVectorStore;
+  /** Optional canonical-writer fence for sources that can change during embedding. */
+  commitBatch?: (passages: PassageEmbeddingRow[], vectors: Float32Array[]) => Promise<void>;
 }
 
 export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<void> {
@@ -62,6 +64,10 @@ export async function embedPassages(ctx: PassageEmbedPipelineContext): Promise<v
   for (let offset = 0; offset < ctx.passages.length; offset += PASSAGE_EMBED_BATCH_SIZE) {
     const batch = ctx.passages.slice(offset, offset + PASSAGE_EMBED_BATCH_SIZE);
     const vectors = await ctx.embedding.embed(batch.map((p) => p.content));
+    if (ctx.commitBatch) {
+      await ctx.commitBatch(batch, vectors);
+      continue;
+    }
     for (let i = 0; i < batch.length; i++) {
       const passage = batch[i];
       ctx.passageVectorStore.upsert(passageVectorKey(passage.docAnchor, passage.passageId), vectors[i]);

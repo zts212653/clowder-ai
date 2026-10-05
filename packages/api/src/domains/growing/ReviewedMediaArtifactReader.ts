@@ -15,6 +15,13 @@ export class ReviewedMediaArtifactReader implements PreparedArtifactReader {
     },
   ) {}
 
+  createReadScope(): PreparedArtifactReader {
+    return new ReviewedMediaArtifactReader({
+      ...this.deps,
+      publications: this.deps.publications.createReadScope?.() ?? this.deps.publications,
+    });
+  }
+
   readPreparedArtifact(input: PreparedArtifactReadInput) {
     return this.readArtifact(input, true);
   }

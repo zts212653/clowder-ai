@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import type { CoCreatorConfig } from '@/components/config-viewer-types';
-import { CO_CREATOR_COLOR } from '@/lib/color-defaults';
 import { refreshCoCreatorMentionData, resetMentionDataForTest } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 
+/* The placeholder the hook starts with, and falls back to when the config cannot be loaded. It carries no colour on
+ * purpose: a colour here would be painted for a moment as if it were the user's and then corrected (F322 human message).
+ * Every consumer that needs a colour already has its own fallback for a config without one. */
 const DEFAULT_CO_CREATOR: CoCreatorConfig = {
   name: 'ME',
   aliases: [],
   mentionPatterns: ['@co-creator'],
-  color: { ...CO_CREATOR_COLOR },
 };
 
 let cachedCoCreator: CoCreatorConfig | null = null;

@@ -1,0 +1,22 @@
+{
+  "source": "docs/features/assets/F229/desktop-pet-sprite/raw/yanyan-codex-character-base-v1.png",
+  "sourceSha256": "16b642a4b17fe9dbbe2ad8a0fa16c36c01e78afddb6cb898113982e369974b94",
+  "identity": "yanyan-codex (Maine Coon)",
+  "processing": {
+    "background": "Connected 7% flood-fill from the image edge removes the baked checkerboard without crossing the dark character outline.",
+    "crop": "760x760+180+120 from the 1122x1402 source; trim; scale to 800px; center on a transparent 1024px canvas.",
+    "safeSpace": "112px vertical and 124px horizontal minimum transparent inset in the 1024px master.",
+    "smallSizes": "Lanczos resize with bounded unsharp pass for 16, 32, 128, 256 and 512 point 1x/2x ICNS entries."
+  },
+  "outputs": {
+    "yanyan-companion.png": {
+      "sha256": "cc4f49727d140c3a6f228528e12b89ccb3dd1eeaea64f80afaddf669db360e90",
+      "format": "1024x1024 RGBA PNG"
+    },
+    "yanyan-companion.icns": {
+      "sha256": "018911113e5091b0c114ca200c45df7423c6bc7276e87964a1661d096b06dee2",
+      "format": "macOS iconset (16 through 1024 pixels)"
+    }
+  },
+  "surfaceBoundary": "The Host uses the PNG for its existing Dock/Cmd-Tab process and packages both resources. It does not register a new Dock entry, notification identity, Finder app, Launch Services bundle, signature or bundle identifier."
+}

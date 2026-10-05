@@ -2291,6 +2291,73 @@ describe('F276 person-memory proposal routes', { skip: redisIsolationSkipReason(
     assert.equal(JSON.parse(forged.response.body).error, 'invalid_proposal_source');
   });
 
+  it('accepts owner quote comments without laundering the quoted text as owner evidence', async () => {
+    workspaceResolution = { status: 'not_found' };
+    const quoteComment = '从现在开始到10.7号吴浪去旅游了，他的 Mac 交给我了';
+    const quotedText = '我的立场是先在 Alpha 里完成双人协作验证';
+    const origin = await messageStore.append({
+      userId: 'owner-1',
+      catId: null,
+      content: '',
+      contentBlocks: [
+        {
+          type: 'context_attachment',
+          attachment: {
+            v: 1,
+            id: 'ctx-quote-owner-memory',
+            kind: 'quote',
+            text: quotedText,
+            comment: quoteComment,
+            source: {
+              kind: 'message',
+              threadId: 'thread-source',
+              messageId: 'message-source',
+            },
+          },
+        },
+      ],
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: 'thread_people',
+    });
+    const bodyFor = (excerpt, clientRequestId) => ({
+      person: { displayName: '吴浪', privateAliases: ['吴浪'] },
+      claims: [
+        {
+          payload: {
+            kind: 'reported_fact',
+            predicate: 'travel_status',
+            value: excerpt,
+            assertedBy: 'owner',
+          },
+          normalizedDraft: excerpt,
+          sourceRole: 'owner_explicit',
+          evidenceExcerpt: excerpt,
+        },
+      ],
+      sourceBundle: {
+        sources: [{ sourceId: 'owner-quote-comment', kind: 'message_text', messageId: origin.id, excerpt }],
+        assertionBindings: [
+          {
+            sourceId: 'owner-quote-comment',
+            target: { kind: 'claim', index: 0 },
+            role: 'reported_fact',
+          },
+        ],
+      },
+      clientRequestId,
+    });
+
+    const accepted = await proposeFromOrigin(bodyFor(quoteComment, 'quote-comment-accepted'), origin);
+    assert.equal(accepted.statusCode, 200, accepted.body);
+
+    const stageCallsBeforeQuoteText = stageCalls;
+    const rejected = await proposeFromOrigin(bodyFor(quotedText, 'quote-text-rejected'), origin);
+    assert.equal(rejected.statusCode, 400, rejected.body);
+    assert.equal(JSON.parse(rejected.body).error, 'source_excerpt_mismatch');
+    assert.equal(stageCalls, stageCallsBeforeQuoteText);
+  });
+
   it('rejects the same idempotency key when resolved source content changes', async () => {
     workspaceResolution = { status: 'not_found' };
     const firstOrigin = await messageStore.append({

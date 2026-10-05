@@ -1,8 +1,9 @@
 ---
 feature_ids: [F309]
-related_features: [F063, F138, F202, F290, F307, F310]
+related_features: [F063, F138, F202, F290, F307, F310, F322]
 topics: [collaborative-content, co-editing, change-awareness, selection-anchors, annotations, agent-patch, office, media]
 doc_kind: spec
+tips_exempt: "2026-09-26 Phase U artwork focus teaches each action in its mounted canvas (放大标注/圈选, 适合窗口, 完成文字, 完成并保存); a background capability tip would appear away from the artwork and cannot perform the contextual action. The parent Alpha still owns product acceptance."
 design_gate_claim_contracts:
   - docs/design-gate-claims/f309-artwork-review-real-shell.json
 created: 2026-08-27
@@ -47,7 +48,7 @@ mcp_admission_claims:
 
 # F309: Collaborative Content Plane — 跨媒介内容协作平面
 
-> **Status**: in-progress / Phase R 工程基线已交付，作品标注/评论体验改版进行中；Office/video 两媒介 Admission Gate 仍开放
+> **Status**: in-progress / Phase R 历史有界交付保留；Phase U 部分实现已合入、父线程验收未通过。CVO517授权作品体验收口批次由新thread的Sol6实现、Sol5.6独立审查，合入后父Astra实看；Office/video Admission Gate仍开放
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **Source thread**: `[thread-id]`
@@ -446,6 +447,54 @@ Phase R 的具名猫入口按上述授权登记为 `cat_cafe_prepare_artifact_re
 它们沿用 callback/agent-key 的独立 principal；人类裁决仍只在认证的人类 surface，Task 更新/closure 仍归原 owner。
 此登记是已批准完整审阅范围的工具映射，不是新的引擎准入、runtime 激活或交付完成结论。
 
+### Phase U: Unified Content Experience — 从任意日常入口进入同一协作现场
+
+`private-source-id`（布局及全部入口）、`private-source-id`（Phase、计划、Fable、自治与父线程验收）；
+沿用 CVO243/096 的修改回传与普通入口目标。本阶段由 Astra 在上述主线程负责产品结果，不新立平行内容平台。
+
+**2026-09-30 图片默认更正（父线程规范同步；UTC 10-01）。** 撤回此前把“和 ChatGPT 一个体验”解释为默认隐藏聊天的裁决。父 Astra 已读 operator `[thread-id]#private-source-id`：发送后仍应看见 Chat 和进度；`#private-source-id` 肯定“聊天留在旁边”修正稿外观后继续开放讨论过程展示，不是逐条批准。当前图片目标统一为下述聊天在左、作品在右，依据 [DESIGN 作品模式](../../DESIGN.md#作品模式)（PR4965，merge `fffefd7b058e7415cb009cdaac0a44614d5cc813`）及 F307 owner 合同 `[thread-id]#private-source-id`。本次由原 CVO894/904/517 所托付的父产品 owner 同步正文、计划和 AC-U2/U10/U13；docs review 不新增实施授权，不补签产品验收。历史 source863 的解读见 Timeline，不再作为隐藏 Chat 的现行依据。
+
+**终态。** 用户从文件树、Home 搜索、产物列表/详情、Schedule、Needs Me、已发布聊天附件/媒体卡，以及普查发现的同类入口打开内容，进入现有 F307 中的同一内容协作面。新版桌面图片由用户主动打开进入作品模式：同一 Chat 在左、同一作品在右，默认约 30/70、可拖动并尊重用户调整的宽度。Host 展示开关不因开启就自动进场；关闭或退出恢复原 scene 与经典比例。新消息、猫交回新版和后台恢复不自动抢布局。返回保留同一作品、草稿、选中点、讨论和原入口位置；其他媒介不据此自动重定打开规则。390px 沿原单栏可用性合同，不强塞桌面三栏，也不将桌面稿冒充新的手机设计。
+
+**共同体验与真实归属。** 同类媒体共享完整查看/标注/评论/保存/讨论/修改交互及状态转换，入口不再选择第二个编辑器。F307 继续只管布局、打开和返回；F309 只管协作会话、锚点、讨论及修改意图；原内容 owner 继续管字节、版本、授权与 mutation receipt；F232/F310 只提供发布、任务或提醒上下文。旧 Task/round 与普通文件不强行合成一个数据库对象，也不把 Task 字段改成到处可选的通用协议。
+
+**作品查看与专注编辑（CVO446/517，2026-09-26确认；图片路径按上述更正更新）。** 图片主路径是“主动点图→聊天与作品并排→圈选/表达或精细操作→在旁边看到回复与真实进度→审阅新版→回到原聊天位置”，不再先经过小右栏并多按一次放大。其他媒介沿原查看与放大路径。这是Phase U内AC-U2/U4的体验收口，AC-U10–U14继续逐项验收，不另立Phase。原依据：同thread operator `private-source-id` 两图，Opus55独立意见453、Astra收敛458/459、Opus55确认460，以及operator `private-source-id` 的落盘、实施、审查、合入及父线程验收授权。
+
+- **并排时聊天持续可见。** 同一 `ThreadChatRuntimeProvider`、`ChatContainer`、`F307ExperienceWorkbench` 和 owner surface DOM 重排，不新增 provider/socket/history，不用会隐藏 Chat 的 `mainAreaAttention` 实现作品模式。F307/F322 持有展示与返回接缝，F309 不接管 Host 布局；通用返回不能借用 Task 专属 `returnTargetRef`，Client 状态沿 owner-scoped 引用恢复。文字选择继续原 quote→聊天链；新消息、恢复、版本变化不改变当前姿态。
+- **图片获得充足空间。** 顶部保留返回、作品/版本、缩放和下载；图片默认整张看全且不超过原尺寸，提供100%、缩放、平移及长图滚动。不能因并排把字缩得不可读；北极星稿的50%切换阈值仍待实测，不作验收依据。返回保留精确版本、视图、选区、未提交编辑及原聊天位置；未保存只提示、不自动发布或丢弃。其他媒介保留原显式放大入口，390px沿原单栏宿主。
+- **文字落在看得清的位置。** 点T→点画面→就地输入→完成文字→回选择工具；下一段从空输入开始，不再把上段反复盖章。新字按创建时屏幕可读尺寸换算到媒体坐标保存，字号和线宽不能直接把界面px当原图px；缩放与横竖图/高分辨率下仍可辨认。已存标记不被全局重写。中文IME、Enter/Esc优先处理局部输入；移动/改字仅限未提交草稿，不能扩大已保存/历史标记权限。
+- **操作与结果对应。** 作品模式复用同一 Chat 输入框和一个发送，作品工具就近、范围为当前选区或整图，目标猫/执行位置可见且沿原任务关系。猫结合原话、圈选和上下文理解意图：修改语境下指出问题或期望结果即可承接，不要求补“请开工”或再按修改按钮；纯讨论就回答，确有歧义才澄清，不按问句形式分类。发送后原话与可核对的范围引用在同一聊天中可见，具名猫回复、真实进度和取消可达；引用/截图展示不是另一套媒体 ledger。能取消不代替开工依据；保存编辑草稿仍消费原 operation receipt，不把保存本身推断为托付。
+- **两组结尾不混用。** Task作品的“通过此版本 / 要求修改”只归还该轮审阅结论，不等于整个Task完成，不写文件；workspace文件的“采用并写回 / 不采用”沿原显式接受与SHA-CAS，只有 `applied` 才显示已写回，`conflict` / `unknown` 分别照实呈现并保留结果。发送修改要求不等于采用新版。
+- **成功才结束这次编辑。** 只清理回执确认的本次提交；失败/unknown保留并核同一operation，迟到成功不覆盖后来输入或独立评论草稿。退出大画布不等于保存或取消。移除整块画布的原生长悬停提示，说明放在不遮挡操作的状态提示/帮助中，保留无障碍命名。
+
+**仍未冻结。** 过程展示三层、“召回 N”、收起聊天整窗看作品仍为讨论，不因1331或PR4965批准而生效；K1渐变名牌无气泡已选，但暗色稿未完成。聊天并排时的新版对比/决定画面仍待补；50%不是验收阈值，视频素材库也不借图片规范同步宣称交付。删除“只保存、不叫猫”入口是设计推论，不是operator逐字授权删除已有草稿/保存能力；需以真实发送与保存合同验证，不扩大执行权限。
+
+**身份。** 经 owner 证明为同一内容、精确版本和协作上下文的多个入口必须解析到同一协作会话与账本；来源页面只影响返回。不同发布副本、权限域或独立审阅轮次即使 bytes 相同，也不能按 URL、名称或 hash 猜合并。既有对象通过显式、可验证映射复用；一对多时说明上下文选择，不能静默取首项。旧链接、历史版本、刷新与重新打开都必须经过同一解析规则。
+
+**旧文件缺目录（2026-09-20父线程确认）。** 无原目录证明的旧相对路径产物，在预览前由用户一次选择具名目录；只有一个候选也不自动猜，明确打开的是当前所选文件。选择按用户/原thread/精确产物持久保留，重开核验，失效不偷偷换；可显式重新选择，不迁移或合并原讨论/草稿。绝对路径或可信新来源经F063核验直接打开，共用完整文件landing和返回。此恢复选择不授予权限、不建Task、不回填历史，不把枚举错误当不存在。完整交互及原件A消失只剩同名B的反例见计划§2/§6。
+
+**外仓首次连接（2026-09-20父线程确认）。** 已持久登记根直接打开；尚未登记但用户当前明确选择的外仓根，可在作品现场一次“连接〈目录〉并继续”，目录/分支/文件预填。操作前说明将整个精确根加入Workspace共享目录列表、可跨对话使用/移除；不私下登记、不纳入Git siblings、不覆盖其他连接、不改变原权限模型。取消/失败保留原选择与返回；后续同根及重启免重复确认。其余失权/文件不存在不包装成待连接，原外仓404不能当排除项；完整边界与验收见计划§2/§6。
+
+**仅absolute文件的共享范围（2026-09-20父线程确认）。** 没有原项目根时，仅提议已核实的文件当前所在目录；一次明确连接前说明范围包含该目录内其他文件，不推断或向上扩大为整个项目。已登记直接打开，已有撤销根不能通过改提子目录绕过；路径/权限/读取异常不包装成可连接。复用同一F063连接与内容owner，不预先授权真实目录，具体页面和独立正反例见计划§2/§6。
+
+**三类来源与Task上下文。** F063持可变文件及当前SHA，F138持message/workspace-snapshot publication及不可变媒体版本；F311已归档实验媒体仍由其原owner持有。Task是执行/裁决上下文，不是所有内容身份前提。新增task-free消息媒体准入和F309 source adapter，不造假Task；新publication身份不依赖Task，旧task-scoped IDs原样兼容。Task上下文引用同一publication版本的canonical ledger，不再复制可写标记。文件到快照是显式lineage一跳，原标记/评论只引用为来源历史，不合并或伪造新对象标记；各入口验证同对象复用与跨对象关联必须分开。
+
+**同源任务审阅的选择（2026-09-23父线程确认，事实已更正）。** 现有消息发布resolver已能发现并选择同源发布，不能把同一publication讨论列表为空说成全入口不可发现。人类从自己的消息媒体打开时，复用这一路径列出精确同源、Task归其所有且当前独立验权通过的审阅。两类发布都在时，明确区分“直接讨论”与具名任务审阅；仅Task发布时给真实具名继续动作，不从泛消息入口自动跳入，也不为凑选项创建第二本账。选择Task后与Needs Me进入同一真实审阅；正文/草稿不复制，精确context和有效选择保留。导航不扩大源读取权限，不以artifactRefs或同URL/bytes猜关系；原已有publication发起修改时复用账本的合同不变。父source116的隔离补看已确认多项选择现有文案及仅Task自动进入两处差异，修复与验收仍待完成，详见计划§2/§6。
+
+**历史只读的精确边界（2026-09-20）。** 历史版本的媒体、锚点/标记、已有批注及回复正文、解决状态和裁决不可改；在原owner当前可见/讨论授权下，允许对该版已有批注追加回复，永久留在原版本，不漂到新版。旧inline与新linked账本适用同一用户规则；只读不能一刀切关闭回复，也不能借回复放开旧版编辑或绕过撤权。界面明确“可继续讨论，画面不可改”；追加回复不重开旧裁决或自动发起修改托付。父Astra已按CVO904确认此解释，实施与独立技术审查仍由child Astra/Opus5负责，见计划§2。
+
+**能力范围。** PNG 包括原接受的画笔/形状/文字、点/区域评论、圈选请猫移除、比例修改请求与具名猫返回真实新版；MP4 包括播放/呈现帧、时间范围/帧标注、讨论与修改后新版回流。Markdown/代码保留原编辑、Add to Chat 和可定位评论，并接入同一修改请求/结果定位体验。DOCX 沿已授权的现有 provider surface 进入同一宿主，不另造查看器；Office engine admission、多人实时共同编辑和视频 NLE 仍由原 Phase 管理。未发布上传草稿、装饰图片和外部不可授权媒体不冒充持久内容，但有明确的预览/不可用状态。此区分不能用于排除已接受的普通 PNG 修改回传。
+
+**缺口必须实做，父线程已定写回策略。** 图片/视频请求修改时，由F063授权读取SHA S→F138准入可见lineage的快照→真实Task/round→既有outbox/原猫/respondWithMediaVersion/publishVersion链返回新版。选择新增F138的F063源，不为准入自动向聊天流发媒体消息；F063只扩binary SHA-CAS接受写回，不长出第二个媒体版本库。文本先在隔离执行空间生成baseSHA约束的patch，用户接受才经F063文本CAS得到newSHA，不走F138媒体round。所有原文件在接受前不变；冲突保留结果，不强覆盖。仅打开/标注不建Task，明确请求才接责；旧任务不借用，当前已接受的修改能力不能以adapter缺失为由删掉。
+
+**唯一landing与能力合同。** 同一组件消费adapter的 `annotate/markup/requestModification(image|video|text)/versions/decide/historyReadOnly` typed状态、原因及真实命令；不可用仍在同一组件呈现，不退回独立媒体预览。ArtifactDetailView媒体正文和已发布媒体Lightbox被替代，元数据/下载可保留。普通PNG/MP4/可写文本的修改请求必须真实可用；F311归档证据的修改明确生成派生作品、不改写原实验；provider未启用/撤权/历史只读不能被入口绕过。
+
+**现存产品缺陷。** 同时纠正 Needs Me 卡片的内部 ref/重复技术文案、文字落点后的结束/保存反馈、review 自动抢主区，以及已观察到的可写 review 与 attention 退休不一致。未知根因先按原样本复现；不把未发完的用户描述补成已确认故障。
+
+**取消范围（2026-09-20父线程确认）。** “取消本次修改”一键取消请求并阻止新接受，只自动撤回可证明独属本source/cat的待处理项，保留其他请求与共享Task。停止正在执行的整轮或撤回合流队列是另一个明确命名的动作；允许额外一次点击，不加弹窗，点击前说明会同时影响其中其他工作。状态说明取消请求与停止执行的区别；候选/讨论/回执保留，已确认写回不撤销，未知写回先查回执。恢复不能误停后来的新执行，详见计划“取消本次修改与停止整轮”。
+
+**执行与停止条件。** Fable一次方案校准已完成并退出，R1经Sol核对，child已建立。父Astra确认Step1的27路处置、对象/上下文/ledger、媒介结果和写回策略，并锁定任务归属不猜选、一次具名提交、明确多context选择及保留草稿的交互约束，详见计划§7。原child按其授权与原SOP自治；CVO517将本次作品体验工作单元明确交新thread的Sol6实现、Sol5.6审查，覆盖该批此前Astra小修/Opus审查建议，不改变其余事项归属。两条执行线不并行改动本批共同画布/工具/宿主展开路径，不发逐步进度。用户可见结果/能力/主要交互的变化必须在改变承诺前回来讨论；技术内部问题本地解决。可实看的合入批次回流，父Astra亲自走两条完整旅程；内部拆PR不把“入口+标注”局部批次叫Phase交付。超出原承诺的价值取舍、不可逆操作及生产激活仍归operator。
+
 ### Phase B: Real Open-source Owner Foundations + Contract Kernel
 
 把获准的真实开源 Office 与 video engines 直接接入其最终 content-owner surface，建立 canonical content/
@@ -529,6 +578,20 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 - **Success:** 两种媒介均可重开与回看旧版；身份、范围、回复和裁决有真实来源；无重复提醒/错误返回/自动关 Task。
 - **Non-goals:** 修改媒体 bytes 的最小编辑器、DOCX 共同编辑替代品、复制 F232/Task/权限真相，或扩张正在施工的 F310 B。
 
+### Phase U 文本旅程：选区批注进入同一聊天引用链
+
+- **Scope unit:** 一个普通Markdown/代码文件的真实选区与同一quote attachment；来源为child CVO095/098四图，父Astra按CVO904确认。
+- **Flow:** 从tree/Home/聊天文件链接进入共同landing → 选文并在原就地卡填写评论 → Enter/加入当前聊天 → 输入框出现可展开、移除的annotation卡片 → 人明确发送 → 猫收到同一选文/评论/workspace_file来源。加入阶段不发送、不建Task、不在F309另写新文本批注；原文件编辑和明确请猫修改→diff→接受写回继续可用。
+- **Compatibility:** 旧F309文本讨论继续读/回复；旧草稿与未知提交先恢复/核receipt，不静默迁移。图片/视频与DOCX不因此裁掉既有能力。
+- **Evidence required:** 真实宿主入口、陌生输入与IME/换行、390px、发送前后结构化载荷/来源回跳及旧草稿兼容；共享组件单测不证明已交付。当前为确认合同，非PASS。
+
+### Phase U 作品体验旅程：聊天与图片并排、发送可见与原位返回
+
+- **Flow:** 用户从聊天图片或普通图片文件主动打开→同一 Chat 在左、同一作品在右→看全图或100%/滚动读长图细节→圈选表达并从同一 Chat 输入框发送→聊天中看具名回复、真实进度和取消→看新版并按来源作决定→返回原 scene；重开尊重作品模式宽度，退出恢复经典比例。版本/讨论/缩放/选区/编辑和评论草稿仍连续；T与保存的既有验收不因换布局取消。
+- **Modification:** 底部对选区或整图说一句并发送，猫依据真实原话与上下文理解问题、期望结果或讨论意图；无需追加开工口令或第二个修改动作。有修改托付时接入原任务/真实请求/新版链，纯讨论不建修改Task；目标猫和执行位置遵守原责任关系，文件结果仍需之后显式接受才能CAS写回。
+- **Recovery:** 中文IME、保存失败/unknown/迟到成功、带草稿往返、旧版/撤权及390px均真实操作；失败时不清输入、不产生重复写入。
+- **Evidence required:** 桌面1440/1280实证主动打开后 Chat/owner DOM identity不变、双列可调、发送后回复/真实进度/取消可见、经典比例与原scene精确返回；后台新版不抢布局。真实长截图/横图/高分辨率验证可读、末行不被工具或输入区遮挡及指针坐标。390px和MP4保留原可用性回归，不冒充新手机/视频设计；合入后父Astra在Alpha判断，技术review不代替产品验收。
+
 ### Supporting Journeys
 
 | ID | Scope unit | Actor | Flow | Evidence |
@@ -573,6 +636,28 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | R22 | 完整不可变图片/mp4 审阅先行交付，review round 与原 Task/Artifact 同源回流，保留共同编辑原 Gate | AC-R1, AC-R2, AC-R3, AC-R4, AC-R5, AC-R6 | 两媒介真实完整旅程 + 并发/恢复/权限反例 + Alpha | [x] |
 | R23 | 作品优先、标注与评论各自清晰、图上直接接续讨论，并用可信内容和真实壳验证体验 | AC-R7, AC-R8, AC-R9, AC-R10, AC-R11, AC-R12 | operator 四图/243 → #4489 → Sonnet335/594真实Alpha原生输入、原Task版本回流及历史只读 | [x] |
 | R24 | F290 W4 复用 F309/content-owner 边界：两个认证 Human 共享 canonical Markdown，F290 不保存 bytes，撤权立即失效 | AC-B6 | two-principal read/annotate/propose/apply/version/revoke + restart evidence | [ ] |
+| R25 | 所有日常内容入口进入共同协作现场，桌面图片主动打开时聊天与作品并排，真实身份/状态/修改回传不分叉 | AC-U1–U8 | 同作品跨入口真实读写/改图回传、原坏页复验、主线程合入后实看 | [ ] |
+| R26 | 独立执行线程技术自治，用户结果变更讨论，合入后回流由父线程审视 | AC-U9 | Fable 校准、获准 child、实质产品取舍及真实合入回流/父线程判断 | [ ] |
+| R27 | 聊天与图片并排看与改；字可读、T结束明确，一个发送按意图承接且过程可见，编辑/讨论/修改各有真实结果 | AC-U10–U14 | CVO446原坏页及949修正后默认重放、同Chat/surface往返、保存并发/权限反例、独立审查+父Astra合入后Alpha | [ ] |
+| R28 | Studio K1：具名猫的聊天消息可携带真实文件选区引用；文档记号只投影可访问的原消息，不重开普通文本批注账 | AC-U6, AC-U8 | 猫身份发送/持久化/模型消费/回原消息全链；撤权不泄漏；无新增文本 annotation 写入 | [ ] |
+| R29 | Studio K2：从真实人的已发送消息承接修改，沿原话、引用、目标与现有责任；同一发送至多一个请求，撤回挡住迟到接手 | AC-U6, AC-U8 | 同消息重复/双猫竞争只建一次；撤回先赢则无开工；接手绑定真实执行，接受前原文件不变 | [ ] |
+| R30 | 文件引用绑定 F063 提供的确切源版本；旧引用缺版本或源漂移时诚实显示，不按旧行号/DOM 偏移猜新位置 | AC-U6, AC-U8 | F063 ContextAttachment schema、消息/草稿/模型消费兼容；同路径改内容、重复选文、旧无版本引用反例 | [ ] |
+| R31 | 同一文件同一源版本的一次发送可携带多处独立选区，合为一个修改请求，原话一份、各处稳定编号 | AC-U6, AC-U8 | 两处选区一次承接/一次候选返回/逐处核对；不合大框、不拆成多次提交；旧单选区可读 | [ ] |
+| R32 | 采用、不采用、写回冲突或结果未知的真实记录投影进原聊天，并可由原负责猫消费；候选可从聊天回到对应 diff | AC-U6, AC-U8 | 真实 accept/reject/CAS conflict/unknown → 同 request/candidate/receipt 回执；恢复不重复、不冒充人、不自动重写 | [ ] |
+
+### Studio K1/K2 后端补齐登记（2026-10-02）
+
+| 跟踪项 | 已核实的代码基线（main `36bc7f022d`） | 归属与兼容边界 |
+|---|---|---|
+| R28 | `packages/mcp-server/src/tools/callback-tools.ts` 的 `postMessageInputSchema` 无附件参数；人侧引用链已存在 | 复用 F063 的 ContextAttachment 与消息存储/投影；猫作者取认证 principal。按文件反查引用过它的消息也只是有权限边界的投影，不另存批注正文 |
+| R29 | `routes/content-modification-routes.ts` 由 `directContentHuman` 拒绝猫凭据；`callback-content-modification-routes.ts` 只有 read/respond；`modification/request-source.ts` 为表单生成来源消息 | 入口归 F309 modification；保留原 Human 表单能力，新增承接不能伪装成人或再制造一条人来源。现有 Task 续原责任；执行状态取 execution-view，不能靠猫回复“正在修改”置位 |
+| R30 | `shared/src/types/context-attachment.ts` 的 workspace_file 及 quote source 均无源版本；`v: 1` 是附件格式版本，不是文件版本 | [F063 AC-25–31](F063-hub-workspace-explorer.md#post-completion-enhancement-structured-context-attachments) 拥有引用合同；F309 提需求、沿 F063 扩展与消费 owner revision。文件 SHA 不赋写权，rendered offsets 不当 raw patch offsets；无版本旧引用保留原文，标为无法确认当前位置 |
+| R31 | `shared/src/types/content-modification.ts` 的 `intent.selection` 是单个 union；候选 edits 数组不等于请求已支持多选区 | 延续 Studio §0.4 已记录的“一次发送、多处独立、原话一份”；本项限同一文件同一 base，跨文件事务未由此开放 |
+| R32 | `modification/result-service.ts` accept/reject 与 F063 writeback 只返回/持久化结果，未接聊天投递；`text/text-service.ts` 与 `inspection.ts` 已允许猫主动读到 rejection | 缺的是聊天投影与主动送达，不是没有后台回执或猫完全不可读。仅 applied 说已写回，conflict/unknown 保留候选；回执用真实系统来源，不伪造人/猫发言，不把收到结果等同再次修改授权 |
+
+**已沿用的产品边界。** K1 接受“聊天引用 + 文档旁投影”，普通文本遵守 CVO095/098，不重新开放文本 ledger 的新批注。K2 普通工作区文档走修改请求、隔离候选、diff、显式采用后 F063 CAS；`artifact-review.ts` 的 PNG/MP4 round 不扩成文档轮。DOCX 继续 Office provider。接口具体形状、通知策略与任务发布文档边界见下方 OQ-4–6，不能把设计画面当已有能力。
+
+**一并保留的兼容检查。** `.mdx` 可按 Markdown 呈现，但 `workspace-text-policy.ts` 的可修改白名单没有它。后端补齐 R29 时须给出一致、可见的支持范围或不支持结果；本次没有擅自扩大 F063 写入白名单。
 
 ### 覆盖检查
 
@@ -639,6 +724,24 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 - [x] **AC-R10**：图片/视频缩放、定位与圈画仍使用真实媒体坐标及已呈现帧 proof；视频时间范围可直接操作，精确数值按需调整；保留 VFR/旋转/暂停帧/切版反例。
 - [x] **AC-R11**：新增标记/点位与旧记录的版本、恢复、并发、未知写结果、历史只读、Task 漂移和撤权语义完整；TTL=0、既有 owner/媒体 bytes/原任务回流边界不变。
 - [x] **AC-R12**：使用可信作品/真实参考截图与陌生输入在正式 F307 壳走完整交互；operator 确认主旅程、默认态、窄屏方向，非作者技术验证和合入后 Alpha 齐全后才称本次体验改版完成。
+
+### Phase U — Unified Content Experience
+
+- [ ] **AC-U1**：文件树/Home、F232 产物、Schedule、Needs Me、已发布聊天媒体与普查找到的同类入口都走共同打开路径；入口清单每项有真实处理结果，未覆盖项不能被三条样例掩盖。外仓文件树/Home未连接根经一次明确连接后完整继续，已有连接免确认且撤销有效；F232文件/代码不留独立文本页，缺原目录的旧相对路径一次明确选位并持久恢复，唯一同名候选不冒充历史原件。装饰/上传草稿/外部媒体的排除有对象理由。
+- [ ] **AC-U2**：新版桌面图片由用户主动打开进入同一Chat在左/同一作品在右的作品模式，默认约30/70可调，宽度偏好与经典比例分离，退出恢复原scene与经典比例。验证同一Chat runtime/provider/DOM、同一F307/owner surface挂载，不用隐藏Chat的mainAreaAttention，不复制socket/history/草稿；版本、选区、缩放、焦点与滚动连续。后台消息/新版/恢复及仅开启新版开关均不抢布局，返回引用失效诚实回安全位置而非猜投。390px沿原入口/返回合同，其他媒介不因本次同步改默认。
+- [ ] **AC-U3**：同一publication/context从产物/聊天/Needs Me/Schedule/深链看到逐字一致的账本，未托付消息媒体无假Task；同F063文件在tree/Home/文件链接间一致。同源但独立发布的自有Task审阅可从消息现场具名选择，选择后与Needs Me进入同一审阅；直接讨论保持独立，不合并对象或扩大权限。文件→快照为可见lineage，原标记只读引用不复制合并；新版不搬旧坐标。多context明确选择，旧ID和独立浏览器恢复保持，不能按同bytes制造同源PASS。
+- [ ] **AC-U4**：PNG 的画笔/形状/文字与点/区域评论在统一画布内自然完成；放置文字、结束编辑、保存、保存中/失败/成功的反馈明确；既有讨论按需打开并回原位置。原875坏页及真实新输入重放通过。
+- [ ] **AC-U5**：普通PNG经显式F138快照/lineage，与原Task产物都能圈选请猫移除、发比例请求、收到真实新版；接受前原文件SHA不变，接受通过binary SHA-CAS回执写回，漂移冲突保留结果。请求前评论/标记的来源历史可回，跨入口结果一致；F063无第二版本库。无法完成即Phase U未完成。
+- [ ] **AC-U6**：MP4在真实呈现帧/范围标注并接回F138新版；文本保留原编辑/Add to Chat，猫请求先显示diff、接受才由F063文本CAS回newSHA，拒绝/失败不改原文；DOCX沿真实provider。F311归档媒体共用landing/标注/评论，修改只产生派生作品、原record不变。各媒介与来源分别实证。
+- [ ] **AC-U7**：Needs Me/Schedule 显示可读的作品、摘要和真实动作，技术 ref 按需展开；已准备内容的打开/审阅一致，attention 的当前、退休、撤权与可执行动作一致；修复有原失败证据，非改短测试文案蒙混。
+- [ ] **AC-U8**：旧链接/草稿/已存评论与标记/版本历史有兼容映射和回归证据；旧/新账本均允许在原授权下追加历史回复，重开仍归原版本，历史编辑/裁决与新版内容不变，撤权后不能回复。单项取消不牵连合流/共享工作，停止整轮须显式动作，旧对象重试不命中新执行；取消及已发生写回分别按真实回执呈现。权限/版本漂移、并发保存与未知提交保留原 owner 约束，新增保存与回流默认 TTL=0。被替代入口不再维护平行完整 UI。
+- [ ] **AC-U9**：Fable方案findings已解决并经非作者核对；child Step1的对象/结果/写回决策包由父Astra确认，再技术自治执行。合入后父Astra亲自完成同publication跨入口和文件→快照→接受写回两条真实旅程并作整体判断；未修问题保持开放，局部PASS/合入不代替完成。
+
+- [ ] **AC-U10**：图片在真实双列宿主可读且Chat持续可见，无需藏起Chat才通过；默认整张看全且不超过原尺寸，100%、缩放和平移可达，真实长截图可滚动读清且末行不被工具/输入区遮挡，50%切换阈值不作PASS依据。拖动比例、原位返回及重开保留同一mounted surface、作品/版本、视图、选区、编辑/评论草稿和原聊天位置；新消息/新版不改变姿态。图上表达及整图修改可用；390px原单栏回归保留。
+- [ ] **AC-U11**：大画布支持适合窗口/100%/缩放/平移，媒体及所有锚点使用同一变换，缩放后点击/圈选仍落在正确原图或视频呈现帧坐标；新文字与线条按创建时屏幕尺寸保持可读，旧标记不被改写。横图/竖图/高分辨率及长中英文有实际显示证据，不只断言DOM在视口内。
+- [ ] **AC-U12**：T点位后就地输入，完成当前文字后回选择；下一段不带旧文，不连点复制旧字。中文IME确认不误提交，Enter/Esc按局部编辑层处理；未提交文字可改/移，已保存与历史标记不能借此获得新写权。原446及875问题须先失败再通过。
+- [ ] **AC-U13**：图片作品模式只有同一Chat输入框和一个发送，作品工具就近；猫按原话、圈选和上下文判断批注意图，修改语境下指出问题或期望结果即可承接，不要求追加“请开工”或再次按修改按钮，不按问句形式分类。纯讨论不建修改Task，真歧义才澄清；无选区仍可改整图，真实人来源/版本/范围/具名目标/执行位置可核对。发送后原话与范围、具名回复、真实执行进度/取消在同一聊天中可见，不新建媒体讨论账本。Task“通过此版本/要求修改”只归还审阅；workspace“采用并写回/不采用”依applied/conflict/unknown分别显示，发送不隐含写回。保存/草稿/历史权限仍按原receipt，工具与提示不遮挡操作。
+- [ ] **AC-U14**：保存成功只结束该次确认的编辑；失败/unknown、保存中继续输入、迟到回执、带草稿退出/恢复均保留正确内容，重试不重复提交，不误清独立评论草稿。Sol6完成本工作单元、Sol5.6独立审查及门禁合入后一次final-only回流；父Astra在实际包含merge的Alpha亲自验U10–U14并记录结果，不能以该批PASS关闭整个Phase U。
 
 ### Phase B — Real Open-source Owner Foundations and Contract Kernel
 
@@ -720,6 +823,9 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 | OQ-1 | 第一切片是否用 DOCX + video | 是；两个媒介均直接走成熟开源终态集成 | ✅ operator `private-source-id` |
 | OQ-2 | 哪个 Office/video 开源组合能通过最终 host、license、部署、数据与维护 Gate | Office 顺序已裁决：GenOffice `v0.8.1039@e833fff` 是首个 plugin pre-admission，SuperDoc v2 是 DOCX 退出路径，ONLYOFFICE/Collabora 是服务型 suite 退出路径；一个 contentRef 只绑定一个 production provider。Video：Elah 是 leading pre-admission | 🟨 GenOffice alpha.1 已发布、Host #4394 已合入；合入后 Alpha 与完整两媒介 AC-A4 仍待闭合 |
 | OQ-3 | TabTin root AGPL 与 package MIT 的实际发布/复用边界 | 必须上游/法务澄清 | ⬜ 外部证据 |
+| OQ-4 | K2 从已发送消息接手的 wire contract | 归 F309 modification。建议 callback 接手操作以 `sourceMessageId`、`operationId` 定位；thread/actor/invocation 由认证上下文确定。服务端读取并核验真实人原话、引用/版本、接收目标、既有 Task 与撤回状态，原子绑定唯一 request，再绑定真实执行；重试返回同一请求，不允许 caller 填 human 身份或借引用取得写权 | 🟨 产品边界已核；API 路径/字段及身份、撤回竞争由后端合同 review 冻结，当前无此接口 |
+| OQ-5 | Task 发布的普通文档是否新增独立评审轮 | 本轮 K1/K2 不新增；普通工作区文本按修改请求返回候选并决定，PNG/MP4 继续原 round。只有 publication 而没有可授权的文本 owner 目标时不显示虚假的“写回原文件”；未来文档 publication review 另核 owner 合同 | 🟨 不把媒体 round 泛化列为本轮前置，后续领域范围保持开放 |
+| OQ-6 | R32 哪些结果需要另起 invocation 叫醒原猫 | 三类决定/异常均需 durable 聊天回执和原猫可消费的通知；建议纯采用/不采用只回执，不额外起一轮空 ACK；冲突/unknown 仅在该猫现有责任要求诊断时触发现有续办，显式要求再改才进入下一请求。活动执行沿正常消息摄入，不重复启动；通知本身不自动重试写入 | 🟨 回执缺口确定，唤醒策略待后端与执行消息 owner 校准；不以新增唤醒替代 receipt 真相 |
 
 当前唯一可授权的 dependency/runtime scope 见
 历史 Packet C 已 superseded，不得作为执行授权。
@@ -753,6 +859,7 @@ remap/rebase/conflict/orphan 旅程后再 KEEP。
 1. **指挥与理论 thread**：当前 source thread；责任猫维护验收后的 vision、边界与 Phase 状态，并持续驱动下一步。
 2. **Phase execution threads**：每个 Phase 单独承载实现、证据与 review，不在指挥 thread 堆执行噪音。
 3. **runtime 重启后的验收 thread**：只消费已合入 main 的 exact SHA，在隔离验收环境复跑真实用户旅程。
+4. **CVO517作品体验执行批次**：新thread以 `codex6-sol` 为实现/交付owner、`codex-sol`（GPT-5.6）为独立reviewer；在自身隔离worktree自治实现、修复、review、commit/push及merge，最终回父 `[thread-id]` / `codex-astra` 做Alpha。创建以F128返回的实际thread为准，pending proposal不冒称已开工；原child其余责任及Task909保留。
 
 Feature、Research、ownership、commit/PR 与 task 状态仍是 canonical truth；thread 只是协作载体。这里复用家里
 现有 Feature/Phase/验收概念，不新增 Stage、Queue、Registry 或另一套状态机。

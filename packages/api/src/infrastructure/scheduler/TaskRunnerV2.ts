@@ -8,6 +8,7 @@ import { emitHoldExpiredAfterSatisfied } from './hold-lifecycle-telemetry.js';
 import type { RunLedger } from './RunLedger.js';
 import { notifyTaskFailed, notifyTaskSucceeded, SCHEDULER_TOAST_DURATION_MS } from './schedule-notify.js';
 import type { TaskTemplate } from './templates/types.js';
+import { classifyTimerHoldRecovery, persistTimerHoldDisposition } from './timer-hold-recovery.js';
 import type {
   ActorRole,
   CostTier,
@@ -233,6 +234,7 @@ export class TaskRunnerV2 {
 
   /** Phase 3A: register a dynamic task and track its def ID */
   registerDynamic(task: AnyTaskSpec, dynamicDefId: string): void {
+    this.configureTimerHoldRecovery(task, dynamicDefId);
     this.register(task);
     this.dynamicTaskIds.set(task.id, dynamicDefId);
     // If runner is already started, schedule timer immediately — but defer first tick
@@ -311,8 +313,38 @@ export class TaskRunnerV2 {
     return true;
   }
 
-  private suppressRetiredHoldWake(taskId: string): boolean {
+  private suppressRetiredHoldWake(task: AnyTaskSpec): boolean {
+    const taskId = task.id;
+    if (taskId.startsWith('hold-ball-') && this.dynamicTaskStore && !this.dynamicTaskStore.getById(taskId)) {
+      this.unregister(taskId);
+      holdStaleWakeSuppressedTotal.add(1);
+      this.logger.info(`[scheduler] ${taskId}: suppressed missing hold wake before execution`);
+      return true;
+    }
     const def = this.getSuppressedHoldWakeDef(taskId);
+    // Recovery validation belongs only to a timer restored after its fireAt.
+    // Online holds, including old persisted shapes and unknown owner provenance,
+    // retain their original one-shot firing semantics.
+    if (!def && task.onceLifecycle?.recoverMissed) {
+      const store = this.dynamicTaskStore;
+      if (!store) return false;
+      const current = store.getById(taskId);
+      if (!current) return false;
+      const recovery = classifyTimerHoldRecovery(current, store.getPrivateOwnerAuthProvenance(current.id));
+      if (recovery.kind === 'recover' || recovery.kind === 'not_timer_hold') return false;
+      if (recovery.kind === 'expired' || recovery.kind === 'invalid') {
+        persistTimerHoldDisposition(store, current, {
+          status: recovery.kind === 'expired' ? 'retired_expired' : 'retired_invalid',
+          at: Date.now(),
+          reason: recovery.kind === 'expired' ? 'sla_elapsed' : recovery.reason,
+        });
+        this.unregister(taskId);
+        holdStaleWakeSuppressedTotal.add(1);
+        this.logger.info(`[scheduler] ${taskId}: suppressed invalid timer hold before execution`);
+        return true;
+      }
+      return false;
+    }
     if (!def) return false;
     this.unregister(taskId);
     holdStaleWakeSuppressedTotal.add(1);
@@ -328,14 +360,17 @@ export class TaskRunnerV2 {
     for (const def of defs) {
       const managedCommandState = readManagedCommandWakeState(def);
       if (managedCommandState && managedCommandState !== 'command_running') continue;
-      // #415: once tasks with past fireAt → missed window, cancel + notify + retire
-      if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now() && !managedCommandState) {
-        this.handleMissedOnceTask(def, store);
-        continue;
-      }
-
       const template = templateGetter.get(def.templateId);
       if (!template) {
+        if (
+          def.trigger.type === 'once' &&
+          def.trigger.fireAt < Date.now() &&
+          !managedCommandState &&
+          !store.getPrivateExecutionReturn(def.id)
+        ) {
+          this.handleMissedOnceTask(def, store);
+          continue;
+        }
         this.logger.error(`[scheduler] hydrate: unknown template "${def.templateId}" for def ${def.id}`);
         continue;
       }
@@ -346,6 +381,19 @@ export class TaskRunnerV2 {
         deliveryThreadId: def.deliveryThreadId,
         ownerAuthProvenance: store.getPrivateOwnerAuthProvenance(def.id),
       });
+      if (def.trigger.type === 'once' && def.trigger.fireAt < Date.now()) {
+        this.configureTimerHoldRecovery(spec, def.id, store);
+      }
+      // Ordinary once tasks still expire; durable owner returns explicitly recover.
+      if (
+        def.trigger.type === 'once' &&
+        def.trigger.fireAt < Date.now() &&
+        !managedCommandState &&
+        !spec.onceLifecycle?.recoverMissed
+      ) {
+        this.handleMissedOnceTask(def, store);
+        continue;
+      }
       // Override display with persisted display
       spec.display = def.display;
       try {
@@ -537,7 +585,7 @@ export class TaskRunnerV2 {
       // Guard: skip if task was unregistered before timeout fires
       if (!this.timers.has(task.id)) return;
       if (this.deferOnceTickForCancellation(task.id)) return;
-      if (this.suppressRetiredHoldWake(task.id)) return;
+      if (this.suppressRetiredHoldWake(task)) return;
       // F167 Phase M: pre-fire defer — if the target thread is busy at fire time,
       // re-arm with a fresh fireAt instead of executing (avoids stale-wake "history
       // replay" while the cat is mid-work). This happens PRE-FIRE (codex insight:
@@ -561,7 +609,20 @@ export class TaskRunnerV2 {
         this.logger.info(`[scheduler] ${task.id}: maxDefers (${maxDefers}) reached → force-fire despite busy thread`);
       }
       this.deferCounts.delete(task.id); // reset defer counter on actual fire
-      this.executePipeline(task)
+      const firedAt = Date.now();
+      const scheduledAt =
+        task.onceLifecycle?.scheduledAt ?? (task.trigger.type === 'once' ? task.trigger.fireAt : firedAt);
+      const onceSchedule: ScheduleRunTiming | undefined = task.onceLifecycle?.recoverMissed
+        ? {
+            triggerKind: 'once',
+            scheduledAt: new Date(scheduledAt).toISOString(),
+            firedAt: new Date(firedAt).toISOString(),
+            latenessMs: Math.max(0, firedAt - scheduledAt),
+            missedSlots: 0,
+            late: firedAt > scheduledAt,
+          }
+        : undefined;
+      this.executePipeline(task, false, onceSchedule)
         .catch((err) => {
           this.logger.error(`[scheduler] ${task.id}: pipeline error`, err);
         })
@@ -570,8 +631,13 @@ export class TaskRunnerV2 {
           const entries = this.ledger.query(task.id, 1);
           const lastOutcome = entries[0]?.outcome;
           const isGovernanceSkip = lastOutcome === 'SKIP_GLOBAL_PAUSE' || lastOutcome === 'SKIP_TASK_OVERRIDE';
-          if (isGovernanceSkip) {
-            this.logger.info(`[scheduler] ${task.id}: once task governance-skipped, retrying in 30s`);
+          const recoverableFailure =
+            task.onceLifecycle &&
+            Date.now() < task.onceLifecycle.retryUntil &&
+            (lastOutcome === 'RUN_FAILED' || lastOutcome === 'SKIP_OVERLAP');
+          const withinLifecycle = !task.onceLifecycle || Date.now() < task.onceLifecycle.retryUntil;
+          if ((isGovernanceSkip || recoverableFailure) && withinLifecycle) {
+            this.logger.info(`[scheduler] ${task.id}: once task ${lastOutcome}, retrying in 30s`);
             const retryTimer = setTimeout(() => {
               if (!this.started || !this.tasks.some((t) => t.id === task.id)) return;
               this.scheduleOnceTick(task);
@@ -600,7 +666,12 @@ export class TaskRunnerV2 {
     }
     // Use taskId directly — for dynamic tasks, taskId === dynDefId
     if (this.dynamicTaskStore) {
-      this.dynamicTaskStore.remove(taskId);
+      const lifecycle = this.tasks.find((task) => task.id === taskId)?.onceLifecycle;
+      if (lifecycle) {
+        lifecycle.retire();
+      } else {
+        this.dynamicTaskStore.remove(taskId);
+      }
     }
     this.unregister(taskId);
     this.logger.info(`[scheduler] ${taskId}: retired (once task completed)`);
@@ -649,8 +720,40 @@ export class TaskRunnerV2 {
       });
     }
 
-    // Remove from persistent store
-    store.remove(def.id);
+    const timerHold = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
+    if (timerHold.kind === 'expired' || timerHold.kind === 'invalid') {
+      persistTimerHoldDisposition(store, def, {
+        status: timerHold.kind === 'expired' ? 'retired_expired' : 'retired_invalid',
+        at: Date.now(),
+        reason: timerHold.kind === 'expired' ? 'sla_elapsed' : timerHold.reason,
+      });
+    } else {
+      // Ordinary once tasks retain their existing missed-window deletion semantics.
+      store.remove(def.id);
+    }
+  }
+
+  private configureTimerHoldRecovery(task: AnyTaskSpec, dynamicDefId: string, store = this.dynamicTaskStore): void {
+    if (!store || task.onceLifecycle) return;
+    const def = store.getById(dynamicDefId);
+    if (!def) return;
+    const recovery = classifyTimerHoldRecovery(def, store.getPrivateOwnerAuthProvenance(def.id));
+    if (recovery.kind !== 'recover') return;
+    task.onceLifecycle = {
+      recoverMissed: true,
+      retryUntil: recovery.retryUntil,
+      scheduledAt: recovery.scheduledAt,
+      retire: () => {
+        const current = store.getById(def.id);
+        if (!current) return;
+        const lastOutcome = this.ledger.query(task.id, 1)[0]?.outcome;
+        persistTimerHoldDisposition(store, current, {
+          status: lastOutcome === 'RUN_DELIVERED' ? 'fired' : 'retired_expired',
+          at: Date.now(),
+          ...(lastOutcome === 'RUN_DELIVERED' ? {} : { reason: lastOutcome ?? 'delivery_not_recorded' }),
+        });
+      },
+    };
   }
 
   private getSuppressedHoldWakeDef(taskId: string): DynamicTaskDef | null {
@@ -684,6 +787,17 @@ export class TaskRunnerV2 {
 
   getRegisteredTasks(): string[] {
     return this.tasks.map((t) => t.id);
+  }
+
+  /** Re-arm an existing once execution without discarding its running lease. */
+  rescheduleOnce(taskId: string, fireAt: number): void {
+    const task = this.tasks.find((candidate) => candidate.id === taskId);
+    if (!task || task.trigger.type !== 'once') throw new Error('Only a registered once task can be re-armed');
+    task.trigger = { type: 'once', fireAt };
+    this.dynamicTaskStore?.updateTrigger(taskId, task.trigger);
+    const timer = this.timers.get(taskId);
+    if (timer) clearTimeout(timer);
+    if (this.started) this.scheduleOnceTick(task);
   }
 
   /** Phase 2: Full task summaries for schedule panel API */

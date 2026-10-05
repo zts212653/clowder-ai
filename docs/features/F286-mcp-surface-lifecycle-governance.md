@@ -8,7 +8,7 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
-tips_exempt: "Renewed for Phase D: provider-native schema delivery, bounded server instructions, delivery attestations, and the Signals pilot change transparent agent/runtime governance rather than add a user-invokable workflow or Hub discovery moment; add a tip only when a future resource migration introduces a teachable user-facing action."
+tips_exempt: "Renewed 2026-09-27 for F324 Phase A: existing MCP readers and their response guard now bound full output with exact source continuations where available; this adds no user-invokable workflow or Hub discovery moment."
 ---
 
 # F286: MCP Surface Lifecycle Governance
@@ -100,6 +100,8 @@ That pilot landed atomically in PR #3947: final HEAD `e9184caf4065ba3de3883e820f
 - Treat the current 111 `migration-candidate` definitions the same way: they are hypotheses, not Phase D scope or a completion denominator.
 - No semantic deletion occurs from top-20 absence alone.
 - Treat `gh` as the canonical local GitHub execution path and the Clowder AI-managed external GitHub MCP catalog/runtime surface as an explicit sunset outside the 124 semantic rows; its code/config removal remains owned by the source thread.
+
+F324 Phase A 的既有读取工具入参增加 `charOffset` 或 `offset` 后，`cat_cafe_read_file_slice`、`cat_cafe_list_events` 与四个 session 读工具按 F286 admission 从 protected-base `migration-candidate` 晋为 canonical；同名工具继续保留原 read authority/risk/runtime profiles，无新顶层身份。`governance:write` 只更新规范快照，`governance:check` 验证新增/删除身份与 resource action/profile/schema delivery delta。输出字节预算由源 reader 和 `server-toolsets.ts` 的最终负例保护共同验证，写回执及已记正文曝光的读回执不被末端改报失败。
 
 ## User Journey
 

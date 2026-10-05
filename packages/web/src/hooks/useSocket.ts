@@ -710,6 +710,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string, foregro
       if (typeof window !== 'undefined')
         window.dispatchEvent(new CustomEvent('cat-cafe:artifact-review-changed', { detail: data }));
     });
+    socket.on('content_modification_source_saved', (data: { threadId: string; messageId: string }) => {
+      if (typeof data.threadId === 'string' && data.threadId && typeof data.messageId === 'string' && data.messageId)
+        useChatStore.getState().requestStreamCatchUp(data.threadId);
+    });
     socket.on('custody_offer_updated', (data: { messageId: string; threadId: string }) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cat-cafe:custody-offer-updated', { detail: data }));

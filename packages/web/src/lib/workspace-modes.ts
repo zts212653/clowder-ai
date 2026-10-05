@@ -39,7 +39,9 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
   },
   recall: {
     label: '记忆',
-    description: '记忆流、事件与账本',
+    // F322 §0.5: this is the per-conversation 记忆 (what the cats used in THIS conversation); the world-level 记忆
+    // page lives in the Café sidebar. The old line promised a "ledger" the panel does not show.
+    description: '这条对话里猫用到的记忆',
     group: 'knowledge',
     searchTerms: 'memory recall ledger feed 记忆 账本',
   },
@@ -51,7 +53,7 @@ export const WORKSPACE_MODE_META: Record<WorkspaceMode, WorkspaceModeMeta> = {
   },
   'product-schedule': {
     label: 'Schedule',
-    description: '托付工作的截止与审阅时间',
+    description: '工作安排、进展与成果',
     group: 'work',
     searchTerms: 'schedule deadline review entrusted 日程 截止 审阅 托付',
   },

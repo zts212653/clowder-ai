@@ -108,6 +108,21 @@ describe('PipelinePromptBuilder (AC-P2-6)', () => {
     );
   });
 
+  it('routes an untimed Phase continuation through D11 without implying admission', async () => {
+    const { parseIntent } = await import('../dist/domains/cats/services/context/IntentParser.js');
+    const intent = parseIntent('继续 Phase B', 1);
+    const output = ppb.buildInvocationContextViaHookPipeline({
+      catId: 'opus',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+      promptTags: intent.promptTags,
+    });
+
+    assert.ok(output.includes('load skill: custody-recognition'));
+    assert.ok(output.includes('not authorization'), 'D11 should describe a wakeup rather than an admission');
+  });
+
   // -- Full system prompt ------------------------------------------------------
 
   it('buildSystemPromptViaHookPipeline combines session + turn', () => {

@@ -3,7 +3,7 @@ import type { IThreadStore } from '../../../domains/cats/services/stores/ports/T
 import { getEvalCatOverride } from '../domain/eval-domain-override.js';
 import type { IReevalClosureEventLog } from '../reeval-closure-event-log.js';
 import { enrichEvalHubLifecycle } from './eval-hub-lifecycle-projection.js';
-import { loadEvalHubSummary } from './eval-hub-read-model.js';
+import { loadEvalHubSummaryAsync } from './eval-hub-read-model.js';
 import type { EvalHubSummary } from './eval-hub-read-model-types.js';
 import { ensureEvalDomainThreads } from './eval-hub-thread-ensure.js';
 
@@ -45,7 +45,7 @@ async function ensureEvalThreadsBestEffort(summary: EvalHubSummary, options: Loa
 }
 
 export async function loadEnrichedEvalHubSummary(options: LoadEnrichedEvalHubSummaryOptions): Promise<EvalHubSummary> {
-  const summary = loadEvalHubSummary({ harnessFeedbackRoot: options.harnessFeedbackRoot });
+  const summary = await loadEvalHubSummaryAsync({ harnessFeedbackRoot: options.harnessFeedbackRoot });
   await applyEvalCatOverrides(summary, options.redis);
   await ensureEvalThreadsBestEffort(summary, options);
   return enrichEvalHubLifecycle(summary, {

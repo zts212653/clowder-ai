@@ -33,8 +33,11 @@ export const UNKNOWN_CAT_COLOR: CatColorPair = { primary: '#9B7EBD', secondary: 
 /** Neutral gray for status dots when no cat color is available (PlanBoard, etc.). */
 export const NEUTRAL_DOT_COLOR = '#9CA3AF';
 
-/** Co-creator (co-creator) default colors — matches cat-persona-tokens.css hue=40 chroma=0.13. */
-export const CO_CREATOR_COLOR: CatColorPair = { primary: '#D4A76A', secondary: '#FFF8F0' };
+/**
+ * Co-creator (co-creator) default colours: cocoa, the one colour every person shares (DESIGN.md「对话」: "没配人的颜色时就用可可").
+ * It was a warm gold (#D4A76A / #FFF8F0) until F322; a config that sets its own colour is unaffected.
+ */
+export const CO_CREATOR_COLOR: CatColorPair = { primary: '#6B5443', secondary: '#E9DCCF' };
 
 /** Co-creator @mention highlight (warm gold, visually distinct from bubble primary). */
 export const CO_CREATOR_MENTION_COLOR = '#F5A623';

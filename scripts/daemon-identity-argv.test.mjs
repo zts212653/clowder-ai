@@ -15,6 +15,7 @@ import {
   stopDaemon,
   writeDaemonState,
 } from './lib/daemon-state.mjs';
+import { captureReadableIdentity } from './lib/process-identity.mjs';
 
 /**
  * F300 daemon identity: an unreadable argv is "unknown", never "a different
@@ -119,7 +120,7 @@ test('capture reports an unreadable argv as unavailable rather than as a command
     assert.equal(identity.argvAvailable, false, `${shown} must be flagged unavailable`);
   }
 
-  const readable = captureProcessIdentity(child.pid);
+  const readable = captureReadableIdentity(child.pid);
   assert.equal(readable.argvAvailable, true);
   assert.match(readable.command, /--cat-cafe-daemon-token=capture-token/);
   assert.equal(typeof readable.ucomm, 'string');
@@ -201,7 +202,7 @@ test('a stop never records "terminated" on the strength of an unreadable argv', 
   let calls = 0;
   const captureIdentity = (pid) => {
     calls += 1;
-    const identity = captureProcessIdentity(pid);
+    const identity = calls === 1 ? captureReadableIdentity(pid) : captureProcessIdentity(pid);
     return calls === 1 ? identity : unreadable(identity);
   };
 
@@ -249,7 +250,7 @@ for (const [label, read] of [
       stopDaemon({
         ...options,
         graceMs: 100,
-        captureIdentity: (pid) => (++calls === 1 ? captureProcessIdentity(pid) : read(pid)),
+        captureIdentity: (pid) => (++calls === 1 ? captureReadableIdentity(pid) : read(pid)),
       }),
       (error) => error.reason === 'stop-outcome-unknown',
     );
@@ -269,7 +270,7 @@ test('spawn retries transient read errors and keeps persistent errors distinct f
     ...fixture,
     child,
     launchToken,
-    captureIdentity: (pid) => (++calls < 3 ? read(pid) : captureProcessIdentity(pid)),
+    captureIdentity: (pid) => (++calls < 3 ? read(pid) : captureReadableIdentity(pid)),
   });
   assert.equal(calls, 3);
   assert.throws(
@@ -283,7 +284,10 @@ test('a forced signal without observed exit does not authorize record cleanup', 
   const launchToken = 'post-signal-observation-token';
   const child = await spawnFakeDaemon(fixture.runtimeRoot, launchToken, { ignoreSigterm: true });
   const paths = writeState({ ...fixture, child, launchToken });
-  const frozen = captureProcessIdentity(child.pid);
+  // This deliberate frozen observer must start from a verified native reading,
+  // not freeze a second, potentially unreadable ps sample forever.
+  const frozen = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(frozen.argvAvailable, true);
   // The observer never reports absence, even after the force signal.
   await assert.rejects(
     stopDaemon({
@@ -332,9 +336,85 @@ test('legacy migration keeps unreadable argv distinct from a readable wrong comm
       assert.equal(existsSync(paths.stateFile), false);
       assert.equal(existsSync(paths.auditFile), false, 'unknown must not leave a false mismatch audit');
     }
+    let readableCommandReads = 0;
+    childProcess.execFileSync = (command, args, ...rest) => {
+      if (command !== 'ps' || !args.includes('command=')) return original(command, args, ...rest);
+      readableCommandReads += 1;
+      return 'node unrelated-command\n';
+    };
+    syncBuiltinESMExports();
+    assert.equal(migrateLegacyDaemonState(options).reason, 'legacy-command-mismatch');
+    assert.equal(readableCommandReads, 1, 'the mismatch must come from the injected readable command');
   } finally {
     childProcess.execFileSync = original;
     syncBuiltinESMExports();
   }
-  assert.equal(migrateLegacyDaemonState(options).reason, 'legacy-command-mismatch');
+});
+
+test('inspection re-observes transient uncertainty but never retries a proved mismatch into a match', async () => {
+  const fixture = createFixture();
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, 'inspection-observation');
+  const paths = writeState({ ...fixture, child, launchToken: 'inspection-observation' });
+  const identity = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(identity.argvAvailable, true);
+  const options = {
+    stateFile: paths.stateFile,
+    expectedProjectRoot: fixture.runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  };
+  for (const first of ['argv', 'read-error']) {
+    let calls = 0;
+    const inspection = inspectDaemonState({
+      ...options,
+      captureIdentity: () => {
+        if (++calls > 1) return identity;
+        if (first === 'read-error') throw new Error('transient identity read');
+        return unreadable(identity);
+      },
+    });
+    assert.equal(inspection.kind, 'running', first);
+    assert.equal(calls, 2, 'success must come from the new complete observation');
+  }
+  let calls = 0;
+  const mismatch = inspectDaemonState({
+    ...options,
+    captureIdentity: () => {
+      calls += 1;
+      return calls === 1 ? { ...identity, command: 'another-process' } : identity;
+    },
+  });
+  assert.equal(mismatch.reason, 'process-identity-mismatch');
+  assert.equal(calls, 1, 'a conclusive refusal must not be retried into permission');
+});
+
+test('inspection bounds persistent uncertainty and refuses an identity change after an unreadable sample', async () => {
+  const fixture = createFixture();
+  const child = await spawnFakeDaemon(fixture.runtimeRoot, 'inspection-refusal');
+  const paths = writeState({ ...fixture, child, launchToken: 'inspection-refusal' });
+  const identity = JSON.parse(readFileSync(paths.stateFile, 'utf8')).process;
+  assert.equal(identity.argvAvailable, true);
+  const options = {
+    stateFile: paths.stateFile,
+    expectedProjectRoot: fixture.runtimeRoot,
+    expectedDeploymentId: 'runtime',
+  };
+  let calls = 0;
+  const unknown = inspectDaemonState({
+    ...options,
+    captureIdentity: () => {
+      calls += 1;
+      assert.ok(calls <= 10, 'observation budget must terminate');
+      return unreadable(identity);
+    },
+  });
+  assert.equal(unknown.reason, 'process-argv-unavailable');
+  assert.ok(calls > 1);
+  calls = 0;
+  const changed = inspectDaemonState({
+    ...options,
+    captureIdentity: () =>
+      ++calls === 1 ? unreadable(identity) : { ...identity, command: 'replacement-without-token' },
+  });
+  assert.equal(changed.reason, 'process-identity-mismatch');
+  assert.equal(calls, 2);
 });

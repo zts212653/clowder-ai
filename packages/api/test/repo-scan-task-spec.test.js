@@ -401,6 +401,38 @@ describe('RepoScanTaskSpec', () => {
       assert.equal(triggerCalls[0][1], 'cat-maine-coon'); // catId
     });
 
+    it('re-resolves the repo inbox owner for every delivery and wake', async () => {
+      let currentOwner = 'codex-sol';
+      const resolverCalls = [];
+      const { opts, deliveredMessages, triggerCalls } = createOpts({
+        inboxCatId: 'stale-env-owner',
+        async resolveInboxCatId(repoFullName) {
+          resolverCalls.push(repoFullName);
+          return currentOwner;
+        },
+      });
+      const spec = createRepoScanTaskSpec(opts);
+      const gateResult = await spec.admission.gate(gateCtx());
+
+      await spec.run.execute(gateResult.workItems[0].signal, gateResult.workItems[0].subjectKey, {
+        assignedCatId: null,
+      });
+      currentOwner = 'codex61-sol';
+      await spec.run.execute(gateResult.workItems[1].signal, gateResult.workItems[1].subjectKey, {
+        assignedCatId: null,
+      });
+
+      assert.deepEqual(resolverCalls, ['owner/repo', 'owner/repo']);
+      assert.deepEqual(
+        deliveredMessages.map((message) => message.catId),
+        ['codex-sol', 'codex61-sol'],
+      );
+      assert.deepEqual(
+        triggerCalls.map((call) => call[1]),
+        ['codex-sol', 'codex61-sol'],
+      );
+    });
+
     it('skips delivery if no inbox thread exists for repo', async () => {
       const { opts, deliveredMessages } = createOpts();
       opts.bindingStore = createMockBindingStore(new Map()); // empty

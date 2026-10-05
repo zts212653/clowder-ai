@@ -73,7 +73,7 @@ test('F309 artwork: a video comment gesture cannot cross presented frames', { ti
   await page.getByRole('button', { name: '刷新', exact: true }).first().click();
   await openReviewPanel(page, 'comments');
   await page.getByTestId('review-comment').waitFor();
-  await page.getByRole('button', { name: '关闭审阅面板', exact: true }).click();
+  await page.getByRole('button', { name: '关闭讨论', exact: true }).click();
   const video = page.locator('video');
   await video.evaluate((element) => {
     window.__f309FrameSafetyFrames = [];
@@ -93,7 +93,7 @@ test('F309 artwork: a video comment gesture cannot cross presented frames', { ti
   await selectReviewMode(page, 'comment');
   const annotationKey = `cat-cafe:review:operator:${reviewId}:round:1:annotation`;
   const before = await page.evaluate((key) => localStorage.getItem(key), annotationKey);
-  await page.getByRole('button', { name: '标注 1', exact: true }).focus();
+  await page.getByRole('button', { name: '打开标注 1 的讨论', exact: true }).focus();
   const start = await canvasPoint(page, 320, 80, media);
   const end = await canvasPoint(page, 480, 180, media);
   await page.mouse.move(start.x, start.y);

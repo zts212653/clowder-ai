@@ -3,13 +3,13 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-
 import {
   BuiltinPluginContributionSupervisor,
   ExternalPluginLifecycleService,
   HostInventoryControlPlane,
   MemoryPluginInventoryStore,
 } from '../dist/domains/plugin/index.js';
+import { trackLongRequestTimers } from './helpers/track-long-request-timers.js';
 
 const digest = `sha512-${Buffer.alloc(64, 4).toString('base64')}`;
 
@@ -342,7 +342,8 @@ test('uses typed manifest defaults for the same effective config accepted by rea
   assert.deepEqual(h.launches[0].env, { MODEL: 'default-model', RETRIES: '3', STREAM: 'false' });
 });
 
-test('withdraws tools and projects a diagnostic when the real MCP child exits', async () => {
+test('withdraws tools and projects a diagnostic when the real MCP child exits', async (t) => {
+  const assertNoPendingRequestTimers = trackLongRequestTimers(t);
   const entrypointSource = `
 const readline = require('node:readline');
 const lines = readline.createInterface({ input: process.stdin });
@@ -383,9 +384,11 @@ lines.on('line', (line) => {
   assert.deepEqual(h.supervisor.activeContributionIds('pi_video'), []);
   await assert.rejects(h.supervisor.listPluginTools('dev.clowder.video-analysis'), /is not active/);
   assert.equal(h.releases(), 1);
+  assertNoPendingRequestTimers();
 });
 
-test('uninstall joins in-flight cleanup after one of two real MCP children exits', async () => {
+test('uninstall joins in-flight cleanup after one of two real MCP children exits', async (t) => {
+  const assertNoPendingRequestTimers = trackLongRequestTimers(t);
   const entrypointSource = `
 const fs = require('node:fs');
 const readline = require('node:readline');
@@ -467,6 +470,7 @@ setTimeout(() => { clearInterval(keepAlive); process.exit(0); }, 8_000).unref();
     });
     assert.equal(retired.lifecycleState, 'retired');
     assert.equal(h.releases(), 1);
+    assertNoPendingRequestTimers();
   } finally {
     if (Number.isInteger(stubbornPid)) {
       try {

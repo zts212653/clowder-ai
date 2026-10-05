@@ -123,7 +123,8 @@ describe('F311 Phase 3 owner join over real F267 normalization', () => {
     });
     assert.equal(bundle.frozenCohortRef.ownerStateRef, `measurement-cohort:${committedResult.cohort.sha256}`);
     for (const ref of [bundle.certificateRef, bundle.resultRef, bundle.frozenCohortRef, bundle.exposureProofRef]) {
-      assert.match(ref.ownerStateRef, /^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/);
+      // biome-ignore lint/complexity/noUselessEscapeInRegex: Mirror the portable owner-ref contract used by MCP.
+      assert.match(ref.ownerStateRef, /^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/);
       assert.ok(!ref.ownerStateRef.includes('/'), `${ref.ownerStateRef} leaked a repository path`);
     }
   });

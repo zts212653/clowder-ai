@@ -247,10 +247,11 @@ Evidence:
       'Hub must surface every registered eval domain (count derived from eval-domains/ dir, not hardcoded)',
     );
     assert.equal(summary.counts.registeredDomains, expectedDomainCount);
-    // F245 Phase C: eval:friction registered + enabled:true since PR1b wired the live sink.
+    // F245 Phase C wired eval:friction live; on 2026-10-01 it went dormant (merged into
+    // the F278 paw-feel view). Dormant domains stay visible with enabled:false.
     const frictionDomain = summary.domains.find((d) => d.domainId === 'eval:friction');
     assert.ok(frictionDomain, 'eval:friction must appear in Hub domains');
-    assert.equal(frictionDomain.enabled, true, 'eval:friction enabled:true after PR1b live sink wiring');
+    assert.equal(frictionDomain.enabled, false, 'dormant eval:friction stays visible with enabled:false');
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
     assert.ok(a2aDomain, 'eval:a2a must appear in domains');

@@ -7,6 +7,7 @@ export function OnboardingScene({
   phase,
   mode,
   providers,
+  hasAuthenticatedHuman = false,
   error,
   onBootstrap,
   onAuthenticate,
@@ -16,6 +17,7 @@ export function OnboardingScene({
   readonly phase: ClientPhase;
   readonly mode: EntryMode;
   readonly providers: readonly HumanAuthProviderStatus[];
+  readonly hasAuthenticatedHuman?: boolean;
   readonly error?: string;
   readonly onBootstrap: (displayName: string) => Promise<void>;
   readonly onAuthenticate: () => Promise<void>;
@@ -84,9 +86,13 @@ export function OnboardingScene({
   if (phase === 'create-collective') {
     return (
       <EntryCard
-        eyebrow="第一次建立 Collective"
-        title="给共同家园起个名字"
-        description="你会成为第一位管理者。首启完成后还需绑定 Human 身份，才能邀请成员、连接 Café 或进入日常协作。"
+        eyebrow={hasAuthenticatedHuman ? '选择下一步' : '第一次建立 Collective'}
+        title={hasAuthenticatedHuman ? '建立新的共同家园' : '给共同家园起个名字'}
+        description={
+          hasAuthenticatedHuman
+            ? '你已离开原共同家园。可以在这里新建，也可以从新的邀请链接加入；原公开历史与署名仍会保留。'
+            : '你会成为第一位管理者。首启完成后还需绑定 Human 身份，才能邀请成员、连接 Café 或进入日常协作。'
+        }
         label="Collective 名称"
         defaultValue="Clowder AI Collective"
         button="建立 Collective"

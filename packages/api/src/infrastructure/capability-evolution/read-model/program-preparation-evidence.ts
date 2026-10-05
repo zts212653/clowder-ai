@@ -19,7 +19,7 @@ export async function readPreparationEvidence(
   ownerUserId: string,
   dependencies: EvolutionPreparationDependencies,
 ): Promise<PreparationEvidenceRead[]> {
-  if (body.kind !== 'measurement_plan') return [];
+  if (body.kind !== 'measurement_plan' && body.kind !== 'object_map') return [];
   const cache = new Map<string, Promise<PreparationEvidenceRead['refs'][number]>>();
   const read = (ref: OwnerTruthRefV1) => {
     const key = JSON.stringify(ref);
@@ -49,14 +49,24 @@ export async function readPreparationEvidence(
     cache.set(key, pending);
     return pending;
   };
+  const sources =
+    body.kind === 'object_map'
+      ? body.items.map((item) => ({ sourceKey: item.itemId, refs: item.sourceRefs, connected: true }))
+      : body.gtSources.map((source) => {
+          const collection = source.collection.state !== 'not_connected' ? source.collection.sourceRef : undefined;
+          const proofs = source.validity.state === 'unknown' ? [] : (source.validity.proofRefs ?? []);
+          return {
+            sourceKey: source.sourceKey,
+            refs: [...(collection ? [collection] : []), ...proofs],
+            connected: Boolean(collection),
+          };
+        });
   return Promise.all(
-    body.gtSources.map(async (source): Promise<PreparationEvidenceRead> => {
-      const collection = source.collection.state !== 'not_connected' ? source.collection.sourceRef : undefined;
-      const proofs = source.validity.state === 'unknown' ? [] : (source.validity.proofRefs ?? []);
-      const refs = await Promise.all([...(collection ? [collection] : []), ...proofs].map(read));
+    sources.map(async (source): Promise<PreparationEvidenceRead> => {
+      const refs = await Promise.all(source.refs.map(read));
       const status = refs.some((value) => value.status === 'unavailable')
         ? 'unavailable'
-        : !collection || refs.some((value) => value.status === 'unverified')
+        : !source.connected || refs.length === 0 || refs.some((value) => value.status === 'unverified')
           ? 'unverified'
           : 'available';
       return { sourceKey: source.sourceKey, status, refs };

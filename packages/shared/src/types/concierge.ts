@@ -32,6 +32,8 @@ export interface ConciergeConfig {
   ballSize?: number;
   /** 自主行为引擎开关 (E4, default true). When false, cat stays in business-projected state. */
   behaviorEnabled?: boolean;
+  /** Household lookup choice shared by all companion surfaces; absent means the owner default (allowed). */
+  householdReadsAllowed?: boolean;
 }
 
 // ---------------------------------------------------------------------------

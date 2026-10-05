@@ -80,3 +80,28 @@ test('recalled, tombstoned, canceled and unpublished stream outputs cannot certi
     assert.equal(await reader([{ ...publication, ...patch }]).readPreparedArtifact(input), null);
   }
 });
+
+test('a read scope deduplicates concurrent scans without sharing owner or thread authority', async () => {
+  let reads = 0;
+  const reader = new F232PreparedArtifactReader({
+    messages: {
+      async getByThread() {
+        reads++;
+        await new Promise((resolve) => setImmediate(resolve));
+        return [publication];
+      },
+      async getByThreadBefore() {
+        return [];
+      },
+    },
+  });
+  const scope = reader.createReadScope();
+  const rows = await Promise.all(Array.from({ length: 20 }, () => scope.readPreparedArtifact(input)));
+  assert.equal(reads, 1);
+  assert.ok(rows.every((row) => row.artifactRevision === '700'));
+  assert.equal(await scope.readPreparedArtifact({ ...input, ownerUserId: 'foreign' }), null);
+  assert.equal(await scope.readPreparedArtifact({ ...input, taskThreadId: 'foreign-thread' }), null);
+  assert.equal(reads, 3, 'scope keys must include owner and thread');
+  await reader.readPreparedArtifact(input);
+  assert.equal(reads, 4, 'a direct owner read cannot reuse a list snapshot');
+});

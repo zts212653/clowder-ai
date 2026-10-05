@@ -10,17 +10,18 @@ interface OpenMemberOrder {
 export interface AttentionOrderSnapshot {
   itemKeys: string[];
   openGroups: Record<string, OpenMemberOrder>;
+  outsideWorkingOrder: string[];
 }
 
 export function attentionItemKey(item: AttentionRenderItem): string {
   return item.kind === 'thread' ? `thread:${item.thread.id}` : item.cluster.anchor;
 }
 
-function sameIds(left: readonly string[], right: readonly string[]): boolean {
+function sameSequence(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index]);
 }
 
-/** Cache identities only: every rendered fact still comes from the current Sidebar snapshot. */
+/** Retain order metadata only; rendered facts always come from the current Sidebar snapshot. */
 export function orderAttentionList(
   items: readonly AttentionRenderItem[],
   isOpen: (cluster: AttentionCluster) => boolean,
@@ -36,7 +37,7 @@ export function orderAttentionList(
     const prior = previous?.openGroups[anchor];
     const members = new Map(item.members.map((member) => [member.id, member]));
     const ids =
-      prior && prior.mode === mode && sameIds(prior.sourceIds, sourceIds)
+      prior && prior.mode === mode && sameSequence(prior.sourceIds, sourceIds)
         ? prior.ids
         : mode === 'running-first'
           ? [
@@ -54,9 +55,27 @@ export function orderAttentionList(
     };
   });
 
-  // Keep the surrounding list stable for an ongoing reading session too. Closing all Groups
-  // releases the hold. Removed rows disappear; new rows join after existing visible rows.
-  const keepPlacement = previous && Object.keys(openGroups).some((anchor) => previous.openGroups[anchor]);
+  // Reading a Group must not freeze unrelated work. Only retain its placement while
+  // working-order inputs outside open Groups are unchanged. Stable IDs alone miss a
+  // refined start time or a different working member of the same closed Group.
+  // These signatures release the hold; canonical sorting stays upstream.
+  const outsideWorkingOrder = ordered.flatMap((item) => {
+    if (item.kind === 'cluster' && openGroups[item.cluster.anchor]) return [];
+    const working = (item.kind === 'thread' ? [item.thread] : item.members).filter(
+      (member) => member.presence.status === 'working',
+    );
+    if (working.length === 0) return [];
+    return [
+      JSON.stringify([
+        attentionItemKey(item),
+        working.map((member) => [member.id, member.pinned, member.presence.activeSince ?? Number.MAX_SAFE_INTEGER]),
+      ]),
+    ];
+  });
+  const keepPlacement =
+    previous &&
+    Object.keys(openGroups).some((anchor) => previous.openGroups[anchor]) &&
+    sameSequence(previous.outsideWorkingOrder, outsideWorkingOrder);
   const byKey = new Map(ordered.map((item) => [attentionItemKey(item), item]));
   const currentKeys = ordered.map(attentionItemKey);
   const priorKeys = new Set(previous?.itemKeys);
@@ -68,6 +87,6 @@ export function orderAttentionList(
       const item = byKey.get(key);
       return item ? [item] : [];
     }),
-    snapshot: { itemKeys, openGroups },
+    snapshot: { itemKeys, openGroups, outsideWorkingOrder },
   };
 }

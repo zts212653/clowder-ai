@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -102,6 +103,85 @@ test(
       if (browser) await browser.close();
       await stopServer(server);
       await nextDev.cleanup();
+    }
+  },
+);
+
+test(
+  'selective PNG waits for an offscreen delayed paw-feel projection in single and stitched captures',
+  { timeout: 120_000 },
+  async (t) => {
+    let sourceRequests = 0;
+    const api = createHttpServer(async (request, response) => {
+      response.setHeader('Access-Control-Allow-Origin', request.headers.origin ?? '*');
+      response.setHeader('Access-Control-Allow-Credentials', 'true');
+      response.setHeader('Access-Control-Allow-Headers', 'X-Cat-Cafe-User, Content-Type');
+      response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      response.setHeader('Content-Type', 'application/json');
+      if (request.method === 'OPTIONS') {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      if (request.url?.startsWith('/api/paw-feel/source/')) {
+        sourceRequests++;
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        response.end(
+          JSON.stringify({
+            projectionStatus: 'available',
+            degraded: false,
+            items: [
+              {
+                disposition: { signalId: 'export-fixture', state: 'seen', lastTransitionAt: '2026-09-30T00:00:00Z' },
+                responsibility: { state: 'unreviewed', validExit: false, evidenceRefs: [] },
+                issue: { resolution: 'open', ageMs: 0, continuation: { kind: 'review_required', evidenceRefs: [] } },
+                source: { availability: 'available' },
+              },
+            ],
+          }),
+        );
+      } else {
+        response.end('{}');
+      }
+    });
+    api.listen(0, '127.0.0.1');
+    await once(api, 'listening');
+    const apiAddress = api.address();
+    assert(apiAddress && typeof apiAddress !== 'string');
+    const port = await findFreePort();
+    const output = [];
+    const nextDev = await createNextDevTestEnvironment('paw-feel-export', {
+      NEXT_PUBLIC_API_URL: `http://127.0.0.1:${apiAddress.port}`,
+    });
+    const server = spawn(process.execPath, [NEXT_BIN, 'dev', '-H', '127.0.0.1', '-p', String(port)], {
+      cwd: WEB_ROOT,
+      env: nextDev.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    server.stdout.on('data', (chunk) => output.push(chunk.toString()));
+    server.stderr.on('data', (chunk) => output.push(chunk.toString()));
+    const exporter = new ImageExporter();
+    try {
+      const url = `http://127.0.0.1:${port}/dev/f294-long-message-export`;
+      await waitForPage(url, server, output);
+      for (const fixture of ['paw-feel-short', 'paw-feel-tall']) {
+        await t.test(fixture, async () => {
+          const png = await exporter.capture(`${url}?fixture=${fixture}`, 'browser-test-user', {
+            selectionMessageIds: [MESSAGE_ID],
+          });
+          const metadata = await sharp(png).metadata();
+          assert.ok(fixture === 'paw-feel-short' ? metadata.height < 4000 : metadata.height > 4000);
+          const magentaPixels = await countMagentaPixels(png);
+          assert.ok(magentaPixels > 20_000, `PNG omitted the bottom disposition dock (${magentaPixels} pixels)`);
+        });
+      }
+      assert.equal(sourceRequests, 2, 'each export must load one source snapshot without viewport reloads');
+    } finally {
+      await exporter.close();
+      await stopServer(server);
+      await nextDev.cleanup();
+      api.closeAllConnections();
+      await new Promise((resolve, reject) => api.close((error) => (error ? reject(error) : resolve())));
     }
   },
 );

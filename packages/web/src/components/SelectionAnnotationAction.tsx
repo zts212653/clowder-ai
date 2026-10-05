@@ -15,6 +15,8 @@ interface SelectionAnnotationActionProps {
   /** F294: optional cross-thread path. Unlike Add to chat, Comment may be empty. */
   onForward?: (comment: string) => void;
   initialComment?: string;
+  /** Opens straight into the editor, for text that is already chosen (e.g. an old draft being continued). */
+  initialEditing?: boolean;
   triggerContent?: ReactNode;
   triggerClassName?: string;
   onDelete?: () => void;
@@ -57,13 +59,14 @@ export function SelectionAnnotationAction({
   onSave,
   onForward,
   initialComment = '',
+  initialEditing = false,
   triggerContent,
   triggerClassName,
   onDelete,
   onOpen,
   onClose,
 }: SelectionAnnotationActionProps) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialEditing);
   const [comment, setComment] = useState(initialComment);
   const commentRef = useRef<HTMLTextAreaElement>(null);
   const commentId = useId();
@@ -72,9 +75,9 @@ export function SelectionAnnotationAction({
 
   useEffect(() => {
     void selectedText;
-    setEditing(false);
+    setEditing(initialEditing);
     setComment(initialComment);
-  }, [initialComment, selectedText]);
+  }, [initialComment, initialEditing, selectedText]);
 
   useLayoutEffect(() => {
     if (editing) commentRef.current?.focus();

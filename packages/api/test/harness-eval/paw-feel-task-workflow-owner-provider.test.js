@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { queryTaskItems } from '../../dist/domains/cats/services/stores/ports/TaskQuery.js';
+import { inspectPawFeelMessage } from '../../dist/infrastructure/harness-eval/friction/paw-feel-source.js';
 import { PawFeelDirectRepairBindingVerifier } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-binding-verifier.js';
 import { PawFeelDirectRepairFederation } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-federation.js';
 import { PawFeelDirectRepairOutcomeResolver } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-outcome-resolver.js';
@@ -8,6 +9,7 @@ import { PawFeelDirectRepairResolver } from '../../dist/infrastructure/harness-e
 import { defaultPawFeelSourceToolClassifier } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-source.js';
 import {
   F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+  f160ListTasksFeatureFilterRepairAction,
   TASK_WORKFLOW_PAW_FEEL_PROVIDER_ROUTE,
 } from '../../dist/infrastructure/harness-eval/paw-feel-disposition/providers/task-workflow-owner-provider.js';
 import {
@@ -27,6 +29,9 @@ import {
   sourceVerifier,
 } from './helpers/paw-feel-task-workflow-owner-provider-fixture.js';
 
+const F299_ACTION = f160ListTasksFeatureFilterRepairAction('F299');
+const F313_ACTION = f160ListTasksFeatureFilterRepairAction('F313');
+
 describe('F313/F160 concrete task-workflow direct-repair owner provider', () => {
   it('routes only the exact list_tasks tool and binds the active owner custody to the immutable source', async () => {
     const sourceToolRef = defaultPawFeelSourceToolClassifier('cat_cafe_list_tasks');
@@ -38,12 +43,13 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     const decision = await provider(fixture).resolveAuthority({
       source: { ...providerSource(), sourceToolRef },
       custody: providerCustody(fixture),
-      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+      actionRef: F299_ACTION,
     });
     assert.equal(decision.status, 'authorized');
     assert.equal(decision.authority.ownerCatId, OWNER_CAT_ID);
     assert.equal(decision.authority.targetVersionRef.version, BASE_REVISION);
     assert.equal(decision.authority.targetVersionRef.assetId, 'cat_cafe_list_tasks');
+    assert.equal(decision.authority.actionScopeRef.ownerStateRef, 'task-action-scope:list-feature-filter:feature:F299');
 
     const wrongAction = await provider(fixture).resolveAuthority({
       source: { ...providerSource(), sourceToolRef },
@@ -55,7 +61,7 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     const wrongOwner = await provider(fixture).resolveAuthority({
       source: { ...providerSource(), sourceToolRef },
       custody: { ...providerCustody(fixture), ownerCatId: 'opus' },
-      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+      actionRef: F299_ACTION,
     });
     assert.equal(wrongOwner.status, 'blocked');
     assert.equal(wrongOwner.reason, 'owner_mismatch');
@@ -64,10 +70,136 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     const terminalCustody = await provider(fixture).resolveAuthority({
       source: { ...providerSource(), sourceToolRef },
       custody: providerCustody(fixture),
-      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+      actionRef: F299_ACTION,
     });
     assert.equal(terminalCustody.status, 'blocked');
     assert.equal(terminalCustody.reason, 'owner_mismatch');
+  });
+
+  it('reuses the tool-scoped provider for another verified list_tasks source', async () => {
+    const baseFixture = createFixture();
+    const anotherMessage = {
+      ...SOURCE_MESSAGE,
+      id: 'message-another-list-tasks-source',
+      content: '[爪感差: cat_cafe_list_tasks featureId=F313 的查询结果不完整]',
+    };
+    const inspection = inspectPawFeelMessage(anotherMessage);
+    assert.equal(inspection.kind, 'canonical');
+    const candidate = inspection.candidates[0];
+    const fixture = {
+      ...baseFixture,
+      messageStore: {
+        async getById(messageId) {
+          return messageId === anotherMessage.id ? anotherMessage : baseFixture.messageStore.getById(messageId);
+        },
+      },
+    };
+    const decision = await provider(fixture).resolveAuthority({
+      source: {
+        ...providerSource(),
+        sourceMessageId: anotherMessage.id,
+        sourceSignalRef: {
+          ownerFeatureId: 'F278',
+          ownerStateRef: `paw-feel-signal:${candidate.signalId}`,
+          version: `${candidate.markerDigest}:0`,
+        },
+        markerDigest: candidate.markerDigest,
+      },
+      custody: providerCustody(baseFixture),
+      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+    });
+
+    assert.equal(decision.status, 'authorized');
+    assert.equal(decision.authority.actionScopeRef.ownerStateRef, 'task-action-scope:list-feature-filter:feature:F313');
+  });
+
+  it('uses the repair goal instead of guessing from one or many source-thread Task features', async () => {
+    const fixture = createFixture();
+    fixture.taskStore.create({
+      threadId: SOURCE_MESSAGE.threadId,
+      title: 'ambiguous second feature',
+      why: 'the source thread no longer names one verification scope',
+      createdBy: OWNER_CAT_ID,
+      ownerCatId: OWNER_CAT_ID,
+      userId: 'owner-1',
+      relatedFeatureId: 'F313',
+    });
+    const decision = await provider(fixture).resolveAuthority({
+      source: providerSource(),
+      custody: providerCustody(fixture),
+      actionRef: F299_ACTION,
+    });
+
+    assert.equal(decision.status, 'authorized');
+    assert.equal(decision.authority.actionScopeRef.ownerStateRef, 'task-action-scope:list-feature-filter:feature:F299');
+
+    const otherDecision = await provider(fixture).resolveAuthority({
+      source: providerSource(),
+      custody: providerCustody(fixture),
+      actionRef: F313_ACTION,
+    });
+    assert.equal(otherDecision.status, 'authorized');
+    assert.equal(
+      otherDecision.authority.actionScopeRef.ownerStateRef,
+      'task-action-scope:list-feature-filter:feature:F313',
+    );
+  });
+
+  it('binds an exact named source operation and rejects a thread-affiliated substitute', async () => {
+    const sourceMessage = {
+      ...SOURCE_MESSAGE,
+      content: '[爪感差: cat_cafe_list_tasks 所在 F299 thread 里的 featureId=F777 查询仍被截断，无法获得完整任务]',
+    };
+    const fixture = createFixture({ sourceMessage });
+    for (let index = 0; index < 60; index += 1) {
+      fixture.taskStore.create({
+        threadId: 'thread-repair',
+        title: `F777 task ${index}`,
+        why: 'reported operation target',
+        createdBy: OWNER_CAT_ID,
+        ownerCatId: OWNER_CAT_ID,
+        userId: 'owner-1',
+        relatedFeatureId: 'F777',
+      });
+    }
+    const inspection = inspectPawFeelMessage(sourceMessage);
+    assert.equal(inspection.kind, 'canonical');
+    const candidate = inspection.candidates[0];
+    const projection = sourceProjection({
+      signalId: candidate.signalId,
+      markerDigest: candidate.markerDigest,
+      sameDigestOrdinal: candidate.sameDigestOrdinal,
+      markerIndex: candidate.markerIndex,
+    });
+    const binding = await resolveBinding(fixture, {
+      projection,
+      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+    });
+    assert.equal(binding.actionScopeRef.ownerStateRef, 'task-action-scope:list-feature-filter:feature:F777');
+
+    const affiliatedQuery = await queryTaskItems(fixture.taskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F299',
+    });
+    await assert.rejects(
+      provider(fixture).verifyOutcome({
+        binding,
+        ownerOutcomeRef: affiliatedQuery.queryRef,
+        taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
+        leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'lease-terminal:lease-1' },
+      }),
+      /source-bound feature scope/u,
+    );
+
+    await assert.rejects(resolveBinding(fixture, { projection, actionRef: F299_ACTION }), /action_source_mismatch/u);
+  });
+
+  it('rejects an unscoped repair goal when the canonical source names no query target', async () => {
+    await assert.rejects(
+      resolveBinding(createFixture(), { actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION }),
+      /action_source_mismatch/u,
+    );
   });
 
   it('rejects a missing owner scope or oversized feature ID before reading task storage', async () => {
@@ -124,7 +256,7 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     const admission = await resolver.resolve({
       projection: sourceProjection(),
       leaseId: 'lease-1',
-      actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
+      actionRef: F299_ACTION,
     });
     assert.equal(admission.status, 'authorized');
 
@@ -183,25 +315,146 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     assert.equal('payload' in outcome, false);
   });
 
+  it('links a fresh bounded query when the repair was already loaded before the binding', async () => {
+    const fixture = createFixture();
+    const binding = await resolveBinding(fixture);
+    fixture.taskStore.create({
+      threadId: SOURCE_MESSAGE.threadId,
+      title: 'post-binding source-thread metadata change',
+      why: 'must not retarget the immutable repair goal',
+      createdBy: OWNER_CAT_ID,
+      ownerCatId: OWNER_CAT_ID,
+      userId: 'owner-1',
+      relatedFeatureId: 'F313',
+    });
+    const query = await queryTaskItems(fixture.taskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F299',
+    });
+    assert.ok(query.queryRef);
+
+    const outcome = await provider(
+      fixture,
+      gitTruth({ loadedRevision: BASE_REVISION, mainRevision: BASE_REVISION, changedFiles: [] }),
+    ).verifyOutcome({
+      binding,
+      ownerOutcomeRef: query.queryRef,
+      taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
+      leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'action-terminal:lease-1', version: '1:2' },
+    });
+
+    assert.equal(outcome.disposition, 'verified_changed');
+    assert.ok(outcome.verificationRefs.some((ref) => ref.ownerStateRef.startsWith('loaded-runtime:')));
+  });
+
+  it('fails closed on a legacy provider-v1 binding that never froze an operation scope', async () => {
+    const fixture = createFixture();
+    const binding = await resolveBinding(fixture);
+    const legacyBinding = {
+      ...binding,
+      actionScopeRef: {
+        ownerFeatureId: 'F160',
+        ownerStateRef: 'task-action-scope:list-feature-filter',
+        version: '1',
+      },
+    };
+    const query = await queryTaskItems(fixture.taskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F299',
+    });
+    assert.ok(query.queryRef);
+
+    fixture.taskStore.create({
+      threadId: SOURCE_MESSAGE.threadId,
+      title: 'later unrelated thread metadata',
+      why: 'must not assign a verification object to the old binding',
+      createdBy: OWNER_CAT_ID,
+      ownerCatId: OWNER_CAT_ID,
+      userId: 'owner-1',
+      relatedFeatureId: 'F313',
+    });
+    await assert.rejects(
+      provider(fixture).verifyOutcome({
+        binding: legacyBinding,
+        ownerOutcomeRef: query.queryRef,
+        taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
+        leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'action-terminal:lease-1', version: '1:2' },
+      }),
+      /canonical feature-query scope/u,
+    );
+  });
+
+  it('verifies a repair-owner-selected second feature without source-thread affinity', async () => {
+    const fixture = createFixture();
+    const binding = await resolveBinding(fixture, { actionRef: F313_ACTION });
+    const query = await queryTaskItems(fixture.taskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F313',
+    });
+    assert.equal(query.totalMatched, 1);
+    assert.ok(query.queryRef);
+
+    const outcome = await provider(fixture).verifyOutcome({
+      binding,
+      ownerOutcomeRef: query.queryRef,
+      taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
+      leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'action-terminal:lease-1', version: '1:2' },
+    });
+
+    assert.equal(outcome.disposition, 'verified_changed');
+    assert.ok(outcome.verificationRefs.some((ref) => ref.ownerStateRef.startsWith('task-query:feature:F313:')));
+  });
+
+  it('accepts an honest empty feature query as a bounded owner result', async () => {
+    const fixture = createFixture();
+    const binding = await resolveBinding(fixture);
+    const emptyTaskStore = {
+      get(taskId) {
+        return fixture.taskStore.get(taskId);
+      },
+      async listByThread(threadId) {
+        return (await fixture.taskStore.listByThread(threadId)).filter((task) => task.relatedFeatureId !== 'F299');
+      },
+    };
+    const query = await queryTaskItems(emptyTaskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F299',
+    });
+    assert.equal(query.totalMatched, 0);
+    assert.ok(query.queryRef);
+
+    const outcome = await provider({ ...fixture, taskStore: emptyTaskStore }).verifyOutcome({
+      binding,
+      ownerOutcomeRef: query.queryRef,
+      taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
+      leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'action-terminal:lease-1', version: '1:2' },
+    });
+
+    assert.equal(outcome.disposition, 'verified_changed');
+    assert.ok(outcome.verificationRefs.some((ref) => ref.ownerStateRef.startsWith('task-query:feature:F299:')));
+  });
+
   it('rejects source/auth drift, stale query refs, unrelated Git deltas, and a still-truncated feature query', async () => {
-    const cases = [
-      createFixture({
-        sourceMessage: { ...SOURCE_MESSAGE, content: SOURCE_MESSAGE.content.replace('featureId', 'feature') },
+    const sourceDrift = createFixture({
+      sourceMessage: { ...SOURCE_MESSAGE, content: SOURCE_MESSAGE.content.replace('featureId', 'feature') },
+    });
+    await assert.rejects(resolveBinding(sourceDrift), /source/i);
+
+    const authorizationDrift = createFixture({
+      authorization: { ...AUTHORIZATION_MESSAGE, content: `${AUTHORIZATION_MESSAGE.content} changed` },
+    });
+    await assert.rejects(
+      provider(authorizationDrift).resolveAuthority({
+        source: providerSource(),
+        custody: providerCustody(authorizationDrift),
+        actionRef: F299_ACTION,
       }),
-      createFixture({
-        authorization: { ...AUTHORIZATION_MESSAGE, content: `${AUTHORIZATION_MESSAGE.content} changed` },
-      }),
-    ];
-    for (const fixture of cases) {
-      await assert.rejects(
-        provider(fixture).resolveAuthority({
-          source: providerSource(),
-          custody: providerCustody(fixture),
-          actionRef: F160_LIST_TASKS_FEATURE_FILTER_REPAIR_ACTION,
-        }),
-        /source|authorization/i,
-      );
-    }
+      /authorization/i,
+    );
 
     const fixture = createFixture();
     const binding = await resolveBinding(fixture);
@@ -218,6 +471,12 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
     assert.equal(query.totalMatched, 2);
     assert.equal(otherOwnerQuery.totalMatched, 1);
     assert.notDeepEqual(query.queryRef, otherOwnerQuery.queryRef);
+    const unrelatedQuery = await queryTaskItems(fixture.taskStore, {
+      threadIds: ['default', SOURCE_MESSAGE.threadId, 'thread-repair'],
+      ownerUserId: 'owner-1',
+      featureId: 'F99999',
+    });
+    assert.ok(unrelatedQuery.queryRef);
     const terminals = {
       taskTerminalRef: { ownerFeatureId: 'F313', ownerStateRef: `task-terminal:${fixture.custodyTask.id}` },
       leaseTerminalRef: { ownerFeatureId: 'F167', ownerStateRef: 'lease-terminal:lease-1' },
@@ -229,6 +488,10 @@ describe('F313/F160 concrete task-workflow direct-repair owner provider', () => 
         mainRevision: MAIN_REVISION,
         changedFiles: ['packages/api/src/domains/cats/services/stores/ports/TaskQuery.ts'],
       }),
+    );
+    await assert.rejects(
+      relevantLoaded.verifyOutcome({ binding, ownerOutcomeRef: unrelatedQuery.queryRef, ...terminals }),
+      /source-bound feature scope/u,
     );
     await assert.rejects(
       relevantLoaded.verifyOutcome({

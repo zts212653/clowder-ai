@@ -9,6 +9,7 @@ import { MarkdownContent } from '../MarkdownContent';
 import { CodeViewer } from './CodeViewer';
 import { JsxPreview } from './JsxPreview';
 import type { MarkdownSelectionAction } from './useMarkdownSelectionAction';
+import type { WorkspaceFileSave } from './workspace-file-draft';
 
 export interface FileContentRendererProps {
   file: FileData;
@@ -26,7 +27,7 @@ export interface FileContentRendererProps {
   mdContainerRef: React.RefObject<HTMLDivElement>;
   mdSelectionAction: MarkdownSelectionAction | null;
   onMdAddToChat: (action: MarkdownSelectionAction, comment: string) => void;
-  onSave: (c: string) => Promise<void>;
+  onSave: WorkspaceFileSave;
   onDirtyChange?: (dirty: boolean) => void;
   rawUrl: (p: string) => string;
   revealInFinder: (path: string) => void;
@@ -197,6 +198,7 @@ export function FileContentRenderer({
             content={maskLeadingMarkdownFrontmatter(file.content)}
             disableCommandPrefix
             basePath={openFilePath ? openFilePath.split('/').slice(0, -1).join('/') : undefined}
+            sourcePath={openFilePath ?? undefined}
             worktreeId={worktreeId ?? undefined}
             listenSentences={listenSentences}
             activeListenAnchor={activeListenAnchor}
@@ -258,6 +260,7 @@ export function FileContentRenderer({
       onDirtyChange={onDirtyChange}
       branch={currentWorktree?.branch}
       worktreeId={worktreeId}
+      baseSha256={file.sha256}
       restoreScrollTop={restoreScrollTop}
       restoreKey={restoreKey}
       onScrollTopChange={onScrollTopChange}

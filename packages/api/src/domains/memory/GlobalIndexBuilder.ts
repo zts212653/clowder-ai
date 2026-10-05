@@ -4,7 +4,8 @@
  * a read-only SqliteEvidenceStore for federated search via KnowledgeResolver.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { EvidenceItem, EvidenceKind, RebuildResult } from './interfaces.js';
 import type { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -38,6 +39,7 @@ export interface GlobalRebuildResult extends RebuildResult {
 }
 
 export class GlobalIndexBuilder {
+  private rebuildInFlight: Promise<GlobalRebuildResult> | null = null;
   private readonly skillsRoot: string;
   private readonly memoryRoot: string;
   private readonly store: SqliteEvidenceStore;
@@ -52,11 +54,20 @@ export class GlobalIndexBuilder {
     this.distilledRoot = config.distilledRoot;
   }
 
-  async rebuild(): Promise<GlobalRebuildResult> {
+  rebuild(): Promise<GlobalRebuildResult> {
+    if (this.rebuildInFlight) return this.rebuildInFlight;
+    const work = this.rebuildOnce().finally(() => {
+      if (this.rebuildInFlight === work) this.rebuildInFlight = null;
+    });
+    this.rebuildInFlight = work;
+    return work;
+  }
+
+  private async rebuildOnce(): Promise<GlobalRebuildResult> {
     const start = Date.now();
-    const memories = this.discoverMemories();
-    const distilled = this.discoverDistilledTruths();
-    const items = [...this.discoverSkills(), ...memories.global, ...distilled];
+    const memories = await this.discoverMemories();
+    const distilled = await this.discoverDistilledTruths();
+    const items = [...(await this.discoverSkills()), ...memories.global, ...distilled];
 
     // Privacy-first order: purge stale/global-personal rows before writing the private
     // projection. A crash may reduce recall availability, but cannot retain the leak.
@@ -97,13 +108,13 @@ export class GlobalIndexBuilder {
 
   // ── Skills discovery ──────────────────────────────────────────────
 
-  private discoverSkills(): EvidenceItem[] {
+  private async discoverSkills(): Promise<EvidenceItem[]> {
     if (!existsSync(this.skillsRoot)) return [];
     const items: EvidenceItem[] = [];
 
-    for (const entry of readdirSync(this.skillsRoot, { withFileTypes: true })) {
+    for (const entry of await readdir(this.skillsRoot, { withFileTypes: true })) {
       if (entry.name === 'refs') {
-        items.push(...this.indexDir(join(this.skillsRoot, 'refs'), 'decision', 'global:ref'));
+        items.push(...(await this.indexDir(join(this.skillsRoot, 'refs'), 'decision', 'global:ref')));
         continue;
       }
       if (!entry.isDirectory()) continue;
@@ -111,7 +122,7 @@ export class GlobalIndexBuilder {
       const skillPath = join(this.skillsRoot, entry.name, 'SKILL.md');
       if (!existsSync(skillPath)) continue;
 
-      const content = readFileSync(skillPath, 'utf-8');
+      const content = await readFile(skillPath, 'utf-8');
       const fm = parseFrontmatter(content);
       items.push({
         anchor: `global:skill/${entry.name}`,
@@ -119,7 +130,7 @@ export class GlobalIndexBuilder {
         status: 'active',
         title: fm?.name ?? entry.name,
         summary: fm?.description ?? content.slice(0, 300),
-        updatedAt: statSync(skillPath).mtime.toISOString(),
+        updatedAt: (await stat(skillPath)).mtime.toISOString(),
       });
     }
     return items;
@@ -127,25 +138,25 @@ export class GlobalIndexBuilder {
 
   // ── Memory discovery ──────────────────────────────────────────────
 
-  private discoverMemories(): {
+  private async discoverMemories(): Promise<{
     global: EvidenceItem[];
     personal: Array<{ globalAnchor: string; item: EvidenceItem }>;
-  } {
+  }> {
     if (!existsSync(this.memoryRoot)) return { global: [], personal: [] };
     const global: EvidenceItem[] = [];
     const personal: Array<{ globalAnchor: string; item: EvidenceItem }> = [];
 
-    for (const projEntry of readdirSync(this.memoryRoot, { withFileTypes: true })) {
+    for (const projEntry of await readdir(this.memoryRoot, { withFileTypes: true })) {
       if (!projEntry.isDirectory()) continue;
       const memDir = join(this.memoryRoot, projEntry.name, 'memory');
       if (!existsSync(memDir)) continue;
 
       const slug = extractProjectSlug(projEntry.name);
 
-      for (const file of readdirSync(memDir)) {
+      for (const file of await readdir(memDir)) {
         if (!file.endsWith('.md') || file === 'MEMORY.md') continue;
         const filePath = join(memDir, file);
-        const content = readFileSync(filePath, 'utf-8');
+        const content = await readFile(filePath, 'utf-8');
         const fm = parseFrontmatter(content);
         const stem = file.replace(/\.md$/, '');
         const memType = fm?.type ?? 'reference';
@@ -157,7 +168,7 @@ export class GlobalIndexBuilder {
           status: 'active',
           title: fm?.name ?? extractTitle(content) ?? stem,
           summary: fm?.description ?? content.slice(0, 300),
-          updatedAt: statSync(filePath).mtime.toISOString(),
+          updatedAt: (await stat(filePath)).mtime.toISOString(),
         };
 
         if (isPersonalMemorySource(stem, fm)) {
@@ -175,14 +186,14 @@ export class GlobalIndexBuilder {
 
   // ── Distilled truths discovery (F152 Phase C) ─────────────────────
 
-  private discoverDistilledTruths(): EvidenceItem[] {
+  private async discoverDistilledTruths(): Promise<EvidenceItem[]> {
     if (!this.distilledRoot || !existsSync(this.distilledRoot)) return [];
     const items: EvidenceItem[] = [];
 
-    for (const file of readdirSync(this.distilledRoot)) {
+    for (const file of await readdir(this.distilledRoot)) {
       if (!file.endsWith('.md')) continue;
       const filePath = join(this.distilledRoot, file);
-      const content = readFileSync(filePath, 'utf-8');
+      const content = await readFile(filePath, 'utf-8');
       const fm = parseFrontmatter(content);
 
       // Only include files with type: distilled frontmatter
@@ -222,7 +233,7 @@ export class GlobalIndexBuilder {
         title,
         summary: summary || content.slice(0, 300),
         keywords,
-        updatedAt: statSync(filePath).mtime.toISOString(),
+        updatedAt: (await stat(filePath)).mtime.toISOString(),
       });
     }
     return items;
@@ -230,14 +241,14 @@ export class GlobalIndexBuilder {
 
   // ── Helpers ────────────────────────────────────────────────────────
 
-  private indexDir(dirPath: string, kind: EvidenceKind, anchorPrefix: string): EvidenceItem[] {
+  private async indexDir(dirPath: string, kind: EvidenceKind, anchorPrefix: string): Promise<EvidenceItem[]> {
     if (!existsSync(dirPath)) return [];
     const items: EvidenceItem[] = [];
 
-    for (const file of readdirSync(dirPath)) {
+    for (const file of await readdir(dirPath)) {
       if (!file.endsWith('.md')) continue;
       const filePath = join(dirPath, file);
-      const content = readFileSync(filePath, 'utf-8');
+      const content = await readFile(filePath, 'utf-8');
       const fm = parseFrontmatter(content);
       const stem = file.replace(/\.md$/, '');
 
@@ -247,7 +258,7 @@ export class GlobalIndexBuilder {
         status: 'active',
         title: fm?.name ?? extractTitle(content) ?? stem,
         summary: fm?.description ?? content.slice(0, 300),
-        updatedAt: statSync(filePath).mtime.toISOString(),
+        updatedAt: (await stat(filePath)).mtime.toISOString(),
       });
     }
     return items;

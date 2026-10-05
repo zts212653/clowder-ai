@@ -17,6 +17,7 @@ redis.call('HSET', KEYS[1],
   'executionKind', ARGV[7],
   'startedAt', ARGV[8],
   'causal', ARGV[9],
+  'queueCompletionPolicy', ARGV[10] or '',
   'status', 'running',
   'endedAt', '',
   'terminalReason', '')

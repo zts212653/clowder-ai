@@ -1,10 +1,12 @@
 import { strict as assert } from 'node:assert';
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { findAddedUiPictographs } from './check-no-new-ui-emoji.mjs';
+import { findAddedUiPictographs, runGit } from './check-no-new-ui-emoji.mjs';
 
 const SCRIPT_PATH = fileURLToPath(new URL('./check-no-new-ui-emoji.mjs', import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -108,6 +110,30 @@ test('allows only reasoned cat-paw expression copy, not semantic pictographs', (
   assert.deepEqual(findAddedUiPictographs(allowed), []);
   assert.equal(findAddedUiPictographs(unmarked).length, 1);
   assert.equal(findAddedUiPictographs(semantic).length, 1);
+});
+
+test('reads git output larger than the 1 MiB default instead of failing closed', (t) => {
+  // A throwaway repository with one committed 1.5 MiB file: independent of this repo's history depth.
+  const fixture = mkdtempSync(join(tmpdir(), 'ui-emoji-guard-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const git = (...args) =>
+    execFileSync(
+      'git',
+      ['-c', 'user.name=guard', '-c', 'user.email=guard@test', '-c', 'commit.gpgsign=false', ...args],
+      {
+        cwd: fixture,
+        stdio: 'ignore',
+      },
+    );
+  git('init', '-q');
+  writeFileSync(join(fixture, 'large.txt'), `${'x'.repeat(127)}\n`.repeat(12 * 1024));
+  git('add', 'large.txt');
+  git('commit', '-q', '-m', 'large fixture');
+
+  const output = runGit(['show', 'HEAD:large.txt'], { cwd: fixture });
+  assert.equal(output.length, 1.5 * 1024 * 1024);
+  // Node's 1 MiB default is exactly what used to make this guard fail closed on a large branch diff.
+  assert.throws(() => runGit(['show', 'HEAD:large.txt'], { cwd: fixture, maxBuffer: 1024 * 1024 }), /ENOBUFS/u);
 });
 
 test('fails closed when the requested git comparison cannot be read', () => {

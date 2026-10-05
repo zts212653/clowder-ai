@@ -5,6 +5,7 @@ import { refIdentity } from '@cat-cafe/shared';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import {
   accessibleExplorationNode,
+  chooseExplorationComparison as chooseComparison,
   chooseExplorationRun as chooseRun,
   chooseExplorationVersion as chooseVersion,
   corruptStoredExplorationSibling,
@@ -95,8 +96,9 @@ test(
       assert.equal(await work.getByLabel('选择本版实验').locator('option:not([disabled])').count(), 3);
       for (const run of runsFor('v3')) await chooseRun(work, run);
       await verifySameRunGuard({ work, runs: runsFor('v3'), chooseRun });
-      const disclosure = work.locator('details.exploration-lineage-disclosure');
-      assert.equal(await disclosure.evaluate((element) => element.open), true);
+      const map = work.locator('.exploration-embedded-map');
+      assert.equal(await map.isVisible(), true);
+      await contained(work.locator('.exploration-canvas-tools'));
       const canvas = work.getByRole('application', { name: '可平移缩放的版本画布' });
       const world = work.locator('.exploration-canvas-world');
       await work.getByRole('button', { name: '看全图', exact: true }).click();
@@ -105,13 +107,11 @@ test(
       assert(fitted.x >= frame.x - 1 && fitted.x + fitted.width <= frame.x + frame.width + 1);
       assert(fitted.y >= frame.y - 1 && fitted.y + fitted.height <= frame.y + frame.height + 1);
       await work.getByRole('button', { name: '定位阅读版', exact: true }).click();
-      const selectedNode = await accessibleExplorationNode(
-        work,
-        catalog.nodes.find((node) => node.title === 'v3').summary,
-      );
-      assert.match(await selectedNode.textContent(), /3 轮实验/);
-      assert((await selectedNode.textContent()).includes(catalog.nodes.find((node) => node.title === 'v3').summary));
+      await accessibleExplorationNode(work, catalog.nodes.find((node) => node.title === 'v3').summary);
+      assert.match(await work.locator('.exploration-run-picker summary').textContent(), /3 次/);
+      await work.getByRole('button', { name: '评估与观测', exact: true }).click();
       assert.equal(await work.getByLabel('当前实验条件', { exact: true }).isVisible(), true);
+      await work.getByRole('button', { name: '结果与案例', exact: true }).click();
       await capture(page, 'exploration-default-reading');
       const transform = await world.getAttribute('style');
       await canvas.focus();
@@ -129,19 +129,49 @@ test(
       await work.getByRole('button', { name: '折叠 v3 后代', exact: true }).click();
       await work.getByText(/个节点已折叠/).waitFor();
       await capture(page, 'exploration-lineage-desktop');
-      await disclosure.locator(':scope > summary').click();
       await chooseVersion(work, 'v8');
       await chooseRun(work, runsFor('v8')[0]);
-      await work.getByLabel('选择对照实验').selectOption(refIdentity(runsFor('v4').at(-1).experimentRef));
+      await chooseComparison(work, refIdentity(runsFor('v4').at(-1).experimentRef));
       const comparison = work.getByRole('region', { name: '所选实验对照' });
       await work.locator('[data-comparison-status="scope_required"]').waitFor();
       await comparison.getByRole('button', { name: '仅比较共同的 6 个场景', exact: true }).click();
       assert.equal(await comparison.getAttribute('data-comparison-status'), 'paired');
-      await comparison.getByText('已知回归', { exact: true }).waitFor();
-      await comparison.getByRole('button', { name: /左侧 · 更远 ·/ }).click();
-      assert.equal(await comparison.locator('.exploration-pair > .exploration-trace').count(), 2);
+      assert.equal(await comparison.getByRole('button', { name: '返回完整范围', exact: true }).count(), 1);
+      const subset = comparison.getByRole('region', { name: '本次比较范围', exact: true });
+      await subset.getByText('仅比较共同的 6 个场景，不能外推到整批。', { exact: true }).waitFor();
+      await subset
+        .getByText(
+          `未纳入本次比较：对照侧 ${runsFor('v4').at(-1).recordCount - 6} 条，本版侧 ${runsFor('v8')[0].recordCount - 6} 条。`,
+          { exact: true },
+        )
+        .waitFor();
+      const selectionBefore = await work.getByLabel('选择本版实验').inputValue();
+      const comparisonBefore = await work.getByLabel('选择对照实验').inputValue();
+      await subset.getByRole('button', { name: '返回完整范围', exact: true }).click();
+      await work.locator('[data-comparison-status="scope_required"]').waitFor();
+      assert.equal(await work.getByLabel('选择本版实验').inputValue(), selectionBefore);
+      assert.equal(await work.getByLabel('选择对照实验').inputValue(), comparisonBefore);
+      assert.equal(await comparison.locator('.exploration-verdict').count(), 0);
+      await comparison.getByRole('button', { name: '仅比较共同的 6 个场景', exact: true }).click();
+      await work.locator('[data-comparison-status="paired"]').waitFor();
+      await subset.locator('summary').click();
+      await subset.getByText(/^仅在对照侧：/).waitFor();
+      await subset.getByText(/^仅在本版侧：/).waitFor();
+      await page.setViewportSize({ width: 320, height: 900 });
+      await subset.scrollIntoViewIfNeeded();
+      await contained(subset);
+      await contained(work);
+      await capture(page, 'exploration-partial-scope-320');
+      await page.setViewportSize({ width: 1360, height: 960 });
+      const expand = page.getByRole('button', { name: '展开阅读 →', exact: true });
+      if (await expand.isVisible()) await expand.click();
+      await work.waitFor();
+      await comparison.getByRole('button', { name: /^退步 [1-9]/ }).click();
+      await comparison.getByRole('button', { name: /左侧 · 更远/ }).click();
+      assert.equal(await comparison.locator('.exploration-pair .exploration-trace').count(), 2);
       await comparison
-        .locator('.exploration-metric-pairs')
+        .locator('.exploration-outcome-metrics')
+        .first()
         .getByText('踢前躯干 XY 累计位移', { exact: true })
         .waitFor();
       await contained(work);
@@ -184,9 +214,11 @@ test(
       const title = catalog.nodes.find((node) => refIdentity(node.nodeRef) === refIdentity(selected.run.nodeRef)).title;
       await chooseVersion(work, title);
       await chooseRun(work, selected.run);
+      await chooseComparison(work, '');
       await work.locator('.exploration-all-cases > summary').click();
       await work.locator(`[data-case-id="${selected.record.caseId}"]`).click();
       const result = work.getByRole('region', { name: '所选案例结果' });
+      await result.locator('.exploration-outcome > details > summary').click();
       const videoChoice = selected.record.media.find((media) => media.kind === 'video');
       if (await result.getByRole('button', { name: videoChoice.label, exact: true }).count())
         await result.getByRole('button', { name: videoChoice.label, exact: true }).click();
@@ -250,7 +282,9 @@ test(
     try {
       await chooseVersion(work, 'v8');
       await chooseRun(work, runsFor('v8')[0]);
+      await chooseComparison(work, '');
       const input = work.getByLabel('继续探索的想法');
+      await work.locator('.exploration-next-step > summary').click();
       const words = '补看侧向接触，保留陌生输入 beta-9 与 @opus5 原文。';
       await input.fill(words);
       await chooseVersion(work, 'v3');
@@ -272,6 +306,7 @@ test(
       await page.reload();
       await page.getByRole('button', { name: '展开阅读 →', exact: true }).click();
       await work.waitFor();
+      await chooseComparison(work, '');
       await work.getByRole('button', { name: '重试同一请求', exact: true }).click();
       await work.getByRole('link', { name: '查看原请求与回复', exact: true }).waitFor();
       assert.equal(fixture.writes.at(-1).idempotencyKey, first.idempotencyKey);
@@ -330,6 +365,7 @@ test(
     const { page, context, work, errors } = await open(fixture.code);
     try {
       const result = work.getByRole('region', { name: '所选案例结果' });
+      await result.locator('.exploration-outcome > details > summary').click();
       await result.locator('h3').getByText('未登录读取被拒绝', { exact: true }).waitFor();
       assert((await result.innerText()).includes('401'));
       assert((await result.innerText()).includes('无登录态'));

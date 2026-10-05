@@ -14,6 +14,8 @@
 
 import type { ApprovalOriginRef, TasteDimension, TasteProposal } from '@cat-cafe/shared';
 import type { ApprovalPublicationStore } from '../../../approval-hub/ports/ApprovalPublicationStore.js';
+import type { TasteDecisionAuthorityFence } from '../../services/RedisTasteDecisionAuthority.js';
+import type { TasteDecisionSnapshot } from '../../services/taste-decision-snapshot.js';
 
 export interface CreateTasteProposalInput {
   /** Pre-generated proposal ID (for dedup coordination with route). When omitted, store generates one. */
@@ -24,6 +26,7 @@ export interface CreateTasteProposalInput {
   sourceMessageId?: string;
   scene: string;
   quote: string;
+  takeaway?: string;
   tags: string[];
   dimension: TasteDimension;
   privacy: 'public' | 'sensitive';
@@ -48,7 +51,18 @@ export interface ITasteProposalStore extends ApprovalPublicationStore {
   /** List settled (approved+rejected) proposals for a user, ordered by decidedAt DESC. */
   listSettledByUser(userId: string, limit?: number): TasteProposal[] | Promise<TasteProposal[]>;
   /** CAS pending → approving. Returns claimed snapshot, or null if not pending. */
-  claimForApproval(id: string, approvedBy: string): TasteProposal | null | Promise<TasteProposal | null>;
+  claimForApproval(
+    id: string,
+    approvedBy: string,
+    expected?: TasteDecisionSnapshot,
+  ): TasteProposal | null | Promise<TasteProposal | null>;
+  /** F317 isolated candidate; absence must fail closed when a durable Host fence is requested. */
+  claimForApprovalFenced?(
+    id: string,
+    approvedBy: string,
+    expected: TasteDecisionSnapshot,
+    fence: TasteDecisionAuthorityFence,
+  ): TasteProposal | null | Promise<TasteProposal | null>;
   /** Persist durable writer output while status remains approving (crash-recovery checkpoint). */
   recordWriteCheckpoint(
     id: string,
@@ -64,7 +78,19 @@ export interface ITasteProposalStore extends ApprovalPublicationStore {
   /** CAS approving → pending. Used when vignette write fails after claim. */
   rollbackClaim(id: string): boolean | Promise<boolean>;
   /** CAS pending → rejected. Returns null if not pending. */
-  markRejected(id: string, reason: string, rejectedBy: string): TasteProposal | null | Promise<TasteProposal | null>;
+  markRejected(
+    id: string,
+    reason: string,
+    rejectedBy: string,
+    expected?: TasteDecisionSnapshot,
+  ): TasteProposal | null | Promise<TasteProposal | null>;
+  markRejectedFenced?(
+    id: string,
+    reason: string,
+    rejectedBy: string,
+    expected: TasteDecisionSnapshot,
+    fence: TasteDecisionAuthorityFence,
+  ): TasteProposal | null | Promise<TasteProposal | null>;
   /** Idempotency: cached proposalId for (userId, clientRequestId). */
   getDedupProposalId(userId: string, clientRequestId: string): string | null | Promise<string | null>;
   /** Idempotency: atomically reserve (userId, clientRequestId) → proposalId. */

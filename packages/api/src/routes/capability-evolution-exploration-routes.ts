@@ -1,16 +1,13 @@
-import {
-  type EvolutionExplorationRequestV1,
-  evolutionExplorationNodeRefSchema,
-  evolutionExplorationRefSchema,
-} from '@cat-cafe/shared';
+import { evolutionExplorationNodeRefSchema, evolutionExplorationRefSchema } from '@cat-cafe/shared';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { ProgramAdapterRegistry } from '../infrastructure/capability-evolution/adapters/program-adapter-registry.js';
 import type { EvolutionProgramService } from '../infrastructure/capability-evolution/program-service.js';
+import { readExplorationOwner } from '../infrastructure/capability-evolution/read-model/program-exploration.js';
 import {
-  readExplorationOwner,
-  unavailableExploration,
-} from '../infrastructure/capability-evolution/read-model/program-exploration.js';
+  EvolutionExplorationReadError,
+  resolveAuthorizedExplorationProgram,
+} from '../infrastructure/capability-evolution/read-model/program-exploration-access.js';
 import { requireContext } from './capability-evolution-program-context.js';
 import { programIdSchema } from './capability-evolution-program-schemas.js';
 
@@ -55,21 +52,19 @@ export async function resolveExplorationProgram(
     return undefined;
   }
   const id = programIdSchema.parse((request.params as { programId: string }).programId);
-  const projection = await options.service.get(id);
-  if (projection.program.workspaceId !== context.workspaceId) {
-    reply.status(404).send({ error: 'not_found' });
-    return undefined;
+  try {
+    return await resolveAuthorizedExplorationProgram(
+      { service: options.service, adapterRegistry: options.adapterRegistry },
+      id,
+      context.ownerUserId,
+    );
+  } catch (error) {
+    if (error instanceof EvolutionExplorationReadError) {
+      reply.status(error.status).send(error.body);
+      return undefined;
+    }
+    throw error;
   }
-  const input: EvolutionExplorationRequestV1 = {
-    programRef: { ownerFeatureId: 'F311', ownerStateRef: id },
-    objectRef: projection.program.objectRef,
-  };
-  const resolution = options.adapterRegistry?.resolve(input.objectRef);
-  if (resolution?.status !== 'resolved') {
-    reply.status(422).send(unavailableExploration(input, 'owner_exploration_unavailable'));
-    return undefined;
-  }
-  return { input, adapter: resolution.adapter };
 }
 
 export function createCapabilityEvolutionExplorationHandler(options: EvolutionExplorationRouteOptions) {

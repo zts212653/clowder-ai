@@ -5,6 +5,7 @@ import { ChatMessage } from '@/components/ChatMessage';
 import { MessageNavigator } from '@/components/MessageNavigator';
 import { useCatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
 
 const now = Date.now();
 
@@ -60,7 +61,30 @@ export default function ShowcaseF052CrossThreadAuthorLabel() {
           ))}
         </div>
 
-        <MessageNavigator messages={messages} scrollContainerRef={scrollContainerRef} />
+        <MessageNavigator
+          messages={messages}
+          scrollContainerRef={scrollContainerRef}
+          // This static author-label demo has no thread history or persisted reading state.
+          onJumpToMessage={(id) => {
+            const container = scrollContainerRef.current;
+            return container ? scrollToMessage(id, container) : false;
+          }}
+          beginUserScroll={() => {
+            const container = scrollContainerRef.current;
+            if (!container) return null;
+            let active = true;
+            return {
+              scrollTo(top) {
+                if (!active || !Number.isFinite(top)) return false;
+                container.scrollTop = Math.max(0, Math.min(top, container.scrollHeight - container.clientHeight));
+                return true;
+              },
+              end() {
+                active = false;
+              },
+            };
+          }}
+        />
       </div>
     </div>
   );

@@ -13,7 +13,13 @@ const sha256Digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const PawFeelResumeSelectorV1Schema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('task'), ref: ownerTruthRefV1Schema }).strict(),
   z.object({ kind: z.literal('owner_event'), ref: ownerTruthRefV1Schema }).strict(),
-  z.object({ kind: z.literal('bounded_time'), recheckAt: isoDateTime }).strict(),
+  z
+    .object({
+      kind: z.literal('bounded_time'),
+      recheckAt: isoDateTime,
+      dependencyRef: ownerTruthRefV1Schema.optional(),
+    })
+    .strict(),
 ]);
 
 export const PawFeelResumeConditionV1Schema = z

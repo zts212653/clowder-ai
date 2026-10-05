@@ -299,7 +299,13 @@ export const graphTools = [
       implementationExport: 'handleGraphResolve',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      runtimeProfiles: [
+        'full',
+        'readonly',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
     },
   }),
 ] as const;

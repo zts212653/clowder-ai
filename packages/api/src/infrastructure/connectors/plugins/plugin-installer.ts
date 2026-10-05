@@ -14,20 +14,18 @@
  */
 
 import { execFile } from 'node:child_process';
-import {
-  existsSync,
-  lstatSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, lstatSync, readdirSync, type Stats } from 'node:fs';
+import { lstat, mkdir, mkdtemp, opendir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { type ConnectorManifest, parseConnectorManifest } from './im-connector-manifest.js';
+import {
+  type ConnectorManifest,
+  parseConnectorManifest,
+  parseConnectorManifestContent,
+} from './im-connector-manifest.js';
+
+import { pathExists, replacePluginTree, withPluginMutation } from './plugin-filesystem.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -77,6 +75,8 @@ export interface PluginInstallError {
 
 export interface PluginInstallOptions {
   tarBin?: string;
+  maxExtractedEntries?: number;
+  maxExtractedBytes?: number;
 }
 
 // ── Paths ──
@@ -93,10 +93,13 @@ function resolvePluginDir(projectRoot: string, connectorId: string): string {
   return join(resolvePluginsDir(projectRoot), connectorId);
 }
 
-function validateExtractedTreeHasNoSymlinks(rootDir: string): PluginInstallError | null {
-  let rootStat;
+async function validateExtractedTreeHasNoSymlinks(
+  rootDir: string,
+  opts: PluginInstallOptions,
+): Promise<PluginInstallError | null> {
+  let rootStat: Stats;
   try {
-    rootStat = lstatSync(rootDir);
+    rootStat = await lstat(rootDir);
   } catch (err) {
     return { code: 'INVALID_ARCHIVE', message: `Invalid plugin archive: ${(err as Error).message}` };
   }
@@ -104,14 +107,29 @@ function validateExtractedTreeHasNoSymlinks(rootDir: string): PluginInstallError
     return { code: 'INVALID_ARCHIVE', message: 'Archive top-level entry must be a directory' };
   }
 
+  return inspectExtractedEntries(rootDir, opts);
+}
+
+async function inspectExtractedEntries(
+  rootDir: string,
+  opts: PluginInstallOptions,
+): Promise<PluginInstallError | null> {
+  let entriesSeen = 0;
+  let bytesSeen = 0;
+  const maxEntries = opts.maxExtractedEntries ?? 20_000;
+  const maxBytes = opts.maxExtractedBytes ?? 250 * 1024 * 1024;
   const stack = [rootDir];
-  while (stack.length > 0) {
-    const dir = stack.pop()!;
-    for (const entry of readdirSync(dir)) {
-      const path = join(dir, entry);
-      const stat = lstatSync(path);
+  for (let dir = stack.pop(); dir !== undefined; dir = stack.pop()) {
+    for await (const entry of await opendir(dir)) {
+      const path = join(dir, entry.name);
+      const stat = await lstat(path);
+      entriesSeen++;
+      bytesSeen += stat.isFile() ? stat.size : 0;
+      if (entriesSeen > maxEntries || bytesSeen > maxBytes) {
+        return { code: 'INVALID_ARCHIVE', message: 'Plugin archive exceeds expanded entry or byte budget' };
+      }
       if (stat.isSymbolicLink()) {
-        return { code: 'INVALID_ARCHIVE', message: `Plugin archive must not contain symlinks: ${entry}` };
+        return { code: 'INVALID_ARCHIVE', message: `Plugin archive must not contain symlinks: ${entry.name}` };
       }
       if (stat.isDirectory()) stack.push(path);
     }
@@ -141,19 +159,19 @@ export async function installPlugin(
   opts: PluginInstallOptions = {},
 ): Promise<PluginInstallResult | PluginInstallError> {
   const pluginsDir = resolvePluginsDir(projectRoot);
-  mkdirSync(pluginsDir, { recursive: true });
-  const tmpDir = mkdtempSync(join(pluginsDir, '.tmp-install-'));
+  await mkdir(pluginsDir, { recursive: true });
+  const tmpDir = await mkdtemp(join(pluginsDir, '.tmp-install-'));
 
   try {
     // Extract tar.gz
     try {
-      await execFileAsync(resolveTarCommand(opts.tarBin), ['xzf', archivePath, '-C', tmpDir]);
+      await execFileAsync(resolveTarCommand(opts.tarBin), ['xzf', archivePath, '-C', tmpDir], { timeout: 30_000 });
     } catch (err) {
       return { code: 'EXTRACT_FAILED', message: `Failed to extract archive: ${(err as Error).message}` };
     }
 
     // Find the single top-level directory
-    const entries = readdirSync(tmpDir).filter((e) => !e.startsWith('.'));
+    const entries = (await readdir(tmpDir)).filter((e) => !e.startsWith('.'));
     if (entries.length !== 1) {
       return {
         code: 'INVALID_ARCHIVE',
@@ -162,21 +180,23 @@ export async function installPlugin(
     }
 
     const extractedDir = join(tmpDir, entries[0]);
-    const treeError = validateExtractedTreeHasNoSymlinks(extractedDir);
+    const treeError = await validateExtractedTreeHasNoSymlinks(extractedDir, opts);
     if (treeError) return treeError;
 
     // Validate connector.yaml
     const yamlPath = join(extractedDir, CONNECTOR_YAML);
-    if (!existsSync(yamlPath)) {
+    if (!(await pathExists(yamlPath))) {
       return { code: 'MISSING_MANIFEST', message: `Plugin must contain ${CONNECTOR_YAML}` };
     }
-    if (!lstatSync(yamlPath).isFile()) {
-      return { code: 'INVALID_ARCHIVE', message: `Plugin ${CONNECTOR_YAML} must be a regular file` };
+    const manifestStat = await lstat(yamlPath);
+    if (!manifestStat.isFile() || manifestStat.size > 128 * 1024) {
+      return { code: 'INVALID_ARCHIVE', message: `Plugin ${CONNECTOR_YAML} must be a regular file of at most 128 KiB` };
     }
 
+    const yamlContent = await readFile(yamlPath, 'utf-8');
     let manifest: ConnectorManifest;
     try {
-      manifest = parseConnectorManifest(yamlPath);
+      manifest = parseConnectorManifestContent(yamlContent, yamlPath);
     } catch (err) {
       return { code: 'MISSING_MANIFEST', message: `Invalid ${CONNECTOR_YAML}: ${(err as Error).message}` };
     }
@@ -191,19 +211,18 @@ export async function installPlugin(
 
     // Validate index.js
     const entryPath = join(extractedDir, PLUGIN_ENTRY);
-    if (!existsSync(entryPath)) {
+    if (!(await pathExists(entryPath))) {
       return { code: 'MISSING_ENTRY', message: `Plugin must contain ${PLUGIN_ENTRY}` };
     }
-    if (!lstatSync(entryPath).isFile()) {
+    if (!(await lstat(entryPath)).isFile()) {
       return { code: 'INVALID_ARCHIVE', message: `Plugin ${PLUGIN_ENTRY} must be a regular file` };
     }
 
     // Force-write source: 'external' into manifest — overrides any user-supplied value.
     // This is the single authority for marking a connector as externally installed.
-    const yamlContent = readFileSync(yamlPath, 'utf-8');
     const rawYaml = parseYaml(yamlContent) as Record<string, unknown>;
     rawYaml.source = 'external';
-    writeFileSync(yamlPath, stringifyYaml(rawYaml));
+    await writeFile(yamlPath, stringifyYaml(rawYaml));
 
     // Check for built-in ID conflict
     if (builtinIds.has(manifest.id)) {
@@ -215,28 +234,15 @@ export async function installPlugin(
 
     // Determine action (install vs update)
     const targetDir = resolvePluginDir(projectRoot, manifest.id);
-    const isUpdate = existsSync(targetDir);
-
-    // Replace existing or create new
-    if (isUpdate) {
-      rmSync(targetDir, { recursive: true });
-    }
-    mkdirSync(join(targetDir, '..'), { recursive: true });
-
-    // Move extracted directory to target
-    const { rename } = await import('node:fs/promises');
-    await rename(extractedDir, targetDir);
-
-    return {
-      id: manifest.id,
-      name: manifest.name,
-      action: isUpdate ? 'updated' : 'installed',
-    };
+    return await withPluginMutation(targetDir, async () => {
+      const isUpdate = await replacePluginTree(extractedDir, targetDir);
+      return { id: manifest.id, name: manifest.name, action: isUpdate ? 'updated' : 'installed' };
+    });
   } finally {
     // Clean up temp directory
-    if (existsSync(tmpDir)) {
+    if (await pathExists(tmpDir)) {
       try {
-        rmSync(tmpDir, { recursive: true });
+        await rm(tmpDir, { recursive: true });
       } catch {
         /* best-effort cleanup */
       }
@@ -250,11 +256,11 @@ export async function installPlugin(
  * Uninstall a plugin by removing its directory.
  * Config store data is preserved by default (user can reinstall without reconfiguring).
  */
-export function uninstallPlugin(
+export async function uninstallPlugin(
   projectRoot: string,
   connectorId: string,
   opts: { clearConfig?: boolean } = {},
-): PluginUninstallResult | PluginInstallError {
+): Promise<PluginUninstallResult | PluginInstallError> {
   // Validate ID format to prevent path traversal (e.g. "../../etc")
   if (!isValidConnectorId(connectorId)) {
     return {
@@ -265,25 +271,27 @@ export function uninstallPlugin(
 
   const pluginDir = resolvePluginDir(projectRoot, connectorId);
 
-  if (!existsSync(pluginDir)) {
-    return { code: 'INVALID_ARCHIVE', message: `Plugin '${connectorId}' is not installed` };
-  }
-
-  rmSync(pluginDir, { recursive: true });
-  rmSync(resolvePluginModuleCacheDir(projectRoot, connectorId), { recursive: true, force: true });
-
-  if (opts.clearConfig) {
-    const configPath = join(projectRoot, '.cat-cafe', 'im-connector-config', `${connectorId}.json`);
-    if (existsSync(configPath)) {
-      rmSync(configPath);
+  return withPluginMutation(pluginDir, async () => {
+    if (!(await pathExists(pluginDir))) {
+      return { code: 'INVALID_ARCHIVE', message: `Plugin '${connectorId}' is not installed` };
     }
-  }
 
-  return {
-    id: connectorId,
-    action: 'uninstalled',
-    configPreserved: !opts.clearConfig,
-  };
+    await rm(pluginDir, { recursive: true });
+    await rm(resolvePluginModuleCacheDir(projectRoot, connectorId), { recursive: true, force: true });
+
+    if (opts.clearConfig) {
+      const configPath = join(projectRoot, '.cat-cafe', 'im-connector-config', `${connectorId}.json`);
+      if (await pathExists(configPath)) {
+        await rm(configPath);
+      }
+    }
+
+    return {
+      id: connectorId,
+      action: 'uninstalled',
+      configPreserved: !opts.clearConfig,
+    };
+  });
 }
 
 // ── Discovery ──

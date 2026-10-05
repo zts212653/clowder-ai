@@ -15,12 +15,13 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
 describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
   let registry;
   let threadStore;
+  let holdQuotaStore;
 
   function makeStubDeps(overrides = {}) {
     const insertedTasks = [];
@@ -64,6 +65,7 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
       socketManager: {
         broadcastToRoom() {},
       },
+      holdQuotaStore,
       _insertedTasks: insertedTasks,
       _registeredDynamic: registeredDynamic,
     };
@@ -75,8 +77,15 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { HoldQuotaStore } = await import('../dist/domains/ball-custody/hold-quota-store.js');
     registry = new InvocationRegistry();
     threadStore = new ThreadStore();
+    holdQuotaStore = new HoldQuotaStore({ dbPath: ':memory:' });
+  });
+
+  afterEach(() => {
+    holdQuotaStore?.close();
+    holdQuotaStore = null;
   });
 
   async function createApp(holdBallDeps) {
@@ -264,6 +273,37 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
     });
     assert.equal(response.statusCode, 200, 'wakeWhen without waitSourceRef should succeed (self-grounding)');
   });
+
+  for (const wakeWhen of [
+    { command: 'echo ok', executionSlaMs: 7_200_000 },
+    { command: 'pnpm gate', executionSlaMs: 10_800_001 },
+    { command: 'pnpm gate', executionSlaMs: 999 },
+    { command: 'pnpm gate', executionSlaMs: 1_000.5 },
+    { command: 'pnpm gate', timeoutMs: 3_600_001, executionSlaMs: 7_200_000 },
+  ]) {
+    test(`rejects unsupported execution budget before quota or scheduling: ${JSON.stringify(wakeWhen)}`, async (t) => {
+      const deps = makeStubDeps({
+        holdQuotaStore: {
+          async tryAdmit() {
+            assert.fail('invalid budget must be rejected before quota admission');
+          },
+        },
+      });
+      const app = await createApp(deps);
+      t.after(() => app.close());
+      const thread = await threadStore.create('budget-owner', 'budget validation');
+      const { invocationId, callbackToken } = await registry.create('budget-owner', 'codex', thread.id);
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/hold-ball',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { reason: 'budget boundary', nextStep: 'consume result', wakeWhen },
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(deps._insertedTasks.length, 0);
+      assert.equal(deps._registeredDynamic.length, 0);
+    });
+  }
 
   test('PR-O3: 400 when pending_input kind used (removed backdoor)', async () => {
     const deps = makeStubDeps();

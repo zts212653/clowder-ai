@@ -53,16 +53,23 @@ for (const width of [1280, 390]) {
         () => document.querySelector('[data-testid="review-media-stage"] img')?.naturalWidth > 0,
       );
       if (width >= 1024) {
+        // F309 AC-U2: a review never takes the main area by its type; only the explicit expand does.
         const workbench = page.getByTestId('f307-experience-workbench');
         assert.equal(
           await workbench.getAttribute('data-main-area-attention'),
+          '',
+          'Opening an artwork must not take the main area by itself.',
+        );
+        await page.getByRole('button', { name: /^在主区打开 / }).click();
+        assert.equal(
+          await workbench.getAttribute('data-main-area-attention'),
           await workbench.getAttribute('data-active-surface'),
-          'Opening an artwork should give it the main area.',
+          'The explicit expand gives the artwork the main area.',
         );
       }
       await selectReviewMode(page, 'comment');
       const stage = await page.getByTestId('review-media-stage').boundingBox();
-      const composer = await page.getByRole('textbox', { name: '新增标注意见' }).boundingBox();
+      const composer = await page.getByRole('textbox', { name: '评论内容' }).boundingBox();
       assert.ok(stage && composer);
       assert.ok(
         composer.y >= 0 && composer.y + composer.height <= 900,
@@ -72,7 +79,7 @@ for (const width of [1280, 390]) {
         stage.y >= 0 && stage.y + stage.height <= 900,
         `The complete artwork stage must remain in the viewport: ${JSON.stringify(stage)}`,
       );
-      const send = await page.getByRole('button', { name: '保存评论', exact: true }).boundingBox();
+      const send = await page.getByRole('button', { name: '保存批注', exact: true }).boundingBox();
       assert.ok(send && send.y + send.height <= 900, 'Sending must not require scrolling below the artwork.');
       await page.screenshot({ path: path.join(evidence, `layout-${width}-comment.png`), fullPage: true });
       await selectReviewMode(page, 'markup');
@@ -89,10 +96,15 @@ for (const width of [1280, 390]) {
         await page.reload();
         await page.locator('[data-testid="review-media-stage"] img').waitFor();
         const restoredHost = page.getByTestId('f307-experience-workbench');
+        assert.match(
+          (await restoredHost.getAttribute('data-active-surface')) ?? '',
+          /^content-review:/,
+          'Reload keeps the artwork as the active work.',
+        );
         assert.equal(
           await restoredHost.getAttribute('data-main-area-attention'),
-          await restoredHost.getAttribute('data-active-surface'),
-          'Reload keeps the artwork as the primary task.',
+          '',
+          'AC-U2: reload restores the desktop default instead of promoting the review.',
         );
         await page.setViewportSize({ width: 390, height: 900 });
         await page.locator('[data-testid="review-media-stage"] img').waitFor();
@@ -110,6 +122,18 @@ for (const width of [1280, 390]) {
         await sidecar.click();
         await page.getByTestId('product-schedule-panel').waitFor();
         assert.equal(await sidecar.getAttribute('aria-expanded'), 'true');
+        await page.waitForFunction(() => {
+          const stage = document.querySelector('[data-testid="review-media-stage"]')?.getBoundingClientRect();
+          const viewport = document.querySelector('[aria-label="作品画面"]')?.getBoundingClientRect();
+          return (
+            stage &&
+            viewport &&
+            stage.height > 100 &&
+            stage.height <= viewport.height + 1 &&
+            stage.width <= viewport.width + 1
+          );
+        });
+        await page.screenshot({ path: path.join(evidence, 'layout-390-context-expanded.png'), fullPage: true });
         const whileExpanded = await page.getByTestId('review-media-stage').boundingBox();
         assert.ok(whileExpanded && whileExpanded.height > 100, 'Expanded context must leave the artwork usable.');
         await sidecar.click();

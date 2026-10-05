@@ -43,6 +43,8 @@ export interface TasteProposal {
   scene: string;
   /** operator verbatim words. */
   quote: string;
+  /** A cat's one-sentence hypothesis about the owner's reusable preference. */
+  takeaway?: string;
   /** Search keywords for later retrieval. */
   tags: string[];
   /** Which taste axis this captures. */

@@ -1,4 +1,5 @@
 import { type PawFeelDispositionEvent, refIdentity } from '@cat-cafe/shared';
+import { matchesPawFeelResumeSelectorRequest } from '../blocker-recovery/resume-condition.js';
 import type { PawFeelDispositionCommand, PawFeelResolvedCommandContext } from '../commands.js';
 import { PawFeelDispositionServiceError } from '../service-guards.js';
 
@@ -86,7 +87,7 @@ function replayBlocker(
 ): PawFeelResolvedCommandContext {
   if (
     !existing.resumeCondition ||
-    JSON.stringify(existing.resumeCondition.selector) !== JSON.stringify(command.resume)
+    !matchesPawFeelResumeSelectorRequest(existing.resumeCondition.selector, command.resume)
   ) {
     return collision(command.eventId, 'stored blocker selector differs from the retry');
   }

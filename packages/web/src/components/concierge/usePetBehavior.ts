@@ -10,7 +10,7 @@
 
 import type { ConciergeBallState, PetBehaviorOutput } from '@cat-cafe/shared';
 import { useEffect, useRef, useState } from 'react';
-
+import type { BallReservedRect } from './ball-position';
 import {
   computeAmbientBehavior,
   computeBehaviorPhase,
@@ -52,6 +52,10 @@ export interface UsePetBehaviorOptions {
   ballPosition: { x: number; y: number };
   /** Current ball size in px (E3 resize support). Used for proximity center calculation. */
   ballSize: number;
+  /** Host collision constraints shared with every ball position path. */
+  edgeMargin: number;
+  toolbarBelow: number;
+  reservedRects: readonly BallReservedRect[];
   /** Timestamp of the last incoming message (for 消息惊起). */
   lastMessageTimestamp: number;
 }
@@ -63,7 +67,17 @@ export interface UsePetBehaviorOptions {
  * When autonomous is active, returns a visual override; otherwise returns null fields.
  */
 export function usePetBehavior(opts: UsePetBehaviorOptions): PetBehaviorOutput {
-  const { ballState, behaviorEnabled, muted, ballPosition, ballSize, lastMessageTimestamp } = opts;
+  const {
+    ballState,
+    behaviorEnabled,
+    muted,
+    ballPosition,
+    ballSize,
+    edgeMargin,
+    toolbarBelow,
+    reservedRects,
+    lastMessageTimestamp,
+  } = opts;
   const enabled = behaviorEnabled && !muted;
 
   // Track when ball entered idle/sleeping for hysteresis
@@ -190,6 +204,10 @@ export function usePetBehavior(opts: UsePetBehaviorOptions): PetBehaviorOutput {
         walkSeed: Math.random(),
         viewport,
         ballPosition,
+        ballSize,
+        edgeMargin,
+        toolbarBelow,
+        reservedRects,
       });
 
       // Track walk timestamps for cooldown
@@ -208,7 +226,17 @@ export function usePetBehavior(opts: UsePetBehaviorOptions): PetBehaviorOutput {
     tick();
 
     return () => clearInterval(intervalId);
-  }, [isIdle, enabled, ballState, lastMessageTimestamp, ballPosition, ballSize]);
+  }, [
+    isIdle,
+    enabled,
+    ballState,
+    lastMessageTimestamp,
+    ballPosition,
+    ballSize,
+    edgeMargin,
+    toolbarBelow,
+    reservedRects,
+  ]);
 
   return output;
 }

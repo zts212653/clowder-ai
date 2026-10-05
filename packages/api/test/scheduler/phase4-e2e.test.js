@@ -13,6 +13,7 @@ import { GlobalControlStore } from '../../dist/infrastructure/scheduler/GlobalCo
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { TaskRunnerV2 } from '../../dist/infrastructure/scheduler/TaskRunnerV2.js';
 import { templateRegistry } from '../../dist/infrastructure/scheduler/templates/registry.js';
+import { createRepoActivityTemplate } from '../../dist/infrastructure/scheduler/templates/repo-activity.js';
 
 describe('F139 Phase 4 E2E', () => {
   let db;
@@ -338,42 +339,47 @@ describe('F139 Phase 4 E2E', () => {
         user: { login: 'bob' },
       },
     ];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mock.fn(async () => ({ ok: true, json: async () => ghIssues }));
-    try {
-      store.insert({
-        id: 'repo-watch',
-        templateId: 'repo-activity',
-        trigger: { type: 'interval', ms: 3600_000 },
-        params: { repo: 'anthropics/claude-code' },
-        display: { label: 'claude-code 动态', category: 'repo', description: 'Watch repo' },
-        deliveryThreadId: 'thread-dev',
-        enabled: true,
-        createdBy: 'opus',
-        createdAt: new Date().toISOString(),
-      });
-      runner.hydrateDynamic(store, templateRegistry);
+    const executeGh = mock.fn(async () => ({ stdout: JSON.stringify(ghIssues) }));
+    const repoTemplate = createRepoActivityTemplate({
+      getGitHubToken: () => 'phase4-fixture-token',
+      execFileAsync: executeGh,
+    });
+    store.insert({
+      id: 'repo-watch',
+      templateId: 'repo-activity',
+      trigger: { type: 'interval', ms: 3600_000 },
+      params: { repo: 'anthropics/claude-code' },
+      display: { label: 'claude-code 动态', category: 'repo', description: 'Watch repo' },
+      deliveryThreadId: 'thread-dev',
+      enabled: true,
+      createdBy: 'opus',
+      createdAt: new Date().toISOString(),
+    });
+    runner.hydrateDynamic(store, {
+      get: (id) => (id === repoTemplate.templateId ? repoTemplate : templateRegistry.get(id)),
+    });
 
-      await runner.triggerNow('repo-watch', { manual: true });
+    await runner.triggerNow('repo-watch', { manual: true });
 
-      // Must have called GitHub API
-      assert.equal(globalThis.fetch.mock.calls.length, 1);
-      const fetchUrl = globalThis.fetch.mock.calls[0].arguments[0];
-      assert.ok(fetchUrl.includes('api.github.com/repos/anthropics/claude-code'));
+    // Must have called GitHub API
+    assert.equal(executeGh.mock.calls.length, 1);
+    const [file, args, options] = executeGh.mock.calls[0].arguments;
+    assert.equal(file, 'gh');
+    assert.equal(args[0], 'api');
+    assert.ok(args[1].startsWith('/repos/anthropics/claude-code/issues?'));
+    assert.equal(options.env.GITHUB_TOKEN, 'phase4-fixture-token');
+    assert.ok(options.signal instanceof AbortSignal);
 
-      // Delivered content includes real issue/PR data
-      assert.equal(deliverCalls.length, 1);
-      assert.ok(deliverCalls[0].content.includes('#10'));
-      assert.ok(deliverCalls[0].content.includes('Add streaming'));
-      assert.ok(deliverCalls[0].content.includes('#11'));
-      assert.equal(deliverCalls[0].threadId, 'thread-dev');
+    // Delivered content includes real issue/PR data
+    assert.equal(deliverCalls.length, 1);
+    assert.ok(deliverCalls[0].content.includes('#10'));
+    assert.ok(deliverCalls[0].content.includes('Add streaming'));
+    assert.ok(deliverCalls[0].content.includes('#11'));
+    assert.equal(deliverCalls[0].threadId, 'thread-dev');
 
-      // Verify ledger
-      const runs = ledger.query('repo-watch', 1);
-      assert.equal(runs[0].outcome, 'RUN_DELIVERED');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    // Verify ledger
+    const runs = ledger.query('repo-watch', 1);
+    assert.equal(runs[0].outcome, 'RUN_DELIVERED');
   });
 
   test('AC-D1: global pause stops all non-manual triggers', async () => {

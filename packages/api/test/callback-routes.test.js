@@ -1254,7 +1254,45 @@ describe('Callback Routes', () => {
     assert.equal('content' in body.messages[0], false); // full body not inlined
   });
 
-  test('GET thread-context projects the typed accepted-source local-review fact', async () => {
+  test('F319 Phase F: thread-context and get-message label a rerouted reply with the served model', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus');
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const rerouted = messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'architecture review done',
+      mentions: [],
+      timestamp: 1,
+      metadata: { provider: 'openai', model: 'gpt-6-astra', servedModel: 'gpt-5.6-luna' },
+    });
+    messageStore.append({
+      userId: 'user-1',
+      catId: 'codex',
+      content: 'same model reply',
+      mentions: [],
+      timestamp: 2,
+      metadata: { provider: 'openai', model: 'gpt-6-astra', servedModel: 'gpt-6-astra' },
+    });
+
+    for (const url of ['/api/callbacks/thread-context', '/api/callbacks/thread-context?responseMode=full']) {
+      const res = await app.inject({ method: 'GET', url, headers });
+      assert.equal(res.statusCode, 200);
+      const { messages } = JSON.parse(res.body);
+      assert.match(messages[0].speaker, /^缅因猫.* ⚠上游实际应答=gpt-5\.6-luna$/, url);
+      assert.ok(!messages[1].speaker.includes('上游实际应答'), `${url}: same-model reply stays unmarked`);
+    }
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${rerouted.id}&mode=full`,
+      headers,
+    });
+    assert.equal(res.statusCode, 200);
+    assert.match(JSON.parse(res.body).message.speaker, / ⚠上游实际应答=gpt-5\.6-luna$/);
+  });
+
+  test('single-message and thread-context reads project the same durable local-review fact', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'codex');
     const stored = messageStore.append({
@@ -1299,6 +1337,39 @@ describe('Callback Routes', () => {
       kind: 'continue',
       formalChangesRequested: 0,
     });
+
+    for (const mode of ['full', 'preview']) {
+      const single = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/get-message?messageId=${stored.id}&mode=${mode}`,
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+      assert.equal(single.statusCode, 200);
+      assert.deepEqual(single.json().message.localReviewFact, fact);
+    }
+
+    const proseOnly = messageStore.append({
+      userId: 'user-1',
+      catId: 'opus5',
+      content: '@codex\n\nAPPROVED, but no typed verdict was sent.',
+      mentions: ['codex'],
+      timestamp: 3,
+    });
+    const proseRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${proseOnly.id}&mode=full`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(proseRead.statusCode, 200);
+    assert.equal('localReviewFact' in proseRead.json().message, false);
+
+    const foreignAuth = await registry.create('user-2', 'codex');
+    const foreignRead = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/get-message?messageId=${stored.id}&mode=full`,
+      headers: { 'x-invocation-id': foreignAuth.invocationId, 'x-callback-token': foreignAuth.callbackToken },
+    });
+    assert.equal(foreignRead.statusCode, 404);
   });
 
   test('GET thread-context marks only the fourth formal local-review arrival for an R4 pause', async () => {
@@ -3891,6 +3962,59 @@ describe('Callback Routes', () => {
     assert.equal(msgs[0].invocationId, invocationId, 'create-rich-block broadcast must include invocationId');
   });
 
+  test('rich blocks remain writable after an interim post and reject callbacks after final consume', async () => {
+    const app = await createApp();
+    const thread = threadStore.create('user-1', 'Rich block lifecycle');
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const createBlock = (id) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/callbacks/create-rich-block',
+        headers,
+        payload: { block: { id, kind: 'card', v: 1, title: id, bodyMarkdown: id } },
+      });
+    const post = (content) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { content },
+      });
+
+    assert.equal((await createBlock('block-a')).statusCode, 200);
+    assert.equal((await post('interim')).statusCode, 200);
+    assert.equal((await createBlock('block-a')).statusCode, 200, 'retry stays idempotent after interim post');
+    assert.equal((await createBlock('block-b')).statusCode, 200);
+    assert.equal((await post('later')).statusCode, 200);
+
+    const messages = messageStore.getRecent(10).filter((message) => message.threadId === thread.id);
+    assert.equal(messages.length, 2);
+    assert.deepEqual(
+      messages.find((message) => message.content === 'interim')?.extra?.rich?.blocks.map((b) => b.id),
+      ['block-a'],
+    );
+    assert.deepEqual(
+      messages.find((message) => message.content === 'later')?.extra?.rich?.blocks.map((b) => b.id),
+      ['block-b'],
+    );
+    const creationBroadcasts = socketManager
+      .getMessages()
+      .filter(
+        (message) =>
+          message.type === 'system_info' &&
+          JSON.parse(message.content).type === 'rich_block' &&
+          !JSON.parse(message.content).messageId,
+      );
+    assert.equal(creationBroadcasts.length, 2, 'retry does not broadcast another creation event');
+
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
+    const late = await createBlock('block-late');
+    assert.equal(late.statusCode, 409);
+    assert.equal(JSON.parse(late.body).code, 'RICH_BLOCK_INVOCATION_COMPLETE');
+  });
+
   test('POST create-rich-block rejects invocation-bound soft-deleted thread without buffering or broadcasting', async () => {
     const thread = threadStore.create('user-1', 'Deleted Rich Block Target');
     assert.equal(threadStore.softDelete(thread.id), true);
@@ -3990,6 +4114,35 @@ describe('Callback Routes', () => {
         [],
         'deleted thread must not receive generated file rich blocks',
       );
+    } finally {
+      delete process.env.UPLOAD_DIR;
+      await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  test('POST generate-document rejects a completed rich-block invocation and removes the generated upload', async () => {
+    const { tmpdir } = await import('node:os');
+    const { readdir, rm } = await import('node:fs/promises');
+    const uploadDir = `${tmpdir()}/cat-cafe-test-uploads-completed-${Date.now()}`;
+    process.env.UPLOAD_DIR = uploadDir;
+    try {
+      const app = await createApp();
+      const thread = threadStore.create('user-1', 'Completed document target');
+      const { invocationId, callbackToken } = await registry.create('user-1', 'opus', thread.id);
+      const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+      getRichBlockBuffer().consume(thread.id, 'opus', invocationId);
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/generate-document',
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+        payload: { markdown: '# Late document', format: 'md', baseName: 'late-document' },
+      });
+
+      assert.equal(response.statusCode, 409);
+      assert.equal(JSON.parse(response.body).code, 'RICH_BLOCK_INVOCATION_COMPLETE');
+      assert.deepEqual(await readdir(uploadDir), []);
+      assert.equal(socketManager.getMessages().length, 0);
     } finally {
       delete process.env.UPLOAD_DIR;
       await rm(uploadDir, { recursive: true, force: true }).catch(() => {});
@@ -4486,7 +4639,11 @@ describe('Callback Routes', () => {
       intent: 'execute',
       messageId: queuedMessage.id,
     });
-    const app = await createApp({ turnExecutionStore });
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', targetThreadId, cursorFor(published));
+    const app = await createApp({ turnExecutionStore, deliveryCursorStore });
 
     const response = await app.inject({
       method: 'GET',
@@ -4516,6 +4673,530 @@ describe('Callback Routes', () => {
       socketManager.getUserEvents().some((event) => event.event === 'queue_updated'),
       false,
       'foreign history reads must not publish queued receipt mutations',
+    );
+  });
+
+  test('cross-thread catch-up continues past the unread limit before same-id retry persists', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const callerThread = threadStore.create('user-1', 'Limit caller');
+    const targetThread = threadStore.create('user-1', 'Limit target');
+    const baseline = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'seen causal anchor',
+      mentions: ['opus'],
+      timestamp: 1,
+      threadId: targetThread.id,
+    });
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', targetThread.id, cursorFor(baseline));
+
+    const unread = [];
+    for (let index = 0; index < 25; index += 1) {
+      unread.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: null,
+          content: `causal unread ${index}`,
+          mentions: ['opus'],
+          replyTo: baseline.id,
+          timestamp: index + 2,
+          threadId: targetThread.id,
+        }),
+      );
+    }
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', callerThread.id);
+    const app = await createApp({ deliveryCursorStore });
+    const postPayload = {
+      threadId: targetThread.id,
+      replyTo: baseline.id,
+      targetCats: ['codex'],
+      clientMessageId: 'cross-thread-limit-recovery',
+      content: 'Persist only after the full unread frontier is consumed',
+    };
+
+    const held = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: postPayload,
+    });
+    assert.equal(held.statusCode, 200, held.body);
+    assert.equal(JSON.parse(held.body).status, 'held');
+
+    const first = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?threadId=${targetThread.id}&readIntent=unread&responseMode=full`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    const firstBody = JSON.parse(first.body);
+    assert.deepEqual(
+      firstBody.messages.map((message) => message.id),
+      unread.slice(0, 20).map((message) => message.id),
+    );
+    assert.equal(firstBody.hasMore, true, 'storage unread beyond the selected limit must keep continuation open');
+    assert.equal(typeof firstBody.nextCursor, 'string');
+
+    const stillHeld = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: postPayload,
+    });
+    assert.equal(stillHeld.statusCode, 200, stillHeld.body);
+    assert.equal(JSON.parse(stillHeld.body).status, 'held', 'a partial catch-up must not persist the same-id retry');
+
+    const final = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?threadId=${targetThread.id}&readIntent=unread&responseMode=full&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(final.statusCode, 200, final.body);
+    const finalBody = JSON.parse(final.body);
+    assert.deepEqual(
+      finalBody.messages.map((message) => message.id),
+      unread.slice(20).map((message) => message.id),
+    );
+    assert.equal(finalBody.hasMore, false);
+    assert.equal(finalBody.nextCursor, undefined);
+
+    const sent = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: postPayload,
+    });
+    assert.equal(sent.statusCode, 200, sent.body);
+    const sentBody = JSON.parse(sent.body);
+    assert.equal(sentBody.status, 'ok');
+    assert.equal(messageStore.getById(sentBody.messageId)?.content, postPayload.content);
+  });
+
+  test('F324: five unread messages page 2/2/1 and empty unread never replays history', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadId = 'thread-f324-unread';
+    const baseline = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'already seen',
+      mentions: ['opus'],
+      timestamp: 1,
+      threadId,
+    });
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', threadId, cursorFor(baseline));
+    const unread = Array.from({ length: 5 }, (_, index) =>
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `unread ${index}`,
+        mentions: ['opus'],
+        timestamp: index + 2,
+        threadId,
+      }),
+    );
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const app = await createApp({ deliveryCursorStore });
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    let cursor;
+    for (const [page, expected] of [
+      [0, unread.slice(0, 2)],
+      [1, unread.slice(2, 4)],
+      [2, unread.slice(4)],
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        headers,
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      const body = response.json();
+      assert.deepEqual(
+        body.messages.map((message) => message.id),
+        expected.map((message) => message.id),
+        `page ${page}`,
+      );
+      assert.equal(body.hasMore, page < 2, `page ${page}`);
+      cursor = body.nextCursor;
+    }
+    const empty = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2',
+      headers,
+    });
+    assert.equal(empty.statusCode, 200, empty.body);
+    assert.deepEqual(empty.json().messages, [], 'caught-up read must not silently switch to old history');
+    assert.equal(empty.json().hasMore, false);
+
+    const arrived = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'new during this invocation',
+      mentions: ['opus'],
+      timestamp: 7,
+      threadId,
+    });
+    const fresh = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2',
+      headers,
+    });
+    assert.deepEqual(
+      fresh.json().messages.map((message) => message.id),
+      [arrived.id],
+    );
+  });
+
+  test('pagination-held cross-thread post exposes executable catch-up and succeeds after bounded full-read continuation', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const callerThread = threadStore.create('user-1', 'Freshness caller');
+    const targetThread = threadStore.create('user-1', 'Freshness target');
+    const baseline = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'reply anchor already seen',
+      mentions: [],
+      timestamp: 1,
+      threadId: targetThread.id,
+    });
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', targetThread.id, cursorFor(baseline));
+
+    const filteredOverlap = [];
+    for (let index = 0; index < 120; index += 1) {
+      filteredOverlap.push(
+        messageStore.append({
+          userId: 'user-1',
+          catId: 'fable5',
+          content: `unrelated coordination ${index} ${'x'.repeat(1_500)}`,
+          mentions: [],
+          timestamp: index + 2,
+          threadId: targetThread.id,
+        }),
+      );
+    }
+
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', callerThread.id);
+    const app = await createApp({ deliveryCursorStore });
+    const postPayload = {
+      threadId: targetThread.id,
+      replyTo: baseline.id,
+      targetCats: ['codex'],
+      clientMessageId: 'cross-thread-pagination-recovery',
+      content: 'Recovered cross-thread delivery',
+    };
+
+    const held = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: postPayload,
+    });
+    assert.equal(held.statusCode, 200, held.body);
+    assert.deepEqual(JSON.parse(held.body), {
+      status: 'held',
+      reason: 'newer_messages_available',
+      freshnessReason: 'pagination_limit_uncertain',
+      unseenCount: 0,
+      unseenCountKnown: false,
+      previews: [],
+      omittedCount: 0,
+      actions: ['read_latest', 'revise', 'send_with_acknowledge'],
+      catchUp: {
+        tool: 'cat_cafe_get_thread_context',
+        arguments: { threadId: targetThread.id, readIntent: 'unread', responseMode: 'full' },
+        continuation: { cursorArgument: 'cursor', cursorFrom: 'nextCursor', completeWhen: 'hasMore=false' },
+      },
+      clientMessageId: 'cross-thread-pagination-recovery',
+    });
+    assert.equal(
+      messageStore
+        .getByThread(targetThread.id, 200, 'user-1')
+        .some((message) => message.content === postPayload.content),
+      false,
+      'held attempt must not persist the outbound message',
+    );
+
+    const returnedIds = [];
+    let cursor;
+    do {
+      const params = new URLSearchParams({
+        threadId: targetThread.id,
+        limit: '100',
+        readIntent: 'unread',
+        responseMode: 'full',
+      });
+      if (cursor) params.set('cursor', cursor);
+      const page = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${params}`,
+        headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      });
+      assert.equal(page.statusCode, 200, page.body);
+      const body = JSON.parse(page.body);
+      returnedIds.push(...body.messages.map((message) => message.id));
+      cursor = body.nextCursor;
+    } while (cursor);
+
+    assert.deepEqual(
+      returnedIds,
+      filteredOverlap.map((message) => message.id),
+      'cross-thread catch-up must start at the seen cursor and continue through the real unread frontier',
+    );
+    const caughtUpCursor = await deliveryCursorStore.getSeenCursor('user-1', 'opus', targetThread.id);
+    assert.ok(caughtUpCursor.includes(filteredOverlap.at(-1).id));
+
+    const sent = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: postPayload,
+    });
+    assert.equal(sent.statusCode, 200, sent.body);
+    const sentBody = JSON.parse(sent.body);
+    assert.equal(sentBody.status, 'ok');
+    assert.equal(messageStore.getById(sentBody.messageId)?.content, postPayload.content);
+
+    const recipient = await registry.create('user-1', 'codex', targetThread.id);
+    const receivedIds = [];
+    let recipientCursor;
+    do {
+      const params = new URLSearchParams({ readIntent: 'unread', responseMode: 'full', limit: '20' });
+      if (recipientCursor) params.set('cursor', recipientCursor);
+      const received = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${params}`,
+        headers: { 'x-invocation-id': recipient.invocationId, 'x-callback-token': recipient.callbackToken },
+      });
+      assert.equal(received.statusCode, 200, received.body);
+      const receivedBody = JSON.parse(received.body);
+      receivedIds.push(...receivedBody.messages.map((message) => message.id));
+      recipientCursor = receivedBody.nextCursor;
+    } while (recipientCursor);
+    assert.equal(
+      receivedIds.includes(sentBody.messageId),
+      true,
+      `recipient must read the persisted cross-thread message through the normal thread-context route: ${JSON.stringify(receivedIds)}`,
+    );
+  });
+
+  test('thread-context explicit unread starts at origin and anchor never consumes unseen bodies', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadId = 'thread-intent-no-baseline';
+    const messages = Array.from({ length: 5 }, (_, index) =>
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `origin ${index}`,
+        mentions: ['opus'],
+        timestamp: index + 1,
+        threadId,
+      }),
+    );
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', threadId);
+    const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
+    const app = await createApp({ deliveryCursorStore });
+    const anchor = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=anchor&limit=2',
+      headers,
+    });
+    assert.equal(anchor.statusCode, 200, anchor.body);
+    assert.deepEqual(
+      anchor.json().messages.map((message) => message.id),
+      messages.slice(0, 2).map((m) => m.id),
+    );
+    assert.equal(await deliveryCursorStore.getSeenCursor('user-1', 'opus', threadId), undefined);
+    let cursor;
+    const ids = [];
+    do {
+      const page = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        headers,
+      });
+      assert.equal(page.statusCode, 200, page.body);
+      ids.push(...page.json().messages.map((message) => message.id));
+      cursor = page.json().nextCursor;
+    } while (cursor);
+    assert.deepEqual(
+      ids,
+      messages.map((message) => message.id),
+    );
+    const empty = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2',
+      headers,
+    });
+    assert.deepEqual(empty.json().messages, []);
+    for (const query of ['responseMode=full', 'readIntent=history&responseMode=full', 'responseMode=anchor']) {
+      const history = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?limit=2&${query}`,
+        headers,
+      });
+      assert.equal(history.statusCode, 200, history.body);
+      assert.deepEqual(
+        history.json().messages.map((message) => message.id),
+        messages.slice(-2).map((message) => message.id),
+      );
+    }
+  });
+
+  test('thread-context unread rejects sparse reads and cursor reuse with changed selection or identity', async () => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const threadId = 'thread-intent-cursor';
+    const messages = Array.from({ length: 4 }, (_, index) =>
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `scoped ${index}`,
+        mentions: [],
+        timestamp: index + 1,
+        threadId,
+      }),
+    );
+    const caller = await registry.create('user-1', 'opus', threadId);
+    const headers = { 'x-invocation-id': caller.invocationId, 'x-callback-token': caller.callbackToken };
+    const app = await createApp({ deliveryCursorStore });
+    for (const filter of ['keyword=scoped', 'catId=user', `messageId=${messages[0].id}`, 'before=0', 'after=0']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?readIntent=unread&responseMode=full&${filter}`,
+        headers,
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(response.json().code, 'INVALID_UNREAD_CONTEXT_FILTERS');
+    }
+    const first = await app.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2',
+      headers,
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    const cursor = encodeURIComponent(first.json().nextCursor);
+    for (const query of [
+      'readIntent=history&responseMode=full&limit=2',
+      'responseMode=full&limit=2',
+      'readIntent=unread&responseMode=anchor&limit=2',
+      'readIntent=unread&responseMode=full&limit=3',
+      'readIntent=unread&responseMode=full&limit=2&threadId=another-thread',
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/callbacks/thread-context?${query}&cursor=${cursor}`,
+        headers,
+      });
+      assert.equal(response.statusCode, 400, response.body);
+      assert.equal(response.json().code, 'INVALID_THREAD_CONTEXT_CURSOR');
+    }
+    const other = await registry.create('user-1', 'codex', threadId);
+    const otherPage = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2&cursor=${cursor}`,
+      headers: { 'x-invocation-id': other.invocationId, 'x-callback-token': other.callbackToken },
+    });
+    assert.equal(otherPage.statusCode, 400);
+    assert.equal(otherPage.json().code, 'INVALID_THREAD_CONTEXT_CURSOR');
+    const next = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?readIntent=unread&responseMode=full&limit=2&cursor=${cursor}`,
+      headers,
+    });
+    assert.equal(next.statusCode, 200, next.body);
+    assert.deepEqual(
+      next.json().messages.map((message) => message.id),
+      messages.slice(2).map((message) => message.id),
+    );
+    const withoutStore = await createApp();
+    const unavailable = await withoutStore.inject({
+      method: 'GET',
+      url: '/api/callbacks/thread-context?readIntent=unread&responseMode=full',
+      headers,
+    });
+    assert.equal(unavailable.statusCode, 501);
+    assert.equal(unavailable.json().code, 'UNREAD_CONTEXT_UNAVAILABLE');
+  });
+
+  test('thread-context MCP to real HTTP reads seen history and completes explicit unread pagination', async (t) => {
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { cursorFor } = await import('../dist/domains/cats/services/stores/cursor.js');
+    const { handleGetThreadContext } = await import('../../mcp-server/dist/tools/callback-tools.js');
+    const deliveryCursorStore = new DeliveryCursorStore();
+    const target = threadStore.create('user-1', 'MCP HTTP history');
+    const baseline = messageStore.append({
+      userId: 'user-1',
+      catId: null,
+      content: 'seen history',
+      mentions: [],
+      timestamp: 1,
+      threadId: target.id,
+    });
+    await deliveryCursorStore.ackSeenCursor('user-1', 'opus', target.id, cursorFor(baseline));
+    const caller = await registry.create('user-1', 'opus', 'thread-mcp-http-caller');
+    const app = await createApp({ deliveryCursorStore });
+    const saved = Object.fromEntries(
+      ['CAT_CAFE_API_URL', 'CAT_CAFE_INVOCATION_ID', 'CAT_CAFE_CALLBACK_TOKEN', 'CAT_CAFE_CREDENTIAL_FILE'].map(
+        (key) => [key, process.env[key]],
+      ),
+    );
+    t.after(async () => {
+      await app.close();
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    process.env.CAT_CAFE_API_URL = await app.listen({ host: '127.0.0.1', port: 0 });
+    process.env.CAT_CAFE_INVOCATION_ID = caller.invocationId;
+    process.env.CAT_CAFE_CALLBACK_TOKEN = caller.callbackToken;
+    delete process.env.CAT_CAFE_CREDENTIAL_FILE;
+    const read = async (arguments_) => {
+      const result = await handleGetThreadContext({
+        threadId: target.id,
+        limit: 2,
+        responseMode: 'full',
+        ...arguments_,
+      });
+      assert.equal(result.isError, undefined, result.content[0].text);
+      return JSON.parse(result.content[0].text);
+    };
+    assert.deepEqual(
+      (await read({})).messages.map((message) => message.id),
+      [baseline.id],
+    );
+    const unread = Array.from({ length: 5 }, (_, index) =>
+      messageStore.append({
+        userId: 'user-1',
+        catId: null,
+        content: `MCP unread ${index}`,
+        mentions: [],
+        timestamp: index + 2,
+        threadId: target.id,
+      }),
+    );
+    const ids = [];
+    let cursor;
+    do {
+      const page = await read({ readIntent: 'unread', ...(cursor ? { cursor } : {}) });
+      ids.push(...page.messages.map((message) => message.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(
+      ids,
+      unread.map((message) => message.id),
+    );
+    assert.deepEqual((await read({ readIntent: 'unread' })).messages, []);
+    assert.deepEqual(
+      (await read({})).messages.map((message) => message.id),
+      unread.slice(-2).map((message) => message.id),
     );
   });
 
@@ -5230,22 +5911,38 @@ describe('Callback Routes', () => {
 
     const first = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-context?limit=100&keyword=cursorneedle&responseMode=full',
+      url: '/api/callbacks/thread-context?limit=40&keyword=cursorneedle&responseMode=full',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(first.statusCode, 200, first.body);
     const nextCursor = JSON.parse(first.body).nextCursor;
     assert.equal(typeof nextCursor, 'string');
 
+    const sameScope = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?limit=40&keyword=cursorneedle&responseMode=full&cursor=${encodeURIComponent(nextCursor)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(sameScope.statusCode, 200, sameScope.body);
+
+    const changedLimit = await app.inject({
+      method: 'GET',
+      url: `/api/callbacks/thread-context?limit=50&keyword=cursorneedle&responseMode=full&cursor=${encodeURIComponent(nextCursor)}`,
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+    });
+    assert.equal(changedLimit.statusCode, 400, changedLimit.body);
+    assert.equal(JSON.parse(changedLimit.body).code, 'INVALID_THREAD_CONTEXT_CURSOR');
+    assert.match(JSON.parse(changedLimit.body).hint, /same.*limit/i);
+
     for (const params of [
       new URLSearchParams({
-        limit: '100',
+        limit: '40',
         keyword: 'different-keyword',
         responseMode: 'full',
         cursor: nextCursor,
       }),
       new URLSearchParams({
-        limit: '100',
+        limit: '40',
         keyword: 'cursorneedle',
         responseMode: 'full',
         cursor: 'not-a-valid-cursor',
@@ -5298,7 +5995,7 @@ describe('Callback Routes', () => {
 
     const first = await app.inject({
       method: 'GET',
-      url: '/api/callbacks/thread-context?limit=100&responseMode=full',
+      url: '/api/callbacks/thread-context?limit=100&readIntent=unread&responseMode=full',
       headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
     });
     assert.equal(first.statusCode, 200, first.body);
@@ -5317,7 +6014,7 @@ describe('Callback Routes', () => {
     const returnedIds = [...firstBody.messages.map((message) => message.id)];
     let cursor = firstBody.nextCursor;
     while (cursor) {
-      const params = new URLSearchParams({ limit: '100', responseMode: 'full', cursor });
+      const params = new URLSearchParams({ limit: '100', readIntent: 'unread', responseMode: 'full', cursor });
       const response = await app.inject({
         method: 'GET',
         url: `/api/callbacks/thread-context?${params}`,
@@ -5523,8 +6220,10 @@ describe('Callback Routes', () => {
     assert.equal(secondResponse.statusCode, 200);
     const secondBody = JSON.parse(secondResponse.body);
     const secondQueuedMessage = secondBody.messages.find((message) => message.queueEntryId === queued.entry.id);
-    assert.ok(secondQueuedMessage, 'queued_seen must not make unresolved queued body unreadable');
-    assert.equal(secondQueuedMessage.content, 'queued body visible only in full read');
+    assert.ok(secondQueuedMessage, 'pending queued work remains visible in this invocation');
+    assert.equal(secondQueuedMessage.alreadyExposed, true);
+    assert.equal(secondQueuedMessage.pendingWork, true);
+    assert.equal('content' in secondQueuedMessage, false, 'same invocation must not receive the queued body twice');
     assert.equal(
       queuedTelemetry.getFreshnessQueueTelemetrySnapshot().queuedSeenTotal,
       1,

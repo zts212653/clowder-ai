@@ -1,4 +1,4 @@
-import { evolutionExplorationNodeSchema, refIdentity } from '@cat-cafe/shared';
+import { evolutionExplorationNodeSchema, evolutionExplorationReviewV1Schema, refIdentity } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,8 @@ import {
 import { parseProgramProjection } from '../evolution-program-projection';
 import { useEvolutionReading } from '../evolution-reading-state';
 import { ExplorationLineage } from '../exploration/ExplorationLineage';
+import { ExplorationPairedResults } from '../exploration/ExplorationPairedResults';
+import { compareExplorationRecords } from '../exploration/exploration-comparison';
 import { layoutExplorationLineage } from '../exploration/exploration-lineage';
 import { DEFAULT_EXPLORATION, explorationReadingSchema } from '../exploration/exploration-reading';
 import { EvolutionMomentContext } from '../journey/EvolutionMomentContext';
@@ -28,6 +30,12 @@ describe('accepted exploration reading experience', () => {
     host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
     api.fetch.mockReset().mockImplementation(async (path: string) => {
       const url = new URL(path, 'https://cafe.invalid');
       return url.pathname.endsWith('/exploration')
@@ -51,18 +59,88 @@ describe('accepted exploration reading experience', () => {
     return value.program.programId;
   }
 
-  it('lets a fresh reader see the version change and real experiment count directly on the map', async () => {
+  it('reads a non-duck API comparison from its verdicts and output, without treating bigger numbers as better', async () => {
+    const review = evolutionExplorationReviewV1Schema.parse(explorationFixture({ withDetail: true }));
+    if (review.status !== 'resolved' || review.details[0]?.status !== 'resolved') throw Error('unresolved fixture');
+    const experiment = review.experiments[0]!;
+    const record = review.details[0].records[0]!;
+    const right = { experiment, records: [record] };
+    const left = {
+      experiment: { ...experiment, experimentRef: source('before'), title: '修改前的身份契约' },
+      records: [
+        {
+          ...record,
+          experimentRef: source('before'),
+          recordRef: source('before-record'),
+          output: [{ label: 'HTTP', value: '200' }],
+          values: { status: 200 },
+          result: { status: 'violated' as const, label: '未登录却获准读取' },
+        },
+      ],
+    };
+    await act(async () =>
+      root.render(
+        <ExplorationPairedResults
+          programId={review.programRef.ownerStateRef}
+          left={left}
+          right={right}
+          result={compareExplorationRecords(left, right, 'full')}
+          reading={DEFAULT_EXPLORATION}
+          onChange={() => {}}
+          onRetry={() => {}}
+        />,
+      ),
+    );
+    expect(host.querySelector('.exploration-pair-focus h3')?.textContent).toBe('未登录读取');
+    expect(host.querySelector('.exploration-slice-filters')?.textContent).toContain('改善 1');
+    expect([...host.querySelectorAll('.exploration-output-reading dd')].map((el) => el.textContent)).toEqual([
+      '200',
+      '401',
+    ]);
+    expect(host.querySelector('.exploration-outcome[data-result="satisfied"]')?.textContent).toContain('读取被拒绝');
+    expect(host.querySelector('.exploration-trace')).toBeNull();
+    expect(host.textContent).not.toContain('触球');
+  });
+
+  it('keeps version changes and experiment counts in the adjacent map without opening a modal', async () => {
     const programId = await showProgram();
-    expect(host.querySelector<HTMLDetailsElement>('[aria-label="版本谱系"]')?.open).toBe(true);
+    expect(host.querySelector('dialog')).toBeNull();
     const node = host.querySelector<HTMLButtonElement>('.exploration-node[aria-pressed="true"]');
-    expect(node?.textContent).toContain('按请求身份拒绝读取');
-    expect(node?.textContent).toContain('1 轮实验');
+    expect(host.querySelector('.exploration-version-summary')?.textContent).toContain('按请求身份拒绝读取');
+    expect(host.querySelector('.exploration-run-picker')?.textContent).toContain('更换实验 · 1 次');
     expect(node?.textContent).not.toContain('当前沿用');
     expect(useEvolutionReading.getState().programs[programId]?.exploration?.draft.text ?? '').toBe('');
   });
 
-  it('keeps environment, samples, measurement and GT visible before expanding source details', async () => {
+  it('shows the actual change in a node preview instead of its field heading', async () => {
+    const node = evolutionExplorationNodeSchema.parse({
+      kind: 'public_archive',
+      nodeRef: source('preview'),
+      sourceRef: source('preview-source'),
+      title: '持续跟球',
+      summary: '完整说明',
+      parentEdges: [],
+      changes: [{ label: '改了什么', detail: '停步后继续追踪移动球', sourceRef: source('change') }],
+    });
+    await act(async () =>
+      root.render(
+        <ExplorationLineage
+          nodes={[node]}
+          currentKeys={new Set()}
+          viewport={DEFAULT_EXPLORATION.viewport}
+          onViewport={() => {}}
+          onSelect={() => {}}
+        />,
+      ),
+    );
+    expect(host.querySelector('.exploration-node-summary')?.textContent).toBe('停步后继续追踪移动球');
+  });
+
+  it('keeps sample and judgment context beside results and opens complete conditions in place', async () => {
     await showProgram();
+    expect(host.querySelector('.exploration-condition-line')?.textContent).toContain('固定输入集');
+    const conditions = [...host.querySelectorAll('button')].find((button) => button.textContent === '评估与观测');
+    await act(async () => conditions!.click());
     const summary = host.querySelector('[aria-label="当前实验条件"]');
     expect(summary).not.toBeNull();
     expect(summary?.closest('details:not([open])')).toBeNull();
@@ -72,16 +150,54 @@ describe('accepted exploration reading experience', () => {
     expect(host.querySelector<HTMLDetailsElement>('.exploration-condition-details')?.open).toBe(false);
   });
 
-  it('starts a narrow reading with the map folded while preserving an explicit choice to open it', async () => {
+  it('opens the full lineage on request while keeping version selection available in a narrow reading', async () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320);
-    const programId = await showProgram();
-    expect(host.querySelector<HTMLDetailsElement>('[aria-label="版本谱系"]')?.open).toBe(false);
+    await showProgram();
+    expect(host.querySelector('dialog')).toBeNull();
+    expect(host.querySelector('select[aria-label="选择阅读版本"]')).not.toBeNull();
+    const graph = [...host.querySelectorAll('button')].find((button) => button.textContent === '完整谱系');
+    await act(async () => graph!.click());
+    expect(host.querySelector<HTMLDialogElement>('dialog')?.open).toBe(true);
+    const parentEscape = vi.fn();
+    document.addEventListener('keydown', parentEscape);
+    try {
+      host
+        .querySelector('dialog button')
+        ?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(parentEscape).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener('keydown', parentEscape);
+    }
+  });
+
+  it('repairs an old tiny saved zoom using the actual viewport without selecting another version', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(320);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(210);
+    const node = evolutionExplorationNodeSchema.parse({
+      kind: 'public_archive',
+      nodeRef: source('tiny'),
+      sourceRef: source('tiny-source'),
+      title: '基线',
+      summary: '基线说明',
+      parentEdges: [],
+      changes: [],
+    });
+    const onViewport = vi.fn();
+    const onSelect = vi.fn();
     await act(async () =>
-      useEvolutionReading.getState().update(programId, {
-        exploration: { ...useEvolutionReading.getState().programs[programId]!.exploration!, lineageCollapsed: false },
-      }),
+      root.render(
+        <ExplorationLineage
+          nodes={[node]}
+          currentKeys={new Set()}
+          selected={refIdentity(node.nodeRef)}
+          viewport={{ ...DEFAULT_EXPLORATION.viewport, zoom: 0.01, framing: 'manual' }}
+          onViewport={onViewport}
+          onSelect={onSelect}
+        />,
+      ),
     );
-    expect(host.querySelector<HTMLDetailsElement>('[aria-label="版本谱系"]')?.open).toBe(true);
+    expect(onViewport.mock.calls.at(-1)?.[0].zoom).toBeGreaterThanOrEqual(0.8);
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('does not overwrite the map recenter when filling the default experiment for a newly read version', async () => {
@@ -97,6 +213,12 @@ describe('accepted exploration reading experience', () => {
       },
     });
     const programId = await showProgram();
+    const embedded = useEvolutionReading.getState().programs[programId]?.exploration;
+    expect(embedded?.selectedExperimentRef).toEqual(publication.experiments[0]!.experimentRef);
+    expect(embedded?.viewport.x).toBeGreaterThanOrEqual(0);
+    expect(embedded?.viewport.x).toBeLessThan(320);
+    const graph = [...host.querySelectorAll('button')].find((button) => button.textContent === '完整谱系');
+    await act(async () => graph!.click());
     const saved = useEvolutionReading.getState().programs[programId]?.exploration;
     expect(saved?.selectedExperimentRef).toEqual(publication.experiments[0]!.experimentRef);
     expect(saved?.viewport.x).toBeGreaterThanOrEqual(0);
@@ -145,7 +267,7 @@ describe('accepted exploration reading experience', () => {
     expect(view.zoom).toBeLessThan(0.5);
     expect(explorationReadingSchema.safeParse({ ...DEFAULT_EXPLORATION, viewport: view }).success).toBe(true);
     expect(onSelect).not.toHaveBeenCalled();
-    const locate = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('定位阅读版'));
+    const locate = host.querySelector<HTMLButtonElement>('button[aria-label="定位阅读版"]');
     await act(async () => locate!.click());
     const readable = onViewport.mock.calls.at(-1)![0];
     expect(readable.zoom).toBeGreaterThanOrEqual(1);

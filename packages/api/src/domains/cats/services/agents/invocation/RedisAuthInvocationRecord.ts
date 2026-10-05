@@ -90,7 +90,20 @@ export function authRecordFromRedisHash(fields: Record<string, string>, msgs: Se
     return null;
   if (
     record.collectiveWorkBinding &&
-    (record.ownerAuthProvenance !== 'strict' || !record.originTriggerMessageId || record.executionGrant)
+    (!record.originTriggerMessageId || record.executionGrant || record.managedWorkBinding)
+  )
+    return null;
+  // A persisted admission proves this Work, not a live strictly authenticated owner session.
+  // Downgrade pre-separation records as well, so restart cannot restore owner control-plane access.
+  if (record.collectiveWorkBinding) record.ownerAuthProvenance = 'unknown';
+  if (
+    record.toolExecutionPolicy?.mode === 'collective_work' &&
+    (!record.collectiveWorkBinding ||
+      record.toolExecutionPolicy.taskId !== record.collectiveWorkBinding.taskId ||
+      record.toolExecutionPolicy.threadId !== record.threadId ||
+      record.toolExecutionPolicy.executionRevision !== (record.collectiveWorkBinding.executionRevision ?? 1) ||
+      record.toolExecutionPolicy.executionRef !==
+        (record.collectiveWorkBinding.executionRef ?? record.collectiveWorkBinding.authorityRef))
   )
     return null;
   return record;

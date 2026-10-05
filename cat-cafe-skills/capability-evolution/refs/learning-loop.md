@@ -4,7 +4,7 @@ feature_ids: []
 related_features: [F311, F192, F246, F267, F299]
 topics: [capability-evolution, evidence-selection, continuation, transfer]
 created: 2026-09-10
-updated: 2026-09-13
+updated: 2026-10-01
 knowledge:
   artifact_type: method
   domain: capability-evolution
@@ -15,6 +15,8 @@ knowledge:
   provenance:
     author_type: collaborative
   source_refs:
+    - "[thread-id]#private-source-id"
+    - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
@@ -90,6 +92,11 @@ skill、代码、数据或配置变化。
 比较说明中写清贡献已解、部分或未解；整套通过不自动生成单项因果结论。
 不同 owner 的资产仍各持写权、版本和恢复路径，不能把版本包当跨 owner 授权。
 项目已冻结的单变量试验仍按其契约执行，不用通用方法重写正在进行的实验。
+
+候选也可以是减法：已积累的规则、步骤或 skill 段落，可把删减版与当前版、
+定向修订版并列比较，复杂度同样承担举证责任。claim 落在 verifier/judge 射程内时，
+外部自动爬坡（如 `/claude-api hillclimb`）可以生成候选；它默认每轮用来挑版本的
+test 只算探索证据，不是下文所说的正式采用独立证据。
 
 候选存在、对它的一次测量、两份结果的比较分别记录。补测不制造新版本，
 未测候选不继承邻版成绩。比较条件按问题选择：可配对则配对，其他合法设计保留

@@ -2,6 +2,7 @@
 import { type EvolutionExplorationMediaV1, type EvolutionExplorationRecordV1, refIdentity } from '@cat-cafe/shared';
 import { useEffect, useState } from 'react';
 import { Lightbox } from '@/components/Lightbox';
+import { openEvolutionMedia } from '@/components/workbench/evolution-media-navigation';
 import { ExplorationIcon } from './ExplorationIcon';
 import { ExplorationTrace, type explorationTraceBounds } from './ExplorationTrace';
 
@@ -13,6 +14,7 @@ function mediaUrl(programId: string, record: EvolutionExplorationRecordV1, media
   return `/api/capability-evolution/programs/${encodeURIComponent(programId)}/exploration-media/${media.mediaRef.version}?${query}`;
 }
 
+/** F311 reading enlarges in place; discussion is the separate explicit action below the evidence. */
 function ImageEvidence({ src, label }: { src: string; label: string }) {
   const [state, setState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [attempt, setAttempt] = useState(0);
@@ -60,6 +62,7 @@ function ImageEvidence({ src, label }: { src: string; label: string }) {
   );
 }
 
+/** F311 reads replays in place; discussion lives in the shared F309 landing, opened beside it on request. */
 function VideoEvidence({ src, label, poster }: { src: string; label: string; poster?: string }) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [attempt, setAttempt] = useState(0);
@@ -134,6 +137,13 @@ export function ExplorationMedia({
     );
   const label = [sideLabel, record.label, media?.label ?? '所选原件'].filter(Boolean).join(' · ');
   const src = media ? mediaUrl(programId, record, media) : '';
+  const openOriginal = () => {
+    if (media)
+      openEvolutionMedia(
+        { programId, experimentRef: record.experimentRef, recordRef: record.recordRef, mediaRef: media.mediaRef },
+        label,
+      );
+  };
   const image = record.media.find((item) => item.kind === 'image' && item.timeRange?.startSeconds === 0);
   return (
     <figure className="exploration-media" data-media-record={refIdentity(record.recordRef)}>
@@ -159,6 +169,11 @@ export function ExplorationMedia({
       ) : (
         <ImageEvidence key={refIdentity(media.mediaRef)} src={src} label={label} />
       )}
+      {media && !record.mediaStatus ? (
+        <button type="button" className="exploration-discuss" aria-label={`打开并讨论 ${label}`} onClick={openOriginal}>
+          打开并讨论
+        </button>
+      ) : null}
       {(record.media.length > 1 || (!media && record.media.length > 0)) && (
         <div className="exploration-media-choices" role="group" aria-label="本条记录的原件">
           {record.media.map((entry) => (

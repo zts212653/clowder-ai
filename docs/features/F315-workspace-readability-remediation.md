@@ -1,8 +1,8 @@
 ---
 feature_ids: [F315]
-related_features: [F056, F083, F246, F284, F293, F299, F305, F307, F310, F311]
+related_features: [F056, F083, F246, F284, F293, F299, F305, F307, F310, F311, F322]
 topics: [workspace, ui, ux, readability, information-architecture, progressive-disclosure, product-language]
-tips_exempt: "2026-09-04 review renewal: this adds durable three-page visual findings and exact owner bindings without adding a new user-invokable capability or discovery step; each repaired surface must teach itself in place."
+tips_exempt: "Renewed 2026-10-02: F322 settlement and Status/Sessions repair evidence update existing-page acceptance truth, not a new destination; those pages must explain their states and actions in place."
 doc_kind: spec
 created: 2026-09-03
 description: "盘点并迁移现有 Workspace 用户表面，使首屏先回答发生了什么、是否需要行动与下一步是什么，同时保留按需可达的精确证据。"
@@ -40,6 +40,14 @@ F305 解决的是“以后怎样不再从 schema 直接长出 UI”：把 F083�
 > 用户进入任一 Workspace 页面，首屏先看懂发生了什么、是否需要自己行动、下一步是什么；精确 ID、来源、运行指标与 Raw 不丢失，但只在任务确实需要时出现。
 
 ## Current State / 现状基线
+
+### 2026-09-27 旧账消费更新
+
+14 条旧开放 AC 保持原文与勾选状态：B4/P1/P3 当前成立或 landed；B3 待独立核对回执、实现和测试；B1/B2 部分，P2 仅 finding，C1–C4/D1–D3 尚未终态结算。[F322 Phase D](F322-everyday-work-experience.md#phase-d旧承诺) 按账消费 F293/F310/F311 最新实现，补三页真实数据、populated/窄屏与后续批次证据；前三页仍不受全量 census 阻塞。F315 保持 in-progress，材料交付不等于产品关闭。
+
+### 2026-09-28 Status / Sessions 真实页面退回
+
+operator `[thread-id]#private-source-id` 的 populated 截图明确否定 Session Chain。#4831 已合入，但其 body 明示“现在是否正常 / 是否要处理”摘要尚未交付；默认突出“未观察到压缩”，技术详情与多组操作仍堆叠。operator 后在原 D 现场128改由 Sol6 接手、176补充按钮辨识度；Sonnet395对 #4906 的 `87bcac9b413001daf161dc67bdcfa66815f7b521` 独立 review approved。
 
 ### 代码可达面
 

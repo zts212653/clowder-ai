@@ -78,7 +78,7 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
       custody.allTargetCats.length !== 1 ||
       (custody.executionScope === 'collective-participation'
         ? custody.ownerAuthProvenance !== 'unknown'
-        : custody.ownerAuthProvenance !== 'strict'))
+        : custody.ownerAuthProvenance !== 'unknown' && custody.ownerAuthProvenance !== 'strict'))
   ) {
     throw new Error('Collective execution scope must retain its singleton source and owner provenance after restart');
   }
@@ -119,7 +119,10 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
     id: entryId,
     threadId: primary.threadId,
     userId: custody.ownerUserId ?? primary.userId,
-    ownerAuthProvenance: normalizeOwnerAuthProvenance(custody.ownerAuthProvenance),
+    ownerAuthProvenance:
+      custody.executionScope === 'collective-work'
+        ? 'unknown'
+        : normalizeOwnerAuthProvenance(custody.ownerAuthProvenance),
     ...(custody.executionScope ? { executionScope: custody.executionScope } : {}),
     content: messages.map((message) => message.content).join('\n'),
     messageId: primary.id,
@@ -161,7 +164,11 @@ export function buildQueueEntry(messages: StoredMessage[], entryId: string): Que
     createdAt: custody.createdAt,
     autoExecute: false,
     priority: custody.priority,
-    ...(managedHoldWake ? { sourceCategory: 'scheduled' as const } : {}),
+    ...(managedHoldWake
+      ? { sourceCategory: 'scheduled' as const }
+      : custody.sourceCategory
+        ? { sourceCategory: custody.sourceCategory as NonNullable<QueueEntry['sourceCategory']> }
+        : {}),
     ...(custody.position !== undefined ? { position: custody.position } : {}),
   };
 }

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { after, afterEach, describe, it } from 'node:test';
+import { after, afterEach, describe, it, test } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { assignRedisDatabaseForTestFile, readRedisTestManifest } from '../scripts/redis-test-db-namespace.mjs';
-import { assertRedisIsolationOrThrow } from './helpers/redis-test-helpers.js';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const originalAssignedDatabase = process.env.CAT_CAFE_REDIS_TEST_DB_ASSIGNED;
 const originalIsolationFlag = process.env.CAT_CAFE_REDIS_TEST_ISOLATED;
@@ -144,6 +144,16 @@ describe('Redis test-file DB namespace', () => {
 });
 
 describe('Redis isolation guard namespace contract', () => {
+  it('skips disabled and protected endpoints even with the isolation flag enabled', () => {
+    process.env.CAT_CAFE_REDIS_TEST_ISOLATED = '1';
+    for (const url of ['redis://127.0.0.1:0/15', 'redis://localhost:6399/15']) {
+      assert.ok(redisIsolationSkipReason(url), 'an unavailable or protected endpoint must never be connected');
+      assert.throws(() => assertRedisIsolationOrThrow(url, 'endpoint-test'), /port/);
+    }
+    assert.equal(redisIsolationSkipReason('redis://127.0.0.1:6300/15'), false);
+    assert.equal(redisIsolationSkipReason('redis://127.0.0.1:6398/15'), false);
+  });
+
   it(
     'applies the preload before an isolated test module runs',
     { skip: originalIsolationFlag !== '1' || originalManifest === undefined },
@@ -191,3 +201,30 @@ describe('Redis isolation guard namespace contract', () => {
     );
   });
 });
+
+test(
+  'real isolated Redis responds from the process and directory recorded by this runner',
+  { skip: redisIsolationSkipReason(process.env.REDIS_URL) },
+  async () => {
+    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'redis-runner-lifecycle');
+    const { default: Redis } = await import('ioredis');
+    const redis = new Redis(process.env.REDIS_URL);
+    const key = `redis-runner-proof:${process.pid}`;
+    try {
+      const info = await redis.info('server');
+      const pid = Number(info.match(/^process_id:(\d+)\r?$/mu)[1]);
+      const [, directory] = await redis.config('GET', 'dir');
+      const { readRedisTestLeases } = await import('../../../scripts/lib/redis-test-leases.mjs');
+      const lease = readRedisTestLeases().leases.find((entry) => entry.redis.pid === pid);
+      assert.ok(lease, 'responding Redis must have this runner lease');
+      assert.equal(lease.port, Number(new URL(process.env.REDIS_URL).port));
+      assert.equal(lease.dataDir, directory);
+      assert.equal(new URL(process.env.REDIS_URL).pathname, `/${process.env.CAT_CAFE_REDIS_TEST_DB_ASSIGNED}`);
+      await redis.set(key, 'retained-child');
+      assert.equal(await redis.get(key), 'retained-child');
+    } finally {
+      await redis.del(key);
+      await redis.quit();
+    }
+  },
+);

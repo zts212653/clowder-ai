@@ -40,6 +40,7 @@ test(
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();
+    await page.clock.install();
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     try {
@@ -53,12 +54,11 @@ test(
       const seeded = await command({ action: 'create', threadIds: [c.id, d.id], name: '已有工作组' });
       const originalGroup = seeded.groups[0];
       let preferenceReads = 0;
-      // Reproduce a server response arriving after the real apiFetch 30s bound.
-      // Only the first GET stalls; recovery must use the same canonical endpoint.
+      // Keep the first native fetch pending until the production apiFetch timer
+      // aborts it. Advance browser time after observing loading; do not replace
+      // TimeoutError with a synthetic response or spend 30s of wall time here.
       const slowPreferenceRead = async (route) => {
         if (route.request().method() === 'GET' && ++preferenceReads === 1) {
-          await new Promise((resolve) => setTimeout(resolve, 31_500));
-          await route.abort('timedout').catch(() => {});
           return;
         }
         await route.continue();
@@ -80,14 +80,18 @@ test(
       assert.equal(await organize.textContent(), '正在读取 Group…');
       assert.equal(await organize.isDisabled(), true);
       await page.screenshot({ path: path.join(evidenceDir, '00-slow-group-read.png') });
+      await page.clock.fastForward(30_000);
       await page.waitForFunction(
         () => document.querySelector('[data-testid="search-group-organize"]')?.textContent === '整理全部 3 条',
         undefined,
-        { timeout: 45_000 },
+        { timeout: 5_000 },
       );
       assert.equal(preferenceReads, 2, 'one timeout must recover without a manual click or unbounded retry');
       assert.deepEqual(await readGroups(), [originalGroup], 'read recovery must preserve all saved membership');
       await page.unroute('**/api/config/thread-attention', slowPreferenceRead);
+      // Later undo receipts use server epoch time; restore the page's wall date
+      // after this timer-only probe, before any new membership mutation.
+      await page.clock.setSystemTime(new Date());
       assert.equal(await organize.textContent(), '整理全部 3 条');
       assert.equal(await page.getByRole('tab', { name: '置顶', exact: true }).getAttribute('aria-selected'), 'true');
       assert.equal(await page.getByTestId('search-group-tip').count(), 1);

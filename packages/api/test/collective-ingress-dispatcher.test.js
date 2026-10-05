@@ -53,6 +53,7 @@ function harness(events, options = {}) {
   const queue = [];
   const broadcasts = [];
   const processed = [];
+  const revisions = [];
   let completionAttempts = 0;
   const threads = new Map(
     ['thread_channel', 'thread_human', 'thread_agent'].map((threadId) => [
@@ -65,6 +66,14 @@ function harness(events, options = {}) {
       },
     ]),
   );
+  for (const endpoint of Object.values(route.channelRoutes ?? {})) {
+    threads.set(endpoint.threadId, {
+      id: endpoint.threadId,
+      createdBy: 'owner_1',
+      deletedAt: null,
+      participants: Object.keys(endpoint.participants),
+    });
+  }
   for (const missing of options.missingThreads ?? []) threads.delete(missing);
   for (const deleted of options.deletedThreads ?? []) {
     const thread = threads.get(deleted);
@@ -158,10 +167,13 @@ function harness(events, options = {}) {
     },
     queueProcessor: { processNext: async (threadId, ownerId) => processed.push({ threadId, ownerId }) },
     socketManager: { broadcastToRoom: (room, name, payload) => broadcasts.push({ room, name, payload }) },
+    resumeWorkRevision: async (source, revisionEvent, catId) => {
+      revisions.push({ source, event: revisionEvent, catId });
+    },
     isCatAvailable: (catId) => !(options.unavailableCats ?? []).includes(catId),
     now: () => Date.parse('2026-08-29T18:01:00.000Z'),
   });
-  return { dispatcher, connector, inbox, completions, failures, messages, queue, broadcasts, processed };
+  return { dispatcher, connector, inbox, completions, failures, messages, queue, broadcasts, processed, revisions };
 }
 
 test('routes default Channel ingress idempotently and keeps route receipt separate from Service ACK', async () => {
@@ -178,6 +190,168 @@ test('routes default Channel ingress idempotently and keeps route receipt separa
   assert.deepEqual(await h.dispatcher.dispatchConnection('con_100000000000'), { routed: 1, failed: 0, skipped: 0 });
   assert.equal(h.messages.size, 1);
   assert.equal(h.completions[0].receipt.messageId, 'msg_1');
+});
+
+test('routes each Channel and every named Cat through the shared Café×Channel endpoint', async () => {
+  const channelRoutes = {
+    general: {
+      channelId: 'general',
+      threadId: 'thread_general_endpoint',
+      participants: { 'codex-sol': { displayName: 'Sol' }, 'codex-terra': { displayName: 'Terra' } },
+    },
+    second: {
+      channelId: 'second',
+      threadId: 'thread_second_endpoint',
+      participants: { 'codex-sol': { displayName: 'Sol' } },
+    },
+  };
+  const h = harness(
+    [
+      event({ eventId: 'evt_general_channel', sequence: 1 }),
+      event({
+        eventId: 'evt_second_channel0',
+        sequence: 2,
+        target: { kind: 'channel', channelId: 'second' },
+        location: { channelId: 'second' },
+        recipient: { kind: 'channel' },
+      }),
+      event({
+        eventId: 'evt_general_agent0',
+        sequence: 3,
+        target: { kind: 'agent', humanId: 'human_owner00000', agentId: 'codex-sol' },
+      }),
+    ],
+    { route: { agentRoutes: {}, channelRoutes } },
+  );
+
+  assert.deepEqual(await h.dispatcher.dispatchConnection('con_100000000000'), {
+    routed: 3,
+    failed: 0,
+    skipped: 0,
+  });
+  assert.deepEqual(
+    [...h.messages.values()].map((message) => message.threadId),
+    ['thread_general_endpoint', 'thread_second_endpoint', 'thread_general_endpoint'],
+  );
+  assert.equal(h.queue[0].threadId, 'thread_general_endpoint');
+  assert.deepEqual(h.queue[0].targetCats, ['codex-sol']);
+});
+
+test('routes revision feedback into the same private Work without a duplicate public invocation', async () => {
+  const revision = event({
+    eventId: 'evt_revision00000',
+    clientEventId: 'work-revision:work_aaaaaaaa:request-v2',
+    target: { kind: 'agent', humanId: 'human_owner00000', agentId: 'codex-sol' },
+    workRequest: 'revise',
+    workRevisionNotice: {
+      v: 1,
+      workId: 'work_aaaaaaaa',
+      workRevision: 4,
+      assignmentEventId: 'evt_assignment00',
+      resultEventId: 'evt_result000000',
+      resultRevision: 1,
+    },
+    body: '请补上重启后的恢复证据。',
+  });
+  const h = harness([revision]);
+
+  assert.deepEqual(await h.dispatcher.dispatchConnection('con_100000000000'), {
+    routed: 1,
+    failed: 0,
+    skipped: 0,
+  });
+  assert.equal(h.queue.length, 0, 'revision feedback must not also launch a public-participation turn');
+  assert.equal(h.revisions.length, 1);
+  assert.equal(h.revisions[0].catId, 'codex-sol');
+  assert.equal(h.revisions[0].event.workRevisionNotice.resultRevision, 1);
+  assert.equal(h.revisions[0].source.source.meta.workRequest, 'revise');
+  assert.deepEqual(h.revisions[0].source.source.meta.workRevisionNotice, revision.workRevisionNotice);
+  assert.equal(h.completions[0].receipt.messageId, h.revisions[0].source.id);
+});
+
+test('wakes at most one self-subscribed Cat for an explicit response request and leaves ordinary talk quiet', async () => {
+  const channelRoutes = {
+    general: {
+      channelId: 'general',
+      threadId: 'thread_general_endpoint',
+      participants: { 'codex-sol': { displayName: 'Sol' }, 'codex-terra': { displayName: 'Terra' } },
+    },
+  };
+  const standingInterests = {
+    general: {
+      'codex-sol': {
+        catId: 'codex-sol',
+        kind: 'response_requests',
+        status: 'active',
+        revision: 1,
+        updatedAt: '2026-09-11T00:00:00.000Z',
+      },
+      'codex-terra': {
+        catId: 'codex-terra',
+        kind: 'response_requests',
+        status: 'active',
+        revision: 2,
+        updatedAt: '2026-09-11T00:01:00.000Z',
+      },
+    },
+  };
+  const requested = harness([event({ eventId: 'evt_response_request', attentionRequest: 'response_requested' })], {
+    route: { agentRoutes: {}, channelRoutes, standingInterests, attentionRevision: 2 },
+  });
+  assert.deepEqual(await requested.dispatcher.dispatchConnection('con_100000000000'), {
+    routed: 1,
+    failed: 0,
+    skipped: 0,
+  });
+  assert.equal(requested.queue.length, 1);
+  assert.deepEqual(requested.queue[0].targetCats, ['codex-sol']);
+  assert.equal(requested.queue[0].threadId, 'thread_general_endpoint');
+  assert.equal([...requested.messages.values()][0].source.meta.participation.catId, 'codex-sol');
+  assert.deepEqual(requested.completions[0].receipt.attention, {
+    request: 'response_requested',
+    state: 'wake_queued',
+    catId: 'codex-sol',
+    interestRevision: 1,
+  });
+
+  const ordinary = harness([event({ eventId: 'evt_ordinary_talk' })], {
+    route: { agentRoutes: {}, channelRoutes, standingInterests, attentionRevision: 2 },
+  });
+  assert.deepEqual(await ordinary.dispatcher.dispatchConnection('con_100000000000'), {
+    routed: 1,
+    failed: 0,
+    skipped: 0,
+  });
+  assert.equal(ordinary.queue.length, 0);
+  assert.equal(ordinary.completions[0].receipt.attention, undefined);
+});
+
+test('persists an explicit response request as delivered but unclaimed when no Cat declared interest', async () => {
+  const h = harness([event({ eventId: 'evt_unclaimed_request', attentionRequest: 'response_requested' })], {
+    route: {
+      agentRoutes: {},
+      channelRoutes: {
+        general: {
+          channelId: 'general',
+          threadId: 'thread_general_endpoint',
+          participants: { 'codex-sol': { displayName: 'Sol' } },
+        },
+      },
+      standingInterests: {},
+      attentionRevision: 0,
+    },
+  });
+  assert.deepEqual(await h.dispatcher.dispatchConnection('con_100000000000'), {
+    routed: 1,
+    failed: 0,
+    skipped: 0,
+  });
+  assert.equal(h.messages.size, 1);
+  assert.equal(h.queue.length, 0);
+  assert.deepEqual(h.completions[0].receipt.attention, {
+    request: 'response_requested',
+    state: 'unclaimed',
+  });
 });
 
 test('recovers a crash after Host append without waiting for a route edit or duplicating the message', async () => {

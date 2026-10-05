@@ -987,6 +987,7 @@ start_runtime_worktree() {
     export CONNECTOR_GATEWAY_AUTOSTART="${CONNECTOR_GATEWAY_AUTOSTART:-1}"
     # Runtime contract: passive frozen — no tsx watch auto-restart on src changes.
     export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
+    export CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1
     cleanup_frozen_runtime_target_ref
     exec env CAT_CAFE_STRICT_PROFILE_DEFAULTS=1 ./scripts/start-dev.sh --prod-web --profile=opensource ${START_ARGS[@]+"${START_ARGS[@]}"}
   fi
@@ -1023,6 +1024,7 @@ start_runtime_worktree() {
   # Restart only happens on explicit `pnpm start` (which runs build invariant first).
   # See docs/decisions/039-runtime-passive-freeze.md for design rationale.
   export CAT_CAFE_DIRECT_NO_WATCH="${CAT_CAFE_DIRECT_NO_WATCH:-1}"
+  export CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1
   info "exporting CAT_CAFE_RUNTIME_ROOT=$CAT_CAFE_RUNTIME_ROOT"
   info "exporting CAT_CAFE_WORKSPACE_ROOT=$CAT_CAFE_WORKSPACE_ROOT"
   info "exporting CAT_CAFE_PROVISION_GLOBAL_SIDECAR=$CAT_CAFE_PROVISION_GLOBAL_SIDECAR"

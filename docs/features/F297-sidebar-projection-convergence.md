@@ -1,6 +1,6 @@
 ---
 feature_ids: [F297]
-related_features: [F069, F081, F095, F153, F164, F183, F194, F277, F295, F304]
+related_features: [F069, F081, F095, F153, F164, F183, F194, F277, F295, F304, F322]
 topics: [sidebar, projection, state-convergence, write-path, authority, thread-list]
 doc_kind: spec
 created: 2026-08-17
@@ -8,7 +8,7 @@ description: "把 Sidebar 收敛为服务端权威快照、前端单一 canonica
 description_source: human
 description_author: opus5
 description_updated_at: 2026-08-17T01:20:00-07:00
-tips_exempt: "续租 2026-08-29 / conditional full snapshot：ETag/304 只减少既有 Sidebar 权威刷新中的重复传输、前端 apply 与 IDB 写入，不新增用户可操作入口或学习步骤。"
+tips_exempt: "Renewed 2026-10-02: F322 backlinks and the crowded-row closure record distinguish landed repairs from pending acceptance; the existing Sidebar entry and refresh workflow gain no new user operation."
 ---
 
 # F297: Sidebar Projection Convergence — 服务端权威快照，前端单一写入
@@ -18,6 +18,7 @@ tips_exempt: "续租 2026-08-29 / conditional full snapshot：ETag/304 只减少
 > **operator kickoff**: `private-source-id`（“回到数学之美和第一性原理”“可以立项一下”“你主导，他辅助 review”；并授权 F081 AC-B2 处置由 owner 自决）+ `private-source-id`（“立项直接 commit push，不需要提 PR，Maine Coon re 出来的问题当场改”）。
 >
 > **Phase C operator authorization**: `private-source-id`（Phase C 改由 @codex-sol 主写；exact-HEAD reviewer 优先 @kimi；Phase D / 合入后 alpha acceptance 另行闭环）。
+>
 >
 > Ownership boundary：独立窄 Sidebar projection store/DTO、刷新/缓存边界与用户侧消费归 `thread-navigation`。运行态输入继续由 `dispatch` 的 F295 active-execution projection 与 F194 liveness classifier 持有；F297 只组合并切断 Sidebar 的 legacy read，不复制或全局禁写其生命周期状态。Map delta: **updated in this AC-A3 review**。
 

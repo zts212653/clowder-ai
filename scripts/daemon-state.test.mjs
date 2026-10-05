@@ -4,9 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import {
-  captureProcessIdentity,
   DaemonStateError,
   daemonStatePaths,
   inspectDaemonState,
@@ -14,6 +14,7 @@ import {
   stopDaemon,
   writeDaemonState,
 } from './lib/daemon-state.mjs';
+import { captureReadableIdentity } from './lib/process-identity.mjs';
 
 const tempRoots = new Set();
 const children = new Set();
@@ -224,37 +225,35 @@ test('legacy global PID migration is runtime-only and validates process ownershi
   mkdirSync(join(homeDir, '.cat-cafe'), { recursive: true });
   writeFileSync(legacyPidFile, `${child.pid}\n`);
   writeFileSync(legacyLogPathFile, `${join(runtimeRoot, 'cat-cafe-daemon.log')}\n`);
-
-  const worktreePaths = daemonStatePaths({
-    homeDir,
-    projectRoot: runtimeRoot,
-    deploymentId: 'worktree',
-  });
+  const options = { legacyPidFile, legacyLogPathFile, expectedProjectRoot: runtimeRoot };
+  const worktreePaths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'worktree' });
   const refused = migrateLegacyDaemonState({
+    ...options,
     paths: worktreePaths,
-    legacyPidFile,
-    legacyLogPathFile,
-    expectedProjectRoot: runtimeRoot,
     expectedDeploymentId: 'worktree',
   });
   assert.equal(refused.outcome, 'skipped');
   assert.equal(refused.reason, 'legacy-runtime-only');
   assert.equal(existsSync(legacyPidFile), true);
 
-  const runtimePaths = daemonStatePaths({
-    homeDir,
-    projectRoot: runtimeRoot,
-    deploymentId: 'runtime',
-  });
-  assert.match(captureProcessIdentity(child.pid).command, /start-dev\.sh/);
-  const migrated = migrateLegacyDaemonState({
+  const runtimePaths = daemonStatePaths({ homeDir, projectRoot: runtimeRoot, deploymentId: 'runtime' });
+  assert.match(captureReadableIdentity(child.pid).command, /start-dev\.sh/);
+  const runtimeOptions = {
+    ...options,
     paths: runtimePaths,
-    legacyPidFile,
-    legacyLogPathFile,
-    expectedProjectRoot: runtimeRoot,
     expectedDeploymentId: 'runtime',
-  });
-  assert.equal(migrated.outcome, 'migrated');
+  };
+  let migrated;
+  // A verified setup observation does not make the migration's later OS read
+  // infallible. Re-observe only uncertainty; a conclusive refusal stays red.
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    migrated = migrateLegacyDaemonState(runtimeOptions);
+    if (migrated.reason !== 'legacy-process-identity-unreadable') break;
+    assert.equal(existsSync(runtimePaths.stateFile), false, 'unknown identity cannot authorize migration');
+    assert.equal(readFileSync(legacyPidFile, 'utf8'), `${child.pid}\n`);
+    await delay(20);
+  }
+  assert.equal(migrated.outcome, 'migrated', JSON.stringify(migrated));
   assert.equal(existsSync(runtimePaths.stateFile), true);
   assert.equal(existsSync(legacyPidFile), false);
   assert.equal(existsSync(legacyLogPathFile), false);

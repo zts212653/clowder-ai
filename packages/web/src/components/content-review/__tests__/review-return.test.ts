@@ -136,3 +136,37 @@ describe.each(['desktop', 'mobile'] as const)('review source continuity: %s', (p
     });
   });
 });
+
+it('opens another review from Needs Me while Needs Me is the desktop sidecar', () => {
+  // Real page 2026-09-23: after the first open, Needs Me moves into the side-by-side sidecar; clicking
+  // "在 Workspace 打开" there did nothing because the return surface was only looked up in the tabs.
+  let state = reduceWorkbench(createInitialWorkbenchState([NEEDS_ME]), {
+    type: 'open-artifact-with-return',
+    artifact: REVIEW,
+    returnSurface: needsMeReturn,
+    presentation: 'desktop',
+    entitlement: USER,
+  });
+  expect(state.sidecar && resolveNeedsMeReturnTarget(state.sidecar)).toEqual({
+    threadId: 'thread-needs-me-source',
+    itemRef: 'needs-me:task-one:review',
+  });
+  const secondReturn = createNeedsMeReturnSurface(NEEDS_ME, 'needs-me:task-two:review');
+  if (!secondReturn) throw new Error('Valid owner return coordinates must be admitted');
+  state = reduceWorkbench(state, {
+    type: 'open-artifact-with-return',
+    artifact: OTHER_REVIEW,
+    returnSurface: secondReturn,
+    presentation: 'desktop',
+    entitlement: USER,
+  });
+  const active = state.surfaces.find((surface) => surface.id === state.activeSurfaceId);
+  expect(active && resolveArtifactReviewTarget(active)).toEqual({
+    reviewId: `review-${'b'.repeat(64)}`,
+    threadId: 'thread-other-review-owner',
+  });
+  expect(state.sidecar && resolveNeedsMeReturnTarget(state.sidecar)).toEqual({
+    threadId: 'thread-needs-me-source',
+    itemRef: 'needs-me:task-two:review',
+  });
+});

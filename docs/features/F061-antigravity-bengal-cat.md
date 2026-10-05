@@ -1,6 +1,7 @@
 ---
 feature_ids: [F061]
-related_features: [F050, F032, F041, F043, F045, F060, F172, F174, F178]
+tips_exempt: "The September 29 change records F325 ownership and the legacy execution retirement plan; it neither activates a new AGY carrier nor removes existing history or shared consumers."
+related_features: [F050, F032, F041, F043, F045, F060, F172, F174, F178, F325]
 topics: [antigravity, bengal-cat, cdp, external-agent, image-generation, evidence-chain, multi-model]
 doc_kind: spec
 created: 2026-03-04
@@ -9,6 +10,7 @@ created: 2026-03-04
 # F061: Antigravity 接入 — Bengal（混血家族）
 
 > **Status**: done | **Owner**: Ragdoll Opus 4.6（Phase 2a/2b） · Ragdoll Opus 4.7（Phase 2c · 猫猫工具平权 + Bug-F UX + binary/workspace 分离）
+
 > **Created**: 2026-03-04 | **Completed**: 2026-04-26
 >
 > **Evolved to**: [F178](./F178-persistent-mcp-agent-key-auth.md) (Bug-H persistent MCP write-path auth follow-up)

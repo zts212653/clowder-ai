@@ -4,8 +4,8 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-09-09
-tips_exempt: "Renewed 2026-09-07: terminal-lineage conflicts and adopted managed-hold completion repair existing protocol paths, without a new user-invokable capability. Failed notifications reuse the existing Queue receipt/actions; explicit completion guidance belongs in the MCP response and tool description."
+updated: 2026-10-03
+tips_exempt: "Renewed 2026-10-02: adopted-dispatch fencing and review/coordination case records refine existing internal completion protocols; no new end-user action is added, and exact completion guidance remains in MCP responses."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -27,6 +27,11 @@ mcp_admission_claims:
     decision: accepted
   - ref: "file:docs/features/F167-a2a-chain-quality.md"
     toolName: cat_cafe_get_hold_status
+    resourceFamily: task-workflow
+    boundaryKind: authority-boundary
+    decision: accepted
+  - ref: "file:docs/features/F167-a2a-chain-quality.md"
+    toolName: cat_cafe_get_custody_events
     resourceFamily: task-workflow
     boundaryKind: authority-boundary
     decision: accepted
@@ -617,6 +622,7 @@ operator experience：
 | KD-29 | Stop gate 判据从"文本出口三选一"切换到"turn-scoped 球权账本查询"（Phase T）：裁决对象仅为**本次唤醒对应的协议球**，不是猫名下全部 open work；覆盖判定器 = 唤醒来源（机械） | 三代 guard（F064 教说话 / F167 刹车 / F177 逼表态）都在语言层加压，语言层压力必然产生语言层症状（表演性 @ / 礼貌回环 / 假 hold）→ 军备竞赛。判据换到 ground truth（账本，封闭集）才终结竞赛。backlog 毛线球若参与拦截则漫游被杀死——turn-scoped 是"管球不管猫"的必要精确化。operator 猫爬架条款：`0001784213241082` | 2026-07-16 |
 | KD-30 | 迁移用三态判据（covered_active / covered_empty / unknown_legacy），unknown 走旧 guard fail-closed；不做 big-bang cutover | 二态（有球拦/没球放）隐含"账本 day one 完备"假设——记账覆盖渐进期"查不到=放行"会把未记账真实责任放生（重演 74 分钟）。Sol 三态方案胜出 fable 二态方案的并行裁决记录：`0001784211771626` | 2026-07-16 |
 | KD-31 | 减法红线：cutover 后 guard 总拦截次数不降反升 = 方案失败回滚；礼貌不产生新工作（terminal 后 ACK 不 re-enqueue）为服务端硬保证，不识别自然语言 | operator 反补锅条款（"我害怕你们一本正经补锅"）制度化——锅变少是验收标准本身，不是愿望。ACK 抑制不依赖猫行为改变，是机制兜底 | 2026-07-16 |
+| KD-32 | 失败关闭的错误必须说清自己落在哪一支，且只带原因码与已存终态的事实（disposition / invocationId / at / 来源），不带正文，不放宽任何护栏；猫读不到账本时，另给一个只读、有界、只看自己 thread 的诊断入口（PR-2），范围见下 | Phase T 把停止判据换成球权账本，猫却被一本自己读不到的账本判定；多种原因折成同一个 409 / 503（F322 的 `a2a_dispatch_disposition_replay_mismatch`、F306 的 `HOLD_OWNER_FENCE_UNAVAILABLE`），每次出事只能多只猫跨 thread 读代码、读日志去猜，结论停在 unknown，还会反复盲试。决策人 opus55（`[thread-id]#private-source-id`），不升 operator：两件都只是加法、只读、只看调用者自己的 thread，不放宽护栏、不改现有契约。PR-A：`replay_mismatch` 附带已存终态与来源（direct / `completeFromCoordinationTerminal` / 写入前未记来源则为 unknown），读回失败是另一支且不声称终态存在；managed-hold 三处同口径；`HOLD_OWNER_FENCE_UNAVAILABLE` 带五种原因码之一（parent 缺失 / thread / user / targetCats / store 读失败），仍失败关闭。PR-2（`cat_cafe_get_custody_events` → `GET /api/callbacks/custody-events`，合入后待授权重启生效）：仅 invocation 身份、thread 取自调用者的 invocation、没有 thread 参数（多传任何参数 = 400）、v1 的 agent-key 返回 403；入参 `sourceMessageId` 必填 + `limit`（默认 20、上限 50、超界拒绝不截断）；锚点 = 本 thread 账本里第一条引用该 source 的事件——`payload.sourceMessageId` 匹配，或该 source 的 `ball.handed`（handed 的 payload 不存消息 id，只在 `sourceEventId` 里），从锚点起向后取 `limit` 条；字段白名单只有 id / 码 / 时间（sequence、kind、at、catId、from/to、invocationId、sourceMessageId、taskId、disposition、adopted、retired、retiredReason、via），无正文；白名单管的是**键也是值**（#5031 审查 P1：账本 payload 是 `Record<string, unknown>`，Redis 读回只是类型断言）：码只有在该事件类型定义的闭集里才放行（`ball.dispatch_dispositioned` 的 disposition / via、`ball.hold_dispositioned` 的 disposition / retiredReason，集合与写入端类型同源），id 必须是单个无空白、至多 200 字符的记号，时间必须是有限数字，kind / 投影 state 必须是已知值；不合格的值不返回、不替换成默认或“终态”，字段名记入该事件的 `unrecognizedFields`，投影里有不合格值则整体 `unavailable: projection_malformed`、事件照常返回；附投影摘要（state、holder、lastStateChangeAt、lastRejectedEvent 的 kind/sequence/at）；`found:false`（200）/ 账本读失败 `status:unavailable`+原因（503）/ `truncated:true` 三态显式，空列表不替任何一态说话；carrier custody 与 child ledger 不在范围，不长成通用事件日志读取器。准入声明：本文件 frontmatter `mcp_admission_claims` 新增 `cat_cafe_get_custody_events` | 2026-10-03 |
 
 ## Behavioral Evidence（Phase B 观察记录）
 
@@ -913,6 +919,46 @@ operator experience："简直了你和Maine Coon是没头脑（Maine Coon听不�
 | 实际要求 | operator 点“聊聊”要直接与猫交流、继续当前事情；第二次附 GPT-Live 紧凑语音条参照，明确否定配置式大面板的交互方向。 |
 | 偏差根因 | **能力检查清单替代了人的主动作**：第一轮只修驻留外形，没重审点击后的交流路径。与 Case E24 的“任务关系被功能清单替换”同型；已有设计规则与参照未进入判断，局部行为检查无法替代体验判断。 |
 | 元心智哪条没执行 | Q1 没有从“此刻只是想和猫说话”判断必要操作；Q3 没分开运行状态必须真实与所有状态必须同时变成前台控件。 |
+
+### Case E27: 把本地 review 的 GitHub 证据误当成 author 回球（2026-09-20，codex-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | cat-cafe#4637 的 exact-HEAD findings 已写成 GitHub formal review，再调用 `cat_cafe_complete_a2a_dispatch(disposition=completed)` 关闭入站 dispatch，当前 review 就已经完成；thread 内的最终总结足以让作者看到。 |
+| 实际要求 | 本地猫交来的 review 必须沿 direct review carrier 回给作者猫：行首 `@opus5`，并在同一次 ordinary durable A2A 中携带 `clientMessageId`、`localReviewVerdict`、`reviewedHeadSha`、`reviewSubjectRef`、`acceptedSourceRef` 与 `acceptedRevision`。GitHub artifact 是额外证据，`complete_a2a_dispatch` 只处置入站球，不会替代 author custody。 |
+| 偏差根因 | **状态机截断 + terminal producer 混同**：把“review 判断与 GitHub 落证完成”“入站 dispatch 已处置”“修复球已回作者”压成一个终态；又没有在初审入口加载 `cross-cat-handoff`，漏消费 Phase S.2 已写明的 local-review return contract。与 Case E10“分析完成后漏掉 finding delivery / author custody”同型，不是缺少文字规则。 |
+| 纠正轮次 | 本次 1 次：operator 在 `[thread-id]#private-source-id` 指出“你 re 完要 at Ragdoll”。纠正后已写入 typed local-review fact `local-review:private-source-id:changes_requested`，服务端确认 routed=`opus5`；review target 仍为 `8d3706c5bbede423aa2e45fedd53bb847ef724e0`。 |
+| 元心智哪条没执行 | Q1 角色确认：当前是本地 reviewer，完成出口是 author cat route，不是只交 GitHub artifact；Q3 坐标变换：没有把一轮 review 拆成 `verdict evidence → inbound disposition → outbound author custody` 三个不同状态迁移。 |
+
+### Case E28: 首猫引导缩成私聊，遗失已确认的频道接收与多工作模型（2026-09-24，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 避免百人公共频道围观首问，只需先移到宿主 Café 私聊，再按反馈改成 Alpha 内的伙伴私聊；头像、受众提示与第二句连贯即可证明这条入场旅程。 |
+| 实际要求 | operator 在 `[thread-id]#private-source-id` 追问邀请制私人 Channel、多 Thread 及具名猫的平行上下文；必须先回查既有模型。8 月 8 日原话 `[thread-id]#private-source-id`、9 月 7 日同问 `private-source-id` 与 Fable 查漏 `private-source-id` 已明确 Café×Channel 接收端、多猫参与、多 Work 对应不同私人 Thread，不让用户逐条配置 Thread ID。邀请制频道的权限仍需与当前公开事件实现分开。 |
+| 偏差根因 | **局部入场体验替代领域模型 + 已读原设计未进入判断**：把频道可见性、猫身份、接收上下文和私人工作续接压成一个“私聊入口”，又把界面仍在 Alpha 误当成已选定数据归属。与 Case E24 的“作品交互关系压成按钮清单”同型。分界判据：先回答谁可读、哪个具名身份、哪个频道上下文、凭哪项工作与授权续接，再判断导航和文案；名字/头像相同不等于继承任一私人会话。 |
+| 纠正轮次 | 9 月 7 日与 9 月 24 日两次直接追问相同接收问题；本轮又先后纠正“回宿主 Thread”和“1 对 1 私聊即私人频道”。已回读原话、愿景 §5.1–5.3/§21、接收与调用代码，将具体关系与未验证项回交原 Task465（`private-source-id`），未把文案候选当设计签字，未改真人 Alpha。 |
+| 元心智哪条没执行 | Q1 没有持续对准“频道如何把多个家与工作连接起来”；Q2 已有来源未参与本轮判断，且 spec 的 9 月 7 日代码基线未标历史，增加误读；Q3 没分开成员权限、身份连续性、上下文与执行责任。处置为恢复已有契约与校准旧基线，不因本次执行遗漏新增通用 hook 或审批。 |
+
+### Case E29: 把“尽快做对产品”缩成门禁机制优化（2026-10-03，codex-astra）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 解释重任务排队、改分类与复用机制，再让作者有据选择 targeted，就完整接住了交付慢的问题。 |
+| 实际要求 | 猫在现场自主消除不必要的 A2A 和门禁等待，尽快把已确认的小结果挂到真实入口，先由作者对照原话/参考亲自核对；不能等一天后让 operator 首次发现做错了。共享底座、数据与权限等风险仍须恰当验证。 |
+| 偏差根因 | **任务替换 + 手段锚定**：把用户等到正确产品的总时间，缩成验证系统的局部耗时；先追求“没弄坏”，却未先判断“做的是不是原约定”。与 E22 无关红灯扩大停止条件、E24 技术检查替代体验判断同型。 |
+| 纠正轮次 | 同一任务至少两次：`[thread-id]#private-source-id` 要求整体解决而非反复救火，`private-source-id` 明确要求猫现场变通。随后 operator 再点明“一小时变24小时、最后仍不对”；Opus55 的具体续办来源是 `private-source-id`。 |
+| 元心智哪条没执行 | Q1 没把自己当作正确结果的交付者；Q3 没将“符合意图”“验证风险”“等待成本”分开。当前范围已扫描 SOP、merge/quality/request-review 和 console-dev，PR #5036 的 `a32f2b8117` 补作者真实入口自验及低风险产品路径，交独立治理审查；实物先行已一次通知 F322 原 B/C/D 作者。PR 尚未合入，通知不等于实物已交付，也未证明周期已缩短。 |
+
+### Case E30: 把原版恢复并入新版设计探索（2026-10-03，codex61-sol）
+
+| 维度 | 内容 |
+|------|------|
+| 我以为 | 收到 ROOT 追加的第三版归组布局后，在原 v1 恢复 PR #5027 内一起实现，能同时接住“恢复紧凑”和“结合新版优势”。 |
+| 实际要求 | CVO1086 要恢复 F322 前的 v1；Studio1167 要原版紧凑事实与直接复制 ID。新版设计探索不能替换这个已接受目标。ROOT1263 再次追问为何 v1 没恢复，CVO1309 明确旧版只允许状态与会话这张恢复例外，其余 v1 不动。来源：`[thread-id]#private-source-id`、`[thread-id]#private-source-id`、`[thread-id]#private-source-id` / `private-source-id`。 |
+| 偏差根因 | **任务替换 + 来源权重倒置**：把协调猫的最新追加当成对 operator 原恢复契约的修订，没有先分开 v1 恢复与 v2 设计；两种外壳共用状态组件，使这种混用直接影响经典入口。错误例是“第三版比较更好，所以并入恢复”；正确例是“按旧基线恢复已承诺入口，保留行为保护，新版只沿自己的已接受范围”；分界判据是目标入口与 accepted source，而非消息更新或测试通过。 |
+| 纠正轮次 | 同一恢复任务至少两次直接纠正（1086、1263），1309 再缩定边界。追加布局确已本地实现但未提交；10 个 tracked delta / 7 个新文件及日志保存在 `/tmp/cat-cafe-evidence/f322-third-layout-withdrawn-20261003`，按 ROOT1295 撤出，407 绿色没有当成 v1 证据。#5027 最终以 `2ac8214c4e486c9852ef67104eb5deb8696d8234` 合入：旧基线 `63437143f0`、391/391、Sonnet exact `833d8df234` approved、作者真实 Workspace 宽窄及后续独立 named Alpha 原生入口/完整 ID 复制均有实物。自动浏览器套件未执行，独立 D/真实多会话/operator 接受仍开放；终态回原 Task169 的源为 `[thread-id]#private-source-id`。 |
+| 元心智哪条没执行 | Q1 作者未持续守住“恢复原版”的当前角色；Q2 没让直接 operator 来源优先于协调追加；Q3 没分开呈现恢复、行为正确性和新版设计。当前恢复范围已扫描，第三版组件与两层详情入口均未留在交付；不扩成另一项 harness 改造。首次实页不等自动套件准入的流程偏差沿 E29 / #5036 已有资产处理，不重复建提案。 |
 
 ## Review Gate
 

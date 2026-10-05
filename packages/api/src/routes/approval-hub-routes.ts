@@ -121,7 +121,7 @@ export const approvalHubRoutes: FastifyPluginAsync<ApprovalHubRoutesOptions> = a
       )
     ).sort((a, b) => b.createdAt - a.createdAt);
 
-    return { items, count: items.length, manifest: registry.manifest() };
+    return { items, count: items.length, manifest: registry.manifest(), coverage: { state: 'complete' as const } };
   });
 
   // F246 Phase F: approval history

@@ -1,8 +1,10 @@
+import { executeGitHubRequest, type GitHubRequestOptions } from '../../github/request-budget.js';
 import type { TaskSpec_P1 } from '../types.js';
 import type { DynamicTaskParams, TaskTemplate } from './types.js';
 
 export interface RepoActivityTemplateOptions {
   getGitHubToken?: () => string | undefined;
+  execFileAsync?: GitHubRequestOptions['execFileAsync'];
 }
 
 /** Repo activity template — watch a GitHub repo for new issues/PRs */
@@ -26,6 +28,7 @@ export function createRepoActivityTemplate(options: RepoActivityTemplateOptions 
         profile: 'poller',
         trigger: p.trigger,
         admission: {
+          dependsOnThreadActivity: false,
           async gate(gateCtx) {
             if (!repo) return { run: false, reason: 'no repo param' };
             if (!threadId) return { run: false, reason: 'no deliveryThreadId' };
@@ -52,17 +55,12 @@ export function createRepoActivityTemplate(options: RepoActivityTemplateOptions 
               direction: 'desc',
             });
             if (since) params.set('since', since);
-            const apiUrl = `https://api.github.com/repos/${repoName}/issues?${params}`;
-            const headers: Record<string, string> = { 'User-Agent': 'CatCafe-RepoActivity/1.0' };
-            const githubToken = getGitHubToken()?.trim();
-            if (githubToken) headers.Authorization = `Bearer ${githubToken}`;
-
-            const requestTimeout = AbortSignal.timeout(15_000);
-            const res = await fetch(apiUrl, {
-              headers,
-              signal: ctx.signal ? AbortSignal.any([ctx.signal, requestTimeout]) : requestTimeout,
+            const { stdout } = await executeGitHubRequest(['api', `/repos/${repoName}/issues?${params}`], {
+              ghToken: getGitHubToken(),
+              signal: ctx.signal,
+              execFileAsync: options.execFileAsync,
             });
-            if (!res.ok) throw new Error(`GitHub API error: ${res.status} ${res.statusText}`);
+            ctx.signal?.throwIfAborted();
 
             type GHIssue = {
               number: number;
@@ -71,7 +69,7 @@ export function createRepoActivityTemplate(options: RepoActivityTemplateOptions 
               pull_request?: unknown;
               user?: { login: string };
             };
-            const items = (await res.json()) as GHIssue[];
+            const items = JSON.parse(stdout) as GHIssue[];
 
             let content: string;
             if (items.length === 0) {
@@ -86,6 +84,7 @@ export function createRepoActivityTemplate(options: RepoActivityTemplateOptions 
               content = `## ${repoName} Activity\n\n${lines.join('\n')}`;
             }
 
+            ctx.signal?.throwIfAborted();
             await ctx.deliver({
               threadId: tid,
               content,

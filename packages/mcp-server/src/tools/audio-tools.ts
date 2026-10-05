@@ -9,6 +9,8 @@ import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-go
 
 import { createMeetingContextBlock } from '@cat-cafe/shared';
 import { z } from 'zod';
+import { audioHttpError } from './audio-http-error.js';
+import { type AudioInputSignal, formatAudioInputSignal } from './audio-signal-format.js';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 
@@ -256,7 +258,9 @@ export async function handleAudioCaptureStop(): Promise<ToolResult> {
   try {
     const resp = await audioFetch('/stop', {
       method: 'POST',
+      body: JSON.stringify({}),
     });
+    if (!resp.ok) return errorResult(await audioHttpError(resp, 'Stop'));
     const data = (await resp.json()) as {
       summary?: {
         chunks?: number;
@@ -268,7 +272,6 @@ export async function handleAudioCaptureStop(): Promise<ToolResult> {
         error?: string;
       };
     };
-    if (!resp.ok) return errorResult(`Stop failed: ${resp.status}`);
     const s = data.summary;
     if (!s || s.error) return successResult(s?.error ?? 'No active session.');
     const txLine = s.transcript_path ? `\n  Transcript: ${s.transcript_path}` : '';
@@ -317,6 +320,7 @@ type StatusResp = {
     reason?: string | null;
     chunk_count?: number;
     deduplicated_chunks?: number;
+    signal?: AudioInputSignal;
   }>;
 };
 
@@ -347,7 +351,7 @@ export async function handleAudioCaptureStatus(): Promise<ToolResult> {
       ? `\n  Inputs:\n${s.inputs
           .map(
             (item) =>
-              `    ${item.label ?? item.id}: ${item.state ?? 'unknown'}; chunks=${item.chunk_count ?? 0}; dedup=${item.deduplicated_chunks ?? 0}${item.reason ? `; reason=${item.reason}` : ''}`,
+              `    ${item.label ?? item.id}: ${item.state ?? 'unknown'}; chunks=${item.chunk_count ?? 0}; dedup=${item.deduplicated_chunks ?? 0}${item.reason ? `; reason=${item.reason}` : ''}${formatAudioInputSignal(item.signal)}`,
           )
           .join('\n')}`
       : '';

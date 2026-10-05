@@ -87,6 +87,9 @@ describe('F306ApprovalAdapter', () => {
       originRef: { kind: 'message', threadId: 'thread-1', messageId: 'message-approval-1' },
       approvalCardRef: { threadId: 'thread-1', messageId: 'message-approval-1' },
     });
+    assert.deepEqual(items[0].needsMeDecisionRefs, [
+      { producerId: 'f306.runtime_interaction', subjectRef: 'approval-1', revision: 3001 },
+    ]);
     assert.equal(items[0].detail.providerRequestId, 'rpc-1');
     assert.equal(items[0].detail.providerTurnId, 'provider-turn');
     assert.equal(items[0].detail.providerItemId, 'provider-item');

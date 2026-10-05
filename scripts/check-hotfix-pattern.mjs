@@ -91,7 +91,9 @@ console.log(`Auto-label eligible (single file ≤${MAX_SINGLE_FILE_LINES} lines 
 if (isHotfix) {
   console.log('\n⚠️  HOTFIX DETECTED — governance rules apply:');
   console.log('  1. Cross-cat review required (no self-merge)');
-  console.log('  2. Author cannot self-validate quality-gate');
+  console.log(
+    '  2. Author self-checks quality-gate as usual; cross-cat review carries the risk (no second quality-gate run)',
+  );
   console.log('  3. 2-week upgrade review cron will be registered on merge');
 }
 

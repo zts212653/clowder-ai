@@ -283,6 +283,36 @@ describe('F167 Phase T queue wake provenance', () => {
     );
   });
 
+  it('classifies producer-return connector entries as unstructured (no stop-gate obligation)', async () => {
+    // Positive: connector with explicit producer_return sourceCategory → unstructured
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: 'producer_return',
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        noMessage,
+      ),
+      { kind: 'unstructured', source: 'producer_return' },
+    );
+
+    // Negative: connector WITHOUT sourceCategory still fails closed (legacy/carrier_missing)
+    assert.deepEqual(
+      await resolveQueueTurnCustodyWake(
+        entry({
+          source: 'connector',
+          sourceCategory: undefined,
+          callerCatId: undefined,
+          a2aTriggerMessageId: undefined,
+        }),
+        noMessage,
+      ),
+      { kind: 'legacy', reason: 'carrier_missing' },
+    );
+  });
+
   it('maps wake carriers to bounded trace source categories', () => {
     assert.equal(
       turnCustodyWakeSourceCategory({ kind: 'legacy', reason: 'carrier_missing', sourceCategory: 'review' }),

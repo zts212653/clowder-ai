@@ -161,3 +161,43 @@ test('historical import fail-closes when auth or runtime authority is not curren
     await stopped.app.close();
   }
 });
+
+test('historical import reports an unavailable auth probe without claiming reauthorization is required', async () => {
+  const result = await harness({
+    auth: {
+      status: async () => ({
+        status: 'failed',
+        failureKind: 'status_probe',
+        error: '飞书认证状态暂时无法验证，请稍后重试。',
+      }),
+      start: async () => {
+        throw new Error('auth start is not expected');
+      },
+    },
+    historyImport: { importMinute: async () => assert.fail('import must not run') },
+  });
+  try {
+    await result.store.transaction((transaction) => {
+      const instance = transaction.instances.get('pi_official');
+      transaction.instances.put({
+        ...instance,
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'healthy',
+        lifecycleRevision: 7,
+      });
+    });
+    const response = await result.app.inject({
+      method: 'POST',
+      url: '/api/plugins/official/pi_official/history-import',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { expectedRevision: 7, reference },
+    });
+
+    assert.equal(response.statusCode, 502, response.payload);
+    assert.equal(response.json().code, 'AUTH_STATUS_FAILED');
+  } finally {
+    await result.app.close();
+  }
+});

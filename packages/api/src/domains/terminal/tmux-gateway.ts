@@ -1,6 +1,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { accessSync, constants, statSync } from 'node:fs';
 import { promisify } from 'node:util';
+import { RUNTIME_ONLY_LIFECYCLE_ENV_KEYS } from '../../utils/runtime-only-env.js';
 import { type AgentPaneLaunchOptions, createPaneLease } from './tmux-agent-pane.js';
 import { releasePaneCreation } from './tmux-pane-creation-record.js';
 import { mutatePaneLease, type PaneLease } from './tmux-pane-lease.js';
@@ -8,10 +9,9 @@ import { tmuxServerEnvironment } from './tmux-server-environment.js';
 import type { CreatePaneOpts, PaneInfo } from './types.js';
 
 const exec = promisify(execFile);
-const RUNTIME_ONLY_ENV_KEYS = ['CONNECTOR_GATEWAY_AUTOSTART', 'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'] as const;
 
 function isolatedPaneEnvArgs(): string[] {
-  return RUNTIME_ONLY_ENV_KEYS.flatMap((key) => ['-e', `${key}=0`]);
+  return RUNTIME_ONLY_LIFECYCLE_ENV_KEYS.flatMap((key) => ['-e', `${key}=0`]);
 }
 
 /** Check that a path is a regular file AND is executable */

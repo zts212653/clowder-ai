@@ -948,6 +948,9 @@ Another feature for embedding.
     const result = await builder.rebuild();
     assert.equal(result.docsIndexed, 2);
     assert.equal(vectorStore.count(), 2, 'should have 2 vectors');
+    const firstEmbedCalls = embedCallCount;
+    assert.equal((await builder.embedMissingDocumentVectors()).docsEmbedded, 0);
+    assert.equal(embedCallCount, firstEmbedCalls, 'ready catch-up must skip current vectors');
     // Meta should be written
     const meta = vectorStore.getMeta();
     assert.equal(meta.embedding_model_id, 'test-model');
@@ -1001,10 +1004,37 @@ Some content.
       getModelInfo: () => ({ modelId: 'model-B', modelRev: 'v2', dim: 4 }),
     };
     const builder2 = new IndexBuilder(store, docsDir, { embedding: modelB, vectorStore });
-    // Force rebuild so the doc gets re-indexed even though hash hasn't changed
-    await builder2.rebuild({ force: true });
+    const priorIndexVersion = vectorStore.getMeta().indexing_version;
+    assert.equal((await builder2.embedMissingDocumentVectors()).docsEmbedded, 1);
     assert.equal(vectorStore.count(), 1, 'still 1 vector after re-embed');
     assert.equal(vectorStore.getMeta().embedding_model_id, 'model-B', 'meta updated to model-B');
+    assert.equal(
+      vectorStore.getMeta().indexing_version,
+      priorIndexVersion,
+      'model switch must preserve scanner version',
+    );
+  });
+
+  it('adopts current legacy vectors on first upgrade but embeds docs changed while the model was off', async () => {
+    const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
+    const path = join(docsDir, 'features', 'F001.md');
+    writeFileSync(path, '---\nfeature_ids: [F001]\ndoc_kind: spec\n---\n# Original\n');
+    const first = new IndexBuilder(store, docsDir, { embedding: mockEmbedding, vectorStore });
+    await first.rebuild();
+    const initialCalls = embedCallCount;
+    store.getDb().prepare('DELETE FROM document_vector_sources').run(); // simulated V48 vector store
+
+    const restarted = new IndexBuilder(store, docsDir);
+    await restarted.rebuild();
+    restarted.setEmbedDeps({ embedding: mockEmbedding, vectorStore });
+    assert.equal((await restarted.embedMissingDocumentVectors()).docsEmbedded, 0);
+    assert.equal(embedCallCount, initialCalls, 'unchanged legacy vectors must be reused on the first upgrade');
+
+    restarted.setEmbedDeps(undefined);
+    writeFileSync(path, '---\nfeature_ids: [F001]\ndoc_kind: spec\n---\n# Revised\n');
+    await restarted.rebuild();
+    restarted.setEmbedDeps({ embedding: mockEmbedding, vectorStore });
+    assert.equal((await restarted.embedMissingDocumentVectors()).docsEmbedded, 1);
   });
 
   it('incrementalUpdate deletes stale vectors when doc removed (P1)', async () => {
@@ -1675,6 +1705,29 @@ describe('IndexBuilder passage indexing (E3/E4/E5)', () => {
     // Idempotent: running again adds nothing
     const addedAgain = await builder.backfillPassagesFromTranscript(threadId);
     assert.equal(addedAgain, 0, 'second run should add 0 (INSERT OR IGNORE)');
+    const checkpoint = db
+      .prepare('SELECT fingerprint FROM transcript_backfill_files WHERE file_path = ?')
+      .get(`${threadId}/${catId}/${sessionId}/events.jsonl`);
+    assert.ok(checkpoint?.fingerprint, 'successful backfill must persist a file checkpoint');
+    writeFileSync(
+      join(sessDir, 'events.jsonl'),
+      [
+        ...events,
+        {
+          v: 1,
+          t: Date.now(),
+          threadId,
+          catId,
+          sessionId,
+          invocationId: 'inv_003',
+          eventNo: 4,
+          event: { type: 'text', content: 'New response.' },
+        },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n') + '\n',
+    );
+    assert.equal(await builder.backfillPassagesFromTranscript(threadId), 1, 'changed transcript must be revisited');
   });
 
   it('I3: rebuild runs transcript backfill after Redis-based passage indexing', async () => {

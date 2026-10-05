@@ -4,10 +4,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCapabilityEvolutionWorkspaceSurface } from '../capability-evolution-workspace-adapter';
 import {
   createApprovalActionSurface,
+  createBrowserSurface,
   createContentEditorSurface,
   createEvolutionProgramSurface,
   createWorkspaceDestinationSurface,
 } from '../real-surface-adapters';
+
+vi.mock('@/components/workspace/BrowserPanel', () => ({
+  BrowserPanel: ({ previewOnly }: { previewOnly?: boolean }) => (
+    <div data-testid="browser-owner" data-preview-only={String(!!previewOnly)} />
+  ),
+}));
 
 vi.mock('../content-editor/ContentEditorOwnerSurface', () => ({
   ContentEditorOwnerSurface: ({ target }: { target: { contentRef: string; sessionRef: string } }) => (
@@ -126,6 +133,28 @@ describe('F307 owner surface renderer', () => {
     container.remove();
   });
 
+  it('suppresses Browser chrome in focus mode without replacing its owner surface', () => {
+    const surface = createBrowserSurface({ ownerKey: 'chess', port: 3147, path: '/' });
+    const render = (focusMode: boolean) => (
+      <F307OwnerSurfaceRenderer
+        surface={surface}
+        focusMode={focusMode}
+        onOpenSurface={() => undefined}
+        onOpenArtifactWithReturn={() => undefined}
+        onRefreshSurface={() => undefined}
+        onRequestDetach={() => undefined}
+      />
+    );
+
+    act(() => root.render(render(false)));
+    const owner = container.querySelector('[data-testid="browser-owner"]');
+    expect(owner?.getAttribute('data-preview-only')).toBe('false');
+
+    act(() => root.render(render(true)));
+    expect(container.querySelector('[data-testid="browser-owner"]')).toBe(owner);
+    expect(owner?.getAttribute('data-preview-only')).toBe('true');
+  });
+
   it('mounts the F309 content editor owner from persisted content/session refs', () => {
     const contentRef = 'project:alpha/assets/proposal.docx';
     const sessionRef = `editor-session:${'a'.repeat(64)}`;
@@ -185,7 +214,7 @@ describe('F307 owner surface renderer', () => {
         kind: 'host',
         id: 'status',
         label: '状态与会话',
-        description: '查看 Session、Thread ID 与运行详情',
+        description: '查看会话、对话标识与运行详情',
         searchTerms: 'status session',
       },
       'thread-f307',

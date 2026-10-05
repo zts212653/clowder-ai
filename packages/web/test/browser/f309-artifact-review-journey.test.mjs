@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import './f309-media-compare.journey.mjs';
+import './f309-media-compare-workspace.journey.mjs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -90,8 +92,9 @@ for (const kind of ['png', 'mp4'])
         await draw('箭头', [0.18, 0.65], [0.42, 0.72]);
         await page.getByTestId('review-local-mark').nth(3).waitFor();
         await page.getByRole('button', { name: '文字', exact: true }).click();
-        await page.getByRole('textbox', { name: '标注文字' }).fill('暖一点');
         await page.mouse.click(markupBox.x + markupBox.width * 0.58, markupBox.y + markupBox.height * 0.72);
+        await page.getByRole('textbox', { name: '标注文字' }).fill('暖一点');
+        await page.getByRole('textbox', { name: '标注文字' }).press('Enter');
         await page.getByTestId('review-local-mark').nth(4).waitFor();
         assert.equal(await page.getByTestId('review-local-mark').count(), 5);
         await page.getByRole('button', { name: '撤销', exact: true }).click();
@@ -111,7 +114,7 @@ for (const kind of ['png', 'mp4'])
         await page.getByTestId('review-local-mark').nth(3).waitFor();
         assert.equal(await page.getByTestId('review-local-mark').count(), 4);
         await selectReviewMode(page, 'comment');
-        await page.getByRole('textbox', { name: '新增标注意见' }).waitFor();
+        await page.getByRole('textbox', { name: '评论内容' }).waitFor();
         const box = await page.getByTestId('review-media-stage').boundingBox();
         assert.ok(box);
         await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.2);
@@ -126,11 +129,14 @@ for (const kind of ['png', 'mp4'])
         await page.getByRole('spinbutton', { name: '片段终点' }).fill('1.6');
       }
       const sentinel = `这处需要调整，陌生输入-${kind}-九月。`;
-      await page.getByRole('textbox', { name: '新增标注意见' }).fill(sentinel);
+      await page.getByRole('textbox', { name: '评论内容' }).fill(sentinel);
       await page.reload();
-      await page.getByRole('textbox', { name: '新增标注意见' }).waitFor();
-      assert.equal(await page.getByRole('textbox', { name: '新增标注意见' }).inputValue(), sentinel);
-      await page.getByRole('button', { name: '保存评论', exact: true }).click();
+      await page.getByRole('textbox', { name: '评论内容' }).waitFor();
+      assert.equal(await page.getByRole('textbox', { name: '评论内容' }).inputValue(), sentinel);
+      await page.getByRole('button', { name: '保存批注', exact: true }).click();
+      // The shared landing keeps the discussion in its drawer; the saved comment is read there.
+      await page.getByRole('button', { name: '打开作品讨论', exact: true }).filter({ hasText: '1' }).waitFor();
+      await openReviewPanel(page, 'comments');
       await page.getByTestId('review-comment').waitFor();
       const reviewId = host.store.listReviewIds('operator')[0];
       assert.ok(reviewId);
@@ -166,7 +172,7 @@ for (const kind of ['png', 'mp4'])
       await page.getByText('这条批注已读到，我会按这个位置处理。', { exact: true }).waitFor();
       await openReviewPanel(page, 'decision');
       await page.getByRole('textbox', { name: '审阅结论说明' }).fill('请按这条意见提交新一版。');
-      await page.getByRole('button', { name: '请猫按意见继续', exact: true }).click();
+      await page.getByRole('button', { name: '要求修改', exact: true }).click();
       await page.getByTestId('review-return-state').waitFor();
       assert.equal(host.store.returns.pending().length, 0);
       view = await host.reviews.read(reviewId, host.cat);
@@ -207,23 +213,27 @@ for (const kind of ['png', 'mp4'])
       await openReviewPanel(page, 'details');
       await page.getByText('新版已经针对这条意见做了调整。', { exact: true }).waitFor();
       await selectReviewMode(page, 'comment');
-      const input = page.getByRole('textbox', { name: '新增标注意见' });
+      const input = page.getByRole('textbox', { name: '评论内容' });
       await input.fill('新版正在写的意见，不可被重新圈选覆盖');
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');
       await openReviewPanel(page, 'comments');
       await page.getByRole('button', { name: '在新版重新圈选', exact: true }).click();
+      await page.getByText('新版还有未保存的标注，已为你保留。请先保存或清空后再重新圈选。', { exact: true }).waitFor();
+      // The shared landing returns to the latest version with a fresh canvas mode; its draft is read there.
+      await selectReviewMode(page, 'comment');
       assert.equal(await input.inputValue(), '新版正在写的意见，不可被重新圈选覆盖');
-      await page
-        .getByText('新版还有未保存的标注，已为你保留。请先保存或清空这条草稿，再从旧版重新圈选。', { exact: true })
-        .waitFor();
-      await page.getByRole('button', { name: '清空草稿', exact: true }).click();
+      // The shared composer clears its draft by emptying it (it has no separate clear button).
+      await input.fill('');
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');
       await openReviewPanel(page, 'comments');
       await page.getByRole('button', { name: '在新版重新圈选', exact: true }).click();
+      await selectReviewMode(page, 'comment');
       assert.equal(await input.inputValue(), sentinel);
       await selectReviewMode(page, 'view');
       await page.getByRole('button', { name: kind === 'png' ? '标注整张图片' : '标注整个片段', exact: true }).click();
-      await page.getByRole('button', { name: '保存标注', exact: true }).click();
+      await page.getByRole('button', { name: '保存批注', exact: true }).click();
+      await page.getByRole('button', { name: '打开作品讨论', exact: true }).filter({ hasText: '1' }).waitFor();
+      await openReviewPanel(page, 'comments');
       await page.getByTestId('review-comment').waitFor();
       view = await host.reviews.read(reviewId, host.human);
       assert.deepEqual(view.review.rounds[1].annotations[0].reanchoredFrom, { round: 1, annotationId: annotation.id });
@@ -234,7 +244,7 @@ for (const kind of ['png', 'mp4'])
       await page.screenshot({ path: path.join(evidence, `${kind}-mobile.png`), fullPage: true });
       await openReviewPanel(page, 'decision');
       await page.getByRole('textbox', { name: '审阅结论说明' }).fill('这版通过，继续完成原任务的发布。');
-      await page.getByRole('button', { name: '这版通过，交还原任务', exact: true }).click();
+      await page.getByRole('button', { name: '通过此版本', exact: true }).click();
       await page.getByTestId('review-round-decision').waitFor();
       view = await host.reviews.read(reviewId, host.human);
       assert.equal(view.review.rounds[1].state, 'approved');
@@ -255,7 +265,7 @@ for (const kind of ['png', 'mp4'])
       });
       await page.getByRole('button', { name: '刷新', exact: true }).first().click();
       await page.getByRole('textbox', { name: '审阅结论说明' }).fill('再次核对通过，继续发布');
-      await page.getByRole('button', { name: '这版通过，交还原任务', exact: true }).click();
+      await page.getByRole('button', { name: '通过此版本', exact: true }).click();
       await page.getByTestId('review-round-decision').waitFor();
       view = await host.reviews.read(reviewId, host.human);
       assert.equal(view.review.rounds[1].state, 'approved');
@@ -270,7 +280,7 @@ for (const kind of ['png', 'mp4'])
         },
       });
       await page.getByRole('button', { name: '刷新', exact: true }).first().click();
-      await page.getByText('原任务已收口，审阅记录与历史版本继续保留。', { exact: true }).waitFor();
+      await page.getByText('原任务已收口，讨论与历史版本继续保留。', { exact: true }).waitFor();
       await page.getByRole('combobox', { name: '审阅版本' }).selectOption('1');
       await openReviewPanel(page, 'comments');
       await page.getByText(sentinel, { exact: true }).waitFor();

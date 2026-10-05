@@ -20,6 +20,8 @@ triggers:
 
 完成声明前做两件事：对照真实需求自检，并用与风险面匹配的真实命令输出证明声明。
 
+先理解本次答应交付的结果，再选择验证。需求仍是含糊愿望或不可承诺结果时，先澄清，不自行编 AC；已有清楚约定则沿用。[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)帮助核对实际使用场景，程序只检验可确定的行为，不能代替猫判断是否解决原问题。
+
 ## 核心知识
 
 **两条铁律合一**：
@@ -62,6 +64,7 @@ Step 2: CREATE — 建检查清单
   - 列出 Discussion 里的 UX 描述和场景
 
 Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
+  - **下面 CloseGateReport / unmet AC 处置 / tail scan / cvo_signoff 四项仅在本次交付声称关闭 Feature（feat close）时执行；普通 PR / Phase 内交付跳过这四项、不生成 CloseGateReport。本步其余按作者/家族触发的检查（包装未做作者的 close 复核、Siamese edit scope、Ragdoll search→Read）不受此门线影响，仍按各自条件执行**
   - 检查 CloseGateReport 是否已生成（schema: `../.cat-cafe-shared-refs/close-gate.md`）
   - 每个 unmet AC 是否三选一处置（immediate / delete / cvo_signoff）
   - **Follow-up tail scan**：扫以下文本来源，命中关键词 = **线索（进入语义判定），不是自动 BLOCKED**——判定标准只有一条：该词是否在把 **unmet AC 包装成已完成 / 偷偷延期**（close 借口）。正常阶段描述（"X 属 next phase 的 scope"）、风险讨论、路线图引用不触发（2026-07-15 修订：raw keyword 自动 BLOCK 误杀正常文本）：
@@ -72,9 +75,9 @@ Step 2.5: CLOSE GATE MATRIX + FOLLOW-UP TAIL SCAN（F177 Phase A）🔴
       `out of scope`（作为 close 借口时）`MVP 先上`（作为 close 借口时）
     - 豁免：spec 的 Why/Risk/History 章节中引用历史上下文时使用这些词不触发
   - cvo_signoff 四件套完整性验证（proposal + cvo message + quote + scope）
-  - 🔴 **47 盲审规则**（F177 Phase B）：若 PR 作者是 opus-47，quality-gate 必须由对家猫执行（Maine Coon优先，46 兜底）。审核者由 reviewer/系统指定，47 无选择权，47 的自评不计入放行判据
-  - 🔴 **hotfix 自检禁止**（F177 Phase E）：执行 `node scripts/check-hotfix-pattern.mjs`，若检测到 hotfix 模式，作者不得自行通过 quality-gate——必须由另一只猫执行 quality-gate。原因：hotfix 心态容易自我说服"够用了"，跨猫审视打破惯性
-  - 🔴 **Ragdoll search→Read 检查**（F177 Phase F）：若执行者是Ragdoll家族（46 / 47 / 4.5 / Sonnet），检查本次 session 的 search 行为：
+  - 🔴 **包装未做作者的 close 复核**（F177 Phase B，原为针对单只已退役猫的规则）：仅当 PR 作者的 dossier「翻车熔断信号」写有「包装未做 / 过早收口」类失败模式时，其 feat close PR 的 quality-gate 由非作者猫重跑，跨族优先；审核者由 reviewer/系统按当前 roster 指定，作者无选择权。其他作者照常自检。通用底线不变：作者自评不能替代已选择的独立 review（reviewer ≠ author）
+  - **hotfix**（F177 Phase E）：执行 `node scripts/check-hotfix-pattern.mjs` 识别 hotfix 模式；其"自我说服"风险由跨个体 review 铁律承接（reviewer ≠ author，merge-gate 校验），作者照常自检，不再额外安排另一只猫重跑 quality-gate
+  - 🔴 **Ragdoll search→Read 检查**（F177 Phase F）：若执行者是Ragdoll家族（任一在役个体，以 roster 为准），检查本次 session 的 search 行为：
     1. 有 `search_evidence` 调用命中 doc anchor（高/中置信度）吗？
     2. 命中后有对应的 `Read` 调用去读源文件吗？
     3. 输出中包含精确数字/版本号/日期但没有 Read 证据吗？
@@ -117,7 +120,7 @@ Step 4: RUNTIME GUARD — 前端证据采集前先做运行态保护
   - `localhost:3003/3004` 默认按 runtime 处理；如果你要验证未合入改动，不能把这两个端口的页面/接口响应当成当前分支的证据
   - 证明“这是我当前 worktree 的验证证据”时，必须同时说清：`worktree/cwd` + 目标 URL。两者对不上 = 证据无效
   - 确需重启时，先获operator明确授权，再执行 `pnpm runtime:restart`；shell 参数与环境变量都不是授权证明
-  - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6398）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
+  - **Alpha 优先**：验证已合入 main 的改动时，优先用 `pnpm alpha:start`（3011/3012/4111/6397）取证，而非 runtime。Alpha 环境每次启动自动同步 origin/main
 
 Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 2026-05-23）🔴
   对 user-visible / runtime feature，author 必须在请求 review 前：
@@ -152,20 +155,19 @@ Step 4.5: DOGFOOD-YOUR-SLICE — 用一次自己刚做的功能（F209 教训 20
     发现的 bug: 无 / 列表（含修复 commit SHA）
     ```
 
-Step 5: PEN CHECK — 自动化设计稿对照（不可跳过！）
-  ① glob designs/**/*.pen，匹配当前 feat 编号或关键词
-  ② 若匹配到 .pen 文件 → 强制进入设计稿对照流程（见下方"有 .pen 设计稿的功能额外要求"）
-  ③ 若无匹配 → 检查 feat 是否有前端 UI 改动（改了 packages/web/src/components/）
-     → 有 UI 改动但无 .pen → 在报告中标注"⚠️ 无设计稿，跳过对照"
-  ④ 此步骤不依赖猫猫"记得"——必须执行 glob 命令，用输出决定是否进入对照
+Step 5: 参考与实物对照 — 有产品/体验要求时
+  先在 designs/ 中用 glob designs/**/*.pen 查设计稿，再沿 feature doc / 原讨论 / docs/evidence 查已接受的参考。
+  命令帮助发现材料，猫判断哪些与本次任务相关；找到适用参考后，用同一任务核对本次实物。
+  关注对象、操作位置、状态变化和结果；没有 .pen 不等于没有参考，更不等于可以跳过产品判断。
+  比较方法按问题选择，不用文件后缀、截图数量或勾选代替判断。
 
 Step 6: RUN — 运行风险匹配的验证命令（必须这次真实运行）
   ① 先列五轴风险与受影响面；命令逐条对应 claim，不按“写了代码”机械全跑
   ② 默认：受影响 package / schema / generator / docs checker + git diff --check
   ③ 新行为 / bug：相关行为或回归测试；现有精确检查红可以直接作 RED
-  ④ 共享契约、门禁执行链或 targeted 无法覆盖跨包合流风险：pnpm gate；安全 / 数据 / 契约标签加强独立审查，不自动扩大测试范围
-  ⑤ Redis 相关改动额外跑：pnpm --filter @cat-cafe/api test:redis（只连 6398）
-  ⑥ 任一实际选择的检查红都先修；不得挑绿灯报告、隐去红灯
+  ④ targeted 无法覆盖实际风险时才跑 pnpm gate；作者可按 merge-gate「Gate 选择」带依据调整机器默认 full，保留按风险要求的独立审查和硬边界
+  ⑤ Redis 相关改动额外跑：pnpm --filter @cat-cafe/api test:redis（租用隔离端口；保护 6397/6398/6399/6401）
+  ⑥ 相关或尚未排除关联的红灯先修；已证实无关的失败保留并交原 owner，不阻塞自己的充分验证；不得隐去失败
 
 Step 7: READ — 完整读输出，看 exit code，数失败数
 
@@ -181,18 +183,11 @@ Step 7.5: ARTIFACT HYGIENE CHECK — 根目录媒体垃圾闸门
 Step 8: REPORT — 输出合规报告 + 证据
 ```
 
-**前端功能额外要求**：author 必须在正确 worktree / preview 上走关键交互，并记录 URL、操作与结果。截图、录屏、DOM assertion、Playwright 输出都是证据载体；只有视觉判断确实需要画面时才采截图 / 录屏，缺截图本身不阻塞，也不得让 operator 代采。执行细则：`../.cat-cafe-shared-refs/vision-evidence-workflow.md`。
+**前端功能额外要求**：author 必须在正确 worktree / preview 的真实入口走关键交互，并记录 URL、操作与结果。SOP 产品快车道先在第一小时争取交付实物、贴作者自采截图并对照原约定，不等 review/full 后才看；其余场景按判断需要选择截图、录屏、DOM assertion 或 Playwright 证据，不把缺截图转成 operator 的劳动。人工预览不以前置跑整套浏览器测试代替；合入后作者在 Alpha 核对。执行细则：`../.cat-cafe-shared-refs/vision-evidence-workflow.md`。
 
-**有 .pen 设计稿的功能额外要求** 🔴（Step 5 匹配到 .pen 时强制执行）：
-1. 打开 .pen 文件 → `get_screenshot` 截取设计稿
-2. Playwright/Chrome 打开实际页面 → 截取实现截图
-3. 逐区域对比：布局、颜色、间距、交互状态
-4. 不一致处必须标注并修复（或记录为"有意偏差 + 原因"）
-5. 报告附 **设计稿截图 vs 实现截图** 对照表
-6. 🔴 **此流程由 Step 5 自动触发，不依赖猫猫主动想起来**
+**视觉对照的用法**：需要判断布局和操作关系时，把已接受的参考与实际页面放在一起看，并实际操作关键状态。截图适合说明外观，不能单独证明保存、返回或恢复；已有证据仍覆盖的部分可以复用。有意偏离参考要说明真实原因，涉及新价值取舍时再找 operator，不要求用户重复批准同一方向。
 
-> 教训（2026-03-11）：三只Ragdoll同时跳过了 .pen 对照，根因是没有自动化检查点。
-> Step 5 的 glob 就是解决这个问题——用命令输出驱动，不靠记忆。
+> 2026-03-11 教训：三只Ragdoll同时跳过了已有 .pen 对照，所以保留命令驱动的参考发现。发现步骤不替猫判断设计，也不能用“没有 .pen”排除图片或实页等其他已接受参考。
 
 ## Quick Reference
 
@@ -202,7 +197,7 @@ Step 8: REPORT — 输出合规报告 + 证据
 | targeted checks 通过 | 与改动面对应的本轮命令 + exit 0 | 只挑一盏绿灯、隐去相关红灯 |
 | full gate 通过 | 影响范围要求 full 时本轮 `pnpm gate` exit 0 | 凭风险标签机械全跑，或局部证据冒充 full |
 | Bug 修了 | 原症状测试：通过 | 代码改了，以为修了 |
-| 需求满足 | spec + Discussion 逐项打勾 | 测试通过就完事 |
+| 需求满足 | 对照 spec / 原讨论判断实际使用结果，说明依据与未验证处 | 测试通过或逐项打勾就完事 |
 | Feature 完成/未完成 | git log + PR 状态 + spec 逐项 | 只看 spec checkbox 就下结论 |
 
 **合规报告模板**：
@@ -224,9 +219,9 @@ Spec: feature spec or implementation note
 |---|------|------|----------|----------|
 | 1 | XXX  | ✅   | file.ts:L10 | test.spec.ts |
 
-### 设计稿对照（Step 5）
-glob designs/**/*.pen 匹配结果: [列出匹配文件或"无匹配"]
-对照状态: ✅ 已对照 / ⚠️ 无设计稿（有 UI 改动）/ ➖ 无 UI 改动
+### 参考与实物对照（适用时）
+已接受参考与实际路径：<来源 / 本次观察>
+判断：<是否保留了约定的操作与结果；差异及理由>
 
 ### Artifact Hygiene（Step 7.5）
 仓库根目录媒体/设计工件（工作树 + 已提交差异）: 无 ✅
@@ -255,14 +250,14 @@ pnpm gate → exit 0 ✅（仅影响范围要求 full 时填写）
 | 错误 | 正确做法 |
 |------|----------|
 | 只检查 AC，没回读 Discussion | Step 0 先读原始需求，AC 可能不完整 |
-| "上次跑测试是通过的" | 这次重新跑，看输出，再声明 |
+| "上次跑测试是通过的" | 先问证据是否仍覆盖当前 HEAD 与输入：同 HEAD 同输入可复用并引用原始输出；变了只重跑受影响的检查 |
 | "应该没问题" / "probably works" | Run the command. Read the output. |
 | 测试通过就声称 phase 完成 | 还要对照 spec 逐项检查 |
 | 部分实现就提 review | P1/P2 遗漏必须当轮补完再提 review |
 | 交付半成品让operator"先看看" | 交付完整 feat，步骤是内部节奏不是交付批次 |
 | 产出后续要重写而非扩展 | 如果要重写，说明绕路了（Spike 除外） |
 | author 没跑 frontend preview，把“缺截图”扔给 operator | author 走关键交互；按视觉风险选择截图 / 录屏 / DOM / 浏览器测试证据 |
-| 有 .pen 设计稿但没对照实现 | Step 5 自动 glob 检测，匹配到就强制对照，不靠记忆 |
+| 没有 .pen 就跳过产品判断 | 按原始来源查参考，结合实际使用判断，不由文件格式决定 |
 | 为了截图在 runtime 会话里重跑 `pnpm start` | 先探活复用现有 runtime；确需重启必须显式授权 |
 | 拿 runtime 的 `3003/3004` 页面当成当前 worktree 的验证结果 | 报告里同时写明 `pwd/worktree` 和目标 URL；如果 URL 是 `3003/3004`，默认这是 runtime 证据，不是未合入改动证据 |
 | 截图/录屏/设计稿顺手掉进仓库根目录 | Step 7.5 必查；先移到 `${TMPDIR}/cat-cafe-evidence/...` 或正式归档目录，再继续 |
@@ -281,16 +276,16 @@ pnpm gate → exit 0 ✅（仅影响范围要求 full 时填写）
 | Skill | 关注点 | 时机 |
 |-------|--------|------|
 | **quality-gate（本 skill）** | spec 对照 + 风险匹配证据 | 作完成声明之前 |
-| `merge-gate` | reviewer 是否放行、P1/P2 是否全修 | 合入 main 之前 |
+| `merge-gate` | 选定验证是否足够、适用 review 是否放行、P1/P2 是否全修 | 合入 main 之前 |
 | `receive-review` | 如何处理 reviewer 的反馈 | 收到 review 之后 |
 
-一句话：quality-gate 是"你自己检查自己"，merge-gate 是"reviewer 放行你"，receive-review 是"你处理 reviewer 的意见"。
+quality-gate 负责作者自检，merge-gate 消费风险匹配的交付证据，receive-review 处理已收到的审查意见。
 
 ## 下一步
 
-Quality Gate 通过后，把证据交给风险路由已选择的独立验证源：治理 / stateful 语义通常走 `request-review`；安全 / 契约的 context-blind 扫描可走 cloud；`fresh-context-review` 仅在 author 判断认知盲点收益足够时作为 finding generator，不是固定前置。
+Quality Gate 通过后，符合 `docs/SOP.md` 产品快车道且未选 review 的改动由作者直接进入 `merge-gate`；其余把证据交给风险路由已选择的独立验证源：治理 / stateful 语义通常走 `request-review`；安全 / 契约的 context-blind 扫描可走 cloud；`fresh-context-review` 仅在 author 判断认知盲点收益足够时作为 finding generator，不是固定前置。
 
 Gate 未通过时：
 - **P1 遗漏** → 补完再过 gate
 - **P2 遗漏** → 必须当轮补完再提 review
-- **已选择的 targeted / full 检查失败** → 修到绿灯再交付
+- **检查失败** → 修复相关失败；已证实无关的失败交原 owner，作者按 `merge-gate` 的验证裁量完成自身覆盖后继续交付

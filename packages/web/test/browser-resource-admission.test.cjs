@@ -4,6 +4,7 @@ const { spawn } = require('node:child_process');
 const { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { join, resolve } = require('node:path');
+const { browserBlockerArgs } = require('./helpers/browser-admission-blocker.cjs');
 
 const webRoot = resolve(__dirname, '..');
 const runnerPath = resolve(webRoot, 'scripts', 'run-with-node-env-test.mjs');
@@ -53,7 +54,7 @@ function startProcess(args, { cwd = webRoot, env = {}, parentEnv = process.env }
   });
   const result = new Promise((resolveChild, rejectChild) => {
     child.on('error', rejectChild);
-    child.on('exit', (code, signal) => resolveChild({ code, signal, output }));
+    child.on('close', (code, signal) => resolveChild({ code, signal, output }));
   });
   return { child, output: () => output, result };
 }
@@ -72,56 +73,23 @@ function resourceEnv(tempDir) {
   };
 }
 
-function startBrowserProbe({ delayMs, env = {}, label, lockDir, logFile, outerPermitHeld = false, parentEnv }) {
+function startBrowserProbe({ delayMs, env = {}, label, lockDir, logFile, parentEnv }) {
   const script = [
     "const { appendFileSync } = require('node:fs')",
     'const [logFile, label, delayMs] = process.argv.slice(1, 4)',
     "appendFileSync(logFile, label + ':start\\n')",
     "setTimeout(() => appendFileSync(logFile, label + ':end\\n'), Number(delayMs))",
   ].join(';');
-  const permitEnv = outerPermitHeld
-    ? {
-        CAT_CAFE_FULL_GATE_RESOURCE_PERMIT_HELD: '1',
-        CAT_CAFE_FULL_GATE_RESOURCE_MODE: 'exclusive',
-        CAT_CAFE_FULL_GATE_RESOURCE_STAGE: 'test-web-browser',
-      }
-    : {};
   return startProcess(
     [runnerPath, process.execPath, '-e', script, logFile, label, String(delayMs), 'test/browser/probe.mjs'],
     {
       env: {
         CAT_CAFE_BROWSER_TEST_LOCK_DIR: lockDir,
         CAT_CAFE_BROWSER_TEST_LEASE_POLL_MS: '10',
-        ...permitEnv,
         ...env,
       },
       parentEnv,
     },
-  );
-}
-
-function startPoolBlocker({ delayMs, env, logFile }) {
-  const script = [
-    "const { appendFileSync } = require('node:fs')",
-    'const [logFile, delayMs] = process.argv.slice(1, 3)',
-    "appendFileSync(logFile, 'blocker:start\\n')",
-    "setTimeout(() => appendFileSync(logFile, 'blocker:end\\n'), Number(delayMs))",
-  ].join(';');
-  return startProcess(
-    [
-      gateResourceRunnerPath,
-      '--mode',
-      'shared',
-      '--stage',
-      'browser-order-blocker',
-      '--',
-      process.execPath,
-      '-e',
-      script,
-      logFile,
-      String(delayMs),
-    ],
-    { env },
   );
 }
 
@@ -269,49 +237,55 @@ test(
   },
 );
 
-test('standalone admission acquires the outer pool before the legacy browser lock', homeResourcePoolTest, async () => {
-  const tempDir = mkdtempSync(join(tmpdir(), 'cat-cafe-browser-admission-order-'));
-  const blockerLog = join(tempDir, 'blocker.log');
-  const browserLog = join(tempDir, 'browser.log');
-  const lockDir = join(tempDir, 'browser.lock');
+test(
+  'standalone admission waits for the canonical browser claim before spawning its command',
+  homeResourcePoolTest,
+  async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'cat-cafe-browser-admission-order-'));
+    const browserLog = join(tempDir, 'browser.log');
+    const lockDir = join(tempDir, 'browser.lock');
+    const releaseFile = join(tempDir, 'release-blocker');
+    const probes = [];
+    try {
+      const observationBudgetMs = 5_000;
+      // Private exclusion fixture: allow bounded observation plus release/drain.
+      const env = { ...resourceEnv(tempDir), CAT_CAFE_FULL_GATE_RESOURCE_WAIT_MS: String(2 * observationBudgetMs) };
+      const blocker = startProcess(
+        browserBlockerArgs({ runnerPath: gateResourceRunnerPath, logFile: browserLog, releaseFile }),
+        { env },
+      );
+      probes.push(blocker);
+      await waitFor(() => readFileSync(browserLog, 'utf8'), /blocker:start/);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 650));
+      assert.equal(readFileSync(browserLog, 'utf8'), 'blocker:start\n');
+      const standalone = startBrowserProbe({ delayMs: 20, env, label: 'standalone', lockDir, logFile: browserLog });
+      probes.push(standalone);
+      await waitFor(standalone.output, /waiting stage=standalone-web-browser/, observationBudgetMs);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 1800)); // Delay observation after queue entry.
+      assert.equal(standalone.child.exitCode, null, standalone.output());
+      assert.equal(readFileSync(browserLog, 'utf8'), 'blocker:start\n');
+      writeFileSync(releaseFile, 'release');
+      const [blockerResult, standaloneResult] = await Promise.all([blocker.result, standalone.result]);
 
-  try {
-    appendFileSync(blockerLog, '');
-    appendFileSync(browserLog, '');
-    const env = resourceEnv(tempDir);
-    const blocker = startPoolBlocker({ delayMs: 500, env, logFile: blockerLog });
-    await waitFor(() => readFileSync(blockerLog, 'utf8'), /blocker:start/);
-
-    const standalone = startBrowserProbe({ delayMs: 20, env, label: 'standalone', lockDir, logFile: browserLog });
-    await waitFor(standalone.output, /waiting stage=standalone-web-browser/);
-
-    const legacyOnly = startBrowserProbe({
-      delayMs: 20,
-      env: { CAT_CAFE_BROWSER_TEST_LEASE_WAIT_MS: '200' },
-      label: 'legacy-only',
-      lockDir,
-      logFile: browserLog,
-      outerPermitHeld: true,
-    });
-    const [legacyResult, blockerResult, standaloneResult] = await Promise.all([
-      legacyOnly.result,
-      blocker.result,
-      standalone.result,
-    ]);
-
-    assert.equal(legacyResult.code, 0, legacyResult.output);
-    assert.equal(blockerResult.code, 0, blockerResult.output);
-    assert.equal(standaloneResult.code, 0, standaloneResult.output);
-    assert.deepEqual(readFileSync(browserLog, 'utf8').trim().split('\n'), [
-      'legacy-only:start',
-      'legacy-only:end',
-      'standalone:start',
-      'standalone:end',
-    ]);
-  } finally {
-    rmSync(tempDir, { recursive: true, force: true });
-  }
-});
+      assert.equal(blockerResult.code, 0, blockerResult.output);
+      assert.equal(standaloneResult.code, 0, standaloneResult.output);
+      assert.deepEqual(readFileSync(browserLog, 'utf8').trim().split('\n'), [
+        'blocker:start',
+        'blocker:end',
+        'standalone:start',
+        'standalone:end',
+      ]);
+    } catch (error) {
+      error.message += `\n${probes.map((probe) => probe.output()).join('\n')}`;
+      throw error;
+    } finally {
+      writeFileSync(releaseFile, 'release');
+      for (const { child } of probes) if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+      await Promise.allSettled(probes.map((probe) => probe.result));
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  },
+);
 
 test('browser commands reject partial or non-exclusive outer permit markers', homeResourcePoolTest, async () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'cat-cafe-browser-admission-marker-'));

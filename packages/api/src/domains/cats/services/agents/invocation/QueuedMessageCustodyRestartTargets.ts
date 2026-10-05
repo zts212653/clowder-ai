@@ -2,6 +2,7 @@ import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecord
 import type { IMessageStore, QueuedMessageCustody, StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
 import { resolveRestartExecutionWitness } from './QueuedMessageCustodyRestartWitness.js';
+import { requiresDispatchDisposition } from './queue-source-completion-policy.js';
 import {
   type QueueSourceResponseEvidence,
   resolveQueueSourceResponseEvidenceFromMessages,
@@ -27,16 +28,19 @@ interface RestartSourceResponse {
   witness: QueueSourceResponseEvidence['witness'];
 }
 
-function resolveRestartSourceResponse(
+async function resolveRestartSourceResponse(
   message: StoredMessage,
   current: QueuedMessageCustody,
   catId: string,
   threadMessages: readonly StoredMessage[],
-): RestartSourceResponse | null {
+  turnExecutionStore: Pick<ITurnExecutionStore, 'get'> | undefined,
+): Promise<RestartSourceResponse | null> {
   const exposures = [...(current.bodyExposures ?? [])]
     .filter((candidate) => candidate.targetCatId === catId)
     .sort((left, right) => right.seenAt - left.seenAt);
   for (const exposure of exposures) {
+    const child = await turnExecutionStore?.get(exposure.invocationId);
+    if (requiresDispatchDisposition(message, catId, exposure.invocationId, child)) continue;
     const sourceResponse = resolveQueueSourceResponseEvidenceFromMessages({
       messages: threadMessages,
       catId,
@@ -126,7 +130,13 @@ export async function resolveRestartTargets(
   // seen maps were cleared by failed bookkeeping.
   for (const catId of [...projection.pending]) {
     if (replacedA2ATargetCats.has(catId) || !retainedExposureTargets.has(catId)) continue;
-    const sourceResponse = resolveRestartSourceResponse(message, current, catId, threadMessages);
+    const sourceResponse = await resolveRestartSourceResponse(
+      message,
+      current,
+      catId,
+      threadMessages,
+      turnExecutionStore,
+    );
     if (!sourceResponse) continue;
     const { exposure, witness } = sourceResponse;
     completeTarget(projection, catId);

@@ -84,13 +84,11 @@ export function ApprovalProvenanceLinks({
           查看触发原文
         </button>
       ) : (
-        <span
-          className="min-w-0 truncate text-micro text-cafe-interactive/55"
-          title={`${originRef.anchor}: ${originRef.summary}`}
-          data-testid="approval-event-origin"
-        >
-          来源事件：{originRef.summary}
-        </span>
+        <details className="min-w-0 text-micro text-cafe-interactive/55" data-testid="approval-event-origin">
+          <summary className="cursor-pointer">来源事件</summary>
+          <p className="mt-1 break-words">{originRef.summary}</p>
+          <p className="mt-1 break-all font-mono">{originRef.anchor}</p>
+        </details>
       )}
     </div>
   );

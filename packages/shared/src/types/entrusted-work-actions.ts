@@ -81,10 +81,14 @@ export const entrustedWorkUpdateActionV1Schema = z
       .object({
         businessDeadline: entrustedWorkTimeFactV1Schema.nullable().optional(),
         reviewBy: entrustedWorkTimeFactV1Schema.nullable().optional(),
+        plannedStart: entrustedWorkTimeFactV1Schema.nullable().optional(),
+        actualStart: entrustedWorkTimeFactV1Schema.nullable().optional(),
+        estimatedCompletion: entrustedWorkTimeFactV1Schema.nullable().optional(),
       })
       .strict()
       .optional(),
     artifactRefs: z.array(boundedRef).max(64).optional(),
+    progress: entrustedWorkV1Schema.shape.progress.unwrap().nullable().optional(),
   })
   .strict();
 

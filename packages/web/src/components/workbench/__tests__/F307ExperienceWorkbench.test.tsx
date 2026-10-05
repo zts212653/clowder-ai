@@ -1,4 +1,14 @@
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
+
+// The workbench kernel also mounts outside the Next app router (browser review hosts bundle it with
+// Vite), so it takes navigation from its host. Override the global test-setup router with the real
+// out-of-router behavior: any router hook in this tree fails here the same way it fails there.
+vi.mock('next/navigation', () => ({
+  useRouter: () => {
+    throw new Error('invariant expected app router to be mounted');
+  },
+}));
+
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,11 +17,20 @@ import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbenc
 import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import { WORKBENCH_STORAGE_KEY } from '@/components/workbench/workbench-persistence';
 import type { WorkspaceOpenRequest } from '@/stores/chat-types';
+import { createArtifactReviewSurface } from '../artifact-review-surface';
+import { createArtifactWorkPresentationState } from '../artifact-work-presentation';
 import { useF307ExperienceWorkbenchStore } from '../experience-workbench-store';
 import { F307ExperienceWorkbench } from '../F307ExperienceWorkbench';
-import { createBrowserSurface, createEvolutionProgramSurface, createTerminalSurface } from '../real-surface-adapters';
+import {
+  createBrowserSurface,
+  createEvolutionProgramSurface,
+  createTerminalSurface,
+  resolveFilesTarget,
+  resolveFileTarget,
+} from '../real-surface-adapters';
 
 const mocks = vi.hoisted(() => ({
+  openAppRoute: vi.fn(),
   isDesktop: true,
   useNativeViewport: false,
   workbenchVisible: true,
@@ -38,23 +57,76 @@ vi.mock('../F307OwnerSurfaceRenderer', () => ({
   F307OwnerSurfaceRenderer: ({
     surface,
     surfaceVisible,
+    focusMode,
+    onReturnToFileOrigin,
   }: {
     surface: WorkspaceSurfaceDescriptor;
     surfaceVisible?: boolean;
-  }) => (
-    <div
-      data-testid={`owner-surface-${surface.type}`}
-      data-owner-surface-id={surface.id}
-      data-surface-visible={String(surfaceVisible)}
-    >
-      {surface.title}
-    </div>
-  ),
+    focusMode?: boolean;
+    onReturnToFileOrigin?: (
+      surface: WorkspaceSurfaceDescriptor,
+      origin: NonNullable<WorkspaceSurfaceDescriptor['navigationOrigin']>,
+    ) => void;
+  }) => {
+    const origin = surface.navigationOrigin;
+    return (
+      <div
+        data-testid={`owner-surface-${surface.type}`}
+        data-owner-surface-id={surface.id}
+        data-surface-visible={String(surfaceVisible)}
+        data-focus-mode={String(focusMode)}
+      >
+        {surface.title}
+        {origin ? (
+          <button
+            type="button"
+            data-testid={`return-origin-${surface.id}`}
+            onClick={() => onReturnToFileOrigin?.(surface, origin)}
+          >
+            返回来源
+          </button>
+        ) : null}
+      </div>
+    );
+  },
 }));
 
 vi.mock('../F307SurfacePane', () => ({
-  F307SurfacePane: ({ children, visible }: { children: React.ReactNode; visible: boolean }) => (
-    <div data-visible={visible}>{children}</div>
+  F307SurfacePane: ({
+    children,
+    surface,
+    visible,
+    focusMode,
+    onEnterFocusMode,
+    onExitFocusMode,
+    artifactWorkFullWindow,
+    onToggleArtifactWorkFullWindow,
+  }: {
+    children: React.ReactNode;
+    surface: WorkspaceSurfaceDescriptor;
+    visible: boolean;
+    focusMode?: boolean;
+    onEnterFocusMode?: () => void;
+    onExitFocusMode?: () => void;
+    artifactWorkFullWindow?: boolean;
+    onToggleArtifactWorkFullWindow?: () => void;
+  }) => (
+    <div data-visible={visible} data-surface-id={surface.id} data-focus-mode={String(focusMode)}>
+      {onToggleArtifactWorkFullWindow ? (
+        <button type="button" data-testid="artifact-work-toggle" onClick={onToggleArtifactWorkFullWindow}>
+          {artifactWorkFullWindow ? '展开聊天' : '整窗'}
+        </button>
+      ) : (
+        <button
+          type="button"
+          data-testid={focusMode ? 'workspace-focus-exit' : 'workspace-focus-enter'}
+          onClick={focusMode ? onExitFocusMode : onEnterFocusMode}
+        >
+          {focusMode ? '退出专注' : '专注'}
+        </button>
+      )}
+      {children}
+    </div>
   ),
 }));
 
@@ -65,7 +137,11 @@ vi.mock('../F307WorkbenchSidecar', () => ({
 }));
 
 vi.mock('../F307WorkspaceHomePage', () => ({
-  F307WorkspaceHomePage: () => <div data-testid="f307-workspace-home-page">Canonical Workspace Home</div>,
+  F307WorkspaceHomePage: ({ workspaceSearchQuery }: { workspaceSearchQuery?: string }) => (
+    <div data-testid="f307-workspace-home-page" data-workspace-search-query={workspaceSearchQuery ?? ''}>
+      Canonical Workspace Home
+    </div>
+  ),
 }));
 
 const FILE_SURFACE: WorkspaceSurfaceDescriptor = {
@@ -105,6 +181,7 @@ const AGENT_RUN_SURFACE: WorkspaceSurfaceDescriptor = {
 };
 
 const PROGRAM_SURFACE = createEvolutionProgramSurface(`evolution-program:${'a'.repeat(32)}`, '文档审阅方式');
+const ARTIFACT_SURFACE = createArtifactReviewSurface(`review-${'b'.repeat(64)}`, 'thread-a', '作品审阅');
 const BROWSER_SURFACE = createBrowserSurface({ ownerKey: 'preview-f307', port: 4173, path: '/owner-a' });
 const TERMINAL_SURFACE = createTerminalSurface({ worktreeId: 'worktree-a' });
 
@@ -129,6 +206,8 @@ describe('F307 zero-surface canonical Home invariant', () => {
       layout: createInitialWorkbenchState(),
       hydrated: true,
       mainAreaAttentionSurfaceId: null,
+      focusSurfaceId: null,
+      artifactWorkPresentation: createArtifactWorkPresentationState(),
     });
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -144,6 +223,8 @@ describe('F307 zero-surface canonical Home invariant', () => {
       layout: createInitialWorkbenchState(),
       hydrated: false,
       mainAreaAttentionSurfaceId: null,
+      focusSurfaceId: null,
+      artifactWorkPresentation: createArtifactWorkPresentationState(),
       hydrate: hydrateWorkbench,
     });
   });
@@ -152,22 +233,55 @@ describe('F307 zero-surface canonical Home invariant', () => {
     delete (globalThis as { React?: typeof React }).React;
   });
 
-  async function renderWorkbench(workspaceOpenRequest?: WorkspaceOpenRequest, onConsumed?: (revision: number) => void) {
+  async function renderWorkbench(
+    workspaceOpenRequest?: WorkspaceOpenRequest,
+    onConsumed?: (revision: number) => void,
+    options?: {
+      onRestoreWorkspaceSearch?: (query: string) => void;
+      onReturnToChatMessage?: (input: { threadId: string; messageId: string }) => void;
+    },
+  ) {
     await act(async () => {
       root.render(
         <F307ExperienceWorkbench
           threadId="thread-a"
           visible={mocks.workbenchVisible}
+          artifactWorkHostAvailable
           onSelectDevSurface={() => undefined}
           worktreeId="worktree-a"
           openFilePath={null}
           preview={{ path: '/' }}
           workspaceOpenRequest={workspaceOpenRequest}
           onWorkspaceOpenRequestConsumed={onConsumed}
+          onRestoreWorkspaceSearch={options?.onRestoreWorkspaceSearch}
+          onReturnToChatMessage={options?.onReturnToChatMessage}
+          onOpenAppRoute={mocks.openAppRoute}
         />,
       );
     });
   }
+
+  it('uses the KD-25 Artifact toggle instead of generic main-area attention', async () => {
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([ARTIFACT_SURFACE]),
+      artifactWorkPresentation: createArtifactWorkPresentationState(),
+    });
+    await renderWorkbench();
+
+    expect(container.querySelector('[data-testid="f307-enter-main-area"]')).toBeNull();
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="artifact-work-toggle"]');
+    expect(toggle).toBeTruthy();
+    await act(async () => toggle?.click());
+    expect(useF307ExperienceWorkbenchStore.getState().artifactWorkPresentation.session).toMatchObject({
+      mode: 'full-window',
+      threadId: 'thread-a',
+      surfaceId: ARTIFACT_SURFACE.id,
+    });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+
+    await act(async () => toggle?.click());
+    expect(useF307ExperienceWorkbenchStore.getState().artifactWorkPresentation.session?.mode).toBe('split');
+  });
 
   it('opens and focuses the canonical Approval surface for an external Workspace entry', async () => {
     const onConsumed = vi.fn();
@@ -188,6 +302,280 @@ describe('F307 zero-surface canonical Home invariant', () => {
       ownerStateRef: { owner: 'f284-workspace-launcher', key: 'mode:approval' },
     });
     expect(onConsumed).toHaveBeenCalledWith(1);
+  });
+
+  it('opens the exact file a settings link left pending before this Workbench mounted', async () => {
+    // Parent Alpha entry 8: the request is written on /settings and consumed by the lobby's new Workbench.
+    const onConsumed = vi.fn();
+    const navigationOrigin = {
+      kind: 'settings' as const,
+      href: '/settings?s=system',
+      anchorId: 'settings-file:cat-template.json',
+      viewportOffsetPx: 0,
+    };
+    await renderWorkbench(
+      {
+        revision: 3,
+        threadId: 'thread-a',
+        target: { kind: 'file', worktreeId: 'settings-root', path: 'cat-template.json', navigationOrigin },
+      },
+      onConsumed,
+    );
+
+    const { layout } = useF307ExperienceWorkbenchStore.getState();
+    const active = layout.surfaces.find((surface) => surface.id === layout.activeSurfaceId);
+    expect(active && resolveFileTarget(active)).toMatchObject({
+      worktreeId: 'settings-root',
+      path: 'cat-template.json',
+    });
+    expect(active?.navigationOrigin).toEqual(navigationOrigin);
+    expect(onConsumed).toHaveBeenCalledWith(3);
+  });
+
+  it('shows the directory a settings link asked for, re-runs a repeated reveal, and returns to Settings', async () => {
+    // Parent Alpha 2026-09-24 second round: the Settings directory entry left the page unchanged.
+    const onConsumed = vi.fn();
+    const navigationOrigin = {
+      kind: 'settings' as const,
+      href: '/settings?s=system',
+      anchorId: 'settings-dir:packages/api/uploads',
+      viewportOffsetPx: 12,
+    };
+    const reveal = (revision: number): WorkspaceOpenRequest => ({
+      revision,
+      threadId: 'thread-a',
+      target: {
+        kind: 'reveal',
+        worktreeId: 'settings-root',
+        path: 'packages/api/uploads',
+        navigationOrigin,
+        repoRoot: '/settings-project',
+      },
+    });
+    const activeSurface = () => {
+      const { layout } = useF307ExperienceWorkbenchStore.getState();
+      return layout.surfaces.find((surface) => surface.id === layout.activeSurfaceId);
+    };
+
+    await renderWorkbench(reveal(4), onConsumed);
+    let active = activeSurface();
+    // Parent Alpha 2026-09-25: the tree must read its branch/HEAD through the root Settings resolved it under.
+    expect(active && resolveFilesTarget(active)).toEqual({
+      worktreeId: 'settings-root',
+      repoRoot: '/settings-project',
+    });
+    expect(active?.filesReveal).toEqual({ path: 'packages/api/uploads', request: 4 });
+    expect(active?.navigationOrigin).toEqual(navigationOrigin);
+    expect(onConsumed).toHaveBeenCalledWith(4);
+
+    // The same tree is already focused; asking again must still reach the tree instead of being skipped.
+    await renderWorkbench(reveal(5), onConsumed);
+    active = activeSurface();
+    expect(active?.filesReveal).toEqual({ path: 'packages/api/uploads', request: 5 });
+    expect(onConsumed).toHaveBeenCalledWith(5);
+
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(`[data-testid="return-origin-${active?.id}"]`)?.click(),
+    );
+    const url = new URL(mocks.openAppRoute.mock.lastCall![0], window.location.origin);
+    expect(url.pathname).toBe('/settings');
+    expect(url.searchParams.get('s')).toBe('system');
+    expect(JSON.parse(url.searchParams.get('fileReturn')!)).toEqual({
+      anchorId: 'settings-dir:packages/api/uploads',
+      viewportOffsetPx: 12,
+    });
+  });
+
+  it('Phase U: opens a review beside chat until the human explicitly enters Artifact full-window', async () => {
+    const surface = createArtifactReviewSurface(`review-${'a'.repeat(64)}`, 'thread-a', '书房');
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: null,
+    });
+    await renderWorkbench();
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+    expect(container.querySelector('[data-testid="owner-surface-review"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="f307-enter-main-area"]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="artifact-work-toggle"]')?.click());
+    expect(useF307ExperienceWorkbenchStore.getState().artifactWorkPresentation.session).toMatchObject({
+      surfaceId: surface.id,
+      mode: 'full-window',
+    });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it('opens and revisits a pinned publication without stealing main attention, and returns to its exact message', async () => {
+    const contentRef = `prepared-media:${'e'.repeat(64)}`;
+    const target = {
+      kind: 'publication' as const,
+      contentRef,
+      ownerRevision: 1,
+      title: '晨光',
+      navigationOrigin: { kind: 'chat-file-link' as const, threadId: 'source-thread', messageId: 'source-message' },
+    };
+    const back = vi.fn();
+    await renderWorkbench({ revision: 1, threadId: 'thread-a', target }, vi.fn(), { onReturnToChatMessage: back });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+    await renderWorkbench({ revision: 2, threadId: 'thread-a', target: { ...target, ownerRevision: 2 } }, vi.fn(), {
+      onReturnToChatMessage: back,
+    });
+    const { layout } = useF307ExperienceWorkbenchStore.getState();
+    expect(layout.surfaces).toHaveLength(1);
+    expect(JSON.parse(layout.surfaces[0]!.ownerStateRef.key).ownerRevision).toBe(2);
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(`[data-testid="return-origin-publication:${contentRef}"]`)!.click(),
+    );
+    expect(back).toHaveBeenCalledWith({ threadId: 'source-thread', messageId: 'source-message' });
+  });
+
+  it('returns a file-tree collaboration close to the F063 files owner', async () => {
+    const surface = { ...FILE_SURFACE, navigationOrigin: { kind: 'file-tree' as const } };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench();
+
+    await act(async () => {
+      (container.querySelector(`[data-testid="return-origin-${surface.id}"]`) as HTMLButtonElement).click();
+    });
+    expect(useF307ExperienceWorkbenchStore.getState().layout.activeSurfaceId).toBe(
+      'workspace:surface:files:worktree-a',
+    );
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it('returns a Home-search collaboration close to the original query', async () => {
+    const onRestoreWorkspaceSearch = vi.fn();
+    const surface = {
+      ...FILE_SURFACE,
+      navigationOrigin: { kind: 'workspace-home-search' as const, query: 'canonical owner' },
+    };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench(undefined, undefined, { onRestoreWorkspaceSearch });
+
+    await act(async () => {
+      (container.querySelector(`[data-testid="return-origin-${surface.id}"]`) as HTMLButtonElement).click();
+    });
+    expect(onRestoreWorkspaceSearch).toHaveBeenCalledWith('canonical owner');
+    const home = container.querySelector<HTMLElement>('[data-testid="f307-workspace-home-page"]');
+    expect(home?.dataset.workspaceSearchQuery).toBe('canonical owner');
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it('returns a chat-link collaboration close to the exact message coordinate', async () => {
+    const onReturnToChatMessage = vi.fn();
+    const surface = {
+      ...FILE_SURFACE,
+      navigationOrigin: { kind: 'chat-file-link' as const, threadId: 'thread-origin', messageId: 'message-origin' },
+    };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench(undefined, undefined, { onReturnToChatMessage });
+
+    await act(async () => {
+      (container.querySelector(`[data-testid="return-origin-${surface.id}"]`) as HTMLButtonElement).click();
+    });
+    expect(onReturnToChatMessage).toHaveBeenCalledWith({ threadId: 'thread-origin', messageId: 'message-origin' });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it('returns a relative document link through the same owner host at its original line', async () => {
+    const surface = {
+      ...FILE_SURFACE,
+      navigationOrigin: {
+        kind: 'workspace-document' as const,
+        worktreeId: 'original-worktree',
+        path: 'docs/original.md',
+        line: 17,
+      },
+    };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(`[data-testid="return-origin-${surface.id}"]`)?.click(),
+    );
+    const state = useF307ExperienceWorkbenchStore.getState();
+    const active = state.layout.surfaces.find((item) => item.id === state.layout.activeSurfaceId)!;
+    expect(resolveFileTarget(active)).toEqual({
+      worktreeId: 'original-worktree',
+      path: 'docs/original.md',
+      scrollToLine: 17,
+    });
+    expect(state.mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it.each([
+    'eval',
+    'status',
+  ] as const)('returns a card-opened file to the actual %s owner in the right Workspace', async (destination) => {
+    window.history.replaceState({}, '', '/thread/thread-a');
+    const origin = {
+      kind: 'workspace-card' as const,
+      threadId: 'thread-a',
+      destination,
+      anchorId: 'original-card',
+      viewportOffsetPx: 34,
+    };
+    const surface = { ...FILE_SURFACE, navigationOrigin: origin };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(`[data-testid="return-origin-${surface.id}"]`)?.click(),
+    );
+    const state = useF307ExperienceWorkbenchStore.getState();
+    const active = state.layout.surfaces.find((item) => item.id === state.layout.activeSurfaceId)!;
+    expect(active.objectRef.id).toBe(destination === 'eval' ? 'mode:eval' : 'host:status');
+    expect(JSON.parse(new URL(window.location.href).searchParams.get('fileReturn')!)).toEqual({
+      anchorId: 'original-card',
+      viewportOffsetPx: 34,
+      threadId: 'thread-a',
+    });
+    expect(state.mainAreaAttentionSurfaceId).toBeNull();
+  });
+
+  it('returns a settings-opened file to the original section with a recoverable card coordinate', async () => {
+    const origin = {
+      kind: 'settings' as const,
+      href: '/settings?s=ops&obs=eval',
+      anchorId: 'eval:original',
+      viewportOffsetPx: 34,
+    };
+    const surface = { ...FILE_SURFACE, navigationOrigin: origin };
+    useF307ExperienceWorkbenchStore.setState({
+      layout: createInitialWorkbenchState([surface]),
+      hydrated: true,
+      mainAreaAttentionSurfaceId: surface.id,
+    });
+    await renderWorkbench();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>(`[data-testid="return-origin-${surface.id}"]`)?.click(),
+    );
+    const url = new URL(mocks.openAppRoute.mock.lastCall![0], window.location.origin);
+    expect(url.pathname).toBe('/settings');
+    expect(url.searchParams.get('obs')).toBe('eval');
+    expect(JSON.parse(url.searchParams.get('fileReturn')!)).toEqual({
+      anchorId: 'eval:original',
+      viewportOffsetPx: 34,
+    });
+    expect(useF307ExperienceWorkbenchStore.getState().mainAreaAttentionSurfaceId).toBeNull();
   });
 
   it('opens an exact Team subject only for an explicit navigation request', async () => {
@@ -349,6 +737,54 @@ describe('F307 zero-surface canonical Home invariant', () => {
       activeSurfaceId: FILE_SURFACE.id,
       split: null,
     });
+  });
+
+  it('focuses the exact active surface without mutating its working set, split, or sidecar', async () => {
+    const split = {
+      primarySurfaceId: FILE_SURFACE.id,
+      secondarySurfaceId: AGENT_RUN_SURFACE.id,
+    };
+    const layout = {
+      ...createInitialWorkbenchState([FILE_SURFACE, AGENT_RUN_SURFACE]),
+      activeSurfaceId: FILE_SURFACE.id,
+      split,
+      sidecar: BROWSER_SURFACE,
+    };
+    useF307ExperienceWorkbenchStore.setState({
+      layout,
+      hydrated: true,
+      focusSurfaceId: null,
+    });
+    await renderWorkbench();
+
+    const workbench = container.querySelector<HTMLElement>('[data-testid="f307-experience-workbench"]');
+    const focus = container.querySelector<HTMLButtonElement>(
+      `[data-surface-id="${FILE_SURFACE.id}"] [data-testid="workspace-focus-enter"]`,
+    );
+    expect(focus).not.toBeNull();
+    await act(async () => focus?.click());
+
+    expect(workbench?.dataset.focusSurface).toBe(FILE_SURFACE.id);
+    expect(container.querySelector('[data-testid="f307-tab-actions"]')).toBeNull();
+    expect(container.querySelector('[data-testid="workbench-sidecar"]')?.getAttribute('data-visible')).toBe('false');
+    expect(container.querySelector('[data-testid="owner-surface-code"]')?.parentElement?.dataset.visible).toBe('true');
+    expect(container.querySelector('[data-testid="owner-surface-agent-run"]')?.parentElement?.dataset.visible).toBe(
+      'false',
+    );
+    expect(container.querySelector('[data-testid="owner-surface-code"]')?.getAttribute('data-focus-mode')).toBe('true');
+    expect(useF307ExperienceWorkbenchStore.getState().layout).toEqual(layout);
+
+    const exit = container.querySelector<HTMLButtonElement>('[data-testid="workspace-focus-exit"]');
+    expect(exit).not.toBeNull();
+    await act(async () => exit?.click());
+
+    expect(workbench?.dataset.focusSurface).toBe('');
+    expect(container.querySelector('[data-testid="f307-tab-actions"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="workbench-sidecar"]')?.getAttribute('data-visible')).toBe('true');
+    expect(container.querySelector('[data-testid="owner-surface-agent-run"]')?.parentElement?.dataset.visible).toBe(
+      'true',
+    );
+    expect(useF307ExperienceWorkbenchStore.getState().layout).toEqual(layout);
   });
 
   it('exposes an explicit split exit that preserves both hosted views', async () => {

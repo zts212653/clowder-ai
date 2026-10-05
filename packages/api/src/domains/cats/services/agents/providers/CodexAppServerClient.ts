@@ -6,6 +6,7 @@ import type {
 import type { CodexNativeResumeReplacementProvenance } from '../../runtime-session/CodexSessionReplacementProvenance.js';
 import type {
   AgentCarrierSession,
+  LiveProviderInputOutcome,
   PreparedProviderRequestV1,
   ProviderCompactionObservation,
   ProviderContinuityEvidence,
@@ -30,6 +31,9 @@ import {
 } from './CodexAppServerLifecycle.js';
 import { CodexAppServerNotificationQueue } from './CodexAppServerNotificationQueue.js';
 import { type CodexAppServerThreadVerdict, resolveCodexAppServerThread } from './CodexAppServerThreadResolver.js';
+import { type CodexLiveRunPort, isLiveDraftEvent } from './CodexLiveRunPort.js';
+import { CodexLiveTurnInput, type LiveProviderInput } from './CodexLiveTurnInput.js';
+import { assertCodexRequiredToolsAvailable } from './CodexRequiredToolsPreflight.js';
 import type { CodexRuntimeInteractionContext } from './CodexRuntimeInteractionAdapter.js';
 import {
   type CodexRuntimeInteractionRunState,
@@ -82,6 +86,8 @@ export interface CodexAppServerContextCompactionEvent {
 }
 
 export interface CodexAppServerRunInput {
+  /** F317: explicit Host-owned continuous call. Ordinary invocations remain single-turn. */
+  live?: CodexLiveRunPort;
   prompt: CodexAppServerPromptSource;
   thread: { kind: 'start' } | { kind: 'resume'; threadId: string };
   model?: string;
@@ -89,6 +95,8 @@ export interface CodexAppServerRunInput {
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   approvalPolicy?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
   developerInstructions?: string;
+  /** Server-qualified (`serverName::toolName`) dependencies checked against the effective thread inventory before turn/start. */
+  requiredTools?: readonly string[];
   config?: JsonObject;
   /** F291: omitted inherits Codex config; null explicitly requests Standard. */
   serviceTier?: string | null;
@@ -132,6 +140,8 @@ export interface CodexAppServerRunInput {
   ) => PreparedProviderRequestV1;
   /** F299: recovery has no user message, but its application context is still model-visible input. */
   prepareRecoveryRequest?: (recoveryInstruction: string) => PreparedProviderRequestV1;
+  prepareLiveRequest?: (input: LiveProviderInput) => PreparedProviderRequestV1;
+  onLiveInputOutcome?: (receipt: LiveProviderInputOutcome) => Promise<void>;
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
   /** F306: one provider-neutral interaction surface bound to this exact invocation. */
   runtimeInteraction?: Omit<CodexRuntimeInteractionContext, 'signal'>;
@@ -216,6 +226,38 @@ export class CodexAppServerClient {
     let activeThreadId: string | null = null;
     let activeTurnId: string | null = null;
     let transportDisposition: 'release' | 'evict' = 'release';
+    const liveEnd = Symbol('live-end');
+    const liveFailure = Symbol('live-failure');
+    let liveFinished = false;
+    let liveError: unknown;
+    let runClosed = false;
+    let boundaryOpen = false;
+    const canSubmitLiveInput = () =>
+      Boolean(input.live) &&
+      !runClosed &&
+      !liveFinished &&
+      !liveError &&
+      !input.signal?.aborted &&
+      input.live?.acceptsInput?.() !== false;
+    const liveInputs = new CodexLiveTurnInput({
+      enqueue: (value) => this.notifications.push(value),
+      isOpen: canSubmitLiveInput,
+      request: (method, params) => this.request(method, params),
+      ...(input.prepareLiveRequest ? { prepare: input.prepareLiveRequest } : {}),
+      ...(input.beforeProviderLaunch ? { commit: input.beforeProviderLaunch } : {}),
+      ...(input.onLiveInputOutcome ? { outcome: input.onLiveInputOutcome } : {}),
+    });
+    let idleTimer: ReturnType<typeof setInterval> | undefined;
+    void input.live?.finished.then(
+      () => {
+        liveFinished = true;
+        if (!runClosed) this.notifications.push(liveEnd);
+      },
+      (error: unknown) => {
+        liveError = error;
+        if (!runClosed) this.notifications.push(liveFailure);
+      },
+    );
     const timeoutMs = Math.max(0, input.timeoutMs ?? 0);
     const interruptGraceMs = Math.max(0, input.interruptGraceMs ?? DEFAULT_INTERRUPT_GRACE_MS);
     const recoveryInstruction = input.recoveryInstruction?.trim();
@@ -234,11 +276,32 @@ export class CodexAppServerClient {
     try {
       await this.request('initialize', {
         clientInfo: { name: 'cat-cafe', title: 'Clowder AI', version: '1' },
-        capabilities: recoveryInstruction || input.collaborationMode ? { experimentalApi: true } : {},
+        capabilities: recoveryInstruction || input.collaborationMode || input.live ? { experimentalApi: true } : {},
       });
       await this.write({ method: 'initialized' });
       yield this.lifecycle.event(this.lifecycle.transition('initialized'));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
+
+      if (input.live) {
+        // Thread config overlays user config; explicitly disable every ambient MCP server.
+        const loaded = asCodexAppServerRecord(await this.request('config/read', { includeLayers: false }));
+        if (!asCodexAppServerRecord(loaded?.config)) throw new Error('Live native config unavailable');
+        const configured = asCodexAppServerRecord(asCodexAppServerRecord(loaded?.config)?.mcp_servers) ?? {};
+        const allowed = asCodexAppServerRecord(input.config?.mcp_servers) ?? {};
+        input = {
+          ...input,
+          config: {
+            ...input.config,
+            mcp_servers: {
+              ...Object.fromEntries(Object.keys(configured).map((name) => [name, { enabled: false }])),
+              ...allowed,
+            },
+            'features.shell_tool': false,
+            'features.apply_patch_freeform': false,
+            'apps._default.enabled': false,
+          },
+        };
+      }
 
       const verdict = await resolveCodexAppServerThread({
         thread: input.thread,
@@ -263,6 +326,12 @@ export class CodexAppServerClient {
         ...(verdict.kind === 'replaced' ? { session_replacement: verdict.replacement } : {}),
       };
       yield { type: 'app_server.continuity_verdict', verdict };
+
+      await assertCodexRequiredToolsAvailable({
+        threadId,
+        requiredTools: input.requiredTools ?? [],
+        request: (method, params) => this.request(method, params),
+      });
 
       // F296 B4a preflight fence. The provider verdict exists; buffered
       // compaction for the bound runtime has been drained; only now may the
@@ -342,15 +411,63 @@ export class CodexAppServerClient {
       const turn = asCodexAppServerRecord(turnResult?.turn);
       if (typeof turn?.id !== 'string') throw new Error('Codex app-server did not return a turn id');
       activeTurnId = turn.id;
-      const subexecutionTracker = createCodexSubexecutionTracker({
+      let subexecutionTracker = createCodexSubexecutionTracker({
         binding: { threadId, turnId: activeTurnId },
         readThread: (childThreadId) => this.request('thread/read', { threadId: childThreadId, includeTurns: false }),
         ...(this.deps.now ? { now: this.deps.now } : {}),
       });
+      const bindAcceptedLiveTurn = async (accepted: string): Promise<void> => {
+        if (accepted === activeTurnId || !input.live) return;
+        activeTurnId = accepted;
+        latestUsage = null;
+        subexecutionTracker = createCodexSubexecutionTracker({
+          binding: { threadId, turnId: accepted },
+          readThread: (childThreadId) => this.request('thread/read', { threadId: childThreadId, includeTurns: false }),
+          ...(this.deps.now ? { now: this.deps.now } : {}),
+        });
+        await input.live.observe({ method: 'turn/started', params: { threadId, turn: { id: accepted } } });
+      };
+      const deliverAtBoundary = async (kind: 'idle' | 'tool_complete' | 'turn_complete'): Promise<void> => {
+        if (!input.live?.onSafeBoundary || !input.live.hasPendingInboxWake?.()) return;
+        boundaryOpen = true;
+        try {
+          await input.live.onSafeBoundary(kind);
+        } finally {
+          boundaryOpen = false;
+        }
+      };
       yield this.lifecycle.event(
         this.lifecycle.transition('turn_accepted', { threadId, turnId: activeTurnId, turnAccepted: true }),
       );
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
+      if (input.live) {
+        await input.live.observe({ method: 'turn/started', params: { threadId, turn: { id: activeTurnId } } });
+        await input.live.ready(threadId, {
+          request: (method, params) => this.request(method, params),
+          submitText: (text, sourceMessageId) => liveInputs.submitText(text, sourceMessageId),
+          submitContextAtBoundary: async (text, sourceRefs, contextKind, signal, authorize) => {
+            if (!boundaryOpen) throw new Error('Live context outside native safe boundary');
+            const accepted = await liveInputs.submitContextAtBoundary(
+              text,
+              sourceRefs,
+              contextKind,
+              signal,
+              authorize,
+              threadId,
+              activeTurnId,
+            );
+            await bindAcceptedLiveTurn(accepted);
+            return accepted;
+          },
+          wakeBoundary: () => liveInputs.queueTick(),
+        });
+        if (this.deps.freshnessController?.idle) {
+          idleTimer = setInterval(() => {
+            if (!activeTurnId && input.live?.acceptsFreshness?.() !== false) liveInputs.queueTick();
+          }, 1000);
+          idleTimer.unref();
+        }
+      }
       if (input.signal?.aborted) {
         void this.lifecycle.interrupt(threadId, activeTurnId, 'user_cancel', interruptGraceMs);
       }
@@ -359,8 +476,54 @@ export class CodexAppServerClient {
         const next = await this.notifications.next();
         if (next.done) throw new Error('Codex app-server stream ended before turn completion');
         const envelope = next.value;
+        let acceptedLiveTurn: string | null = null;
+        const isText = liveInputs.isSubmission(envelope);
+        const isIdleTick = liveInputs.consumeTick(envelope);
+        if (isText || isIdleTick) {
+          if (isText) acceptedLiveTurn = await liveInputs.sendText(envelope, threadId, activeTurnId);
+          else if (!activeTurnId && input.live?.hasPendingInboxWake?.()) await deliverAtBoundary('idle');
+          else if (
+            !activeTurnId &&
+            canSubmitLiveInput() &&
+            input.live?.acceptsFreshness?.() !== false &&
+            this.deps.freshnessController?.idle
+          ) {
+            try {
+              acceptedLiveTurn = await liveInputs.startIdle(threadId, this.deps.freshnessController.idle);
+            } catch {
+              /* Attention failure cannot terminate the voice call. */
+            }
+          }
+          if (acceptedLiveTurn) await bindAcceptedLiveTurn(acceptedLiveTurn);
+          continue;
+        }
+        if (envelope === liveFailure) throw liveError;
+        if (envelope === liveEnd) {
+          if (activeTurnId) {
+            transportDisposition = 'evict';
+            throw new Error('live_finished_with_active_native_turn');
+          }
+          this.lifecycle.markAuthoritativeTerminal();
+          yield { type: 'turn.completed', status: 'completed' };
+          yield this.lifecycle.event(this.lifecycle.transition('completed', { threadId }));
+          break;
+        }
         const record = asCodexAppServerRecord(envelope);
         const params = asCodexAppServerRecord(record?.params);
+        if (input.live && params?.threadId === threadId) {
+          const started = asCodexAppServerRecord(params.turn);
+          if (record?.method === 'turn/started' && typeof started?.id === 'string' && started.id !== activeTurnId) {
+            latestUsage = null;
+            activeTurnId = started.id;
+            subexecutionTracker = createCodexSubexecutionTracker({
+              binding: { threadId, turnId: activeTurnId },
+              readThread: (childThreadId) =>
+                this.request('thread/read', { threadId: childThreadId, includeTurns: false }),
+              ...(this.deps.now ? { now: this.deps.now } : {}),
+            });
+          }
+          if (record) await input.live.observe(record);
+        }
         const subexecution = await subexecutionTracker.observe(envelope);
         if (subexecution.scope === 'foreign') continue;
         this.lifecycle.touch(timeoutMs, timeoutHandler);
@@ -383,7 +546,7 @@ export class CodexAppServerClient {
           yield this.lifecycle.event(
             this.lifecycle.transition('active', {
               threadId,
-              turnId: activeTurnId,
+              ...(activeTurnId ? { turnId: activeTurnId } : {}),
               ...(itemObserved ? { itemObserved: true } : {}),
               ...(classifyCodexAppServerToolSurface(envelope) ? { toolSurfaceObserved: true } : {}),
             }),
@@ -409,6 +572,8 @@ export class CodexAppServerClient {
             activeNotice = null;
           }
         }
+        if (boundary && boundary.threadId === threadId && boundary.turnId === activeTurnId)
+          await deliverAtBoundary('tool_complete');
 
         if (isCodexAppServerTokenUsageNotification(record)) {
           latestUsage = mapCodexAppServerTokenUsage(asCodexAppServerRecord(record?.params)?.tokenUsage) ?? latestUsage;
@@ -428,8 +593,27 @@ export class CodexAppServerClient {
         const mapped = mapCodexAppServerNotification(envelope);
         await this.observeUnsupportedNotification(envelope);
         if (mapped?.type === 'turn.completed' && latestUsage) mapped.usage = latestUsage;
-        if (mapped) yield mapped;
-        if (isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+        if (mapped && !(input.live && isLiveDraftEvent(mapped))) yield mapped;
+        if (activeTurnId && isExactCodexRootTurnCompletion(envelope, { threadId, turnId: activeTurnId })) {
+          if (input.live) {
+            const completed = asCodexAppServerRecord(params?.turn);
+            if (completed?.status === 'failed') {
+              transportDisposition = 'evict';
+              throw new Error(codexAppServerErrorMessage(completed.error));
+            }
+            // This is a child completion, not the end of the Host invocation.
+            // markTurnCompleted would consume unseen frontiers as no_safe_boundary
+            // and prevent a subsequent Live turn from discovering them.
+            yield {
+              type: 'app_server.live_turn_completed',
+              turnId: activeTurnId,
+              ...(latestUsage ? { usage: latestUsage } : {}),
+            };
+            activeTurnId = null;
+            await deliverAtBoundary('turn_complete');
+            if (liveFinished && !activeTurnId) this.notifications.push(liveEnd);
+            continue;
+          }
           runtimeInteraction?.close('provider_cancelled');
           try {
             await this.deps.freshnessController?.markTurnCompleted(activeTurnId);
@@ -475,6 +659,9 @@ export class CodexAppServerClient {
       if (failed) yield this.lifecycle.event(failed);
       throw failure;
     } finally {
+      runClosed = true;
+      clearInterval(idleTimer);
+      liveInputs.close();
       runtimeInteraction?.close('provider_cancelled');
       const { closing, closed } = await closeCodexAppServerTransport(
         this.deps.wire,

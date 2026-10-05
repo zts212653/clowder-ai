@@ -10,6 +10,7 @@ import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTas
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { TaskRunnerV2 } from '../../dist/infrastructure/scheduler/TaskRunnerV2.js';
 import { templateRegistry } from '../../dist/infrastructure/scheduler/templates/registry.js';
+import { reminderTemplate } from '../../dist/infrastructure/scheduler/templates/reminder.js';
 
 describe('Dynamic Task Hydration', () => {
   let db;
@@ -97,6 +98,79 @@ describe('Dynamic Task Hydration', () => {
     assert.equal(runner.hydrateDynamic(store, templateGetter), 1);
     assert.equal(captured[0].params.ownerAuthProvenance, 'strict');
     assert.equal(Object.hasOwn(captured[0].params.params, 'ownerAuthProvenance'), false);
+  });
+
+  test('online timer holds retain ordinary firing with unknown owner provenance or the previous wait shape', async () => {
+    const delivered = [];
+    const onlineRunner = new TaskRunnerV2({
+      logger: { info: () => {}, error: () => {} },
+      ledger,
+      dynamicTaskStore: store,
+      deliver: async (input) => {
+        delivered.push(input);
+        return `message-${delivered.length}`;
+      },
+      invokeTrigger: { trigger: async () => 'enqueued' },
+    });
+    const fireAt = Date.now() + 100;
+    const slaUntilMs = fireAt + 60_000;
+    for (const [id, provenance, legacy] of [
+      ['hold-ball-online-unknown', undefined, false],
+      ['hold-ball-online-legacy', 'strict', true],
+    ]) {
+      store.insert(
+        {
+          id,
+          templateId: 'reminder',
+          trigger: { type: 'once', fireAt },
+          params: {
+            message: id,
+            targetCatId: 'codex-sol',
+            triggerUserId: 'user-1',
+            holdLifecycle: {
+              mode: 'timer',
+              status: 'active',
+              wakeAt: fireAt,
+              createdBy: 'hold-ball:codex-sol',
+              waitSourceRef: { kind: 'task', value: id, expectedSignal: 'done', slaUntilMs },
+              await: {
+                v: 1,
+                generation: 1,
+                subjectRef: `timer:${id}`,
+                ownerFence: { kind: 'containing_task', generation: 1 },
+                baseline: { kind: 'timer', capturedAt: fireAt - 1_000, fireAt },
+                continuation: {
+                  when: [{ kind: 'timer_elapsed' }],
+                  // biome-ignore lint/suspicious/noThenProperty: F280 frozen continuation field.
+                  then: 'continue',
+                },
+                ...(legacy ? {} : { autoRenew: false }),
+                expiresAt: legacy ? fireAt : slaUntilMs,
+                createdAt: fireAt - 1_000,
+                provenance: 'explicit_registration',
+              },
+            },
+          },
+          display: { label: id, category: 'system' },
+          deliveryThreadId: 'thread-online-hold',
+          enabled: true,
+          createdBy: 'hold-ball:codex-sol',
+          createdAt: new Date(fireAt - 1_000).toISOString(),
+        },
+        provenance,
+      );
+    }
+    assert.equal(onlineRunner.hydrateDynamic(store, { get: () => reminderTemplate }), 2);
+    onlineRunner.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(delivered.length, 2);
+      for (const id of ['hold-ball-online-unknown', 'hold-ball-online-legacy']) {
+        assert.equal(ledger.query(id, 1)[0]?.outcome, 'RUN_DELIVERED');
+      }
+    } finally {
+      onlineRunner.stop();
+    }
   });
 
   test('hydrateDynamic skips disabled tasks', () => {

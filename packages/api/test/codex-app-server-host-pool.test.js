@@ -10,6 +10,45 @@ import {
 } from '../dist/domains/cats/services/agents/providers/CodexUnixWebSocketSession.js';
 import { createHarness, sessionOptions } from './helpers/codex-host-pool-harness.js';
 
+test('a direct Live carrier retires only its own idle native owner; active and attached writers stay fenced', async () => {
+  const { pool, hosts } = createHarness({ idleTtlMs: 300000 });
+  try {
+    const original = await pool.createSession(sessionOptions());
+    original.rememberSession('native-conversation');
+    await assert.rejects(
+      pool.retireIdleOwnerForDirectSession('native-conversation'),
+      (error) => error.name === 'CodexActiveWriterRecoveryError',
+    );
+    assert.equal(hosts[0].closeCalls, 0, 'the real active turn is preserved');
+    assert.equal(pool.getMetrics().activeLeaseCount, 1);
+    await original.close();
+    const attached = await pool.createSessionAttachment(
+      sessionOptions({ sessionId: 'native-conversation', invocationId: 'attachment' }),
+    );
+    await assert.rejects(
+      pool.retireIdleOwnerForDirectSession('native-conversation'),
+      (error) => error.name === 'CodexActiveWriterRecoveryError',
+    );
+    assert.equal(hosts[0].closeCalls, 0, 'an attachment prevents retiring its shared writer host');
+    await attached.close();
+    assert.equal(await pool.retireIdleOwnerForDirectSession('native-conversation'), true);
+    assert.equal(hosts[0].isAlive, false);
+    assert.equal(hosts[0].closeCalls, 1);
+    assert.equal(
+      await pool.retireIdleOwnerForDirectSession('unowned-external-session'),
+      false,
+      'unknown writers are never claimed or killed',
+    );
+    const next = await pool.createSession(sessionOptions({ invocationId: 'next', sessionId: 'native-conversation' }));
+    assert.equal(hosts.length, 2);
+    assert.equal(next.reusedSessionHost, false);
+    assert.equal(pool.getMetrics().activeLeaseCount, 1);
+    await next.close();
+  } finally {
+    await pool.closeAll();
+  }
+});
+
 test('sequential invocations reuse one warm host while opening isolated connections', async () => {
   const { pool, hosts } = createHarness();
   try {

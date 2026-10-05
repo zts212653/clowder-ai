@@ -81,6 +81,7 @@ function authorizedProvider(calls, overrides = {}) {
 
 function harness({ snapshots, storedMessage = message, custodyResolver } = {}) {
   const sourceVerifier = new PawFeelDirectRepairSourceVerifier({
+    ownerUserId: 'user-1',
     messageStore: {
       async getById() {
         return storedMessage;
@@ -137,6 +138,20 @@ describe('F313 source-routed direct repair authority', () => {
     await assert.rejects(
       resolver.resolve({ projection: projection(), leaseId: 'lease-1', actionRef: 'must-not-route' }),
       (error) => error?.code === 'source_unavailable',
+    );
+    assert.deepEqual(calls, []);
+  });
+
+  it('rejects a source from another tenant before provider selection', async () => {
+    const calls = [];
+    const resolver = harness({
+      snapshots: [{ route: route(), provider: authorizedProvider(calls) }],
+      storedMessage: { ...message, userId: 'other-user' },
+    });
+
+    await assert.rejects(
+      resolver.resolve({ projection: projection(), leaseId: 'lease-1', actionRef: 'must-not-route' }),
+      (error) => error?.code === 'source_mismatch',
     );
     assert.deepEqual(calls, []);
   });

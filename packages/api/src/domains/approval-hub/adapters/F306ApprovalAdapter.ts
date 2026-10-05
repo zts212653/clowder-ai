@@ -25,6 +25,9 @@ function project(record: RuntimeInteractionRecord): ApprovalItem {
   const messageRef = { kind: 'message' as const, threadId: cardRef.threadId, messageId: cardRef.messageId };
   return {
     proposalId: record.request.interactionId,
+    needsMeDecisionRefs: [
+      { producerId: 'f306.runtime_interaction', subjectRef: record.request.interactionId, revision: record.updatedAt },
+    ],
     sourceFeatureId: 'F306',
     requesterCatId: record.request.owner.catId as CatId,
     ownerUserId: record.request.owner.userId,

@@ -108,7 +108,7 @@ export function createContinuityHarness() {
     });
   }
 
-  async function openFixture() {
+  async function openFixture({ query = '' } = {}) {
     const page = await context.newPage();
     const clientErrors = [];
     page.on('console', (message) => {
@@ -119,7 +119,7 @@ export function createContinuityHarness() {
       clientErrors.push(`requestfailed: ${request.url()} (${request.failure()?.errorText ?? 'unknown'})`),
     );
     await stubApis(page);
-    await page.goto(`${baseUrl}${FIXTURE_PATH}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.goto(`${baseUrl}${FIXTURE_PATH}${query}`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
     try {
       await page
         .locator('[data-testid="rich-html-interaction-continuity-fixture"][data-hydrated="true"]')

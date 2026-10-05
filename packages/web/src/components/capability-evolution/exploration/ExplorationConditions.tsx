@@ -80,6 +80,9 @@ export function ExplorationConditions({
           </div>
         </dl>
         <p>{conditions.limitation}</p>
+        {conditions.preparationRefs.map((entry) => (
+          <EvolutionSource key={entry.label} label={entry.label} source={entry.ref} href={entry.href} />
+        ))}
         {onPreparation && (
           <button type="button" className="exploration-link" onClick={onPreparation}>
             回读准备材料

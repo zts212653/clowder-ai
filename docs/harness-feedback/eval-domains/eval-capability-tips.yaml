@@ -55,4 +55,9 @@ sla:
   acknowledgeHours: 72
   reevalWithinHours: 336
 fixtures: []
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Never enabled and has no opportunity denominator, certificate or action surface; this retires the eval registration, not F244 tips."
+  revivalPath: "Bind or create a qualified measure when a specific Program has a consumer and a valid opportunity denominator."
+  decisionRef: "private-thread-id#private-source-id"
 enabled: false

@@ -22,26 +22,29 @@ export async function appendParagraph(frame, page, text) {
   await tail.click();
   // Position only the native caret. GenOffice overrides navigation/formatting
   // shortcuts; all content changes below still use actual keyboard input.
-  await tail.evaluate((node) => {
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    range.collapse(false);
-    const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  });
-  await frame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.ok(
+  let caretAtEnd = false;
+  for (let attempt = 0; attempt < 3 && !caretAtEnd; attempt += 1) {
     await tail.evaluate((node) => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    // The editor can restore its previous selection just after a plugin state change.
+    // Confirm the fixture caret survives that render before sending real keyboard input.
+    await frame.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    caretAtEnd = await tail.evaluate((node) => {
       const selection = window.getSelection();
       if (!selection?.isCollapsed || !node.contains(selection.anchorNode)) return false;
       const remaining = document.createRange();
       remaining.selectNodeContents(node);
       remaining.setStart(selection.anchorNode, selection.anchorOffset);
       return remaining.toString().length === 0;
-    }),
-    'append must start from a collapsed caret at the end of the fixture tail paragraph',
-  );
+    });
+  }
+  assert.ok(caretAtEnd, 'append must start from a collapsed caret at the end of the fixture tail paragraph');
   await editor.press('Enter');
   await page.keyboard.insertText(text);
   await frame.getByText(text, { exact: true }).waitFor();

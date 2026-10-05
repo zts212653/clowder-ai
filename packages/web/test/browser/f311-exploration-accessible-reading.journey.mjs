@@ -2,15 +2,24 @@ import assert from 'node:assert/strict';
 import { refIdentity } from '@cat-cafe/shared';
 
 export async function chooseExplorationVersion(work, version) {
-  const sourceTab = work.getByRole('button', { name: '公开归档', exact: true });
-  await sourceTab.waitFor();
-  if ((await sourceTab.getAttribute('aria-pressed')) === 'false') await sourceTab.click();
-  await work.getByLabel('选择阅读版本', { exact: true }).selectOption({ label: version });
-  await work.getByRole('heading', { name: `正在阅读 ${version}`, exact: true }).waitFor();
+  const picker = work.getByLabel('选择阅读版本', { exact: true });
+  if (await picker.isVisible()) await picker.selectOption({ label: version });
+  else {
+    await work.getByLabel('版本来源', { exact: true }).selectOption('public_archive');
+    await work.getByRole('button', { name: `阅读 ${version}`, exact: true }).click();
+  }
+  await work.getByRole('heading', { name: version, exact: true }).waitFor();
+}
+export async function chooseExplorationComparison(work, value) {
+  const picker = work.locator('.exploration-run-picker');
+  if ((await picker.getAttribute('open')) === null) await picker.locator('summary').click();
+  await work.getByLabel('选择对照实验', { exact: true }).selectOption(value);
 }
 export async function chooseExplorationRun(work, run) {
+  const picker = work.locator('.exploration-run-picker');
+  if ((await picker.getAttribute('open')) === null) await picker.locator('summary').click();
   await work.getByLabel('选择本版实验', { exact: true }).selectOption(refIdentity(run.experimentRef));
-  await work.getByRole('region', { name: '实验案例与覆盖', exact: true }).waitFor();
+  await picker.locator('summary').getByText(run.title, { exact: true }).waitFor();
 }
 
 export async function corruptStoredExplorationSibling(page) {
@@ -27,12 +36,12 @@ export async function verifyNarrowCurrentAdoption(work, catalog) {
     (node) => node.kind === 'owner_version' && node.title === '官方 walking ONNX baseline',
   );
   assert(current, 'the real owner publishes the currently adopted walking baseline');
-  await work.getByRole('button', { name: '本项目版本', exact: true }).click();
   await work.getByLabel('选择阅读版本', { exact: true }).selectOption(refIdentity(current.nodeRef));
-  const badge = work.locator('.exploration-selection-heading [data-current-adoption="true"]');
-  await badge.waitFor({ state: 'visible' });
-  assert.equal(await badge.textContent(), '当前沿用');
+  await work.getByRole('button', { name: '改动与依据', exact: true }).click();
+  await work.locator('.exploration-adoption > summary').click();
+  assert((await work.getByRole('status', { name: '当前沿用', exact: true }).innerText()).includes(current.title));
   await chooseExplorationVersion(work, 'v3');
+  await work.getByRole('button', { name: '结果与案例', exact: true }).click();
 }
 
 export async function verifyStableExplorationTitle(page) {
@@ -48,17 +57,17 @@ export async function verifyStableExplorationTitle(page) {
 }
 
 export async function accessibleExplorationNode(work, summary) {
-  const escaped = summary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const node = work.getByRole('button', { name: new RegExp(`阅读.*v3.*${escaped}.*3 轮实验.*公开归档`) });
+  const node = work.getByRole('button', { name: '阅读 v3', exact: true });
   await node.waitFor({ timeout: 5000 });
+  assert.equal(await node.getAttribute('title'), summary);
   return node;
 }
 
 export async function verifyNarrowExplorationEvidence(work, page) {
-  const disclosure = work.locator('details.exploration-lineage-disclosure');
+  const disclosure = work.locator('.exploration-version-nav');
   assert.equal(
-    await disclosure.evaluate((element) => element.open),
-    false,
+    await disclosure.getAttribute('data-map-open'),
+    'false',
     'the narrow default prioritizes the selected experiment',
   );
   await work.evaluate((element) => element.scrollIntoView({ block: 'start' }));

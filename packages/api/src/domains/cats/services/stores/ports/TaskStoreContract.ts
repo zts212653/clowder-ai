@@ -1,6 +1,8 @@
 import type {
   AutomationState,
   CreateTaskInput,
+  DeploymentWaitStateV1,
+  DevelopmentScopeV1,
   EntrustedWorkV1,
   ManagedWorkBinding,
   TaskItem,
@@ -11,6 +13,11 @@ import type {
   TypedWaitRegistration,
   TypedWaitRegistrationSnapshot,
 } from '../../../../ball-custody/TypedWaitRegistration.js';
+import type {
+  DevelopmentSourceQuery,
+  DevelopmentWorkResult,
+  DevelopmentWorkTransition,
+} from './DevelopmentWorkTransition.js';
 
 export const ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED = 'ENTRUSTED_WORK_TERMINAL_ACTION_REQUIRED' as const;
 export const ENTRUSTED_WORK_ADMISSION_CONFLICT = 'ENTRUSTED_WORK_ADMISSION_CONFLICT' as const;
@@ -33,6 +40,8 @@ export interface AdmitEntrustedWorkStoreResult {
 export interface CloseEntrustedWorkStoreInput {
   readonly expectedRevision: number;
   readonly closure: EntrustedWorkTerminalClosure;
+  /** Internal Artifact-owner snapshot, never accepted from a closure tool payload. */
+  readonly artifactSnapshot?: NonNullable<EntrustedWorkV1['completion']>['artifactSnapshot'];
 }
 
 export type CloseEntrustedWorkStoreResult =
@@ -45,10 +54,10 @@ export interface UpdateEntrustedWorkStoreInput {
   readonly expectedRevision: number;
   readonly status?: Exclude<TaskItem['status'], 'done'>;
   readonly time?: {
-    readonly businessDeadline?: EntrustedWorkV1['time']['businessDeadline'] | null;
-    readonly reviewBy?: EntrustedWorkV1['time']['reviewBy'] | null;
+    readonly [K in keyof EntrustedWorkV1['time']]?: EntrustedWorkV1['time'][K] | null;
   };
   readonly artifactRefs?: readonly string[];
+  readonly progress?: EntrustedWorkV1['progress'] | null;
 }
 
 export type UpdateEntrustedWorkStoreResult =
@@ -156,6 +165,9 @@ export function assertEntrustedWorkGenericUpsertAllowed(task: TaskItem): void {
 
 /** Common server-side contract for in-memory and Redis task stores. */
 export interface ITaskStore {
+  hasDevelopmentSource(query: DevelopmentSourceQuery): boolean | Promise<boolean>;
+  findDevelopmentWork(userId: string, scope: DevelopmentScopeV1): TaskItem[] | Promise<TaskItem[]>;
+  transitionDevelopmentWork(input: DevelopmentWorkTransition): DevelopmentWorkResult | Promise<DevelopmentWorkResult>;
   /** Private registration and canonical Task read from one aggregate snapshot. */
   getWaitRegistration(
     taskId: string,
@@ -178,6 +190,7 @@ export interface ITaskStore {
     binding: ManagedWorkBinding,
   ): TaskItem | Promise<TaskItem>;
   listByKind(kind: TaskKind): TaskItem[] | Promise<TaskItem[]>;
+  listDeploymentWaitProjectionCandidates?(): TaskItem[] | Promise<TaskItem[]>;
   patchAutomationState(taskId: string, patch: Partial<AutomationState>): TaskItem | null | Promise<TaskItem | null>;
   bindManagedWorkBinding(
     taskId: string,
@@ -200,6 +213,11 @@ export interface ITaskStore {
     taskId: string,
     input: ReplaceAutomationStateIfGenerationInput,
   ): TaskItem | null | Promise<TaskItem | null>;
+  /** Replace a work Task's complete deployment wait state under the same generation/revision CAS. */
+  replaceDeploymentWaitIfGeneration(
+    taskId: string,
+    input: ReplaceDeploymentWaitIfGenerationInput,
+  ): TaskItem | null | Promise<TaskItem | null>;
 }
 
 export interface ReplaceAutomationStateIfGenerationInput {
@@ -214,4 +232,15 @@ export interface ReplaceAutomationStateIfGenerationInput {
   readonly automationState: AutomationState | undefined;
   readonly why?: string;
   readonly status?: TaskItem['status'];
+}
+
+export interface ReplaceDeploymentWaitIfGenerationInput {
+  /** Producer-owned proof installed atomically with a new await generation; never public Task state. */
+  readonly waitRegistration?: TypedWaitRegistration;
+  readonly expectedGeneration: number | null;
+  /** Exact aggregate wait snapshot; generation and millisecond timestamp alone cannot fence termination. */
+  readonly expectedDeploymentWait: DeploymentWaitStateV1 | undefined;
+  readonly expectedUpdatedAt?: number;
+  readonly deploymentWait: DeploymentWaitStateV1 | undefined;
+  readonly status?: Exclude<TaskItem['status'], 'done'>;
 }

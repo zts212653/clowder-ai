@@ -43,17 +43,21 @@ export interface VerifiedPluginPackageLocator {
   resolveInstalledPackage(packageDigest: string): Promise<VerifiedPluginPackage>;
 }
 
-export interface ExternalPluginBootstrapEnvironment {
+export interface ExternalPluginBootstrapEnvironment extends NodeJS.ProcessEnv {
   readonly CLOWDER_PLUGIN_ID: string;
   readonly CLOWDER_PACKAGE_DIGEST: string;
   readonly CLOWDER_CONTRACT_VERSION: string;
   readonly CLOWDER_WIRE_VERSION: string;
 }
 
-export interface ExternalPluginProcessSpec {
+export interface ManagedPluginProcessSpec {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
+  readonly env: Readonly<NodeJS.ProcessEnv>;
+}
+
+export interface ExternalPluginProcessSpec extends ManagedPluginProcessSpec {
   readonly env: ExternalPluginBootstrapEnvironment;
 }
 

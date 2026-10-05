@@ -1,6 +1,8 @@
 import { createCatId, type TaskItem } from '@cat-cafe/shared';
 import type { StoredMessage } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import type { Thread } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
+import type { ArtifactReviewStore } from '../../src/domains/collaborative-content/artifact-review/store.js';
+import { ModificationPublicationGrants } from '../../src/domains/collaborative-content/modification/request-authority.js';
 import { F232PreparedArtifactReader } from '../../src/domains/growing/F232PreparedArtifactReader.js';
 import {
   type MediaReviewPrincipal,
@@ -17,7 +19,7 @@ export const reviewCat: MediaReviewPrincipal = {
   actor: { kind: 'cat', actorId: 'codex-astra' },
 };
 
-export function createReviewFixture(dataDir: string, uploadDir: string) {
+export function createReviewFixture(dataDir: string, uploadDir: string, reviewStore?: ArtifactReviewStore) {
   const task: { current: TaskItem | null } = {
     current: {
       id: 'task-cover',
@@ -105,8 +107,14 @@ export function createReviewFixture(dataDir: string, uploadDir: string) {
   };
   const artifactDeps = { messages: messageStore, tasks: taskStore, threads: threadStore };
   const artifacts = new F232PreparedArtifactReader(artifactDeps);
-  const access = new PublishedMediaAccess({ tasks: taskStore, threads: threadStore });
-  const sources = new PublishedMediaSource({ artifacts, messages: messageStore, uploadDir });
+  const access = new PublishedMediaAccess({
+    tasks: taskStore,
+    threads: threadStore,
+    ...(reviewStore
+      ? { publicationGrants: new ModificationPublicationGrants(reviewStore.requests, messageStore) }
+      : {}),
+  });
+  const sources = new PublishedMediaSource({ access, artifacts, messages: messageStore, uploadDir });
   const owner = new ProjectContentOwnerService({ dataDir });
   const media = new PublishedMediaService({ access, sources, owner });
   const prepare = {

@@ -80,29 +80,108 @@ const TRANSPARENT_CONTAINERS = new Set([
   'tableCell',
 ]);
 
-function rawSlice(node: MarkdownNode, source: string): string {
-  const start = node.position?.start?.offset;
-  const end = node.position?.end?.offset;
-  if (start === undefined || end === undefined) return '';
-  return source.slice(start, end);
+/**
+ * The projection plus, for every projected character, the source offset it was read from.
+ * `null` marks characters with no single source character: separators, line breaks, and text
+ * whose source spelling differs (character references). A caller that needs a source range
+ * must refuse when either end of its match is `null`.
+ */
+export interface MarkdownReadableProjection {
+  readonly text: string;
+  readonly sourceOffsets: readonly (number | null)[];
 }
 
-function projectNode(node: MarkdownNode, source: string): string {
-  if (TEXT_VALUE_NODES.has(node.type)) return node.value ?? '';
-  if (node.type === 'break') return '\n';
+interface Piece {
+  text: string;
+  offsets: (number | null)[];
+}
+
+// Offsets index UTF-16 units like every string index here; `Array.from(text)` would count code points instead.
+const unitNulls = (length: number): (number | null)[] => Array.from({ length }, () => null);
+const nulls = (text: string): Piece => ({ text, offsets: unitNulls(text.length) });
+
+function sourceRange(node: MarkdownNode): { start: number; end: number } | null {
+  const start = node.position?.start?.offset;
+  const end = node.position?.end?.offset;
+  return start === undefined || end === undefined ? null : { start, end };
+}
+
+/**
+ * Aligns a text node's value with its source: equal characters map, a backslash escape maps to
+ * the escaped character, container prefixes after a newline (`>`, indentation) are skipped, and a
+ * character reference yields `null`. The first character that cannot be aligned ends mapping.
+ */
+function alignText(value: string, source: string, start: number, end: number): (number | null)[] {
+  const offsets: (number | null)[] = [];
+  let at = start;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (at > start && source[at - 1] === '\n') while (at < end && /[ \t>]/.test(source[at] ?? '')) at += 1;
+    // A reference is checked first: its visible character has no single source character to end a range on.
+    if (
+      source[at] === '&' &&
+      /^&(?:#\d{1,7}|#[xX][\da-fA-F]{1,6}|[A-Za-z][A-Za-z\d]{1,31});/.test(source.slice(at, at + 40))
+    ) {
+      offsets.push(null);
+      at = source.indexOf(';', at) + 1;
+    } else if (source[at] === character) {
+      offsets.push(at);
+      at += 1;
+    } else if (source[at] === '\\' && source[at + 1] === character) {
+      offsets.push(at + 1);
+      at += 2;
+    } else {
+      while (offsets.length < value.length) offsets.push(null);
+      break;
+    }
+  }
+  return offsets;
+}
+
+/** Code values are verbatim inside their fence or backticks; map them only where they occur exactly once. */
+function alignVerbatim(value: string, source: string, start: number, end: number): (number | null)[] {
+  const slice = source.slice(start, end);
+  const at = slice.indexOf(value);
+  if (value.length === 0 || at === -1 || slice.indexOf(value, at + 1) !== -1) return unitNulls(value.length);
+  return Array.from({ length: value.length }, (_unused, index) => start + at + index);
+}
+
+function projectNode(node: MarkdownNode, source: string): Piece {
+  const range = sourceRange(node);
+  if (TEXT_VALUE_NODES.has(node.type)) {
+    const value = node.value ?? '';
+    if (!range) return nulls(value);
+    const offsets =
+      node.type === 'text'
+        ? alignText(value, source, range.start, range.end)
+        : alignVerbatim(value, source, range.start, range.end);
+    return { text: value, offsets };
+  }
+  if (node.type === 'break') return nulls('\n');
 
   const separator = CHILD_SEPARATORS[node.type];
-  if (separator !== undefined) {
-    return (node.children ?? []).map((child) => projectNode(child, source)).join(separator);
-  }
-  if (TRANSPARENT_CONTAINERS.has(node.type)) {
-    return (node.children ?? []).map((child) => projectNode(child, source)).join('');
+  if (separator !== undefined || TRANSPARENT_CONTAINERS.has(node.type)) {
+    const joined: Piece = { text: '', offsets: [] };
+    (node.children ?? []).forEach((child, index) => {
+      if (index > 0 && separator) {
+        joined.text += separator;
+        joined.offsets.push(...nulls(separator).offsets);
+      }
+      const piece = projectNode(child, source);
+      joined.text += piece.text;
+      joined.offsets.push(...piece.offsets);
+    });
+    return joined;
   }
 
   // Unknown to this projection (raw HTML, images, thematic breaks, footnote references,
   // future syntax). Keeping the source text over-approximates what the reader sees, which
   // is the direction that fails closed.
-  return rawSlice(node, source);
+  if (!range) return nulls('');
+  return {
+    text: source.slice(range.start, range.end),
+    offsets: Array.from({ length: range.end - range.start }, (_unused, index) => range.start + index),
+  };
 }
 
 function collectGeneratedTextNodes(node: MarkdownNode, found: Set<string>): void {
@@ -128,5 +207,16 @@ export function findGeneratedTextConstructs(markdown: string): string[] {
  * always produce identical output.
  */
 export function projectMarkdownReadableText(markdown: string): string {
-  return projectNode(parser.parse(markdown) as MarkdownNode, markdown);
+  return projectMarkdownReadableTextWithSourceMap(markdown).text;
+}
+
+/**
+ * The same projection, with the source offset behind each projected character. Both functions
+ * walk one tree once, so the text here is the digested F294 projection character for character.
+ */
+export function projectMarkdownReadableTextWithSourceMap(markdown: string): MarkdownReadableProjection {
+  const piece = projectNode(parser.parse(markdown) as MarkdownNode, markdown);
+  // One offset per UTF-16 unit, or no mapping at all: a shifted map would anchor a quote on the wrong text.
+  const aligned = piece.offsets.length === piece.text.length;
+  return { text: piece.text, sourceOffsets: aligned ? piece.offsets : unitNulls(piece.text.length) };
 }

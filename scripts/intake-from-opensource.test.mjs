@@ -64,6 +64,11 @@ function makeFixture() {
   cpSync(SOURCE_SCRIPT, join(repoRoot, 'scripts', 'intake-from-opensource.sh'));
   mkdirSync(join(repoRoot, 'scripts', 'lib'), { recursive: true });
   cpSync(GH_RETRY_LIB, join(repoRoot, 'scripts', 'lib', 'intake-gh-retry.sh'));
+  cpSync(
+    resolve('scripts/lib/sync-public-export-coverage.mjs'),
+    join(repoRoot, 'scripts/lib/sync-public-export-coverage.mjs'),
+  );
+  cpSync(resolve('sync-manifest.yaml'), join(repoRoot, 'sync-manifest.yaml'));
   chmodSync(join(repoRoot, 'scripts', 'intake-from-opensource.sh'), 0o755);
 
   // F238 Phase C: dictionary helper + YAML for classify_path()
@@ -820,6 +825,44 @@ describe('intake-from-opensource.sh --validate-inbound', () => {
     assert.match(err.stdout, /Clowder AI/);
   });
 
+  it('allows public branding in every manifest-mapped root document source', async () => {
+    const { loadPublicExportCoverage } = await import('./lib/sync-public-export-coverage.mjs');
+    const { classifyPath } = await import('./brand-dictionary-helper.mjs');
+    const coverage = loadPublicExportCoverage(process.cwd());
+    const sources = [...coverage.transformExactByTarget.values()]
+      .filter(
+        (entry) =>
+          entry.type === 'generate' && entry.source && !entry.target.includes('/') && entry.target.endsWith('.md'),
+      )
+      .map((entry) => entry.source);
+    assert.ok(sources.length > 0);
+    for (const source of sources) assert.equal(classifyPath(source).classification, 'public-source', source);
+    const f = makeBrandFixture(Object.fromEntries(sources.map((source) => [source, '# Clowder AI\n'])));
+    fixtures.push(f.sandboxRoot);
+    git(f.repoRoot, 'init', '-b', 'main');
+    git(f.repoRoot, 'add', '-A');
+    const output = run('bash', ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'], f.repoRoot);
+    assert.match(output, /No brand violations detected/);
+  });
+
+  for (const name of ['README', 'SETUP']) {
+    it(`keeps unregistered ${name} source lookalikes brand-protected`, () => {
+      const paths = [`${name}.opensource-preview.md`, `${name}.opensource.fr-FR.md`];
+      const f = makeBrandFixture(Object.fromEntries(paths.map((path) => [path, '# Clowder AI\n'])));
+      fixtures.push(f.sandboxRoot);
+      git(f.repoRoot, 'init', '-b', 'main');
+      git(f.repoRoot, 'add', '-A');
+      const result = runResult(
+        'bash',
+        ['scripts/intake-from-opensource.sh', '--validate-inbound', '--from-index'],
+        f.repoRoot,
+      );
+      assert.notEqual(result.status, 0, 'unregistered sources must not receive the public-brand exemption');
+      assert.match(result.stdout, /brand violation/i);
+      for (const path of paths) assert.ok(result.stdout.includes(path), `missing brand violation for ${path}`);
+    });
+  }
+
   it('fail-closes when dictionary helper exits non-zero', () => {
     const f = makeBrandFixture();
     fixtures.push(f.sandboxRoot);
@@ -1552,6 +1595,147 @@ describe('intake-from-opensource.sh --verify-merge-ready', () => {
 });
 
 describe('intake-from-opensource.sh --record strict guard (absorbed)', () => {
+  it('rejects skipped mapped public documents even when the rest of the PR was absorbed', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: [{ path: 'README.md' }, { path: 'site/index.html' }],
+      absorbPrFiles: [{ path: 'site/index.html' }],
+      issueBody: [
+        'Source: clowder-ai#495',
+        '## Per-File Decision Table',
+        '| File | Change | Decision | Reason |',
+        '| README.md | concise landing page | skip | canonical source already exists |',
+        '| site/index.html | website | manual-port | absorb site |',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+    const result = runResult(
+      'bash',
+      [
+        'scripts/intake-from-opensource.sh',
+        '--record',
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      f.repoRoot,
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+    assert.notEqual(result.status, 0, 'PR-level absorption cannot cover an omitted README source');
+    assert.match(result.stdout + result.stderr, /README\.md.*README\.opensource\.md/);
+    assert.equal(JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length, 0);
+  });
+
+  it('accepts mapped public documents only with their canonical source in the reviewed absorb diff', () => {
+    const mappings = [
+      ['README.md', 'README.md'],
+      ['README.zh-CN.md', 'README.zh-CN.md'],
+      ['README.ja-JP.md', 'README.opensource.ja-JP.md'],
+      ['SETUP.md', 'SETUP.md'],
+      ['CONTRIBUTING.md', 'CONTRIBUTING.md'],
+    ];
+    const f = makeRecordFixture({
+      targetPrFiles: mappings.map(([path]) => ({ path })),
+      absorbPrFiles: mappings.map(([, path]) => ({ path })),
+      issueBody: [
+        'Source: clowder-ai#495',
+        '## Per-File Decision Table',
+        '| File | Change | Decision | Reason |',
+        ...mappings.map(([path]) => `| ${path} | public document | manual-port | preserve community work |`),
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+    for (const [, path] of mappings) writeFileSync(join(f.repoRoot, path), '# Clowder AI\n', 'utf8');
+    const output = runRecord(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+    assert.match(output, /Recorded PR #495 → absorbed/);
+  });
+
+  it('rejects a partially ported localized README and does not write an absorbed record', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: [{ path: 'README.md' }, { path: 'README.ja-JP.md' }],
+      absorbPrFiles: [{ path: 'README.md' }],
+      issueBody: [
+        'Source: clowder-ai#495',
+        '## Per-File Decision Table',
+        '| File | Change | Decision | Reason |',
+        '| README.md | English | manual-port | keep |',
+        '| README.ja-JP.md | Japanese | skip | source exists |',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+    assert.match(err.stdout, /README\.ja-JP\.md -> README\.opensource\.ja-JP\.md/);
+    assert.equal(JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length, 0);
+  });
+
+  it('does not use a skipped target decision to authorize changes to its mapped source', () => {
+    const f = makeRecordFixture({
+      targetPrFiles: [{ path: 'README.md' }],
+      absorbPrFiles: [{ path: 'README.md' }],
+      issueBody: [
+        'Source: clowder-ai#495',
+        '## Per-File Decision Table',
+        '| File | Change | Decision | Reason |',
+        '| README.md | public document | skip | source exists |',
+      ].join('\n'),
+    });
+    fixtures.push(f.sandboxRoot);
+    const err = captureRecordFailure(
+      f.repoRoot,
+      [
+        '--pr',
+        '495',
+        '--decision',
+        'absorbed',
+        '--intent-issue',
+        '1234',
+        '--absorb-pr',
+        '1236',
+        '--review-proof',
+        'https://github.com/zts212653/clowder-ai/pull/1236#issuecomment-1',
+      ],
+      { PATH: `${f.mockBin}:${process.env.PATH}` },
+    );
+    assert.match(err.stdout, /outside Intake Intent Issue/);
+    assert.equal(JSON.parse(readFileSync(f.ledgerPath, 'utf8')).entries.length, 0);
+  });
+
   const fixtures = [];
 
   afterEach(() => {

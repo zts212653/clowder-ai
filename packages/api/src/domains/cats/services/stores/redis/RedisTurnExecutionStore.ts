@@ -44,6 +44,7 @@ export class RedisTurnExecutionStore implements ITurnExecutionStore {
         input.executionKind,
         String(input.startedAt),
         JSON.stringify(input.causal ?? {}),
+        input.queueCompletionPolicy ?? '',
       ),
     );
     if (result === -1) {

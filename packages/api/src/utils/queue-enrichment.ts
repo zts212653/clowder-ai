@@ -28,6 +28,8 @@ import type { SocketManager } from '../infrastructure/websocket/index.js';
 export interface QueueEntryMessagePreview {
   contentBlocks?: readonly MessageContent[];
   replyTo?: string;
+  /** Stored connector identity, so a queue row can render the same summary as its timeline bubble. */
+  connector?: string;
 }
 
 /** QueueEntry enriched with message preview for frontend consumption. */
@@ -342,6 +344,7 @@ async function buildMessageEnrichment(
 }> {
   const blocks: MessageContent[] = [];
   let replyTo: string | undefined;
+  let connector: string | undefined;
   let queueReceipt: QueueMessageReceipt | undefined;
   const retryableTargetCatIds = new Set<string>();
 
@@ -357,6 +360,7 @@ async function buildMessageEnrichment(
     if (!msg) continue;
     if (msg.contentBlocks) blocks.push(...msg.contentBlocks);
     if (!replyTo && msg.replyTo) replyTo = msg.replyTo;
+    if (!connector && msg.source?.connector) connector = msg.source.connector;
     if (msg.queueCustody) mergeQueueReceipt(projectQueueReceipt(msg.queueCustody));
     for (const action of entry.recoveryActions) {
       if (action.kind === 'retry_target' && resolveDurableRetryAttemptId(entry, msg, action.targetCatId)) {
@@ -366,11 +370,12 @@ async function buildMessageEnrichment(
   }
 
   return {
-    ...(blocks.length > 0 || replyTo
+    ...(blocks.length > 0 || replyTo || connector
       ? {
           messagePreview: {
             ...(blocks.length > 0 ? { contentBlocks: blocks } : {}),
             ...(replyTo ? { replyTo } : {}),
+            ...(connector ? { connector } : {}),
           },
         }
       : {}),

@@ -16,10 +16,13 @@ const publicInput = {
   executionScope: 'collective-participation',
 };
 
-test('Queue rejects public owner escalation and unowned private Work before persistence', () => {
+test('Queue rejects owner escalation on external participation and private Work producers before persistence', () => {
   const queue = new InvocationQueue();
   assert.throws(() => queue.enqueue({ ...publicInput, ownerAuthProvenance: 'strict' }), /scope/i);
-  assert.throws(() => queue.enqueue({ ...publicInput, executionScope: 'collective-work' }), /scope/i);
+  assert.throws(
+    () => queue.enqueue({ ...publicInput, executionScope: 'collective-work', ownerAuthProvenance: 'strict' }),
+    /scope/i,
+  );
   assert.throws(() => queue.enqueue({ ...publicInput, targetCats: ['codex-astra', 'opus'] }), /scope/i);
 });
 

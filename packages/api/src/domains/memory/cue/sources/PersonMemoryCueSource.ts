@@ -82,8 +82,8 @@ export class PersonMemoryCueSource implements PersonEntityCueSource {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
     const personId = input.anchor.slice(PERSON_MEMORY_ANCHOR_PREFIX.length);
-    const recalled = await this.deps.recall.recallByPersonId(input.ownerUserId, personId).catch(() => null);
-    if (!recalled || recalled.status !== 'resolved') {
+    const recalled = await this.deps.recall.recallByPersonId(input.ownerUserId, personId);
+    if (recalled.status !== 'resolved') {
       return { status: 'not_available', invalidationReason: 'source_forgotten' };
     }
     if (revisionOf(recalled.card) !== input.expectedRevision) {

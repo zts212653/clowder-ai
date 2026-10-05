@@ -1,35 +1,28 @@
 import type { CollectiveConnector, ConnectorProjection, VerifiedAgent } from '@cat-cafe/collective-connector';
-import {
-  collectiveAgentMessageRequestSchema,
-  collectivePairingIntentSchema,
-  collectiveStandingWorkSchema,
-} from '@cat-cafe/shared';
+import { collectiveAgentMessageRequestSchema, collectiveStandingWorkSchema } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 import { requireCapabilityWriteOwner } from '../config/capabilities/capability-write-guards.js';
 import type { CollectiveConnectorBuiltinRuntime } from '../domains/plugin/builtin-runtime/collective-connector-runtime.js';
+import type { ParticipationCat } from '../domains/plugin/builtin-runtime/collective-participation-reconciler.js';
 import type { LocalCollectiveServiceManager } from '../domains/plugin/builtin-runtime/local-collective-service-manager.js';
 import {
   type CallbackAuthRegistry,
   registerCallbackAuthHook,
   requireCallbackAuth,
 } from './callback-auth-prehandler.js';
+import { registerCollectiveEntryRoutes } from './collective-entry-routes.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
-const pairBodySchema = z
-  .object({
-    serviceUrl: z.string().url(),
-    endpointLabel: z.string().trim().min(1).max(160),
-    intent: collectivePairingIntentSchema,
-  })
-  .strict();
-
-const agentMessageBodySchema = collectiveAgentMessageRequestSchema.omit({
+const agentMessageBodySchema = collectiveAgentMessageRequestSchema.innerType().omit({
   serviceInstanceId: true,
   collectiveId: true,
   connectionId: true,
   agent: true,
+  participationRevision: true,
+  workResultIntent: true,
+  workProgressIntent: true,
 });
 
 const hostRouteBodySchema = z
@@ -72,6 +65,7 @@ interface CollectiveConnectorRouteOptions {
       | Promise<{ id: string; createdBy: string; participants: readonly string[]; deletedAt?: number | null } | null>;
   };
   readonly isCatAvailable: (catId: string) => boolean;
+  readonly cats: () => readonly ParticipationCat[];
 }
 
 interface ConnectionRequest {
@@ -132,6 +126,7 @@ export function registerCollectiveConnectorRoutes(
   app: FastifyInstance,
   options: CollectiveConnectorRouteOptions,
 ): void {
+  registerCollectiveEntryRoutes(app, { connector: () => options.runtime.connector(), cats: options.cats });
   app.get('/api/plugins/collective-connector', async (request, reply) => {
     if (!requireAccess(request, reply, 'read')) return;
     const localService = await options.localService.status();
@@ -153,25 +148,6 @@ export function registerCollectiveConnectorRoutes(
         error: error instanceof Error ? error.message : 'Local Collective Service could not be created',
         code: 'COLLECTIVE_SERVICE_PROVISION_FAILED',
       });
-    }
-  });
-
-  app.post<{ Body: unknown }>('/api/plugins/collective-connector/pair', async (request, reply) => {
-    if (!requireAccess(request, reply, 'write')) return;
-    const parsed = pairBodySchema.safeParse(request.body);
-    if (!parsed.success) return reply.status(400).send({ error: 'Invalid pairing request' });
-    if (!request.headers.origin || new URL(parsed.data.intent.hostOrigin).origin !== request.headers.origin) {
-      return reply.status(403).send({
-        error: 'Pairing intent is not bound to this Clowder AI origin',
-        code: 'PAIRING_ORIGIN_MISMATCH',
-      });
-    }
-    const connector = activeConnector(options.runtime, reply);
-    if (!connector) return;
-    try {
-      return await connector.pair(parsed.data);
-    } catch (error) {
-      return operationError(reply, error);
     }
   });
 
@@ -219,7 +195,8 @@ export function registerCollectiveConnectorRoutes(
       const existing = await connector.getHostRoute(request.params.connectionId);
       const scoped =
         Object.values(parsed.data.agentRoutes).some((value) => value.participation || value.standingWork) ||
-        Object.values(existing?.agentRoutes ?? {}).some((value) => value.participation || value.standingWork);
+        Object.values(existing?.agentRoutes ?? {}).some((value) => value.participation || value.standingWork) ||
+        Object.keys(existing?.channelRoutes ?? {}).length > 0;
       if (scoped && parsed.data.expectedRevision === undefined)
         return reply.status(400).send({ code: 'PARTICIPATION_REVISION_REQUIRED' });
       const { expectedRevision, ...routeInput } = parsed.data;
@@ -326,7 +303,7 @@ async function validateHostRoute(
       ) {
         return { error: 'Standing work exceeds public participation scope', code: 'OWNER_ADMISSION_SCOPE_MISMATCH' };
       }
-      destinationIds.add(agentRoute.standingWork.threadId);
+      if (agentRoute.standingWork.threadId) destinationIds.add(agentRoute.standingWork.threadId);
     }
     destinationIds.add(agentRoute.threadId);
   }
@@ -341,7 +318,7 @@ async function validateHostRoute(
   for (const agentRoute of Object.values(route.agentRoutes)) {
     if (
       !threads.get(agentRoute.threadId)?.participants.includes(agentRoute.catId) ||
-      (agentRoute.standingWork &&
+      (agentRoute.standingWork?.threadId &&
         !threads.get(agentRoute.standingWork.threadId)?.participants.includes(agentRoute.catId))
     ) {
       return {

@@ -2,7 +2,7 @@
 feature_ids: [F267]
 related_features: [F192, F245, F263, F266, F268, F275, F311]
 topics: [eval, measurement-validity, calibration, uncertainty, repeatability, friction, work-eligibility]
-tips_exempt: "Renewed 2026-09-09 for opaque target-owner grammar alignment in the existing cat-only measurement issuance contract; operator discovery remains the F311 Evolution Program entry, with no new command or user action."
+tips_exempt: "Renewed 2026-10-02: KD-11 separates internal evaluation dormancy, measurement validity and historical coordinates; existing F311 discovery is unchanged and dormancy grants no new action authority."
 doc_kind: spec
 created: 2026-07-18
 updated: 2026-09-06
@@ -233,6 +233,7 @@ metric_birth_certificate:
 | KD-8 | 归属采用 managed/unattributed/not-applicable 三桶 | 二值归属会把范围外错记成失败，或把失败静默排除 | 2026-07-25 |
 | KD-9 | unmanaged 抽样先测桶污染率，不直接声称全局 SOP 漏开率 | 没有抽样权重与总体规模时，局部比例不等于 admission recall | 2026-07-25 |
 | KD-10 | historical `artifactRevision` 必须是 canonical `origin/main` 的祖先，full SHA 格式本身不代表 durable | feature/pre-squash commit 即使当前可解析，也可能在分支删除与 Git GC 后消失，不能作为 sealed evidence 的长期 locator | 2026-07-27 |
+| KD-11 | 休眠（dormancy）是调度生命周期的一条独立轴，和测量有效性、历史迁移坐标并列，三条轴不互相推导。登记表要求 `enabled: false` 加上 typed `dormancy {reason, revivalPath, decisionRef}`，普查归入 `dormant`。dormant 的域保留历史 status、refs、rank、batch，当前不持有任何 action 权限；复活时重新进入观察态，不会重开 action。家里 memory 的 batch-1 坐标由 home evidence 绑定，与普查条目里可改写的状态无关。insufficient 的历史结果只能是 `keep_observe` | 如果三条轴互相推导，休眠可能篡改历史坐标，复活可能悄悄恢复 action 权限，PR #4982 R1/R2 的复合突变已实证这两种绕过。Owner Maine Coon定契约，Ragdoll实现，`main@5402badcae` | 2026-10-01 |
 
 ## Phase A Implementation Evidence (merged; live acceptance captured)
 

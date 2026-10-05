@@ -10,7 +10,7 @@
 
 import type { ApprovalItem, SettledApprovalItem, TasteProposal } from '@cat-cafe/shared';
 import type { ITasteProposalStore } from '../../taste/stores/ports/TasteProposalStore.js';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 const F221_STALE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -25,7 +25,7 @@ export class F221ApprovalAdapter implements IApprovalAdapter {
   }
 
   listPending(userId: string): ApprovalItem[] | Promise<ApprovalItem[]> {
-    const result = this.store.listActionable(userId);
+    const result = this.store.listActionable(userId, ALL_PENDING_APPROVALS_LIMIT);
     if (Array.isArray(result)) return compactApprovalProjections(result.map((p) => toItem(p)));
     return result.then((proposals) => compactApprovalProjections(proposals.map((p) => toItem(p))));
   }
@@ -49,10 +49,11 @@ function toItem(p: TasteProposal): ApprovalItem | null {
     requesterCatId: p.catId,
     ownerUserId: p.userId,
     status: p.status,
-    summary: `Taste [${p.dimension}]: ${p.quote.slice(0, 60)}`,
+    summary: `Taste [${p.dimension}]: ${(p.takeaway ?? p.quote).slice(0, 60)}`,
     detail: {
       scene: p.scene,
       quote: p.quote,
+      ...(p.takeaway ? { takeaway: p.takeaway } : {}),
       dimension: p.dimension,
       tags: p.tags,
       privacy: p.privacy,
@@ -80,10 +81,11 @@ function toSettledItem(p: TasteProposal): SettledApprovalItem | null {
     requesterCatId: p.catId,
     ownerUserId: p.userId,
     status: p.status,
-    summary: `Taste [${p.dimension}]: ${p.quote.slice(0, 60)}`,
+    summary: `Taste [${p.dimension}]: ${(p.takeaway ?? p.quote).slice(0, 60)}`,
     detail: {
       scene: p.scene,
       quote: p.quote,
+      ...(p.takeaway ? { takeaway: p.takeaway } : {}),
       dimension: p.dimension,
       tags: p.tags,
       privacy: p.privacy,

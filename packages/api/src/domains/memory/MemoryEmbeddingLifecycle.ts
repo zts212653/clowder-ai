@@ -1,6 +1,6 @@
 import { EmbeddingService } from './EmbeddingService.js';
 import { IndexBuilder } from './IndexBuilder.js';
-import type { EmbedConfig, IEmbeddingService, RebuildResult } from './interfaces.js';
+import type { EmbedConfig, IEmbeddingService } from './interfaces.js';
 import { PassageVectorStore } from './PassageVectorStore.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
 import { ensurePassageVectorTable, ensureVectorTable } from './schema.js';
@@ -140,8 +140,8 @@ export class MemoryEmbeddingLifecycle {
     return this.passageVectorStore;
   }
 
-  async catchUpAfterReady(): Promise<RebuildResult> {
-    const result = await this.indexBuilder.rebuild();
+  async catchUpAfterReady(): Promise<{ docsEmbedded: number; durationMs: number }> {
+    const result = await this.indexBuilder.embedMissingDocumentVectors();
     this.indexBuilder.startPassageEmbeddingWarmup();
     return result;
   }

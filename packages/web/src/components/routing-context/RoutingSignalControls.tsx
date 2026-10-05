@@ -2,10 +2,27 @@
 
 import type { RoutingSignalEventV1, RoutingSubjectRefV1 } from '@cat-cafe/shared';
 import { useMemo, useRef, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { closeRoutingSignal, markRoutingSignal } from './routing-context-client';
 import { buildSignalMarkCommand, newRoutingCommandId, openRoutingSignalsForSubject } from './routing-context-commands';
+import { availabilityStateLabel } from './team-member-projection';
 
 const HOUR_MS = 3_600_000;
+
+/** Reason codes this surface writes or has ever rendered; anything else stays as stored. */
+const REASON_CODE_LABELS: Record<string, string> = {
+  'owner-constraint': 'co-creator设置的临时限制',
+  'owner-maintenance': '维护中',
+  'quota-window': '额度周期限制',
+  quota_exhausted: '额度已用尽',
+  authentication_rejected: '鉴权被拒绝',
+  provider_unreachable: '服务暂时不可达',
+  provider_timeout: '服务响应超时',
+};
+
+function reasonCodeLabel(reasonCode: string): string {
+  return REASON_CODE_LABELS[reasonCode] ?? reasonCode;
+}
 
 export function RoutingSignalControls({
   subjectRef,
@@ -30,6 +47,17 @@ export function RoutingSignalControls({
     () => openRoutingSignalsForSubject(signalEvents, subjectRef),
     [signalEvents, subjectRef],
   );
+  const { cats } = useCatData({ fetch: false });
+  const affectedNames = affectedCatIds
+    .map((catId) => cats.find((cat) => cat.id === catId)?.displayName)
+    .filter((name): name is string => Boolean(name));
+  const outsideCatalog = affectedCatIds.length - affectedNames.length;
+  const affectedLine =
+    affectedCatIds.length === 0
+      ? '当前目录无匹配成员'
+      : [affectedNames.join('、'), outsideCatalog > 0 ? `${outsideCatalog} 位目录外成员` : '']
+          .filter(Boolean)
+          .join('；');
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -91,7 +119,7 @@ export function RoutingSignalControls({
           只影响未来发送前判断；不会取消已开始的 invocation，也不会自动改派原目标。
         </p>
         <p className="mt-1 text-micro leading-4 text-cafe-secondary">
-          影响 {affectedCatIds.length} 位成员：{affectedCatIds.join('、') || '当前目录无匹配成员'}
+          影响 {affectedCatIds.length} 位成员：{affectedLine}
         </p>
       </div>
       {openAssertions.length > 0 && (
@@ -105,9 +133,9 @@ export function RoutingSignalControls({
                 ) <= Date.now()
                   ? '已过期（等待确认）'
                   : assertion.eventType === 'asserted'
-                    ? assertion.state
+                    ? availabilityStateLabel(assertion.state)
                     : ''}{' '}
-                · {assertion.reasonCode}
+                · {reasonCodeLabel(assertion.reasonCode)}
               </p>
               <div className="mt-2 flex gap-2">
                 <button
@@ -166,7 +194,7 @@ export function RoutingSignalControls({
           </label>
         </div>
         <label className="text-micro font-semibold text-cafe-secondary">
-          原因代码
+          原因
           <input
             name="signal-reason"
             required

@@ -11,8 +11,9 @@ export interface ConnectorProjection {
   readonly endpointId: string;
   readonly authorizedHumanId?: string;
   readonly endpointLabel: string;
+  readonly initialExcludedCatIds?: readonly string[];
   readonly authorityStatus: 'connected' | 'revoking' | 'revoked';
-  readonly revocationReason?: 'owner_revoked' | 'identity_rebind_required';
+  readonly revocationReason?: 'owner_revoked' | 'identity_rebind_required' | 'service_revoked';
   readonly liveStatus: 'online' | 'offline';
   readonly lastAckedSequence: number;
   readonly outbox: { readonly queued: number; readonly accepted: number };
@@ -48,6 +49,7 @@ export function projectConnection(connection: ConnectorConnectionState, route?: 
     endpointId: connection.endpointId,
     ...(connection.authorizedHumanId ? { authorizedHumanId: connection.authorizedHumanId } : {}),
     endpointLabel: connection.endpointLabel,
+    ...(connection.initialExcludedCatIds ? { initialExcludedCatIds: [...connection.initialExcludedCatIds] } : {}),
     authorityStatus: connection.authorityStatus,
     ...(connection.revocationReason ? { revocationReason: connection.revocationReason } : {}),
     liveStatus: connection.liveStatus,

@@ -56,6 +56,7 @@ function stubDeps(overrides = {}) {
       getById: mock.fn(async () => null),
       // Whole-message selection resolves the canonical bubble group from the thread timeline.
       getByThreadAfter: mock.fn(async () => []),
+      getByQueueExposure: mock.fn(async () => []),
       markDelivered: mock.fn(async (id) => ({
         id,
         threadId: 't1',
@@ -122,6 +123,100 @@ async function waitFor(predicate, timeoutMs = 5000, intervalMs = 10) {
 }
 
 describe('QueueProcessor', () => {
+  it('keeps a persisted deployment continuation queued when its runtime guard is unavailable', async () => {
+    const messageStore = new MessageStore();
+    const deps = stubDeps({ messageStore });
+    const processor = new QueueProcessor(deps);
+    const carrier = {
+      v: 1,
+      waitId: 'task-deployment',
+      outcomeId: 'wait:deployment:abc123def456:runtime:g1:matched',
+      ownerFence: { kind: 'containing_task', generation: 1 },
+    };
+    const { entry, message } = enqueueCustodiedEntry(deps.queue, messageStore, {
+      source: 'connector',
+      waitContinuationCarrier: carrier,
+      messageSource: {
+        connector: 'deployment-wait',
+        label: 'Deployment Wait',
+        icon: 'refresh-cw',
+        meta: { waitContinuationCarrier: carrier },
+      },
+    });
+    assert.equal((await processor.processNext('t1', 'u1')).started, true);
+    await waitFor(() => deps.queue.getEntrySnapshot('t1', 'u1', entry.id)?.status !== 'processing');
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(deps.queue.getEntrySnapshot('t1', 'u1', entry.id)?.status, 'queued');
+    assert.notEqual(messageStore.getById(message.id)?.deliveryStatus, 'canceled');
+  });
+
+  it('still starts an ordinary connector when no deployment runtime guard exists', async () => {
+    const messageStore = new MessageStore();
+    const deps = stubDeps({ messageStore });
+    const processor = new QueueProcessor(deps);
+    enqueueCustodiedEntry(deps.queue, messageStore, {
+      source: 'connector',
+      messageSource: { connector: 'github', label: 'GitHub', icon: 'github' },
+    });
+    await processor.processNext('t1', 'u1');
+    await waitFor(() => deps.router.routeExecution.mock.calls.length > 0);
+    assert.equal(deps.router.routeExecution.mock.calls.length, 1);
+  });
+
+  it('rejects a stale queued deployment continuation before creating an invocation', async () => {
+    let checks = 0;
+    const deps = stubDeps({
+      deploymentWaitStartGuard: {
+        check: async () => {
+          checks += 1;
+          return { ok: false, reason: 'authority_stale' };
+        },
+      },
+    });
+    const processor = new QueueProcessor(deps);
+    enqueueEntry(deps.queue, { source: 'connector', messageId: 'msg-stale-wait' });
+    await processor.processNext('t1', 'u1');
+    await waitFor(() => checks > 0);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 0);
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0);
+  });
+
+  it('rechecks queued deployment authority immediately before route execution', async () => {
+    let checks = 0;
+    const deps = stubDeps({
+      deploymentWaitStartGuard: {
+        check: async () => (++checks === 1 ? { ok: true } : { ok: false, reason: 'authority_stale' }),
+      },
+    });
+    const processor = new QueueProcessor(deps);
+    enqueueEntry(deps.queue, { source: 'connector', messageId: 'msg-stale-late' });
+    await processor.processNext('t1', 'u1');
+    await waitFor(() => checks >= 2);
+    assert.equal(deps.invocationRecordStore.create.mock.calls.length, 1);
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0);
+  });
+
+  it('leaves a readiness-stale queued continuation retryable without canceling its message', async () => {
+    let checks = 0;
+    const deps = stubDeps({
+      deploymentWaitStartGuard: {
+        check: async () => (++checks === 1 ? { ok: true } : { ok: false, reason: 'evidence_stale' }),
+      },
+    });
+    deps.messageStore.markCanceled = mock.fn();
+    const processor = new QueueProcessor(deps);
+    enqueueEntry(deps.queue, { source: 'connector', messageId: 'msg-not-ready' });
+    await processor.processNext('t1', 'u1');
+    await waitFor(() => checks >= 2);
+    assert.equal(deps.router.routeExecution.mock.calls.length, 0);
+    assert.equal(deps.messageStore.markCanceled.mock.calls.length, 0);
+    assert.equal(
+      deps.invocationRecordStore.update.mock.calls.some(({ arguments: args }) => args[1]?.status === 'failed'),
+      true,
+    );
+  });
+
   it('F293 preserves the durable queue source separately from replay provenance', async () => {
     for (const source of ['user', 'connector', 'agent']) {
       const deps = stubDeps();
@@ -5284,18 +5379,26 @@ describe('QueueProcessor', () => {
   });
 
   it('copies a queued wait continuation carrier into the exact child InvocationRecord', async () => {
+    const messageStore = new MessageStore();
+    deps = stubDeps({ messageStore });
+    processor = new QueueProcessor(deps);
     const waitContinuationCarrier = {
       v: 1,
       waitId: 'task-pr-7',
       outcomeId: 'wait:pr:owner/repo#7:g3:matched',
       ownerFence: { kind: 'containing_task', generation: 3 },
     };
-    const entry = enqueueEntry(deps.queue, {
+    enqueueCustodiedEntry(deps.queue, messageStore, {
       source: 'connector',
       sourceCategory: 'review',
       waitContinuationCarrier,
+      messageSource: {
+        connector: 'github-wait',
+        label: 'GitHub Wait',
+        icon: 'github',
+        meta: { waitContinuationCarrier },
+      },
     });
-    deps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-wait-queued');
 
     await processor.processNext('t1', 'u1');
     await new Promise((resolve) => setTimeout(resolve, 50));

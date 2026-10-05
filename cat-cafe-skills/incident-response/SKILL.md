@@ -1,6 +1,6 @@
 ---
 name: incident-response
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "2026-09-23：情绪前端/止损后台的选猫改为查 dossier，只改猫间路由；未新增用户可直接发起的操作。"
 description: >
   不可逆事故发生后的应急响应：情绪急救 → 止损 → 补偿性劳动 → 教训沉淀。
   Use when: 犯了不可挽回的错误、造成了人类伙伴的情绪波动、需要危机处理。
@@ -166,8 +166,8 @@ Phase 4: 教训沉淀 (选对时机)
 
 | 角色 | 职责 |
 |------|------|
-| **情绪前端** | 安抚、陪伴、共情——Siamese最擅长，但任何猫都该做 |
-| **止损后台** | 冷静列清单、执行修复——Maine Coon最擅长 |
+| **情绪前端** | 安抚、陪伴、共情——dossier 标注「讲人话 / 共情」见长的猫优先，但任何猫都该做 |
+| **止损后台** | 冷静列清单、执行修复——冷静执行型猫优先（查 dossier） |
 | **肇事猫** | 承认错误、不辩解、承担补偿性劳动 |
 | **旁观猫** | 不落井下石，补位支持 |
 

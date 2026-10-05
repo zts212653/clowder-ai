@@ -6,6 +6,10 @@ import {
 } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import {
+  type CollectiveWorkActionTarget,
+  parseCollectiveWorkActionRef,
+} from '@/components/collective/collective-work-action';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
@@ -46,7 +50,8 @@ export interface EntrustedWorkMessageAction {
 
 export type EntrustedWorkActionTarget =
   | ({ kind: 'message' } & EntrustedWorkMessageAction)
-  | { kind: 'approval'; producerId: ApprovalProducerId; proposalId: string };
+  | { kind: 'approval'; producerId: ApprovalProducerId; proposalId: string }
+  | CollectiveWorkActionTarget;
 
 export function parseEntrustedWorkMessageAction(actionRef: string): EntrustedWorkMessageAction | null {
   const match = /^message:([^:#]+):([^:#]+)(?:#(.+))?$/u.exec(actionRef);
@@ -97,7 +102,9 @@ export function resolveEntrustedWorkActionTarget(actionRef: string): EntrustedWo
   const message = parseEntrustedWorkMessageAction(actionRef);
   return message
     ? { kind: 'message', ...message }
-    : (resolveMeetingActionTarget(actionRef) ?? resolveApprovalActionTarget(actionRef));
+    : (parseCollectiveWorkActionRef(actionRef) ??
+        resolveMeetingActionTarget(actionRef) ??
+        resolveApprovalActionTarget(actionRef));
 }
 
 function findRichBlock(coordinate: EntrustedWorkMessageAction): HTMLElement | null {
@@ -174,7 +181,12 @@ function readPendingEntrustedAction(threadId: string): EntrustedWorkMessageActio
 export function navigateToEntrustedWorkAction(actionRef: string): boolean {
   if (typeof window === 'undefined') return false;
   const target = resolveEntrustedWorkActionTarget(actionRef);
-  if (!target || target.kind !== 'message') return false;
+  if (!target) return false;
+  if (target.kind === 'collective-work') {
+    window.location.assign(target.actionRef);
+    return true;
+  }
+  if (target.kind !== 'message') return false;
   const coordinate: EntrustedWorkMessageAction = target;
   persistEntrustedAction(coordinate);
   const plan = planTeleport({
@@ -216,7 +228,8 @@ export function handleNavigateEvent(
   currentWorktreeId: string | null,
   actions: {
     setWorkspaceWorktreeId: (id: string | null) => void;
-    setWorkspaceRevealPath: (path: string | null, originThreadId?: string) => void;
+    /** Show `path` in that worktree's file tree; false when it could not be recorded for the thread. */
+    revealWorkspacePath: (worktreeId: string, path: string, originThreadId?: string) => boolean;
     setWorkspaceOpenFile: (
       path: string | null,
       line: number | null,
@@ -258,16 +271,16 @@ export function handleNavigateEvent(
     return false;
   }
 
+  // A reveal needs a real worktree to show: the event's (as the current alias when equivalent), else the
+  // current one. Without either there is nothing honest to open.
+  const revealWorktreeId =
+    resolveNavigateTargetWorktreeId(currentWorktreeId, data.worktreeId ?? null, worktreeAliases) ?? currentWorktreeId;
+  if (!revealWorktreeId) return false;
   if (data.worktreeId && !areWorktreeIdsEquivalent(data.worktreeId, currentWorktreeId, worktreeAliases)) {
     actions.setWorkspaceWorktreeId(data.worktreeId);
   }
   actions.setWorkspaceMode?.('dev');
-  if (data.threadId) {
-    actions.setWorkspaceRevealPath(data.path, data.threadId);
-  } else {
-    actions.setWorkspaceRevealPath(data.path);
-  }
-  return true;
+  return actions.revealWorkspacePath(revealWorktreeId, data.path, data.threadId);
 }
 
 function sessionNavigationStorage(): WorkspaceNavigationStorage | null {
@@ -283,7 +296,7 @@ export function useWorkspaceNavigate(
   options: { isChatRoute: boolean; isWorkspaceVisible?: boolean; enabled?: boolean } = { isChatRoute: true },
 ) {
   const setWorkspaceWorktreeId = useChatStore((s) => s.setWorkspaceWorktreeId);
-  const setWorkspaceRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
+  const openWorkspacePath = useChatStore((s) => s.openWorkspacePath);
   const setWorkspaceOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
   const setWorkspaceMode = useChatStore((s) => s.setWorkspaceMode);
   const worktreeAliases = useChatStore((s) => s.workspaceWorktreeAliases);
@@ -303,7 +316,12 @@ export function useWorkspaceNavigate(
         state.workspaceWorktreeId,
         {
           setWorkspaceWorktreeId,
-          setWorkspaceRevealPath,
+          revealWorkspacePath: (worktreeId, path, originThreadId) =>
+            openWorkspacePath(originThreadId ?? useChatStore.getState().currentThreadId, {
+              kind: 'reveal',
+              worktreeId,
+              path,
+            }),
           setWorkspaceOpenFile,
           setWorkspaceMode,
         },
@@ -316,7 +334,7 @@ export function useWorkspaceNavigate(
       }
       return processed;
     },
-    [scopedWorktreeAliases, setWorkspaceMode, setWorkspaceOpenFile, setWorkspaceRevealPath, setWorkspaceWorktreeId],
+    [openWorkspacePath, scopedWorktreeAliases, setWorkspaceMode, setWorkspaceOpenFile, setWorkspaceWorktreeId],
   );
   const deliveryStateRef = useRef({
     threadId,

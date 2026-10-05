@@ -45,10 +45,10 @@ function CurrentAdoption({
               (version) => refIdentity(version.versionRef) === refIdentity(ref),
             )?.title;
             return (
-              <p key={refIdentity(ref)} className="mt-2 break-words text-sm text-cafe">
-                <span className="block font-semibold">{title ?? ref.assetId}</span>
-                <span className="mt-1 block break-all font-mono text-xs text-cafe-muted">{ref.version}</span>
-              </p>
+              <div key={refIdentity(ref)} className="mt-2">
+                <p className="break-words text-sm font-semibold text-cafe">{title ?? ref.assetId}</p>
+                <EvolutionSource label="版本标识" source={ref} />
+              </div>
             );
           })
         ) : (
@@ -57,11 +57,8 @@ function CurrentAdoption({
       ) : (
         <p className="evolution-empty mt-2">{loading ? '正在读取资产来源…' : '当前采用尚待资产来源确认。'}</p>
       )}
-      {!catalog && programRefs.length > 0 && (
-        <p className="mt-2 text-xs text-cafe-muted">
-          项目最近记录：{programRefs.map((ref) => ref.version ?? '未固定版本').join('、')}
-        </p>
-      )}
+      {!catalog &&
+        programRefs.map((ref) => <EvolutionSource key={refIdentity(ref)} label="项目最近记录" source={ref} />)}
       {catalog && <EvolutionSource label="采用来源" source={catalog.currentProofRef} />}
     </div>
   );
@@ -99,6 +96,11 @@ export function CapabilityEvolutionProgramDetail({
   const status = productStatus(projection);
   const moment = reading.journeyMoment ?? journeyMoment(projection);
   const change = projection.lineage?.current;
+  const candidateTitle = change
+    ? asset.catalog?.versions.find(
+        (version) => refIdentity(version.versionRef) === refIdentity(change.targetVersionRef),
+      )?.title
+    : undefined;
   const open = (view: EvolutionReadingView, exactVersionRef?: ExactAssetVersionRefV1) => {
     openEvolutionReading(id, view, exactVersionRef);
     onOpenProgram(id, view);
@@ -150,9 +152,10 @@ export function CapabilityEvolutionProgramDetail({
           <h3 className="text-xs font-semibold text-cafe-secondary">本轮候选</h3>
           <p className="evolution-empty mt-2">
             {change
-              ? `基于 ${change.targetVersionRef.version} 的改动 · ${status.label}`
+              ? `${candidateTitle ? `基于「${candidateTitle}」的改动` : '基于来源新发布的改动'} · ${status.label}`
               : '正式改动尚未形成；来源发布的候选可在上方“探索进化”中阅读。'}
           </p>
+          {change && <EvolutionSource label="候选版本" source={change.targetVersionRef} />}
           {change && <EvolutionSource label="候选来源" source={change.proposalRef} />}
         </div>
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-t border-cafe-subtle pt-5">

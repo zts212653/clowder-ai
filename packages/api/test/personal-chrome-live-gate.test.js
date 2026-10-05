@@ -49,12 +49,12 @@ describe('F247 logged-in Personal Chrome live gate orchestration', () => {
       await mkdir(join(root, 'Profile 1'));
       await writeFile(
         join(root, 'Local State'),
-        JSON.stringify({ profile: { info_cache: { 'Profile 1': { name: 'Lysander', user_name: 'private' } } } }),
+        JSON.stringify({ profile: { info_cache: { 'Profile 1': { name: 'you', user_name: 'private' } } } }),
       );
       assert.deepEqual(await resolveChromeProfile({ userDataDirectory: root, profileDirectory: 'Profile 1' }), {
         userDataDirectory: root,
         profileDirectory: 'Profile 1',
-        profileName: 'Lysander',
+        profileName: 'you',
       });
       assert.equal(
         defaultChromeUserDataDirectory({ platform: 'darwin', homeDirectory: '/home/user' }),

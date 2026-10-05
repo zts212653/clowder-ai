@@ -93,6 +93,25 @@ export function HoldBallIcon({ className = 'w-5 h-5', color = '#374151' }: IconP
   );
 }
 
+/** Development result returning to its original owner, monoline SVG. */
+export function ReturnArrowIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      fill="none"
+      stroke={color}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m9 5-5 5 5 5" />
+      <path d="M4 10h11a5 5 0 0 1 0 10h-3" />
+    </svg>
+  );
+}
+
 /** Auth key — key silhouette, monoline SVG, 24x24 */
 export function AuthKeyIcon({ className = 'w-5 h-5', color = '#374151' }: IconProps) {
   return (

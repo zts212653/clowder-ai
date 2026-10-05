@@ -54,6 +54,28 @@ describe('F311 production preparation reading surface', () => {
     await act(async () => button?.click());
   }
 
+  it('accepts all 32 object source refs permitted by the submitted body', () => {
+    const projection = fixtureProjection();
+    const current = projection.preparation!.sections.object_map.current!;
+    const body = current.submission!.body;
+    if (body.kind !== 'object_map') throw new Error('wrong fixture');
+    const refs = Array.from({ length: 32 }, (_, index) => ({
+      ownerFeatureId: 'F311',
+      ownerStateRef: `proof:source-${index}`,
+    }));
+    body.items[0]!.sourceRefs = refs;
+    current.evidenceSources = [
+      {
+        sourceKey: body.items[0]!.itemId,
+        status: 'unverified',
+        refs: refs.map((ref) => ({ ref, status: 'unverified' })),
+      },
+    ];
+    expect(
+      parseProgramProjection(projection)?.preparation?.sections.object_map.current?.evidenceSources?.[0]?.refs,
+    ).toHaveLength(32);
+  });
+
   it('keeps work progress independent from the modifiability boundary', async () => {
     await render();
     const data = host.querySelector('[data-preparation-item="data"]');

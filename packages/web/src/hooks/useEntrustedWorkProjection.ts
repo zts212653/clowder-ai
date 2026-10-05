@@ -9,7 +9,7 @@ interface EntrustedWorkProjectionResult {
   refetch: () => void;
 }
 
-export type EntrustedWorkProjection = 'schedule' | 'needs-me';
+export type EntrustedWorkProjection = 'schedule' | 'needs-me' | 'completed';
 
 export function useEntrustedWorkProjection(
   projection: EntrustedWorkProjection = 'schedule',
@@ -17,6 +17,7 @@ export function useEntrustedWorkProjection(
   const [ownerReads, setOwnerReads] = useState<EntrustedWorkOwnerReadV1[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [resolvedProjection, setResolvedProjection] = useState<EntrustedWorkProjection | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refetch = useCallback(async () => {
@@ -26,7 +27,12 @@ export function useEntrustedWorkProjection(
     setLoading(true);
     setError(false);
     try {
-      const endpoint = projection === 'needs-me' ? '/api/entrusted-work/needs-me' : '/api/entrusted-work/owner-reads';
+      const endpoint =
+        projection === 'needs-me'
+          ? '/api/entrusted-work/needs-me'
+          : projection === 'completed'
+            ? '/api/entrusted-work/owner-reads?view=completed'
+            : '/api/entrusted-work/owner-reads';
       const response = await apiFetch(endpoint, { signal: controller.signal }, { afterCurrentGet: true });
       if (!response.ok) throw new Error(`entrusted-work owner reads failed: ${response.status}`);
       const body = (await response.json()) as { ownerReads?: unknown };
@@ -37,7 +43,10 @@ export function useEntrustedWorkProjection(
       setOwnerReads([]);
       setError(true);
     } finally {
-      if (!controller.signal.aborted) setLoading(false);
+      if (!controller.signal.aborted) {
+        setResolvedProjection(projection);
+        setLoading(false);
+      }
     }
   }, [projection]);
 
@@ -53,5 +62,5 @@ export function useEntrustedWorkProjection(
     };
   }, [refetch]);
 
-  return { ownerReads, loading, error, refetch };
+  return { ownerReads, loading: loading || resolvedProjection !== projection, error, refetch };
 }

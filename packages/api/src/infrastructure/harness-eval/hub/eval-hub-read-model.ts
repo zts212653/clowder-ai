@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { runModuleWorker } from '../../../utils/run-module-worker.js';
 import { resolveA2aEvidenceBundle } from '../a2a/eval-a2a-artifact-resolver.js';
 import {
   type EvalDomainRegistryEntry,
@@ -31,6 +32,29 @@ import type {
   LoadEvalHubSummaryInput,
 } from './eval-hub-read-model-types.js';
 import { resolveEvalHubRepoWorktreeId } from './eval-hub-repo-worktree-id.js';
+
+const summariesInFlight = new Map<string, Promise<EvalHubSummary>>();
+
+/** A fresh projection per request wave, isolated before any artifact parsing. */
+export async function loadEvalHubSummaryAsync(input: LoadEvalHubSummaryInput): Promise<EvalHubSummary> {
+  const key = JSON.stringify(input);
+  let pending = summariesInFlight.get(key);
+  if (!pending) {
+    pending = runModuleWorker<EvalHubSummary>({
+      moduleUrl: new URL(import.meta.url),
+      exportName: 'loadEvalHubSummary',
+      input,
+    });
+    summariesInFlight.set(key, pending);
+    void pending
+      .finally(() => {
+        if (summariesInFlight.get(key) === pending) summariesInFlight.delete(key);
+      })
+      .catch(() => {});
+  }
+  // Enrichment mutates the projection per authenticated caller. Never share it.
+  return structuredClone(await pending);
+}
 
 export function loadEvalHubSummary(input: LoadEvalHubSummaryInput): EvalHubSummary {
   const verdictsDir = join(input.harnessFeedbackRoot, 'verdicts');

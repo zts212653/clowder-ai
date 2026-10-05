@@ -15,6 +15,11 @@
     "electron": "35.7.5",
     "electron-builder": "26.8.1"
   },
+  "overrides": {
+    "extract-zip": {
+      "yauzl": "3.4.0"
+    }
+  },
   "build": {
     "appId": "ai.clowderai.desktop",
     "productName": "Clowder AI",
@@ -70,7 +75,10 @@
       "update-network-diagnostics.js",
       "update-prompt-controller.js",
       "splash.html",
-      "assets/**/*"
+      "assets/**/*",
+      "plugin-window/**/*",
+      "!plugin-window/**/*.test.*",
+      "!plugin-window/**/*-fixture.cjs"
     ],
     "extraResources": [
       {

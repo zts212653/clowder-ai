@@ -150,6 +150,8 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
     const records: InvocationRecord[] = [];
     for (const key of await this.scanInvocationKeys()) {
       const raw = await this.redis.hgetall(key);
+      // SCAN is not a snapshot: terminal tombstones may expire before HGETALL.
+      if (Object.keys(raw).length === 0) continue;
       const record = authRecordFromRedisHash(raw, new Set<string>());
       if (!record) throw new Error(`corrupt callback auth record during startup scan: ${key}`);
       if (record.state === 'active') records.push(record);
@@ -281,7 +283,10 @@ export class RedisAuthInvocationBackend implements IAuthInvocationBackend {
   private async loadMigrationRecords(keys: string[]): Promise<InvocationRecord[]> {
     const records: InvocationRecord[] = [];
     for (const key of keys) {
-      const record = authRecordFromRedisHash(await this.redis.hgetall(key), new Set<string>());
+      const raw = await this.redis.hgetall(key);
+      // Missing after SCAN is normal GC, not a corrupt principal to admit.
+      if (Object.keys(raw).length === 0) continue;
+      const record = authRecordFromRedisHash(raw, new Set<string>());
       if (!record) throw new Error(`corrupt callback auth record during migration: ${key}`);
       records.push(record);
     }

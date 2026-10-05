@@ -1,14 +1,12 @@
 'use client';
 
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
-import { useChatStore } from '@/stores/chatStore';
+import { type ReactNode, useMemo, useState } from 'react';
 import {
   SettingsBadge,
   SettingsBreadcrumb,
   SettingsCodeField,
   SettingsCodeLabel,
   SettingsCollapsibleCard,
-  SettingsHubLink,
   SettingsInlineItem,
   SettingsPrimaryButton,
   SettingsReadOnlyField,
@@ -17,6 +15,7 @@ import {
   SettingsText,
   SettingsVarRow,
 } from './primitives';
+import { SettingsWorkspaceLink } from './SettingsWorkspaceLink';
 
 export interface EnvVar {
   name: string;
@@ -130,38 +129,6 @@ export function PageIntro() {
   );
 }
 
-function HubFileLink({ relPath, label }: { relPath: string; label: string }) {
-  const setOpenFile = useChatStore((s) => s.setWorkspaceOpenFile);
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setOpenFile(relPath, null, null);
-    },
-    [setOpenFile, relPath],
-  );
-  return (
-    <SettingsHubLink onClick={handleClick} title={`在 Hub 工作区中查看\n${relPath}`}>
-      {label}
-    </SettingsHubLink>
-  );
-}
-
-function HubDirLink({ relPath, label }: { relPath: string; label: string }) {
-  const setRevealPath = useChatStore((s) => s.setWorkspaceRevealPath);
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setRevealPath(relPath);
-    },
-    [setRevealPath, relPath],
-  );
-  return (
-    <SettingsHubLink onClick={handleClick} title={`打开工作区面板，在文件树中找到:\n${relPath}`}>
-      {label}
-    </SettingsHubLink>
-  );
-}
-
 function RestrictedPathLabel({ absPath, reason }: { absPath: string; reason: string }) {
   return (
     <SettingsText tone="muted" className="shrink-0 cursor-default" title={`${reason}\n${absPath}`}>
@@ -173,15 +140,17 @@ function RestrictedPathLabel({ absPath, reason }: { absPath: string; reason: str
 function PathAction({
   classification,
   absPath,
+  projectRoot,
 }: {
   classification: { kind: PathKind; relPath: string };
   absPath: string;
+  projectRoot: string;
 }) {
   switch (classification.kind) {
     case 'file':
-      return <HubFileLink relPath={classification.relPath} label="在 Hub 中查看" />;
+      return <SettingsWorkspaceLink kind="file" relPath={classification.relPath} projectRoot={projectRoot} />;
     case 'dir-inside':
-      return <HubDirLink relPath={classification.relPath} label="在 Hub 中查看" />;
+      return <SettingsWorkspaceLink kind="directory" relPath={classification.relPath} projectRoot={projectRoot} />;
     case 'denied':
       return <RestrictedPathLabel absPath={absPath} reason="受安全策略保护，无法在 Hub 中打开" />;
     case 'outside':
@@ -233,7 +202,7 @@ export function ConfigFilesSection({ projectRoot }: { projectRoot: string }) {
             <SettingsInlineItem key={f.name}>
               <SettingsCodeLabel>{f.name}</SettingsCodeLabel>
               <SettingsText tone="secondary">{f.desc}</SettingsText>
-              <PathAction classification={cls} absPath={f.path} />
+              <PathAction classification={cls} absPath={f.path} projectRoot={projectRoot} />
             </SettingsInlineItem>
           );
         })}
@@ -369,7 +338,7 @@ export function DataDirsSection({ dataDirs, projectRoot }: { dataDirs: DataDirs;
                 {d.name}
               </SettingsText>
               <SettingsText tone="secondary">{d.desc}</SettingsText>
-              <PathAction classification={cls} absPath={d.path} />
+              <PathAction classification={cls} absPath={d.path} projectRoot={projectRoot} />
             </SettingsInlineItem>
           );
         })}

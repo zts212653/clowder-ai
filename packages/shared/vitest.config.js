@@ -1,11 +1,14 @@
 import { defineConfig } from 'vitest/config';
+import { vitestReporters } from '../../scripts/test-file-timing/vitest-file-timing-reporter.mjs';
 
 export default defineConfig({
   test: {
+    reporters: vitestReporters(),
     // Only vitest-runner tests. Most shared tests use node:test (import from 'node:test')
     // and run separately via `node --test`. Vitest tests import from 'vitest'.
     include: [
       'test/concierge-config.test.js',
+      'src/__tests__/companion-identity.test.ts',
       'test/pet-skin-projection.test.js',
       'src/__tests__/capability-tips.test.ts',
       'src/__tests__/capability-evolution.test.ts',
@@ -15,15 +18,18 @@ export default defineConfig({
       'src/__tests__/capability-evolution-preparation.test.ts',
       'src/__tests__/capability-evolution-preparation-choice.test.ts',
       'src/__tests__/collective.test.ts',
+      'src/__tests__/collective-appearance-bridge.test.ts',
       'src/__tests__/action-successor-types.test.ts',
       'src/__tests__/cross-thread-coordination.test.ts',
       'src/__tests__/auto-dream.test.ts',
       'src/__tests__/human-disposition-feedback.test.ts',
       'src/__tests__/wait-termination.test.ts',
+      'src/__tests__/deployment-wait.test.ts',
       'src/__tests__/proactive-memory-opportunity.test.ts',
       'src/__tests__/memory-write-opportunity.test.ts',
       'src/__tests__/standing-reflex-episode.test.ts',
       'src/__tests__/growing-contract.test.ts',
+      'src/__tests__/growing-development-contract.test.ts',
       'src/__tests__/memory-architecture-closure.test.ts',
       'src/__tests__/lesson-learning-closure.test.ts',
       'src/__tests__/subject-key.test.ts',

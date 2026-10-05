@@ -5,8 +5,8 @@ related_decisions: [040, 041, 042]
 topics: [freshness, glass-box, supplement, inbox-notice, runtime-descriptor, side-effect-gate, codex-app-server, lifecycle, liveness, ax]
 doc_kind: spec
 created: 2026-06-27
-updated: 2026-09-05
-tips_exempt: F254's automatic freshness runtime and eval-measurement correctness surfaces add no user action, setting, or discoverable capability.
+updated: 2026-09-27
+tips_exempt: "Renewed 2026-09-27 for F324 Phase A: bounded notice attachment preserves the existing full-read/ack actions without adding a user-invoked capability, setting, or discovery moment."
 ---
 
 # F254: Side-Effect Freshness Gate — 副作用出口 freshness 拦截
@@ -381,8 +381,13 @@ Held 信封结构：
 ```typescript
 interface HeldEnvelope {
   status: 'held';
+  // Stable category retained for existing clients.
   reason: 'newer_messages_available';
+  // Exact gate decision, e.g. pagination_limit_uncertain or unseen_available.
+  freshnessReason: string;
   unseenCount: number;
+  // false means a numeric 0 is uncertainty, not proof that nothing is unseen.
+  unseenCountKnown: boolean;
   // 最多 3 条摘要（DEFAULT_HELD_CONTEXT_LIMIT，学 Raft）
   previews: Array<{
     from: string;     // catId 或 'user'
@@ -391,8 +396,35 @@ interface HeldEnvelope {
   }>;
   omittedCount: number;  // 超过 3 条时的省略数
   actions: ['read_latest', 'revise', 'send_with_acknowledge'];
+  catchUp: {
+    tool: 'cat_cafe_get_thread_context';
+    arguments: { threadId?: string; responseMode: 'full' };
+    continuation: {
+      cursorArgument: 'cursor';
+      cursorFrom: 'nextCursor';
+      completeWhen: 'hasMore=false';
+    };
+  };
 }
 ```
+
+`cross_post_message` 的 `catchUp.arguments.threadId` 必须是目标 thread；同 thread
+`post_message` / `multi_mention` 可省略。`pagination_limit_uncertain` 的 `unseenCount=0`
+表示 bounded scan 无法确定数量，MCP 不得渲染成“确有 0 条未读”。
+
+Architecture cell: `ball-custody` + `transport`
+
+Map delta: none — 本轮只修正既有 freshness gate 的 held envelope、ack escape hatch 与
+`get_thread_context` 跨 thread 读取入口，不迁移 owner、store 或 queued-body custody。
+
+Why: 目标 thread 已有 seenCursor 时，cross-thread full read 也必须从该边界开始；同时仍只允许
+当前执行读取自己的 queued body。这样能恢复发送而不削弱权限、因果相关性或 F167 时间见证围栏。
+
+Canonical source: `packages/api/src/domains/cats/services/freshness/checkFreshnessForPostMessage.ts#checkFreshnessForPostMessage`；`packages/api/src/routes/callbacks.ts#readThreadContext`；`packages/mcp-server/src/tools/callback-tools.ts#_executePostMessage`
+
+Consumer evidence: `rg -n 'checkFreshnessForPostMessage|freshnessReason|catchUp|cat_cafe_get_thread_context' packages/api/src/routes packages/mcp-server/src/tools packages/api/test packages/mcp-server/test`
+
+Claim guard: “HELD/0 可恢复且跨 thread 不泄露 foreign queued body” → `f254-freshness-gate-integration.test.js` 的 `honors acknowledgeHeld when the bounded pagination scan cannot prove catch-up`、`callback-routes.test.js` 的 `pagination-held cross-thread post exposes executable catch-up and succeeds after bounded full-read continuation` 与 `full cross-thread context returns published history without exposing foreign queued bodies` → 删除 early ack、目标 seenCursor 选择或 queued-body 隔离任一项即 RED。
 
 **覆盖的副作用工具**（按优先级）：
 
@@ -409,9 +441,11 @@ interface HeldEnvelope {
 - 检测 `data.status === 'held'` → 返回可读的提示文本给猫
 - 提示包含：原因、新消息摘要、可选动作说明
 - 猫读完 held 信封后可以：
-  - 调无 filter 的 `get_thread_context` 连续读新消息（自动推进游标）
+  - 按 `catchUp` 调无 filter 的 `get_thread_context(responseMode="full")`；跨 thread 使用目标
+    `threadId`，`hasMore=true` 时把 `nextCursor` 作为下一次 `cursor`，直到 `hasMore=false`
   - 修改内容后重新调 `post_message`
-  - 加 `acknowledgeHeld: true` 参数强制发送原文
+  - 加 `acknowledgeHeld: true` 参数强制发送原文；该 escape hatch 在 bounded pagination scan
+    之前生效，不能再次落回 `pagination_limit_uncertain`
 
 #### A3: seenCursor 推进时机
 
@@ -521,6 +555,8 @@ interface FreshnessInvocationState {
 - **Scope**：仅当前 thread（KD-10）。跨 thread notice 不在 Phase B scope 内
 - **持久化**：每次 notice 投递写 `notice_attached` 事件到 FreshnessAttentionEventLog
 - **时序**：只读工具执行完可能的 seenCursor ack 后再计算（`get_thread_context` 会推进 seenCursor，notice 检查在 ack 之后，避免"刚读过又 notice"，codex 洞察）
+
+**2026-09-27 F324 读取回归边界**：`get_thread_context` 已有 seenCursor 时，空未读是完整的空页，不回放历史；分页 lookahead 与实际返回正文决定 hasMore/seen，queued 的 `seen` 仍不等于 `handled`。同一 invocation 已完整曝光的 user queued 工作只回待办锚，不能靠永久去重隐藏失败/未处理工作；connector/agent 的 adoption 失败仍允许正文重试。B1 的 `notice_attached` 在 API 侧先记录，因此 MCP 只在原工具结果预留足够空间时请求 notice；API notice 文本先有界化再记录投递，绝不在末端丢掉一条已登记的提示。回归：`callback-routes.test.js` 的 F324 未读/queued fixture、F167 adoption 重试、`f254-notice-service.test.js` 的有界提示、`tool-response-budget.test.js` 的预留与副作用保护。
 
 #### B2: Turn 结束 notice（hold_ball 提醒 + 延期记录，修订）
 
@@ -709,10 +745,10 @@ Phase E 不再增加另一层“提醒猫去读”的 fallback。它改变输出
 ### Phase A（Freshness Gate MVP）
 
 - [x] AC-A1: 猫调 `post_message` 时，如果 thread 有猫未看过的消息（`latestMessageId > seenCursor`），返回 held 信封而非执行发送——**用独立 seenCursor seq 游标判断，不用 timestamp，不用 deliveryCursor**
-- [x] AC-A2: 猫 turn 中途通过无 filter 的 full `get_thread_context` 读过新消息后，seenCursor 推进，再调 `post_message` 不被 hold（**零误 hold 验证**）
+- [x] AC-A2: 猫 turn 中途通过无 filter 的 full `get_thread_context` 读过新消息后，seenCursor 推进，再调 `post_message` 不被 hold（**零误 hold 验证**）；跨 thread full read 同样从目标 thread 的 seenCursor 开始，但不暴露目标执行的 queued body
 - [x] AC-A3: `seenCursor` 不存在时 fail-open 放行（不因缺数据卡死副作用）
 - [x] AC-A4: held 信封最多展示 3 条摘要 + omittedCount（防 context 膨胀）
-- [x] AC-A5: 猫加 `acknowledgeHeld: true` 可强制发送（escape hatch）
+- [x] AC-A5: 猫加 `acknowledgeHeld: true` 可强制发送（escape hatch），包括 `pagination_limit_uncertain` 分支；ack 不重复 bounded scan
 - [x] AC-A6: `cross_post_message` 和 `multi_mention` 同样受 freshness gate 保护（cross_post 检查**目标 thread** 的 seenCursor；目标 thread 无 cursor 时 fail-open）。`callbacks.ts` 传 `isCrossThread ? 'cross_post_message' : 'post_message'` toolName；`callback-multi-mention-routes.ts` 加 freshness gate（含 play-mode visibility filter）+ fail-open + `deliveryCursorStore` DI
 - [x] AC-A7: 每次 held/forward 决策记录为**独立 freshness 事件流**（不是 F233 `BallCustodyEvent` 联合成员；F233 projector 可选读取此流做聚合报告）。`checkFreshnessForPostMessage` 新增 optional `eventLog` param，6 条决策路径写 `held_decision`/`forward_decision` 事件，fail-open；route 层（post_message + multi_mention）接入 FreshnessAttentionEventLog。15 新测试
 - [x] AC-A8: Redis-backed 测试覆盖游标读写 + held 决策（不用纯 in-memory 假绿）

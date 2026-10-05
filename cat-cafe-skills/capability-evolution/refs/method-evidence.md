@@ -4,7 +4,7 @@ feature_ids: []
 related_features: [F311, F267]
 topics: [meta-method, provenance, skill-transfer]
 created: 2026-09-10
-updated: 2026-09-13
+updated: 2026-10-01
 knowledge:
   artifact_type: method
   domain: capability-evolution
@@ -15,6 +15,8 @@ knowledge:
   provenance:
     author_type: collaborative
   source_refs:
+    - "[thread-id]#private-source-id"
+    - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
     - "[thread-id]#private-source-id"
@@ -50,6 +52,7 @@ Git 保存本文件与相应 skill 的文本修订史；它不替代 asset owner
 | 选材信号不等于学习收益 | Theseus 选材与方法研究索引，原报告 §3.4.4、§3.6.5 | 正确/困难不自动意味着值得学；待测选材机制可产生不同材料，仍控制资源与验收条件。方法比较包含方法开发成本，不把其后继改进等同于当前对象分数 |
 | 环境组织也是候选改动 | 同索引 §5.1 的来源与范围 | 先定位是否存在信息组织缺口；可与其他改动比较，不把外部局部实验变成“先改环境”的固定顺序 |
 | 失败位置不等于修改位置 | 同索引 §5.3 的扫描件反例（作者报告，未独立复现） | 检查器说原件不可用，可能是抽取失败；回看原件与测量链，区分观测不足、判法错误和对象缺陷 |
+| 先确认量尺看得见目标改进；挑版本用过的集合不是独立验收 | [Automating eval design and hillclimbing（claude.dev，2026-09-28）](https://claude.dev/blog/automating-eval-design-and-hillclimbing/)及其 `claude-api` skill 的 `shared/evals/eval-hillclimb.md` §0.5、§3 切分段（本机插件缓存，2026-10-01 读） | 优化比较前按比较设计估计噪声，与剩余空间、最小可行动改进对照；含随机生成步骤时区分生成与打分波动；删减版也是候选。其默认 test 每轮参与选版，按家里口径是模拟考。例子是厂商内部基准且无该例区间，不迁移其数字或模型排名 |
 
 ## 怎样消费与继续修订
 

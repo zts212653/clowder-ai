@@ -21,17 +21,38 @@ export function sameProducerEvidence(left: unknown, right: ReturnType<typeof can
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function selectCanonicalOwnerTime<T extends { role: 'business_deadline' | 'review_by' | 'execution_trigger' }>(
-  timeRefs: readonly T[],
-): T | undefined {
-  const priority = ['review_by', 'business_deadline', 'execution_trigger'] as const;
+export function selectCanonicalOwnerTime<
+  T extends {
+    role:
+      | 'business_deadline'
+      | 'review_by'
+      | 'execution_trigger'
+      | 'planned_start'
+      | 'actual_start'
+      | 'estimated_completion';
+  },
+>(timeRefs: readonly T[]): T | undefined {
+  const priority = [
+    'review_by',
+    'business_deadline',
+    'estimated_completion',
+    'planned_start',
+    'actual_start',
+    'execution_trigger',
+  ] as const;
   return priority.flatMap((role) => timeRefs.filter((timeRef) => timeRef.role === role))[0];
 }
 
 interface OwnerTimeCoordinates {
   envelope: { subjectRef: string; ownerRef: string; revision: number };
   timeRefs: Array<{
-    role: 'business_deadline' | 'review_by' | 'execution_trigger';
+    role:
+      | 'business_deadline'
+      | 'review_by'
+      | 'execution_trigger'
+      | 'planned_start'
+      | 'actual_start'
+      | 'estimated_completion';
     subjectRef: string;
     ownerRef: string;
     revision: number;

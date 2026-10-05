@@ -1,6 +1,6 @@
 ---
 name: eval-design
-tips_exempt: "2026-09-13 clarifies adaptive-acquisition comparisons and method costs within existing eval design; no new product action or surface."
+tips_exempt: "2026-10-01 adds pre-comparison detectability, stochastic-generation rebuild variance, selection-exposed sets and a monotonicity probe to existing eval design; no new product action or surface."
 description: "Use when: 要判断 Agent 是否专业、省心或真正改善，需设计判断依据、指标、校准，或修改/审计 eval。Not for: 单次交付(quality-gate)、外部claim(source-audit)、摩擦诊断(code-as-harness)。Output: 测量与校准草案或指标出生证（纵向eval含触发契约），或病名+处置。"
 ---
 
@@ -77,6 +77,12 @@ metric_birth_certificate:
   repeatability_contract:  # （v0.1 增，Sol 刀③）本指标属发现/归因/验收哪一环节；
                            # episode/环境/judge/版本如何冻结；跑几次；均值与 CI 波动
                            # 容差；哪些随机源允许变化。校准管"测得准"，本件管"重测稳"。
+                           # 要据此做优化比较时，针对本轮目标按比较设计估计噪声（可
+                           # 配对时用差值 CI 半宽），与该目标的剩余空间、consumer
+                           # 最小可行动改进对照；噪声不小于任一项，先提高测量分辨率
+                           # 或调整目标，不开优化比较轮。被打分物经随机生成步骤得到
+                           # （记忆库、合成语料等）时，固定被调对象重复重建，区分生成
+                           # 与打分波动；次数按测量需要与预算定（2–3 次可作初探）。
   # 以下两项仅对使用 judge / 其他有额度裁判的环适用；纯 verifier 环不填。
   calibration_runway:      # （v0.2 增，宪法 E0）适用时必填：额度不可读成单一电量，
                            # 按向量三账估——校准账（人-judge 决策级分歧率，晋升/回滚
@@ -115,7 +121,7 @@ metric_birth_certificate:
 | E3 对抗 | observer/domain owner/consumer/calibrator 分权了吗？有外生锚吗？观测面体检过了吗？ | 机制作者兼 observer 后又独自校准开放价值 claim；带毒管线上装仪表 |
 | E4 代谢 | 有孵化-退役机制吗？纵向 Eval 的进入/唤醒/成熟/可行动分开了吗？多久不能不醒？ | 把 maturity 当 scheduler trigger；只有事件触发、沉默时永久不复评 |
 | E5 回灌 | 未验证自评会以事实身份进被测者上下文吗？叙事反馈的案例抽样冻结了吗？ | 把 expected outcome 写成 outcome 回灌；报告人自选案例 |
-| E6 环节 | 发现/归因/验收/改进的性质分开了吗？ | 同批 fixture 既挑改动又验收；归因直接当梯度 |
+| E6 环节 | 发现/归因/验收/改进的性质分开了吗？ | 同批 fixture 既挑改动又验收；仅以聚合分参与选版/回退的模拟考（宪法 E6 三阀门之二）充当独立 holdout；归因直接当梯度 |
 
 E5 禁止的是**事实化回灌**：明确保留为 `hypothesis/expectation`，且下游始终按
 待验证命题读取的字段可以保留；一旦改名、渲染或汇总成既成事实，仍触发否决。
@@ -129,7 +135,7 @@ E5 禁止的是**事实化回灌**：明确保留为 `hypothesis/expectation`，
 | 病名 | 类型 / 链位 | 判据 | 检法 | 处置 |
 |---|---|---|---|---|
 | **划水** | 资产病 / 规约 | 无 validity：与病灶正交（含代谢死亡导致的滞后正交——考卷停更，病灶已迁移） | 全绿期间同域生产翻车照发？最近一次抓到真问题是何时？零代谢？ | 换题对准病灶；重启孵化-退役 |
-| **污染** | 资产病 / 测量 | 输出错误且自信：观测面带毒/judge 共振/被磨熟 | 抽样人工复核；proxy 与人工裁决相关性；判"分数涨效用不涨"散度 | **先修观测面再谈其他**（E3） |
+| **污染** | 资产病 / 测量 | 输出错误且自信：观测面带毒/judge 共振/被磨熟 | 抽样人工复核；proxy 与人工裁决相关性；判"分数涨效用不涨"散度；更强模型/更高 effort 反而不升分→先查题目歧义与判分（只作排查信号，单调不证明量尺正确） | **先修观测面再谈其他**（E3） |
 | **归因停滞** | 流程病 / 归因 | 竞争解释未被区分，下一轮没有新增证据 | 当轮审。"≥3 轮同型 finding"只是报警器——须先排除干预未落地 / 环境重复触发 / 风险已显式接受三种替代解释，方可确诊 | 停点修，回归因补关键区分实验 |
 | **干预失证** | 流程病 / 干预 | 无因果理由 / 预期 Δ / 证伪条件 / 独立验收 | 当轮拦：干预证牌照检查，一轮即拒 | 补齐干预证再动手 |
 | **摸鱼** | 资产病 / 外推 | 无 consumer：输出不驱动任何决策 | 查最近 N 期输出 → 驱动过什么改动？零 = 摸鱼 | sunset（走 F192 verdict） |
@@ -167,7 +173,7 @@ intervention_card:
                             # 即回规约改评分标准（宪法 E6：链是环）。诊断指纹：
                             # 系统故障带噪声，量具故障带着几何学的整洁
   replay_cohort:            # 在哪批冻结数据上重放（待测机制为选材时，冻结的是起点/来源可达范围/预算，见下文）
-  holdout:                  # 独立验收集
+  holdout:                  # 独立验收集（未参与挑候选、挑版本或回退判断）
   cost_and_rollback:        # 成本与回滚路径
 ```
 

@@ -88,8 +88,60 @@ export interface EventsRoutesOptions {
 }
 
 export interface EventsListResponse {
-  events: StoredEventMemory[];
-  meta: { count: number; limit: number | null; offset: number };
+  events: Array<
+    StoredEventMemory & { summaryTruncated?: boolean; originalSummaryChars?: number; drillDown?: EventDrillDown }
+  >;
+  meta: { count: number; limit: number; offset: number; hasMore: boolean; nextOffset?: number };
+}
+
+const EVENT_RESPONSE_MAX_CHARS = 24_000;
+
+interface EventDrillDown {
+  path: string;
+  charOffset: number;
+  tool: 'cat_cafe_list_events';
+  args: { eventId: string; charOffset: number };
+}
+
+function eventDrillDown(eventId: string, charOffset: number): EventDrillDown {
+  return {
+    path: `/api/memory/events/${encodeURIComponent(eventId)}`,
+    charOffset,
+    tool: 'cat_cafe_list_events',
+    args: { eventId, charOffset },
+  };
+}
+
+function fitEventListPage(window: StoredEventMemory[], limit: number, offset: number): EventsListResponse {
+  const events: EventsListResponse['events'] = [];
+  const responseFor = (items: EventsListResponse['events']): EventsListResponse => {
+    const hasMore = items.length < window.length;
+    return {
+      events: items,
+      meta: { count: items.length, limit, offset, hasMore, ...(hasMore ? { nextOffset: offset + items.length } : {}) },
+    };
+  };
+  for (const event of window.slice(0, limit)) {
+    if (JSON.stringify(responseFor([...events, event])).length <= EVENT_RESPONSE_MAX_CHARS) {
+      events.push(event);
+      continue;
+    }
+    if (events.length > 0) break;
+    const placeholder = {
+      ...event,
+      summary: event.summary.slice(0, 120),
+      relatedHarness: event.relatedHarness?.slice(0, 4) ?? null,
+      summaryTruncated: true,
+      originalSummaryChars: event.summary.length,
+      drillDown: eventDrillDown(event.eventId, 0),
+    };
+    if (JSON.stringify(responseFor([placeholder])).length > EVENT_RESPONSE_MAX_CHARS) {
+      throw new Error('Event source reference exceeds the bounded response budget');
+    }
+    events.push(placeholder);
+    break;
+  }
+  return responseFor(events);
 }
 
 export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app, opts) => {
@@ -119,14 +171,47 @@ export const eventsRoutes: FastifyPluginAsync<EventsRoutesOptions> = async (app,
 
     // Owner scope is server-enforced (cloud-review P1): callers only ever see their own
     // events; `ownerUserId` is appended LAST so a client-supplied value can't widen it.
-    const filter: EventMemoryFilter = { ...parsed.data, ownerUserId: owner };
-    const events = opts.eventMemoryStore.listEvents(filter);
-    const response: EventsListResponse = {
-      events,
-      meta: { count: events.length, limit: filter.limit ?? null, offset: filter.offset ?? 0 },
-    };
-    return response;
+    const limit = parsed.data.limit ?? 50;
+    const offset = parsed.data.offset ?? 0;
+    const filter: EventMemoryFilter = { ...parsed.data, limit: limit + 1, offset, ownerUserId: owner };
+    const window = opts.eventMemoryStore.listEvents(filter);
+    return fitEventListPage(window, limit, offset);
   });
+
+  app.get<{ Params: { eventId: string }; Querystring: { charOffset?: string } }>(
+    '/api/memory/events/:eventId',
+    async (request, reply) => {
+      if (!isAuthenticated(request)) return reply.status(401).send({ error: 'auth required' });
+      const owner = ownerUserIdOf(request);
+      if (!owner) return reply.status(403).send({ error: 'owner scope required' });
+      const event = opts.eventMemoryStore.getEvent(request.params.eventId);
+      if (!event || event.ownerUserId !== owner) return reply.status(404).send({ error: 'Event not found' });
+      const serialized = JSON.stringify(event);
+      const offsetText = request.query.charOffset;
+      if (offsetText !== undefined) {
+        if (!/^\d+$/.test(offsetText)) return reply.status(400).send({ error: 'Invalid charOffset' });
+        const charOffset = Number(offsetText);
+        if (!Number.isSafeInteger(charOffset) || charOffset >= serialized.length) {
+          return reply.status(400).send({ error: 'Invalid charOffset' });
+        }
+        const eventSlice = serialized.slice(charOffset, charOffset + 8_000);
+        const nextCharOffset = charOffset + eventSlice.length;
+        return reply.send({
+          eventSlice,
+          charOffset,
+          totalChars: serialized.length,
+          ...(nextCharOffset < serialized.length ? { nextCharOffset } : {}),
+        });
+      }
+      if (serialized.length <= EVENT_RESPONSE_MAX_CHARS) return reply.send(event);
+      return reply.send({
+        eventId: event.eventId,
+        oversized: true,
+        eventChars: serialized.length,
+        drillDown: eventDrillDown(event.eventId, 0),
+      });
+    },
+  );
 
   // F227 Task 8 (AC-A5): magic-word meanings (word → meaning/action) read from injected governance.
   // The timeline's meaning popover consumes this; no hardcoded word table.

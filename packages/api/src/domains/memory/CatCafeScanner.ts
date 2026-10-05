@@ -49,6 +49,10 @@ export class CatCafeScanner implements RepoScanner {
     this.exclude = exclude;
   }
 
+  getExcludePatterns(): string[] | undefined {
+    return this.exclude;
+  }
+
   addExcludePatterns(patterns: string[]): void {
     this.exclude = [...(this.exclude ?? []), ...patterns];
   }

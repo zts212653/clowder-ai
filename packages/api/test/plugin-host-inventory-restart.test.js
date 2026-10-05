@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
+import { validateEffectiveGrants, validateManifest } from '@clowder-ai/plugin-contract';
 import {
   FilePluginInventoryStore,
   HostInventoryControlPlane,
@@ -33,6 +34,44 @@ function candidate() {
 }
 
 describe('K-2A persisted restart normalization', () => {
+  it('opens inventory admitted by the published beta.15 Host without changing persisted authority', async (t) => {
+    const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-beta15-upgrade-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = join(root, 'inventory.json');
+    // Public Host b1fe2966 admitted these exact versions before the beta.16 bump.
+    // Keep real manifest/grant validators; only the historical version policy differs.
+    const previousContract = {
+      manifestContractVersions: ['0.1.0', '0.1.0-beta.13', '0.1.0-beta.15'],
+      validateManifest,
+      validateEffectiveGrants,
+    };
+    const previousStore = new FilePluginInventoryStore(path, { contract: previousContract });
+    const previousHost = new HostInventoryControlPlane(previousStore, {
+      contract: previousContract,
+      createInstanceId: () => 'pi_beta15',
+      now: () => 3_000,
+    });
+    const admitted = candidate();
+    admitted.manifest.contractVersion = '0.1.0-beta.15';
+    await previousHost.installPackage(admitted);
+    await previousStore.transaction((tx) => {
+      tx.instances.put({
+        ...tx.instances.get('pi_beta15'),
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'stopped',
+      });
+    });
+    const before = await previousStore.snapshot();
+    const persistedBytes = readFileSync(path, 'utf8');
+
+    const currentStore = new FilePluginInventoryStore(path);
+    const currentHost = new HostInventoryControlPlane(currentStore, { now: () => 4_000 });
+    assert.equal(await currentHost.recoverAfterRestart(), 0);
+    assert.deepEqual(await currentStore.snapshot(), before);
+    assert.equal(readFileSync(path, 'utf8'), persistedBytes);
+  });
+
   it('reloads durable axes and resets only interrupted runtime progress', async () => {
     const root = mkdtempSync(join(os.tmpdir(), 'plugin-inventory-restart-'));
     const path = join(root, 'inventory.json');
@@ -153,6 +192,18 @@ describe('K-2A persisted restart normalization', () => {
     };
     writeFileSync(path, JSON.stringify(snapshot));
 
+    await assert.rejects(
+      () => new FilePluginInventoryStore(path).snapshot(),
+      (error) => error?.code === 'CORRUPT_SNAPSHOT',
+    );
+    snapshot.instances[0].lastRuntimeError = {
+      code: 'UNEXPECTED_RUNTIME_FAILURE',
+      exitCode: null,
+      signal: null,
+      occurredAt: 3_500,
+      desktopReason: '../raw-renderer-message',
+    };
+    writeFileSync(path, JSON.stringify(snapshot));
     await assert.rejects(
       () => new FilePluginInventoryStore(path).snapshot(),
       (error) => error?.code === 'CORRUPT_SNAPSHOT',

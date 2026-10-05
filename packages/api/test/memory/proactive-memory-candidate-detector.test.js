@@ -161,6 +161,47 @@ describe('ProactiveMemoryCandidateDetector', () => {
     assert.deepEqual(result, []);
   });
 
+  it('starts independent thread privacy reads together before one slow thread returns', async () => {
+    for (const threadId of ['thread-a', 'thread-b', 'thread-c', 'thread-d']) addThread(threadId);
+    append('Alden', 'thread-b', 100);
+    append('Alden', 'thread-c', 200);
+    append('Alden', 'thread-d', 300);
+    const current = append('Alden', 'thread-a', 400);
+
+    let releaseSlowRead;
+    let backgroundReads = 0;
+    const delayedThreadStore = {
+      get(threadId) {
+        if (threadId === 'thread-a') return threads.get(threadId);
+        backgroundReads += 1;
+        if (threadId === 'thread-d') throw new Error('privacy lookup unavailable');
+        if (backgroundReads === 1) {
+          return new Promise((resolve) => {
+            releaseSlowRead = () => resolve(threads.get(threadId));
+          });
+        }
+        return threads.get(threadId);
+      },
+    };
+
+    const pending = new ProactiveMemoryCandidateDetector(messageStore, delayedThreadStore, {
+      windowMs: 1_000,
+      recentWindowMs: 100,
+      minDistinctThreads: 2,
+      minDistinctMessages: 3,
+      minBackgroundMessages: 4,
+      minRecentBurstLift: 2,
+      maxNudgesPerTurn: 3,
+    }).detect({ ownerUserId: 'owner-1', currentUserMessageId: current.id, now: 400 });
+    await new Promise(setImmediate);
+    const readsBeforeSlowReturn = backgroundReads;
+    releaseSlowRead();
+    const result = await pending;
+
+    assert.ok(readsBeforeSlowReturn > 1, 'other threads should not wait for a slow privacy read');
+    assert.equal(result[0]?.distinctThreadCount, 3, 'failed privacy reads stay excluded');
+  });
+
   it('removes fixture-backed common phrases while keeping Alden', async () => {
     for (const threadId of ['thread-a', 'thread-b', 'thread-c']) addThread(threadId);
     append('公司，项目，昨天，Alden', 'thread-a', 100);

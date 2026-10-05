@@ -17,6 +17,7 @@ import {
 
 const viewport = { width: 1920, height: 1080 };
 const edgePos = { x: 100, y: 900 };
+const positionConstraints = { ballSize: 72, edgeMargin: 24, toolbarBelow: 44, reservedRects: [] } as const;
 
 // ---------------------------------------------------------------------------
 // "三不" #1: No focus hijack (AC-E4-6)
@@ -36,6 +37,7 @@ describe('No focus hijack', () => {
       walkSeed: 0.1,
       viewport,
       ballPosition: edgePos,
+      ...positionConstraints,
     });
 
     // Return value must be a plain object with only these keys
@@ -93,6 +95,7 @@ describe('No central obstruction', () => {
         walkSeed: seed,
         viewport,
         ballPosition: centerPos,
+        ...positionConstraints,
       });
       if (result.positionDelta) {
         const newX = centerPos.x + result.positionDelta.dx;
@@ -113,6 +116,7 @@ describe('No central obstruction', () => {
       walkSeed: 0.1,
       viewport,
       ballPosition: edgePos,
+      ...positionConstraints,
     });
     if (result.positionDelta) {
       const newX = edgePos.x + result.positionDelta.dx;
@@ -171,6 +175,7 @@ describe('No event spamming', () => {
         walkSeed: 0.1,
         viewport,
         ballPosition: edgePos,
+        ...positionConstraints,
       });
       if (result.positionDelta) {
         walkCount++;

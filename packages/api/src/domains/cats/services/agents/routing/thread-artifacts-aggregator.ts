@@ -13,7 +13,7 @@
  *   分类直接由数据源类型决定（rich block kind / task kind / ledger entry type）。
  */
 
-import { isSourceCodeExtension, type RichBlock, type ThreadArtifactDTO } from '@cat-cafe/shared';
+import { isSourceCodeExtension, type MessageContent, type RichBlock, type ThreadArtifactDTO } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../../stores/ports/MessageStore.js';
 import { getTimelineOrderTime } from '../../stores/visibility.js';
 
@@ -58,6 +58,7 @@ export interface AggregatorMessage {
   catId: string | null;
   timestamp: number;
   extra?: { rich?: { blocks?: RichBlock[] } };
+  contentBlocks?: readonly MessageContent[];
 }
 
 export interface AggregatorPrTask {
@@ -103,17 +104,26 @@ function blockToArtifacts(b: RichBlock, msg: AggregatorMessage): ThreadArtifactD
   switch (b.kind) {
     case 'media_gallery':
       return b.items.map(
-        (item): ThreadArtifactDTO => ({
+        (item, itemIndex): ThreadArtifactDTO => ({
           ...base,
           type: 'image',
           name: item.caption ?? item.alt ?? 'image',
           url: item.url,
+          publicationItem: { kind: 'media-gallery', blockId: b.id, itemIndex },
         }),
       );
     case 'file': {
       // AC-A9: video 识别——mimeType 优先，扩展名 fallback
       const isVideo = b.mimeType ? b.mimeType.startsWith('video/') : VIDEO_EXTENSIONS.has(extensionOf(b.fileName));
-      return [{ ...base, type: isVideo ? 'video' : 'file', name: b.fileName, url: b.url }];
+      return [
+        {
+          ...base,
+          type: isVideo ? 'video' : 'file',
+          name: b.fileName,
+          url: b.url,
+          publicationItem: { kind: 'rich-file', blockId: b.id },
+        },
+      ];
     }
     case 'diff':
       return [{ ...base, type: 'code', name: b.filePath, ref: b.filePath }];
@@ -133,6 +143,18 @@ function blockToArtifacts(b: RichBlock, msg: AggregatorMessage): ThreadArtifactD
 function richBlocksToArtifacts(messages: AggregatorMessage[]): ThreadArtifactDTO[] {
   const out: ThreadArtifactDTO[] = [];
   for (const msg of messages) {
+    for (const [index, block] of (msg.contentBlocks ?? []).entries()) {
+      if (block.type !== 'image' && block.type !== 'file') continue;
+      out.push({
+        catId: msg.catId,
+        createdAt: msg.timestamp,
+        sourceMessageId: msg.id,
+        type: block.type === 'image' ? 'image' : block.mimeType.startsWith('video/') ? 'video' : 'file',
+        name: block.type === 'image' ? '图片' : block.fileName,
+        url: block.url,
+        publicationItem: { kind: 'content-block', index },
+      });
+    }
     for (const b of msg.extra?.rich?.blocks ?? []) {
       out.push(...blockToArtifacts(b, msg));
     }
@@ -165,6 +187,7 @@ function fileLedgerToArtifacts(fileLedger: AggregatorFileLedgerEntry[]): ThreadA
     createdAt: f.updatedAt,
     sourceMessageId: null,
     ref: f.ref,
+    fileLedgerRef: f.ref,
   }));
 }
 

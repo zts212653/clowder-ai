@@ -1,6 +1,7 @@
 ---
 feature_ids: [F053]
-related_features: [F033]
+tips_exempt: "The September 29 change records F325 successor ownership for session continuity; it does not change the existing Gemini resume entry or ship a new carrier."
+related_features: [F033, F325]
 topics: [gemini, session, resume, parity, reliability]
 doc_kind: feature-spec
 created: 2026-03-03
@@ -10,6 +11,8 @@ updated: 2026-03-03
 # F053: Gemini Session/Resume 语义对齐
 
 > **Status**: done | **Owner**: Maine Coon
+
+**2026-09-29 successor**：本 F 的历史 done 裁定保留；新 AGY 官方载体的 session/resume 与跨载体连续性回归由 [F325](F325-antigravity-native-parity.md) A4/B4/D3 承接，不重开 Gemini CLI 路线。
 > **Priority**: P1
 > **依赖**: F033（Session Chain 策略）
 > **Updated**: 2026-03-03（Phase A + Phase B 全部落地）

@@ -3,10 +3,13 @@ import { existsSync, statfsSync } from 'node:fs';
 import { homedir, totalmem } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runModuleWorker } from '../../utils/run-module-worker.js';
 import type { EnvArch, EnvGpu, EnvironmentProfile, EnvOs, PythonArch } from './recommendation-types.js';
 
 const CACHE_TTL_MS = 30_000;
-let cached: { profile: EnvironmentProfile; expiresAt: number } | null = null;
+let inFlight: { key: string; promise: Promise<EnvironmentProfile> } | null = null;
+let generation = 0;
+let cached: { key: string; profile: EnvironmentProfile; expiresAt: number } | null = null;
 
 function resolveOs(): EnvOs {
   const p = process.platform;
@@ -273,16 +276,35 @@ export function detectEnvironmentSync(): EnvironmentProfile {
   };
 }
 
-export function getEnvironmentProfile(forceRefresh = false): EnvironmentProfile {
-  const now = Date.now();
-  if (!forceRefresh && cached && cached.expiresAt > now) {
-    return cached.profile;
-  }
-  const profile = detectEnvironmentSync();
-  cached = { profile, expiresAt: now + CACHE_TTL_MS };
-  return profile;
+export function getEnvironmentProfile(forceRefresh = false): Promise<EnvironmentProfile> {
+  const key = JSON.stringify([
+    process.env.PATH,
+    process.env.Path,
+    process.env.HOME,
+    process.env.CAT_CAFE_HOME,
+    process.env.PATHEXT,
+  ]);
+  if (!forceRefresh && cached?.key === key && cached.expiresAt > Date.now()) return Promise.resolve(cached.profile);
+  if (inFlight?.key === key) return inFlight.promise;
+  const startedGeneration = ++generation;
+  const pending = runModuleWorker<EnvironmentProfile>({
+    moduleUrl: new URL(import.meta.url),
+    exportName: 'detectEnvironmentSync',
+    timeoutMs: 60_000,
+  })
+    .then((profile) => {
+      if (generation === startedGeneration) cached = { key, profile, expiresAt: Date.now() + CACHE_TTL_MS };
+      return profile;
+    })
+    .finally(() => {
+      if (inFlight?.promise === pending) inFlight = null;
+    });
+  inFlight = { key, promise: pending };
+  return pending;
 }
 
 export function clearEnvironmentCache(): void {
   cached = null;
+  generation++;
+  inFlight = null;
 }

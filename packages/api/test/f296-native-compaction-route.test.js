@@ -9,7 +9,7 @@ async function fixture({ busy = false, cursorChanged = false, enabled = true, pr
       import('../dist/routes/native-session-control-routes.js'),
       import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'),
       import('../dist/domains/cats/services/agents/registry/AgentRegistry.js'),
-      import('../dist/domains/cats/services/session/ContextEpochOwner.js'),
+      import('../dist/domains/cats/services/session/context/ContextEpochOwner.js'),
       import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js'),
     ]);
   const app = Fastify();

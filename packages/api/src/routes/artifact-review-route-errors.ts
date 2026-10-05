@@ -1,7 +1,9 @@
 import type { FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import { ArtifactReviewError } from '../domains/collaborative-content/artifact-review/errors.js';
+import { WorkspaceContentReviewError } from '../domains/collaborative-content/workspace-review/errors.js';
 import { MediaOwnerError } from '../domains/video-studio/content-owner/media-errors.js';
+import { MessagePublicationChoiceRequired } from '../domains/video-studio/content-owner/message-publication-landing.js';
 import {
   ContentOwnerConflictError,
   ContentOwnerIdempotencyError,
@@ -9,8 +11,16 @@ import {
 } from '../domains/video-studio/content-owner/service.js';
 
 export function replyArtifactReviewError(reply: FastifyReply, error: unknown) {
+  if (error instanceof MessagePublicationChoiceRequired)
+    return reply.code(409).send({ error: 'publication_choice_required', ...error.landing });
   if (error instanceof ZodError) return reply.code(400).send({ error: 'invalid_request', details: error.issues });
-  if (error instanceof ArtifactReviewError || error instanceof MediaOwnerError) {
+  if (error instanceof ArtifactReviewError && ['request_superseded', 'request_cancelled'].includes(error.code))
+    return reply.code(409).send({ error: error.code, retryable: false });
+  if (
+    error instanceof ArtifactReviewError ||
+    error instanceof MediaOwnerError ||
+    error instanceof WorkspaceContentReviewError
+  ) {
     return reply.code(reviewErrorStatus(error.code)).send({ error: error.code });
   }
   if (error instanceof ContentOwnerNotFoundError) return reply.code(404).send({ error: 'not_found' });

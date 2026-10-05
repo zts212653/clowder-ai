@@ -32,10 +32,16 @@ test_usage_includes_alpha_commands() {
 test_print_alpha_env_exports() {
   local output
   output="$(print_alpha_env_exports)"
-  assert_contains "$output" "export REDIS_PORT=6398" "should pin redis port to 6398"
+  assert_contains "$output" "export REDIS_PORT=6397" "should pin Alpha to its own Redis port"
+  assert_contains "$output" "export REDIS_KEY_PREFIX=cat-cafe:" "should read the historic Alpha key namespace"
+  assert_contains "$output" "export REDIS_DATA_DIR=$ALPHA_DIR/.cat-cafe/redis" "should pin Alpha to its own Redis data"
+  assert_contains "$output" "export REDIS_BACKUP_DIR=$ALPHA_DIR/.cat-cafe/redis-backups" "should pin Alpha backups locally"
+  assert_contains "$output" "export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS=0" "should require an explicit empty-data decision"
   assert_contains "$output" "export API_SERVER_PORT=3012" "should pin api port to 3012"
   assert_contains "$output" "export FRONTEND_PORT=3011" "should pin frontend port to 3011"
   assert_contains "$output" "export PREVIEW_GATEWAY_PORT=4111" "should pin preview gateway port to 4111"
+  assert_contains "$output" "export COLLECTIVE_SERVICE_PORT=5211" "should pin the independent Service port"
+  assert_contains "$output" "export COLLECTIVE_SERVICE_DATA_DIR=$ALPHA_DIR/.cat-cafe/collective-service" "should pin the Alpha Service home"
   assert_contains "$output" "export ANTHROPIC_PROXY_ENABLED=0" "should disable proxy sidecar"
   assert_contains "$output" "export ASR_ENABLED=0" "should disable ASR sidecar"
   assert_contains "$output" "export TTS_ENABLED=0" "should disable TTS sidecar"
@@ -72,6 +78,77 @@ test_apply_alpha_env_overrides_inherited_runtime_paths() (
   }
   echo "PASS: alpha env replaces inherited runtime paths"
 )
+
+test_apply_alpha_env_pins_collective_service_to_alpha() (
+  local tmp_root
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$ALPHA_DIR/packages/web"
+  export COLLECTIVE_SERVICE_PORT=5201
+  export COLLECTIVE_SERVICE_DATA_DIR="$tmp_root/runtime-data"
+  export COLLECTIVE_GITHUB_CLIENT_ID=runtime-client
+  export COLLECTIVE_GITHUB_CLIENT_SECRET=runtime-secret
+  export WORKTREE_PORT_OFFSET=-10
+  export CAT_CAFE_RESPECT_DOTENV_PORTS=1
+
+  apply_alpha_env
+
+  [ "$REDIS_PORT" = "6397" ] || {
+    echo "FAIL: alpha must not attach to the shared worktree Redis port"
+    exit 1
+  }
+  [ "$REDIS_DATA_DIR" = "$ALPHA_DIR/.cat-cafe/redis" ] || {
+    echo "FAIL: alpha must pin its own Redis data directory"
+    exit 1
+  }
+
+  [ "$COLLECTIVE_SERVICE_PORT" = "5211" ] || {
+    echo "FAIL: alpha must not use the runtime Collective Service port"
+    exit 1
+  }
+  [ "$COLLECTIVE_SERVICE_DATA_DIR" = "$ALPHA_DIR/.cat-cafe/collective-service" ] || {
+    echo "FAIL: alpha must use its own Collective Service data directory"
+    exit 1
+  }
+  [ "$WORKTREE_PORT_OFFSET" = "0" ] || {
+    echo "FAIL: alpha must override an inherited worktree port offset"
+    exit 1
+  }
+  [ "$CAT_CAFE_RESPECT_DOTENV_PORTS" = "0" ] || {
+    echo "FAIL: alpha must keep its Redis port and data directory ahead of dotenv"
+    exit 1
+  }
+  [ -z "${COLLECTIVE_GITHUB_CLIENT_ID:-}" ] && [ -z "${COLLECTIVE_GITHUB_CLIENT_SECRET:-}" ] || {
+    echo "FAIL: alpha must not inherit runtime OAuth credentials"
+    exit 1
+  }
+  echo "PASS: alpha pins an isolated Collective Service without runtime OAuth credentials"
+)
+
+test_alpha_refuses_empty_target_when_legacy_redis_is_offline() {
+  local tmp_root blocked_output
+  tmp_root="$(mktemp -d)"
+  mkdir -p "$tmp_root/home/.cat-cafe/redis-worktree-6398"
+  printf 'legacy data\n' > "$tmp_root/home/.cat-cafe/redis-worktree-6398/dump.rdb"
+
+  if blocked_output="$(
+    HOME="$tmp_root/home"
+    REDIS_DATA_DIR="$tmp_root/alpha/redis"
+    ALPHA_REDIS_PORT=6397
+    ALPHA_EMPTY_REDIS_ALLOWED=false
+    redis-cli() { return 1; }
+    assert_alpha_redis_seeded 2>&1
+  )"; then
+    rm -rf "$tmp_root"
+    echo "FAIL: Alpha must not silently start empty while offline legacy Redis data exists"
+    return 1
+  fi
+  rm -rf "$tmp_root"
+  assert_contains "$blocked_output" "Alpha Redis migration required" "offline legacy data requires migration"
+  echo "PASS: offline legacy Redis data blocks an empty Alpha target"
+}
 
 test_apply_alpha_env_needs_no_f307_client_gate() (
   local tmp_root has_switch
@@ -281,6 +358,85 @@ test_is_api_running_checks_alpha_api_port() {
   echo "PASS: is_api_running checks the configured alpha api port"
 }
 
+test_stop_alpha_uses_owned_preview_lifecycle() (
+  local tmp_root calls
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  calls=""
+  node() {
+    calls="$calls|$*"
+    if [[ "$*" == *preview-process.mjs* ]]; then
+      printf '{"status":"stopped"}\n'
+      return 0
+    fi
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/missing-daemon.json"
+      return 0
+    fi
+    echo "unexpected daemon-state stop" >&2
+    return 7
+  }
+  is_api_running() { return 1; }
+  lsof() { return 1; }
+
+  stop_alpha_daemon
+  assert_contains "$calls" "preview-process.mjs stop --port 3011 --cwd $PROJECT_DIR" \
+    "alpha:stop should first stop the exact owned preview session"
+  echo "PASS: alpha stop uses the owned managed preview lifecycle"
+)
+
+test_stop_alpha_reports_an_orphaned_service() (
+  local tmp_root
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  node() {
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/missing-daemon.json"
+    else
+      printf '{"status":"stopped"}\n'
+    fi
+  }
+  is_api_running() { return 1; }
+  lsof() { return 0; }
+  if ( stop_alpha_daemon ) 2>/dev/null; then
+    echo "FAIL: alpha:stop must report a still-listening 5211 rather than claim success"
+    exit 1
+  fi
+  echo "PASS: alpha stop reports an orphaned Service"
+)
+
+test_stop_alpha_preserves_daemon_mode() (
+  local tmp_root calls
+  tmp_root="$(mktemp -d)"
+  trap 'rm -rf "$tmp_root"' EXIT
+  PROJECT_DIR="$tmp_root/cat-cafe"
+  ALPHA_DIR="$tmp_root/cat-cafe-alpha"
+  mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
+  touch "$tmp_root/daemon.json"
+  calls=""
+  node() {
+    if [[ "$*" == *"daemon-state.mjs path"* ]]; then
+      printf '%s\n' "$tmp_root/daemon.json"
+      return 0
+    fi
+    calls="$calls|$*"
+    return 0
+  }
+  is_api_running() { return 1; }
+  lsof() { return 1; }
+
+  stop_alpha_daemon
+  assert_contains "$calls" "daemon-state.mjs stop" "alpha:stop should preserve daemon ownership handling"
+  assert_contains "$calls" "preview-process.mjs stop" "alpha:stop should also close a managed preview when present"
+  echo "PASS: alpha stop preserves daemon mode"
+)
+
 test_build_alpha_stale_packages_rebuilds_missing_dist() {
   local tmp_root origin_dir src_dir alpha_dir
   tmp_root="$(mktemp -d)"
@@ -462,12 +618,17 @@ test_build_alpha_stale_packages_rebuilds_when_head_moved() {
 test_usage_includes_alpha_commands
 test_print_alpha_env_exports
 test_apply_alpha_env_overrides_inherited_runtime_paths
+test_apply_alpha_env_pins_collective_service_to_alpha
+test_alpha_refuses_empty_target_when_legacy_redis_is_offline
 test_apply_alpha_env_needs_no_f307_client_gate
 test_init_and_sync_alpha_worktree_ff_only
 test_ensure_alpha_branch_repairs_detached_worktree
 test_migrate_legacy_main_test_worktree_to_alpha_location
 test_resolve_env_source_file_falls_back_to_sibling_cat_cafe
 test_is_api_running_checks_alpha_api_port
+test_stop_alpha_uses_owned_preview_lifecycle
+test_stop_alpha_reports_an_orphaned_service
+test_stop_alpha_preserves_daemon_mode
 test_build_alpha_stale_packages_rebuilds_missing_dist
 test_build_alpha_stale_packages_skips_fresh_packages
 test_build_alpha_stale_packages_rebuilds_when_head_moved

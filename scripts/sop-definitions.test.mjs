@@ -35,7 +35,7 @@ const EXPECTED_PORTED_RULE_TEXTS = [
   '必须用 gh pr merge --squash（禁止本地 squash）',
   '云端 review 同一 SHA 不重复触发',
   'merge 前核对 feature doc 是否说真话（Status/AC/Phase vs 代码现实），merge 后记录已合入状态',
-  '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；未获co-creator授权时记录 live=dormant，不得冒充已生效',
+  '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；登记能力已加载时把普通 live=dormant 验收续办登记到原 work Task，能力未加载或登记失败时不得假报成功，且登记不授予停启权限',
   '本地 squash + push + gh pr close（PR 显示 closed 不是 merged）',
   '合入后擅自更新 runtime',
   '用户可见或愿景变化的 feat close 前必须有独立愿景守护',

@@ -32,6 +32,7 @@ interface RawStatusResponse {
   passage_warmup_active?: boolean;
   edges_count?: number;
   last_rebuild_at?: string | null;
+  last_document_updated_at?: string | null;
   embedding_model?: string | null;
   reason?: string;
   // F188 Phase K extension
@@ -51,6 +52,7 @@ export interface IndexStatusData {
   passageWarmupActive: boolean;
   edgesCount: number;
   lastRebuildAt: string | null;
+  lastDocumentUpdatedAt: string | null;
   embeddingModel: string | null;
   reason?: string;
   // F188 Phase K — default `'ok'` + `[]` when API omits them (older backend).
@@ -74,6 +76,7 @@ export function parseIndexStatus(raw: RawStatusResponse): IndexStatusData {
     passageWarmupActive: raw.passage_warmup_active ?? false,
     edgesCount: raw.edges_count ?? 0,
     lastRebuildAt: raw.last_rebuild_at ?? null,
+    lastDocumentUpdatedAt: raw.last_document_updated_at ?? null,
     embeddingModel: raw.embedding_model ?? null,
     reason: raw.reason,
     functionalStatus: raw.functionalStatus ?? 'ok',

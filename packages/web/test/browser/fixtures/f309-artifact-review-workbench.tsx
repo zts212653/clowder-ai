@@ -34,6 +34,7 @@ function ReviewHost() {
         openFilePath={null}
         preview={{ path: '/' }}
         onSelectDevSurface={() => undefined}
+        onOpenAppRoute={(href) => window.location.assign(href)}
       />
     </main>
   );

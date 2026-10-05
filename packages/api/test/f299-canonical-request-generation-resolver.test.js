@@ -97,7 +97,8 @@ function dependencies(eventsBySession) {
       get: async () => ({ id: 'thread-1', createdBy: 'user-1' }),
       list: async () => [{ id: 'thread-1', createdBy: 'user-1' }],
     },
-    readInvocationEvents: async (session) => eventsBySession[session.id] ?? [],
+    readInvocationEvents: async (sessions) =>
+      new Map(sessions.map((session) => [session.id, eventsBySession[session.id] ?? []])),
   };
 }
 

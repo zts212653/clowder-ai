@@ -79,6 +79,8 @@ export interface HcOverride {
 export const CAT_TIERS = ['primary', 'surface', 'text', 'inset', 'ring'] as const;
 export type CatTier = (typeof CAT_TIERS)[number];
 export const SURF_KEYS = ['sunken', 'base', 'elevated', 'canvas'] as const;
+/* Surface chroma = --surface-chroma x layer factor, in SURF_KEYS order. */
+export const SURF_FACTORS = [1.5, 1.2, 0.5, 0.3] as const;
 export const SEMANTIC_KEYS = ['critical', 'success', 'warning', 'info'] as const;
 export type SemanticKey = (typeof SEMANTIC_KEYS)[number];
 export const SEMANTIC_LABELS: Record<SemanticKey, string> = {

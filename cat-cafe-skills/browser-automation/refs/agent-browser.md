@@ -41,7 +41,7 @@ agent-browser close                            # 关闭浏览器
 
 ## 在家里的定位
 
-- 默认给 CLI-only / 无 `webfetch` / 无 VL 的猫（如 opencode 上的 glm）
+- 默认给 CLI-only / 无 `webfetch` / 无 VL 的猫（以 roster 能力字段为准）
 - 是 CLI 工具，不走 MCP — 猫直接用 Bash tool 调命令
 - 不取代 `browser-preview`（localhost）或 Playwright MCP（MCP 型猫的默认）
 

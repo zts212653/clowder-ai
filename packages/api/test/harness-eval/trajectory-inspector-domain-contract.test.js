@@ -22,7 +22,8 @@ const metricsUrl = new URL(
 
 describe('eval:trajectory-inspector first-party domain contract', () => {
   it('registers the weekly time-only source and F299 closure owner', async () => {
-    const domain = parseEvalDomainRegistryFile(parseYaml(await readFile(domainUrl, 'utf8')));
+    const registry = parseYaml(await readFile(domainUrl, 'utf8'));
+    const domain = parseEvalDomainRegistryFile(registry);
     assert.equal(domain.domainId, 'eval:trajectory-inspector');
     assert.equal(domain.systemThreadId, 'thread_eval_trajectory_inspector');
     assert.equal(domain.frequency, 'weekly');
@@ -34,7 +35,10 @@ describe('eval:trajectory-inspector first-party domain contract', () => {
       ownerCatId: 'fable5',
       threadLookup: 'feature-thread',
     });
-    assert.equal(domain.enabled, true);
+    // 2026-10-01: dormant by owner disposition (docs/discussions/2026-10-01-eval-into-f311/README.md).
+    assert.equal(domain.enabled, false);
+    assert.ok(registry.dormancy.decisionRef.length > 0);
+    assert.equal(domain.dormancy?.decisionRef, registry.dormancy.decisionRef);
   });
 
   it('publishes a glossary for the vector and validity bounds without an opening-rate or total-score metric', async () => {

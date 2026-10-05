@@ -226,7 +226,11 @@ describe('/api/capabilities returns pluginId for plugin-owned MCPs', () => {
   test('MCP board items include pluginId when capability has one', async () => {
     // This is a structural test: verify that the capabilities route code
     // includes pluginId in MCP board items by checking the source
-    const capabilitiesSource = await readFile(join(__dirname, '..', 'src', 'routes', 'capabilities.ts'), 'utf-8');
+    // F300 2.1: board items are built by the read service the route calls.
+    const capabilitiesSource = await readFile(
+      join(__dirname, '..', 'src', 'domains', 'capabilities', 'capability-read-service.ts'),
+      'utf-8',
+    );
 
     // The MCP board item construction should include pluginId
     // Find the mcpItem construction block

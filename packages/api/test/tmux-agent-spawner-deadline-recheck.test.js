@@ -36,6 +36,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, constants, openSync, readFileSync, writeFileSync, writeSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { spawnCliInTmux } from '../dist/domains/terminal/tmux-agent-spawner.js';
+import { resumeAfterFifoOpen } from './helpers/resume-after-fifo-open.js';
 
 const FIRST_EVENT_MS = 200;
 const IDLE_MS = 1500;
@@ -153,9 +154,8 @@ async function bootScenario() {
     original.clearInterval(h);
   };
 
-  // Kick the generator to arm both timers + settle at FIFO await.
-  const pending = gen.next();
-  await new Promise((resolve) => setImmediate(resolve));
+  // A setImmediate tick does not prove libuv completed the asynchronous FIFO open.
+  const { pending } = await resumeAfterFifoOpen(gen, fifoPath);
 
   assert.ok(firstEventHandle, 'first-event timer must be armed at generator resume');
   assert.ok(firstEventHandle.active, 'first-event handle must be active on arm');

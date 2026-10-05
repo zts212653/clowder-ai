@@ -14,6 +14,8 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { normalizeTranscriptEvent } from './TranscriptEventEnvelope.js';
 import { formatEventsHandoff, type HandoffInvocationSummary } from './TranscriptFormatter.js';
+import { TranscriptInvocationReader } from './transcript-index/TranscriptInvocationReader.js';
+import type { IndexedSession } from './transcript-index/transcript-invocation-index-types.js';
 
 export interface TranscriptEvent {
   v: number;
@@ -218,7 +220,10 @@ export class TranscriptReader {
       endIdx++;
     }
 
-    const pageSummaries = allSummaries.slice(startIdx, endIdx);
+    const pageSummaries = allSummaries.slice(startIdx, endIdx).map((summary, index) => ({
+      ...summary,
+      startEventNo: invocationMeta[startIdx + index].firstEventNo,
+    }));
     const hasMore = endIdx < invocationMeta.length;
 
     return {
@@ -355,36 +360,25 @@ export class TranscriptReader {
     threadId: string,
     catId: string,
     invocationId: string,
+    signal?: AbortSignal,
   ): Promise<TranscriptEvent[] | null> {
-    const sessionDir = this.sessionDir(threadId, catId, sessionId);
-    const jsonlPath = join(sessionDir, 'events.jsonl');
-
-    try {
-      await stat(jsonlPath);
-    } catch {
-      return null;
-    }
-
-    const events: TranscriptEvent[] = [];
-    const rl = createInterface({
-      input: createReadStream(jsonlPath, 'utf-8'),
-      crlfDelay: Infinity,
-    });
-
-    for await (const line of rl) {
-      if (line.trim().length === 0) continue;
-      try {
-        const evt = normalizeTranscriptEvent(JSON.parse(line));
-        if (!evt) continue;
-        if (evt.invocationId === invocationId) {
-          events.push(evt);
-        }
-      } catch {
-        /* skip malformed */
-      }
-    }
-
+    const pages = await this.readInvocationEventsForSessions(
+      [{ id: sessionId, threadId, catId, seq: 0, status: 'sealed' }],
+      invocationId,
+      signal,
+    );
+    const events = pages.get(sessionId) ?? [];
     return events.length > 0 ? events : null;
+  }
+
+  /** Batched canonical resolution avoids one worker and one whole-file scan per session. */
+  async readInvocationEventsForSessions(
+    sessions: readonly IndexedSession[],
+    invocationId: string,
+    signal?: AbortSignal,
+  ): Promise<Map<string, TranscriptEvent[]>> {
+    const pages = await new TranscriptInvocationReader(this).readInvocation(sessions, invocationId, {}, signal);
+    return new Map([...pages].map(([id, page]) => [id, page.events]));
   }
 
   /**

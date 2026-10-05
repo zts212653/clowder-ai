@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { dirname, resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
@@ -327,6 +327,11 @@ function createMockDeps(services, appendCalls, augmentCalls = []) {
 }
 
 describe('#573/#1332: explicit callback/final persistence semantics', () => {
+  beforeEach(async () => {
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    getRichBlockBuffer().destroy();
+  });
+
   it('does not re-dispatch a callback-routed source/target through the serial mention worklist', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
@@ -711,6 +716,42 @@ describe('#573/#1332: explicit callback/final persistence semantics', () => {
       turnInvocationId: 'inv-1',
     });
     assert.deepEqual(patch.extra.rich.blocks, [bufferedBlock]);
+  });
+
+  it('persists blocks created after an interim callback when the serial route appends its final', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const { getRichBlockBuffer } = await import('../dist/domains/cats/services/agents/invocation/RichBlockBuffer.js');
+    const buffer = getRichBlockBuffer();
+    const first = { id: 'interim-card', kind: 'card', v: 1, title: 'Interim' };
+    const later = { id: 'final-card', kind: 'card', v: 1, title: 'Final' };
+    const service = {
+      async *invoke() {
+        yield {
+          type: 'system_info',
+          catId: 'opus',
+          content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-1' }),
+          timestamp: Date.now(),
+        };
+        assert.equal(buffer.add('thread1', 'opus', first, 'inv-1'), 'added');
+        assert.deepEqual(buffer.consume('thread1', 'opus', 'inv-1', { final: false }), [first]);
+        assert.equal(buffer.add('thread1', 'opus', later, 'inv-1'), 'added');
+        yield { type: 'text', catId: 'opus', content: 'Final answer', timestamp: Date.now() };
+        yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+      },
+    };
+    const appendCalls = [];
+    const deps = createMockDeps({ opus: service }, appendCalls);
+
+    for await (const _msg of routeSerial(deps, ['opus'], 'hello', 'user1', 'thread1')) {
+      // drain
+    }
+
+    const final = appendCalls.find((message) => message.origin === 'stream' && message.catId === 'opus');
+    assert.deepEqual(final?.extra?.rich?.blocks, [later]);
+    assert.equal(
+      buffer.add('thread1', 'opus', { id: 'too-late', kind: 'card', v: 1, title: 'Late' }, 'inv-1'),
+      'rejected',
+    );
   });
 
   it('honors replace_final for namespaced cat_cafe_post_message tool names', async () => {

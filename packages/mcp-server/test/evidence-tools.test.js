@@ -313,6 +313,47 @@ describe('MCP Evidence Tools', () => {
     assert.ok(text.includes('provenance: F209 Phase B MCP contract test'), 'should render entity match provenance');
   });
 
+  test('F324: topk entire rendered envelope stays bounded with 2456 entity matches', async () => {
+    const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
+    const entityMatches = Array.from({ length: 2_456 }, (_, index) => ({
+      entityId: 'person:sol',
+      surface: `mention-${index}`,
+      source: 'passage',
+      docAnchor: 'thread:sol',
+      passageId: `passage-${index}`,
+      why: 'derived entity explanation '.repeat(8),
+      provenance: [{ source: 'entity registry', anchor: `passage-${index}` }],
+    }));
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        degraded: false,
+        results: Array.from({ length: 3 }, (_, index) => ({
+          title: `Sol naming ${index}`,
+          anchor: `thread:sol-${index}`,
+          snippet: 'Source remains available through its thread anchor.',
+          matchRank: 'high',
+          sourceType: 'discussion',
+          entityMatches,
+          drillDown: { tool: 'cat_cafe_get_thread_context', params: { threadId: `sol-${index}` } },
+        })),
+      }),
+    });
+
+    const result = await handleSearchEvidence({
+      query: 'Sol naming',
+      scope: 'threads',
+      mode: 'hybrid',
+      limit: 3,
+      include_expansion: false,
+    });
+    const text = result.content[0].text;
+    assert.ok(text.length <= 24_000, `topk MCP envelope used ${text.length} chars`);
+    for (let index = 0; index < 3; index += 1) assert.ok(text.includes(`thread:sol-${index}`));
+    assert.match(text, /entityMatches omitted/);
+    assert.match(text, /derived appendix.*not pageable/i);
+  });
+
   test('renders typed drillDown hints returned by search_evidence API', async () => {
     const { handleSearchEvidence } = await import('../dist/tools/evidence-tools.js');
 
@@ -562,7 +603,7 @@ describe('MCP Evidence Tools', () => {
         matrix: [
           {
             anchor: 'docs/iron-rules.md',
-            title: 'Redis production Redis (sacred)',
+            title: 'Redis production Redis (sacred) (sacred)',
             kind: 'lesson',
             matchType: 'direct',
             retrievalScore: 0.95,
@@ -595,14 +636,14 @@ describe('MCP Evidence Tools', () => {
       'coverage output should include the standard evidence result marker for live RecallFeed pairing',
     );
     assert.ok(text.includes('2'), 'should show total hits');
-    assert.ok(text.includes('Redis production Redis (sacred)'), 'should render matrix item titles');
+    assert.ok(text.includes('Redis production Redis (sacred) (sacred)'), 'should render matrix item titles');
     assert.ok(text.includes('docs/iron-rules.md'), 'should render anchors');
     assert.ok(text.includes('direct'), 'should show match types');
     assert.ok(text.includes('alias'), 'should show indirect match types');
     assert.ok(text.includes('frontmatter-alias'), 'should show expansion provenance');
     assert.ok(text.includes('retrievalScore: 0.95'), 'should label retrieval score explicitly');
     assert.ok(text.includes('edgeStrength: heuristic'), 'should label expansion edge strength explicitly');
-    assert.match(text, /^\[matchType:direct\] Redis production Redis \(sacred\)$/m);
+    assert.ok(text.split('\n').includes('[matchType:direct] Redis production Redis (sacred) (sacred)'));
     const sidecar = JSON.parse(text.match(/<recall-meta>(.+)<\/recall-meta>/)?.[1] ?? '{}');
     assert.equal(sidecar.previewItems?.[0]?.matchType, 'direct');
     assert.equal(sidecar.previewItems?.[0]?.matchRank, undefined);
@@ -854,6 +895,7 @@ describe('MCP Evidence Tools', () => {
       'readonly',
       'desktop:fable-phase0',
       'desktop:cloud-pro-phase0',
+      'desktop:live-companion',
     ]);
     assert.equal(tool.implementation.ref, 'module:./tools/evidence-tools.js#handleSearchEvidence');
   });

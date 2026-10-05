@@ -183,6 +183,7 @@ describe('computeEventBehavior', () => {
 describe('computeAmbientBehavior', () => {
   const viewport = { width: 1920, height: 1080 };
   const ballPos = { x: 100, y: 900 }; // bottom-left, outside center 40%
+  const positionConstraints = { ballSize: 72, edgeMargin: 24, toolbarBelow: 44, reservedRects: [] } as const;
 
   it('returns idle state when no behavior is active', () => {
     const result = computeAmbientBehavior({
@@ -193,6 +194,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.5,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('idle');
     expect(result.overlay).toBeNull();
@@ -211,6 +213,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.5,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('waving');
     expect(result.overlay).toBe('\u{1F4A4}'); // 💤
@@ -226,6 +229,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.5,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('idle');
     expect(result.overlay).toBeNull();
@@ -243,6 +247,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.5,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('idle');
     expect(result.overlay).toBeNull();
@@ -260,6 +265,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.1,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('idle');
     expect(result.overlay).toBeNull();
@@ -279,6 +285,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.1,
       viewport,
       ballPosition: ballPos,
+      ...positionConstraints,
     });
     expect(result.positionDelta).toBeNull();
   });
@@ -296,6 +303,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.1,
       viewport,
       ballPosition: centerPos,
+      ...positionConstraints,
     });
     if (result.positionDelta) {
       const newX = centerPos.x + result.positionDelta.dx;
@@ -329,6 +337,7 @@ describe('computeAmbientBehavior', () => {
       walkSeed: 0.5,
       viewport,
       ballPosition: largeBall,
+      ...positionConstraints,
     });
     expect(result.visualState).toBe('idle');
     expect(result.overlay).toBeNull();

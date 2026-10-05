@@ -72,6 +72,65 @@ describe('F293 RoutingPreferenceControls', () => {
     container.remove();
   });
 
+  it('opens a new preference draft without a prefilled internal evidence token', async () => {
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn()} />));
+
+    openPreferenceForm(container);
+    const evidence = container.querySelector<HTMLInputElement>('[name="preference-evidence"]');
+    if (!evidence) throw new Error('preference evidence input was not rendered');
+    expect(evidence.value).toBe('');
+    expect(evidence.placeholder).not.toBe('');
+  });
+
+  it('does not resurrect an internal evidence token when editing a revision that has none', async () => {
+    const noEvidenceRevision = { ...activeRevision, evidenceRefs: [] };
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () =>
+      root.render(<RoutingPreferenceControls revisions={[noEvidenceRevision]} onChanged={vi.fn()} />),
+    );
+
+    const edit = [...container.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    await act(async () => edit?.click());
+    const evidence = container.querySelector<HTMLInputElement>('[name="preference-evidence"]');
+    expect(evidence?.value).toBe('');
+  });
+
+  it('clears the inherited evidence token when a cancelled edit is followed by a new draft', async () => {
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () => root.render(<RoutingPreferenceControls revisions={[activeRevision]} onChanged={vi.fn()} />));
+
+    const edit = [...container.querySelectorAll('button')].find((button) => button.textContent === '编辑');
+    await act(async () => edit?.click());
+    expect(container.querySelector<HTMLInputElement>('[name="preference-evidence"]')?.value).toBe('decision:F293');
+
+    const cancel = [...container.querySelectorAll('button')].find((button) => button.textContent === '取消编辑');
+    await act(async () => cancel?.click());
+    openPreferenceForm(container);
+    expect(container.querySelector<HTMLInputElement>('[name="preference-evidence"]')?.value).toBe('');
+  });
+
+  it('clears the saved evidence token when a successful save is followed by a new draft', async () => {
+    mocks.create.mockResolvedValueOnce({ outcome: 'appended' });
+    const { RoutingPreferenceControls } = await import('../RoutingPreferenceControls');
+    await act(async () => root.render(<RoutingPreferenceControls revisions={[]} onChanged={vi.fn()} />));
+
+    openPreferenceForm(container);
+    const prefer = container.querySelector<HTMLInputElement>('[name="preference-prefer"]');
+    const rationale = container.querySelector<HTMLInputElement>('[name="preference-rationale"]');
+    const evidence = container.querySelector<HTMLInputElement>('[name="preference-evidence"]');
+    const form = container.querySelector<HTMLFormElement>('form');
+    if (!prefer || !rationale || !evidence || !form) throw new Error('preference form was not rendered');
+    act(() => Simulate.change(prefer, { target: { value: 'opus5' } } as never));
+    act(() => Simulate.change(rationale, { target: { value: '终审优先' } } as never));
+    act(() => Simulate.change(evidence, { target: { value: 'decision:F293' } } as never));
+    await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(mocks.create).toHaveBeenCalledOnce();
+
+    openPreferenceForm(container);
+    expect(container.querySelector<HTMLInputElement>('[name="preference-evidence"]')?.value).toBe('');
+  });
+
   it('does not claim a refresh happened when the post-conflict re-read also failed', async () => {
     const { RoutingContextCommandError } = await import('../routing-context-client');
     mocks.create.mockRejectedValueOnce(new RoutingContextCommandError('conflict', 409));

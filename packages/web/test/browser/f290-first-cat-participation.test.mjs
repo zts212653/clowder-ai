@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { CollectiveServiceStore, startCollectiveServer } from '../../../collective-service/dist/index.js';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { verifyFirstCatOwnerControls } from './f290-first-cat-owner.harness.mjs';
+import { verifyFirstEntryGuide } from './f290-first-entry-guide.harness.mjs';
 import { availablePort } from './f290-runtime-journey.harness.mjs';
 
 // Synthetic authenticated fixture only. Real GitHub two-Human/cat UAT remains a separate acceptance gate.
@@ -80,13 +81,19 @@ test(
       await page.goto(`${url}/?collectiveId=${collective.collectiveId}`, { waitUntil: 'networkidle' });
       await page.getByRole('heading', { name: '# general' }).waitFor();
       assert.equal(await page.getByText('WORKSHOP_CANARY', { exact: true }).count(), 0);
-      const key = (connection) => `${store.serviceInstanceId}:${connection.connectionId}:codex-astra`;
-      const recipientSelect = page.getByLabel('请求谁回应');
-      const options = await recipientSelect.locator('option').allTextContents();
-      assert.equal(options.filter((label) => label.includes('Astra')).length, 2);
-      assert.equal(new Set(options).size, 3, 'same-name options must remain visibly distinct');
-      await recipientSelect.selectOption(key(second));
-      await page.getByPlaceholder('发消息到 # general').fill('普通请求不自动产生持续委托');
+      const selectMention = async (scope, connection, placeholder = '在 #general 里说点什么……') => {
+        await scope.getByPlaceholder(placeholder).fill('@Astra');
+        const list = scope.getByRole('listbox', { name: '选择要提到的成员' });
+        const options = await list.getByRole('option').allTextContents();
+        assert.equal(options.filter((label) => label.includes('Astra')).length, 2);
+        assert.equal(new Set(options).size, 2, 'same-name choices must remain visibly distinct');
+        await list
+          .getByRole('option')
+          .filter({ hasText: connection.endpointId.slice(-6) })
+          .click();
+      };
+      await selectMention(page, second);
+      await page.getByPlaceholder('在 #general 里说点什么……').fill('普通请求不自动产生持续委托');
       await page.getByRole('button', { name: '发送', exact: true }).click();
       await page.locator('.message-body').filter({ hasText: '普通请求不自动产生持续委托' }).waitFor();
       let events = await store.listEventsForHuman(owner.sessionToken, collective.collectiveId);
@@ -98,11 +105,12 @@ test(
       await page.locator(`[data-event-id="${root.eventId}"]`).hover();
       await page
         .locator(`[data-event-id="${root.eventId}"]`)
-        .getByRole('button', { name: '回复', exact: true })
+        .getByRole('button', { name: '回复 Test Owner', exact: true })
         .click();
       const topic = page.getByRole('complementary', { name: '话题' });
-      await topic.getByLabel('请求谁回应').selectOption(key(first));
-      await topic.getByLabel('请求持续处理并回到此话题').check();
+      await selectMention(topic, first, '回复 Test Owner');
+      await topic.getByRole('button', { name: '更多输入选项', exact: true }).click();
+      await topic.getByLabel('请求持续处理', { exact: true }).check();
       await topic.getByPlaceholder('回复 Test Owner').fill('请在原话题持续处理并回流');
       await topic.getByRole('button', { name: '发送', exact: true }).click();
       await topic.locator('.message-body').filter({ hasText: '请在原话题持续处理并回流' }).waitFor();
@@ -137,7 +145,7 @@ test(
         evidence,
       });
 
-      await recipientSelect.selectOption('');
+      assert.equal(await page.getByRole('button', { name: '取消点名' }).count(), 0);
       const operationIds = [];
       await page.route('**/api/events/human', async (route) => {
         if (route.request().method() !== 'POST') return route.continue();
@@ -147,12 +155,12 @@ test(
         if (operationIds.length === 1) await route.abort('failed');
         else await route.fulfill({ response });
       });
-      await page.getByPlaceholder('发消息到 # general').fill('accepted 丢响应后重试同一条');
+      await page.getByPlaceholder('在 #general 里说点什么……').fill('accepted 丢响应后重试同一条');
       await page.getByRole('button', { name: '发送', exact: true }).click();
       await page.getByText('尚未确认送达，可以重试', { exact: true }).waitFor();
       await page.reload({ waitUntil: 'networkidle' });
       await page.getByRole('heading', { name: '# general' }).waitFor();
-      await page.getByPlaceholder('发消息到 # general').fill('accepted 丢响应后重试同一条');
+      await page.getByPlaceholder('在 #general 里说点什么……').fill('accepted 丢响应后重试同一条');
       await page.getByRole('button', { name: '发送', exact: true }).click();
       await page.getByText('已进入共同现场；这不代表某只猫已经接住', { exact: true }).waitFor();
       assert.equal(operationIds.length, 2);
@@ -166,16 +174,17 @@ test(
       service = await startCollectiveServer({ store, host: '127.0.0.1', port, allowedHostOrigins });
       await page.reload({ waitUntil: 'networkidle' });
       await page.getByText('普通请求不自动产生持续委托', { exact: true }).waitFor();
-      await recipientSelect.selectOption(key(first));
+      await selectMention(page, first);
       await store.revokeConnection({
         sessionToken: owner.sessionToken,
         collectiveId: collective.collectiveId,
         connectionId: first.connectionId,
       });
-      await page.getByRole('option', { name: '参与设置已变化，请重新选择' }).waitFor({ state: 'attached' });
-      await page.getByPlaceholder('发消息到 # general').fill('撤权后不得送达');
-      await page.getByRole('button', { name: '发送', exact: true }).click();
-      await page.getByText('尚未确认送达，可以重试', { exact: true }).waitFor();
+      await page.getByRole('alert').filter({ hasText: '参与设置已变化' }).waitFor();
+      await page.getByPlaceholder('在 #general 里说点什么……').fill('撤权后不得送达');
+      const revokedSend = page.getByRole('button', { name: '发送', exact: true });
+      assert.equal(await revokedSend.isDisabled(), true);
+      await revokedSend.evaluate((button) => button.click());
       events = await store.listEventsForHuman(owner.sessionToken, collective.collectiveId);
       assert.equal(
         events.some((event) => event.body === '撤权后不得送达'),
@@ -185,12 +194,15 @@ test(
         events.some((event) => event.eventId === entrusted.eventId),
         'revoke retains original request history',
       );
-      await page.getByLabel('选择频道', { exact: true }).selectOption('workshop');
+      await page
+        .getByRole('navigation', { name: '频道', exact: true })
+        .getByRole('button', { name: /workshop/ })
+        .click();
       await page.getByText('WORKSHOP_CANARY', { exact: true }).waitFor();
       assert.equal(
-        await recipientSelect.inputValue(),
-        '',
-        'changing channel clears stale recipient instead of retargeting',
+        await page.getByRole('button', { name: '取消点名' }).count(),
+        0,
+        'another channel never inherits the stale target',
       );
       console.log(
         JSON.stringify({
@@ -207,4 +219,10 @@ test(
       await rm(directory, { recursive: true, force: true });
     }
   },
+);
+
+test(
+  'embedded first entry demos stay off Service and hand a real named request to the cat',
+  { timeout: 60_000 },
+  verifyFirstEntryGuide,
 );

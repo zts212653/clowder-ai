@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-tips_exempt: internal plan-authoring guidance and command provenance; no distinct end-user capability
+tips_exempt: "Renewed 2026-10-02: clarify whether an accepted goal is implementable and whether the plan preserves its intended result; internal planning guidance adds no end-user capability."
 description: >
   把已接受的愿景与需求转成接手者可实施、可验收的计划。
   Use when: 跨组件、状态对象、依赖或实施顺序需要先理清，且没有足够的现成计划。
@@ -15,6 +15,8 @@ triggers:
 # Writing Plans
 
 计划让实际接手者能够按原始愿景实施与验收。历史上既有把模板写得很细却偏离目标，也有遗漏状态边界、留给 reviewer 逐轮补课的问题；计划应消除这些歧义。
+
+先判断输入是否已经是可实施的约定。愿望过宽、结果不可承诺或关键取舍未定时，先澄清真正影响方案的问题，不用模板替用户制造一个目标。已有清楚约定则直接沿用。按[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)核对拆分后的工作是否仍兑现同一个使用结果；实现步骤齐全不能代替这项判断。
 
 ## 必须做到
 

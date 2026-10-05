@@ -1,6 +1,6 @@
 ---
 feature_ids: [F210]
-related_features: [F053, F061, F089, F118, F149, F161, F179, F197, F198, F201]
+related_features: [F053, F061, F089, F118, F149, F161, F179, F197, F198, F201, F325]
 topics: [antigravity, gemini, cli, migration, provider]
 doc_kind: spec
 created: 2026-05-22
@@ -8,7 +8,7 @@ created: 2026-05-22
 
 # F210: Gemini CLI to Antigravity CLI Migration
 
-> **Status**: in-progress | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1
+> **Status**: frozen (superseded-by F325; not completed) | **Owner**: Maine Coon（Maine Coon） | **Priority**: P1
 
 Architecture cell: `transport`
 Map delta: none

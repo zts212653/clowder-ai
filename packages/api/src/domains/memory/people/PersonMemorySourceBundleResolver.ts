@@ -10,6 +10,12 @@ import {
 import type { IMessageStore, StoredMessage } from '../../cats/services/stores/ports/MessageStore.js';
 import { isDelivered } from '../../cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../../cats/services/stores/visibility.js';
+import {
+  normalizeOwnerMessageText,
+  ownerMessageTextDigestMaterial,
+  ownerMessageTextSegments,
+  resolveOwnerMessageExcerptSegment,
+} from './owner-message-text-projection.js';
 
 export interface PersonMemorySourceAuth {
   ownerUserId: string;
@@ -40,7 +46,7 @@ interface ResolverDeps {
 }
 
 export function normalizePersonMemorySourceText(value: string): string {
-  return value.normalize('NFKC').trim();
+  return normalizeOwnerMessageText(value);
 }
 
 function stableJson(value: unknown): string {
@@ -88,10 +94,14 @@ export function eligibleOwnerMessage(
 }
 
 export function explicitlyConfirmsAccuracy(message: StoredMessage): boolean {
-  const content = normalizePersonMemorySourceText(message.content);
-  if (/(?:不对|不准确|未确认|not correct|inaccurate)/iu.test(content)) return false;
-  return /(?:^|[\s，,。.!！])(?:对|是的|没错)(?:[\s，,。.!！]|$)|(?:转写|记录|内容).{0,24}(?:准确|没错|已确认)|\bconfirm(?:ed)?\b/iu.test(
-    content,
+  const ownerSegments = ownerMessageTextSegments(message).map((segment) => segment.text);
+  if (ownerSegments.some((content) => /(?:不对|不准确|未确认|not correct|inaccurate)/iu.test(content))) {
+    return false;
+  }
+  return ownerSegments.some((content) =>
+    /(?:^|[\s，,。.!！])(?:对|是的|没错)(?:[\s，,。.!！]|$)|(?:转写|记录|内容).{0,24}(?:准确|没错|已确认)|\bconfirm(?:ed)?\b/iu.test(
+      content,
+    ),
   );
 }
 
@@ -200,10 +210,10 @@ export class PersonMemorySourceBundleResolver {
   ) {
     const message = await this.deps.messageStore.getById(input.messageId);
     if (!eligibleOwnerMessage(message, auth)) return { status: 'invalid' as const, error: 'invalid_message_source' };
-    if (!normalizePersonMemorySourceText(message.content).includes(normalizePersonMemorySourceText(input.excerpt))) {
+    if (!resolveOwnerMessageExcerptSegment(message, input.excerpt)) {
       return { status: 'invalid' as const, error: 'source_excerpt_mismatch' };
     }
-    const resolvedDigest = digestPersonMemorySourceMaterial(message.content);
+    const resolvedDigest = digestPersonMemorySourceMaterial(ownerMessageTextDigestMaterial(message));
     if (input.expectedDigest && input.expectedDigest !== resolvedDigest) {
       return { status: 'invalid' as const, error: 'source_digest_mismatch' };
     }
@@ -267,7 +277,7 @@ export class PersonMemorySourceBundleResolver {
     }
     const resolvedDigest = digestPersonMemorySourceMaterial({
       transcript: normalizePersonMemorySourceText(input.transcript),
-      confirmation: normalizePersonMemorySourceText(confirmation.content),
+      confirmation: ownerMessageTextDigestMaterial(confirmation),
     });
     return {
       status: 'resolved' as const,
@@ -303,7 +313,7 @@ export class PersonMemorySourceBundleResolver {
     }
     const resolvedDigest = digestPersonMemorySourceMaterial({
       artifactDigest: artifact.digest,
-      confirmation: normalizePersonMemorySourceText(confirmation.content),
+      confirmation: ownerMessageTextDigestMaterial(confirmation),
     });
     return {
       status: 'resolved' as const,

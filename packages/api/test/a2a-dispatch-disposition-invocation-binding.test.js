@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Fastify from 'fastify';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 import './helpers/setup-cat-registry.js';
 
 import { createCatId } from '@cat-cafe/shared';
@@ -160,8 +161,9 @@ test('the real callback completes and replays its bound source despite a heartbe
 const redisUrl = process.env.REDIS_URL;
 test(
   'restart rehydrates the exact A2A source before disposition',
-  { skip: !redisUrl || redisUrl.includes(':6399') ? 'requires isolated Redis, never 6399' : false },
+  { skip: redisIsolationSkipReason(redisUrl) },
   async () => {
+    assertRedisIsolationOrThrow(redisUrl, 'a2a-dispatch-disposition-invocation-binding');
     const keyPrefix = `cat-cafe-test:a2a-source:${process.pid}:`;
     let redis = createRedisClient({ url: redisUrl, keyPrefix });
     let activeRegistry = new InvocationRegistry({ backend: new RedisAuthInvocationBackend(redis) });

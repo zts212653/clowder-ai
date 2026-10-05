@@ -32,7 +32,7 @@ import {
 import { profilePointerEmitted } from '../../../../../infrastructure/telemetry/instruments.js';
 import { FileProfileRepository } from '../../profile/ProfileRepository.js';
 import { L0DependencySignatureTracker } from './l0-dependency-signature.js';
-import { type L0CacheGeneration, L0ProfileCache } from './l0-profile-cache.js';
+import { type L0CacheGeneration, L0ProfileCache, type L0Projection } from './l0-profile-cache.js';
 
 const SCRIPT_BASENAME = 'compile-system-prompt-l0.mjs';
 const l0Cache = new L0ProfileCache();
@@ -133,6 +133,8 @@ export interface CompileL0Options {
   catId: string;
   /** User whose private profile is compiled. Defaults to CAT_CAFE_USER_ID/default-user. */
   userId?: string;
+  /** Private Work retains home L0 without USER_CAPSULE; public uses its separate bounded projection. */
+  projection?: L0Projection;
   /** Canonical data root test/config seam. Defaults to CAT_CAFE_DATA_DIR/~/.cat-cafe. */
   dataDir?: string;
   /**
@@ -147,6 +149,40 @@ export interface CompileL0Options {
   spawnFn?: typeof nodeSpawn;
 }
 
+type L0ProjectionContext =
+  | { readonly projection: Exclude<L0Projection, 'owner'>; readonly profileSignature: string }
+  | { readonly projection: 'owner'; readonly profileDir: string; readonly profileSignature: string | null };
+
+function resolveProjection(options: CompileL0Options): L0Projection {
+  if (options.projection === undefined) return 'owner';
+  if (options.projection === 'owner' || options.projection === 'public' || options.projection === 'collective-work')
+    return options.projection;
+  throw new Error(`Unsupported L0 projection: ${String(options.projection)}`);
+}
+
+function resolveProjectionContext(
+  options: CompileL0Options,
+  userId: string,
+  cacheKey: string,
+  projection: L0Projection,
+): L0ProjectionContext {
+  if (projection !== 'owner') return { projection, profileSignature: `l0-projection:${projection}` };
+  const profileDir = new FileProfileRepository({ dataDir: options.dataDir }).profileDir(userId);
+  return {
+    projection,
+    profileDir,
+    profileSignature: l0Cache.refreshProfileSignature(cacheKey, profileDir),
+  };
+}
+
+function projectionProfileIsCurrent(context: L0ProjectionContext): boolean {
+  return (
+    context.projection !== 'owner' ||
+    (context.profileSignature !== null &&
+      l0Cache.profileSignatureIsCurrent(context.profileDir, context.profileSignature))
+  );
+}
+
 /**
  * Compile per-cat L0 by invoking the Phase B CLI as a subprocess.
  * @returns the compiled L0 string (file content when `outPath` is set, else stdout).
@@ -156,12 +192,13 @@ export interface CompileL0Options {
 export async function compileL0ViaSubprocess(options: CompileL0Options): Promise<string> {
   const { catId, outPath } = options;
   const userId = options.userId ?? process.env.CAT_CAFE_USER_ID ?? DEFAULT_PROFILE_USER_ID;
-  const key = l0Cache.key(userId, catId);
+  const projection = resolveProjection(options);
+  const key = l0Cache.key(userId, catId, projection);
   const cwd = options.cwd ?? process.cwd();
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   const dependencySignature = scriptPath ? refreshL0DependencySignature(cwd, scriptPath) : null;
-  const profileDir = new FileProfileRepository({ dataDir: options.dataDir }).profileDir(userId);
-  const profileSignature = l0Cache.refreshProfileSignature(key, profileDir);
+  const projectionContext = resolveProjectionContext(options, userId, key, projection);
+  const { profileSignature } = projectionContext;
 
   // Cache hit — skip subprocess entirely
   const cached = dependencySignature && profileSignature !== null ? l0Cache.get(key) : undefined;
@@ -190,8 +227,7 @@ export async function compileL0ViaSubprocess(options: CompileL0Options): Promise
     key,
     compileGeneration,
     dependencySignature,
-    profileSignature,
-    profileDir,
+    projectionContext,
   );
   l0Cache.setInflight(key, compilePromise);
   try {
@@ -214,10 +250,10 @@ async function doCompileL0(
   cacheKey: string,
   compileGeneration: L0CacheGeneration,
   dependencySignature: string | null,
-  profileSignature: string | null,
-  profileDir: string,
+  projectionContext: L0ProjectionContext,
 ): Promise<string> {
   const { catId, outPath, cwd = process.cwd(), spawnFn = nodeSpawn } = options;
+  const { profileSignature } = projectionContext;
   const scriptPath = resolveL0CompilerScriptPath(cwd);
   if (!scriptPath) {
     throw new Error(
@@ -226,7 +262,16 @@ async function doCompileL0(
   }
 
   // F231 KD-19: private profile truth is user-scoped persistent data, never cwd/worktree state.
-  const args = [scriptPath, '--cat', catId, '--profile-dir', profileDir, ...(outPath ? ['--out', outPath] : [])];
+  // Public and private Work compilation receive neither profile paths nor bytes.
+  const args = [
+    scriptPath,
+    '--cat',
+    catId,
+    ...(projectionContext.projection !== 'owner'
+      ? ['--projection', projectionContext.projection]
+      : ['--profile-dir', projectionContext.profileDir]),
+    ...(outPath ? ['--out', outPath] : []),
+  ];
 
   const stdout = await new Promise<string>((resolvePromise, rejectPromise) => {
     const child = spawnFn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -273,7 +318,7 @@ async function doCompileL0(
     dependencySignature &&
     profileSignature !== null &&
     dependencySignatures.isCurrent(dependencySignature) &&
-    l0Cache.profileSignatureIsCurrent(profileDir, profileSignature) &&
+    projectionProfileIsCurrent(projectionContext) &&
     l0Cache.generationIsCurrent(cacheKey, compileGeneration)
   ) {
     l0Cache.set(cacheKey, result, profileSignature);

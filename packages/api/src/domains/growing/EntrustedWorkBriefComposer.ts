@@ -1,7 +1,7 @@
 import type { EntrustedWorkOwnerReadV1, ProducerAttentionReceiptV1 } from '@cat-cafe/shared';
 
 interface EntrustedWorkBriefInput {
-  currentState: 'todo' | 'doing' | 'blocked';
+  currentState: 'todo' | 'doing' | 'blocked' | 'done';
   taskOwnerCatId?: string | null;
   ownerRef: string;
   ownerUserId: string;
@@ -59,6 +59,8 @@ function composeVerifiedMilestone(
   eligibleReceipts: EligibleReceipt[],
 ): Brief['verifiedMilestone'] {
   if (input.freshnessState === 'stale') return { kind: 'unknown', reason: 'stale_owner_read' };
+  if (input.currentState === 'done')
+    return { kind: 'work_completed', evidenceRef: input.ownerRef, revision: input.revision };
   const [soleReceipt, secondReceipt] = eligibleReceipts;
   if (soleReceipt && !secondReceipt) {
     return {
@@ -75,9 +77,14 @@ function composeVerifiedMilestone(
       revision: input.preparedArtifact.artifactRevision,
     };
   }
-  const primaryTime = ['review_by', 'business_deadline', 'execution_trigger'].flatMap((role) =>
-    input.timeRefs.filter((timeRef) => timeRef.role === role),
-  )[0];
+  const primaryTime = [
+    'review_by',
+    'business_deadline',
+    'estimated_completion',
+    'planned_start',
+    'actual_start',
+    'execution_trigger',
+  ].flatMap((role) => input.timeRefs.filter((timeRef) => timeRef.role === role))[0];
   if (primaryTime) {
     return {
       kind: 'time_committed',
@@ -93,7 +100,7 @@ function composeNextOwner(
   input: EntrustedWorkBriefInput,
   evidence: Extract<Brief['needsMe'], { state: 'needed' }>['evidence'],
 ): Brief['nextOwner'] {
-  if (input.freshnessState === 'stale') return { kind: 'unknown' };
+  if (input.freshnessState === 'stale' || input.currentState === 'done') return { kind: 'unknown' };
   if (evidence.length > 0) return { kind: 'human', ownerRef: `user:${input.ownerUserId}`, evidence };
   if (!input.taskOwnerCatId) return { kind: 'unknown' };
   return {

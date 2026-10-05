@@ -1,4 +1,8 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -197,35 +201,33 @@ function parseHostVersion(output: string): string | undefined {
   return output.match(/\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?\b/)?.[0];
 }
 
-function defaultVersionProbe(command: string): string {
-  return execFileSync(command, ['--version'], {
+async function defaultVersionProbe(command: string): Promise<string> {
+  const { stdout } = await execFileAsync(command, ['--version'], {
     encoding: 'utf8',
     timeout: 2_000,
     maxBuffer: 16 * 1024,
-    stdio: ['ignore', 'pipe', 'pipe'],
   });
+  return stdout;
 }
 
 export function createMemoizedHostVersionProbe(
-  probe: (command: string) => string = defaultVersionProbe,
-): (command: string) => string | undefined {
-  const cache = new Map<string, string | undefined>();
-  return (command: string): string | undefined => {
-    if (cache.has(command)) return cache.get(command);
-    let version: string | undefined;
-    try {
-      version = parseHostVersion(probe(command));
-    } catch {
-      version = undefined;
-    }
-    cache.set(command, version);
-    return version;
+  probe: (command: string) => string | Promise<string> = defaultVersionProbe,
+): (command: string) => Promise<string | undefined> {
+  const cache = new Map<string, Promise<string | undefined>>();
+  return (command: string): Promise<string | undefined> => {
+    const cached = cache.get(command);
+    if (cached) return cached;
+    const pending = Promise.resolve()
+      .then(() => probe(command))
+      .then(parseHostVersion, () => undefined);
+    cache.set(command, pending);
+    return pending;
   };
 }
 
 export const getMemoizedMcpHostVersion = createMemoizedHostVersionProbe();
 
-export function resolveMcpSchemaDeliveryForProviderLaunch(input: {
+export async function resolveMcpSchemaDeliveryForProviderLaunch(input: {
   readonly repoRoot: string;
   readonly command: string;
   readonly provider: string;
@@ -234,10 +236,10 @@ export function resolveMcpSchemaDeliveryForProviderLaunch(input: {
   readonly profileClass: RequestGenerationSchemaDeliveryV1['profileClass'];
   readonly profileId: string;
   readonly config: unknown;
-  readonly hostVersionProbe?: (command: string) => string | undefined;
+  readonly hostVersionProbe?: (command: string) => string | undefined | Promise<string | undefined>;
   readonly onHealthEvent?: (event: McpSchemaDeliveryHealthEvent) => void;
-}): RequestGenerationSchemaDeliveryV1 {
-  const hostVersion = (input.hostVersionProbe ?? getMemoizedMcpHostVersion)(input.command);
+}): Promise<RequestGenerationSchemaDeliveryV1> {
+  const hostVersion = await (input.hostVersionProbe ?? getMemoizedMcpHostVersion)(input.command);
   if (!hostVersion) {
     input.onHealthEvent?.({
       code: 'mcp_schema_delivery_host_version_unavailable',

@@ -680,6 +680,7 @@ describe('GeminiAgentService (antigravity-cli adapter)', () => {
       ['gemini-2.5-pro', 'Gemini 3.1 Pro (High)'],
       ['gemini-2.5-flash', 'Gemini 3.5 Flash (High)'],
       ['gemini-3.6-flash', 'Gemini 3.6 Flash (High)'],
+      ['gemini-3.8-flash', 'Gemini 3.8 Flash (High)'],
     ]) {
       const proc = createMockProcess();
       const spawnFn = createMockSpawnFn(proc);

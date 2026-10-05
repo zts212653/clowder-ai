@@ -204,8 +204,9 @@ export async function verifyMicroduckPreparationReading({
   await candidateSummary.waitFor();
   assert.equal(await candidateSummary.count(), 1);
   await candidate.click();
-  const selectedHeading = program.getByRole('heading', {
-    name: '正在阅读 action_scale = 1.10',
+  const exploration = program.getByTestId('evolution-exploration-workspace');
+  const selectedHeading = exploration.getByRole('heading', {
+    name: 'action_scale = 1.10',
     exact: true,
   });
   await selectedHeading.waitFor();
@@ -214,7 +215,9 @@ export async function verifyMicroduckPreparationReading({
   await program.locator('.exploration-owner-evidence > summary').click();
   await program.getByText('暂时无法确认此版本的候选独立验证证据。', { exact: true }).waitFor();
   assert.equal(await program.getByText('后续任务已实际使用这个版本', { exact: true }).count(), 0);
-  assert.doesNotMatch(await program.locator('.exploration-selection-heading').innerText(), /当前沿用/);
+  assert.doesNotMatch(await exploration.locator('.exploration-decision-header').innerText(), /当前沿用/);
+  await exploration.getByRole('button', { name: '改动与依据', exact: true }).click();
+  await exploration.locator('.exploration-adoption > summary').click();
   assert.match(
     await program.getByRole('status', { name: '当前沿用', exact: true }).innerText(),
     /官方 walking ONNX baseline/,

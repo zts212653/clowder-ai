@@ -83,6 +83,13 @@ for (const consumer of ['stream', 'duplex']) {
             JSON.stringify({ bin: realBin, socket, stage, witness: witnessPath }),
           );
           const proxy = join(directory, 'tmux.cjs');
+          // The proxy runs as a standalone script materialized here, so anything
+          // it requires must be materialized beside it — its __dirname is this
+          // directory, not the fixtures directory.
+          writeFileSync(
+            join(directory, 'atomic-witness.cjs'),
+            readFileSync(new URL('./fixtures/atomic-witness.cjs', import.meta.url), 'utf8'),
+          );
           writeFileSync(
             proxy,
             `#!${process.execPath}\n${readFileSync(new URL('./fixtures/tmux-setup-stall-proxy.cjs', import.meta.url), 'utf8')}`,

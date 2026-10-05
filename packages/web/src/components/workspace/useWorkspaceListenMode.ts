@@ -21,7 +21,7 @@ export function useWorkspaceListenMode({ file, openFilePath, worktreeId, enabled
   const sentences = useMemo(() => (enabled ? extractListenSentences(file.content) : []), [enabled, file.content]);
   const descriptor = useMemo(
     () =>
-      openFilePath
+      enabled && openFilePath && currentProjectPath
         ? {
             identity: {
               projectPath: currentProjectPath,
@@ -33,10 +33,17 @@ export function useWorkspaceListenMode({ file, openFilePath, worktreeId, enabled
             sentences,
           }
         : null,
-    [currentProjectPath, file.sha256, openFilePath, sentences, worktreeId],
+    [currentProjectPath, file.sha256, openFilePath, sentences, worktreeId, enabled],
   );
+  const sameDocument =
+    !!listenSession &&
+    listenSession.identity.projectPath === currentProjectPath &&
+    listenSession.identity.relativePath === openFilePath;
   const active =
-    listenSession?.identity.projectPath === currentProjectPath && listenSession.identity.relativePath === openFilePath;
+    enabled &&
+    sameDocument &&
+    listenSession?.worktreeId === worktreeId &&
+    listenSession.identity.contentDigest.replace(/^sha256:/, '') === file.sha256.replace(/^sha256:/, '');
   const cacheKey = descriptor ? listenDocumentCacheKey(descriptor.identity) : '';
   const cachedProjection = useListenModeStore((state) => (cacheKey ? state.cacheByDocument[cacheKey] : undefined));
   useEffect(() => {
@@ -66,8 +73,10 @@ export function useWorkspaceListenMode({ file, openFilePath, worktreeId, enabled
   };
 
   return {
+    cacheKey,
     sentences,
     active,
+    previousVersion: sameDocument && listenSession?.worktreeId === worktreeId && !active,
     activeAnchor: active ? listenSession?.sentences[listenSession.currentIndex]?.anchor : undefined,
     start,
     startCache,

@@ -1,6 +1,7 @@
 ---
 feature_ids: [F149]
-related_features: [F143, F053, F115, F118, F050]
+tips_exempt: "The September 29 change records F325 reuse of existing ACP infrastructure; it adds no user entry, account setup or runtime operation."
+related_features: [F143, F053, F115, F118, F050, F325]
 topics: [acp, runtime, process-pool, session-lease, gemini, agent-hosting]
 doc_kind: spec
 created: 2026-03-31
@@ -10,6 +11,8 @@ updated: 2026-04-02
 # F149: ACP Runtime Operations — 项目级进程池 + Session Lease
 
 > **Status**: done | **Owner**: Maine Coon/gpt52 | **Priority**: P1
+
+**2026-09-29 reuse**：[F325](F325-antigravity-native-parity.md) 复用本 F 的通用 ACP pool/session lease 与生命周期基础设施，旧 Gemini carrier 退役不等于通用 ACP 退役；AGY 专属验收归 F325。
 
 ## Why
 

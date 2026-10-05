@@ -132,8 +132,33 @@ export interface MessageMetadata {
   subexecutionEvents?: readonly ProviderSubexecutionSemanticEvent[];
   /** F061: false when provider cannot verify which model actually ran (e.g. CDP bridge) */
   modelVerified?: boolean;
+  /**
+   * F319: model the upstream declared in its response object. Absent = not
+   * observed (honest unknown), never a copy of `model`. Compare with `model`
+   * to detect silent substitution.
+   */
+  servedModel?: string;
+  /** F319: upstream response id the served model was read from (for provider support lookups). */
+  servedResponseId?: string;
+  /** F319: how servedModel was observed (HTTPS SSE trace or builtin websocket frame trace). */
+  servedModelSource?: 'sse_response_object' | 'ws_response_object';
+  /**
+   * F319 Phase B.2: length of the upstream `x-codex-turn-state` sticky-routing
+   * token for this turn (the token itself is never stored). Informational —
+   * measured identical on normal and rerouted turns, so not a reroute signal.
+   */
+  upstreamTurnStateLength?: number;
+  /** F319 Phase B.2: `x-codex-safety-buffering-faster-model` header (account-level, informational). */
+  upstreamSafetyBufferingFasterModel?: string;
+  /** F319 Phase B.2: `response.safety_buffering` flag from the upstream response object. */
+  upstreamSafetyBuffering?: boolean;
   /** F061: diagnostic context attached when empty_response is triggered */
   diagnostics?: Record<string, unknown>;
+  /** Carrier-owned pre-turn tool availability failure for recoverable callers. */
+  requiredToolsUnavailable?: {
+    readonly code: 'required_tools_unavailable';
+    readonly missingTools: readonly string[];
+  };
   /** F061 Phase 3: structured upstream error classification for recovery decisions */
   upstreamError?: {
     kind: 'capacity' | 'network' | 'stream_interrupted' | 'invalid_tool_call' | 'unknown';
@@ -293,6 +318,8 @@ export interface AgentMessage {
   toolChannel?: 'analysis' | 'commentary' | 'final' | 'unknown';
   /** Tool input parameters (for 'tool_use' type) */
   toolInput?: Record<string, unknown>;
+  /** Native completed-file result captured at event birth; never inferred from a later session directory. */
+  fileResultEvidence?: import('./agents/providers/native-file-result-evidence.js').NativeFileResultEvidence;
   /** F153 Phase J AC-J1: native provider tool call id; used to pair tool_use ↔ tool_result for real-duration spans.
    *  Provider transformers MUST inject this from raw payload when available (Claude tool_use.id,
    *  CatAgent tool_use_id, Codex item.id, etc). Providers without native id may omit; ToolSpanTracker treats
@@ -326,6 +353,8 @@ export interface AgentMessage {
   origin?: 'stream' | 'callback';
   /** Canonical stored-message ID once persistence has completed. */
   messageId?: string;
+  /** F309: the stored message's own timestamp (its publication revision); absent when unknown. */
+  messageTimestamp?: number;
   /** F52: Cross-thread origin metadata (set for cross-thread callback messages) */
   extra?: {
     crossPost?: {
@@ -823,7 +852,18 @@ export type ToolExecutionPolicy =
       readonly mode: 'read_only';
       readonly replayDeniedToolNames: readonly string[];
     }
-  | { readonly mode: 'collective_participation' };
+  | { readonly mode: 'collective_participation' }
+  | { readonly mode: 'callback_allowlist'; readonly allowedCallbackRoutes: readonly string[] }
+  | {
+      readonly mode: 'collective_work';
+      readonly taskId: string;
+      readonly threadId: string;
+      readonly executionRevision: number;
+      readonly executionRef: string;
+      readonly workspaceRoot: string;
+      /** Only host-resolved, explicitly admitted resources; never inferred from external prose. */
+      readonly readOnlyRoots: readonly string[];
+    };
 
 /**
  * Route-owned intent projection for provider behavior controls.
@@ -839,10 +879,14 @@ export interface AgentRouteIntent {
  * Options for invoking an agent
  */
 export interface AgentServiceOptions {
+  /** F317 Host-only continuous companion port; no model-supplied configuration. */
+  liveCompanion?: import('./agents/providers/CodexLiveRunPort.js').CodexLiveRunPort;
   /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
   routeIntent?: AgentRouteIntent;
   /** Session ID to resume (optional) */
   sessionId?: string;
+  /** MCP server-qualified tool IDs (`serverName::toolName`) required before this invocation may start. */
+  requiredTools?: readonly string[];
   /**
    * #1542: launch plan for the managed Claude compaction carrier. Built once
    * per print-SDK attempt by invoke-single-cat; ClaudeAgentService derives the
@@ -921,12 +965,27 @@ export interface AgentServiceOptions {
   parentSpan?: Span;
   /** ADR-042 hard execution boundary for automatic supplement checks. */
   toolExecutionPolicy?: ToolExecutionPolicy;
+  /** F325: host-authored, per-turn AGY native grants. Never derive from model text or member CLI args. */
+  agyNativeScope?: {
+    readonly workspaceRoot?: string;
+    readonly taskId?: string;
+    readonly testFile?: string;
+    readonly writableFiles: readonly string[];
+    readonly mcpTools: readonly string[];
+  };
   /**
    * F299 Phase D: fail-closed recorder invoked by the concrete adapter after
    * its final message/native channels are immutable and immediately before
    * those same values cross the provider boundary.
    */
   beforeProviderLaunch?: (request: PreparedProviderRequestV1) => Promise<ProviderRequestGenerationCommitV1>;
+  onLiveInputOutcome?: (receipt: LiveProviderInputOutcome) => Promise<void>;
+}
+
+export interface LiveProviderInputOutcome {
+  request: ProviderRequestGenerationCommitV1;
+  outcome: 'accepted' | 'rejected' | 'error' | 'cancelled';
+  nativeTurnId?: string;
 }
 
 export interface PreparedProviderRequestV1 {
@@ -1073,7 +1132,9 @@ export interface AgentService {
   supportsToolExecutionPolicy?(policy: ToolExecutionPolicy): boolean;
 
   /** F254 D2: effective carrier capability for this concrete service instance. */
-  freshnessCarrierCapability?(): AgentFreshnessCarrierCapability;
+  freshnessCarrierCapability?(
+    options?: Pick<AgentServiceOptions, 'liveCompanion' | 'requiredTools'>,
+  ): AgentFreshnessCarrierCapability;
 
   /** #1208: effective context capability for this concrete service/carrier. */
   contextCapability?(): AgentContextCapability;
@@ -1124,6 +1185,7 @@ export interface AgentService {
 export type L0CompilerFn = (options: {
   catId: string;
   userId?: string;
+  projection?: 'owner' | 'public';
   dataDir?: string;
   outPath?: string;
 }) => Promise<string>;

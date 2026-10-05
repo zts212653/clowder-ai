@@ -1,11 +1,13 @@
 import { expect, it } from 'vitest';
 import {
   addMarkupMark,
+  canAddMarkupMark,
   emptyMarkupHistory,
   type ReviewMarkupMark,
   redoMarkup,
   removeMarkupMark,
   undoMarkup,
+  updateMarkupMark,
 } from '../review-markup-draft';
 
 const media = { kind: 'image' as const, width: 100, height: 60 };
@@ -27,6 +29,14 @@ it('keeps local marks bounded and gives add, undo, redo, and erase distinct beha
   expect(undone.current).toEqual([]);
   expect(redoMarkup(undone).current).toEqual([rectangle]);
   expect(removeMarkupMark(added, rectangle.id).current).toEqual([]);
+});
+
+it('lets a full draft edit an existing mark without granting another mark slot', () => {
+  const full = emptyMarkupHistory(Array.from({ length: 100 }, (_, index) => ({ ...rectangle, id: `mark-${index}` })));
+  expect(canAddMarkupMark(full)).toBe(false);
+  const edited = updateMarkupMark(full, { ...full.current[0], color: '#3478c7' }, media);
+  expect(edited.current).toHaveLength(100);
+  expect(edited.current[0].color).toBe('#3478c7');
 });
 
 it('refuses uncontrolled or out-of-media drawing data before it reaches the local draft', () => {

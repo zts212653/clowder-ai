@@ -55,6 +55,34 @@ describe('PawFeelDispositionDock viewport hydration', () => {
   afterEach(() => {
     act(() => root.unmount());
     container.remove();
+    window.history.replaceState({}, '', '/');
+    vi.useRealTimers();
+  });
+
+  it('loads an offscreen export projection before capture and never polls the snapshot', async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, '', '/thread/export-fixture?export=true');
+    let resolveResponse!: (value: unknown) => void;
+    apiFetch.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    await act(async () => {
+      root.render(<PawFeelDispositionDock messageId="message-export" pollMs={100} />);
+    });
+    expect(apiFetch).toHaveBeenCalledWith('/api/paw-feel/source/message-export');
+    expect(container.querySelector('[data-export-layout-pending]')).not.toBeNull();
+
+    await act(async () => {
+      resolveResponse({ ok: true, json: async () => ({ projectionStatus: 'available', items: [], degraded: false }) });
+    });
+    expect(container.querySelector('[data-export-layout-pending]')).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
   });
 
   it('does not fan out a source-ledger request until the marker is near the viewport', async () => {

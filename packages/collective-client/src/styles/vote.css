@@ -1,0 +1,114 @@
+.vote-create-action {
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+.vote-draft,
+.informal-vote-card {
+  display: grid;
+  width: min(650px, 100%);
+  gap: 9px;
+  margin-top: 11px;
+  padding: 13px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 10px;
+  background: var(--console-card-soft-bg);
+}
+.vote-draft > header,
+.informal-vote-card > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+.vote-draft label {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.vote-draft input,
+.vote-draft select {
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+}
+.vote-draft-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.vote-draft button,
+.vote-close-action {
+  padding: 6px 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+}
+.vote-draft .quiet-action,
+.vote-close-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cafe-text-muted);
+}
+.informal-vote-card h3,
+.informal-vote-card p {
+  margin: 0;
+}
+.informal-vote-card h3 {
+  font-size: 14px;
+}
+.vote-meta {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.vote-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+}
+.vote-options button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  text-align: left;
+}
+.vote-options button[aria-pressed="true"] {
+  border-color: var(--cafe-accent);
+  color: var(--cafe-accent);
+}
+.vote-options small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--cafe-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topic-event .vote-create-action,
+.topic-event .informal-vote-card,
+.topic-event .vote-draft {
+  width: calc(100% - 38px);
+  margin-left: 38px;
+}
+@media (max-width: 520px) {
+  .vote-draft label {
+    grid-template-columns: 1fr;
+  }
+}

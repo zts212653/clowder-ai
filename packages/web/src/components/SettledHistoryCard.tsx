@@ -61,7 +61,7 @@ export function SettledHistoryCard({ item }: SettledHistoryCardProps) {
           </span>
         </div>
       }
-      title={approvalDisplayTitle(item)}
+      title={approvalDisplayTitle(item, { resolveCatName })}
       titleLines={2}
       titleTestId="settled-card-summary"
       context={

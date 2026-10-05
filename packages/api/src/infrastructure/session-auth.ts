@@ -43,17 +43,18 @@ export class SessionStore {
 
 const globalStore = new SessionStore();
 
+/** Read the same session principal used by HTTP; headers cannot replace it. */
+export function sessionUserIdForCookies(cookies: Record<string, string | undefined>): string | null {
+  const token = cookies[COOKIE_NAME];
+  return token ? globalStore.validate(token) : null;
+}
+
 function sessionAuth(app: FastifyInstance, _opts: Record<string, never>, done: () => void) {
   app.decorateRequest('sessionUserId', undefined);
 
   app.addHook('onRequest', (request, _reply, next) => {
-    const token = request.cookies?.[COOKIE_NAME];
-    if (token) {
-      const userId = globalStore.validate(token);
-      if (userId) {
-        request.sessionUserId = userId;
-      }
-    }
+    const userId = sessionUserIdForCookies(request.cookies ?? {});
+    if (userId) request.sessionUserId = userId;
     next();
   });
 

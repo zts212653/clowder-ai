@@ -8,8 +8,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -17,6 +17,37 @@ import { promisify } from 'node:util';
 
 const { ManagedRunner, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS } = await import('../dist/infrastructure/managed-runner.js');
 const execFileAsync = promisify(execFile);
+
+// A shell redirect (`printf x > file`) creates its target before the first byte is written, so "the file
+// exists" does not mean "the command has written". Wait for text the caller accepts (default: any bytes) and
+// return what was last read; on timeout that is whatever was there, so the caller's assertion reports it.
+async function waitForFileText(path, accept = (text) => text !== '', timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const text = existsSync(path) ? readFileSync(path, 'utf8') : '';
+    if (accept(text) || Date.now() >= deadline) return text;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+test('waitForFileText does not hand back the empty file a redirect leaves before the command writes', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'managed-runner-wait-for-file-text-'));
+  const path = join(tempDir, 'marker.txt');
+  let writeTimer;
+  try {
+    writeFileSync(path, ''); // what the shell does first for `printf isolated > marker`
+    writeTimer = setTimeout(() => writeFileSync(path, 'isolated'), 120);
+    assert.equal(await waitForFileText(path), 'isolated');
+    assert.equal(
+      await waitForFileText(join(tempDir, 'never-written.txt'), undefined, 60),
+      '',
+      'on timeout the helper returns what it last saw, not a made-up value',
+    );
+  } finally {
+    clearTimeout(writeTimer);
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 // ─── T1: Command exits normally → exitCode + output ───────────────────────
 
@@ -57,6 +88,34 @@ test('T1a: managed commands do not inherit cat CLI process markers', async () =>
       delete process.env.CAT_CAFE_CLI_PROCESS_CONTEXT;
     } else {
       process.env.CAT_CAFE_CLI_PROCESS_CONTEXT = previousCliContext;
+    }
+  }
+});
+
+test('T1c: managed commands do not inherit runtime-only lifecycle capabilities', async () => {
+  // 2026-09-23: a hold_ball wakeWhen `pnpm dev:direct` inherited the live runtime's
+  // CONNECTOR_GATEWAY_AUTOSTART=1, so a worktree dev API autostarted the shared WeCom /
+  // Feishu / DingTalk / WeChat bots and kicked the production connection offline ~every 23s.
+  const keys = [
+    'CONNECTOR_GATEWAY_AUTOSTART',
+    'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',
+    'CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED',
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) process.env[key] = '1';
+
+  try {
+    const runner = new ManagedRunner();
+    const result = await runner.launch(
+      `if [ -n "\${CONNECTOR_GATEWAY_AUTOSTART+set}" ] || [ -n "\${CAT_CAFE_PROVISION_GLOBAL_SIDECAR+set}" ] || [ -n "\${CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED+set}" ]; then exit 73; else echo managed-runtime-capabilities-isolated; fi`,
+    );
+
+    assert.strictEqual(result.exitCode, 0);
+    assert.match(result.tailOutput, /managed-runtime-capabilities-isolated/);
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
     }
   }
 });
@@ -416,13 +475,8 @@ test('durable managed job survives supervisor exit and writes to its persistent 
 
   try {
     await execFileAsync(process.execPath, ['--input-type=module', '--eval', parentScript]);
-    const deadline = Date.now() + 2_000;
-    while (
-      (!existsSync(markerPath) || !existsSync(logPath) || !readFileSync(logPath, 'utf8').includes('detached-output')) &&
-      Date.now() < deadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+    const marker = await waitForFileText(markerPath);
+    await waitForFileText(logPath, (text) => text.includes('detached-output'));
     const durableRecord = JSON.parse(readFileSync(recordPath, 'utf8'));
     assert.equal(durableRecord.state, 'running', 'worker must journal its own birth before command execution');
     assert.equal(durableRecord.ownerIdentity.pid, Number(readFileSync(workerPidPath, 'utf8')));
@@ -432,8 +486,109 @@ test('durable managed job survives supervisor exit and writes to its persistent 
       supervisorEpoch: 'fresh-supervisor-epoch',
     });
     assert.equal(adopted.state, 'adopted', 'a fresh supervisor must adopt the exact live worker, never mark it lost');
-    assert.equal(readFileSync(markerPath, 'utf8'), 'survived\n');
+    assert.equal(marker, 'survived\n');
     assert.match(readFileSync(logPath, 'utf8'), /detached-output/);
+  } finally {
+    if (existsSync(workerPidPath)) {
+      try {
+        process.kill(-Number(readFileSync(workerPidPath, 'utf8')), 'SIGKILL');
+      } catch {
+        // Worker already reached terminal.
+      }
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * Reduce environment entries to the two capability flags. Only key names are inspected and only
+ * booleans leave this function, so a failing assertion can never print another variable's value
+ * (a worker environment in CI or on a dev machine carries real tokens).
+ */
+function runtimeCapabilityFlags(entries) {
+  const keys = new Set(entries.map((entry) => entry.split('=', 1)[0]));
+  return {
+    hasConnectorAutostart: keys.has('CONNECTOR_GATEWAY_AUTOSTART'),
+    hasGlobalSidecar: keys.has('CAT_CAFE_PROVISION_GLOBAL_SIDECAR'),
+  };
+}
+
+function readProcessRuntimeCapabilityFlags(pid) {
+  const entries = existsSync(`/proc/${pid}/environ`)
+    ? readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0')
+    : execFileSync('ps', ['-wwE', '-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).split(' ');
+  return runtimeCapabilityFlags(entries);
+}
+
+const NO_RUNTIME_CAPABILITIES = { hasConnectorAutostart: false, hasGlobalSidecar: false };
+
+test('runtime capability diagnostics never carry other environment values', () => {
+  // Sol's #4721 repro: asserting on the raw environment printed a neighbouring secret on failure.
+  const flags = runtimeCapabilityFlags([
+    'WECOM_BOT_SECRET=sentinel-secret-value',
+    'CONNECTOR_GATEWAY_AUTOSTART=1',
+    'PATH=/usr/bin',
+  ]);
+  assert.deepEqual(flags, { hasConnectorAutostart: true, hasGlobalSidecar: false });
+  assert.throws(
+    () => assert.deepEqual(flags, NO_RUNTIME_CAPABILITIES),
+    (error) => {
+      assert.doesNotMatch(String(error.message), /sentinel-secret-value|WECOM_BOT_SECRET/);
+      assert.doesNotMatch(JSON.stringify(error.actual), /sentinel-secret-value|WECOM_BOT_SECRET/);
+      return true;
+    },
+  );
+});
+
+test('durable managed job: neither the worker nor the command inherits runtime-only lifecycle capabilities', async () => {
+  const tempDir = mkdtempSync(join(tmpdir(), 'managed-runner-durable-runtime-caps-'));
+  const markerPath = join(tempDir, 'caps.txt');
+  const managedRoot = join(tempDir, 'managed-gate-jobs');
+  const workerPidPath = join(tempDir, 'worker.pid');
+  const managedRunnerUrl = new URL('../dist/infrastructure/managed-runner.js', import.meta.url).href;
+  const durableJobUrl = new URL('../dist/domains/ball-custody/durable-managed-gate-job.js', import.meta.url).href;
+  const descriptor = {
+    kind: 'full_gate',
+    jobId: 'managed-gate-runtime-caps-test',
+    originTaskId: 'hold-ball-runtime-caps-test',
+    supervisorEpoch: 'runtime-caps-epoch',
+    recordPath: join(managedRoot, 'managed-gate-runtime-caps-test.json'),
+    gateReceiptPath: join(managedRoot, 'managed-gate-runtime-caps-test.gate.json'),
+    logPath: join(managedRoot, 'managed-gate-runtime-caps-test.log'),
+    executionSlaMs: 1_000,
+    wallSlaMs: 180_000,
+    wakeTarget: { threadId: 'thread-runtime-caps-test', catId: 'opus55', userId: 'user-runtime-caps-test' },
+  };
+  // The command reports what it sees, then stays alive so the worker's own environment can be read.
+  const command = `if [ -n "\${CONNECTOR_GATEWAY_AUTOSTART+set}" ] || [ -n "\${CAT_CAFE_PROVISION_GLOBAL_SIDECAR+set}" ]; then printf leaked > ${JSON.stringify(markerPath)}; else printf isolated > ${JSON.stringify(markerPath)}; fi; sleep 999`;
+  const parentScript = `
+    const { writeFileSync } = await import('node:fs');
+    process.env.CAT_CAFE_DATA_DIR = ${JSON.stringify(tempDir)};
+    process.env.CONNECTOR_GATEWAY_AUTOSTART = '1';
+    process.env.CAT_CAFE_PROVISION_GLOBAL_SIDECAR = '1';
+    const { initializeDurableManagedGateJob } = await import(${JSON.stringify(durableJobUrl)});
+    const { ManagedRunner } = await import(${JSON.stringify(managedRunnerUrl)});
+    const descriptor = ${JSON.stringify(descriptor)};
+    initializeDurableManagedGateJob(descriptor);
+    const runner = new ManagedRunner();
+    const { admission } = runner.start(${JSON.stringify(command)}, {
+      timeoutMs: 5_000,
+      maximumTimeoutMs: 5_000,
+      managedJob: descriptor,
+    });
+    const admitted = await admission;
+    if (admitted.pid) writeFileSync(${JSON.stringify(workerPidPath)}, String(admitted.pid));
+    process.exit(admitted.spawned ? 0 : 2);
+  `;
+
+  try {
+    await execFileAsync(process.execPath, ['--input-type=module', '--eval', parentScript]);
+    assert.equal(await waitForFileText(markerPath), 'isolated', 'the command a durable worker runs must not see them');
+    assert.deepEqual(
+      readProcessRuntimeCapabilityFlags(Number(readFileSync(workerPidPath, 'utf8'))),
+      NO_RUNTIME_CAPABILITIES,
+      'the durable worker itself must not carry them',
+    );
   } finally {
     if (existsSync(workerPidPath)) {
       try {

@@ -15,6 +15,7 @@ export function tailTruncate(name: string, maxLen = 24): string {
 }
 
 const PROJECT_PATH_COPY_KEYS = new Set(['Enter', ' ']);
+type ExactThread = { id: string; title: string | null; projectPath: string } | { id: string; error: true };
 
 /** Thread indicator: shows which thread you're currently chatting in.
  *  Double-click the title to enter inline edit mode for renaming. */
@@ -22,11 +23,45 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
   const threads = useChatStore((s) => s.threads);
   const sidebarRows = useSidebarProjectionStore((state) => state.rows);
   const updateThreadTitle = useChatStore((s) => s.updateThreadTitle);
-  const currentThread = sidebarRows.find((row) => row.id === threadId) ?? threads.find((t) => t.id === threadId);
+  const listedThread = sidebarRows.find((row) => row.id === threadId) ?? threads.find((t) => t.id === threadId);
+  const [exactThread, setExactThread] = useState<ExactThread | null>(null);
+  const currentThread =
+    listedThread ?? (exactThread?.id === threadId && !('error' in exactThread) ? exactThread : undefined);
+  const needsExactRead = threadId !== 'default' && !listedThread;
   const [copied, setCopied] = useState(false);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const title = currentThread?.title ?? '未命名对话';
+  const title = currentThread
+    ? (currentThread.title ?? '未命名对话')
+    : exactThread?.id === threadId && 'error' in exactThread
+      ? '对话不可用'
+      : '正在读取对话…';
   const rawPath = currentThread?.projectPath ?? '';
+
+  useEffect(() => {
+    if (!needsExactRead) return;
+    let current = true;
+    void apiFetch(`/api/threads/${encodeURIComponent(threadId)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Thread unavailable');
+        const value: unknown = await response.json();
+        if (!value || typeof value !== 'object') throw new Error('Invalid thread detail');
+        const detail = value as Record<string, unknown>;
+        if (
+          detail.id !== threadId ||
+          (detail.title !== null && typeof detail.title !== 'string') ||
+          typeof detail.projectPath !== 'string'
+        )
+          throw new Error('Invalid thread detail');
+        if (current)
+          setExactThread({ id: threadId, title: detail.title as string | null, projectPath: detail.projectPath });
+      })
+      .catch(() => {
+        if (current) setExactThread({ id: threadId, error: true });
+      });
+    return () => {
+      current = false;
+    };
+  }, [needsExactRead, threadId]);
 
   // Inline title editing state
   const [isEditing, setIsEditing] = useState(false);
@@ -78,7 +113,11 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
       });
       if (res.ok) {
         const updated = await res.json();
-        updateThreadTitle(threadId, updated.title ?? next);
+        const savedTitle = typeof updated.title === 'string' ? updated.title : next;
+        updateThreadTitle(threadId, savedTitle);
+        setExactThread((previous) =>
+          previous?.id === threadId && !('error' in previous) ? { ...previous, title: savedTitle } : previous,
+        );
         void invalidateSidebarProjection();
       }
     } catch {
@@ -173,9 +212,11 @@ export function ThreadIndicator({ threadId }: { threadId: string }) {
           type="button"
           className="truncate min-w-0 text-left font-medium text-cafe-secondary cursor-text"
           title={`${title}\n双击编辑标题`}
-          onDoubleClick={() => setIsEditing(true)}
+          onDoubleClick={() => {
+            if (currentThread) setIsEditing(true);
+          }}
           onKeyDown={(e) => {
-            if (e.key === 'F2') {
+            if (e.key === 'F2' && currentThread) {
               e.preventDefault();
               setIsEditing(true);
             }

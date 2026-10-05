@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync as removeFixture, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +15,14 @@ function candidate(effect, kind, value = '/tmp/ordinary', source = {}) {
     target: { kind, value },
     source: { provider: 'codex', tool: 'shell', cwd: '/tmp/work', ...source },
   };
+}
+
+function assertUnboundedManagedPreviewCommands(decide, commands, cwd) {
+  for (const command of commands) {
+    const decision = decide(command, cwd);
+    assert.equal(decision.decision, 'deny', command);
+    assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation', command);
+  }
 }
 
 describe('F306 AC-C7 provider-neutral effect/target policy', () => {
@@ -44,16 +55,317 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       decideNativeEffect(candidate('remote_mutation', 'runtime_sanctuary', '/runtime/unresolved')).decision,
       'deny',
     );
+    // An unrecognised effect is not a dangerous one (2026-09-26); only the literal
+    // runtime and Redis 6399 sanctuaries stay closed to it (asserted above).
     assert.equal(
       decideNativeEffect(candidate('unknown', 'remote_repository', 'github://current/pull/4368')).decision,
-      'deny',
+      'allow',
     );
   });
 
-  test('adapts Codex Bash and apply_patch at the actual provider boundary', async () => {
+  test('attributes the canonical managed Alpha preview lifecycle to its bounded service coordinate', async (t) => {
+    const { decideNativeHookPayload } = await guardModule;
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'f306-alpha-preview-'));
+    t.after(() => removeFixture(fixtureRoot, { recursive: true, force: true }));
+    const repoRoot = join(fixtureRoot, 'cat-cafe');
+    const runtimeRoot = join(fixtureRoot, 'cat-cafe-runtime');
+    const broadRepoRoot = '/home/user/cat-cafe';
+    for (const directory of [repoRoot, runtimeRoot]) mkdirSync(directory, { recursive: true });
+    const decide = (command, cwd = repoRoot) =>
+      decideNativeHookPayload(
+        {
+          turn_id: 'turn-alpha-preview',
+          tool_name: 'exec_command',
+          cwd,
+          tool_input: { cmd: command },
+        },
+        {
+          selfHost: () => ({
+            confidence: 'verified',
+            facet: { installation: { deploymentId: 'runtime', projectRoot: runtimeRoot } },
+          }),
+        },
+      );
+
+    for (const { command, effect } of [
+      {
+        command: `pnpm preview:process start --port 3011 --cwd ${repoRoot} -- pnpm alpha:start`,
+        effect: 'service_mutation',
+      },
+      {
+        command: `pnpm preview:process status --port 3011 --cwd ${repoRoot} --json`,
+        effect: 'read',
+      },
+      {
+        command: `pnpm preview:process stop --port 3011 --cwd ${repoRoot} --json`,
+        effect: 'process_control',
+      },
+    ]) {
+      const decision = decide(command);
+      assert.equal(decision.decision, 'allow', command);
+      assert.equal(decision.effect, effect, command);
+      assert.equal(decision.target.kind, 'ordinary', command);
+      assert.equal(decision.target.value, `preview://alpha${realpathSync(repoRoot)}:3011`, command);
+    }
+
+    // Denied by the preview rule itself (`unbounded_managed_preview_operation`). Before
+    // 2026-09-26 the mentioned main checkout also labelled these `broad_root`; an unrecognised
+    // effect no longer makes a mentioned root the target, so the label is `ordinary`.
+    for (const { command, cwd = broadRepoRoot, target } of [
+      {
+        command: `pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- pnpm runtime:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `/tmp/evil/pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- /tmp/evil/pnpm alpha:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `./pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `PNPM preview:process start --port 3011 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `pnpm preview:process start --port 3003 --cwd ${broadRepoRoot} -- pnpm alpha:start`,
+        target: 'ordinary',
+      },
+      {
+        command: `pnpm preview:process start --port 3011 --cwd ${runtimeRoot} -- pnpm alpha:start`,
+        cwd: runtimeRoot,
+        target: 'runtime_sanctuary',
+      },
+      {
+        command: `pnpm preview:process start --port 3011 --cwd ${broadRepoRoot} -- redis-cli -p 6399 shutdown`,
+        target: 'redis_sanctuary',
+      },
+      {
+        command: 'pnpm preview:process start --port 3011 --cwd . -- redis-cli -p 6399 shutdown',
+        cwd: '/tmp',
+        target: 'redis_sanctuary',
+      },
+    ]) {
+      const decision = decide(command, cwd);
+      assert.equal(decision.decision, 'deny', command);
+      assert.equal(decision.reasonCode, 'unbounded_managed_preview_operation', command);
+      assert.equal(decision.target.kind, target, command);
+    }
+  });
+
+  test('attributes a managed feature preview to its physical worktree lifecycle instead of config coordinates', async (t) => {
+    const { decideNativeHookPayload } = await guardModule;
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'f306-preview-identity-'));
+    t.after(() => removeFixture(fixtureRoot, { recursive: true, force: true }));
+    const physicalParent = join(fixtureRoot, 'physical');
+    const repoRoot = join(physicalParent, 'cat-cafe');
+    const worktreeRoot = join(physicalParent, 'cat-cafe-f317-real-journey');
+    const runtimeRoot = join(physicalParent, 'cat-cafe-runtime');
+    for (const directory of [repoRoot, worktreeRoot, runtimeRoot]) mkdirSync(directory, { recursive: true });
+    const child = [
+      'env -u NODE_ENV -u npm_config_production -u NPM_CONFIG_PRODUCTION',
+      `CAT_CAFE_WORKSPACE_ROOT=${repoRoot}`,
+      `CAT_CAFE_RUNTIME_ROOT=${worktreeRoot}`,
+      'pnpm dev:direct',
+    ].join(' ');
+    const decide = (command, cwd = worktreeRoot) =>
+      decideNativeHookPayload(
+        {
+          turn_id: 'turn-feature-preview',
+          tool_name: 'exec_command',
+          cwd,
+          tool_input: { cmd: command },
+        },
+        { selfHost: () => ({ confidence: 'none' }) },
+      );
+
+    for (const { command, effect } of [
+      {
+        command: `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} --lifetime-seconds 14400 -- ${child}`,
+        effect: 'service_mutation',
+      },
+      {
+        command: `pnpm preview:process status --port 3511 --cwd ${worktreeRoot} --json`,
+        effect: 'read',
+      },
+      {
+        command: `pnpm preview:process stop --port 3511 --cwd ${worktreeRoot} --json`,
+        effect: 'process_control',
+      },
+    ]) {
+      const decision = decide(command);
+      assert.equal(decision.decision, 'allow', command);
+      assert.equal(decision.effect, effect, command);
+      assert.equal(decision.target.kind, 'ordinary', command);
+      assert.equal(decision.target.value, `preview://worktree${realpathSync(worktreeRoot)}:3511`, command);
+    }
+
+    for (const command of [
+      `pnpm preview:process start --port 3003 --cwd ${worktreeRoot} -- ${child}`,
+      `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm dev:direct`,
+      `pnpm preview:process start --port 3511 --cwd ${worktreeRoot} -- env CAT_CAFE_WORKSPACE_ROOT=${repoRoot} CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm runtime:start`,
+    ]) {
+      assert.equal(decide(command).decision, 'deny', command);
+    }
+
+    for (const reservedPort of [
+      '3001',
+      '3002',
+      '3003',
+      '3004',
+      '3011',
+      '3012',
+      '4100',
+      '4111',
+      '6397',
+      '6398',
+      '6399',
+    ]) {
+      for (const aliasedPort of [reservedPort, `0${reservedPort}`, `000${reservedPort}`]) {
+        const command = `pnpm preview:process start --port ${aliasedPort} --cwd ${worktreeRoot} -- ${child}`;
+        assert.equal(decide(command).decision, 'deny', command);
+      }
+    }
+
+    const runtimeDecision = decide(
+      `pnpm preview:process start --port 3511 --cwd ${runtimeRoot} -- env CAT_CAFE_RUNTIME_ROOT=${runtimeRoot} pnpm dev:direct`,
+      runtimeRoot,
+    );
+    assert.equal(runtimeDecision.decision, 'deny');
+    assert.equal(runtimeDecision.target.kind, 'runtime_sanctuary');
+
+    const aliasParent = join(fixtureRoot, 'aliases');
+    const aliasMain = join(aliasParent, 'cat-cafe');
+    const aliasWorktree = join(aliasParent, 'cat-cafe-fake');
+    mkdirSync(aliasParent, { recursive: true });
+    symlinkSync(repoRoot, aliasMain, 'dir');
+    symlinkSync(runtimeRoot, aliasWorktree, 'dir');
+    const aliasedChild = [
+      `env CAT_CAFE_WORKSPACE_ROOT=${aliasMain}`,
+      `CAT_CAFE_RUNTIME_ROOT=${aliasWorktree}`,
+      'pnpm dev:direct',
+    ].join(' ');
+    const aliasedRuntime = decide(
+      `pnpm preview:process start --port 3511 --cwd ${aliasWorktree} -- ${aliasedChild}`,
+      aliasWorktree,
+    );
+    assert.equal(aliasedRuntime.decision, 'deny');
+    assert.equal(
+      decide(`pnpm preview:process status --port 3511 --cwd ${aliasWorktree} --json`, aliasWorktree).decision,
+      'deny',
+    );
+
+    const alphaAliasParent = join(fixtureRoot, 'alpha-aliases');
+    const aliasedAlphaRuntime = join(alphaAliasParent, 'cat-cafe');
+    mkdirSync(alphaAliasParent, { recursive: true });
+    symlinkSync(runtimeRoot, aliasedAlphaRuntime, 'dir');
+    for (const port of ['3011', '03011']) {
+      const command = `pnpm preview:process start --port ${port} --cwd ${aliasedAlphaRuntime} -- pnpm alpha:start`;
+      assert.equal(decide(command, aliasedAlphaRuntime).decision, 'deny', command);
+    }
+
+    assertUnboundedManagedPreviewCommands(
+      decide,
+      [
+        `pnpm preview:process start --port 3511 --cwd ${aliasedAlphaRuntime} -- pnpm start:direct`,
+        `pnpm preview:process status --port 3511 --cwd ${aliasedAlphaRuntime} --json`,
+        `pnpm preview:process stop --port 3511 --cwd ${aliasedAlphaRuntime} --json`,
+      ],
+      aliasedAlphaRuntime,
+    );
+
+    const ordinaryAliasParent = join(fixtureRoot, 'ordinary-aliases');
+    const ordinaryPhysicalRoot = join(fixtureRoot, 'ordinary-target');
+    const ordinaryMainAlias = join(ordinaryAliasParent, 'cat-cafe');
+    mkdirSync(ordinaryAliasParent, { recursive: true });
+    mkdirSync(ordinaryPhysicalRoot, { recursive: true });
+    symlinkSync(ordinaryPhysicalRoot, ordinaryMainAlias, 'dir');
+    const ordinaryAliasStatus = decide(
+      `pnpm preview:process status --port 3511 --cwd ${ordinaryMainAlias} --json`,
+      ordinaryMainAlias,
+    );
+    assert.equal(ordinaryAliasStatus.decision, 'allow');
+    assert.equal(ordinaryAliasStatus.target.kind, 'ordinary');
+
+    const ordinaryPreviewRoot = join(fixtureRoot, 'ordinary-preview');
+    mkdirSync(ordinaryPreviewRoot, { recursive: true });
+    const ordinaryStatus = decide(
+      `pnpm preview:process status --port 3511 --cwd ${ordinaryPreviewRoot} --json`,
+      ordinaryPreviewRoot,
+    );
+    assert.equal(ordinaryStatus.decision, 'allow');
+    assert.equal(ordinaryStatus.target.kind, 'ordinary');
+    const ordinaryStatusFromManagedShell = decide(
+      `pnpm preview:process status --port 3511 --cwd ${ordinaryPreviewRoot} --json`,
+      worktreeRoot,
+    );
+    assert.equal(ordinaryStatusFromManagedShell.decision, 'allow');
+    assert.equal(ordinaryStatusFromManagedShell.target.kind, 'ordinary');
+
+    assertUnboundedManagedPreviewCommands(decide, [
+      `pnpm preview:process status --port 3003 --cwd ${worktreeRoot} --json`,
+      `pnpm preview:process status --port 03001 --cwd ${worktreeRoot} --json`,
+      `pnpm preview:process status --port 6397 --cwd ${worktreeRoot} --json`,
+    ]);
+  });
+
+  test('does not reinterpret apply_patch source text as a shell command', async () => {
     const { decideNativeHookPayload } = await guardModule;
     const repoRoot = '/home/user/cat-cafe';
     const runtimeRoot = '/home/user/cat-cafe-runtime';
+    const fixture = readFileSync(new URL('../../../scripts/lib/self-host-guard.test.mjs', import.meta.url), 'utf8');
+    const sourceLine = fixture.split('\n').find((line) => line.includes('-TERM 4242'));
+    assert.ok(sourceLine, 'self-host fixture must retain the process-control source line');
+    const sourceCommand = sourceLine.match(/verdictOf\('([^']+)'\)/)?.[1];
+    assert.ok(sourceCommand, 'fixture line must retain a quoted command');
+    const interpolation = ['$', '{pid}'].join('');
+    const tick = String.fromCharCode(96);
+    const insertedSource = `+    assert.equal(decide(${tick}${sourceCommand.replace('4242', interpolation)}${tick}), 'self_host', String(pid));`;
+    const patchBody = [
+      '*** Begin Patch',
+      '*** Update File: scripts/lib/self-host-guard.test.mjs',
+      '@@',
+      insertedSource,
+      '*** End Patch',
+    ].join('\n');
+
+    const decision = decideNativeHookPayload(
+      {
+        turn_id: 'turn-edit-data-boundary',
+        tool_name: 'apply_patch',
+        cwd: repoRoot,
+        tool_input: { command: patchBody },
+      },
+      {
+        selfHost: () => ({
+          confidence: 'verified',
+          facet: {
+            installation: { deploymentId: 'runtime', projectRoot: runtimeRoot, sourceRef: 'fixture://runtime' },
+            runtime: { apiPid: 30, launcherPid: 20, apiPort: 3002, worktree: runtimeRoot },
+          },
+        }),
+      },
+    );
+
+    assert.equal(decision.decision, 'allow');
+    assert.equal(decision.effect, 'write');
+    assert.equal(decision.target.kind, 'ordinary');
+    assert.equal(decision.target.value, 'scripts/lib/self-host-guard.test.mjs');
+  });
+
+  test('adapts Codex Bash and apply_patch at the actual provider boundary', async (t) => {
+    const { decideNativeHookPayload } = await guardModule;
+    const fixtureRoot = realpathSync(mkdtempSync(join(tmpdir(), 'f306-installation-')));
+    t.after(() => removeFixture(fixtureRoot, { recursive: true, force: true }));
+    const stationRoot = join(fixtureRoot, 'projects', 'relay-station');
+    const repoRoot = join(stationRoot, 'cat-cafe');
+    const runtimeRoot = join(stationRoot, 'cat-cafe-runtime');
+    for (const directory of [repoRoot, runtimeRoot]) mkdirSync(directory, { recursive: true });
 
     const redis = decideNativeHookPayload({
       turn_id: 'turn-1',
@@ -78,7 +390,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     const ordinaryPatch = decideNativeHookPayload({
       turn_id: 'turn-patch-ordinary',
       tool_name: 'apply_patch',
-      cwd: '/home/user/cat-cafe',
+      cwd: repoRoot,
       tool_input: {
         command:
           '*** Begin Patch\n*** Update File: packages/shared/src/provider-semantic-projection.ts\n@@\n-old\n+new\n*** End Patch',
@@ -154,7 +466,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
     const moveIntoRuntime = decideNativeHookPayload({
       turn_id: 'turn-patch-move-runtime',
       tool_name: 'apply_patch',
-      cwd: '/home/user/cat-cafe',
+      cwd: repoRoot,
       tool_input: {
         command: `*** Begin Patch\n*** Update File: packages/shared/src/example.ts\n*** Move to: ${runtimeRoot}/example.ts\n@@\n-old\n+new\n*** End Patch`,
       },
@@ -201,12 +513,12 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
 
     for (const { command, effect, target } of [
       {
-        command: 'find /home/user/projects/relay-station -delete',
+        command: `find ${stationRoot} -delete`,
         effect: 'delete',
         target: 'broad_root',
       },
       {
-        command: 'find /home/user/projects/relay-station -exec rm -rf {} +',
+        command: `find ${stationRoot} -exec rm -rf {} +`,
         effect: 'delete',
         target: 'broad_root',
       },
@@ -217,32 +529,32 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       { command: 'rm -rf /.', effect: 'delete', target: 'broad_root' },
       { command: 'rm -rf //', effect: 'delete', target: 'broad_root' },
       {
-        command: 'rm -rf /home/user/cat-cafe-runtime/*',
+        command: `rm -rf ${runtimeRoot}/*`,
         effect: 'delete',
         target: 'runtime_sanctuary',
       },
       {
-        command: 'rm -rf /home/user/cat-cafe-runtime*',
+        command: `rm -rf ${runtimeRoot}*`,
         effect: 'delete',
         target: 'runtime_sanctuary',
       },
       {
-        command: 'rm -rf /home/user/cat-cafe-runtim?',
+        command: `rm -rf ${repoRoot}-runtim?`,
         effect: 'delete',
         target: 'runtime_sanctuary',
       },
       {
-        command: 'rm -rf /home/user/cat-cafe-runtim[e]',
+        command: `rm -rf ${repoRoot}-runtim[e]`,
         effect: 'delete',
         target: 'runtime_sanctuary',
       },
       {
-        command: 'rm -rf /home/user/cat-cafe-runtim{e,x}',
+        command: `rm -rf ${repoRoot}-runtim{e,x}`,
         effect: 'delete',
         target: 'runtime_sanctuary',
       },
       {
-        command: 'mv /home/user/cat-cafe-runtime* /tmp/x',
+        command: `mv ${runtimeRoot}* /tmp/x`,
         effect: 'write',
         target: 'runtime_sanctuary',
       },
@@ -272,7 +584,7 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       const destructiveFind = decideNativeHookPayload({
         turn_id: 'turn-destructive-find',
         tool_name: 'Bash',
-        cwd: '/home/user/projects/relay-station',
+        cwd: repoRoot,
         tool_input: { command },
       });
       assert.equal(destructiveFind.effect, effect, command);
@@ -285,11 +597,33 @@ describe('F306 AC-C7 provider-neutral effect/target policy', () => {
       tool_name: 'Bash',
       cwd: '/tmp/work',
       tool_input: {
-        command: 'rm -rf /home/user/cat-cafe-runtime-cwd-debug*',
+        command: `rm -rf ${runtimeRoot}-cwd-debug*`,
       },
     });
     assert.equal(ordinarySibling.target.kind, 'ordinary');
     assert.equal(ordinarySibling.decision, 'allow');
+
+    for (const [command, expected] of [
+      [`rm -rf ${runtimeRoot}*`, 'deny'],
+      [`rm -rf ${runtimeRoot}-cwd-debug*`, 'allow'],
+      ['rm -rf /unrelated-fixture/cat-cafe-runtime*', 'allow'],
+    ]) {
+      const env = { ...process.env };
+      delete env.CAT_CAFE_DEPLOYMENT_ID;
+      const result = spawnSync(process.execPath, [hookPath], {
+        encoding: 'utf8',
+        env,
+        input: JSON.stringify({
+          turn_id: 'portable-cli',
+          tool_name: 'exec_command',
+          cwd: repoRoot,
+          tool_input: { cmd: command },
+        }),
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const decision = result.stdout.trim() ? JSON.parse(result.stdout).hookSpecificOutput.permissionDecision : 'allow';
+      assert.equal(decision, expected, command);
+    }
 
     for (const { command, effect } of [
       { command: 'git push origin feat/f306-phase-c', effect: 'write' },

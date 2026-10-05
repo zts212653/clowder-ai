@@ -104,6 +104,18 @@ export interface ExternalReviewVerdictServiceOptions {
     now: number;
   }) => Promise<{ outcome: string }>;
   readonly recordUserNudgeRequired?: () => void;
+  /**
+   * F168 #1511: Verify durable reviewer admission from the PR tracker task.
+   * For PR subjects, the community projection never receives ownerThreadId/ownerRole
+   * from case.routed or case.bootstrap (both issue-only). When the coordinator hasn't
+   * run yet (no case.external_review_assigned in the event log), bootstrap Case 1 needs
+   * an alternative authority source. This callback checks the tracker task (registered
+   * via callback-auth-verified register-pr-tracking) to verify the caller is the
+   * admitted reviewer.
+   *
+   * Returns true if a durable tracker exists for the subject with matching catId/threadId.
+   */
+  readonly verifyDurableReviewerAdmission?: (subjectKey: string, catId: string, threadId: string) => Promise<boolean>;
   readonly now?: () => number;
 }
 

@@ -100,6 +100,26 @@ export function identityInspectionIsUnreadable(inspection) {
   return inspection.reason === 'process-argv-unavailable' || inspection.reason === 'process-identity-unreadable';
 }
 
+/** Re-observe unknown evidence within the existing spawn-read budget; never retry a conclusive mismatch. */
+export function inspectProcessIdentity(state, capture = captureProcessIdentity) {
+  let inspection;
+  for (let attempt = 0; attempt < ARGV_READ_ATTEMPTS; attempt += 1) {
+    if (attempt > 0) sleepSync(ARGV_READ_DELAY_MS);
+    const observed = observeProcessIdentity(state.pid, capture);
+    if (observed.status === 'absent') return { kind: 'stale', reason: 'process-not-running', state };
+    if (observed.status === 'unknown') {
+      inspection = { kind: 'mismatch', reason: 'process-identity-unreadable', state, error: observed.error };
+      continue;
+    }
+    const identity = observed.identity;
+    const comparison = compareStoredIdentity(state, identity);
+    if (comparison === 'match') return { kind: 'running', state, identity };
+    if (comparison === 'mismatch') return { kind: 'mismatch', reason: 'process-identity-mismatch', state, identity };
+    inspection = { kind: 'mismatch', reason: 'process-argv-unavailable', state, identity };
+  }
+  return inspection;
+}
+
 /**
  * For the moment right after spawn: re-read a bounded number of times while ps
  * cannot show the argv, and return whatever the last read was. The caller must

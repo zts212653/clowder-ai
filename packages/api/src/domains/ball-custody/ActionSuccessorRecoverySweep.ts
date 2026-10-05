@@ -85,6 +85,7 @@ function carrierFor(lease: ActionSuccessorLease): ActionSuccessorReturnCarrier {
 }
 
 export class ActionSuccessorRecoverySweep {
+  private inFlight: Promise<ActionSuccessorRecoveryStats> | undefined;
   private readonly now: () => number;
   private readonly scanLimit: number;
   private readonly dispatchRecovery?: ActionSuccessorDispatchRecovery;
@@ -101,7 +102,16 @@ export class ActionSuccessorRecoverySweep {
     }
   }
 
-  async runOnce(): Promise<ActionSuccessorRecoveryStats> {
+  runOnce(): Promise<ActionSuccessorRecoveryStats> {
+    if (this.inFlight) return this.inFlight;
+    const cycle = this.runCycle().finally(() => {
+      if (this.inFlight === cycle) this.inFlight = undefined;
+    });
+    this.inFlight = cycle;
+    return cycle;
+  }
+
+  private async runCycle(): Promise<ActionSuccessorRecoveryStats> {
     const leases = (await this.deps.leaseStore.listPendingReturns(this.scanLimit)).filter(
       isRecoverableActionSuccessorReturn,
     );

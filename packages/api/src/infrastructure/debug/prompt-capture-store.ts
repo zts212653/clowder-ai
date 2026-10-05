@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 /**
  * F153 Prompt X-Ray: File-based ring buffer for canonical prompt captures.
  *
@@ -6,18 +7,18 @@
  */
 
 import {
-  appendFile,
   appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
+  statSync,
   unlinkSync,
-  writeFile,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync, gzip, gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { createModuleLogger } from '../logger.js';
 
 const log = createModuleLogger('debug:prompt-capture');
@@ -117,19 +118,29 @@ const DEFAULT_BASE_DIR = join(homedir(), '.cat-cafe', 'prompt-captures');
 const DEFAULT_MAX_ENTRIES = 500;
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000;
 
-export class PromptCaptureStore {
+export interface PromptCaptureStoreOptions {
+  baseDir?: string;
+  maxEntries?: number;
+  ttlMs?: number;
+  maxPayloadBytes?: number;
+}
+
+/** Synchronous implementation used only by the isolated worker and fixture writes. */
+export class PromptCaptureFileStore {
   private readonly baseDir: string;
   private readonly payloadDir: string;
   private readonly indexPath: string;
   private readonly maxEntries: number;
   private readonly ttlMs: number;
+  private readonly maxPayloadBytes: number;
 
-  constructor(opts?: { baseDir?: string; maxEntries?: number; ttlMs?: number }) {
+  constructor(opts?: PromptCaptureStoreOptions) {
     this.baseDir = opts?.baseDir ?? DEFAULT_BASE_DIR;
     this.payloadDir = join(this.baseDir, 'payloads');
     this.indexPath = join(this.baseDir, 'index.ndjson');
     this.maxEntries = opts?.maxEntries ?? DEFAULT_MAX_ENTRIES;
     this.ttlMs = opts?.ttlMs ?? DEFAULT_TTL_MS;
+    this.maxPayloadBytes = opts?.maxPayloadBytes ?? 16 * 1024 * 1024;
     this.ensureDirs();
   }
 
@@ -139,38 +150,13 @@ export class PromptCaptureStore {
     }
   }
 
-  captureAsync(data: PromptCapture): void {
-    const json = JSON.stringify(data);
-    const fileName = `${data.captureId}.json.gz`;
-    const filePath = join(this.payloadDir, fileName);
-
-    gzip(Buffer.from(json), (gzipErr, compressed) => {
-      if (gzipErr) {
-        log.warn({ err: gzipErr, captureId: data.captureId }, 'Prompt capture gzip failed');
-        return;
-      }
-      writeFile(filePath, compressed, (writeErr) => {
-        if (writeErr) {
-          log.warn({ err: writeErr, captureId: data.captureId }, 'Prompt capture write failed');
-          return;
-        }
-        const indexEntry: CaptureIndexEntry = {
-          captureId: data.captureId,
-          invocationId: data.invocationId,
-          hmacInvocationId: data.hmacInvocationId,
-          catId: data.catId,
-          threadId: data.threadId,
-          userId: data.userId,
-          capturedAt: data.capturedAt,
-          promptBytes: data.promptBytes,
-          file: fileName,
-        };
-        appendFile(this.indexPath, `${JSON.stringify(indexEntry)}\n`, (appendErr) => {
-          if (appendErr) log.warn({ err: appendErr }, 'Prompt capture index append failed');
-          this.pruneIfNeeded();
-        });
-      });
-    });
+  workerOptions(): Required<PromptCaptureStoreOptions> {
+    return {
+      baseDir: this.baseDir,
+      maxEntries: this.maxEntries,
+      ttlMs: this.ttlMs,
+      maxPayloadBytes: this.maxPayloadBytes,
+    };
   }
 
   captureSync(data: PromptCapture): string {
@@ -203,8 +189,11 @@ export class PromptCaptureStore {
     try {
       const filePath = join(this.payloadDir, `${captureId}.json.gz`);
       if (!existsSync(filePath)) return null;
+      if (statSync(filePath).size > this.maxPayloadBytes) return null;
       const compressed = readFileSync(filePath);
-      const capture = JSON.parse(gunzipSync(compressed).toString('utf8')) as PromptCapture;
+      const capture = JSON.parse(
+        gunzipSync(compressed, { maxOutputLength: this.maxPayloadBytes }).toString('utf8'),
+      ) as PromptCapture;
       if (capture.capturedAt < Date.now() - this.ttlMs) return null;
       if (userId && capture.userId !== userId) return null;
       return capture;
@@ -302,7 +291,17 @@ export class PromptCaptureStore {
   }
 
   private writeIndex(entries: CaptureIndexEntry[]): void {
-    writeFileSync(this.indexPath, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    const temporary = `${this.indexPath}.${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temporary, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`, { flag: 'wx' });
+      renameSync(temporary, this.indexPath);
+    } finally {
+      try {
+        unlinkSync(temporary);
+      } catch {
+        /* renamed or interrupted before creation */
+      }
+    }
   }
 
   private deletePayload(fileName: string): void {
@@ -333,3 +332,5 @@ export function isPromptCaptureEnabled(catId?: string): boolean {
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.5);
 }
+
+export { PromptCaptureStore } from './prompt-capture-runtime-store.js';

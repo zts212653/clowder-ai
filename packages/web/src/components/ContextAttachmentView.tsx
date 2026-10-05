@@ -38,22 +38,36 @@ const ATTACHMENT_KIND_LABELS: Record<ContextAttachment['kind'], string> = {
   quote: 'QUOTE',
 };
 
+/** The file a chip leads back to: a file attachment itself, or the file a quote was taken from. */
+function attachmentFileTarget(
+  attachment: ContextAttachment,
+): { path: string; lineStart?: number; worktreeId?: string } | null {
+  if (attachment.kind === 'workspace_file') return attachment;
+  if (attachment.kind === 'quote' && attachment.source.kind === 'workspace_file') return attachment.source;
+  return null;
+}
+
 export function ContextAttachmentView({ attachment, compact = false, onRemove }: ContextAttachmentViewProps) {
   const presentation = attachmentPresentation(attachment);
-  const actionable = attachment.kind === 'thread' || attachment.kind === 'workspace_file';
-  const openAttachment = () => {
+  const fileTarget = attachmentFileTarget(attachment);
+  const actionable = attachment.kind === 'thread' || fileTarget !== null;
+  const openAttachment = (event: React.MouseEvent<HTMLButtonElement>) => {
     if (attachment.kind === 'thread') {
       pushThreadRouteWithHistory(attachment.threadId, typeof window === 'undefined' ? undefined : window);
       return;
     }
-    if (attachment.kind === 'workspace_file') {
+    if (fileTarget) {
       const state = useChatStore.getState();
+      const messageId = event.currentTarget.closest<HTMLElement>('[data-message-id]')?.dataset.messageId;
       state.setWorkspaceMode('dev');
       state.setWorkspaceOpenFile(
-        attachment.path,
-        attachment.lineStart ?? null,
-        attachment.worktreeId ?? null,
+        fileTarget.path,
+        fileTarget.lineStart ?? null,
+        fileTarget.worktreeId ?? null,
         state.currentThreadId,
+        state.currentThreadId && messageId
+          ? { kind: 'chat-file-link', threadId: state.currentThreadId, messageId }
+          : undefined,
       );
     }
   };

@@ -9,6 +9,7 @@ export function F307WorkbenchTabs({
   onActivateSurface,
   homeFocused,
   isDesktop,
+  artifactWorkHostAvailable,
   mainAreaAttentionSurfaceId,
   onEnterMainAreaAttention,
   onExitMainAreaAttention,
@@ -19,6 +20,7 @@ export function F307WorkbenchTabs({
   onActivateSurface: () => void;
   homeFocused: boolean;
   isDesktop: boolean;
+  artifactWorkHostAvailable: boolean;
   mainAreaAttentionSurfaceId: string | null;
   onEnterMainAreaAttention: (surfaceId: string) => void;
   onExitMainAreaAttention: () => void;
@@ -56,6 +58,7 @@ export function F307WorkbenchTabs({
         onAddSurface={onAddSurface}
         homeFocused={homeFocused}
         isDesktop={isDesktop}
+        artifactWorkHostAvailable={artifactWorkHostAvailable}
         mainAreaAttentionSurfaceId={mainAreaAttentionSurfaceId}
         onEnterMainAreaAttention={onEnterMainAreaAttention}
         onExitMainAreaAttention={onExitMainAreaAttention}

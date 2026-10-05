@@ -19,6 +19,8 @@ import {
 } from '@/utils/sidebar-thread-snapshot';
 import { BootcampListModal } from '../BootcampListModal';
 import { BootcampIcon } from '../icons/BootcampIcon';
+import type { ShellDestination } from '../shell/shell-navigation';
+import { useShellPresentation } from '../shell/shell-presentation';
 import { AttentionArrangeToolbar } from './AttentionArrangeToolbar';
 import { AttentionClusterHeader, AttentionClusterMember } from './AttentionCluster';
 import { AttentionGroupableThreadRow } from './AttentionGroupableThreadRow';
@@ -42,6 +44,7 @@ import {
 import { SearchGroupOrganizer } from './SearchGroupOrganizer';
 import { SectionGroup } from './SectionGroup';
 import { SidebarTabIcon } from './SidebarTabIcon';
+import { SidebarViewBarV2 } from './SidebarViewBarV2';
 import type { SearchGroupRequest } from './search-group-types';
 import {
   createSidebarTabState,
@@ -51,6 +54,7 @@ import {
 } from './sidebar-tab-state';
 import { ThreadItem } from './ThreadItem';
 import { ThreadOrganizerModal } from './ThreadOrganizerModal';
+import { ThreadSidebarV2Header } from './ThreadSidebarV2Header';
 import { openTheaterReplay } from './theater-navigation';
 import { pushThreadRouteWithHistory } from './thread-navigation';
 import { isGroupableThread, matchesThreadSearch } from './thread-search';
@@ -76,6 +80,11 @@ interface ThreadSidebarProps {
   className?: string;
   /** URL/layout truth used to gate the one-time initial tab bootstrap. */
   routeThreadId: string;
+  /**
+   * F322 v2: a Café destination (记忆) that is the current page while the sidebar stays visible. No conversation row is
+   * current then, and the conversation the store still remembers must be reachable by a click like any other.
+   */
+  activeDestination?: ShellDestination | null;
 }
 
 interface TrashedThread {
@@ -129,14 +138,19 @@ function forOpenableProject<T>(projectPath: string | undefined, build: (projectP
   return build(projectPath);
 }
 
-export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSidebarProps) {
+export function ThreadSidebar({ onClose, className, routeThreadId, activeDestination = null }: ThreadSidebarProps) {
   const [showBootcampList, setShowBootcampList] = useState(false);
+  const isV2 = useShellPresentation() === 'v2';
   const { currentThreadId, setCurrentProject } = useChatStore(
     useShallow((s) => ({
       currentThreadId: s.currentThreadId,
       setCurrentProject: s.setCurrentProject,
     })),
   );
+  // The conversation the user is in. The store keeps remembering the last one while a Café destination (记忆) is the
+  // current page, but then the user is not in it: it is not highlighted, clicking it navigates, and deleting or
+  // archiving it must not move the user off the page they are on.
+  const currentConversationId = activeDestination === null ? currentThreadId : null;
   const { rows, pendingThreadCommands, refreshing } = useSidebarProjectionStore(
     useShallow((state) => ({
       rows: state.rows,
@@ -385,7 +399,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       const url = isSystem ? `/api/threads/${threadId}?force=true` : `/api/threads/${threadId}`;
       const res = await apiFetch(url, { method: 'DELETE' });
       if (!res.ok && res.status !== 204) return;
-      if (threadId === currentThreadId) {
+      if (threadId === currentConversationId) {
         navigateToThread('default');
       }
       await loadThreads();
@@ -394,7 +408,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
     } catch {
       // Silently ignore
     }
-  }, [deleteTarget, currentThreadId, navigateToThread, loadThreads, showTrash, loadTrash]);
+  }, [deleteTarget, currentConversationId, navigateToThread, loadThreads, showTrash, loadTrash]);
 
   const handleRename = useCallback(async (threadId: string, title: string) => {
     const nextTitle = title.trim();
@@ -503,7 +517,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         hasUserMention: false,
       });
       useChatStore.getState().clearUnread(threadId);
-      if (threadId === currentThreadId) return;
+      if (threadId === currentConversationId) return;
       // Let the new thread restore projectPath after the route switch.
       // Pre-navigation global store writes can stall SPA thread navigation.
       navigateToThread(threadId);
@@ -512,7 +526,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
         onClose?.();
       }
     },
-    [currentThreadId, navigateToThread, onClose],
+    [currentConversationId, navigateToThread, onClose],
   );
 
   // F095 Phase F: Project action handlers
@@ -546,13 +560,13 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       );
       await Promise.allSettled(targets.map((t) => apiFetch(`/api/threads/${t.id}`, { method: 'DELETE' })));
       // P2-1: If current thread was archived, redirect to default
-      if (currentThreadId && targets.some((t) => t.id === currentThreadId)) {
+      if (currentConversationId && targets.some((t) => t.id === currentConversationId)) {
         navigateToThread('default');
       }
       await loadThreads();
       if (showTrash) void loadTrash();
     },
-    [threads, loadThreads, currentThreadId, navigateToThread, showTrash, loadTrash],
+    [threads, loadThreads, currentConversationId, navigateToThread, showTrash, loadTrash],
   );
 
   const handleQuickCreate = useCallback(
@@ -1320,7 +1334,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
             title={thread.title}
             participants={thread.participants}
             lastActiveAt={thread.lastActiveAt}
-            isActive={currentThreadId === thread.id}
+            isActive={currentConversationId === thread.id}
             onSelect={handleSelect}
             onDelete={handleDeleteRequest}
             onRename={handleRename}
@@ -1354,7 +1368,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
       attentionLoadState,
       openSearchGroup,
       commitAttentionThreadDrop,
-      currentThreadId,
+      currentConversationId,
       draggedAttentionThreadId,
       handleDeleteRequest,
       handleRename,
@@ -1508,79 +1522,104 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
 
   return (
     <>
-      <aside className={`${sidebarWidthClass} bg-[var(--console-panel-bg)] flex flex-col h-full`}>
-        <div className="px-3 pt-3 pb-2 flex items-center justify-between">
-          <span className="text-sm font-semibold text-cafe-black">对话</span>
-          <div className="flex items-center gap-1.5">
-            {uncategorizedCount > 0 && (
-              <button
-                type="button"
-                onClick={handleOrganizeWithCat}
-                className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-conn-amber-text transition-colors"
-                title={`猫猫帮你分类 (${uncategorizedCount} 未分类)`}
-              >
-                <SparkleIcon />
-              </button>
-            )}
-            {uncategorizedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowOrganizer(true)}
-                className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary transition-colors"
-                title={`手动批量分类 (${uncategorizedCount} 未分类)`}
-              >
-                <GridIcon />
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setShowBootcampList(true)}
-              className="p-1.5 rounded-lg text-cafe-accent hover:bg-accent-50 transition-colors"
-              title="猫猫训练营"
-              data-testid="sidebar-bootcamp"
-              data-guide-id="sidebar.bootcamp"
-            >
-              <BootcampIcon className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowPicker(true)}
-              disabled={isCreating}
-              className="console-button-primary text-xs disabled:opacity-40"
-              data-guide-id="sidebar.new-thread"
-            >
-              {creationPhase === 'reconciling' ? '请求超时，核对中…' : isCreating ? '...' : '+ 新对话'}
-            </button>
-          </div>
-        </div>
+      <aside
+        className={`${sidebarWidthClass} flex flex-col h-full ${isV2 ? '' : 'bg-[var(--console-panel-bg)]'}`}
+        style={isV2 ? { background: 'var(--shell-frame)', borderRight: '1px solid var(--shell-hairline)' } : undefined}
+        data-shell-sidebar={isV2 ? 'v2' : undefined}
+      >
+        {isV2 ? (
+          <ThreadSidebarV2Header
+            creationPhase={creationPhase}
+            onNewThread={() => setShowPicker(true)}
+            onCollapse={onClose}
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            bindWarning={bindWarning}
+            uncategorizedCount={uncategorizedCount}
+            onOrganizeWithCat={handleOrganizeWithCat}
+            onOpenOrganizer={() => setShowOrganizer(true)}
+            onOpenBootcamp={() => setShowBootcampList(true)}
+            unreadCount={unreadIds.size}
+            isMarkingAllRead={isMarkingAllRead}
+            onMarkAllRead={handleMarkAllRead}
+            activeDestination={activeDestination}
+          />
+        ) : (
+          <>
+            <div className="px-3 pt-3 pb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-cafe-black">对话</span>
+              <div className="flex items-center gap-1.5">
+                {uncategorizedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOrganizeWithCat}
+                    className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-conn-amber-text transition-colors"
+                    title={`猫猫帮你分类 (${uncategorizedCount} 未分类)`}
+                  >
+                    <SparkleIcon />
+                  </button>
+                )}
+                {uncategorizedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOrganizer(true)}
+                    className="p-1.5 rounded-lg text-cafe-muted hover:bg-[var(--console-hover-bg)] hover:text-cafe-secondary transition-colors"
+                    title={`手动批量分类 (${uncategorizedCount} 未分类)`}
+                  >
+                    <GridIcon />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowBootcampList(true)}
+                  className="p-1.5 rounded-lg text-cafe-accent hover:bg-accent-50 transition-colors"
+                  title="猫猫训练营"
+                  data-testid="sidebar-bootcamp"
+                  data-guide-id="sidebar.bootcamp"
+                >
+                  <BootcampIcon className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPicker(true)}
+                  disabled={isCreating}
+                  className="console-button-primary text-xs disabled:opacity-40"
+                  data-guide-id="sidebar.new-thread"
+                >
+                  {creationPhase === 'reconciling' ? '请求超时，核对中…' : isCreating ? '...' : '+ 新对话'}
+                </button>
+              </div>
+            </div>
 
-        {bindWarning && (
-          <div className="px-3 py-1.5 bg-conn-amber-bg border-b border-conn-amber-ring text-micro text-conn-amber-text">
-            {bindWarning}
-          </div>
+            {bindWarning && (
+              <div className="px-3 py-1.5 bg-conn-amber-bg border-b border-conn-amber-ring text-micro text-conn-amber-text">
+                {bindWarning}
+              </div>
+            )}
+
+            <div className="px-3 pb-2">
+              <div className="flex items-center gap-1.5">
+                <input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="搜索对话、项目或 ID..."
+                  className="flex-1 min-w-0 rounded-lg bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-cafe-muted focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]"
+                />
+                {unreadIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    disabled={isMarkingAllRead}
+                    className="shrink-0 rounded-md bg-transparent px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
+                    data-testid="mark-all-read-btn"
+                  >
+                    {isMarkingAllRead ? '...' : '全部已读'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
         )}
-
-        <div className="px-3 pb-2">
-          <div className="flex items-center gap-1.5">
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索对话、项目或 ID..."
-              className="flex-1 min-w-0 rounded-lg bg-[var(--console-card-soft-bg)] px-2.5 py-1.5 text-xs text-cafe-secondary placeholder:text-cafe-muted focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]"
-            />
-            {unreadIds.size > 0 && (
-              <button
-                type="button"
-                onClick={handleMarkAllRead}
-                disabled={isMarkingAllRead}
-                className="shrink-0 rounded-md bg-transparent px-2 py-0.5 text-micro text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-black disabled:opacity-40 transition-colors whitespace-nowrap"
-                data-testid="mark-all-read-btn"
-              >
-                {isMarkingAllRead ? '...' : '全部已读'}
-              </button>
-            )}
-          </div>
-        </div>
 
         <div
           ref={scrollContainerRef}
@@ -1591,7 +1630,18 @@ export function ThreadSidebar({ onClose, className, routeThreadId }: ThreadSideb
             <div className="text-center py-4 text-xs text-cafe-muted">加载中...</div>
           )}
 
-          {showTabRow && (
+          {showTabRow && isV2 && (
+            <SidebarViewBarV2
+              tabs={tabs}
+              activeTab={activeTab}
+              onSelectTab={handleSelectTab}
+              labels={labels}
+              labelFilter={labelFilter}
+              onLabelFilter={setLabelFilter}
+              uncategorizedCount={uncategorizedCount}
+            />
+          )}
+          {showTabRow && !isV2 && (
             <div
               className="sticky top-0 z-10 flex items-stretch border-b border-cafe-subtle bg-[var(--console-panel-bg)] pt-2 px-2"
               data-testid="sidebar-tabs-row"

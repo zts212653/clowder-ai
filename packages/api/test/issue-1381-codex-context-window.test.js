@@ -71,7 +71,7 @@ describe('issue #1381: Codex exec_json native/effective context window feedback 
     ({ resolveInvocationCapacitySnapshot, applyUsageEvidenceToInvocationSnapshot, applyActiveSessionCapacityPin } =
       await import('../dist/domains/cats/services/agents/invocation/invocation-capacity-snapshot.js'));
     ({ SessionChainStore } = await import('../dist/domains/cats/services/stores/ports/SessionChainStore.js'));
-    ({ ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js'));
+    ({ ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js'));
     ({ InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js'));
     savedConfigs = catRegistry.getAllConfigs();
   });

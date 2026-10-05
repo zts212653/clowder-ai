@@ -44,15 +44,44 @@
   gap: 8px;
 }
 .evolution-preparation-item > summary {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
+  gap: 16px;
+  padding-top: 22px;
+  padding-bottom: 22px;
 }
-.evolution-preparation-item-identity,
-.evolution-preparation-item-states {
-  grid-column: 1 / -1;
+.evolution-preparation-item-reasoning {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
 }
-.evolution-preparation-item-states {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.evolution-preparation-reading-copy {
+  color: var(--cafe-text-secondary);
+  font-size: var(--console-font-compact);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.evolution-preparation-choice-status {
+  color: var(--preparation-active-tone);
+  font-size: var(--console-font-label);
+  font-weight: 600;
+}
+.evolution-preparation-evidence-toggle {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-label);
+}
+.evolution-preparation-item > summary .evolution-preparation-when-open,
+.evolution-preparation-item[open] > summary .evolution-preparation-when-closed {
+  display: none;
+}
+.evolution-preparation-item[open] > summary .evolution-preparation-when-open {
+  display: inline;
+}
+.evolution-preparation-item[open] > summary .evolution-preparation-evidence-toggle > [aria-hidden] {
+  transform: rotate(180deg);
 }
 .evolution-preparation-return {
   padding: 12px 0;
@@ -62,13 +91,10 @@
 .evolution-preparation-state-value {
   overflow-wrap: anywhere;
 }
-@container evolution (min-width: 780px) {
+@container evolution (min-width: 660px) {
   .evolution-preparation-item > summary {
-    grid-template-columns: minmax(130px, 1.1fr) minmax(130px, 1fr) minmax(130px, 1fr) minmax(260px, 1.8fr);
-  }
-  .evolution-preparation-item-identity,
-  .evolution-preparation-item-states {
-    grid-column: auto;
+    grid-template-columns: minmax(150px, 0.85fr) minmax(0, 2fr);
+    gap: 28px;
   }
 }
 @container evolution (min-width: 780px) {
@@ -98,8 +124,7 @@
   }
 }
 @container evolution (max-width: 355px) {
-  .evolution-preparation-tabs,
-  .evolution-preparation-item-states {
+  .evolution-preparation-tabs {
     grid-template-columns: minmax(0, 1fr);
   }
 }

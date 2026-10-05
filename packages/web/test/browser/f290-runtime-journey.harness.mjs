@@ -19,7 +19,7 @@ export async function browserSessionToken(page, serviceUrl) {
 }
 
 export function startNext(port) {
-  return spawn('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'next', 'start', '-p', String(port)], {
+  return spawn('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'next', 'start', '-H', '127.0.0.1', '-p', String(port)], {
     cwd: REPO_ROOT,
     env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', NODE_ENV: 'production' },
     stdio: ['ignore', 'pipe', 'pipe'],

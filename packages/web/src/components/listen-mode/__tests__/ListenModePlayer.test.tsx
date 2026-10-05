@@ -18,6 +18,9 @@ const controls = vi.hoisted(() => ({
 }));
 vi.mock('@/services/DocumentListenController', () => ({ documentListenController: controls }));
 
+import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
+import { createWorkspaceModeSurface } from '@/components/workbench/real-surface-adapters';
+import { createInitialWorkbenchState } from '@/components/workbench/workbench-model';
 import { useChatStore } from '@/stores/chatStore';
 import { listenDocumentCacheKey, useListenModeStore } from '@/stores/listenModeStore';
 import { ListenModePlayer } from '../ListenModePlayer';
@@ -33,6 +36,7 @@ describe('ListenModePlayer', () => {
   const setCurrentProject = vi.fn();
 
   beforeEach(() => {
+    useF307ExperienceWorkbenchStore.setState({ hydrated: false, layout: createInitialWorkbenchState() });
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.clearAllMocks();
     useChatStore.setState({
@@ -81,6 +85,7 @@ describe('ListenModePlayer', () => {
 
   afterEach(() => {
     act(() => root.unmount());
+    useF307ExperienceWorkbenchStore.setState({ hydrated: false, layout: createInitialWorkbenchState() });
     container.remove();
     useListenModeStore.setState({ session: null });
     useChatStore.setState({
@@ -100,6 +105,22 @@ describe('ListenModePlayer', () => {
     expect(setCurrentProject).toHaveBeenCalledWith('/repo');
     expect(setWorkspaceOpenFile).toHaveBeenCalledWith('docs/research.md', null, 'cat-cafe');
     expect(container.textContent).toContain('缓存 1/1');
+  });
+
+  it('offers return to the playing document when another real owner is active despite a retained legacy file path', async () => {
+    useChatStore.setState({
+      currentProjectPath: '/repo',
+      workspaceOpenFilePath: 'docs/research.md',
+      workspaceWorktreeId: 'cat-cafe',
+      workspaceSurface: 'files',
+      rightPanelMode: 'workspace',
+    });
+    useF307ExperienceWorkbenchStore.setState({
+      hydrated: true,
+      layout: createInitialWorkbenchState([createWorkspaceModeSurface('eval', 'thread-listen')]),
+    });
+    await act(async () => root.render(<ListenModePlayer />));
+    expect([...container.querySelectorAll('button')].some((node) => node.textContent === '返回正文')).toBe(true);
   });
 
   it('occupies normal Workspace flow instead of floating over the chat composer', async () => {

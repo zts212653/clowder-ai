@@ -61,12 +61,11 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
       defineTool({
         name: 'cat_cafe_drill_memory_cue',
         description:
-          'Read the exact canonical source behind one owner-authenticated CueEnvelope. ' +
-          'Use when a bounded memory cue is relevant but the short projection is insufficient. ' +
-          'The server revalidates exact owner/thread/invocation scope, visibility, expiry, and current source revision on every call. ' +
-          'Output: the current owner-visible canonical source payload, or not_available with no source body. ' +
-          'NOT for raw query search, whole-library recall, caller-supplied source coordinates, or cross-thread handle replay. ' +
-          'GOTCHA: handles are process-scoped; after API restart or source correction/forget they fail closed.',
+          'Read the current canonical source behind an owner-authenticated CueEnvelope. ' +
+          'Use when its bounded projection is insufficient. ' +
+          'Output: owner-visible payload; not_available if gone or revoked; retryable source_read_failed on reader failure. ' +
+          'NOT for raw search, bulk recall, caller-supplied coordinates, or cross-thread replay. ' +
+          'GOTCHA: owner/thread/invocation scope, visibility, expiry, and current source revision are revalidated; restart, correction, or forget closes the handle.',
         inputSchema: drillMemoryCueInputSchema,
         handler: handleDrillMemoryCue,
         governance: {
@@ -79,11 +78,11 @@ export function createMemoryCueTools(callbackPost: CallbackPost) {
       defineTool({
         name: 'cat_cafe_record_memory_cue_outcome',
         description:
-          'Record whether one authenticated, already-presented memory cue was applied or dismissed. ' +
-          'Use once the current invocation has made that concrete consumption decision. ' +
-          'Output: a content-free recorded outcome coordinate; no cue body or private reasoning is stored. ' +
-          'NOT for source correction, forgetting, invalidation, or reporting an outcome for a cue that was never presented. ' +
-          'GOTCHA: there is intentionally no rationale field; canonical source lifecycle uses its own invalidation axis.',
+          'Record applied or dismissed for one authenticated, presented memory cue. ' +
+          'Use after this invocation makes that consumption decision. ' +
+          'Output: a content-free outcome reference; safe post-expiry writes add settlement=late_after_drill. ' +
+          'NOT for source mutation/invalidation or unpresented cues. ' +
+          'GOTCHA: no rationale is stored. Expired handles settle only after this exact owner/thread/invocation/cat recorded a successful drill and the current revision and visibility revalidate; otherwise 410 expired. Transient reader failures return retryable source_read_failed; corrected, forgotten, or revoked sources stay closed.',
         inputSchema: recordMemoryCueOutcomeInputSchema,
         handler: handleRecordMemoryCueOutcome,
         governance: {

@@ -123,6 +123,25 @@ describe('Collective Service HTTP process boundary', () => {
       member.sessionToken,
     );
     expect(events.events).toMatchObject([{ eventId: ownerEvent.eventId, sequence: 1 }]);
+    const proposedWork = await post(
+      server.url,
+      '/api/collaboration/work/propose',
+      {
+        serviceInstanceId: opened.store.serviceInstanceId,
+        collectiveId: collective.collectiveId,
+        sourceEventId: ownerEvent.eventId,
+        requestId: 'http-work-proposal',
+      },
+      owner.sessionToken,
+    );
+    expect(proposedWork).toMatchObject({ sourceEventId: ownerEvent.eventId, status: 'proposed' });
+    const collaboration = await get(
+      server.url,
+      `/api/collaboration?collectiveId=${collective.collectiveId}`,
+      member.sessionToken,
+    );
+    expect(collaboration.works).toMatchObject([{ workId: proposedWork.workId, sourceEventId: ownerEvent.eventId }]);
+    expect((await fetch(`${server.url}/api/collaboration?collectiveId=${collective.collectiveId}`)).status).toBe(401);
 
     const pairing = await post(
       server.url,

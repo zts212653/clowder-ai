@@ -7,6 +7,8 @@
  */
 
 /** 产物类型 — 决定前端图标 / 筛选分组 */
+import type { MessageMediaItemSelector } from './media-publication-source.js';
+
 export type ThreadArtifactType = 'image' | 'file' | 'code' | 'pr' | 'audio' | 'video' | 'widget';
 
 export interface ThreadArtifactDTO {
@@ -22,8 +24,12 @@ export interface ThreadArtifactDTO {
   sourceMessageId: string | null;
   /** 资源 URL（图 / 文件 / 语音的 /uploads/ 或外链；diff / 无 url 产物省略） */
   url?: string;
+  /** Exact item within the durable source message; URL/name never disambiguate a publication. */
+  publicationItem?: MessageMediaItemSelector;
   /** 去重键（PR ref `org/repo#123` / 文件路径）；同 ref 取最新 */
   ref?: string;
+  /** File-ledger owner key, independent of display name/update time. Not execution-root proof. */
+  fileLedgerRef?: string;
 }
 
 /** GET /api/threads/:threadId/artifacts 响应 */

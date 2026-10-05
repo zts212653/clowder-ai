@@ -24,7 +24,7 @@ export async function selectMarkupColor(page, color) {
 
 export async function openReviewPanel(page, panel) {
   const targets = {
-    comments: { landmark: '作品讨论', button: /^查看讨论/ },
+    comments: { landmark: '作品讨论', button: '打开作品讨论' },
     decision: { landmark: '审阅结论', button: '完成审阅' },
     details: { landmark: '版本与历史', button: '审阅详情' },
   };

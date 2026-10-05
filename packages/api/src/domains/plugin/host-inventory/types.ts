@@ -1,4 +1,5 @@
 import type { Capability, PluginManifest, SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
+import type { DesktopWindowFailureReason } from '../desktop-window-runtime/types.js';
 
 export const PLUGIN_INVENTORY_SCHEMA_VERSION = 1 as const;
 
@@ -33,6 +34,8 @@ export interface PluginRuntimeErrorRecord {
   readonly exitCode: number | null;
   readonly signal: NodeJS.Signals | null;
   readonly occurredAt: number;
+  /** Bounded first cause for the Host-owned desktop body; older snapshots omit it. */
+  readonly desktopReason?: DesktopWindowFailureReason;
 }
 
 export interface PluginPackageRecord {

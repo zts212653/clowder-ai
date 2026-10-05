@@ -1,18 +1,24 @@
 'use client';
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
+import type { ChatUserScrollGesture } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { catColorVar } from '@/lib/cat-slug';
 import { CAT_COLORS } from '@/lib/color-defaults';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
-import { scrollToMessage } from '@/utils/scrollToMessage';
 import { foldedSourceInvocationIdInTimeline } from './turn-absorption-summary';
 
 /** Maximum dots rendered on the track — prevents clutter in long conversations */
 const MAX_DOTS = 18;
 
 type CatLookup = (id: string) => CatData | undefined;
+
+function wheelDeltaPx(event: WheelEvent, container: HTMLElement): number {
+  if (event.deltaMode === 2) return event.deltaY * container.clientHeight;
+  if (event.deltaMode === 1) return event.deltaY * (Number.parseFloat(getComputedStyle(container).lineHeight) || 16);
+  return event.deltaY;
+}
 
 // Some variants use non-hyphen catIds (e.g. gpt52/sonnet/spark/gemini25 in the runtime cat config).
 // During the brief pre-/api/cats state, the cat list may be empty, so we map
@@ -84,9 +90,16 @@ export function messageNavigatorPreviewText(
 interface MessageNavigatorProps {
   messages: ChatMessageData[];
   scrollContainerRef: React.RefObject<HTMLElement | null>;
+  onJumpToMessage: (messageId: string) => boolean;
+  beginUserScroll: () => ChatUserScrollGesture | null;
 }
 
-export function MessageNavigator({ messages, scrollContainerRef }: MessageNavigatorProps) {
+export function MessageNavigator({
+  messages,
+  scrollContainerRef,
+  onJumpToMessage,
+  beginUserScroll,
+}: MessageNavigatorProps) {
   const { getCatById } = useCatData();
   const coCreator = useCoCreatorConfig();
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -123,19 +136,37 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
       // Ignore clicks on dots — closest() handles future child elements too (P3 fix)
       if ((e.target as HTMLElement).closest('button')) return;
       const rect = track.getBoundingClientRect();
+      if (rect.height <= 0) return;
       const ratio = (e.clientY - rect.top) / rect.height;
-      container.scrollTo({
-        top: ratio * (container.scrollHeight - container.clientHeight),
-        behavior: 'smooth',
-      });
+      const gesture = beginUserScroll();
+      gesture?.scrollTo(ratio * (container.scrollHeight - container.clientHeight));
+      gesture?.end();
     },
-    [scrollContainerRef],
+    [scrollContainerRef, beginUserScroll],
   );
 
-  if (navItems.length < 3) return null;
+  const visible = navItems.length >= 3;
+  useEffect(() => {
+    if (!visible) return;
+    const track = trackRef.current;
+    if (!track) return;
+    const wheel = (event: WheelEvent) => {
+      const container = scrollContainerRef.current;
+      if (!container || event.ctrlKey || event.deltaY === 0) return;
+      const gesture = beginUserScroll();
+      if (!gesture) return;
+      if (gesture.scrollTo(container.scrollTop + wheelDeltaPx(event, container))) event.preventDefault();
+      gesture.end();
+    };
+    // React delegates wheel passively; this control must prevent scrolling the page.
+    track.addEventListener('wheel', wheel, { passive: false });
+    return () => track.removeEventListener('wheel', wheel);
+  }, [beginUserScroll, scrollContainerRef, visible]);
+
+  if (!visible) return null;
 
   return (
-    <div className="absolute right-0.5 top-2 bottom-2 w-5 z-10">
+    <div data-message-navigator className="absolute right-0.5 top-2 bottom-2 w-5 z-10">
       <div ref={trackRef} className="relative h-full cursor-pointer" onClick={handleTrackClick}>
         {/* Track rail — thin connecting line between dots */}
         <div className="absolute left-1/2 top-0 bottom-0 w-px bg-[var(--console-border-soft)] -translate-x-1/2" />
@@ -158,10 +189,11 @@ export function MessageNavigator({ messages, scrollContainerRef }: MessageNaviga
 
           return (
             <button
+              type="button"
               key={`${msg.id}-${sourceIdx}`}
               className={`absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-150 hover:scale-[2] ${className}`}
               style={{ top: `${top}%`, left: '50%', ...(style ?? {}) }}
-              onClick={() => scrollToMessage(msg.id)}
+              onClick={() => onJumpToMessage(msg.id)}
               onMouseEnter={() => setHoveredIdx(idx)}
               onMouseLeave={() => setHoveredIdx(null)}
               aria-label={`跳转到 ${getSenderName(msg)} 的消息`}

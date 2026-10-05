@@ -142,14 +142,14 @@ describe('F286 MCP schema-delivery capability', () => {
       return command === 'codex' ? 'codex-cli 0.149.1\n' : '2.1.247 (Claude Code)\n';
     });
 
-    assert.equal(probe('codex'), '0.149.1');
-    assert.equal(probe('codex'), '0.149.1');
-    assert.equal(probe('claude'), '2.1.247');
+    assert.equal(await probe('codex'), '0.149.1');
+    assert.equal(await probe('codex'), '0.149.1');
+    assert.equal(await probe('claude'), '2.1.247');
     assert.equal(calls, 2);
 
     const runtimeVersion = createMemoizedHostVersionProbe(() => 'v22.14.0\n');
     assert.equal(
-      runtimeVersion('node-wrapper'),
+      await runtimeVersion('node-wrapper'),
       undefined,
       'must not misidentify a wrapper runtime as the provider CLI',
     );
@@ -193,7 +193,7 @@ describe('F286 MCP schema-delivery capability', () => {
       attestation({ subject: exactSubject }),
     );
 
-    const result = resolveMcpSchemaDeliveryForProviderLaunch({
+    const result = await resolveMcpSchemaDeliveryForProviderLaunch({
       repoRoot,
       command: 'codex',
       provider: 'openai',
@@ -212,7 +212,7 @@ describe('F286 MCP schema-delivery capability', () => {
   it('keeps availability independent when the host version cannot be probed', async () => {
     const { resolveMcpSchemaDeliveryForProviderLaunch } = await modulePromise;
     const health = [];
-    const result = resolveMcpSchemaDeliveryForProviderLaunch({
+    const result = await resolveMcpSchemaDeliveryForProviderLaunch({
       repoRoot: '/unused',
       command: 'missing-host',
       provider: 'openai',

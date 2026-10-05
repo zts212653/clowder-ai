@@ -52,6 +52,7 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
       threadId: 'thread-1',
       scene: 'durable Git write completed before process loss',
       quote: 'resume safely',
+      takeaway: '我们以为 You 喜欢可恢复的审批。',
       tags: ['recovery'],
       dimension: 'system-philosophy',
       privacy: 'public',
@@ -77,6 +78,7 @@ describe('Redis Taste proposal crash recovery', { skip: redisIsolationSkipReason
     });
 
     const afterRestart = new RedisTasteProposalStore(redis);
+    assert.equal((await afterRestart.get(proposal.id))?.takeaway, '我们以为 You 喜欢可恢复的审批。');
     const adapter = new F221ApprovalAdapter(afterRestart);
     const [recoveryItem] = await adapter.listPending('user-1');
     assert.ok(recoveryItem);

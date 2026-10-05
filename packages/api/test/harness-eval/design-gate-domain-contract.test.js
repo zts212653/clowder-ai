@@ -41,7 +41,10 @@ test('eval:design-gate owns an independent source adapter, consumer, and six-fie
   const entry = census.entries.find((candidate) => candidate.domainId === 'eval:design-gate');
   const sopEntry = census.entries.find((candidate) => candidate.domainId === 'eval:sop');
 
-  assert.equal(domain.enabled, true);
+  // 2026-10-01: dormant by owner disposition (docs/discussions/2026-10-01-eval-into-f311/README.md).
+  assert.equal(domain.enabled, false);
+  assert.ok(domain.dormancy?.revivalPath, 'dormant design-gate keeps an explicit revival path');
+  assert.equal(entry.classification, 'dormant');
   assert.equal(domain.sourceAdapter, 'f303-design-gate-episode');
   assert.equal(domain.sourceRefsKind, 'design-gate-episode-source-map');
   assert.equal(domain.handoffTargetResolver.featureId, 'F303');

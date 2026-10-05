@@ -75,8 +75,26 @@ export {
 } from './thread-drafts';
 
 const MAX_IMAGE_DRAFT_THREADS = 5;
+const NO_CONTEXT_ATTACHMENTS: ContextAttachment[] = [];
+const subscribeNothing = () => () => {};
+/** False while hydrating server HTML, true afterwards (and on any plain client mount). */
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
+}
 
 interface ChatInputProps {
+  /**
+   * Which presentation the HOST gives this composer. `'v2'` only where the host also mounts the one execution row above
+   * it (ThreadChatSurface): the row then says who is running / whether the run can be verified / how to stop it, so the
+   * composer drops its "猫猫正在回复中… 取消" bar and the empty-draft stop becomes its last control. Every other host
+   * (the split view mounts a bare ChatInput) keeps the classic composer, whatever shell is chosen — nothing there would
+   * say those things in its place.
+   */
+  presentation?: 'classic' | 'v2';
   /** Thread ID for draft persistence — drafts are saved per-thread */
   threadId?: string;
   onSend: (
@@ -101,6 +119,7 @@ const ACCEPTED_TYPES =
   'image/png,image/jpeg,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,application/zip,application/gzip,application/x-tar,application/octet-stream,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm';
 
 export function ChatInput({
+  presentation = 'classic',
   threadId,
   onSend,
   disabled,
@@ -158,6 +177,7 @@ export function ChatInput({
     unscopedHasActiveInvocation,
   );
   const hasActiveInvocation = canonicalExecutions.length > 0 || hasUnverifiedLegacyExecution;
+  const shellV2 = presentation === 'v2';
   const stopState: 'available' | 'pending' | 'unavailable' | 'hidden' =
     canonicalExecutions.length === 0 ? (hasUnverifiedLegacyExecution ? 'unavailable' : 'hidden') : projectedCancelState;
   const activeCatIds = useMemo(() => {
@@ -218,6 +238,10 @@ export function ChatInput({
   const [contextAttachments, setContextAttachments] = useState<ContextAttachment[]>(() =>
     threadId ? (threadContextAttachmentDrafts.get(threadId) ?? []) : [],
   );
+  // Context drafts are restored from this browser session, which the server never sees: keep them in state (so the
+  // draft sync below never clears them) but render them only once hydration is over, like the text draft.
+  const hydrated = useHydrated();
+  const shownContextAttachments = hydrated ? contextAttachments : NO_CONTEXT_ATTACHMENTS;
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode, setWhisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
@@ -868,8 +892,9 @@ export function ChatInput({
 
   return (
     <div className="relative bg-[var(--console-shell-bg)] safe-area-bottom">
-      {/* F39: Queue status bar — visible when cat is running */}
-      {hasActiveInvocation && (
+      {/* F39: Queue status bar — visible when cat is running. New shell (v2): the one execution row above the composer
+          says this and holds the stop; the classic interface keeps the bar unchanged. */}
+      {hasActiveInvocation && !shellV2 && (
         <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
           <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
           <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">
@@ -986,7 +1011,7 @@ export function ChatInput({
       <AttachmentPreview files={images} onRemove={handleRemoveImage} />
 
       <ContextAttachmentList
-        attachments={contextAttachments}
+        attachments={shownContextAttachments}
         compact
         onRemove={(id) => setContextAttachments((previous) => previous.filter((attachment) => attachment.id !== id))}
       />
@@ -1100,7 +1125,8 @@ export function ChatInput({
           sendDisabled={sendTemporarilyDisabled}
           hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
           activeExecutionKey={whisperTargetsAllIdle ? undefined : activeExecutionKey}
-          hasText={Boolean(input.trim() || contextAttachments.length > 0)}
+          hasText={Boolean(input.trim() || shownContextAttachments.length > 0)}
+          presentation={shellV2 ? 'v2' : 'classic'}
         />
       </div>
 

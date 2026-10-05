@@ -54,7 +54,10 @@ describe('F311 journey navigation is reading, not lifecycle advancement', () => 
     );
     expect(button, `the journey step ${label} must be a semantic control`).toBeDefined();
     await act(async () => button!.click());
-    expect(button!.getAttribute('aria-pressed')).toBe('true');
+    const selected = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="能力进化旅程"] button')].find(
+      (node) => node.textContent === label,
+    );
+    expect(selected?.getAttribute('aria-pressed')).toBe('true');
   }
 
   it.each([

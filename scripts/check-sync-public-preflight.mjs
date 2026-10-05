@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -94,6 +94,43 @@ export function checkPublicPackageScriptClosure(repoRoot = defaultRepoRoot) {
   }
   errors.sort();
   return { ok: errors.length === 0, errors };
+}
+
+function workflowScriptPaths(workflowText) {
+  // This pre-install audit must run with only Node built-ins. Conservatively
+  // check literal companion paths; workflow syntax validation belongs to CI.
+  const activeText = workflowText
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*#/.test(line))
+    .join('\n');
+  return [...activeText.matchAll(/\.github\/scripts\/[A-Za-z0-9_./@+-]+/g)].map(([path]) => path);
+}
+
+function publicWorkflowScriptErrors(repoRoot) {
+  const workflowRoot = resolve(repoRoot, '.github/workflows');
+  if (!existsSync(workflowRoot)) return [];
+  const errors = [];
+  const workflows = readdirSync(workflowRoot, { withFileTypes: true }).filter(
+    (entry) => entry.isFile() && /\.ya?ml$/.test(entry.name),
+  );
+  for (const entry of workflows) {
+    const workflowPath = `.github/workflows/${entry.name}`;
+    try {
+      const workflowText = readFileSync(resolve(workflowRoot, entry.name), 'utf8');
+      for (const scriptPath of workflowScriptPaths(workflowText)) {
+        const absolutePath = resolve(repoRoot, scriptPath);
+        const relativePath = relative(repoRoot, absolutePath);
+        if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {
+          errors.push(`${workflowPath} -> outside export root ${scriptPath}`);
+        } else if (!existsSync(absolutePath)) {
+          errors.push(`${workflowPath} -> missing ${scriptPath}`);
+        }
+      }
+    } catch (error) {
+      errors.push(`${workflowPath}: cannot inspect workflow (${error.message})`);
+    }
+  }
+  return [...new Set(errors)].sort();
 }
 
 function loadCapabilityTipInventories(repoRoot, baseRef) {
@@ -218,6 +255,7 @@ export function checkSyncPublicPreflight(repoRoot = defaultRepoRoot, options = {
   });
   const errors = [
     ...packageClosure.errors,
+    ...publicWorkflowScriptErrors(repoRoot),
     ...tipReferenceRegressions.errors,
     ...tipExportCoverage.errors,
     ...capabilityTips.errors,

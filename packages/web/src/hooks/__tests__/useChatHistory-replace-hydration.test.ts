@@ -166,6 +166,36 @@ describe('useChatHistory replace hydration', () => {
     };
   }
 
+  it('rehydrates the saved companion identity instead of replacing it with current selection', async () => {
+    const history = installDeferredHistoryResponse();
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    const identity = {
+      v: 1,
+      name: '猫猫球',
+      partner: { catId: 'fable-5', displayName: '宪宪', skin: 'xianxian-codex' },
+      live: { catId: 'codex6-sol', displayName: '砚砚', transport: 'gpt_live_v3', verifiedModel: null },
+      deep: { catId: 'fable-5', displayName: '宪宪', verifiedModel: null },
+    };
+    await history.resolve({
+      messages: [
+        {
+          id: 'saved-live',
+          type: 'assistant',
+          catId: 'codex6-sol',
+          content: '那天的回答',
+          timestamp: Date.now(),
+          extra: { liveCompanion: { modality: 'voice', identity } },
+        },
+      ],
+      tasks: [],
+      hasMore: false,
+    });
+    expect(
+      useChatStore.getState().messages.find((message) => message.id === 'saved-live')?.extra?.liveCompanion?.identity,
+    ).toEqual(identity);
+  });
+
   it('hydrates semantic messages through the shared projector without exposing stored raw copy', async () => {
     const history = installDeferredHistoryResponse();
     const cachedAssistantTs = Date.now() - 1000;
@@ -201,6 +231,38 @@ describe('useChatHistory replace hydration', () => {
     expect(hydrated?.type).toBe('system');
     expect(hydrated?.content).toBe('警告：受保护操作已拒绝。');
     expect(JSON.stringify(hydrated)).not.toContain('raw/provider');
+  });
+
+  it('hydrates a modification source from persisted history when no live metadata copy exists', async () => {
+    const history = installDeferredHistoryResponse();
+    const metadata = {
+      v: 1,
+      requestId: 'f309-modification-' + 'a'.repeat(64),
+      requestFingerprint: 'sha256:' + 'b'.repeat(64),
+      contentTitle: '晨光封面',
+      targetCatId: 'codex-astra',
+      targetName: '小星星',
+      executionThreadTitle: '封面共创',
+      completionRule: 'file-writeback-applied',
+    };
+    mountReplaceHydrationThread(makeThreadBState(Date.now() - 1000));
+    await history.waitUntilPending();
+    await history.resolve({
+      messages: [
+        {
+          id: 'modification-source',
+          catId: null,
+          content: '移除画面标志',
+          timestamp: Date.now(),
+          extra: { contentModificationRequestV1: metadata },
+        },
+      ],
+      hasMore: false,
+    });
+    expect(
+      useChatStore.getState().messages.find((item) => item.id === 'modification-source')?.extra
+        ?.contentModificationRequestV1,
+    ).toEqual(metadata);
   });
 
   it('preserves the source-owned custody offer when a stale hydration copy omits message extra', async () => {
