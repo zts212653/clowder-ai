@@ -43,7 +43,6 @@ export type {
   A2ATask,
   A2ATaskStatus,
 } from './a2a.js';
-// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
 export {
   A2A_INLINE_MENTION_MODE,
   type A2ARoutingMode,
@@ -187,6 +186,19 @@ export {
   isBubbleEventType,
   isBubbleKind,
 } from './bubble-pipeline.js';
+export {
+  BUILTIN_CLOUD_IDENTITY_LOCKED_FIELDS,
+  BUILTIN_GPT_PRO_CANONICAL_MENTION,
+  BUILTIN_GPT_PRO_CAT_ID,
+  BUILTIN_GPT_PRO_IDENTITY,
+  type BuiltinCloudIdentityCandidate,
+  type BuiltinCloudIdentityLockedField,
+  type BuiltinCloudIdentityProtectedField,
+  type BuiltinCloudIdentityProtection,
+  hasBuiltinGptProCanonicalMention,
+  isBuiltinGptProIdentity,
+  projectBuiltinCloudIdentityProtection,
+} from './builtin-cloud-identity.js';
 // F174 Phase A: shared reason taxonomy for callback auth failures
 export {
   CALLBACK_AUTH_FAILURE_REASONS,
@@ -203,8 +215,12 @@ export type {
   CapabilityAuditEntry,
   CapabilityBoardItem,
   CapabilityBoardResponse,
+  CapabilityConfigUnreadableCause,
   CapabilityEntry,
   CapabilityPatchRequest,
+  CapabilityReadEnvelope,
+  CapabilityReadScope,
+  CapabilitySnapshotResponse,
   CatCapabilityOverride,
   CatFamily,
   DispatchExecutionDigest,
@@ -241,6 +257,7 @@ export * from './capability-evolution-preparation-review.js';
 export * from './capability-evolution-refs.js';
 // Cat types
 export type {
+  AgyNativeCodingGrantConfig,
   AgyProfileConfig,
   CatColor,
   CatConfig,
@@ -299,6 +316,10 @@ export {
   isCloudBridgeRecoveryV1,
 } from './cloud-bridge-outbound-receipt.js';
 export * from './collective.js';
+export * from './collective-collaboration.js';
+export * from './collective-decision-vote.js';
+export * from './collective-reaction.js';
+export * from './collective-vote.js';
 // Command types (F142 Phase B — slash command framework)
 export type {
   CommandSource,
@@ -476,6 +497,8 @@ export type {
   DeliberateSession,
   DeliberateTransition,
 } from './deliberate.js';
+export * from './development-return.js';
+export * from './development-work-actions.js';
 // Dispatch proposal types (F246 Phase B: F193 E3 cross-thread dispatch)
 export {
   type DispatchProposal,
@@ -688,6 +711,7 @@ export {
   type GitHubTrackingIdentityV1,
   type GitHubWaitBaseline,
   type GitHubWaitMatchedDelta,
+  type GitHubWaitOutcomeV1,
   type GitHubWaitPredicate,
   type GitHubWaitPredicateKind,
   type GitHubWaitSubjectRef,
@@ -699,6 +723,7 @@ export {
   sameGitHubLogin,
   type UnifiedAwaitStateV1,
   type WaitContinuationCarrierV1,
+  type WaitOutcomeBaseV1,
   type WaitOutcomeDelivery,
   type WaitOutcomeV1,
   type WaitOwnerFence,
@@ -724,6 +749,8 @@ export {
   producerAttentionReceiptV1Schema,
   producerAttentionReevaluationLinkV1Schema,
 } from './growing.js';
+// F086/F216: structured A2A scheduling mode (serial vs parallel) — never inferred from ordering
+export * from './growing-development.js';
 export {
   CUSTODY_OPPORTUNITY_CONTRACT_VIOLATION_CODES,
   type CustodyOpportunityCohortSnapshotV1,
@@ -1380,7 +1407,6 @@ export {
   type ProviderSubexecutionStage,
   type ProviderWarningSemanticEvent,
 } from './provider-semantic-event.js';
-// F264: durable per-target queued-message receipt and manual reminder truth
 export type {
   FreshnessCarrier,
   FreshnessCarrierCapability,
@@ -1390,7 +1416,9 @@ export type {
   QueueAuthorIntent,
   QueueAuthorIntentFallbackReason,
   QueueAuthorIntentReceipt,
+  QueueDispatchDispositionEvidenceRef,
   QueueHandledDisposition,
+  QueueInvocationSettlement,
   QueueLineageEvidenceRef,
   QueueManagedHoldContinuationWitness,
   QueueMessageReceipt,
@@ -1411,6 +1439,13 @@ export type {
   QueueTerminalConsumptionWitness,
   QueueTerminalSilentConsumptionWitness,
   QueueTurnExecutionEvidenceRef,
+} from './queue-receipt.js';
+// F264: durable per-target queued-message receipt and manual reminder truth
+export {
+  FRESHNESS_CARRIER_DELIVERY_SEMANTICS,
+  FRESHNESS_CARRIER_PROVIDERS,
+  FRESHNESS_CARRIERS,
+  isQueueDispatchDispositionEvidence,
 } from './queue-receipt.js';
 // Reflux types (F076 Phase 2 — 回流)
 export type {
@@ -1674,6 +1709,7 @@ export type {
   TurnExecutionTerminalInput,
   TurnExecutionTerminalStatus,
 } from './turn-execution.js';
+export * from './unified-attention.js';
 // User preferences types (F166 猫猫排序自定义)
 export type {
   MessageDispositionPreferenceSnapshot,

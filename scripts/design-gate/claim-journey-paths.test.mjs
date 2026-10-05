@@ -42,14 +42,14 @@ describe('claim journey paths (gate route classifier input)', () => {
     assert.equal(isDesignGateJourneyPath('docs/design-gate-claims-notes.md', bound), false);
   });
 
-  it('the committed claims bind the F307 default-entry journey file', () => {
+  it('the committed claims bind existing default-entry journeys, including F307', () => {
     if (!existsSync(resolve(repoRoot, 'docs/design-gate-claims'))) {
       assert.deepEqual(listDefaultEntryJourneyPaths(repoRoot), []);
       return;
     }
-    assert.deepEqual(listDefaultEntryJourneyPaths(repoRoot), [
-      'packages/web/test/browser/f307-phase-a-experience-gate.test.mjs',
-    ]);
+    const paths = listDefaultEntryJourneyPaths(repoRoot);
+    assert.ok(paths.includes('packages/web/test/browser/f307-phase-a-experience-gate.test.mjs'));
+    for (const path of paths) assert.equal(existsSync(resolve(repoRoot, path)), true, path);
   });
 });
 

@@ -42,26 +42,24 @@ function selfPids(self) {
 }
 
 /**
- * The recorded pid is the launcher; the API and web server are its unrecorded
- * children (`process-tree.mjs`). So a pid that is not in the recorded set has
- * not been shown to be someone else's -- it still has to be asked about.
- *
- * Three answers, kept distinct: ours, not ours, and could-not-tell.
- * @returns {true | false | undefined}
+ * INV-7: protect dependencies and their ancestors, not their descendants.
+ * A feature server spawned by a CLI is downstream of the host API, but the
+ * host does not depend on that feature server. All observations are injected;
+ * a listener/ancestry lookup failure remains unknown, never permission.
  */
-function targetsHostTree(pids, self, isHostDescendant) {
-  if (!isHostDescendant) return false;
-  const launchers = uniq([self.runtime?.launcherPid, ...(self.launcherPids ?? [])]);
-  if (launchers.length === 0) return false;
-  let sawUnknown = false;
+function targetsHostDependencies(pids, self, { isHostDescendant, readHostPids, observerPid }) {
+  if (!isHostDescendant) return { hit: false, unknownFacts: [] };
+  const observed = readHostPids?.() ?? { pids: [], complete: selfPorts(self).length === 0 };
+  const dependencies = uniq([...selfPids(self), ...observed.pids, observerPid]);
+  const unknownFacts = observed.complete ? [] : ['listener ownership'];
   for (const pid of pids) {
-    for (const launcher of launchers) {
-      const answer = isHostDescendant(pid, launcher);
-      if (answer === true) return true;
-      if (answer === undefined) sawUnknown = true;
+    for (const dependency of dependencies) {
+      const answer = isHostDescendant(dependency, pid);
+      if (answer === true) return { hit: true, unknownFacts: [] };
+      if (answer === undefined) unknownFacts.push(`ancestor chain for pid ${dependency}`);
     }
   }
-  return sawUnknown ? undefined : false;
+  return { hit: false, unknownFacts: uniq(unknownFacts) };
 }
 
 function identityRefFor(self, { pid, port }) {
@@ -78,7 +76,7 @@ function assessment(verdict, reason, matchedTargets = [], sourceRefs = []) {
 }
 
 const ELSEWHERE =
-  'If you need a runtime to poke at, use the isolated alpha stack (Redis 6398); if production really has to stop, ask You.';
+  'If you need a runtime to poke at, use the isolated alpha stack (Redis 6397); if production really has to stop, ask You.';
 
 /** Sanctuary is the existing classifier's answer, not a second opinion. */
 function sanctuaryHit(raw, cwd) {
@@ -172,7 +170,7 @@ function stopsOwnDeployment(deployment, self) {
   return deployment.projectRoot === ownRoot || String(deployment.projectRoot).startsWith(`${ownRoot}/`);
 }
 
-export function assessSideEffect(commandLine, cwd, self = {}, { isHostDescendant } = {}) {
+export function assessSideEffect(commandLine, cwd, self = {}, observations = {}) {
   const raw = String(commandLine ?? '');
   if (!raw.trim()) return assessment('allow', 'Nothing to assess.');
 
@@ -219,24 +217,24 @@ export function assessSideEffect(commandLine, cwd, self = {}, { isHostDescendant
       );
     }
 
-    // The recorded pid is only the launcher. A pid we do not recognise may still
-    // be the API or the web server it started, and stopping those stops us.
+    // Recorded ports resolve the actual services; reverse ancestry protects
+    // their wrappers and this invocation, without protecting every descendant.
     const unrecognised = command.pids.filter((pid) => !knownPids.includes(pid));
     if (unrecognised.length > 0) {
-      const inTree = targetsHostTree(unrecognised, self, isHostDescendant);
+      const dependency = targetsHostDependencies(unrecognised, self, observations);
       const ref = self.runtime?.sourceRef ?? 'self';
-      if (inTree === true) {
+      if (dependency.hit) {
         return assessment(
           'self_host',
-          `"${command.text}" targets a process started by the deployment hosting this cat -- the launcher is recorded, its API and web children are not, and stopping any of them stops us. ${ELSEWHERE}`,
+          `"${command.text}" targets a host dependency or an ancestor of a host service or the current executor -- stopping it would interrupt this session. ${ELSEWHERE}`,
           [ref],
           [ref],
         );
       }
-      if (inTree === undefined) {
+      if (dependency.unknownFacts.length > 0) {
         return assessment(
           'unknown',
-          `"${command.text}" targets a process whose ancestry could not be read, so it cannot be shown not to belong to the deployment hosting this cat. ${ELSEWHERE}`,
+          `"${command.text}" cannot be ruled out as a host dependency: unreadable ${dependency.unknownFacts.join(', ')}. ${ELSEWHERE}`,
         );
       }
     }

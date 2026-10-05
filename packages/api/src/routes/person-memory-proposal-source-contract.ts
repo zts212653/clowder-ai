@@ -16,6 +16,7 @@ import {
 import { z } from 'zod';
 import { type IMessageStore, isDelivered } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { canViewMessage } from '../domains/cats/services/stores/visibility.js';
+import { resolveOwnerMessageExcerptSegment } from '../domains/memory/people/owner-message-text-projection.js';
 import { estimateTokens } from '../utils/token-counter.js';
 
 const claimInputSchema = candidateClaimDraftSchema.omit({ draftId: true, decision: true });
@@ -219,7 +220,8 @@ export async function resolvedBindingsAreMaterializable(
     const source = sources.get(binding.sourceId);
     if (source?.kind !== 'message_text') return false;
     const message = await messageStore.getById(source.sourceRef.messageId);
-    if (!message || containsRelayedQuote(message.content)) return false;
+    const segment = message ? resolveOwnerMessageExcerptSegment(message, source.excerpt) : null;
+    if (!segment || containsRelayedQuote(segment.text)) return false;
   }
   return true;
 }
@@ -242,7 +244,7 @@ export async function resolveInteractionSourceEvidence(
       message._tombstone === true ||
       !isDelivered(message) ||
       !canViewMessage(message, { type: 'user' }) ||
-      !message.content.normalize('NFKC').includes(source.evidenceExcerpt.normalize('NFKC'))
+      !resolveOwnerMessageExcerptSegment(message, source.evidenceExcerpt)
     ) {
       return null;
     }
@@ -284,7 +286,7 @@ export async function resolveProposalSourceMessageId(
     message._tombstone === true ||
     !isDelivered(message) ||
     !canViewMessage(message, { type: 'user' }) ||
-    evidenceExcerpts.some((excerpt) => !message.content.normalize('NFKC').includes(excerpt.normalize('NFKC')))
+    evidenceExcerpts.some((excerpt) => !resolveOwnerMessageExcerptSegment(message, excerpt))
   ) {
     return null;
   }

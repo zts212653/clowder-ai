@@ -26,6 +26,7 @@ export const webDigestTemplate: TaskTemplate = {
       profile: 'awareness',
       trigger: p.trigger,
       admission: {
+        dependsOnThreadActivity: false,
         async gate() {
           if (!url) return { run: false, reason: 'no url param' };
           if (!threadId) return { run: false, reason: 'no deliveryThreadId' };

@@ -5,6 +5,7 @@ export type FreshnessRelevanceReason =
   | 'directed_to_other_cat'
   | 'closure_replacement_for_other_cat'
   | 'same_parallel_batch'
+  | 'same_live_call_exposure'
   | 'same_user_wave_sibling_reply';
 
 export interface FreshnessRelevanceDecision {
@@ -13,6 +14,7 @@ export interface FreshnessRelevanceDecision {
 }
 
 export interface FreshnessRelevanceContext {
+  sameLiveCallExposure?: boolean;
   catId: string;
   parallelBatchId?: string;
   coveredTriggerMessageIds?: ReadonlySet<string>;
@@ -40,6 +42,7 @@ export function decideFreshnessRelevance(
   message: FreshnessReadableMessage,
   context: FreshnessRelevanceContext,
 ): FreshnessRelevanceDecision {
+  if (context.sameLiveCallExposure) return { relevant: false, reason: 'same_live_call_exposure' };
   const freshness = message.extra?.freshness;
   if (freshness?.kind === 'closure_replacement' && freshness.targetCatId !== context.catId) {
     return { relevant: false, reason: 'closure_replacement_for_other_cat' };

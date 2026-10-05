@@ -2,7 +2,7 @@
 
 > **触发场景**：拆解任何 agent runtime / agent harness / memory system / knowledge tool。
 > **要回答的核心问题**：这个系统的真用户是谁？它给真用户的，是**继续工作的入口**还是**死路**？再深一层——它有没有**帮 agent 做闭环**？
-> **教学来源**：Lysander 2026-04-25 tech-sharing 脚本 §1.3"agent 本体是闭环" + 2026-04-28 push back（hindsight 实测烧 token + 效果烂的根因分析）+ 三猫并行讨论收敛（@opus-47 / @opus 4.6 / @codex）。
+> **教学来源**：you 2026-04-25 tech-sharing 脚本 §1.3"agent 本体是闭环" + 2026-04-28 push back（hindsight 实测烧 token + 效果烂的根因分析）+ 三猫并行讨论收敛（@opus-47 / @opus 4.6 / @codex）。
 
 ---
 
@@ -66,7 +66,7 @@
 
 ---
 
-## 经典反例：Hindsight token 烧爆事件（Lysander 实测）
+## 经典反例：Hindsight token 烧爆事件（you 实测）
 
 **场景**：Clowder AI 早期试用 hindsight 作为记忆 backend。
 
@@ -190,8 +190,8 @@ agent 能用这个结果定位到错误源、修正、补查吗？
 ---
 
 教学来源 + 作者贡献：
-- Lysander @ 2026-04-25 tech-sharing 脚本 §1.3（agent 本体是闭环 + 状态三层）
-- Lysander @ 2026-04-28 push back（hindsight 实测 + observation 真假命题）
+- you @ 2026-04-25 tech-sharing 脚本 §1.3（agent 本体是闭环 + 状态三层）
+- you @ 2026-04-28 push back（hindsight 实测 + observation 真假命题）
 - @opus-47（Layer A 架构 3 层判决 + Step A/B 写法）
 - @opus 4.6（Layer B 体感 3 朴素问题）
 - @codex Maine Coon（Layer C 工程 5 点 checklist + report-template Agent User Fit 一栏建议）

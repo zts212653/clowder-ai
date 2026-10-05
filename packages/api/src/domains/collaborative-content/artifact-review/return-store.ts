@@ -5,6 +5,8 @@ import type { ReviewMutation } from './store.js';
 export interface ReviewReturnTarget {
   targetCatId: string;
   expectedTaskRevision: number;
+  /** Set only by the F309 request producer within its ledger/outbox/journal transaction. */
+  requestId?: string;
 }
 
 /** Delivery custody only. The referenced Task and review remain their respective owners' truth. */
@@ -19,11 +21,29 @@ export interface ReviewReturnIntent extends ReviewReturnTarget {
   contentRef: string;
   ownerRevision: number;
   state: 'pending' | 'queued' | 'retired';
-  kind: 'submit_feedback' | 'decide' | 'reopen' | 'request_image_edit';
+  kind: 'submit_feedback' | 'decide' | 'reopen' | 'request_image_edit' | 'request_media_edit' | 'supersede_request';
   createdAt: string;
   messageId?: string;
   retirementReason?: string;
 }
+
+/** Text has a real Task and human source, but no media contentRef or media round. */
+export interface TextModificationReturnIntent extends ReviewReturnTarget {
+  kind: 'request_text_edit';
+  receiptRef: string;
+  requestId: string;
+  sourceMessageId: string;
+  ownerUserId: string;
+  threadId: string;
+  taskId: string;
+  locator: { worktreeId: string; path: string };
+  baseRevision: string;
+  state: 'pending' | 'queued' | 'retired';
+  createdAt: string;
+  messageId?: string;
+  retirementReason?: string;
+}
+export type ContentReturnIntent = ReviewReturnIntent | TextModificationReturnIntent;
 
 export class ArtifactReviewReturnStore {
   constructor(private readonly database: Database.Database) {
@@ -36,7 +56,15 @@ export class ArtifactReviewReturnStore {
   record(review: ArtifactReview, receipt: ArtifactReviewReceipt, input: ReviewMutation): void {
     if (receipt.outcome !== 'applied' || receipt.actor.kind !== 'human' || !input.returnTarget) return;
     const kind = input.kind;
-    if (kind !== 'submit_feedback' && kind !== 'decide' && kind !== 'reopen' && kind !== 'request_image_edit') return;
+    if (
+      kind !== 'submit_feedback' &&
+      kind !== 'decide' &&
+      kind !== 'reopen' &&
+      kind !== 'request_image_edit' &&
+      kind !== 'request_media_edit' &&
+      kind !== 'supersede_request'
+    )
+      return;
     const round = review.rounds.find((item) => item.number === input.round);
     if (!round) throw new Error('Review return has no receipt round');
     const intent: ReviewReturnIntent = {
@@ -59,21 +87,28 @@ export class ArtifactReviewReturnStore {
       .run(intent.receiptRef, intent.state, intent.createdAt, JSON.stringify(intent));
   }
 
-  pending(limit = 100): ReviewReturnIntent[] {
+  recordText(intent: TextModificationReturnIntent): void {
+    if (!this.database.inTransaction) throw new Error('Text return must share the human decision transaction');
+    this.database
+      .prepare('INSERT INTO artifact_review_returns (receipt_ref,state,created_at,body) VALUES (?,?,?,?)')
+      .run(intent.receiptRef, intent.state, intent.createdAt, JSON.stringify(intent));
+  }
+
+  pending(limit = 100): ContentReturnIntent[] {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('Invalid return batch limit');
     const rows = this.database
       .prepare(
         "SELECT body FROM artifact_review_returns WHERE state = 'pending' ORDER BY created_at, receipt_ref LIMIT ?",
       )
       .all(limit) as { body: string }[];
-    return rows.map((row) => JSON.parse(row.body) as ReviewReturnIntent);
+    return rows.map((row) => JSON.parse(row.body) as ContentReturnIntent);
   }
 
-  get(receiptRef: string): ReviewReturnIntent | null {
+  get(receiptRef: string): ContentReturnIntent | null {
     const row = this.database
       .prepare('SELECT body FROM artifact_review_returns WHERE receipt_ref = ?')
       .get(receiptRef) as { body: string } | undefined;
-    return row ? (JSON.parse(row.body) as ReviewReturnIntent) : null;
+    return row ? (JSON.parse(row.body) as ContentReturnIntent) : null;
   }
 
   latest(reviewId: string): ReviewReturnIntent | null {
@@ -97,7 +132,7 @@ export class ArtifactReviewReturnStore {
     this.update({ ...intent, state: 'retired', retirementReason });
   }
 
-  private update(intent: ReviewReturnIntent): void {
+  private update(intent: ContentReturnIntent): void {
     this.database
       .prepare("UPDATE artifact_review_returns SET state = ?, body = ? WHERE receipt_ref = ? AND state = 'pending'")
       .run(intent.state, JSON.stringify(intent), intent.receiptRef);

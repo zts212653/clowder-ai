@@ -11,6 +11,7 @@ import type {
   ReportingMode,
   ThreadProposal,
 } from '@cat-cafe/shared';
+import { developmentScopeV1Schema } from '@cat-cafe/shared';
 import type { FinalizeApprovalInput } from '../ports/ProposalStore.js';
 import { hydrateApprovalPublication, serializeApprovalPublication } from './RedisApprovalPublication.js';
 
@@ -97,6 +98,10 @@ export function serializeProposal(proposal: ThreadProposal): string[] {
   if (proposal.publication) fields.push('publication', serializeApprovalPublication(proposal.publication));
   if (proposal.withdrawnBy) fields.push('withdrawnBy', proposal.withdrawnBy);
   if (proposal.withdrawnAt) fields.push('withdrawnAt', String(proposal.withdrawnAt));
+  if (proposal.subjectTaskId) fields.push('subjectTaskId', proposal.subjectTaskId);
+  if (proposal.subjectTaskTitle) fields.push('subjectTaskTitle', proposal.subjectTaskTitle);
+  if (proposal.approvedDevelopmentScope)
+    fields.push('approvedDevelopmentScope', JSON.stringify(proposal.approvedDevelopmentScope));
   return fields;
 }
 
@@ -132,6 +137,17 @@ export function hydrateProposal(data: Record<string, string>): ThreadProposal {
   if (data.cardMessageId) proposal.cardMessageId = data.cardMessageId;
   const publication = hydrateApprovalPublication(data.publication);
   if (publication) proposal.publication = publication;
+  if (data.subjectTaskId) proposal.subjectTaskId = data.subjectTaskId;
+  if (data.subjectTaskTitle) proposal.subjectTaskTitle = data.subjectTaskTitle;
+  if (data.approvedDevelopmentScope) {
+    try {
+      const parsed = developmentScopeV1Schema.safeParse(JSON.parse(data.approvedDevelopmentScope));
+      if (parsed.success) proposal.approvedDevelopmentScope = parsed.data;
+      // Invalid JSON or schema mismatch → fail closed (no delegate authority)
+    } catch {
+      /* corrupted JSON → fail closed (no delegate authority) */
+    }
+  }
   const claimedAt = parseInt(data.claimedAt ?? '0', 10);
   if (claimedAt > 0) proposal.claimedAt = claimedAt;
   return proposal;

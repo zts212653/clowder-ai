@@ -25,8 +25,19 @@ export interface IBallCustodyIngest {
   record(event: BallCustodyEvent): Promise<void>;
 }
 
+/** What the projection did with an event the ingest appended and applied. Decided inside the write operation. */
+export type BallCustodyProjectionOutcome = 'accepted' | 'rejected';
+
+/**
+ * The append result, plus (when the event was appended) what the projection did with it. `projection` is
+ * optional so an ingest that cannot say is still valid; callers treat a missing value as unknown.
+ */
+export type BallCustodyFencedRecordResult =
+  | { outcome: 'appended'; sequence: number; projection?: BallCustodyProjectionOutcome }
+  | Exclude<BallCustodyFencedAppendResult, { outcome: 'appended' }>;
+
 export interface IBallCustodyFencedIngest extends IBallCustodyIngest {
-  recordFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedAppendResult>;
+  recordFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedRecordResult>;
 }
 
 export class BallCustodyIngest implements IBallCustodyFencedIngest {
@@ -48,8 +59,24 @@ export class BallCustodyIngest implements IBallCustodyFencedIngest {
     return this.enqueue(event.subjectKey, () => this.doRecord(event));
   }
 
-  recordFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedAppendResult> {
+  recordFenced(event: BallCustodyEvent, expectedSequence: number): Promise<BallCustodyFencedRecordResult> {
     return this.enqueue(event.subjectKey, () => this.doRecordFenced(event, expectedSequence));
+  }
+
+  /**
+   * Rebuild one subject's projection on the SAME per-subject chain as record / recordFenced.
+   *
+   * `projector.rebuild` is delete + replay: it reads the log once and then applies that snapshot event by
+   * event. Run beside a writer it can finish last with a snapshot that predates the writer's event, and
+   * overwrite the writer's projection with an older holder. The log keeps the event, but the materialised
+   * ball is wrong until the next rebuild. Taking its place in the chain makes it read the log only after
+   * every earlier writer has applied, and makes later writers wait until it has finished.
+   *
+   * This is the entry every repair path must use; calling the projector's rebuild directly bypasses the chain.
+   * The chain is in-process, like record's: it orders this process's writers and repairs of a subject.
+   */
+  rebuild(subjectKey: string): Promise<void> {
+    return this.enqueue(subjectKey, () => this.projector.rebuild(subjectKey));
   }
 
   private enqueue<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -79,11 +106,10 @@ export class BallCustodyIngest implements IBallCustodyFencedIngest {
   private async doRecordFenced(
     event: BallCustodyEvent,
     expectedSequence: number,
-  ): Promise<BallCustodyFencedAppendResult> {
+  ): Promise<BallCustodyFencedRecordResult> {
     const result = await this.eventLog.appendFenced(event, expectedSequence);
-    if (result.outcome === 'appended') {
-      await this.projector.apply(event);
-    }
-    return result;
+    if (result.outcome !== 'appended') return result;
+    const applied = await this.projector.apply(event);
+    return { ...result, projection: applied.accepted ? 'accepted' : 'rejected' };
   }
 }

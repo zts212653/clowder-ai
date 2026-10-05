@@ -136,6 +136,11 @@ export async function readHtmlWidgetExportLayoutSnapshot(page: Page, requiredPro
     const browserGlobal = globalThis as unknown as { document: BrowserDocumentSnapshot };
     return {
       height: browserGlobal.document.documentElement.scrollHeight,
+      // Async message projections participate in the same bounded layout proof.
+      // A stable placeholder is not a complete export, even without an iframe.
+      pendingContentIds: Array.from(browserGlobal.document.querySelectorAll('[data-export-layout-pending]')).map(
+        (element) => element.getAttribute('data-export-layout-pending') ?? 'unknown-content',
+      ),
       widgets: Array.from(browserGlobal.document.querySelectorAll('[data-html-widget]')).map((element) => ({
         widgetId: element.getAttribute('data-html-widget') ?? 'unknown',
         layoutState: element.getAttribute('data-html-widget-layout-state'),
@@ -144,9 +149,14 @@ export async function readHtmlWidgetExportLayoutSnapshot(page: Page, requiredPro
       })),
     };
   }, HTML_WIDGET_PROOF_ACK_ATTRIBUTE);
+  const readiness = resolveHtmlWidgetExportReadiness(snapshot.widgets, requiredProofRequestId);
+  const pendingContentIds = snapshot.pendingContentIds;
   return {
     height: snapshot.height,
-    readiness: resolveHtmlWidgetExportReadiness(snapshot.widgets, requiredProofRequestId),
+    readiness:
+      readiness.status === 'error' || pendingContentIds.length === 0
+        ? readiness
+        : { status: 'pending' as const, widgetIds: [...readiness.widgetIds, ...pendingContentIds] },
   };
 }
 

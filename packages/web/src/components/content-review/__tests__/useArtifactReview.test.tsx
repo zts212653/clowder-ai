@@ -200,6 +200,50 @@ async function mountRetainedReview() {
   return onOpen;
 }
 
+// Sol review of #4643 @dc98a419: the first denial came while no review reader was mounted, and the
+// reader mounted later was silenced by the "announce once" dedupe. Local clearing must not depend on
+// who happens to be mounted; only the owner-projection refresh is announced once.
+it('a denial seen before any reader mounts still stops the old draft and retry from reviving', async () => {
+  const seed = () => {
+    localStorage.setItem(draftKey, JSON.stringify({ body: '尚未提交的意见', anchor: null }));
+    localStorage.setItem(`${prefix}pending`, JSON.stringify(command));
+  };
+  seed();
+  const invalidated = vi.fn();
+  window.addEventListener('cat-cafe:entrusted-work-projection-invalidated', invalidated);
+  try {
+    vi.mocked(apiFetch).mockResolvedValue(response({ error: 'access_denied' }, 403));
+    await act(async () =>
+      root.render(
+        createElement(NeedsMeOwnerSurface, {
+          surface: createWorkspaceModeSurface('needs-me', 'thread-one'),
+          onOpenArtifactWithReturn: vi.fn(),
+          onOpenSurface: vi.fn(),
+          onRefreshSurface: vi.fn(),
+        }),
+      ),
+    );
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="open-review-action"]')?.click());
+    expect(localStorage.getItem(draftKey)).toBeNull();
+    expect(localStorage.getItem(`${prefix}pending`)).toBeNull();
+
+    seed(); // written meanwhile by another tab that still showed the review
+    await act(async () => root.render(createElement(Probe)));
+    expect(controller.view).toBeNull();
+    expect(localStorage.getItem(draftKey)).toBeNull();
+    expect(localStorage.getItem(`${prefix}pending`)).toBeNull();
+    expect(invalidated).toHaveBeenCalledOnce();
+
+    vi.mocked(apiFetch).mockResolvedValue(response(initial));
+    await act(async () => controller.refresh());
+    expect(controller.view).not.toBeNull();
+    expect(controller.pending).toBeNull();
+    expect(draftBody).toBe('');
+  } finally {
+    window.removeEventListener('cat-cafe:entrusted-work-projection-invalidated', invalidated);
+  }
+});
+
 it.each([
   401, 403, 404, 410,
 ])('a denied Needs Me open (%i) clears the retained review and refreshes its owner projection', async (status) => {

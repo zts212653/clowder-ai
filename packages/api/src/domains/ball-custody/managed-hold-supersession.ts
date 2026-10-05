@@ -1,4 +1,6 @@
 import type { BallCustodyEvent } from '@cat-cafe/shared';
+import type { BallEventOutcome } from './ball-custody-projection-reducer.js';
+import { replayBallCustodyOutcomes } from './ball-custody-projection-reducer.js';
 import type { TurnCustodyProjection, TurnCustodyWakeProvenance } from './turn-custody-projection-types.js';
 
 type StructuredWakeLocator = Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>;
@@ -27,8 +29,44 @@ export type ManagedHoldSupersession =
   | { readonly kind: 'superseded'; readonly bySourceEventId: string };
 
 /**
+ * Whether one later custody event took the ball away from this wake. Only an event the state machine
+ * ACCEPTED can: a rejected event changed nothing, and an accepted one that changed nothing (an FYI
+ * hand-off to the operator) did not move custody either.
+ */
+function supersedesWake(
+  event: BallCustodyEvent,
+  outcome: BallEventOutcome | undefined,
+  wake: ManagedHoldWakeIdentity,
+  ownReceiverHandoffSourceId: string,
+): boolean {
+  if (!outcome?.accepted) return false;
+  switch (event.kind) {
+    // Any cat: an accepted hold is a new custody source. By the wake cat it is a re-hold; by another
+    // cat the ball has moved to that cat.
+    case 'ball.held':
+      return true;
+    // The wake's own receiver hand-off is what delivered it; it is never its own replacement.
+    case 'ball.handed':
+      return (
+        event.sourceEventId !== ownReceiverHandoffSourceId &&
+        (event.payload.fromCatId === wake.catId || event.payload.toCatId === wake.catId)
+      );
+    case 'ball.handed_cvo':
+      return outcome.stateChanged && event.payload.fromCatId === wake.catId;
+    default:
+      return false;
+  }
+}
+
+/**
  * Locate the exact `ball.wake_condition_met` for this wake, then report whether a
- * later custody event took the ball away from it.
+ * later ACCEPTED custody transition took the ball away from it.
+ *
+ * Acceptance is decided by replaying the event snapshot through the same reducer the projector
+ * uses (`replayBallCustodyOutcomes`), never by the materialised projection: that cache can lag the
+ * log (events are appended before they are applied), and a predicate built on it would retire a wake
+ * that nothing superseded. An event's outcome depends only on the events before it, so reading the
+ * snapshot in a single pass is consistent for every `boundarySequence`.
  *
  * `boundarySequence` bounds the scan to events that existed at a given moment.
  * The read side passes its adoption baseline so that a *post*-adoption rehold or
@@ -48,21 +86,16 @@ export function classifyManagedHoldWake(
   );
   if (exactWakeIndex === -1) return { kind: 'wake_missing' };
 
-  // The wake's own receiver-boundary handoff is what delivered it; it is never
-  // its own replacement.
   const ownReceiverHandoffSourceId = handedEventSourceId(wake.sourceMessageId, wake.catId);
-  const superseding = events
-    .slice(exactWakeIndex + 1, Math.max(exactWakeIndex + 1, boundarySequence))
-    .find(
-      (event) =>
-        (event.kind === 'ball.held' && event.payload.catId === wake.catId) ||
-        (event.kind === 'ball.handed' &&
-          event.sourceEventId !== ownReceiverHandoffSourceId &&
-          (event.payload.fromCatId === wake.catId || event.payload.toCatId === wake.catId)) ||
-        (event.kind === 'ball.handed_cvo' && event.payload.fromCatId === wake.catId),
-    );
-
-  return superseding ? { kind: 'superseded', bySourceEventId: superseding.sourceEventId } : { kind: 'live' };
+  const scanEnd = Math.min(events.length, Math.max(exactWakeIndex + 1, boundarySequence));
+  const outcomes = replayBallCustodyOutcomes(events, scanEnd);
+  for (let index = exactWakeIndex + 1; index < scanEnd; index += 1) {
+    const event = events[index] as BallCustodyEvent;
+    if (supersedesWake(event, outcomes[index], wake, ownReceiverHandoffSourceId)) {
+      return { kind: 'superseded', bySourceEventId: event.sourceEventId };
+    }
+  }
+  return { kind: 'live' };
 }
 
 /**

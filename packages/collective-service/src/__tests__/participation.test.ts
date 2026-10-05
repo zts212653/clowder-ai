@@ -123,6 +123,105 @@ it('keeps same-name cats on two endpoints distinct and refuses stale declaration
   expect(await readFile(join(f.directory, 'collective-service.json'), 'utf8')).toContain(request.eventId);
 });
 
+it('publishes bounded Cat cards to members and keeps untrusted image formats out', async () => {
+  const f = await fixture();
+  const avatarDataUrl = 'data:image/webp;base64,UklGRg==';
+  await f.store.publishParticipation(f.connection.endpointCredential, {
+    ...f.coordinates,
+    connectionId: f.connection.connectionId,
+    revision: 1,
+    agents: [{ catId: 'sol', displayName: '缅因猫（Sol）', channelIds: ['a'], description: '复杂实现', avatarDataUrl }],
+  });
+  const [member] = await f.store.listParticipants(f.owner.sessionToken, f.coordinates.collectiveId);
+  expect(member).toMatchObject({ displayName: '缅因猫（Sol）', description: '复杂实现', avatarDataUrl });
+  await expect(
+    f.store.publishParticipation(f.connection.endpointCredential, {
+      ...f.coordinates,
+      connectionId: f.connection.connectionId,
+      revision: 2,
+      agents: [
+        { catId: 'sol', displayName: 'Sol', channelIds: ['a'], avatarDataUrl: 'data:image/svg+xml;base64,PHN2Zz4=' },
+      ],
+    }),
+  ).rejects.toThrow();
+});
+
+it('authorizes a declared Cat in its Channel independently of explicit response attention', async () => {
+  const f = await fixture();
+  await f.store.publishParticipation(f.connection.endpointCredential, {
+    ...f.coordinates,
+    connectionId: f.connection.connectionId,
+    revision: 1,
+    agents: [{ catId: 'opus', displayName: 'Opus', channelIds: ['a'] }],
+  });
+  const requested = await f.store.postHumanMessage(f.owner.sessionToken, {
+    ...f.coordinates,
+    clientEventId: 'unaddressed-response-request',
+    location: { channelId: 'a' },
+    recipient: { kind: 'channel' },
+    attentionRequest: 'response_requested',
+    body: '这件事谁家在做',
+  });
+  await expect(
+    f.store.postHumanMessage(f.owner.sessionToken, {
+      ...f.coordinates,
+      clientEventId: 'unaddressed-response-request',
+      location: { channelId: 'a' },
+      recipient: { kind: 'channel' },
+      body: '这件事谁家在做',
+    }),
+  ).rejects.toMatchObject({ code: 'CLIENT_EVENT_CONFLICT' });
+  await expect(
+    f.store.postHumanMessage(f.owner.sessionToken, {
+      ...f.coordinates,
+      clientEventId: 'named-and-unaddressed-response-request',
+      location: { channelId: 'a' },
+      recipient: {
+        kind: 'agent',
+        humanId: f.connection.authorizedHumanId,
+        agentId: 'opus',
+        connectionId: f.connection.connectionId,
+        participationRevision: 1,
+      },
+      attentionRequest: 'response_requested',
+      body: 'Opus，请回应',
+    }),
+  ).rejects.toMatchObject({ code: 'PARTICIPATION_INVALID' });
+  const source = {
+    ...f.coordinates,
+    connectionId: f.connection.connectionId,
+    catId: 'opus',
+    participationRevision: 1,
+    eventId: requested.eventId,
+  };
+  expect(f.store.readParticipationContext(f.connection.endpointCredential, source).source).toEqual(requested);
+  await expect(
+    f.store.postAgentMessage(f.connection.endpointCredential, {
+      ...f.coordinates,
+      connectionId: f.connection.connectionId,
+      clientEventId: 'unaddressed-response',
+      agent: { agentId: 'opus', catId: 'opus', displayName: 'Opus', sessionRef: 'invocation:interest' },
+      participationRevision: 1,
+      replyToEventId: requested.eventId,
+      location: { channelId: 'a', rootEventId: requested.eventId },
+      recipient: { kind: 'channel' },
+      body: '我家在跟进。',
+    }),
+  ).resolves.toMatchObject({ replyToEventId: requested.eventId });
+
+  const ordinary = await f.store.postHumanMessage(f.owner.sessionToken, {
+    ...f.coordinates,
+    clientEventId: 'ordinary-channel-talk',
+    location: { channelId: 'a' },
+    recipient: { kind: 'channel' },
+    body: '今天阳光不错。',
+  });
+  expect(
+    f.store.readParticipationContext(f.connection.endpointCredential, { ...source, eventId: ordinary.eventId }).source,
+  ).toEqual(ordinary);
+  expect(f.store.listCollectiveCollaboration(f.owner.sessionToken, f.coordinates.collectiveId).works).toEqual([]);
+});
+
 it('migrates only provable legacy locations and never reconstructs an ambiguous cat recipient', async () => {
   const f = await fixture();
   const root = await f.store.postHumanMessage(f.owner.sessionToken, {

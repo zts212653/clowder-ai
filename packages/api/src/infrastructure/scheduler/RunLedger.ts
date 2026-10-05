@@ -59,6 +59,21 @@ export class RunLedger {
       .all(taskId, subjectKey, limit) as RunLedgerRow[];
   }
 
+  /** Membership needs one indexed witness per candidate, never its retained history. */
+  findTaskIdsBySubjects(taskIds: readonly string[], subjectKeys: readonly string[]): Set<string> {
+    if (taskIds.length === 0 || subjectKeys.length === 0) return new Set();
+    const rows = this.db
+      .prepare(
+        `SELECT candidate.value AS task_id FROM json_each(?) AS candidate
+         WHERE EXISTS (
+           SELECT 1 FROM task_run_ledger
+           WHERE task_id = candidate.value AND subject_key IN (SELECT value FROM json_each(?))
+         )`,
+      )
+      .all(JSON.stringify(taskIds), JSON.stringify(subjectKeys)) as { task_id: string }[];
+    return new Set(rows.map((row) => row.task_id));
+  }
+
   /** Read exact counters maintained in the same transaction as the canonical run. */
   stats(taskId: string): RunStats {
     const row = this.db

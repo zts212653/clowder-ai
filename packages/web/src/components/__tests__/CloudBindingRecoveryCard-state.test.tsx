@@ -108,3 +108,37 @@ it('lets the current retry authority replace a stale sending projection', async 
     expect.objectContaining({ body: JSON.stringify({ attemptId: 'attempt-current' }) }),
   );
 });
+
+it('retires a retryable card when the current Host receipt proves failure, without rehydrating a retry', async () => {
+  mockFetch.mockImplementation(async (path) => {
+    if (path.endsWith('/retry-authority')) return json({ attemptId: 'attempt-current' });
+    if (path.endsWith('/cloud-bindings')) return json({ bindings: { 'gpt-pro': url } });
+    return json({
+      authorization: {
+        conversations: [{ conversationId, displayTitle: '小星星', authorizedAt: stamp, updatedAt: stamp }],
+      },
+    });
+  });
+  const props = {
+    threadId: 'thread-7',
+    sourceMessageId: 'source-7',
+    targetCatId: 'gpt-pro',
+    attemptId: 'attempt-current',
+  };
+  await act(async () => {
+    root.render(<CloudBindingRecoveryCard {...props} />);
+  });
+  const retiredButton = container.querySelector<HTMLButtonElement>('[data-recovery-primary]');
+  expect(retiredButton?.textContent).toBe('继续发送');
+  mockFetch.mockClear();
+  await act(async () => {
+    root.render(<CloudBindingRecoveryCard {...props} deliveryStatus="failed" />);
+  });
+  expect(container.textContent).toContain('未发送');
+  expect(container.textContent).toContain('重新 @gpt-pro 发一条新消息');
+  expect(container.querySelector('[data-recovery-primary]')).toBeNull();
+  await act(async () => {
+    retiredButton?.click();
+  });
+  expect(mockFetch).not.toHaveBeenCalled();
+});

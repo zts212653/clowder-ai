@@ -1,0 +1,25 @@
+.panel {
+  container-type: inline-size;
+}
+.layout {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+.calendar {
+  min-width: 0;
+}
+.worklist {
+  min-width: 0;
+}
+
+@container (min-width: 820px) {
+  .layout {
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 1fr);
+    gap: 1.5rem;
+  }
+  .calendar {
+    position: sticky;
+    top: 0;
+  }
+}

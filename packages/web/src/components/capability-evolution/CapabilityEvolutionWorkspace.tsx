@@ -1,6 +1,7 @@
 'use client';
 
 import type { EvolutionProgramOriginV1 } from '@cat-cafe/shared';
+import { refIdentity } from '@cat-cafe/shared';
 import { useLayoutEffect, useRef } from 'react';
 import { CapabilityEvolutionProgramDetail } from './CapabilityEvolutionProgramDetail';
 import { CapabilityEvolutionProgramRow } from './CapabilityEvolutionProgramRow';
@@ -27,20 +28,26 @@ function ProgramFocus({
   const status = productStatus(projection);
   const asset = useEvolutionAssetReview(projection);
   const target = evolutionProgramPresentation(projection.program, projection.origin);
+  const currentTitles = asset.catalog
+    ? asset.catalog.currentVersionRefs.map(
+        (ref) => asset.catalog?.versions.find((version) => refIdentity(version.versionRef) === refIdentity(ref))?.title,
+      )
+    : [];
+  const adoptedLine = !asset.catalog
+    ? ''
+    : asset.catalog.currentVersionRefs.length === 0
+      ? '尚无采用记录'
+      : currentTitles.every(Boolean)
+        ? `当前采用：${currentTitles.join('、')}`
+        : `当前采用 ${asset.catalog.currentVersionRefs.length} 个已记录版本`;
   return (
     <section className="evolution-focus" aria-label="当前关注项目">
       <p className="text-xs font-semibold text-cafe-secondary">{status.label}</p>
       <h2 className="mt-3 text-xl font-semibold leading-8 text-cafe">{target.title}</h2>
       <EvolutionProgramOrigin projection={projection} />
       <p className="mt-2 text-sm leading-6 text-cafe-secondary">{status.description}</p>
-      {asset.catalog && (
-        <p className="mt-3 text-xs text-cafe-muted">
-          {asset.catalog.currentVersionRefs.length
-            ? `当前采用：${asset.catalog.currentVersionRefs.map((ref) => ref.version).join('、')}`
-            : '尚无采用记录'}
-        </p>
-      )}
-      <button type="button" className="evolution-primary mt-5" onClick={onSelect}>
+      {asset.catalog && <p className="mt-3 text-xs text-cafe-muted">{adoptedLine}</p>}
+      <button type="button" className="evolution-link mt-5" onClick={onSelect}>
         查看进展
       </button>
     </section>

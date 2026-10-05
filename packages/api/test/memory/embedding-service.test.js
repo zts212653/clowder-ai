@@ -100,21 +100,25 @@ describe('EmbeddingService (HTTP client to embed-api.py)', () => {
     });
     svc.markReady();
     const originalFetch = globalThis.fetch;
+    const requestStarted = Promise.withResolvers();
+    let requestSignal;
     globalThis.fetch = async (_url, options) =>
       new Promise((_resolve, reject) => {
-        options.signal.addEventListener(
-          'abort',
-          () => reject(options.signal.reason ?? new DOMException('aborted', 'AbortError')),
-          { once: true },
-        );
+        requestSignal = options.signal;
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+        requestStarted.resolve();
       });
     const controller = new AbortController();
-    const startedAt = Date.now();
+    const parentReason = new DOMException('coverage deadline', 'AbortError');
     try {
       const embedding = svc.embed(['abort me'], controller.signal);
-      setTimeout(() => controller.abort(new DOMException('coverage deadline', 'AbortError')), 5);
-      await assert.rejects(embedding, /coverage deadline|aborted/i);
-      assert.ok(Date.now() - startedAt < 100, 'parent deadline should win over the embedding client timeout');
+      const rejected = embedding.catch((error) => error);
+      await requestStarted.promise;
+      assert.equal(requestSignal.aborted, false, 'abort must happen after the HTTP request starts');
+      controller.abort(parentReason);
+      assert.equal(requestSignal.aborted, true, 'parent abort must reach the in-flight HTTP signal synchronously');
+      assert.equal(requestSignal.reason, parentReason, 'parent reason must win over the independent client timeout');
+      assert.equal(await rejected, parentReason, 'the HTTP rejection must preserve the exact parent reason');
     } finally {
       globalThis.fetch = originalFetch;
     }

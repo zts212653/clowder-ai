@@ -30,6 +30,20 @@ import type { RuntimeCapabilityDescriptor } from './RuntimeCapabilityDescriptor.
 
 /** Maximum notices per invocation (default 3, opus-47 suggestion) */
 const MAX_NOTICES_PER_INVOCATION = 3;
+const FRESHNESS_NOTICE_MAX_CHARS = 1_500;
+
+function formatBoundedFreshnessNotice(unseen: UnseenResult, threadId: string): string {
+  const senders = unseen.senders.slice(0, 8).map((sender) => sender.slice(0, 60));
+  const senderSuffix = unseen.senders.length > senders.length ? ` 等 ${unseen.senders.length} 位` : '';
+  const text =
+    `📬 提醒：你有 ${unseen.count} 条未读消息（当前 thread）\n` +
+    `来自：${senders.join(', ')}${senderSuffix}\n` +
+    `位置：threadId=${threadId}; messageId=${unseen.maxMessageId}\n` +
+    `调 cat_cafe_get_thread_context({ threadId: "${threadId}", readIntent: "unread", responseMode: "full" }) 无过滤查看完整内容`;
+  return text.length <= FRESHNESS_NOTICE_MAX_CHARS
+    ? text
+    : `📬 当前 thread 有 ${unseen.count} 条未读消息。调 cat_cafe_get_thread_context({ readIntent: "unread", responseMode: "full" }) 无过滤查看完整内容。`;
+}
 
 // --- Dependency interfaces ---
 
@@ -49,8 +63,10 @@ export interface NoticeEventLog {
 
 /** Pluggable unseen-message detection (decoupled from messageFilter/store wiring) */
 export interface UnseenChecker {
-  checkUnseen(params: { threadId: string; catId: CatId }): Promise<UnseenResult | null>;
+  checkUnseen(params: { threadId: string; catId: CatId }): Promise<UnseenScanResult | null>;
 }
+
+export type UnseenScanResult = UnseenResult | { kind: 'incomplete'; reason: 'scan_cap'; scanned: number };
 
 export interface UnseenResult {
   count: number;
@@ -135,11 +151,12 @@ export class FreshnessNoticeService {
 
     // Gate 3: unseen messages in current thread
     const unseen = await this.unseenChecker.checkUnseen({ threadId, catId });
-    if (!unseen || unseen.count === 0) return null;
+    if (!unseen || 'kind' in unseen || unseen.count === 0) return null;
 
     // All gates passed — deliver notice
     const toolCallCount = state?.toolCallCount ?? 1;
     const noticeId = `notice-${invocationId}-${toolCallCount}`;
+    const text = formatBoundedFreshnessNotice(unseen, threadId);
 
     // Update hot path state
     await this.stateStore.recordNoticeDelivered(invocationId, toolCallCount);
@@ -167,13 +184,6 @@ export class FreshnessNoticeService {
 
     // AC-B5: OTel counter
     freshnessNoticeAttached.add(1);
-
-    // Format content-free notice text
-    const text =
-      `📬 提醒：你有 ${unseen.count} 条未读消息（当前 thread）\n` +
-      `来自：${unseen.senders.join(', ')}\n` +
-      `位置：threadId=${threadId}; messageId=${unseen.maxMessageId}\n` +
-      `调 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤查看完整内容`;
 
     return { text, noticeId };
   }
@@ -265,7 +275,7 @@ export class FreshnessNoticeService {
       `⚠️ 你这轮有 ${unresolved.length} 条未读消息未查看\n` +
       `来自：${senders.join(', ')}\n` +
       `位置：threadId=${threadId}; messageId=${latestMessageId}\n` +
-      `建议调 cat_cafe_get_thread_context({ threadId: "${threadId}", responseMode: "full" }) 无过滤读取后再退出`;
+      `建议调 cat_cafe_get_thread_context({ threadId: "${threadId}", readIntent: "unread", responseMode: "full" }) 无过滤读取后再退出`;
 
     return { text };
   }

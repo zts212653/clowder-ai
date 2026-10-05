@@ -2,6 +2,8 @@ import type { QueueMessageReceipt, QueueReceiptTarget } from '@cat-cafe/shared';
 import type { CatInvocationInfo, QueueEntry } from '@/stores/chat-types';
 
 export const UNSETTLED_SEEN_LABEL = '已读，但关联回合已结束；尚未确认处理完成';
+export const SETTLING_SEEN_LABEL = '正在收尾 · 等待本轮完成';
+const NO_SETTLING_IDS: ReadonlySet<string> = new Set();
 
 function completedWithTurnReceiptLabel(scope?: QueueMessageReceipt['scope']): string {
   return scope === 'cross_thread_delivery' ? '正文已由本轮消费' : '已随本轮完成';
@@ -40,6 +42,21 @@ function receiptTargetFor(entry: QueueEntry, catId: string): QueueReceiptTarget 
   return entry.queueReceipt?.targets.find((target) => target.catId === catId);
 }
 
+export function collectSettlingInvocationIds(
+  activeInvocations: ActiveInvocationSlots,
+  catInvocations: Record<string, CatInvocationInfo>,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const [slotId, slot] of Object.entries(activeInvocations)) {
+    const info = catInvocations[slot.catId];
+    if (!info?.invocationId || !info.turnInvocationId || !info.settlement) continue;
+    if (slotId !== info.invocationId && slotId !== `${info.invocationId}-${slot.catId}`) continue;
+    if (info.settlement.activeTurnInvocationId !== info.turnInvocationId) continue;
+    for (const id of info.settlement.completedTurnInvocationIds) if (id !== info.turnInvocationId) ids.add(id);
+  }
+  return ids;
+}
+
 export function isExactSeenTargetLive(
   entry: QueueEntry,
   catId: string,
@@ -70,12 +87,15 @@ function isQueueTargetActionable(
 export function projectQueueEntryForActions(
   entry: QueueEntry,
   activeInvocationIds: ReadonlySet<string>,
+  settlingInvocationIds: ReadonlySet<string> = NO_SETTLING_IDS,
 ): QueueEntry | null {
   const targetStates = queueTargetStateEntries(entry);
   if (targetStates.length === 0) return entry;
 
-  const actionableStates = targetStates.filter(([catId, state]) =>
-    isQueueTargetActionable(entry, catId, state, activeInvocationIds),
+  const actionableStates = targetStates.filter(
+    ([catId, state]) =>
+      isQueueTargetActionable(entry, catId, state, activeInvocationIds) &&
+      !(state === 'seen' && settlingInvocationIds.has(receiptTargetFor(entry, catId)?.invocationId ?? '')),
   );
   if (actionableStates.length === 0) return null;
 
@@ -90,12 +110,15 @@ export function queueEntryNeedsRecovery(
   entry: QueueEntry,
   activeInvocationIds: ReadonlySet<string>,
   activeCatIds: ReadonlySet<string>,
+  settlingInvocationIds: ReadonlySet<string> = NO_SETTLING_IDS,
 ): boolean {
   const targetStates = queueTargetStateEntries(entry);
   if (targetStates.length > 0) {
     return targetStates.some(([catId, state]) => {
       if (state === 'handled' || state === 'withdrawn' || state === 'failed') return false;
       if (state === 'seen' || state === 'awakened') {
+        if (state === 'seen' && settlingInvocationIds.has(receiptTargetFor(entry, catId)?.invocationId ?? ''))
+          return false;
         return !isExactSeenTargetLive(entry, catId, activeInvocationIds);
       }
       return !activeCatIds.has(catId);
@@ -110,11 +133,13 @@ export function receiptTargetStateLabel(
   activeInvocationIds: ReadonlySet<string>,
   scope?: QueueMessageReceipt['scope'],
   hasLoadedLineage = false,
+  settlingInvocationIds: ReadonlySet<string> = NO_SETTLING_IDS,
 ): string {
   if (target.outcome?.consumption?.kind === 'terminal_silent') {
     return '已消费 · terminal 静默结束';
   }
   if (target.state === 'seen') {
+    if (target.invocationId && settlingInvocationIds.has(target.invocationId)) return SETTLING_SEEN_LABEL;
     return target.invocationId && activeInvocationIds.has(target.invocationId)
       ? scope === 'cross_thread_delivery'
         ? '已唤醒 · 当前轮处理中'
@@ -138,6 +163,7 @@ export function receiptTargetStateLabel(
     return target.retryable === false ? '通知未送达 · 关联事项已结束' : '已撤出待处理 · 历史保留';
   }
   if (target.outcome?.disposition === 'responded') return '已由回复明确处理';
+  if (target.outcome?.disposition === 'dispatch_disposition') return '已明确处置 · 有回执';
   if (target.outcome?.disposition === 'completed_with_turn') {
     if (target.outcome.evidenceRef.kind === 'turn_execution' && !hasLoadedLineage) {
       return '本轮已结束，无可见回复';

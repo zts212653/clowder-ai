@@ -53,6 +53,11 @@ describe('writeVignette', () => {
   });
 
   describe('formatVignette', () => {
+    it('writes the approved one-sentence takeaway as YAML and keeps legacy files valid', () => {
+      const withTakeaway = formatVignette(makeProposal({ takeaway: '我们以为 You 喜欢“有温度”的解释。' }));
+      assert.match(withTakeaway, /takeaway: "我们以为 You 喜欢“有温度”的解释。"/);
+      assert.equal(formatVignette(makeProposal()).includes('takeaway:'), false);
+    });
     it('emits standard vignette frontmatter: when / quotes / scene / tags (spec B4)', () => {
       const content = formatVignette(makeProposal());
       // when: date derived from createdAt (1720000000000 → 2024-07-03)

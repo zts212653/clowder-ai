@@ -1,0 +1,104 @@
+.collective-work-card {
+  display: grid;
+  width: min(650px, 100%);
+  gap: 7px;
+  margin-top: 11px;
+  padding: 12px 13px;
+  border: 1px solid var(--console-border-soft);
+  border-left: 3px solid var(--cafe-accent);
+  border-radius: 9px;
+  background: var(--console-card-soft-bg);
+}
+.collective-work-card > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+.collective-work-card > header strong {
+  color: var(--cafe-accent);
+  font-weight: 600;
+}
+.collective-work-card h3,
+.collective-work-card p {
+  margin: 0;
+}
+.collective-work-card h3 {
+  font-size: 14px;
+  font-weight: 600;
+}
+.collective-work-card > p {
+  color: var(--cafe-text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.collective-work-card .work-ownership,
+.collective-work-card .work-dependencies,
+.collective-work-card .work-result {
+  color: var(--cafe-text-muted);
+  font-size: 11px;
+}
+.work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 2px;
+}
+.work-result-review {
+  display: grid;
+  gap: 7px;
+}
+.work-result-review label {
+  display: grid;
+  gap: 4px;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+.work-result-review textarea {
+  min-height: 54px;
+  resize: vertical;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-primary);
+  font: inherit;
+  line-height: 1.45;
+}
+.work-actions button {
+  padding: 6px 9px;
+  border: 1px solid var(--console-border-soft);
+  border-radius: 7px;
+  background: var(--console-card-bg);
+  color: var(--cafe-text-secondary);
+  font-size: 11px;
+}
+.work-actions .quiet-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--cafe-text-muted);
+}
+.work-secondary-actions {
+  margin-top: 0;
+}
+.topic-event .collective-work-card {
+  width: calc(100% - 38px);
+  margin-left: 38px;
+}
+.topic-work-action {
+  margin: 1px 0 5px 38px;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  color: var(--cafe-text-muted);
+  font-size: 10px;
+}
+.topic-work-action:hover {
+  color: var(--cafe-accent);
+}
+@media (max-width: 820px) {
+  .collective-work-card {
+    padding: 10px;
+  }
+}

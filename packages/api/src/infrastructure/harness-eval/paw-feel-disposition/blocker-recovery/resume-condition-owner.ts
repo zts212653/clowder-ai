@@ -1,4 +1,4 @@
-import { ownerTruthRefV1Schema, type PawFeelResumeSelectorV1 } from '@cat-cafe/shared';
+import { type OwnerTruthRefV1, ownerTruthRefV1Schema, type PawFeelResumeSelectorV1 } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../../../domains/cats/services/stores/ports/TaskStore.js';
 import type { PawFeelResumeConditionResolver, PawFeelResumeResolverSnapshot } from './resume-condition.js';
 
@@ -14,6 +14,7 @@ export class PawFeelCanonicalResumeConditionResolver implements PawFeelResumeCon
 
   async resolve(selector: PawFeelResumeSelectorV1): Promise<PawFeelResumeResolverSnapshot> {
     if (selector.kind === 'bounded_time') {
+      if (selector.dependencyRef) return this.resolveTask(selector.dependencyRef, selector);
       return {
         normalizedSelector: selector,
         state: 'waiting',
@@ -26,8 +27,15 @@ export class PawFeelCanonicalResumeConditionResolver implements PawFeelResumeCon
       if (!this.ownerEventResolver) throw new Error('owner-event condition provider is unavailable');
       return this.ownerEventResolver.resolve(selector);
     }
-    const match = /^task:item:([^\s]+)$/u.exec(selector.ref.ownerStateRef);
-    if (selector.ref.ownerFeatureId !== 'F310' || !match?.[1]) {
+    return this.resolveTask(selector.ref, selector);
+  }
+
+  private async resolveTask(
+    ref: OwnerTruthRefV1,
+    normalizedSelector: PawFeelResumeSelectorV1,
+  ): Promise<PawFeelResumeResolverSnapshot> {
+    const match = /^task:item:([^\s]+)$/u.exec(ref.ownerStateRef);
+    if (ref.ownerFeatureId !== 'F310' || !match?.[1]) {
       throw new Error('task resume selector must be an exact F310 task:item ref');
     }
     const task = await this.taskStore.get(match[1]);
@@ -38,10 +46,7 @@ export class PawFeelCanonicalResumeConditionResolver implements PawFeelResumeCon
       version: String(task.updatedAt),
     });
     return {
-      normalizedSelector: {
-        kind: 'task',
-        ref: { ownerFeatureId: 'F310', ownerStateRef: `task:item:${task.id}` },
-      },
+      normalizedSelector,
       state: task.status,
       version: JSON.stringify([task.updatedAt, task.status, task.ownerCatId, task.threadId]),
       satisfied: task.status === 'done',

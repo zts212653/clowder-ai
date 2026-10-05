@@ -34,6 +34,9 @@ async function harness(active = true, callbackRecordOverrides = {}) {
       hostRoute = { connectionId, ...input, revision: 1, updatedAt: '2026-08-29T00:00:00.000Z' };
       return hostRoute;
     },
+    publishParticipation: async (connectionId) => {
+      calls.push(['publish-participation', connectionId]);
+    },
     pair: async (input) => {
       calls.push(['pair', input]);
       return connection;
@@ -118,9 +121,25 @@ async function harness(active = true, callbackRecordOverrides = {}) {
       }),
     },
     isCatAvailable: (catId) => catId === 'codex-sol',
+    cats: () => [
+      {
+        id: 'codex-sol',
+        displayName: '缅因猫（Sol）',
+        supported: true,
+        avatar: '/avatars/sol.png',
+        roleDescription: '一起写代码',
+        defaultModel: 'gpt-6-sol',
+      },
+    ],
   });
   await app.ready();
-  return { app, calls };
+  return {
+    app,
+    calls,
+    setHostRoute(route) {
+      hostRoute = route;
+    },
+  };
 }
 
 test('projects Connector status without credentials and requires authenticated local owner access', async () => {
@@ -212,6 +231,17 @@ test('provisions the independent local Service only for the local owner and does
 test('pairs, synchronizes and revokes through localhost owner mutations', async () => {
   const { app, calls } = await harness();
   try {
+    const roster = await app.inject({
+      method: 'GET',
+      url: '/api/plugins/collective-connector/entry-roster',
+      headers: readHeaders,
+      remoteAddress: '127.0.0.1',
+    });
+    assert.equal(roster.statusCode, 200, roster.payload);
+    assert.deepEqual(
+      roster.json().cats.map((cat) => cat.id),
+      ['codex-sol'],
+    );
     const pair = await app.inject({
       method: 'POST',
       url: '/api/plugins/collective-connector/pair',
@@ -220,6 +250,8 @@ test('pairs, synchronizes and revokes through localhost owner mutations', async 
       payload: {
         serviceUrl: connection.serviceUrl,
         endpointLabel: 'Clowder AI',
+        rosterFingerprint: roster.json().fingerprint,
+        excludedCatIds: ['codex-sol'],
         intent: {
           serviceInstanceId: connection.serviceInstanceId,
           collectiveId: connection.collectiveId,
@@ -231,6 +263,7 @@ test('pairs, synchronizes and revokes through localhost owner mutations', async 
       },
     });
     assert.equal(pair.statusCode, 200, pair.payload);
+    assert.deepEqual(calls[0][1].initialExcludedCatIds, ['codex-sol']);
     const reconnect = await app.inject({
       method: 'POST',
       url: '/api/plugins/collective-connector/con_12345678/reconnect',
@@ -249,6 +282,40 @@ test('pairs, synchronizes and revokes through localhost owner mutations', async 
       calls.map((call) => call[0]),
       ['pair', 'sync', 'revoke'],
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test('entry roster and pairing fail closed for stale or unauthenticated owner review', async () => {
+  const { app, calls } = await harness();
+  try {
+    assert.equal(
+      (await app.inject({ method: 'GET', url: '/api/plugins/collective-connector/entry-roster' })).statusCode,
+      401,
+    );
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/plugins/collective-connector/pair',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: {
+        serviceUrl: connection.serviceUrl,
+        endpointLabel: 'Clowder AI',
+        rosterFingerprint: '0'.repeat(64),
+        excludedCatIds: [],
+        intent: {
+          serviceInstanceId: connection.serviceInstanceId,
+          collectiveId: connection.collectiveId,
+          pairingIntentId: 'pair_12345678',
+          nonce: 'n'.repeat(32),
+          hostOrigin: 'http://localhost:5173',
+          expiresAt: '2026-08-29T00:00:00.000Z',
+        },
+      },
+    });
+    assert.equal(stale.statusCode, 409, stale.payload);
+    assert.equal(calls.length, 0);
   } finally {
     await app.close();
   }
@@ -314,10 +381,67 @@ test('persists an owner-only Host route and maps an exact Collective Agent targe
   }
 });
 
+test('a materialized Channel route keeps generic Host edits behind participation CAS and republication', async () => {
+  const fixture = await harness();
+  fixture.setHostRoute({
+    connectionId: connection.connectionId,
+    localOwnerUserId: writeHeaders['x-test-session-user'],
+    defaultIngressThreadId: 'thread_channel',
+    humanNotificationThreadId: 'thread_human',
+    agentRoutes: {},
+    desiredParticipation: { defaultMode: 'include', excludedCatIds: [], channelOverrides: {} },
+    observedEligibility: { 'codex-sol': { displayName: 'Sol', configured: true, eligible: true } },
+    channelRoutes: {
+      general: {
+        channelId: 'general',
+        threadId: 'thread_channel',
+        participants: { 'codex-sol': { displayName: 'Sol' } },
+      },
+    },
+    revision: 7,
+    updatedAt: '2026-09-11T00:00:00.000Z',
+  });
+  try {
+    const payload = {
+      defaultIngressThreadId: 'thread_channel',
+      humanNotificationThreadId: 'thread_human',
+      agentRoutes: {},
+    };
+    const missingRevision = await fixture.app.inject({
+      method: 'PUT',
+      url: '/api/plugins/collective-connector/con_12345678/route',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload,
+    });
+    assert.equal(missingRevision.statusCode, 400, missingRevision.payload);
+    assert.equal(missingRevision.json().code, 'PARTICIPATION_REVISION_REQUIRED');
+
+    const updated = await fixture.app.inject({
+      method: 'PUT',
+      url: '/api/plugins/collective-connector/con_12345678/route',
+      headers: writeHeaders,
+      remoteAddress: '127.0.0.1',
+      payload: { ...payload, expectedRevision: 7 },
+    });
+    assert.equal(updated.statusCode, 200, updated.payload);
+    assert.deepEqual(fixture.calls.at(-1), ['publish-participation', connection.connectionId]);
+  } finally {
+    await fixture.app.close();
+  }
+});
+
 test('Collective participation and private Work cannot bypass the exact return operation through legacy owner send', async () => {
-  for (const override of [
-    { executionGrant: { kind: 'collective-participation' } },
-    { collectiveWorkBinding: { taskId: 'work' } },
+  for (const [override, expectedDenial] of [
+    [{ executionGrant: { kind: 'collective-participation' } }, { code: 'EXACT_COLLECTIVE_RETURN_REQUIRED' }],
+    [
+      { collectiveWorkBinding: { taskId: 'work' } },
+      { error: 'collective_work_scope_violation', reason: 'tool_outside_admitted_work' },
+    ],
+    [
+      { toolExecutionPolicy: { mode: 'collective_participation' } },
+      { error: 'tool_policy_violation', reason: 'collective_participation_tool_policy' },
+    ],
   ]) {
     const { app, calls } = await harness(true, override);
     try {
@@ -332,7 +456,7 @@ test('Collective participation and private Work cannot bypass the exact return o
         },
       });
       assert.equal(response.statusCode, 403, response.payload);
-      assert.equal(response.json().code, 'EXACT_COLLECTIVE_RETURN_REQUIRED');
+      for (const [key, value] of Object.entries(expectedDenial)) assert.equal(response.json()[key], value);
       assert.equal(calls.filter((call) => call[0] === 'send').length, 0);
     } finally {
       await app.close();
@@ -395,6 +519,27 @@ test('queues Agent signals only from callback authority and derives provenance f
       },
     });
     assert.equal(callerShapedAgent.statusCode, 400, callerShapedAgent.payload);
+
+    const callerShapedWorkResult = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/collective-connector/con_12345678/send',
+      headers: { 'x-invocation-id': 'inv_1', 'x-callback-token': 'callback-secret' },
+      remoteAddress: '127.0.0.1',
+      payload: {
+        clientEventId: 'client_shaped_work_result',
+        target: { kind: 'message', eventId: 'evt_source0000' },
+        participationRevision: 1,
+        replyToEventId: 'evt_assignment0000',
+        workResultIntent: {
+          assignmentEventId: 'evt_assignment0000',
+          participationRevision: 1,
+          resultRevision: 1,
+        },
+        body: 'generic callback cannot mint exact Work-result authority',
+      },
+    });
+    assert.equal(callerShapedWorkResult.statusCode, 400, callerShapedWorkResult.payload);
+    assert.equal(calls.length, 0);
 
     const accepted = await app.inject({
       method: 'POST',

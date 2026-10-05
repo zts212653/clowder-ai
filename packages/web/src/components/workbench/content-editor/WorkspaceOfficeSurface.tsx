@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
+import type { WorkspaceFileNavigationOrigin } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
+import { ContentLandingHeader } from '../content-review/ContentLandingHeader';
 import { ContentEditorOwnerSurface } from './ContentEditorOwnerSurface';
 
 const EXPLANATIONS: Readonly<Record<string, string>> = {
@@ -17,10 +19,21 @@ const EXPLANATIONS: Readonly<Record<string, string>> = {
 interface EditorTarget {
   readonly contentRef: string;
   readonly sessionRef: string;
+  readonly ownerRevision: number | null;
 }
 
 /** The F063 source is imported once; subsequent opens resume the durable content owner. */
-export function WorkspaceOfficeSurface({ worktreeId, path }: { readonly worktreeId: string; readonly path: string }) {
+export function WorkspaceOfficeSurface({
+  worktreeId,
+  path,
+  navigationOrigin,
+  onBack,
+}: {
+  readonly worktreeId: string;
+  readonly path: string;
+  readonly navigationOrigin?: WorkspaceFileNavigationOrigin;
+  readonly onBack?: () => void;
+}) {
   const [target, setTarget] = useState<EditorTarget | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,7 +60,12 @@ export function WorkspaceOfficeSurface({ worktreeId, path }: { readonly worktree
           throw new Error(typeof body.error?.code === 'string' ? body.error.code : 'document_unavailable');
         if (typeof body.contentRef !== 'string' || typeof body.sessionRef !== 'string')
           throw new Error('document_unavailable');
-        if (!abort.signal.aborted) setTarget({ contentRef: body.contentRef, sessionRef: body.sessionRef });
+        const ownerRevision =
+          typeof body.ownerRevision === 'number' && Number.isSafeInteger(body.ownerRevision) && body.ownerRevision > 0
+            ? body.ownerRevision
+            : null;
+        if (!abort.signal.aborted)
+          setTarget({ contentRef: body.contentRef, sessionRef: body.sessionRef, ownerRevision });
       })
       .catch((cause: unknown) => {
         if (!abort.signal.aborted) setError(cause instanceof Error ? cause.message : 'document_unavailable');
@@ -60,14 +78,27 @@ export function WorkspaceOfficeSurface({ worktreeId, path }: { readonly worktree
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col" data-testid="workspace-office-surface">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-cafe-border px-4 py-2 text-xs text-cafe-muted">
-        <span>{path.split('/').at(-1)} · 协作版本</span>
-        <button type="button" className="text-cafe-accent hover:underline" onClick={requestOpen} disabled={loading}>
-          重新打开
-        </button>
-      </div>
+      <ContentLandingHeader
+        title={path.split('/').at(-1) || path}
+        navigationOrigin={navigationOrigin}
+        onBack={onBack}
+        versionControl={
+          <button
+            type="button"
+            className="shrink-0 text-xs text-cafe-accent hover:underline"
+            onClick={requestOpen}
+            disabled={loading}
+          >
+            重新打开
+          </button>
+        }
+      />
+      <p className="px-3 py-2 text-xs text-cafe-muted">
+        编辑保存在协作文档中，原文件不会自动改变。
+        {target?.ownerRevision ? ` 打开时为第 ${target.ownerRevision} 版。` : ''}
+      </p>
       {target ? (
-        <ContentEditorOwnerSurface target={target} onRetry={requestOpen} />
+        <ContentEditorOwnerSurface target={target} title={path.split('/').at(-1) || path} onRetry={requestOpen} />
       ) : (
         <div className="grid flex-1 place-items-center p-6 text-center">
           <div className="max-w-sm space-y-3">
@@ -75,7 +106,7 @@ export function WorkspaceOfficeSurface({ worktreeId, path }: { readonly worktree
             <p className="text-xs leading-5 text-cafe-muted">
               {error
                 ? (EXPLANATIONS[error] ?? '文档暂时无法打开。请确认文件仍在工作区，或稍后重试。')
-                : '首次打开会导入工作区文件，编辑保存在同一份协作版本中。再次打开会恢复已保存的内容。'}
+                : '首次打开会导入这份文件；再次打开会恢复已保存的协作版本。'}
             </p>
             {!loading && (
               <div className="flex flex-wrap justify-center gap-4">

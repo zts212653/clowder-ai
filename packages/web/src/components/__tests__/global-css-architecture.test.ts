@@ -25,6 +25,7 @@ describe('global css architecture', () => {
       'console-tokens.css',
       'console-shell.css',
       'console-controls.css',
+      'shell-v2.css',
     ];
 
     for (const file of entrypoints) {
@@ -48,6 +49,7 @@ describe('global css architecture', () => {
       'console-tokens.css',
       'console-shell.css',
       'console-controls.css',
+      'shell-v2.css',
     ];
     for (const sheet of vendorSheets) {
       expect(layoutSource).toContain(`/vendor/app/${sheet}`);

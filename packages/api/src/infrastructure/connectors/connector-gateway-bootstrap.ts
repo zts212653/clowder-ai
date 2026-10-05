@@ -45,6 +45,10 @@ import { type IConnectorThreadBindingStore, MemoryConnectorThreadBindingStore } 
 import { GitHubRepoWebhookHandler } from './github-repo-event/GitHubRepoWebhookHandler.js';
 import { ReconciliationDedup } from './github-repo-event/ReconciliationDedup.js';
 import { RedisDeliveryDedup } from './github-repo-event/RedisDeliveryDedup.js';
+import {
+  createRepoInboxOwnerResolver,
+  type RepoInboxOwnerConfigStore,
+} from './github-repo-event/RepoInboxOwnerResolver.js';
 import { InboundMessageDedup } from './InboundMessageDedup.js';
 import {
   clearConnectorConfigCache,
@@ -209,6 +213,8 @@ export interface ConnectorGatewayDeps {
   readonly bindingStore?: IConnectorThreadBindingStore;
   /** Canonical GitHub issue-comment classifier shared with scheduler collection paths. */
   readonly classifyGitHubIssueComment?: (comment: { author: string; body: string }) => IssueCommentClassification;
+  /** Canonical per-repo community routing config used by GitHub Repo Inbox. */
+  readonly repoConfigStore?: RepoInboxOwnerConfigStore;
   /** @internal Test-only: override WSClient factory to avoid real SDK connections */
   readonly _wsClientFactory?:
     | ((opts: { appId: string; appSecret: string }) => {
@@ -877,6 +883,9 @@ export async function startConnectorGateway(
         invokeTrigger: deps.invokeTrigger,
         dedup: ghDedup,
         reconciliationDedup: ghReconciliationDedup,
+        ...(deps.repoConfigStore
+          ? { resolveInboxCatId: createRepoInboxOwnerResolver(deps.repoConfigStore, ghInboxCatId, log) }
+          : {}),
         redis: deps.redis as import('./github-repo-event/RedisDeliveryDedup.js').RedisLike,
         deliveryDeps: {
           messageStore:

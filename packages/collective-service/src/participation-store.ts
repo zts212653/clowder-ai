@@ -2,8 +2,11 @@ import {
   type CollectiveEventEnvelope,
   type CollectiveParticipant,
   type CollectiveParticipationDeclaration,
+  type CollectiveWorkPolicy,
   collectiveConnectionCoordinatesSchema,
   collectiveParticipationDeclarationSchema,
+  participationScopeStarts,
+  participationSourceIsCurrent,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
 import { assertConnectionCoordinates, requireAuthorizedHuman, requireConnection } from './connection-authority.js';
@@ -14,6 +17,8 @@ import type { ServiceState } from './state.js';
 
 export interface ParticipationRecord extends CollectiveParticipationDeclaration {
   readonly publishedAt: string;
+  readonly workPolicy?: CollectiveWorkPolicy;
+  readonly scopeStarts?: Readonly<Record<string, number>>;
 }
 
 const contextRequest = collectiveConnectionCoordinatesSchema
@@ -41,16 +46,21 @@ export class CollectiveParticipationStore {
       const current = state.participations[input.connectionId];
       if (current && current.revision >= input.revision) {
         if (current.revision === input.revision && JSON.stringify(current.agents) === JSON.stringify(input.agents))
-          return structuredClone(current);
+          return participationReceipt(current);
         throw new CollectiveServiceError(
           'PARTICIPATION_REVISION_CONFLICT',
           'Participation revision cannot be replayed or replaced',
           409,
         );
       }
-      const record = { ...input, publishedAt: new Date(this.now()).toISOString() };
+      const record = {
+        ...input,
+        scopeStarts: participationScopeStarts(current, input),
+        ...(current?.workPolicy ? { workPolicy: current.workPolicy } : {}),
+        publishedAt: new Date(this.now()).toISOString(),
+      };
       state.participations[input.connectionId] = record;
-      return structuredClone(record);
+      return participationReceipt(record);
     });
   }
 
@@ -64,7 +74,11 @@ export class CollectiveParticipationStore {
     return {
       declaration: declaration
         ? collectiveParticipationDeclarationSchema.parse(
-            Object.fromEntries(Object.entries(declaration).filter(([key]) => key !== 'publishedAt')),
+            Object.fromEntries(
+              Object.entries(declaration).filter(
+                ([key]) => key !== 'publishedAt' && key !== 'workPolicy' && key !== 'scopeStarts',
+              ),
+            ),
           )
         : null,
     };
@@ -92,7 +106,10 @@ export class CollectiveParticipationStore {
           humanDisplayName: owner.displayName,
           ...agent,
           participationRevision: declaration.revision,
-          availability: connection.status === 'connected' && membership ? ('declared' as const) : ('revoked' as const),
+          availability:
+            connection.status === 'connected' && membership?.status === 'active'
+              ? ('declared' as const)
+              : ('revoked' as const),
         }));
       });
   }
@@ -100,33 +117,8 @@ export class CollectiveParticipationStore {
   readContext(endpointCredential: string, unsafeInput: unknown) {
     const input = contextRequest.parse(unsafeInput);
     const state = this.persistence.snapshot();
-    const connection = requireConnection(state, endpointCredential, input.connectionId);
-    assertConnectionCoordinates(state, connection, input);
-    const owner = requireAuthorizedHuman(state, connection);
     const events = state.events[input.collectiveId] ?? [];
-    const source = events.find((event) => event.eventId === input.eventId);
-    if (!source?.location || !source.recipient)
-      throw new CollectiveServiceError('RETURN_UNAVAILABLE', 'Public source is unavailable', 409);
-    const sourceHuman = source.actor.kind === 'human' ? source.actor.humanId : source.actor.human.humanId;
-    requireMembership(state, input.collectiveId, sourceHuman);
-    requireHumanAuthBinding(state, sourceHuman);
-    if (
-      source.actor.kind === 'agent' &&
-      state.connections[source.actor.provenance.connectionId]?.status !== 'connected'
-    ) {
-      throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'The requesting Agent connection was revoked', 403);
-    }
-    const recipient = source.recipient;
-    if (
-      recipient.kind !== 'agent' ||
-      recipient.connectionId !== connection.connectionId ||
-      recipient.agentId !== input.catId ||
-      recipient.participationRevision !== input.participationRevision ||
-      recipient.humanId !== owner.humanId
-    ) {
-      throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'Source does not authorize this participant', 403);
-    }
-    requireParticipant(state, { ...input, humanId: owner.humanId, channelId: source.location.channelId });
+    const source = requireParticipationSource(state, endpointCredential, input);
     const permitted = events.filter((event) => inSourceScope(event, source) && event.sequence > input.afterSequence);
     const page = permitted.slice(0, input.limit);
     return {
@@ -135,6 +127,63 @@ export class CollectiveParticipationStore {
       ...(permitted.length > page.length ? { nextCursor: page.at(-1)?.sequence } : {}),
     };
   }
+}
+
+/** Common read boundary for public context and bounded matter discovery; attention is not execution authority. */
+export function requireParticipationSource(
+  state: ServiceState,
+  credential: string,
+  input: {
+    serviceInstanceId: string;
+    collectiveId: string;
+    connectionId: string;
+    eventId: string;
+    catId: string;
+    participationRevision: number;
+  },
+) {
+  const connection = requireConnection(state, credential, input.connectionId);
+  assertConnectionCoordinates(state, connection, input);
+  const owner = requireAuthorizedHuman(state, connection);
+  const source = (state.events[input.collectiveId] ?? []).find((event) => event.eventId === input.eventId);
+  if (!source?.location || !source.recipient)
+    throw new CollectiveServiceError('RETURN_UNAVAILABLE', 'Public source is unavailable', 409);
+  const sourceHuman = source.actor.kind === 'human' ? source.actor.humanId : source.actor.human.humanId;
+  requireMembership(state, input.collectiveId, sourceHuman);
+  requireHumanAuthBinding(state, sourceHuman);
+  if (source.actor.kind === 'agent' && state.connections[source.actor.provenance.connectionId]?.status !== 'connected')
+    throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'The requesting Agent connection was revoked', 403);
+  if (!sourceAuthorizesParticipant(source, { ...input, humanId: owner.humanId }))
+    throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'Source does not authorize this participant', 403);
+  requireParticipant(state, { ...input, humanId: owner.humanId, channelId: source.location.channelId });
+  return source as CollectiveEventEnvelope & { location: NonNullable<CollectiveEventEnvelope['location']> };
+}
+
+function participationReceipt(record: ParticipationRecord) {
+  const { workPolicy: _policy, scopeStarts: _scopes, ...receipt } = record;
+  return structuredClone(receipt);
+}
+
+export function sourceAuthorizesParticipant(
+  source: CollectiveEventEnvelope,
+  input: {
+    readonly connectionId: string;
+    readonly catId: string;
+    readonly participationRevision: number;
+    readonly humanId: string;
+  },
+) {
+  const recipient = source.recipient;
+  // Attention decides whether Host wakes a model. It does not change a current
+  // participant's read scope in this public Channel.
+  if (recipient?.kind === 'channel') return Boolean(source.location);
+  return (
+    recipient?.kind === 'agent' &&
+    recipient.connectionId === input.connectionId &&
+    recipient.agentId === input.catId &&
+    recipient.participationRevision === input.participationRevision &&
+    recipient.humanId === input.humanId
+  );
 }
 
 export function requireParticipant(
@@ -156,7 +205,8 @@ export function requireParticipant(
     connection.status !== 'connected' ||
     connection.collectiveId !== input.collectiveId ||
     connection.authorizedHumanId !== input.humanId ||
-    declaration?.revision !== input.participationRevision ||
+    !declaration ||
+    !participationSourceIsCurrent(declaration, input.catId, input.channelId, input.participationRevision) ||
     !agent?.channelIds.includes(input.channelId)
   ) {
     throw new CollectiveServiceError('PARTICIPATION_REVOKED', 'Participant is unavailable for this public scope', 403);

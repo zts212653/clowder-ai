@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>砚砚 Live</title><link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/style.css"></head>
+<body>
+  <section id="details" hidden>
+    <header><strong>砚砚</strong><span>本次交流</span><button type="button" id="collapse" aria-label="收起文字">收起 ⌄</button></header>
+    <div id="transcript" role="log" aria-live="polite"><p class="empty">可以直接说，也可以写一句。</p></div>
+    <form id="compose"><input id="message" aria-label="给砚砚写一句" placeholder="写一句…" maxlength="8000"><button type="submit" aria-label="发送">↑</button></form>
+  </section>
+  <div id="pet" aria-label="砚砚，拖动可以移动" role="img"></div>
+  <section id="dock" aria-label="和砚砚交流">
+  <div class="voice-state"><div id="orb" aria-hidden="true"></div><p id="status" role="status">点开始聊天，直接对我说话</p></div>
+  <div id="idle"><button type="button" id="begin">开始聊天</button></div>
+  <div id="controls" hidden>
+    <button type="button" id="mic" aria-label="关闭麦克风" title="关闭麦克风"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8"/></svg><span>静音</span></button>
+    <button type="button" id="speaker" aria-label="关闭播音" title="关闭播音"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5zM15 8a6 6 0 0 1 0 8M18 4a11 11 0 0 1 0 16"/></svg><span>关声音</span></button>
+    <button type="button" id="write" aria-label="展开文字交流" aria-expanded="false" title="写一句 / 看文字"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M13 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-7M15 4l5 5M9 15l1-5 8-8 4 4-8 8z"/></svg><span>文字</span></button>
+    <button type="button" id="end" aria-label="结束语音" title="结束本次通话"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M7 17 17 7"/></svg><span>结束</span></button>
+  </div>
+  <div id="access">
+    <button type="button" id="share" hidden title="选择窗口或屏幕后共享给当前模型；不共享系统声音">共享屏幕</button>
+    <button type="button" id="documents" title="资料查询设置；不包含屏幕共享">资料查询</button>
+  </div>
+  <p id="screen-status" role="status" hidden></p>
+  <p id="connection-scope"></p>
+  </section>
+  <script type="module" src="/surface.mjs"></script>
+</body></html>

@@ -1,6 +1,7 @@
 import type { ContentEditorProviderContribution } from '@clowder-ai/plugin-contract';
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
 import type { BuiltinPluginRuntime } from '../builtin-runtime/hybrid-supervisor.js';
+import { type StaticSurfaceServer, startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage, VerifiedPluginPackageLocator } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import type { HostBrokerControlPlane } from '../host-broker/control-plane.js';
@@ -8,7 +9,6 @@ import type { HostBrokerStore } from '../host-broker/ports.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
 import type { PluginInventoryStore } from '../host-inventory/ports.js';
 import { staticEditorContributions } from './admission.js';
-import { type EditorSurfaceServer, startEditorSurfaceServer } from './surface-server.js';
 
 interface Options {
   readonly inventory: PluginInventoryStore;
@@ -41,7 +41,7 @@ interface ActivePackage {
   readonly lifecycleRevision: number;
   readonly package: VerifiedPluginPackage;
   readonly connection: BuiltinBrokerConnection;
-  readonly servers: Map<string, EditorSurfaceServer>;
+  readonly servers: Map<string, StaticSurfaceServer>;
   timer?: ReturnType<typeof setTimeout>;
   closing?: Promise<void>;
   ready: boolean;
@@ -149,10 +149,10 @@ export class ContentEditorPluginRuntime implements BuiltinPluginRuntime {
         signal.throwIfAborted();
         const ids = new Set((feature.contributions ?? []).map((r) => r.id));
         const contributions = staticEditorContributions(pkg.manifest).filter((c) => ids.has(c.id));
-        const server = await startEditorSurfaceServer({
+        const server = await startStaticSurfaceServer({
           package: pkg,
           contributions,
-          parentOrigin: this.options.parentOrigin,
+          containment: { kind: 'editor', parentOrigin: this.options.parentOrigin },
           isCurrent: async () => {
             if (!run.ready || this.active.get(id) !== run) return false;
             try {

@@ -1,5 +1,6 @@
 import { resolveArtifactReviewTarget } from './artifact-review-surface';
-import { createEntrustedReturnFromRef } from './real-surface-adapters';
+import { createEntrustedReturnFromRef, resolveFileTarget } from './real-surface-adapters';
+import { resolveContentSurfaceIdentity } from './resolve-content-surface';
 import type {
   FocusEntitlement,
   WorkbenchAction,
@@ -26,6 +27,13 @@ function isTaskArtifactSurface(surface: WorkspaceSurfaceDescriptor): boolean {
   return (
     (surface.type === 'artifact' && surface.renderer === 'artifact-view') ||
     resolveArtifactReviewTarget(surface) !== null
+  );
+}
+
+function hasArtifactReturn(surface: WorkspaceSurfaceDescriptor): boolean {
+  return (
+    isTaskArtifactSurface(surface) ||
+    (resolveFileTarget(surface) !== null && createEntrustedReturnFromRef(surface.returnTargetRef) !== null)
   );
 }
 
@@ -171,9 +179,12 @@ function openArtifactWithReturn(
   ) {
     return state;
   }
-  const hasReturnSurface = state.surfaces.some(
-    (surface) => surface.id === action.returnSurface.id || sameObject(surface, action.returnSurface),
-  );
+  const isReturnSurface = (surface: WorkspaceSurfaceDescriptor) =>
+    surface.id === action.returnSurface.id || sameObject(surface, action.returnSurface);
+  // After the first desktop open the source (Needs Me / Schedule) lives in the sidecar, not the tabs;
+  // opening another item from there must still work.
+  const hasReturnSurface =
+    state.surfaces.some(isReturnSurface) || (state.sidecar !== null && isReturnSurface(state.sidecar));
   if (!hasReturnSurface) return state;
   const refreshed = state.surfaces.map((surface) =>
     surface.id === action.returnSurface.id || sameObject(surface, action.returnSurface)
@@ -209,7 +220,7 @@ function closeArtifactToReturn(
 ): WorkbenchLayoutState {
   if (!isUserEntitled(action.entitlement)) return state;
   const artifact = state.surfaces.find(
-    (surface) => surface.id === action.artifactSurfaceId && isTaskArtifactSurface(surface),
+    (surface) => surface.id === action.artifactSurfaceId && hasArtifactReturn(surface),
   );
   if (!artifact) return state;
   if (artifact.id !== state.activeSurfaceId)
@@ -376,7 +387,7 @@ function reduceUserAction(state: WorkbenchLayoutState, action: WorkbenchAction):
   }
   if (action.type === 'close-surface') {
     const closing = state.surfaces.find((surface) => surface.id === action.surfaceId);
-    return closing && isTaskArtifactSurface(closing)
+    return closing && hasArtifactReturn(closing)
       ? closeArtifactToReturn(state, {
           type: 'close-artifact-to-return',
           artifactSurfaceId: closing.id,
@@ -396,6 +407,8 @@ export function reduceWorkbench(state: WorkbenchLayoutState, action: WorkbenchAc
   }
   if (action.type === 'open-surface') return openSurface(state, action);
   if (action.type === 'refresh-surface') return refreshSurface(state, action.surface);
+  if (action.type === 'resolve-content-surface')
+    return resolveContentSurfaceIdentity(state, action.sourceSurfaceId, action.surface);
   if (action.type === 'open-artifact-with-return') return openArtifactWithReturn(state, action);
   if (action.type === 'close-artifact-to-return') return closeArtifactToReturn(state, action);
   if (!isUserEntitled(action.entitlement)) return state;

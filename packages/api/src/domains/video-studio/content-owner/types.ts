@@ -1,18 +1,62 @@
+import type {
+  EvolutionMediaSnapshotSource,
+  MessageMediaPublicationSource,
+  WorkspaceMediaSnapshotSource,
+} from '@cat-cafe/shared';
+
 export type ContentActorV1 =
   | { readonly kind: 'human'; readonly actorId: string }
   | { readonly kind: 'cat'; readonly actorId: string };
 
 /** Immutable authority coordinates established by an explicit prepared-publication import. */
-export interface ContentPublicationScopeV1 {
+export interface TaskContentPublicationScopeV1 {
   readonly ownerUserId: string;
   readonly threadId: string;
   readonly taskId: string;
+}
+
+export interface MessageContentPublicationScopeV1 {
+  readonly kind: 'message';
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly source: MessageMediaPublicationSource;
+}
+
+/** Legacy task scopes retain their exact serialized shape and content identity. */
+export interface WorkspaceSnapshotPublicationScopeV1 {
+  readonly kind: 'workspace-snapshot';
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly source: WorkspaceMediaSnapshotSource;
+  readonly sourceContentRef: string;
+  readonly snapshotOperationId: string;
+}
+
+export type ContentPublicationScopeV1 =
+  | TaskContentPublicationScopeV1
+  | MessageContentPublicationScopeV1
+  | WorkspaceSnapshotPublicationScopeV1
+  | EvolutionSnapshotPublicationScopeV1;
+
+export interface EvolutionSnapshotPublicationScopeV1 {
+  readonly kind: 'evolution-snapshot';
+  readonly ownerUserId: string;
+  readonly threadId: string;
+  readonly source: EvolutionMediaSnapshotSource;
+  readonly sourceContentRef: string;
+  readonly snapshotOperationId: string;
+}
+
+export function isTaskPublicationScope(scope: ContentPublicationScopeV1): scope is TaskContentPublicationScopeV1 {
+  return !('kind' in scope);
 }
 
 export interface ContentSourcePublicationV1 {
   readonly artifactRef: string;
   readonly sourceRef: string;
   readonly revision: string;
+  /** New returned versions may be published in an explicitly selected execution conversation. */
+  readonly threadId?: string;
 }
 
 export interface ProjectContentRevisionV1 {

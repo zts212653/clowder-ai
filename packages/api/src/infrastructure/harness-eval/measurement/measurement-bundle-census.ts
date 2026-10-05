@@ -40,7 +40,7 @@ const ValidityMigrationSchema = z
 export const MeasurementBundleCensusEntrySchema = z
   .object({
     domainId: evalDomainIdSchema,
-    classification: z.enum(['active_decision_bearing', 'gated', 'registered_nonoperational']),
+    classification: z.enum(['active_decision_bearing', 'dormant', 'gated', 'registered_nonoperational']),
     enabled: z.boolean(),
     decisionConsumer: z
       .object({
@@ -118,7 +118,28 @@ function assertUnique(values: readonly string[]): void {
 type CensusEntry = MeasurementBundleCensus['entries'][number];
 type ValidityMigration = CensusEntry['validityMigration'];
 
+function assertHistoricalCoordinates(entry: CensusEntry, migration: ValidityMigration): void {
+  if (migration.batch !== null && migration.riskRank === null) {
+    throw new Error(`validity migration batch requires a risk rank for ${entry.domainId}`);
+  }
+  if (migration.status === 'unmigrated' && migration.batch !== null) {
+    throw new Error(`unmigrated bundle ${entry.domainId} cannot claim a validity migration batch`);
+  }
+  if (migration.batch !== null && migration.batch !== migration.riskRank) {
+    throw new Error(`validity migration batch must match risk rank for ${entry.domainId}`);
+  }
+}
+
 function assertMigrationClassification(entry: CensusEntry, migration: ValidityMigration): void {
+  if (entry.classification === 'dormant') {
+    // Dormancy stops scheduling only: historical status, evidence refs, and
+    // migration coordinates stay as they were, but no current action is allowed.
+    if (migration.actionGate !== 'keep_observe_only') {
+      throw new Error(`dormant bundle ${entry.domainId} cannot carry a current action authorization`);
+    }
+    assertHistoricalCoordinates(entry, migration);
+    return;
+  }
   if (entry.classification !== 'active_decision_bearing') {
     if (migration.riskRank !== null || migration.batch !== null) {
       throw new Error(`non-active bundle ${entry.domainId} cannot have a validity migration risk rank or batch`);
@@ -134,12 +155,7 @@ function assertMigrationClassification(entry: CensusEntry, migration: ValidityMi
   if (migration.status === 'gated' || migration.status === 'nonoperational') {
     throw new Error(`validity migration status mismatch for active bundle ${entry.domainId}`);
   }
-  if (migration.status === 'unmigrated' && migration.batch !== null) {
-    throw new Error(`unmigrated bundle ${entry.domainId} cannot claim a validity migration batch`);
-  }
-  if (migration.batch !== null && migration.batch !== migration.riskRank) {
-    throw new Error(`validity migration batch must match risk rank for ${entry.domainId}`);
-  }
+  assertHistoricalCoordinates(entry, migration);
 }
 
 function assertMigrationEvidenceRefs(entry: CensusEntry, migration: ValidityMigration): void {
@@ -187,21 +203,28 @@ function assertMigrationEntry(entry: CensusEntry): void {
   }
 }
 
+// Risk ranks and batches are historical migration coordinates, not a queue of the
+// currently active subset: dormant bundles keep theirs, so uniqueness and
+// contiguity are checked across every bundle that still carries one.
 function assertMigrationCoverage(census: MeasurementBundleCensus): void {
-  const active = census.entries.filter((entry) => entry.classification === 'active_decision_bearing');
-  const ranks = active.map((entry) => entry.validityMigration.riskRank as number).sort((left, right) => left - right);
-  const expectedRanks = Array.from({ length: active.length }, (_, index) => index + 1);
+  const ranked = census.entries.filter((entry) => entry.validityMigration.riskRank !== null);
+  const ranks = ranked.map((entry) => entry.validityMigration.riskRank as number).sort((left, right) => left - right);
+  const expectedRanks = Array.from({ length: ranked.length }, (_, index) => index + 1);
   if (JSON.stringify(ranks) !== JSON.stringify(expectedRanks)) {
-    throw new Error('validity migration risk ranks must be unique and contiguous across active bundles');
+    throw new Error('validity migration risk ranks must be unique and contiguous across ranked bundles');
   }
-  const assignedBatches = active
+  const assignedBatches = ranked
     .map((entry) => entry.validityMigration.batch)
     .filter((batch): batch is number => batch !== null)
     .sort((left, right) => left - right);
   if (assignedBatches.length === 0) return;
-  const firstBatch = active.filter((entry) => entry.validityMigration.batch === 1);
-  if (firstBatch.length !== 1 || firstBatch[0]?.domainId !== 'eval:memory') {
-    throw new Error('validity migration batch 1 must contain only eval:memory');
+  // Batch 1 opens the migration at the rank-1 bundle. In the home census that is
+  // eval:memory (its canonical batch-1 coordinate is enforced by the hard checker
+  // against the evidence chain); a fresh target-owned census whose memory never
+  // took a local coordinate starts its own sequence at its first ranked domain.
+  const firstBatch = ranked.filter((entry) => entry.validityMigration.batch === 1);
+  if (firstBatch.length !== 1 || firstBatch[0]?.validityMigration.riskRank !== 1) {
+    throw new Error('validity migration batch 1 must belong to the rank-1 bundle');
   }
   const expectedBatches = Array.from({ length: assignedBatches.at(-1) ?? 0 }, (_, index) => index + 1);
   if (JSON.stringify(assignedBatches) !== JSON.stringify(expectedBatches)) {
@@ -220,6 +243,7 @@ export function loadMeasurementBundleRegistry(repoRoot: string): EvalDomainRegis
 export function classifyMeasurementBundleDomain(
   domain: EvalDomainRegistryEntry,
 ): MeasurementBundleCensus['entries'][number]['classification'] {
+  if (domain.dormancy) return 'dormant';
   if (!domain.enabled) return 'gated';
   if (hasEvalDomainInstructions(domain.domainId) && hasEvalDomainPublishInstructions(domain.domainId)) {
     return 'active_decision_bearing';

@@ -36,4 +36,9 @@ sla:
   acknowledgeHours: 48
   reevalWithinHours: 168
 # Generator + provider wired end-to-end (index.ts verdictGenerators + wiredPublishDomains).
-enabled: true
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Zero anchor calls in the window and twelve keep verdicts: no observable signal."
+  revivalPath: "Revive if F276 person-cue grounding or memory routing needs this method again."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

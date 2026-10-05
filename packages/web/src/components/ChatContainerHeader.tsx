@@ -1,7 +1,13 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
+import { AppTooltip } from './AppTooltip';
+import { ThreadTitleResetMenu } from './execution-row/ThreadTitleResetMenu';
 import { CatCafeLogo } from './icons/CatCafeLogo';
+import { ThreadTasksButton, ThreadWorksButton } from './shell/HeaderCounts';
+import { HeaderParticipants } from './shell/HeaderParticipants';
+import { ShellGlyph } from './shell/ShellIcons';
+import { useShellPresentation } from './shell/shell-presentation';
 import { ThreadCatPill } from './ThreadCatPill';
 import { ThreadIndicator } from './ThreadIndicator';
 
@@ -29,6 +35,54 @@ export function ChatContainerHeader({
   onToggleStatusPanel,
   hasWorkspaceActivity = false,
 }: ChatContainerHeaderProps) {
+  const isV2 = useShellPresentation() === 'v2';
+  if (isV2) {
+    return (
+      <header
+        className="safe-area-top"
+        style={{ background: 'var(--shell-work)', borderBottom: '1px solid var(--shell-hairline)' }}
+        data-shell-header="v2"
+      >
+        <div className="flex h-[52px] items-center gap-1.5 pl-6 pr-3.5">
+          {/* The sidebar has its own collapse control; this one only brings a collapsed sidebar back. */}
+          {!sidebarOpen && (
+            <AppTooltip label="展开侧栏" side="bottom">
+              <button
+                type="button"
+                onClick={onToggleSidebar}
+                aria-label="展开侧栏"
+                data-testid="header-sidebar-expand"
+                className="shell-rail-item shell-focusable -ml-2 mr-1 flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg"
+                style={{ color: 'var(--shell-muted)' }}
+              >
+                <ShellGlyph name="panelLeft" />
+              </button>
+            </AppTooltip>
+          )}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <ThreadIndicator threadId={threadId} />
+            {/* F322 original-B (new shell only): the title's ⌄ menu holds the normal force-reset; it appears only while something runs. Keyed by thread so a question opened for one thread cannot be confirmed against the next. */}
+            <ThreadTitleResetMenu key={threadId} threadId={threadId} />
+            {/* F198 Phase C AC-C5: Daemon active indicator */}
+            <DaemonActiveIndicator threadId={threadId} />
+            {/* F154 Phase B: Preferred cat pill — desktop only (KD-10) */}
+            <div className="hidden flex-shrink-0 lg:block">
+              <ThreadCatPill threadId={threadId} />
+            </div>
+          </div>
+          <HeaderParticipants threadId={threadId} />
+          <ThreadWorksButton />
+          <ThreadTasksButton />
+          <PanelToggle
+            onToggleStatusPanel={onToggleStatusPanel}
+            statusPanelOpen={statusPanelOpen}
+            hasWorkspaceActivity={hasWorkspaceActivity}
+            tooltip
+          />
+        </div>
+      </header>
+    );
+  }
   return (
     <header className="safe-area-top">
       <div className="px-5 py-3 flex items-center gap-2">
@@ -128,10 +182,13 @@ export function PanelToggle({
   onToggleStatusPanel,
   statusPanelOpen,
   hasWorkspaceActivity = false,
+  tooltip = false,
 }: {
   onToggleStatusPanel: () => void;
   statusPanelOpen: boolean;
   hasWorkspaceActivity?: boolean;
+  /** F322 v2: name comes from AppTooltip (150ms, focus, Escape) instead of the native `title` (~1s). */
+  tooltip?: boolean;
 }) {
   // The button is server-rendered before React owns its click handler. Browser
   // journeys wait on this marker rather than racing cold client hydration.
@@ -140,7 +197,8 @@ export function PanelToggle({
     setClientInteractive(true);
   }, []);
 
-  return (
+  const label = statusPanelOpen ? '收起 Workspace' : '打开 Workspace';
+  const button = (
     <button
       type="button"
       onClick={onToggleStatusPanel}
@@ -149,8 +207,8 @@ export function PanelToggle({
           ? 'text-cafe-accent'
           : 'text-cafe-secondary hover:bg-[var(--console-hover-bg)] hover:text-cafe-accent'
       }`}
-      aria-label={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
-      title={statusPanelOpen ? '收起 Workspace' : '打开 Workspace'}
+      aria-label={label}
+      title={tooltip ? undefined : label}
       data-client-interactive={clientInteractive ? 'true' : 'false'}
       data-testid="workspace-panel-toggle"
     >
@@ -175,5 +233,12 @@ export function PanelToggle({
         />
       )}
     </button>
+  );
+  return tooltip ? (
+    <AppTooltip label={label} side="bottom">
+      {button}
+    </AppTooltip>
+  ) : (
+    button
   );
 }

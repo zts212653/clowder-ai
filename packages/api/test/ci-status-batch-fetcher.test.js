@@ -89,8 +89,9 @@ describe('fetchPrCiStatuses batch failure isolation', () => {
         signal: controller.signal,
         async execFileAsync(_file, _args, options) {
           commandCount++;
-          assert.equal(options.signal, controller.signal);
+          assert(options.signal instanceof AbortSignal);
           controller.abort(new Error('scheduler timeout'));
+          assert.equal(options.signal.aborted, true);
           throw controller.signal.reason;
         },
       },

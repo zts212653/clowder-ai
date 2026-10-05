@@ -77,6 +77,7 @@ export const REQUEST_GENERATION_RETRY_REASONS = [
   'provider_continuation',
   'provider_busy',
   'provider_fallback',
+  'provider_capacity_recovery',
 ] as const;
 
 export const requestGenerationSourceRefSchema = z

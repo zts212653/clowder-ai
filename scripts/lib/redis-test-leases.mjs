@@ -1,9 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-export const PROTECTED_REDIS_TEST_PORTS = new Set([6398, 6399, 6401]);
-export const PROTECTED_REDIS_DEV_PORTS = new Set([6099, 6398, 6399, 6401]);
+export const PROTECTED_REDIS_TEST_PORTS = new Set([6397, 6398, 6399, 6401]);
+export const PROTECTED_REDIS_DEV_PORTS = new Set([6099, 6397, 6398, 6399, 6401]);
 
 export function redisTestRegistryDir(env = process.env) {
   return env.CAT_CAFE_REDIS_TEST_REGISTRY_DIR || path.join(env.TMPDIR || '/tmp', 'cat-cafe-redis-tests');
@@ -23,7 +23,7 @@ export function readProcessIdentity(pid, { execFileSyncFn = execFileSync, killFn
   try {
     const output = execFileSyncFn(
       'ps',
-      ['-ww', '-p', String(pid), '-o', 'lstart=', '-o', 'state=', '-o', 'ucomm=', '-o', 'command='],
+      ['-ww', '-p', String(pid), '-o', 'lstart=', '-o', 'state=', '-o', 'pgid=', '-o', 'ucomm=', '-o', 'command='],
       {
         encoding: 'utf8',
         env: { ...process.env, LC_ALL: 'C' },
@@ -33,11 +33,13 @@ export function readProcessIdentity(pid, { execFileSyncFn = execFileSync, killFn
     const processFields = output
       .slice(24)
       .trim()
-      .match(/^(\S+)\s+(\S+)\s+(.+)$/s);
+      .match(/^(\S+)\s+(\d+)\s+(\S+)\s+(.+)$/s);
     if (!startedAt || !processFields) return { status: 'unknown' };
-    const [, state, ucomm, command] = processFields;
+    const [, state, rawProcessGroupId, ucomm, command] = processFields;
     if (state.startsWith('Z')) return { status: 'dead' };
-    return { status: 'live', identity: { pid, startedAt, ucomm, command } };
+    const processGroupId = Number(rawProcessGroupId);
+    if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0) return { status: 'unknown' };
+    return { status: 'live', identity: { pid, startedAt, processGroupId, ucomm, command } };
   } catch {
     return { status: 'unknown' };
   }
@@ -49,9 +51,16 @@ export function inspectExpectedProcess(identity, deps) {
   if (current.identity.startedAt !== identity.startedAt) return { status: 'dead' };
   // `ps command` reflects mutable argv; ucomm is the stable accounting name and changes on exec.
   if (typeof identity.ucomm === 'string' && identity.ucomm) {
-    return current.identity.ucomm === identity.ucomm ? current : { status: 'dead' };
+    if (current.identity.ucomm !== identity.ucomm) return { status: 'dead' };
+  } else if (current.identity.command !== identity.command) {
+    return { status: 'dead' };
   }
-  return current.identity.command === identity.command ? current : { status: 'dead' };
+  // A live process may call setpgid(2) or setsid(2) without changing incarnation.
+  // Group drift is useful operational context, but never proof that the recorded
+  // process died; preserve the target until stronger birth evidence is available.
+  if (identity.processGroupId !== undefined && current.identity.processGroupId !== identity.processGroupId)
+    return { status: 'unknown' };
+  return current;
 }
 
 export function inspectLeaseOwner(identity, deps) {
@@ -59,7 +68,10 @@ export function inspectLeaseOwner(identity, deps) {
   if (current.status !== 'live') return current;
   // Bash may exec the final test command in-place, preserving PID and process
   // birth time while changing command. The start token still prevents PID reuse.
-  return current.identity.startedAt === identity.startedAt ? current : { status: 'dead' };
+  if (current.identity.startedAt !== identity.startedAt) return { status: 'dead' };
+  if (identity.processGroupId !== undefined && current.identity.processGroupId !== identity.processGroupId)
+    return { status: 'unknown' };
+  return current;
 }
 
 function isValidProcessIdentity(identity) {
@@ -70,6 +82,8 @@ function isValidProcessIdentity(identity) {
     Boolean(identity.startedAt) &&
     typeof identity.command === 'string' &&
     Boolean(identity.command) &&
+    (identity.processGroupId === undefined ||
+      (Number.isSafeInteger(identity.processGroupId) && identity.processGroupId > 0)) &&
     (identity.ucomm === undefined || (typeof identity.ucomm === 'string' && Boolean(identity.ucomm)))
   );
 }
@@ -273,18 +287,12 @@ export function cleanupRedisGateOwnership(env = process.env) {
   };
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 function defaultStopInstance(lease) {
   const initial = inspectExpectedProcess(lease.redis);
   if (initial.status === 'unknown') return false;
   if (initial.status === 'dead') return true;
-  spawnSync('redis-cli', ['-h', '127.0.0.1', '-p', String(lease.port), 'shutdown', 'nosave'], {
-    timeout: 3000,
-    stdio: 'ignore',
-  });
   const waitForExit = (attempts) => {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const current = inspectExpectedProcess(lease.redis);
@@ -294,8 +302,11 @@ function defaultStopInstance(lease) {
     }
     return 'live';
   };
-  let state = waitForExit(30);
+  let state = initial.status;
   for (const signal of ['SIGTERM', 'SIGKILL']) {
+    // The recorded process may still be alive without owning the old port.
+    // Revalidate its incarnation before each signal; never send port-based shutdown.
+    state = inspectExpectedProcess(lease.redis).status;
     if (state !== 'live') return state === 'dead';
     try {
       process.kill(lease.redis.pid, signal);
@@ -307,7 +318,6 @@ function defaultStopInstance(lease) {
   }
   return state === 'dead';
 }
-
 export function cleanupStaleRedisTestLeases(
   registryDir = redisTestRegistryDir(),
   { inspectOwnerFn = inspectLeaseOwner, stopInstanceFn = defaultStopInstance } = {},

@@ -1,3 +1,8 @@
+import {
+  type LiveCarrierIdentity,
+  LiveCarrierOperationGate,
+  type LiveCarrierOperationLease,
+} from '../concierge/live/LiveCarrierOperationGate.js';
 import type { TurnCustodyWakeProvenance } from './TurnCustodyProjectionService.js';
 
 type AdoptionCommit = () => void;
@@ -16,6 +21,7 @@ interface AdoptionEntry {
   accepting: boolean;
   tail: Promise<void>;
   readonly wakes: Map<string, AdoptedManagedHold>;
+  readonly operations: LiveCarrierOperationGate;
 }
 
 /**
@@ -31,17 +37,24 @@ export class TurnCustodyAdoptionRegistry {
     if (!invocationId || this.handlers.has(invocationId)) {
       throw new Error(`turn custody adoption handler already registered for ${invocationId || '<empty>'}`);
     }
-    const entry: AdoptionEntry = { handler, accepting: true, tail: Promise.resolve(), wakes: new Map() };
+    const entry: AdoptionEntry = {
+      handler,
+      accepting: true,
+      tail: Promise.resolve(),
+      wakes: new Map(),
+      operations: new LiveCarrierOperationGate(),
+    };
     this.handlers.set(invocationId, entry);
     return async () => {
       if (!entry.accepting) {
-        await entry.tail;
+        await Promise.all([entry.tail, entry.operations.drain()]);
         return;
       }
       // Refuse new reservations immediately, but keep discovery alive until every
       // already-admitted transaction either commits or aborts.
       entry.accepting = false;
-      await entry.tail;
+      entry.operations.close();
+      await Promise.all([entry.tail, entry.operations.drain()]);
       if (this.handlers.get(invocationId) === entry) this.handlers.delete(invocationId);
     };
   }
@@ -123,8 +136,25 @@ export class TurnCustodyAdoptionRegistry {
     return entry ? [...entry.wakes.values()].map((wake) => ({ ...wake })) : [];
   }
 
+  isAccepting(invocationId: string): boolean {
+    return this.handlers.get(invocationId)?.accepting === true;
+  }
+
+  /** Hold the existing route owner until an admitted exact-source operation finishes. */
+  withOperation<T>(
+    identity: LiveCarrierIdentity,
+    operation: (lease: LiveCarrierOperationLease) => Promise<T>,
+  ): Promise<T> {
+    const entry = this.handlers.get(identity.invocationId);
+    if (!entry?.accepting) return Promise.reject(new Error('Invocation adoption owner unavailable'));
+    return entry.operations.runForCarrier(identity, operation);
+  }
+
   resetForTest(): void {
-    for (const entry of this.handlers.values()) entry.accepting = false;
+    for (const entry of this.handlers.values()) {
+      entry.accepting = false;
+      entry.operations.close();
+    }
     this.handlers.clear();
   }
 }

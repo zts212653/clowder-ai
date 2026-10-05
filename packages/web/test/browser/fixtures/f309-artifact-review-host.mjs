@@ -8,11 +8,19 @@ import { catRegistry } from '@cat-cafe/shared';
 import { build } from 'vite';
 import { InvocationRegistry } from '../../../../api/src/domains/cats/services/agents/invocation/InvocationRegistry.ts';
 import { aggregateThreadArtifacts } from '../../../../api/src/domains/cats/services/agents/routing/thread-artifacts-aggregator.ts';
+import { createContentModificationIntegration } from '../../../../api/src/domains/collaborative-content/modification/composition.ts';
+import { WorkspaceContentReviewService } from '../../../../api/src/domains/collaborative-content/workspace-review/service.ts';
+import { WorkspaceContentReviewStore } from '../../../../api/src/domains/collaborative-content/workspace-review/store.ts';
+import { WorkspaceContentSourceService } from '../../../../api/src/domains/workspace/workspace-content-source.ts';
+import { signEditToken } from '../../../../api/src/domains/workspace/workspace-edit.ts';
 import { registerArtifactReviewRoutes } from '../../../../api/src/routes/artifact-review-routes.ts';
 import { registerCallbackArtifactReviewRoutes } from '../../../../api/src/routes/callback-artifact-review-routes.ts';
 import { registerCallbackAuthHook } from '../../../../api/src/routes/callback-auth-prehandler.ts';
 import { registerCallbackTaskRoutes } from '../../../../api/src/routes/callback-task-routes.ts';
+import { registerContentModificationRoutes } from '../../../../api/src/routes/content-modification-routes.ts';
 import { registerEntrustedWorkReadRoutes } from '../../../../api/src/routes/entrusted-work-read-routes.ts';
+import { registerPublishedContentRoutes } from '../../../../api/src/routes/published-content-routes.ts';
+import { registerWorkspaceContentReviewRoutes } from '../../../../api/src/routes/workspace-content-review-routes.ts';
 import { createLiveReviewFixture } from '../../../../api/test/helpers/artifact-review-live-fixture.ts';
 
 const WEB_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -24,13 +32,24 @@ const webRequire = createRequire(path.join(WEB_ROOT, 'package.json'));
 const tailwind = webRequire('tailwindcss'),
   tailwindConfig = webRequire(path.join(WEB_ROOT, 'tailwind.config.js'));
 
-export async function startReviewHost(root, mediaType, { port = 0, clientRevision } = {}) {
+export async function startReviewHost(
+  root,
+  mediaType,
+  { port = 0, clientRevision, entryPath, workspaceComparison = false } = {},
+) {
   assert.ok(Number.isInteger(port) && port >= 0 && port <= 65535);
   if (clientRevision !== undefined) assert.match(clientRevision, /^[a-f0-9]{40}$/);
   const revisionAttribute = clientRevision ? ` data-cat-cafe-build-revision="${clientRevision}"` : '';
   let sockets;
   const emitToUser = (userId, event, data) => sockets?.to(`user:${userId}`).emit(event, data);
-  const f = await createLiveReviewFixture(root, mediaType, emitToUser);
+  // Production composes the publication ledger from the F063 source owner (index.ts); without it the
+  // review surface's `/api/content-reviews/resolve` would not exist here.
+  const workspace = new WorkspaceContentSourceService({
+    ownerUserId: 'operator',
+    resolveWorktreeRoot: async () => ({ root, canonicalWorktreeId: 'work' }),
+  });
+  const f = await createLiveReviewFixture(root, mediaType, emitToUser, workspace);
+  assert.ok(f.ledgers, 'the review host needs the same publication ledger as the API');
   let bundle = '',
     css = '';
   const frontend = createServer(async (req, res) => {
@@ -70,6 +89,7 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
   });
   const origin = `http://127.0.0.1:${frontend.address().port}`;
   const app = Fastify();
+  const session = { userId: 'operator' };
   // The fixture's HTTP session is operator; use the same authenticated test principal for real Socket.IO transport.
   sockets = new SocketServer(app.server, { cors: { origin, credentials: true } });
   sockets.on('connection', (socket) => {
@@ -77,7 +97,7 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
   });
   app.decorateRequest('sessionUserId', null);
   app.addHook('onRequest', async (request) => {
-    request.sessionUserId = 'operator';
+    request.sessionUserId = session.userId;
   });
   await app.register(cors, { origin, credentials: true });
   app.get('/api/session', async () => ({ userId: 'operator' }));
@@ -112,7 +132,42 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
     });
   });
   await app.register(async (scope) => registerArtifactReviewRoutes(scope, f));
-  await registerCallbackArtifactReviewRoutes(app, { ...f, threads: f.threads, registry });
+  registerPublishedContentRoutes(app, { media: f.media });
+  registerWorkspaceContentReviewRoutes(app, {
+    reviews: f.ledgers,
+    namespace: 'publication',
+    changed: (ownerUserId, reviewId) => emitToUser(ownerUserId, 'artifact_review_changed', { reviewId }),
+  });
+  // "请猫修改" is served by the same modification integration production composes (index.ts).
+  const filesStore = new WorkspaceContentReviewStore(path.join(root, 'workspace-content-reviews.sqlite'));
+  const files = new WorkspaceContentReviewService({ store: filesStore, source: workspace });
+  const modifications = createContentModificationIntegration({
+    dataDir: root,
+    source: workspace,
+    files,
+    artifacts: f,
+    tasks: f.tasks,
+    messages: f.messages,
+    changed: (ownerUserId) => emitToUser(ownerUserId, 'entrusted_work_projection_invalidated', { ownerUserId }),
+    onError: (error) => f.events.push({ userId: 'operator', event: 'modification_error', data: error }),
+  });
+  registerContentModificationRoutes(app, modifications);
+  if (workspaceComparison) {
+    registerWorkspaceContentReviewRoutes(app, { reviews: files });
+    // The token issuer, like the HTTP session issuer above, is scoped to the private fixture root.
+    // Signing, acceptance, F063 CAS and receipt readback use the shipped implementation.
+    app.post('/api/workspace/edit-session', async (request, reply) => {
+      if (request.sessionUserId !== 'operator' || request.body?.worktreeId !== 'work')
+        return reply.code(403).send({ error: 'access_denied' });
+      return { token: signEditToken('work'), expiresIn: 1800 };
+    });
+  }
+  await registerCallbackArtifactReviewRoutes(app, {
+    ...f,
+    sourceDiscussions: modifications.sourceDiscussions,
+    threads: f.threads,
+    registry,
+  });
   await app.register(async (scope) =>
     registerEntrustedWorkReadRoutes(scope, { service: f.ownerReads, callbackRegistry: registry }),
   );
@@ -131,7 +186,7 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
       write: false,
       minify: false,
       rollupOptions: {
-        input: path.join(WEB_ROOT, 'test/browser/fixtures/f309-artifact-review-workbench.tsx'),
+        input: entryPath ?? path.join(WEB_ROOT, 'test/browser/fixtures/f309-artifact-review-workbench.tsx'),
         output: { format: 'es', inlineDynamicImports: true },
       },
     },
@@ -163,6 +218,8 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
     await f.dispatch.close();
     await new Promise((resolve) => sockets.close(resolve));
     await app.close();
+    modifications.writer.close();
+    filesStore.close();
     f.store.close();
     frontend.closeAllConnections();
     await new Promise((resolve) => frontend.close(resolve));
@@ -173,6 +230,8 @@ export async function startReviewHost(root, mediaType, { port = 0, clientRevisio
     origin,
     apiOrigin,
     emitToUser,
+    session,
+    files,
     catCallback: (operation, body) => callback(`artifact-review/${operation}`, body),
     taskCallback: callback,
     close,

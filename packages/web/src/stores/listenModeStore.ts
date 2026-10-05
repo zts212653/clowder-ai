@@ -3,6 +3,8 @@ import { create } from 'zustand';
 import type { ListenSentence } from '@/lib/listen-mode/markdown-sentences';
 
 export type ListenModePhase = 'loading' | 'buffering' | 'playing' | 'paused' | 'idle' | 'error';
+/** Explicit view navigation only; this event never starts playback or changes document authority. */
+export const LISTEN_RETURN_DOCUMENT_EVENT = 'cat-cafe:listen-return-document';
 
 export interface ListenDocumentDescriptor {
   identity: ListenDocumentIdentity;

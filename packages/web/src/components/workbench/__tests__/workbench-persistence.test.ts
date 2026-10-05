@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveFileTarget } from '../real-surface-adapters';
+import { createFileSurface, resolveFileTarget } from '../real-surface-adapters';
 import type { WorkbenchLayoutState } from '../workbench-contract';
 import { createInitialWorkbenchState } from '../workbench-model';
 import {
@@ -57,6 +57,30 @@ function phaseALayout(): Omit<WorkbenchLayoutState, 'schemaVersion' | 'pinnedSur
 }
 
 describe('Workbench persistence boundary', () => {
+  it('retains the original document return location across reload and rejects malformed source coordinates', () => {
+    const storage = new MemoryStorage();
+    const navigationOrigin = {
+      kind: 'workspace-document' as const,
+      worktreeId: 'original-worktree',
+      path: 'docs/source.md',
+      line: 17,
+    };
+    const surface = createFileSurface({ worktreeId: 'target-worktree', path: 'docs/next.md', navigationOrigin });
+    const layout = { ...createInitialWorkbenchState(), surfaces: [surface], activeSurfaceId: surface.id };
+    storage.setItem(WORKBENCH_STORAGE_KEY, JSON.stringify(layout));
+    expect(loadWorkbenchState({ storage }).layout.surfaces[0]?.navigationOrigin).toEqual(navigationOrigin);
+    for (const invalid of [
+      { ...navigationOrigin, line: 0 },
+      { ...navigationOrigin, path: 'bad\u0000path' },
+      { ...navigationOrigin, worktreeId: '' },
+    ]) {
+      storage.setItem(
+        WORKBENCH_STORAGE_KEY,
+        JSON.stringify({ ...layout, surfaces: [{ ...surface, navigationOrigin: invalid }] }),
+      );
+      expect(loadWorkbenchState({ storage }).layout.surfaces.some((item) => item.id === surface.id)).toBe(false);
+    }
+  });
   it('upgrades the Phase A key into the shared v2 key', () => {
     const storage = new MemoryStorage();
     storage.setItem(LEGACY_F307_WORKBENCH_STORAGE_KEY, JSON.stringify(phaseALayout()));

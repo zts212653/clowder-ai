@@ -12,7 +12,7 @@ import {
   type CustodyOpportunityCohort,
   custodyOpportunitySample,
 } from './CustodyOpportunityCohortStore.js';
-import { containsEntrustedWorkTimeSignal } from './EntrustedWorkSourceSignals.js';
+import { classifyEntrustedWorkSourceTime } from './EntrustedWorkSourceSignals.js';
 
 type Episode = CustodyOpportunityEpisodeInputV1;
 export type OpportunityProjection =
@@ -57,7 +57,8 @@ export function projectCustodyOpportunity(
   }
   const action = offer !== undefined || work !== undefined;
   const sampled = custodyOpportunitySample(sourceRef, cohort.policyVersion);
-  const riskTargeted = containsEntrustedWorkTimeSignal(source.content);
+  const sourceTimeRelation = classifyEntrustedWorkSourceTime(source.content);
+  const riskTargeted = sourceTimeRelation === 'deadline' || sourceTimeRelation === 'ambiguous';
   if (!action && ((!sampled && !riskTargeted) || capturedAt - source.timestamp < CUSTODY_SILENCE_DELAY_MS)) {
     return { kind: 'excluded' };
   }

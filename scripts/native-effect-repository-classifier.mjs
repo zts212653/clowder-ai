@@ -1,5 +1,8 @@
+import { gitSubcommandArgs, isTemporaryWorktreePath, worktreeRemovalOperand } from './lib/git-invocation.mjs';
 import { stripHarmlessRedirections, tokenizeSimpleShellCommand } from './native-effect-shell-tokenizer.mjs';
 import { namesRuntimeBranch } from './native-effect-target-classifier.mjs';
+
+export { gitSubcommandArgs, worktreeRemovalOperand } from './lib/git-invocation.mjs';
 
 /**
  * Return the explicit filesystem target for a narrowly parsed temporary worktree lifecycle.
@@ -19,7 +22,8 @@ export function explicitTemporaryWorktreeTarget(raw) {
     return isTemporaryWorktreePath(target) && (exactRevision || detachedTrackingRevision) ? target : null;
   }
 
-  if (args[1] === 'remove' && args.length === 3 && isTemporaryWorktreePath(args[2])) return args[2];
+  const removal = worktreeRemovalOperand(args);
+  if (args[1] === 'remove' && removal && isTemporaryWorktreePath(removal)) return removal;
   return null;
 }
 
@@ -70,35 +74,31 @@ export function isGitRepositoryObservation(raw) {
 }
 
 export function isRepositoryRefresh(raw) {
-  return refreshesRepository(gitCommandArgs(tokenizeSimpleShellCommand(raw)));
+  return refreshesRepository(gitCommandArgs(tokenizeSimpleShellCommand(stripHarmlessRedirections(raw))));
 }
 
+const FORCING_FETCH_OPTIONS = new Set(['--force', '-f', '--update-head-ok', '-u']);
+const FETCH_OPTIONS_WITH_VALUE = new Set(['--depth', '--deepen', '--jobs', '-j', '--upload-pack', '--refmap', '-o']);
+
+/**
+ * Git's own rule, not a list of shapes: a fetch only rewrites a ref when it is forced
+ * (`--force`, a `+` refspec) or writes outside `refs/remotes/` (`src:refs/heads/main`).
+ * Everything else updates FETCH_HEAD and remote-tracking refs. Until 2026-09-27 only
+ * `fetch origin main` and one pull-refspec shape counted as a refresh, so
+ * `git fetch origin feat/x main` was denied as a rewrite of main.
+ */
 function refreshesRepository(args) {
   if (!args || args[0] !== 'fetch') return false;
-  const fetchArgs = args.slice(1).filter((token) => !['--quiet', '-q', '--no-tags'].includes(token));
-  if (fetchArgs.length !== 2 || fetchArgs[0] !== 'origin') return false;
-  if (fetchArgs[1] === 'main') return true;
-  const pullRefspec = fetchArgs[1].match(/^(?:refs\/)?pull\/(\d+)\/head:refs\/remotes\/origin\/pr\/(\d+)$/);
-  return pullRefspec !== null && pullRefspec[1] === pullRefspec[2];
-}
-
-/** Git's own selectors, peeled off an operand list to reach the subcommand. */
-function gitSubcommandArgs(operands) {
-  let index = 0;
-  while (index < operands.length) {
-    const token = operands[index];
-    if (token === '-C' || token === '-c') {
-      if (operands[index + 1] === undefined) return null;
-      index += 2;
-      continue;
-    }
-    if (token.startsWith('-')) {
-      index += 1;
-      continue;
-    }
-    break;
-  }
-  return operands.slice(index);
+  const rest = args.slice(1);
+  if (rest.some((token) => FORCING_FETCH_OPTIONS.has(token))) return false;
+  const positional = rest.filter(
+    (token, index) => !token.startsWith('-') && !FETCH_OPTIONS_WITH_VALUE.has(rest[index - 1]),
+  );
+  return positional.slice(1).every((refspec) => {
+    if (refspec.startsWith('+')) return false;
+    const colon = refspec.indexOf(':');
+    return colon < 0 || refspec.slice(colon + 1).startsWith('refs/remotes/');
+  });
 }
 
 const BRANCH_REWRITE_FLAGS = new Set(['-d', '-D', '-m', '-M', '--delete', '--move']);
@@ -235,10 +235,6 @@ function isSafeGitObjectName(raw) {
 
 function isGitHubPullHeadRef(raw) {
   return /^(?:refs\/)?pull\/\d+\/head$/.test(raw);
-}
-
-function isTemporaryWorktreePath(raw) {
-  return /^\/(?:private\/)?tmp\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(raw);
 }
 
 function ghPullRequestFlagContract(subcommand) {

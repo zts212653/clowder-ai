@@ -84,21 +84,30 @@
   },
   "provenance": {
     "source": "video-extraction",
-    "pipeline": "mother-image → AI video (operator manual) → ffmpeg 4fps → center-crop → transparent → resize → atlas",
+    "pipeline": "mother-image → AI video (operator manual) → ffmpeg 4fps → center-crop → border-connected white-background flood-fill → resize → 128-color palette → lossless WebP",
     "pipelineDoc": "docs/features/assets/F229/desktop-pet-sprite/video-to-spritesheet-pipeline.md",
     "generatedBy": "opus (claude-opus-4-6)",
     "motherImage": "docs/features/assets/F229/desktop-pet-sprite/raw/xianxian-mother.png",
     "videoSource": "operator-provided AI-generated videos (9 states)",
     "tasteWatchItems": [
       "Video-extracted frames have organic movement vs AI-generated pixel art",
-      "Background removal via magick -fuzz 15% — some edge artifacts possible at tiny scale"
-    ]
+      "White fur requires border-connected background removal; global color-key transparency is forbidden",
+      "Idle frames must preserve one fixed video crop and scale; per-frame trim/fit creates visible size popping"
+    ],
+    "alphaRepairEvidence": "docs/features/assets/F229/desktop-pet-sprite/qa/xianxian-alpha-repair-2026-09-20/provenance.json",
+    "idleScaleRepairEvidence": "docs/features/assets/F229/desktop-pet-sprite/qa/xianxian-idle-scale-2026-09-22/provenance.json"
   },
   "qa": {
     "readabilityCheck": "pass",
     "identityDiffCheck": "pass",
     "provenanceCheck": "pass",
-    "scaleConsistencyCheck": "pass (all states processed with identical crop/resize pipeline)",
+    "scaleConsistencyCheck": "pass (idle visible-height spread 9px; ground-line spread 5px; fixed-crop scale preserved)",
+    "alphaMaskIntegrityCheck": "pass (57 manifest-declared frames; no frame exceeds 300 enclosed transparent pixels)",
+    "darkBackgroundCheck": "pass (white muzzle, chest, and paws remain opaque at atlas and 59x64 display sizes)",
+    "displayCompressionCheck": "pass (palette-optimized lossless WebP checked at 59x64 default and 169px maximum production display sizes)",
+    "idleMotionPreviewCheck": "pass (no unintended size popping at production display size)",
+    "alphaRepairBy": "codex-sol",
+    "alphaRepairAt": "2026-09-20",
     "reviewer": "opus",
     "reviewedAt": "2026-06-24"
   }

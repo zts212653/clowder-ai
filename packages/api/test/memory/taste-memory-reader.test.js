@@ -53,7 +53,7 @@ describe('TasteMemoryReader', () => {
     const { TasteMemoryReader } = await import('../../dist/domains/memory/taste/TasteMemoryReader.js');
     const reader = new TasteMemoryReader(repository, 'owner-1');
 
-    const result = reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH });
+    const result = await reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH });
 
     assert.ok(result);
     assert.equal(result.ownerUserId, 'owner-1');
@@ -70,10 +70,24 @@ describe('TasteMemoryReader', () => {
       proposalId: 'proposal_test_approved',
     });
     assert.equal(
-      reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH, revision: 'sha256:stale' }),
+      await reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH, revision: 'sha256:stale' }),
       null,
       'stale drill coordinates must fail closed',
     );
+  });
+
+  it('reads approved takeaway hypotheses while legacy files omit them', async () => {
+    const raw = vignette('takeaway: "我们以为 You 喜欢先看证据。"\n');
+    writeFileSync(join(root, PUBLIC_PATH), raw, 'utf8');
+    const { TasteMemoryReader, buildTasteDecisionPassage } = await import(
+      '../../dist/domains/memory/taste/TasteMemoryReader.js'
+    );
+    const reader = new TasteMemoryReader(repository, 'owner-1');
+    const item = await reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH });
+    assert.equal(item?.payload.takeaway, '我们以为 You 喜欢先看证据。');
+    assert.match(buildTasteDecisionPassage(item.payload), /Takeaway hypothesis: 我们以为 You 喜欢先看证据。/);
+    writeFileSync(join(root, PUBLIC_PATH), vignette(), 'utf8');
+    assert.equal((await reader.read({ ownerUserId: 'owner-1', sourcePath: PUBLIC_PATH }))?.payload.takeaway, undefined);
   });
 
   it('uses the same payload contract for private owner reads and rejects cross-owner reads', async () => {
@@ -81,7 +95,7 @@ describe('TasteMemoryReader', () => {
     const { TasteMemoryReader } = await import('../../dist/domains/memory/taste/TasteMemoryReader.js');
     const reader = new TasteMemoryReader(repository, 'owner-1');
 
-    const ownerResult = reader.read({ ownerUserId: 'owner-1', sourcePath: PRIVATE_PATH });
+    const ownerResult = await reader.read({ ownerUserId: 'owner-1', sourcePath: PRIVATE_PATH });
     assert.ok(ownerResult);
     assert.equal(ownerResult.visibility, 'private');
     assert.deepEqual(Object.keys(ownerResult.payload), [
@@ -94,7 +108,7 @@ describe('TasteMemoryReader', () => {
       'proposalId',
     ]);
 
-    assert.equal(reader.read({ ownerUserId: 'owner-2', sourcePath: PRIVATE_PATH }), null);
+    assert.equal(await reader.read({ ownerUserId: 'owner-2', sourcePath: PRIVATE_PATH }), null);
   });
 
   it('returns zero for paths outside the exact allowlist and for non-approved or invalid vignettes', async () => {
@@ -116,11 +130,14 @@ privacy: public
     const { TasteMemoryReader } = await import('../../dist/domains/memory/taste/TasteMemoryReader.js');
     const reader = new TasteMemoryReader(repository, 'owner-1');
 
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: rejectedPath }), null);
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: invalidPath }), null);
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: 'docs/taste/index.md' }), null);
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: '../private/taste/private-decision.md' }), null);
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: '/tmp/complete-decision.md' }), null);
+    assert.equal(await reader.read({ ownerUserId: 'owner-1', sourcePath: rejectedPath }), null);
+    assert.equal(await reader.read({ ownerUserId: 'owner-1', sourcePath: invalidPath }), null);
+    assert.equal(await reader.read({ ownerUserId: 'owner-1', sourcePath: 'docs/taste/index.md' }), null);
+    assert.equal(
+      await reader.read({ ownerUserId: 'owner-1', sourcePath: '../private/taste/private-decision.md' }),
+      null,
+    );
+    assert.equal(await reader.read({ ownerUserId: 'owner-1', sourcePath: '/tmp/complete-decision.md' }), null);
   });
 
   it('rejects allowed-path symlinks that escape the repository or leave the Taste source lane', async () => {
@@ -138,9 +155,9 @@ privacy: public
     const { TasteMemoryReader } = await import('../../dist/domains/memory/taste/TasteMemoryReader.js');
     const reader = new TasteMemoryReader(repository, 'owner-1');
 
-    assert.equal(reader.read({ ownerUserId: 'owner-1', sourcePath: externalLink }), null);
+    assert.equal(await reader.read({ ownerUserId: 'owner-1', sourcePath: externalLink }), null);
     assert.equal(
-      reader.read({ ownerUserId: 'owner-1', sourcePath: internalLink }),
+      await reader.read({ ownerUserId: 'owner-1', sourcePath: internalLink }),
       null,
       'a symlink must not smuggle Taste-shaped content from outside the declared source lane',
     );

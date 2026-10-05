@@ -68,6 +68,7 @@ export interface EntityMentionDocFilters {
   sceneId?: string;
   provenanceTier?: ProvenanceTier;
   suppressBackstop?: boolean;
+  residualTerms?: string[];
 }
 
 export interface EntityMentionPassageHit {
@@ -113,8 +114,41 @@ export function aliasMatchesText(text: string, alias: string): boolean {
   return Boolean(textNorm && matcher?.(textNorm));
 }
 
+function literalContainsPattern(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+  return `%${escaped}%`;
+}
+
+function mentionResidualPredicate(residualTerms: string[] | undefined, params: unknown[]): string {
+  const terms = residualTerms ?? [];
+  if (terms.length === 0) return '';
+  const docClauses = terms.map(
+    () =>
+      "(LOWER(d.anchor) LIKE ? ESCAPE '\\' OR LOWER(d.title) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(d.summary, '')) LIKE ? ESCAPE '\\' OR LOWER(COALESCE(d.keywords, '')) LIKE ? ESCAPE '\\')",
+  );
+  const passageClauses = terms.map(() => "LOWER(p.content) LIKE ? ESCAPE '\\'");
+  for (const term of terms) {
+    const pattern = literalContainsPattern(term.toLowerCase());
+    params.push(pattern, pattern, pattern, pattern);
+  }
+  params.push(...terms.map((term) => literalContainsPattern(term.toLowerCase())));
+  return ` AND (
+    (${docClauses.join(' AND ')})
+    OR (
+      m.passage_id != '' AND EXISTS (
+        SELECT 1 FROM evidence_passages p
+        WHERE p.doc_anchor = m.doc_anchor AND p.passage_id = m.passage_id
+          AND ${passageClauses.join(' AND ')}
+      )
+    )
+  )`;
+}
+
 export class EntityRegistryStore {
-  constructor(private readonly db: Database.Database) {}
+  constructor(
+    private readonly db: Database.Database,
+    private readonly corpusDb: Database.Database = db,
+  ) {}
 
   upsert(entities: EntityRecord[], context: EntityMutationContext = { source: 'system' }): boolean {
     return new EntityRegistryMutationWriter(this.db).upsert(entities, context);
@@ -259,18 +293,16 @@ export class EntityRegistryStore {
 
   private refreshMentionSubset(docAnchors?: string[], entityIds?: string[]): void {
     const aliases = compileAliases(this.loadAliases({ includeCanonical: true, entityIds }));
-    this.deleteMentions(docAnchors, entityIds);
-    if (aliases.length === 0) return;
 
     const insertStmt = this.db.prepare(`
       INSERT OR IGNORE INTO entity_mentions
       (entity_id, doc_anchor, passage_id, surface, surface_norm, source, provenance_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const docRows = this.selectDocs(docAnchors);
-    const passageRows = this.selectPassages(docAnchors);
     const tx = this.db.transaction(() => {
-      for (const doc of docRows) {
+      this.deleteMentions(docAnchors, entityIds);
+      if (aliases.length === 0) return;
+      for (const doc of this.selectDocs(docAnchors)) {
         const textNorm = normalizeEntityAlias([doc.title, doc.summary ?? '', doc.keywords ?? ''].join('\n'));
         for (const alias of aliases) {
           if (!alias.matchesNormalizedText(textNorm)) continue;
@@ -286,7 +318,7 @@ export class EntityRegistryStore {
           );
         }
       }
-      for (const passage of passageRows) {
+      for (const passage of this.selectPassages(docAnchors)) {
         const textNorm = normalizeEntityAlias(passage.content);
         for (const alias of aliases) {
           if (!alias.matchesNormalizedText(textNorm)) continue;
@@ -332,7 +364,7 @@ export class EntityRegistryStore {
   findMentionPassages(
     queryMatches: QueryEntityMatch[],
     limit: number,
-    options?: { threadId?: string; dateFrom?: string; dateTo?: string },
+    options?: { threadId?: string; dateFrom?: string; dateTo?: string; residualTerms?: string[] },
   ): {
     passages: EntityMentionPassageHit[];
     matchesByAnchor: Map<string, EntityMatch[]>;
@@ -376,7 +408,7 @@ export class EntityRegistryStore {
 
   private loadAliases(options: { includeCanonical?: boolean; entityIds?: string[] } = {}): AliasRow[] {
     const entityIds = options.entityIds?.length ? [...new Set(options.entityIds)] : undefined;
-    const entityFilter = entityIds ? ` WHERE a.entity_id IN (${entityIds.map(() => '?').join(',')})` : '';
+    const entityFilter = entityIds ? ' WHERE a.entity_id IN (SELECT value FROM json_each(?))' : '';
     const rows = this.db
       .prepare(
         `SELECT r.*, a.alias, a.alias_norm, a.provenance_json
@@ -385,16 +417,16 @@ export class EntityRegistryStore {
          ${entityFilter}
          ORDER BY length(a.alias_norm) DESC, a.alias_norm`,
       )
-      .all(...(entityIds ?? [])) as AliasRow[];
+      .all(...(entityIds ? [JSON.stringify(entityIds)] : [])) as AliasRow[];
     if (!options.includeCanonical) return rows;
 
     const seen = new Set(
       rows.map((row) => `${row.entity_id}\u0000${normalizeEntityAlias(row.alias_norm || row.alias)}`),
     );
-    const registryFilter = entityIds ? ` WHERE entity_id IN (${entityIds.map(() => '?').join(',')})` : '';
+    const registryFilter = entityIds ? ' WHERE entity_id IN (SELECT value FROM json_each(?))' : '';
     const entityRows = this.db
       .prepare(`SELECT * FROM entity_registry${registryFilter}`)
-      .all(...(entityIds ?? [])) as EntityRow[];
+      .all(...(entityIds ? [JSON.stringify(entityIds)] : [])) as EntityRow[];
     for (const entity of entityRows) {
       const aliasNorm = normalizeEntityAlias(entity.canonical_name);
       const key = `${entity.entity_id}\u0000${aliasNorm}`;
@@ -413,12 +445,12 @@ export class EntityRegistryStore {
     const clauses: string[] = [];
     const params: string[] = [];
     if (docAnchors?.length) {
-      clauses.push(`doc_anchor IN (${docAnchors.map(() => '?').join(',')})`);
-      params.push(...docAnchors);
+      clauses.push('doc_anchor IN (SELECT value FROM json_each(?))');
+      params.push(JSON.stringify(docAnchors));
     }
     if (entityIds?.length) {
-      clauses.push(`entity_id IN (${entityIds.map(() => '?').join(',')})`);
-      params.push(...entityIds);
+      clauses.push('entity_id IN (SELECT value FROM json_each(?))');
+      params.push(JSON.stringify(entityIds));
     }
     if (clauses.length === 0) {
       this.db.exec('DELETE FROM entity_mentions');
@@ -427,61 +459,65 @@ export class EntityRegistryStore {
     this.db.prepare(`DELETE FROM entity_mentions WHERE ${clauses.join(' AND ')}`).run(...params);
   }
 
-  private selectDocs(docAnchors?: string[]): Array<{
+  private *selectDocs(docAnchors?: string[]): Iterable<{
     anchor: string;
     title: string;
     summary: string | null;
     keywords: string | null;
     updated_at: string;
   }> {
-    let sql = 'SELECT anchor, title, summary, keywords, updated_at FROM evidence_docs';
-    const params: string[] = [];
-    if (docAnchors?.length) {
-      sql += ` WHERE anchor IN (${docAnchors.map(() => '?').join(',')})`;
-      params.push(...docAnchors);
+    const filter = docAnchors?.length ? ' AND anchor IN (SELECT value FROM json_each(?))' : '';
+    const stmt = this.corpusDb.prepare(`SELECT rowid AS cursor, anchor, title, summary, keywords, updated_at
+      FROM evidence_docs WHERE rowid > ?${filter} ORDER BY rowid LIMIT 256`);
+    let cursor = 0;
+    for (;;) {
+      const rows = stmt.all(cursor, ...(docAnchors?.length ? [JSON.stringify(docAnchors)] : [])) as Array<{
+        cursor: number;
+        anchor: string;
+        title: string;
+        summary: string | null;
+        keywords: string | null;
+        updated_at: string;
+      }>;
+      if (rows.length === 0) return;
+      yield* rows;
+      cursor = rows[rows.length - 1]!.cursor;
     }
-    return this.db.prepare(sql).all(...params) as Array<{
-      anchor: string;
-      title: string;
-      summary: string | null;
-      keywords: string | null;
-      updated_at: string;
-    }>;
   }
 
-  private selectPassages(docAnchors?: string[]): Array<{
+  private *selectPassages(docAnchors?: string[]): Iterable<{
     doc_anchor: string;
     passage_id: string;
     content: string;
     created_at: string;
   }> {
-    let sql = `
-      SELECT p.doc_anchor, p.passage_id, p.content, p.created_at
-      FROM evidence_passages p
-      JOIN evidence_docs d ON d.anchor = p.doc_anchor
-    `;
-    const params: string[] = [];
-    if (docAnchors?.length) {
-      sql += ` WHERE p.doc_anchor IN (${docAnchors.map(() => '?').join(',')})`;
-      params.push(...docAnchors);
+    const filter = docAnchors?.length ? ' AND p.doc_anchor IN (SELECT value FROM json_each(?))' : '';
+    const stmt = this.corpusDb.prepare(`SELECT p.id AS cursor, p.doc_anchor, p.passage_id, p.content, p.created_at
+      FROM evidence_passages p JOIN evidence_docs d ON d.anchor = p.doc_anchor
+      WHERE p.id > ?${filter} ORDER BY p.id LIMIT 256`);
+    let cursor = 0;
+    for (;;) {
+      const rows = stmt.all(cursor, ...(docAnchors?.length ? [JSON.stringify(docAnchors)] : [])) as Array<{
+        cursor: number;
+        doc_anchor: string;
+        passage_id: string;
+        content: string;
+        created_at: string;
+      }>;
+      if (rows.length === 0) return;
+      yield* rows;
+      cursor = rows[rows.length - 1]!.cursor;
     }
-    return this.db.prepare(sql).all(...params) as Array<{
-      doc_anchor: string;
-      passage_id: string;
-      content: string;
-      created_at: string;
-    }>;
   }
 
   private selectMentionPassageKeys(
     queryMatches: QueryEntityMatch[],
     limit: number,
-    options?: { threadId?: string; dateFrom?: string; dateTo?: string },
+    options?: { threadId?: string; dateFrom?: string; dateTo?: string; residualTerms?: string[] },
   ): Array<{ doc_anchor: string; passage_id: string }> {
     if (limit <= 0) return [];
     const ids = [...new Set(queryMatches.map((m) => m.entityId))];
-    const placeholders = ids.map(() => '?').join(',');
-    const params: unknown[] = [...ids];
+    const params: unknown[] = [JSON.stringify(ids)];
     let sql = `
       SELECT m.doc_anchor,
              m.passage_id,
@@ -489,7 +525,7 @@ export class EntityRegistryStore {
              MAX(p.created_at) AS passage_created_at
       FROM entity_mentions m
       JOIN evidence_passages p ON p.doc_anchor = m.doc_anchor AND p.passage_id = m.passage_id
-      WHERE m.entity_id IN (${placeholders})
+      WHERE m.entity_id IN (SELECT value FROM json_each(?))
         AND m.passage_id != ''
     `;
     if (options?.threadId) {
@@ -503,6 +539,10 @@ export class EntityRegistryStore {
     if (options?.dateTo) {
       sql += ' AND p.created_at <= ?';
       params.push(options.dateTo.length === 10 ? `${options.dateTo}T23:59:59` : options.dateTo);
+    }
+    for (const term of options?.residualTerms ?? []) {
+      sql += " AND LOWER(p.content) LIKE ? ESCAPE '\\'";
+      params.push(literalContainsPattern(term.toLowerCase()));
     }
     sql += `
       GROUP BY m.doc_anchor, m.passage_id
@@ -521,9 +561,11 @@ export class EntityRegistryStore {
   > {
     if (passages.length === 0) return [];
     const ids = [...new Set(queryMatches.map((m) => m.entityId))];
-    const idPlaceholders = ids.map(() => '?').join(',');
     const passageClauses = passages.map(() => '(m.doc_anchor = ? AND m.passage_id = ?)').join(' OR ');
-    const params: unknown[] = [...ids, ...passages.flatMap((passage) => [passage.doc_anchor, passage.passage_id])];
+    const params: unknown[] = [
+      JSON.stringify(ids),
+      ...passages.flatMap((passage) => [passage.doc_anchor, passage.passage_id]),
+    ];
     const rows = this.db
       .prepare(
         `SELECT r.*, m.surface, m.source, m.doc_anchor, m.passage_id,
@@ -531,7 +573,7 @@ export class EntityRegistryStore {
          FROM entity_mentions m
          JOIN entity_registry r ON r.entity_id = m.entity_id
          JOIN evidence_passages p ON p.doc_anchor = m.doc_anchor AND p.passage_id = m.passage_id
-         WHERE m.entity_id IN (${idPlaceholders})
+         WHERE m.entity_id IN (SELECT value FROM json_each(?))
            AND (${passageClauses})
          ORDER BY m.created_at DESC, m.doc_anchor, m.passage_id`,
       )
@@ -548,14 +590,13 @@ export class EntityRegistryStore {
   ): string[] {
     if (limit <= 0) return [];
     const ids = [...new Set(queryMatches.map((m) => m.entityId))];
-    const placeholders = ids.map(() => '?').join(',');
-    const params: unknown[] = [...ids];
+    const params: unknown[] = [JSON.stringify(ids)];
     let sql = `SELECT m.doc_anchor,
                       MAX(CASE WHEN m.source = 'passage' THEN 1 ELSE 0 END) AS has_passage,
                       MAX(m.created_at) AS latest_mention_at
                FROM entity_mentions m
                JOIN evidence_docs d ON d.anchor = m.doc_anchor
-               WHERE m.entity_id IN (${placeholders})`;
+               WHERE m.entity_id IN (SELECT value FROM json_each(?))`;
     if (filters?.kind) {
       sql += ' AND d.kind = ?';
       params.push(filters.kind);
@@ -601,6 +642,7 @@ export class EntityRegistryStore {
     if (filters?.suppressBackstop) {
       sql += " AND d.activation != 'backstop'";
     }
+    sql += mentionResidualPredicate(filters?.residualTerms, params);
     sql += `
       GROUP BY m.doc_anchor
       ORDER BY has_passage DESC, latest_mention_at DESC, m.doc_anchor
@@ -620,8 +662,6 @@ export class EntityRegistryStore {
   > {
     if (anchors.length === 0) return [];
     const ids = [...new Set(queryMatches.map((m) => m.entityId))];
-    const idPlaceholders = ids.map(() => '?').join(',');
-    const anchorPlaceholders = anchors.map(() => '?').join(',');
     const rows = this.db
       .prepare(
         `SELECT r.*, m.surface, m.source, m.doc_anchor, m.passage_id,
@@ -629,11 +669,11 @@ export class EntityRegistryStore {
          FROM entity_mentions m
          JOIN entity_registry r ON r.entity_id = m.entity_id
          LEFT JOIN evidence_passages p ON p.doc_anchor = m.doc_anchor AND p.passage_id = m.passage_id
-         WHERE m.entity_id IN (${idPlaceholders})
-           AND m.doc_anchor IN (${anchorPlaceholders})
+         WHERE m.entity_id IN (SELECT value FROM json_each(?))
+           AND m.doc_anchor IN (SELECT value FROM json_each(?))
          ORDER BY (m.source = 'passage') DESC, m.created_at DESC`,
       )
-      .all(...ids, ...anchors) as Array<
+      .all(JSON.stringify(ids), JSON.stringify(anchors)) as Array<
       MentionRow & { content: string; speaker: string | null; position: number | null; created_at: string | null }
     >;
     return rows;

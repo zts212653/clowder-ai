@@ -130,6 +130,49 @@ function runApiLaunchCommand({ sandboxDir, env = {}, extraArgs = [] }) {
 }
 
 describe('start-dev strict profile isolation', () => {
+  it('reuses wrapper-verified production artifacts without changing user start arguments', () => {
+    const sandboxDir = createSandbox();
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        env: {
+          CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED: '1',
+          CAT_CAFE_DEPLOYMENT_ID: 'runtime',
+          CAT_CAFE_RUNTIME_ROOT: sandboxDir,
+        },
+        commands: [
+          'source scripts/start-dev.sh --source-only --prod-web',
+          'reuse_verified_runtime_artifacts',
+          'printf "QUICK=%s\\n" "$QUICK_MODE"',
+        ],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.match(result.stdout, /QUICK=true/);
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
+  it('waits for HTTP readiness after port listen before reporting startup complete', () => {
+    const sandboxDir = createSandbox();
+    const callsPath = join(sandboxDir, 'ready-calls');
+    try {
+      const result = runSourceOnly({
+        sandboxDir,
+        commands: [
+          'source scripts/start-dev.sh --source-only --quick',
+          `curl() { local n=0; [ ! -f '${callsPath}' ] || n=$(cat '${callsPath}'); n=$((n+1)); printf '%s' "$n" > '${callsPath}'; [ "$n" -lt 2 ] && printf 503 || printf 200; }`,
+          'sleep() { :; }',
+          'wait_for_api_readiness 3102 "$$" 5',
+        ],
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(readFileSync(callsPath, 'utf8'), '2', '503 must not count as ready');
+    } finally {
+      rmSync(sandboxDir, { recursive: true, force: true });
+    }
+  });
+
   it('ignores inherited shell env for profile-controlled vars when strict mode is on', () => {
     const sandboxDir = createSandbox();
     try {
@@ -555,12 +598,29 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
       resolve(ROOT, 'packages/api/src/domains/cats/services/agents/providers/acp/AcpHttpStreamClient.ts'),
       'utf8',
     );
-    const tmuxGateway = readFileSync(resolve(ROOT, 'packages/api/src/domains/terminal/tmux-gateway.ts'), 'utf8');
+    const runtimeOnlyEnv = readFileSync(resolve(ROOT, 'packages/api/src/utils/runtime-only-env.ts'), 'utf8');
 
     assert.match(acpClient, /buildChildEnv\(this\.config\.env, \{ workingDirectory: this\.config\.cwd \}\)/);
     assert.match(acpHttpClient, /buildChildEnv\(this\.config\.env, \{ workingDirectory: this\.config\.cwd \}\)/);
-    assert.match(tmuxGateway, /'CONNECTOR_GATEWAY_AUTOSTART'/);
-    assert.match(tmuxGateway, /'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/);
+    // One list, owned by one module…
+    assert.match(
+      runtimeOnlyEnv,
+      /export const RUNTIME_ONLY_LIFECYCLE_ENV_KEYS = \[\s*'CONNECTOR_GATEWAY_AUTOSTART',\s*'CAT_CAFE_PROVISION_GLOBAL_SIDECAR',\s*'CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED',\s*'CAT_CAFE_ALPHA_COORDINATES',?\s*\] as const;/,
+    );
+    // …consumed by every spawn path that runs cat-authored commands, never re-copied.
+    for (const consumer of [
+      'packages/api/src/domains/terminal/tmux-gateway.ts',
+      'packages/api/src/utils/cli-spawn.ts',
+      'packages/api/src/infrastructure/managed-runner-environment.ts',
+    ]) {
+      const source = readFileSync(resolve(ROOT, consumer), 'utf8');
+      assert.match(
+        source,
+        /import \{ RUNTIME_ONLY_LIFECYCLE_ENV_KEYS \} from '[./]+(utils\/)?runtime-only-env\.js';/,
+        `${consumer} must consume the shared runtime-only list`,
+      );
+      assert.doesNotMatch(source, /'CONNECTOR_GATEWAY_AUTOSTART'|'CAT_CAFE_PROVISION_GLOBAL_SIDECAR'/, consumer);
+    }
   });
 
   it('requires every buildChildEnv caller to declare its intended working directory or a narrow exception', () => {

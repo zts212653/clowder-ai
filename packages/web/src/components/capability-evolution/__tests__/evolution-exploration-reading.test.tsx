@@ -15,7 +15,8 @@ describe('exploration reading persistence', () => {
       comparisonExperimentRef: { ownerFeatureId: 'F100', ownerStateRef: 'source:experiment-b', version: 'v1' },
       comparisonScope: 'paired_subset',
       selectedCaseId: 'anonymous',
-      viewport: { x: 72, y: -16, zoom: 1.25, collapsed: [] },
+      lineageLayout: 'vertical',
+      viewport: { x: 72, y: -16, zoom: 1.25, collapsed: [], framing: 'manual' },
       draft: { text: '请核对陌生输入 sentinel-7f13 的超时行为', intent: 'explore' },
     };
     useEvolutionReading.getState().update(PROGRAM_ID, { exploration });

@@ -3,6 +3,8 @@
  * Design Gate contract 3 — serializes SqliteEvidenceStore writes + IndexBuilder direct writes.
  */
 
+import { setImmediate as yieldToIo } from 'node:timers/promises';
+
 export class EvidenceWriteQueue {
   private tail: Promise<void> = Promise.resolve();
 
@@ -11,6 +13,7 @@ export class EvidenceWriteQueue {
     return new Promise<T>((resolve, reject) => {
       this.tail = this.tail.then(async () => {
         try {
+          await yieldToIo();
           resolve(await fn());
         } catch (e) {
           reject(e);

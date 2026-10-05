@@ -1,10 +1,10 @@
 ---
 feature_ids: [F056]
-related_features: [F051, F057]
+related_features: [F051, F057, F322]
 topics: [design-language, ux, branding, cat-aesthetic]
 doc_kind: feature-spec
 created: 2026-03-04
-tips_exempt: "Renewed 2026-09-05 for Phase F1: DESIGN.md design-intent governance and its lint contract are developer-facing standards, with no new user-invokable action or discovery surface."
+tips_exempt: "Renewed 2026-10-02: the F322 delivery backlink records ownership and acceptance coordination; design standards and existing user entry points are unchanged."
 ---
 
 # F056: Clowder AI 设计语言 — 猫猫化不是猫化
@@ -686,3 +686,7 @@ Phase E 主提交（`62c93fc5`）落地后，9 个 follow-up commit 处理 bubbl
 - Phase B/C: 常规跨家族 review
 - Phase D: operator拍板企业定制边界 + 跨家族 review
 - Phase F: F1 文档 + gate 走跨家族 review；F2 每一步 token/字体/密度迁移以 A/B 渲染截图由operator选定，猫不自判"好看"
+
+## Related Delivery
+
+- [F322 日常工作体验整治](F322-everyday-work-experience.md)：统一相关体验整改的交付路线与逐 AC 结算；本次回链不改变本 Feature 状态、原 owner 或未完成承诺。

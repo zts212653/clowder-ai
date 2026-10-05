@@ -1,5 +1,6 @@
 import type {
   CommunityEvent,
+  CommunityObjectProjection,
   ExternalReviewAggregate,
   PendingExternalReviewVerdict,
   ReviewDeliveryOutcome,
@@ -291,12 +292,28 @@ export class ExternalReviewVerdictService {
       throw new ExternalReviewVerdictError('stale_head', 'reviewedHeadSha does not match the current GitHub HEAD');
     }
 
-    const projection = await this.opts.objectStore.get(subjectKey);
-    const aggregate = projection?.externalReview;
+    let projection = await this.opts.objectStore.get(subjectKey);
+    let aggregate = projection?.externalReview ?? null;
+
+    // Phase 1: Rebuild — events may exist but projection was never materialized.
     if (!aggregate || aggregate.currentHeadSha !== currentHeadSha) {
-      throw new ExternalReviewVerdictError(
-        'projection_unavailable',
-        'Current external-review projection is unavailable',
+      await this.opts.projector.rebuild(subjectKey);
+      projection = await this.opts.objectStore.get(subjectKey);
+      aggregate = projection?.externalReview ?? null;
+    }
+
+    // Phase 2: Bootstrap for retro-triaged PRs where the CI poller hasn't
+    // run yet — ExternalReviewCoordinator.initialize() was never called.
+    // Pass post-rebuild projection (not a pre-rebuild snapshot) so authority
+    // is derived from canonical event-reconstructed state, not stale cache.
+    if (!aggregate || aggregate.currentHeadSha !== currentHeadSha) {
+      aggregate = await this.bootstrapExternalReviewAggregate(
+        subjectKey,
+        config,
+        input,
+        currentHeadSha,
+        aggregate,
+        projection,
       );
     }
     const authorizationFailure = externalReviewVerdictAuthorizationFailure(aggregate, input.principal);
@@ -321,6 +338,143 @@ export class ExternalReviewVerdictService {
       };
     }
     throw new ExternalReviewVerdictError('head_not_ready', 'Current HEAD has not reached reviewer-ready state');
+  }
+
+  /**
+   * Bootstrap an external-review aggregate for a retro-triaged PR. Emits the
+   * same admission event pair that ExternalReviewCoordinator.initialize() would
+   * emit (case.external_review_assigned + case.head_observed), producing a
+   * fresh aggregate at lifecycle=awaiting_ci. This allows the verdict to be
+   * accepted as pending_verification (ci_not_observed).
+   */
+  private async bootstrapExternalReviewAggregate(
+    subjectKey: string,
+    config: { reviewMode: string; cloudReviewPolicy: string; updatedAt: number },
+    input: ExternalReviewVerdictRecordInput,
+    currentHeadSha: string,
+    existingAggregate: ExternalReviewAggregate | null,
+    caseProjection: CommunityObjectProjection | null,
+  ): Promise<ExternalReviewAggregate> {
+    const now = this.now();
+
+    if (!existingAggregate) {
+      // --- Case 1: No aggregate — bootstrap from scratch. ---
+      // Two-tier authority verification:
+      //
+      // Tier 1 (projection ownership): Verify caller against the post-rebuild
+      // canonical projection's durable ownership fields. These are set by
+      // case.routed / case.bootstrap (issues) or case.external_review_assigned
+      // (PRs, when the coordinator has already run).
+      //
+      // Tier 2 (tracker admission, #1511 fix): For PR subjects where the
+      // ExternalReviewCoordinator has NOT yet run, the projection has no
+      // ownerThreadId/ownerRole. Fall back to verifying the caller against
+      // the durable PR tracker task (registered via callback-auth-verified
+      // register-pr-tracking). This preserves fail-closed: authority derives
+      // from a server-verified admission record, not from the submitting
+      // principal's self-assertion.
+      let authorityVerified = false;
+
+      if (caseProjection?.ownerThreadId && caseProjection?.ownerRole) {
+        // Tier 1: projection ownership available
+        if (
+          caseProjection.ownerThreadId !== input.principal.threadId ||
+          caseProjection.ownerRole !== input.principal.catId
+        ) {
+          throw new ExternalReviewVerdictError(
+            'wrong_principal',
+            'Callback principal does not match case owner identity',
+          );
+        }
+        authorityVerified = true;
+      } else if (this.opts.verifyDurableReviewerAdmission) {
+        // Tier 2: no projection ownership — verify against tracker task (#1511)
+        authorityVerified = await this.opts.verifyDurableReviewerAdmission(
+          subjectKey,
+          input.principal.catId,
+          input.principal.threadId,
+        );
+      }
+
+      if (!authorityVerified) {
+        throw new ExternalReviewVerdictError(
+          'projection_unavailable',
+          'No durable thread/role ownership to verify reviewer authority for bootstrap',
+        );
+      }
+
+      // Emit assignment event. Reviewer identity is verified via ownerThreadId.
+      const assignedEvent: CommunityEvent = {
+        sourceEventId: `f168:external-review-assigned:${subjectKey}:${config.updatedAt}`,
+        subjectKey,
+        kind: 'case.external_review_assigned',
+        classification: 'informational',
+        payload: {
+          mode: config.reviewMode,
+          cloudPolicy: config.cloudReviewPolicy,
+          reviewerCatId: input.principal.catId,
+          reviewerThreadId: input.principal.threadId,
+        },
+        at: now,
+      };
+      const assignResult = await this.opts.eventLog.append(assignedEvent);
+      if (assignResult.appended) {
+        await this.opts.projector.apply(assignedEvent);
+      } else {
+        await this.opts.projector.rebuild(subjectKey);
+      }
+    } else {
+      // --- Case 2: Aggregate exists with stale HEAD. ---
+      // Verify caller against the aggregate's durable reviewer identity
+      // (already established from prior events). Skip assignment event.
+      if (
+        existingAggregate.reviewerCatId !== input.principal.catId ||
+        existingAggregate.reviewerThreadId !== input.principal.threadId
+      ) {
+        throw new ExternalReviewVerdictError(
+          'wrong_principal',
+          'Callback principal does not match the assigned reviewer',
+        );
+      }
+    }
+
+    // Compute generation using the coordinator's formula (not hardcoded).
+    // Read the current aggregate state: from existingAggregate (Case 2) or
+    // from the freshly projected aggregate after assignment (Case 1).
+    const afterAssignment = existingAggregate ?? (await this.opts.objectStore.get(subjectKey))?.externalReview ?? null;
+    const currentGeneration =
+      typeof afterAssignment?.headGeneration === 'number' && afterAssignment.headGeneration > 0
+        ? afterAssignment.headGeneration
+        : afterAssignment?.currentHeadSha
+          ? 1
+          : 0;
+    const headGeneration =
+      afterAssignment?.currentHeadSha === currentHeadSha ? currentGeneration : currentGeneration + 1;
+
+    const headEvent: CommunityEvent = {
+      sourceEventId: `f168:head:${subjectKey}:g${headGeneration}:${currentHeadSha}`,
+      subjectKey,
+      kind: 'case.head_observed',
+      classification: 'informational',
+      payload: { headSha: currentHeadSha, headGeneration },
+      at: now,
+    };
+    const headResult = await this.opts.eventLog.append(headEvent);
+    if (headResult.appended) {
+      await this.opts.projector.apply(headEvent);
+    } else {
+      await this.opts.projector.rebuild(subjectKey);
+    }
+
+    const projection = await this.opts.objectStore.get(subjectKey);
+    const aggregate = projection?.externalReview ?? null;
+    if (!aggregate || aggregate.currentHeadSha !== currentHeadSha) {
+      throw new ExternalReviewVerdictError(
+        'projection_unavailable',
+        'External-review projection unavailable after bootstrap attempt',
+      );
+    }
+    return aggregate;
   }
 
   private async preflightActionLease(

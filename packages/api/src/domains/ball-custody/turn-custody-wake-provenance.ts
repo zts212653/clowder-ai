@@ -202,6 +202,7 @@ export async function resolveQueueTurnCustodyWake(
   if (entry.sourceCategory === 'scheduled') return resolveScheduledWake(entry, messageStore);
   if (entry.sourceCategory === 'freshness') return { kind: 'unstructured', source: 'protocol_decline' };
   if (entry.sourceCategory === 'a2a') return resolveA2AWake(entry, messageStore);
+  if (entry.sourceCategory === 'producer_return') return { kind: 'unstructured', source: 'producer_return' };
   return {
     kind: 'legacy',
     reason: entry.messageId ? 'carrier_missing' : 'source_missing',

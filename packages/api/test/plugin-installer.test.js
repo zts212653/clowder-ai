@@ -333,7 +333,7 @@ describe('uninstallPlugin', { concurrency: false }, () => {
     const archive = createTestPlugin('to-remove');
     await installPlugin(TEST_ROOT, archive, BUILTIN_IDS);
 
-    const result = uninstallPlugin(TEST_ROOT, 'to-remove');
+    const result = await uninstallPlugin(TEST_ROOT, 'to-remove');
     assert.equal(result.action, 'uninstalled');
     assert.equal(result.configPreserved, true);
     assert.ok(!existsSync(join(resolvePluginsDir(TEST_ROOT), 'to-remove')));
@@ -347,7 +347,7 @@ describe('uninstallPlugin', { concurrency: false }, () => {
     mkdirSync(join(cacheRoot, 'abc123'), { recursive: true });
     writeFileSync(join(cacheRoot, 'abc123', 'index.js'), 'export default {};');
 
-    const result = uninstallPlugin(TEST_ROOT, 'remove-cache');
+    const result = await uninstallPlugin(TEST_ROOT, 'remove-cache');
     assert.equal(result.action, 'uninstalled');
     assert.ok(!existsSync(cacheRoot), 'module cache subtree must be removed with the plugin');
   });
@@ -360,7 +360,7 @@ describe('uninstallPlugin', { concurrency: false }, () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, 'keep-config.json'), '{"KEY":"val"}');
 
-    uninstallPlugin(TEST_ROOT, 'keep-config');
+    await uninstallPlugin(TEST_ROOT, 'keep-config');
     assert.ok(existsSync(join(configDir, 'keep-config.json')), 'config preserved after uninstall');
   });
 
@@ -372,19 +372,19 @@ describe('uninstallPlugin', { concurrency: false }, () => {
     mkdirSync(configDir, { recursive: true });
     writeFileSync(join(configDir, 'clear-config.json'), '{"KEY":"val"}');
 
-    uninstallPlugin(TEST_ROOT, 'clear-config', { clearConfig: true });
+    await uninstallPlugin(TEST_ROOT, 'clear-config', { clearConfig: true });
     assert.ok(!existsSync(join(configDir, 'clear-config.json')), 'config cleared');
   });
 
-  it('returns error for non-existent plugin', () => {
-    const result = uninstallPlugin(TEST_ROOT, 'nonexistent');
+  it('returns error for non-existent plugin', async () => {
+    const result = await uninstallPlugin(TEST_ROOT, 'nonexistent');
     assert.equal(result.code, 'INVALID_ARCHIVE');
   });
 
-  it('rejects path-traversal IDs (uninstall)', () => {
+  it('rejects path-traversal IDs (uninstall)', async () => {
     const traversalIds = ['../../etc', '../passwd', 'a/b', '.hidden'];
     for (const id of traversalIds) {
-      const result = uninstallPlugin(TEST_ROOT, id);
+      const result = await uninstallPlugin(TEST_ROOT, id);
       assert.equal(result.code, 'INVALID_ARCHIVE', `Expected rejection for ID '${id}'`);
       assert.ok(result.message.includes('Invalid connector ID'), `Expected ID validation message for '${id}'`);
     }

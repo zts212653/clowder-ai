@@ -41,6 +41,11 @@ const TEMPLATE_VARIANT_BACKFILL_ALLOWLIST = new Set([
     variantId: 'codex-sol',
     catId: 'codex-sol',
   }),
+  templateVariantKey({
+    breedId: 'gemini35',
+    variantId: 'gemini38',
+    catId: 'gemini38',
+  }),
 ]);
 
 const TEMPLATE_BREED_BACKFILL_ALLOWLIST = new Set([

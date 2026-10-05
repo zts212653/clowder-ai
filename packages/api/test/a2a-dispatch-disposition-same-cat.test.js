@@ -35,6 +35,8 @@ describe('F167 same-cat A2A dispatch disposition', () => {
             invocationId: 'inv-1',
             sourceMessageId: h.source.id,
             disposition: 'completed',
+            // Provenance of the terminal (a direct completion), recorded so a later conflict can name it.
+            via: 'direct',
           },
           at: 2_000,
         },

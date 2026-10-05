@@ -65,16 +65,24 @@ export class RedisGameStore implements IGameStore {
     // IMPORTANT: ioredis keyPrefix does NOT auto-apply to keys()/scan().
     // Must manually prepend prefix for pattern matching, then strip it for get().
     const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
-    const keys = await this.redis.keys(`${prefix}game:thread:*:active`);
     const games: GameRuntime[] = [];
-    for (const key of keys) {
-      // Strip prefix before passing to get() (which auto-applies prefix)
-      const bareKey = prefix ? key.slice(prefix.length) : key;
-      const gameId = await this.redis.get(bareKey);
-      if (!gameId) continue;
-      const game = await this.getGame(gameId);
-      if (game) games.push(game);
-    }
+    const seen = new Set<string>();
+    let cursor = '0';
+    do {
+      const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', `${prefix}game:thread:*:active`, 'COUNT', 100);
+      cursor = nextCursor;
+      // SCAN can repeat keys and return an empty nonterminal page. COUNT is a
+      // hint, so bound MGET batches independently of the returned page size.
+      for (let offset = 0; offset < keys.length; offset += 100) {
+        const bareKeys = keys.slice(offset, offset + 100).map((key) => key.slice(prefix.length));
+        const gameIds = (await this.redis.mget(...bareKeys)).filter((id): id is string => id !== null && !seen.has(id));
+        const uniqueIds = [...new Set(gameIds)];
+        if (uniqueIds.length === 0) continue;
+        for (const id of uniqueIds) seen.add(id);
+        const details = await this.redis.mget(...uniqueIds.map(GameKeys.detail));
+        for (const detail of details) if (detail) games.push(JSON.parse(detail) as GameRuntime);
+      }
+    } while (cursor !== '0');
     return games;
   }
 

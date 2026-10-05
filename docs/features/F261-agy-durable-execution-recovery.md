@@ -1,6 +1,6 @@
 ---
 feature_ids: [F261]
-related_features: [F210, F201, F211, F048, F167, F118, F061, F194]
+related_features: [F210, F201, F211, F048, F167, F118, F061, F194, F325]
 topics: [agy, durable-job, long-running-command, restart-recovery, action-plane, observability]
 doc_kind: spec
 created: 2026-07-10
@@ -8,12 +8,13 @@ description: "为 AGY 长任务建立独立于 invocation 与 hold_ball 的持�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-07-10T15:10:30Z
-tips_exempt: "2026-09-02 Phase A audit and ownership truth only; the Managed Job user journey remains unshipped and Phase B implementation is still gated."
+tips_exempt: "Renewed 2026-10-02: independent delivery is frozen and outstanding job requirements pass to F325; existing jobs remain unchanged, and this record does not ship the still-unaccepted general Managed Job journey."
 ---
 
 # F261: AGY Durable Execution & Recovery — 长任务不随回合或重启消失
 
-> **Status**: in-progress | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+> **Status**: frozen (superseded-by F325; not completed) | **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol) | **Priority**: P1
+
 >
 > **operator 立项 signoff**: 2026-07-10 “我同意，那你立项一下？不过你最好看看现在 F261 有没有被用了！”
 >

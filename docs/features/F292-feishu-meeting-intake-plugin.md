@@ -4,6 +4,7 @@ related_features: [F141, F168, F195, F202, F240, F285, F288, F290, F310]
 topics: [feishu, lark, meeting-intake, plugin, input-source, signal-ingress, needs-me, transcript]
 doc_kind: spec
 created: 2026-08-08
+updated: 2026-09-19
 architecture-cell: plugin, signal-intake, approval-index
 community_issue: "clowder-ai-plugins#23"
 description: "飞书生成会议文字稿后，官方 input-source 插件把它变成可恢复的 Meeting Intake；人只补说话人、背景与去向，猫带着家里记忆产出纪要、决定、Roadmap 或任务。"
@@ -23,7 +24,7 @@ mcp_admission_claims:
 
 # F292: Feishu Meeting Intake Plugin — 会后产物不再靠人搬运
 
-> **Status**: implementation / live alpha.8 plus the paired Host repair are activated; the owner-selected future-only recovery skipped 3 bounded candidates without replay, and a fresh successful observation verifies that automatic intake is running
+> **Status**: implementation / Phase D acceptance active; public alpha.10 and the paired Host auth-probe repair are landed, but live still has alpha.9 installed with its source consumer in the error state and not running. Runtime adoption, a fresh healthy observation, and one new source-bound real-meeting journey remain required
 > **Owner**: 小太阳·Maine Coon (@codex-sol, GPT-5.6 Sol)
 > **Priority**: P1
 > **operator kickoff**: `[thread-id]` / `private-source-id`
@@ -117,15 +118,33 @@ Anker recorder
 
 | Evidence | Already true | Not yet true |
 |---|---|---|
-| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials. Package state owns the polling cursor, exactly-once outbox, observation/publication timestamps, and bounded catch-up window | The current live alpha.7 instance is intentionally left dormant until the owner chooses future-only versus previewed replay for the observed two-day gap |
-| Plugin repository | PR #41 merged as `37796035e4` and published Feishu `0.1.0-alpha.8`. It migrates state v1→v2 in memory, records observation/publication health, detects an old cursor before activation, and exposes bounded preview/fingerprint/replay/future-only recovery. Registry integrity is `sha512-unl8sq1rEMckgiqE8mI0e0+Qa6l69J4cxT2GOe5AMUSomkrbmpKdZR/EYljvH+hP4tNaR9l1KQd6T9GWX49L4w==` | Publication is closed; no registry or package-runnability blocker remains. The approved prerelease policy preserves npm's first-publish `latest` tag until stable replacement |
-| Host Broker direction | The paired Host repair preserves enabled intent across package update, exposes package-owned intake health, blocks stale-cursor activation, and gives the owner a previewed future-only versus replay choice before any enable/backfill. Replay still enters through the package outbox and existing Broker idempotency boundary | The change must pass review/merge and alpha verification; live alpha.7 update, enable, or replay remains owner-gated |
+| Feishu/Lark surface | Generated-note/minute events and transcript retrieval exist in the installed CLI capability surface; Host-side resolution uses user-scoped `lark-cli` credentials. Package state owns the polling cursor, exactly-once outbox, observation/publication timestamps, and bounded catch-up window | The live alpha.9 source consumer is currently in the error state and not running at lifecycle revision 69. A healthy Host process and `intakeHealth=ready` do not prove that the source consumer is active |
+| Plugin repository | PR [`#53`](https://github.com/zts212653/clowder-ai-plugins/pull/53) merged as `4b38777fa8`; Contract CI run [`35447079338`](https://github.com/zts212653/clowder-ai-plugins/actions/runs/35447079338) published immutable Feishu `0.1.0-alpha.10` under `next` with registry integrity `sha512-vjDAjFC15ELcrOzB0uLibsyrTDS7IOjzi/E2qCwfRA+njjcgJ1m9hVIOUOtNonBsvIsHJNl3dwJM2F2FKrPHHQ==`. Failed generated-event sources are closed and recreated; only typed transient availability pressure retries, while auth expiry/revocation propagates into the existing regrant path without cursor advance or replay | The live instance has not adopted alpha.10 or produced a post-release successful source observation |
+| Host Broker direction | Existing Host repair preserves enabled intent, exposes intake health, blocks stale-cursor activation, and keeps previewed future-only versus replay behind an owner fence. PR [`#4616`](https://github.com/zts212653/clowder-ai/pull/4616) landed as `df1da5bf90`; auth verification is single-flight and distinguishes a temporary probe failure (`AUTH_STATUS_FAILED`) from a verified logout (`AUTH_REQUIRED`) across every mutation consumer | The current live deployment has not loaded `df1da5bf90`; its pre-repair behavior remains runtime truth until an explicitly authorized update |
 | GitHub operations | Webhook/poll/event-log/inbox/guardian behavior proves long-lived-source value | It is specialized behavior and must not be generalized by copying its private schema |
 | Needs Me / F310 | F292 unresolved-choice and repair cards use the shared Needs Me surface; successful auto-resolved work stays quiet | F310 still needs the global eligibility/dedupe/salience/exact-return Design Gate; F290 remains only the future Channel destination |
 
 The preferred automatic trigger is “note/minute generated”, not merely “recording ended”: the latter
 can arrive before the artifact is ready. Manual import by Feishu URL/token remains a recovery path for
 missed events and pre-plugin meetings, not the primary journey.
+
+### Phase D continuation truth — 2026-09-19
+
+- Owner custody is durable task `private-source-id`: resume exactly one new
+  real-meeting dogfood after the repaired release boundary, rather than replaying an old meeting or
+  treating process health as product acceptance.
+- The verified live deployment is `6a45cdcc6324870423c34de3cc5dcbf57cba1397`; official instance
+  `pi_47e040ba-bc01-4cb0-b9a1-8696755e112f` has alpha.9 installed but is in the error state and not
+  running at lifecycle revision 69. No runtime restart or historical replay is authorized by this
+  continuation record.
+- Release boundary: alpha.10 is published from merge `4b38777fa8` with registry integrity
+  `sha512-vjDAjFC15ELcrOzB0uLibsyrTDS7IOjzi/E2qCwfRA+njjcgJ1m9hVIOUOtNonBsvIsHJNl3dwJM2F2FKrPHHQ==`,
+  and the paired Host repair is on main at `df1da5bf90`. After the released instance is updated, the
+  Host repair is loaded, and a fresh source observation is healthy, one newly generated Feishu source
+  revision must produce exactly one TTL=0
+  `MeetingIntake`, one Needs Me item, one owner-selected private-thread ingress, and the selected
+  artifact. Duplicate/redelivery and auth loss/regrant must retain that lineage and fail honestly.
+- The same journey is the evidence for AC-D1/D2. Package/runtime health alone cannot close Phase D.
 
 ### Current activation and repair truth
 
@@ -412,11 +431,13 @@ missed events and pre-plugin meetings, not the primary journey.
 ## Dependencies
 
 - **Evolved from**: F202 + F240（plugin lifecycle and IM connector boundary）.
-- **Remaining Phase D gate**: the exact alpha.8 artifact and paired Host repair passed isolated alpha
-  verification and are active on the connected live instance. The owner's future-only choice skipped
-  3 bounded candidates without replay; the poller is enabled/healthy and has recorded a fresh successful
-  observation. Verify one new durable intake plus duplicate/redelivery behavior before continuing the
-  full real-meeting journey. K-2D #3558,
+- **Remaining Phase D gate**: historical alpha.8/alpha.9 recovery evidence remains valid, including the
+  owner's bounded future-only choice and earlier successful observations, but the 2026-09-19 live
+  source consumer is now in the error state and not running. Public alpha.10 and Host PR #4616 are
+  landed; update the released instance, load the Host repair, verify a fresh successful observation,
+  then run the source-bound task
+  `private-source-id`. Only that new journey plus duplicate/redelivery and auth
+  loss/regrant evidence may close AC-D1/D2. K-2D #3558,
   hot release discovery, the readiness-budget repair, package publication, package-side stdio runtime,
   K-2A inventory/update, K-2B transport, and K-2D supervision are complete. F289's paused one-shot
   migration remains explicitly outside this dependency chain.

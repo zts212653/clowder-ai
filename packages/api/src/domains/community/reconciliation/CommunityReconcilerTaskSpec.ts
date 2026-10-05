@@ -19,6 +19,7 @@
  */
 
 import type { CommunityObjectProjection } from '@cat-cafe/shared';
+import { GitHubRateLimitError } from '../../../infrastructure/github/request-budget.js';
 import type { ExecuteContext, GateCtx, TaskSpec_P1 } from '../../../infrastructure/scheduler/types.js';
 import type { ICommunityEventLog } from '../CommunityEventLog.js';
 import type { ICommunityObjectStore } from '../CommunityObjectStore.js';
@@ -154,11 +155,14 @@ export function createCommunityReconcilerTaskSpec(
             // — null is a valid "not found" answer, distinct from a fetch error
             fetchSuccessSubjects.add(sk);
           } catch (err) {
+            ctx.signal?.throwIfAborted();
+            if (err instanceof GitHubRateLimitError) continue;
             opts.log.warn(`[reconciler] Failed to fetch GitHub state for ${sk}:`, err);
             // Do NOT add to fetchSuccessSubjects — resolveAbsent must skip this subject
           }
         }
 
+        ctx.signal?.throwIfAborted();
         if (projections.length === 0) return;
 
         // Run pure reconciliation

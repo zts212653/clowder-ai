@@ -287,6 +287,19 @@ export interface SkillHealthSummary {
   unregistered: string[];
   /** Skills in capabilities.json but not in source dir */
   phantom: string[];
+  /**
+   * F300 2.1: `false` when a skill directory could not be listed (not merely
+   * missing). The per-cat presence and mount fields above were then computed
+   * from a partial scan, and absence of a skill in them is not evidence it is
+   * absent on disk.
+   */
+  scanComplete?: boolean;
+  /**
+   * The paths that exist but could not be read (`CODE:path`), when
+   * `scanComplete` is false — so a cat can say "this is an environment
+   * problem at X", not "you have no such skill".
+   */
+  unreadable?: string[];
 }
 
 /** Full GET /api/capabilities response (F041 re-open: includes family + project metadata) */
@@ -303,7 +316,77 @@ export interface CapabilityBoardResponse {
   governanceHealth?: GovernanceHealthSummary;
   /** F249: All cat IDs with display names — frontend uses to render per-cat toggles. */
   allCats?: Array<{ catId: string; displayName: string }>;
+  /**
+   * F300 Task 2.1: which source state this board was read from. The Console and
+   * a cat reading the same home get the same `revision` and `sourceRefs` even
+   * when what they are shown differs (KD-16 same-source, different-presentation).
+   */
+  envelope?: CapabilityReadEnvelope;
 }
+
+// ─── F300 Task 2.1: capability read service ──────────────────────
+
+/**
+ * The F300 thin envelope (spec §3, AC-0.3) as the capability owner fills it.
+ *
+ * `revision` names the source state, not the presentation: it does not change
+ * with who is reading, whether secrets were shown, or live probe results.
+ */
+export interface CapabilityReadEnvelope {
+  readonly subjectRef: string;
+  readonly ownerRef: 'F041';
+  readonly sourceRefs: readonly string[];
+  readonly revision: string;
+  readonly freshness: {
+    readonly observedAt: number;
+    readonly invalidators: readonly { readonly ownerRef: string; readonly ref: string }[];
+  };
+  readonly visibility: 'member_private' | 'authorized_shared';
+}
+
+/**
+ * Who the board is being read for. A member sees every capability of the home
+ * but only its own per-cat state; other members' toggles and the Console's
+ * navigation aids are not part of its answer.
+ */
+export type CapabilityReadScope = { readonly kind: 'console' } | { readonly kind: 'member'; readonly catId: string };
+
+/**
+ * The capability read, for readers that must not cause writes (cats via MCP).
+ *
+ * Three states, never folded: `absent` is a fact ("this project has no
+ * capability config"), `unknown` is not ("there is one and it could not be
+ * read"). Neither means "no capabilities are available".
+ */
+export type CapabilitySnapshotResponse =
+  | {
+      readonly status: 'present';
+      readonly scope: CapabilityReadScope;
+      readonly envelope: CapabilityReadEnvelope;
+      readonly board: CapabilityBoardResponse;
+    }
+  | {
+      readonly status: 'absent';
+      readonly reason: 'config_missing';
+      readonly scope: CapabilityReadScope;
+      readonly envelope: CapabilityReadEnvelope;
+    }
+  | {
+      readonly status: 'unknown';
+      /**
+       * `config_unreadable`: this project's config. `global_config_unreadable`:
+       * the home config an external project inherits policy from — the board
+       * would otherwise be computed from a stale local copy.
+       */
+      readonly reason: 'config_unreadable' | 'global_config_unreadable';
+      /** Typed only: parser/IO messages can quote config bytes (secrets). */
+      readonly cause: CapabilityConfigUnreadableCause;
+      readonly scope: CapabilityReadScope;
+      readonly envelope: CapabilityReadEnvelope;
+    };
+
+/** Why a capability config could not be read. Never carries file content. */
+export type CapabilityConfigUnreadableCause = 'io_error' | 'parse_error' | 'unsupported_shape';
 
 // ─── F070: Portable Governance Types ──────────────────────────────
 

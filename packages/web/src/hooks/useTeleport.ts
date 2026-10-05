@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { openExactPlace } from '@/components/shell/mailbox/open-exact-place';
 import { pushThreadRouteWithHistory } from '@/components/ThreadSidebar/thread-navigation';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
@@ -19,6 +20,8 @@ export interface TeleportEvent {
   threadId: string;
   messageId: string;
   eventId?: string;
+  blockId?: string;
+  source?: 'companion-decision';
 }
 
 export function handleTeleportEvent(
@@ -34,9 +37,18 @@ export function handleTeleportEvent(
      */
     pushThreadRoute: (threadId: string) => void;
     scrollToMessage: (messageId: string) => void;
+    openSourceAction?: (actionRef: string) => boolean;
   },
 ): 'scrolled' | 'navigated' | 'ignored' {
   if (!data?.threadId || !data?.messageId) return 'ignored';
+  if (data.blockId !== undefined || data.source === 'companion-decision') {
+    if (data.blockId !== undefined && !/^[A-Za-z0-9_-]{1,200}$/.test(data.blockId)) return 'ignored';
+    return actions.openSourceAction?.(
+      `message:${data.threadId}:${data.messageId}${data.blockId ? `#${data.blockId}` : ''}`,
+    )
+      ? 'navigated'
+      : 'ignored';
+  }
   const plan = planTeleport({ threadId: data.threadId, messageId: data.messageId, currentThreadId });
   if (plan.scrollNow) {
     actions.scrollToMessage(plan.scrollNow);
@@ -90,6 +102,10 @@ export function useTeleport(): void {
           // thread, and resolvePendingTeleport fires after render.
           pushThreadRoute: (tid) => pushThreadRouteWithHistory(tid, window),
           scrollToMessage: scrollToMessageWithRetry,
+          openSourceAction: (actionRef) => {
+            openExactPlace(actionRef, window.location.pathname);
+            return true;
+          },
         });
       };
 

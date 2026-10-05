@@ -1,26 +1,78 @@
-# 准备选择：由真实提交表达
+# 准备选择：从真实对象形成提交
 
-使用现有 begin / submit / exact get；以下字段位于 `body.items[]`（对象地图）或
-`body.conditions[]`（实验条件），不改变 Program target、阶段、权限或采用状态。
-字段真相源是 `packages/shared/src/types/capability-evolution-preparation.ts` 和
+使用现有 begin / submit / exact get；对象地图仍使用 `body.items[]`，实验条件使用
+`body.conditions[]`。不改变Program target、阶段、权限或采用状态。字段真相源为
+`packages/shared/src/types/capability-evolution-preparation.ts` 与
 `capability-evolution-preparation-choice.ts`。
 
-- `category`：本项目的人类可读类别，如 Harness、Env。自由短文本，不把固定六类套到所有项目。
-- `recommendation: {summary, reason, basisRefs}`：当前提交猫的真实建议；无证据则不填，说明未知及下一步。
-- `existingWork: {summary, sourceRefs}`：已经做过什么与精确产物来源，不能用当前 invocation 活跃与否代替。
-- `decision`：尚未决定时填 `{state:"undecided", reason, neededFrom:"cat"|"human"|"unknown"}`；
-  已决定时填 `{state:"explore"|"fixed"|"excluded", reason, responsibility, basisRefs}`。
-  纳入探索要求当前已有可改边界；选择本身不会扩大它。
+## 先找对象，再写选择
+
+从一条代表性的任务过程找出实际被读取、执行、修改或用于判断结果的东西；有失败片段就沿片段查，
+没有失败也可沿一次正常任务查。先读原件及消费路径，再写名字、范围和owner；已有明确事实直接复用。
+对象可以是有界的多文件组合、模型配置或真实数据资产，不要求逐文件拆行，也不要求先有Git历史。
+可核的owner、版本或状态与消费路径足以说明当前查到了什么；缺哪项就写哪项未知，不编齐。
+
+分清三件事：载体是什么、在本任务做什么、本轮决定怎样处理它。权重/模型身份与执行代码、
+配置、方法文本分别定位；HTTP客户端不等于其调用的模型，单次指令或解释不等于可复用策略。
+引用方法文本时核它是否存在及如何消费；文件存在不证明本轮加载，未找到独立资产就如实记缺口。
+Agent整套（Model + Harness）可以是整体比较对象，但不要和自身零件平铺成互斥类别。
+
+用途如取证、判分、记录，和决定如保持固定、纳入探索分别表达；同一对象可以承担取证用途且本轮固定。
+六词分类只在可能漏看相关对象时作提示，不是必填清单；模型变化也可能是换现有版本，不都需要训练。
+载体本身不能决定成本、风险或因果是否清楚；按实际改动和所需结论选择验证方式。
+
+最终呈现时，把已核定的同类对象连续排列：有 Model 时先呈现 Model，再连续呈现 Harness，
+然后进入下一类。同类内部保留具体对象的区别；没有的类别不补空行，类别未知时不猜归属。
+
+拆开原组合时，逐项重读旧决定的真实范围：旧固定条件覆盖的子范围继续受其约束，不能因重新命名解除；
+组合被纳入探索不等于每个子范围都已获独立探索决定。新技术判断引用本次真实来源与时点，
+旧决定留在history，不能倒写成当时已经逐项选定。范围不清则保留未决并向原owner核实。
+
+### 把目标、条件和材料放回各自位置
+
+对象地图回答“具体哪样东西可能影响目标、在哪里被使用、本轮怎么处理它”，不是把调查提纲逐行套上选择。
+真实提交曾把目标、控制原则、两场景试验和旧试验说明都写成对象；改成人话仍没有回答在进化什么。
+
+| 写下的内容 | 本轮实际用途与落点 |
+|---|---|
+| “分清局部修好与整件事完成” | 目标放 `goalStatement`，判断依据放 `success_contract`，不把目标认可写成对象固定 |
+| “比较时模型和工具条件一致” | 控制原则放 `measurement_plan.conditions/comparison`；核到实际模型配置后，才可把那个配置列为固定对象 |
+| “是不是工具挡住了正确动作” | 未定位具体工具时是 `baseline_diagnosis` 的竞争解释；定位断点后再形成具体对象与owner边界 |
+| “用两个相反场景试”“保留旧试验” | 分别归测量的场景/GT准备和基线的历史/适用边界，不为凑对象重复列行 |
+
+例如“交付审查方法（请求审查入口＋范围判断方法）”可以是一个有界组合：`sourceRefs` 定位两份实际方法及版本，
+`scope` 说明请求审查者如何传递原约定、reviewer如何据实物判断批准范围；未取得加载记录时仍写“实际消费待核实”。
+如果要改善的恰是模型配置、工具或版本化材料包，它们当然也可成为对象；按本轮真实用途判断，不按文件数或类别裁定。
+人同意调查方向，不等于亲自逐项选了这些资产或冻结所有工具。猫定位的具体对象与控制安排写成猫的判断，引用原授权边界。
+这份归位示例教的是语义判断，不增加必填栏、审批或可用关键词自动判定的门禁。
+
+## 写入既有字段
+
+- `label / scope / why / sourceRefs / nextAction`：具体对象、范围、为何关注、精确来源及下一步。
+  不从类别生成对象或权限。引用的版本/范围按原件填写；只能取得当前文件时，不冒充历史版本。
+  原件不可读或引用未支持时说明限制，不拼造链接，也不把引用存在当作已经核读。
+- `category`：可省略的人类可读载体说明；只有帮助理解时填写，不因省略制造缺项，
+  不用Agent/Model/Harness等词凑行，不把固定/探索填作载体。
+- `recommendation: {summary, reason, basisRefs}`：本次猫的真实建议和依据，独立于已记录决定。
+  无依据则省略，并在对应范围或unknowns说明未知与下一步；不要把设计示例抄成历史建议。
+  省略本身既不表示欠一条建议，也不证明“无须建议”；实际未决用 `decision.undecided`、未知与下一步说明。
+- `existingWork: {summary, sourceRefs}`：已有产物及精确来源。当前F167活动另读；无活跃invocation
+  不能抹去已有工作，有文件也不能证明现在忙碌、已验证或已采用。
+- `modifiability`：现有可改边界及依据；已知边界须有owner证据。
+- `decision`：未决定填 `{state:"undecided", reason, neededFrom:"cat"|"human"|"unknown"}`；
+  已决定填 `{state:"explore"|"fixed"|"excluded", reason, responsibility, basisRefs}`。
+  纳入探索要求已有可改边界；该选择不产生实验执行、训练、业务采用或新增授权。
 - `responsibility`：技术决定用 `{kind:"cat", basis:"technical"}`；
   猫沿已有价值/预算授权决定用 `{kind:"cat", basis:"existing_authorization", input:{threadId,messageId}}`；
   转录人的真实选择用 `{kind:"human", input:{threadId,messageId}}`。
-  作者/时间由正式提交与 F117 原输入派生，不能自填人类作者。服务端核验人类输入的身份、
-  workspace、来源与可读性；存在真实消息不等于其语义自动覆盖此选择，猫仍须核原话与授权范围。
+  作者/时间由正式提交与F117原输入派生，不能自填人类作者。服务端核验人类输入的身份、
+  workspace、来源与可读性；真实消息存在不证明其语义覆盖此选择，提交猫仍须核原话和授权范围。
 
-既有授权继续有效；技术选择猫定并留下依据。真正缺失的价值/预算选择沿既有 Chat / Needs Me
-取得输入，不让人逐条审批技术工作。不把设计示例抄成历史决定，也不把工具通知当人类授权。
-不同来源用各自精确 ref；触发 invocation 的消息不必然是决定依据。
+既有授权继续有效；技术选择猫定并留下依据。真正缺失的价值/预算选择沿既有Chat/Needs Me取得输入，
+不让人逐条审批技术工作。触发invocation的消息不必然是决定依据，工具通知不充作人类授权。
+新修订保留旧正文和history；提交使用最新sequence与精确依赖，冲突重读，已提交事件中断恢复
+仍用相同clientMessageId与完全相同正文，不能在重试中改对象、作者或来源。
 
-每条规约继续提交 `gtDomain / gtSourceKeys / judge / validityBounds`。同项目可有不同 GT 域；
-模拟器、benchmark 与线上使用是可组合的取证渠道，写进真实采集/校准方法，不和 GT 域机械对应。
+每条规约继续提交 `gtDomain / gtSourceKeys / judge / validityBounds`。同项目可有不同GT域；
+模拟器、benchmark与线上使用是可组合的取证渠道，不和GT域机械对应。
 采集成功、范围声明、当前原件是否可读分别回读；缺来源时保留规约与未知，不编造新成绩。

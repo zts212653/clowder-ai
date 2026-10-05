@@ -9,9 +9,11 @@
  * KD-9: Gate passes ALL mergeState results (including MERGEABLE) so ConflictRouter
  *       can clear fingerprints for re-conflict detection.
  */
-import type { CatId, TaskItem, WaitOutcomeV1 } from '@cat-cafe/shared';
+import type { CatId, GitHubWaitOutcomeV1, TaskItem } from '@cat-cafe/shared';
 import { parsePrSubjectKey } from '@cat-cafe/shared';
 import type { ITaskStore } from '../../domains/cats/services/stores/ports/TaskStore.js';
+import { gitHubAdmissionCanContinue } from '../github/admission-budget.js';
+import { GitHubRateLimitError } from '../github/request-budget.js';
 import type { ExecuteContext, TaskSpec_P1 } from '../scheduler/types.js';
 import type { AutoResolveResult, ConflictAutoExecutor } from './ConflictAutoExecutor.js';
 import type { ConflictRouter, ConflictSignal } from './ConflictRouter.js';
@@ -19,7 +21,11 @@ import type { ConnectorInvokeTrigger, ConnectorTriggerPolicy } from './Connector
 
 export interface ConflictCheckTaskSpecOptions {
   readonly taskStore: ITaskStore;
-  readonly checkMergeable: (repoFullName: string, prNumber: number) => Promise<{ mergeState: string; headSha: string }>;
+  readonly checkMergeable: (
+    repoFullName: string,
+    prNumber: number,
+    signal?: AbortSignal,
+  ) => Promise<{ mergeState: string; headSha: string }>;
   readonly conflictRouter: ConflictRouter;
   readonly invokeTrigger?: ConnectorInvokeTrigger;
   readonly autoExecutor?: ConflictAutoExecutor;
@@ -54,7 +60,7 @@ interface ConflictWorkItem {
  * Both are machine-checked enum fields rather than parsed prose, and both are positive tests: an
  * absent outcome fails them, because writing to a repository needs proof, not the absence of denial.
  */
-function conflictWasMatched(outcome: WaitOutcomeV1 | undefined): boolean {
+function conflictWasMatched(outcome: GitHubWaitOutcomeV1 | undefined): boolean {
   if (outcome?.reason !== 'matched') return false;
   return outcome.matched?.some((delta) => delta.kind === 'pr_became_conflicting') === true;
 }
@@ -62,7 +68,7 @@ function conflictWasMatched(outcome: WaitOutcomeV1 | undefined): boolean {
 async function tryAutoResolveBeforeWake(
   opts: ConflictCheckTaskSpecOptions,
   workItem: ConflictWorkItem,
-  outcome: WaitOutcomeV1 | undefined,
+  outcome: GitHubWaitOutcomeV1 | undefined,
   signal?: AbortSignal,
 ): Promise<AutoResolveResult | null> {
   if (!opts.autoExecutor || workItem.signal.mergeState !== 'CONFLICTING' || signal?.aborted) return null;
@@ -83,12 +89,15 @@ async function tryAutoResolveBeforeWake(
 }
 
 export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions): TaskSpec_P1<ConflictWorkItem> {
+  let nextTaskIndex = 0;
   return {
     id: opts.id ?? 'conflict-check',
     profile: 'poller',
     trigger: { type: 'interval', ms: opts.pollIntervalMs ?? 5 * 60 * 1000 },
     admission: {
-      async gate() {
+      async gate(ctx) {
+        const signal = ctx?.signal;
+        signal?.throwIfAborted();
         // #320: Read from unified TaskStore — exclude done tasks (PR merged/closed)
         const tasks = (await opts.taskStore.listByKind('pr_tracking')).filter((t) => t.status !== 'done');
         if (tasks.length === 0) {
@@ -96,13 +105,20 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
         }
 
         const workItems: { signal: ConflictWorkItem; subjectKey: string }[] = [];
-        for (const task of tasks) {
+        const startIndex = nextTaskIndex % tasks.length;
+        for (let step = 0; step < tasks.length; step++) {
+          signal?.throwIfAborted();
+          if (step > 0 && !gitHubAdmissionCanContinue(ctx)) break;
+          const index = (startIndex + step) % tasks.length;
+          const task = tasks[index]!;
+          nextTaskIndex = (index + 1) % tasks.length;
           try {
             const parsed = task.subjectKey ? parsePrSubjectKey(task.subjectKey) : null;
             if (!parsed) continue;
             const { repoFullName, prNumber } = parsed;
 
-            const { mergeState, headSha } = await opts.checkMergeable(repoFullName, prNumber);
+            const { mergeState, headSha } = await opts.checkMergeable(repoFullName, prNumber, signal);
+            signal?.throwIfAborted();
             workItems.push({
               signal: {
                 signal: { repoFullName, prNumber, headSha, mergeState },
@@ -111,6 +127,8 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
               subjectKey: task.subjectKey!,
             });
           } catch (err) {
+            signal?.throwIfAborted();
+            if (err instanceof GitHubRateLimitError) continue;
             opts.log.warn(
               { err, taskId: task.id, subjectKey: task.subjectKey },
               '[conflict-check] fail-open: skipping PR where check failed',
@@ -118,6 +136,7 @@ export function createConflictCheckTaskSpec(opts: ConflictCheckTaskSpecOptions):
           }
         }
 
+        signal?.throwIfAborted();
         if (workItems.length === 0) {
           return { run: false, reason: 'no tracked PRs with checkable state' };
         }

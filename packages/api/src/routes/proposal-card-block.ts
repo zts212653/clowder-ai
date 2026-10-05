@@ -49,6 +49,21 @@ export function buildProposalCardBlock(proposal: ThreadProposal): RichCardBlock 
           : '未指定（default · 子 thread 无项目归属，cat 会回落运行时默认目录）',
     },
   ];
+  // F167 R4: surface task delegation so operator sees which task's execution authority they are granting.
+  if (proposal.subjectTaskId) {
+    const taskLabel = proposal.subjectTaskTitle
+      ? `${proposal.subjectTaskTitle} (${proposal.subjectTaskId})`
+      : proposal.subjectTaskId;
+    fields.push({ label: '关联任务', value: taskLabel });
+    // F167 R5: surface development scope so operator sees the exact work unit being delegated.
+    if (proposal.approvedDevelopmentScope) {
+      const s = proposal.approvedDevelopmentScope;
+      fields.push({
+        label: '执行范围',
+        value: `${s.workUnitRef} · source: ${s.acceptedSourceRef}@${s.acceptedRevision.slice(0, 8)}`,
+      });
+    }
+  }
   if (proposal.initialMessage) fields.push({ label: '首条消息', value: proposal.initialMessage });
   return {
     id: `proposal-${proposal.proposalId}`,

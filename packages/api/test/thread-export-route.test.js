@@ -340,6 +340,19 @@ describe('buildImageExportUrl', () => {
     }
   });
 
+  it('waits for asynchronous export content even when no HTML widgets exist', async () => {
+    let snapshots = 0;
+    const page = {
+      async evaluate(_fn, ...args) {
+        if (args[0] === 'catcafe:html-widget-export-proof-request') return;
+        snapshots += 1;
+        return { height: 1748, widgets: [], pendingContentIds: snapshots < 2 ? ['paw-feel:message-1'] : [] };
+      },
+    };
+    await refreshHtmlWidgetExportLayoutProof(page, Date.now() + 1000, 1);
+    assert.equal(snapshots, 2, 'capture proof must not accept the offscreen placeholder as complete content');
+  });
+
   it('commits a screenshot candidate only after fresh proof both before and after capture', async () => {
     const events = [];
     let proofCount = 0;
@@ -393,6 +406,7 @@ describe('buildImageExportUrl', () => {
         if (args[0] === 'data-html-widget-proof-request-id') {
           return {
             height: 100,
+            pendingContentIds: [],
             widgets: [
               {
                 widgetId: 'late-proof-widget',
@@ -465,6 +479,7 @@ describe('buildImageExportUrl', () => {
         if (args[0] === 'data-html-widget-proof-request-id') {
           return {
             height: 100,
+            pendingContentIds: [],
             widgets: [
               {
                 widgetId: 'cumulative-deadline-widget',

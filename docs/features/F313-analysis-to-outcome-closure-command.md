@@ -2,7 +2,7 @@
 feature_ids: [F313]
 related_features: [F128, F167, F192, F245, F246, F266, F267, F278, F281, F311, F312]
 topics: [analysis, approval, repair, outcome, paw-feel, eval, closure, orchestration, runtime-acceptance, responsibility-continuation]
-tips_exempt: "Renewed 2026-09-12 for the F307 mobile carrier correction: this edit only replaces a retired MobileApprovalSheet reference with the already-discoverable canonical F307 Approval surface; it adds no F313 action, capability, or user workflow. The earlier D8/D9 exemption remains unchanged in substance."
+tips_exempt: "Renewed 2026-09-24 for the Phase D result-closure and pre-E census transport corrections: these edits repair existing F313 owner-verification, blocker-resume, and continuation-envelope contracts, update stale production evidence, and add no new user workflow or separately discoverable capability. The earlier D8/D9 and F307 exemptions remain unchanged in substance."
 doc_kind: spec
 created: 2026-08-29
 description: "把分析结论经正式审批、真实修复与新鲜复验闭成一条由单一 Feature 持续负责的交付责任田，同时保留各 canonical owner 的单写边界。"
@@ -48,8 +48,8 @@ mcp_admission_claims:
 Architecture cell: harness-eval + memory + managed-work
 
 Map delta: update existing `harness-eval` and `memory` cells for D7 wiring, plus `harness-eval` and `managed-work`
-anchors for D8's source-exact provider, shared bounded task-feature contract, and tenant-bound canonical TaskStore query
-seam; D9 extends ratified ADR-039. No new cell or business-state owner.
+anchors for D8's tool-scoped provider, shared owner-repair Git proof, bounded task-feature contract, and tenant-bound
+canonical TaskStore query seam; D9 extends ratified ADR-039. No new cell or business-state owner.
 
 ## Why
 
@@ -96,10 +96,10 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 | 字段 | 当前真相 |
 |---|---|
 | Canonical command/theory thread | `[thread-id]`（本 thread） |
-| Current phase | Phase D continuing-responsibility fix-forward 的 D7 工程接线已由 PR #4472 合入并在 merged-main Alpha 验证；D8 工程与 merged-main Alpha provider/filter journey 已完成；D9 exact-load fence 已由 PR #4494 合入 `main@772c72a08c` 并在 merged-main Alpha `92c42c034e` 验收；生产 pre-E reconciliation 尚未完成，Phase E production acceptance 尚未开始 |
+| Current phase | Phase D continuing-responsibility fix-forward 的 D7–D9 已合入且正式 runtime `8ffebb71e155fb95718e3dd077a50110d56b5f90` 已加载；当前修正包在保持既有 provider route/version 与 active binding 可续的前提下，允许“修复已加载后才建立 binding”的可信回链，并停止无新证据 blocker 的时间到期重审。生产 pre-E reconciliation 与 Phase E production acceptance 均未开始 |
 | Durable task | `private-source-id` · `doing` · owner `codex-sol` |
 | Production pre-E task | `private-source-id` · `blocked`；Alpha 26-signal/0-legacy receipt 只证明 Alpha 数据环境，不能关闭生产 cohort |
-| Second real-source task | `private-source-id` · Phase D8；PR #4486 已合入 `main@9993fe42f0df`，Alpha `111ba5dbbf0c` 已验证真实 MCP→API feature filter、canonical query ref、provider registration 与 outcome 边界；原 production source 仍只能由后续 loaded-runtime outcome 关闭 |
+| Second real-source task | `private-source-id` · Phase D8；PR #4486 已合入 `main@9993fe42f0df`，正式 runtime 的 `cat_cafe_list_tasks(featureId=...)` 已可调用。当前修正把 per-message source exactness 留给 canonical source verifier，把 provider 变为同一 tool/action 的可复用 route；原 production source 仍待 reviewed correction 被加载后，以 active Task/F167、当前 bounded query 与 owner-verified outcome 回链 |
 | Exact-load fencing task | `private-source-id` · Phase D9 done；PR #4494 已合入 `main@772c72a08c`，canonical runtime entry 在执行新代码前证明实际 Git HEAD、tracked content 与 API/MCP/Web build revision 等于获批 full SHA，漂移则零加载；merged-main Alpha `92c42c034e` 的 checkout/stamps/page revision 与 13/13 fence journey 已验证 |
 | Runtime interaction correction | operator source `[thread-id]#private-source-id` supersedes caller-supplied SHA and environment-variable intent as user-facing authorization proxies while preserving D9's exact-version invariant and completed historical status；start-if-down、named relaunch 与 idempotent halt 只作用于 identity-verified managed state，foreign/unknown process ownership 继续 fail closed |
 | Thread convention | 复用 F312 的 command / phase execution / runtime acceptance 三类线程；不新增 role/store/status |
@@ -108,8 +108,8 @@ Approval lifecycle → safe dispatch**，且仍为零 open case/proposal/card/ta
 | Owner-backed authorization source | `docs/features/F311-capability-evolution-workspace.md@396a379d7b` · hard constraint 13 / Phase 4 / KD-17 |
 | Phase C implementation baseline | reviewed base `origin/main@ff17a8cd50610a411cf13cba7abf5b8cc4cf1d11`；landed onto `main@e0e36943254fac0e46d788ab4b56f13cb11f0e32` |
 | Phase B terminal | PR #4136 · reviewed HEAD `9f2f26346a89eba34f9e9b64a59a44cf9fabde50` · merged `91e6fc401f0dadbaf4212c8a4c8eb2f54b9bd23` · Terra APPROVED · full gate PASS |
-| Production evidence ceiling | `2026-09-10T01:36Z` 两条原始 source 均仍为 `blocked / issue.open / legacy_blocker_unbound`；production API PID 98207 运行 `05cf4c867f5f`，不含 D7 merge `51f131d6833e` |
-| Next gate | 冻结一个披露全部 cumulative main delta 的 exact runtime target并取得该 target 的 load/restart 授权；获批版本加载后，猫沿 canonical authenticated refs-only 入口自主完成生产有界只读 census，不新增 operator read gate；非空 manifest mutation 与 F266 epoch 各自另需准确授权/receipt，最后才进入非作者 Phase E |
+| Production evidence ceiling | 正式 `/health` 为 `8ffebb71e155fb95718e3dd077a50110d56b5f90`，已含 #4472/D7、#4486/D8、#4494/D9；`cat_cafe_list_tasks(featureId=F299)` 返回完整 canonical query ref。但两条原始 source `private-source-id` 与 `private-source-id` 仍为 `sequence=2 / blocked / issue.open / legacy_blocker_unbound`，证明“代码已加载”尚未成为 source result |
+| Next gate | 完成当前 Phase D 修正包的非作者 review、merge 与 merged-main Alpha；随后为 reviewed correction 准备 exact runtime target/影响/回滚包交指挥线程。只有修正实际加载且存在 active Task/F167 custody 后，才对上述两个 exact source 分别执行 owner result + 当前行为复验 +可信回链。生产历史批量 mutation、F266 epoch 与 Phase E 仍分别消费各自授权，三个 friction timer 保持 disabled |
 
 ### 2026-09-07 operator Input — Cat Tool Autonomy & Continuing Responsibility
 
@@ -253,10 +253,17 @@ card/provenance commit，不是业务 lifecycle，也没有新 store/queue/state
 - ref-only `repair_outcome_linked` 只接收 prior binding 与 owner outcome ref；服务端同时验证 actor、exact Task/F167
   terminal，并由该 binding 指定的 owner verifier 解析同一 source/action/authorization/target 的 changed/no-change
   与 verification refs。Task done、lease terminal、merge 或 caller payload 单独都不能使 source resolved。
-- 新的 explicit blocker 必须携带可恢复条件（canonical task/event ref 或 bounded `recheckAt`）。服务端在 blocked
-  append 时冻结 v1 `conditionId + blockedVersion`，在条件变化/到期时从 resolver snapshot 派生 `resumeVersion`
-  与 `blocker_reopened` event id，并对当前 blocked sequence 做 CAS；稳定条件零写入，同一 race/restart/replay 只产生
-  一次 reopen。无恢复条件只可作为 legacy debt 显示，不得称问题已完成。历史 debt 的 bounded reopen mutation
+- F160 list-tasks provider 不从 source thread / Task 的 Feature 归属猜测被报错的查询。digest-bound source marker 若以
+  tool-specific `featureId=F…` 明确命名操作目标，provider 只接受该目标；未命名目标时，必须由当前 Task/F167 repair
+  owner 通过 scoped action 明确绑定 repair goal。两者冲突、多个不同目标或两者都缺失均在 fix 前 fail closed，且不
+  从自由文本中的任意 F 号推断。owner outcome query 必须 exact-match 冻结的 `actionScopeRef`，不能由 callback 换一个
+  无关空 Feature；同 scope 的空结果合法，truncated 结果不合法。没有冻结具体 scope 的旧 binding 明确阻断，不能从
+  后来变化的 thread/task 元数据重新分配验证对象。
+- 新的 explicit blocker 必须携带 canonical task/event ref；bounded `recheckAt` 只可中断已有 repair，服务端把原
+  Task 加入 selector dependency。纯时间、无 Task 的新 blocker 在 append 前拒绝并提示先绑定 Task/owner event。
+  服务端冻结 v1 `conditionId + blockedVersion`；到期但 Task 未完成只返回 `deferred`、零写入、零重新签名，Task
+  完成或普通 canonical evidence 变化才派生 `resumeVersion + blocker_reopened` 并 CAS。blocker 多次修订仍保留原
+  owner/task/lease/binding，恢复同一个 fix。无恢复条件只可作为 legacy debt 显示，不得称问题已完成。历史 debt 的 bounded reopen mutation
   属于 Phase D：从 read-only manifest 与显式生产授权执行；Phase E 只核验 receipt，不扫描或追加事件。
 - `sourceSignalRefs` 是 F245/F267 finding 到 F278 signal 的唯一 join；F278 read model 只解析 refs 并读取 F266
   projection；只接受 exact `source-message:<messageId>#<markerIndex>` 与 F278 source identity 相符的引用。重复报告
@@ -418,7 +425,7 @@ human_disposition_feedback:
 | S3 | cold-start action | 猫猫 | case-ready projection → ref-only action / typed blocker | 五场景 contract fixtures |
 | S4 | F311 lineage | CEW consumer | 消费 owner refs → 展示 verified status，不复制 payload | refs-only projection test |
 | S5 | cat-tool direct fix | repair owner | verified source → unique source-routed provider → exact existing authority + F278 task/F167 → owner outcome | zero Approval + route/binding/task/outcome refs |
-| S6 | blocked/duplicate continuation | 系统 | review receipt complete；等待条件到期/事件变化或 canonical target 结果 → 原消息更新 | no-repeat wait + resume/linked-result test |
+| S6 | blocked/duplicate continuation | 系统 | review receipt complete；时钟到期且证据不变继续 deferred；canonical task/event 或 target 结果变化才恢复原责任并更新原消息 | no-repeat wait + resume/linked-result test |
 
 ## Acceptance Criteria
 
@@ -484,13 +491,18 @@ human_disposition_feedback:
   和原消息同源展示 task/Approval/main/loaded/verification 进度，duplicate 跟随 canonical target，零 payload/state copy。
   首个 production provider 仅覆盖 F287 `cat_cafe_record_memory_cue_outcome`，named actionRef 为
   `f287:memory-cue-outcome-lifecycle`；它重读 `private-source-id` 的 user/thread/content digest、
-  F287 owner、loaded Git baseline 与 append-only outcome event，并要求 repair delta 同时 loaded 且属于 current main。
+  F287 owner、loaded Git baseline 与 append-only outcome event；binding 后加载的 repair 需要 bounded relevant delta，
+  已在 binding 前加载的 repair 则由 post-load fresh owner event 证明，二者都保持 current-main ancestry。
 - [ ] AC-D6: 新 blocker 必须有 canonical event/task ref 或 bounded recheck；服务端冻结 versioned condition identity，
-  并从 condition change/due snapshot 派生 CAS-safe reopen id，保证条件不变零写入、race/restart/replay exactly-once。
+  bounded recheck 由服务端绑定中断 repair 的 exact Task，纯时间无 Task 写入被拒绝；Task 未完成即使到期也保持
+  deferred、零写入，Task 完成或普通 canonical evidence change 才派生 CAS-safe reopen id。race/restart/replay
+  exactly-once，blocker 修订与恢复均保留同一个 task/lease/binding。
   猫中断、task 失败或 done-but-unverified 可恢复；历史 blocker bounded mutation 由 Phase D 按 manifest + 显式生产授权
   完成并出 terminal receipt，Phase E 只验证。typed condition poller 每 tick 只读/判一个 ≤50 signal page；
-  `cat_cafe_census_legacy_paw_feel_blockers` 每次同样最多读 50 logs，partial 只有 signed cursor，完整遍历才返回
-  digest-bound manifest。上述工程合同与 Alpha 行为已验证，但生产 runtime 尚未加载 D7，且两条原始记录仍为
+  `cat_cafe_census_legacy_paw_feel_blockers` 每次同样最多读 50 logs，partial 只有 signed cursor；canonical MCP
+  continuation 通过 callback-authenticated POST JSON body 传输 cursor，不把最多 100,000 字符的签名状态放进 GET
+  request line，完整遍历才返回 digest-bound manifest。D7–D9 已加载至正式 runtime
+  `8ffebb71e155fb95718e3dd077a50110d56b5f90`，但两条原始记录仍为
   `legacy_blocker_unbound`；只有同一生产数据环境的完整 census + 空 cohort receipt，或非空 exact manifest 的
   受权恢复 receipt，才能勾选本 AC。确定性猫用工具修复在 exact 既有授权内零 F246，新权限仍只能进 F246。
 
@@ -556,7 +568,7 @@ human_disposition_feedback:
 | Phase C 沿用旧 Approval publication 状态，随后再迁统一 contract | 在 Phase C 入口冻结代码；先完成全家 canonical Approval contract，再让 F266 作为同一 producer extension point 的消费者，禁止双状态机/过渡 producer |
 | Approval 卡过量 | 只有请求改变/采纳/继续投入才出生 proposal；observe/insufficient 自动复查 |
 | `validExit` 同时冒充 duty 与 resolution | 正交派生 review receipt 与 open/resolved continuation；不新增组合状态机 |
-| blocker 永久静默或周期刷屏 | 新 blocker 必须有 event/task/bounded recheck；只在条件变化或到期时重新进入 attention |
+| blocker 永久静默或周期刷屏 | 新 blocker 必须有 event/task/bounded recheck；到期不冒充新证据，只有 canonical evidence change 恢复原责任 |
 | owner 漂移复用旧批准 | target version + explicit supersession + fresh Approval + dispatch-time resolver guard |
 | “main 绿了”冒充真实进化 | Phase E 必须 merged+loaded real paw-feel + fresh outcome + 非作者复核 |
 

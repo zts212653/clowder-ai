@@ -45,6 +45,32 @@ describe('GET /api/messages', () => {
     assert.equal(body.hasMore, false);
   });
 
+  it('projects the modification source carrier in real history without requiring another extra field', async () => {
+    const metadata = {
+      v: 1,
+      requestId: 'f309-modification-' + 'a'.repeat(64),
+      requestFingerprint: 'sha256:' + 'b'.repeat(64),
+      contentTitle: '晨光封面',
+      targetCatId: 'codex-astra',
+      targetName: '小星星',
+      executionThreadTitle: '封面共创',
+      completionRule: 'file-writeback-applied',
+    };
+    messageStore.append({
+      userId: 'default-user',
+      catId: null,
+      content: '请保留手写文字',
+      mentions: [],
+      timestamp: 1000,
+      extra: { contentModificationRequestV1: metadata },
+    });
+    const res = await app.inject({ method: 'GET', url: '/api/messages' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().messages[0].type, 'user');
+    assert.deepEqual(res.json().messages[0].extra?.contentModificationRequestV1, metadata);
+    assert.equal(res.json().messages[0].content, '请保留手写文字');
+  });
+
   it('returns messages with correct format', async () => {
     messageStore.append({
       userId: 'default-user',

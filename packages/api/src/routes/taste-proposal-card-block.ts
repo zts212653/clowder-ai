@@ -27,7 +27,12 @@ export function buildTasteProposalCardBlock(proposal: TasteProposal): RichCardBl
     kind: 'card',
     v: 1,
     title: '提议捕捉品味信号',
-    bodyMarkdown: [`**场景：** ${scenePreview}`, '', `> ${proposal.quote}`].join('\n'),
+    bodyMarkdown: [
+      ...(proposal.takeaway ? [`**猫的判断（假设）：** ${proposal.takeaway}`, ''] : []),
+      `**场景：** ${scenePreview}`,
+      '',
+      `> ${proposal.quote}`,
+    ].join('\n'),
     tone: 'info',
     fields: [
       { label: '维度', value: DIMENSION_LABELS[proposal.dimension] ?? proposal.dimension },

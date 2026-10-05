@@ -73,6 +73,58 @@ describe('ContextAttachment rendering', () => {
     expect(useChatStore.getState().workspaceWorktreeId).toBe('wt-f063');
   });
 
+  it('opens the source file of a workspace-file quote, keeping the original message as the way back', () => {
+    // Real page 2026-09-23 (entry 5): "Add to chat" on a Markdown selection sends a QUOTE chip
+    // whose source is the file; clicking it did nothing, so the chip was a dead end.
+    act(() => {
+      root.render(
+        <div data-message-id="msg-quote-1">
+          <ContentBlocks
+            blocks={[
+              {
+                type: 'context_attachment',
+                attachment: {
+                  v: 1,
+                  id: 'ctx-quote-file',
+                  kind: 'quote',
+                  text: '抹茶蛋糕',
+                  source: { kind: 'workspace_file', path: 'desserts.md', worktreeId: 'wt-scratch', lineStart: 3 },
+                },
+              },
+              {
+                type: 'context_attachment',
+                attachment: {
+                  v: 1,
+                  id: 'ctx-quote-message',
+                  kind: 'quote',
+                  text: 'an earlier reply',
+                  source: { kind: 'message', threadId: 'thread-current', messageId: 'msg-earlier' },
+                },
+              },
+            ]}
+          />
+        </div>,
+      );
+    });
+
+    const cards = container.querySelectorAll('[data-context-kind="quote"]');
+    expect(cards).toHaveLength(2);
+    const fileQuoteButton = cards[0].querySelector('button');
+    expect(fileQuoteButton).not.toBeNull();
+    act(() => (fileQuoteButton as HTMLButtonElement).click());
+    const state = useChatStore.getState();
+    expect(state.workspaceOpenFilePath).toBe('desserts.md');
+    expect(state.workspaceOpenFileLine).toBe(3);
+    expect(state.workspaceWorktreeId).toBe('wt-scratch');
+    expect(state._workspaceFileSetAt?.navigationOrigin).toEqual({
+      kind: 'chat-file-link',
+      threadId: 'thread-current',
+      messageId: 'msg-quote-1',
+    });
+    // A quote of a chat message has no file to open.
+    expect(cards[1].querySelector('button')).toBeNull();
+  });
+
   it('keeps ordinary Markdown links as links instead of promoting them to attachments', () => {
     act(() => {
       root.render(<ContentBlocks blocks={[{ type: 'text', text: '[ordinary](/thread/thread-target)' }]} />);

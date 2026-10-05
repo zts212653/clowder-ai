@@ -137,6 +137,13 @@ AC-B2 已发现三文件并行 WIP（`context-transport.ts`、`route-helpers.ts`
 - resolver 只读取 `docs/taste/vignettes/visual-quality-ELI5-pcpjsd.md`，投影阶段不复制 vignette；owner-auth drill 才返回当前 revision 的完整批准内容与 typed `html_widget` application contract。
 - explicit Taste 的 `applied` 必须已有 `presented + drilled`，source revision 仍有效，且同 callback-auth invocation 的 `RichBlockBuffer` 真实存在 `html_widget`。纯 Markdown、只检索/只读 Index 或跨 invocation rich block 都不能记为 applied。
 
+### 2026-09-28 F324 Phase B：成功 drill 后的安全晚结算
+
+- Handle expiry 仍阻止新的 drill，也不延长 Cue TTL。若同一 owner/thread/invocation/cat 已在过期前持久记录 `drilled`，`applied|dismissed` 可在 handle 过期后结算；返回带 `settlement=late_after_drill`，复用既有 content-free episode ledger，不新增 receipt store。
+- 晚结算前必须按原 coordinate 重读 current source，验证 revision 与 visibility。`source_corrected / source_forgotten / scope_revoked / superseded` 继续走独立 invalidation，旧 cue 不可因权限恢复而复活；恢复后由新的 current cue/handle 进入新 episode。
+- source reader 执行失败返回 retryable `source_read_failed`，不伪装成 `not_available`、不写 invalidation；真实 Person reader 的 recall rejection 也必须上抛到这条 typed failure 路径。同一晚结算请求可在 reader 恢复后重试。没有 durable drill 的过期 handle 仍返回 410 并记录 `expired`。
+- 已提交 outcome 的 exact retry 仍先消费既有 idempotent event，不依赖瞬态 source/body，也不复活已失效 cue。
+
 ## User Journey
 
 ### Primary Journey: 猫在真正需要时想起，而不是等人重复

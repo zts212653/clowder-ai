@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { MeetingIntakeJudgmentField, PluginDescription, PluginIconSpec } from '@cat-cafe/shared';
 import type { Capability, PluginManifest } from '@clowder-ai/plugin-contract';
+import { PUBLISHED_COMPANION_V2 } from './desktop-window-runtime/published-companion-v2.js';
 
 export interface OfficialPluginOwnerAuth {
   readonly kind: 'lark-cli-device';
@@ -174,6 +175,20 @@ export const OFFICIAL_PLUGIN_POLICIES = [
       packageDigest: 'sha512-MT893A4JY0zi8WWgI3xxNqE2ENoX8032rdRiJRvUIQxq7A0uvB8gbiapj1cuHBLCuRxgBNg5wBRnwGX69sPxrQ==',
     },
     effectiveGrants: [],
+    hostSignalRoutes: [],
+  },
+  {
+    catalogId: 'companion',
+    packageName: '@clowder-ai/companion',
+    pluginId: 'official.companion',
+    distribution: 'registry',
+    releaseTag: 'next',
+    bootstrapRelease: {
+      version: PUBLISHED_COMPANION_V2.version,
+      archiveUrl: `https://registry.npmjs.org/@clowder-ai/companion/-/companion-${PUBLISHED_COMPANION_V2.version}.tgz`,
+      packageDigest: PUBLISHED_COMPANION_V2.packageDigest,
+    },
+    effectiveGrants: ['windows.create'],
     hostSignalRoutes: [],
   },
 ] as const satisfies readonly OfficialPluginCatalogPolicy[];

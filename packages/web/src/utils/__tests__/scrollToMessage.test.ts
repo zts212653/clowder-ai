@@ -56,6 +56,31 @@ describe('scrollToMessage', () => {
     expect(container.scrollTop).toBe(560);
   });
 
+  it('waits when the browser clamps a mounted anchor behind a short layout', () => {
+    const container = document.createElement('div');
+    let top = 200;
+    let maxTop = 400;
+    Object.defineProperty(container, 'scrollTop', {
+      get: () => top,
+      set: (value: number) => {
+        top = Math.min(value, maxTop);
+      },
+    });
+    container.getBoundingClientRect = () => ({ top: 100, bottom: 700 }) as DOMRect;
+    const boundary = document.createElement('div');
+    boundary.dataset.messageViewportId = 'target';
+    boundary.getBoundingClientRect = () => ({ top: 700 - top, bottom: 900 - top }) as DOMRect;
+    const target = document.createElement('div');
+    target.dataset.messageId = 'target';
+    boundary.appendChild(target);
+    container.appendChild(boundary);
+    const anchor = { messageId: 'target', viewportOffsetPx: 0 };
+    expect(restoreMessageScrollAnchor(container, anchor)).toBe(false);
+    maxTop = 800;
+    expect(restoreMessageScrollAnchor(container, anchor)).toBe(true);
+    expect(top).toBe(600);
+  });
+
   it('scrolls to the element with matching data-message-id', () => {
     const el = document.createElement('div');
     el.setAttribute('data-message-id', 'msg-123');

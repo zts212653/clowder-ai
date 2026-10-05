@@ -64,10 +64,22 @@ plan.planFingerprint = createHash('sha256')
   .update(JSON.stringify(stable(plan)))
   .digest('hex');
 
-function report(lane, files, elapsedMs) {
+function isolationAttestation(lane, { boundary = 'verified' } = {}) {
+  const resourceScope = lane === 'serial-shared' ? 'shared' : 'distributable';
+  return {
+    schemaVersion: 1,
+    kind: 'public_test_isolation_attestation',
+    resourceScope,
+    boundary,
+    targetGrade: resourceScope === 'distributable' && boundary === 'verified',
+  };
+}
+
+function report(lane, files, elapsedMs, { isolation = isolationAttestation(lane) } = {}) {
   return {
     schemaVersion: 2,
     kind: 'public_test_shard_run',
+    isolation,
     status: 'succeeded',
     lane,
     planFingerprint: plan.planFingerprint,
@@ -117,6 +129,35 @@ describe('F308 public-test shard summary', () => {
           maxCriticalPathMs: 19,
         }),
       /critical path 20ms exceeds budget 19ms/,
+    );
+  });
+
+  it('refuses to summarize a distributable lane that never proved its kernel boundary', () => {
+    // Evidence laundering: a locally produced report is otherwise byte-compatible
+    // with a target-CI one, so its timings would enter measurement history as if
+    // the claimed isolation had held.
+    for (const boundary of ['absent', 'unknown']) {
+      const laundered = greenReports().map((entry) =>
+        entry.lane === 'distributable-1'
+          ? { ...entry, isolation: isolationAttestation('distributable-1', { boundary }) }
+          : entry,
+      );
+      assert.throws(
+        () => summarizePublicTestShardReports({ plan, reports: laundered }),
+        /verified kernel network boundary/,
+        `expected boundary=${boundary} to be rejected`,
+      );
+    }
+  });
+
+  it('refuses a report with no isolation attestation at all', () => {
+    const stripped = greenReports().map((entry) => {
+      const { isolation: _dropped, ...rest } = entry;
+      return rest;
+    });
+    assert.throws(
+      () => summarizePublicTestShardReports({ plan, reports: stripped }),
+      /isolation attestation is missing/,
     );
   });
 

@@ -19,7 +19,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { CallbackPrincipal } from '@cat-cafe/shared';
@@ -33,6 +33,7 @@ import {
   type SkillConsumptionVerificationFailure,
   WORKSPACE_NAVIGATOR_CONSUMER_ID,
 } from '../domains/cats/services/tool-usage/SkillConsumptionReceiptService.js';
+import { canonicalLinkedRootId, readLinkedRootState } from '../domains/workspace/roots/workspace-linked-root-store.js';
 import { guessMime, readWorkspaceFilePreview } from '../domains/workspace/workspace-file-read.js';
 import type { WorkspaceNavigationEmitter } from '../domains/workspace/workspace-navigation-delivery.js';
 import { resolveWorkspaceDocumentHref } from '../domains/workspace/workspace-path-resolution.js';
@@ -55,12 +56,15 @@ import {
 } from './callback-auth-prehandler.js';
 import { resolvePrincipalThread } from './callback-scope-helpers.js';
 import { parseWorkspaceChangedFiles } from './workspace-diff.js';
+import { workspaceDirectHuman } from './workspace-direct-human.js';
+import { registerWorkspaceFileSourceRoutes } from './workspace-file-source-routes.js';
 import {
   handleWorkspaceNavigateBody,
   parseWorkspaceNavigateBody,
   type ResolveWorktreeIdByPathForNavigate,
   type WorkspaceNavigateBody,
 } from './workspace-navigate-handler.js';
+import { registerWorkspaceRootConnectionRoutes } from './workspace-root-connection-routes.js';
 
 const execFileAsync = promisify(execFile);
 const MAX_FILE_SIZE = 1024 * 1024; // 1 MB text preview
@@ -246,6 +250,11 @@ async function searchWorkspaceContent(
   return { results, truncated };
 }
 
+/** The tree listing's own visibility rule: dot entries (except .claude/.kimi) and SKIP_DIRS are not shown. */
+function hiddenFromTree(name: string): boolean {
+  return (name.startsWith('.') && name !== '.claude' && name !== '.kimi') || SKIP_DIRS.has(name);
+}
+
 async function buildTree(root: string, dirPath: string, depth: number, maxDepth: number): Promise<TreeNode[]> {
   if (depth >= maxDepth) return [];
   const entries = await readdir(dirPath, { withFileTypes: true });
@@ -258,8 +267,7 @@ async function buildTree(root: string, dirPath: string, depth: number, maxDepth:
   });
 
   for (const entry of sorted) {
-    if (entry.name.startsWith('.') && entry.name !== '.claude' && entry.name !== '.kimi') continue;
-    if (SKIP_DIRS.has(entry.name)) continue;
+    if (hiddenFromTree(entry.name)) continue;
 
     const fullPath = join(dirPath, entry.name);
     const relPath = normalizeWorkspaceRelativePath(relative(root, fullPath));
@@ -399,6 +407,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   if (opts.callbackRegistry) {
     registerCallbackAuthHook(app, opts.callbackRegistry, { agentKeyRegistry: opts.agentKeyRegistry });
   }
+  registerWorkspaceFileSourceRoutes(app, resolveWorkspaceInteractiveUserId);
+  registerWorkspaceRootConnectionRoutes(app, resolveWorkspaceInteractiveUserId);
   // GET /api/workspace/worktrees (includes linked roots)
   app.get<{ Querystring: { repoRoot?: string } }>('/api/workspace/worktrees', async (request, reply) => {
     const { repoRoot } = request.query;
@@ -426,7 +436,18 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       }
     }
     const linked = await getLinkedRootsAsync();
-    const all = [...entries, ...linked];
+    const rootState = readLinkedRootState();
+    const all = await Promise.all(
+      [...entries, ...linked].map(async (entry) => {
+        const resolvedRoot = await realpath(entry.root).catch(() => undefined);
+        return {
+          ...entry,
+          ...(resolvedRoot
+            ? { resolvedRoot, rootEpoch: rootState.rootEpochs[canonicalLinkedRootId(resolvedRoot)] ?? 0 }
+            : {}),
+        };
+      }),
+    );
     registerWorktrees(all);
     return { worktrees: all };
   });
@@ -447,11 +468,20 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
       const root = await getWorktreeRoot(worktreeId);
       const resolved = subpath ? await resolveWorkspaceFilesystemPath(root, subpath) : root;
       const tree = await buildTree(root, resolved, 0, depth);
-      return { root: subpath ? normalizeWorkspaceRelativePath(subpath) : '.', worktreeId, tree };
+      if (!subpath) return { root: '.', worktreeId, tree };
+      const normalized = normalizeWorkspaceRelativePath(subpath);
+      // A listable sub-path the parent listing would still leave out: the answer a caller can show as a reason.
+      const hidden = normalized.split('/').some((segment) => segment !== '.' && hiddenFromTree(segment));
+      return { root: normalized, worktreeId, tree, hiddenFromTree: hidden };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
+      }
+      // Path resolution tolerates a missing target (writes create it); a listing of one is simply absent.
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.status(404);
+        return { error: 'Path not found' };
       }
       reply.status(500);
       return { error: 'Internal error' };
@@ -724,6 +754,8 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
   app.post<{
     Body: { name?: string; path?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
+    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(401).send({ error: 'identity_required' });
     const { name, path: rootPath } = request.body ?? {};
     if (!name || !rootPath) {
       reply.status(400);
@@ -748,19 +780,23 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRouteOpts> = async (ap
 
   // DELETE /api/workspace/linked-roots?id=
   app.delete<{
-    Querystring: { id?: string };
+    Querystring: { id?: string; expectedEpoch?: string };
   }>('/api/workspace/linked-roots', async (request, reply) => {
-    const { id } = request.query;
-    if (!id) {
+    if (!workspaceDirectHuman(request, resolveWorkspaceInteractiveUserId))
+      return reply.code(401).send({ error: 'identity_required' });
+    const { id, expectedEpoch } = request.query;
+    const epoch = expectedEpoch !== undefined && /^\d+$/.test(expectedEpoch) ? Number(expectedEpoch) : NaN;
+    if (!id || !Number.isSafeInteger(epoch) || epoch < 0) {
       reply.status(400);
-      return { error: 'id is required' };
+      return { error: 'id and expectedEpoch are required' };
     }
-    const removed = await removeLinkedRoot(id);
-    if (!removed) {
-      reply.status(404);
-      return { error: 'Linked root not found in config' };
+    try {
+      const removed = await removeLinkedRoot(id, epoch);
+      return { ok: true, removed };
+    } catch (error) {
+      if (error instanceof WorkspaceSecurityError) return reply.code(409).send({ error: 'connection_changed' });
+      return reply.code(503).send({ error: 'connection_state_unavailable' });
     }
-    return { ok: true };
   });
 
   // POST /api/workspace/reveal — open file/directory in system file manager

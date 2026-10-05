@@ -87,6 +87,7 @@ cat_cafe_redis_start_daemon() {
   local appendfsync="everysec"
   local pidfile=""
   local logfile=""
+  local named_alpha_ownership=false
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -102,6 +103,7 @@ cat_cafe_redis_start_daemon() {
       --daemonize) shift 2 ;;
       --pidfile) pidfile="$2"; shift 2 ;;
       --logfile) logfile="$2"; shift 2 ;;
+      --named-alpha-ownership) named_alpha_ownership=true; shift ;;
       *)
         echo "[redis-rdb-first] unknown arg: $1" >&2
         return 2
@@ -111,6 +113,10 @@ cat_cafe_redis_start_daemon() {
 
   if [ -z "$port" ] || [ -z "$dir" ]; then
     echo "[redis-rdb-first] --port and --dir are required" >&2
+    return 2
+  fi
+  if [ "$named_alpha_ownership" = true ] && [ "$(type -t named_alpha_capture_redis_identity)" != function ]; then
+    echo "[redis-rdb-first] named Alpha requires its fixed native ownership callback" >&2
     return 2
   fi
 
@@ -153,6 +159,11 @@ cat_cafe_redis_start_daemon() {
   [ -n "$logfile" ] && args+=(--logfile "$logfile")
 
   redis-server "${args[@]}" >/dev/null 2>&1 || return 1
+  # A fixed launcher callback proves the spawned OS incarnation before this
+  # helper's first protocol read. No environment-supplied command is executed.
+  if [ "$named_alpha_ownership" = true ]; then
+    named_alpha_capture_redis_identity "$port" "$dir" "$pidfile" || return 1
+  fi
   cat_cafe_redis_wait_for_ping "$port" || return 1
 
   if [ "$rdb_first" = true ]; then

@@ -39,4 +39,21 @@ describe('MarkdownContent file path linking', () => {
     expect(html).not.toContain('vscode://file');
     expect(html).toContain('text-[var(--semantic-info)]');
   });
+
+  it('links a path written straight after Chinese full-width punctuation', () => {
+    // Real chat 2026-09-23: "入口验收：/home/user/drinks.md" stayed plain text because
+    // only whitespace was accepted before a path.
+    const colon = render('入口验收：/home/user/projects/f309-dogfood-scratch/drinks.md');
+    expect(colon).toContain('vscode://file/home/user/projects/f309-dogfood-scratch/drinks.md');
+    expect(colon).toContain('入口验收：');
+
+    const paren = render('改好了（/home/user/projects/f309-dogfood-scratch/desserts.md:3）');
+    expect(paren).toContain('vscode://file/home/user/projects/f309-dogfood-scratch/desserts.md:3');
+    expect(paren).toContain('改好了（');
+  });
+
+  it('still leaves URLs and non-path slashes alone after full-width punctuation', () => {
+    const html = render('链接：https://example.com/a/b.png，比例：16/9.5');
+    expect(html).not.toContain('vscode://file');
+  });
 });

@@ -19,6 +19,11 @@ const moduleBudgets = [
     reason: 'keep the in-memory managed-work aggregate focused',
   },
   {
+    path: '../src/domains/cats/services/stores/ports/TaskWaitMutationStore.ts',
+    maxLines: 350,
+    reason: 'keep in-memory wait CAS and receipt mutation separate from generic Task storage',
+  },
+  {
     path: '../src/domains/cats/services/stores/ports/TaskEntrustedWorkMutationStore.ts',
     maxLines: 350,
     reason: 'keep entrusted-work owner mutations separate from generic Task storage',

@@ -79,6 +79,18 @@ function relativeLuminance(rLin: number, gLin: number, bLin: number): number {
   return 0.2126 * clamp01(rLin) + 0.7152 * clamp01(gLin) + 0.0722 * clamp01(bLin);
 }
 
+/** An OKLCH colour as linear sRGB, each channel clipped into [0, 1] (the gamut handling `oklchContrast` uses). */
+export function oklchToClippedLinearRgb(color: OklchColor): [number, number, number] {
+  const [L, a, b] = oklchToOklab(color.l, color.c, color.h);
+  const [r, g, bl] = oklabToLinearRgb(L, a, b);
+  return [clamp01(r), clamp01(g), clamp01(bl)];
+}
+
+/** WCAG relative luminance of a linear sRGB colour (channels in [0, 1]). */
+export function linearRgbLuminance(rgb: readonly [number, number, number]): number {
+  return relativeLuminance(rgb[0], rgb[1], rgb[2]);
+}
+
 /**
  * Compute WCAG contrast ratio between two OKLCH colors.
  * Returns ratio in [1, 21]. WCAG AA: ≥4.5 normal text / ≥3 large text.

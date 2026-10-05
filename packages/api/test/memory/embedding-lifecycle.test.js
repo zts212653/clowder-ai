@@ -53,7 +53,7 @@ function makeEmbeddingService(load) {
 }
 
 describe('MemoryEmbeddingLifecycle', () => {
-  it('uses the version-driven rebuild contract for embedding-ready catch-up', async () => {
+  it('fills missing vectors without rescanning the evidence corpus when embedding becomes ready', async () => {
     const { MemoryEmbeddingLifecycle } = await import('../../dist/domains/memory/MemoryEmbeddingLifecycle.js');
     const rebuildCalls = [];
     let warmupCalls = 0;
@@ -62,6 +62,7 @@ describe('MemoryEmbeddingLifecycle', () => {
         rebuildCalls.push(args);
         return { docsIndexed: 0, docsSkipped: 7, durationMs: 1 };
       },
+      embedMissingDocumentVectors: async () => ({ docsEmbedded: 2, durationMs: 1 }),
       startPassageEmbeddingWarmup: () => {
         warmupCalls += 1;
       },
@@ -81,9 +82,9 @@ describe('MemoryEmbeddingLifecycle', () => {
 
     const result = await lifecycle.catchUpAfterReady();
 
-    assert.deepEqual(rebuildCalls, [[]], 'ready catch-up must not unconditionally force a full rebuild');
+    assert.deepEqual(rebuildCalls, [], 'embedding activation must not rescan docs and threads');
     assert.equal(warmupCalls, 1, 'missing passage vectors should still be backfilled');
-    assert.deepEqual(result, { docsIndexed: 0, docsSkipped: 7, durationMs: 1 });
+    assert.deepEqual(result, { docsEmbedded: 2, durationMs: 1 });
   });
 
   it('activates vector indexing after the API starts with embedding off', async () => {

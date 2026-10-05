@@ -51,7 +51,7 @@ export class QueuedMessageCustodyStartupReconciler {
     if (!scan) return emptyResult();
 
     const queuedMessageIds = await scan.call(this.deps.messageStore, 'queued');
-    const activeMessages: StoredMessage[] = [];
+    const activeMessages: Array<StoredMessage | undefined> = new Array(queuedMessageIds.length);
     const deferredCarrierEntryIds = new Set<string>();
     const unresolvedQueuedMessageIds = new Set<string>();
     let messagesBackfilled = 0;
@@ -61,12 +61,12 @@ export class QueuedMessageCustodyStartupReconciler {
     let failedTargets = 0;
     const legacyVisibilityFallbackMessageIds: string[] = [];
 
-    for (const messageId of queuedMessageIds) {
+    const reconcileMessage = async (messageId: string, position: number): Promise<void> => {
       let scannedMessage: StoredMessage | null = null;
       try {
         let message = await this.deps.messageStore.getById(messageId);
         scannedMessage = message;
-        if (!message || message.deliveryStatus !== 'queued') continue;
+        if (!message || message.deliveryStatus !== 'queued') return;
         if (!message.queueCustody) {
           if (message.queueCustodyAdmission) {
             const recoveryEntries = createFanoutQueueEntriesFromAdmission(
@@ -92,16 +92,16 @@ export class QueuedMessageCustodyStartupReconciler {
             messagesBackfilled += 1;
           } else if (message.catId !== null) {
             legacyVisibilityFallbackMessageIds.push(message.id);
-            continue;
+            return;
           } else {
             const initialized = await initializeLegacyCustody(this.deps, message, this.now());
-            if (!initialized) continue;
+            if (!initialized) return;
             message = initialized.message;
             if (initialized.backfilled) messagesBackfilled += 1;
           }
         }
         const reconciled = await reconcileStartupCustodyMessage(this.deps, message.id, this.now);
-        if (!reconciled) continue;
+        if (!reconciled) return;
         handledTargets += reconciled.handledTargets;
         failedTargets += reconciled.failedTargets;
         if (reconciled.terminalized) messagesTerminalized += 1;
@@ -109,7 +109,7 @@ export class QueuedMessageCustodyStartupReconciler {
           for (const entryId of activeCarrierEntryIds(reconciled.message)) deferredCarrierEntryIds.add(entryId);
         } else {
           const queuedEntryIds = new Set(queuedCarrierEntryIds(reconciled.message));
-          if (queuedEntryIds.size > 0) activeMessages.push(reconciled.message);
+          if (queuedEntryIds.size > 0) activeMessages[position] = reconciled.message;
           for (const entryId of activeCarrierEntryIds(reconciled.message)) {
             if (!queuedEntryIds.has(entryId)) deferredCarrierEntryIds.add(entryId);
           }
@@ -125,9 +125,17 @@ export class QueuedMessageCustodyStartupReconciler {
             `${error instanceof Error ? error.message : String(error)}`,
         );
       }
+    };
+
+    // Each message has its own custody CAS. A small window overlaps Redis
+    // round trips while preserving scan order for coalesced Queue groups.
+    const RECOVERY_BATCH_SIZE = 8;
+    for (let offset = 0; offset < queuedMessageIds.length; offset += RECOVERY_BATCH_SIZE) {
+      const batch = queuedMessageIds.slice(offset, offset + RECOVERY_BATCH_SIZE);
+      await Promise.all(batch.map((messageId, index) => reconcileMessage(messageId, offset + index)));
     }
 
-    const groups = groupActiveMessages(activeMessages);
+    const groups = groupActiveMessages(activeMessages.filter((message): message is StoredMessage => Boolean(message)));
     const resumeScopes: QueueCustodyResumeScope[] = [];
     const builtEntries: QueueEntry[] = [];
     let entriesRestored = 0;

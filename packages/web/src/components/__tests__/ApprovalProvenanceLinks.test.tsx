@@ -82,7 +82,12 @@ describe('F246 approval provenance links', () => {
 
     expect(container.querySelector('[data-testid="approval-card-link"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="approval-origin-link"]')).toBeNull();
-    expect(container.querySelector('[data-testid="approval-event-origin"]')?.textContent).toContain('每日治理扫描');
+    const eventOrigin = container.querySelector<HTMLDetailsElement>('[data-testid="approval-event-origin"]');
+    expect(eventOrigin?.querySelector('summary')?.textContent).toBe('来源事件');
+    expect(eventOrigin?.open).toBe(false);
+    expect(eventOrigin?.textContent).toContain('每日治理扫描');
+    expect(eventOrigin?.textContent).toContain('cron:daily');
+    expect(container.textContent).not.toContain('来源事件：每日治理扫描');
   });
 
   it('marks legacy records as non-exact and only offers an honest thread fallback', async () => {

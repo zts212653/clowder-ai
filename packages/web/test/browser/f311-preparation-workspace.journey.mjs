@@ -88,7 +88,16 @@ export async function verifyPreparationWorkspace({
     .locator('.evolution-preparation-goal')
     .getByText('让 PM Agent 专业地推进项目，只在必要时请人介入。', { exact: false })
     .waitFor();
-  await workspace.getByText('当前 Program 只绑定一个 target', { exact: false }).waitFor();
+  const provenance = workspace.locator(':scope > .evolution-preparation-provenance');
+  const provenanceSummary = provenance.locator(':scope > summary');
+  const targetBinding = provenance.getByText('当前 Program 只绑定一个 target', { exact: false });
+  await provenanceSummary.getByText('项目绑定与技术记录', { exact: true }).waitFor();
+  assert.equal(await provenance.evaluate((element) => element.open), false);
+  await targetBinding.waitFor({ state: 'hidden' });
+  await provenanceSummary.click();
+  await targetBinding.waitFor({ state: 'visible' });
+  await provenanceSummary.click();
+  await targetBinding.waitFor({ state: 'hidden' });
   const tabs = workspace.getByRole('tab');
   assert.equal(await tabs.count(), 4);
   const visualHierarchy = await verifyPreparationVisualContract({ page, workspace, tabs });
@@ -98,16 +107,17 @@ export async function verifyPreparationWorkspace({
   const environment = workspace.locator('[data-preparation-item="environment"]');
   const records = workspace.locator('[data-preparation-item="records"]');
   await data.getByText('准备中', { exact: true }).waitFor();
+  await data.locator(':scope > summary').click();
   await data.getByText('可改', { exact: true }).waitFor();
   assert.equal(await data.locator('[data-preparation-spinner="true"]').count(), 1);
-  await environment.getByText('已有提交', { exact: true }).waitFor();
+  await environment.locator(':scope > summary').click();
+  await environment.getByText('已有工作 · 已有提交', { exact: true }).waitFor();
   await environment.getByText('本轮不可改', { exact: true }).waitFor();
   assert.equal(await environment.locator('[data-preparation-spinner="true"]').count(), 0);
+  await records.locator(':scope > summary').click();
   await records.getByText('待核实', { exact: true }).first().waitFor();
   assert.doesNotMatch(await records.locator('[data-progress-state]').innerText(), /codex-terra/u);
   assertFlatPreparationSurface(await readFlatPreparationSurface(data), 'object candidates');
-  await data.locator(':scope > summary').click();
-  await environment.locator(':scope > summary').click();
   await program.evaluate((element) => {
     element.scrollTop = 0;
   });

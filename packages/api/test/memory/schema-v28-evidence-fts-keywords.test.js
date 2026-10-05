@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { installLegacyEntityMentionFixture } from '../helpers/legacy-entity-mention-fixture.js';
 
 describe('V28 migration — evidence_fts keywords', () => {
   it('rebuilds existing evidence_fts with keyword tokens', async () => {
@@ -11,6 +12,7 @@ describe('V28 migration — evidence_fts keywords', () => {
     const db = new Database(':memory:');
     try {
       db.exec(schema.SCHEMA_V5);
+      db.exec(schema.SCHEMA_V8_DYNAMIC_TASKS);
       db.exec(`
         CREATE TABLE evidence_docs (
           anchor TEXT PRIMARY KEY,
@@ -60,6 +62,7 @@ describe('V28 migration — evidence_fts keywords', () => {
       `);
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(27, new Date().toISOString());
 
+      installLegacyEntityMentionFixture(db);
       schema.applyMigrations(db);
 
       const rows = db.prepare('SELECT rowid FROM evidence_fts WHERE evidence_fts MATCH ?').all('rarekeywordxyz');

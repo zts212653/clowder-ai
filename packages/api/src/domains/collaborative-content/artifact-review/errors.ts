@@ -8,6 +8,8 @@ export type ArtifactReviewErrorCode =
   | 'task_closed'
   | 'asset_changed'
   | 'revision_conflict'
+  | 'request_superseded'
+  | 'request_cancelled'
   | 'operation_reused'
   | 'invalid_action'
   | 'invalid_anchor'

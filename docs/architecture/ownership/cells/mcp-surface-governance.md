@@ -12,12 +12,24 @@ description_updated_at: "2026-08-04T10:59:42-07:00"
 doc_kind: architecture
 created: 2026-08-01
 canonical_features: [F286]
+mcp_selector_status: accepted
+mcp_selector_claims:
+  - ref: architecture-cell:mcp-surface-governance
+    toolName: cat_cafe_search_evidence
+    resourceFamily: evidence-navigation
+    field: mode
+    role: read-strategy
+    decision: accepted
 code_anchors:
   - packages/mcp-server/src/canonical-server-tools.ts
+  - packages/mcp-server/src/tools/native-task-test-tool.ts
   - packages/mcp-server/src/canonical-tool-registry.ts
   - packages/mcp-server/src/server-toolsets.ts
   - packages/mcp-server/src/tool-governance.ts
   - packages/mcp-server/src/tool-governance-cli.ts
+  - packages/mcp-server/src/tool-governance-selectors.ts
+  - packages/mcp-server/src/tool-governance-string-domain.ts
+  - packages/mcp-server/src/tool-governance-evidence.ts
   - packages/mcp-server/src/tool-cutover.ts
   - packages/mcp-server/governance/mcp-surface-baseline.json
   - packages/mcp-server/test/tool-registration.test.js
@@ -32,6 +44,7 @@ doc_anchors:
   - feature-specs/2026-08-04-f286-phase-b-admission-contract.md
 static_scan_hints: [resourceFamily, cutoverState, exposureTier, standaloneReason, allowedNextActions, registerFullToolset, EXPECTED_TOOLS, MCP_TOOLS_SECTION, compatibility alias, atomic cutover]
 cited_by:
+  - {feature: F325, date: 2026-09-29, delta: "P1 admits cat_cafe_run_task_test as one Task-scoped side-effect boundary with host-selected target and no model command/path parameters"}
   - {feature: F286, date: 2026-08-01, delta: "new cell for MCP semantic admission and atomic resource-family cutover"}
 ---
 
@@ -54,6 +67,22 @@ This cell owns the cutover invariant: a runtime/profile must never advertise bot
 - Detecting duplicate local/connector projections or stale full-versus-split topology references.
 
 ## Extend By
+
+The F286 owner accepted the narrow canonical read-selector seam in coordination
+`coord-e2c0b174-954a-4bd8-a4d2-1cd95eef72a3` for PR #5000. `search_evidence.mode`
+selects retrieval strategy within one `read` action; it does not select identity,
+authority, mutation, or resource transitions. Its optional lexical/semantic/hybrid
+schema remains executable truth. Document calls retain the lexical default and
+message calls retain the hybrid default. Local-process document reads and
+authenticated invocation/agent-key message reads declare their actual separate
+authorization paths. This claim admits only this exact tool/family/field/role.
+
+Canonical single read operations may declare a `read-strategy` selector with
+subject-bound accepted evidence. The normalized executable schema derives its
+literals and the registry reports selector additions/removals separately from
+action-count changes. `action`, `operation`, and `decision` cannot be exempted;
+undeclared finite `mode`, write/destructive boundaries, invalid declarations,
+unresolved claims, and changed migration candidates continue to fail closed.
 
 - Derive registry and guard data from canonical tool definitions; do not maintain a second hand-written inventory.
 - Require a birth certificate for every semantic identity: resource family, operation, actor authority, risk, exposure tier, owner, standalone reason, cutover state, cognitive entry, and verification evidence.

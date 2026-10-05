@@ -11,22 +11,35 @@ const messages: ChatMessage[] = [
   {
     id: 'f229-user',
     type: 'user',
-    content: '帮我找回之前讨论的认证问题。',
+    content: '好。',
     timestamp: 1_787_995_000_001,
+  },
+  {
+    id: 'f229-user-long',
+    type: 'user',
+    content: '请把最近两次讨论的决定、还没解决的疑问和下一步动作放在一起，我想边听边核对这段历史。',
+    timestamp: 1_787_995_000_002,
+  },
+  {
+    id: 'f229-assistant-short',
+    type: 'assistant',
+    catId: 'codex-sol',
+    content: '找到了。',
+    timestamp: 1_787_995_000_003,
   },
   {
     id: 'f229-auth-error',
     type: 'system',
     variant: 'error',
     content: '首次调用未通过认证；诊断仍保留在真实时间线中。',
-    timestamp: 1_787_995_000_002,
+    timestamp: 1_787_995_000_004,
   },
   {
     id: 'f229-connector',
     type: 'connector',
     content: '连接器诊断：callback token 已过期，请重新授权。',
     source: { connector: 'vote-result', label: '连接器诊断', icon: 'ballot' },
-    timestamp: 1_787_995_000_003,
+    timestamp: 1_787_995_000_005,
   },
   {
     id: 'f229-assistant-rich',
@@ -56,7 +69,7 @@ const messages: ChatMessage[] = [
         ],
       },
     },
-    timestamp: 1_787_995_000_004,
+    timestamp: 1_787_995_000_006,
   },
   {
     id: 'f229-cli',
@@ -68,7 +81,7 @@ const messages: ChatMessage[] = [
       '这是用于验证 compact 宽度下 CLI diagnostics 不会撑破面板的长输出：'.repeat(6),
     metadata: { provider: 'openai', model: 'gpt-5.6-sol' },
     extra: { stream: { invocationId: 'f229-cli-invocation', turnInvocationId: 'f229-cli-turn' } },
-    timestamp: 1_787_995_000_005,
+    timestamp: 1_787_995_000_007,
   },
 ];
 
@@ -93,7 +106,7 @@ const thread: Thread = {
   createdBy: 'fixture',
   participants: ['codex-sol'],
   createdAt: 1_787_995_000_000,
-  lastActiveAt: 1_787_995_000_005,
+  lastActiveAt: 1_787_995_000_007,
   bubbleCli: 'expanded',
 };
 

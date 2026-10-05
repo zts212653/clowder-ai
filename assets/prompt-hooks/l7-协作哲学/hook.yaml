@@ -21,4 +21,4 @@ transparencyTier: visible-by-default
 governanceTier: immutable
 
 # operator-facing
-userExplanation: "伙伴猫不是工具猫"
+userExplanation: "代码哲学：愿景驱动 + 质量门禁 + TDD，不是最小改动"

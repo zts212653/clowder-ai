@@ -1,4 +1,4 @@
-import type { CatId, CloudBridgeOutboundReceiptV1 } from '@cat-cafe/shared';
+import { type CatId, type CloudBridgeOutboundReceiptV1, isCloudBridgeFailureDiagnosticV1 } from '@cat-cafe/shared';
 import type { BridgeDispatchOutcome, BridgeFallbackReason } from './types.js';
 
 const messageByReason: Record<BridgeFallbackReason, (catId: string) => string> = {
@@ -20,8 +20,26 @@ export interface CloudBridgeAuditContext {
   readonly dispatchInvocationId: string;
 }
 
-/** A sent outcome always carries the Host's receipt; an append failure or a last-resort catch may have had an effect. */
+function preSubmitFailureCode(outcome: BridgeDispatchOutcome): string | undefined {
+  if (outcome.kind !== 'error' || outcome.reason !== 'host-append-failed') return undefined;
+  const failure = outcome.failureDiagnostic;
+  if (!isCloudBridgeFailureDiagnosticV1(failure) || failure.fingerprint.phase !== 'failed_before_submit') {
+    return undefined;
+  }
+  return [
+    'SEND_BUTTON_NOT_FOUND',
+    'SEND_BUTTON_DISABLED',
+    'SEND_BUTTON_INVALID',
+    'SEND_BUTTON_AMBIGUOUS',
+    'CHATGPT_GENERATING',
+  ].includes(failure.errorCode)
+    ? failure.errorCode
+    : undefined;
+}
+
+/** A sent outcome has a Host receipt; only verified pre-submit failures prove no effect. */
 function receiptStatus(outcome: BridgeDispatchOutcome): CloudBridgeOutboundReceiptV1['status'] {
+  if (preSubmitFailureCode(outcome)) return 'failed';
   if (outcome.kind === 'sent') return 'sent';
   if (outcome.reason === 'host-append-failed' || outcome.reason === 'dispatch-failed') return 'unknown';
   return 'failed';
@@ -91,6 +109,13 @@ export function buildCloudBridgeStatusContent(args: {
         detail: args.outcome.detail ?? (args.outcome.kind === 'error' ? args.outcome.message : undefined),
       }),
     ) as Record<string, unknown>;
+    const noSubmit = preSubmitFailureCode(args.outcome);
+    if (noSubmit) {
+      fallback.message =
+        noSubmit === 'CHATGPT_GENERATING'
+          ? `未发送给 @${args.catId}：ChatGPT 正在回复。请等当前回复结束后，重新 @${args.catId} 发一条新消息。`
+          : `未发送给 @${args.catId}：ChatGPT 的发送控件暂不可用，尚未点击发送。请检查绑定会话的页面与扩展状态后，重新 @${args.catId} 发一条新消息。`;
+    }
     return JSON.stringify({ ...fallback, ...(outboundReceipt ? { outboundReceipt } : {}) });
   }
   return JSON.stringify({

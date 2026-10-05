@@ -114,6 +114,7 @@ export function createPresentLoopTemplate({ service }: PresentLoopTemplateDepend
         profile: 'awareness',
         trigger: params.trigger,
         admission: {
+          dependsOnThreadActivity: false,
           async gate() {
             if (!targetCatId) return { run: false, reason: 'no targetCatId' };
             if (!ownerUserId) return { run: false, reason: 'no triggerUserId' };

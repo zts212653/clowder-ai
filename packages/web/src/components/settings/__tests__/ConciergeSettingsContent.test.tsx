@@ -12,7 +12,9 @@ vi.mock('@/utils/api-client', () => ({
 
 vi.mock('@/hooks/useCatData', () => ({
   formatCatName: (cat: { id: string }) => cat.id,
-  useCatData: () => ({ cats: [] }),
+  useCatData: () => ({
+    cats: [{ id: 'fable-5', displayName: '布偶猫', nickname: '宪宪', variantLabel: 'Fable 5' }],
+  }),
 }));
 
 import { ConciergeSettingsContent } from '../ConciergeSettingsContent';
@@ -22,7 +24,7 @@ const CONFIG = {
   muted: false,
   displayName: '猫猫球',
   personaTone: '温暖',
-  dutyCatProfileId: '',
+  dutyCatProfileId: 'fable-5',
   proactivePolicy: 'quiet-badge' as const,
   skin: 'xianxian-codex' as const,
   ballPosition: null,
@@ -82,5 +84,17 @@ describe('ConciergeSettingsContent behavior controls', () => {
 
     expect(container.textContent).toContain('宪宪专属皮肤（视频提取）。（默认）');
     expect(container.textContent).not.toContain('砚砚专属皮肤。（默认）');
+  });
+
+  it('keeps the companion entry name fixed while leaving the partner and tone configurable', async () => {
+    await act(async () => {
+      root.render(<ConciergeSettingsContent />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(container.textContent).toContain('猫猫球是固定的伴随入口名称');
+    expect(container.querySelector('input[value="猫猫球"]')).toBeNull();
+    expect(container.textContent).toContain('人设基调');
+    expect(container.textContent).toContain('值班猫');
+    expect(container.textContent).toContain('宪宪（Fable 5） · fable-5');
   });
 });

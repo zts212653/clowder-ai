@@ -231,6 +231,6 @@ describe('Design Gate committed claim-evidence checker', () => {
       assert.equal(result.checked, 0);
       return;
     }
-    assert.equal(result.checked, 4);
+    assert.equal(result.checked, 5);
   });
 });

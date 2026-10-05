@@ -16,7 +16,13 @@ triggers:
 
 # Request Review
 
-把当前 diff、最高风险面和真实验证证据送到一只非作者猫眼前。默认只选一个合适的独立验证源；local peer、cloud、愿景守护各按自己的风险触发，不能因为“进入 review”就自动叠加。
+先按 `docs/SOP.md` 判断：符合产品快车道时，作者完成真实入口自验与受影响检查后直接交付，默认不进入本 skill。需要 review 时，才把原始约定、本次交付、当前 diff 和真实验证证据送到一只非作者猫眼前。审查先判断“做的是我们约定的东西吗”，再结合实现与风险判断能否放行。默认只选一个合适的独立验证源；local peer、cloud、愿景守护各按自己的风险触发，不能因为“进入 review”就自动叠加。
+
+### 先理解本次交付
+
+Reviewer 回读原 issue / 讨论 / 已接受决定，再看计划与实际结果，不能让作者的实现摘要替代原题。有可运行实物就看实物：前端从真实入口走完整操作，后端跑原 issue 描述的使用场景；仅在尚无可运行实物的方案或文档交付中用推演。暂时跑不了要说明未验证处，不能换成文档推演后宣称通过。按[原问题到交付的判断方法](../.cat-cafe-shared-refs/delivery-intent-judgment.md)核对，目标还不清楚就先澄清，实现偏离明确约定就退回修正。
+
+结论应说明本次约定结果是否成立及依据，不以“没有剩余 finding”代替。安全、数据与契约检查仍各自成立；这是同一 reviewer 的判断职责，不增加固定表格、逐 AC 必填字段或每 PR 的第三只守护猫。完整 Feature 的终态守护不替代本次交付判断。
 
 ## 先选验证源
 
@@ -24,7 +30,7 @@ triggers:
 |---|---|
 | 家里语境、skill/SOP/治理文字、实现语义 | local peer（本 skill） |
 | 安全 / 鉴权 / 生产数据 / 外部契约，或需要 context-blind 代码扫描 | cloud；不再同时把同一问题默认发 local |
-| 用户可见 feature 的终态是否符合愿景 | 愿景守护；在 feature close 触发，不是每个 PR 的 reviewer |
+| 用户可见 feature 的终态是否符合愿景 | 愿景守护在 feature close 触发；本次交付的约定结果仍由已选 reviewer 判断，不给每个 PR 加第三棒 |
 
 安全、数据或契约高风险需要不同视角时可以叠加；叠加理由必须指向不同风险面。相同目的的重复 reviewer 不增加门禁强度，只增加等待。
 
@@ -32,7 +38,7 @@ triggers:
 
 ### 稀缺判断席位（dossier-driven）
 
-当队友 dossier / L0 把 reviewer 标为周额度稀缺的高杠杆判断猫（当前为 Fable）时，不能沿用普通迭代 reviewer 的默认回路。请求必须写明
+当队友 dossier / L0 把 reviewer 标为周额度稀缺的高杠杆判断猫（以 dossier `engagementPolicy` 当前标注为准）时，不能沿用普通迭代 reviewer 的默认回路。请求必须写明
 `engagementMode=one_shot_calibration|final_seal`、本轮唯一判断问题、停止条件和修后去向：
 
 - `one_shot_calibration`：用于重要 plan、架构/failure-mode 校准。reviewer 一次性交付判断和 findings 后退出；作者负责修复与测试，仍需独立验证时转日常 reviewer。
@@ -72,18 +78,19 @@ triggers:
 Review target: <branch@HEAD>
 Review-Subject-Ref: <pr:owner/repo#N | task:taskId>
 Reviewed-Head-Sha: <exact full Git OID>
-Request-Review-Consumption-Handle: <cat_cafe_prepare_request_review_consumption.handle>
 Accepted-Source-Ref: <canonical docs/features/F*.md | immutable threadId#messageId>
 Accepted-Revision: <that file's last-content-change full Git OID | the same immutable source message id>
 Scope: <changed files / one-line intent>
 Risk: <最高风险面，或 none + 理由>
 Evidence: <真实命令 / preview 结果>
 Engagement: <iterative|one_shot_calibration|final_seal> + <stop condition / repair return>
-Ask: checked=<请 reviewer 指认最高风险面> verdict=approve|block
+Ask: <本次约定的结果是否成立，以及需重点检查的风险> verdict=approve|block
 ```
 
 Feature 以 canonical `docs/features/F*.md` + 该文件最后一次内容变更的完整 40/64 位 Git OID 为 anchor；消息 source 以
-`threadId#messageId` 自身为 revision。author 先用同一 `reviewSubjectRef / reviewedHeadSha / acceptedSourceRef / acceptedRevision` 调 `cat_cafe_prepare_request_review_consumption`；reviewer 先 bind，发 typed verdict 后 record，不适用则 dismiss；三步使用对应 `request_review_consumption` tools。只传引用，不复制 source 正文。
+`threadId#messageId` 自身为 revision。普通 local review 按这份 packet 请求，reviewer 一次发出 typed verdict，author 直接读取原消息的 `localReviewFact`；只传引用，不复制 source 正文。
+
+只有 F100/F311 已指定要证明 `request-review` **某个 skill 版本在这次 review 中实际沿用**，才在发送请求前 prepare，并在 packet 追加 `Request-Review-Consumption-Handle`；具名 reviewer 可 bind，发出同一条 typed verdict 后 record。prepare/bind/record 是独立的使用测量，不能作为 verdict 送达、作者消费或 merge 的前置条件。handle 缺失、过期、bind/record 失败或结果 `unconfirmed` 时如实保留测量缺口；不得为补回执新建 handle、重发结论、重新唤醒 reviewer 或虚报 `applied`。不适用的已绑定实验可 dismiss；既有历史回执保持原样。
 
 ### 完整 packet
 
@@ -115,6 +122,9 @@ git diff --name-only origin/main...HEAD | rg '^[^/]+\.(png|jpe?g|webp|gif|webm|m
 ```text
 /tmp/cat-cafe-review/{review-target-id}/{reviewer-handle}
 ```
+
+创建时带出生声明，让 reaper 能兜底回收（merge-gate Step 8.5 没跑到时）：
+`pnpm worktree:new /tmp/cat-cafe-review/{id}/{reviewer} --base {exact-SHA} --owner {reviewer} --policy ttl --ttl-days 7`。
 
 统一入口 `pnpm review:start`，请求中记录实际 web/api 端口。只审 diff 或治理文字时不启动 sandbox；要改代码则 TAKEOVER，另开正式 worktree。
 

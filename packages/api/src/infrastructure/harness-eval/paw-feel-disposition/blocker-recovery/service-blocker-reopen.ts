@@ -1,4 +1,9 @@
-import type { PawFeelDispositionEvent, PawFeelDispositionProjection } from '@cat-cafe/shared';
+import {
+  ownerTruthRefV1Schema,
+  type PawFeelDispositionEvent,
+  type PawFeelDispositionProjection,
+  type PawFeelResumeSelectorV1,
+} from '@cat-cafe/shared';
 import { projectPawFeelDisposition } from '../projector.js';
 import { parsePawFeelDispositionEvent } from '../schema.js';
 import { PawFeelDispositionServiceError } from '../service-guards.js';
@@ -30,6 +35,35 @@ export type PawFeelBlockerReopenCommand = PawFeelBlockerReopenCommandBase & {
 export type PawFeelBlockerReconcilePlan =
   | { outcome: 'ignored' | 'stable' | 'deferred' }
   | { outcome: 'write'; attempted: PawFeelBlockerReopenedEvent; nextProjection: PawFeelDispositionProjection };
+
+function bindLegacyBoundedTask(
+  selector: PawFeelResumeSelectorV1,
+  projection: PawFeelDispositionProjection,
+): PawFeelResumeSelectorV1 {
+  if (selector.kind !== 'bounded_time' || selector.dependencyRef || !projection.taskId) return selector;
+  return {
+    ...selector,
+    dependencyRef: ownerTruthRefV1Schema.parse({
+      ownerFeatureId: 'F310',
+      ownerStateRef: `task:item:${projection.taskId}`,
+    }),
+  };
+}
+
+function nonWriteReconcilePlan(input: {
+  selector: PawFeelResumeSelectorV1;
+  snapshot: Awaited<ReturnType<typeof resolvePawFeelResumeSnapshot>>;
+  blockedVersion: string;
+  due: boolean;
+  mayWrite: boolean;
+}): PawFeelBlockerReconcilePlan | null {
+  const unchanged = digestPawFeelResumeSnapshot(input.snapshot) === input.blockedVersion;
+  if (input.selector.kind === 'bounded_time' && !input.snapshot.satisfied) {
+    return !input.due && unchanged ? { outcome: 'stable' } : { outcome: 'deferred' };
+  }
+  if (unchanged) return input.due ? { outcome: 'deferred' } : { outcome: 'stable' };
+  return input.mayWrite ? null : { outcome: 'deferred' };
+}
 
 export function preparePawFeelBlockerReopen(command: PawFeelBlockerReopenCommand): PawFeelBlockerReopenedEvent {
   if ((command as { reopen?: { kind?: unknown } }).reopen?.kind !== 'legacy_unbound') {
@@ -93,21 +127,24 @@ export async function planPawFeelConditionBlockerReopen(input: {
   if (!Number.isFinite(nowMs)) {
     throw new PawFeelDispositionServiceError('resume_condition_invalid', 'blocker reconciliation time is invalid');
   }
-  const snapshot = await resolvePawFeelResumeSnapshot(condition.selector, input.resolver).catch((error: unknown) => {
+  const selector = bindLegacyBoundedTask(condition.selector, projection);
+  const snapshot = await resolvePawFeelResumeSnapshot(selector, input.resolver).catch((error: unknown) => {
     throw new PawFeelDispositionServiceError(
       'resume_condition_invalid',
       `resume condition is invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
-  const currentVersion = digestPawFeelResumeSnapshot(snapshot);
   const due = condition.selector.kind === 'bounded_time' && Date.parse(condition.selector.recheckAt) <= nowMs;
-  if (!due && currentVersion === condition.blockedVersion) return { outcome: 'stable' };
-  if (!input.mayWrite) return { outcome: 'deferred' };
-
-  const resumeVersion = derivePawFeelResumeVersion(
+  const nonWritePlan = nonWriteReconcilePlan({
+    selector,
     snapshot,
-    due && condition.selector.kind === 'bounded_time' ? condition.selector.recheckAt : undefined,
-  );
+    blockedVersion: condition.blockedVersion,
+    due,
+    mayWrite: input.mayWrite,
+  });
+  if (nonWritePlan) return nonWritePlan;
+
+  const resumeVersion = derivePawFeelResumeVersion(snapshot);
   const attempted = parsePawFeelDispositionEvent({
     eventId: derivePawFeelBlockerReopenEventId({
       signalId: input.signalId,
@@ -124,7 +161,7 @@ export async function planPawFeelConditionBlockerReopen(input: {
       conditionId: condition.conditionId,
       blockedVersion: condition.blockedVersion,
       resumeVersion,
-      reason: due ? 'bounded_time_due' : 'condition_changed',
+      reason: 'condition_changed',
       evidenceRefs: snapshot.evidenceRefs,
     },
   });

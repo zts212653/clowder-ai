@@ -266,6 +266,18 @@ describe('isValidRichBlock', () => {
     );
   });
 
+  it('validates the explicit interactive auto-group boundary', () => {
+    const base = {
+      id: 'question-1',
+      kind: 'interactive',
+      v: 1,
+      interactiveType: 'select',
+      options: [{ id: 'yes', label: 'Yes' }],
+    };
+    assert.equal(isValidRichBlock({ ...base, autoGroup: false }), true);
+    assert.equal(isValidRichBlock({ ...base, autoGroup: 'false' }), false);
+  });
+
   it('validates audio blocks (F34)', () => {
     // Valid minimal audio block
     assert.equal(isValidRichBlock({ id: 'a1', kind: 'audio', v: 1, url: '/api/tts/audio/abc123.wav' }), true);

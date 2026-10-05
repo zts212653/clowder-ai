@@ -1,10 +1,11 @@
 ---
 feature_ids: [F147]
-related_features: [F041, F190, F056]
+tips_exempt: "2026-10-03: this update records the F322 v2 bilingual requirement and responsibility only. Language switching is not implemented or accepted on this source cut, so there is no usable locale control to advertise."
+related_features: [F041, F190, F056, F322]
 topics: [i18n, hub, locale, ui]
 doc_kind: spec
 created: 2026-03-29
-updated: 2026-05-19
+updated: 2026-10-02
 ---
 
 # F147: i18n — Hub 界面中英文切换
@@ -53,6 +54,12 @@ Hub 界面支持中英文切换。operator本人习惯英文 UI，全量同步�
 - [ ] AC-A3: 切换入口在 Settings 或全局 header 可见
 - [ ] AC-A4: 覆盖 Memory/Signals/Settings/Ops 四大页面区域
 - [ ] AC-A5: 新增 UI 文案时有机制保证双语同步（lint 或 CI check）
+
+## 2026-10-02 F322 v2 承接
+
+operator `[thread-id]#private-source-id` 再次要求本次重构记录中英双语；新版文案沿主页认可的中英用词表。该有界交付归[F322 R5 / AC-B6–B8](F322-everyday-work-experience.md#2026-10-02-新版界面中英切换)，由原F322 B责任接续。
+
+本批只做v2，经典界面按CVO1309保持；刷新保留语言、切换保工作现场及词典同步会为本Feature AC-A1/A2/A3/A5提供v2范围证据。全Hub覆盖、AC-A4的Memory/Signals/Settings/Ops完整区域与本文件其余承诺未因此完成或取消。当前仅需求/接续登记，尚无双语实现或运行验收；技术候选仍未选定。
 
 ## 技术方案候选
 

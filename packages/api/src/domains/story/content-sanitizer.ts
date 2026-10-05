@@ -236,7 +236,7 @@ export function buildCatIdentityAliases(
     if (set.size > 0) aliases.set(breed.catId, [...set]);
   }
 
-  // coCreator identity (You / L.S. / Lysander etc.)
+  // coCreator identity (You / L.S. / you etc.)
   if (coCreator) {
     const coSet = new Set<string>();
     if (coCreator.name) coSet.add(coCreator.name);
@@ -275,7 +275,7 @@ export function buildCatIdentityAliases(
  * Criteria for inclusion: the word commonly appears in English prose
  * without referring to a Clowder AI identity. Proper nouns that are
  * distinctive enough to safely redact (e.g. "Gemini", "You",
- * "Lysander") are excluded even if short.
+ * "you") are excluded even if short.
  */
 const AMBIGUOUS_COMMON_WORDS: ReadonlySet<string> = new Set([
   'spark', // noun/verb — "a spark of inspiration"

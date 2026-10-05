@@ -55,6 +55,25 @@ describe('MCP Callback Tools', () => {
     }
   });
 
+  test('propose_taste forwards an optional takeaway hypothesis with the approval request', async () => {
+    const { handleProposeTaste, proposeTasteInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(proposeTasteInputSchema.takeaway.safeParse('我们以为 You 喜欢清楚的来源。').success, true);
+    let body;
+    globalThis.fetch = async (_url, options) => {
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ proposalId: 'proposal-test', status: 'pending' }) };
+    };
+    await handleProposeTaste({
+      scene: '审查设计稿',
+      quote: '原话',
+      takeaway: '我们以为 You 喜欢清楚的来源。',
+      tags: ['source'],
+      dimension: 'cognitive-honesty',
+      privacy: 'public',
+    });
+    assert.equal(body.takeaway, '我们以为 You 喜欢清楚的来源。');
+  });
+
   test('handlePostMessage calls API with correct body', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
@@ -219,6 +238,92 @@ describe('MCP Callback Tools', () => {
     assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'handled' });
     assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
     assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+  });
+
+  test('handleGetCustodyEvents asks only for a source message and a limit, with the invocation credentials', async () => {
+    const { handleGetCustodyEvents, callbackTools } = await import('../dist/tools/callback-tools.js');
+    const tool = callbackTools.find((candidate) => candidate.name === 'cat_cafe_get_custody_events');
+    assert.deepEqual(Object.keys(tool.inputSchema).sort(), ['limit', 'sourceMessageId']);
+    assert.equal(tool.inputSchema.limit.safeParse(0).success, false);
+    assert.equal(tool.inputSchema.limit.safeParse(51).success, false);
+    assert.equal(tool.inputSchema.limit.safeParse(50).success, true);
+
+    let capturedUrl;
+    let capturedOptions;
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ status: 'ok', found: false, events: [] }) };
+    };
+
+    const withLimit = await handleGetCustodyEvents({ sourceMessageId: 'msg-1', limit: 7 });
+    assert.equal(withLimit.isError, undefined);
+    const url = new URL(capturedUrl);
+    assert.equal(url.pathname, '/api/callbacks/custody-events');
+    assert.deepEqual(
+      [...url.searchParams.entries()],
+      [
+        ['sourceMessageId', 'msg-1'],
+        ['limit', '7'],
+      ],
+    );
+    assert.equal(capturedOptions.method, undefined, 'a plain GET');
+    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
+    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+
+    await handleGetCustodyEvents({ sourceMessageId: 'msg-2' });
+    assert.deepEqual([...new URL(capturedUrl).searchParams.keys()], ['sourceMessageId'], 'no limit unless given');
+  });
+
+  test('handleGetCustodyEvents hands a 503 back as an error with its reason, never as an empty answer', async () => {
+    const { handleGetCustodyEvents } = await import('../dist/tools/callback-tools.js');
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 503,
+      text: async () => JSON.stringify({ status: 'unavailable', reason: 'event_log_read_failed' }),
+    });
+
+    const result = await handleGetCustodyEvents({ sourceMessageId: 'msg-1' });
+
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /503/);
+    assert.match(result.content[0].text, /event_log_read_failed/);
+  });
+
+  test('handleCompleteA2ADispatch forwards adoptSourceMessageId in POST body for adopted dispatch', async () => {
+    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ outcome: 'applied' }) };
+    };
+
+    const result = await handleCompleteA2ADispatch({
+      disposition: 'completed',
+      adoptSourceMessageId: 'msg-adopt-123',
+    });
+
+    assert.equal(result.isError, undefined);
+    assert.deepEqual(JSON.parse(capturedOptions.body), {
+      disposition: 'completed',
+      adoptSourceMessageId: 'msg-adopt-123',
+    });
+  });
+
+  test('handleCompleteA2ADispatch omits adoptSourceMessageId when not provided', async () => {
+    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
+    let capturedOptions;
+    globalThis.fetch = async (_url, options) => {
+      capturedOptions = options;
+      return { ok: true, json: async () => ({ outcome: 'applied' }) };
+    };
+
+    const result = await handleCompleteA2ADispatch({ disposition: 'handled' });
+
+    assert.equal(result.isError, undefined);
+    const body = JSON.parse(capturedOptions.body);
+    assert.deepEqual(body, { disposition: 'handled' });
+    assert.equal(body.adoptSourceMessageId, undefined, 'adoptSourceMessageId must not be present when omitted');
   });
 
   test('handleUpdateEntrustedWork forwards one typed nonterminal Task-owner action', async () => {
@@ -550,6 +655,48 @@ describe('MCP Callback Tools', () => {
     assert.ok(result.content[0].text.includes('NOT delivered'));
   });
 
+  test('handleCrossPostMessage preserves pagination reason and gives executable target-thread catch-up', async () => {
+    const { handleCrossPostMessage } = await import('../dist/tools/callback-tools.js');
+
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => ({
+        status: 'held',
+        reason: 'newer_messages_available',
+        freshnessReason: 'pagination_limit_uncertain',
+        unseenCount: 0,
+        unseenCountKnown: false,
+        previews: [],
+        omittedCount: 0,
+        actions: ['read_latest', 'revise', 'send_with_acknowledge'],
+        catchUp: {
+          tool: 'cat_cafe_get_thread_context',
+          arguments: { threadId: 'thread-target', readIntent: 'unread', responseMode: 'full' },
+          continuation: { cursorArgument: 'cursor', cursorFrom: 'nextCursor', completeWhen: 'hasMore=false' },
+        },
+      }),
+    });
+
+    const result = await handleCrossPostMessage({
+      threadId: 'thread-target',
+      targetCats: ['codex'],
+      content: 'Recover this delivery',
+    });
+
+    assert.equal(result.isError, true);
+    const text = result.content[0].text;
+    assert.match(text, /pagination_limit_uncertain/);
+    assert.match(text, /unseen count is unknown/i);
+    assert.doesNotMatch(text, /You have 0 unseen message/);
+    assert.match(text, /cat_cafe_get_thread_context/);
+    assert.match(text, /thread-target/);
+    assert.match(text, /readIntent.*unread/);
+    assert.match(text, /responseMode.*full/);
+    assert.match(text, /nextCursor/);
+    assert.match(text, /hasMore=false/);
+    assert.match(text, /cat_cafe_cross_post_message.*acknowledgeHeld: true/s);
+  });
+
   test('handlePostMessage treats normal success as success (not stale)', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
 
@@ -729,6 +876,40 @@ describe('MCP Callback Tools', () => {
     assert.ok(capturedUrl.includes('cursor=opaque-page-token'));
     assert.ok(capturedUrl.includes('keyword=budget+needle'));
     assert.ok(capturedUrl.includes('responseMode=full'));
+  });
+
+  test('handleGetThreadContext forwards selection intent and blocks filtered unread locally', async () => {
+    const { handleGetThreadContext, getThreadContextInputSchema } = await import('../dist/tools/callback-tools.js');
+    assert.equal(getThreadContextInputSchema.readIntent.parse(undefined), 'history');
+    assert.equal(getThreadContextInputSchema.readIntent.safeParse('latest').success, false);
+    let capturedUrl;
+    globalThis.fetch = async (url) => {
+      capturedUrl = url;
+      return { ok: true, json: async () => ({ messages: [], hasMore: false }) };
+    };
+    const result = await handleGetThreadContext({
+      threadId: 'thread-42',
+      readIntent: 'unread',
+      responseMode: 'full',
+      limit: 2,
+      cursor: 'opaque-page-token',
+    });
+    assert.equal(result.isError, undefined);
+    assert.ok(capturedUrl.includes('readIntent=unread'));
+    assert.ok(capturedUrl.includes('responseMode=full'));
+    capturedUrl = undefined;
+    for (const filter of [
+      { keyword: 'needle' },
+      { catId: 'opus' },
+      { messageId: 'msg-1' },
+      { before: 0 },
+      { after: 0 },
+    ]) {
+      const blocked = await handleGetThreadContext({ readIntent: 'unread', ...filter });
+      assert.equal(blocked.isError, true);
+      assert.match(blocked.content[0].text, /readIntent=history/);
+    }
+    assert.equal(capturedUrl, undefined, 'invalid unread must not send HTTP');
   });
 
   test('handleListThreads forwards limit/activeSince filters', async () => {
@@ -1544,6 +1725,27 @@ describe('MCP Callback Tools', () => {
 
     assert.equal(result.isError, undefined);
     assert.ok(capturedUrl.includes('/api/callbacks/create-rich-block'));
+  });
+
+  test('handleCreateRichBlock surfaces a completed-invocation rejection without fallback or outbox', async () => {
+    const { handleCreateRichBlock } = await import('../dist/tools/callback-tools.js');
+    let attempts = 0;
+    globalThis.fetch = async () => {
+      attempts += 1;
+      return {
+        ok: false,
+        status: 409,
+        text: async () =>
+          JSON.stringify({ code: 'RICH_BLOCK_INVOCATION_COMPLETE', error: 'Invocation has already completed' }),
+      };
+    };
+
+    const block = JSON.stringify({ id: 'late-card', kind: 'card', v: 1, title: 'Late' });
+    const result = await handleCreateRichBlock({ block });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /RICH_BLOCK_INVOCATION_COMPLETE/);
+    assert.equal(attempts, 1);
+    assert.deepEqual(readdirSync(outboxDir), []);
   });
 
   test('handleCreateRichBlock lets synthesized audio outlive the generic callback timeout', async () => {

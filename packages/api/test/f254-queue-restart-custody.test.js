@@ -138,6 +138,27 @@ function createReconciler({
 }
 
 describe('F254 Queue restart custody', () => {
+  test('startup recovery overlaps independent messages with a bounded read fanout', async () => {
+    const messageStore = createMessageStore();
+    for (let i = 0; i < 24; i++) {
+      appendQueued(messageStore, custody({ entryId: `entry-batch-${i}` }), { content: `message ${i}` });
+    }
+    const getById = messageStore.getById.bind(messageStore);
+    let active = 0;
+    let peak = 0;
+    messageStore.getById = async (id) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      active -= 1;
+      return getById(id);
+    };
+    const result = await createReconciler({ messageStore, invocationQueue: new InvocationQueue() }).reconcile();
+    assert.equal(result.entriesRestored, 24);
+    assert.ok(peak > 1, `independent messages should overlap (peak=${peak})`);
+    assert.ok(peak <= 8, `startup work must remain bounded (peak=${peak})`);
+  });
+
   test('PR7 restores a legal fan-out sibling without replaying its failed sibling', async () => {
     const messageStore = createMessageStore();
     const beforeRestart = new InvocationQueue();

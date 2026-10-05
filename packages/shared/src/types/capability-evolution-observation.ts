@@ -3,7 +3,8 @@ import { ownerTruthRefV1Schema } from './capability-evolution-refs.js';
 
 const bounded = (max: number) => z.string().trim().min(1).max(max);
 const canonicalJoinKeySchema = bounded(500).regex(
-  /^(?:thread|message|subject):[^\s{}[\]"']+$/,
+  // biome-ignore lint/complexity/noUselessEscapeInRegex: Serialized MCP patterns also reach engines with nested character classes.
+  /^(?:thread|message|subject):[^\s\[\]{}"']+$/,
   'join keys must use a canonical thread/message/subject coordinate',
 );
 

@@ -48,6 +48,15 @@ export {
   retirePendingDispatchForFreshnessMismatch,
 } from './action-successor-outcome-state-machine.js';
 export type {
+  RefreshHandledActionSuccessorInput,
+  RefreshHandledActionSuccessorResult,
+} from './action-successor-refresh-state-machine.js';
+export {
+  carrierRefreshEvidenceRef,
+  isCarrierRefreshGeneration,
+  refreshHandledActionSuccessor,
+} from './action-successor-refresh-state-machine.js';
+export type {
   ReplaceActionSuccessorInput,
   ReplaceActionSuccessorResult,
 } from './action-successor-replacement-state-machine.js';

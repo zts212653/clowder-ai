@@ -120,6 +120,13 @@ export {
   handleInspectOfficeDocument,
   inspectOfficeDocumentInputSchema,
 } from './content-editor-tools.js';
+export { contentModificationTools } from './content-modification-tools.js';
+export {
+  developmentReturnInputSchema,
+  developmentReturnTools,
+  handleDevelopmentReturn,
+} from './development-return-tools.js';
+export { developmentWorkInputSchema, developmentWorkTools, handleDevelopmentWork } from './development-work-tools.js';
 export {
   distillationTools,
   handleMarkGeneralizable,
@@ -192,7 +199,13 @@ export {
   graphTools,
   handleGraphResolve,
 } from './graph-tools.js';
-export { handleHomeStateSelf, homeStateSelfInputSchema, homeStateTools } from './home-state-tools.js';
+export {
+  capabilitiesSnapshotInputSchema,
+  handleCapabilitiesSnapshot,
+  handleHomeStateSelf,
+  homeStateSelfInputSchema,
+  homeStateTools,
+} from './home-state-tools.js';
 export {
   handlePreviewOpen,
   handleWorkspaceNavigate,
@@ -234,6 +247,7 @@ export {
   drillMemoryCueInputSchema,
   recordMemoryCueOutcomeInputSchema,
 } from './memory-cue-tools.js';
+export { handleNativeTaskTest, nativeTaskTestTools } from './native-task-test-tool.js';
 export {
   handleListPawFeelInbox,
   handleTriagePawFeel,

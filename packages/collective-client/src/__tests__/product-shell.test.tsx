@@ -12,7 +12,7 @@ const collective = {
 };
 
 describe('Collective product shell', () => {
-  it('marks an experience candidate explicitly so responsive styling cannot alter the default Client', () => {
+  it('does not invent a channel before Service data is available', () => {
     const html = renderToStaticMarkup(
       <ProductShell
         embedded={false}
@@ -20,22 +20,23 @@ describe('Collective product shell', () => {
         connection="online"
         canSteward={false}
         canPair={false}
-        experienceGate="f290-assembly"
         onInvite={() => undefined}
         onPair={() => undefined}
       >
-        <p>体验候选</p>
+        <p>正在读取共同家园</p>
       </ProductShell>,
     );
 
-    expect(html).toContain('data-experience-gate="f290-assembly"');
+    expect(html).not.toContain('data-experience-gate');
+    expect(html).not.toContain('general');
   });
 
-  it('uses the frozen direct-Web spatial grammar and resident language', () => {
+  it('uses Service-owned world navigation and the accepted destination/scene grammar', () => {
     const html = renderToStaticMarkup(
       <ProductShell
         embedded={false}
         collective={collective}
+        collectives={[collective]}
         connection="online"
         canSteward
         canPair
@@ -49,9 +50,9 @@ describe('Collective product shell', () => {
     expect(html).toContain('data-spatial-role="global-rail"');
     expect(html).toContain('data-spatial-role="destination-pane"');
     expect(html).toContain('data-spatial-role="primary-scene"');
-    expect(html).toContain('我的 Café');
-    expect(html).toContain('Needs Me');
-    expect(html).toContain('频道');
+    expect(html).toContain('aria-label="Clowder AI Collective"');
+    expect(html).not.toContain('我的 Café');
+    expect(html).not.toContain('Needs Me');
     expect(html).not.toContain('Canonical order');
     expect(html).not.toContain('Service truth');
   });
@@ -73,7 +74,7 @@ describe('Collective product shell', () => {
 
     expect(html).not.toContain('data-spatial-role="global-rail"');
     expect(html).toContain('连接此 Café');
-    expect(html).toContain('离线期间不会冒充已送达');
+    expect(html).toContain('暂时离线');
   });
 
   it('lets an embedded member pair their own Café without exposing steward governance', () => {
@@ -84,6 +85,31 @@ describe('Collective product shell', () => {
         connection="online"
         canSteward={false}
         canPair
+        canLeave
+        onInvite={() => undefined}
+        onPair={() => undefined}
+        onLeave={() => undefined}
+      >
+        <p>真实 Channel</p>
+      </ProductShell>,
+    );
+
+    expect(html).toContain('连接此 Café');
+    expect(html).toContain('退出共同家园');
+    expect(html).not.toContain('邀请成员');
+    expect(html).toContain('共同家园在线 · 这台 Café 还没连接');
+    expect(html).not.toContain('共同现场已连接');
+  });
+
+  it('separates Service availability from an exact paired Café and its current cats', () => {
+    const html = renderToStaticMarkup(
+      <ProductShell
+        embedded
+        collective={collective}
+        connection="online"
+        cafeConnection={{ catCount: 2 }}
+        canSteward={false}
+        canPair={false}
         onInvite={() => undefined}
         onPair={() => undefined}
       >
@@ -91,7 +117,7 @@ describe('Collective product shell', () => {
       </ProductShell>,
     );
 
-    expect(html).toContain('连接此 Café');
-    expect(html).not.toContain('邀请成员');
+    expect(html).toContain('这台 Café 已连接 · 2 位猫猫在场');
+    expect(html).not.toContain('连接此 Café');
   });
 });

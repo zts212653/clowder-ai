@@ -1,3 +1,4 @@
+import { evolutionExplorationReviewV1Schema } from '@cat-cafe/shared';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -36,6 +37,48 @@ describe('exploration in the actual journey surface', () => {
     host.remove();
     delete (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
   });
+  it('keeps public archives reachable when the Program also has formal owner versions', async () => {
+    const value = programFixture('observing');
+    value.program.objectRef = objectRef;
+    const archive = explorationFixture();
+    const nodes = [
+      ...archive.nodes,
+      {
+        kind: 'public_archive',
+        nodeRef: source('public-other'),
+        title: '公开样本',
+        summary: '尚无实验',
+        sourceRef: source('archive'),
+        changes: [],
+        parentEdges: [],
+      },
+    ];
+    evolutionExplorationReviewV1Schema.parse({ ...archive, nodes });
+    api.fetch.mockImplementation(async (path: string) => {
+      if (!path.includes('/exploration')) return new Response('{}', { status: 404 });
+      const archive = explorationFixture({ withDetail: path.includes('selectedExperimentRef') });
+      return Response.json(evolutionExplorationReviewV1Schema.parse({ ...archive, nodes }));
+    });
+    await act(async () =>
+      root.render(
+        <EvolutionMomentContext projection={parseProgramProjection(value)!} moment={2} explorationMode="workspace" />,
+      ),
+    );
+    const picker = host.querySelector<HTMLSelectElement>('[aria-label="版本来源"]');
+    expect(picker, host.textContent ?? '').not.toBeNull();
+    expect(picker?.value).toBe('owner_version');
+    await act(async () => {
+      picker!.value = 'public_archive';
+      picker!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.querySelector('.exploration-decision-header h2')?.textContent).toBe('公开样本');
+    expect(host.querySelector('.exploration-caption')?.textContent).toContain('公开归档不表示已采用');
+    await act(async () => {
+      picker!.value = 'owner_version';
+      picker!.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(host.textContent).toContain('未登录读取');
+  });
   it('shows unavailable owner truth beside a readable archive instead of implying no formal versions exist', async () => {
     const value = programFixture('observing');
     value.program.objectRef = objectRef;
@@ -69,10 +112,8 @@ describe('exploration in the actual journey surface', () => {
     expect(host.querySelector('[aria-label="探索来源待确认"]')?.textContent).toContain('正式版本暂不可读');
     expect(host.textContent).toContain('版本来源的目标已变化');
     expect(host.textContent).toContain('公开 v8');
-    const owner = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
-      (entry) => entry.textContent === '本项目版本',
-    );
-    expect(owner?.disabled).toBe(true);
+    expect(host.querySelector('.exploration-caption')?.textContent).toContain('公开归档不表示已采用');
+    expect(host.querySelector('.exploration-node')?.textContent).not.toContain('当前沿用');
   });
   it('recovers from an unavailable persisted node without losing the draft or requiring storage cleanup', async () => {
     const value = programFixture('observing');
@@ -106,7 +147,7 @@ describe('exploration in the actual journey surface', () => {
         <EvolutionMomentContext projection={projection} moment={2} {...{ explorationMode: 'workspace' as const }} />,
       );
     });
-    expect(host.querySelector('[aria-label="版本谱系"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="版本导航"]')).not.toBeNull();
     expect(host.textContent).toContain('未登录读取');
     expect(host.textContent).toContain('401');
     const input = host.querySelector<HTMLTextAreaElement>('[aria-label="继续探索的想法"]');

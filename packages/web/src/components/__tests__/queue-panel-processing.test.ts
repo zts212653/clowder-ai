@@ -88,6 +88,27 @@ describe('QueuePanel processing recovery', () => {
   let container: HTMLDivElement;
   let root: Root;
 
+  it('does not offer duplicate recovery during an exact guard, but restores it after the owner ends', () => {
+    useChatStore.setState({
+      queue: [withTargetStates({ opus: 'seen' })],
+      queuePaused: false,
+      activeInvocations: { parent: { catId: 'opus', mode: 'execute' } },
+      catInvocations: {
+        opus: {
+          invocationId: 'parent',
+          turnInvocationId: 'guard',
+          settlement: { activeTurnInvocationId: 'guard', completedTurnInvocationIds: ['inv-opus'] },
+        },
+      },
+    });
+    act(() => root.render(React.createElement(QueuePanel, { threadId: 'thread-1' })));
+    expect(container.textContent).not.toContain('待处理');
+    expect(container.querySelector('[data-testid="queue-recover"]')).toBeNull();
+    act(() => useChatStore.setState({ activeInvocations: {} }));
+    expect(container.textContent).toContain('尚未确认处理完成');
+    expect(container.querySelector('[data-testid="queue-recover"]')).not.toBeNull();
+  });
+
   it('#1371 exposes the failed managed wake behind a paused queue instead of an empty counter', () => {
     const failedWake: QueueEntry = {
       ...withTargetStates({ opus: 'failed' }),

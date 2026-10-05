@@ -1,5 +1,7 @@
-import type { PawFeelDispositionEvent } from '@cat-cafe/shared';
+import type { PawFeelDispositionEvent, PawFeelDispositionProjection } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
+import { awaitPawFeelRead } from './projection/bounded-reads.js';
+import { RedisPawFeelProjectionReader } from './projection/redis-projection-reader.js';
 import { parsePawFeelDispositionEvent } from './schema.js';
 import { type PawFeelSignalScanCursorV1, type PawFeelSignalScanPage, scanPawFeelSignalIds } from './signal-scan.js';
 
@@ -20,12 +22,16 @@ export type PawFeelDispositionAppendResult =
   | { outcome: 'conflict'; actualSequence: number };
 
 export interface IPawFeelDispositionEventLog {
+  readProjections?(
+    signalIds: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<Map<string, PawFeelDispositionProjection>>;
   append(event: PawFeelDispositionEvent, expectedSequence: number): Promise<PawFeelDispositionAppendResult>;
-  read(signalId: string, fromSequence?: number): Promise<PawFeelDispositionEvent[]>;
-  readMany?(signalIds: readonly string[]): Promise<Map<string, PawFeelDispositionEvent[]>>;
+  read(signalId: string, fromSequence?: number, signal?: AbortSignal): Promise<PawFeelDispositionEvent[]>;
+  readMany?(signalIds: readonly string[], signal?: AbortSignal): Promise<Map<string, PawFeelDispositionEvent[]>>;
   scanSignalIds(cursor: PawFeelSignalScanCursorV1 | undefined, limit: number): Promise<PawFeelSignalScanPage>;
-  listSignalIds(): Promise<string[]>;
-  listSignalIdsBySourceMessageId(sourceMessageId: string): Promise<string[]>;
+  listSignalIds(signal?: AbortSignal): Promise<string[]>;
+  listSignalIdsBySourceMessageId(sourceMessageId: string, signal?: AbortSignal): Promise<string[]>;
 }
 
 const APPEND_LUA = `
@@ -61,7 +67,21 @@ function escapeRedisGlob(value: string): string {
 }
 
 export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEventLog {
-  constructor(private readonly redis: RedisClient) {}
+  private readonly projectionReader: RedisPawFeelProjectionReader;
+  constructor(private readonly redis: RedisClient) {
+    this.projectionReader = new RedisPawFeelProjectionReader(
+      redis,
+      PawFeelDispositionKeys.eventLog,
+      async (id, from, to) => {
+        const encoded = await redis.lrange(PawFeelDispositionKeys.eventLog(id), from, to);
+        return encoded.map((value) => parsePawFeelDispositionEvent(JSON.parse(value)));
+      },
+    );
+  }
+
+  readProjections(ids: readonly string[], signal?: AbortSignal): Promise<Map<string, PawFeelDispositionProjection>> {
+    return this.projectionReader.readMany(ids, signal);
+  }
 
   async append(event: PawFeelDispositionEvent, expectedSequence: number): Promise<PawFeelDispositionAppendResult> {
     requireSequence(expectedSequence, 'expectedSequence');
@@ -83,9 +103,13 @@ export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEvent
     return { outcome: 'appended', sequence: result[1] };
   }
 
-  async read(signalId: string, fromSequence = 0): Promise<PawFeelDispositionEvent[]> {
+  async read(signalId: string, fromSequence = 0, signal?: AbortSignal): Promise<PawFeelDispositionEvent[]> {
+    signal?.throwIfAborted();
     requireSequence(fromSequence, 'fromSequence');
-    const encoded = await this.redis.lrange(PawFeelDispositionKeys.eventLog(signalId), fromSequence, -1);
+    const encoded = await awaitPawFeelRead(
+      this.redis.lrange(PawFeelDispositionKeys.eventLog(signalId), fromSequence, -1),
+      signal,
+    );
     return encoded.map((value) => parsePawFeelDispositionEvent(JSON.parse(value)));
   }
 
@@ -93,22 +117,20 @@ export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEvent
     return scanPawFeelSignalIds(this.redis, PawFeelDispositionKeys.signals, rawCursor, limit);
   }
 
-  async listSignalIds(): Promise<string[]> {
-    return (await this.redis.smembers(PawFeelDispositionKeys.signals)).sort();
+  async listSignalIds(signal?: AbortSignal): Promise<string[]> {
+    signal?.throwIfAborted();
+    return (await awaitPawFeelRead(this.redis.smembers(PawFeelDispositionKeys.signals), signal)).sort();
   }
 
-  async listSignalIdsBySourceMessageId(sourceMessageId: string): Promise<string[]> {
+  async listSignalIdsBySourceMessageId(sourceMessageId: string, signal?: AbortSignal): Promise<string[]> {
     const signalIds = new Set<string>();
     const pattern = `${escapeRedisGlob(sourceMessageId)}:*`;
     let cursor = '0';
     do {
-      const [nextCursor, matches] = await this.redis.sscan(
-        PawFeelDispositionKeys.signals,
-        cursor,
-        'MATCH',
-        pattern,
-        'COUNT',
-        SOURCE_SCAN_COUNT,
+      signal?.throwIfAborted();
+      const [nextCursor, matches] = await awaitPawFeelRead(
+        this.redis.sscan(PawFeelDispositionKeys.signals, cursor, 'MATCH', pattern, 'COUNT', SOURCE_SCAN_COUNT),
+        signal,
       );
       for (const signalId of matches) signalIds.add(signalId);
       cursor = nextCursor;
@@ -116,10 +138,11 @@ export class RedisPawFeelDispositionEventLog implements IPawFeelDispositionEvent
     return [...signalIds].sort();
   }
 
-  async readMany(signalIds: readonly string[]): Promise<Map<string, PawFeelDispositionEvent[]>> {
+  async readMany(signalIds: readonly string[], signal?: AbortSignal): Promise<Map<string, PawFeelDispositionEvent[]>> {
+    signal?.throwIfAborted();
     const pipeline = this.redis.pipeline();
     for (const signalId of signalIds) pipeline.lrange(PawFeelDispositionKeys.eventLog(signalId), 0, -1);
-    const replies = await pipeline.exec();
+    const replies = await awaitPawFeelRead(pipeline.exec(), signal);
     if (!replies) throw new Error('paw-feel event-log pipeline returned no replies');
     const events = new Map<string, PawFeelDispositionEvent[]>();
     for (let index = 0; index < signalIds.length; index += 1) {

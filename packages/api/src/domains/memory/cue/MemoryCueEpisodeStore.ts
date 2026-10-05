@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   memoryCueDrillFamilyForResolver,
   RECALL_OPPORTUNITY_CATALOG_VERSION,
@@ -66,6 +67,15 @@ export const memoryCueEventInputSchema = z.discriminatedUnion('axis', [
 export type MemoryCueEventInput = z.infer<typeof memoryCueEventInputSchema>;
 export type MemoryCueConsumptionOutcome = (typeof MEMORY_CUE_CONSUMPTION_OUTCOMES)[number];
 export type MemoryCueInvalidationReason = (typeof MEMORY_CUE_INVALIDATION_REASONS)[number];
+
+export function memoryCueConsumptionIdempotencyKey(
+  cueId: string,
+  outcome: Exclude<MemoryCueConsumptionOutcome, 'presented'>,
+  requestId: string,
+): string {
+  const digest = createHash('sha256').update(['consumption', cueId, outcome, requestId].join('\0')).digest('hex');
+  return `memory-cue-consumption-${digest.slice(0, 40)}`;
+}
 
 export interface MemoryCueEvent {
   eventId: string;
@@ -203,6 +213,18 @@ export class MemoryCueEpisodeStore {
            ORDER BY occurred_at ASC, rowid ASC`,
         )
         .all(ownerUserId, cueId) as MemoryCueEventRow[]
+    ).map(fromRow);
+  }
+
+  listByInvocation(ownerUserId: string, threadId: string, invocationId: string): MemoryCueEvent[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM memory_cue_events
+           WHERE owner_user_id = ? AND thread_id = ? AND invocation_id = ?
+           ORDER BY occurred_at ASC, rowid ASC`,
+        )
+        .all(ownerUserId, threadId, invocationId) as MemoryCueEventRow[]
     ).map(fromRow);
   }
 
@@ -375,7 +397,10 @@ export class MemoryCueEpisodeStore {
   }
 
   private assertExactRetry(input: MemoryCueEventInput, actual: MemoryCueEvent): MemoryCueEvent {
-    const expected = expectedEvent(input, actual.createdAt);
+    // Idempotent retries can arrive later than the first committed write. The
+    // original event owns occurrence time; compare every caller-controlled
+    // coordinate/outcome field while reusing that committed timestamp.
+    const expected = expectedEvent({ ...input, occurredAt: actual.occurredAt }, actual.createdAt);
     if (JSON.stringify(immutableProjection(actual)) !== JSON.stringify(immutableProjection(expected))) {
       throw new MemoryCueEventConflictError(input.idempotencyKey);
     }

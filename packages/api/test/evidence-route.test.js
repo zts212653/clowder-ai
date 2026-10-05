@@ -726,6 +726,53 @@ describe('GET /api/evidence/search', () => {
     assert.equal(body.results.length, 3);
   });
 
+  it('F324: bounds the complete topk envelope with a large derived entity appendix', async () => {
+    const entityMatches = Array.from({ length: 2_456 }, (_, index) => ({
+      entityId: 'person:sol',
+      type: 'person',
+      canonicalName: 'Sol',
+      matchedAlias: 'Sol',
+      surface: `mention-${index}`,
+      source: 'passage',
+      docAnchor: 'thread:sol',
+      passageId: `passage-${index}`,
+      why: 'derived entity explanation '.repeat(8),
+      provenance: [{ source: 'entity registry', anchor: `passage-${index}` }],
+    }));
+    await setup({
+      search: async () =>
+        Array.from({ length: 3 }, (_, index) => ({
+          anchor: `thread:sol-${index}`,
+          kind: 'thread',
+          status: 'active',
+          title: `Sol naming ${index}`,
+          summary: 'Source remains available through its thread anchor.',
+          updatedAt: '2026-09-27T00:00:00Z',
+          entityMatches,
+        })),
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/evidence/search?q=Sol%20naming&scope=threads&mode=hybrid&limit=3&include_expansion=false',
+    });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.ok(res.body.length <= 24_000, `topk API envelope used ${res.body.length} chars`);
+    assert.deepEqual(
+      body.results.map((item) => item.anchor),
+      ['thread:sol-0', 'thread:sol-1', 'thread:sol-2'],
+    );
+    assert.equal(body.response.truncated, true);
+    assert.equal(body.response.serializedChars, res.body.length);
+    assert.equal(
+      body.response.omittedEntityMatches,
+      2_456 * 3 - body.results.reduce((n, item) => n + (item.entityMatches?.length ?? 0), 0),
+    );
+    assert.ok(body.results.every((item) => item.entityMatchesOmitted > 0));
+    assert.ok(body.results.every((item) => item.entityMatchesDrillUnavailable === 'derived-appendix-not-pageable'));
+  });
+
   // ── F163: variantId + boostSource in response ─────────────────────
   it('F163: response includes variantId (12-char hex)', async () => {
     await setup({ search: async () => [] });

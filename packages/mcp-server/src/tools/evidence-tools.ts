@@ -3,7 +3,7 @@
  * MCP 工具: 搜索项目知识 (SQLite FTS5 + semantic rerank)
  *
  * F102 Phase D: 统一检索入口。支持 scope/mode/depth 分层。
- * 不依赖 callback 鉴权 — evidence 路由是公开 GET。
+ * 文档模式保公开 GET；消息模式走 invocation/agent-key 鉴权与 canonical visibility。
  */
 
 import {
@@ -16,7 +16,8 @@ import {
   type SuggestedCrossPostAction,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { bindMcpImplementation, defineMcpTool } from '../tool-governance.js';
+import { callbackGet } from './callback-tools.js';
 import { formatSuggestedCrossPostActionLines } from './cross-post-suggestion-format.js';
 import { composeCoverageIntentNudge } from './evidence-coverage-nudge.js';
 import { type CoverageToolData, renderCoverageToolResponse } from './evidence-coverage-response.js';
@@ -26,13 +27,9 @@ import { errorResult, successResult } from './file-tools.js';
 const API_URL = process.env['CAT_CAFE_API_URL'] ?? 'http://localhost:3004';
 const COVERAGE_OUTER_HTTP_BUDGET_MS = 16_000;
 
-const defineTool = defineMcpMigrationFactory('evidence-tools.ts', undefined, {
-  resourceFamily: 'evidence-navigation',
-  authority: 'local-runtime',
-});
-
 const DOC_SOURCE_TYPES = new Set(['feature', 'decision', 'phase', 'architecture', 'lesson', 'plan', 'research']);
 const EVIDENCE_RESULT_MARKER = 'Evidence search results:';
+const TOPK_TOOL_RESPONSE_CHAR_BUDGET = 24_000;
 let searchCount = 0;
 
 type EvidenceEntityMatch = {
@@ -55,6 +52,25 @@ type EvidenceDrillDown = {
 };
 
 export const searchEvidenceInputSchema = {
+  resultUnit: z
+    .enum(['document', 'message'])
+    .optional()
+    .describe(
+      'Result unit: document (default) or distinct canonical messages for finding an earlier discussion. Message mode uses authenticated callback access.',
+    ),
+  messageSort: z
+    .enum(['time', 'relevance'])
+    .optional()
+    .describe(
+      'Message mode only: time (oldest candidate first, default) or relevance. Limited recall does not prove the first occurrence in all history.',
+    ),
+  agentKeyCatId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Message mode: persistent-agent identity selector for shared Antigravity MCP. Ignored when full invocation credentials are present.',
+    ),
   query: z.string().min(1).max(2_000).describe('Search query for project knowledge (max 2,000 characters)'),
   limit: z.number().int().min(1).max(20).optional().describe('Max results (default 5)'),
   scope: z
@@ -81,7 +97,7 @@ export const searchEvidenceInputSchema = {
     .string()
     .optional()
     .describe(
-      'Filter results to a specific thread. Only returns evidence from that thread digest. For reading raw messages, use get_thread_context instead.',
+      'Filter results to a specific conversation. Document mode returns its digest; message mode returns distinct readable message hits. Omit in message mode for global readable conversations. For full messages, use get_thread_context.',
     ),
   dimension: z
     .enum(['project', 'global', 'library', 'collection', 'all'])
@@ -129,6 +145,9 @@ export interface EvidenceToolCallExtra {
 export async function handleSearchEvidence(
   input: {
     query: string;
+    resultUnit?: 'document' | 'message';
+    messageSort?: 'time' | 'relevance';
+    agentKeyCatId?: string;
     limit?: number | undefined;
     scope?: string | undefined;
     mode?: string | undefined;
@@ -146,6 +165,22 @@ export async function handleSearchEvidence(
   },
   extra?: EvidenceToolCallExtra,
 ): Promise<ToolResult> {
+  if (input.resultUnit === 'message') {
+    const params: Record<string, string> = {
+      q: input.query,
+      resultUnit: 'message',
+      scope: input.scope ?? 'threads',
+      messageSort: input.messageSort ?? 'time',
+      mode: input.mode ?? 'hybrid',
+    };
+    if (input.threadId) params.threadId = input.threadId;
+    if (input.limit !== undefined) params.limit = String(input.limit);
+    if (input.dateFrom) params.dateFrom = input.dateFrom;
+    if (input.dateTo) params.dateTo = input.dateTo;
+    if (input.dimension) params.dimension = input.dimension;
+    if (input.intent) params.intent = input.intent;
+    return callbackGet('/api/callbacks/search-evidence', params, { agentKeyCatId: input.agentKeyCatId });
+  }
   const { dimension = 'project' } = input;
   const params = new URLSearchParams({ q: input.query });
   if (input.limit != null) params.set('limit', String(input.limit));
@@ -221,6 +256,9 @@ export async function handleSearchEvidence(
         boostSource?: string[];
         matchReason?: string;
         entityMatches?: EvidenceEntityMatch[];
+        entityMatchesOmitted?: number;
+        entityMatchesDrillUnavailable?: string;
+        passagesOmitted?: number;
         drillDown?: EvidenceDrillDown;
         sourcePath?: string;
         rankingFactors?: { bm25Score?: number; consumptionPrior?: number; mmrPenalty?: number };
@@ -264,6 +302,12 @@ export async function handleSearchEvidence(
       }>;
       /** F256 Wave 1b: expansion health funnel metadata */
       expansionMeta?: ExpansionFunnelMeta;
+      response?: {
+        truncated: boolean;
+        omittedEntityMatches: number;
+        omittedPassages: number;
+        omittedExpansionHints: number;
+      };
     };
 
     const degradedBanner = formatDegradedBanner(data.degraded, data.degradeReason, data.effectiveMode);
@@ -353,6 +397,11 @@ export async function handleSearchEvidence(
         for (const entityMatch of r.entityMatches) {
           lines.push(...formatEntityMatchLines(entityMatch));
         }
+      }
+      if (r.entityMatchesOmitted) {
+        lines.push(
+          `  entityMatches omitted: ${r.entityMatchesOmitted}; derived appendix is not pageable; open the source anchor for original evidence.`,
+        );
       }
       if (r.drillDown) {
         lines.push(...formatDrillDownLines(r.drillDown));
@@ -453,7 +502,9 @@ export async function handleSearchEvidence(
       }),
     );
 
-    return successResult(lines.join('\n'));
+    const rendered = lines.join('\n');
+    if (rendered.length <= TOPK_TOOL_RESPONSE_CHAR_BUDGET) return successResult(rendered);
+    return successResult(renderCompactTopkResponse(data.results, queryLabel, data.degraded));
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const stack = err instanceof Error ? err.stack : undefined;
@@ -625,6 +676,78 @@ function formatEntityMatchLines(match: EvidenceEntityMatch): string[] {
   return lines;
 }
 
+function boundTopkField(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+}
+
+function renderCompactTopkResponse(
+  results: Array<{
+    title: string;
+    anchor: string;
+    snippet: string;
+    matchRank: string;
+    sourceType: string;
+    authority?: string;
+    updatedAt?: string;
+    sourcePath?: string;
+    drillDown?: EvidenceDrillDown;
+    entityMatches?: EvidenceEntityMatch[];
+    entityMatchesOmitted?: number;
+    passages?: Array<unknown>;
+    passagesOmitted?: number;
+  }>,
+  queryLabel: string,
+  degraded: boolean,
+): string {
+  const lines = [
+    `${EVIDENCE_RESULT_MARKER} Found ${results.length} result(s) for ${boundTopkField(queryLabel, 220)} [bounded topk]:`,
+    '⚠️ Search detail exceeded the 24,000-character envelope; ranked source references remain visible.',
+    '',
+  ];
+  for (const result of results) {
+    lines.push(
+      `[match:${result.matchRank} · authority:${boundTopkField(result.authority ?? 'unknown', 80)} · updated:${boundTopkField(result.updatedAt ?? 'unknown', 80)}] ${boundTopkField(result.title, 140)}`,
+      `  anchor: ${boundTopkField(result.anchor, 300)}`,
+      `  type: ${boundTopkField(result.sourceType, 60)}`,
+    );
+    if (result.sourcePath) lines.push(`  sourcePath: ${boundTopkField(result.sourcePath, 300)}`);
+    if (result.anchor.length > 300 || (result.sourcePath?.length ?? 0) > 300) {
+      lines.push('  sourceReferenceTruncated: true; exact reference unavailable in this compact projection.');
+    }
+    if (result.drillDown) {
+      const drill = JSON.stringify(result.drillDown);
+      lines.push(
+        drill.length <= 500
+          ? `  drillDown: ${drill}`
+          : '  drillUnavailable: exact drill hint exceeded this bounded projection; open the source anchor.',
+      );
+    }
+    const omittedEntities = (result.entityMatches?.length ?? 0) + (result.entityMatchesOmitted ?? 0);
+    if (omittedEntities > 0) {
+      lines.push(
+        `  entityMatches omitted: ${omittedEntities}; derived appendix is not pageable; open the source anchor for original evidence.`,
+      );
+    }
+    const omittedPassages = (result.passages?.length ?? 0) + (result.passagesOmitted ?? 0);
+    if (omittedPassages > 0) lines.push(`  passages omitted: ${omittedPassages}; open the source anchor.`);
+    lines.push(`  > ${boundTopkField(result.snippet.replace(/\n/g, ' '), 170)}`, '');
+  }
+  lines.push(
+    formatRecallMeta({
+      resultStatus: 'counted',
+      resultCount: results.length,
+      degraded,
+      truncated: true,
+      readNextHint: 'Open the listed source anchors. Derived entity-match appendix has no direct continuation.',
+    }),
+  );
+  const text = lines.join('\n');
+  if (text.length > TOPK_TOOL_RESPONSE_CHAR_BUDGET) {
+    throw new Error('Topk source reference projection exceeds the declared response budget');
+  }
+  return text;
+}
+
 function formatDrillDownLines(drillDown: EvidenceDrillDown): string[] {
   const params = Object.entries(drillDown.params ?? {})
     .map(([key, value]) => `${key}=${value}`)
@@ -637,19 +760,21 @@ function formatDrillDownLines(drillDown: EvidenceDrillDown): string[] {
 }
 
 export const evidenceTools = [
-  defineTool({
+  defineMcpTool({
     name: 'cat_cafe_search_evidence',
     description:
-      'Search project knowledge base — features, decisions, architecture maps, plans, lessons, session history. ' +
-      'Use when: semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
+      'Search project knowledge or distinct readable messages from earlier conversations. ' +
+      'Use when: finding an earlier discussion ("以前聊过 / 找回旧消息", resultUnit=message), semantically finding project knowledge, tracing a topic across docs or threads, or building a bounded coverage/source map. ' +
       'NOT for: resolving a known exact anchor (use cat_cafe_graph_resolve), scanning recent items without a query (use cat_cafe_list_recent), or reading raw messages from a known thread (use get_thread_context). ' +
-      'Output: ranked evidence summaries with typed match, authority, freshness, provenance, degradation, and continuation metadata; this is read-only. ' +
+      'Output: document-mode evidence summaries, or message-mode canonical source snippets, thread/message coordinates and honest scope/degradation metadata; this is read-only and does not navigate. ' +
+      'MESSAGE CONTRACT: resultUnit=message supports messageSort=time (default) or relevance and mode=hybrid (default); scope is threads, optional threadId means current conversation, omission means all readable project conversations. Authenticated invocation binds the exact question exclusion; caller-supplied user/source IDs are ignored. Limited results and unknown freshness do not prove the first occurrence or complete history. ' +
       'GOTCHA: matchRank is rank position, not trust; authority is document reliability, and broad coverage requires separate docs + threads searches instead of treating one all-scope query as exhaustive. ' +
       'Semantic/fuzzy find entry point for memory recall. For precise anchors (F186, ADR-019), prefer cat_cafe_graph_resolve; for zero-prior scanning, prefer cat_cafe_list_recent; when unsure, start here with mode=hybrid. ' +
       'Supports scope (docs/threads/all), mode (lexical/semantic/hybrid), and depth (summary/raw). ' +
       'QUERY CONTRACT: query has max 2,000 characters; overlong input fails validation instead of being truncated. ' +
       'THREAD FILTER CONTRACT: threadId is enforced at the final response boundary; results can only come from that thread, and empty responses state whether the filter was authoritative or degraded. Related-direction expansion is suppressed for exact thread searches. ' +
       'COVERAGE CONTRACT: caller scope is executed exactly; coverage limit has max 20; latency is bounded; serialized output has a declared budget with explicit truncation and a continuation drill pointer. ' +
+      'TOPK CONTRACT: complete API/MCP output is bounded to 24k characters; omitted derived entity explanations report their count and lack a direct pager, while source anchors remain readable. ' +
       'At the 15s API deadline coverage returns an explicit partial/degraded result; the MCP HTTP caller cancels any request that outlives that boundary plus transport grace. ' +
       'SCOPE STRATEGY (decide first!): ' +
       'docs = 结论/真相源 (features, ADRs, architecture maps, plans, lessons). ' +
@@ -675,13 +800,64 @@ export const evidenceTools = [
       'this tool (search_evidence) = semantic/fuzzy find; ' +
       'session drill-down → list_session_chain / read_session_digest / read_session_events / read_invocation_detail. ' +
       'When this tool returns no results or only low match-rank hits, payload appends a deterministic nudge pointing to graph_resolve/list_recent (KD-7).',
-    inputSchema: searchEvidenceInputSchema,
-    handler: handleSearchEvidence,
-    governance: {
-      implementationExport: 'handleSearchEvidence',
+    operation: {
+      kind: 'single',
       action: 'read',
-      risk: { level: 'read', openWorld: true },
-      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      inputSchema: searchEvidenceInputSchema,
+      closedSelectors: [
+        { field: 'mode', role: 'read-strategy', evidenceRef: 'architecture-cell:mcp-surface-governance' },
+      ],
+      boundary: {
+        risk: { level: 'read', openWorld: true },
+        authorizationPaths: [
+          {
+            principal: 'local-operator',
+            credentialSource: 'local-process',
+            scope: { kind: 'local-runtime' },
+            enforcementRef: 'file:packages/api/src/routes/evidence.ts',
+          },
+          {
+            principal: 'invocation-cat',
+            credentialSource: 'callback-principal',
+            scope: { kind: 'owner-private' },
+            enforcementRef: 'file:packages/api/src/routes/callback-memory-routes.ts',
+          },
+          {
+            principal: 'agent-key-cat',
+            credentialSource: 'agent-key',
+            scope: { kind: 'owner-private' },
+            enforcementRef: 'file:packages/api/src/routes/callback-memory-routes.ts',
+          },
+        ],
+      },
+    },
+    implementation: bindMcpImplementation(
+      'module:./tools/evidence-tools.js#handleSearchEvidence',
+      handleSearchEvidence,
+    ),
+    policy: {
+      resourceFamily: 'evidence-navigation',
+      activeState: 'canonical',
+      schemaDelivery: { policy: 'host-default', evidenceRef: 'file:packages/mcp-server/src/tools/evidence-tools.ts' },
+      runtimeProfiles: [
+        'full',
+        'readonly',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
+      owner: { domainCell: 'architecture-cell:mcp-surface-governance', surface: 'mcp-surface-governance' },
+      standaloneReason: {
+        disposition: 'consolidation-candidate',
+        kind: 'same-resource-lifecycle',
+        evidenceRef: 'file:packages/mcp-server/src/tools/evidence-tools.ts',
+      },
+      cognitiveEntryPoints: [{ kind: 'tool-description', ref: 'file:packages/mcp-server/src/tools/evidence-tools.ts' }],
+      verification: [
+        { kind: 'test', ref: 'test:packages/mcp-server/test/message-search-tools.test.js' },
+        { kind: 'test', ref: 'test:packages/api/test/message-search-routes.test.js' },
+        { kind: 'guard', ref: 'test:packages/mcp-server/test/tool-governance-read-selectors.test.js' },
+      ],
     },
   }),
 ] as const;

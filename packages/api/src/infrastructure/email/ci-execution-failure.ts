@@ -1,3 +1,4 @@
+import { GitHubRateLimitError } from '../github/request-budget.js';
 import type { CiCheckDetail, CiExecutionFailure } from './ci-cd-contract.js';
 
 export interface GitHubExecutionFailureEvidence {
@@ -42,6 +43,7 @@ export function classifyGitHubExecutionFailure(
 }
 
 export async function enrichGitHubExecutionFailures(input: {
+  signal?: AbortSignal;
   repoFullName: string;
   headSha: string;
   checks: CiCheckDetail[];
@@ -70,36 +72,50 @@ export async function enrichGitHubExecutionFailures(input: {
     );
     const jobs = jobsPayloads.flatMap((payload) => payload.jobs ?? []);
     const checkRuns = checkRunsPayload.check_runs ?? [];
-    return Promise.all(
-      input.checks.map(async (check) => {
-        if (check.bucket !== 'fail') return check;
-        const checkRun = checkRuns.find((candidate) => candidate.name === check.name);
-        if (!checkRun) return check;
-        const checkRunPath = `/repos/${input.repoFullName}/check-runs/${checkRun.id}`;
-        const job = jobs.find(
-          (candidate) => candidate.name === check.name && candidate.check_run_url?.endsWith(checkRunPath),
-        );
-        if (!job) return check;
-        const annotations = await input.ghApiJson<Array<{ message?: string; title?: string }>>(
-          `repos/${input.repoFullName}/check-runs/${checkRun.id}/annotations?per_page=100`,
-        );
-        const annotationTexts = [
-          ...annotations.flatMap((annotation) => [annotation.title, annotation.message]),
-          checkRun.output?.title,
-          checkRun.output?.summary,
-          checkRun.output?.text,
-        ].filter((value): value is string => typeof value === 'string');
-        const executionFailure = classifyGitHubExecutionFailure({
-          checkConclusion: checkRun.conclusion ?? '',
-          jobConclusion: job.conclusion ?? '',
-          runnerId: job.runner_id,
-          steps: Array.isArray(job.steps) ? job.steps : [],
-          annotationTexts,
-        });
-        return executionFailure ? { ...check, executionFailure } : check;
-      }),
-    );
+    const enriched: CiCheckDetail[] = [];
+    // The shared credential owner is serialized; do not pre-queue an unbounded
+    // annotation request for every failed check into its bounded admission queue.
+    for (const check of input.checks) {
+      input.signal?.throwIfAborted();
+      if (check.bucket !== 'fail') {
+        enriched.push(check);
+        continue;
+      }
+      const checkRun = checkRuns.find((candidate) => candidate.name === check.name);
+      if (!checkRun) {
+        enriched.push(check);
+        continue;
+      }
+      const checkRunPath = `/repos/${input.repoFullName}/check-runs/${checkRun.id}`;
+      const job = jobs.find(
+        (candidate) => candidate.name === check.name && candidate.check_run_url?.endsWith(checkRunPath),
+      );
+      if (!job) {
+        enriched.push(check);
+        continue;
+      }
+      const annotations = await input.ghApiJson<Array<{ message?: string; title?: string }>>(
+        `repos/${input.repoFullName}/check-runs/${checkRun.id}/annotations?per_page=100`,
+      );
+      const annotationTexts = [
+        ...annotations.flatMap((annotation) => [annotation.title, annotation.message]),
+        checkRun.output?.title,
+        checkRun.output?.summary,
+        checkRun.output?.text,
+      ].filter((value): value is string => typeof value === 'string');
+      const executionFailure = classifyGitHubExecutionFailure({
+        checkConclusion: checkRun.conclusion ?? '',
+        jobConclusion: job.conclusion ?? '',
+        runnerId: job.runner_id,
+        steps: Array.isArray(job.steps) ? job.steps : [],
+        annotationTexts,
+      });
+      enriched.push(executionFailure ? { ...check, executionFailure } : check);
+    }
+    return enriched;
   } catch (error) {
+    input.signal?.throwIfAborted();
+    if (error instanceof GitHubRateLimitError) throw error;
     input.warn(
       `[ci-status] typed execution evidence unavailable for ${input.repoFullName}@${input.headSha}: ${String(error)}`,
     );

@@ -102,6 +102,9 @@ export function createPaneCreationRecord(bin: string, socket: string, worktreeId
       // Empty-gate cancellation authorized no launcher to exec an agent. Wait
       // for those late launchers to finish their self-bound cleanup. This query
       // observes liveness only; no current PID is read or turned into a lease.
+      // list-panes -a still resolves a current window before enumerating; losing
+      // the last pane can fail with "no current target". list-sessions needs no
+      // current target; nested W/P loops cover every window and pane atomically.
       const deadline = Date.now() + TMUX_CLIENT_TIMEOUT_MS;
       while (Date.now() < deadline) {
         try {
@@ -110,12 +113,9 @@ export function createPaneCreationRecord(bin: string, socket: string, worktreeId
             [
               '-L',
               socket,
-              'list-panes',
-              '-a',
-              '-f',
-              `#{&&:${paneCreationCondition(token)},#{==:#{pane_dead},0}}`,
+              'list-sessions',
               '-F',
-              '#{pane_id}',
+              `#{W:#{P:#{?#{&&:${paneCreationCondition(token)},#{==:#{pane_dead},0}},#{pane_id},}}}`,
             ],
             { env: tmuxServerEnvironment() },
           );

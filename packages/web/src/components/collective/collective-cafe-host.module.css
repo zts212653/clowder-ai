@@ -1,0 +1,62 @@
+.activity {
+  position: absolute;
+  bottom: 76px;
+  left: 64px;
+  z-index: 10;
+  width: 326px;
+  height: 152px;
+  padding: 12px 14px 6px;
+  border-top: 1px solid var(--console-border-soft);
+  background: var(--console-panel-bg);
+  color: var(--cafe-text);
+}
+.activity h3 {
+  margin: 0 0 10px;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-micro);
+  font-weight: 500;
+}
+.activity button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+}
+.activity button:hover {
+  background: var(--console-hover-bg);
+}
+.activity button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+.activity strong {
+  overflow: hidden;
+  font-size: var(--console-font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity small,
+.activity p {
+  margin: 0;
+  color: var(--cafe-text-muted);
+  font-size: var(--console-font-micro);
+  line-height: 1.5;
+}
+@container collective-host (max-width: 1540px) {
+  .activity {
+    width: 266px;
+  }
+}
+@container collective-host (max-width: 820px) {
+  .activity {
+    display: none;
+  }
+}

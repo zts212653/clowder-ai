@@ -4,7 +4,7 @@ import {
   prepareProviderPresentationAttempt,
   promptGenerationId,
 } from '../dist/domains/cats/services/agents/invocation/provider-presentation-delivery.js';
-import { mintDeliveryReceipt } from '../dist/domains/cats/services/session/delivery-receipt.js';
+import { mintDeliveryReceipt } from '../dist/domains/cats/services/session/context/delivery-receipt.js';
 
 function envelope(subjectKey, promptSegment, overrides = {}) {
   const asOf = { kind: 'version', value: 'revision-1' };

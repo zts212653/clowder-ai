@@ -16,6 +16,8 @@ import {
 } from '../eval-lifecycle-display';
 import { HubEvalMetricGlossary } from '../HubEvalMetricGlossary';
 import type { EvalLifecycleRef } from '../HubEvalTypes';
+import { captureFileCardOrigin } from '../workbench/file-card-origin';
+import { useFileCardReturn } from '../workbench/useFileCardReturn';
 import { invocationIdFromEvidenceRef } from '../workspace/trajectory/invocation-evidence-ref';
 import {
   findEvalWorkspaceEvent,
@@ -39,13 +41,29 @@ export function EvalWorkspaceEventCard({
   const setWorkspaceOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
   const setWorkspaceMode = useChatStore((state) => state.setWorkspaceMode);
   const currentThreadId = useChatStore((state) => state.currentThreadId);
+  const originRef = useFileCardReturn<HTMLElement>(`eval:${event.id}`, currentThreadId);
   const openWorkspaceFile = useCallback(
     (path: string) => {
       if (projectPath) setCurrentProject(projectPath);
       setWorkspaceMode('dev');
-      setWorkspaceOpenFile(path, null, worktreeId ?? null);
+      setWorkspaceOpenFile(
+        path,
+        null,
+        worktreeId ?? null,
+        currentThreadId,
+        captureFileCardOrigin(originRef.current, `eval:${event.id}`, currentThreadId, 'eval'),
+      );
     },
-    [projectPath, setCurrentProject, setWorkspaceMode, setWorkspaceOpenFile, worktreeId],
+    [
+      projectPath,
+      setCurrentProject,
+      setWorkspaceMode,
+      setWorkspaceOpenFile,
+      worktreeId,
+      currentThreadId,
+      event.id,
+      originRef,
+    ],
   );
   const openTrajectoryEvidence = useCallback(
     (invocationId: string) => {
@@ -68,7 +86,12 @@ export function EvalWorkspaceEventCard({
   );
 
   return (
-    <article className="rounded-lg bg-cafe-surface-elevated p-4" data-eval-event-id={event.id} tabIndex={-1}>
+    <article
+      ref={originRef}
+      className="rounded-lg bg-cafe-surface-elevated p-4"
+      data-eval-event-id={event.id}
+      tabIndex={-1}
+    >
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="text-xs font-medium text-cafe-muted">

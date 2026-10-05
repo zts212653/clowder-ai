@@ -20,7 +20,10 @@
   "dependencies": {
     "@cat-cafe/shared": "workspace:*",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-breaks": "^4.0.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

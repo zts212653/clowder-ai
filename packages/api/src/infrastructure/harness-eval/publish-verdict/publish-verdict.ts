@@ -1,32 +1,20 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { getEvalCatOverride } from '../domain/eval-domain-override.js';
-import { loadDomains } from '../hub/eval-hub-read-model.js';
 import { assertMeasurementVerdictActionAllowed } from '../measurement/measurement-bundle-census.js';
 import {
   ensureMeasurementBundleCensusFile,
   refreshMeasurementBundleCensusFile,
 } from '../measurement/measurement-bundle-census-file.js';
-import {
-  assertCanCrossThreadHandoff,
-  parseVerdictHandoffPacket,
-  type VerdictHandoffPacket,
-} from '../verdict-handoff.js';
 import { mapPublishVerdictError } from './error-mapping.js';
-import {
-  rejectServerOwnedFrictionPacketFields,
-  validateFrictionAggregateWrite,
-  validateFrictionAnalysisInput,
-} from './friction-findings/friction-analysis-input.js';
 import {
   generatedArtifactStagePaths,
   writeGeneratedLifecycleArtifacts,
 } from './friction-findings/generated-lifecycle-artifacts.js';
-import { validateMetricRefsAgainstGlossary } from './metric-glossary-validation.js';
+import { fetchAndCreateMainReader, resolveRepoRoot } from './publication/replay-detection.js';
 import { verdictEvidenceContractSuccessStatuses } from './publication/verdict-commit-status-publisher.js';
 import { computePublishPolicy } from './publish-policy.js';
-import { validateSourceRefsForPublish } from './source-ref-handler-validation.js';
+import { resolvePostPublishCollision, resolvePrePublishReplay } from './replay-orchestration.js';
 import type {
   GeneratedFindingArtifact,
   GeneratedVerdictArtifact,
@@ -35,28 +23,11 @@ import type {
   PublishedVerdictChildArtifact,
   PublishVerdictDeps,
   PublishVerdictInput,
+  PublishVerdictNoNewWindow,
   PublishVerdictSuccess,
   VerdictGenerator,
 } from './types.js';
-import { assertNoNewlineInBulletFields, inferSourceRefsKind, isKnownSourceRefsKind } from './validation.js';
-
-export type {
-  GitPublisher,
-  HandlerError,
-  PublishOnIsolatedWorktreeOpts,
-  PublishVerdictDeps,
-  PublishVerdictInput,
-  PublishVerdictSuccess,
-  ResolvedSourceRefs,
-  StageResult,
-  VerdictGenerator,
-  VerdictSourceRefs,
-} from './types.js';
-
-// AC-H8: length + slug + idempotency (复用 generate-now 模式)
-const MAX_VERDICT_ID_LEN = 128;
-const MAX_PHENOMENON_LEN = 2048;
-const SAFE_VERDICT_ID = /^[a-z0-9][a-z0-9-]*$/;
+import { validatePublishInput } from './validate-publish-input.js';
 
 /**
  * F192 Phase H — Verdict Publishing Pipeline (砚砚 R0 Path B narrowed).
@@ -86,166 +57,51 @@ const defaultGitPublisher: GitPublisher = {
 export async function handlePublishVerdict(
   deps: PublishVerdictDeps,
   input: PublishVerdictInput,
-): Promise<PublishVerdictSuccess | HandlerError> {
-  const serverFieldError = rejectServerOwnedFrictionPacketFields(input.packet);
-  if (serverFieldError) return serverFieldError;
-  // AC-H1: validate full packet schema
-  let packet: VerdictHandoffPacket;
-  try {
-    packet = parseVerdictHandoffPacket(input.packet);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { status: 400, error: 'invalid_packet', detail: message };
-  }
+): Promise<PublishVerdictSuccess | PublishVerdictNoNewWindow | HandlerError> {
+  // --- Input validation (extracted to validate-publish-input.ts for 350-line cap) ---
+  const validated = await validatePublishInput(deps, input);
+  if ('status' in validated) return validated;
+  const { packet, analysisFindings, publicationTime } = validated;
 
-  // AC-H7 partial: cross-check input.domain ↔ packet.domainId (consistency guard)
-  if (input.domain !== packet.domainId) {
-    return {
-      status: 400,
-      error: 'domain_mismatch',
-      detail: `input.domain '${input.domain}' does not match packet.domainId '${packet.domainId}'`,
-    };
-  }
-
-  const analysisInput = validateFrictionAnalysisInput(packet.domainId, input.analysisFindings);
-  if (analysisInput.error) return analysisInput.error;
-  const analysisFindings = analysisInput.findings;
-  const aggregateError = validateFrictionAggregateWrite(packet, analysisFindings);
-  if (aggregateError) return aggregateError;
-
-  // One server-owned clock governs both future-time rejection and generator
-  // provenance. This must run before GitPublisher can create a branch, commit,
-  // remote ref, or PR; packet.createdAt remains the event time and may be old,
-  // but it cannot claim an event later than the publication request itself.
-  const publicationTime = (deps.now?.() ?? new Date()).toISOString();
-  if (Date.parse(packet.createdAt) > Date.parse(publicationTime)) {
-    return {
-      status: 400,
-      error: 'packet_created_at_in_future',
-      detail: `packet.createdAt '${packet.createdAt}' is later than server publication time '${publicationTime}'`,
-    };
-  }
-
-  // 砚砚 R11 P1 + AC-H1: completeness — schema validates "array", guard checks
-  // "non-empty". Cat owns metric/trace refs (NOT bundle-overridden); reject early
-  // before invoking generator if cat omitted them. snapshot/attribution placeholders
-  // also checked here (will be overridden by bundle but cat must still send shape).
-  const handoffDecision = assertCanCrossThreadHandoff(packet);
-  if (!handoffDecision.ok) {
-    return { status: 400, error: 'handoff_incomplete', detail: `handoff_incomplete: ${handoffDecision.reason}` };
-  }
-
-  // 砚砚 R18 P2 + cloud R18 P2: reject \r\n in fields renderer writes as single-line
-  // bullets (read-model regex parses first line — newline truncates + enables injection).
-  const newlineError = assertNoNewlineInBulletFields(packet);
-  if (newlineError) return newlineError;
-
-  // AC-H3 + 砚砚 R6 P1: catId from callback auth (MCP layer). Domain allowlist
-  // respects OQ-20 Redis override (symmetric with trigger-now), else static registry.
-  if (!input.catId) {
-    return {
-      status: 401,
-      error: 'unauthenticated',
-      detail: 'catId not provided — MCP layer must derive from callback',
-    };
-  }
-  const domains = loadDomains(deps.harnessFeedbackRoot);
-  const domainEntry = domains.get(packet.domainId as Parameters<typeof domains.get>[0]);
-  if (!domainEntry) {
-    return {
-      status: 400,
-      error: 'domain_not_registered',
-      detail: `Domain '${packet.domainId}' not found in eval-domains/ registry`,
-    };
-  }
-  // 砚砚 R6 P1: prefer Redis override if set, fallback to static registry cat
-  let allowedCatId = domainEntry.evalCat.catId as string;
-  let overrideApplied = false;
-  if (deps.redis) {
-    try {
-      const override = await getEvalCatOverride(deps.redis, packet.domainId);
-      if (override) {
-        allowedCatId = override.catId;
-        overrideApplied = true;
-      }
-    } catch {
-      // Redis read failure: fall back to static cat (safer than open-fail)
-    }
-  }
-  if (input.catId !== allowedCatId) {
-    return {
-      status: 403,
-      error: 'not_allowed',
-      detail: `catId '${input.catId}' is not the eval cat for domain '${packet.domainId}' (expected '${allowedCatId}'${overrideApplied ? ' via OQ-20 Redis override' : ' from registry'})`,
-    };
-  }
-
-  const metricRefsError = validateMetricRefsAgainstGlossary(packet, domainEntry);
-  if (metricRefsError) return metricRefsError;
-
-  // AC-H8: length + slug + idempotency (复用 generate-now 模式)
-  if (packet.id.length > MAX_VERDICT_ID_LEN) {
-    return {
-      status: 400,
-      error: 'invalid_packet_id',
-      detail: `packet.id must be <= ${MAX_VERDICT_ID_LEN} chars (got ${packet.id.length})`,
-    };
-  }
-  if (!SAFE_VERDICT_ID.test(packet.id)) {
-    return {
-      status: 400,
-      error: 'invalid_packet_id',
-      detail: `packet.id must match safe slug pattern /^[a-z0-9][a-z0-9-]*$/ (lowercase alphanumeric + hyphens, no leading hyphen). Got: '${packet.id}'`,
-    };
-  }
-  if (packet.phenomenon.length > MAX_PHENOMENON_LEN) {
-    return {
-      status: 400,
-      error: 'invalid_packet',
-      detail: `packet.phenomenon must be <= ${MAX_PHENOMENON_LEN} chars (got ${packet.phenomenon.length})`,
-    };
-  }
-  // Idempotency fast-fail: live-tree existsSync catches common dup quickly.
-  // 砚砚 R3 P1 #2 cloud: NOT authoritative — if API checkout is stale vs origin/main,
-  // dup-on-main slips through. Authoritative re-check inside isolated worktree below.
-  const liveVerdictPath = resolve(deps.harnessFeedbackRoot, 'verdicts', `${packet.id}.md`);
-  const liveBundleDir = resolve(deps.harnessFeedbackRoot, 'bundles', packet.id);
-  if (existsSync(liveVerdictPath) || existsSync(liveBundleDir)) {
-    return {
-      status: 409,
-      error: 'verdict_already_exists',
-      detail: `packet.id '${packet.id}' already has a verdict file or bundle directory in the live worktree. Pick a different id — overwriting existing Eval Hub evidence is forbidden (data integrity).`,
-    };
-  }
-
-  // PR-2 (砚砚 R1 P1): handler pre-validates sourceRefs shape per kind for proper
-  // 4xx error codes. Adapter-level validation is defense-in-depth (catches when
-  // generator called outside handler flow), but user-facing validation lives here.
+  // --- Replay detection (R7: centralized canonical authority) ---
   //
-  // cloud R8 P2 (PR-2): cross-check sourceRefs.kind ↔ packet.domainId BEFORE
-  // per-kind validation. Wrong-shape input for a supported domain (e.g. a2a refs
-  // sent for capability-wakeup domain, or cw selector sent for a2a domain) is
-  // user-correctable; rejecting at 400 here is better UX than letting it
-  // dispatch to adapter → throw `*_adapter_wrong_kind` → 500 generator_failed.
-  const refsKind = inferSourceRefsKind(input.sourceRefs);
-  const expectedKind = domainEntry.sourceRefsKind;
-  if (expectedKind && expectedKind !== refsKind) {
-    return {
-      status: 400,
-      error: 'sourceRefs_kind_mismatch',
-      detail: `Domain '${packet.domainId}' expects sourceRefs.kind='${expectedKind}', got '${refsKind}'. Registry sourceRefsKind is the contract; explicit validator/generator wiring must still exist for the domain to publish.`,
-    };
-  }
-  if (!isKnownSourceRefsKind(refsKind)) {
-    return {
-      status: 501,
-      error: 'unsupported_source_refs_kind',
-      detail: `Domain '${packet.domainId}' declares sourceRefs.kind='${refsKind}', but publish-verdict has no validator wiring for that selector kind yet. Add explicit validator/generator wiring before using this kind.`,
-    };
-  }
+  // All no_new_window decisions are centralized in replay-orchestration.ts.
+  // Success requires canonical proof from fresh origin/main + source identity.
+  // Live-tree state alone is never sufficient for typed success when replay
+  // infrastructure (source verification) is present.
+  //
+  // R5 P1-3: FreshMainReader only created for domains with replay resolvers.
+  const repoRootForRefresh =
+    (!deps.mainReader || !deps.createFreshMainReader) && (deps.replayPreflight || deps.checkStoredSourceEquivalence)
+      ? await resolveRepoRoot(deps.harnessFeedbackRoot, { signal: deps.signal })
+      : null;
+  const createFreshMainReader =
+    deps.createFreshMainReader ??
+    (repoRootForRefresh
+      ? async () => (await fetchAndCreateMainReader(repoRootForRefresh, { signal: deps.signal })) ?? undefined
+      : undefined);
+  const mainReader =
+    deps.mainReader ??
+    (repoRootForRefresh
+      ? ((await fetchAndCreateMainReader(repoRootForRefresh, { signal: deps.signal })) ?? undefined)
+      : undefined);
 
-  const sourceRefsError = validateSourceRefsForPublish(input.sourceRefs);
-  if (sourceRefsError) return sourceRefsError;
+  const replayCtx = {
+    mainReader,
+    createFreshMainReader,
+    harnessFeedbackRoot: deps.harnessFeedbackRoot,
+    domainId: packet.domainId,
+    replayPreflight: deps.replayPreflight,
+    checkStoredSourceEquivalence: deps.checkStoredSourceEquivalence,
+  };
+
+  const prePublish = await resolvePrePublishReplay(packet.id, input.sourceRefs, replayCtx);
+  if (prePublish.outcome === 'replay') {
+    return { ok: true, outcome: 'no_new_window', canonicalVerdictId: prePublish.canonicalVerdictId };
+  }
+  if (prePublish.outcome === 'conflict') {
+    return prePublish.error;
+  }
 
   // PR-2 (砚砚 R1 P1): route layer dispatches per-domain generator from
   // `opts.verdictGenerators?.[domainId]` → if undefined, no generator wired → 501.
@@ -271,6 +127,7 @@ export async function handlePublishVerdict(
   let findingArtifacts: GeneratedFindingArtifact[] = [];
   let childArtifacts: PublishedVerdictChildArtifact[] = [];
   try {
+    deps.signal?.throwIfAborted();
     const { commitSha, prUrl } = await gitPublisher.publishOnIsolatedWorktree({
       branchName,
       sourceBase: 'origin/main',
@@ -374,6 +231,12 @@ export async function handlePublishVerdict(
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // --- Layer 2: Catch-block replay intercepts (R7: centralized authority) ---
+    // Delegates to replay-orchestration for canonical authority enforcement.
+    const collision = await resolvePostPublishCollision(message, packet.id, input.sourceRefs, replayCtx);
+    if (collision?.outcome === 'replay') {
+      return { ok: true, outcome: 'no_new_window', canonicalVerdictId: collision.canonicalVerdictId };
+    }
     const mapped = mapPublishVerdictError(message);
     if (mapped) return mapped;
     if (!artifact) return { status: 500, error: 'generator_failed', detail: message };

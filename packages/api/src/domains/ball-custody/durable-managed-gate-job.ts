@@ -13,6 +13,7 @@ import {
   type DurableGateCancellationRequest,
   readDurableGateCancellationRequest,
 } from './durable-managed-gate-cancellation.js';
+import { DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS } from './durable-managed-gate-child-contract.js';
 import {
   claimDurableGateTerminal,
   type DurableGateRecord,
@@ -23,6 +24,7 @@ import {
   terminalResult,
   writeDurableGateRecord,
 } from './durable-managed-gate-job-store.js';
+import type { DurableGatePowerEvidenceSource } from './durable-managed-gate-power-evidence.js';
 import {
   CURRENT_DURABLE_GATE_SUPERVISOR_EPOCH,
   claimDurableGateSupervisor,
@@ -30,10 +32,17 @@ import {
 import type { ManagedCommandTerminalResult } from './managed-command-wake-task-projection.js';
 
 export const DURABLE_GATE_WALL_SLA_MS = 3 * 60 * 60_000;
-const TERMINATION_GRACE_MS = 5_000;
+
+export interface DurableManagedGateRecoveryConfig {
+  readonly protocolVersion: 2;
+  readonly eventLoopGapMs: number;
+  readonly reconciliationBudgetMs: number;
+  readonly pollMs: number;
+  readonly powerEvidenceSource: DurableGatePowerEvidenceSource;
+}
 
 export interface DurableManagedGateJob {
-  readonly kind: 'full_gate';
+  readonly kind: 'full_gate' | 'resumable_full_gate_v2';
   readonly jobId: string;
   readonly originTaskId: string;
   readonly supervisorEpoch: string;
@@ -43,6 +52,7 @@ export interface DurableManagedGateJob {
   readonly executionSlaMs: number;
   readonly wallSlaMs: number;
   readonly wakeTarget: { readonly threadId: string; readonly catId: string; readonly userId: string };
+  readonly recovery?: DurableManagedGateRecoveryConfig;
   readonly processIdentity?: UnixProcessIdentity;
 }
 
@@ -114,12 +124,13 @@ function deadInspection(record: DurableGateRecord): DurableGateInspection {
 }
 
 function signalExactProcessGroup(
+  job: DurableManagedGateJob,
   identity: UnixProcessIdentity,
   signal: NodeJS.Signals,
   killProcess: KillProcess,
 ): void {
   try {
-    killProcess(-identity.pgid, signal);
+    killProcess(signal === 'SIGTERM' && job.recovery ? identity.pid : -identity.pgid, signal);
   } catch {
     // Exact birth identity remains the fence; a later sweep retries or observes terminal truth.
   }
@@ -136,8 +147,11 @@ function inspectLiveProcess(
   if (!record) {
     if (cancellationRequest) {
       signalExactProcessGroup(
+        job,
         identity,
-        now - cancellationRequest.requestedAt >= TERMINATION_GRACE_MS ? 'SIGKILL' : 'SIGTERM',
+        now - cancellationRequest.requestedAt >= DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS
+          ? 'SIGKILL'
+          : 'SIGTERM',
         killProcess,
       );
       return { state: 'pending' };
@@ -153,11 +167,12 @@ function inspectLiveProcess(
       updatedAt: now,
     };
     if (!writeDurableGateRecord(job, cancelling, { now })) return { state: 'pending', record };
-    signalExactProcessGroup(identity, 'SIGTERM', killProcess);
+    signalExactProcessGroup(job, identity, 'SIGTERM', killProcess);
     return { state: 'pending', record: cancelling };
   }
   if (record.state === 'cancelling') {
-    if (now - record.updatedAt >= TERMINATION_GRACE_MS) signalExactProcessGroup(identity, 'SIGKILL', killProcess);
+    if (now - record.updatedAt >= DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS)
+      signalExactProcessGroup(job, identity, 'SIGKILL', killProcess);
     return { state: 'pending', record };
   }
   if (now - record.createdAt < job.wallSlaMs) return { state: 'adopted', record };
@@ -169,7 +184,7 @@ function inspectLiveProcess(
     updatedAt: now,
   };
   if (!writeDurableGateRecord(job, timedOut, { now })) return { state: 'pending', record };
-  signalExactProcessGroup(identity, 'SIGTERM', killProcess);
+  signalExactProcessGroup(job, identity, 'SIGTERM', killProcess);
   return { state: 'pending', record: timedOut };
 }
 

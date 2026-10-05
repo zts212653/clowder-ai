@@ -8,6 +8,7 @@ import type {
   NonEmptyReadonlyArray,
   ResolvedAdmissionClaim,
   ResolvedEvidenceCatalog,
+  ResolvedSelectorClaim,
 } from './tool-governance-types.js';
 
 type Frontmatter = Record<string, unknown>;
@@ -70,12 +71,59 @@ export async function discoverAdmissionSourcePaths(repoRoot: string): Promise<re
       const path = resolve(entry.parentPath, entry.name);
       const content = await readFile(path, 'utf8');
       const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content)?.[1];
-      if (header && /^mcp_admission_claims:/m.test(header)) {
+      if (header && /^mcp_(admission|selector)_claims:/m.test(header)) {
         paths.push(relative(resolve(repoRoot), path));
       }
     }
   }
   return paths.sort();
+}
+
+function parseSelectorClaims(content: string, sourcePath: string): readonly ResolvedSelectorClaim[] {
+  const metadata = frontmatter(content, sourcePath);
+  const rawClaims = metadata.mcp_selector_claims;
+  if (rawClaims === undefined) return [];
+  if (!Array.isArray(rawClaims) || rawClaims.length === 0 || metadata.mcp_selector_status !== 'accepted') {
+    throw new Error(`${sourcePath} selector claims must be a non-empty accepted array`);
+  }
+  let expectedRef: EvidenceRef;
+  if (metadata.doc_kind === 'architecture' && typeof metadata.cell_id === 'string') {
+    if (sourcePath !== `docs/architecture/ownership/cells/${metadata.cell_id}.md`) {
+      throw new Error(`${sourcePath} selector claim must use its canonical source path`);
+    }
+    expectedRef = `architecture-cell:${metadata.cell_id}`;
+  } else if (metadata.doc_kind === 'feature') {
+    expectedRef = `file:${sourcePath}`;
+  } else if (metadata.doc_kind === 'decision' && metadata.status === 'accepted' && normalizedAdr(metadata.adr)) {
+    const number = normalizedAdr(metadata.adr) as string;
+    if (!sourcePath.startsWith(`docs/decisions/${number.padStart(3, '0')}-`)) {
+      throw new Error(`${sourcePath} selector claim must use its canonical source path`);
+    }
+    expectedRef = `adr:${Number.parseInt(String(metadata.adr), 10)}`;
+  } else {
+    throw new Error(`${sourcePath} selector claim needs accepted feature/architecture/decision truth`);
+  }
+  const sourceDigest = `sha256:${createHash('sha256').update(content).digest('hex')}`;
+  return rawClaims.map((rawClaim) => {
+    if (typeof rawClaim !== 'object' || rawClaim === null || Array.isArray(rawClaim)) {
+      throw new Error(`${sourcePath} selector claim must be an object`);
+    }
+    const claim = rawClaim as Record<string, unknown>;
+    if (claim.ref !== expectedRef || claim.role !== 'read-strategy' || claim.decision !== 'accepted') {
+      throw new Error(`${sourcePath} selector claim must match its accepted source and read-strategy role`);
+    }
+    return {
+      ref: expectedRef,
+      decision: 'accepted',
+      sourceDigest,
+      subject: {
+        toolName: requiredString(claim.toolName, 'toolName', sourcePath),
+        resourceFamily: requiredString(claim.resourceFamily, 'resourceFamily', sourcePath),
+        field: requiredString(claim.field, 'field', sourcePath),
+        role: 'read-strategy',
+      },
+    };
+  });
 }
 
 function normalizedAdr(value: unknown): string | null {
@@ -194,9 +242,15 @@ export async function resolveToolGovernanceEvidence(input: EvidenceResolutionInp
   }
 
   const groupedClaims = new Map<EvidenceRef, ResolvedAdmissionClaim[]>();
+  const selectorClaims = new Map<EvidenceRef, ResolvedSelectorClaim[]>();
   const admissionSourcePaths = input.admissionSourcePaths ?? (await discoverAdmissionSourcePaths(input.repoRoot));
   for (const sourcePath of [...new Set(admissionSourcePaths)].sort()) {
     const content = await readFile(repoPath(input.repoRoot, sourcePath), 'utf8');
+    for (const claim of parseSelectorClaims(content, sourcePath)) {
+      const claims = selectorClaims.get(claim.ref) ?? [];
+      claims.push(claim);
+      selectorClaims.set(claim.ref, claims);
+    }
     for (const claim of parseClaims(content, sourcePath)) {
       const claims = groupedClaims.get(claim.ref) ?? [];
       claims.push(claim);
@@ -214,5 +268,5 @@ export async function resolveToolGovernanceEvidence(input: EvidenceResolutionInp
     if (!first) throw new Error(`Internal error: empty admission claim group for ${ref}`);
     admissionClaims.set(ref, [first, ...rest]);
   }
-  return { existingRefs, admissionClaims };
+  return { existingRefs, admissionClaims, selectorClaims };
 }

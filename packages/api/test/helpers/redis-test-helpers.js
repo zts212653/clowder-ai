@@ -31,6 +31,10 @@ export function assertRedisIsolationOrThrow(redisUrl, suiteName) {
     throw new Error(`[${suiteName}] Invalid REDIS_URL: ${redisUrl}`);
   }
 
+  if (parsed.port === '0' || parsed.port === '6399') {
+    throw new Error(`[${suiteName}] Redis port ${parsed.port} is disabled or protected`);
+  }
+
   if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
     throw new Error(`[${suiteName}] REDIS_URL must point to localhost for tests, got hostname=${parsed.hostname}`);
   }
@@ -50,6 +54,8 @@ export function assertRedisIsolationOrThrow(redisUrl, suiteName) {
  */
 export function redisIsolationSkipReason(redisUrl) {
   if (!redisUrl) return 'REDIS_URL not set';
+  const port = parseRedisUrl(redisUrl)?.port;
+  if (port === '0' || port === '6399') return `Redis port ${port} is disabled or protected`;
   if (process.env[ISOLATION_FLAG] !== '1') return 'Redis isolation flag not set';
   return false;
 }

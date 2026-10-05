@@ -53,6 +53,18 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
       reflectionService: { async run() {} },
       holdBallDeps: {
         registry,
+        holdQuotaStore: {
+          async tryAdmit() {
+            return { admitted: true, count: 1, eventId: `stub-${Date.now()}` };
+          },
+          async releaseByEventId() {
+            return true;
+          },
+          async getCount() {
+            return 0;
+          },
+          async close() {},
+        },
         taskRunner: {
           registerDynamic() {},
           unregister() {
@@ -160,7 +172,8 @@ describe('F233 PR3: hold_ball ball-custody events', () => {
           // biome-ignore lint/suspicious/noThenProperty: F280's frozen wait contract field.
           then: 'check status',
         },
-        expiresAt: insertedTasks[0].trigger.fireAt,
+        autoRenew: false,
+        expiresAt: 3_600_000,
         createdAt: awaitState.createdAt,
         provenance: 'explicit_registration',
       },

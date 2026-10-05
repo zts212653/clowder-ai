@@ -1,5 +1,6 @@
 'use client';
 
+import type { BuiltinCloudIdentityProtectedField, BuiltinCloudIdentityProtection } from '@cat-cafe/shared';
 import { useMemo, useRef } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { AvatarImageWithFallback } from './AvatarImageWithFallback';
@@ -324,6 +325,78 @@ interface CallHint {
   warning: string;
 }
 
+const PROTECTED_IDENTITY_FIELD_LABELS: Record<BuiltinCloudIdentityProtectedField, string> = {
+  breedId: '所属家族',
+  clientId: 'Client',
+  defaultModel: '模型',
+  provider: '云端 Provider',
+  mcpSupport: 'Remote MCP',
+  accountRef: '认证账号',
+  cli: '本地 CLI',
+  commandArgs: '启动参数',
+  cliConfigArgs: 'CLI 配置',
+  acp: 'ACP 传输',
+  mentionPatterns: '主句柄 @gpt-pro',
+};
+
+export function ProtectedCloudIdentitySection({
+  protection,
+  restoring,
+  onRestore,
+}: {
+  protection: BuiltinCloudIdentityProtection;
+  restoring: boolean;
+  onRestore: () => Promise<void> | void;
+}) {
+  const driftedLabels = protection.driftedFields.map((field) => PROTECTED_IDENTITY_FIELD_LABELS[field]);
+  const drifted = protection.state === 'drifted';
+
+  return (
+    <SectionCard title="认证与模型" tone={drifted ? 'error' : 'neutral'} data-guide-id="member-editor.auth-config">
+      <div className="space-y-3 rounded-xl bg-[var(--console-field-bg,var(--console-card-bg))] px-4 py-3">
+        <div>
+          <p className={`text-sm font-extrabold ${drifted ? 'text-conn-red-text' : 'text-cafe'}`}>
+            {drifted ? '检测到云端身份配置异常' : '云端身份已保护'}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-cafe-secondary">
+            @gpt-pro 是 Clowder AI 的固定云端入口。它必须保持 ChatGPT Pro 与 Remote MCP 身份，云端回复才能回到正确的
+            Thread；因此这里不允许改所属家族、Client、模型、账号或本地运行方式。可以增加别名，主句柄 @gpt-pro
+            固定。需要本地 Codex，请新建另一位成员。
+          </p>
+        </div>
+
+        {drifted ? (
+          <div className="space-y-2">
+            <p className="text-xs leading-5 text-conn-red-text">
+              已偏离：{driftedLabels.join('、')}
+              。普通保存不会静默覆盖这些值；请明确恢复后再继续使用云端成员。
+            </p>
+            <button
+              type="button"
+              onClick={() => void onRestore()}
+              disabled={restoring}
+              className="h-8 rounded-[10px] bg-[var(--cafe-accent)] px-4 text-compact font-extrabold text-[var(--cafe-surface)] transition hover:bg-[var(--cafe-accent-hover)] disabled:opacity-50"
+            >
+              {restoring ? '恢复中…' : '恢复云端身份'}
+            </button>
+          </div>
+        ) : (
+          <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-xs">
+            <dt className="text-cafe-secondary">接入方式</dt>
+            <dd className="font-semibold text-cafe">ChatGPT Pro 云端</dd>
+            <dt className="text-cafe-secondary">模型身份</dt>
+            <dd className="font-semibold text-cafe">gpt-pro</dd>
+            <dt className="text-cafe-secondary">回程工具</dt>
+            <dd className="font-semibold text-cafe">Remote MCP 已开启</dd>
+            <dt className="text-cafe-secondary">本地运行时</dt>
+            <dd className="font-semibold text-cafe">未启用</dd>
+          </dl>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
 // Generate a hint showing what API endpoint the CLI will actually call.
 // Exported for testing (#886 regression coverage).
 export function buildCallHint(
@@ -646,6 +719,7 @@ export function RoutingSection({
   form,
   hasError,
   reservedPatterns,
+  fixedPatterns = [],
   onChange,
 }: {
   cat?: CatData | null;
@@ -653,9 +727,17 @@ export function RoutingSection({
   hasError?: boolean;
   /** Lowercase alias set already taken by other cats. */
   reservedPatterns?: ReadonlySet<string>;
+  /** Product-owned handles that stay visible but cannot be removed. */
+  fixedPatterns?: readonly string[];
   onChange: (patch: FormPatch) => void;
 }) {
   const aliases = currentAliasTags(form);
+  const fixedPatternKeys = new Set(fixedPatterns.map((pattern) => pattern.toLowerCase()));
+  const presentFixedPatterns = aliases.filter((pattern) => fixedPatternKeys.has(pattern.toLowerCase()));
+  const updateAliases = (tags: string[]) => {
+    const next = Array.from(new Set([...presentFixedPatterns, ...tags]));
+    onChange({ mentionPatterns: joinTags(next) });
+  };
   const validateAlias = useMemo(() => {
     if (!reservedPatterns?.size) return undefined;
     return (tag: string) => {
@@ -669,17 +751,18 @@ export function RoutingSection({
     <SectionCard title="别名与 @ 路由" tone={hasError ? 'error' : 'neutral'}>
       <TagEditor
         tags={aliases}
-        onChange={(tags) => onChange({ mentionPatterns: joinTags(tags) })}
+        onChange={updateAliases}
         addLabel="+ 添加"
         placeholder="砚砚"
         emptyLabel="(至少添加 1 个别名，否则无法 @)"
         validate={validateAlias}
-        minCount={1}
+        lockedTags={presentFixedPatterns}
+        minCount={presentFixedPatterns.length > 0 ? 0 : 1}
       />
       <textarea
         aria-label="Aliases"
         value={form.mentionPatterns}
-        onChange={(event) => onChange({ mentionPatterns: event.target.value })}
+        onChange={(event) => updateAliases(currentAliasTags({ ...form, mentionPatterns: event.target.value }))}
         placeholder="@codex, @缅因猫"
         className="sr-only"
       />

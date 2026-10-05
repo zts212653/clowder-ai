@@ -1,20 +1,25 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { describe, it } from 'node:test';
+import { after, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { resolveWorktreeIdByPath } from '../../dist/domains/workspace/workspace-security.js';
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 
+import { createActiveEraHarnessFeedback } from './measurement-census-active-era.js';
+
 const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+// Summary-shape tests use the active-era registry (before the 2026-10-01 dormancy batch).
+const activeEra = await createActiveEraHarnessFeedback();
+after(() => rmSync(activeEra.repoRoot, { recursive: true, force: true }));
 const FIXTURE_NOW_BEFORE_DEADLINE = new Date('2026-05-23T12:00:00.000Z');
 
 describe('Eval Hub read model — F248 Phase C', () => {
   it('includes evalCatId and nextCronFireAt in domain summaries (#OQ-20)', () => {
     const summary = loadEvalHubSummary({
-      harnessFeedbackRoot: repoHarnessFeedbackRoot,
+      harnessFeedbackRoot: activeEra.harnessFeedbackRoot,
       now: FIXTURE_NOW_BEFORE_DEADLINE,
     });
 
@@ -65,10 +70,11 @@ describe('Eval Hub read model — F248 Phase C', () => {
       assert.equal(typeof d.enabled, 'boolean', `${d.domainId} must have boolean enabled field`);
     }
 
+    // Dormant since 2026-10-01: visible, disabled, and never shown with a next cron fire.
     const sopDomain = summary.domains.find((d) => d.domainId === 'eval:sop');
     assert.ok(sopDomain);
-    assert.equal(sopDomain.enabled, true);
-    assert.ok(sopDomain.nextCronFireAt, 're-enabled weekly domain must have nextCronFireAt');
+    assert.equal(sopDomain.enabled, false);
+    assert.equal(sopDomain.nextCronFireAt, undefined, 'dormant domain must not advertise a next cron fire');
 
     const a2aDomain = summary.domains.find((d) => d.domainId === 'eval:a2a');
     assert.ok(a2aDomain);

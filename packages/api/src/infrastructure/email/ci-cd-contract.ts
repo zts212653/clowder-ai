@@ -1,4 +1,4 @@
-import type { AwaitStateV1, WaitOutcomeV1 } from '@cat-cafe/shared';
+import type { AwaitStateV1, GitHubWaitOutcomeV1 } from '@cat-cafe/shared';
 
 export type CiBucket = 'pass' | 'fail' | 'pending' | 'external_infrastructure';
 export type CiExecutionFailure = 'billing_spending_limit_zero_step';
@@ -57,7 +57,7 @@ export interface TrackedTaskLike {
   readonly automationState?: {
     readonly ci?: { readonly prState?: 'merged' | 'closed'; readonly headSha?: string };
     readonly await?: AwaitStateV1;
-    readonly waitOutcome?: WaitOutcomeV1;
+    readonly waitOutcome?: GitHubWaitOutcomeV1;
   };
 }
 

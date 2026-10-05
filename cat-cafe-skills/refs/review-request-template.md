@@ -63,7 +63,7 @@ Total findings: {N} ({P1} P1, {P2} P2, {P3} P3)
 **Reviewer delta tracking**: 正式 reviewer 请在你的 findings 中标注 `[FC:covered]`（fresh-context 已发现）或 `[FC:new]`（新发现）或 `[FC:N/A]`（不适用）。详见 receive-review skill "Reviewer Delta Annotation"。
 
 ## Next Action
-{希望 reviewer 做什么}
+{请 reviewer 先判断本次交付是否兑现上面的原始约定，再检查相关实现与风险；写清本轮若仅审修复，原有完整判断由哪份仍适用的证据覆盖。组织形式按任务选择，不需要另填逐条 conformance 表。}
 
 Reviewer 回传 ordinary durable A2A verdict 时，必须原样携带上面的 `Review-Subject-Ref`、
 `Accepted-Source-Ref` 与 `Accepted-Revision`，并同时给出 typed `localReviewVerdict`、exact

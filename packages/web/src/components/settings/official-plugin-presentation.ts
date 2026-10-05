@@ -11,6 +11,12 @@ interface Presentation {
 }
 
 const profiles: Readonly<Record<string, Pick<Presentation, 'name' | 'description' | 'icon' | 'avatarBackground'>>> = {
+  companion: {
+    name: '猫猫球',
+    description: '把当前猫猫带到桌面，语音交流、查询资料，回到同一段聊天继续工作',
+    icon: 'cat',
+    avatarBackground: 'var(--cafe-accent)',
+  },
   'collective-connector': {
     name: 'Collective Connector',
     description: '把 Clowder AI endpoint 配对到独立 Collective Service；凭据只由 Host 托管',
@@ -48,6 +54,8 @@ export function officialPluginPresentation(plugin: OfficialPluginInfo): Presenta
 }
 
 export function officialPluginEnableConfirmation(plugin: OfficialPluginInfo): string {
+  if (plugin.catalogId === 'companion')
+    return '启用后会显示桌面猫猫球。点击开始聊天才会使用麦克风；共享屏幕需要你另行选择。';
   if (plugin.catalogId === 'genoffice-docx')
     return '确认启用 GenOffice？启用后可在 Workspace 打开和编辑 DOCX 文档。当前为 alpha。';
   if (plugin.catalogId === 'collective-connector')
@@ -57,6 +65,7 @@ export function officialPluginEnableConfirmation(plugin: OfficialPluginInfo): st
 }
 
 export function officialPluginRepairGuidance(plugin: OfficialPluginInfo): string {
+  if (plugin.catalogId === 'companion') return '点“修复”重新打开猫猫球；聊天记录和资料查询选择会保留。';
   if (plugin.catalogId === 'genoffice-docx') return '点“修复”恢复编辑器，再重新打开文档；已保存的协作版本会保留。';
   if (plugin.catalogId === 'collective-connector') return '检查 Connector 运行错误与本地凭据目录权限，再点“修复”。';
   if (plugin.catalogId === 'feishu-meeting-intake') return '请确认飞书账号授权有效，再点“修复”。';

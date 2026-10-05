@@ -5,7 +5,6 @@ import {
   formatRuntimeLabel,
   formatRuntimeSessionTitle,
   formatSealReason,
-  shortRuntimeId,
 } from '../external-runtime-session-format';
 import type { ExternalRuntimeSessionListItem } from '../external-runtime-session-types';
 
@@ -73,16 +72,13 @@ describe('external runtime session formatting', () => {
     expect(formatBindingLabel({ mode: 'thread', threadId: 'thread-1' })).toBe('Thread 绑定');
   });
 
-  it('uses title, model fallback, and short runtime id fallback for session titles', () => {
+  it('uses title, then model, and a human fallback when both are absent', () => {
     expect(formatRuntimeSessionTitle(session())).toBe('IDE direct investigation');
     expect(formatRuntimeSessionTitle(session({ title: undefined }))).toBe('antigravity · gemini-3.1-pro');
-    expect(formatRuntimeSessionTitle(session({ title: undefined, model: undefined }))).toBe(
-      'antigravity · cascade-012…89abcdef',
-    );
-  });
-
-  it('shortens long runtime ids and keeps short ids unchanged', () => {
-    expect(shortRuntimeId('short-id')).toBe('short-id');
-    expect(shortRuntimeId('cascade-0123456789abcdef0123456789abcdef')).toBe('cascade-012…89abcdef');
+    // Missing title AND model is a legal state — fall back to human words, not a truncated ID
+    expect(formatRuntimeSessionTitle(session({ title: undefined, model: undefined }))).toBe('antigravity · 未命名会话');
+    expect(formatRuntimeSessionTitle(session({ title: '   ', model: undefined }))).toBe('antigravity · 未命名会话');
+    // The full runtime ID is never a title; it stays recoverable in the 会话标识 details
+    expect(formatRuntimeSessionTitle(session({ title: undefined, model: undefined }))).not.toContain('cascade-');
   });
 });

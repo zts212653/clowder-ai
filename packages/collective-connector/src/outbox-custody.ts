@@ -3,11 +3,16 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { type CollectiveSourceIdentity, collectiveTargetSchema } from '@cat-cafe/shared';
 import { z } from 'zod';
-import { participationError, requireParticipation } from './participation-custody.js';
+import { participationError, requireParticipation, resolveMaterializedParticipation } from './participation-custody.js';
 import type { ConnectorPersistence } from './persistence.js';
 import { type ConnectorProjection, projectConnection } from './projection.js';
-import type { ConnectorOutboxItem } from './state.js';
-import { type VerifiedAgent, verifiedAgentSchema } from './state.js';
+import type { ConnectorOutboxItem, MutableConnectorState } from './state.js';
+import {
+  type VerifiedAgent,
+  verifiedAgentSchema,
+  type WorkResultArtifactSnapshot,
+  workResultArtifactSnapshotSchema,
+} from './state.js';
 
 const queuedMessageSchema = z
   .object({
@@ -67,30 +72,196 @@ interface PrepareReplyInput {
   sourceRef: string;
   resultKey: string;
   workRevision?: number;
+  resultRevision?: number;
+  execution?: { readonly revision: number; readonly assignmentEventId: string };
+  progressKey?: string;
+}
+
+type MutableOutboxItem = MutableConnectorState['connections'][string]['outbox'][number];
+
+function replyOperationKeys(
+  input: Pick<PrepareReplyInput, 'sourceRef' | 'source' | 'resultKey' | 'execution' | 'progressKey'>,
+  resultRevision: number,
+) {
+  const legacyOperationKey = JSON.stringify([input.sourceRef, input.source.catId, input.resultKey]);
+  return {
+    workResult: input.resultKey.startsWith('work:'),
+    legacyOperationKey,
+    operationKey: input.progressKey
+      ? JSON.stringify([
+          'progress',
+          input.sourceRef,
+          input.source.catId,
+          input.resultKey,
+          resultRevision,
+          input.execution?.revision,
+          input.progressKey,
+        ])
+      : input.resultKey.startsWith('work:')
+        ? JSON.stringify([
+            input.sourceRef,
+            input.source.catId,
+            input.resultKey,
+            resultRevision,
+            ...(input.execution && input.execution.revision > 1 ? [input.execution.revision] : []),
+          ])
+        : legacyOperationKey,
+  };
+}
+
+function isExistingReplyOperation(
+  item: ConnectorOutboxItem,
+  operationKey: string,
+  legacyOperationKey: string,
+  workResult: boolean,
+  resultRevision: number,
+): boolean {
+  return (
+    item.operationKey === operationKey ||
+    (workResult &&
+      resultRevision === 1 &&
+      item.operationKey === legacyOperationKey &&
+      item.workPurpose?.resultRevision === 1)
+  );
+}
+
+function refreshPreparedWorkPurpose(
+  item: MutableOutboxItem,
+  workPurpose: MutableOutboxItem['workPurpose'],
+  operationKey: string,
+): void {
+  if (item.status !== 'prepared' || !item.workPurpose || !workPurpose) return;
+  item.workPurpose.admittedRevision = workPurpose.admittedRevision;
+  item.operationKey = operationKey;
+}
+
+function requireReplyOperation(
+  state: MutableConnectorState,
+  input: PrepareReplyInput & { readonly operationId: string },
+  agent: VerifiedAgent,
+): MutableOutboxItem {
+  const { binding, connection, route } = requireParticipation(state, input.source);
+  const item = connection.outbox.find((candidate) => candidate.outboxId === input.operationId);
+  const resultRevision = z
+    .number()
+    .int()
+    .positive()
+    .parse(input.resultRevision ?? 1);
+  const { legacyOperationKey, operationKey, workResult } = replyOperationKeys(input, resultRevision);
+  const operationMatches =
+    item?.operationKey === operationKey ||
+    (workResult && !input.progressKey && resultRevision === 1 && item?.operationKey === legacyOperationKey);
+  if (
+    !item ||
+    !operationMatches ||
+    item.workPurpose?.progressKey !== input.progressKey ||
+    (workResult
+      ? item.workPurpose?.resultRevision !== resultRevision ||
+        (item.workPurpose.executionRevision ?? 1) !== (input.execution?.revision ?? 1) ||
+        (item.workPurpose.assignmentEventId ?? input.source.eventId) !==
+          (input.execution?.assignmentEventId ?? input.source.eventId)
+      : item.workPurpose !== undefined) ||
+    !isDeepStrictEqual(item.replySource, input.source)
+  ) {
+    throw participationError('RETURN_UNAVAILABLE', 'Reply operation does not belong to this source');
+  }
+  const executorBinding =
+    agent.catId === input.source.catId
+      ? binding
+      : connection.authorizedHumanId
+        ? resolveMaterializedParticipation(
+            route,
+            connection.authorizedHumanId,
+            agent.catId,
+            input.source.location.channelId,
+          )
+        : undefined;
+  if ((agent.catId !== input.source.catId && !item.workPurpose) || executorBinding?.displayName !== agent.displayName) {
+    throw participationError('AGENT_PROVENANCE_UNVERIFIED', 'Named participant has changed');
+  }
+  return item;
+}
+
+function assertArtifactMatchesWork(
+  item: ConnectorOutboxItem,
+  artifactSnapshot: WorkResultArtifactSnapshot | undefined,
+): void {
+  if (artifactSnapshot && !item.workPurpose) {
+    throw participationError('RETURN_UNAVAILABLE', 'Prepared Artifact does not belong to an admitted Work result');
+  }
+  if (
+    artifactSnapshot &&
+    item.workPurpose &&
+    (artifactSnapshot.taskRef !== item.workPurpose.taskRef ||
+      artifactSnapshot.taskRevision !== item.workPurpose.admittedRevision)
+  ) {
+    throw participationError('RETURN_UNAVAILABLE', 'Prepared Artifact does not match the current Task revision');
+  }
+}
+
+function recoverSubmittedReply(
+  item: ConnectorOutboxItem,
+  body: string,
+  agent: VerifiedAgent,
+  artifactSnapshot: WorkResultArtifactSnapshot | undefined,
+): ConnectorOutboxItem | undefined {
+  if (item.status === 'prepared') return undefined;
+  if (
+    item.body !== body ||
+    item.agent?.catId !== agent.catId ||
+    !isDeepStrictEqual(item.workPurpose?.artifactSnapshot, artifactSnapshot)
+  ) {
+    throw participationError('REPLY_PAYLOAD_CONFLICT', 'This reply operation already owns a different payload');
+  }
+  return structuredClone(item);
 }
 
 export async function prepareReplyOperation(input: PrepareReplyInput): Promise<ConnectorOutboxItem> {
-  const operationKey = JSON.stringify([input.sourceRef, input.source.catId, input.resultKey]);
+  const resultRevision = z
+    .number()
+    .int()
+    .positive()
+    .parse(input.resultRevision ?? 1);
+  const { legacyOperationKey, operationKey, workResult } = replyOperationKeys(input, resultRevision);
   if (!input.sourceRef.startsWith('message:') || input.sourceRef.length > 300 || operationKey.length > 1000) {
     throw participationError('RETURN_UNAVAILABLE', 'Invalid durable reply purpose');
   }
   return input.persistence.transaction((state) => {
     requireParticipation(state, input.source);
-    const connection = state.connections[input.source.connectionId]!;
-    const existing = connection.outbox.find((item) => item.operationKey === operationKey);
-    if (existing) {
-      if (!isDeepStrictEqual(existing.replySource, input.source))
-        throw participationError('PARTICIPATION_REVOKED', 'A new grant cannot revive an old reply');
-      return structuredClone(existing);
-    }
-    const root = input.source.location.rootEventId ?? input.source.eventId;
-    const workPurpose = input.resultKey.startsWith('work:')
+    const connection = state.connections[input.source.connectionId];
+    if (!connection) throw participationError('PARTICIPATION_REVOKED', 'Collective connection is unavailable');
+    const workPurpose = workResult
       ? {
           taskRef: `task:${input.resultKey}`,
           admittedRevision: z.number().int().positive().parse(input.workRevision),
-          resultRevision: 1 as const,
+          resultRevision,
+          ...(input.execution
+            ? { executionRevision: input.execution.revision, assignmentEventId: input.execution.assignmentEventId }
+            : {}),
+          ...(input.progressKey ? { progressKey: input.progressKey } : {}),
         }
       : undefined;
+    const existing = connection.outbox.find((item) =>
+      isExistingReplyOperation(
+        item,
+        operationKey,
+        legacyOperationKey,
+        workResult && !input.progressKey,
+        resultRevision,
+      ),
+    );
+    if (existing) {
+      if (!isDeepStrictEqual(existing.replySource, input.source))
+        throw participationError('PARTICIPATION_REVOKED', 'A new grant cannot revive an old reply');
+      if ((existing.workPurpose?.executionRevision ?? 1) !== (input.execution?.revision ?? 1))
+        throw participationError(
+          'WORK_EXECUTION_NOT_CURRENT',
+          'A new authority cannot retarget a prior reply operation',
+        );
+      refreshPreparedWorkPurpose(existing, workPurpose, operationKey);
+      return structuredClone(existing);
+    }
+    const root = input.source.location.rootEventId ?? input.source.eventId;
     const item: ConnectorOutboxItem = {
       outboxId: `outbox_${randomUUID().replaceAll('-', '')}`,
       clientEventId: `reply_${randomUUID().replaceAll('-', '')}`,
@@ -100,7 +271,7 @@ export async function prepareReplyOperation(input: PrepareReplyInput): Promise<C
       ...(workPurpose ? { workPurpose } : {}),
       target: { kind: 'message', eventId: root },
       location: { channelId: input.source.location.channelId, rootEventId: root },
-      replyToEventId: input.source.eventId,
+      replyToEventId: input.execution?.assignmentEventId ?? input.source.eventId,
       body: '',
       status: 'prepared',
       createdAt: new Date(input.now()).toISOString(),
@@ -116,34 +287,25 @@ export async function submitReplyOperation(
     body: string;
     agent: VerifiedAgent;
     verifyAgent: (agent: VerifiedAgent) => Promise<boolean>;
+    artifactSnapshot?: WorkResultArtifactSnapshot;
   },
 ): Promise<ConnectorOutboxItem> {
   const body = z.string().trim().min(1).max(32000).parse(input.body);
   const agent = verifiedAgentSchema.parse(input.agent);
-  if (agent.catId !== input.source.catId || agent.agentId !== input.source.catId || !(await input.verifyAgent(agent))) {
+  const artifactSnapshot = input.artifactSnapshot
+    ? workResultArtifactSnapshotSchema.parse(input.artifactSnapshot)
+    : undefined;
+  if (agent.agentId !== agent.catId || !(await input.verifyAgent(agent))) {
     throw participationError('AGENT_PROVENANCE_UNVERIFIED', 'Host could not verify the current Cat invocation');
   }
   return input.persistence.transaction((state) => {
-    const { binding } = requireParticipation(state, input.source);
-    if (binding.participation?.displayName !== agent.displayName)
-      throw participationError('AGENT_PROVENANCE_UNVERIFIED', 'Named participant has changed');
-    const item = state.connections[input.source.connectionId]!.outbox.find(
-      (candidate) => candidate.outboxId === input.operationId,
-    );
-    if (
-      !item ||
-      item.operationKey !== JSON.stringify([input.sourceRef, input.source.catId, input.resultKey]) ||
-      !isDeepStrictEqual(item.replySource, input.source)
-    )
-      throw participationError('RETURN_UNAVAILABLE', 'Reply operation does not belong to this source');
-    if (item.status !== 'prepared') {
-      if (item.body !== body || item.agent?.catId !== agent.catId || item.agent.displayName !== agent.displayName) {
-        throw participationError('REPLY_PAYLOAD_CONFLICT', 'This reply operation already owns a different payload');
-      }
-      return structuredClone(item);
-    }
+    const item = requireReplyOperation(state, input, agent);
+    assertArtifactMatchesWork(item, artifactSnapshot);
+    const recovered = recoverSubmittedReply(item, body, agent, artifactSnapshot);
+    if (recovered) return recovered;
     item.agent = agent;
     item.body = body;
+    if (item.workPurpose && artifactSnapshot) item.workPurpose.artifactSnapshot = artifactSnapshot;
     item.status = 'queued';
     return structuredClone(item);
   });

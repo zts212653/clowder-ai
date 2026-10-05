@@ -322,13 +322,13 @@ export const DEVELOPMENT_SOP_DEFINITION = {
         {
           id: 'merge-runtime-activation-truth',
           kind: 'hard_rule',
-          text: '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；未获co-creator授权时记录 live=dormant，不得冒充已生效',
+          text: '触及 runtime 加载面的 PR 合入后必须分开声明 main 与 live runtime 状态；登记能力已加载时把普通 live=dormant 验收续办登记到原 work Task，能力未加载或登记失败时不得假报成功，且登记不授予停启权限',
           severity: 'blocker',
           owner: { type: 'stage_suggested_skill', skill: 'merge-gate' },
           predicate: {
             type: 'manual_only',
             reason:
-              'Runtime impact, current live-load state, and operator authorization are semantic and external truths; changed filenames alone cannot prove activation.',
+              'Runtime impact, durable Task ownership, current live-load state, and operator authorization are semantic and external truths; changed filenames alone cannot prove registration or activation.',
             futureCandidate: 'runtime_activation_receipt',
           },
         },

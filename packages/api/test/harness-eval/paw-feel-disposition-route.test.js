@@ -189,7 +189,10 @@ describe('F278 paw-feel disposition routes', () => {
 
     assert.equal(denied.statusCode, 401);
     assert.equal(allowed.statusCode, 200);
-    assert.deepEqual(fixture.readQueries[0], {
+    const { signal, ...filters } = fixture.readQueries[0];
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(signal.aborted, false);
+    assert.deepEqual(filters, {
       states: ['new', 'seen'],
       overdueOnly: true,
       resolution: 'open',
@@ -226,7 +229,10 @@ describe('F278 paw-feel disposition routes', () => {
 
     assert.equal(denied.statusCode, 401);
     assert.equal(allowed.statusCode, 200);
-    assert.deepEqual(fixture.readQueries[0], { sourceCatId: 'codex-sol' });
+    const { signal, ...filters } = fixture.readQueries[0];
+    assert.ok(signal instanceof AbortSignal);
+    assert.equal(signal.aborted, false);
+    assert.deepEqual(filters, { sourceCatId: 'codex-sol' });
   });
 
   it('derives the triage actor from callback auth and rejects spoofing or oversized batches', async () => {

@@ -52,10 +52,13 @@ export const COLLECTIVE_CODEX_POLICY_ARGS = [
     'in_app_browser',
     'in_app_local_automation',
     'goals',
-    'code_mode_host',
     'tool_suggest',
     'view_image',
   ].flatMap((feature) => ['--disable', feature]),
+  // Code-mode-only models need the isolated dispatcher to call the seven selected
+  // Collective MCP tools. The native shell, filesystem and network remain denied.
+  '--enable',
+  'code_mode_host',
   '--enable',
   'skip_host_skill_discovery',
 ] as const;

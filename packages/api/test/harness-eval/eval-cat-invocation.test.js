@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { buildScheduledEvalInvocationMessage } from '../../dist/infrastructure/harness-eval/domain/scheduled-eval-grounding.js';
 import { buildEvalCatInvocation } from '../../dist/infrastructure/harness-eval/eval-cat-invocation.js';
 
 const domain = {
@@ -60,6 +61,81 @@ describe('Eval cat invocation packet', () => {
 
     assert.deepEqual(invocation.context.legacyScheduledTaskIds, ['harness-fit-digest']);
     assert.match(invocation.instructions, /legacy scheduled task/);
+  });
+
+  it('pins eval:a2a current-source runs to the reusable fixed checkout', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    });
+
+    assert.match(invocation.instructions, /CURRENT-SOURCE CHECKOUT HYGIENE/);
+    assert.match(invocation.instructions, /cat-cafe-eval-a2a-current/);
+    assert.match(invocation.instructions, /do not create a per-run `mktemp` clone/);
+    assert.match(invocation.instructions, /fail with the exact blocker/);
+    assert.doesNotMatch(
+      invocation.instructions,
+      /\/Users\/|\/home\//,
+      'no machine-specific absolute path in exported instructions',
+    );
+  });
+
+  it('binds every destructive/declaring step of the eval checkout to its owner and scope', () => {
+    const text = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'not_checked' },
+    }).instructions;
+    // Every git fetch/reset is scoped with `git -C "$EVAL_CHECKOUT"`; a bare `git reset --hard` would act on
+    // whatever the cwd is (main or runtime checkout).
+    const resets = text.match(/git(?: -C "\$[A-Z_]+")? reset --hard[^;.]*/g) ?? [];
+    assert.ok(resets.length > 0, 'the instructions still refresh the eval checkout');
+    for (const r of resets) assert.match(r, /^git -C "\$EVAL_CHECKOUT" reset --hard origin\/main/, r);
+    assert.match(text, /git -C "\$EVAL_CHECKOUT" fetch origin main/);
+    assert.match(
+      text,
+      /[Nn]ever (?:fetch or )?reset (?:in )?(?:the )?main (?:repository|checkout) or the runtime checkout/,
+    );
+    // The declaration must be runnable by the current CLI: `worktree:new --declare-only` requires --owner.
+    const declares = text.match(/worktree:new [^`]*--declare-only[^`]*/g) ?? [];
+    assert.ok(declares.length > 0, 'a fresh clone is declared');
+    for (const d of declares) assert.match(d, /--owner codex\b/, d);
+    for (const d of declares) assert.match(d, /--policy never\b/, d);
+    // Before any reset, an existing checkout must prove it is the eval resource: origin AND owner/policy,
+    // all stated in the text that precedes the first hard reset.
+    const guardStart = text.search(/before any reset/i);
+    const firstReset = text.indexOf('reset --hard');
+    assert.ok(guardStart >= 0 && guardStart < firstReset, 'the pre-reset guard precedes the first reset');
+    const preReset = text.slice(guardStart, firstReset);
+    for (const required of [
+      'git -C "$EVAL_CHECKOUT" remote get-url origin',
+      'zts212653/cat-cafe',
+      'catcafe.lifecycle.owner` = `codex',
+      'catcafe.lifecycle.policy` = `never',
+    ]) {
+      assert.ok(preReset.includes(required), `pre-reset guard must include: ${required}`);
+    }
+  });
+
+  it('scheduled eval grounding prefers designated reusable checkouts over per-run clones', () => {
+    const invocation = buildEvalCatInvocation({
+      domain,
+      trendRefs: [],
+      verdictRefs: [],
+      legacyCleanup: { status: 'disabled' },
+    });
+    const message = buildScheduledEvalInvocationMessage(invocation, {
+      channel: 'time',
+      windowKey: 'daily:2026-09-18T03:00:00.000Z',
+      dedupeKey: 'eval-domain-trigger:eval:a2a:daily:2026-09-18T03:00:00.000Z',
+    });
+
+    assert.match(message, /outside the runtime checkout/);
+    assert.match(message, /designated reusable checkout/);
+    assert.match(message, /instead of creating per-run clones/);
   });
 
   it('builds instructions for eval:anchor-first (F236 Track-2 wired)', () => {

@@ -11,7 +11,6 @@
  */
 
 import type {
-  ApprovalFeatureId,
   ApprovalHubItem,
   EntityConflictContext,
   EntityConflictResolutionRequest,
@@ -19,92 +18,23 @@ import type {
   SettledApprovalHubItem,
 } from '@cat-cafe/shared';
 import { create } from 'zustand';
-import { approvalFeatureMeta, isApprovalItemBatchDecidable } from '@/lib/approval-features';
-import { useToastStore } from '@/stores/toastStore';
+import { isApprovalItemBatchDecidable } from '@/lib/approval-features';
 import { apiFetch } from '@/utils/api-client';
-
-/**
- * Per-feature endpoint routing for approve/reject actions. Dedicated decision
- * routes live in the exhaustive client registry; all others use the default.
- */
-/** Default endpoint for features without a dedicated decision route. */
-const DEFAULT_ENDPOINT_BASE = '/api/dispatch-proposals';
-
-function resolveEndpoint(
-  featureId: ApprovalFeatureId | undefined,
-  proposalId: string,
-  action: 'approve' | 'reject',
-): string {
-  const metadata = featureId ? approvalFeatureMeta(featureId) : undefined;
-  if (metadata?.decisionSurface === 'origin_card') {
-    throw new Error(`${featureId} decisions are available only on the canonical origin card`);
-  }
-  const base = metadata?.decisionEndpointBase ?? DEFAULT_ENDPOINT_BASE;
-  return `${base}/${proposalId}/${action}`;
-}
+import { createApprovalDecisionActions } from './approval-decision-actions';
+import { consumeDecisionAttempt, type DecisionAttempts } from './approval-decision-attempts';
+import {
+  applyConflictFeedback,
+  type DecidingMap,
+  type DecisionErrorBody,
+  decisionErrorMessage,
+  resolveEndpoint,
+} from './approval-decision-http';
 
 /** Result of a batch operation for a single item. */
 interface BatchItemResult {
   proposalId: string;
   success: boolean;
   error?: string;
-}
-
-interface DecisionErrorBody {
-  error?: string;
-  detail?: string;
-  message?: string;
-  conflict?: EntityConflictContext | null;
-}
-
-interface EntityResolutionSuccessBody {
-  proposalId: string;
-  entityId: string;
-  status: 'approved';
-}
-
-const ENTITY_RESOLUTION_ACTION_LABELS: Record<EntityConflictResolutionRequest['action'], string> = {
-  'merge-aliases': '合并别名',
-  replace: '明确替换',
-  correct: '纠错归并',
-  transfer: '转移归属',
-  polysemy: '多义并存',
-};
-
-function decisionErrorMessage(body: DecisionErrorBody, fallback: string): string {
-  const summary = body.message ?? body.error ?? fallback;
-  return body.detail ? `${summary}: ${body.detail}` : summary;
-}
-
-function stablePersonMemoryDecisionId(
-  proposalId: string,
-  action: 'approve' | 'not-now' | 'reject' | 'withdraw',
-  selectedDraftIds: string[] = [],
-): string {
-  const input = `${proposalId}\0${action}\0${[...selectedDraftIds].sort().join('\0')}`;
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `f276_${action.replace('-', '_')}_${(hash >>> 0).toString(16)}`;
-}
-
-function withoutDecision(deciding: ApprovalHubState['deciding'], proposalId: string): ApprovalHubState['deciding'] {
-  const next = { ...deciding };
-  delete next[proposalId];
-  return next;
-}
-
-function applyConflictFeedback(
-  items: ApprovalHubItem[],
-  proposalId: string,
-  conflict: EntityConflictContext,
-  message: string,
-): ApprovalHubItem[] {
-  return items.map((item) =>
-    item.proposalId === proposalId ? { ...item, detail: { ...item.detail, conflict, conflictError: message } } : item,
-  );
 }
 
 interface ApprovalHubState {
@@ -114,7 +44,14 @@ interface ApprovalHubState {
   isOpen: boolean;
   error: string | null;
   /** Map of proposalId → 'approving' | 'rejecting' for optimistic UI feedback */
-  deciding: Record<string, 'approving' | 'rejecting' | 'resolving' | 'deferring' | 'withdrawing'>;
+  deciding: DecidingMap;
+  /**
+   * F322 S3-2b-2: the latest decision attempt per proposal, as transient raw evidence (see approval-decision-attempts.ts).
+   * Not part of `items`/`count`, not a lifecycle: absence never means success.
+   */
+  decisionAttempts: DecisionAttempts;
+  /** Drop an attempt once a host has read it; a no-op unless it is still the attempt the caller saw. */
+  consumeDecisionAttempt: (proposalId: string, attemptId: number) => void;
   /** AC-D5: Set of selected proposalIds for batch operations */
   selectedIds: Set<string>;
   /** AC-D5: Results of the last batch operation (cleared on next batch) */
@@ -160,6 +97,7 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
   isOpen: false,
   error: null,
   deciding: {},
+  decisionAttempts: {},
   selectedIds: new Set<string>(),
   batchResults: [],
   settledItems: [],
@@ -202,256 +140,10 @@ export const useApprovalHubStore = create<ApprovalHubState>((set, get) => ({
     if (!wasOpen) get().fetchPending();
   },
 
-  approveProposal: async (proposalId: string) => {
-    set((s) => ({ deciding: { ...s.deciding, [proposalId]: 'approving' as const } }));
-    try {
-      const item = get().items.find((i) => i.proposalId === proposalId);
-      const res = await apiFetch(resolveEndpoint(item?.sourceFeatureId, proposalId, 'approve'), { method: 'POST' });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        const conflict = data.conflict;
-        if (conflict) {
-          const message = decisionErrorMessage(data, `Approve failed: ${res.status}`);
-          set((state) => ({
-            items: applyConflictFeedback(state.items, proposalId, conflict, message),
-            error: null,
-            deciding: { ...state.deciding, [proposalId]: undefined as never },
-          }));
-          return;
-        }
-        throw new Error(decisionErrorMessage(data, `Approve failed: ${res.status}`));
-      }
-      // Optimistic remove from items list
-      set((s) => ({
-        items: s.items.filter((i) => i.proposalId !== proposalId),
-        count: Math.max(0, s.count - 1),
-        deciding: { ...s.deciding, [proposalId]: undefined as never },
-      }));
-    } catch (err) {
-      set((s) => ({
-        error: err instanceof Error ? err.message : 'Approve failed',
-        deciding: { ...s.deciding, [proposalId]: undefined as never },
-      }));
-    }
-  },
+  ...createApprovalDecisionActions(set, get),
 
-  rejectProposal: async (proposalId: string, feedback?: HumanDispositionFeedbackInput) => {
-    set((s) => ({ deciding: { ...s.deciding, [proposalId]: 'rejecting' as const }, error: null }));
-    try {
-      const item = get().items.find((i) => i.proposalId === proposalId);
-      const isPersonMemory = item?.sourceFeatureId === 'F276' && item.decisionMode === 'claim-select';
-      const isSessionHandoff = item?.sourceFeatureId === 'F225';
-      const feedbackRequest =
-        isPersonMemory || isSessionHandoff
-          ? {
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ...(isPersonMemory ? { decisionId: stablePersonMemoryDecisionId(proposalId, 'reject') } : {}),
-                ...(feedback ? { feedback } : {}),
-              }),
-            }
-          : {};
-      const res = await apiFetch(resolveEndpoint(item?.sourceFeatureId, proposalId, 'reject'), {
-        method: 'POST',
-        ...feedbackRequest,
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        throw new Error(decisionErrorMessage(data, `Reject failed: ${res.status}`));
-      }
-      // Optimistic remove from items list
-      set((s) => ({
-        items: s.items.filter((i) => i.proposalId !== proposalId),
-        count: Math.max(0, s.count - 1),
-        deciding: withoutDecision(s.deciding, proposalId),
-        error: null,
-      }));
-      return true;
-    } catch (err) {
-      set((s) => ({
-        error: err instanceof Error ? err.message : 'Reject failed',
-        deciding: withoutDecision(s.deciding, proposalId),
-      }));
-      return false;
-    }
-  },
-
-  approvePersonMemory: async (proposalId, selectedDraftIds) => {
-    const item = get().items.find((candidate) => candidate.proposalId === proposalId);
-    if (item?.sourceFeatureId !== 'F276' || item.decisionMode !== 'claim-select' || selectedDraftIds.length === 0) {
-      set({ error: 'Person memory approval requires an exact non-empty draft selection' });
-      return;
-    }
-    const remainingDraftIds = new Set(
-      Array.isArray(item.detail.remainingDraftIds)
-        ? item.detail.remainingDraftIds.filter((value): value is string => typeof value === 'string')
-        : [],
-    );
-    const exactSelection = [...new Set(selectedDraftIds)];
-    if (exactSelection.some((draftId) => !remainingDraftIds.has(draftId))) {
-      set({ error: 'Person memory approval selection is stale' });
-      return;
-    }
-
-    set((state) => ({ deciding: { ...state.deciding, [proposalId]: 'approving' as const }, error: null }));
-    try {
-      const res = await apiFetch(`/api/person-memory-proposals/${proposalId}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          selectedDraftIds: exactSelection,
-          decisionId: stablePersonMemoryDecisionId(proposalId, 'approve', exactSelection),
-        }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        throw new Error(decisionErrorMessage(data, `Approve failed: ${res.status}`));
-      }
-      const data = (await res.json()) as {
-        status: 'partially_materialized' | 'materialized';
-        remainingDraftIds?: string[];
-      };
-      set((state) => {
-        const nextDeciding = { ...state.deciding };
-        delete nextDeciding[proposalId];
-        if (data.status === 'materialized') {
-          return {
-            items: state.items.filter((candidate) => candidate.proposalId !== proposalId),
-            count: Math.max(0, state.count - 1),
-            deciding: nextDeciding,
-          };
-        }
-        return {
-          items: state.items.map((candidate) =>
-            candidate.proposalId === proposalId
-              ? {
-                  ...candidate,
-                  detail: {
-                    ...candidate.detail,
-                    remainingDraftIds: data.remainingDraftIds ?? [],
-                  },
-                }
-              : candidate,
-          ),
-          deciding: nextDeciding,
-        };
-      });
-    } catch (err) {
-      set((state) => ({
-        error: err instanceof Error ? err.message : 'Approve failed',
-        deciding: withoutDecision(state.deciding, proposalId),
-      }));
-    }
-  },
-
-  notNowPersonMemory: async (proposalId) => {
-    const item = get().items.find((candidate) => candidate.proposalId === proposalId);
-    if (item?.sourceFeatureId !== 'F276' || item.decisionMode !== 'claim-select') {
-      set({ error: 'Not-now is only available for person memory proposals' });
-      return;
-    }
-    set((state) => ({ deciding: { ...state.deciding, [proposalId]: 'deferring' as const }, error: null }));
-    try {
-      const res = await apiFetch(`/api/person-memory-proposals/${proposalId}/not-now`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          decisionId: stablePersonMemoryDecisionId(proposalId, 'not-now'),
-        }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        throw new Error(decisionErrorMessage(data, `Not-now failed: ${res.status}`));
-      }
-      set((state) => ({
-        items: state.items.map((candidate) =>
-          candidate.proposalId === proposalId
-            ? { ...candidate, detail: { ...candidate.detail, candidateState: 'not_now' } }
-            : candidate,
-        ),
-        deciding: withoutDecision(state.deciding, proposalId),
-      }));
-    } catch (err) {
-      set((state) => ({
-        error: err instanceof Error ? err.message : 'Not-now failed',
-        deciding: withoutDecision(state.deciding, proposalId),
-      }));
-    }
-  },
-
-  withdrawPersonMemory: async (proposalId) => {
-    const item = get().items.find((candidate) => candidate.proposalId === proposalId);
-    if (item?.sourceFeatureId !== 'F276' || item.decisionMode !== 'claim-select') {
-      set({ error: 'Withdraw is only available for person memory proposals' });
-      return;
-    }
-    set((state) => ({ deciding: { ...state.deciding, [proposalId]: 'withdrawing' as const }, error: null }));
-    try {
-      const res = await apiFetch(`/api/person-memory-proposals/${proposalId}/withdraw`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          decisionId: stablePersonMemoryDecisionId(proposalId, 'withdraw'),
-        }),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        throw new Error(decisionErrorMessage(data, `Withdraw failed: ${res.status}`));
-      }
-      set((state) => ({
-        items: state.items.filter((candidate) => candidate.proposalId !== proposalId),
-        count: Math.max(0, state.count - 1),
-        deciding: withoutDecision(state.deciding, proposalId),
-      }));
-    } catch (err) {
-      set((state) => ({
-        error: err instanceof Error ? err.message : 'Withdraw failed',
-        deciding: withoutDecision(state.deciding, proposalId),
-      }));
-    }
-  },
-
-  resolveEntityConflict: async (proposalId, resolution) => {
-    set((state) => ({ deciding: { ...state.deciding, [proposalId]: 'resolving' as const } }));
-    try {
-      const res = await apiFetch(`/api/entity-proposals/${proposalId}/resolve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(resolution),
-      });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as DecisionErrorBody;
-        const conflict = data.conflict;
-        if (conflict) {
-          const message = decisionErrorMessage(data, `Resolution failed: ${res.status}`);
-          set((state) => ({
-            items: applyConflictFeedback(state.items, proposalId, conflict, message),
-            error: null,
-            deciding: { ...state.deciding, [proposalId]: undefined as never },
-          }));
-          return;
-        }
-        throw new Error(decisionErrorMessage(data, `Resolution failed: ${res.status}`));
-      }
-      const data = (await res.json()) as EntityResolutionSuccessBody;
-      set((state) => ({
-        items: state.items.filter((item) => item.proposalId !== proposalId),
-        count: Math.max(0, state.count - 1),
-        deciding: { ...state.deciding, [proposalId]: undefined as never },
-      }));
-      useToastStore.getState().addToast({
-        type: 'success',
-        title: `提案 ${data.proposalId} 已完成`,
-        message: `${ENTITY_RESOLUTION_ACTION_LABELS[resolution.action]}已写入目标实体 ${data.entityId}；其他待处理提案仍会保留。`,
-        duration: 6000,
-      });
-    } catch (err) {
-      set((state) => ({
-        error: err instanceof Error ? err.message : 'Resolution failed',
-        deciding: { ...state.deciding, [proposalId]: undefined as never },
-      }));
-    }
-  },
+  consumeDecisionAttempt: (proposalId, attemptId) =>
+    set((state) => ({ decisionAttempts: consumeDecisionAttempt(state.decisionAttempts, proposalId, attemptId) })),
 
   // --- AC-D5: Batch operations ---
 

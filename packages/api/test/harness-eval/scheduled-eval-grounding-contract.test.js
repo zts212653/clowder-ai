@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
 import { describe, it, mock } from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { createEvalDomainDailySpec } from '../../dist/infrastructure/harness-eval/domain/eval-domain-daily.js';
 import { createEvalDomainNDaySpec } from '../../dist/infrastructure/harness-eval/domain/eval-domain-nday.js';
 import { FIXTURE_FRICTION_3D_YAML, makeRedis, makeTempRoot } from './eval-domain-nday-fixtures.js';
-
-const repoHarnessFeedbackRoot = fileURLToPath(new URL('../../../../docs/harness-feedback', import.meta.url));
+import { createActiveEraHarnessFeedback } from './measurement-census-active-era.js';
 
 async function readDeliveredContent(spec, subjectKey) {
   const gateResult = await spec.admission.gate();
@@ -33,8 +32,10 @@ function assertSharedCheckoutGroundingContract(content) {
 }
 
 describe('scheduled eval repository grounding contract', () => {
-  it('injects the passive-runtime, SHA-bound contract into daily eval messages', async () => {
-    const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: repoHarnessFeedbackRoot });
+  it('injects the passive-runtime, SHA-bound contract into daily eval messages', async (t) => {
+    const activeEra = await createActiveEraHarnessFeedback();
+    t.after(() => rmSync(activeEra.repoRoot, { recursive: true, force: true }));
+    const spec = createEvalDomainDailySpec({ harnessFeedbackRoot: activeEra.harnessFeedbackRoot });
     const content = await readDeliveredContent(spec, 'eval:memory');
 
     assertSharedCheckoutGroundingContract(content);

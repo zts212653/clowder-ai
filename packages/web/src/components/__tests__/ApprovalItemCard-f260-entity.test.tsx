@@ -208,14 +208,19 @@ describe('F260 T0: entity proposal card', () => {
     expect(card!.textContent).toContain('concept');
   });
 
-  it('F260 card visibly identifies both the proposal and target entity', async () => {
+  it('F260 card recovers the proposal and entity ids through a named disclosure', async () => {
     await act(async () => {
       root.render(React.createElement(ApprovalItemCard, { item: F260_ITEM }));
     });
 
     const card = container.querySelector('[data-testid="approval-item-ent-f260-1"]');
-    expect(card!.textContent).toContain('ent-f260-1');
-    expect(card!.textContent).toContain('concept:未婚喵');
+    const identity = card!.querySelector<HTMLDetailsElement>('[data-testid="entity-proposal-identity"]');
+    expect(identity).not.toBeNull();
+    expect(identity!.open).toBe(false);
+    expect(identity!.textContent).toContain('提案 ID');
+    expect(identity!.textContent).toContain('ent-f260-1');
+    expect(identity!.textContent).toContain('实体 ID');
+    expect(identity!.textContent).toContain('concept:未婚喵');
   });
 
   it('F260 card shows aliases', async () => {

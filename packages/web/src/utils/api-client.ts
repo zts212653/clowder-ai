@@ -16,8 +16,16 @@ function getBrowserLocation(): Location | null {
   return candidate ?? null;
 }
 
-function isLoopbackLocation(location: Location | null): boolean {
+function isLoopbackLocation(location: Location | null): location is Location {
   return location != null && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+}
+
+const LOOPBACK_API_ORIGIN = /^(https?:\/\/)(?:localhost|127\.0\.0\.1)(?=[:/]|$)/;
+
+function alignLoopbackApiHostname(envUrl: string, location: Location | null): string {
+  if (!isLoopbackLocation(location)) return envUrl;
+  // SameSite=Strict session cookies require the page and local API to use the same hostname.
+  return envUrl.replace(LOOPBACK_API_ORIGIN, `$1${location.hostname}`);
 }
 
 /** @internal Exported for testing — prefer using `API_URL` constant. */
@@ -30,14 +38,14 @@ export function resolveApiUrl(): string {
   }
   const envUrl = process.env.NEXT_PUBLIC_API_URL;
   if (envUrl) {
-    const isLocalhostDefault = /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(envUrl);
+    const isLocalhostDefault = LOOPBACK_API_ORIGIN.test(envUrl);
     const isLocalAccess = isLoopbackLocation(location);
     const isRemoteAccess = location != null && !isLocalAccess;
     // Skip envUrl when it mismatches actual access origin:
     //   - localhost env + remote browser → reverse-proxy users would hit dev's loopback
     //   - cloud env + local browser → would force a Cloudflare Tunnel round-trip for nothing
     const mismatch = (isLocalhostDefault && isRemoteAccess) || (!isLocalhostDefault && isLocalAccess);
-    if (!mismatch) return envUrl;
+    if (!mismatch) return alignLoopbackApiHostname(envUrl, location);
   }
   if (typeof window === 'undefined') return 'http://localhost:3004';
   const protocol = location?.protocol ?? 'http:';

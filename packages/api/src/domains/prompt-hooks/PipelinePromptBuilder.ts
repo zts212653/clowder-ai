@@ -18,7 +18,7 @@ import type { AssemblerInput, CatId } from '@cat-cafe/shared';
 import { findMonorepoRoot } from '../../utils/monorepo-root.js';
 import { renderSegment } from '../cats/services/context/prompt-template-loader.js';
 import type { InvocationContext, StaticIdentityOptions } from '../cats/services/context/SystemPromptBuilder.js';
-import { buildConciergePromptLines } from '../concierge/ConciergePromptSection.js';
+import { buildConversationDutyPromptLines } from '../concierge/conversation-duty.js';
 import { assembleForSession, assembleForTurn } from './assemble-bridge.js';
 import { HookPipeline, type PipelineResult } from './HookPipeline.js';
 import { HookRegistry } from './HookRegistry.js';
@@ -179,15 +179,15 @@ export function buildInvocationContextViaHookPipeline(context: InvocationContext
   // Legacy SystemPromptBuilder places concierge between D17 and D18 (before D21
   // trailing anchor). Splice into patches at the correct position to preserve
   // ordering for AC-P2-14 zero-behavior-change.
-  if (context.threadKind === 'concierge' && context.conciergeConfig) {
-    const conciergeLines = buildConciergePromptLines(context.conciergeConfig, context.threadId);
+  if (context.liveCompanion || (context.threadKind === 'concierge' && context.conciergeConfig)) {
+    const conciergeLines = buildConversationDutyPromptLines(context);
     if (conciergeLines.length > 0) {
       const scopedPatches = [...trace.patches.filter((p) => SCOPE_D.test(p.hookId))];
       // Insert before D18 (order 1800) — matches legacy position after D17 (order 1700)
       const d18Idx = scopedPatches.findIndex((p) => p.hookId === 'D18');
       const insertIdx = d18Idx >= 0 ? d18Idx : scopedPatches.length;
       scopedPatches.splice(insertIdx, 0, {
-        hookId: 'concierge-f229',
+        hookId: context.liveCompanion ? 'live-companion-f317' : 'concierge-f229',
         content: conciergeLines.join('\n'),
         order: 1750,
       });

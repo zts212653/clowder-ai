@@ -1,6 +1,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
+import { tintOf } from '@/lib/hex-color';
 import type { DirectionInfo } from '@/lib/parse-direction';
 
 interface DirectionPillProps {
@@ -27,7 +28,7 @@ export function DirectionPill({ direction, getCatById }: DirectionPillProps) {
   return (
     <span
       className="text-micro font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap"
-      style={{ backgroundColor: `${color}20`, color }}
+      style={{ backgroundColor: tintOf(color, '20'), color }}
     >
       {text}
     </span>

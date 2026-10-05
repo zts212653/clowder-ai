@@ -52,9 +52,18 @@ function verifiedOutcomeContinuation(projection: PawFeelDispositionProjection): 
 
 function blockedContinuation(projection: PawFeelDispositionProjection): PawFeelIssueProjection['continuation'] {
   if (!projection.blocker) return { kind: 'review_required', evidenceRefs: [] };
+  const condition = projection.blocker.resumeCondition;
+  const unboundTimeWait =
+    condition?.selector.kind === 'bounded_time' && !condition.selector.dependencyRef && !projection.taskId;
   return {
-    kind: projection.blocker.resumeCondition ? 'blocked' : 'legacy_blocker_unbound',
-    evidenceRefs: [projection.blocker.ref],
+    kind: condition && !unboundTimeWait ? 'blocked' : 'legacy_blocker_unbound',
+    evidenceRefs: compact([
+      projection.blocker.ref,
+      projection.taskId,
+      projection.actionLeaseRef?.leaseId,
+      projection.directRepairBinding?.bindingRef.ownerStateRef,
+    ]),
+    ...repairIdentity(projection),
   };
 }
 

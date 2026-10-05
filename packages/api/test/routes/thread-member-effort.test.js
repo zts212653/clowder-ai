@@ -132,6 +132,49 @@ describe('F262 thread member effort routes', () => {
     assert.equal(cleared.compatibility, 'compatible');
   });
 
+  it('offers and accepts GPT-6 model effort tiers through the thread API', async () => {
+    const previousSolModel = process.env.CAT_CODEX_SOL_MODEL;
+    try {
+      process.env.CAT_CODEX_SOL_MODEL = 'gpt-6-sol';
+      const solList = await app.inject({
+        method: 'GET',
+        url: `/api/threads/${THREAD_ID}/members/effort`,
+        headers: HEADERS,
+      });
+      const sol = JSON.parse(solList.payload).members.find((row) => row.catId === 'codex-sol');
+      assert.deepEqual(sol.options, ['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+
+      const solMax = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
+        headers: HEADERS,
+        payload: { effort: 'max' },
+      });
+      assert.equal(solMax.statusCode, 200);
+      assert.equal(JSON.parse(solMax.payload).effective, 'max');
+
+      process.env.CAT_CODEX_SOL_MODEL = 'gpt-6-luna';
+      const lunaList = await app.inject({
+        method: 'GET',
+        url: `/api/threads/${THREAD_ID}/members/effort`,
+        headers: HEADERS,
+      });
+      const luna = JSON.parse(lunaList.payload).members.find((row) => row.catId === 'codex-sol');
+      assert.deepEqual(luna.options, ['low', 'medium', 'high', 'xhigh', 'max']);
+
+      const lunaUltra = await app.inject({
+        method: 'PATCH',
+        url: `/api/threads/${THREAD_ID}/members/codex-sol/effort`,
+        headers: HEADERS,
+        payload: { effort: 'ultra' },
+      });
+      assert.equal(lunaUltra.statusCode, 400);
+    } finally {
+      if (previousSolModel === undefined) delete process.env.CAT_CODEX_SOL_MODEL;
+      else process.env.CAT_CODEX_SOL_MODEL = previousSolModel;
+    }
+  });
+
   it('projects options and validates overrides against the runtime-effective model', async () => {
     const previousCodexModel = process.env.CAT_CODEX_MODEL;
     const previousSolModel = process.env.CAT_CODEX_SOL_MODEL;

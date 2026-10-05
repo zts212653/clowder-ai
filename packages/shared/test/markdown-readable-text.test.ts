@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { findGeneratedTextConstructs, projectMarkdownReadableText } from '../src/markdown-readable-text.js';
+import {
+  findGeneratedTextConstructs,
+  projectMarkdownReadableText,
+  projectMarkdownReadableTextWithSourceMap,
+} from '../src/markdown-readable-text.js';
 
 /**
  * The load-bearing property is not the exact separators — matching normalizes whitespace —
@@ -93,5 +97,67 @@ describe('markdown readable-text projection (F294 quote plane v2)', () => {
     );
     expect(projectMarkdownReadableText('转义的 \\*星号\\* 显示为星号')).toBe('转义的 *星号* 显示为星号');
     expect(projectMarkdownReadableText('snake_case_name 不该被当成强调')).toBe('snake_case_name 不该被当成强调');
+  });
+});
+
+describe('markdown readable-text source map (F309 rendered selection → raw range)', () => {
+  const samples = [
+    '# 松针与潮汐 · Pine needles\n\n第一段：**暮色里的灯塔**把航线折成两半，\nthe keeper writes.\n\nSecond — *salt*, 海风。',
+    'Tom &amp; Jerry &copy; 2026 and \\*escaped\\* stars',
+    '> 引用第一行\n> 引用第二行\n\n- 列表 **加粗**\n  续行\n- `inline code` 后',
+    '| 名称 | 状态 |\n| --- | --- |\n| **转发** | `绿` |\n\n见 [链接文字](/docs/x.md)。',
+    '```js\njs\n```\n\n```ts\nconst a = 1;\n```\n\n<div>raw html</div>\n\n---',
+    // Characters outside the BMP are two UTF-16 units: offsets must count units, as string indexes do
+    // (codex6-sol #4750 review: code points shifted every later offset by one).
+    '`😀` after words',
+    'text 😀 here **bold 🐾** end\n\n```\n🐾 code 👀\n```\n\n&#x1F600; entity',
+  ];
+
+  it('is the digested projection character for character, and every mapped offset names that character', () => {
+    for (const markdown of samples) {
+      const mapped = projectMarkdownReadableTextWithSourceMap(markdown);
+      expect(mapped.text).toBe(projectMarkdownReadableText(markdown));
+      expect(mapped.sourceOffsets).toHaveLength(mapped.text.length);
+      mapped.sourceOffsets.forEach((offset, index) => {
+        if (offset !== null) expect(markdown[offset], `${JSON.stringify(markdown)} @${index}`).toBe(mapped.text[index]);
+      });
+    }
+  });
+
+  const offsetOf = (markdown: string, visible: string) => {
+    const mapped = projectMarkdownReadableTextWithSourceMap(markdown);
+    const at = mapped.text.indexOf(visible);
+    expect(at, visible).toBeGreaterThanOrEqual(0);
+    return Array.from(visible, (_c, index) => mapped.sourceOffsets[at + index] ?? null);
+  };
+
+  it('maps text inside emphasis, across soft breaks and blockquote continuations to its raw characters', () => {
+    const [first] = samples;
+    expect(offsetOf(first!, '暮色')).toEqual([first!.indexOf('暮色'), first!.indexOf('暮色') + 1]);
+    expect(offsetOf(first!, 'salt')[0]).toBe(first!.indexOf('salt'));
+    const quote = samples[2]!;
+    expect(offsetOf(quote, '引用第二行')[0]).toBe(quote.indexOf('引用第二行'));
+    expect(offsetOf(quote, '续行')[0]).toBe(quote.indexOf('续行'));
+    expect(offsetOf(quote, 'inline')[0]).toBe(quote.indexOf('inline'));
+  });
+
+  it('never maps a character reference, but maps the escaped character of a backslash escape', () => {
+    const markdown = samples[1]!;
+    expect(offsetOf(markdown, '&')).toEqual([null]);
+    expect(offsetOf(markdown, '©')).toEqual([null]);
+    expect(offsetOf(markdown, 'Jerry')[0]).toBe(markdown.indexOf('Jerry'));
+    expect(offsetOf(markdown, '*escaped*')).toEqual([
+      markdown.indexOf('*escaped'),
+      ...Array.from('escaped', (_c, index) => markdown.indexOf('escaped') + index),
+      markdown.lastIndexOf('*'),
+    ]);
+  });
+
+  it('refuses to guess a code value that its own fence repeats', () => {
+    const markdown = samples[4]!;
+    const mapped = projectMarkdownReadableTextWithSourceMap(markdown);
+    expect(mapped.text.startsWith('js')).toBe(true);
+    expect(mapped.sourceOffsets.slice(0, 2)).toEqual([null, null]);
+    expect(offsetOf(markdown, 'const a')[0]).toBe(markdown.indexOf('const a'));
   });
 });

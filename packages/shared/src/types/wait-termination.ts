@@ -24,7 +24,7 @@ const waitTerminationEventShape = {
   eventId: referenceSchema,
   kind: z.literal('wait.terminated'),
   waitId: identifierSchema,
-  waitKind: z.enum(['hold_ball', 'github_pr', 'github_issue', 'managed_command', 'timer']),
+  waitKind: z.enum(['hold_ball', 'github_pr', 'github_issue', 'deployment', 'managed_command', 'timer']),
   generation: z.number().int().positive(),
   subjectRef: referenceSchema,
   threadId: identifierSchema,

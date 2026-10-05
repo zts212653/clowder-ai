@@ -1,11 +1,11 @@
 ---
 name: collaborative-thinking
-tips_exempt: internal shared-reference coordinate repair; no user-visible capability change
+tips_exempt: "This revision corrects conversation-to-work boundaries and optional settlement in an internal thinking method; it adds no user-openable capability."
 description: >
   单人或多猫的创意探索、独立思考、讨论收敛。
   Use when: brainstorm、多猫独立思考、讨论结束需要收敛、方向性问题需要多视角。
   Not for: 已有明确 spec 直接写代码、单猫执行已定方案。
-  Output: 收敛报告（共识/分歧/行动项）+ 三件套沉淀检查。
+  Output: 共同理解、反例、取舍或结论；需要留存且已获授权时形成设计或讨论记录。
 triggers:
   - "brainstorm"
   - "讨论"
@@ -17,24 +17,24 @@ triggers:
 
 # Collaborative Thinking
 
-三种思考模式：单人探索 / 多猫独立思考 / 讨论收敛沉淀。与 `feat-lifecycle` 讨论阶段的区别：`feat-lifecycle` 专用于 feat 采访和需求澄清；本 skill 是通用思考框架。
+三种按需使用的思考方式：单人探索 / 多猫独立思考 / 讨论收敛沉淀。`feat-lifecycle` 处理 Feature 的需求与设计；这里也容纳尚未指向交付的共同探索。讨论可以停在更清楚的问题、被推翻的假设或未决取舍，不自动产生任务、审批卡或下一阶段。已有明确委托沿原责任推进，不因开始讨论重新采访。
 
 ## 核心知识
 
 | 模式 | 何时用 | 何时不用 |
 |------|--------|----------|
-| **A 单人探索** | 1:1 功能设计、想法 → spec | 需要多视角的方向性决策 |
+| **A 单人探索** | 1:1 共同理解问题、探讨想法或设计 | 需要多视角的方向性决策 |
 | **B 多猫思考** | 架构选型、流程设计、跨模型互补 | 实现细节、bug 定位（token 成本不值） |
 | **C 收敛沉淀** | 任何讨论产出了决策/规则/否决理由 | 纯问答（结论在 thread 里已够）、operator说"不用记" |
 
 ## Mode A: 单人探索 (Brainstorm)
 
-**目标**：将模糊想法转化为可执行 spec，通过增量验证降低返工。
+**目标**：一起弄清正在关心的问题，允许修正问题本身；到了要交付的地方，再形成可执行范围。
 
-1. **理解上下文**：先读项目现状（文件、文档、近期 commits）。每次只问一个问题，优先多选题。
-2. **探索方案**：提出 2-3 个备选 + tradeoffs，先说推荐和理由。**YAGNI 无情剪枝**——"以后可能需要"的功能先砍。
-3. **呈现设计**：每次 200-300 字，每段后问"这个方向对吗？"。覆盖：架构 / 组件 / 数据流 / 错误处理 / 测试。
-4. **产出**：设计文档写到 `feature-specs/YYYY-MM-DD-{topic}-design.md`，commit 后问"要开始实现了吗？"
+1. **理解上下文**：先恢复相关事实和已有决定。结合语境理解对方是在举反例、开放探索还是委托交付；只澄清会影响当前理解的未知，不把一句想法加工成需求采访。
+2. **探索方案**：拿出理由、反例和有意义的备选，允许一起换问题。已进入交付设计时，才据真实需求判断哪些功能值得做。
+3. **呈现进展**：把眼前的新理解或具体稿给对方看，说明重要取舍。提问服务真实疑点，不按字数分段索要确认；对方主动参与和猫主动占用注意力的分寸见 [决策准备](../.cat-cafe-shared-refs/decision-matrix.md#交流准备与时机)。
+4. **收尾**：可以在当前对话说明所得与尚未确定之处。确有后续消费、需要留存且已有授权时，再写设计或讨论记录；讨论结束不等于授权写文件、commit 或开始实现。
 
 ## Mode B: 多猫独立思考
 
@@ -50,7 +50,7 @@ Phase 2: 串行讨论（有分歧才触发，限 2-3 轮）
 Phase 3: operator选扇入者
 Phase 4: 扇入综合（会议纪要 + 行动项）
 Phase 5: 其他猫审阅补充（纠正误读）
-Phase 6: operator反馈 + 最终确认 → 进入 Mode C
+Phase 6: 有待决事项时请operator参与；有留存需要时进入 Mode C
 ```
 
 **Phase 1 独立性保护规则（最重要）**：
@@ -94,23 +94,15 @@ Phase 6: operator反馈 + 最终确认 → 进入 Mode C
 
 **收敛时 operator 升级检查**：如果收敛结论中有需要 operator 拍板的 Open Question，必须附 Decision Packet（格式见 `../.cat-cafe-shared-refs/decision-matrix.md`）。先判断可逆性：回滚成本低的猫猫自决，不升级。
 
-**收敛三件套——每项必须显式回答"有/没有"，不允许跳过**：
+先判断这轮是否需要持久留存。没有形成决定、当前对话已足够或只是共同探索时，可以到此结束。已有授权且后续工作确实需要的结论，沿现有真相源更新；不要因为开过讨论就生成三份材料。
 
-**1. 否决理由 → ADR**：这次讨论有否决某个技术方案？有 → 补到对应 ADR 的否决记录段。
+**1. 否决理由 → ADR**：已形成且需追溯的架构取舍，补到对应 ADR 的理由段。
 
-**2. 踩坑教训 → public-lessons.md**：这次讨论有暴露新坑？有 → 追加到 `docs/public-lessons.md`（7 槽位格式）。
+**2. 踩坑教训 → 既有教训或回放**：消费真实失败；已有记录够用就引用，不为讨论收尾复制一份。
 
-**3. 操作规则 → 指引文件**：这次讨论有产生新的必须遵守的规则？有 → 更新 CLAUDE.md / AGENTS.md / GEMINI.md（或 `../.cat-cafe-shared-refs/shared-rules.md`）。
+**3. 判断方法 → 相应 skill/ref**：已接受且授权修订的方法落到猫实际经过的入口，不把探索性意见直接升成 L0 规则。
 
-**强制回答格式**（附在 commit message 或文档末尾）：
-```
-## 收敛检查
-1. 否决理由 → ADR？[有 → 已补到 ADR-0xx / 没有]
-2. 踩坑教训 → lessons-learned？[有 → 已追加 / 没有]
-3. 操作规则 → 指引文件？[有 → 已更新 CLAUDE.md §xx / 没有]
-```
-
-**追溯链**（每次收敛必须建立）：BACKLOG 条目 link 会议纪要入口；每篇文档头部 link 回上级文档。
+**追溯**：实际留存的材料指回来源与所服务的工作；已有 Feature/BACKLOG 时更新对应入口，不为获得追溯链另建项目。
 
 **会议纪要模板**（存放：`feature-discussions/YYYY-MM-DD-{topic}-meeting-notes.md`）：
 ```markdown
@@ -128,24 +120,24 @@ Phase 6: operator反馈 + 最终确认 → 进入 Mode C
 | 几只猫各自看一个架构方向 | B |
 | 不可逆 / 价值取舍 / 方向级的重大决策 | **B 严格档** |
 | 讨论刚结束，要沉淀 | C |
-| Mode B 结束后 | **C（必须）** |
+| Mode B 结束且结论需要留存 | C |
 
 ## Common Mistakes
 
 | Mistake | Fix |
 |---------|-----|
-| Mode A 一次问多个问题 | 拆成多条，每条只问一件事 |
-| Mode A 没提备选方案就直接设计 | 先 2-3 个方案 + tradeoffs，再推荐 |
+| 把共同探索或举反例自动变成立项 | 先接住本次对话；有真实推进意图与授权才进入交付 |
+| 为了凑备选或固定提问节奏反复确认 | 用实际疑点和取舍决定问什么，复用已清楚的约定 |
 | Mode B Phase 1 让猫看到彼此回答 | routeParallel 或分别 @ 并强调独立思考 |
 | Mode B 综合时抹平分歧 | 分歧必须保留 + 标注各方理由 |
 | Mode B 跳过 Phase 5 审阅 | 综合可能误读观点，原作者必须确认 |
 | 严格档写成逐条填表 / 打卡的步骤剧本 | 变成 longform-005 批的"演戏"；skill 只保护原则（沉默≠同意 / 分歧保留 / 接 census），可机械检测的强制归硬层 |
-| Mode C 三件套"感觉没有就跳过" | 必须显式回答每一项"有/没有" |
-| Mode C 写了纪要但不 link BACKLOG | 追溯链断裂，未来找不到 |
+| 收尾默认写文档、commit、开任务 | 先判断留存是否有消费者与授权；当前对话可以就是产物 |
+| 已留存的结论没有来源和原工作入口 | 补到原真相源的追溯，不另造平行项目 |
 
 ## 下一步
 
-- Mode A 结束 → `worktree` 拉 worktree，`writing-plans` 做实现计划
-- Mode B 结束 → **必须进入 Mode C** 收敛
-- Mode C 完成后 → commit：`docs({scope}): {topic} 讨论收敛 + 追溯链 [{猫猫签名}]`
-- 产出了新 feat → `feat-lifecycle` skill 立项
+- 共同理解已足够 → 在当前对话结束，可以保留未决问题。
+- 已接受且授权的交付 → 沿原工作链；需要实施计划时用 `writing-plans`，需要隔离时用 `worktree`。
+- 需要留存结论 → Mode C；获准的文档变更按 `co-creation-docs` 交付。
+- 确实决定立项新 Feature → `feat-lifecycle`，不由讨论或一个建议自动触发。

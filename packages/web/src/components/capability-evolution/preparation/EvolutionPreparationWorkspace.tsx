@@ -141,17 +141,8 @@ export function EvolutionPreparationWorkspace({ projection }: { projection: Evol
       aria-label="准备工作面"
     >
       <header className="evolution-preparation-heading">
-        <div>
-          <span className="evolution-preparation-kicker">Program 内的可回读准备记录</span>
-          <h2>准备</h2>
-        </div>
-        <p>四块可以交叉推进。提交只表示草案已登记，不代表验证、授权或效果已经成立。</p>
-        <p className="evolution-source">
-          当前 Program 只绑定一个 target：{projection.program.objectRef.ownerFeatureId} ·{' '}
-          {readableTarget(projection.program.objectRef.ownerStateRef)}
-          {projection.program.objectRef.version ? ` · ${projection.program.objectRef.version}` : ''}
-          。候选地图不会改写此绑定。
-        </p>
+        <h2 className="sr-only">准备</h2>
+        <p>先看改进方向与选择理由，再核对判断标准和证据。</p>
       </header>
       <div role="tablist" aria-label="准备阅读入口" className="evolution-preparation-tabs">
         {EVOLUTION_PREPARATION_SECTIONS.map((section) => {
@@ -234,6 +225,15 @@ export function EvolutionPreparationWorkspace({ projection }: { projection: Evol
           />
         )}
       </div>
+      <details className="evolution-preparation-provenance">
+        <summary>项目绑定与技术记录</summary>
+        <p className="evolution-source">
+          当前 Program 只绑定一个 target：{projection.program.objectRef.ownerFeatureId} ·{' '}
+          {readableTarget(projection.program.objectRef.ownerStateRef)}
+          {projection.program.objectRef.version ? ` · ${projection.program.objectRef.version}` : ''}
+          。候选地图不会改写此绑定。
+        </p>
+      </details>
     </section>
   );
 }

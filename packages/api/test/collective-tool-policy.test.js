@@ -23,10 +23,16 @@ const source = {
 };
 const grant = { kind: 'collective-participation', originTriggerMessageId: 'msg_1', source };
 
-test('public participation exposes exactly current-context/read/reply and no owner callbacks', () => {
+test('public participation exposes only current-source context, reply, interest, and proposal tools', () => {
   assert.deepEqual(normalizeToolExecutionPolicy(policy), policy);
   assert.deepEqual(parseToolExecutionPolicy(JSON.stringify(policy)), policy);
-  for (const tool of ['collective_current_context', 'collective_read_context', 'collective_reply']) {
+  for (const tool of [
+    'collective_current_context',
+    'collective_read_context',
+    'collective_reply',
+    'collective_set_interest',
+    'collective_propose_work',
+  ]) {
     assert.equal(toolExecutionPolicyDenial(policy, `cat_cafe_${tool}`), null);
     assert.equal(toolExecutionPolicyDenial(policy, `/api/callbacks/${tool.replaceAll('_', '-')}`), null);
   }
@@ -96,6 +102,14 @@ test('real callback authentication accepts the public tools but rejects owner ac
       calls.push(record);
       return { submitted: args };
     },
+    async setInterest(record, ...args) {
+      calls.push(record);
+      return { interest: args };
+    },
+    async proposeWork(record, ...args) {
+      calls.push(record);
+      return { proposal: args };
+    },
   };
   const app = Fastify();
   await registerCollectiveParticipationCallbacks(app, { registry, context });
@@ -129,7 +143,18 @@ test('real callback authentication accepts the public tools but rejects owner ac
         .statusCode,
       200,
     );
-    assert.equal(calls.length, 3);
+    assert.equal((await post('collective-set-interest', { contextRef: 'opaque', state: 'listen' })).statusCode, 200);
+    assert.equal(
+      (
+        await post('collective-propose-work', {
+          contextRef: 'opaque',
+          title: '整理为工作',
+          intendedOutcome: '让原消息继续成为来源。',
+        })
+      ).statusCode,
+      200,
+    );
+    assert.equal(calls.length, 5);
     for (const record of calls) {
       assert.deepEqual(record.executionGrant, grant);
       assert.equal(record.ownerAuthProvenance, 'unknown');
@@ -146,7 +171,15 @@ test('real callback authentication accepts the public tools but rejects owner ac
       400,
     );
     assert.equal((await post('collective-read-context', { contextRef: 'opaque', limit: 101 })).statusCode, 400);
-    assert.equal(calls.length, 3);
+    assert.equal(
+      (await post('collective-set-interest', { contextRef: 'opaque', state: 'all_messages' })).statusCode,
+      400,
+    );
+    assert.equal(
+      (await post('collective-propose-work', { contextRef: 'opaque', requestId: 'model-chosen' })).statusCode,
+      400,
+    );
+    assert.equal(calls.length, 5);
   } finally {
     await app.close();
   }

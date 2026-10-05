@@ -4,6 +4,7 @@ import type { McpToolDefinition } from './tool-governance-types.js';
 export type CanonicalToolSources = Readonly<Record<McpServerFamily, readonly McpToolDefinition[]>>;
 
 export type CanonicalToolsetEnv = {
+  collectiveWork?: boolean;
   participation?: boolean;
   readonly?: boolean;
   hasAgentKey?: boolean;
@@ -15,6 +16,7 @@ export type CanonicalToolsetEnv = {
 const DESKTOP_PROFILES = {
   'fable-phase0': 'desktop:fable-phase0',
   'cloud-pro-phase0': 'desktop:cloud-pro-phase0',
+  'live-companion': 'desktop:live-companion',
 } as const;
 
 function assertGovernedDefinition(definition: McpToolDefinition): void {
@@ -64,6 +66,10 @@ export function projectCanonicalToolRegistry(
   registry: readonly FamilyToolDefinition[],
   env: CanonicalToolsetEnv,
 ): readonly FamilyToolDefinition[] {
+  if (env.collectiveWork) {
+    if (env.participation) throw new Error('Conflicting Collective MCP profiles');
+    return registry.filter((definition) => definition.policy.runtimeProfiles.includes('collective-work'));
+  }
   if (env.participation)
     return registry.filter((definition) => definition.policy.runtimeProfiles.includes('collective-participation'));
   if (env.desktopMode) {

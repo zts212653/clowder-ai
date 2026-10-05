@@ -17,6 +17,7 @@ export interface RequestReviewOwnerPortOptions {
 
 const PACKET_SHAPES = [
   ['Review-Subject-Ref:', 'Accepted-Source-Ref:', 'Accepted-Revision:'],
+  ['Review-Subject-Ref:', 'Reviewed-Head-Sha:', 'Accepted-Source-Ref:', 'Accepted-Revision:'],
   ['Review-Subject-Ref:', 'Request-Review-Consumption-Handle:', 'Accepted-Source-Ref:', 'Accepted-Revision:'],
   [
     'Review-Subject-Ref:',

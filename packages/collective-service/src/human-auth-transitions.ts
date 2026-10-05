@@ -126,18 +126,38 @@ function acceptInviteIdentity(
     ? state.humans[existingBinding.humanId]
     : createHumanRecord(state, identity.displayName, now, identity.avatarUrl);
   if (!human) throw new CollectiveServiceError('AUTH_IDENTITY_CONFLICT', 'Bound Human identity is missing', 409);
-  if (state.memberships[membershipKey(invite.collectiveId, human.humanId)]) {
+  const existingMembership = state.memberships[membershipKey(invite.collectiveId, human.humanId)];
+  if (existingMembership?.status === 'active') {
     throw new CollectiveServiceError('AUTH_IDENTITY_CONFLICT', 'Human is already a Collective member', 409);
   }
   upsertBinding(state, human, provider, identity, existingBinding?.bindingId, now);
   refreshHumanProfile(human, identity);
   invite.consumedAt = new Date(now).toISOString();
-  state.memberships[membershipKey(invite.collectiveId, human.humanId)] = {
-    collectiveId: invite.collectiveId,
-    humanId: human.humanId,
-    role: 'member',
-    joinedAt: new Date(now).toISOString(),
-  };
+  const joinedAt = new Date(now).toISOString();
+  if (existingMembership) {
+    existingMembership.role = 'member';
+    existingMembership.joinedAt = joinedAt;
+    existingMembership.status = 'active';
+    existingMembership.revision += 1;
+    delete existingMembership.leftAt;
+    delete existingMembership.leaveReason;
+    existingMembership.history.push({
+      revision: existingMembership.revision,
+      action: 'joined',
+      at: joinedAt,
+      role: 'member',
+    });
+  } else {
+    state.memberships[membershipKey(invite.collectiveId, human.humanId)] = {
+      collectiveId: invite.collectiveId,
+      humanId: human.humanId,
+      role: 'member',
+      joinedAt,
+      status: 'active',
+      revision: 1,
+      history: [{ revision: 1, action: 'joined', at: joinedAt, role: 'member' }],
+    };
+  }
   return { human, collectiveId: invite.collectiveId };
 }
 

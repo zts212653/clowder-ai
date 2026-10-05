@@ -8,9 +8,11 @@ export class WaitContinuationCarrierError extends Error {
 export function waitContinuationCarrierFromStoredMessage(
   message: Pick<StoredMessage, 'source'> | null | undefined,
 ): WaitContinuationCarrierV1 | undefined {
-  if (message?.source?.connector !== 'github-wait') return undefined;
+  if (message?.source?.connector !== 'github-wait' && message?.source?.connector !== 'deployment-wait') {
+    return undefined;
+  }
   const carrier = parseWaitContinuationCarrier(message.source.meta?.waitContinuationCarrier);
-  if (!carrier) throw new WaitContinuationCarrierError('github-wait message is missing a valid continuation carrier');
+  if (!carrier) throw new WaitContinuationCarrierError('wait message is missing a valid continuation carrier');
   return carrier;
 }
 

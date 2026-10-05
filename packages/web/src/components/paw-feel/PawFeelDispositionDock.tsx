@@ -1,7 +1,7 @@
 'use client';
 
 import type { PawFeelInboxPage, PawFeelResponsibilityState } from '@cat-cafe/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { pawFeelDutyDetail } from './paw-feel-duty-presentation';
 import { pawFeelIssueDetail, pawFeelIssueStatus } from './paw-feel-issue-presentation';
@@ -14,6 +14,9 @@ const STATE_LABELS: Record<PawFeelResponsibilityState, string> = {
   blocked: 'blocked',
   terminal: 'terminal',
 };
+
+const subscribeToExportLocation = () => () => {};
+const readExportMode = () => new URLSearchParams(window.location.search).get('export') === 'true';
 
 function PawFeelDispositionDetail({ item }: { item: PawFeelInboxPage['items'][number] }) {
   const detail = pawFeelDutyDetail(item);
@@ -44,12 +47,18 @@ function PawFeelDispositionDetail({ item }: { item: PawFeelInboxPage['items'][nu
 }
 
 export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { messageId: string; pollMs?: number }) {
+  const isExport = useSyncExternalStore(subscribeToExportLocation, readExportMode, () => false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const visibleMessageIdRef = useRef<string | null>(null);
   const [page, setPage] = useState<PawFeelInboxPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [inViewport, setInViewport] = useState(false);
+  const anchorProps = {
+    ref: anchorRef,
+    'data-paw-feel-viewport-anchor': true,
+    'data-export-layout-pending': isExport && !page && !error ? `paw-feel:${messageId}` : undefined,
+  };
 
   const load = useCallback(async () => {
     try {
@@ -71,7 +80,7 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
 
   useEffect(() => {
     const anchor = anchorRef.current;
-    if (!anchor || typeof IntersectionObserver === 'undefined') {
+    if (isExport || !anchor || typeof IntersectionObserver === 'undefined') {
       setInViewport(true);
       return;
     }
@@ -81,7 +90,7 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
     );
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, []);
+  }, [isExport]);
 
   useEffect(() => {
     if (!inViewport) {
@@ -94,31 +103,31 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
   }, [inViewport, load, messageId]);
 
   useEffect(() => {
-    if (!inViewport || pollMs <= 0 || allIssuesResolved) return;
+    if (isExport || !inViewport || pollMs <= 0 || allIssuesResolved) return;
     const timer = window.setInterval(() => void load(), pollMs);
     return () => window.clearInterval(timer);
-  }, [allIssuesResolved, inViewport, load, pollMs]);
+  }, [allIssuesResolved, inViewport, isExport, load, pollMs]);
 
   if (error) {
     return (
-      <div ref={anchorRef} data-paw-feel-viewport-anchor>
+      <div {...anchorProps}>
         <output className="mt-3 block border-t border-current/15 pt-2 text-micro opacity-70">
           爪感差处置状态暂不可读；原报告仍已保留。
         </output>
       </div>
     );
   }
-  if (!page) return <div ref={anchorRef} data-paw-feel-viewport-anchor className="h-px" />;
+  if (!page) return <div {...anchorProps} className="h-px" />;
   if (page.projectionStatus === 'unavailable') {
     return (
-      <div ref={anchorRef} data-paw-feel-viewport-anchor>
+      <div {...anchorProps}>
         <output className="mt-3 block border-t border-current/15 pt-2 text-micro opacity-70">
           处置台账暂不可用；原报告仍已保留。
         </output>
       </div>
     );
   }
-  if (page.items.length === 0) return <div ref={anchorRef} data-paw-feel-viewport-anchor className="h-px" />;
+  if (page.items.length === 0) return <div {...anchorProps} className="h-px" />;
   const stateCounts = new Map<PawFeelResponsibilityState, number>();
   for (const item of page.items) {
     const state = item.responsibility.state;
@@ -132,7 +141,7 @@ export function PawFeelDispositionDock({ messageId, pollMs = 30_000 }: { message
   const openIssueCount = page.items.filter((item) => item.issue.resolution === 'open').length;
 
   return (
-    <div ref={anchorRef} data-paw-feel-viewport-anchor>
+    <div {...anchorProps}>
       <section
         className="mt-3 space-y-1.5 border-t border-current/15 pt-2"
         aria-label="爪感差处置状态"

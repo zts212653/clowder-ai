@@ -1,12 +1,11 @@
 import { z } from 'zod';
+import { validateOwnerTimeCoordinates } from './entrusted-work-owner-read-evidence.js';
 import {
-  canonicalProducerEvidence,
-  type EligibleAttentionReceipt,
-  sameProducerEvidence,
-  selectCanonicalOwnerTime,
-  validateOwnerTimeCoordinates,
-} from './entrusted-work-owner-read-evidence.js';
-import { NEEDS_ME_PRODUCER_IDS, producerAttentionReceiptV1Schema } from './growing.js';
+  validateBriefAttentionAndMilestone,
+  validateBriefTaskCoordinates,
+} from './entrusted-work-owner-read-validation.js';
+import { entrustedWorkV1Schema, NEEDS_ME_PRODUCER_IDS, producerAttentionReceiptV1Schema } from './growing.js';
+import { preparedArtifactSnapshotV1Schema } from './growing-artifact.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 const boundedText = z.string().trim().min(1).max(4_000);
@@ -53,19 +52,18 @@ const ownerReadEnvelopeV1Schema = z
     }
   });
 
-const preparedArtifactReadV1Schema = z
-  .object({
-    artifactRef: boundedRef,
-    artifactRevision: boundedRef,
-    completenessRef: boundedRef,
-    previewRef: boundedRef,
-    openInWorkspaceRef: boundedRef,
-  })
-  .strict();
+const preparedArtifactReadV1Schema = preparedArtifactSnapshotV1Schema;
 
 const entrustedWorkTimeRefV1Schema = z
   .object({
-    role: z.enum(['business_deadline', 'review_by', 'execution_trigger']),
+    role: z.enum([
+      'business_deadline',
+      'review_by',
+      'execution_trigger',
+      'planned_start',
+      'actual_start',
+      'estimated_completion',
+    ]),
     subjectRef: boundedRef,
     ownerRef: boundedRef,
     revision: revisionSchema,
@@ -92,9 +90,10 @@ export const entrustedWorkBriefV1Schema = z
       z.object({ state: z.literal('unknown') }).strict(),
     ]),
     current: z
-      .object({ state: z.enum(['todo', 'doing', 'blocked']), ownerRef: boundedRef, revision: revisionSchema })
+      .object({ state: z.enum(['todo', 'doing', 'blocked', 'done']), ownerRef: boundedRef, revision: revisionSchema })
       .strict(),
     verifiedMilestone: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('work_completed'), evidenceRef: boundedRef, revision: revisionSchema }).strict(),
       z.object({ kind: z.literal('needs_judgment'), evidenceRef: boundedRef, revision: revisionSchema }).strict(),
       z
         .object({
@@ -106,7 +105,14 @@ export const entrustedWorkBriefV1Schema = z
       z
         .object({
           kind: z.literal('time_committed'),
-          role: z.enum(['business_deadline', 'review_by', 'execution_trigger']),
+          role: z.enum([
+            'business_deadline',
+            'review_by',
+            'execution_trigger',
+            'planned_start',
+            'actual_start',
+            'estimated_completion',
+          ]),
           evidenceRef: boundedRef,
           revision: revisionSchema,
         })
@@ -144,7 +150,23 @@ export const entrustedWorkOwnerReadV1Schema = z
   .object({
     envelope: ownerReadEnvelopeV1Schema,
     brief: entrustedWorkBriefV1Schema,
+    // Read-only presentation from the same authorized Task snapshot; admission is not a start or due date.
+    work: z
+      .object({
+        title: boundedText,
+        ownerCatId: boundedRef.nullable(),
+        threadId: boundedRef,
+        admittedAt: timestampSchema,
+        ownerNote: z.string().max(4_000),
+        progress: entrustedWorkV1Schema.shape.progress,
+      })
+      .strict()
+      .optional(),
     preparedArtifact: preparedArtifactReadV1Schema.optional(),
+    completion: z
+      .object({ recordedAt: timestampSchema.optional(), evidenceRefs: z.array(boundedRef).min(1).max(64) })
+      .strict()
+      .optional(),
     timeRefs: z.array(entrustedWorkTimeRefV1Schema).max(64),
     attentionReceipts: z.array(producerAttentionReceiptV1Schema).max(NEEDS_ME_PRODUCER_IDS.length),
   })
@@ -177,163 +199,6 @@ export const entrustedWorkOwnerReadV1Schema = z
     validateOwnerTimeCoordinates(ownerRead, context);
     validateBriefAttentionAndMilestone(ownerRead, context);
   });
-
-type OwnerReadRefinementInput = z.infer<typeof entrustedWorkOwnerReadV1Schema>;
-function addBriefIssue(context: z.RefinementCtx, path: string, message: string): void {
-  context.addIssue({ code: z.ZodIssueCode.custom, path: ['brief', path], message });
-}
-
-function validateBriefTaskCoordinates(ownerRead: OwnerReadRefinementInput, context: z.RefinementCtx): void {
-  if (
-    ownerRead.brief.current.ownerRef !== ownerRead.envelope.ownerRef ||
-    ownerRead.brief.current.revision !== ownerRead.envelope.revision
-  ) {
-    addBriefIssue(context, 'current', 'brief current state must use the same Task owner coordinate');
-  }
-  if (
-    ownerRead.brief.outcome.state === 'known' &&
-    (ownerRead.brief.outcome.ownerRef !== ownerRead.envelope.ownerRef ||
-      ownerRead.brief.outcome.revision !== ownerRead.envelope.revision)
-  ) {
-    addBriefIssue(context, 'outcome', 'brief outcome must use the same Task owner coordinate');
-  }
-  if (
-    ownerRead.brief.nextOwner.kind === 'cat' &&
-    (!ownerRead.brief.nextOwner.ownerRef.startsWith('cat:') ||
-      ownerRead.brief.nextOwner.evidenceRef !== ownerRead.envelope.ownerRef ||
-      ownerRead.brief.nextOwner.revision !== ownerRead.envelope.revision)
-  ) {
-    addBriefIssue(context, 'nextOwner', 'cat next owner must be backed by the current Task owner coordinate');
-  }
-}
-
-function validateBriefAttentionAndMilestone(ownerRead: OwnerReadRefinementInput, context: z.RefinementCtx): void {
-  const eligibleReceipts = ownerRead.attentionReceipts.filter(
-    (receipt): receipt is EligibleAttentionReceipt => receipt.eligible,
-  );
-  if (ownerRead.envelope.freshness.state === 'stale') {
-    if (
-      ownerRead.brief.needsMe.state !== 'unknown' ||
-      ownerRead.brief.nextOwner.kind !== 'unknown' ||
-      ownerRead.brief.verifiedMilestone.kind !== 'unknown' ||
-      ownerRead.brief.verifiedMilestone.reason !== 'stale_owner_read'
-    ) {
-      addBriefIssue(context, 'needsMe', 'stale owner reads must fail closed to unknown attention truth');
-    }
-    return;
-  }
-  validateBriefAttention(ownerRead, eligibleReceipts, context);
-  validateBriefMilestone(ownerRead, eligibleReceipts, context);
-}
-
-function validateBriefAttention(
-  ownerRead: OwnerReadRefinementInput,
-  eligibleReceipts: EligibleAttentionReceipt[],
-  context: z.RefinementCtx,
-): void {
-  const expectedHumanOwnerRef = `user:${ownerRead.envelope.visibility.ownerUserId}`;
-  const evidence = canonicalProducerEvidence(eligibleReceipts);
-  if (eligibleReceipts.length > 0) {
-    if (
-      ownerRead.brief.needsMe.state !== 'needed' ||
-      !sameProducerEvidence(ownerRead.brief.needsMe.evidence, evidence) ||
-      ownerRead.brief.nextOwner.kind !== 'human' ||
-      ownerRead.brief.nextOwner.ownerRef !== expectedHumanOwnerRef ||
-      !sameProducerEvidence(ownerRead.brief.nextOwner.evidence, evidence)
-    ) {
-      addBriefIssue(
-        context,
-        'needsMe',
-        'needed brief state must match every current eligible producer coordinate and the human next owner',
-      );
-    }
-    return;
-  }
-  if (
-    ownerRead.brief.needsMe.state !== 'not_needed' ||
-    ownerRead.brief.needsMe.evidenceRef !== ownerRead.envelope.ownerRef ||
-    ownerRead.brief.needsMe.revision !== ownerRead.envelope.revision ||
-    ownerRead.brief.nextOwner.kind === 'human'
-  ) {
-    addBriefIssue(
-      context,
-      'needsMe',
-      'not-needed brief state must use the current Task coordinate and cannot retain a human next owner',
-    );
-  }
-}
-
-function validateBriefMilestone(
-  ownerRead: OwnerReadRefinementInput,
-  eligibleReceipts: EligibleAttentionReceipt[],
-  context: z.RefinementCtx,
-): void {
-  if (eligibleReceipts.length > 0) {
-    validateAttentionMilestone(ownerRead, eligibleReceipts, context);
-    return;
-  }
-  validateOwnerMilestone(ownerRead, context);
-}
-
-function validateAttentionMilestone(
-  ownerRead: OwnerReadRefinementInput,
-  eligibleReceipts: EligibleAttentionReceipt[],
-  context: z.RefinementCtx,
-): void {
-  const milestone = ownerRead.brief.verifiedMilestone;
-  if (eligibleReceipts.length === 1) {
-    const [eligibleReceipt] = eligibleReceipts;
-    if (
-      !eligibleReceipt ||
-      milestone.kind !== 'needs_judgment' ||
-      milestone.evidenceRef !== eligibleReceipt.producer.ownerRef ||
-      milestone.revision !== eligibleReceipt.producer.revision
-    ) {
-      addBriefIssue(context, 'verifiedMilestone', 'judgment milestone must match the sole eligible producer receipt');
-    }
-    return;
-  }
-  if (milestone.kind !== 'unknown' || milestone.reason !== 'multiple_current_milestones') {
-    addBriefIssue(context, 'verifiedMilestone', 'multiple producer milestones must remain explicitly ambiguous');
-  }
-}
-
-function validateOwnerMilestone(ownerRead: OwnerReadRefinementInput, context: z.RefinementCtx): void {
-  const milestone = ownerRead.brief.verifiedMilestone;
-  if (ownerRead.preparedArtifact) {
-    if (
-      milestone.kind !== 'artifact_ready' ||
-      milestone.evidenceRef !== ownerRead.preparedArtifact.completenessRef ||
-      milestone.revision !== ownerRead.preparedArtifact.artifactRevision
-    ) {
-      addBriefIssue(
-        context,
-        'verifiedMilestone',
-        'Artifact milestone must match the prepared Artifact owner coordinate',
-      );
-    }
-    return;
-  }
-  const primaryTime = selectCanonicalOwnerTime(ownerRead.timeRefs);
-  if (primaryTime) {
-    if (
-      milestone.kind !== 'time_committed' ||
-      milestone.role !== primaryTime.role ||
-      milestone.evidenceRef !== primaryTime.ownerRef ||
-      milestone.revision !== primaryTime.revision
-    ) {
-      addBriefIssue(context, 'verifiedMilestone', 'time milestone must match the canonical typed Task time coordinate');
-    }
-    return;
-  }
-  if (
-    milestone.kind !== 'custody_admitted' ||
-    milestone.evidenceRef !== ownerRead.envelope.admissionReceiptRef ||
-    milestone.revision !== ownerRead.envelope.revision
-  ) {
-    addBriefIssue(context, 'verifiedMilestone', 'custody milestone must match the canonical Task admission receipt');
-  }
-}
 
 export type EntrustedWorkBriefV1 = z.infer<typeof entrustedWorkBriefV1Schema>;
 export type EntrustedWorkOwnerReadV1 = z.infer<typeof entrustedWorkOwnerReadV1Schema>;

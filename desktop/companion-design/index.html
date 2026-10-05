@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>砚砚 · 桌面伴随体验稿</title>
+  <link rel="stylesheet" href="/theme.css" />
+  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/conversation.css" />
+</head>
+<body class="compact">
+  <aside class="truth">交互体验稿 · 屏幕、声音与模型均未连接</aside>
+  <button type="button" id="expand" class="desktop-pet" aria-label="砚砚，点我展开陪伴（体验稿，未采集）">
+    <span id="pet-hint" class="pet-hint">体验稿 · 未共享</span>
+    <span class="pet" aria-hidden="true"></span>
+  </button>
+  <main id="surface">
+    <header class="drag">
+      <div class="pet" aria-hidden="true"></div>
+      <div class="identity"><strong>砚砚</strong><span id="compact-state">尚未共享</span></div>
+      <button type="button" class="icon-button" id="collapse" aria-label="收起陪伴窗口" title="收起">−</button>
+      <button type="button" class="icon-button" id="settings" aria-label="伴随设置" title="伴随设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3" fill="var(--cafe-surface-elevated)"/><circle cx="15" cy="17" r="3" fill="var(--cafe-surface-elevated)"/></svg></button>
+    </header>
+    <section id="setup" hidden>
+      <p class="eyebrow">CAT CAFÉ · 桌面伴随</p>
+      <h1>让猫陪在你身边</h1>
+      <p class="intro">一起看视频，试做一点东西，<br />或只是随口聊聊。</p>
+      <dl class="setup-status">
+        <div><dt>伴随插件</dt><dd id="artifact-state">尚未安装</dd></div>
+        <div><dt>ChatGPT 登录</dt><dd>演示身份 · 尚未连接</dd></div>
+        <div><dt>屏幕与声音</dt><dd>未授权 · 未采集</dd></div>
+        <div><dt>后台陪伴</dt><dd id="intent-state">关闭</dd></div>
+      </dl>
+      <button type="button" id="install" class="primary">试用安装流程</button>
+      <button type="button" id="enable" class="primary" hidden>开启桌面陪伴</button>
+      <button type="button" id="back" hidden>回到陪伴</button>
+      <button type="button" id="disable" hidden>关闭桌面陪伴</button>
+      <p class="fine">正式版从猫咖「设置 → 插件」安装与授权。这里演示状态变化，不安装插件、不授予权限。</p>
+    </section>
+    <section id="companion" hidden>
+      <div class="source-row"><label for="target">一起看</label><select id="target"><option>B站窗口</option><option>Blender窗口</option><option>会议窗口</option><option>只聊一会儿</option></select></div>
+      <label class="follow-option"><input id="follow" type="checkbox" /> 本次在选定的 B站 / Blender 窗口间跟随</label>
+      <div class="live-row"><span id="live-dot" class="dot"></span><span id="live-state">尚未连接</span><span class="spacer"></span><button type="button" id="sharing" class="primary">开始陪伴</button></div>
+      <p id="scope" class="fine scope">确认范围后，屏幕与声音才会共享。</p>
+      <div class="empty" id="empty"><h1>我在这里，<br />你接着看。</h1><p>想聊就说，想指就指。<br />不必每句话都变成一件任务。</p></div>
+      <ol id="messages" aria-label="这段交流" aria-live="polite"></ol>
+      <p class="thought" id="thought" hidden><span class="dot thinking"></span>我在核对这处阴影，你继续说。</p>
+      <div class="point-row" id="point-row" hidden><span id="point-label"></span><button type="button" id="clear-point">清除指点</button></div>
+      <form id="composer"><label class="sr-only" for="input">说给砚砚听</label><textarea id="input" rows="2" placeholder="写一句，体验思考时继续补充…" maxlength="2000"></textarea><div class="composer-actions"><button id="point" type="button">指给你看</button><button id="remember" type="button">记下这句</button><span class="spacer"></span><button type="submit" aria-label="发送给砚砚">发送</button></div></form>
+      <footer><button type="button" id="moments">记下的片刻 <span id="moment-count">0</span></button><span class="spacer"></span><button type="button" id="end">结束陪伴</button></footer>
+    </section>
+    <section id="moments-view" hidden><h1>记下的片刻</h1><p class="fine">体验稿独立保留的文字。正式记录回到原协作内容。</p><ol id="moment-list"></ol><button type="button" id="return">回到陪伴</button></section>
+    <p id="notice" role="status" hidden></p>
+  </main>
+  <details id="director"><summary>演示控制</summary><p>以下按钮模拟猫与连接；不代表实际接入。</p><div class="controls"><button type="button" data-action="think">思考开始</button><button type="button" data-action="question">追问回来</button><button type="button" data-action="answer">结论回来</button><button type="button" data-action="stale">旧答案到达</button><button type="button" data-action="disconnect">模拟断连</button><button type="button" data-action="reconnect">恢复连接</button><button type="button" id="narrow">窄窗 / 常规</button></div></details>
+  <script type="module" src="/surface.mjs"></script>
+</body>
+</html>

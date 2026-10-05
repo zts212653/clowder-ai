@@ -11,7 +11,7 @@ import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
 import { resolveInvocationCredentials } from './invocation-auth.js';
 
-const SPEC_REF = 'file:feature-specs/2026-09-01-f202-terminal-plugin-manager.md' as const;
+const ADMISSION_REF = 'file:docs/features/F202-plugin-framework.md' as const;
 const defineTool = defineMcpCanonicalFactory('plugin-management-tools.ts', undefined, {
   resourceFamily: 'plugin-manager',
   authority: 'callback-owner',
@@ -269,7 +269,7 @@ export const pluginManagementTools = [
       standaloneReason: {
         disposition: 'accepted-boundary',
         kind: 'resource-entry',
-        admissionRef: SPEC_REF,
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -287,8 +287,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'progressive-disclosure',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -306,8 +306,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'progressive-disclosure',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -325,8 +325,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'progressive-disclosure',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -344,8 +344,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'side-effect-boundary',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -363,8 +363,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'side-effect-boundary',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -382,8 +382,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'side-effect-boundary',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),
@@ -401,8 +401,8 @@ export const pluginManagementTools = [
       targetExposure: 'lazy-discoverable',
       standaloneReason: {
         disposition: 'accepted-boundary',
-        kind: 'destructive-boundary',
-        admissionRef: SPEC_REF,
+        kind: 'resource-entry',
+        admissionRef: ADMISSION_REF,
       },
     },
   }),

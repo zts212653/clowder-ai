@@ -145,15 +145,6 @@ function inactiveSignalReason(signal: AssertedSignal, closer?: ClosingSignal): R
   };
 }
 
-function profileReasons(profile?: CapabilityProfileRevisionRefV1): RoutingReasonV1[] {
-  if (profile === undefined) return [];
-  return profile.relevantSignals.map((signal) => ({
-    code: `capability_${signal.kind}`,
-    summary: signal.summary,
-    sourceRefs: [profile.dossierRevision, ...signal.evidenceRefs],
-  }));
-}
-
 function effectForAvailability(availability: Availability): CandidateProjection['effect'] {
   if (availability === 'unavailable') return 'blocked';
   if (availability === 'available') return 'eligible';
@@ -301,17 +292,14 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
       const profile = profileHeads.get(binding.catId);
       const diagnostics = profileDiagnostics
         .filter((diagnostic) => diagnostic.catId === binding.catId)
-        .map((diagnostic) => diagnostic.reason);
+        .map((diagnostic) => diagnostic.reason)
+        .slice(0, 32);
       const signalState = reduceCandidateSignals({
         candidate: binding,
         events: signalEvents,
         closures,
         observedAt: rawInput.observedAt,
       });
-      const capabilityReasons = profileReasons(profile);
-      const boundedDiagnostics = diagnostics.slice(0, 32);
-      const boundedCapabilityReasons = capabilityReasons.slice(0, 32 - boundedDiagnostics.length);
-      const signalReasonLimit = 32 - boundedDiagnostics.length - boundedCapabilityReasons.length;
       return {
         binding,
         profile:
@@ -319,11 +307,7 @@ export function reduceRoutingContext(rawInput: ReduceRoutingContextInput): Routi
         availability: signalState.availability,
         freshness: signalState.freshness,
         ...(signalState.dispatch ? { dispatch: signalState.dispatch } : {}),
-        reasons: [
-          ...boundedDiagnostics,
-          ...signalState.reasons.slice(0, signalReasonLimit),
-          ...boundedCapabilityReasons,
-        ],
+        reasons: [...diagnostics, ...signalState.reasons.slice(0, 32 - diagnostics.length)],
         matchedPreferences: [],
         effect: effectForAvailability(signalState.availability),
       };

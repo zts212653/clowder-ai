@@ -11,6 +11,8 @@ code_anchors:
   - packages/api/src/routes/callback-auth-schema.ts
   - packages/api/src/routes/callback-auth-telemetry.ts
   - packages/api/src/routes/callback-auth-system-message.ts
+  - packages/api/src/routes/callback-native-test-grant.ts
+  - packages/api/src/domains/cats/services/agents/invocation/tool-execution-policy.ts
   - packages/api/src/domains/cats/services/agents/agent-key/AgentKeyRegistry.ts
   - packages/api/src/domains/cats/services/agents/agent-key/AgentKeySidecarProvisioner.ts
   - packages/api/src/domains/cats/services/agents/agent-key/AgentKeySidecarRenewalLoop.ts
@@ -20,6 +22,7 @@ doc_anchors:
   - docs/features/F178-persistent-mcp-agent-key-auth.md
 static_scan_hints: [InvocationRegistry, AgentKeyRegistry, AgentKeySidecarProvisioner, callbackToken, agent-key, callback-auth, AuthFailureReason, refresh-token, callback auth]
 cited_by:
+  - {feature: F325, date: 2026-09-29, delta: "P1 adds per-invocation callback route allowlisting and one task test grant route; native MCP receives a disposable scoped credential file, not ambient agent-key or API process tokens"}
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-07, delta: KD-1 principal-conditioned threadId enforcement (post_message vs cross_post_message contract reconcile)}
   - {feature: F178, date: 2026-08-08, delta: persistent agent-key registry and sidecar lifecycle ownership}

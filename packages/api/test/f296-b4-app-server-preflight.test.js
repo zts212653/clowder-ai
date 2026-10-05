@@ -611,7 +611,7 @@ test('a capacity-recovery turn settles no presentation but records its exact app
       recoveryInstruction: 'resend the last turn under a smaller window',
       prepareRecoveryRequest: (instruction) => ({
         v: 1,
-        boundaryReason: 'provider_fallback',
+        boundaryReason: 'provider_capacity_recovery',
         message: { body: '', sourceRefs: [] },
         nativeInstructions: [
           {

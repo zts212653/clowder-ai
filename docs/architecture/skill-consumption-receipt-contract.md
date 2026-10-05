@@ -5,7 +5,7 @@ feature_ids: [F100, F131, F188, F200, F223, F228, F314]
 related_features: [F287, F299, F311]
 topics: [skill, consumption-receipt, outcome, workspace, request-review, local-review, runtime-carrier, revision]
 created: 2026-08-28
-updated: 2026-09-12
+updated: 2026-09-23
 status: active
 author: codex-sol
 description: "workspace-navigator 与 request-review 纵切的 revision-bound applied/dismissed 收据、consumer-bounded outcome、失效与 runtime carrier 边界。"
@@ -76,6 +76,10 @@ consumer，或明确判定它不适用；若应用，consumer 得到的 bounded 
 author 预留 exact semantic asset version 与 review HEAD/source tuple，具名非作者 reviewer 的真实 invocation
 绑定该 reservation，再以 durable typed local-review message 结算 `applied | unconfirmed`，或显式 dismiss。
 `approved` 与 `changes_requested` 都可能证明 skill 被 consumer 使用；它们的 merge 含义不属于本合同。
+这条纵切只在 F100/F311 明确指定的版本沿用实验中启用。普通 local review 直接走一次 durable typed verdict；
+author 从同一原消息的 `localReviewFact` 消费审查结果，不需要 reservation、bind 或 record。实验回执的
+missing、stale、failed 或 `unconfirmed` 只代表使用测量缺口，不影响既有 verdict，也不要求新 handle、
+重发消息或再唤醒 reviewer。不能从有效 verdict 反推 `applied`；历史回执仍按原规则解释。
 
 ## 收据路径
 

@@ -48,6 +48,8 @@ describe('F247 AC-B1c-12: buildDeltaPayload — envelope shape', () => {
     assert.match(out, /threadId from thread-runtime/);
     assert.match(out, /replyTo=sourceMessageId from thread-runtime/);
     assert.match(out, /content equal to your complete final answer/);
+    assert.match(out, /reply to the human.*omit targetCats/i);
+    assert.match(out, /@co-creator/);
     assert.match(out, /A visible ChatGPT answer alone does not complete this request/);
     assert.match(out, /callback status "ok" or "duplicate" as success/);
     assert.ok(out.endsWith('</cat-cafe-return-contract>'));

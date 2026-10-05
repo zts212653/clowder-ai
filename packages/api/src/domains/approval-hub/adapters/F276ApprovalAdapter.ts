@@ -1,7 +1,7 @@
 import type { ApprovalItem, SettledApprovalItem } from '@cat-cafe/shared';
 import { projectCandidateInteractionInformedEvidence } from '../../memory/people/PersonMemoryInformedEvidence.js';
 import type { PersonMemoryStore, StoredPersonMemoryCandidate } from '../../memory/people/PersonMemoryStore.js';
-import type { IApprovalAdapter, ListSettledOpts } from '../ports/IApprovalAdapter.js';
+import { ALL_PENDING_APPROVALS_LIMIT, type IApprovalAdapter, type ListSettledOpts } from '../ports/IApprovalAdapter.js';
 import { compactApprovalProjections, projectApprovalNavigation } from '../projectApprovalNavigation.js';
 
 export class F276ApprovalAdapter implements IApprovalAdapter {
@@ -11,7 +11,7 @@ export class F276ApprovalAdapter implements IApprovalAdapter {
 
   async listPending(userId: string): Promise<ApprovalItem[]> {
     if (!this.store) return [];
-    const candidates = await this.store.listPending(userId);
+    const candidates = await this.store.listPending(userId, ALL_PENDING_APPROVALS_LIMIT);
     return compactApprovalProjections(candidates.map(toItem));
   }
 

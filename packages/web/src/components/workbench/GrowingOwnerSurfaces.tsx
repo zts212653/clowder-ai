@@ -74,8 +74,8 @@ function usePreparedArtifactReturn(onOpen: ArtifactReturnProps['onOpenArtifactWi
     [openReview],
   );
   const open = useCallback(
-    (coordinate: PreparedArtifactCoordinate, returnSurface: WorkspaceSurfaceDescriptor | null) => {
-      const reviewSurface = reviewSurfaceFromPreparedRef(coordinate.openInWorkspaceRef);
+    (coordinate: PreparedArtifactCoordinate, returnSurface: WorkspaceSurfaceDescriptor | null, title?: string) => {
+      const reviewSurface = reviewSurfaceFromPreparedRef(coordinate.openInWorkspaceRef, title);
       if (reviewSurface && returnSurface) {
         setUnavailable(false);
         onOpen({ artifact: reviewSurface, returnSurface });
@@ -102,8 +102,8 @@ function usePreparedArtifactReturn(onOpen: ArtifactReturnProps['onOpenArtifactWi
 export function ProductScheduleOwnerSurface({ surface, onOpenArtifactWithReturn }: ArtifactReturnProps) {
   const target = usePreparedArtifactReturn(onOpenArtifactWithReturn);
   const selectedItemRef = resolveProductScheduleReturnTarget(surface)?.itemRef ?? null;
-  const openArtifact = (coordinate: PreparedArtifactCoordinate, itemRef: string) =>
-    target.open(coordinate, createProductScheduleReturnSurface(surface, itemRef));
+  const openArtifact = (coordinate: PreparedArtifactCoordinate, itemRef: string, title?: string) =>
+    target.open(coordinate, createProductScheduleReturnSurface(surface, itemRef), title);
   return (
     <div className="min-w-0">
       {target.unavailable ? <ArtifactUnavailable onRetry={target.retry} /> : null}
@@ -131,8 +131,8 @@ export function NeedsMeOwnerSurface({
   const target = usePreparedArtifactReturn(onOpenArtifactWithReturn);
   const selectedItemRef = resolveNeedsMeReturnTarget(surface)?.itemRef ?? null;
   const returnSurface = useCallback((itemRef: string) => createNeedsMeReturnSurface(surface, itemRef), [surface]);
-  const openArtifact = (coordinate: PreparedArtifactCoordinate, itemRef: string) =>
-    target.open(coordinate, returnSurface(itemRef));
+  const openArtifact = (coordinate: PreparedArtifactCoordinate, itemRef: string, title?: string) =>
+    target.open(coordinate, returnSurface(itemRef), title);
   const openAction = useCallback(
     (actionRef: string, itemRef: string) => {
       const selectedSurface = returnSurface(itemRef);
@@ -145,7 +145,7 @@ export function NeedsMeOwnerSurface({
       const actionTarget = resolveEntrustedWorkActionTarget(actionRef);
       if (!actionTarget) return;
       onRefreshSurface(selectedSurface);
-      if (actionTarget.kind === 'message') {
+      if (actionTarget.kind === 'message' || actionTarget.kind === 'collective-work') {
         navigateToEntrustedWorkAction(actionRef);
         return;
       }

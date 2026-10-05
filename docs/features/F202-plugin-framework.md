@@ -5,19 +5,69 @@ topics: [plugin-framework, plugin-manager, host-inventory, capability-registry, 
 doc_kind: spec
 created: 2026-05-15
 architecture-cell: plugin
-tips_exempt: "The historical Phase 1 and K-2 acceptance records are retained below. The terminal direction supersedes their product ordering: Train B completes the Manager and one real package loop; Train C1 migrates existing plugins and removes compatibility paths; Train C2 opens bounded public hook/UI seams with real consumers."
+tips_exempt: "Renewed 2026-10-02: the public delta records home intake, existing Train B tool admission and verified package provenance; it adds no action beyond the already published Manager journey. C1 default cutover and C2 remain separate."
+mcp_admission_status: accepted
+mcp_admission_ref: "file:docs/features/F202-plugin-framework.md"
+mcp_admission_claims:
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_list
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_search
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_get
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_list_tools
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_call
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_install
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_set_enabled
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+  - ref: "file:docs/features/F202-plugin-framework.md"
+    toolName: plugin_uninstall
+    resourceFamily: plugin-manager
+    boundaryKind: resource-entry
+    decision: accepted
+description: "Defines Host plugin admission, lifecycle authority, shared Settings/Agent management, and the separate Train B/C1/C2 boundaries."
+description_source: model
+description_author: codex-astra
+description_updated_at: 2026-09-19T12:49:07+00:00
+description_generated_by: gpt-6-astra
+description_generated_at: 2026-09-19T12:49:07+00:00
+description_confirmed_by: codex-astra
 ---
 
 # F202: Terminal Plugin Manager and Host-governed Plugin Framework
 
 > **Status**: in-progress (Train B direction accepted in
 > [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478); formal review and
-> published-package integration pending) | **Owner**: Clowder AI maintainers | **Priority**: P1
+> published-package integration verified; Train B home intake merged, runtime activation separate) | **Owner**: community @mindfn + Clowder AI maintainers | **Priority**: P1
 
 ## Architecture Ownership
 
 Architecture cell: plugin
-Map delta: required in Train B; tracked by `feature-specs/2026-09-01-f202-terminal-plugin-manager.md`.
+Map delta: Train B ownership update landed in cat-cafe#4613; C1/C2 remain separately scoped.
 Why: F202 owns the terminal Plugin Manager, Host-governed package/instance/config/activation/runtime
 projection, and its Console/Agent management surfaces. The plugin repository owns published catalog,
 contract, SDK and business packages. Product-domain effects remain in their canonical cells.
@@ -158,10 +208,10 @@ The accepted Train B direction does not approve the aggregate migration or commi
 - Declarative UI contributions target only Host-owned registered slots and commands. A slot lands together
   with the acceptance that plugin disable/uninstall removes both its button/icon and command handler.
 
-The detailed state census, invariants, Design Gate and TDD sequence live in
-`feature-specs/2026-09-01-f202-terminal-plugin-manager.md`.
+The detailed state census, invariants, Design Gate and TDD sequence are retained in the
+[upstream Train B implementation plan](https://github.com/zts212653/clowder-ai/blob/9ab0eaf287381efcb209781463f38cc5f23870ea/feature-specs/2026-09-01-f202-terminal-plugin-manager.md).
 
-### Train B direction and implementation checkpoint (updated 2026-09-18)
+### Historical Train B direction and implementation checkpoint (2026-09-18)
 
 Maintainers accepted the bounded Train B direction in
 [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478): one Host-owned Manager and one
@@ -181,8 +231,8 @@ install → config/auth → enable → Host restart → disable → uninstall jo
 This is an implementation checkpoint, not a Train B completion or merge claim:
 
 - Co-creator approved the Settings list/detail direction on 2026-09-01 and authorized formal wiring to
-  continue; the exact wording and architecture evidence are recorded in
-  `feature-discussions/2026-09-01-f202-terminal-manager-design/README.md`. The reported image-icon sizing
+  continue; the exact wording and architecture evidence are retained in the
+  [upstream design record](https://github.com/zts212653/clowder-ai/blob/9ab0eaf287381efcb209781463f38cc5f23870ea/feature-discussions/2026-09-01-f202-terminal-manager-design/README.md). The reported image-icon sizing
   defect is covered by a Red→Green regression. `pluginManagerDemo=1` remains the fixture surface and
   `pluginManagerLive=1` now exercises canonical REST list/detail/install/configure/set-enabled/uninstall
   wiring in the feature checkout. Configure remains a manifest-owned typed detail contribution, not a
@@ -190,8 +240,9 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   `plugin_list_tools` → `plugin_call` path and the same live contribution authority used by Manager status.
   This historical UI-direction feedback is not evidence that the complete personal hands-on journey was
   accepted. Per #1478, a new personal co-creator signoff is not a prerequisite for formal review;
-  maintainers own the still-pending reproducible end-to-end acceptance against the published exact package
-  and final integration before approval/merge.
+  maintainers own reproducible end-to-end acceptance against the published exact package. Astra completed
+  the Agent/Host and real Settings journeys on 2026-09-18 for source HEAD `4ce3556`; home intake must retain
+  those behaviors and its own validation before merging.
 - Plugins Train B merged as `clowder-ai-plugins` commit
   `73d77f7efddb7a0b53829e9d88ebab51e03bdb32`. Contract beta.13, SDK beta.9 and
   `video-analysis` alpha.0 are public with the independently sealed integrities. The Core feature worktree
@@ -199,8 +250,8 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   separate and fail-closed. The catalog may contain later packages, but this Train B Host admission scope
   projects only `dev.clowder.video-analysis`; absent Host policy means an entry is not exposed or installable.
   The companion [clowder-ai-plugins#50](https://github.com/zts212653/clowder-ai-plugins/pull/50)
-  carries the reviewed `video-analysis@0.1.0-alpha.1` package/catalog generation, but that exact version must
-  still be published and publicly consumable before this Core PR may merge.
+  published the reviewed `video-analysis@0.1.0-alpha.1` package/catalog generation via commit `ae7e4594`;
+  publisher run `35366295319` succeeded and independent npm tarball SHA-1/SHA-512 verification matched.
 - Core production composition now owns fail-closed builtin dependency materialization: dependency-bearing
   packages must carry a publisher-owned lockfile-v3 `npm-shrinkwrap.json`, every locked package stays on the canonical
   npm registry with canonical sha512 integrity, and the Host runs script-free `npm ci`. It also owns the
@@ -210,8 +261,7 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   install → Host config/secret binding → enable → supervisor-held real `video_analysis` call → Host
   restart/resume → real call → disable → uninstall; the final instance was retired and the secret never
   entered inventory. The current `plugin_list_tools` → `plugin_call` indirection is covered at the
-  composition/restart boundary and remains part of the pending maintainer-owned final integration
-  acceptance.
+  composition/restart boundary and passed the maintainer-owned published-artifact integration journey.
   `pluginManagerLive=1`
   consumes that composition in the feature checkout. Per the Train B/Train C boundary, production Settings
   still keeps the existing panels as its default until the aggregate Train C1 cutover preserves specialized
@@ -228,14 +278,19 @@ This is an implementation checkpoint, not a Train B completion or merge claim:
   route; all six Agent management operations, including `plugin_get`, use only the short manifest description.
   Contribution discovery and invocation expose only live tool schemas/results and never read the README.
   The published video alpha.0 package does not include that README, so the Manager reports the omission
-  honestly. The alpha.1 follow-up in clowder-ai-plugins#50 includes the package-owned guide, but its public
-  npm availability and the digest-matched final Manager journey remain pending. Maintainers must record the
-  reproducible install → configure → enable → invoke → restart → disable → uninstall result before final
-  approval/merge.
+  honestly. The published alpha.1 follow-up in clowder-ai-plugins#50 includes the package-owned guide.
+  Maintainers verified install → configure → enable → invoke → restart → disable → uninstall in both
+  Agent/Host and Settings paths. The isolated authentication/provider fixtures prove Host/package
+  integration, not commercial model quality or a personal co-creator experience claim.
 
 External publication provenance: `[primary | npm registry + clowder-ai-plugins#50 exact artifact |
-checked 2026-09-18 | alpha.0 public; alpha.1 npm lookup 404; final Train B integration pending | high
-confidence]`.
+checked 2026-09-18 | alpha.1 public and digest matched; source integration passed | high confidence]`.
+Review: [Astra approval](https://github.com/zts212653/clowder-ai/pull/1477#pullrequestreview-5250628473).
+Source PR merged on 2026-09-19 as `9ab0eaf287381efcb209781463f38cc5f23870ea`; home
+[intake #4605](https://github.com/zts212653/clowder-ai/issues/4605) completed through
+[cat-cafe#4613](https://github.com/zts212653/clowder-ai/pull/4613), merged as
+`b96b4d7d5615f8a5b78e97e2bc7a57e26ac7cefc`, after independent review, full-gate evidence,
+post-rebase compatibility checks and canonical Guardian approval.
 
 ## What
 
@@ -375,6 +430,30 @@ The external-package K-2 path currently covers:
 | 2026-08-05 | K-2A Host inventory merged via cat-cafe#3422 (`a6b38ac53`); package/install/grant truth landed with runtime dormant. |
 | 2026-08-10 | K-2B production-transport state machine merged via cat-cafe#3555 (`f7fe82303`): contract-native handshake, durable call ledger, restart normalization, builtin loopback, and typed F292 `events.publish`; external runtime activation remains dormant. |
 | 2026-08-11 | K-2D implemented on cat-cafe#3558: immutable package verification, supervised stdio transport, closed bootstrap environment, and current-main project persistence composition; startup remains dormant with no activation route. |
+| 2026-09-19 | Train B terminal Manager from clowder-ai#1477 absorbed via cat-cafe#4613 (`b96b4d7d5615f8a5b78e97e2bc7a57e26ac7cefc`); intake #4605 closed and ledger advanced to source `9ab0eaf2`. Terra's independent review, full gate plus mechanical-rebase checks, Opus Guardian and the published alpha.1 journey provide the acceptance evidence. Runtime activation, C1/default migration and C2 remain separate. |
+
+## Agent Tool Admission
+
+The accepted Train B scope in [clowder-ai#1478](https://github.com/zts212653/clowder-ai/issues/1478)
+named entry points below as the new `plugin-manager` resource family. The frontmatter binds each
+entry to this decision; `resource-entry` records family admission, while the operation policy retains
+the independent read/write/destructive risk and callback-owner authority.
+
+| Entry | Boundary retained by the Host |
+| --- | --- |
+| `plugin_list` | Read the canonical catalog/install projection; no mutation. |
+| `plugin_search` | Discover verified metadata through the same read-only projection. |
+| `plugin_get` | Inspect one exact plugin and its current lifecycle revision. |
+| `plugin_list_tools` | Disclose schemas only for a live, authorized contribution. |
+| `plugin_call` | Invoke an exact discovered schema under current live/grant authority; write profile only. |
+| `plugin_install` | Admit the exact verified package as a disabled instance; no implicit enablement. |
+| `plugin_set_enabled` | Explicit owner lifecycle mutation fenced by the current revision. |
+| `plugin_uninstall` | Destructive owner mutation; revoke runtime/grants before retiring the instance. |
+
+This admission does not expose generic update/repair, grant authority to catalog metadata, or register
+arbitrary dynamic schemas as canonical tools. Restricted Collective sessions cannot use these entries;
+readonly sessions can only use the four read entries. F309 and existing official-plugin lifecycle
+policies retain their own authority.
 
 ## Current Maintainer Position
 
@@ -384,10 +463,13 @@ Phase 2 is accepted as the correct home for schedule resources and the existing 
 
 Concrete product plugins such as Weixin MP (F204) and MediaHub providers (F205) keep their own feature anchors because they add new user-visible capabilities on top of F202. GitHub schedule migration is different: it moves an existing core integration into the F202 lifecycle boundary and therefore belongs under this feature.
 
-K-2A through K-2D are accepted as the Host-owned external-package foundation. The Host now has a
-supervised stdio process boundary and a production composition object, but startup only performs
-fail-closed persistence recovery. No package is installed or started by that wiring, no activation
-route exists, and real plugin co-run remains separately gated. Core must continue importing the
-exact public contract rather than growing a private wire registry.
+K-2A through K-2D remain the accepted Host-owned external-package foundation. Their historical
+no-activation-route restriction describes that foundation slice, not the current Train B implementation.
+Train B was accepted in clowder-ai#1478 and merged upstream in clowder-ai#1477, with explicit
+owner-authorized install/enable/invoke/disable/uninstall routes and a maintainer-run published-package
+journey. The home implementation landed through cat-cafe#4613 at `b96b4d7d56`, closing intake #4605.
+This establishes main delivery, not production-runtime activation. Train C1 migration and
+default cutover, and Train C2 consumer extensions, remain separate. Core continues importing the exact
+public contract rather than growing a private wire registry.
 
 [小太阳·Maine Coon/GPT-5.6 Sol🐾]

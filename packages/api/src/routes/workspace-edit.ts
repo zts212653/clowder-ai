@@ -9,63 +9,33 @@
  * POST   /api/workspace/file/rename   — rename/move file
  * POST   /api/workspace/upload        — upload file (multipart)
  */
-import { createHash } from 'node:crypto';
-import { mkdir, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
-import { dirname, extname } from 'node:path';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 import { signEditToken, verifyEditToken, writeWorkspaceFile } from '../domains/workspace/workspace-edit.js';
+import {
+  createWorkspaceDirectory,
+  createWorkspaceFile,
+  moveWorkspaceFile,
+  removeWorkspaceFile,
+  uploadWorkspaceFile,
+  WorkspaceMutationError,
+} from '../domains/workspace/workspace-file-mutations.js';
 import {
   getWorktreeRoot,
   resolveWorkspaceFilesystemPath,
   WorkspaceSecurityError,
 } from '../domains/workspace/workspace-security.js';
-
-/** Extensions allowed for text editing (whitelist approach). */
-const EDITABLE_EXTENSIONS = new Set([
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.json',
-  '.md',
-  '.css',
-  '.html',
-  '.yaml',
-  '.yml',
-  '.toml',
-  '.sh',
-  '.py',
-  '.txt',
-]);
-
-/** Dotfiles (no extension) that are safe to edit. */
-const EDITABLE_DOTFILES = new Set([
-  '.gitignore',
-  '.npmrc',
-  '.eslintrc',
-  '.prettierrc',
-  '.editorconfig',
-  '.env.example',
-  '.nvmrc',
-  '.dockerignore',
-  '.prettierignore',
-]);
-
-function isEditable(filepath: string): boolean {
-  const ext = extname(filepath);
-  if (ext && EDITABLE_EXTENSIONS.has(ext)) return true;
-  // Dotfiles without extension — only explicit safe list
-  const basename = filepath.split('/').pop() ?? '';
-  if (EDITABLE_DOTFILES.has(basename)) return true;
-  return false;
-}
+import { isWorkspaceTextEditable as isEditable } from '../domains/workspace/workspace-text-policy.js';
 
 /** Max upload size: 10MB */
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
   await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_BYTES } });
+  app.setErrorHandler((error, _request, reply) => {
+    if (error instanceof WorkspaceMutationError) return reply.code(error.status).send({ error: error.message });
+    return reply.send(error);
+  });
   // POST /api/workspace/edit-session — sign an edit session token (30min TTL)
   app.post<{
     Body: { worktreeId: string };
@@ -158,21 +128,9 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     try {
       const root = await getWorktreeRoot(worktreeId);
       const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
-      // Check if file already exists
-      try {
-        await stat(resolved);
-        reply.status(409);
-        return { error: 'File already exists' };
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-      }
-      // Ensure parent directory exists
-      await mkdir(dirname(resolved), { recursive: true });
-      const fileContent = content ?? '';
-      await writeFile(resolved, fileContent, 'utf-8');
-      const sha = createHash('sha256').update(fileContent).digest('hex');
-      return { path: filePath, sha256: sha, size: Buffer.byteLength(fileContent) };
+      return { path: filePath, ...(await createWorkspaceFile(resolved, content ?? '')) };
     } catch (e) {
+      if (e instanceof WorkspaceMutationError) throw e;
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
@@ -198,7 +156,7 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     try {
       const root = await getWorktreeRoot(worktreeId);
       const resolved = await resolveWorkspaceFilesystemPath(root, dirPath);
-      await mkdir(resolved, { recursive: true });
+      await createWorkspaceDirectory(resolved);
       return { path: dirPath };
     } catch (e) {
       if (e instanceof WorkspaceSecurityError) {
@@ -226,18 +184,10 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
     try {
       const root = await getWorktreeRoot(worktreeId);
       const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
-      const s = await stat(resolved).catch(() => null);
-      if (!s) {
-        reply.status(404);
-        return { error: 'File not found' };
-      }
-      if (s.isDirectory()) {
-        await rmdir(resolved); // fails if non-empty (safe)
-      } else {
-        await rm(resolved);
-      }
+      await removeWorkspaceFile(resolved);
       return { path: filePath, deleted: true };
     } catch (e) {
+      if (e instanceof WorkspaceMutationError) throw e;
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
@@ -264,22 +214,10 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
       const root = await getWorktreeRoot(worktreeId);
       const resolvedOld = await resolveWorkspaceFilesystemPath(root, oldPath);
       const resolvedNew = await resolveWorkspaceFilesystemPath(root, newPath);
-      // Source must exist
-      const s = await stat(resolvedOld).catch(() => null);
-      if (!s) {
-        reply.status(404);
-        return { error: 'Source not found' };
-      }
-      // Target must not exist
-      const t = await stat(resolvedNew).catch(() => null);
-      if (t) {
-        reply.status(409);
-        return { error: 'Target already exists' };
-      }
-      await mkdir(dirname(resolvedNew), { recursive: true });
-      await rename(resolvedOld, resolvedNew);
+      await moveWorkspaceFile(resolvedOld, resolvedNew);
       return { oldPath, newPath };
     } catch (e) {
+      if (e instanceof WorkspaceMutationError) throw e;
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };
@@ -324,20 +262,10 @@ export const workspaceEditRoutes: FastifyPluginAsync = async (app) => {
       const root = await getWorktreeRoot(worktreeId);
       const resolved = await resolveWorkspaceFilesystemPath(root, filePath);
 
-      if (!overwrite) {
-        try {
-          await stat(resolved);
-          reply.status(409);
-          return { error: 'File already exists. Use ?overwrite=true to replace.' };
-        } catch {
-          // ENOENT = file doesn't exist, proceed
-        }
-      }
-
-      await mkdir(dirname(resolved), { recursive: true });
-      await writeFile(resolved, fileBuffer);
+      await uploadWorkspaceFile(resolved, fileBuffer, overwrite);
       return { path: filePath, size: fileBuffer.length };
     } catch (e) {
+      if (e instanceof WorkspaceMutationError) throw e;
       if (e instanceof WorkspaceSecurityError) {
         reply.status(e.code === 'NOT_FOUND' ? 404 : 403);
         return { error: e.message };

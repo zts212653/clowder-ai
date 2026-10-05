@@ -1,13 +1,19 @@
-import type { ArtifactReviewVisualMark, ImmutableMedia } from '@cat-cafe/shared';
+import type { ArtifactReviewDrawing, ImmutableMedia } from '@cat-cafe/shared';
 import { MarkupShape } from './ReviewMarkupShapes';
 import type { ReviewMarkupFrame } from './review-markup-draft';
+
+type SavedMarkup = {
+  readonly drawing: ArtifactReviewDrawing;
+  readonly state: 'active' | 'deleted';
+  readonly author: { readonly actorId: string };
+};
 
 export function ReviewSavedMarkupLayer({
   marks,
   media,
   frame,
 }: {
-  marks: ArtifactReviewVisualMark[];
+  marks: readonly SavedMarkup[];
   media: ImmutableMedia;
   frame: ReviewMarkupFrame | null;
 }) {
@@ -32,6 +38,8 @@ export function ReviewSavedMarkupLayer({
             active={false}
             saved
             label={`${mark.author.actorId} 保存的标记 ${index + 1}`}
+            mediaWidth={media.width}
+            mediaHeight={media.height}
           />
         ))}
     </svg>

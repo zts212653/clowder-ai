@@ -44,7 +44,9 @@ if redis.call('HGET', KEYS[1], 'updatedAt') ~= ARGV[3]
   or redis.call('HGET', KEYS[1], 'status') ~= ARGV[4] then
   return -1
 end
-if ARGV[1] == 'persist' then
+local entrusted = redis.call('HGET', KEYS[1], 'entrustedWork')
+local scoped = entrusted and type(cjson.decode(entrusted).developmentScope) == 'table'
+if ARGV[1] == 'persist' or scoped then
   redis.call('PERSIST', KEYS[1])
   redis.call('PERSIST', KEYS[2])
 else

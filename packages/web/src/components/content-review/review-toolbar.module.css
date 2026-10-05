@@ -1,18 +1,17 @@
 .toolbar {
-  position: absolute;
+  position: relative;
   z-index: 5;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
-  max-width: calc(100% - 24px);
-  width: max-content;
+  width: 100%;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  padding: 6px 8px 0;
 }
 .dock {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 4px;
   padding: 6px;
@@ -20,6 +19,34 @@
   border-radius: 99px;
   background: var(--cafe-surface-canvas);
   box-shadow: var(--shadow-elevation-2);
+}
+.focusActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+}
+.focusButton,
+.saveButton {
+  min-height: 34px;
+  border-radius: 99px;
+  padding: 0 10px;
+  color: var(--cafe-accent);
+  font-size: var(--console-font-xs);
+  font-weight: 600;
+}
+.focusButton:hover {
+  background: var(--cafe-surface);
+}
+.focusButton:disabled {
+  opacity: 0.4;
+}
+.saveButton {
+  background: var(--cafe-accent);
+  color: var(--cafe-accent-foreground);
+}
+.saveButton:disabled {
+  opacity: 0.45;
 }
 .modeButton {
   display: inline-flex;
@@ -166,32 +193,9 @@
 .swatch[aria-pressed="true"] {
   border-color: var(--cafe-text);
 }
-.textTool {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  max-width: 100%;
-  padding: 8px 12px;
-  border: 1px solid var(--cafe-border-subtle);
-  border-radius: 12px;
-  background: var(--cafe-surface-canvas);
-  box-shadow: var(--shadow-elevation-2);
-  color: var(--cafe-accent);
-}
-.textTool input {
-  width: 210px;
-  max-width: 55vw;
-  border: 0;
-  background: transparent;
-  color: var(--cafe-text);
-  font-size: var(--console-font-compact);
-  outline: none;
-}
 @media (max-width: 600px) {
   .toolbar {
-    top: 10px;
-    max-width: calc(100% - 12px);
-    gap: 6px;
+    padding: 4px 4px 0;
   }
   .modeButton {
     height: 32px;

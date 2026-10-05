@@ -116,16 +116,24 @@ function runConcurrentVerdictWorker({ role, taskOutcomeDbPath, episodeId, sync, 
 export async function runTwoConnectionSameValueRace({
   taskOutcomeDbPath,
   episodeId,
+  stallFirstBeforeStore = false,
   stallSecondBeforeStore = false,
   timeoutMs = 5_000,
 }) {
   const sync = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT * 3);
   const workers = [];
+  const readiness = new AbortController();
   const run = async () => {
-    const first = runConcurrentVerdictWorker({ role: 'first', taskOutcomeDbPath, episodeId, sync });
+    const first = runConcurrentVerdictWorker({
+      role: 'first',
+      taskOutcomeDbPath,
+      episodeId,
+      sync,
+      stallBeforeStore: stallFirstBeforeStore,
+    });
     workers.push(first);
-    const firstStoreReady = await waitForAtomicValue(sync, 2, 1, Math.min(timeoutMs, 1_000));
-    if (!firstStoreReady) throw new Error('first verdict worker did not open its episode store');
+    await waitForAtomicValue(sync, 2, 1, readiness.signal);
+    readiness.signal.throwIfAborted();
 
     const second = runConcurrentVerdictWorker({
       role: 'second',
@@ -141,25 +149,33 @@ export async function runTwoConnectionSameValueRace({
   try {
     return await withTimeout(run(), timeoutMs);
   } finally {
+    readiness.abort(new Error('verdict race finished'));
     await Promise.allSettled(workers.map((worker) => worker.terminate()));
   }
 }
 
-function waitForAtomicValue(buffer, index, expected, timeoutMs = 1_000) {
+function waitForAtomicValue(buffer, index, expected, signal) {
   const sync = new Int32Array(buffer);
-  const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve) => {
-    const poll = () => {
-      if (Atomics.load(sync, index) === expected) {
-        resolve(true);
-        return;
-      }
-      if (Date.now() >= deadline) {
-        resolve(false);
-        return;
-      }
-      setTimeout(poll, 1);
+  return new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
     };
+    const abort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    const poll = () => {
+      if (signal.aborted) return abort();
+      if (Atomics.load(sync, index) === expected) {
+        cleanup();
+        resolve();
+        return;
+      }
+      timer = setTimeout(poll, 1);
+    };
+    signal.addEventListener('abort', abort, { once: true });
     poll();
   });
 }

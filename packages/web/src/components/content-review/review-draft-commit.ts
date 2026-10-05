@@ -36,6 +36,10 @@ export function clearCommittedReviewDraft(prefix: string, command: ArtifactRevie
       return;
   }
   const key = `${prefix}round:${command.round}:${suffix}`;
+  clearCommittedDraft(key, body);
+}
+
+export function clearCommittedDraft(key: string, body: string): void {
   try {
     const saved = localStorage.getItem(key);
     if (saved && (JSON.parse(saved) as { body?: unknown }).body === body) localStorage.removeItem(key);

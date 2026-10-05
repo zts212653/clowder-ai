@@ -108,8 +108,11 @@ describe('F246 AC-D3: ApprovalPanel', () => {
     });
 
     const panel = container.querySelector('[data-testid="approval-panel"]');
-    expect(panel?.textContent).toContain('请求失败');
-    expect(panel?.textContent).toContain('Network failed');
+    expect(panel?.textContent).toContain('暂时无法读取待审批列表');
+    expect(panel?.textContent).not.toContain('请求失败');
+    const errorDetails = container.querySelector<HTMLDetailsElement>('[data-testid="approval-pending-error"] details');
+    expect(errorDetails?.textContent).toContain('Network failed');
+    expect(errorDetails?.open).toBe(false);
   });
 
   it('renders approval item cards when items present', async () => {
@@ -126,6 +129,32 @@ describe('F246 AC-D3: ApprovalPanel', () => {
     const card2 = container.querySelector('[data-testid="approval-card-dp-2"]');
     expect(card1).not.toBeNull();
     expect(card2).not.toBeNull();
+  });
+
+  it('keeps cached items visible with an honest stale note when a refresh fails', async () => {
+    mockItems = [{ proposalId: 'dp-1', content: 'Fix bug' }];
+    mockCount = 1;
+    mockError = 'Network failed';
+    await act(async () => {
+      root.render(React.createElement(ApprovalPanel));
+    });
+
+    const errorBlock = container.querySelector('[data-testid="approval-pending-error"]');
+    expect(errorBlock?.textContent).toContain('正在显示最近一次成功读取的内容');
+    expect(container.querySelector('[data-testid="approval-card-dp-1"]')).not.toBeNull();
+    expect(errorBlock?.textContent).not.toContain('已保留现有内容');
+  });
+
+  it('says the list is simply unreadable when the first fetch fails with no cache', async () => {
+    mockItems = [];
+    mockError = 'Network failed';
+    await act(async () => {
+      root.render(React.createElement(ApprovalPanel));
+    });
+
+    const errorBlock = container.querySelector('[data-testid="approval-pending-error"]');
+    expect(errorBlock?.textContent).toContain('暂时无法读取待审批列表');
+    expect(errorBlock?.textContent).not.toContain('最近一次成功读取');
   });
 
   it('focuses the exact producer-owned proposal selected from Needs Me', async () => {

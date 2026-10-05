@@ -1,7 +1,7 @@
-import { isCloudBridgeOutboundReceiptV1, isCloudBridgeRecoveryV1 } from '@cat-cafe/shared';
+import { isCloudBridgeRecoveryV1 } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
 import type { RecoveryDeliveryStatus } from './cloud-binding-recovery-operations';
-import { latestRetryableQueueAttempt } from './queue-retry-action';
+import { latestCloudReceiptForTarget, latestRetryableQueueAttempt } from './queue-retry-action';
 
 export interface CloudBindingRecoveryProjection {
   targetCatId: string;
@@ -33,23 +33,13 @@ export function projectCloudBindingRecovery(
 
   const target = source.extra?.queueReceipt?.targets.find((candidate) => candidate.catId === recovery?.targetCatId);
   const latestAttempt = target?.attempts?.at(-1);
-  for (let index = timelineMessages.length - 1; index >= 0; index--) {
-    const notice = timelineMessages[index];
-    const receipt = notice?.source?.meta?.cloudBridgeOutboundReceipt;
-    if (notice?.type !== 'connector' || notice.replyTo !== source.id || !isCloudBridgeOutboundReceiptV1(receipt))
-      continue;
-    if (receipt.sourceMessageId !== source.id || receipt.targetCatId !== recovery.targetCatId) continue;
-    if (
-      latestAttempt &&
-      (!latestAttempt.invocationId ||
-        notice.timestamp < latestAttempt.createdAt ||
-        receipt.dispatchInvocationId !== latestAttempt.invocationId)
-    )
-      continue;
+  const receipt = latestCloudReceiptForTarget(source.id, recovery.targetCatId, timelineMessages, latestAttempt);
+  if (receipt) {
     if (receipt.status === 'sent' && receipt.transport === 'host' && receipt.hostMessageId)
       return { targetCatId: recovery.targetCatId, deliveryStatus: 'sent' };
     if (receipt.status === 'unknown') return { targetCatId: recovery.targetCatId, deliveryStatus: 'unknown' };
-    break;
+    if (receipt.status === 'failed' && receipt.transport === 'host')
+      return { targetCatId: recovery.targetCatId, deliveryStatus: 'failed' };
   }
   if (!target) return { targetCatId: recovery.targetCatId };
   const attempt = latestRetryableQueueAttempt(target);

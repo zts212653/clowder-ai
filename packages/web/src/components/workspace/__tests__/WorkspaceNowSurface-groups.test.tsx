@@ -6,6 +6,9 @@ import { activeExecutionKey, useActiveExecutionStore } from '@/stores/activeExec
 
 vi.mock('@/hooks/useCatData', () => ({ useCatData: () => ({ getCatById: () => undefined }) }));
 vi.mock('@/hooks/useActiveExecutionProjection', () => ({ cancelProjectedExecution: vi.fn() }));
+vi.mock('@/hooks/useDeploymentWaitProjection', () => ({
+  useDeploymentWaitProjection: () => ({ projection: null, hydration: 'idle', error: null, retry: vi.fn() }),
+}));
 
 import { cancelProjectedExecution } from '@/hooks/useActiveExecutionProjection';
 import { WorkspaceNowSurface } from '../WorkspaceNowSurface';

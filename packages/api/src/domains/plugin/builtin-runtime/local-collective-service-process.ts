@@ -7,6 +7,7 @@ export interface LocalCollectiveServiceSpawnSpec {
   readonly args: readonly string[];
   readonly env: Readonly<Record<string, string>>;
   readonly logPath: string;
+  readonly detached: boolean;
 }
 
 export interface LocalCollectiveServiceHealth {
@@ -72,14 +73,14 @@ export function resolveLocalCollectiveServiceCliPath(): string {
   return fileURLToPath(import.meta.resolve('@cat-cafe/collective-service/cli'));
 }
 
-export async function spawnDetachedCollectiveService(
+export async function spawnLocalCollectiveService(
   spec: LocalCollectiveServiceSpawnSpec,
 ): Promise<{ readonly pid: number }> {
   const logFd = openSync(spec.logPath, 'a', 0o600);
   let child: ReturnType<typeof spawn>;
   try {
     child = spawn(spec.command, [...spec.args], {
-      detached: process.platform !== 'win32',
+      detached: spec.detached && process.platform !== 'win32',
       env: { ...spec.env },
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,

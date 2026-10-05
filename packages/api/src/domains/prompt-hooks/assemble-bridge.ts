@@ -23,7 +23,7 @@ import {
   getWorkflowTriggers,
   pickVariantMentionForBridge,
 } from '../cats/services/context/SystemPromptBuilder.js';
-import { buildConciergePromptLines } from '../concierge/ConciergePromptSection.js';
+import { buildConversationDutyPromptLines } from '../concierge/conversation-duty.js';
 import { buildGuidePromptLines } from '../guides/GuidePromptSection.js';
 import {
   extractPackBlocks,
@@ -215,10 +215,7 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
     guidePromptLines: context.guideCandidate
       ? buildGuidePromptLines(context.guideCandidate, context.threadId).join('\n')
       : null,
-    conciergeLines:
-      context.threadKind === 'concierge' && context.conciergeConfig
-        ? buildConciergePromptLines(context.conciergeConfig, context.threadId)
-        : null,
+    conciergeLines: buildConversationDutyPromptLines(context),
     worldContext: context.worldContext ? flattenWorldContext(context.worldContext) : null,
     alwaysOnDocsBlock:
       context.alwaysOnDocs && context.alwaysOnDocs.length > 0 ? formatAlwaysOnDocs(context.alwaysOnDocs) : null,

@@ -29,4 +29,9 @@ sla:
   acknowledgeHours: 48
   reevalWithinHours: 336
 fixtures: []
-enabled: true
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "The consumer will not decide on it; the only verdict had 8 eligible cases and 0 inspector opens, and weekly wakes stall on the same window 409."
+  revivalPath: "Revive with a real Program targeting investigation efficiency, a named consumer, an F267 certificate and the weekly 409 fixed."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

@@ -34,6 +34,7 @@ const TASTE_DIMENSIONS = [
 const proposeSchema = z.object({
   scene: z.string().min(1).max(2000),
   quote: z.string().min(1).max(2000),
+  takeaway: z.string().trim().min(1).max(500).optional(),
   tags: z.array(z.string().min(1).max(50)).min(1).max(10),
   dimension: z.enum(TASTE_DIMENSIONS),
   privacy: z.enum(['public', 'sensitive']),
@@ -68,7 +69,7 @@ export const callbackProposeTasteRoutes: FastifyPluginAsync<ProposeTasteDeps> = 
       reply.status(400);
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
-    const { scene, quote, tags, dimension, privacy, sourceMessageId, clientRequestId } = parsed.data;
+    const { scene, quote, takeaway, tags, dimension, privacy, sourceMessageId, clientRequestId } = parsed.data;
 
     const invocationIsLatest = await registry.isLatest(record.invocationId);
 
@@ -146,6 +147,7 @@ export const callbackProposeTasteRoutes: FastifyPluginAsync<ProposeTasteDeps> = 
         sourceMessageId,
         scene,
         quote,
+        takeaway,
         tags,
         dimension,
         privacy,

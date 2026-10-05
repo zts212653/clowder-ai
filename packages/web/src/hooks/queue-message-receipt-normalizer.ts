@@ -9,6 +9,12 @@ import type {
   QueueTargetOutcome,
   QueueTerminalConsumptionWitness,
 } from '@cat-cafe/shared';
+import {
+  FRESHNESS_CARRIER_DELIVERY_SEMANTICS,
+  FRESHNESS_CARRIER_PROVIDERS,
+  FRESHNESS_CARRIERS,
+  isQueueDispatchDispositionEvidence,
+} from '@cat-cafe/shared';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -33,7 +39,12 @@ const ATTEMPT_TERMINAL_REASONS = new Set([
   'source_withdrawn',
 ]);
 const WORK_DISPOSITIONS = new Set(['continue_current', 'next_work']);
-const HANDLED_DISPOSITIONS = new Set(['responded', 'completed_with_turn', 'managed_hold_disposition']);
+const HANDLED_DISPOSITIONS = new Set([
+  'responded',
+  'completed_with_turn',
+  'managed_hold_disposition',
+  'dispatch_disposition',
+]);
 const FALLBACK_REASONS = new Set([
   'no_active_parent',
   'carrier_capability_undeclared',
@@ -41,23 +52,9 @@ const FALLBACK_REASONS = new Set([
   'parent_terminal_before_exposure',
   'parent_non_success_after_exposure',
 ]);
-const CARRIER_PROVIDERS = new Set(['openai_codex', 'anthropic', 'kimi', 'other']);
-const CARRIERS = new Set([
-  'codex_app_server',
-  'codex_exec_json',
-  'claude_print_sdk',
-  'claude_stream_json',
-  'kimi_stream_json',
-  'mcp_result_piggyback',
-  'other',
-]);
-const DELIVERY_SEMANTICS = new Set([
-  'exact_active_turn',
-  'queued_internal_turn',
-  'mcp_result_piggyback',
-  'unsupported',
-  'undeclared',
-]);
+const CARRIER_PROVIDERS = new Set<string>(FRESHNESS_CARRIER_PROVIDERS);
+const CARRIERS = new Set<string>(FRESHNESS_CARRIERS);
+const DELIVERY_SEMANTICS = new Set<string>(FRESHNESS_CARRIER_DELIVERY_SEMANTICS);
 
 function asRecord(value: unknown): UnknownRecord | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as UnknownRecord) : undefined;
@@ -172,18 +169,24 @@ function normalizeOutcome(value: unknown): QueueTargetOutcome | undefined {
     typeof candidate.disposition !== 'string' ||
     !HANDLED_DISPOSITIONS.has(candidate.disposition) ||
     !evidenceRef ||
-    (evidenceRef.kind !== 'invocation_lineage' && evidenceRef.kind !== 'turn_execution') ||
+    (evidenceRef.kind !== 'invocation_lineage' &&
+      evidenceRef.kind !== 'turn_execution' &&
+      !isQueueDispatchDispositionEvidence(evidenceRef)) ||
     !isNonEmptyString(evidenceRef.invocationId) ||
     !isFiniteNumber(candidate.handledAt)
   ) {
     return undefined;
   }
   const consumption = candidate.consumption === undefined ? undefined : normalizeConsumption(candidate.consumption);
+  if ((candidate.disposition === 'dispatch_disposition') !== (evidenceRef.kind === 'dispatch_disposition'))
+    return undefined;
   if (candidate.consumption !== undefined && !consumption) return undefined;
   return {
     invocationId: candidate.invocationId,
     disposition: candidate.disposition as QueueTargetOutcome['disposition'],
-    evidenceRef: { kind: evidenceRef.kind, invocationId: evidenceRef.invocationId },
+    evidenceRef: isQueueDispatchDispositionEvidence(evidenceRef)
+      ? { ...evidenceRef }
+      : { kind: evidenceRef.kind as 'invocation_lineage' | 'turn_execution', invocationId: evidenceRef.invocationId },
     handledAt: candidate.handledAt,
     ...(consumption ? { consumption } : {}),
   };

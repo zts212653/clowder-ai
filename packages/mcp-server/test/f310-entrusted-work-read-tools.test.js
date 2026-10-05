@@ -16,6 +16,7 @@ describe('F310 entrusted-work owner-read MCP projection', () => {
     const parsed = z.object(readEntrustedWorkInputSchema).safeParse({
       taskId: 'task-1',
       observedRevision: 7,
+      includeCompleted: true,
     });
     assert.equal(parsed.success, true);
 

@@ -2,7 +2,7 @@
 
 import type { HierarchicalContextConfig } from '../../../../../config/hierarchical-context-config.js';
 import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
-import { getSenderName } from '../../context/ContextAssembler.js';
+import { getMessageSpeakerName } from '../../context/ContextAssembler.js';
 import { formatPromptTimeRange } from '../../format-time.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ThreadMemorySourceRef } from '../../stores/ports/ThreadStore.js';
@@ -440,7 +440,7 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
   return anchors.map((a, i) => {
     const content =
       a.message.content.length > truncateLimit ? `${a.message.content.slice(0, truncateLimit)}...` : a.message.content;
-    const speaker = a.message.source?.label || getSenderName(a.message.catId);
+    const speaker = a.message.source?.label || getMessageSpeakerName(a.message);
     const label = a.isPrimacy ? 'Thread opener' : `Anchor ${i + 1}/${anchors.length}`;
     return `[${label} @${speaker}: ${a.message.id}] ${content}`;
   });

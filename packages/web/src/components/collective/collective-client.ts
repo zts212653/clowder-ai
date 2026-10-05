@@ -3,6 +3,7 @@ import type { CollectiveClientAnchor } from '@cat-cafe/shared';
 export type { CollectivePairingIntentMessage } from '@cat-cafe/shared';
 
 export interface CollectiveConnectionProjection {
+  readonly authorizedHumanId?: string;
   readonly serviceUrl: string;
   readonly canonicalClientAnchor: CollectiveClientAnchor;
   readonly serviceInstanceId: string;

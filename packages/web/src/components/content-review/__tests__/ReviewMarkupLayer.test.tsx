@@ -22,12 +22,10 @@ async function render({
   drawingKey = 'markup:one',
   canAdd = true,
   tool = 'rectangle',
-  text = '',
 }: {
   drawingKey?: string;
   canAdd?: boolean;
   tool?: 'rectangle' | 'text';
-  text?: string;
 } = {}) {
   await act(async () =>
     root.render(
@@ -36,15 +34,17 @@ async function render({
         marks: [],
         selectedId: null,
         canAdd,
+        canEdit: true,
         tool,
         color: '#d04a3a',
         strokeWidth: 4,
-        text,
         drawingKey,
         onAdd,
+        onUpdate: vi.fn(),
         onSelect: vi.fn(),
         onRemove: vi.fn(),
-        onTextRequired: vi.fn(),
+        onTextComplete: vi.fn(),
+        onEditingChange: vi.fn(),
         onNotice: vi.fn(),
         onDrawStart: vi.fn(),
       }),
@@ -77,9 +77,15 @@ function surface() {
 
 it('text authoring preserves a numeric media-space size independently of live UI typography overrides', async () => {
   container.style.setProperty('--console-font-lg', '32px');
-  await render({ tool: 'text', text: '保留暖光' });
+  await render({ tool: 'text' });
   const { layer } = surface();
   await act(async () => layer.dispatchEvent(pointer('pointerdown', 1, 20, 30)));
+  expect(onAdd).not.toHaveBeenCalled();
+  const input = container.querySelector<HTMLTextAreaElement>('[aria-label="标注文字"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(input, '保留暖光');
+  await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })));
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   expect(onAdd).toHaveBeenCalledWith(
     expect.objectContaining({
       kind: 'text',

@@ -9,6 +9,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { mock } from 'node:test';
+import { emitProcessExit, waitForMockProcessReady } from './mock-process-lifecycle.js';
 
 export async function collect(iterable) {
   const items = [];
@@ -57,12 +58,13 @@ export function createMockSpawnFn(proc) {
   return mock.fn(() => proc);
 }
 
-export function emitEvents(proc, events) {
+export async function emitEvents(proc, events) {
+  await waitForMockProcessReady(proc);
   for (const event of events) {
     proc.stdout.write(`${JSON.stringify(event)}\n`);
   }
   proc.stdout.end();
-  proc._emitter.emit('exit', 0, null);
+  await emitProcessExit(proc, 0, null);
 }
 
 export function createMockArchive() {

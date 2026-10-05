@@ -17,6 +17,8 @@ export interface PluginMaintenanceInput<T> {
   readonly expectedRevision: number;
   readonly stopReason: 'package_update' | 'meeting_catch_up';
   readonly resumeFailureCode: Extract<PluginRuntimeErrorCode, 'UPDATE_RESUME_FAILED' | 'CATCH_UP_RESUME_FAILED'>;
+  /** Validate a replacement before disrupting the currently running package. */
+  readonly preflight?: () => Promise<void>;
   readonly operation: (stopped: PluginInstanceRecord) => Promise<T>;
 }
 

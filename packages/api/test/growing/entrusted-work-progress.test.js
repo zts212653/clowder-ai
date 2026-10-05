@@ -88,6 +88,68 @@ test('the decorated in-memory typed store preserves synchronous results', async 
   );
 });
 
+test('owner progress and distinct start/estimate facts stay on the same revision-fenced Task', async () => {
+  const { store, lifecycle, taskId } = await setup();
+  const original = structuredClone(store.get(taskId));
+  const sourceRef = 'message:source-progress';
+  const actualStart = { value: 1_789_000_000_000, sourceRef };
+  const plannedStart = { value: 1_788_999_000_000, sourceRef };
+  const estimatedCompletion = { value: 1_789_086_400_000, sourceRef };
+  const progress = { summary: '材料已整理，正在制作页面', nextStep: '完成手机端检查', sourceRef };
+  const updated = await lifecycle.update({
+    taskId,
+    expectedRevision: 1,
+    status: 'doing',
+    time: { actualStart, plannedStart, estimatedCompletion },
+    progress,
+  });
+  assert.equal(updated.id, original.id);
+  assert.equal(updated.why, original.why, 'progress does not overwrite original entrustment');
+  assert.equal(updated.entrustedWork.revision, 2);
+  assert.deepEqual(updated.entrustedWork.time, { plannedStart, actualStart, estimatedCompletion });
+  assert.equal(updated.entrustedWork.time.businessDeadline, undefined);
+  assert.deepEqual(updated.entrustedWork.progress, progress);
+  const { EntrustedWorkOwnerReadService } = await import('../../dist/domains/growing/EntrustedWorkOwnerReadService.js');
+  const reader = new EntrustedWorkOwnerReadService({
+    tasks: store,
+    producerCatalog: {
+      async listCurrentReceipts() {
+        return [];
+      },
+    },
+  });
+  const read = await reader.read({ taskId, viewer: { surface: 'human', userId: 'owner-progress' } });
+  assert.deepEqual(
+    read.timeRefs.map((time) => time.role),
+    ['planned_start', 'actual_start', 'estimated_completion'],
+  );
+  assert.equal(read.brief.verifiedMilestone.role, 'estimated_completion');
+  assert.deepEqual(read.work.progress, progress);
+  await assert.rejects(
+    lifecycle.update({ taskId, expectedRevision: 1, progress }),
+    (error) => error.code === 'ENTRUSTED_WORK_REVISION_CONFLICT',
+  );
+  await assert.rejects(
+    lifecycle.update({ taskId, expectedRevision: 2, progress }),
+    (error) => error.code === 'ENTRUSTED_WORK_NO_OP',
+  );
+  await lifecycle.update({
+    taskId,
+    expectedRevision: 2,
+    status: 'blocked',
+    progress: { ...progress, blockerReason: '等待已登记的材料审阅' },
+  });
+  const resumed = await lifecycle.update({
+    taskId,
+    expectedRevision: 3,
+    status: 'doing',
+    time: { plannedStart: null, estimatedCompletion: null },
+  });
+  assert.equal(resumed.entrustedWork.progress.blockerReason, undefined, 'a resolved blocker cannot linger');
+  assert.deepEqual(resumed.entrustedWork.time, { actualStart });
+  assert.equal(store.get(taskId).entrustedWork.revision, 4);
+});
+
 test('same progress is a no-op unless an Artifact/time fact changes in the same atomic update', async () => {
   const { store, lifecycle, taskId, custodyEvents } = await setup();
   const before = structuredClone(store.get(taskId));

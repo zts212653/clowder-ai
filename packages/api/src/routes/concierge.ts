@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   type CatId,
+  type ConciergeConfig,
   catIdSchema,
   type InvestigationJob,
   type PendingConfirmation,
@@ -33,8 +34,15 @@ import { executeInvestigation } from '../domains/concierge/ConciergeInvestigatio
 import type { IConciergeRelayStore } from '../domains/concierge/ConciergeRelayStore.js';
 import type { ConciergeThreadService } from '../domains/concierge/ConciergeThreadService.js';
 import type { IConciergeTriagePlanStore } from '../domains/concierge/ConciergeTriagePlanStore.js';
+import { readCompanionSettingsSource } from '../domains/concierge/live/host/companion-settings-read.js';
+import { LiveCallAlreadyActiveError } from '../domains/concierge/live/LiveCompanionSessions.js';
+import {
+  ConfigurationReadFailedError,
+  readConfigurationForChange,
+} from '../domains/concierge/live/live-config-transition.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
+import { requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
 const log = createModuleLogger('concierge-routes');
 
@@ -70,6 +78,7 @@ const patchConciergeConfigSchema = z
     ballSize: z.number().int().min(48).max(192),
     /** E4: autonomous behavior engine toggle */
     behaviorEnabled: z.boolean(),
+    householdReadsAllowed: z.boolean(),
   })
   .partial()
   .strict();
@@ -133,6 +142,17 @@ interface ConciergeRoutesOptions {
   /** Evidence store for investigation search (optional — investigation degrades gracefully) */
   evidenceStore?: import('../domains/concierge/concierge-search-context.js').ConciergeEvidenceStore;
   messageStore: IMessageStore;
+  /** Bound the receipt, while the existing transition retains the pending write. */
+  configWriteTimeoutMs?: number;
+  /** Read the existing transition fence, including writes whose receipt timed out. */
+  isLiveConfigChangePending?(userId: string): boolean;
+  /** Host injects stop-before-save; storage and owner remain in this existing route. */
+  withLiveConfigChange?<T>(
+    userId: string,
+    save: () => Promise<T>,
+    patch: Readonly<Record<string, unknown>>,
+    onStopped?: () => void,
+  ): Promise<T>;
 }
 
 function validateTriageTarget(plan: TriagePlan): string | null {
@@ -377,6 +397,29 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
 
   // GET /api/concierge/config — 获取用户前台猫配置
   app.get('/api/concierge/config', async (request, reply) => {
+    if ((request.query as { view?: unknown }).view === 'native') {
+      reply.header('Cache-Control', 'no-store');
+      const access = requirePluginOwnerLocalAccess(request, 'read');
+      if ('error' in access) return reply.code(access.status).send({ error: access.error });
+      const config = await conciergeConfigStore.get(access.operator);
+      const transitionInactive =
+        !opts.withLiveConfigChange || opts.isLiveConfigChangePending?.(access.operator) === false;
+      return {
+        config,
+        behaviorEnabled: (config.behaviorEnabled ?? true) === true && transitionInactive,
+      };
+    }
+    if ((request.query as { view?: unknown }).view === 'settings') {
+      reply.header('Cache-Control', 'no-store');
+      const access = requirePluginOwnerLocalAccess(request, 'read');
+      if ('error' in access) return reply.code(access.status).send({ error: access.error });
+      try {
+        const source = await readCompanionSettingsSource(conciergeConfigStore, access.operator);
+        return reply.code(source.status === 'available' ? 200 : 503).send(source);
+      } catch {
+        return reply.code(503).send({ status: 'unavailable', reason: 'temporarily_unavailable' });
+      }
+    }
     const userId = resolveUserId(request, { defaultUserId: 'default-user' });
     if (!userId) {
       reply.status(401);
@@ -403,10 +446,80 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
       return { error: 'Invalid config fields', details: parseResult.error.flatten().fieldErrors };
     }
     const patch = parseResult.data;
-    // Merge with existing config (partial update semantics)
-    const existing = await conciergeConfigStore.get(userId);
-    const updated = { ...existing, ...patch };
-    await conciergeConfigStore.put(userId, updated);
+    let callStatus: 'unchanged' | 'stopped' = 'unchanged';
+    let saveStarted = false;
+    let writeTimer: ReturnType<typeof setTimeout> | undefined;
+    let rejectWriteDeadline: ((error: Error) => void) | undefined;
+    const writeDeadline = new Promise<never>((_resolve, reject) => {
+      rejectWriteDeadline = reject;
+    });
+    const save = async () => {
+      saveStarted = true;
+      // Read inside the serialized permission transition, after media is gone.
+      const existing = await readConfigurationForChange(conciergeConfigStore, userId);
+      const updated = { ...existing, ...patch };
+      writeTimer = setTimeout(
+        () => rejectWriteDeadline?.(new Error('Configuration write settlement unconfirmed')),
+        opts.configWriteTimeoutMs ?? 3000,
+      );
+      writeTimer.unref();
+      await conciergeConfigStore.put(userId, updated);
+      return updated;
+    };
+    let updated: ConciergeConfig;
+    try {
+      const operation = opts.withLiveConfigChange
+        ? opts.withLiveConfigChange(userId, save, patch, () => {
+            callStatus = 'stopped';
+          })
+        : save();
+      updated = await Promise.race([operation, writeDeadline]);
+    } catch (error) {
+      if (error instanceof ConfigurationReadFailedError)
+        return reply.code(503).send({
+          code: 'configuration_read_failed',
+          phase: 'read',
+          callStatus,
+          error: 'Settings source unavailable; no settings write attempted',
+        });
+      if (!saveStarted && error instanceof LiveCallAlreadyActiveError) {
+        return reply.code(409).send({
+          code: 'config_change_in_progress',
+          phase: 'admission',
+          callStatus,
+          error: 'Another call or settings transition is in progress; no settings write attempted',
+        });
+      }
+      return reply.code(503).send(
+        saveStarted
+          ? {
+              code: 'configuration_write_unconfirmed',
+              phase: 'save',
+              callStatus,
+              error: 'Settings result unconfirmed; read current configuration',
+            }
+          : {
+              code: 'live_teardown_unconfirmed',
+              phase: 'stop',
+              callStatus: 'stop_failed',
+              error: 'Media stop unconfirmed; no settings write attempted',
+            },
+      );
+    } finally {
+      if (writeTimer) clearTimeout(writeTimer);
+    }
+    // Persistence keeps the exact selected ID; ordinary Web/routing consumers
+    // continue using the same effective selection as their default GET.
+    try {
+      updated = await conciergeConfigStore.get(userId);
+    } catch {
+      return reply.code(503).send({
+        code: 'configuration_write_unconfirmed',
+        phase: 'readback',
+        callStatus,
+        error: 'Saved settings readback unconfirmed',
+      });
+    }
     // P2 cloud fix: sync thread.preferredCats immediately so duty-cat change takes effect
     // on the next @mention-free message without requiring a /api/concierge/thread roundtrip.
     // Fail-open: getOrCreate self-heals on next call if this races or throws.
@@ -417,7 +530,7 @@ export const conciergeRoutes: FastifyPluginAsync<ConciergeRoutesOptions> = async
         // best-effort — routing stale at worst until next getOrCreate
       }
     }
-    return { config: updated };
+    return { config: updated, callStatus };
   });
 
   // POST /api/concierge/thread — 懒创建/获取 per-user concierge thread

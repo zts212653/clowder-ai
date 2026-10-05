@@ -8,22 +8,15 @@
  * size so buffer overflow is structurally impossible.
  *
  * Performance note: GitHub returns oldest-first and not all endpoints
- * support `since`/`direction` params, so we still scan all pages
- * client-side. A future optimization could use GraphQL `last:N`.
+ * support incremental cursors. Comment endpoints use a verified created_at
+ * lower bound; review decisions still reread history because old reviews can be dismissed.
  */
-import { buildGhCliEnv, withHiddenGhCliWindow } from './gh-cli-env.js';
+import { commentSince } from './comment-since.js';
+import { executeGitHubRequest, type GitHubRequestOptions } from './request-budget.js';
 
-export interface FetchPaginatedOptions {
+export interface FetchPaginatedOptions extends GitHubRequestOptions {
   /** Items with id > sinceId are collected. 0 or omitted = collect all. */
   sinceId?: number;
-  /** Optional token resolved by the caller; when absent, gh uses its own auth store. */
-  ghToken?: string;
-  /** Override for testing — replaces real execFile */
-  execFileAsync?: (
-    file: string,
-    args: string[],
-    opts: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv; windowsHide: boolean },
-  ) => Promise<{ stdout: string }>;
 }
 
 /**
@@ -36,34 +29,18 @@ export interface FetchPaginatedOptions {
  */
 // biome-ignore lint/suspicious/noExplicitAny: GitHub API JSON responses are untyped; callers cast inline
 export async function fetchPaginated(endpoint: string, options: FetchPaginatedOptions = {}): Promise<any[]> {
-  const { sinceId, ghToken, execFileAsync: execOverride } = options;
-  const execFn =
-    execOverride ??
-    (async (
-      file: string,
-      args: string[],
-      opts: { timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv; windowsHide: boolean },
-    ) => {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      return promisify(execFile)(file, args, opts);
-    });
-
-  const cursor = sinceId ?? 0;
+  const cursor = options.sinceId ?? 0;
+  options.signal?.throwIfAborted();
+  const since = await commentSince(endpoint, cursor, options);
   // biome-ignore lint/suspicious/noExplicitAny: GitHub API JSON parse results
   const allItems: any[] = [];
   let page = 1;
 
   while (true) {
-    const { stdout } = await execFn(
-      'gh',
-      ['api', `${endpoint}?per_page=100&page=${page}`, '--jq', '.[]'],
-      withHiddenGhCliWindow({
-        timeout: 15_000,
-        maxBuffer: 2 * 1024 * 1024,
-        env: buildGhCliEnv({ token: ghToken }),
-      }),
-    );
+    options.signal?.throwIfAborted();
+    const query = `${endpoint}${endpoint.includes('?') ? '&' : '?'}per_page=100&page=${page}${since ? `&since=${encodeURIComponent(since)}` : ''}`;
+    const { stdout } = await executeGitHubRequest(['api', query, '--jq', '.[]'], options);
+    options.signal?.throwIfAborted();
     if (!stdout.trim()) break; // empty page = no more data
 
     const items = stdout

@@ -160,12 +160,16 @@ export interface CensusLegacyPawFeelBlockersInput {
 }
 
 export async function handleCensusLegacyPawFeelBlockers(input: CensusLegacyPawFeelBlockersInput): Promise<ToolResult> {
-  const params: Record<string, string> = {};
-  if (input.limit !== undefined) params.limit = String(input.limit);
-  if (input.cursor) params.cursor = input.cursor;
-  return callbackGet('/api/callbacks/paw-feel-legacy-blocker-census', params, {
-    agentKeyCatId: input.agentKeyCatId,
-  });
+  return callbackPost(
+    '/api/callbacks/paw-feel-legacy-blocker-census',
+    {
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    },
+    {
+      agentKeyCatId: input.agentKeyCatId,
+    },
+  );
 }
 
 export const capturePawFeelInputSchema = {};
@@ -288,7 +292,7 @@ export const pawFeelDispositionTools = [
       'Use before the separately authorized Phase D historical-blocker recovery terminal. ' +
       'Output: partial pages contain only counts and a signed nextCursor; only a complete traversal returns the deterministic digest-bound manifest. ' +
       'NOT for mutating blockers, reading marker bodies, or treating a partial page as a frozen cohort. ' +
-      'GOTCHA: pass each partial nextCursor unchanged and keep the original limit; forged, oversized, or version-drifted cursors fail closed.',
+      'GOTCHA: pass each partial nextCursor unchanged and keep the original limit; the client carries it in an authenticated JSON body so large signed state never enters the GET request line; forged, oversized, or version-drifted cursors fail closed.',
     inputSchema: censusLegacyPawFeelBlockersInputSchema,
     handler: handleCensusLegacyPawFeelBlockers,
     governance: {

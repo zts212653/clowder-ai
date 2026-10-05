@@ -43,6 +43,14 @@ describe('EventMemoryStore (F227 PR-1)', () => {
     await store.initialize();
   });
 
+  it('F324: omitted limit is a bounded store read', () => {
+    for (let index = 0; index < 250; index += 1) {
+      mark(baseRecord({ threadId: 'bounded', messageId: `message-${index}`, timestamp: index + 1 }));
+    }
+    assert.equal(store.listEvents().length, 50);
+    assert.equal(store.listEvents({ offset: 50 }).length, 50);
+  });
+
   describe('markEvent + getEvent', () => {
     it('mints evt_ eventId and returns the stored record (inserted=true)', () => {
       const { event: stored, inserted } = mark(baseRecord());

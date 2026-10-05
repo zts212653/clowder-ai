@@ -2,6 +2,7 @@
 
 import type { CatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
+import { tintOf } from '@/lib/hex-color';
 import { resolveSender } from '@/lib/resolve-sender';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 
@@ -32,7 +33,7 @@ export function ReplyPill({ replyPreview, replyToId, getCatById }: ReplyPillProp
       type="button"
       onClick={handleClick}
       className="text-micro font-medium px-1.5 py-0.5 rounded-full whitespace-nowrap max-w-[200px] truncate cursor-pointer hover:opacity-80 transition-opacity"
-      style={{ backgroundColor: `${sender.color}20`, color: sender.color }}
+      style={{ backgroundColor: tintOf(sender.color, '20'), color: sender.textColor }}
       title={deleted ? '消息已删除' : `${senderLabel}: ${content}`}
     >
       ↩ {senderLabel}

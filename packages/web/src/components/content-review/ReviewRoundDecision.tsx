@@ -10,6 +10,7 @@ export function ReviewRoundDecision({
   saving,
   draftKey,
   act,
+  compact = false,
 }: {
   round: ArtifactReviewRound;
   ownerUserId: string;
@@ -17,6 +18,7 @@ export function ReviewRoundDecision({
   saving: boolean;
   draftKey: string;
   act: (action: ArtifactReviewAction, round: number) => Promise<boolean>;
+  compact?: boolean;
 }) {
   const { draft, update, clear, storageError } = useReviewDraft(draftKey);
   const decided = round.state === 'approved' || round.state === 'changes_requested';
@@ -25,7 +27,10 @@ export function ReviewRoundDecision({
     if (await act(action, round.number)) clear();
   }
   return (
-    <section className="rounded-xl border border-cafe-accent/25 bg-cafe-accent/5 p-4" aria-label="这一轮的结论">
+    <section
+      className={compact ? 'space-y-2' : 'rounded-xl border border-cafe-accent/25 bg-cafe-accent/5 p-4'}
+      aria-label="这一轮的结论"
+    >
       <h3 className="text-sm font-semibold text-cafe-black">
         {needed ? '猫已准备好，需要你判断' : decided ? '这一轮的结论' : '把意见交给负责的猫'}
       </h3>
@@ -87,7 +92,7 @@ export function ReviewRoundDecision({
                     )
                   }
                 >
-                  请猫按意见继续
+                  要求修改
                 </button>
                 {needed ? (
                   <button
@@ -96,7 +101,7 @@ export function ReviewRoundDecision({
                     className="rounded-lg bg-cafe-accent px-3 py-2 text-xs font-semibold text-[var(--cafe-accent-foreground)] disabled:opacity-40"
                     onClick={() => void submit({ kind: 'decide', outcome: 'approved', explanation: draft.body })}
                   >
-                    这版通过，交还原任务
+                    通过此版本
                   </button>
                 ) : null}
               </>

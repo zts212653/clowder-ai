@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 import { startReviewHost } from './fixtures/f309-artifact-review-host.mjs';
 import { mediaFixture, offsetRotatedVfrFixture } from './fixtures/f309-artifact-review-media.mjs';
-import { selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
+import { openReviewPanel, selectReviewMode } from './fixtures/f309-artwork-controls.mjs';
 import { installMediaDiagnostics, readMediaDiagnostics } from './fixtures/f309-media-diagnostics.mjs';
 
 async function openReview(page, host) {
@@ -123,7 +123,12 @@ for (const kind of ['png', 'mp4'])
               });
             });
             video.currentTime = 2.12;
-            void video.play();
+            // The frame callback pauses at the first presented frame, which can arrive before
+            // play() settles; Chrome then rejects play() with AbortError ("interrupted by a call
+            // to pause()"). Unhandled, that lands in `errors`. Only that interruption is expected.
+            video.play().catch((error) => {
+              if (error?.name !== 'AbortError') throw error;
+            });
           }),
       );
       assert.equal(displayed.width, media.width);
@@ -135,8 +140,9 @@ for (const kind of ['png', 'mp4'])
       await page.getByRole('button', { name: '圈选区域', exact: true }).click();
     }
     await circle(page, view.review.rounds[0].asset.media);
-    await page.getByRole('textbox', { name: '新增标注意见' }).fill('帧坐标及撤权恢复的陌生意见');
-    await page.getByRole('button', { name: '保存标注', exact: true }).click();
+    await page.getByRole('textbox', { name: '评论内容' }).fill('帧坐标及撤权恢复的陌生意见');
+    await page.getByRole('button', { name: '保存批注', exact: true }).click();
+    await openReviewPanel(page, 'comments');
     await page.getByTestId('review-comment').waitFor();
     view = await host.reviews.read(reviewId, host.human);
     const anchor = view.review.rounds[0].annotations[0].anchor;
@@ -166,10 +172,10 @@ for (const kind of ['png', 'mp4'])
         'saved frame tick must identify the independently decoded, actually displayed frame',
       );
     }
-    const draft = page.getByRole('textbox', { name: '新增标注意见' });
+    const draft = page.getByRole('textbox', { name: '评论内容' });
     await selectReviewMode(page, 'comment');
     await draft.fill('返回原入口后还在的草稿');
-    await page.getByRole('button', { name: '← 回到原处', exact: true }).click();
+    await page.getByRole('button', { name: '返回', exact: true }).click();
     const selected = page
       .getByTestId('product-schedule-item')
       .filter({ has: page.locator('[data-testid="entrusted-work-brief"]') });
@@ -177,13 +183,20 @@ for (const kind of ['png', 'mp4'])
     assert.equal(await selected.getAttribute('data-selected'), 'true');
     assert.equal(await selected.getAttribute('data-subject-ref'), `task:work:${host.taskId}`);
     await page.getByTestId('open-artifact-review').click();
+    // AC-U2: the retained draft is showing again on return, without re-entering comment mode.
     await draft.waitFor();
     assert.equal(await draft.inputValue(), '返回原入口后还在的草稿');
     await page.reload();
     await draft.waitFor();
     assert.equal(await draft.inputValue(), '返回原入口后还在的草稿');
     if (clock) {
-      await page.getByRole('button', { name: '标注 1', exact: true }).click();
+      // The per-annotation navigation strip is gone; the discussion entry for #1 locates its frame.
+      await openReviewPanel(page, 'comments');
+      await page
+        .getByTestId('review-comment')
+        .first()
+        .getByRole('button', { name: /^#1 · / })
+        .click();
       await page.waitForFunction((time) => {
         const video = document.querySelector('video');
         return video && !video.seeking && video.readyState >= 2 && Math.abs(video.currentTime - time) < 0.01;
@@ -243,7 +256,12 @@ for (const kind of ['png', 'mp4'])
         Math.abs((await page.locator('video').evaluate((video) => video.currentTime)) - 2.84) < 0.01,
         'owner refresh must not interrupt the user playback position',
       );
-      await page.getByRole('button', { name: '标注 1', exact: true }).click();
+      await openReviewPanel(page, 'comments');
+      await page
+        .getByTestId('review-comment')
+        .first()
+        .getByRole('button', { name: /^#1 · / })
+        .click();
       await page.waitForFunction(() => {
         const video = document.querySelector('video');
         return !video.seeking && Math.abs(video.currentTime - 2.12) < 0.01;

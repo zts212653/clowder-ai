@@ -1,7 +1,7 @@
 ---
 cell_id: harness-eval
 title: Harness Eval Control Plane
-summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 duty/issue 双轴、source-exact owner-backed direct-repair、可恢复 blocker poller 与 refs-only legacy census。
+summary: Harness contract、runtime eval、measurement validity/owner-backed issuance、verdict handoff、domain registry、durable verdict lifecycle、F313 immutable finding/repair-target artifacts，以及 F278 每条爪感差的 duty/issue 双轴、tenant-bound tool-scoped owner repair、already-loaded result proof、evidence-driven blocker resume 与 refs-only legacy census。
 canonical_features: [F192, F266, F267, F278, F313]
 code_anchors:
   - packages/api/src/infrastructure/harness-eval/f167-eval.ts
@@ -70,8 +70,12 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/friction/friction-repair-target-resolver.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/read-model.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/service.ts
+  - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/resume-condition.ts
+  - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/resume-condition-owner.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/service-blocker-reopen.ts
+  - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/projection/projector-continuation-transitions.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/continuation/follow-up-resolver.ts
+  - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-source.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/direct-repair/direct-repair-federation.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/continuation/source-case-action-resolver.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/blocker-reconciler.ts
@@ -80,6 +84,7 @@ code_anchors:
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/blocker-recovery/legacy-blocker-recovery.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/providers/memory-cue-owner-provider.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/providers/memory-cue-git-truth.ts
+  - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/providers/owner-repair-git-proof.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/providers/task-workflow-owner-provider.ts
   - packages/api/src/infrastructure/harness-eval/paw-feel-disposition/providers/task-workflow-git-truth.ts
   - packages/api/src/infrastructure/harness-eval/measurement/measurement-bundle-schema.ts
@@ -155,7 +160,8 @@ cited_by:
   - F313 Phase C (F266 immutable Approval lineage, owner-backed exact refs, drift supersession, and exactly-once canonical repair custody behind one fail-closed v3 cutover)
   - F313 Phase D (owner-backed changed/no-change receipts, loaded-runtime freshness, typed outcomes, dormant ref-only F311 owner port, plus F278 continuing-responsibility/direct-repair/blocker-recovery integration)
   - F313 Phase D7 (exact F287 direct-repair provider, bounded typed-blocker polling, and authenticated stateless legacy census; legacy mutation remains separately authorized)
-  - F313 Phase D8 (exact F160 task-workflow provider and live bounded feature-query outcome verification; TaskStore remains the projection owner)
+  - F313 Phase D8 (tool-scoped F160 task-workflow provider and live bounded feature-query outcome verification; TaskStore remains the projection owner)
+  - F313 Phase D result-closure correction (tenant-bound source verification, already-loaded/later-loaded owner proof, and task-preserving evidence-driven blocker resume)
 ---
 
 # Harness Eval Control Plane
@@ -196,22 +202,35 @@ digest-verifies the source, selects exactly one non-overlapping provider from a 
 snapshot, and stores only server-derived route/authority/target/outcome refs. Task/F167 proves custody, never action
 authority. D7 registers exactly one concrete F287 route for `cat_cafe_record_memory_cue_outcome`: its provider rereads
 the immutable operator authorization message, binds the canonical F287 owner and loaded Git baseline, then accepts only the
-named outcome-lifecycle action. Outcome linking rereads the exact F287 append-only event and requires a relevant owner
-surface delta that is both loaded and contained by current main; it never copies cue content.
+named outcome-lifecycle action. Outcome linking rereads the exact F287 append-only event and proves loaded/current-main
+ancestry. A later load also requires a bounded relevant owner-surface delta; an already-loaded repair instead requires a
+fresh post-load owner event without an artificial commit. Both proof modes retain the repair's `verified_changed`
+business disposition; `verified_no_change` is reserved for an owner no-change receipt. It never copies cue content.
 
-D8 adds a separate exact route for `cat_cafe_list_tasks`; it cannot borrow the F287 provider or select by caller-authored
-`actionRef`. The provider rereads the immutable source marker and operator authorization, requires active Task/F167 custody,
-binds the loaded tool revision, and verifies a relevant loaded/current-main Git delta plus the same bounded,
-`ownerUserId`-scoped F299 query derived from canonical TaskStore truth. Missing/foreign task ownership fails closed even
-inside the shared default thread, and the owner scope participates in the content-free query identity. The provider
-returns refs only and adds no task writer, outcome store, or alternate work identity.
+D8 adds a separate tool route for `cat_cafe_list_tasks`; it cannot borrow the F287 provider or select by caller-authored
+`actionRef`. The common source verifier rereads exact message/digest/tool identity and rejects a foreign `ownerUserId`
+before provider selection, so the F160 provider can serve any verified source for the one named feature-filter action
+without hardcoding a historical signal or Feature ID. It resolves exactly one tenant-owned Feature from canonical Tasks
+in the exact source thread and freezes that identity in `actionScopeRef`; zero or multiple scopes block admission. It
+rereads the operator authorization, requires active Task/F167 custody, binds the loaded tool revision, and verifies
+loaded/current-main ancestry plus one bounded, `ownerUserId`-scoped query for the frozen scope. The callback query ref
+cannot select a different Feature. Existing provider-v1 bindings retain their route/version and recover this scope from
+their exact canonical source instead of becoming drifted. A later load still requires a bounded relevant delta; an already-loaded repair uses
+the current complete canonical query as its owner result. Empty results are valid for the bound scope; truncated results
+are not. Missing/foreign task ownership fails closed even inside the
+shared default thread, and the owner scope participates in the content-free query identity. The provider returns refs only
+and adds no task writer, outcome store, or alternate work identity.
 
-New blockers freeze a canonical task/event or bounded-time condition and can produce one CAS-safe
-`blocker_reopened`; stable conditions write nothing. The existing F139 reconciliation task now invokes a bounded F278
+New blockers freeze a canonical task/event condition. A bounded-time repair condition also stores a server-derived
+dependency on the retained Task; a pure time blocker without a Task is rejected. Due time with the Task still active is
+deferred and writes nothing; Task completion produces one CAS-safe `blocker_reopened`. When an active fix is blocked or
+its blocker is revised, owner/task/lease/binding remain visible as blocked provenance, and recovery resumes that same fix.
+The existing F139 reconciliation task now invokes a bounded F278
 poller first: one tick consumes one SSCAN cursor page of at most 50 signal logs, with process-local continuation and no
 new lifecycle authority. Legacy unbound blockers remain visible debt. Cats may traverse them through the authenticated
 `cat_cafe_census_legacy_paw_feel_blockers` reader: every request reads at most 50 logs, partial pages expose only counts
-plus an HMAC-signed stateless cursor, and only a complete traversal emits the digest-bound ≤50-row manifest. The
+plus an HMAC-signed stateless cursor, the canonical MCP/API continuation carries that cursor in a callback-authenticated
+POST JSON body rather than a GET request line, and only a complete traversal emits the digest-bound ≤50-row manifest. The
 separately authorized recovery helper remains absent from API, scheduler and startup registration. Any later mutation
 still flows through `PawFeelDispositionService`, which re-derives event identity, actor and legacy blocker digest before
 the sole event-log append.

@@ -51,6 +51,16 @@ describe('tracking registration is one attempt that waits for a slow GitHub', ()
   }
 
   const registrations = [
+    [
+      'register_deployment_wait',
+      'handleRegisterDeploymentWait',
+      {
+        taskId: 'task-1',
+        deploymentId: 'runtime',
+        when: { kind: 'revision_included', revision: 'a'.repeat(40), services: ['api', 'web'] },
+        nextStep: 'Verify the landed behavior.',
+      },
+    ],
     ['register_pr_tracking', 'handleRegisterPrTracking', { repoFullName: 'owner/repo', prNumber: 7 }],
     ['register_issue_tracking', 'handleRegisterIssueTracking', { repoFullName: 'owner/repo', issueNumber: 8 }],
   ];

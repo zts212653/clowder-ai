@@ -222,6 +222,13 @@ describe('F293 routing context V1 contracts', () => {
           targetCatId: 'codex-sol',
           disposition: 'warned',
           reasons: [reason],
+          contextualSignals: [
+            {
+              code: 'capability_strength',
+              summary: 'Evidence-driven architecture work',
+              sourceRefs: ['sha256:dossier-1'],
+            },
+          ],
           alternatives: [{ catId: 'fable-5', reasonRefs: ['route-preference-1:v1'] }],
         },
       ],

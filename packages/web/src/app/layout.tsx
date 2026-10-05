@@ -5,6 +5,7 @@ import type { Metadata, Viewport } from 'next';
 import { AppShell } from '@/components/AppShell';
 import { BrakeModal } from '@/components/BrakeModal';
 import { CatHueInjector } from '@/components/CatHueInjector';
+import { CoCreatorHueInjector } from '@/components/CoCreatorHueInjector';
 import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
 import { ThemeApplier } from '@/components/ThemeApplier';
@@ -65,6 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="stylesheet" href="/vendor/app/console-tokens.css" />
         <link rel="stylesheet" href="/vendor/app/console-shell.css" />
         <link rel="stylesheet" href="/vendor/app/console-controls.css" />
+        <link rel="stylesheet" href="/vendor/app/shell-v2.css" />
         <link rel="stylesheet" href="/vendor/app/werewolf-theme.css" />
         <link rel="stylesheet" href="/vendor/xterm/xterm.css" />
       </head>
@@ -78,6 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         ) : null}
         <SessionBootstrap />
         <CatHueInjector />
+        <CoCreatorHueInjector />
         <ThemeProvider>
           <ThemeApplier />
           <ConfirmProvider>

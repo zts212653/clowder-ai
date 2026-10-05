@@ -27,20 +27,27 @@ export function prepareEntrustedWorkUpdate(
   const current = task.entrustedWork;
   const status = entrustedWorkUpdateActionV1Schema.shape.status.parse(input.status) ?? task.status;
   const time = patchTime(current.time, input.time);
+  const progress = input.progress === undefined ? current.progress : (input.progress ?? undefined);
+  const nextProgress = progress ? { ...progress } : undefined;
+  if (nextProgress && status !== 'blocked') delete nextProgress.blockerReason;
   const artifactRefs = input.artifactRefs ? [...new Set(input.artifactRefs)].sort() : current.artifactRefs;
   if (
     status === task.status &&
     JSON.stringify(time) === JSON.stringify(current.time) &&
-    JSON.stringify(artifactRefs) === JSON.stringify(current.artifactRefs)
+    JSON.stringify(artifactRefs) === JSON.stringify(current.artifactRefs) &&
+    JSON.stringify(nextProgress) === JSON.stringify(current.progress)
   ) {
     return { kind: 'no_change', task };
   }
-  const entrustedWork = entrustedWorkV1Schema.parse({
+  const candidate: EntrustedWorkV1 = {
     ...current,
     revision: current.revision + 1,
     time,
     artifactRefs,
-  });
+    progress: nextProgress,
+  };
+  if (!nextProgress) delete candidate.progress;
+  const entrustedWork = entrustedWorkV1Schema.parse(candidate);
   return { kind: 'ready', status, entrustedWork };
 }
 
@@ -49,13 +56,10 @@ function patchTime(
   patch: UpdateEntrustedWorkStoreInput['time'],
 ): EntrustedWorkV1['time'] {
   const next = { ...current };
-  if (patch && Object.hasOwn(patch, 'businessDeadline')) {
-    if (patch.businessDeadline === null) delete next.businessDeadline;
-    else if (patch.businessDeadline !== undefined) next.businessDeadline = patch.businessDeadline;
-  }
-  if (patch && Object.hasOwn(patch, 'reviewBy')) {
-    if (patch.reviewBy === null) delete next.reviewBy;
-    else if (patch.reviewBy !== undefined) next.reviewBy = patch.reviewBy;
+  for (const key of ['businessDeadline', 'reviewBy', 'plannedStart', 'actualStart', 'estimatedCompletion'] as const) {
+    if (!patch || !Object.hasOwn(patch, key)) continue;
+    if (patch[key] === null) delete next[key];
+    else if (patch[key] !== undefined) next[key] = patch[key];
   }
   return next;
 }

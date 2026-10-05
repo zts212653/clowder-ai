@@ -3,7 +3,9 @@ import { toJsonSchemaCompat } from '@modelcontextprotocol/sdk/server/zod-json-sc
 import { getEncoding } from 'js-tiktoken';
 import { z } from 'zod';
 import { jsonSchemaToZod } from './json-schema-to-zod.js';
+import { compareClosedSelectors, deriveClosedSelectors } from './tool-governance-selectors.js';
 import type {
+  DerivedMcpClosedSelector,
   McpRuntimeProfile,
   McpSchemaDeliveryPolicy,
   McpToolDefinition,
@@ -20,6 +22,7 @@ export type McpSurfaceSnapshotEntry = {
   serverFamily: McpServerFamily;
   resourceFamily: string;
   actions: readonly string[];
+  closedSelectors?: readonly DerivedMcpClosedSelector[];
   activeState: McpToolDefinition['policy']['activeState'];
   description: string;
   descriptionDigest: string;
@@ -101,12 +104,14 @@ export function createMcpSurfaceSnapshot(
       const implementation = options.implementationCatalog.get(definition.implementation.ref);
       if (!implementation) throw new Error(`Missing implementation evidence for ${definition.name}`);
       const inputSchema = normalizeMcpInputSchema(definition.inputSchema);
+      const selectors = deriveClosedSelectors(definition, inputSchema);
       return {
         name: definition.name,
         serverFamily: definition.serverFamily,
         resourceFamily: definition.policy.resourceFamily,
         actions: [...definition.actionInventory].sort(),
         activeState: definition.policy.activeState,
+        ...(selectors.length > 0 ? { closedSelectors: selectors } : {}),
         description: definition.description,
         descriptionDigest: digest(definition.description),
         descriptionCharacters: definition.description.length,
@@ -175,6 +180,7 @@ export function compareMcpSurfaceRegistry(before: McpSurfaceSnapshot, after: Mcp
     addedNames: setDelta(beforeNames, afterNames),
     removedNames: setDelta(afterNames, beforeNames),
     resourceActionChanges,
+    closedSelectorChanges: compareClosedSelectors(before.tools, after.tools),
     profileChanges,
     schemaDeliveryChanges,
   };

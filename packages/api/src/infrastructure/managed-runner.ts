@@ -1,3 +1,4 @@
+import { admitDurableGateCancellationRequest } from '../domains/ball-custody/durable-managed-gate-cancellation.js';
 /**
  * ManagedRunner — F167 Phase P (H3)
  *
@@ -84,6 +85,7 @@ export interface ManagedRunnerStartResult {
 
 export class ManagedRunner {
   private _state: ManagedRunnerState = 'idle';
+  private _managedJob: DurableManagedGateJob | null = null;
   private _pid: number | null = null;
   private _logPath: string | null = null;
   private _child: ChildProcess | null = null;
@@ -153,6 +155,7 @@ export class ManagedRunner {
     const timeoutMs = Math.min(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS, opts?.maximumTimeoutMs ?? MAX_TIMEOUT_MS);
     const cwd = opts?.cwd;
 
+    this._managedJob = opts?.managedJob ?? null;
     this._preserveLog = opts?.managedJob != null;
     if (opts?.managedJob) {
       this._logPath = opts.managedJob.logPath;
@@ -385,6 +388,12 @@ export class ManagedRunner {
     if (this._state !== 'running' || !this._child) return;
 
     log.info({ pid: this._pid }, 'ManagedRunner: cancel requested, sending SIGTERM');
+    if (this._managedJob?.recovery)
+      admitDurableGateCancellationRequest(this._managedJob, {
+        requestedAt: Date.now(),
+        cancelledBy: 'managed-runner',
+        reason: 'explicit runner cancellation',
+      });
     this._state = 'cancelled';
     this._clearTimers();
     const gracefulTermination = this._killProcessGroup('SIGTERM');
@@ -409,7 +418,8 @@ export class ManagedRunner {
     }
 
     try {
-      process.kill(-this._pid, signal);
+      // A recovery-aware owner publishes its attempt intent before signalling children.
+      process.kill(signal === 'SIGTERM' && this._managedJob?.recovery ? this._pid : -this._pid, signal);
     } catch (err) {
       // Process group may already be gone — that's fine
       log.debug({ pid: this._pid, signal, err }, 'ManagedRunner: kill process group failed (may already be gone)');

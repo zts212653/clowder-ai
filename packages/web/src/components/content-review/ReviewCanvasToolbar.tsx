@@ -29,8 +29,8 @@ export function ReviewCanvasToolbar({
   onColorChange,
   strokeWidth,
   onStrokeWidthChange,
-  text,
-  onTextChange,
+  onFocus,
+  saveAction,
   canUndo,
   canRedo,
   hasMarks,
@@ -50,8 +50,8 @@ export function ReviewCanvasToolbar({
   onColorChange: (color: (typeof MARKUP_COLORS)[number]) => void;
   strokeWidth: (typeof MARKUP_STROKE_WIDTHS)[number];
   onStrokeWidthChange: (width: (typeof MARKUP_STROKE_WIDTHS)[number]) => void;
-  text: string;
-  onTextChange: (text: string) => void;
+  onFocus?: (mode: 'view' | 'markup' | 'select') => void;
+  saveAction?: ReactNode;
   canUndo: boolean;
   canRedo: boolean;
   hasMarks: boolean;
@@ -78,6 +78,29 @@ export function ReviewCanvasToolbar({
               {modeLabels[candidate]}
             </button>
           ))}
+          {onFocus ? (
+            <div className={styles.focusActions}>
+              <button type="button" className={styles.focusButton} onClick={() => onFocus('view')}>
+                放大查看
+              </button>
+              <button
+                type="button"
+                className={styles.focusButton}
+                disabled={!canEditMarkup}
+                onClick={() => onFocus('markup')}
+              >
+                放大标注
+              </button>
+              <button
+                type="button"
+                className={styles.focusButton}
+                disabled={!canAnnotate}
+                onClick={() => onFocus('select')}
+              >
+                放大圈选
+              </button>
+            </div>
+          ) : null}
           {imageMenu}
         </div>
       ) : null}
@@ -161,36 +184,31 @@ export function ReviewCanvasToolbar({
           >
             <ReviewToolbarIcon name="close" />
           </button>
+          {onFocus ? (
+            <button type="button" className={styles.focusButton} onClick={() => onFocus('markup')}>
+              放大标注
+            </button>
+          ) : null}
+          {saveAction}
         </div>
       ) : null}
-      {mode === 'markup' && tool === 'text' ? (
-        <label className={styles.textTool}>
-          <ReviewToolbarIcon name="text" />
-          <input
-            aria-label="标注文字"
-            value={text}
-            disabled={!canEditMarkup}
-            maxLength={240}
-            onChange={(event) => onTextChange(event.target.value)}
-            placeholder="输入文字，再点在画面上"
-          />
-        </label>
+      {mode === 'comment' ? (
+        // A host composer replaces only the hint; leaving comment mode must stay reachable either way.
+        <>
+          {composer}
+          <div className={styles.dock}>
+            {composer ? null : <span className="px-3 text-xs text-cafe-muted">点击或圈选画面，添加评论</span>}
+            <button
+              type="button"
+              className={styles.iconButton}
+              aria-label="退出评论"
+              onClick={() => onModeChange('view')}
+            >
+              <ReviewToolbarIcon name="close" />
+            </button>
+          </div>
+        </>
       ) : null}
-      {mode === 'comment'
-        ? (composer ?? (
-            <div className={styles.dock}>
-              <span className="px-3 text-xs text-cafe-muted">点击或圈选画面，添加评论</span>
-              <button
-                type="button"
-                className={styles.iconButton}
-                aria-label="退出评论"
-                onClick={() => onModeChange('view')}
-              >
-                <ReviewToolbarIcon name="close" />
-              </button>
-            </div>
-          ))
-        : null}
     </section>
   );
 }

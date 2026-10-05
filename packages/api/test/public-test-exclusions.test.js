@@ -10,13 +10,11 @@ const registryPath = resolve(packageRoot, 'config/public-test-exclusions.json');
 const resolverModuleUrl = pathToFileURL(resolve(packageRoot, 'scripts/resolve-public-test-files.mjs')).href;
 
 const RECONCILED_EXCLUSIONS = [
-  'redis-',
-  'session-strategy-phase3',
+  '^(?:test/approval\\-hub/approval\\-publication\\-redis\\-contract\\.test\\.js|test/approval\\-hub/redis\\-dispatch\\-proposal\\-store\\.test\\.js|test/approval\\-hub/redis\\-entity\\-proposal\\-dedup\\.test\\.js|test/dossier\\-distillation\\-redis\\-store\\.test\\.js|test/dossier\\-observation\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-closure\\-redis\\-store\\.test\\.js|test/f254\\-freshness\\-supplement\\-redis\\-store\\.test\\.js|test/f254\\-output\\-commit\\-redis\\-race\\.test\\.js|test/issue1371\\-redis\\-convergence\\.test\\.js|test/person\\-memory\\-redis\\-store\\.test\\.js|test/plugin\\-messaging\\-redis\\-event\\-fencing\\.test\\.js|test/plugin\\-messaging\\-redis\\-snapshot\\.test\\.js|test/plugin\\-messaging\\-redis\\-stores\\.test\\.js|test/redis\\-action\\-successor\\-lease\\-store\\.test\\.js|test/redis\\-action\\-successor\\-task\\-lifecycle\\.test\\.js|test/redis\\-backlog\\-store\\.test\\.js|test/redis\\-community\\-bootstrap\\.test\\.js|test/redis\\-community\\-event\\-log\\.test\\.js|test/redis\\-community\\-pr\\-lifecycle\\.test\\.js|test/redis\\-community\\-projector\\.test\\.js|test/redis\\-concierge\\-config\\-store\\.test\\.js|test/redis\\-connector\\-binding\\-store\\.test\\.js|test/redis\\-f168\\-phase\\-b\\-awaiting\\-external\\.test\\.js|test/redis\\-grounding\\-sample\\-store\\.test\\.js|test/redis\\-invocation\\-record\\-store\\.test\\.js|test/redis\\-label\\-store\\.test\\.js|test/redis\\-limb\\-pairing\\-persistence\\.test\\.js|test/redis\\-message\\-delivery\\-atomicity\\.test\\.js|test/redis\\-message\\-delivery\\-contracts\\.test\\.js|test/redis\\-message\\-store\\.test\\.js|test/redis\\-pr\\-tracking\\-store\\.test\\.js|test/redis\\-profile\\-update\\-proposal\\-store\\.test\\.js|test/redis\\-proposal\\-store\\-finalize\\.test\\.js|test/redis\\-proposal\\-withdraw\\.test\\.js|test/redis\\-read\\-state\\-store\\.test\\.js|test/redis\\-repo\\-comment\\-cursor\\.test\\.js|test/redis\\-runtime\\-interaction\\-store\\.test\\.js|test/redis\\-runtime\\-session\\-store\\.test\\.js|test/redis\\-session\\-chain\\-store\\.test\\.js|test/redis\\-session\\-handoff\\-disposition\\.test\\.js|test/redis\\-session\\-handoff\\-proposal\\-store\\.test\\.js|test/redis\\-summary\\-store\\.test\\.js|test/redis\\-task\\-progress\\-store\\.test\\.js|test/redis\\-task\\-store\\.test\\.js|test/redis\\-taste\\-proposal\\-recovery\\.test\\.js|test/redis\\-test\\-db\\-namespace\\.test\\.js|test/redis\\-thread\\-store\\.test\\.js|test/redis\\-tip\\-telemetry\\-sink\\.test\\.js|test/redis\\-turn\\-execution\\-store\\.test\\.js|test/redis\\-unread\\-summary\\-visibility\\-cursor\\.test\\.js|test/signal\\-intake/redis\\-signal\\-intake\\.test\\.js|test/stores/redis\\-frustration\\-issue\\-store\\-window\\.test\\.js)$',
+  '^test/redis-restore-script\\.test\\.js$',
   'workflow-sop-store',
-  'kimi-agent-service',
-  'test/memory/',
-  'thread-wiring\\.test',
-  'integration/wiring\\.test',
+  '^(?:test/memory/cat\\-cafe\\-scanner\\-recall\\.test\\.js|test/memory/entity\\-seeds\\.test\\.js|test/memory/f209\\-recall\\-fixtures\\.test\\.js|test/memory/f287\\-billing\\-only\\-journey\\.test\\.js|test/memory/taste\\-index\\-authority\\.test\\.js)$',
+  '^(?:test/memory/asr\\-defer\\-receipt\\-lineage\\.test\\.js|test/memory/asr\\-write\\-opportunity\\-delivery\\-store\\.test\\.js|test/memory/asr\\-write\\-opportunity\\-terminal\\-ledger\\.test\\.js)$',
   'shared-state-wiring\\.test',
   'write-vignette-publication-hook\\.test',
   'capability-evolution-evaluation-owner-join\\.test',
@@ -31,12 +29,11 @@ const RECONCILED_EXCLUSIONS = [
   'f188-cold-start-fixtures\\.test',
   'f188-harness-consistency\\.test',
   'f236-cc-anchor-hook\\.test',
-  'f296-(?:b3b3-post-compact-hook|session-hook-source-auth)\\.test',
   'harness-eval/eval-hub-read-model\\.test',
   'harness-eval/merge-gate-provenance-contract\\.test',
   'harness-eval/design-gate-episode-source-provider-private-evidence\\.test',
-  'f254-(?:freshness-instruction-private-evidence|freshness-replay-provider|manual-reminder-scope|provider-native-freshness)\\.test',
-  'harness-eval/eval-hub-(?:lifecycle-summary-route|metric-glossary-coverage|read-model-f248-phase-b2|route)\\.test',
+  '^(?:test/f254\\-freshness\\-instruction\\-private\\-evidence\\.test\\.js|test/f254\\-manual\\-reminder\\-scope\\.test\\.js)$',
+  '^(?:test/harness\\-eval/eval\\-hub\\-lifecycle\\-summary\\-route\\.test\\.js|test/harness\\-eval/eval\\-hub\\-read\\-model\\-f248\\-phase\\-b2\\.test\\.js|test/harness\\-eval/eval\\-hub\\-route\\.test\\.js)$',
   'harness-eval/(?:friction-measurement-bundle|measurement-independent-rejudge(?:-adjudication|-judgment)?)\\.test',
   'harness-eval/measurement-decision-proof(?:-resolver)?\\.test',
   'harness-eval/publish-verdict-(?:capability-wakeup(?:-owner-scope)?|freshness|friction|measurement-validity-gate|memory|pipeline|task-outcome(?:-writeback-guard)?)\\.test',
@@ -160,20 +157,24 @@ test('memory exclusion audit binds the current source-managed candidate', async 
   const memoryEntry = registry.entries.find((entry) => entry.id === 'memory-tests');
 
   assert.ok(memoryEntry, 'memory exclusion must remain audited');
-  assert.equal(memoryEntry.audit.sourceHead, '6bffad45ecb50e6cbe1f11ae897358a54ef5ff39');
-  assert.equal(memoryEntry.audit.publicHead, '6b6fbbaa863ced704081f0ddc718d797b619f8c2');
-  assert.equal(memoryEntry.audit.matchedFileCount, 257);
+  assert.equal(memoryEntry.audit.sourceHead, '9663e789484fbf7569f1159c9779f1c9ab89375e');
+  assert.equal(memoryEntry.audit.publicHead, 'b1fe2966fa0a97d1e3cd2e174ed59fd1477b4fc4');
+  assert.equal(memoryEntry.audit.matchedFileCount, 5);
   assert.equal(memoryEntry.publicAudit, undefined, 'the stale public-main snapshot is not an exported-candidate audit');
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const selection = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  assert.ok(selection.selectedFiles.includes('test/memory-cue-invocation-read.test.js'));
+  assert.ok(!selection.excludedFiles.includes('test/memory-cue-invocation-read.test.js'));
 });
 
-test('resolver excludes source-only Claude hook bytes but keeps public F296 composition coverage', async () => {
+test('resolver re-admits the exported Claude hooks and F296 composition coverage', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
-  for (const sourceOnlyTest of [
+  for (const portableTest of [
     'test/f296-b3b3-post-compact-hook.test.js',
     'test/f296-session-hook-source-auth.test.js',
   ]) {
-    assert.ok(resolved.excludedFiles.includes(sourceOnlyTest));
+    assert.ok(resolved.selectedFiles.includes(portableTest));
   }
   assert.ok(resolved.selectedFiles.includes('test/f296-session-hook-auth.test.js'));
   assert.ok(resolved.selectedFiles.includes('test/f296-b3b3-provider-boundary-integration.test.js'));
@@ -218,8 +219,6 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
   const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
   for (const file of [
     'test/f254-freshness-instruction-private-evidence.test.js',
-    'test/f254-freshness-replay-provider.test.js',
-    'test/f254-provider-native-freshness.test.js',
     'test/harness-eval/design-gate-episode-source-provider-private-evidence.test.js',
     'test/harness-eval/measurement-decision-proof-resolver.test.js',
     'test/harness-eval/measurement-decision-proof.test.js',
@@ -228,6 +227,8 @@ test('resolver excludes private evidence consumers but keeps self-contained publ
     assert.ok(resolved.excludedFiles.includes(file), `${file} should be private-fixture-only`);
   }
   for (const file of [
+    'test/f254-freshness-replay-provider.test.js',
+    'test/f254-provider-native-freshness.test.js',
     'test/cicd-router.test.js',
     'test/embed-runtime-policy.test.js',
     'test/f254-freshness-instruction-surface.test.js',
@@ -314,10 +315,7 @@ test('default expiry date helper falls back to the repo policy timezone when env
  * 21 ordinary product regressions out of the public suite under a reason
  * ("public CI resource availability") that was never true of them.
  *
- * The file is named for the behaviour it tests now. This pins that: a store
- * test that needs no Redis must stay in the public selection, so the next
- * inventory drift is resolved by asking what the test needs rather than by
- * re-signing whatever the prefix happened to catch.
+ * Mock-only store tests stay public; audit dependencies instead of re-signing a prefix.
  */
 test('a mock-only store test stays in the public selection regardless of what it imports', async () => {
   const { resolvePublicTestFiles } = await import(resolverModuleUrl);
@@ -330,4 +328,18 @@ test('a mock-only store test stays in the public selection regardless of what it
     !resolved.excludedFiles.includes('test/thread-list-batch.test.js'),
     'no exclusion may claim a test that needs no excluded resource',
   );
+});
+
+test('portable synthetic memory regressions stay in the public selection', async () => {
+  const { resolvePublicTestFiles } = await import(resolverModuleUrl);
+  const resolved = await resolvePublicTestFiles({ packageRoot, configPath: registryPath });
+  for (const file of [
+    'test/entity-upsert-mention-scope.test.js',
+    'test/startup-recall-races.test.js',
+    'test/startup-thread-index.test.js',
+    'test/thread-index-startup.test.js',
+  ]) {
+    assert.ok(resolved.selectedFiles.includes(file), `${file} needs no private memory fixtures`);
+    assert.ok(!resolved.excludedFiles.includes(file), `${file} must remain public`);
+  }
 });

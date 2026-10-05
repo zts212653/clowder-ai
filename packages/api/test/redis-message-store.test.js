@@ -634,6 +634,41 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.deepEqual(hydrated?.extra?.localReviewVerdict, localReviewVerdict);
   });
 
+  it('F317 keeps the historical Live identity and actual author through real Redis reads', async () => {
+    const identity = {
+      v: 1,
+      name: '猫猫球',
+      partner: { catId: 'fable-5', displayName: '宪宪', skin: 'black-cat' },
+      live: { catId: 'codex', displayName: '砚砚', transport: 'gpt_live_v3', verifiedModel: null },
+      deep: { catId: 'fable-5', displayName: '宪宪', verifiedModel: null },
+    };
+    const liveCompanion = {
+      callId: 'call-1',
+      nativeThreadId: 'native-1',
+      realtimeSessionId: 'realtime-1',
+      nativeItemId: 'answer-1',
+      nativeTurnId: 'turn-1',
+      modality: 'result',
+      identity,
+    };
+    const stored = await store.append({
+      userId: 'owner-f317',
+      threadId: 'thread-f317-identity',
+      catId: 'codex',
+      content: '当时的回答',
+      mentions: [],
+      timestamp: Date.now(),
+      origin: 'stream',
+      extra: { liveCompanion },
+    });
+    const direct = await store.getById(stored.id);
+    const history = await store.getByThread('thread-f317-identity', 10, 'owner-f317');
+    assert.equal(direct?.catId, 'codex');
+    assert.equal(direct?.origin, 'stream');
+    assert.deepEqual(direct?.extra?.liveCompanion, liveCompanion);
+    assert.deepEqual(history[0]?.extra?.liveCompanion, liveCompanion);
+  });
+
   it('F167 rehydrates the managed-command action lease generation from the real Redis hash', async () => {
     const actionLeaseRef = { leaseId: 'lease-managed-review-redis-1', generation: 7 };
     const stored = await store.append({

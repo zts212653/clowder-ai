@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
@@ -7,6 +7,8 @@ import {
   CodexAgentService,
   codexConfigObjectFromArgs,
 } from '../dist/domains/cats/services/agents/providers/CodexAgentService.js';
+import { getCliExecutionExit, isCliExecutionRunning } from '../dist/utils/CliExecutionObservation.js';
+import { createHarness, sessionOptions } from './helpers/codex-host-pool-harness.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
 
 class AsyncInbox {
@@ -63,6 +65,8 @@ class PoolWire {
     this.writes.push(message);
     if (message.method === 'initialize') {
       this.inbox.push({ id: message.id, result: { userAgent: 'fake-pool' } });
+    } else if (message.method === 'config/read') {
+      this.inbox.push({ id: message.id, result: { config: { mcp_servers: {} } } });
     } else if (message.method === 'thread/start' || message.method === 'thread/resume') {
       const threadId = message.method === 'thread/resume' ? message.params.threadId : this.threadId;
       this.inbox.push({ id: message.id, result: { thread: { id: threadId, turns: [] } } });
@@ -186,6 +190,23 @@ class FakeHostPool {
 
 const credsDir = mkdtempSync(join(tmpdir(), 'cat-cafe-codex-pool-creds-'));
 process.env.CAT_CAFE_MCP_CREDS_DIR = credsDir;
+// Credential tests must not depend on the developer workspace's enabled tools.
+mkdirSync(join(credsDir, '.cat-cafe'));
+writeFileSync(
+  join(credsDir, '.cat-cafe', 'capabilities.json'),
+  JSON.stringify({
+    version: 1,
+    capabilities: [
+      {
+        id: 'cat-cafe-memory',
+        type: 'mcp',
+        enabled: true,
+        source: 'cat-cafe',
+        mcpServer: { command: 'node', args: [] },
+      },
+    ],
+  }),
+);
 
 after(() => {
   delete process.env.CAT_CAFE_MCP_CREDS_DIR;
@@ -273,23 +294,35 @@ test('pooled Codex materializes ordered MCP overlays without duplicate TOML tabl
 test('pooled host lease observes the invocation abort signal', async () => {
   const pool = new FakeHostPool();
   const abortController = new AbortController();
+  const owner = {
+    invocationId: 'invocation-signal',
+    executionId: 'parent-signal',
+    userId: 'pooled-user',
+    threadId: 'pooled-thread',
+    catId: 'codex-sol',
+  };
   const service = new CodexAgentService({
     carrierMode: 'app_server',
     appServerHostPool: pool,
     cliCommand: process.execPath,
     l0CompilerFn: fakeL0Compiler,
     model: 'gpt-5.3-codex',
+    rawArchive: { append: async () => {} },
   });
 
   await drain(
     service.invoke('signal plumbing', {
       invocationId: 'invocation-signal',
       signal: abortController.signal,
+      auditContext: owner,
     }),
   );
 
   assert.equal(pool.calls.length, 1);
   assert.equal(pool.calls[0].signal, abortController.signal);
+  assert.equal(getCliExecutionExit(owner), undefined, 'warm-host close is not an exact turn process exit');
+  assert.equal(isCliExecutionRunning(owner), false, 'warm host must not be pinned to one invocation');
+  assert.equal(pool.calls[0].executionOwner, undefined);
 });
 
 test('CodexAgentService hides a recovered model-capacity failure from the Clowder AI message stream', async () => {
@@ -400,6 +433,140 @@ test('CodexAgentService exposes active-writer refusal without minting a replacem
     'typed diagnostics must not expose raw upstream active-writer text',
   );
 });
+
+test(
+  'ordinary typing to Live retires only the released local writer and resumes the same history',
+  { timeout: 10000 },
+  async () => {
+    const { pool, hosts } = createHarness({ idleTtlMs: 300000 });
+    const original = await pool.createSession(sessionOptions());
+    original.rememberSession('native-old');
+    const service = new CodexAgentService({
+      carrierMode: 'app_server',
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      model: 'gpt-5.6-sol',
+      appServerHostPool: pool,
+    });
+    let created = 0;
+    const failures = [];
+    const wire = new PoolWire('native-old');
+    const invoke = async () => {
+      let finish;
+      return drain(
+        service.invoke('continue this same conversation in Live', {
+          invocationId: 'ordinary-to-live',
+          sessionId: 'native-old',
+          callbackEnv: {},
+          agentCarrierSessionFactory: async () => {
+            created++;
+            assert.equal(hosts[0].isAlive, false);
+            return wire;
+          },
+          liveCompanion: {
+            configure: async () => ({ mcp_servers: {} }),
+            finished: new Promise((resolve) => {
+              finish = resolve;
+            }),
+            ready: async (id) => {
+              assert.equal(id, 'native-old');
+              finish();
+            },
+            observe: async () => {},
+            fail: async (error) => {
+              failures.push(error);
+            },
+          },
+        }),
+      );
+    };
+    try {
+      const blocked = await invoke();
+      assert.equal(created, 0, 'an active local writer forbids opening a second carrier');
+      assert.equal(hosts[0].closeCalls, 0);
+      assert.equal(failures[0].name, 'CodexActiveWriterRecoveryError');
+      assert.equal(
+        blocked.some((event) => event.type === 'session_init'),
+        false,
+      );
+      await original.close();
+      const resumed = await invoke();
+      assert.equal(created, 1);
+      assert.equal(hosts[0].closeCalls, 1);
+      assert.equal(wire.writes.find((message) => message.method === 'thread/resume').params.threadId, 'native-old');
+      assert.equal(
+        wire.writes.some((message) => ['thread/start', 'thread/archive', 'turn/interrupt'].includes(message.method)),
+        false,
+      );
+      assert.equal(
+        resumed.some((event) => event.type === 'session_init' && event.sessionReplacement),
+        false,
+      );
+    } finally {
+      await pool.closeAll();
+    }
+  },
+);
+
+test(
+  'Live receives the typed final writer refusal without replacement or a ready media call',
+  { timeout: 10000 },
+  async () => {
+    const wires = [new ActiveWriterWire('native-old'), new ActiveWriterWire('native-old')];
+    for (const wire of wires) {
+      const write = wire.write.bind(wire);
+      wire.write = async (message) => {
+        if (message.method === 'config/read') {
+          wire.writes.push(message);
+          wire.inbox.push({ id: message.id, result: { config: { mcp_servers: {} } } });
+          return;
+        }
+        return write(message);
+      };
+    }
+    let factoryCalls = 0;
+    const failures = [];
+    const service = new CodexAgentService({
+      carrierMode: 'app_server',
+      cliCommand: process.execPath,
+      l0CompilerFn: fakeL0Compiler,
+      model: 'gpt-5.6-sol',
+    });
+    const output = await drain(
+      service.invoke('ordinary typing into Live', {
+        invocationId: 'invocation-live-writer-refusal',
+        sessionId: 'native-old',
+        callbackEnv: {},
+        agentCarrierSessionFactory: async () => wires[factoryCalls++],
+        liveCompanion: {
+          finished: new Promise(() => {}),
+          configure: async () => ({ mcp_servers: {} }),
+          ready: async () => {
+            throw new Error('busy writer must not become a ready Live call');
+          },
+          fail: async (error) => {
+            failures.push(error);
+            assert.equal(factoryCalls, 1);
+          },
+        },
+      }),
+    );
+    assert.equal(factoryCalls, 1, 'Live keeps its zero-replay transport policy');
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].name, 'CodexActiveWriterRecoveryError');
+    assert.equal(
+      output.some((event) => event.type === 'session_init'),
+      false,
+    );
+    for (const wire of wires.slice(0, factoryCalls)) {
+      assert.equal(
+        wire.writes.some((message) => ['thread/start', 'thread/archive', 'turn/interrupt'].includes(message.method)),
+        false,
+      );
+      assert.equal(wire.writes.find((message) => message.method === 'thread/resume').params.threadId, 'native-old');
+    }
+  },
+);
 
 test('CodexAgentService carries oversized native replacement provenance on the pre-turn session_init', async () => {
   const wire = new OversizedResumeWire('native-oversized', 'native-cold');
@@ -564,6 +731,7 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
   };
   await drain(
     service.invoke('first turn', {
+      workingDirectory: credsDir,
       invocationId: 'invocation-1',
       callbackEnv: firstCallbackEnv,
       auditContext: {
@@ -597,6 +765,7 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
   pool.rejectedSessionIds.add('codex-thread-1');
   await drain(
     service.invoke('overlapping resume', {
+      workingDirectory: credsDir,
       invocationId: 'invocation-overlap',
       sessionId: 'codex-thread-1',
       callbackEnv: callbackEnv('invocation-overlap', 'callback-token-overlap'),
@@ -612,6 +781,7 @@ test('pooled Codex carries MCP config per session and refreshes an isolated cred
 
   await drain(
     service.invoke('resume turn', {
+      workingDirectory: credsDir,
       invocationId: 'invocation-2',
       sessionId: 'codex-thread-1',
       callbackEnv: callbackEnv('invocation-2', 'callback-token-2'),
@@ -638,6 +808,7 @@ test('replacement host rotates credentials while leaving the superseded host fil
 
   await drain(
     service.invoke('seed turn', {
+      workingDirectory: credsDir,
       invocationId: 'replacement-seed',
       callbackEnv: callbackEnv('replacement-seed', 'seed-token'),
     }),
@@ -650,6 +821,7 @@ test('replacement host rotates credentials while leaving the superseded host fil
   pool.replacementSessionIds.add('codex-thread-1');
   await drain(
     service.invoke('replacement turn', {
+      workingDirectory: credsDir,
       invocationId: 'replacement-next',
       sessionId: 'codex-thread-1',
       callbackEnv: callbackEnv('replacement-next', 'replacement-token'),

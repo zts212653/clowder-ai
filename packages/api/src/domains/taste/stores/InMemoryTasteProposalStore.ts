@@ -11,6 +11,7 @@
 import type { ApprovalEnvelope, ApprovalPublication, TasteProposal } from '@cat-cafe/shared';
 import { assertApprovalEnvelopeIdentity, commitApprovalEnvelope, generateProposalId } from '@cat-cafe/shared';
 import type { ApprovalPublicationStore } from '../../approval-hub/ports/ApprovalPublicationStore.js';
+import { matchesTasteDecisionSnapshot, type TasteDecisionSnapshot } from '../services/taste-decision-snapshot.js';
 import type {
   CreateTasteProposalInput,
   ITasteProposalStore,
@@ -36,6 +37,7 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
       sourceMessageId: input.sourceMessageId,
       scene: input.scene,
       quote: input.quote,
+      ...(input.takeaway ? { takeaway: input.takeaway } : {}),
       tags: [...input.tags],
       dimension: input.dimension,
       privacy: input.privacy,
@@ -84,9 +86,14 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     return this.insertionOrder.get(p.id) ?? 0;
   }
 
-  claimForApproval(id: string, approvedBy: string): TasteProposal | null {
+  claimForApproval(id: string, approvedBy: string, expected?: TasteDecisionSnapshot): TasteProposal | null {
     const proposal = this.proposals.get(id);
-    if (!proposal || proposal.status !== 'pending') return null;
+    if (
+      !proposal ||
+      proposal.status !== 'pending' ||
+      (expected && (approvedBy !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected)))
+    )
+      return null;
     proposal.status = 'approving';
     proposal.approvedBy = approvedBy;
     return clone(proposal);
@@ -121,9 +128,14 @@ export class InMemoryTasteProposalStore implements ITasteProposalStore, Approval
     return true;
   }
 
-  markRejected(id: string, reason: string, rejectedBy: string): TasteProposal | null {
+  markRejected(id: string, reason: string, rejectedBy: string, expected?: TasteDecisionSnapshot): TasteProposal | null {
     const proposal = this.proposals.get(id);
-    if (!proposal || proposal.status !== 'pending') return null;
+    if (
+      !proposal ||
+      proposal.status !== 'pending' ||
+      (expected && (rejectedBy !== expected.ownerUserId || !matchesTasteDecisionSnapshot(proposal, expected)))
+    )
+      return null;
     proposal.status = 'rejected';
     proposal.rejectedBy = rejectedBy;
     proposal.rejectedAt = Date.now();

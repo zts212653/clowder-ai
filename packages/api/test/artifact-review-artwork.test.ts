@@ -55,6 +55,53 @@ const drawing = {
   ],
 };
 
+test('the assigned cat reconstructs a valid escaped comment across bounded pages without losing any text', async (t) => {
+  const f = await fixture(t);
+  const body = '\\'.repeat(511) + '🐾' + '\\'.repeat(6400) + '猫';
+  assert.ok(body.length <= 8000);
+  const saved = await f.service.act(
+    command(f.initial, {
+      kind: 'annotate',
+      annotationId: 'escaped-comment',
+      anchor: { kind: 'image-point', x: 4, y: 5 },
+      body,
+    }),
+    reviewHuman,
+  );
+  let cursor: number | null = 0;
+  const parts: { value: string; offset: number; totalLength?: number }[] = [];
+  do {
+    const page = await inspectArtifactReview(
+      f.service,
+      {
+        reviewId: saved.view.review.reviewId,
+        view: 'annotations',
+        expectedRevision: saved.view.review.revision,
+        cursor,
+      },
+      reviewCat,
+    );
+    assert.ok(JSON.stringify(page).length <= 12000);
+    for (const row of page.records)
+      if (row.path === '/0/body') {
+        const fragment = row as typeof row & { offset?: number; totalLength?: number };
+        assert.equal(typeof fragment.value, 'string');
+        parts.push({ value: String(fragment.value), offset: fragment.offset ?? 0, totalLength: fragment.totalLength });
+      }
+    if (page.nextCursor !== null) assert.ok(page.nextCursor > cursor);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  assert.ok(parts.length > 1, 'encoded text must not need one oversized leaf');
+  let reconstructed = '';
+  for (const part of parts) {
+    assert.equal(/[\uD800-\uDBFF]$/.test(part.value), false, 'one fragment must not end inside a surrogate pair');
+    assert.equal(part.offset, reconstructed.length);
+    assert.equal(part.totalLength, body.length);
+    reconstructed += part.value;
+  }
+  assert.equal(reconstructed, body);
+});
+
 test('marks persist with authenticated authors, no fabricated comments, exact replay and historical deletion', async (t) => {
   const f = await fixture(t);
   assert.deepEqual(legacyReader.parse(f.store.get(f.initial.review.reviewId)), f.initial.review);
