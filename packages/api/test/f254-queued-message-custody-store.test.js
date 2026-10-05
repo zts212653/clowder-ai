@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import {
+  FRESHNESS_CARRIER_DELIVERY_SEMANTICS,
+  FRESHNESS_CARRIER_PROVIDERS,
+  FRESHNESS_CARRIERS,
+} from '@cat-cafe/shared';
 
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { parseQueuedMessageCustody } from '../dist/domains/cats/services/stores/ports/queued-message-custody.js';
 import { makeQueuedMessageCustody as makeCustody } from './helpers/queued-message-custody.js';
 
 function appendQueued(store, custody = makeCustody()) {
@@ -18,6 +24,65 @@ function appendQueued(store, custody = makeCustody()) {
 }
 
 describe('F254 queued message custody store', () => {
+  test('round-trips every shared carrier enum through durable JSON custody', () => {
+    const capability = { provider: 'google', carrier: 'agy_stream_json', deliverySemantics: 'queued_internal_turn' };
+    for (const carrierCapability of [
+      ...FRESHNESS_CARRIER_PROVIDERS.map((provider) => ({ ...capability, provider })),
+      ...FRESHNESS_CARRIERS.map((carrier) => ({ ...capability, carrier })),
+      ...FRESHNESS_CARRIER_DELIVERY_SEMANTICS.map((deliverySemantics) => ({ ...capability, deliverySemantics })),
+    ]) {
+      const custody = makeCustody({
+        allTargetCats: ['gemini38'],
+        pendingTargetCats: ['gemini38'],
+        authorIntentByCatId: { gemini38: { requested: 'next_work', carrierCapability } },
+      });
+      assert.deepEqual(parseQueuedMessageCustody(JSON.stringify(custody)), custody);
+    }
+  });
+
+  test('round-trips the native AGY author intent without accepting unknown carriers', async () => {
+    const { AgyNativeAgentService } = await import(
+      '../dist/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.js'
+    );
+    const service = new AgyNativeAgentService({
+      catId: 'gemini38',
+      profile: { enabled: true, profileId: 'gemini38', model: 'gemini-3.8-flash-high' },
+    });
+    const carrierCapability = service.freshnessCarrierCapability();
+    for (const requested of ['continue_current', 'next_work']) {
+      const custody = makeCustody({
+        allTargetCats: ['gemini38'],
+        pendingTargetCats: ['gemini38'],
+        authorIntentByCatId: {
+          gemini38: {
+            requested,
+            carrierCapability,
+            ...(requested === 'continue_current' ? { boundParentInvocationId: 'exact-parent' } : {}),
+          },
+        },
+      });
+      assert.deepEqual(parseQueuedMessageCustody(JSON.stringify(custody)), custody);
+      for (const invalid of [
+        { ...carrierCapability, provider: 'unregistered-provider' },
+        { ...carrierCapability, carrier: 'unregistered-carrier' },
+        { ...carrierCapability, deliverySemantics: 'unregistered-delivery' },
+      ]) {
+        assert.throws(
+          () =>
+            parseQueuedMessageCustody(
+              JSON.stringify({
+                ...custody,
+                authorIntentByCatId: {
+                  gemini38: { ...custody.authorIntentByCatId.gemini38, carrierCapability: invalid },
+                },
+              }),
+            ),
+          /invalid queue author intent carrier/,
+        );
+      }
+    }
+  });
+
   test('persists one revisioned custody projection on the exact queued message', () => {
     const store = new MessageStore();
     const message = appendQueued(store);

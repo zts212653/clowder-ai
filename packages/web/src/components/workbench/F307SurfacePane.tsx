@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import type { WorkspaceSurfaceDescriptor } from '@/components/workbench/workbench-contract';
+import { FocusModeButton } from '@/components/workspace/FocusModeButton';
+import { WorkspaceFocusExitButton } from '@/components/workspace/WorkspaceFocusShell';
 
 function SurfaceGlyph({ type }: { type: WorkspaceSurfaceDescriptor['type'] }) {
   if (type === 'browser') {
@@ -38,10 +40,20 @@ function SurfaceGlyph({ type }: { type: WorkspaceSurfaceDescriptor['type'] }) {
 export function F307SurfacePane({
   surface,
   visible = true,
+  focusMode = false,
+  artifactWorkFullWindow = false,
+  onEnterFocusMode,
+  onExitFocusMode,
+  onToggleArtifactWorkFullWindow,
   children,
 }: {
   surface: WorkspaceSurfaceDescriptor;
   visible?: boolean;
+  focusMode?: boolean;
+  artifactWorkFullWindow?: boolean;
+  onEnterFocusMode?: () => void;
+  onExitFocusMode?: () => void;
+  onToggleArtifactWorkFullWindow?: () => void;
   children: ReactNode;
 }) {
   return (
@@ -52,18 +64,39 @@ export function F307SurfacePane({
       aria-label={surface.title}
       aria-hidden={!visible}
     >
-      <header className="flex h-10 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface/70 px-3">
-        <span className="h-4 w-4 shrink-0 text-cafe-muted">
-          <SurfaceGlyph type={surface.type} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-xs font-semibold text-cafe">{surface.title}</span>
-        <span className="truncate text-micro text-cafe-muted">{surface.context}</span>
-      </header>
+      {!focusMode && (
+        <header
+          className="flex h-10 shrink-0 items-center gap-2 border-b border-cafe-subtle bg-cafe-surface/70 px-3"
+          data-testid="f307-surface-chrome"
+        >
+          <span className="h-4 w-4 shrink-0 text-cafe-muted">
+            <SurfaceGlyph type={surface.type} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-cafe">{surface.title}</span>
+          <span className="truncate text-micro text-cafe-muted">{surface.context}</span>
+          {onToggleArtifactWorkFullWindow ? (
+            <button
+              type="button"
+              className="rounded-lg border border-cafe-subtle bg-cafe-surface-sunken px-2.5 py-1 text-micro font-semibold text-cafe-secondary transition-colors hover:text-cafe"
+              onClick={onToggleArtifactWorkFullWindow}
+              aria-label={artifactWorkFullWindow ? '展开聊天' : '整窗查看作品'}
+              data-testid={
+                artifactWorkFullWindow ? 'f307-artifact-exit-full-window' : 'f307-artifact-enter-full-window'
+              }
+            >
+              {artifactWorkFullWindow ? '展开聊天' : '整窗'}
+            </button>
+          ) : (
+            onEnterFocusMode && <FocusModeButton onClick={onEnterFocusMode} />
+          )}
+        </header>
+      )}
       <div
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [&>*]:min-h-0 [&>*]:w-full [&>*]:flex-1"
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-auto [&>*]:min-h-0 [&>*]:w-full [&>*]:flex-1"
         data-testid="f307-owner-surface-host"
       >
         {children}
+        {focusMode && onExitFocusMode && <WorkspaceFocusExitButton onExit={onExitFocusMode} />}
       </div>
     </article>
   );

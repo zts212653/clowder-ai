@@ -9,6 +9,7 @@ import {
   releasedStructuredWake,
   supersededBeforeAdoption,
 } from './managed-hold-supersession.js';
+import { waitOutcomeObligation } from './wait-state-machine.js';
 
 // Public vocabulary re-exported so the seven existing importers stay untouched.
 export type {
@@ -84,6 +85,24 @@ function dispatchTransitionObservation(
 
 function unknown(reason: string): TurnCustodyProjection {
   return { state: 'unknown_legacy', evidenceRefs: [`unknown:${reason}`] };
+}
+
+/**
+ * An event-wait wake that only reports its wait already ended (subject closed, deadline passed)
+ * leaves nothing to continue, so no re-hold / handoff can ever satisfy a block. That is a property
+ * of the carrier itself, so it is decided before any store read: a custody-store failure, or a ball
+ * that has since moved on, cannot revive an obligation the wake never carried. An outcome this
+ * build cannot read fails closed. `undefined` = the carrier decides nothing; consult custody.
+ */
+function eventWaitCarrierVerdict(
+  wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
+): TurnCustodyProjection | undefined {
+  if (wake.protocol !== 'event_wait') return undefined;
+  const { outcomeId } = wake.waitContinuationCarrier;
+  const obligation = waitOutcomeObligation(outcomeId);
+  if (obligation === 'unrecognized') return unknown('event_wait_outcome_unrecognized');
+  if (obligation === 'continuation_owed') return undefined;
+  return { state: 'covered_empty', evidenceRefs: [`${wake.protocol}:${wake.subjectKey}`, `settled:${outcomeId}`] };
 }
 
 function decision(
@@ -170,6 +189,8 @@ export class TurnCustodyProjectionService {
   private async openStructured(
     wake: Extract<TurnCustodyWakeProvenance, { kind: 'structured' }>,
   ): Promise<TurnCustodyProjection> {
+    const carrierVerdict = eventWaitCarrierVerdict(wake);
+    if (carrierVerdict) return carrierVerdict;
     if (!this.deps.ballCustodyProjectionStore || !this.deps.ballCustodyEventLog) {
       return unknown('structured_store_unavailable');
     }
@@ -195,18 +216,10 @@ export class TurnCustodyProjectionService {
         };
       }
     }
-    if (projection?.state !== 'active' && projection?.state !== 'blocked') {
-      return unknown('structured_projection_missing');
-    }
-    const exactWakeIndex = exactStructuredWakeIndex(wake, events);
-    if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
-      return unknown('dispatch_handoff_missing');
-    }
-    if (projection.holder !== wake.holderCatId) {
-      return releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
-    }
     // clowder-ai#1366: a wake superseded before this turn adopted it is not a
-    // live obligation; treating it as one blocked unrelated healthy turns.
+    // live obligation. A mid-turn read has no receiver-boundary handoff; prove
+    // retirement from the exact wake history before consulting today's holder.
+    // Keep its baseline so an explicit retired terminal can still be observed.
     if (wake.protocol === 'hold') {
       const superseded = supersededBeforeAdoption(
         events,
@@ -220,6 +233,16 @@ export class TurnCustodyProjectionService {
           evidenceRefs: [...superseded],
         };
       }
+    }
+    if (projection?.state !== 'active' && projection?.state !== 'blocked') {
+      return unknown('structured_projection_missing');
+    }
+    const exactWakeIndex = exactStructuredWakeIndex(wake, events);
+    if (wake.protocol === 'dispatch' && exactWakeIndex === -1) {
+      return unknown('dispatch_handoff_missing');
+    }
+    if (projection.holder !== wake.holderCatId) {
+      return releasedStructuredWake(wake, events, exactWakeIndex) ?? unknown('structured_holder_mismatch');
     }
     return this.coveredActiveProjection(wake, events);
   }

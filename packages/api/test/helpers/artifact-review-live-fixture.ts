@@ -3,12 +3,14 @@ import { catRegistry, createCatId, type NeedsMeProducerId } from '@cat-cafe/shar
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../../src/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../../src/domains/cats/services/stores/ports/ThreadStore.js';
+import type { EvolutionMediaReadPort } from '../../src/domains/collaborative-content/workspace-review/evolution-review-source.js';
 import { createArtifactReviewIntegration } from '../../src/domains/growing/artifact-review-composition.js';
 import { EntrustedWorkLifecycleService } from '../../src/domains/growing/EntrustedWorkLifecycleService.js';
 import { EntrustedWorkOwnerReadService } from '../../src/domains/growing/EntrustedWorkOwnerReadService.js';
 import { F232PreparedArtifactReader } from '../../src/domains/growing/F232PreparedArtifactReader.js';
 import { NeedsMeProducerCatalog } from '../../src/domains/growing/NeedsMeProducerCatalog.js';
 import { ProjectContentOwnerService } from '../../src/domains/video-studio/content-owner/service.js';
+import type { WorkspaceContentSourceService } from '../../src/domains/workspace/workspace-content-source.js';
 import './setup-cat-registry.js';
 import { createPersistedQueueFixture } from './persisted-queue-fixture.js';
 
@@ -16,6 +18,8 @@ export async function createLiveReviewFixture(
   root: string,
   mediaType: 'image/png' | 'video/mp4' = 'image/png',
   onEvent?: (userId: string, event: string, data: unknown) => void,
+  workspace?: WorkspaceContentSourceService,
+  evolution?: EvolutionMediaReadPort,
 ) {
   if (!catRegistry.has('codex-astra')) {
     const base = catRegistry.getOrThrow('codex').config;
@@ -90,6 +94,8 @@ export async function createLiveReviewFixture(
     uploadDir: root,
     owner,
     publications,
+    ...(workspace ? { workspace } : {}),
+    ...(evolution ? { evolution } : {}),
     tasks,
     threads,
     messages,
@@ -114,6 +120,7 @@ export async function createLiveReviewFixture(
     passive('f292.repair'),
     passive('f306.runtime_interaction'),
     integration.producer,
+    passive('f290.collective_work_result'),
   ]);
   const ownerReads = new EntrustedWorkOwnerReadService({
     tasks,

@@ -19,9 +19,20 @@ code_anchors:
   - packages/api/src/domains/collaborative-content/patch-service.ts
   - packages/api/src/domains/collaborative-content/semantic-operation-store.ts
   - packages/api/src/domains/collaborative-content/named-cat-content-service.ts
+  - packages/api/src/domains/collaborative-content/modification/composition.ts
+  - packages/api/src/domains/collaborative-content/modification/journal.ts
+  - packages/api/src/domains/collaborative-content/modification/request-authority.ts
+  - packages/api/src/domains/collaborative-content/modification/result-service.ts
+  - packages/api/src/domains/collaborative-content/modification/control/runtime-control-service.ts
+  - packages/api/src/domains/collaborative-content/workspace-review/service.ts
+  - packages/api/src/domains/collaborative-content/artifact-review/version-response-service.ts
+  - packages/api/src/routes/content-modification-routes.ts
   - packages/api/src/routes/callback-content-editor-routes.ts
   - packages/api/src/domains/video-studio/content-owner/service.ts
   - packages/mcp-server/src/tools/content-editor-tools.ts
+  - packages/mcp-server/src/tools/content-modification-tools.ts
+  - packages/web/src/components/workbench/content-review/ContentReviewSurface.tsx
+  - packages/web/src/components/content-review/ContentModificationPanel.tsx
   - packages/web/src/components/workbench/content-editor/ContentEditorOwnerSurface.tsx
 doc_anchors:
   - docs/features/F309-collaborative-content-plane.md
@@ -35,6 +46,7 @@ cited_by:
   - {feature: F309, date: 2026-08-27, delta: new cell — extract cross-media collaboration mechanics from F290 and keep F307/content-owner boundaries explicit}
   - {feature: F309, date: 2026-09-06, delta: DOCX owner session and independent authenticated cat operation vertical; materialization stays F202-owned and canonical bytes/receipts stay F138-owned}
   - {feature: F309, date: 2026-09-13, delta: record the missing two-Human canonical Markdown slice for F290 W4 and keep bytes/auth in the content owner, lifecycle in F309, and mount in F307}
+  - {feature: F309, date: 2026-09-20, delta: "Phase U — shared landing and canonical discussion, explicit request saga, file candidate decisions, and native control receipts; no second file/media/Task/Queue owner"}
 ---
 
 # Collaborative Content Plane
@@ -70,6 +82,31 @@ the read/annotation/proposal/disposition/version lifecycle around that owner; F3
 No currently shipped path satisfies this full boundary: the existing Workspace editor and named-cat service are
 DOCX-only and fenced to one Host `ownerUserId`; F063 Markdown is owner-local worktree SHA CAS, not cross-Human
 content authority.
+
+## Phase U request and result boundaries
+
+The common landing consumes typed file, publication, legacy Task and F311 source adapters. F063 owns the
+mutable file and its SHA-CAS writeback; F138 owns immutable message publications, explicit workspace snapshots
+and returned media versions. F311 original records remain read-only. F309 keeps the canonical discussion for
+the exact object/version and the explicit modification request journal; a Task round references that ledger
+instead of creating another writable copy. Old inline rounds retain their original identity and read adapter.
+Original-file comments are version-bound historical references, not marks transplanted onto a new canvas.
+
+An ordinary-file text request may retain an immutable execution source and isolated patch candidates. These
+are review artifacts with source SHA/provenance, not a second canonical mutable document or F290 shared-Human
+Markdown owner. Explicit human acceptance and rejection serialize in the same SQLite owner; actual writeback
+still requires the original F063 human/path/token and file receipt. Rejection leaves the file and Task intact.
+
+MessageStore owns the human request source; F310/TaskStore owns admission and closure; the existing return
+outbox and Queue own delivery; TurnExecutionStore owns the real child state. The request journal records their
+exact receipts with replayable operation keys, not a cross-owner transaction or another queue. Publication
+authorization consumes immutable human-source bindings and current content/Task checks, never mutable Task
+artifactRefs as a self-issued grant. Cancelling one request does not terminate a shared Task or execution.
+Whole-entry/whole-execution actions retain a separately confirmed target and native owner acknowledgement;
+those historical acknowledgements never replace current child truth or retarget a later execution.
+
+The implementation and verification cut is tracked in the Phase U packet. These boundaries are not a claim
+of browser acceptance, real model completion, Alpha availability or production activation.
 
 ## Use This When
 

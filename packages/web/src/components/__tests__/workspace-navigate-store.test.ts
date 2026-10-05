@@ -19,7 +19,7 @@ const repoRootAliases = {
 describe('workspace navigate store (F131)', () => {
   afterEach(() => {
     useChatStore.setState({
-      workspaceRevealPath: null,
+      workspaceOpenRequest: null,
       workspaceOpenFilePath: null,
       workspaceOpenFileLine: null,
       workspaceWorktreeId: null,
@@ -32,11 +32,29 @@ describe('workspace navigate store (F131)', () => {
     });
   });
 
-  it('setWorkspaceRevealPath stores path and switches to workspace mode', () => {
-    useChatStore.getState().setWorkspaceRevealPath('docs/README.md');
+  it('a reveal is a consume-once Workbench request for the current thread, not a legacy file stamp', () => {
+    useChatStore.setState({ currentThreadId: 'thread-y' });
+    const recorded = useChatStore
+      .getState()
+      .openWorkspacePath('thread-y', { kind: 'reveal', worktreeId: 'wt-1', path: 'docs/README.md' });
     const state = useChatStore.getState();
-    expect(state.workspaceRevealPath).toBe('docs/README.md');
+    expect(recorded).toBe(true);
     expect(state.rightPanelMode).toBe('workspace');
+    expect(state.workspaceOpenRequest).toMatchObject({
+      threadId: 'thread-y',
+      target: { kind: 'reveal', worktreeId: 'wt-1', path: 'docs/README.md' },
+    });
+    // The old reveal bumped this stamp, which re-opened whatever file was open without its origin.
+    expect(state._workspaceFileSetAt).toEqual({ ts: 0, threadId: null });
+  });
+
+  it('a reveal for a thread that is no longer current is refused instead of landing elsewhere', () => {
+    useChatStore.setState({ currentThreadId: 'thread-current' });
+    const recorded = useChatStore
+      .getState()
+      .openWorkspacePath('thread-origin', { kind: 'reveal', worktreeId: 'wt-1', path: 'docs/' });
+    expect(recorded).toBe(false);
+    expect(useChatStore.getState().workspaceOpenRequest).toBeNull();
   });
 
   it('setWorkspaceOpenFile stores path with line and switches to workspace mode', () => {
@@ -149,16 +167,6 @@ describe('workspace navigate store (F131)', () => {
     expect(stamp.threadId).toBe('thread-x');
   });
 
-  it('setWorkspaceRevealPath stamps _workspaceFileSetAt with threadId', () => {
-    useChatStore.setState({ currentThreadId: 'thread-y' });
-    const before = Date.now();
-    useChatStore.getState().setWorkspaceRevealPath('docs/README.md');
-    const { _workspaceFileSetAt: stamp } = useChatStore.getState();
-    expect(stamp.ts).toBeGreaterThanOrEqual(before);
-    expect(stamp.ts).toBeLessThanOrEqual(Date.now());
-    expect(stamp.threadId).toBe('thread-y');
-  });
-
   it('setWorkspaceOpenFile uses originThreadId when provided (async caller safety)', () => {
     useChatStore.setState({ currentThreadId: 'thread-current' });
     useChatStore.getState().setWorkspaceOpenFile('src/app.ts', 1, null, 'thread-origin');
@@ -166,11 +174,21 @@ describe('workspace navigate store (F131)', () => {
     expect(stamp.threadId).toBe('thread-origin');
   });
 
-  it('setWorkspaceRevealPath uses originThreadId when provided', () => {
+  it('carries a typed chat origin with the fresh file-open event', () => {
     useChatStore.setState({ currentThreadId: 'thread-current' });
-    useChatStore.getState().setWorkspaceRevealPath('docs/', 'thread-origin');
+    useChatStore.getState().setWorkspaceOpenFile('docs/guide.md', 18, null, 'thread-origin', {
+      kind: 'chat-file-link',
+      threadId: 'thread-origin',
+      messageId: 'message-origin',
+    });
+
     const { _workspaceFileSetAt: stamp } = useChatStore.getState();
     expect(stamp.threadId).toBe('thread-origin');
+    expect(stamp.navigationOrigin).toEqual({
+      kind: 'chat-file-link',
+      threadId: 'thread-origin',
+      messageId: 'message-origin',
+    });
   });
 });
 
@@ -243,7 +261,7 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
   it('switches worktree before reveal when target differs from current', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -251,27 +269,27 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
 
     expect(result).toBe(true);
     expect(actions.setWorkspaceWorktreeId).toHaveBeenCalledWith('runtime');
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('packages/api/data/logs/');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('runtime', 'packages/api/data/logs/', undefined);
     expect(actions.setWorkspaceOpenFile).not.toHaveBeenCalled();
   });
 
   it('does not switch worktree for reveal when target matches current', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
     handleNavigateEvent({ path: 'docs/README.md', worktreeId: 'same-wt' }, 'same-wt', actions);
 
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('same-wt', 'docs/README.md', undefined);
   });
 
   it('does not switch worktree for reveal when target is the canonical alias of current', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -286,13 +304,13 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
 
     expect(result).toBe(true);
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('230809_cat-cafe', 'docs/README.md', undefined);
   });
 
   it('delegates to setWorkspaceOpenFile for action=open', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -305,13 +323,13 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
     expect(result).toBe(true);
     expect(actions.setWorkspaceOpenFile).toHaveBeenCalledWith('src/index.ts', 42, 'wt-1');
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
-    expect(actions.setWorkspaceRevealPath).not.toHaveBeenCalled();
+    expect(actions.revealWorkspacePath).not.toHaveBeenCalled();
   });
 
   it('delegates open events with current worktree alias when event carries canonical id', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -329,17 +347,39 @@ describe('handleNavigateEvent (reveal + worktree switching)', () => {
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
   });
 
-  it('handles reveal without worktreeId (no switch needed)', () => {
+  it('reveals in the current worktree when the event names none (no switch needed)', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
-    handleNavigateEvent({ path: 'docs/README.md' }, null, actions);
+    const result = handleNavigateEvent({ path: 'docs/README.md', threadId: 'thread-a' }, 'wt-1', actions);
 
+    expect(result).toBe(true);
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('wt-1', 'docs/README.md', 'thread-a');
+  });
+
+  it('does not claim a reveal when there is no worktree to show it in', () => {
+    const actions = {
+      setWorkspaceWorktreeId: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
+      setWorkspaceOpenFile: vi.fn(),
+    };
+
+    expect(handleNavigateEvent({ path: 'docs/README.md' }, null, actions)).toBe(false);
+    expect(actions.revealWorkspacePath).not.toHaveBeenCalled();
+  });
+
+  it('reports a reveal the store refused as not handled', () => {
+    const actions = {
+      setWorkspaceWorktreeId: vi.fn(),
+      revealWorkspacePath: vi.fn(() => false),
+      setWorkspaceOpenFile: vi.fn(),
+    };
+
+    expect(handleNavigateEvent({ path: 'docs/README.md', threadId: 'thread-old' }, 'wt-1', actions)).toBe(false);
   });
 });
 
@@ -347,7 +387,7 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
   it('suppresses reveal for same path+worktree within grace window after open', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -355,14 +395,14 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
     const result = handleNavigateEvent({ path: 'src/index.ts', worktreeId: 'wt-1' }, 'wt-1', actions, recentOpen);
 
     expect(result).toBe(false);
-    expect(actions.setWorkspaceRevealPath).not.toHaveBeenCalled();
+    expect(actions.revealWorkspacePath).not.toHaveBeenCalled();
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
   });
 
   it('allows reveal for different path even within grace window', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -370,13 +410,13 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
     const result = handleNavigateEvent({ path: 'src/other.ts' }, 'wt-1', actions, recentOpen);
 
     expect(result).toBe(true);
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('src/other.ts');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('wt-1', 'src/other.ts', undefined);
   });
 
   it('allows reveal for same path but different worktree within grace window', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -385,13 +425,13 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
 
     expect(result).toBe(true);
     expect(actions.setWorkspaceWorktreeId).toHaveBeenCalledWith('wt-B');
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('docs/README.md');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('wt-B', 'docs/README.md', undefined);
   });
 
   it('suppresses reveal for equivalent worktree aliases within grace window', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -406,14 +446,14 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
     );
 
     expect(result).toBe(false);
-    expect(actions.setWorkspaceRevealPath).not.toHaveBeenCalled();
+    expect(actions.revealWorkspacePath).not.toHaveBeenCalled();
     expect(actions.setWorkspaceWorktreeId).not.toHaveBeenCalled();
   });
 
   it('allows reveal for same path after grace window expires', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
@@ -421,26 +461,26 @@ describe('handleNavigateEvent grace period (open→reveal suppression)', () => {
     const result = handleNavigateEvent({ path: 'src/index.ts', worktreeId: 'wt-1' }, 'wt-1', actions, recentOpen);
 
     expect(result).toBe(true);
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('src/index.ts');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('wt-1', 'src/index.ts', undefined);
   });
 
   it('allows reveal when no recent open exists', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 
     const result = handleNavigateEvent({ path: 'src/index.ts' }, 'wt-1', actions, null);
 
     expect(result).toBe(true);
-    expect(actions.setWorkspaceRevealPath).toHaveBeenCalledWith('src/index.ts');
+    expect(actions.revealWorkspacePath).toHaveBeenCalledWith('wt-1', 'src/index.ts', undefined);
   });
 
   it('open events are never suppressed by grace window', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
     };
 

@@ -10,8 +10,16 @@ import {
   parseToolsetEnv,
 } from '../src/server-toolsets.js';
 
-const names = ['cat_cafe_collective_current_context', 'cat_cafe_collective_read_context', 'cat_cafe_collective_reply'];
-test('real mounted participation profile exposes only three canonical collab tools across every entrypoint', () => {
+const names = [
+  'cat_cafe_collective_accept_work',
+  'cat_cafe_collective_continue_work',
+  'cat_cafe_collective_current_context',
+  'cat_cafe_collective_propose_work',
+  'cat_cafe_collective_read_context',
+  'cat_cafe_collective_reply',
+  'cat_cafe_collective_set_interest',
+];
+test('real mounted participation profile exposes only seven canonical collab tools across every entrypoint', () => {
   const env = parseToolsetEnv({
     CAT_CAFE_MCP_PROFILE: 'collective-participation',
     CAT_CAFE_AGENT_KEY_SECRET: 'cannot-expand',

@@ -25,6 +25,7 @@ export function ApprovalHistoryPane({
   const settledItems = useApprovalHubStore((state) => state.settledItems);
   const isLoading = useApprovalHubStore((state) => state.settledIsLoading);
   const error = useApprovalHubStore((state) => state.settledError);
+  const fetchSettled = useApprovalHubStore((state) => state.fetchSettled);
   const featureCounts = useMemo(() => countApprovalFeatures(settledItems), [settledItems]);
   const filteredItems = useMemo(() => {
     let filtered = settledItems;
@@ -77,8 +78,20 @@ export function ApprovalHistoryPane({
       <div className="flex-1 overflow-y-auto" data-testid="approval-history-content">
         {isLoading && settledItems.length === 0 && <HistoryMessage>加载中...</HistoryMessage>}
         {error && (
-          <div className="m-3 rounded-lg border border-[var(--semantic-critical)] p-3">
-            <p className="text-sm text-[var(--semantic-critical)]">加载失败: {error}</p>
+          <div
+            className="m-3 rounded-lg border border-[var(--semantic-critical)] p-3"
+            data-testid="approval-history-error"
+          >
+            <p className="text-sm text-[var(--semantic-critical)]">
+              {settledItems.length > 0 ? '暂时无法刷新，正在显示最近一次成功读取的内容。' : '暂时无法读取审批记录。'}
+            </p>
+            <button type="button" className="mt-2 text-xs underline" onClick={() => void fetchSettled()}>
+              重试
+            </button>
+            <details className="mt-2 text-xs text-cafe-muted">
+              <summary className="cursor-pointer">错误详情</summary>
+              <p className="mt-1 break-words">{error}</p>
+            </details>
           </div>
         )}
         {!isLoading && !error && settledItems.length === 0 && (
@@ -87,7 +100,7 @@ export function ApprovalHistoryPane({
         {!isLoading && !error && settledItems.length > 0 && filteredItems.length === 0 && (
           <HistoryMessage>没有符合筛选条件的记录</HistoryMessage>
         )}
-        {!isLoading && !error && filteredItems.length > 0 && <ApprovalHistoryList items={filteredItems} />}
+        {!isLoading && filteredItems.length > 0 && <ApprovalHistoryList items={filteredItems} />}
       </div>
     </>
   );

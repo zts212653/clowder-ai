@@ -285,5 +285,19 @@ export function buildCatPatchPayload(form: HubCatEditorFormState, cat: CatData, 
     delete payload.mcpSupport;
   }
 
+  // Built-in cloud members expose profile fields through this editor, but their
+  // transport identity is a product invariant. Do not let generic form defaults
+  // turn an innocent nickname/avatar save into a provider or CLI mutation.
+  if (cat.identityProtection?.kind === 'builtin-cloud') {
+    for (const field of cat.identityProtection.lockedFields) {
+      delete payload[field];
+    }
+    const nextMentions = Array.isArray(payload.mentionPatterns) ? payload.mentionPatterns : [];
+    const currentMentions = Array.from(new Set(cat.mentionPatterns.map(normalizeMentionPattern).filter(Boolean)));
+    if (JSON.stringify(nextMentions) === JSON.stringify(currentMentions)) {
+      delete payload.mentionPatterns;
+    }
+  }
+
   return payload;
 }

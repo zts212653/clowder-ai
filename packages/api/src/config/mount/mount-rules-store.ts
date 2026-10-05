@@ -109,6 +109,29 @@ export function mountRuleEntriesToMountRules(entries: MountRuleEntry[]): MountRu
   return { version: 1, mountPoints: mountPoints as Record<StandardMountPointId, StandardMountPointRule>, customPaths };
 }
 
+/**
+ * The same resolution as `readMountRules`, from configs the caller already
+ * loaded: project `mountRules` → home `defaultMountRules` → defaults. A reader
+ * that reports a source revision must not compute part of its answer from a
+ * second read of the file (F300 2.1 review R1 P1-3).
+ */
+export function resolveMountRulesFromConfigs(
+  projectConfig: Pick<CapabilitiesConfig, 'mountRules'> | null,
+  mainConfig: Pick<CapabilitiesConfig, 'defaultMountRules'> | null,
+): MountRules {
+  if (projectConfig?.mountRules && Array.isArray(projectConfig.mountRules) && projectConfig.mountRules.length > 0) {
+    return mountRuleEntriesToMountRules(projectConfig.mountRules);
+  }
+  if (
+    mainConfig?.defaultMountRules &&
+    Array.isArray(mainConfig.defaultMountRules) &&
+    mainConfig.defaultMountRules.length > 0
+  ) {
+    return mountRuleEntriesToMountRules(mainConfig.defaultMountRules);
+  }
+  return structuredClone(DEFAULT_MOUNT_RULES);
+}
+
 export async function readProjectMountRulesOverride(projectRoot: string): Promise<MountRules | null> {
   const config = await readCapabilitiesConfig(projectRoot);
   if (config?.mountRules && Array.isArray(config.mountRules) && config.mountRules.length > 0) {

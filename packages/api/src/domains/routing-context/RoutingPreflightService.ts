@@ -1,10 +1,9 @@
+import { type RoutingPreflightDecisionV1, routingPreflightDecisionV1Schema } from '@cat-cafe/shared';
 import {
-  type RoutingContextSnapshotV1,
-  type RoutingPreflightDecisionV1,
-  type RoutingReasonV1,
-  routingPreflightDecisionV1Schema,
-} from '@cat-cafe/shared';
-import { CAPABILITY_PROFILE_INVALID_REASON } from './CapabilityProfileRevisionSource.js';
+  type FreshRoutingContextResolution,
+  freshTargetDecision,
+  unavailableReason,
+} from './preflight/RoutingPreflightDecisionProjector.js';
 import type {
   ResolveRoutingContextInput,
   RoutingContextResolution,
@@ -64,39 +63,6 @@ class ResolverBudgetTimeoutError extends Error {
 
 const NULL_AUDIT_SINK: RoutingPreflightAuditSink = { record: () => undefined };
 const SYSTEM_CLOCK: RoutingPreflightClock = { now: () => Date.now() };
-
-function reasonRefsForAlternative(snapshot: RoutingContextSnapshotV1, catId: string): string[] {
-  const candidate = snapshot.candidates.find((entry) => entry.binding.catId === catId);
-  const refs = [
-    snapshot.catalogRevision,
-    ...(candidate?.profile.state === 'applied' ? [candidate.profile.revision.dossierRevision] : []),
-    ...(candidate?.reasons.flatMap((reason) => reason.sourceRefs) ?? []),
-  ];
-  return [...new Set(refs)].slice(0, 16);
-}
-
-function alternativesFor(snapshot: RoutingContextSnapshotV1, targetCatId: string) {
-  return snapshot.candidates
-    .filter(
-      (candidate) =>
-        candidate.binding.catId !== targetCatId &&
-        candidate.effect === 'eligible' &&
-        candidate.profile.state === 'applied',
-    )
-    .slice(0, 32)
-    .map((candidate) => ({
-      catId: candidate.binding.catId,
-      reasonRefs: reasonRefsForAlternative(snapshot, candidate.binding.catId),
-    }));
-}
-
-function unavailableReason(failureClass: string): RoutingReasonV1 {
-  return {
-    code: 'routing_context_unavailable',
-    summary: 'Routing context is temporarily unavailable; the requested target remains unchanged',
-    sourceRefs: [`routing-context:${failureClass}`],
-  };
-}
 
 export class RoutingPreflightService {
   private readonly resolver: Pick<RoutingContextResolver, 'resolve'>;
@@ -251,47 +217,9 @@ export class RoutingPreflightService {
 
   private freshDecision(
     input: RoutingPreflightInput,
-    resolution: Extract<RoutingContextResolution, { status: 'fresh' }>,
+    resolution: FreshRoutingContextResolution,
   ): RoutingPreflightDecisionV1 {
-    const targets = input.targetCatIds.map((targetCatId) => {
-      const candidate = resolution.snapshot.candidates.find((entry) => entry.binding.catId === targetCatId);
-      if (candidate === undefined) {
-        return {
-          targetCatId,
-          disposition: 'warned' as const,
-          reasons: [
-            {
-              code: 'routing_target_not_in_catalog',
-              summary: 'The requested target has no binding in the resolved runtime catalog',
-              sourceRefs: [resolution.snapshot.catalogRevision],
-            },
-          ],
-          alternatives: alternativesFor(resolution.snapshot, targetCatId),
-        };
-      }
-      const ownerAttempt =
-        input.ownerRequestedAttempt === true &&
-        candidate.availability === 'unavailable' &&
-        candidate.dispatch?.ownerAttemptAllowed === true;
-      const disposition = ownerAttempt
-        ? ('warned' as const)
-        : candidate.availability === 'unavailable'
-          ? ('rejected' as const)
-          : candidate.availability === 'available' &&
-              !candidate.reasons.some((reason) => reason.code === CAPABILITY_PROFILE_INVALID_REASON)
-            ? ('allowed' as const)
-            : ('warned' as const);
-      return {
-        targetCatId,
-        disposition,
-        ...(ownerAttempt ? { ownerAttempt: true as const } : {}),
-        ...(candidate.dispatch?.automaticRetryAt !== undefined
-          ? { automaticRetryAt: candidate.dispatch.automaticRetryAt }
-          : {}),
-        reasons: candidate.reasons,
-        alternatives: disposition === 'allowed' ? [] : alternativesFor(resolution.snapshot, targetCatId),
-      };
-    });
+    const targets = input.targetCatIds.map((targetCatId) => freshTargetDecision(input, resolution, targetCatId));
     return routingPreflightDecisionV1Schema.parse({
       v: 1,
       ownerId: input.ownerId,

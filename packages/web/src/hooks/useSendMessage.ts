@@ -11,6 +11,36 @@ import { apiFetch } from '@/utils/api-client';
 
 export type UploadStatus = 'idle' | 'uploading' | 'failed';
 
+/** What the server stored for the sent message: its time and its blocks (uploads as `/uploads/...`). */
+interface UserMessageReceipt {
+  id: string;
+  timestamp: number;
+  contentBlocks?: MessageContent[];
+}
+
+interface SendResponseBody {
+  status?: string;
+  userMessageId?: string;
+  userMessage?: UserMessageReceipt;
+  gameThreadId?: string;
+}
+
+/**
+ * F309: the stored blocks carry `/uploads/...` URLs, and the stored time is the message revision a
+ * publication names; without them a just-sent image cannot open as a work until a reload.
+ */
+function storedMessagePatch(body: SendResponseBody): Pick<ChatMessageData, 'timestamp' | 'contentBlocks'> | undefined {
+  const receipt = body.userMessage;
+  if (!receipt || receipt.id !== body.userMessageId) return undefined;
+  return { timestamp: receipt.timestamp, ...(receipt.contentBlocks ? { contentBlocks: receipt.contentBlocks } : {}) };
+}
+
+/** Local previews are released only once the stored blocks have replaced them. */
+function releaseReplacedPreviews(stored: ReturnType<typeof storedMessagePatch>, previewUrls: readonly string[]) {
+  if (!stored?.contentBlocks) return;
+  for (const url of previewUrls) URL.revokeObjectURL(url);
+}
+
 /** F35: Whisper options for private messages */
 export interface WhisperOptions {
   visibility: 'whisper';
@@ -26,6 +56,7 @@ export function useSendMessage(activeThreadId?: string) {
     addMessageToThread,
     removeThreadMessage,
     replaceThreadMessageId,
+    patchThreadMessage,
     setThreadLoading,
     setThreadHasActiveInvocation,
   } = useChatStore(
@@ -33,6 +64,7 @@ export function useSendMessage(activeThreadId?: string) {
       addMessageToThread: s.addMessageToThread,
       removeThreadMessage: s.removeThreadMessage,
       replaceThreadMessageId: s.replaceThreadMessageId,
+      patchThreadMessage: s.patchThreadMessage,
       setThreadLoading: s.setThreadLoading,
       setThreadHasActiveInvocation: s.setThreadHasActiveInvocation,
     })),
@@ -112,6 +144,13 @@ export function useSendMessage(activeThreadId?: string) {
         ...(whisper ? { visibility: whisper.visibility, whisperTo: whisper.whisperTo } : {}),
         ...(replyToId ? { replyTo: replyToId, ...(replyPreview ? { replyPreview } : {}) } : {}),
       };
+      // Local previews live until the stored receipt replaces them.
+      const previewUrls: string[] = [];
+      const previewUrl = (file: File) => {
+        const url = URL.createObjectURL(file);
+        previewUrls.push(url);
+        return url;
+      };
       if (hasImages || hasContextAttachments) {
         const contentBlocks: MessageContent[] = [
           ...(content ? [{ type: 'text' as const, text: content }] : []),
@@ -121,11 +160,11 @@ export function useSendMessage(activeThreadId?: string) {
           })),
           ...(images ?? []).map((file): MessageContent => {
             if (file.type.startsWith('image/')) {
-              return { type: 'image', url: URL.createObjectURL(file) };
+              return { type: 'image', url: previewUrl(file) };
             }
             return {
               type: 'file',
-              url: URL.createObjectURL(file),
+              url: previewUrl(file),
               fileName: file.name,
               mimeType: file.type || 'application/octet-stream',
               fileSize: file.size,
@@ -147,9 +186,7 @@ export function useSendMessage(activeThreadId?: string) {
         setThreadHasActiveInvocation(threadId, true);
       }
 
-      const reconcileSuccessfulResponse = (
-        body: { status?: string; userMessageId?: string; gameThreadId?: string } | null,
-      ) => {
+      const reconcileSuccessfulResponse = (body: SendResponseBody | null) => {
         // Game started in independent thread — remove optimistic message from source
         // and clear loading/invocation flags (game runs in its own thread, source is idle).
         // Always use thread-scoped APIs here: by the time the HTTP response arrives,
@@ -163,12 +200,14 @@ export function useSendMessage(activeThreadId?: string) {
           return;
         }
         if (!body?.userMessageId) return;
+        const stored = storedMessagePatch(body);
         if (isQueueSend) {
-          const durableUserMessage = { ...userMsg, id: body.userMessageId };
-          addMessageToThread(threadId, durableUserMessage);
+          addMessageToThread(threadId, { ...userMsg, id: body.userMessageId, ...stored });
         } else {
           replaceThreadMessageId(threadId, optimisticMessageId, body.userMessageId);
+          if (stored) patchThreadMessage(threadId, body.userMessageId, stored);
         }
+        releaseReplacedPreviews(stored, previewUrls);
       };
 
       try {
@@ -265,6 +304,7 @@ export function useSendMessage(activeThreadId?: string) {
       addMessageToThread,
       removeThreadMessage,
       replaceThreadMessageId,
+      patchThreadMessage,
       setThreadLoading,
       setThreadHasActiveInvocation,
       activeThreadId,

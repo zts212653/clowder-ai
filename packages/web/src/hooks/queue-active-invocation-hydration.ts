@@ -5,6 +5,7 @@ import { resumeInvocationReconciliationAfterHydration } from './invocation-timeo
 
 /** Canonical `/queue` liveness shape shared by initial hydration and reconnect repair. */
 export interface QueueActiveInvocationSlot {
+  settlement?: import('@cat-cafe/shared').QueueInvocationSettlement;
   catId: string;
   startedAt: number;
   executionId?: string;
@@ -59,6 +60,7 @@ export function hydrateQueueActiveInvocationSlots({
       // Explicit undefined prevents a same-parent snapshot from certifying an old child.
       invocationId: slot.executionId,
       turnInvocationId: slot.turnInvocationId,
+      settlement: slot.settlement,
       freshnessCarrierCapability: slot.freshnessCarrierCapability ?? {
         provider: 'other',
         carrier: 'other',

@@ -2,44 +2,29 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { assertSourceFullBrowserGreen } from './gate-browser-evidence.mjs';
+import { GATE_EXECUTION_PATHS } from './gate-execution-paths.mjs';
 import { openGateResourcePool } from './gate-resource-db.mjs';
-import { assertGateStagesGreen, readGateStageReceipts } from './gate-stage-receipts.mjs';
+import {
+  assertGateStagesGreen,
+  ensureGateStageReceiptTables,
+  GATE_STAGES,
+  invalidatePostPauseGateStageReceiptsInTransaction,
+  readGateStageReceipts,
+} from './gate-stage-receipts.mjs';
+import {
+  assertSourceFullIdentity,
+  gateInvocationScope,
+  gateRunHasScope,
+  gateVerificationScope,
+} from './gate-verification-scope.mjs';
 import { inspectLeaseOwner } from './redis-test-leases.mjs';
 
 const TERMINAL_STATUSES = new Set(['green', 'failed', 'cancelled', 'timed_out', 'lost', 'partial']);
 const REUSABLE_STATUS = 'green';
 export const DEFAULT_GATE_TERMINAL_WAIT_MS = 3 * 60 * 60_000;
-export const GATE_EXECUTION_PATHS = Object.freeze([
-  'scripts/classify-gate-route.mjs',
-  'scripts/lib/git-patch-id.mjs',
-  'scripts/co-creation-docs-lane.mjs',
-  'scripts/design-gate/claim-journey-paths.mjs',
-  'scripts/pre-merge-check.sh',
-  'scripts/gate-terminal-receipt.mjs',
-  'scripts/snapshot-gate-control-plane.mjs',
-  'scripts/gate-prepared-artifacts.mjs',
-  'scripts/run-with-gate-resource-permit.mjs',
-  'scripts/lib/gate-resource-health-monitor.mjs',
-  'scripts/pre-merge-gate-guard.mjs',
-  'scripts/lib/gate-terminal-receipt.mjs',
-  'scripts/lib/gate-stage-receipts.mjs',
-  'scripts/shared-gate-red.mjs',
-  'scripts/lib/shared-gate-red.mjs',
-  'scripts/lib/shared-gate-red-contract.mjs',
-  'scripts/lib/shared-gate-red-store.mjs',
-  'scripts/lib/gate-resource-policy.mjs',
-  'scripts/lib/gate-resource-pool.mjs',
-  'scripts/lib/gate-resource-pool-store.mjs',
-  'scripts/lib/gate-resource-receipts.mjs',
-  'scripts/lib/gate-resource-db.mjs',
-  'scripts/lib/gate-resource-pressure.mjs',
-  'scripts/lib/process-resource-lease.mjs',
-  'scripts/lib/process-resource-lease-lock.mjs',
-  'scripts/lib/process-resource-lease-queue.mjs',
-  'scripts/lib/redis-test-leases.mjs',
-  'scripts/lib/fseventsd-pressure.mjs',
-  'scripts/lib/full-sync-train-dag.mjs',
-]);
+export { GATE_EXECUTION_PATHS } from './gate-execution-paths.mjs';
+
 const GATE_CONFIG_PATHS = ['package.json', 'pnpm-workspace.yaml', 'biome.json', '.nvmrc'];
 
 function stableJson(value) {
@@ -75,6 +60,7 @@ function digestFiles(repoRoot, relativePaths) {
 }
 
 export function computeGateFingerprint(repoRoot, argv = []) {
+  const { verificationScope, sourceSha } = gateInvocationScope(argv);
   const dirty = git(repoRoot, ['status', '--porcelain', '--untracked-files=all']);
   if (dirty) throw new Error('canonical full-gate receipt requires a clean exact tree');
   const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
@@ -85,7 +71,7 @@ export function computeGateFingerprint(repoRoot, argv = []) {
     toolchain: { node: process.version, pnpm: pnpmVersion, packageManager: packageJson.packageManager ?? null },
     gateCode: digestFiles(repoRoot, GATE_EXECUTION_PATHS),
     gateConfig: digestFiles(repoRoot, GATE_CONFIG_PATHS),
-    invocation: { argv },
+    invocation: { argv, ...(sourceSha ? { verificationScope, sourceSha } : {}) },
   };
   return { fingerprint: gateFingerprintFromComponents(components), components };
 }
@@ -117,6 +103,9 @@ function openRunStore(databasePath) {
       heartbeat_at INTEGER NOT NULL,
       terminal_at INTEGER,
       result_json TEXT,
+      frozen_identity_json TEXT,
+      execution_owner_job_id TEXT,
+      execution_origin_task_id TEXT,
       execution_used_ms INTEGER NOT NULL DEFAULT 0,
       execution_slice_started_at INTEGER
     );
@@ -124,6 +113,19 @@ function openRunStore(databasePath) {
       ON gate_runs(fingerprint) WHERE state = 'active';
     CREATE INDEX IF NOT EXISTS gate_runs_green_lookup
       ON gate_runs(fingerprint, terminal_status, terminal_at);
+    CREATE TABLE IF NOT EXISTS gate_run_reuse_invalidations (
+      run_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      terminal_at INTEGER NOT NULL,
+      pause_epoch INTEGER NOT NULL,
+      reconcile_from INTEGER NOT NULL,
+      invalidated_at INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      PRIMARY KEY (run_id, pause_epoch),
+      FOREIGN KEY (run_id) REFERENCES gate_runs(run_id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS gate_run_reuse_invalidations_lookup
+      ON gate_run_reuse_invalidations(fingerprint, run_id);
   `);
   const ensureColumn = (name, definition) => {
     const hasColumn = () =>
@@ -140,6 +142,10 @@ function openRunStore(databasePath) {
   };
   ensureColumn('execution_used_ms', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('execution_slice_started_at', 'INTEGER');
+  ensureColumn('frozen_identity_json', 'TEXT');
+  ensureColumn('execution_owner_job_id', 'TEXT');
+  ensureColumn('execution_origin_task_id', 'TEXT');
+  ensureGateStageReceiptTables(database);
   return database;
 }
 
@@ -155,10 +161,40 @@ function publicRun(row) {
     createdAt: row.created_at,
     heartbeatAt: row.heartbeat_at,
     terminalAt: row.terminal_at,
+    reuseEligible: row.reuse_eligible === undefined ? true : Boolean(row.reuse_eligible),
     result: row.result_json ? JSON.parse(row.result_json) : null,
+    frozenIdentity: row.frozen_identity_json ? JSON.parse(row.frozen_identity_json) : null,
+    executionOwnerJobId: row.execution_owner_job_id ?? null,
+    executionOriginTaskId: row.execution_origin_task_id ?? null,
     executionUsedMs: row.execution_used_ms,
     executionSliceStartedAt: row.execution_slice_started_at,
   };
+}
+
+function invalidatePostPauseGateRunsInTransaction(database, { fingerprint, reconcileFrom, pauseEpoch, now }) {
+  const runs = database
+    .prepare(
+      `SELECT run_id, fingerprint, terminal_at FROM gate_runs
+       WHERE fingerprint = ? AND state = 'terminal' AND terminal_status = 'green' AND terminal_at >= ?`,
+    )
+    .all(fingerprint, reconcileFrom);
+  const insert = database.prepare(
+    `INSERT OR IGNORE INTO gate_run_reuse_invalidations
+      (run_id, fingerprint, terminal_at, pause_epoch, reconcile_from, invalidated_at, reason)
+     VALUES (?, ?, ?, ?, ?, ?, 'sleep-recovery-boundary')`,
+  );
+  for (const run of runs) {
+    insert.run(run.run_id, run.fingerprint, run.terminal_at, pauseEpoch, reconcileFrom, now);
+  }
+  return runs.map((run) => run.run_id);
+}
+
+function assertRunScope(row, expected, terminal) {
+  const run = publicRun(row);
+  const matches = terminal
+    ? gateRunHasScope(run, expected)
+    : gateVerificationScope(run.frozenIdentity?.verificationScope) === expected;
+  if (!matches) throw new Error('gate reuse verificationScope changed for the same fingerprint');
 }
 
 export function beginGateRun({
@@ -166,18 +202,49 @@ export function beginGateRun({
   fingerprint,
   ownerIdentity,
   jobId,
+  executionOwnerJobId = null,
+  executionOriginTaskId = null,
+  frozenIdentity = null,
+  recoveryBoundary = null,
   now = Date.now(),
   inspectProcess = inspectLeaseOwner,
 }) {
+  const verificationScope = gateVerificationScope(frozenIdentity?.verificationScope);
+  if (frozenIdentity) assertSourceFullIdentity(frozenIdentity);
   const database = openRunStore(databasePath);
   try {
     return transaction(database, () => {
+      if (recoveryBoundary !== null) {
+        invalidatePostPauseGateStageReceiptsInTransaction(database, {
+          expectedFingerprint: fingerprint,
+          reconcileFrom: recoveryBoundary.reconcileFrom,
+          pauseEpoch: recoveryBoundary.pauseEpoch,
+          now,
+        });
+        invalidatePostPauseGateRunsInTransaction(database, {
+          fingerprint,
+          reconcileFrom: recoveryBoundary.reconcileFrom,
+          pauseEpoch: recoveryBoundary.pauseEpoch,
+          now,
+        });
+      }
       const reusable = database
-        .prepare(
-          "SELECT * FROM gate_runs WHERE fingerprint = ? AND state = 'terminal' AND terminal_status = ? ORDER BY terminal_at DESC LIMIT 1",
-        )
-        .get(fingerprint, REUSABLE_STATUS);
+        .prepare(`SELECT * FROM gate_runs
+          WHERE fingerprint = ? AND state = 'terminal' AND terminal_status = ?
+            AND (? IS NULL OR terminal_at < ?)
+            AND NOT EXISTS (
+              SELECT 1 FROM gate_run_reuse_invalidations AS invalidation
+              WHERE invalidation.run_id = gate_runs.run_id
+            )
+          ORDER BY terminal_at DESC LIMIT 1`)
+        .get(
+          fingerprint,
+          REUSABLE_STATUS,
+          recoveryBoundary?.reconcileFrom ?? null,
+          recoveryBoundary?.reconcileFrom ?? null,
+        );
       if (reusable) {
+        assertRunScope(reusable, verificationScope, true);
         return { role: 'reused', runId: reusable.run_id, fingerprint, terminalStatus: REUSABLE_STATUS };
       }
 
@@ -185,6 +252,7 @@ export function beginGateRun({
         .prepare("SELECT * FROM gate_runs WHERE fingerprint = ? AND state = 'active'")
         .get(fingerprint);
       if (active) {
+        assertRunScope(active, verificationScope, false);
         const inspection = inspectProcess({ pid: active.owner_pid, startedAt: active.owner_started_at });
         if (inspection.status !== 'dead') {
           return { role: 'follower', runId: active.run_id, fingerprint };
@@ -199,9 +267,23 @@ export function beginGateRun({
       const runId = randomUUID();
       database
         .prepare(
-          "INSERT INTO gate_runs (run_id, fingerprint, job_id, owner_pid, owner_started_at, state, created_at, heartbeat_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
+          `INSERT INTO gate_runs
+            (run_id, fingerprint, job_id, owner_pid, owner_started_at, state, created_at, heartbeat_at,
+             frozen_identity_json, execution_owner_job_id, execution_origin_task_id)
+           VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
         )
-        .run(runId, fingerprint, jobId, ownerIdentity.pid, ownerIdentity.startedAt, now, now);
+        .run(
+          runId,
+          fingerprint,
+          jobId,
+          ownerIdentity.pid,
+          ownerIdentity.startedAt,
+          now,
+          now,
+          frozenIdentity === null ? null : JSON.stringify(frozenIdentity),
+          executionOwnerJobId,
+          executionOriginTaskId,
+        );
       return { role: 'producer', runId, fingerprint };
     });
   } finally {
@@ -272,7 +354,25 @@ export function finishGateExecutionSlice(databasePath, jobId, now = Date.now()) 
 
 export function settleGateRun({ databasePath, runId, status, result = null, requiredStages = null, now = Date.now() }) {
   if (!TERMINAL_STATUSES.has(status)) throw new Error(`invalid gate terminal status: ${status}`);
-  if (status === 'green') assertGateStagesGreen(databasePath, runId, requiredStages);
+  if (status === 'green') {
+    const run = readGateRun(databasePath, runId);
+    if (gateVerificationScope(run?.frozenIdentity?.verificationScope) === 'source_full') {
+      assertGateStagesGreen(
+        databasePath,
+        runId,
+        GATE_STAGES.filter((stage) => stage !== 'test-public'),
+      );
+      if (result?.verificationScope !== 'source_full')
+        throw new Error('source_full terminal verificationScope changed');
+      assertSourceFullBrowserGreen(
+        run.frozenIdentity,
+        result,
+        readGateStageReceipts(databasePath, runId).find((stage) => stage.stage === 'test-web-browser'),
+      );
+    } else {
+      assertGateStagesGreen(databasePath, runId, requiredStages);
+    }
+  }
   const database = openRunStore(databasePath);
   try {
     return transaction(database, () => {
@@ -291,7 +391,17 @@ export function settleGateRun({ databasePath, runId, status, result = null, requ
 export function readGateRun(databasePath, runId) {
   const database = openRunStore(databasePath);
   try {
-    return publicRun(database.prepare('SELECT * FROM gate_runs WHERE run_id = ?').get(runId));
+    return publicRun(
+      database
+        .prepare(
+          `SELECT run.*, NOT EXISTS (
+             SELECT 1 FROM gate_run_reuse_invalidations AS invalidation
+             WHERE invalidation.run_id = run.run_id
+           ) AS reuse_eligible
+           FROM gate_runs AS run WHERE run.run_id = ?`,
+        )
+        .get(runId),
+    );
   } finally {
     database.close();
   }
@@ -316,6 +426,29 @@ export function readGateRunTelemetry(databasePath, runId) {
   };
 }
 
+// Eligibility is an exact-fingerprint fact, not a paginated history projection.
+export function hasBlockingGateEvidence(databasePath, fingerprint) {
+  if (typeof fingerprint !== 'string' || !fingerprint) throw new Error('gate fingerprint is required');
+  if (!existsSync(databasePath)) return false;
+  const database = openRunStore(databasePath);
+  try {
+    return Boolean(
+      database
+        .prepare(`SELECT EXISTS (
+      SELECT 1 FROM gate_runs AS run WHERE run.fingerprint = ? AND (
+        run.state <> 'terminal' OR run.terminal_status IS NOT 'green' OR EXISTS (
+          SELECT 1 FROM gate_run_reuse_invalidations AS invalidation
+          WHERE invalidation.run_id = run.run_id
+        )
+      )
+    ) AS blocked`)
+        .get(fingerprint).blocked,
+    );
+  } finally {
+    database.close();
+  }
+}
+
 export function listGateRuns(databasePath, { limit = 200 } = {}) {
   if (!existsSync(databasePath)) return [];
   if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 2_000) {
@@ -323,7 +456,16 @@ export function listGateRuns(databasePath, { limit = 200 } = {}) {
   }
   const database = openRunStore(databasePath);
   try {
-    return database.prepare('SELECT * FROM gate_runs ORDER BY created_at DESC LIMIT ?').all(limit).map(publicRun);
+    return database
+      .prepare(
+        `SELECT run.*, NOT EXISTS (
+           SELECT 1 FROM gate_run_reuse_invalidations AS invalidation
+           WHERE invalidation.run_id = run.run_id
+         ) AS reuse_eligible
+         FROM gate_runs AS run ORDER BY run.created_at DESC LIMIT ?`,
+      )
+      .all(limit)
+      .map(publicRun);
   } finally {
     database.close();
   }
@@ -332,7 +474,14 @@ export function listGateRuns(databasePath, { limit = 200 } = {}) {
 export function projectMainHealthReceipt(runs, commits, maxCandidates = 12) {
   const greenByTree = new Map();
   for (const run of runs) {
-    if (run.terminalStatus !== 'green' || !run.result?.treeSha || greenByTree.has(run.result.treeSha)) continue;
+    if (
+      run.terminalStatus !== 'green' ||
+      run.reuseEligible === false ||
+      !gateRunHasScope(run, 'merge') ||
+      !run.result?.treeSha ||
+      greenByTree.has(run.result.treeSha)
+    )
+      continue;
     greenByTree.set(run.result.treeSha, run);
   }
   const head = commits[0] ?? null;

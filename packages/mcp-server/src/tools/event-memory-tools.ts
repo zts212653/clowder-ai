@@ -8,12 +8,13 @@
  * cat_cafe_workspace_navigate (design gate).
  */
 import { z } from 'zod';
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory, defineMcpMigrationFactory } from '../tool-governance-migration.js';
 
 import { callbackGet, callbackPost } from './callback-tools.js';
-import type { ToolResult } from './file-tools.js';
+import { errorResult, type ToolResult } from './file-tools.js';
 
 const defineTool = defineMcpMigrationFactory('event-memory-tools.ts');
+const defineCanonicalTool = defineMcpCanonicalFactory('event-memory-tools.ts');
 
 export const teleportInputSchema = {
   threadId: z.string().min(1).describe('Target Clowder AI thread id to teleport into.'),
@@ -52,6 +53,13 @@ export async function handleTeleport(input: {
 
 // F227 Task 7 — read the Event Memory timeline (cats recalling their trajectory).
 export const listEventsInputSchema = {
+  eventId: z.string().min(1).optional().describe('Exact Event Memory id. Selects detail mode; omit every list filter.'),
+  charOffset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Exact character offset within the serialized Event record; requires eventId. Start at 0.'),
   trigger: z
     .string()
     .min(1)
@@ -64,12 +72,14 @@ export const listEventsInputSchema = {
   cognitiveTransition: z.string().min(1).optional().describe('Filter by transition (e.g. user_brake, aha).'),
   since: z.number().int().optional().describe('Only events with timestamp >= since (ms epoch).'),
   until: z.number().int().optional().describe('Only events with timestamp <= until (ms epoch).'),
-  limit: z.number().int().min(1).max(200).optional().describe('Max events (default unbounded, cap 200).'),
+  limit: z.number().int().min(1).max(200).optional().describe('Max events in list mode (default 50, cap 200).'),
   offset: z.number().int().min(0).optional().describe('Paging offset.'),
   agentKeyCatId: z.string().min(1).optional().describe('Persistent-agent identity selector for shared MCP.'),
 };
 
 export async function handleListEvents(input: {
+  eventId?: string;
+  charOffset?: number;
   trigger?: string;
   cat?: string;
   type?: string;
@@ -94,6 +104,20 @@ export async function handleListEvents(input: {
     'limit',
     'offset',
   ] as const;
+  if (input.eventId !== undefined) {
+    if (!input.eventId || keys.some((key) => input[key] !== undefined)) {
+      return errorResult('Event detail mode accepts eventId and optional charOffset only; omit list filters.');
+    }
+    if (input.charOffset !== undefined && (!Number.isSafeInteger(input.charOffset) || input.charOffset < 0)) {
+      return errorResult('charOffset must be a nonnegative safe integer.');
+    }
+    return callbackGet(
+      `/api/memory/events/${encodeURIComponent(input.eventId)}`,
+      input.charOffset === undefined ? undefined : { charOffset: String(input.charOffset) },
+      { agentKeyCatId: input.agentKeyCatId },
+    );
+  }
+  if (input.charOffset !== undefined) return errorResult('charOffset requires eventId.');
   const params: Record<string, string> = {};
   for (const key of keys) {
     const value = input[key];
@@ -130,13 +154,14 @@ export const eventMemoryTools = [
       runtimeProfiles: ['full', 'agent-key'],
     },
   }),
-  defineTool({
+  defineCanonicalTool({
     name: 'cat_cafe_list_events',
     description:
       'Query Event Memory — the timeline of cognitive-transition events (magic-word brakes, self-checks, aha). ' +
-      'Use to recall WHEN/WHERE a cat was braked or had a realization — e.g. "show my 脚手架 brakes" (filter cat + type). ' +
-      'Returns events newest-first with their thread/message coordinates (jump there with cat_cafe_teleport). ' +
-      'Read-only; filters: trigger/cat/type/threadId/confidence/cognitiveTransition/since/until + limit/offset.',
+      'List mode: omit eventId; filter by trigger/cat/type/threadId/confidence/cognitiveTransition/since/until, limit (default 50, max 200), offset. ' +
+      'Returns a complete-response-bounded newest-first page with meta.hasMore/nextOffset and source thread/message coordinates. ' +
+      'Detail mode: pass eventId alone to read one owner-scoped record. For an oversized record, follow its drillDown with eventId and charOffset=0; repeat with nextCharOffset until absent to recover the exact serialized record. ' +
+      'List filters and detail mode are mutually exclusive. Read-only; foreign-owner ids return 404. Jump to a source message with cat_cafe_teleport.',
     inputSchema: listEventsInputSchema,
     handler: handleListEvents,
     governance: {

@@ -1,8 +1,8 @@
 ---
 cell_id: identity-session
 title: Identity / Session
-summary: Agent identity、connector session binding、bubble identity、runtime session binding、thread access policy、user profile 六个 subcell 的边界。
-canonical_features: [F032, F088, F183, F211, F231, F262, F291, F299]
+summary: Agent identity、connector session binding、bubble identity、runtime session binding、context continuity、thread access policy 与 user profile 等 subcell 的边界。
+canonical_features: [F032, F088, F183, F211, F231, F262, F291, F296, F299]
 code_anchors:
   - cat-config.json
   - packages/api/src/config/cat-config-loader.ts
@@ -20,10 +20,22 @@ code_anchors:
   - packages/api/src/domains/runtime-interaction/ports/RuntimeInteractionPort.ts
   - packages/api/src/domains/runtime-interaction/RuntimeInteractionService.ts
   - packages/api/src/domains/cats/services/agents/providers/CodexAgentService.ts
+  - packages/api/src/domains/cats/services/agents/providers/agy-native/AgyNativeAgentService.ts
+  - packages/api/src/domains/cats/services/agents/providers/agy-native/agy-native-coding-grant.ts
   - packages/web/src/components/HubCatEditor.tsx
   - packages/web/src/components/ThreadSidebar/ThreadSpeedSettings.tsx
   - packages/web/src/debug/bubbleIdentity.ts
   - packages/api/src/domains/cats/services/stores/ports/SessionChainStore.ts
+  - packages/api/src/domains/cats/services/session/context/ContextEpochOwner.ts
+  - packages/api/src/domains/cats/services/session/context/PresentationLedger.ts
+  - packages/api/src/domains/cats/services/session/context/authoritative-compaction.ts
+  - packages/api/src/domains/cats/services/session/context/content-revision.ts
+  - packages/api/src/domains/cats/services/session/context/context-continuity-telemetry.ts
+  - packages/api/src/domains/cats/services/session/context/context-presentation.ts
+  - packages/api/src/domains/cats/services/session/context/context-projection-telemetry-contract.ts
+  - packages/api/src/domains/cats/services/session/context/context-surface-projection.ts
+  - packages/api/src/domains/cats/services/session/context/delivery-receipt.ts
+  - packages/api/src/domains/cats/services/session/context/ledger-key.ts
   - packages/api/src/domains/cats/services/session/thread-access-policy.ts
   - packages/api/src/domains/cats/services/session/CanonicalInvocationTrajectoryResolver.ts
   - packages/api/src/domains/cats/services/session/RequestGenerationProjector.ts
@@ -62,13 +74,15 @@ doc_anchors:
   - docs/features/F231-user-profile-capsule.md
   - docs/features/F262-per-thread-cat-effort-overrides.md
   - docs/features/F291-codex-oauth-fast-mode.md
+  - docs/features/F296-continuity-aware-context-injection.md
   - docs/features/F299-workspace-invocation-trajectory.md
   - docs/features/F306-codex-app-capability-parity.md
   - feature-discussions/2026-08-08-f291-codex-oauth-fast-mode/README.md
   - feature-discussions/2026-06-13-f231-phase-c-design-gate.md
   - feature-discussions/2026-07-10-f231-profile-topology-convergence.md
-static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, cliSessionId, cascadeId, runtimeSession, runtimeInteractionPort, interactionId, serviceTier, CodexSpeed, memberSpeed, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
+static_scan_hints: [catId, relationshipKey, AgentRegistry, cat-config, roster, ConnectorThreadBindingStore, bubbleIdentity, session, SessionChainStore, ContextEpochOwner, PresentationLedger, cliSessionId, cascadeId, runtimeSession, runtimeInteractionPort, interactionId, serviceTier, CodexSpeed, memberSpeed, capsule, CAT_CAFE_DATA_DIR, cat-cafe-profile, "private/profile"]
 cited_by:
+  - {feature: F325, date: 2026-09-29, delta: "P1 compiles owner-bound native L0 through the existing shared compiler on each turn, keeps dynamic pack prepend out of that slot, and scopes operator coding grants to the exact live entrusted Task"}
   - {feature: F191, date: 2026-05-07, delta: new cell}
   - {feature: F193, date: 2026-05-08, delta: Phase B — typed crossThreadReplyHint field on InvocationContext + render block in buildInvocationContext (receiver-side reply hint hydrated from trigger message id)}
   - {feature: F209, date: 2026-05-22, delta: "boundary note — F209 entity_id is a retrievable entity doorway, not roster truth"}
@@ -85,6 +99,7 @@ cited_by:
   - {feature: F231, date: 2026-09-06, delta: "Phase E Design Gate closed — third profile layer: owner-wide shared corpus (profiles/<userId>/corpus/shared-facts.md) as proposal target 'corpus'; revision (profileRevisionOf) exposed on read/approve; F312 cue gains corpus anchor (memory cell reference); no new store/engine/authority. Contract: feature-discussions/2026-09-06-f231-phase-e-design-gate.md"}
   - {feature: F299, date: 2026-08-21, delta: "Phase B.2 thread-access-policy authority — Sessions / Transcript / Invocations / Theater share one read decision; user-indexed system threads expose only the current user's session-backed records."}
   - {feature: F299, date: 2026-08-23, delta: "Phase D transcript-owned request-generation evidence — immutable provider-bound bytes are durably appended before launch; TurnExecution joins generations across replacement Sessions; exact reveal inherits thread and segment source ownership."}
+  - {feature: F296, date: 2026-09-30, delta: "continuity / presentation modules extracted as the session/context subdomain; canonical owners and runtime contracts unchanged"}
   - {feature: F306, date: 2026-08-27, delta: "Phase B invocation-bound runtime interaction identity — immutable user/thread/cat/invocation owner comes from AuditContext; provider thread/turn/item/request coordinates remain provenance; restart never reconstructs a waiter."}
 ---
 
@@ -94,13 +109,14 @@ Architecture cell: identity-session
 
 ## Canonical Owner
 
-This is a top-level routing cell with six subcells. It exists to prevent identity concerns from becoming a garbage bin.
+This is a top-level routing cell with explicit, separately owned subcells. It exists to prevent identity and session concerns from becoming a garbage bin.
 
 - `identity-agent`: F032 owns dynamic CatId, roster, AgentRegistry, roles, and reviewer matching.
 - `identity-agent config`: F127 owns per-cat runtime defaults and provider/model capability; F262 extends that chain with raw `(threadId, catId)` effort overrides, and F291 adds OAuth Codex speed intent with carrier-specific projection. The thread store owns persistence, but effective effort/speed are derived after actual-cat routing at invocation time and are not navigation or session-strategy state.
 - `identity-connector`: F088 owns connector principal link and external chat/thread binding.
 - `identity-bubble`: F183 / ADR-033 own frontend bubble identity within a thread.
 - `identity-runtime-session`: F211 owns runtime session identity and binding for long-lived or external runtimes: cascade/conversation IDs, SessionChainStore bridge records, lifecycle registration, hidden external-runtime anchor threads, seal reason, and per-session identity history.
+- `context-continuity`: F296 owns the context epoch, presentation ceiling, content-free delivery ledger and authoritative-compaction admission. These modules decide what can enter one prompt generation without taking ownership of source bodies, Session transcript persistence or provider session identity.
 - `thread-access-policy`: F299 Phase B.2 owns the canonical read decision for session-backed thread resources. Owner threads are thread-scoped; shared default, user-indexed system threads, and matching external-runtime anchors are current-user-scoped. Sessions, Transcript, Invocations, and Theater must consume this authority instead of spelling owner/default checks in each route.
 - `request-generation evidence`: F299 Phase D is an immutable event family inside the existing Session transcript, not a new store. The active Session at each launch owns that generation's assembled event; the durable child `TurnExecution` is the cross-Session join coordinate. Provider adapters must await the transcript commit before launch, and the invocation-scoped projector must reuse `thread-access-policy` plus each segment's source owner before revealing exact bytes.
 - `runtime-interaction identity`: F306 binds one provider-neutral interaction port from the invocation's authenticated `AuditContext`. The immutable owner is exact `(userId, threadId, catId, invocationId)`; provider request/thread/turn/item ids are opaque provenance. `RuntimeInteractionService` persists lifecycle truth, while the active response waiter remains process-local and is never restored after restart. One Redis namespace therefore has one active API lifecycle writer; multi-instance waiter routing is unsupported and fails closed as `transport_lost` instead of guessing which process owns the provider run.
@@ -114,6 +130,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - Changing connector user/chat/thread binding, connector permission ownership, or external sender mapping.
 - Changing frontend bubble identity, canonical invocation ID, or bubble kind identity rules.
 - Changing runtime session binding, external conversation registration, cascade/session ownership, runtime-session list/read surfaces, or how `cliSessionId` maps to runtime-specific session IDs.
+- Changing context epoch transitions, presentation ceilings, delivery dedupe, authoritative compaction admission or their bounded telemetry contract.
 - Changing whether an identity may list or read session-backed resources for a thread, or how shared/system threads filter records by user.
 - Changing provider request-generation identity, pre-launch transcript durability, cross-Session generation resolution, or exact segment reveal.
 - Changing how a mid-run human interaction is bound to its authenticated invocation owner or exact provider request coordinates.
@@ -126,6 +143,7 @@ F209's entity registry is adjacent but not canonical for agent identity. Its `en
 - For connector binding, use `ConnectorThreadBindingStore` and connector binding keys instead of ad hoc thread maps.
 - For bubble identity, follow ADR-033 and route through `bubble-pipeline` contracts and tests.
 - For runtime session binding, use Session Chain / runtime-session metadata keyed by Clowder AI session id and runtime session id. IDE-direct registration belongs behind the external runtime registration contract and agent-key authorization, not ad hoc JSON maps.
+- For context continuity, extend `session/context/` and preserve its separation from transcript persistence, Session lifecycle and F299 request-generation evidence. Source domains retain body/revision/invalidator truth; provider receipt is the only delivery-commit authority.
 - For session-backed thread reads, call `thread-access-policy`; a user index grants current-user-scoped reads, never access to every user's records under that thread id.
 - For request-generation evidence, append to the generation's active Session and join through the exact child invocation. Keep source bodies behind their existing owner resolvers; typed `unknown` is the safe result when no owner resolver exists.
 - For runtime interactions, derive owner identity from `AuditContext`, pass only the provider-neutral port through `AgentServiceOptions`, and invalidate process-local waiters on provider cancellation, transport loss, or host restart. Keep one active API lifecycle writer per Redis namespace; any future multi-instance topology needs a separate owner-lease and waiter-routing Design Gate. Never accept owner coordinates from a response body; browser reads and writes require the same strict authenticated owner, while the exact canonical `(threadId, messageId, blockId)` card ref is an additional response fence rather than the identity principal. Provider requests must also match the active app-server thread and every turn coordinate the upstream protocol supplies before publication; MCP's protocol-defined standalone `turnId:null` remains explicit provenance rather than a guessed turn. The canonical message/block must still be live immediately before terminal CAS.

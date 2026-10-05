@@ -10,8 +10,10 @@
  * 能力引导放到空面板内，避免工具栏出现两个几乎相同的入口。
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { reopenConciergeDesktopLossNotice, useConciergeDesktopStore } from '@/stores/conciergeDesktopStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
+import { ConciergeDesktopLaunch } from './ConciergeDesktopLaunch';
 
 // Inline SVG icons (no icon library dependency)
 const ChatIcon = () => (
@@ -26,8 +28,15 @@ const ChatIcon = () => (
 );
 
 export function ConciergeToolbar() {
+  const [openingDesktop, setOpeningDesktop] = useState(false);
+  const chatButton = useRef<HTMLButtonElement>(null);
   const surfaceState = useConciergeStore((s) => s.surfaceState);
+  const desktopLost = useConciergeDesktopStore((s) => s.desktopLost);
+  const noticeVisible = useConciergeDesktopStore((s) => s.noticeVisible);
   const setSurfaceState = useConciergeStore((s) => s.setSurfaceState);
+  useEffect(() => {
+    if (!openingDesktop && surfaceState === 'toolbar') chatButton.current?.focus();
+  }, [openingDesktop, surfaceState]);
 
   // P2 cloud fix: second-level Escape — toolbar → collapsed (mirrors ConciergePanel's bubble → toolbar)
   // Guard inside effect so the listener is only registered (and removed on cleanup) when in toolbar state.
@@ -42,6 +51,17 @@ export function ConciergeToolbar() {
 
   if (surfaceState !== 'toolbar') return null;
 
+  if (openingDesktop)
+    return (
+      <ConciergeDesktopLaunch
+        onClose={() => setOpeningDesktop(false)}
+        onText={() => {
+          setOpeningDesktop(false);
+          setSurfaceState('bubble', '');
+        }}
+      />
+    );
+
   return (
     <div
       data-testid="concierge-toolbar"
@@ -50,6 +70,7 @@ export function ConciergeToolbar() {
       aria-label="猫猫能力工具栏"
     >
       <button
+        ref={chatButton}
         type="button"
         aria-label="聊聊"
         style={{ backgroundColor: 'var(--accent-100)' }}
@@ -62,11 +83,21 @@ export function ConciergeToolbar() {
           'transition-all duration-200 hover:scale-105 hover:bg-[var(--accent-200)]',
           'focus:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--cafe-accent)]',
         ].join(' ')}
-        onClick={() => setSurfaceState('bubble', '')}
+        onClick={() => setOpeningDesktop(true)}
       >
         <ChatIcon />
         <span>聊聊</span>
       </button>
+      {desktopLost && !noticeVisible && (
+        <button
+          type="button"
+          aria-label="查看桌面猫猫球状态"
+          onClick={reopenConciergeDesktopLossNotice}
+          className="rounded-full border border-cafe-divider bg-cafe-surface px-2 py-1 text-micro text-cafe-secondary shadow-sm hover:text-cafe-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-cafe-accent"
+        >
+          桌面状态
+        </button>
+      )}
     </div>
   );
 }

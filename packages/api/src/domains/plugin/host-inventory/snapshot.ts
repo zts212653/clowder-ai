@@ -33,6 +33,19 @@ const RUNTIME_ERROR_CODES = new Set<PluginRuntimeErrorCode>([
   'CATCH_UP_RESUME_FAILED',
   'UNEXPECTED_RUNTIME_FAILURE',
 ]);
+const DESKTOP_FAILURE_REASONS = new Set<NonNullable<PluginRuntimeErrorRecord['desktopReason']>>([
+  'renderer-gone',
+  'unresponsive',
+  'window-closed',
+  'process-exit',
+  'request-timeout',
+  'protocol-violation',
+  'connection-ended',
+  'heartbeat-expired',
+  'poll-failed',
+  'surface-unavailable',
+  'unknown',
+]);
 const MAX_PROCESS_EXIT_CODE = 0xffff_ffff;
 
 function corrupt(message: string): never {
@@ -118,7 +131,9 @@ function runtimeError(value: unknown, label: string): PluginRuntimeErrorRecord {
   const raw = object(value, label);
   const keys = Object.keys(raw).sort();
   const expectedKeys = ['code', 'exitCode', 'occurredAt', 'signal'];
-  if (!equalStrings(keys, expectedKeys)) corrupt(`${label} has unsupported fields`);
+  if (!equalStrings(keys, expectedKeys) && !equalStrings(keys, [...expectedKeys, 'desktopReason'].sort())) {
+    corrupt(`${label} has unsupported fields`);
+  }
   if (
     raw.exitCode !== null &&
     (typeof raw.exitCode !== 'number' ||
@@ -136,6 +151,9 @@ function runtimeError(value: unknown, label: string): PluginRuntimeErrorRecord {
     exitCode: raw.exitCode,
     signal: raw.signal as NodeJS.Signals | null,
     occurredAt: timestamp(raw.occurredAt, `${label}.occurredAt`),
+    ...(raw.desktopReason === undefined
+      ? {}
+      : { desktopReason: enumValue(raw.desktopReason, DESKTOP_FAILURE_REASONS, `${label}.desktopReason`) }),
   };
 }
 

@@ -109,6 +109,7 @@ export interface ManagedCommandWakeTrigger {
 
 export interface ManagedCommandWakeDynamicTaskStore {
   getAll(): DynamicTaskDef[];
+  listManagedCommandCandidates?(): DynamicTaskDef[];
   getById(id: string): DynamicTaskDef | null;
   /** Production stores must expose the private carrier; runtime legacy shapes still normalize to unknown. */
   getPrivateOwnerAuthProvenance(id: string): OwnerAuthProvenance;

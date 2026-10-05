@@ -8,7 +8,11 @@ import { z } from 'zod';
  */
 export const bounded = (max: number) => z.string().trim().min(1).max(max);
 export const timestampSchema = z.string().datetime({ offset: true });
-const ownerStateRefSchema = bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/, 'owner state refs must use non-payload kind:id syntax');
+const ownerStateRefSchema = bounded(500).regex(
+  // biome-ignore lint/complexity/noUselessEscapeInRegex: Serialized MCP patterns also reach engines with nested character classes.
+  /^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/,
+  'owner state refs must use non-payload kind:id syntax',
+);
 export const refShape = {
   ownerFeatureId: bounded(120),
   ownerStateRef: ownerStateRefSchema,

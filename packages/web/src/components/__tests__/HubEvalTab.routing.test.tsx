@@ -161,10 +161,19 @@ describe('HubEvalTab settings routing', () => {
     });
 
     expect(setCurrentProjectMock).toHaveBeenCalledWith('/tmp/current-project');
+    // F309: the file opens in the active thread and remembers the eval card it came from.
     expect(setWorkspaceOpenFileMock).toHaveBeenCalledWith(
       'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
       null,
       'cat-cafe',
+      'thread-current',
+      {
+        kind: 'workspace-card',
+        destination: 'eval',
+        anchorId: 'eval:2026-05-23-eval-a2a-live-verdict',
+        threadId: 'thread-current',
+        viewportOffsetPx: 0,
+      },
     );
     expect(setCurrentThreadMock).not.toHaveBeenCalled();
     expect(pushMock).toHaveBeenCalledWith('/thread/thread-current');
@@ -203,10 +212,19 @@ describe('HubEvalTab settings routing', () => {
     });
 
     expect(setCurrentProjectMock).toHaveBeenCalledWith('/tmp/current-project');
+    // Opens in the root chat shell, while the return origin still names the foreign thread the card was in.
     expect(setWorkspaceOpenFileMock).toHaveBeenCalledWith(
       'docs/harness-feedback/verdicts/2026-05-23-eval-a2a-live-verdict.md',
       null,
       'cat-cafe',
+      'default',
+      {
+        kind: 'workspace-card',
+        destination: 'eval',
+        anchorId: 'eval:2026-05-23-eval-a2a-live-verdict',
+        threadId: 'thread-foreign',
+        viewportOffsetPx: 0,
+      },
     );
     expect(setCurrentThreadMock).toHaveBeenCalledWith('default');
     expect(pushMock).toHaveBeenCalledWith('/');

@@ -19,11 +19,6 @@ const alive = (pid) => {
 function hasStarted(path, pid) {
   return existsSync(path) && readFileSync(path, 'utf8').split('\n').includes(String(pid));
 }
-async function until(check, label) {
-  const deadline = Date.now() + 4000;
-  while (!check() && Date.now() < deadline) await delay(10);
-  assert.ok(check(), label);
-}
 function rows(bin, socket) {
   try {
     return execFileSync(
@@ -40,7 +35,7 @@ function rows(bin, socket) {
 
 for (const existing of [false, true]) {
   for (const mode of ['before-claim', 'claimed-successor', 'successor-race', 'normal']) {
-    test(`${existing ? 'existing' : 'fresh'} creation claim: ${mode}`, { timeout: 15000 }, async () => {
+    test(`${existing ? 'existing' : 'fresh'} creation claim: ${mode}`, { timeout: 30000 }, async (t) => {
       const gateway = new TmuxGateway();
       const bin = gateway.tmuxBin;
       const wt = `test-creation-claim-${randomUUID()}`;
@@ -51,16 +46,27 @@ for (const existing of [false, true]) {
       const witnessPath = join(dir, 'witness');
       const started = join(dir, 'started');
       const abort = new AbortController();
+      // Existing-server preparation runs several independently bounded clients.
+      // Wait for the scenario's evidence under one cancellable test deadline.
+      async function until(check, label) {
+        while (!check() && !t.signal.aborted) await delay(10);
+        assert.ok(check(), label);
+      }
       let outcome;
       let witness;
       try {
-        if (existing) await gateway.createAgentPaneLease(wt, { command: ['/bin/sleep', '30'], cwd: dir });
+        if (existing)
+          await gateway.createAgentPaneLease(wt, { command: ['/bin/sleep', '60'], cwd: dir, signal: t.signal });
         const before = rows(bin, socket);
         writeFileSync(
           join(dir, 'control.json'),
           JSON.stringify({ bin, socket, mode, barrier, release, witness: witnessPath }),
         );
         const proxy = join(dir, 'tmux.cjs');
+        writeFileSync(
+          join(dir, 'atomic-witness.cjs'),
+          readFileSync(new URL('./fixtures/atomic-witness.cjs', import.meta.url), 'utf8'),
+        );
         writeFileSync(
           proxy,
           `#!${process.execPath}\n${readFileSync(new URL('./fixtures/tmux-claim-barrier-proxy.cjs', import.meta.url), 'utf8')}`,
@@ -69,9 +75,9 @@ for (const existing of [false, true]) {
         gateway.tmuxBin = proxy;
         outcome = gateway
           .createAgentPaneLease(wt, {
-            command: ['/bin/sh', '-c', `echo $$ >> '${started}'; exec /bin/sleep 30`],
+            command: ['/bin/sh', '-c', `echo $$ >> '${started}'; exec /bin/sleep 60`],
             cwd: dir,
-            signal: abort.signal,
+            signal: AbortSignal.any([abort.signal, t.signal]),
           })
           .then(
             (lease) => ({ lease }),
@@ -83,7 +89,13 @@ for (const existing of [false, true]) {
         assert.ok(original);
         assert.equal(alive(witness.panePid), true);
         if (mode === 'before-claim') {
-          await until(() => existsSync(barrier), 'launcher must stop before the publish syscall');
+          await until(() => {
+            try {
+              return readFileSync(barrier, 'utf8').length > 0;
+            } catch {
+              return false;
+            }
+          }, 'launcher must stop before the publish syscall');
           assert.equal(existsSync(started), false, 'agent cannot exec before publishing');
           assert.throws(() => readlinkSync(join(witness.gate, 'claim')), { code: 'ENOENT' });
           abort.abort();
@@ -110,8 +122,13 @@ for (const existing of [false, true]) {
           assert.notEqual(successorPid, witness.panePid);
           assert.equal(successor.split('|')[3], original.split('|')[3], 'no command means identical stored argv');
           if (mode === 'successor-race') {
-            await until(() => existsSync(barrier), 'successor must receive EEXIST before abort closes the gate');
-            assert.equal(readFileSync(barrier, 'utf8'), `${witness.paneId}.${successorPid}`);
+            await until(() => {
+              try {
+                return readFileSync(barrier, 'utf8') === `${witness.paneId}.${successorPid}`;
+              } catch {
+                return false;
+              }
+            }, 'successor barrier must contain the EEXIST-path claim identity');
             assert.equal(
               readlinkSync(join(witness.gate, 'claim')),
               firstClaim,

@@ -11,6 +11,7 @@ import ts from 'typescript';
 import { applyMigrations, SCHEMA_V5 } from '../../dist/domains/memory/schema.js';
 import { RunLedger } from '../../dist/infrastructure/scheduler/RunLedger.js';
 import { replayScheduleHttp, seedScheduleDefinitions } from './schedule-scale-http-replay.mjs';
+import { installV43CueLedgerSchemaFixture } from './v43-memory-cue-ledger-fixture.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const base = process.argv[2];
@@ -40,6 +41,7 @@ try {
   db = new Database(join(scratch, 'scale.sqlite'));
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA_V5);
+  installV43CueLedgerSchemaFixture(db);
   db.exec(`CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
     INSERT INTO schema_version VALUES (44, '2026-09-08T00:00:00Z');`);
   const insert = db.prepare(`WITH RECURSIVE rows(n) AS (

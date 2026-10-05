@@ -29,6 +29,16 @@ function buildDeps() {
       getExecutionId: (threadId) => executions.get(threadId)?.executionId,
     },
     dynamicTaskStore: { getAll: () => [] },
+    turnExecutions: {
+      get: mock.fn(async (id) => ({
+        invocationId: id,
+        parentInvocationId: 'inv-a',
+        threadId: 'thread-a',
+        userId: USER_ID,
+        catId: 'codex-sol',
+        status: 'running',
+      })),
+    },
     resolveLiveExecutions: mock.fn(async (threadId, userId) => {
       const execution = executions.get(threadId);
       if (!execution || userId !== USER_ID) return [];
@@ -67,6 +77,90 @@ describe('F295 user/project active execution resource', () => {
 
   afterEach(async () => {
     await app?.close();
+  });
+
+  it('a frozen child selector cannot cancel a replacement child under the same parent execution', async () => {
+    let child = 'child-original';
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'inv-a',
+        invocationId: child,
+        startedAt: 100,
+        ownerUserId: USER_ID,
+        controlSource: 'tracker',
+      },
+    ]);
+    const cancel = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+        headers: { 'x-cat-cafe-user': USER_ID },
+        payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+      });
+    const first = await cancel();
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(deps.cancelExactLiveInvocation.mock.calls[0].arguments[0].candidate.invocationId, 'child-original');
+    child = 'child-replacement';
+    const stale = await cancel();
+    assert.equal(stale.statusCode, 409, stale.body);
+    assert.equal(stale.json().code, 'EXECUTION_REPLACED');
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 1);
+  });
+
+  it('rechecks the tracker after an awaited canonical child read before sending any cancel', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'inv-a',
+        invocationId: 'child-original',
+        startedAt: 100,
+        ownerUserId: USER_ID,
+        controlSource: 'tracker',
+      },
+    ]);
+    deps.turnExecutions.get.mock.mockImplementation(async (id) => {
+      deps.invocationTracker.getExecutionId = () => 'inv-replacement';
+      return {
+        invocationId: id,
+        parentInvocationId: 'inv-a',
+        threadId: 'thread-a',
+        userId: USER_ID,
+        catId: 'codex-sol',
+        status: 'running',
+      };
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'EXECUTION_REPLACED');
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+  });
+
+  it('a projection pairing an old child with a newer tracker parent cannot stop that newer parent', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'inv-new',
+        invocationId: 'child-original',
+        startedAt: 100,
+        ownerUserId: USER_ID,
+        controlSource: 'tracker',
+      },
+    ]);
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-new/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+    });
+    assert.equal(stale.statusCode, 409, stale.body);
+    assert.equal(stale.json().code, 'EXECUTION_REPLACED');
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
   });
 
   it('emits queryable stage traces without encoding a latency threshold', async () => {

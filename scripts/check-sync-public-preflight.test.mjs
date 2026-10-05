@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -53,6 +53,55 @@ afterEach(() => {
 });
 
 describe('public package script closure', () => {
+  it('runs the actual preflight CLI before dependency installation and still rejects missing companions', () => {
+    const root = makeRoot();
+    for (const file of [
+      'check-sync-public-preflight.mjs',
+      'check-capability-tips.mjs',
+      'lib/sync-public-export-coverage.mjs',
+    ]) {
+      write(root, `scripts/${file}`, readFileSync(new URL(file, import.meta.url), 'utf8'));
+    }
+    write(root, 'package.json', JSON.stringify({ scripts: {} }));
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    write(
+      root,
+      '.github/workflows/ci.yml',
+      '# Retired: .github/scripts/old.mjs\njobs:\n  test:\n    steps:\n      - run: |\n          node .github/scripts/proof.mjs\n',
+    );
+    commitAll(root, 'uninstalled candidate');
+    const run = () =>
+      spawnSync(process.execPath, ['scripts/check-sync-public-preflight.mjs', '--repo-root', root], {
+        cwd: root,
+        env: { ...process.env, NODE_PATH: '' },
+        encoding: 'utf8',
+      });
+    const missing = run();
+    assert.equal(missing.status, 1);
+    assert.match(missing.stderr, /ci\.yml -> missing \.github\/scripts\/proof\.mjs/);
+    write(root, '.github/scripts/proof.mjs', 'export {};\n');
+    const present = run();
+    assert.equal(present.status, 0, present.stderr);
+    assert.match(present.stdout, /PASS sync public preflight/);
+  });
+
+  it('rejects a preserved CI workflow whose companion script was lost during export', () => {
+    const root = makeRoot();
+    write(root, 'package.json', JSON.stringify({ scripts: {} }));
+    write(root, 'packages/web/src/lib/capability-tips.seed.json', '[]');
+    write(
+      root,
+      '.github/workflows/ci.yml',
+      'jobs:\n  test:\n    steps:\n      - run: node .github/scripts/proof.test.mjs\n',
+    );
+    commitAll(root, 'preserved workflow');
+    const result = checkSyncPublicPreflight(root, { baseRef: 'HEAD' });
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.errors, ['.github/workflows/ci.yml -> missing .github/scripts/proof.test.mjs']);
+    write(root, '.github/scripts/proof.test.mjs', 'export {};\n');
+    assert.equal(checkSyncPublicPreflight(root, { baseRef: 'HEAD' }).ok, true);
+  });
+
   it('rejects a root package command whose local script target is absent', () => {
     const root = makeRoot();
     write(root, 'package.json', JSON.stringify({ scripts: { check: 'node scripts/missing-check.mjs' } }));

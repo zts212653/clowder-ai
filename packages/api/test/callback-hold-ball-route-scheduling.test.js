@@ -14,7 +14,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { beforeEach, describe, test } from 'node:test';
+import { afterEach, beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 
 /**
@@ -31,6 +31,7 @@ const VALID_WAIT_SOURCE_REF = {
 describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
   let registry;
   let threadStore;
+  let holdQuotaStore;
 
   function makeStubDeps(overrides = {}) {
     const insertedTasks = [];
@@ -65,6 +66,27 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
         getAll() {
           return insertedTasks.filter((t) => !removedIds.includes(t.id));
         },
+        getById(id) {
+          return insertedTasks.find((task) => task.id === id && !removedIds.includes(id)) ?? null;
+        },
+        updateParams(id, params) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task) return false;
+          task.params = params;
+          return true;
+        },
+        updateParamsIfCurrent(id, current, next) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task || task.params !== current) return false;
+          task.params = next;
+          return true;
+        },
+        setEnabled(id, enabled) {
+          const task = insertedTasks.find((candidate) => candidate.id === id && !removedIds.includes(id));
+          if (!task) return false;
+          task.enabled = enabled;
+          return true;
+        },
         remove(id) {
           removedIds.push(id);
           return true;
@@ -80,6 +102,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       socketManager: {
         broadcastToRoom() {},
       },
+      holdQuotaStore,
       _insertedTasks: insertedTasks,
       _registeredDynamic: registeredDynamic,
       _unregisteredIds: unregisteredIds,
@@ -93,8 +116,15 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { HoldQuotaStore } = await import('../dist/domains/ball-custody/hold-quota-store.js');
     registry = new InvocationRegistry();
     threadStore = new ThreadStore();
+    holdQuotaStore = new HoldQuotaStore({ dbPath: ':memory:' });
+  });
+
+  afterEach(() => {
+    holdQuotaStore?.close();
+    holdQuotaStore = null;
   });
 
   async function createApp(holdBallDeps) {
@@ -197,7 +227,7 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
 
   test('F167-G AC-G3/G5: second hold_ball replaces first pending (single-slot semantics, KD-23)', async () => {
     // KD-23: hold_ball 是单-槽语义。同 (thread, cat) 同时只有一个 pending hold wake；
-    // 二次调用覆盖前者（unregister + remove 旧 task，insert 新的）。
+    // 二次调用覆盖前者（unregister + terminal tombstone，insert 新的）。
     // 避免 stale wake 累积（持球中被 external 唤醒，再次 hold_ball 时前一个 wake
     // 的 nextStep 已经过时——不应仍 fire）。
     const deps = makeStubDeps();
@@ -227,17 +257,18 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     const secondTaskId = JSON.parse(r2.body).taskId;
     assert.notEqual(firstTaskId, secondTaskId, 'second hold must produce a distinct taskId');
 
-    // First task must be cancelled (taskRunner.unregister) and deleted (dynamicTaskStore.remove)
+    // First task is unscheduled and retained as a terminal replacement disposition.
     assert.ok(
       deps._unregisteredIds.includes(firstTaskId),
       `first taskId should have been unregistered; got ${JSON.stringify(deps._unregisteredIds)}`,
     );
-    assert.ok(
-      deps._removedIds.includes(firstTaskId),
-      `first taskId should have been removed from dynamicTaskStore; got ${JSON.stringify(deps._removedIds)}`,
-    );
+    assert.equal(deps._removedIds.includes(firstTaskId), false);
+    const retired = deps.dynamicTaskStore.getById(firstTaskId);
+    assert.equal(retired.enabled, false);
+    assert.equal(retired.params.holdLifecycle.status, 'retired_by_replacement');
+    assert.equal(retired.params.holdLifecycle.replacedByTaskId, secondTaskId);
     // Only the second task remains in the store's live view
-    const liveTasks = deps.dynamicTaskStore.getAll();
+    const liveTasks = deps.dynamicTaskStore.getAll().filter((task) => task.enabled);
     assert.equal(liveTasks.length, 1, `exactly one pending hold task should remain; got ${liveTasks.length}`);
     assert.equal(liveTasks[0].id, secondTaskId);
     assert.match(liveTasks[0].params.message, /wait-B/);
@@ -448,11 +479,10 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(deps._insertedTasks.length, 3, 'blocked hold must NOT schedule a new task');
   });
 
-  test('retryAt boundary regression: off-by-one guard (3-instance friction fix)', async () => {
-    // Pre-load the counter via exported function with a CONTROLLED lastAt,
-    // then hit the route. This makes retryAt deterministic: if the +1ms fix
-    // is reverted, the assertion fails with delta = -1.
-    const { incrementHoldCount, HOLD_WINDOW_MS } = await import('../dist/routes/callback-hold-ball-routes.js');
+  test('retryAt boundary regression: sliding window retryAt points to oldest event + windowMs', async () => {
+    // Pre-load the store via holdQuotaStore.tryAdmit() with controlled timestamps,
+    // then hit the route. retryAt is deterministic: oldest_event.held_at + HOLD_WINDOW_MS.
+    const { HOLD_WINDOW_MS } = await import('../dist/routes/callback-hold-ball-routes.js');
 
     const deps = makeStubDeps();
     const app = await createApp(deps);
@@ -460,14 +490,15 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     const { invocationId, callbackToken } = await registry.create('user-hb-boundary', 'codex', thread.id);
     const headers = { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken };
 
-    // Pre-load 3 holds with a known lastAt. The counter key is `${threadId}:codex`.
-    const controlledLastAt = Date.now();
-    incrementHoldCount(thread.id, 'codex', controlledLastAt - 2000);
-    incrementHoldCount(thread.id, 'codex', controlledLastAt - 1000);
-    incrementHoldCount(thread.id, 'codex', controlledLastAt); // hold 3 → lastAt = controlledLastAt
+    // Pre-fill 3 holds with known timestamps via the SQLite store.
+    // The route handler shares the same holdQuotaStore instance.
+    const baseTs = Date.now();
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs - 2000);
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs - 1000);
+    holdQuotaStore.tryAdmit(thread.id, 'codex', 3, HOLD_WINDOW_MS, baseTs);
 
-    // 4th call via route → 429. Route reads holdEntry.lastAt (= controlledLastAt)
-    // and computes retryAt = lastAt + HOLD_WINDOW_MS + 1.
+    // 4th call via route → 429. The store's tryAdmit computes
+    // retryAt = oldest_in_window.held_at + HOLD_WINDOW_MS.
     const r = await app.inject({
       method: 'POST',
       url: '/api/callbacks/hold-ball',
@@ -483,20 +514,19 @@ describe('F167 C1: /api/callbacks/hold-ball scheduling + errors', () => {
     assert.equal(r.statusCode, 429);
     const body = JSON.parse(r.body);
     const retryAtMs = new Date(body.retryAt).getTime();
-    const expectedRetryAtMs = controlledLastAt + HOLD_WINDOW_MS + 1;
+    // Oldest event is at baseTs - 2000; retryAt = (baseTs - 2000) + HOLD_WINDOW_MS
+    const expectedRetryAtMs = baseTs - 2000 + HOLD_WINDOW_MS;
 
-    // THE regression assertion: retryAt must equal lastAt + HOLD_WINDOW_MS + 1.
-    // Without the +1 fix, retryAtMs = lastAt + HOLD_WINDOW_MS → delta = -1 → FAIL.
     assert.equal(
       retryAtMs,
       expectedRetryAtMs,
-      `retryAt must be lastAt + HOLD_WINDOW_MS + 1 = ${expectedRetryAtMs}; ` +
-        `got ${retryAtMs} (delta = ${retryAtMs - expectedRetryAtMs}, off-by-one regression if -1)`,
+      `retryAt must be oldest_event + HOLD_WINDOW_MS = ${expectedRetryAtMs}; ` +
+        `got ${retryAtMs} (delta = ${retryAtMs - expectedRetryAtMs})`,
     );
 
-    // retryAfterMs consistency: retryAt - rejectNow, both within a few ms of controlledLastAt
+    // retryAfterMs consistency: retryAt - rejectNow (both within a few ms of baseTs)
     assert.ok(body.retryAfterMs > 0, 'retryAfterMs must be positive');
-    assert.ok(body.retryAfterMs <= HOLD_WINDOW_MS + 1, 'retryAfterMs must not exceed HOLD_WINDOW_MS + 1');
+    assert.ok(body.retryAfterMs <= HOLD_WINDOW_MS, 'retryAfterMs must not exceed HOLD_WINDOW_MS');
 
     // Rejection must NOT advance the window (counter stays at 3, no new task)
     assert.equal(body.holdsInWindow, 3);

@@ -101,4 +101,93 @@ describe('Official plugin runtime diagnostics', () => {
       body: JSON.stringify({ expectedRevision: 10 }),
     });
   });
+
+  it('shows the bounded desktop first cause before offering an explicit repair', async () => {
+    const plugin = {
+      ...eventBusConflictPlugin(),
+      catalogId: 'companion',
+      pluginId: 'official.companion',
+      packageName: '@clowder-ai/companion',
+      ownerAuthAvailable: false,
+      instance: {
+        ...eventBusConflictPlugin().instance,
+        activationState: 'enabled',
+        lastRuntimeError: {
+          code: 'UNEXPECTED_RUNTIME_FAILURE',
+          desktopReason: 'renderer-gone',
+          exitCode: 17,
+          signal: null,
+          occurredAt: 2,
+        },
+      },
+    };
+    mockApiFetch.mockResolvedValue(jsonResponse({ plugins: [plugin] }));
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await act(async () => Promise.resolve());
+    const details = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    await act(async () => details?.click());
+    expect(container.textContent).toContain('桌面渲染进程结束');
+    expect(container.textContent).toContain('插件实例未更换');
+    expect(container.textContent).toContain('修复');
+  });
+
+  it('retains the desktop failure and repair action after restart normalizes the runtime to stopped', async () => {
+    const plugin = {
+      ...eventBusConflictPlugin(),
+      catalogId: 'companion',
+      pluginId: 'official.companion',
+      packageName: '@clowder-ai/companion',
+      instance: {
+        ...eventBusConflictPlugin().instance,
+        activationState: 'enabled',
+        runtimeState: 'stopped',
+        lastRuntimeError: {
+          code: 'UNEXPECTED_RUNTIME_FAILURE',
+          desktopReason: 'renderer-gone',
+          exitCode: 17,
+          signal: null,
+          occurredAt: 2,
+        },
+      },
+    };
+    mockApiFetch.mockImplementation(async (url) =>
+      jsonResponse(url.endsWith('/repair') ? plugin : { plugins: [plugin] }),
+    );
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await act(async () => Promise.resolve());
+    expect(container.textContent).toContain('需修复');
+    expect(container.textContent).not.toContain('正在启动');
+    const details = container.querySelector<HTMLButtonElement>('button[aria-expanded="false"]');
+    await act(async () => details?.click());
+    expect(container.textContent).toContain('桌面渲染进程结束');
+    const repair = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '修复');
+    expect(repair).toBeDefined();
+    await act(async () => repair?.click());
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/plugins/official/pi_official/repair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedRevision: 10 }),
+    });
+  });
+
+  it('does not label a normal enabled but stopped Companion as a desktop crash', async () => {
+    const plugin = {
+      ...eventBusConflictPlugin(),
+      catalogId: 'companion',
+      pluginId: 'official.companion',
+      instance: {
+        ...eventBusConflictPlugin().instance,
+        activationState: 'enabled',
+        runtimeState: 'stopped',
+        lastRuntimeError: undefined,
+      },
+    };
+    mockApiFetch.mockResolvedValue(jsonResponse({ plugins: [plugin] }));
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await act(async () => Promise.resolve());
+    expect(container.textContent).toContain('正在启动');
+    expect(Array.from(container.querySelectorAll('button')).some((button) => button.textContent === '修复')).toBe(
+      false,
+    );
+  });
 });

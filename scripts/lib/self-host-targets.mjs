@@ -27,14 +27,6 @@ const SERVICE_STOP_VERBS = new Set(['shutdown', 'stop', 'restart', 'kill', 'down
 /** Only a bare literal probe. `kill -0 9999; pkill ...` is not one command. */
 const LIVENESS_PROBE_ONLY = /^\s*kill\s+-0\s+\d+\s*$/i;
 /**
- * Used for one thing only: deciding whether a construct we *could not read*
- * has to fail closed. Never a verdict on its own -- a command whose executed
- * content is unreadable and mentions stopping cannot be shown not to be us,
- * while one that mentions nothing of the kind is not evidence of a stop.
- */
-const STOP_VOCABULARY = /\b(?:kill|pkill|killall|shutdown|stop|restart)/i;
-
-/**
  * The operands a signal command would act on, given everything after the verb.
  *
  * Returns `undefined` when the set cannot be established -- an operand we
@@ -224,20 +216,19 @@ export function analyseCommands(raw, cwd) {
     const quiet = { stopClass: false, unresolved: false, pids: [], ports: [], deployments: [], text: command };
     if (LIVENESS_PROBE_ONLY.test(command)) return quiet;
 
-    const { pipelines, complete } = executedInvocations(command, { cwd });
+    const { pipelines } = executedInvocations(command, { cwd });
     const deployments = stoppedDeploymentsIn(pipelines.flat(), cwd);
     const { pids, ports, unresolved, stops } = resolveStopTargets(pipelines);
 
-    // Executed content we could not read is only a reason to fail closed when
-    // something about it suggests stopping. Otherwise an unparsed construct
-    // would deny every command with a `$VAR` in it.
-    const unreadableStop = !complete && STOP_VOCABULARY.test(command);
-    if (deployments.length === 0 && !stops && !unreadableStop) return quiet;
+    // Only an identified invocation establishes a stop. An opaque program or
+    // variable mentioning "stop" is not evidence of one. Once a stop IS known,
+    // missing target facts still produce unresolved below (e.g. kill "$PID").
+    if (deployments.length === 0 && !stops) return quiet;
 
     const namesNothing = pids.length === 0 && ports.length === 0 && deployments.length === 0;
     return {
       stopClass: true,
-      unresolved: unresolved || namesNothing || unreadableStop,
+      unresolved: unresolved || namesNothing,
       pids,
       ports,
       deployments,

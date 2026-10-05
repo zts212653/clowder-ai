@@ -1,5 +1,6 @@
 ---
 name: capability-evolution
+tips_exempt: "本轮仅收准既有准备字段的填写方法，不新增用户入口或操作；准备工作面的既有tip继续适用。"
 description: "F311 能力进化入口与续办。Use when: 用户询问可进化对象，或直接给出要改善的 Agent/业务能力结果，或已有项目需要继续。Not for: 事后复盘、确定性 bug、运行健康排查；只讨论或延后启动时不建 Program。Output: 解释边界；动作型目标幂等建 Program，并在同一 invocation 提交、回读首轮准备；已有项目按真实证据与权限继续取证、改进、复验和方法回流。"
 ---
 
@@ -64,7 +65,7 @@ F311 是围绕一个可变对象运行的长期 Evolution Program；`self-evolut
 
 1. 调用 `cat_cafe_get_evolution_program({ programId })`，读取 `program.sequence`、四块当前修订/历史、真实活动与来源状态。list 只用于找项目，不含准备正文。
 2. 确认本 invocation 正要做一项具体工作时，调用 `cat_cafe_begin_evolution_preparation_work`。带上当前 Program sequence、本块 exact current ref（尚无则 `null`）、可定位的 item 和具体 focus；返回后用新 sequence 继续。登记本身会出现在阅读面，不能先挂“进行中”再停工，也不能替另一只猫登记。
-3. 实际完成当前可做的调查与方法工作。对象地图用已发布的 [准备选择字段](refs/preparation-choice.md) 保留类别、具体对象、猫建议、本轮决定、谁定、已有工作与可改边界；未知显式提交，旧稿不补默认决定。规约给观察单位、判法、反例、GT 域/裁判/付薪方；测量准备分开 GT 来源、采集和可信性；基线保留事实、未知、竞争解释与区分动作。不要把 draft 写成证书或客户事实。
+3. 实际完成当前可做的调查与方法工作。按[准备选择指引](refs/preparation-choice.md)先定位具体对象、可信来源与范围，再记录猫建议、本轮决定、谁定、已有工作与可改边界；类别是可省略的辅助说明，不据类别凑对象。未找到的方法资产、加载版本或决定明确为未知，旧稿不补默认决定。规约给观察单位、判法、反例、GT域/裁判/付薪方；测量准备分开GT来源、采集和可信性；基线保留事实、未知、竞争解释与区分动作。不要把draft写成证书或客户事实。
 4. 内容确实可交接时，调用 `cat_cafe_submit_evolution_preparation`。使用 begin 返回的最新 sequence、本块 exact current ref和所有 exact current dependency refs；每个动作使用独立、可重放的 `clientMessageId`，不能复用 start 或其他 section 的事件身份。
 5. 再次 exact get，确认正文、作者、workspace、来源、revision 与状态已回读。`conflict` 先重读并基于新版本处理，禁止覆盖；若同一次 submit 在 Program 事件落盘后中断并显示 `materializing`，必须用**相同 clientMessageId 与完全相同正文**重试补写，不能换 id 冒充新修订。
 

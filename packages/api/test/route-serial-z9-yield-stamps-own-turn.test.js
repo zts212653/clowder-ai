@@ -165,6 +165,44 @@ describe('F194 Phase Z9 — routeSerial stamps ownInvocationId on yielded events
     assert.equal(stored?.content, 'persist me', 'the emitted ID must resolve to the durable message immediately');
   });
 
+  it('done carries the stored time, which a publication of the message names as its revision', async () => {
+    // F309 entry 20: the live bubble keeps its client clock; a media item it shows is only
+    // publishable under the stored message's own timestamp.
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'persist me') });
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      parentInvocationId: 'parent-stored-time-test',
+    })) {
+      yielded.push(msg);
+    }
+
+    const doneMsg = yielded.find((message) => message.type === 'done');
+    const stored = await deps.messageStore.getById(doneMsg.messageId);
+    assert.equal(typeof stored?.timestamp, 'number');
+    assert.equal(doneMsg.messageTimestamp, stored.timestamp);
+  });
+
+  it('done still settles when the stored time cannot be read back', async () => {
+    const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
+    const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'persist me') });
+    deps.messageStore.getById = async () => {
+      throw new Error('store unavailable');
+    };
+
+    const yielded = [];
+    for await (const msg of routeSerial(deps, ['opus'], 'hi', 'user1', 'thread1', {
+      parentInvocationId: 'parent-stored-time-unreadable',
+    })) {
+      yielded.push(msg);
+    }
+
+    const doneMsg = yielded.find((message) => message.type === 'done');
+    assert.equal(doneMsg?.messageId, 'msg-1', 'the durable id is still announced');
+    assert.equal('messageTimestamp' in doneMsg, false, 'an unreadable time is left unknown, not guessed');
+  });
+
   it('F233 PR3: records invocation.started + heartbeat with own turn invocationId', async () => {
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const deps = createMockDeps({ opus: createMockService('opus', 'cli-inner-id', 'hello') });

@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { presentationLedgerKey, decodePresentationLedgerKey, encodeLedgerFields, decodeLedgerFields } = await import(
-  '../dist/domains/cats/services/session/ledger-key.js'
+  '../dist/domains/cats/services/session/context/ledger-key.js'
 );
 
 const US = '\u001f';

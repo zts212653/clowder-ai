@@ -11,6 +11,7 @@ export function ReviewCanvasPopover({
   canvasRef,
   containerRef,
   onClose,
+  viewKey,
   children,
 }: {
   anchor: ArtifactReviewAnchor;
@@ -18,11 +19,12 @@ export function ReviewCanvasPopover({
   canvasRef: RefObject<HTMLDivElement>;
   containerRef: RefObject<HTMLDivElement>;
   onClose: () => void;
+  viewKey?: string;
   children: ReactNode;
 }) {
   const [position, setPosition] = useState<CSSProperties>({
     '--comment-left': '12px',
-    '--comment-top': '104px',
+    '--comment-top': '16px',
   } as CSSProperties);
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
@@ -40,14 +42,14 @@ export function ReviewCanvasPopover({
       const top = host.width <= 600 ? y + region.height * scale + 14 : y;
       setPosition({
         '--comment-left': `${Math.max(12, Math.min(left, host.width - 332))}px`,
-        '--comment-top': `${Math.max(104, Math.min(top, host.height - 208))}px`,
+        '--comment-top': `${Math.max(16, Math.min(top, host.height - 208))}px`,
       } as CSSProperties);
     };
     place();
     const observer = new ResizeObserver(place);
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [anchor, canvasRef, containerRef, media.width, media.height]);
+  }, [anchor, canvasRef, containerRef, media.width, media.height, viewKey]);
   return (
     <div
       className={styles.popover}

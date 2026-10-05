@@ -32,6 +32,7 @@ const contributionKindLabel: Record<string, string> = {
   service: 'Service',
   ui: 'UI',
   'content-editor-provider': 'Content Editor',
+  'desktop-window': 'Desktop Window',
 };
 
 interface CapabilityDocItem {

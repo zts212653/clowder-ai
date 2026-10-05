@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { WorkspaceContentReviewText } from '@/components/workbench/content-review/WorkspaceContentReviewText';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from '@/components/workspace-md-components';
 
 /**
@@ -61,6 +62,29 @@ describe('createWorkspaceLinkComponent worktree-scoped navigation (云端 P2)', 
     expect(setOpenFile).toHaveBeenCalledWith('docs/guide.md', null, 'wt-feature');
   });
 
+  it('carries the original document and exact source line when its file owner supplies them', () => {
+    const Link = createWorkspaceLinkComponent('docs/sub', (c) => c, 'wt-feature', 'docs/sub/original.md') as React.FC<{
+      href: string;
+      children: React.ReactNode;
+      node: { position: { start: { line: number } } };
+    }>;
+    act(() =>
+      root.render(
+        <Link href="../guide.md" node={{ position: { start: { line: 17 } } }}>
+          指南
+        </Link>,
+      ),
+    );
+    act(() => container.querySelector('a')?.click());
+    expect(setOpenFile).toHaveBeenCalledWith('docs/guide.md', null, 'wt-feature', undefined, {
+      kind: 'workspace-document',
+      worktreeId: 'wt-feature',
+      path: 'docs/sub/original.md',
+      line: 17,
+    });
+    expect(container.querySelector('a')?.getAttribute('data-workspace-link-line')).toBe('17');
+  });
+
   it('falls back to null worktree when none provided (docked default — behavior unchanged)', () => {
     clickRelativeLink(undefined);
     expect(setOpenFile).toHaveBeenCalledWith('docs/guide.md', null, null);
@@ -87,5 +111,45 @@ describe('createWorkspaceLinkComponent worktree-scoped navigation (云端 P2)', 
     const src = container.querySelector('img')?.getAttribute('src');
     expect(src).toBeTruthy();
     expect(new URL(src!, 'http://localhost').searchParams.get('path')).toBe('docs/My Guide.png');
+  });
+
+  it('the common collaboration renderer resolves file-owned images and links, masks metadata, and restores the source link line', () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    const focused: HTMLElement[] = [];
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        focused.push(this);
+      },
+    });
+    try {
+      act(() =>
+        root.render(
+          <WorkspaceContentReviewText
+            revision={`sha256:${'a'.repeat(64)}`}
+            markdown
+            text={'---\ntitle: Private metadata\n---\n\n[指南](../guide.md)\n\n![封面](../cover.png)'}
+            locator={{ worktreeId: 'wt-feature', path: 'docs/sub/original.md' }}
+            scrollToLine={5}
+            onQuoteSelected={() => {}}
+          />,
+        ),
+      );
+      expect(container.textContent).not.toContain('Private metadata');
+      const sourceUrl = new URL(container.querySelector('img')!.src);
+      expect(sourceUrl.searchParams.get('worktreeId')).toBe('wt-feature');
+      expect(sourceUrl.searchParams.get('path')).toBe('docs/cover.png');
+      expect(focused[0]?.getAttribute('data-workspace-link-line')).toBe('5');
+      act(() => container.querySelector('a')?.click());
+      expect(setOpenFile.mock.calls.at(-1)?.[4]).toEqual({
+        kind: 'workspace-document',
+        worktreeId: 'wt-feature',
+        path: 'docs/sub/original.md',
+        line: 5,
+      });
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', original);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
   });
 });

@@ -63,7 +63,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
         disabled={disabled}
         className="text-micro text-cafe-muted hover:text-cafe-secondary transition-colors mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        + 绑定 CLI Session
+        + 绑定命令行会话
       </button>
     );
   }
@@ -71,7 +71,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
   return (
     <div className="mt-2 p-2 rounded-lg bg-[var(--console-shell-bg)]">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-micro font-medium text-cafe-secondary">绑定 CLI Session</span>
+        <span className="text-micro font-medium text-cafe-secondary">绑定命令行会话</span>
         <button
           type="button"
           onClick={() => {
@@ -105,7 +105,7 @@ export function BindNewSessionSection({ threadId, activeCatIds, onBound, disable
             if (ime.isComposing()) return;
             if (e.key === 'Enter') void handleBind();
           }}
-          placeholder="CLI Session ID"
+          placeholder="命令行会话 ID"
           maxLength={500}
           className="w-full text-xs font-mono px-2 py-1 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         />

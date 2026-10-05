@@ -2,22 +2,27 @@
 
 import type { EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shared';
 import type { ReactNode } from 'react';
+import { preparedArtifactPresentation } from './prepared-artifact-presentation';
+import { PreparedReviewThumbnail } from './prepared-review-presentation';
 
 export type PreparedArtifactCoordinate = NonNullable<EntrustedWorkOwnerReadV1['preparedArtifact']>;
 
 export function PreparedArtifactPreview({
   coordinate,
   artifact,
+  reviewTitle,
   loading = false,
   onOpen,
   reviewAction,
 }: {
   coordinate: PreparedArtifactCoordinate;
   artifact?: GlobalArtifactDTO;
+  reviewTitle?: string;
   loading?: boolean;
   onOpen?: () => void;
   reviewAction?: ReactNode;
 }) {
+  const { review, title, version } = preparedArtifactPresentation(coordinate, artifact, reviewTitle);
   return (
     <section
       className="rounded-xl border border-cafe-subtle bg-cafe-surface-sunken p-3"
@@ -29,11 +34,9 @@ export function PreparedArtifactPreview({
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-micro font-bold uppercase tracking-[0.14em] text-cafe-accent">准备好的 Artifact</p>
-          <p className="mt-1 break-words text-sm font-semibold text-cafe-black">
-            {artifact?.name ?? coordinate.artifactRef}
-          </p>
+          <p className="mt-1 break-words text-sm font-semibold text-cafe-black">{title}</p>
           <p className="mt-1 text-micro text-cafe-muted">
-            Artifact r{coordinate.artifactRevision} · 已可查看
+            {version ? `${version} · ` : ''}已可查看
             {artifact?.threadTitle ? ` · ${artifact.threadTitle}` : ''}
           </p>
         </div>
@@ -59,6 +62,8 @@ export function PreparedArtifactPreview({
           alt={artifact.name}
           className="mt-3 max-h-44 w-full rounded-lg border border-cafe-subtle object-contain"
         />
+      ) : !artifact && review ? (
+        <PreparedReviewThumbnail coordinate={review} alt={title} />
       ) : null}
     </section>
   );

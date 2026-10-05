@@ -15,6 +15,7 @@ export function FocusModeButton({ label = '专注', disabled, className, onClick
   return (
     <button
       type="button"
+      data-testid="workspace-focus-enter"
       disabled={disabled}
       onClick={onClick}
       className={`px-2 py-1 rounded-md text-micro font-medium transition-colors bg-cafe-accent/10 text-cafe-accent border border-cafe-accent/20 hover:bg-cafe-accent/15 disabled:opacity-30 disabled:cursor-not-allowed ${className ?? ''}`}

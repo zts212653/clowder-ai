@@ -113,6 +113,88 @@ after(async () => {
 });
 
 describe('F298 Redis callback auth lifecycle', { skip: SKIP }, () => {
+  function backendWithExpiryBeforeRead(invocationId) {
+    let expired = false;
+    const client = new Proxy(redis, {
+      get(target, property) {
+        if (property === 'hgetall') {
+          return async (key) => {
+            if (key === `auth:inv:${invocationId}`) {
+              assert.equal(await redis.pexpire(key, 0), 1, 'record must exist in the SCAN snapshot');
+              expired = true;
+            }
+            return redis.hgetall(key);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    return { backend: new RedisAuthInvocationBackend(client), didExpire: () => expired };
+  }
+
+  for (const scan of ['migrateLegacyRecords', 'listActiveRecords']) {
+    test(`${scan} tolerates a terminal tombstone expiring after SCAN without reviving it`, async () => {
+      const writer = new InvocationRegistry({ backend: new RedisAuthInvocationBackend(redis) });
+      const expired = await writer.create('user-1', 'codex-sol', 'expired-thread');
+      await writer.commitTerminal({
+        invocationId: expired.invocationId,
+        disposition: 'completed',
+        endedAt: Date.now(),
+        endReason: 'turn_completed',
+      });
+      const live = await writer.create('user-1', 'codex-sol', 'live-thread');
+      const racing = backendWithExpiryBeforeRead(expired.invocationId);
+      const registry = new InvocationRegistry({ backend: racing.backend, startupRecoveryRequired: true });
+      const app = Fastify({ logger: false });
+      registerCallbackAuthHook(app, registry);
+      app.get('/api/callbacks/expiry-probe', async () => ({ ok: true }));
+      const probe = (credentials) =>
+        app.inject({
+          method: 'GET',
+          url: '/api/callbacks/expiry-probe',
+          headers: { 'x-invocation-id': credentials.invocationId, 'x-callback-token': credentials.callbackToken },
+        });
+      try {
+        assert.equal((await probe(live)).statusCode, 503);
+        assert.equal(registry.isStartupRecoveryComplete(), false);
+        const result = await registry[scan]();
+        assert.equal(racing.didExpire(), true, 'must exercise the SCAN/read expiry race');
+        if (scan === 'migrateLegacyRecords') {
+          assert.deepEqual(result, { scanned: 1, persistedActive: 1, replaced: 0, rebuiltLatest: 0 });
+        } else {
+          assert.deepEqual(
+            result.map((record) => record.invocationId),
+            [live.invocationId],
+          );
+        }
+        registry.markStartupRecoveryComplete();
+        assert.equal((await registry.verify(live.invocationId, live.callbackToken)).ok, true);
+        assert.deepEqual(await registry.verify(expired.invocationId, expired.callbackToken), {
+          ok: false,
+          reason: 'unknown_invocation',
+        });
+        assert.equal(await redis.exists(`auth:inv:${expired.invocationId}`), 0);
+        assert.equal(await redis.pttl(`auth:inv:${live.invocationId}`), -1);
+        assert.equal((await probe(live)).statusCode, 200);
+        assert.equal((await probe(expired)).statusCode, 401);
+      } finally {
+        await app.close();
+      }
+    });
+
+    test(`${scan} still rejects a nonempty corrupt record and keeps admission closed`, async () => {
+      await redis.hset('auth:inv:corrupt', 'invocationId', 'corrupt');
+      const registry = new InvocationRegistry({
+        backend: new RedisAuthInvocationBackend(redis),
+        startupRecoveryRequired: true,
+      });
+      await assert.rejects(() => registry[scan](), /corrupt callback auth record/);
+      assert.equal(registry.isStartupRecoveryComplete(), false);
+      assert.deepEqual(await redis.hgetall('auth:inv:corrupt'), { invocationId: 'corrupt' });
+    });
+  }
+
   test('active record, dedup set, and latest pointer all remain TTL=0', async () => {
     const registry = new InvocationRegistry({ backend: new RedisAuthInvocationBackend(redis) });
     const credentials = await registry.create('user-1', 'codex-sol', 'thread-1');

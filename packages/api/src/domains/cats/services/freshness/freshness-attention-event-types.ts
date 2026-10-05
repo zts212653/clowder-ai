@@ -110,7 +110,7 @@ export type ProviderNativeFreshnessMissReason =
   | 'transport_failed'
   | 'not_read';
 
-export interface ProviderNoticeEventBase extends FreshnessEventBase {
+interface ProviderNoticeFields extends FreshnessEventBase {
   noticeId: string;
   frontier: string;
   /** Exact durable identities used for receipt correlation; legacy events fall back to frontier. */
@@ -119,38 +119,40 @@ export interface ProviderNoticeEventBase extends FreshnessEventBase {
   carrier: ProviderNativeFreshnessCarrier;
   deliverySemantics: ProviderNativeFreshnessDeliverySemantics;
   toolSurface: ProviderNativeFreshnessToolSurface;
-  expectedTurnId: string;
 }
 
-export interface ProviderNoticeOpportunityEvent extends ProviderNoticeEventBase {
+export type ProviderNoticeEventBase = ProviderNoticeFields &
+  ({ boundaryKind?: 'active_turn'; expectedTurnId: string } | { boundaryKind: 'idle_start'; expectedTurnId?: never });
+
+export type ProviderNoticeOpportunityEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_opportunity';
-}
+};
 
-export interface ProviderNoticePreparedEvent extends ProviderNoticeEventBase {
+export type ProviderNoticePreparedEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_prepared';
-}
+};
 
-export interface ProviderNoticeDeliveredEvent extends ProviderNoticeEventBase {
+export type ProviderNoticeDeliveredEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_delivered';
   acceptedTurnId: string;
-}
+};
 
-export interface ProviderNoticeMissedEvent extends ProviderNoticeEventBase {
+export type ProviderNoticeMissedEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_missed';
   missReason: ProviderNativeFreshnessMissReason;
-}
+};
 
-export interface ProviderNoticeSeenEvent extends ProviderNoticeEventBase {
+export type ProviderNoticeSeenEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_seen';
   seenMessageIds: string[];
   evidenceKind: 'full_contiguous_thread_context' | 'queue_exact_read';
-}
+};
 
-export interface ProviderNoticeHandledEvent extends ProviderNoticeEventBase {
+export type ProviderNoticeHandledEvent = ProviderNoticeEventBase & {
   kind: 'provider_notice_handled';
   queueEntryId: string;
   evidenceRef: QueueTargetOutcomeEvidenceRef;
-}
+};
 
 export interface ProviderCarrierCapabilityDeclaredEvent extends FreshnessEventBase {
   kind: 'provider_carrier_capability_declared';

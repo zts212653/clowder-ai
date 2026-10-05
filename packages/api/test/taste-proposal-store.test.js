@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'node:test';
-import { InMemoryTasteProposalStore } from '../src/domains/taste/stores/InMemoryTasteProposalStore.ts';
+import { InMemoryTasteProposalStore } from '../dist/domains/taste/stores/InMemoryTasteProposalStore.js';
 
 /** @returns {import('../src/domains/taste/stores/ports/TasteProposalStore.ts').CreateTasteProposalInput} */
 function makeInput(overrides = {}) {
@@ -40,6 +40,12 @@ describe('InMemoryTasteProposalStore', () => {
     assert.equal(proposal.dimension, 'authentic-expression');
     assert.equal(proposal.privacy, 'public');
     assert.deepEqual(proposal.tags, ['authentic-expression', '活人感']);
+  });
+
+  it('keeps an optional takeaway with the proposal and leaves legacy proposals without one', () => {
+    const withTakeaway = store.create(makeInput({ takeaway: '我们以为 You 喜欢自然的表达。' }));
+    assert.equal(store.get(withTakeaway.id)?.takeaway, '我们以为 You 喜欢自然的表达。');
+    assert.equal(store.create(makeInput()).takeaway, undefined);
   });
 
   it('creates proposals with unique ids', () => {

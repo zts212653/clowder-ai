@@ -283,6 +283,13 @@ describe('F261 durable managed full-gate job', () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), 'durable-managed-gate-cancel-fence-'));
     const identity = { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' };
     try {
+      const { DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS } = await import(
+        '../dist/domains/ball-custody/durable-managed-gate-child-contract.js'
+      );
+      assert.ok(
+        DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS > 30_000,
+        'outer force-kill grace must leave the S3 cleanup budget intact',
+      );
       const owner = createDurableManagedGateJob(
         'hold-ball-cancel-fenced',
         100,
@@ -324,6 +331,21 @@ describe('F261 durable managed full-gate job', () => {
       assert.deepEqual(signals, [[-41, 'SIGTERM']]);
       assert.equal(JSON.parse(readFileSync(owner.recordPath, 'utf8')).state, 'cancelling');
 
+      inspectDurableManagedGateJob(owner, {
+        now: 2_501 + 5_001,
+        supervisorEpoch: owner.supervisorEpoch,
+        readSnapshot: () => new Map([[41, identity]]),
+        killProcess: (pid, signal) => signals.push([pid, signal]),
+      });
+      assert.deepEqual(signals, [[-41, 'SIGTERM']], 'the former five-second cutoff must not preempt S3 cleanup');
+      inspectDurableManagedGateJob(owner, {
+        now: 2_501 + DURABLE_MANAGED_GATE_CHILD_TERMINATION_GRACE_MS + 1,
+        supervisorEpoch: owner.supervisorEpoch,
+        readSnapshot: () => new Map([[41, identity]]),
+        killProcess: (pid, signal) => signals.push([pid, signal]),
+      });
+      assert.deepEqual(signals.at(-1), [-41, 'SIGKILL']);
+
       const terminal = inspectDurableManagedGateJob(owner, { now: 2_502, readSnapshot: () => new Map() });
       assert.equal(terminal.state, 'terminal');
       assert.equal(terminal.result.cancelled, true);
@@ -355,6 +377,47 @@ describe('F261 durable managed full-gate job', () => {
       processIdentity: { pid: 41, ppid: 1, pgid: 41, startedAt: 'birth-41' },
     };
     assert.equal(validateDurableManagedGateJob(descriptor, 'hold-ball-123', dataRoot), true);
+    const resumableDescriptor = {
+      ...descriptor,
+      kind: 'resumable_full_gate_v2',
+      recovery: {
+        protocolVersion: 2,
+        eventLoopGapMs: 100,
+        reconciliationBudgetMs: 500,
+        pollMs: 10,
+        powerEvidenceSource: { kind: 'json_file', path: path.join(dataRoot, 'power-evidence.json') },
+      },
+    };
+    assert.equal(validateDurableManagedGateJob(resumableDescriptor, 'hold-ball-123', dataRoot), true);
+    assert.doesNotThrow(() =>
+      validateDurableManagedGateJob(
+        { ...resumableDescriptor, recovery: { protocolVersion: 2 } },
+        'hold-ball-123',
+        dataRoot,
+      ),
+    );
+    assert.equal(
+      validateDurableManagedGateJob(
+        { ...resumableDescriptor, recovery: { protocolVersion: 2 } },
+        'hold-ball-123',
+        dataRoot,
+      ),
+      false,
+    );
+    assert.equal(
+      validateDurableManagedGateJob(
+        {
+          ...resumableDescriptor,
+          recovery: {
+            ...resumableDescriptor.recovery,
+            powerEvidenceSource: { kind: 'json_file', path: path.join(dataRoot, '../outside.json') },
+          },
+        },
+        'hold-ball-123',
+        dataRoot,
+      ),
+      false,
+    );
     assert.equal(
       validateDurableManagedGateJob(
         { ...descriptor, gateReceiptPath: path.join(managedRoot, '../outside.gate.json') },

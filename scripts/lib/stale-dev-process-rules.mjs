@@ -1,8 +1,8 @@
 const HOUR = 60 * 60;
 
-// 6379=default / 6099=fork runtime sanctuary / 6398=worktree dev /
+// 6379=default / 6099=fork runtime sanctuary / 6397=dedicated Alpha / 6398=worktree dev /
 // 6399=runtime sanctuary / 6401=user-redis persistent data.
-const PROTECTED_REDIS_PORTS = new Set([6379, 6099, 6398, 6399, 6401]);
+const PROTECTED_REDIS_PORTS = new Set([6379, 6099, 6397, 6398, 6399, 6401]);
 const CAT_CAFE_WORKTREE_PATH = /\/cat-cafe(?:-[^/\s]+)?(?:\/|$)/;
 
 function tokenizeCommand(command) {

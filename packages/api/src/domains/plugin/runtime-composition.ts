@@ -14,6 +14,15 @@ import { HybridPluginRuntimeSupervisor } from './builtin-runtime/hybrid-supervis
 import { staticEditorContributions } from './content-editor-runtime/admission.js';
 import { ContentEditorPluginRuntime } from './content-editor-runtime/runtime.js';
 import { ContentMaterializerPluginRuntime } from './content-materializer-runtime/runtime.js';
+import { desktopWindowContribution } from './desktop-window-runtime/admission.js';
+import { OwnerDesktop } from './desktop-window-runtime/owner-desktop.js';
+import type { CompanionArchiveContract } from './desktop-window-runtime/published-companion-v2.js';
+import { DesktopWindowPluginRuntime } from './desktop-window-runtime/runtime.js';
+import type {
+  DesktopCompanionBridge,
+  DesktopWindowExecutor,
+  DesktopWindowFailure,
+} from './desktop-window-runtime/types.js';
 import { ExternalPluginLifecycleService } from './external-plugin-lifecycle.js';
 import type { PluginRuntimeLifecyclePort } from './external-plugin-lifecycle-types.js';
 import { FilesystemVerifiedPluginPackageLocator } from './external-runtime/filesystem-package-locator.js';
@@ -26,7 +35,7 @@ import { FileHostBrokerStore } from './host-broker/stores.js';
 import { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import type { PackageAdmissionContractRuntime } from './host-inventory/manifest-verifier.js';
 import { FilePluginInventoryStore } from './host-inventory/stores.js';
-import type { PluginInventorySnapshot } from './host-inventory/types.js';
+import type { PluginInstanceRecord, PluginInventorySnapshot } from './host-inventory/types.js';
 import {
   BuiltinPluginContributionSupervisor,
   type BuiltinPluginContributionSupervisorOptions,
@@ -76,6 +85,17 @@ export interface DormantPluginRuntimeCompositionOptions {
   readonly contract?: PackageAdmissionContractRuntime;
   readonly now?: () => number;
   readonly editorParentOrigin?: string;
+  readonly desktopExecutor?: DesktopWindowExecutor;
+  /** Private dependency injection for an isolated verified-archive catalog. */
+  readonly companionArchives?: readonly CompanionArchiveContract[];
+  readonly onDesktopFailure?: (id: string, failure: DesktopWindowFailure) => void;
+  readonly createCompanionBridge?: (context: {
+    assertCurrent(): Promise<void>;
+    navigate(url: string): Promise<boolean>;
+    publicCompanionV2: boolean;
+    companionContract?: CompanionArchiveContract['contract'];
+    disableCompanion?(): Promise<void>;
+  }) => DesktopCompanionBridge;
   readonly collectiveConnector?: Omit<CollectiveConnectorBuiltinRuntimeOptions, 'dataDirectory'> & {
     readonly dataDirectory?: string;
   };
@@ -85,6 +105,14 @@ export interface DormantPluginRuntimeRecovery {
   readonly brokerSessions: number;
   readonly inventoryInstances: number;
   readonly resumeRequested: number;
+}
+
+export interface DormantPluginRuntimeRecoveryOptions {
+  /** Desktop windows call back into the Host in-process (the companion bridge uses
+   * app.inject), so resuming one before the Host has booted breaks route registration.
+   * Enabled desktop windows resume only once this gate opens; every other plugin
+   * resumes at once. */
+  readonly desktopWindowsAfter?: PromiseLike<unknown>;
 }
 
 export interface DormantPluginRuntimeComposition {
@@ -98,6 +126,8 @@ export interface DormantPluginRuntimeComposition {
   readonly collectiveConnectorRuntime?: CollectiveConnectorBuiltinRuntime;
   readonly contentEditors?: ContentEditorPluginRuntime;
   readonly contentMaterializers?: ContentMaterializerPluginRuntime;
+  readonly desktopWindows?: DesktopWindowPluginRuntime;
+  readonly ownerDesktop?: OwnerDesktop;
   readonly messaging: MessagingService;
   readonly lifecycle: ExternalPluginLifecycleService;
   readonly packages: VerifiedPluginPackageLocator;
@@ -105,7 +135,7 @@ export interface DormantPluginRuntimeComposition {
   registerBuiltinContributions(
     options: Omit<BuiltinPluginContributionSupervisorOptions, 'inventory'>,
   ): BuiltinPluginContributionSupervisor;
-  recoverAfterRestart(): Promise<DormantPluginRuntimeRecovery>;
+  recoverAfterRestart(options?: DormantPluginRuntimeRecoveryOptions): Promise<DormantPluginRuntimeRecovery>;
   shutdown(reason?: string): Promise<void>;
 }
 
@@ -125,7 +155,11 @@ class PluginRuntimeSupervisorRouter implements PluginRuntimeLifecyclePort {
   }
 
   private baseOwnsBuiltin(pluginId: string, manifest: PluginManifest): boolean {
-    return this.baseBuiltinPluginIds.has(pluginId) || staticEditorContributions(manifest).length > 0;
+    return (
+      this.baseBuiltinPluginIds.has(pluginId) ||
+      staticEditorContributions(manifest).length > 0 ||
+      desktopWindowContribution(manifest) !== undefined
+    );
   }
 
   async start(pluginInstanceId: string): Promise<unknown> {
@@ -268,13 +302,32 @@ export function createDormantPluginRuntimeComposition(
         });
   if (contentEditors)
     contentMaterializers = new ContentMaterializerPluginRuntime({ editors: contentEditors, packages });
+  const desktopWindows = options.desktopExecutor
+    ? new DesktopWindowPluginRuntime({
+        inventory: inventoryStore,
+        brokerStore,
+        broker,
+        packages,
+        executor: options.desktopExecutor,
+        disableCompanion: (id, revision): Promise<void> => lifecycle.disable(id, revision).then(() => undefined),
+        ...(options.companionArchives ? { companionArchives: options.companionArchives } : {}),
+        ...(options.onDesktopFailure ? { onFailure: options.onDesktopFailure } : {}),
+        ...(options.createCompanionBridge ? { createBridge: options.createCompanionBridge } : {}),
+        ...(options.now === undefined ? {} : { now: options.now }),
+      })
+    : undefined;
   const supervisor = new HybridPluginRuntimeSupervisor({
     inventory: inventoryStore,
     external: externalSupervisor,
     builtinRuntimes: new Map(
       collectiveConnectorRuntime ? [['official.collective-connector', collectiveConnectorRuntime] as const] : [],
     ),
-    resolveBuiltinRuntime: (pkg) => (staticEditorContributions(pkg.manifest).length > 0 ? contentEditors : undefined),
+    resolveBuiltinRuntime: (pkg) =>
+      desktopWindowContribution(pkg.manifest)
+        ? desktopWindows
+        : staticEditorContributions(pkg.manifest).length > 0
+          ? contentEditors
+          : undefined,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const runtimeSupervisor = new PluginRuntimeSupervisorRouter(
@@ -299,15 +352,27 @@ export function createDormantPluginRuntimeComposition(
     ...(collectiveConnectorRuntime === undefined ? {} : { collectiveConnectorRuntime }),
     ...(contentEditors === undefined ? {} : { contentEditors }),
     ...(contentMaterializers === undefined ? {} : { contentMaterializers }),
+    ...(desktopWindows === undefined ? {} : { desktopWindows }),
+    ...(desktopWindows === undefined
+      ? {}
+      : { ownerDesktop: new OwnerDesktop({ inventory: inventoryStore, lifecycle, desktop: desktopWindows }) }),
     messaging,
     lifecycle,
     packages,
     ...(options.contract === undefined ? {} : { contract: options.contract }),
     registerBuiltinContributions: (builtinOptions) => runtimeSupervisor.registerBuiltin(builtinOptions),
-    async recoverAfterRestart() {
-      await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
+    async recoverAfterRestart({ desktopWindowsAfter } = {}) {
+      const [inventorySnapshot] = await Promise.all([inventoryStore.snapshot(), brokerStore.snapshot()]);
       const brokerSessions = await supervisor.recoverAfterRestart();
-      const inventoryRecovery = await lifecycle.recoverAfterRestart();
+      const isDesktopWindow = (instance: PluginInstanceRecord) => {
+        const record = inventorySnapshot.packages.find((pkg) => pkg.packageDigest === instance.packageDigest);
+        return record !== undefined && desktopWindowContribution(record.manifest) !== undefined;
+      };
+      const inventoryRecovery = await lifecycle.recoverAfterRestart(
+        desktopWindowsAfter === undefined
+          ? {}
+          : { resumeGate: (instance) => (isDesktopWindow(instance) ? desktopWindowsAfter : undefined) },
+      );
       return {
         brokerSessions,
         inventoryInstances: inventoryRecovery.recoveredInstances,
@@ -603,6 +668,7 @@ export interface PluginManagerRuntimeCompositionOptions {
   readonly auth?: OfficialPluginAuthPort;
   readonly localGrantPolicy?: (manifest: PluginManifest) => Promise<readonly Capability[]> | readonly Capability[];
   readonly fetchOfficialArchive?: (entry: OfficialPluginCatalogEntry) => Promise<Uint8Array>;
+  readonly prepareDesktopComponent?: () => Promise<void>;
   readonly builtinContributions?: Omit<BuiltinPluginContributionSupervisorOptions, 'inventory'>;
   readonly compatibility?: PluginManagerCompatibilityPort;
   readonly now?: () => number;
@@ -652,6 +718,9 @@ export function createPluginManagerRuntimeComposition(
       packagesRoot: options.runtime.paths.packagesRoot,
       catalogProvider,
       ...(options.fetchOfficialArchive === undefined ? {} : { fetchArchive: options.fetchOfficialArchive }),
+      ...(options.prepareDesktopComponent === undefined
+        ? {}
+        : { prepareDesktopComponent: options.prepareDesktopComponent }),
       ...(options.runtime.contract === undefined
         ? {}
         : { validateManifest: options.runtime.contract.validateManifest }),

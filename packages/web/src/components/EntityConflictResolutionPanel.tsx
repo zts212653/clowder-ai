@@ -7,6 +7,7 @@ import type {
   EntityConflictResolutionRequest,
 } from '@cat-cafe/shared';
 import { useMemo, useState } from 'react';
+import { useApprovalHost, useReportEditing } from './ApprovalHost';
 
 const ACTION_LABELS: Record<EntityConflictResolutionAction, string> = {
   'merge-aliases': '合并别名',
@@ -32,6 +33,13 @@ export function EntityConflictResolutionPanel({
   onReject,
 }: EntityConflictResolutionPanelProps) {
   const [replacements, setReplacements] = useState<Record<string, string>>({});
+  // A host that has locked writes keeps the inputs editable but sends nothing; one typed replacement is work in progress.
+  const { writesLocked } = useApprovalHost();
+  const writeBlocked = deciding || writesLocked;
+  useReportEditing(
+    'entity-conflict',
+    Object.values(replacements).some((value) => value.trim().length > 0),
+  );
 
   const requiredReplacementsReady = useMemo(
     () => conflict.canonicalReplacementRequiredFor.every((entityId) => replacements[entityId]?.trim().length > 0),
@@ -134,7 +142,7 @@ export function EntityConflictResolutionPanel({
               key={action}
               type="button"
               onClick={() => submit(action)}
-              disabled={deciding || (needsReplacement && !requiredReplacementsReady)}
+              disabled={writeBlocked || (needsReplacement && !requiredReplacementsReady)}
               className="rounded-md border border-[var(--semantic-warning)] px-2.5 py-1 text-micro font-medium text-[var(--semantic-warning)] hover:bg-[var(--cafe-muted)] disabled:cursor-not-allowed disabled:opacity-40"
               data-testid={`resolve-${action}`}
             >
@@ -145,7 +153,7 @@ export function EntityConflictResolutionPanel({
         <button
           type="button"
           onClick={onReject}
-          disabled={deciding}
+          disabled={writeBlocked}
           className="rounded-md border border-[var(--cafe-border)] px-2.5 py-1 text-micro font-medium hover:bg-[var(--semantic-critical-surface)] disabled:opacity-40"
           data-testid="conflict-reject"
         >

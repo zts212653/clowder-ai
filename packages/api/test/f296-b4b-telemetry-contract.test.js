@@ -8,13 +8,13 @@ const {
   boundLedgerOutcome,
   projectBoundedContinuity,
   summarizeFinalProjectionTiers,
-} = await import('../dist/domains/cats/services/session/context-projection-telemetry-contract.js');
+} = await import('../dist/domains/cats/services/session/context/context-projection-telemetry-contract.js');
 const {
   ledgerOutcomeFromCommits,
   recordContextProjectionDeliveryLatency,
   recordContextProjectionFinalGeneration,
   recordContextProjectionLedgerOutcome,
-} = await import('../dist/domains/cats/services/session/context-continuity-telemetry.js');
+} = await import('../dist/domains/cats/services/session/context/context-continuity-telemetry.js');
 
 function handshake(disposition, reason, overrides = {}) {
   return {

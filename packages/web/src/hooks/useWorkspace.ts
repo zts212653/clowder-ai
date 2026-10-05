@@ -15,6 +15,11 @@ export interface WorktreeEntry {
   root: string;
   branch: string;
   head: string;
+  resolvedRoot?: string;
+  rootEpoch?: number;
+  removable?: boolean;
+  connectionEpoch?: number;
+  legacyAliases?: readonly string[];
 }
 
 export interface TreeNode {

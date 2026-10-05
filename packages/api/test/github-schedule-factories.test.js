@@ -404,6 +404,58 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
     assert.strictEqual(spec.profile, 'poller');
   });
 
+  test('github.repo-scan factory forwards the dynamic inbox owner resolver', async () => {
+    const registry = new ScheduleFactoryRegistry();
+    registerGitHubScheduleFactories(registry);
+    const factory = registry.get('github.repo-scan');
+    assert.ok(factory);
+
+    const delivered = [];
+    const triggered = [];
+    const resolverCalls = [];
+    const spec = factory.createTaskSpec(
+      'schedule:github:repo-scan',
+      makeGitHubDeps({
+        inboxCatId: 'stale-env-owner',
+        resolveInboxCatId: async (repoFullName) => {
+          resolverCalls.push(repoFullName);
+          return 'codex61-sol';
+        },
+        bindingStore: {
+          getByExternal: async () => ({ threadId: 'thread-repo-inbox', userId: 'user-1' }),
+        },
+        fetchOpenPRs: async () => [
+          {
+            number: 7,
+            title: 'Community PR',
+            html_url: 'https://github.com/owner/repo/pull/7',
+            user: 'contributor',
+            author_association: 'CONTRIBUTOR',
+            draft: false,
+          },
+        ],
+        deliverFn: async (_deps, input) => {
+          delivered.push(input);
+          return { messageId: 'message-7', content: input.content };
+        },
+        invokeTrigger: {
+          trigger(...args) {
+            triggered.push(args);
+            return 'dispatched';
+          },
+        },
+      }),
+    );
+
+    const gate = await spec.admission.gate();
+    assert.equal(gate.run, true);
+    await spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
+
+    assert.deepEqual(resolverCalls, ['owner/repo']);
+    assert.equal(delivered[0].catId, 'codex61-sol');
+    assert.equal(triggered[0][1], 'codex61-sol');
+  });
+
   test('github.repo-scan factory throws when repoAllowlist missing', () => {
     const registry = new ScheduleFactoryRegistry();
     registerGitHubScheduleFactories(registry);

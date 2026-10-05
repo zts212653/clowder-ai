@@ -76,6 +76,11 @@ export interface EvidenceResult {
   matchReason?: string;
   /** F209 Phase B: entity alias / mention explanation for retrieval-anchor hits */
   entityMatches?: EntityMatch[];
+  /** Derived explanations omitted to fit the topk envelope; no direct appendix pager exists. */
+  entityMatchesOmitted?: number;
+  entityMatchesDrillUnavailable?: 'derived-appendix-not-pageable';
+  passagesOmitted?: number;
+  sourceReferenceTruncated?: boolean;
   /** F209 Phase C: typed bounded reader hint for opening the exact source window */
   drillDown?: EvidenceDrillDown;
   /** F200 HW-4 根因②b (砚砚 P1-2): source file path for path-based

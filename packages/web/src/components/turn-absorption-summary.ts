@@ -1,7 +1,12 @@
 import type { QueueMessageReceipt } from '@cat-cafe/shared';
 import type { ChatMessage } from '@/stores/chat-types';
 
-export type TurnAbsorptionKind = 'responded' | 'completed_with_turn' | 'actionable' | 'withdrawn_after_exposure';
+export type TurnAbsorptionKind =
+  | 'responded'
+  | 'completed_with_turn'
+  | 'dispatch_disposition'
+  | 'actionable'
+  | 'withdrawn_after_exposure';
 
 export interface TurnAbsorptionItem {
   sourceMessageId: string;
@@ -63,6 +68,7 @@ function exactExposedTarget(message: ChatMessage, invocationId: string): Receipt
 function classifyTarget(target: ReceiptTarget): TurnAbsorptionKind {
   const outcome = target.outcome;
   if (outcome && outcome.invocationId === target.invocationId) {
+    if (outcome.disposition === 'dispatch_disposition') return 'dispatch_disposition';
     return outcome.disposition === 'responded' ? 'responded' : 'completed_with_turn';
   }
   // Withdrawal is an exact receipt truth, independent of why custody ended.
@@ -76,7 +82,11 @@ function classifyTarget(target: ReceiptTarget): TurnAbsorptionKind {
 function hasExactHandledOutcome(target: ReceiptTarget): boolean {
   const outcome = target.outcome;
   if (target.state !== 'handled' || !outcome || outcome.invocationId !== target.invocationId) return false;
-  return outcome.disposition === 'responded' || outcome.disposition === 'completed_with_turn';
+  return (
+    outcome.disposition === 'responded' ||
+    outcome.disposition === 'completed_with_turn' ||
+    outcome.disposition === 'dispatch_disposition'
+  );
 }
 
 /**
@@ -160,7 +170,7 @@ export function projectTurnAbsorptionSummary(
     invocationId,
     counts: {
       total: items.length,
-      handled: responded + completedWithTurn,
+      handled: responded + completedWithTurn + items.filter((item) => item.kind === 'dispatch_disposition').length,
       responded,
       completedWithTurn,
       actionable,

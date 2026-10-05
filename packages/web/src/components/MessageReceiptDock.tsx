@@ -13,7 +13,7 @@ import { resolveMessageElements } from '@/utils/scrollToMessage';
 import { CatAvatar } from './CatAvatar';
 import { authorIntentLabel, carrierCapabilityLabel, humanCarrierLabel } from './message-disposition-presentation';
 import { receiptFailureReason, receiptTargetStateLabel } from './queue-receipt-projection';
-import { latestRetryableQueueAttempt } from './queue-retry-action';
+import { latestCloudReceiptForTarget, latestRetryableQueueAttempt } from './queue-retry-action';
 
 const REMINDER_STATE_LABEL: Record<QueueReminderAttempt['state'], string> = {
   requested: '提醒已请求',
@@ -24,7 +24,6 @@ const REMINDER_STATE_LABEL: Record<QueueReminderAttempt['state'], string> = {
 
 type ReceiptExecutionKind = NonNullable<NonNullable<ChatMessage['extra']>['turnExecution']>['executionKind'];
 const EMPTY_ACTIVE_INVOCATION_IDS: ReadonlySet<string> = new Set();
-
 const EXECUTION_KIND_LABEL: Record<ReceiptExecutionKind, string> = {
   ordinary: '普通执行',
   routing_guard: '系统补路由',
@@ -163,6 +162,7 @@ interface MessageReceiptDockProps {
   receipt: QueueMessageReceipt;
   messages: readonly ChatMessage[];
   activeInvocationIds?: ReadonlySet<string>;
+  settlingInvocationIds?: ReadonlySet<string>;
   getCatLabel: (catId: string) => string;
 }
 
@@ -171,14 +171,16 @@ export function MessageReceiptDock({
   receipt,
   messages,
   activeInvocationIds = EMPTY_ACTIVE_INVOCATION_IDS,
+  settlingInvocationIds = EMPTY_ACTIVE_INVOCATION_IDS,
   getCatLabel,
 }: MessageReceiptDockProps) {
   const isCrossThreadDelivery = receipt.scope === 'cross_thread_delivery';
   const [retryingAttemptId, setRetryingAttemptId] = useState<string | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const retryContext = { messageId, messages };
 
   const retry = async (target: QueueReceiptTarget, attempt: QueueTargetAttempt) => {
-    if (!messageId) return;
+    if (!messageId || !latestRetryableQueueAttempt(target, retryContext)) return;
     setRetryingAttemptId(attempt.id);
     setRetryError(null);
     try {
@@ -201,7 +203,10 @@ export function MessageReceiptDock({
     }
   };
 
-  if (receipt.scope === 'primary_trigger' && !receipt.targets.some((target) => latestRetryableQueueAttempt(target)))
+  if (
+    receipt.scope === 'primary_trigger' &&
+    !receipt.targets.some((target) => latestRetryableQueueAttempt(target, retryContext))
+  )
     return null;
 
   return (
@@ -225,7 +230,18 @@ export function MessageReceiptDock({
             ? collectInvocationLineageMessageIds(messages, evidence.invocationId).length > 0
             : false;
           const latestAttempt = target.attempts?.at(-1);
-          const retryableAttempt = latestRetryableQueueAttempt(target);
+          const cloudReceipt = messageId
+            ? latestCloudReceiptForTarget(messageId, target.catId, messages, latestAttempt)
+            : undefined;
+          const failedHost = cloudReceipt?.transport === 'host' && cloudReceipt.status === 'failed';
+          const retryableAttempt = latestRetryableQueueAttempt(target, retryContext);
+          const stateLabel = receiptTargetStateLabel(
+            target,
+            activeInvocationIds,
+            receipt.scope,
+            loadedLineage,
+            settlingInvocationIds,
+          );
           return (
             <div
               key={target.catId}
@@ -239,12 +255,7 @@ export function MessageReceiptDock({
               />
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <CatAvatar catId={target.catId} size={18} status={attemptStatus(target)} />
-                <span>{`${getCatLabel(target.catId)} · ${receiptTargetStateLabel(
-                  target,
-                  activeInvocationIds,
-                  receipt.scope,
-                  loadedLineage,
-                )}`}</span>
+                <span>{`${getCatLabel(target.catId)} · ${failedHost ? '未发送 · 需要新消息' : stateLabel}`}</span>
                 {intentLabel && <span data-receipt-author-intent>{intentLabel}</span>}
                 {target.authorIntent?.carrierCapability && (
                   <details className="text-cafe-muted" data-receipt-carrier-detail={target.catId}>
@@ -296,7 +307,10 @@ export function MessageReceiptDock({
                 >
                   <CatAvatar catId={target.catId} size={16} status="error" />
                   <span>
-                    系统：{receiptFailureReason(target)}
+                    系统：
+                    {failedHost
+                      ? '未发送到 ChatGPT；请处理投递提示中的问题后重新发一条新消息'
+                      : receiptFailureReason(target)}
                     {latestAttempt ? ` · 本条消息第 ${latestAttempt.sequence} 次尝试` : ''}
                   </span>
                 </output>

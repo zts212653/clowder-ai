@@ -255,9 +255,9 @@ export function createSkillConsumptionTools(callbackPost: CallbackPost) {
         name: 'cat_cafe_prepare_request_review_consumption',
         description:
           'Reserve one exact request-review semantic revision and review HEAD/source tuple for a named non-author local-review consumer. ' +
-          'Use after reading request-review and before sending the ordinary review request. ' +
-          'NOT for posting the request, approving code, or claiming the skill was applied. ' +
-          'Output: a durable opaque handle to place on the exact Request-Review-Consumption-Handle template line. ' +
+          'Use only when an F100/F311 evolution experiment explicitly measures which request-review skill version this local review used; prepare before sending that review request. ' +
+          'NOT for ordinary local reviews, posting the request, approving code, or claiming the skill was applied. ' +
+          'Output: a durable opaque handle for the experimental request packet. ' +
           'GOTCHA: only a strict author invocation with a real origin can reserve; preparation alone is not use, and the routed reviewer must bind it from the resulting invocation before recording the typed verdict message.',
         inputSchema: prepareRequestReviewConsumptionInputSchema,
         handler: handlePrepareRequestReviewConsumption,
@@ -273,9 +273,9 @@ export function createSkillConsumptionTools(callbackPost: CallbackPost) {
         name: 'cat_cafe_bind_request_review_consumption',
         description:
           'Bind a prepared request-review handle to this exact routed reviewer invocation before reviewing. ' +
-          'Use when a review request contains Request-Review-Consumption-Handle and this invocation is its named reviewer. ' +
+          'Use only for a prepared F100/F311 measurement when a review request contains Request-Review-Consumption-Handle and this invocation is its named reviewer. ' +
           'NOT for authors, unrelated invocations, review verdicts, or generic skill loading. ' +
-          'Output: a durable bound/duplicate reservation plus the server-observed mounted package and semantic revision, with no review or approval side effect. ' +
+          'Output: a durable bound/duplicate measurement reservation plus the server-observed mounted package and semantic revision, with no review or approval side effect. Binding failure does not block the typed verdict. ' +
           'GOTCHA: the server verifies reviewer cat, strict invocation origin, request message, thread, handle line, and managed runtime mount; an unverifiable mount stays unconfirmed and binding does not prove the package was read.',
         inputSchema: bindRequestReviewConsumptionInputSchema,
         handler: handleBindRequestReviewConsumption,
@@ -291,9 +291,9 @@ export function createSkillConsumptionTools(callbackPost: CallbackPost) {
         name: 'cat_cafe_record_request_review_consumption',
         description:
           'Resolve a bound request-review reservation against one durable typed local-review message. ' +
-          'Use immediately after the named reviewer posts localReviewVerdict for the reserved review subject. ' +
+          'Use only for a successfully bound F100/F311 measurement after the named reviewer posts one localReviewVerdict for the reserved review subject. ' +
           'NOT for creating the verdict, deciding merge approval, or inferring use from prose or a generic callback. ' +
-          'Output: one exact-version applied or unconfirmed F100 use receipt bound to the F299 reviewer invocation and reserved HEAD/source tuple. ' +
+          'Output: one exact-version applied or unconfirmed F100 use receipt bound to the F299 reviewer invocation and reserved HEAD/source tuple; failure never invalidates or requires reposting the verdict. ' +
           'GOTCHA: approved and changes_requested are both possible applied uses; a mismatched HEAD/source or unattested mounted revision remains rejected/unconfirmed and never becomes applied.',
         inputSchema: recordRequestReviewConsumptionInputSchema,
         handler: handleRecordRequestReviewConsumption,

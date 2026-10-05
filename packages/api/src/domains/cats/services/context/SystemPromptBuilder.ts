@@ -210,6 +210,8 @@ export interface InvocationContext {
    * Required when threadKind === 'concierge'. Provides displayName / personaTone / dutyCatProfileId.
    */
   conciergeConfig?: ConciergeConfig;
+  /** Server-owned admitted Live surface; never inferred from a concierge thread or message content. */
+  liveCompanion?: { householdToolsEnabled: boolean; compositionInstructions?: string };
 }
 
 /** Get all cat configs from catRegistry (.cat-cafe/cat-catalog.json) */

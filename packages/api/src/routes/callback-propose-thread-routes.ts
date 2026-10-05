@@ -9,7 +9,7 @@
  * proposal-routes.ts.
  */
 
-import type { ApprovalEnvelope, CatId, ThreadProposal } from '@cat-cafe/shared';
+import type { ApprovalEnvelope, CatId, DevelopmentScopeV1, TaskItem, ThreadProposal } from '@cat-cafe/shared';
 import { catIdSchema, generateProposalId, suggestedReportingModeForWorkMode } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -39,6 +39,11 @@ const proposeThreadCallbackSchema = z.object({
   projectPath: z.string().min(1).max(500).optional(),
   parentThreadId: z.string().min(1).optional(),
   clientRequestId: z.string().min(1).max(200).optional(),
+  /**
+   * F167 × F322: task binding hint. Server validates against the task store —
+   * caller cannot gain delegation authority by fabricating a task ID.
+   */
+  subjectTaskId: z.string().trim().min(1).max(200).optional(),
 });
 
 export interface ProposeThreadDeps {
@@ -48,6 +53,8 @@ export interface ProposeThreadDeps {
   messageStore: IMessageStore;
   socketManager: SocketManager;
   approvalIngress?: ApprovalIngress;
+  /** F167 × F322: task lookup for server-side subjectTaskId validation. */
+  taskLookup?: { get(taskId: string): TaskItem | null | Promise<TaskItem | null> };
 }
 
 export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: ProposeThreadDeps): void {
@@ -74,6 +81,7 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
       projectPath: explicitProjectPath,
       parentThreadId,
       clientRequestId,
+      subjectTaskId: rawSubjectTaskId,
     } = parsed.data;
     const invocationId = record.invocationId;
 
@@ -97,6 +105,31 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
     if (!originMessageId) {
       reply.status(400);
       return { error: 'Exact source message is required for an approval proposal' };
+    }
+
+    // F167 × F322: server-side validation of subjectTaskId — verifies the task exists
+    // and belongs to the same user. Full delegation chain runs at claim time.
+    let validatedSubjectTaskId: string | undefined;
+    let validatedSubjectTaskTitle: string | undefined;
+    let validatedDevelopmentScope: DevelopmentScopeV1 | undefined;
+    if (rawSubjectTaskId) {
+      if (!deps.taskLookup) {
+        reply.status(400);
+        return { error: 'subjectTaskId is not supported without a task store' };
+      }
+      const task = await deps.taskLookup.get(rawSubjectTaskId);
+      if (!task) {
+        reply.status(400);
+        return { error: 'subjectTaskId references a non-existent task' };
+      }
+      if (task.userId && task.userId !== record.userId) {
+        reply.status(403);
+        return { error: 'subjectTaskId belongs to a different user' };
+      }
+      validatedSubjectTaskId = task.id;
+      validatedSubjectTaskTitle = task.title;
+      // F167 R5: snapshot scope from the already-validated task (server-derived, not caller-supplied).
+      validatedDevelopmentScope = task.entrustedWork?.developmentScope;
     }
 
     // Idempotency fast path: only return success if the proposal is fully VISIBLE — i.e. the
@@ -232,6 +265,9 @@ export function registerCallbackProposeThreadRoutes(app: FastifyInstance, deps: 
         ...(initialMessage ? { initialMessage } : {}),
         reportingMode: reportingMode ?? suggestedReportingModeForWorkMode(declaredWorkMode),
         ...(declaredWorkMode ? { declaredWorkMode } : {}),
+        ...(validatedSubjectTaskId ? { subjectTaskId: validatedSubjectTaskId } : {}),
+        ...(validatedSubjectTaskTitle ? { subjectTaskTitle: validatedSubjectTaskTitle } : {}),
+        ...(validatedDevelopmentScope ? { approvedDevelopmentScope: validatedDevelopmentScope } : {}),
       });
     } catch (err) {
       // Critical: if we reserved a dedup key but failed to create the proposal it points at,

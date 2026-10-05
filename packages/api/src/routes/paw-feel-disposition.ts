@@ -63,7 +63,19 @@ async function listInbox(
   if (!readModel) return reply.status(503).send({ error: 'paw-feel disposition ledger unavailable' });
   const query = parsePawFeelInboxQuery(request, reply);
   if (!query) return;
-  return readModel.list({ ...query, ...overrides });
+  const controller = new AbortController();
+  const abort = () => controller.abort(new DOMException('Paw-feel inbox client disconnected', 'AbortError'));
+  const onClose = () => {
+    if (!reply.raw.writableEnded) abort();
+  };
+  request.raw.once('aborted', abort);
+  reply.raw.once('close', onClose);
+  try {
+    return await readModel.list({ ...query, ...overrides, signal: controller.signal });
+  } finally {
+    request.raw.off('aborted', abort);
+    reply.raw.off('close', onClose);
+  }
 }
 
 function mapServiceError(error: unknown, reply: FastifyReply) {

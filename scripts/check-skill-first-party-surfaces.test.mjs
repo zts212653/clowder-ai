@@ -64,6 +64,17 @@ describe('check-skill-first-party-surfaces', () => {
     assert.match(mergeGate, /禁止[^。\n]*(?:重跑|重新运行)[^。\n]*full gate/i);
   });
 
+  it('routes ordinary dormant activation through the original Task without granting restart authority', () => {
+    const mergeGate = readFileSync(new URL('../cat-cafe-skills/merge-gate/SKILL.md', import.meta.url), 'utf8');
+
+    assert.match(mergeGate, /cat_cafe_register_deployment_wait/);
+    assert.match(mergeGate, /原验收 \/ 开发 work Task/);
+    assert.match(mergeGate, /不能从 merge 事件推导新授权/);
+    assert.match(mergeGate, /登记是续办责任，不是部署授权/);
+    assert.match(mergeGate, /能力未加载[^\n]*禁止写“已登记”/);
+    assert.match(mergeGate, /不调用 `hold_ball` 轮询/);
+  });
+
   it('routes belief-testing explainers through an optional falsifiable technical cutaway', () => {
     const conceptDemo = readFileSync(
       new URL('../cat-cafe-skills/concept-demo-design/SKILL.md', import.meta.url),

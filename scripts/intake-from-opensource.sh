@@ -89,7 +89,7 @@ is_public_only() {
     .github/FUNDING.yml|.github/ISSUE_TEMPLATE/*|.github/DISCUSSION_TEMPLATE/*) return 0 ;;
     CHANGELOG.md|docs/community/*) return 0 ;;
     # Generated/replaced files
-    CONTRIBUTING.md|SETUP.md|LICENSE|.env.example) return 0 ;;
+    LICENSE|.env.example) return 0 ;;
     .github/pull_request_template.md) return 0 ;;
     CLAUDE.md|AGENTS.md|GEMINI.md) return 0 ;;
     cat-config.json) return 0 ;;
@@ -801,9 +801,45 @@ validate_review_proof_continuity() {
   return 1
 }
 
+resolve_intake_source_projections() {
+  node --input-type=module -e '
+import { pathToFileURL } from "node:url";
+import { resolve } from "node:path";
+const root = process.argv[1];
+const { loadPublicExportCoverage } = await import(pathToFileURL(resolve(root, "scripts/lib/sync-public-export-coverage.mjs")));
+const coverage = loadPublicExportCoverage(root);
+if (!coverage) throw new Error("Intake source projection guard requires sync-manifest.yaml");
+const entries = [...coverage.transformExactByTarget].filter(([, entry]) =>
+  entry.type === "generate" && !entry.target.includes("/") && entry.target.endsWith(".md") &&
+  typeof entry.source === "string" && entry.source.length > 0);
+console.log(JSON.stringify(Object.fromEntries(entries.map(([target, entry]) => [target, entry.source]))));
+' "$SOURCE_DIR"
+}
+
+validate_absorb_source_projections() {
+  local missing_projections
+  missing_projections=$(PUBLIC_PR_FILES="$1" ABSORB_PR_FILES="$2" SOURCE_PROJECTIONS_JSON="$3" node -e '
+const paths = (value) => String(value || "").split("\n").filter(Boolean);
+const absorbed = new Set(paths(process.env.ABSORB_PR_FILES));
+const mappings = JSON.parse(process.env.SOURCE_PROJECTIONS_JSON);
+const missing = paths(process.env.PUBLIC_PR_FILES)
+  .filter((path) => mappings[path] && !absorbed.has(mappings[path]))
+  .map((path) => `${path} -> ${mappings[path]}`);
+process.stdout.write(missing.join("\n"));
+') || return 1
+  if [ -n "$missing_projections" ]; then
+    echo -e "${RED}✗ Absorbed intake omits canonical source projection(s):${NC}"
+    printf '%s\n' "$missing_projections" | sed 's/^/    - /'
+    echo "  Port each public document into its mapped source in the reviewed absorb PR."
+    echo "  An existing source template or PR-level absorbed decision is not preservation proof."
+    return 1
+  fi
+}
+
 validate_absorb_pr_scope_alignment() {
   local scope_issue_bodies_b64="$1"
   local absorb_pr_files="${2:-}"
+  local source_projections_json="${3:-\{\}}"
 
   if [ -z "$absorb_pr_files" ]; then
     absorb_pr_files=$(resolve_absorb_pr_brand_scope || true)
@@ -814,7 +850,8 @@ validate_absorb_pr_scope_alignment() {
   fi
 
   local out_of_scope_files
-  out_of_scope_files=$(INTENT_BODIES_B64="$scope_issue_bodies_b64" ABSORB_PR_FILES="$absorb_pr_files" node -e '
+  out_of_scope_files=$(INTENT_BODIES_B64="$scope_issue_bodies_b64" ABSORB_PR_FILES="$absorb_pr_files" SOURCE_PROJECTIONS_JSON="$source_projections_json" node -e '
+const sourceProjections = JSON.parse(process.env.SOURCE_PROJECTIONS_JSON);
 const scopeBodies = String(process.env.INTENT_BODIES_B64 || "")
   .split("\n")
   .map((line) => line.trim())
@@ -865,6 +902,9 @@ function isDeclaredInDecisionTable(file) {
       if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue;
       if (!decisionTokenRe.test(cells.slice(1).join(" | "))) continue;
       if (matchesDeclaredToken(cells[0], file)) return true;
+      const absorbs = cells.slice(1).some((cell) => /^(absorb(?:ed)?|safe[- ]?cherry[- ]?pick|manual[- ]?port|high[- ]?risk)$/i.test(normalizeToken(cell)));
+      if (absorbs && Object.entries(sourceProjections).some(([target, source]) =>
+        source === file && matchesDeclaredToken(cells[0], target))) return true;
     }
   }
   return false;
@@ -1258,7 +1298,14 @@ console.log(required.every((pattern) => pattern.test(text)) ? "yes" : "no");
     scope_issue_bodies_b64+="$scope_issue_body_b64"
   done <<< "$scope_issue_ids"
 
-  validate_absorb_pr_scope_alignment "$scope_issue_bodies_b64" "${BRAND_SCOPE_FILES:-}" || return 1
+  local absorb_scope_files="${BRAND_SCOPE_FILES:-}"
+  if [ -z "$absorb_scope_files" ]; then
+    absorb_scope_files=$(resolve_absorb_pr_brand_scope) || return 1
+  fi
+  local source_projection_map
+  source_projection_map=$(resolve_intake_source_projections) || return 1
+  validate_absorb_source_projections "$source_pr_files" "$absorb_scope_files" "$source_projection_map" || return 1
+  validate_absorb_pr_scope_alignment "$scope_issue_bodies_b64" "$absorb_scope_files" "$source_projection_map" || return 1
   validate_absorb_pr_validation_evidence "${BRAND_SCOPE_FILES:-}" "$(echo "$absorb_pr_info" | node -e "const d=JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')); console.log(String(d.body||''))")" || return 1
   validate_review_proof_continuity "$absorb_pr_head" "$review_proof_mode" || return 1
 

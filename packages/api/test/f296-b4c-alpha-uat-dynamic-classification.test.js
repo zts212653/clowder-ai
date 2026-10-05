@@ -47,7 +47,7 @@ test('keeps dynamic presentation unsupported when the cold producer trace is una
 
   const manifest = await runAlphaUat({
     apiUrl: 'http://127.0.0.1:3012',
-    redisUrl: 'redis://127.0.0.1:6398',
+    redisUrl: 'redis://127.0.0.1:6397',
     catId: 'codex',
     userId: 'f296-alpha-uat',
     timeoutMs: 1000,

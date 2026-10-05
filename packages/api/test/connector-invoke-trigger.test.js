@@ -481,6 +481,72 @@ describe('ConnectorInvokeTrigger', () => {
     assert.deepStrictEqual(routerMock.calls[0].targetCats, ['opus']);
   });
 
+  it('rejects a stale deployment continuation before direct invocation admission', async () => {
+    const trigger = createTrigger({
+      deploymentWaitStartGuard: { check: async () => ({ ok: false, reason: 'authority_stale' }) },
+    });
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'old wait', 'msg-stale'),
+      /deployment wait continuation authority_stale/,
+    );
+    assert.equal(recordMock.creates.length, 0);
+    assert.equal(routerMock.calls.length, 0);
+  });
+
+  it('rejects a deployment continuation when the runtime authority guard is absent', async () => {
+    const trigger = createTrigger();
+    await assert.rejects(
+      trigger.trigger(
+        'thread-1',
+        /** @type {any} */ ('opus'),
+        'user-1',
+        'deployment wait',
+        'msg-deployment',
+        undefined,
+        {
+          reason: 'deployment_wait_satisfied',
+        },
+      ),
+      /deployment wait continuation evidence_stale/,
+    );
+    assert.equal(recordMock.creates.length, 0);
+    assert.equal(routerMock.calls.length, 0);
+  });
+
+  it('rechecks deployment authority after direct admission and before starting the child', async () => {
+    let reads = 0;
+    const trigger = createTrigger({
+      deploymentWaitStartGuard: {
+        check: async () => (++reads === 1 ? { ok: true } : { ok: false, reason: 'authority_stale' }),
+      },
+    });
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'old wait', 'msg-stale-late'),
+      /deployment wait continuation authority_stale before execution/,
+    );
+    assert.equal(reads, 2);
+    assert.equal(recordMock.creates.length, 1);
+    assert.equal(routerMock.calls.length, 0);
+  });
+
+  it('keeps a failed direct admission retryable when deployment readiness disappears', async () => {
+    let reads = 0;
+    const trigger = createTrigger({
+      deploymentWaitStartGuard: {
+        check: async () => (++reads === 1 ? { ok: true } : { ok: false, reason: 'evidence_stale' }),
+      },
+    });
+    await assert.rejects(
+      trigger.trigger('thread-1', /** @type {any} */ ('opus'), 'user-1', 'wait', 'msg-not-ready'),
+      /deployment wait continuation evidence_stale before execution/,
+    );
+    assert.equal(
+      recordMock.updates.some(({ data }) => data.status === 'failed'),
+      true,
+    );
+    assert.equal(routerMock.calls.length, 0);
+  });
+
   it('copies the exact stored wait carrier into a direct Invocation and event-wait turn provenance', async () => {
     const storedMessage = waitConnectorMessage('msg-wait-direct', 'wait:pr:owner/repo#7:g3:matched');
     const trigger = createTrigger({

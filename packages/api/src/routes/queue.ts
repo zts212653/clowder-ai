@@ -36,6 +36,7 @@ import {
   isSystemPinnedQueueEntry,
   type QueueEntry,
 } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+import type { NativeControlReceiptPort } from '../domains/cats/services/agents/invocation/NativeControlReceipt.js';
 import {
   canSteerQueueSources,
   readQueueCarrierMessages,
@@ -59,6 +60,7 @@ import {
 import { resolveUserId } from '../utils/request-identity.js';
 import { type LiveExecutionCandidate, registerActiveExecutionRoutes } from './active-execution-routes.js';
 import { getMultiMentionOrchestrator } from './callback-multi-mention-routes.js';
+import { nativeControlReceiptHooks, nativeQueueControlCommand } from './native-control-receipts.js';
 
 interface ManagedCommandWakeRecoveryLike {
   retireCarrier(messageIds: readonly string[], reason: 'withdrawn'): Promise<number>;
@@ -70,6 +72,7 @@ interface ManagedCommandWakeRecoveryLike {
 }
 
 export interface QueueRoutesOptions {
+  controlReceipts?: () => NativeControlReceiptPort | undefined;
   threadStore: IThreadStore;
   invocationQueue: InvocationQueue;
   queueProcessor: QueueProcessor;
@@ -92,7 +95,7 @@ export interface QueueRoutesOptions {
   invocationRecordStore?: IInvocationRecordStore;
   draftStore?: IDraftStore;
   /** Durable per-child lifecycle truth used to bridge tracker/draft handoff gaps. */
-  turnExecutionStore?: Pick<ITurnExecutionStore, 'listByParent' | 'transitionTerminal'>;
+  turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'listByParent' | 'transitionTerminal'>;
   /** F194 Phase Z (KD-22): InvocationRegistry — provides namespace bridge between
    *  parent recordStore invocation and per-cat-turn child registry invocation.
    *  When wired, helper uses parentInvocationId / latestId to detect parent+child
@@ -541,6 +544,8 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
 
   registerActiveExecutionRoutes(app, {
     threadStore,
+    ...(opts.controlReceipts ? { controlReceipts: opts.controlReceipts } : {}),
+    ...(opts.turnExecutionStore ? { turnExecutions: opts.turnExecutionStore } : {}),
     invocationTracker,
     dynamicTaskStore: opts.dynamicTaskStore,
     // F297 AC-D3：与 Sidebar 共用同一个 composition service；project scan 只取
@@ -612,8 +617,12 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
   });
 
   // DELETE /api/threads/:threadId/queue/:entryId
-  app.delete<{ Params: { threadId: string; entryId: string }; Querystring: { deleteMessage?: string } }>(
+  app.delete<{
+    Params: { threadId: string; entryId: string };
+    Querystring: { deleteMessage?: string; expectedSourceMessageId?: string; expectedTargetCatId?: string };
+  }>(
     '/api/threads/:threadId/queue/:entryId',
+    nativeControlReceiptHooks(opts.controlReceipts, nativeQueueControlCommand),
     async (request, reply) => {
       const { threadId, entryId } = request.params;
       const guard = await guardThreadOwnership(request, reply, threadStore, threadId);
@@ -633,6 +642,24 @@ export const queueRoutes: FastifyPluginAsync<QueueRoutesOptions> = async (app, o
       if (invocationQueue.hasUnsettledExactSteerReservation(threadId, guard.userId, entryId)) {
         reply.status(409);
         return { error: 'Steer 正在抢占，暂无法撤回', code: 'ENTRY_STEERING' };
+      }
+
+      const { expectedSourceMessageId, expectedTargetCatId } = request.query;
+      if (expectedSourceMessageId !== undefined || expectedTargetCatId !== undefined) {
+        const expected = z
+          .object({ messageId: z.string().min(1).max(256), catId: z.string().min(1).max(100) })
+          .safeParse({ messageId: expectedSourceMessageId, catId: expectedTargetCatId });
+        if (!expected.success)
+          return reply.code(400).send({ error: 'Invalid exact queue source', code: 'INVALID_REQUEST' });
+        const sources = new Set(queueEntryMessageIds(entry));
+        if (
+          sources.size !== 1 ||
+          !sources.has(expected.data.messageId) ||
+          entry.allTargetCats?.length !== 1 ||
+          entry.allTargetCats[0] !== expected.data.catId ||
+          entry.targetCats.some((catId) => catId !== expected.data.catId)
+        )
+          return reply.code(409).send({ error: '该队列项不再只包含这次请求，尚未撤回', code: 'ENTRY_SCOPE_CHANGED' });
       }
 
       // Remove entry from queue FIRST (sync) to close the TOCTOU window —

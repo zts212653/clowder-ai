@@ -16,6 +16,7 @@ import type { IConnectorThreadBindingStore } from '../../infrastructure/connecto
 import type { ReconciliationDedup } from '../../infrastructure/connectors/github-repo-event/ReconciliationDedup.js';
 import type { RepoIssueComment } from '../../infrastructure/connectors/github-repo-event/RepoCommentPollTaskSpec.js';
 import { repoCommentPollTaskSpec } from '../../infrastructure/connectors/github-repo-event/RepoCommentPollTaskSpec.js';
+import type { ResolveRepoInboxCatId } from '../../infrastructure/connectors/github-repo-event/RepoInboxOwnerResolver.js';
 import type { GhIssueItem, GhPrItem } from '../../infrastructure/connectors/github-repo-event/RepoScanTaskSpec.js';
 import { createRepoScanTaskSpec } from '../../infrastructure/connectors/github-repo-event/RepoScanTaskSpec.js';
 import { createCiCdCheckTaskSpec } from '../../infrastructure/email/CiCdCheckTaskSpec.js';
@@ -43,6 +44,7 @@ import type {
 import type {
   PrFeedbackCommentCursors,
   ReviewFeedbackPrMetadata,
+  ReviewFeedbackTaskSpecOptions,
 } from '../../infrastructure/email/ReviewFeedbackTaskSpec.js';
 import { createReviewFeedbackTaskSpec } from '../../infrastructure/email/ReviewFeedbackTaskSpec.js';
 import type { TaskSpec_P1 } from '../../infrastructure/scheduler/types.js';
@@ -85,11 +87,17 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   invokeTrigger: ConnectorInvokeTrigger;
   // Repo-scan connector delivery deps. Review-feedback delivery stays encapsulated
   // in ReviewFeedbackRouter; no rotation/backlink delivery path exists post-#2394.
-  checkMergeable: (repo: string, pr: number) => Promise<{ mergeState: string; headSha: string }>;
+  checkMergeable: (repo: string, pr: number, signal?: AbortSignal) => Promise<{ mergeState: string; headSha: string }>;
   autoExecutor: ConflictAutoExecutor;
-  fetchPrMetadata: (repo: string, pr: number) => Promise<ReviewFeedbackPrMetadata | null>;
-  fetchComments: (repo: string, pr: number, cursors: PrFeedbackCommentCursors) => Promise<PrFeedbackComment[]>;
-  fetchReviews: (repo: string, pr: number) => Promise<PrReviewDecision[]>;
+  fetchPrMetadata: (repo: string, pr: number, signal?: AbortSignal) => Promise<ReviewFeedbackPrMetadata | null>;
+  fetchComments: (
+    repo: string,
+    pr: number,
+    cursors: PrFeedbackCommentCursors,
+    signal?: AbortSignal,
+  ) => Promise<PrFeedbackComment[]>;
+  fetchReviews: (repo: string, pr: number, signal?: AbortSignal) => Promise<PrReviewDecision[]>;
+  fetchReviewThreads?: ReviewFeedbackTaskSpecOptions['fetchReviewThreads'];
   isEchoComment: (c: PrFeedbackComment) => boolean;
   isEchoReview: (r: PrReviewDecision) => boolean;
   isNoiseComment: (c: PrFeedbackComment) => boolean;
@@ -99,6 +107,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   // repo-scan deps — optional, not available when redis is not configured
   repoAllowlist?: string[];
   inboxCatId?: string;
+  resolveInboxCatId?: ResolveRepoInboxCatId;
   defaultUserId?: string;
   reconciliationDedup?: Pick<
     ReconciliationDedup,
@@ -107,14 +116,23 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
   bindingStore?: Pick<IConnectorThreadBindingStore, 'getByExternal'>;
   deliverFn?: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
   deliveryDeps?: ConnectorDeliveryDeps;
-  fetchOpenPRs?: (repo: string) => Promise<GhPrItem[]>;
-  fetchOpenIssues?: (repo: string) => Promise<GhIssueItem[]>;
+  fetchOpenPRs?: (repo: string, signal?: AbortSignal) => Promise<GhPrItem[]>;
+  fetchOpenIssues?: (repo: string, signal?: AbortSignal) => Promise<GhIssueItem[]>;
   // F202 Phase 2D: issue comment tracking deps
   issueCommentRouter?: IssueCommentRouter;
   waitLifecycle?: GitHubWaitLifecycleService;
-  fetchIssueComments?: (repoFullName: string, issueNumber: number, sinceId?: number) => Promise<IssueComment[]>;
-  fetchIssueState?: (repoFullName: string, issueNumber: number) => Promise<'open' | 'closed'>;
-  fetchIssueMetadata?: (repoFullName: string, issueNumber: number) => Promise<IssueTrackingMetadata>;
+  fetchIssueComments?: (
+    repoFullName: string,
+    issueNumber: number,
+    sinceId?: number,
+    signal?: AbortSignal,
+  ) => Promise<IssueComment[]>;
+  fetchIssueState?: (repoFullName: string, issueNumber: number, signal?: AbortSignal) => Promise<'open' | 'closed'>;
+  fetchIssueMetadata?: (
+    repoFullName: string,
+    issueNumber: number,
+    signal?: AbortSignal,
+  ) => Promise<IssueTrackingMetadata>;
   isEchoIssueComment?: (c: IssueComment) => boolean;
   /** F220 (clowder-ai#972): exact-identity bot setup-noise filter for the issue path
    *  (mirrors the PR-review path's isNoiseComment; provided from the shared F140 filter). */
@@ -134,7 +152,7 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
    * event log + a Redis-backed per-repo cursor (read/write), NOT the delivery deps
    * (inbox / reconciliationDedup / bindingStore) that repo-scan uses.
    */
-  fetchRepoComments?: (repo: string, sinceIso?: string) => Promise<RepoIssueComment[]>;
+  fetchRepoComments?: (repo: string, sinceIso?: string, signal?: AbortSignal) => Promise<RepoIssueComment[]>;
   readRepoCommentCursor?: (repo: string) => Promise<string | undefined>;
   writeRepoCommentCursor?: (repo: string, cursor: string) => Promise<void>;
   /**
@@ -144,8 +162,8 @@ export interface GitHubScheduleDeps extends ScheduleFactoryDeps {
    */
   objectStore?: Pick<ICommunityObjectStore, 'get' | 'listSubjectKeys'>;
   findingStore?: CommunityReconciliationFindingStore;
-  fetchGitHubIssueState?: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
-  fetchGitHubPrState?: (repo: string, number: number) => Promise<GitHubSnapshot | null>;
+  fetchGitHubIssueState?: (repo: string, number: number, signal?: AbortSignal) => Promise<GitHubSnapshot | null>;
+  fetchGitHubPrState?: (repo: string, number: number, signal?: AbortSignal) => Promise<GitHubSnapshot | null>;
   reconcilerSlaPolicy?: SlaPolicy;
   isReconcilerBaselineEstablished?: () => Promise<boolean>;
   markReconcilerBaselineEstablished?: () => Promise<void>;
@@ -221,6 +239,7 @@ const reviewFeedbackFactory: ScheduleFactory = {
       fetchPrMetadata: d.fetchPrMetadata,
       fetchComments: d.fetchComments,
       fetchReviews: d.fetchReviews,
+      fetchReviewThreads: d.fetchReviewThreads,
       reviewFeedbackRouter: d.reviewFeedbackRouter,
       threadStore: d.threadStore,
       invokeTrigger: d.invokeTrigger,
@@ -262,6 +281,7 @@ const repoScanFactory: ScheduleFactory = {
       id: instanceId,
       repoAllowlist: d.repoAllowlist,
       inboxCatId: d.inboxCatId,
+      resolveInboxCatId: d.resolveInboxCatId,
       defaultUserId: d.defaultUserId,
       reconciliationDedup: d.reconciliationDedup,
       bindingStore: d.bindingStore,

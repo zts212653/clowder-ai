@@ -28,6 +28,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, posix, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { rootCheckChain } from './lib/root-check-chain.mjs';
 
 const ROOT = resolve(process.cwd());
 
@@ -187,17 +188,25 @@ function buildExportedRootScripts(sourceScripts) {
   const scripts = { ...sourceScripts };
   scripts['start:direct'] = 'node ./scripts/start-entry.mjs start:direct --profile=opensource';
   scripts['dev:direct'] = 'node ./scripts/start-entry.mjs dev:direct --profile=opensource';
-  scripts['check:start-profile-isolation'] = 'node --test scripts/start-dev-profile-isolation.test.mjs';
+  scripts['check:start-profile-isolation'] =
+    'node --test scripts/start-dev-profile-isolation.test.mjs scripts/start-dev-named-alpha-redis-lease.test.mjs';
   scripts['check:pre-merge-gate'] =
-    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs';
-  if (!scripts.check.includes('pnpm check:start-profile-isolation')) {
+    'node --test scripts/pre-merge-check.test.mjs scripts/pre-merge-gate-guard.test.mjs scripts/pre-merge-gate-guard.alpha.test.mjs scripts/lib/alpha-redis-leases.test.mjs scripts/gate-resource-health-monitor.test.mjs scripts/lib/fseventsd-pressure.test.mjs scripts/lib/clowder-merge-check-evidence.test.mjs scripts/lib/git-patch-id.test.mjs scripts/test-bash-runtime.test.mjs scripts/check-worktree-dirty-ledger.test.mjs scripts/classify-merge-outcome.test.mjs scripts/clowder-merge-execution.test.mjs scripts/lib/gate-continuity-claim.test.mjs scripts/lib/gate-continuity-secret.test.mjs';
+  // Mirrors sync-to-opensource.sh: membership looks through the check tiers.
+  if (!rootCheckChain(scripts).split(' && ').includes('pnpm check:start-profile-isolation')) {
     scripts.check += ' && pnpm check:start-profile-isolation';
   }
-  scripts.check = scripts.check.replace(' && pnpm test:architecture-ownership', '');
+  for (const [name, command] of Object.entries(scripts)) {
+    scripts[name] = command
+      .split(' && ')
+      .filter((segment) => segment !== 'pnpm test:architecture-ownership')
+      .join(' && ');
+  }
   delete scripts['check:architecture-ownership'];
   delete scripts['test:architecture-ownership'];
 
   const internalScripts = [
+    'check:browser-consumers',
     'sync:train',
     'antigravity:smoke',
     'check:hmac-salt',
@@ -224,6 +233,11 @@ function buildExportedRootScripts(sourceScripts) {
     // F267 component hashes resolve private home certificate revisions and must
     // be removed from both the exported script table and check:features chain.
     'check:measurement-component-hashes',
+    // F286 bootstrap attestation is bound to cat-cafe origin/main; the public checkout has a
+    // different protected history. Mirrors sync-to-opensource.sh internalScripts.
+    'check:mcp-surface-governance',
+    // F251 sibling guard hard-depends on sync-manifest.yaml (not exported). Mirrors the shell list.
+    'check:sync-docs-runtime-assets',
     // F238 Phase D: reverse-sanitizer detect-only CLI — internal boundary tooling
     // (PR #2333). Must mirror sync-to-opensource.sh internalScripts list.
     'check:reverse-sanitizer',
@@ -249,6 +263,11 @@ function buildExportedRootScripts(sourceScripts) {
     'cloud:copy-url',
     'cloud:stop',
     'check:f247-cloud-services',
+    // F256 Phase A hook regression tests live in test/hooks/, which is not exported.
+    'check:hooks',
+    // Prompt-budget guard (#4686 + follow-up): native L0 tokens + builder-prompt chars against
+    // the HOME roster; the L0 test and the dossier stay home-only. Mirrors sync-to-opensource.sh.
+    'check:prompt-budget',
     // F068 primary-worktree post-checkout guard + local event log are home-only.
     'eval:post-checkout-guard',
     'clean:root-debris',
@@ -582,7 +601,7 @@ describe(`Code-side port defaults are internally consistent (${repoLabel}: API=$
     assert.doesNotMatch(
       content,
       /export CAT_CAFE_PROVISION_GLOBAL_SIDECAR=1/,
-      'alpha uses isolated Redis 6398 and must not overwrite runtime global agent-key sidecars',
+      'alpha uses dedicated Redis 6397 and must not overwrite runtime global agent-key sidecars',
     );
   });
 
@@ -1158,9 +1177,18 @@ excluded:
         'public package.json should keep only exported source tests in check:pre-merge-gate',
       );
       assert.ok(
-        exportedScripts.check.includes('pnpm check:skills:surfaces') && !content.includes('"check:skills:surfaces",'),
+        rootCheckChain(exportedScripts).split(' && ').includes('pnpm check:skills:surfaces') &&
+          !content.includes('"check:skills:surfaces",'),
         'public package.json should run the exported skill surface guard in pnpm check',
       );
+      // A tier may keep calling a script the transform deleted; the literal
+      // `check` string would never show it. Every step `pnpm check` reaches
+      // must resolve to a script that still exists in the public package.
+      for (const step of rootCheckChain(exportedScripts).split(' && ')) {
+        const match = /^pnpm (?:run )?([\w:.-]+)$/u.exec(step);
+        if (!match || match[1] === 'biome') continue;
+        assert.ok(exportedScripts[match[1]], `public pnpm check reaches a deleted script: ${step}`);
+      }
       assert.ok(
         content.includes('delete pkg.scripts["check:architecture-ownership"]'),
         'public package.json should not expose check:architecture-ownership without exporting its script target',
@@ -1170,8 +1198,9 @@ excluded:
         'public package.json should not expose test:architecture-ownership without exporting its script target',
       );
       assert.ok(
-        content.includes('pkg.scripts.check = pkg.scripts.check.replace(" && pnpm test:architecture-ownership", "")'),
-        'public package.json should remove the source-only architecture ownership test from its check chain',
+        content.includes('.filter((segment) => segment !== "pnpm test:architecture-ownership")') &&
+          !rootCheckChain(exportedScripts).split(' && ').includes('pnpm test:architecture-ownership'),
+        'public package.json should remove the source-only architecture ownership test from every check chain',
       );
       assert.ok(
         content.includes('"check:f223-action-tracking"'),
@@ -1229,6 +1258,18 @@ excluded:
         mirroredScripts.check,
         /check:memory-architecture-catalog/,
         'public check-chain mirror drift',
+      );
+    });
+
+    it('public package transform and its test mirror agree on every exported root script (drift guard)', () => {
+      // #4686 review P2: the shell transform grew an internalScripts entry while the mirror did not,
+      // and every other assertion stayed green. Compare the two whole outputs on the real package.json
+      // so a one-sided edit turns red by itself.
+      const sourceScripts = readJsonFile('package.json').scripts;
+      assert.deepEqual(
+        buildExportedRootScripts(sourceScripts),
+        executePackageScriptsTransform(sourceScripts),
+        'buildExportedRootScripts must mirror the PACKAGE_JSON_TRANSFORM_EOF program in scripts/sync-to-opensource.sh — update both when adding an internal-only script',
       );
     });
 
@@ -1448,7 +1489,7 @@ excluded:
 
       assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
       assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
-      assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
+      assert.doesNotMatch(sanitized, /\b6397\b|\b6398\b|\b6399\b/);
       assert.doesNotMatch(sanitized, /Clowder AI 的护城河是情感壁垒不是技术壁垒/);
     });
 
@@ -1460,7 +1501,7 @@ excluded:
       assert.match(sanitized, /\*\*Release acceptance channel\*\*/);
       assert.doesNotMatch(sanitized, /Redis production Redis \(sacred\)/);
       assert.doesNotMatch(sanitized, /Redis production Redis (sacred)/);
-      assert.doesNotMatch(sanitized, /\b6398\b|\b6399\b/);
+      assert.doesNotMatch(sanitized, /\b6397\b|\b6398\b|\b6399\b/);
       assert.doesNotMatch(sanitized, /co-creator/);
     });
 
@@ -2383,7 +2424,7 @@ describe(
       const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
       assert.match(
         gate,
-        /forbidden_ports="3001\|3002\|3011\|3012\|4111\|4000\|6398\|6399"/,
+        /forbidden_ports="3001\|3002\|3011\|3012\|4111\|4000\|6397\|6398\|6399"/,
         'startup acceptance should only block internal/runtime ports, not the public Preview Gateway default',
       );
       assert.doesNotMatch(
@@ -2397,7 +2438,7 @@ describe(
       const gate = readFunctionBody(readSyncScript(), 'run_target_public_gate');
       assert.match(
         gate,
-        /run_public_acceptance_env WATCHPACK_POLLING=true PORT=\$accept_web_port\s+\\\s+pnpm --filter @cat-cafe\/web dev -p \$accept_web_port/,
+        /run_public_startup_env "\$startup_state" "\$gate_target_real" WATCHPACK_POLLING=true PORT=\$accept_web_port\s+\\\s+pnpm --filter @cat-cafe\/web dev -p \$accept_web_port/,
         'startup acceptance should avoid native watchpack EMFILE failures on release machines with many worktrees',
       );
     });

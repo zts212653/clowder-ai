@@ -125,8 +125,8 @@ describe('ExternalRuntimeSessionsPanel', () => {
     expect(container.textContent).toContain('antigravity');
     expect(container.textContent).toContain('gemini-3.1-pro');
     expect(container.textContent).toContain('IDE 直连');
-    expect(container.textContent).toContain('policy handoff · unavailable · unmanaged boundary');
-    expect(container.textContent).toContain('policy hybrid · degraded · missing compression_signal');
+    expect(container.textContent).toContain('策略 接力 · 不可用 · 缺少：托管调用边界');
+    expect(container.textContent).toContain('策略 混合 · 降级 · 缺少：压缩信号');
     expect(container.textContent).toContain('已封存');
     expect(container.textContent).toContain('Runtime 断开');
     expect(container.textContent).toContain('Thread 绑定');
@@ -171,6 +171,25 @@ describe('ExternalRuntimeSessionsPanel', () => {
     });
 
     expect(onViewSession).toHaveBeenCalledWith('session-active', 'antigravity');
+  });
+
+  it('labels runtime session id and conversation id inside the collapsed 会话标识 details', async () => {
+    await renderPanel();
+
+    const detailsList = container.querySelectorAll<HTMLDetailsElement>('[data-testid="runtime-session-identity"]');
+    expect(detailsList.length).toBe(2);
+    for (const details of detailsList) {
+      // Default layer keeps the disclosure closed; labels and full values are recoverable on expand
+      expect(details.hasAttribute('open')).toBe(false);
+      details.open = true;
+      expect(details.textContent).toContain('runtime 会话 ID：');
+    }
+    const activeDetails = detailsList[0];
+    expect(activeDetails.textContent).toContain('runtime 会话 ID：cascade-active-1234567890abcdef');
+    expect(activeDetails.textContent).toContain('runtime 对话 ID：conversation-active');
+    const sealedDetails = detailsList[1];
+    expect(sealedDetails.textContent).toContain('runtime 会话 ID：cascade-sealed-1234567890abcdef');
+    expect(sealedDetails.textContent).toContain('runtime 对话 ID：conversation-sealed');
   });
 
   it('filters visible rows locally without refetching', async () => {

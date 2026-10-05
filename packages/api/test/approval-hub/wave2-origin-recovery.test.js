@@ -272,11 +272,20 @@ describe('staged recovery origin preservation', () => {
     const payload = {
       scene: 'A stable taste signal',
       quote: 'Keep the original provenance',
+      takeaway: '我们以为 You 喜欢可追溯的来源。',
       tags: ['authentic-expression'],
       dimension: 'authentic-expression',
       privacy: 'public',
       clientRequestId: 'taste-origin-preserve',
     };
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/propose-taste',
+      payload: { ...payload, takeaway: '   ' },
+    });
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(store.listPending('user-1').length, 0);
 
     const first = await app.inject({ method: 'POST', url: '/api/callbacks/propose-taste', payload });
     assert.ok(first.statusCode >= 500);
@@ -287,6 +296,7 @@ describe('staged recovery origin preservation', () => {
     };
     const retry = await app.inject({ method: 'POST', url: '/api/callbacks/propose-taste', payload });
     assert.equal(retry.statusCode, 200);
+    assert.equal(store.listPending('user-1')[0]?.takeaway, '我们以为 You 喜欢可追溯的来源。');
     assert.deepEqual(drafts[0].originRef, {
       kind: 'event',
       anchor: 'invocation:inv-taste-original',

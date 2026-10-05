@@ -22,7 +22,11 @@ import {
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
 import { normalizeTranscriptEvent, transcriptEventFingerprint } from './TranscriptEventEnvelope.js';
-import type { TranscriptEvent } from './TranscriptReader.js';
+import { type TranscriptEvent, TranscriptReader } from './TranscriptReader.js';
+import { materializeFilesTouched, recordFilesTouched } from './transcript-file-touches.js';
+import { TranscriptInvocationReader } from './transcript-index/TranscriptInvocationReader.js';
+import { compactTranscriptEvent } from './transcript-index/transcript-invocation-compact-event.js';
+import type { CompactTranscriptEvent } from './transcript-index/transcript-invocation-index-types.js';
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -152,6 +156,7 @@ export interface HandoffDigestMeta {
 }
 
 export class TranscriptWriter {
+  private readonly readProjections = new WeakMap<BufferedEvent, CompactTranscriptEvent>();
   private readonly dataDir: string;
   private readonly indexStride: number;
   /** sessionId → buffered events */
@@ -276,7 +281,6 @@ export class TranscriptWriter {
     const prev = this.diskWriteQueue.get(session.sessionId) ?? Promise.resolve();
     const attempt = prev.then(async () => {
       const dir = this.sessionDir(session);
-      await mkdir(dir, { recursive: true });
       const envelope = {
         v: 1,
         t: entry.timestamp,
@@ -288,6 +292,8 @@ export class TranscriptWriter {
         eventNo: entry.eventNo,
         event: entry.event,
       };
+      this.readProjections.set(entry, compactTranscriptEvent(envelope));
+      await mkdir(dir, { recursive: true });
       await appendFile(join(dir, 'events.live.jsonl'), `${JSON.stringify(envelope)}\n`, 'utf-8');
     });
     // Keep the queue usable after a failed durable append. Individual callers
@@ -306,6 +312,37 @@ export class TranscriptWriter {
     } else {
       await Promise.all([...this.diskWriteQueue.values()]);
     }
+  }
+
+  /** Capture references and their already-computed compact metadata, never the full live file. */
+  async readBufferedSnapshot(session: TranscriptSessionInfo): Promise<{
+    events: TranscriptEvent[];
+    compact: CompactTranscriptEvent[];
+  }> {
+    await this.drainPendingWrites(session.sessionId);
+    const events: TranscriptEvent[] = [];
+    const compact: CompactTranscriptEvent[] = [];
+    for (const entry of this.buffers.get(session.sessionId) ?? []) {
+      const envelope: TranscriptEvent = {
+        v: 1,
+        t: entry.timestamp,
+        threadId: session.threadId,
+        catId: session.catId,
+        sessionId: session.sessionId,
+        eventNo: entry.eventNo,
+        event: entry.event,
+        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+        ...(entry.invocationId !== undefined ? { invocationId: entry.invocationId } : {}),
+      };
+      events.push(envelope);
+      let projection = this.readProjections.get(entry);
+      if (!projection) {
+        projection = compactTranscriptEvent(envelope);
+        this.readProjections.set(entry, projection);
+      }
+      compact.push(projection);
+    }
+    return { events, compact };
   }
 
   /**
@@ -345,14 +382,13 @@ export class TranscriptWriter {
   ): Promise<ExtractiveDigestV1['filesTouched']> {
     const filePaths = new Map<string, Set<string>>();
 
-    // Merge from disk: has pre-restart events + already-flushed post-restart events
     if (sessionMeta) {
-      const sessionDir = join(this.dataDir, 'threads', sessionMeta.threadId, sessionMeta.catId, 'sessions', sessionId);
-      const diskEvents = await this.readEventsFromLiveFile(sessionDir);
-      for (const entry of diskEvents) {
-        const evt = entry.event;
-        recordFilesTouched(filePaths, evt, (evt.toolName ?? evt.name) as string | undefined);
-      }
+      return new TranscriptInvocationReader(new TranscriptReader({ dataDir: this.dataDir }), this).readFiles({
+        id: sessionId,
+        ...sessionMeta,
+        seq: 0,
+        status: 'active',
+      });
     }
 
     // Overlay in-memory buffer: has current events + not-yet-flushed writes
@@ -612,66 +648,6 @@ export class TranscriptWriter {
   private sessionDir(session: TranscriptSessionInfo): string {
     return join(this.dataDir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
   }
-}
-
-function recordFilesTouched(
-  filePaths: Map<string, Set<string>>,
-  evt: Record<string, unknown>,
-  evtName: string | undefined,
-): void {
-  if (evt.type !== 'tool_use' || typeof evtName !== 'string') return;
-
-  const input = (evt.toolInput ?? evt.input) as Record<string, unknown> | undefined;
-  if (!input) return;
-  const opName = toolNameToOp(evtName);
-  const filePathsTouched = extractToolPaths(input, evtName);
-  for (const filePath of filePathsTouched) {
-    const ops = filePaths.get(filePath) ?? new Set<string>();
-    if (opName) ops.add(opName);
-    filePaths.set(filePath, ops);
-  }
-}
-
-function materializeFilesTouched(filePaths: Map<string, Set<string>>): ExtractiveDigestV1['filesTouched'] {
-  return [...filePaths.entries()].map(([path, ops]) => ({
-    path,
-    ops: [...ops],
-  }));
-}
-
-function toolNameToOp(name: string): string | null {
-  switch (name.toLowerCase()) {
-    case 'write':
-      return 'create';
-    case 'edit':
-    case 'file_change':
-      return 'edit';
-    case 'delete':
-      return 'delete';
-    case 'read':
-    case 'grep':
-    case 'glob':
-      return 'read';
-    default:
-      return null;
-  }
-}
-
-function extractToolPaths(input: Record<string, unknown>, toolName: string): string[] {
-  const directPath = (input.file_path ?? input.path) as string | undefined;
-  if (directPath && typeof directPath === 'string') return [directPath];
-
-  if (toolName.toLowerCase() !== 'file_change' || !Array.isArray(input.changes)) return [];
-
-  return input.changes
-    .map((change) => {
-      if (typeof change === 'string') return change;
-      if (change && typeof change === 'object' && typeof (change as { path?: unknown }).path === 'string') {
-        return (change as { path: string }).path;
-      }
-      return null;
-    })
-    .filter((path): path is string => typeof path === 'string' && path.length > 0);
 }
 
 function extractVisibleAssistantText(evt: Record<string, unknown>, opts?: { trim?: boolean }): string | null {

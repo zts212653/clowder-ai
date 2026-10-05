@@ -1,4 +1,4 @@
-import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
+import { defineMcpCanonicalFactory } from '../tool-governance-migration.js';
 
 /**
  * Session Chain MCP Tools — F24 Phase D + F98
@@ -8,15 +8,21 @@ import { defineMcpMigrationFactory } from '../tool-governance-migration.js';
  * - list_session_chain: List sessions for a thread
  * - read_session_events: Paginated event read (view=raw|chat|handoff)
  * - read_session_digest: Read extractive digest
- * - read_invocation_detail: Read all events for a specific invocation
+ * - read_invocation_detail: Read a bounded page of events for a specific invocation
  * - session_search: Full-text search across transcripts/digests
  */
 
 import { z } from 'zod';
 import type { ToolResult } from './file-tools.js';
 import { errorResult, successResult } from './file-tools.js';
+import {
+  renderChatSessionEvents,
+  renderHandoffSessionEvents,
+  renderRawSessionEvents,
+  SESSION_TOOL_RESPONSE_MAX_CHARS,
+} from './session-chain-response.js';
 
-const defineTool = defineMcpMigrationFactory('session-chain-tools.ts', undefined, {
+const defineTool = defineMcpCanonicalFactory('session-chain-tools.ts', undefined, {
   resourceFamily: 'runtime-session',
   authority: 'local-runtime',
 });
@@ -44,17 +50,26 @@ function buildAuthHeaders(): Record<string, string> {
 
 export const listSessionChainInputSchema = {
   threadId: z.string().min(1).describe('Thread ID'),
-  catId: z.string().optional().describe('Filter by cat ID (any valid registered catId)'),
+  catId: z
+    .string()
+    .optional()
+    .describe(
+      'Optional self filter; omit normally. If set, it must equal the current authenticated cat ID. Peer raw sessions are forbidden.',
+    ),
   limit: z.number().int().min(1).max(100).optional().describe('Max results'),
+  offset: z.number().int().min(0).optional().describe('Resume at this session-list offset'),
 };
 
 export async function handleListSessionChain(input: {
   threadId: string;
   catId?: string | undefined;
   limit?: number | undefined;
+  offset?: number | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams();
   if (input.catId) params.set('catId', input.catId);
+  params.set('limit', String(input.limit ?? 20));
+  params.set('offset', String(input.offset ?? 0));
 
   const url = `${API_URL}/api/threads/${input.threadId}/sessions?${params.toString()}`;
 
@@ -65,14 +80,31 @@ export async function handleListSessionChain(input: {
     if (!res.ok) {
       return errorResult(`Failed to list sessions (${res.status}): ${await res.text()}`);
     }
-    const data = (await res.json()) as { sessions: unknown[] };
-    const sessions = input.limit ? data.sessions.slice(0, input.limit) : data.sessions;
+    const data = (await res.json()) as {
+      sessions: Array<{ id?: string; catId?: string; status?: string }>;
+      hasMore?: boolean;
+      nextOffset?: number;
+    };
+    const sessions = data.sessions;
 
     if (sessions.length === 0) {
       return successResult('No sessions found for this thread.');
     }
 
-    return successResult(JSON.stringify(sessions, null, 2));
+    const rendered = JSON.stringify(data, null, 2);
+    if (rendered.length <= SESSION_TOOL_RESPONSE_MAX_CHARS) return successResult(rendered);
+    const bounded = {
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        catId: session.catId,
+        status: session.status,
+        recordDetailUnavailable:
+          'session list item exceeded the response budget; use the session ID to read its digest',
+      })),
+      hasMore: data.hasMore,
+      nextOffset: data.nextOffset,
+    };
+    return successResult(JSON.stringify(bounded));
   } catch (err) {
     return errorResult(`List sessions failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -90,6 +122,12 @@ export const readSessionEventsInputSchema = {
     .describe(
       'View mode: raw (default, full JSONL events), chat (role/content pairs), handoff (per-invocation summaries)',
     ),
+  charOffset: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Exact character continuation within one raw event; requires cursor and limit=1'),
 };
 
 export async function handleReadSessionEvents(input: {
@@ -97,11 +135,13 @@ export async function handleReadSessionEvents(input: {
   cursor?: number | undefined;
   limit?: number | undefined;
   view?: string | undefined;
+  charOffset?: number | undefined;
 }): Promise<ToolResult> {
   const params = new URLSearchParams();
   if (input.cursor != null) params.set('cursor', String(input.cursor));
   if (input.limit != null) params.set('limit', String(input.limit));
   if (input.view) params.set('view', input.view);
+  if (input.charOffset != null) params.set('charOffset', String(input.charOffset));
 
   const url = `${API_URL}/api/sessions/${input.sessionId}/events?${params.toString()}`;
 
@@ -115,67 +155,71 @@ export async function handleReadSessionEvents(input: {
 
     const view = input.view ?? 'raw';
 
+    if (input.charOffset != null) {
+      const data = (await res.json()) as {
+        eventNo: number;
+        eventSlice: string;
+        charOffset: number;
+        totalChars: number;
+        nextCharOffset?: number;
+      };
+      const lines = [
+        `Event ${data.eventNo} JSON characters ${data.charOffset}-${data.charOffset + data.eventSlice.length} of ${data.totalChars}:`,
+        data.eventSlice,
+        ...(data.nextCharOffset === undefined
+          ? []
+          : [
+              `Next slice: cat_cafe_read_session_events(sessionId=${JSON.stringify(input.sessionId)}, cursor=${data.eventNo}, limit=1, view="raw", charOffset=${data.nextCharOffset})`,
+            ]),
+      ];
+      const text = lines.join('\n');
+      return text.length <= SESSION_TOOL_RESPONSE_MAX_CHARS
+        ? successResult(text)
+        : errorResult('Session event slice exceeded its declared response budget');
+    }
+
     if (view === 'chat') {
       const data = (await res.json()) as {
-        messages: Array<{ role: string; content: string; timestamp: number; invocationId?: string }>;
+        messages: Array<{
+          eventNo?: number;
+          role: string;
+          content?: string;
+          timestamp: number;
+          invocationId?: string;
+          oversized?: boolean;
+          contentLength?: number;
+        }>;
         nextCursor?: { eventNo: number };
         total: number;
       };
-      const lines: string[] = [];
-      lines.push(`Total events: ${data.total}, messages: ${data.messages.length}`);
-      if (data.nextCursor) lines.push(`Next cursor: ${data.nextCursor.eventNo}`);
-      lines.push('');
-      for (const msg of data.messages) {
-        lines.push(`[${msg.role}] ${msg.content.slice(0, 300)}`);
-      }
-      return successResult(lines.join('\n'));
+      return successResult(renderChatSessionEvents({ sessionId: input.sessionId, ...data }));
     }
 
     if (view === 'handoff') {
       const data = (await res.json()) as {
         invocations: Array<{
           invocationId: string;
+          startEventNo?: number;
           eventCount: number;
           toolCalls: string[];
           errors: number;
           durationMs: number;
           keyMessages: string[];
+          oversized?: boolean;
         }>;
         nextCursor?: { eventNo: number };
         total: number;
       };
-      const lines: string[] = [];
-      lines.push(`Total events: ${data.total}, invocations: ${data.invocations.length}`);
-      if (data.nextCursor) lines.push(`Next cursor: ${data.nextCursor.eventNo}`);
-      lines.push('');
-      for (const inv of data.invocations) {
-        const dur = inv.durationMs > 0 ? ` (${Math.round(inv.durationMs / 1000)}s)` : '';
-        lines.push(`--- Invocation ${inv.invocationId}${dur} ---`);
-        lines.push(`  Events: ${inv.eventCount}, Errors: ${inv.errors}`);
-        if (inv.toolCalls.length > 0) lines.push(`  Tools: ${inv.toolCalls.join(', ')}`);
-        for (const msg of inv.keyMessages) {
-          lines.push(`  > ${msg}`);
-        }
-        lines.push('');
-      }
-      return successResult(lines.join('\n'));
+      return successResult(renderHandoffSessionEvents({ sessionId: input.sessionId, ...data }));
     }
 
     // raw view (default)
     const data = (await res.json()) as {
-      events: Array<{ eventNo: number; event: { type?: string } }>;
+      events: Array<{ eventNo: number; event?: Record<string, unknown>; oversized?: boolean; eventChars?: number }>;
       nextCursor?: { eventNo: number };
       total: number;
     };
-    const lines: string[] = [];
-    lines.push(`Total events: ${data.total}, returned: ${data.events.length}`);
-    if (data.nextCursor) lines.push(`Next cursor: ${data.nextCursor.eventNo}`);
-    lines.push('');
-    for (const evt of data.events) {
-      const evtType = evt.event?.type ?? 'unknown';
-      lines.push(`[${evt.eventNo}] ${evtType}: ${JSON.stringify(evt.event).slice(0, 300)}`);
-    }
-    return successResult(lines.join('\n'));
+    return successResult(renderRawSessionEvents({ sessionId: input.sessionId, ...data }));
   } catch (err) {
     return errorResult(`Read events failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -185,10 +229,12 @@ export async function handleReadSessionEvents(input: {
 
 export const readSessionDigestInputSchema = {
   sessionId: z.string().min(1).describe('Session ID to read digest from'),
+  charOffset: z.number().int().min(0).optional().describe('Exact character continuation within a large digest'),
 };
 
-export async function handleReadSessionDigest(input: { sessionId: string }): Promise<ToolResult> {
-  const url = `${API_URL}/api/sessions/${input.sessionId}/digest`;
+export async function handleReadSessionDigest(input: { sessionId: string; charOffset?: number }): Promise<ToolResult> {
+  const params = input.charOffset === undefined ? '' : `?charOffset=${input.charOffset}`;
+  const url = `${API_URL}/api/sessions/${input.sessionId}/digest${params}`;
 
   try {
     const res = await fetch(url, {
@@ -200,8 +246,26 @@ export async function handleReadSessionDigest(input: { sessionId: string }): Pro
       }
       return errorResult(`Failed to read digest (${res.status}): ${await res.text()}`);
     }
-    const data = await res.json();
-    return successResult(JSON.stringify(data, null, 2));
+    const data = (await res.json()) as Record<string, unknown>;
+    if (typeof data.digestSlice === 'string') {
+      const next = typeof data.nextCharOffset === 'number' ? data.nextCharOffset : undefined;
+      return successResult(
+        `Digest JSON characters ${data.charOffset}-${Number(data.charOffset) + data.digestSlice.length} of ${data.totalChars}:\n${data.digestSlice}${
+          next === undefined
+            ? ''
+            : `\nNext slice: cat_cafe_read_session_digest(sessionId=${JSON.stringify(input.sessionId)}, charOffset=${next})`
+        }`,
+      );
+    }
+    if (data.oversized === true) {
+      return successResult(
+        `Digest is oversized (${data.digestChars} chars). Read exact JSON with cat_cafe_read_session_digest(sessionId=${JSON.stringify(input.sessionId)}, charOffset=0).`,
+      );
+    }
+    const rendered = JSON.stringify(data);
+    return rendered.length <= SESSION_TOOL_RESPONSE_MAX_CHARS
+      ? successResult(rendered)
+      : errorResult('Digest response exceeded the declared budget without source continuation');
   } catch (err) {
     return errorResult(`Read digest failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -212,13 +276,19 @@ export async function handleReadSessionDigest(input: { sessionId: string }): Pro
 export const readInvocationDetailInputSchema = {
   sessionId: z.string().min(1).describe('Session ID containing the invocation'),
   invocationId: z.string().min(1).describe('Invocation ID to read events for'),
+  cursor: z.number().int().min(0).optional().describe('Resume at this source event number'),
+  limit: z.number().int().min(1).max(200).optional().describe('Maximum source events in this page (default 50)'),
 };
 
 export async function handleReadInvocationDetail(input: {
   sessionId: string;
   invocationId: string;
+  cursor?: number;
+  limit?: number;
 }): Promise<ToolResult> {
-  const url = `${API_URL}/api/sessions/${input.sessionId}/invocations/${input.invocationId}`;
+  const params = new URLSearchParams({ limit: String(input.limit ?? 50) });
+  if (input.cursor != null) params.set('cursor', String(input.cursor));
+  const url = `${API_URL}/api/sessions/${input.sessionId}/invocations/${input.invocationId}?${params.toString()}`;
 
   try {
     const res = await fetch(url, {
@@ -234,16 +304,11 @@ export async function handleReadInvocationDetail(input: {
       invocationId: string;
       events: Array<{ eventNo: number; event: Record<string, unknown> }>;
       total: number;
+      nextCursor?: { eventNo: number };
     };
-
-    const lines: string[] = [];
-    lines.push(`Invocation ${data.invocationId}: ${data.total} event(s)`);
-    lines.push('');
-    for (const evt of data.events) {
-      const evtType = (evt.event['type'] as string) ?? 'unknown';
-      lines.push(`[${evt.eventNo}] ${evtType}: ${JSON.stringify(evt.event).slice(0, 300)}`);
-    }
-    return successResult(lines.join('\n'));
+    return successResult(
+      `Invocation ${data.invocationId}: ${data.total} event(s)\n${renderRawSessionEvents({ sessionId: input.sessionId, ...data })}`,
+    );
   } catch (err) {
     return errorResult(`Read invocation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -322,28 +387,35 @@ export const sessionChainTools = [
   defineTool({
     name: 'cat_cafe_list_session_chain',
     description:
-      'List session chain for a thread. Shows session IDs, sequence numbers, status, and context health for each cat. ' +
-      'Use when you need to find a specific session ID to drill into (e.g. "what did a specific cat do in thread X?"). ' +
-      'WORKFLOW: list_session_chain → read_session_digest (overview first) → read_session_events (detail). ' +
-      'TIP: Filter by catId to narrow results when a thread has many sessions from different cats.',
+      "List the authenticated cat's own session chain in one owner-visible thread. " +
+      'Use when: recovering prior CLI/session work or locating a sealed session. ' +
+      'Output: bounded session metadata with hasMore/nextOffset. ' +
+      'NOT for peer raw sessions: they are forbidden; visible thread access does not grant them—use shared messages or owner-approved evidence. ' +
+      'GOTCHA: omit catId normally; if supplied, it must be the authenticated cat. Read the digest before events.',
     inputSchema: listSessionChainInputSchema,
     handler: handleListSessionChain,
     governance: {
       implementationExport: 'handleListSessionChain',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      runtimeProfiles: [
+        'full',
+        'readonly',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
       targetExposure: 'lazy-discoverable',
     },
   }),
   defineTool({
     name: 'cat_cafe_read_session_events',
     description:
-      'Read events from a sealed session transcript. Supports view modes: raw (default, full events), chat (role/content pairs), handoff (per-invocation summaries). Pagination via cursor. ' +
+      'Read a bounded page from a sealed session transcript. Supports raw (default), chat, and handoff views; cursor is the exact source event number. ' +
       'VIEW SELECTION: ' +
       'handoff (RECOMMENDED first) = per-invocation summaries with tool calls and key messages — best overview of what happened. ' +
       'chat = role/content message pairs — useful when you need to see the actual conversation flow. ' +
-      'raw = full JSONL events — only when you need low-level event details (rarely needed). ' +
+      'raw = complete JSON events that fit; for one oversized event, use its cursor with limit=1 and charOffset to read the exact JSON in slices. ' +
       'GOTCHA: Only sealed (completed) sessions are readable — in-progress sessions return empty. ' +
       'TIP: Start with view=handoff to get the big picture, then use read_invocation_detail for specific invocations.',
     inputSchema: readSessionEventsInputSchema,
@@ -352,7 +424,7 @@ export const sessionChainTools = [
       implementationExport: 'handleReadSessionEvents',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly'],
+      runtimeProfiles: ['full', 'readonly', 'desktop:live-companion'],
       targetExposure: 'lazy-discoverable',
     },
   }),
@@ -362,7 +434,7 @@ export const sessionChainTools = [
       'Read the extractive digest of a sealed session. Contains tool names, files touched, errors, and timing info. ' +
       'ALWAYS start here before reading full events — the digest gives you a quick overview ' +
       'so you know which parts of the session are worth drilling into. ' +
-      'GOTCHA: Returns 404 if the session is not yet sealed (still in progress). ' +
+      'GOTCHA: An oversized digest returns a charOffset=0 drill; use charOffset to read exact JSON. In-progress sessions have no digest. ' +
       'TIP: After reading the digest, use read_session_events with view=handoff for more detail, ' +
       'or read_invocation_detail if the digest mentions a specific invocationId of interest.',
     inputSchema: readSessionDigestInputSchema,
@@ -371,16 +443,22 @@ export const sessionChainTools = [
       implementationExport: 'handleReadSessionDigest',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly', 'desktop:fable-phase0', 'desktop:cloud-pro-phase0'],
+      runtimeProfiles: [
+        'full',
+        'readonly',
+        'desktop:fable-phase0',
+        'desktop:cloud-pro-phase0',
+        'desktop:live-companion',
+      ],
       targetExposure: 'lazy-discoverable',
     },
   }),
   defineTool({
     name: 'cat_cafe_read_invocation_detail',
     description:
-      'Read all events for a specific invocation within a sealed session. ' +
+      'Read a bounded eventNo page for a specific invocation within a sealed session. ' +
       'Use AFTER search_evidence or read_session_events (handoff view) returns an invocationId you want to inspect. ' +
-      'This gives you the complete picture of one invocation: every tool call, response, and error. ' +
+      'Follow nextCursor until complete; an oversized event points to read_session_events with exact eventNo and charOffset. ' +
       'GOTCHA: You need both sessionId AND invocationId. Get sessionId from list_session_chain, ' +
       'and invocationId from read_session_events (handoff view) or search_evidence results.',
     inputSchema: readInvocationDetailInputSchema,
@@ -389,7 +467,7 @@ export const sessionChainTools = [
       implementationExport: 'handleReadInvocationDetail',
       action: 'read',
       risk: { level: 'read', openWorld: false },
-      runtimeProfiles: ['full', 'readonly'],
+      runtimeProfiles: ['full', 'readonly', 'desktop:live-companion'],
       targetExposure: 'lazy-discoverable',
     },
   }),

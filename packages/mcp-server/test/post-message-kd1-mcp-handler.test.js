@@ -37,6 +37,8 @@ describe('F193 AC-A2: post_message MCP handler rejects invocation-token + thread
     process.env.CAT_CAFE_CALLBACK_RETRY_DELAYS_MS = '0,0,0';
     credentialDir = join(tmpdir(), `cat-cafe-kd1-credential-${Date.now()}-${Math.random()}`);
     mkdirSync(credentialDir, { recursive: true });
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = join(credentialDir, 'outbox');
+    process.env.CAT_CAFE_CALLBACK_OUTBOX_ENABLED = 'true';
 
     originalFetch = globalThis.fetch;
     // Default mock — every test invokes handlePostMessage; without this mock

@@ -8,6 +8,10 @@ export const GATE_STAGES = Object.freeze([
   'test-web-browser',
   'test-web-guards',
   'lint-web',
+  // The check chain is split by what each step requires, so the cheap tiers can
+  // run (and be resumed) before install and before build.
+  'check-sources',
+  'check-installed',
   'check',
 ]);
 
@@ -20,8 +24,7 @@ function assertKnownStage(stage) {
   if (!GATE_STAGE_SET.has(stage)) throw new Error(`unknown gate stage: ${stage}`);
 }
 
-function openStageStore(databasePath) {
-  const database = openGateResourcePool(databasePath);
+export function ensureGateStageReceiptTables(database) {
   database.exec(`
     CREATE TABLE IF NOT EXISTS gate_stage_receipts (
       fingerprint TEXT NOT NULL,
@@ -44,6 +47,11 @@ function openStageStore(databasePath) {
       PRIMARY KEY (fingerprint, stage, completed_run_id)
     );
   `);
+}
+
+function openStageStore(databasePath) {
+  const database = openGateResourcePool(databasePath);
+  ensureGateStageReceiptTables(database);
   return database;
 }
 
@@ -181,6 +189,76 @@ export function invalidateGateStageReceipts({
   } finally {
     database.close();
   }
+}
+
+export function invalidatePostPauseGateStageReceipts({
+  databasePath,
+  runId,
+  expectedFingerprint,
+  reconcileFrom,
+  pauseEpoch,
+  now = Date.now(),
+}) {
+  if (typeof expectedFingerprint !== 'string' || !GATE_FINGERPRINT_PATTERN.test(expectedFingerprint)) {
+    throw new Error('post-pause stage invalidation requires an exact fingerprint');
+  }
+  if (!Number.isSafeInteger(reconcileFrom) || !Number.isSafeInteger(pauseEpoch) || pauseEpoch <= 0) {
+    throw new Error('post-pause stage invalidation requires its reconciliation boundary and pause epoch');
+  }
+  const database = openStageStore(databasePath);
+  try {
+    return transaction(database, () => {
+      const run = database
+        .prepare("SELECT fingerprint FROM gate_runs WHERE run_id = ? AND fingerprint = ? AND state = 'active'")
+        .get(runId, expectedFingerprint);
+      if (!run) throw new Error('post-pause stage invalidation requires the active successor run');
+      return invalidatePostPauseGateStageReceiptsInTransaction(database, {
+        expectedFingerprint,
+        reconcileFrom,
+        pauseEpoch,
+        now,
+      });
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export function invalidatePostPauseGateStageReceiptsInTransaction(
+  database,
+  { expectedFingerprint, reconcileFrom, pauseEpoch, now = Date.now() },
+) {
+  if (typeof expectedFingerprint !== 'string' || !GATE_FINGERPRINT_PATTERN.test(expectedFingerprint)) {
+    throw new Error('post-pause stage invalidation requires an exact fingerprint');
+  }
+  if (!Number.isSafeInteger(reconcileFrom) || !Number.isSafeInteger(pauseEpoch) || pauseEpoch <= 0) {
+    throw new Error('post-pause stage invalidation requires its reconciliation boundary and pause epoch');
+  }
+  ensureGateStageReceiptTables(database);
+  const receipts = database
+    .prepare(
+      "SELECT * FROM gate_stage_receipts WHERE fingerprint = ? AND status = 'green' AND completed_at >= ? ORDER BY stage ASC",
+    )
+    .all(expectedFingerprint, reconcileFrom);
+  const insert = database.prepare(
+    `INSERT OR IGNORE INTO gate_stage_receipt_invalidations
+      (fingerprint, stage, completed_run_id, completed_at, evidence_json, invalidated_at, reason, source_ref)
+     VALUES (?, ?, ?, ?, ?, ?, 'sleep-recovery-boundary', ?)`,
+  );
+  for (const receipt of receipts) {
+    insert.run(
+      receipt.fingerprint,
+      receipt.stage,
+      receipt.completed_run_id,
+      receipt.completed_at,
+      receipt.evidence_json,
+      now,
+      `managed-pause:${pauseEpoch}`,
+    );
+  }
+  const remove = database.prepare('DELETE FROM gate_stage_receipts WHERE fingerprint = ? AND stage = ?');
+  for (const receipt of receipts) remove.run(receipt.fingerprint, receipt.stage);
+  return { invalidatedStages: receipts.map((receipt) => receipt.stage), pauseEpoch, reconcileFrom };
 }
 
 export function readGateStageReceiptInvalidations(databasePath, runId) {

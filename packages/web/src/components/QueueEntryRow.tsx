@@ -1,10 +1,16 @@
 'use client';
 
-import type { FreshnessCarrierCapability, QueueRecoveryAction, QueueReminderAttempt } from '@cat-cafe/shared';
+import {
+  type FreshnessCarrierCapability,
+  getConnectorDefinition,
+  type QueueRecoveryAction,
+  type QueueReminderAttempt,
+} from '@cat-cafe/shared';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useState } from 'react';
 import { LongFormReader } from '@/components/content-overflow';
+import { HOST_CONTENT_REVIEW_CONNECTOR, hostReturnHeadline } from '@/components/content-review/host-return-headline';
 import type { QueueEntry } from '@/stores/chatStore';
 import {
   carrierCapabilityLabel,
@@ -58,6 +64,7 @@ function queueTargetStateLabel(entry: QueueEntry, catId: string, state: keyof ty
   if (state !== 'handled') return TARGET_STATE_LABEL[state];
   const disposition = entry.queueReceipt?.targets.find((target) => target.catId === catId)?.outcome?.disposition;
   if (disposition === 'responded') return '已由回复明确处理';
+  if (disposition === 'dispatch_disposition') return '已明确处置 · 有回执';
   if (disposition === 'completed_with_turn') return '已随本轮完成';
   return '已处理 · 无可回溯证据';
 }
@@ -228,14 +235,17 @@ function QueueEntryRow({
   const rowToneClass = isPaused ? 'bg-conn-amber-bg/60' : isAgent ? 'bg-[var(--color-cocreator-surface)]' : '';
 
   const targetLabel = entry.targetCats[0] ? resolveCatName(entry.targetCats[0]) : '猫猫';
+  const connectorId = entry.source === 'connector' ? entry.messagePreview?.connector : undefined;
   const sourceLabel =
     isAgent && entry.sourceCategory === 'freshness'
       ? `Freshness → ${targetLabel}`
       : isAgent
         ? `${entry.callerCatId ? resolveCatName(entry.callerCatId) : '猫猫'} → ${targetLabel}`
         : entry.source === 'connector'
-          ? 'Connector'
+          ? ((connectorId && getConnectorDefinition(connectorId)?.displayName) ?? 'Connector')
           : ownerName;
+  // Host content-review returns address the cat; the row shows the same headline as the timeline bubble.
+  const summary = connectorId === HOST_CONTENT_REVIEW_CONNECTOR ? hostReturnHeadline(entry.content) : entry.content;
 
   return (
     <div className={`flex items-start gap-2 px-3 py-2 rounded-lg ${rowToneClass}`}>
@@ -258,7 +268,7 @@ function QueueEntryRow({
       <div className="flex-1 min-w-0">
         <LongFormReader
           title={`排队消息 · ${sourceLabel}`}
-          summary={entry.content}
+          summary={summary}
           accessibleSummary={`排队消息，来源 ${sourceLabel}。完整内容请使用查看全文按钮。`}
           content={entry.content}
           format="markdown"

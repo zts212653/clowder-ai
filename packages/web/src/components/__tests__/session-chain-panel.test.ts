@@ -34,7 +34,7 @@ vi.mock('../CloudConversationLink', () => ({
     React.createElement(
       'div',
       { 'data-testid': 'cloud-conversation-link', 'data-thread-id': threadId },
-      'ChatGPT Conversation',
+      'ChatGPT 对话',
     ),
 }));
 
@@ -136,7 +136,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
-    expect(container.textContent).toContain('Session Chain 加载失败');
+    expect(container.textContent).toContain('会话记录加载失败');
   });
 
   it.each([
@@ -149,7 +149,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     expect(container.querySelector('[data-testid="session-chain-load-failed"]')).not.toBeNull();
-    expect(container.textContent).toContain('Session Chain 加载失败');
+    expect(container.textContent).toContain('会话记录加载失败');
   });
 
   it('runs native compaction beside an idle bound Codex session and refreshes canonical session truth', async () => {
@@ -302,7 +302,11 @@ describe('F24: SessionChainPanel', () => {
     mockSessionsResponse([
       { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
     ]);
-    renderPanel('thread-1', { opus: { invocationId: 'invocation-1' } });
+    renderPanel(
+      'thread-1',
+      { opus: { invocationId: 'invocation-1' } },
+      { 'invocation-1': { catId: 'opus', mode: 'execute' } },
+    );
     await flushFetch();
 
     const sealButton = container.querySelector('[data-testid="seal-session-s1"]') as HTMLButtonElement;
@@ -320,11 +324,11 @@ describe('F24: SessionChainPanel', () => {
     expect(container.querySelector('section')).not.toBeNull();
     // No session cards, but bind section available
     expect(container.textContent).toContain('0 未封存');
-    expect(container.textContent).toContain('0 total');
-    expect(container.textContent).toContain('绑定 CLI Session');
+    expect(container.textContent).toContain('0 总计');
+    expect(container.textContent).toContain('绑定命令行会话');
   });
 
-  it('renders a typed access denial instead of presenting a forbidden chain as 0 total', async () => {
+  it('renders a typed access denial instead of presenting a forbidden chain as 0 总计', async () => {
     mockApiFetch.mockResolvedValue({
       ok: false,
       status: 403,
@@ -339,8 +343,8 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     expect(container.querySelector('[data-testid="session-chain-access-denied"]')).not.toBeNull();
-    expect(container.textContent).toContain('无权查看这个 Thread 的 Session Chain');
-    expect(container.textContent).not.toContain('0 total');
+    expect(container.textContent).toContain('无权查看这条对话的会话记录');
+    expect(container.textContent).not.toContain('0 总计');
   });
 
   it('renders session count in header', async () => {
@@ -359,7 +363,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('1 未封存');
-    expect(container.textContent).toContain('2 total');
+    expect(container.textContent).toContain('2 总计');
   });
 
   it('distinguishes unknown compression history from observed zero', async () => {
@@ -387,8 +391,8 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-count-state');
     await flushFetch();
 
-    expect(container.textContent).toContain('compress count unknown');
-    expect(container.textContent).toContain('0 compress observed');
+    expect(container.textContent).toContain('压缩次数未报告');
+    expect(container.textContent).toContain('未观察到压缩');
   });
 
   it('keeps applied policy details out of active cards and sealed summaries', async () => {
@@ -452,8 +456,8 @@ describe('F24: SessionChainPanel', () => {
     const sealedSummary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
     await act(async () => sealedSummary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
     expect(sealedSummary?.textContent).toContain('74%');
-    expect(sealedSummary?.textContent).toContain('2 compress');
-    expect(sealedSummary?.textContent).toContain('threshold');
+    expect(sealedSummary?.textContent).toContain('压缩 2 次');
+    expect(sealedSummary?.textContent).toContain('达到阈值');
     expect(sealedSummary?.textContent).not.toContain('handoff');
     expect(sealedSummary?.textContent).not.toContain('unavailable');
     expect(sealedSummary?.textContent).not.toContain('authoritative_usage');
@@ -497,7 +501,7 @@ describe('F24: SessionChainPanel', () => {
     const summary = container.querySelector('[data-testid="session-card-retry-collapsed"]');
     expect(summary).not.toBeNull();
     expect(summary?.textContent).toContain('4');
-    expect(summary?.textContent).toContain('重试残骸');
+    expect(summary?.textContent).toContain('重试片段');
   });
 
   it('collapses repeated runtime-tagged retry fragments without relying on sealReason heuristics', async () => {
@@ -595,12 +599,12 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Session #3');
+    expect(container.textContent).toContain('第 3 段会话');
     expect(container.textContent).toContain('布偶猫');
     expect(container.textContent).toContain('未封存 · 可续接');
     expect(container.textContent).not.toContain('正在工作');
     expect(container.querySelector('[data-session-lifecycle="resumable"]')).not.toBeNull();
-    expect(container.textContent).toContain('8 msgs');
+    expect(container.textContent).toContain('8 条消息');
     // Session ID should be visible (truncated) with copy title
     const idBtn = container.querySelector('button[title*="ses_abc12345xyz"]');
     expect(idBtn).not.toBeNull();
@@ -649,9 +653,9 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     expect(container.querySelector('[data-testid="runtime-session-summary"]')).not.toBeNull();
-    expect(container.textContent).toContain('runtime');
+    expect(container.textContent).toContain('运行会话');
     expect(container.textContent).toContain('antigravity-desktop');
-    expect(container.textContent).toContain('unexpected switch');
+    expect(container.textContent).toContain('运行会话意外切换');
     expect(container.querySelector('button[title*="cascade-new-unexpected"]')).not.toBeNull();
     expect(container.querySelector('button[title*="cascade-old-unexpected"]')).not.toBeNull();
   });
@@ -732,16 +736,17 @@ describe('F24: SessionChainPanel', () => {
     expect(container.textContent).toContain('已封存');
     expandSealed();
     expect(container.querySelectorAll('[data-session-lifecycle="sealed"]').length).toBe(2);
-    expect(container.textContent).toContain('Session #1');
-    expect(container.textContent).toContain('Session #2');
+    expect(container.textContent).toContain('第 1 段会话');
+    expect(container.textContent).toContain('第 2 段会话');
     const summaries = container.querySelectorAll<HTMLElement>('[data-testid="sealed-session-summary"]');
     expect(summaries.length).toBe(2);
     for (const summary of summaries) {
       await act(async () => summary.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
-      expect(summary.querySelector('pre')?.className).toContain('overflow-auto');
+      expect(summary.querySelector('pre')).toBeNull();
+      expect(summary.querySelector('button[aria-expanded]')).toBeNull();
     }
-    expect(container.textContent).toContain('compact');
-    expect(container.textContent).toContain('threshold');
+    expect(container.textContent).toContain('压缩后封存');
+    expect(container.textContent).toContain('达到阈值');
     // Both sealed sessions should have clickable ID buttons
     expect(container.querySelector('button[title*="seal_aaa111"]')).not.toBeNull();
     expect(container.querySelector('button[title*="seal_bbb222"]')).not.toBeNull();
@@ -792,8 +797,8 @@ describe('F24: SessionChainPanel', () => {
     };
     renderPanel('thread-1', invocations);
     await flushFetch();
-    expect(container.textContent).toContain('Post-compact safety active');
-    expect(container.textContent).toContain('High-risk ops may be blocked');
+    expect(container.textContent).toContain('压缩后安全保护中');
+    expect(container.textContent).toContain('高风险操作可能被拦截');
   });
 
   it('does not show post-compact alert when no cat has sessionSealed', async () => {
@@ -802,7 +807,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1', { opus: { sessionSeq: 0 } });
     await flushFetch();
-    expect(container.textContent).not.toContain('Post-compact safety active');
+    expect(container.textContent).not.toContain('压缩后安全保护中');
   });
 
   it('re-fetches when sealSignal changes', async () => {
@@ -878,9 +883,9 @@ describe('F24: SessionChainPanel', () => {
         usage: { inputTokens: 100000, outputTokens: 5000, cacheReadTokens: 75000 },
       },
     };
-    renderPanel('thread-1', invocations);
+    renderPanel('thread-1', invocations, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
     await flushFetch();
-    expect(container.textContent).toContain('cached');
+    expect(container.textContent).toContain('缓存命中');
   });
 
   it('hides cached percentage when no cacheReadTokens', async () => {
@@ -894,7 +899,7 @@ describe('F24: SessionChainPanel', () => {
     };
     renderPanel('thread-1', invocations);
     await flushFetch();
-    expect(container.textContent).not.toContain('cached');
+    expect(container.textContent).not.toContain('缓存命中');
   });
 
   it('shows token counts from session.lastUsage when no live invocation', async () => {
@@ -914,7 +919,7 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
     expect(container.textContent).toContain('120k');
     expect(container.textContent).toContain('8k');
-    expect(container.textContent).toContain('cached');
+    expect(container.textContent).toContain('缓存命中');
   });
 
   it('prefers live invocation usage over session.lastUsage', async () => {
@@ -934,7 +939,7 @@ describe('F24: SessionChainPanel', () => {
         usage: { inputTokens: 150000, outputTokens: 10000 },
       },
     };
-    renderPanel('thread-1', invocations);
+    renderPanel('thread-1', invocations, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
     await flushFetch();
     // Should show live data (150k/10k), not persisted (50k/2k)
     expect(container.textContent).toContain('150k');
@@ -955,7 +960,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     // Should not crash; panel still renders (F33: bind section always present)
-    expect(container.textContent).toContain('0 total');
+    expect(container.textContent).toContain('0 总计');
     expect(container.textContent).not.toContain('Session #');
   });
 
@@ -966,7 +971,7 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-1');
     await flushFetch();
     expect(container.textContent).toContain('1 未封存');
-    expect(container.textContent).toContain('1 total');
+    expect(container.textContent).toContain('1 总计');
   });
 
   it('hides the prior thread session synchronously while the next thread request is pending', async () => {
@@ -982,7 +987,7 @@ describe('F24: SessionChainPanel', () => {
 
     expect(container.querySelector('button[title*="session-thread-a"]')).toBeNull();
     expect(container.textContent).not.toContain('session-thread-a');
-    expect(container.textContent).toContain('Loading sessions...');
+    expect(container.textContent).toContain('正在读取会话…');
   });
 
   it('does not expose another thread session after the replacement fetch fails', async () => {
@@ -1000,13 +1005,13 @@ describe('F24: SessionChainPanel', () => {
     renderPanel('thread-A');
     await flushFetch();
     expandSealed();
-    expect(container.textContent).toContain('Session #1');
+    expect(container.textContent).toContain('第 1 段会话');
 
     mockApiFetch.mockRejectedValue(new Error('network error'));
     renderPanel('thread-B');
     await flushFetch();
 
-    expect(container.textContent).not.toContain('Session #1');
+    expect(container.textContent).not.toContain('第 1 段会话');
   });
 
   it('does not expose another thread restore action after a failed refetch', async () => {
@@ -1089,7 +1094,7 @@ describe('F24: SessionChainPanel', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Session #3'));
+    expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('第 3 段会话'));
     expect(mockApiFetch).toHaveBeenNthCalledWith(2, '/api/sessions/old/unseal', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1125,7 +1130,7 @@ describe('F24: SessionChainPanel', () => {
     ]);
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
+    expect(container.textContent).toContain('第 1 段会话');
 
     // Switch to thread-2 with different data — old data replaced
     mockSessionsResponse([
@@ -1136,7 +1141,7 @@ describe('F24: SessionChainPanel', () => {
 
     // New data visible, old data gone
     expect(container.textContent).toContain('缅因猫');
-    expect(container.textContent).toContain('1 total');
+    expect(container.textContent).toContain('1 总计');
   });
 
   it('reuses per-thread session cache immediately when revisiting a thread during revalidate', async () => {
@@ -1162,19 +1167,19 @@ describe('F24: SessionChainPanel', () => {
 
     renderPanel('thread-1');
     await flushFetch();
-    expect(container.textContent).toContain('Session #1');
+    expect(container.textContent).toContain('第 1 段会话');
 
     renderPanel('thread-2');
     await flushFetch();
-    expect(container.textContent).toContain('Session #6');
+    expect(container.textContent).toContain('第 6 段会话');
     expect(container.textContent).toContain('缅因猫');
 
     renderPanel('thread-1');
     await flushFetch();
 
     // Cache should win immediately while revalidate is still in flight.
-    expect(container.textContent).toContain('Session #1');
-    expect(container.textContent).not.toContain('Session #6');
+    expect(container.textContent).toContain('第 1 段会话');
+    expect(container.textContent).not.toContain('第 6 段会话');
 
     resolveThread1Revisit({
       ok: true,
@@ -1184,8 +1189,8 @@ describe('F24: SessionChainPanel', () => {
     });
     await flushFetch();
 
-    expect(container.textContent).toContain('Session #2');
-    expect(container.textContent).not.toContain('Session #6');
+    expect(container.textContent).toContain('第 2 段会话');
+    expect(container.textContent).not.toContain('第 6 段会话');
   });
 
   it('applies codex green colors from cat.color (border + badge inline style)', async () => {
@@ -1311,7 +1316,7 @@ describe('F24: SessionChainPanel', () => {
     });
     await flushFetch();
 
-    expect(container.textContent).toContain('Session #6'); // seq 5 → display #6
+    expect(container.textContent).toContain('第 6 段会话'); // seq 5 → display #6
 
     // Now thread-1 (stale) resolves late
     resolveThread1({
@@ -1323,8 +1328,8 @@ describe('F24: SessionChainPanel', () => {
     await flushFetch();
 
     // Stale thread-1 data must NOT overwrite thread-2
-    expect(container.textContent).toContain('Session #6');
-    expect(container.textContent).not.toContain('Session #1');
+    expect(container.textContent).toContain('第 6 段会话');
+    expect(container.textContent).not.toContain('第 1 段会话');
   });
 
   describe('cat color rendering — driven by cat-config.json (no hardcoded table)', () => {
@@ -1431,15 +1436,15 @@ describe('F24: SessionChainPanel', () => {
   });
 
   describe('F33: bind new external session', () => {
-    it('keeps cloud conversations in Session Chain and distinguishes them from CLI sessions', async () => {
+    it('keeps cloud conversations in 会话记录 and distinguishes them from CLI sessions', async () => {
       mockSessionsResponse([]);
 
       renderPanel('thread-1');
       await flushFetch();
 
       expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
-      expect(container.textContent).toContain('ChatGPT Conversation');
-      expect(container.textContent).toContain('绑定 CLI Session');
+      expect(container.textContent).toContain('ChatGPT 对话');
+      expect(container.textContent).toContain('绑定命令行会话');
     });
 
     it('hides bind UI for default thread (system-owned, bind returns 403)', async () => {
@@ -1448,16 +1453,16 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('default');
       await flushFetch();
-      // Neither the per-session "bind..." nor the "绑定外部 Session" should appear
-      expect(container.textContent).not.toContain('bind...');
-      expect(container.textContent).not.toContain('绑定 CLI Session');
+      // Neither the per-session "绑定会话 ID…" nor the "绑定外部 Session" should appear
+      expect(container.textContent).not.toContain('绑定会话 ID…');
+      expect(container.textContent).not.toContain('绑定命令行会话');
     });
 
     it('shows bind-new-session button even when no sessions exist', async () => {
       mockSessionsResponse([]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('绑定 CLI Session');
+      expect(container.textContent).toContain('绑定命令行会话');
     });
 
     it('shows bind-new-session button alongside active sessions', async () => {
@@ -1466,8 +1471,8 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('Session #1');
-      expect(container.textContent).toContain('绑定 CLI Session');
+      expect(container.textContent).toContain('第 1 段会话');
+      expect(container.textContent).toContain('绑定命令行会话');
     });
 
     it('filters out cats that already have active sessions from dropdown', async () => {
@@ -1479,7 +1484,7 @@ describe('F24: SessionChainPanel', () => {
 
       // Click to expand bind section
       const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) =>
-        btn.textContent?.includes('绑定 CLI Session'),
+        btn.textContent?.includes('绑定命令行会话'),
       );
       expect(bindBtn).not.toBeUndefined();
       act(() => {
@@ -1504,7 +1509,7 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).toContain('bind...');
+      expect(container.textContent).toContain('绑定会话 ID…');
     });
 
     it('does not render bind button for sealed sessions', async () => {
@@ -1521,7 +1526,7 @@ describe('F24: SessionChainPanel', () => {
       ]);
       renderPanel('thread-1');
       await flushFetch();
-      expect(container.textContent).not.toContain('bind...');
+      expect(container.textContent).not.toContain('绑定会话 ID…');
     });
 
     it('shows input after clicking bind button', async () => {
@@ -1531,14 +1536,16 @@ describe('F24: SessionChainPanel', () => {
       renderPanel('thread-1');
       await flushFetch();
 
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       expect(bindBtn).not.toBeUndefined();
 
       act(() => {
         bindBtn?.click();
       });
 
-      const input = container.querySelector('input[placeholder="CLI session ID"]');
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]');
       expect(input).not.toBeNull();
     });
 
@@ -1550,13 +1557,15 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
 
       // Click bind button to open input
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       act(() => {
         bindBtn?.click();
       });
 
       // Type session ID
-      const input = container.querySelector('input[placeholder="CLI session ID"]') as HTMLInputElement;
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]') as HTMLInputElement;
       act(() => {
         const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!
           .set!;
@@ -1568,7 +1577,7 @@ describe('F24: SessionChainPanel', () => {
       mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
 
       // Click bind submit button
-      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind');
+      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === '绑定');
       act(() => {
         submitBtn?.click();
       });
@@ -1595,13 +1604,15 @@ describe('F24: SessionChainPanel', () => {
       await flushFetch();
 
       // Open bind input
-      const bindBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind...');
+      const bindBtn = Array.from(container.querySelectorAll('button')).find(
+        (btn) => btn.textContent === '绑定会话 ID…',
+      );
       act(() => {
         bindBtn?.click();
       });
 
       // Type value
-      const input = container.querySelector('input[placeholder="CLI session ID"]') as HTMLInputElement;
+      const input = container.querySelector('input[placeholder="命令行会话 ID"]') as HTMLInputElement;
       act(() => {
         const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
         setter.call(input, 'bad_session');
@@ -1611,19 +1622,19 @@ describe('F24: SessionChainPanel', () => {
       // Mock failed bind
       mockApiFetch.mockResolvedValue({ ok: false, status: 404 });
 
-      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === 'bind');
+      const submitBtn = Array.from(container.querySelectorAll('button')).find((btn) => btn.textContent === '绑定');
       act(() => {
         submitBtn?.click();
       });
 
       await flushFetch();
 
-      expect(container.textContent).toContain('err');
+      expect(container.textContent).toContain('失败，重试');
     });
   });
 
   describe('collapse toggle', () => {
-    it('active Session Chain: click header hides active cards, click again restores', async () => {
+    it('active 会话记录: click header hides active cards, click again restores', async () => {
       mockSessionsResponse([
         { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
       ]);
@@ -1632,13 +1643,13 @@ describe('F24: SessionChainPanel', () => {
 
       // Default: expanded — active card visible
       expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
-      expect(container.textContent).toContain('Session #1');
+      expect(container.textContent).toContain('第 1 段会话');
       // Header shows counts
       expect(container.textContent).toContain('1 未封存');
 
-      // Click Session Chain header to collapse
+      // Click 会话记录 header to collapse
       const chainHeader = Array.from(container.querySelectorAll('button')).find((b) =>
-        b.textContent?.includes('Session Chain'),
+        b.textContent?.includes('会话记录'),
       );
       expect(chainHeader).toBeTruthy();
       act(() => {
@@ -1648,9 +1659,9 @@ describe('F24: SessionChainPanel', () => {
       // Collapsed: active card hidden, but header/count still visible
       expect(container.querySelector('[data-testid="session-card-active"]')).toBeNull();
       expect(container.querySelector('[data-testid="cloud-conversation-link"]')).toBeNull();
-      expect(container.textContent).not.toContain('绑定 CLI Session');
+      expect(container.textContent).not.toContain('绑定命令行会话');
       expect(container.textContent).toContain('1 未封存');
-      expect(container.textContent).toContain('Session Chain');
+      expect(container.textContent).toContain('会话记录');
 
       // Click again to expand
       act(() => {
@@ -1660,8 +1671,8 @@ describe('F24: SessionChainPanel', () => {
       // Restored: active card visible again
       expect(container.querySelector('[data-testid="session-card-active"]')).not.toBeNull();
       expect(container.querySelector('[data-testid="cloud-conversation-link"]')).not.toBeNull();
-      expect(container.textContent).toContain('绑定 CLI Session');
-      expect(container.textContent).toContain('Session #1');
+      expect(container.textContent).toContain('绑定命令行会话');
+      expect(container.textContent).toContain('第 1 段会话');
     });
 
     it('Sealed section: default collapsed, click expands, click collapses', async () => {
@@ -1689,10 +1700,10 @@ describe('F24: SessionChainPanel', () => {
 
       // Expanded: sealed card visible
       expect(container.querySelector('[data-testid="session-card-sealed"]')).not.toBeNull();
-      expect(container.textContent).toContain('Session #1');
+      expect(container.textContent).toContain('第 1 段会话');
       const summary = container.querySelector<HTMLElement>('[data-testid="sealed-session-summary"]');
       await act(async () => summary?.querySelector<HTMLButtonElement>('button[aria-expanded="false"]')?.click());
-      expect(container.textContent).toContain('compact');
+      expect(container.textContent).toContain('压缩后封存');
 
       // Click to collapse again
       expandSealed(); // toggles back
@@ -1735,5 +1746,145 @@ describe('F24: SessionChainPanel', () => {
       const replayLink = container.querySelector('a[href*="/story/session:"]');
       expect(replayLink).toBeNull();
     });
+  });
+
+  it('does not treat an old invocation ID snapshot as live work or block a resumable record', async () => {
+    mockSessionsResponse([
+      { id: 's1', catId: 'opus', seq: 0, status: 'active', messageCount: 5, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-stale-invocation', { opus: { invocationId: 'inv-finished-long-ago', durationMs: 8000 } });
+    await flushFetch();
+    const card = container.querySelector<HTMLElement>('[data-testid="session-card-active"]');
+    expect(card?.dataset.sessionLifecycle).toBe('resumable');
+
+    expect(card?.querySelector<HTMLButtonElement>('[data-testid="seal-session-s1"]')?.disabled).toBe(false);
+    expect(card?.textContent).not.toContain('猫正在工作');
+  });
+
+  it('does not call either idle record resumable when the same cat has two unsealed records', async () => {
+    mockSessionsResponse([
+      { id: 'older', catId: 'opus', seq: 0, status: 'active', messageCount: 4, createdAt: Date.now() - 60000 },
+      { id: 'newer', catId: 'opus', seq: 1, status: 'active', messageCount: 9, createdAt: Date.now() },
+    ]);
+    renderPanel('thread-idle-ambiguous');
+    await flushFetch();
+
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="session-card-active"]'));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.dataset.sessionLifecycle).toBe('unverified');
+      expect(row.parentElement?.textContent).toContain('当前会话待核对');
+      expect(row.textContent).not.toContain('可续接');
+    }
+  });
+
+  it('does not attribute cat-level live usage to either ambiguous session record', async () => {
+    mockSessionsResponse([
+      {
+        id: 'older',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 4,
+        createdAt: Date.now() - 60000,
+        lastUsage: { inputTokens: 5000 },
+      },
+      {
+        id: 'newer',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 9,
+        createdAt: Date.now(),
+        lastUsage: { inputTokens: 9000 },
+      },
+    ]);
+    renderPanel(
+      'thread-ambiguous-usage',
+      { opus: { usage: { inputTokens: 200000 } } },
+      { 'inv-opus': { catId: 'opus', mode: 'execute' } },
+    );
+    await flushFetch();
+    const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-testid="session-card-active"]'));
+    expect(rows[0]?.textContent).toContain('5k');
+    expect(rows[1]?.textContent).toContain('9k');
+    expect(container.textContent).not.toContain('200k');
+  });
+
+  it('blocks restore while that cat is working and explains when it can be used', async () => {
+    mockSessionsResponse([
+      { id: 'old', catId: 'opus', seq: 0, status: 'sealed', messageCount: 3, createdAt: 1, sealedAt: 2 },
+      { id: 'current', catId: 'opus', seq: 2, status: 'active', messageCount: 1, createdAt: 3 },
+    ]);
+    renderPanel('thread-running-restore', {}, { 'inv-opus': { catId: 'opus', mode: 'execute' } });
+    await flushFetch();
+    expandSealed();
+
+    const sealedCard = container.querySelector<HTMLElement>('[data-testid="session-card-sealed"]');
+    const restoreButton = sealedCard?.querySelector<HTMLButtonElement>('button[data-testid="restore-session-old"]');
+    expect(restoreButton?.disabled).toBe(true);
+    expect(restoreButton?.title).toBe('停止工作后才能恢复为当前');
+  });
+
+  it('blocks cat-scoped compact, bind and restore when two records claim the current cat', async () => {
+    mockSessionsResponse([
+      {
+        id: 'first',
+        cliSessionId: 'cli-first',
+        catId: 'opus',
+        seq: 0,
+        status: 'active',
+        messageCount: 2,
+        createdAt: 1,
+      },
+      {
+        id: 'second',
+        cliSessionId: 'cli-second',
+        catId: 'opus',
+        seq: 1,
+        status: 'active',
+        messageCount: 3,
+        createdAt: 2,
+      },
+      { id: 'old', catId: 'opus', seq: 2, status: 'sealed', messageCount: 4, createdAt: 3, sealedAt: 4 },
+    ]);
+    renderPanel('thread-ambiguous-actions');
+    await flushFetch();
+    const first = container.querySelector<HTMLElement>('[data-testid="session-card-active"]');
+    expect(first?.querySelector<HTMLButtonElement>('[data-testid="compact-native-session-first"]')?.disabled).toBe(
+      true,
+    );
+    const bind = Array.from(first?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === '绑定会话 ID…',
+    );
+    expect(bind?.disabled).toBe(true);
+    expandSealed();
+    const restore = container.querySelector<HTMLButtonElement>('[data-testid="restore-session-old"]');
+    expect(restore?.disabled).toBe(true);
+    expect(restore?.title).toContain('多条未封存记录');
+  });
+  it('shows sealed record facts directly after the history list is opened', async () => {
+    mockSessionsResponse([
+      {
+        id: 'sealed-direct',
+        catId: 'opus',
+        seq: 2,
+        status: 'sealed',
+        messageCount: 8,
+        createdAt: 1,
+        sealedAt: 2,
+        compressionCount: 2,
+        sealReason: 'manual',
+        contextHealth: { fillRatio: 0.6 },
+      },
+    ]);
+    renderPanel('thread-direct-history');
+    await flushFetch();
+    expandSealed();
+    const row = container.querySelector('[data-testid="session-card-sealed"]');
+    expect(row?.textContent).toContain('60%');
+    expect(row?.textContent).toContain('压缩 2 次');
+    expect(row?.textContent).toContain('手动封存');
+    expect(row?.textContent).not.toContain('查看技术详情');
   });
 });

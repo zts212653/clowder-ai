@@ -3,7 +3,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import Database from 'better-sqlite3';
 import sharp from 'sharp';
+import { ArtifactReviewService } from '../src/domains/collaborative-content/artifact-review/service.js';
+import { ArtifactReviewStore } from '../src/domains/collaborative-content/artifact-review/store.js';
+import { ArtifactReviewReturnDispatcher } from '../src/domains/growing/ArtifactReviewReturnDispatcher.js';
 import { createLiveReviewFixture } from './helpers/artifact-review-live-fixture.js';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
@@ -42,8 +46,123 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
     operationId: 'accept-cover',
     action: { kind: 'decide', outcome: 'approved', explanation: '这版通过，请继续原任务。' },
   };
-  return { ...f, view, decision };
+  return { ...f, root, view, decision };
 }
+
+test(
+  'a live stalled delivery releases the drain winner; retry and late delivery share one durable queue carrier',
+  { timeout: 5000 },
+  async (t) => {
+    const f = await fixture(t);
+    const decision = await f.reviews.act(f.decision, f.human);
+    const release = Promise.withResolvers<void>(),
+      lateFinished = Promise.withResolvers<void>();
+    let first = true;
+    const dispatcher = new ArtifactReviewReturnDispatcher({
+      store: f.store,
+      reviews: f.reviews,
+      deliveryBudgetMs: 150,
+      drainBudgetMs: 500,
+      invalidate: () => {},
+      emit: () => {},
+      delivery: {
+        deliver: async (input) => {
+          if (first) {
+            first = false;
+            await release.promise;
+            try {
+              return await f.dispatch.delivery.deliver(input);
+            } finally {
+              lateFinished.resolve();
+            }
+          }
+          return f.dispatch.delivery.deliver(input);
+        },
+      },
+    });
+    await assert.rejects(dispatcher.drain());
+    assert.equal(f.store.returns.get(decision.receipt.receiptRef)?.state, 'pending');
+    await dispatcher.drain();
+    const winner = f.store.returns.get(decision.receipt.receiptRef);
+    assert.equal(winner?.state, 'queued');
+    assert.ok(winner?.messageId);
+    release.resolve();
+    await lateFinished.promise;
+    await f.dispatch.waitForAwakening(winner.messageId);
+    assert.equal(f.starts.length, 1);
+    assert.equal(
+      f.messages
+        .getByThreadIncludingQueued(f.thread.id)
+        .filter((message) => message.source?.connector === 'content-review').length,
+      1,
+    );
+    assert.deepEqual(f.store.returns.get(decision.receipt.receiptRef), winner);
+  },
+);
+
+test('deployment-before-text pending artifact_review_returns JSON drains after restart to the same queue winner', async (t) => {
+  const f = await fixture(t);
+  const decision = await f.reviews.act(f.decision, f.human);
+  f.store.returns.queued = () => {
+    throw new Error('lost outbox mark');
+  };
+  await assert.rejects(f.dispatcher.drain());
+  const winner = f.messages
+    .getByThreadIncludingQueued(f.thread.id)
+    .find((item) => item.source?.connector === 'content-review');
+  assert.ok(winner);
+  assert.equal(
+    winner.queueCustody?.sourceCategory,
+    'producer_return',
+    'artifact-review producer must classify its wake',
+  );
+  await f.dispatch.waitForAwakening(winner.id);
+  const legacy = {
+    receiptRef: decision.receipt.receiptRef,
+    reviewId: decision.view.review.reviewId,
+    reviewRevision: decision.receipt.revision,
+    round: 1,
+    ownerUserId: 'operator',
+    threadId: f.thread.id,
+    taskId: f.taskId,
+    contentRef: decision.view.review.contentRef,
+    ownerRevision: 1,
+    targetCatId: 'codex-astra',
+    expectedTaskRevision: 1,
+    state: 'pending',
+    kind: 'decide',
+    createdAt: decision.receipt.createdAt,
+  };
+  const path = join(f.root, 'collaborative-content', 'artifact-reviews.sqlite');
+  f.store.close();
+  const raw = new Database(path);
+  raw
+    .prepare('UPDATE artifact_review_returns SET state=?,body=? WHERE receipt_ref=?')
+    .run('pending', JSON.stringify(legacy), legacy.receiptRef);
+  raw.close();
+  const restarted = new ArtifactReviewStore(path);
+  try {
+    const reviews = new ArtifactReviewService({ store: restarted, media: f.media });
+    const dispatcher = new ArtifactReviewReturnDispatcher({
+      store: restarted,
+      reviews,
+      delivery: f.dispatch.delivery,
+      invalidate: () => {},
+      emit: () => {},
+    });
+    assert.deepEqual(restarted.returns.pending(), [legacy]);
+    await dispatcher.drain();
+    assert.equal(restarted.returns.get(legacy.receiptRef)?.messageId, winner.id);
+    assert.equal(f.starts.length, 1);
+    assert.equal(
+      f.messages.getByThreadIncludingQueued(f.thread.id).filter((item) => item.source?.connector === 'content-review')
+        .length,
+      1,
+    );
+  } finally {
+    restarted.close();
+  }
+});
 
 test('F310 reads the real content owner; one committed decision returns to the same owner queue and typed Task closure', async (t) => {
   const f = await fixture(t);
@@ -225,12 +344,21 @@ test('the content reader never borrows human visibility for an unscoped cat or a
     taskRevision: 1,
     ownerUserId: 'operator',
   };
-  assert.equal(await f.artifactReader.readPreparedArtifact(input), null);
-  assert.equal(
-    await f.artifactReader.readPreparedArtifact({
-      ...input,
-      viewer: { surface: 'cat', userId: 'operator', threadId: 'another-thread', catId: 'codex-astra' },
-    }),
-    null,
-  );
+  const readers = [f.artifactReader, f.artifactReader.createReadScope()];
+  const humanInput = { ...input, viewer: { surface: 'human' as const, userId: 'operator' } };
+  for (const reader of readers) {
+    assert.ok(await reader.readPreparedArtifact(humanInput));
+    assert.equal(await reader.readPreparedArtifact(input), null);
+    assert.equal(
+      await reader.readPreparedArtifact({
+        ...input,
+        viewer: { surface: 'cat', userId: 'operator', threadId: 'another-thread', catId: 'codex-astra' },
+      }),
+      null,
+    );
+  }
+  await f.messages.softDelete(f.publication.id, 'operator');
+  for (const reader of readers) {
+    assert.equal(await reader.readPreparedArtifact(humanInput), null, 'review authority is never memoized');
+  }
 });

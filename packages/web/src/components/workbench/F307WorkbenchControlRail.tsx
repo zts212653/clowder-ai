@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { isArtifactWorkSurface } from './artifact-work-presentation';
 import type { WorkbenchAction, WorkbenchLayoutState } from './workbench-contract';
 
 function SplitIcon({ collapse = false }: { collapse?: boolean }) {
@@ -47,6 +48,7 @@ export function F307WorkbenchControlRail({
   onAddSurface,
   homeFocused,
   isDesktop,
+  artifactWorkHostAvailable,
   mainAreaAttentionSurfaceId,
   onEnterMainAreaAttention,
   onExitMainAreaAttention,
@@ -56,6 +58,7 @@ export function F307WorkbenchControlRail({
   onAddSurface: () => void;
   homeFocused: boolean;
   isDesktop: boolean;
+  artifactWorkHostAvailable: boolean;
   mainAreaAttentionSurfaceId: string | null;
   onEnterMainAreaAttention: (surfaceId: string) => void;
   onExitMainAreaAttention: () => void;
@@ -108,29 +111,32 @@ export function F307WorkbenchControlRail({
         +
       </button>
 
-      {isDesktop && !homeFocused && activeSurface !== null && (
-        <button
-          type="button"
-          onClick={() => {
-            if (mainAreaAttentionSurfaceId === activeSurface.id) onExitMainAreaAttention();
-            else onEnterMainAreaAttention(activeSurface.id);
-          }}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe"
-          aria-label={
-            mainAreaAttentionSurfaceId === activeSurface.id
-              ? `返回侧栏 ${activeSurface.title}`
-              : `在主区打开 ${activeSurface.title}`
-          }
-          title={mainAreaAttentionSurfaceId === activeSurface.id ? '返回 Workspace 侧栏' : '临时在主区阅读'}
-          data-testid={
-            mainAreaAttentionSurfaceId === activeSurface.id ? 'f307-return-from-main-area' : 'f307-enter-main-area'
-          }
-        >
-          <span className="h-4 w-4">
-            <MainAreaIcon returning={mainAreaAttentionSurfaceId === activeSurface.id} />
-          </span>
-        </button>
-      )}
+      {isDesktop &&
+        !homeFocused &&
+        activeSurface !== null &&
+        (!artifactWorkHostAvailable || !isArtifactWorkSurface(activeSurface)) && (
+          <button
+            type="button"
+            onClick={() => {
+              if (mainAreaAttentionSurfaceId === activeSurface.id) onExitMainAreaAttention();
+              else onEnterMainAreaAttention(activeSurface.id);
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-cafe-muted transition-colors hover:bg-cafe-surface-sunken hover:text-cafe"
+            aria-label={
+              mainAreaAttentionSurfaceId === activeSurface.id
+                ? `返回侧栏 ${activeSurface.title}`
+                : `在主区打开 ${activeSurface.title}`
+            }
+            title={mainAreaAttentionSurfaceId === activeSurface.id ? '返回 Workspace 侧栏' : '临时在主区阅读'}
+            data-testid={
+              mainAreaAttentionSurfaceId === activeSurface.id ? 'f307-return-from-main-area' : 'f307-enter-main-area'
+            }
+          >
+            <span className="h-4 w-4">
+              <MainAreaIcon returning={mainAreaAttentionSurfaceId === activeSurface.id} />
+            </span>
+          </button>
+        )}
 
       {layout.surfaces.length > 1 && (
         <button

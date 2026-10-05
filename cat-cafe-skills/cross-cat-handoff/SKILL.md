@@ -1,6 +1,6 @@
 ---
 name: cross-cat-handoff
-tips_exempt: "This revision makes handoff templates optional while retaining required context and custody; it is an internal delivery convention with no new user action."
+tips_exempt: "2026-09-23：反例表去掉写死猫名，只改猫间路由措辞；未新增用户可直接发起的操作。"
 description: "跨猫交接与 review 双路由。Use when: 交接、exact-HEAD external PR review task 或 PR tracking。Not for: 自己任务。Output: 足够接手的交接与适用的责任/审查回执。"
 triggers:
   - "交接"
@@ -25,6 +25,8 @@ triggers:
 - 未完成、未送达、未验证如实说明；一次交接是否完成看合法出口与接手需要，不看五个标题是否齐全。
 
 五项提示、例子和排版均为可选参考，可以直接使用、改造或替换；不按模型资格决定方法选择，也不因未采用模板另设审批。只处理自己任务时不进入交接流程。
+
+接手后确需请 operator 判断时，由持有工作责任的猫按[交流准备与时机](../.cat-cafe-shared-refs/decision-matrix.md#交流准备与时机)恢复背景、核已有决定并呈现真实取舍。猫之间可沿 source ref 自行取证；不能把同样的编号/链接包原样交给人补课。
 
 ## Action Successor Single-Flight
 
@@ -192,7 +194,7 @@ clean-stop，不需要再 `@reviewer` 证明收到。如后续真有行为 delta
 | "我改完了" | 不知道改了什么/为什么 | 写明 What + Why |
 | "按你说的改了" | 不知道改对了没 | 说明具体改了什么 |
 | "遇到问题，你看看" | 不知道具体问题 | 描述问题 + 你的分析 |
-| 前手没终止就继续喊 Terra/GPT/Claude | 同一动作膨胀成猫军团 | 接受 `safe_wait`；有 terminal proof 才原子 replace |
+| 前手没终止就继续喊别的猫 | 同一动作膨胀成猫军团 | 接受 `safe_wait`；有 terminal proof 才原子 replace |
 | 只派一只本地 reviewer 却调用 `multi_mention` | 无必要地扩大调用与责任 | local review 用 ordinary durable A2A；其他动作按其 successor 契约选择入口 |
 | 为绕 single-flight 换 thread/slot 名 | 重复或 stale 工作继续运行 | 使用 server-authorized slot；thread/carrier 不进 identity |
 | 把所有 review completion 一律写 GitHub | 本地猫作者收不到 verdict，平台账号还会伪装成 self-review | 先按 author/custody/handoff source 分类，再选 external artifact 或 author cat route |

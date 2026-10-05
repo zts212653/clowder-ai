@@ -58,7 +58,7 @@ export function BindSessionInput({
         disabled={disabled}
         className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        bind...
+        绑定会话 ID…
       </button>
     );
   }
@@ -78,7 +78,7 @@ export function BindSessionInput({
             setStatus('idle');
           }
         }}
-        placeholder="CLI session ID"
+        placeholder="命令行会话 ID"
         maxLength={500}
         className="flex-1 text-xs font-mono px-1.5 py-0.5 rounded-[10px] border-transparent bg-[var(--console-field-bg,var(--console-card-bg))] focus:outline-none focus:ring-1 focus:ring-cafe-accent"
         // biome-ignore lint/a11y/noAutofocus: intentional UX — focus input immediately on open
@@ -90,7 +90,7 @@ export function BindSessionInput({
         disabled={status === 'saving' || !value.trim() || disabled}
         className="text-xs px-1.5 py-0.5 rounded bg-cafe-surface hover:bg-[var(--console-hover-bg)] disabled:opacity-40 transition-colors"
       >
-        {status === 'saving' ? '...' : status === 'ok' ? 'ok' : status === 'error' ? 'err' : 'bind'}
+        {status === 'saving' ? '...' : status === 'ok' ? '已绑定' : status === 'error' ? '失败，重试' : '绑定'}
       </button>
       <button
         type="button"
@@ -106,21 +106,29 @@ export function BindSessionInput({
   );
 }
 
-export function SessionIdTag({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    void navigator.clipboard.writeText(id);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
+export function SessionIdTag({ id, label = '会话 ID' }: { id: string; label?: string }) {
+  const [copyResult, setCopyResult] = useState<{ id: string; state: 'copied' | 'failed' } | null>(null);
+  const copyState = copyResult?.id === id ? copyResult.state : 'idle';
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopyResult({ id, state: 'copied' });
+    } catch {
+      setCopyResult({ id, state: 'failed' });
+    }
   };
   return (
     <button
       type="button"
-      className="min-w-0 flex-1 truncate text-left text-xs font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors whitespace-nowrap"
-      title={`点击复制: ${id}`}
-      onClick={handleCopy}
+      className="flex min-w-0 flex-1 items-center gap-1 text-left text-xs font-mono text-cafe-muted hover:text-cafe-secondary cursor-pointer transition-colors whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cafe-accent"
+      title={`点击复制完整${label}: ${id}`}
+      aria-label={`复制${label}：${id}`}
+      onClick={() => void handleCopy()}
     >
-      {copied ? 'copied!' : id}
+      <span className="min-w-0 truncate">{id}</span>
+      <span role="status" aria-live="polite" className="shrink-0 font-sans">
+        {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败，重试' : ''}
+      </span>
     </button>
   );
 }

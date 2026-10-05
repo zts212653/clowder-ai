@@ -43,6 +43,11 @@ export async function verifyJourneyProgress({
   for (let index = 0; index < labels.length; index += 1) {
     await journey.getByRole('button', { name: labels[index], exact: true }).click();
     await surface.locator(`[data-journey-panel="${index}"]`).waitFor();
+    if (index === 2) {
+      const projectContext = surface.locator('details.exploration-project-context');
+      assert.equal(await projectContext.getAttribute('open'), null, 'exploration starts with project controls folded');
+      await projectContext.locator(':scope > summary').click();
+    }
     assert.equal(
       await journey.getByRole('button', { name: labels[index], exact: true }).getAttribute('aria-pressed'),
       'true',

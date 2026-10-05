@@ -44,9 +44,10 @@ try {
 
   await selectReviewMode(page, 'markup');
   await page.getByRole('button', { name: '文字', exact: true }).click();
-  await page.getByRole('textbox', { name: '标注文字', exact: true }).fill(markupText);
   const label = await point(0.4, 0.22);
   await page.mouse.click(label.x, label.y);
+  await page.getByRole('textbox', { name: '标注文字', exact: true }).fill(markupText);
+  await page.getByRole('textbox', { name: '标注文字', exact: true }).press('Enter');
   await page.getByTestId('review-local-mark').waitFor();
   assert.ok((await page.getByTestId('review-local-mark').textContent()).includes(markupText));
   await page.getByRole('button', { name: '撤销', exact: true }).click();

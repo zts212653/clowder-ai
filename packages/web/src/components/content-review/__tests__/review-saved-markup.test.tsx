@@ -38,7 +38,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-it('read-back removes only exactly committed marks and retires their local undo history', async () => {
+it('read-back retires exact snapshots and forks a changed local mark for a later save', async () => {
   await render();
   await act(async () => draft.add(first));
   await act(async () => draft.add(second));
@@ -48,9 +48,15 @@ it('read-back removes only exactly committed marks and retires their local undo 
   expect(draft.canUndo).toBe(false);
   expect(draft.canRedo).toBe(false);
   expect(JSON.parse(localStorage.getItem(key)!).marks).toEqual([second]);
-  await render([first, { ...second, x: 150 }]);
-  expect(draft.marks).toEqual([second]);
-  await render([first, second]);
+  const olderSnapshot = { ...second, x: 150 };
+  await render([first, olderSnapshot]);
+  const laterDraft = draft.marks[0];
+  expect(laterDraft).toMatchObject({ ...second, id: expect.any(String) });
+  expect(laterDraft.id).not.toBe(second.id);
+  expect(JSON.parse(localStorage.getItem(key)!).marks).toEqual([laterDraft]);
+  await render([first, olderSnapshot]);
+  expect(draft.marks).toEqual([laterDraft]);
+  await render([first, olderSnapshot, laterDraft]);
   expect(draft.marks).toEqual([]);
 });
 

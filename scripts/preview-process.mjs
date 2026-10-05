@@ -32,19 +32,27 @@ function usage() {
   pnpm preview:process stop --port PORT --cwd DIR [--json]`;
 }
 
+function claimUniqueOption(seenOptions, option) {
+  if (seenOptions.has(option)) throw new Error(`duplicate argument: ${option}`);
+  seenOptions.add(option);
+}
+
 function parseArgs(argv) {
   const action = argv[0];
   const separator = argv.indexOf('--');
   const optionArgs = separator >= 0 ? argv.slice(1, separator) : argv.slice(1);
   const command = separator >= 0 ? argv.slice(separator + 1) : [];
   const options = { action, command, json: false };
+  const seenOptions = new Set();
   for (let index = 0; index < optionArgs.length; index += 1) {
     const arg = optionArgs[index];
     if (arg === '--json') {
+      claimUniqueOption(seenOptions, arg);
       options.json = true;
       continue;
     }
     if (arg === '--port' || arg === '--cwd' || arg === '--lifetime-seconds') {
+      claimUniqueOption(seenOptions, arg);
       options[arg.slice(2)] = optionArgs[index + 1];
       index += 1;
       continue;

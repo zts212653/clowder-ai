@@ -1,6 +1,6 @@
 ---
 name: worktree
-tips_exempt: "Renewed 2026-09-05 for separating worktree isolation and review assurance from test coverage; the developer isolation workflow adds no end-user capability or useful Hub discovery moment."
+tips_exempt: "Renewed 2026-09-29 for Alpha Redis 6397 and shared developer Redis 6398 safety guidance; this internal checkout setup has no separate end-user command or useful Hub discovery moment."
 description: 为代码、脚本、API 与第一方执行面创建隔离 Git worktree，并配置 Redis 6398；classifier 放行的 co-creation docs direct push 不进入本流程。
 triggers:
   - "开始开发"
@@ -12,6 +12,8 @@ renamed-from: using-git-worktrees
 # Worktree
 
 开始任何非 trivial 的功能开发前，必须拉 worktree 隔离，不要直接在 main 上改代码。Skill / MCP description 如果改到 API route、localhost、script、CLI command、第一方执行面，即使只有几行，也不按“纯文档免验证”处理：默认跑 skill reference/surface 与 claim 对应的定向检查；只有共享契约、门禁执行链或 targeted 无法覆盖跨包合流风险时才跑 full `pnpm gate`；高风险标签单独加强对应独立审查 / 授权。非 trivial 行为改动仍应开 worktree。
+
+获准的新 Feature 开工或旧 Phase 续做，在原责任现场先按 `custody-recognition` 核 accepted scope 并复用原 Task；worktree 只是代码隔离，不是新的托付身份。已批准的执行子线程继续自己的实现，不读取或迁移父线程 Task。
 
 ## Co-Creation Docs 边界
 
@@ -39,7 +41,7 @@ search_evidence("{topic}", scope="all")
 **Clowder AI 项目：`../cat-cafe-{feature-name}`（relay-station/ 同级）**
 
 ```bash
-git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name} --owner {你的 catId} --policy merged
 ```
 
 - 🔴 **禁止在项目内部创建**（不要用 `.worktrees/` 子目录）
@@ -98,8 +100,9 @@ gh pr diff <n> --name-only          # 或 gh pr view <n> --json files --jq '.fil
 ## 创建步骤
 
 ```bash
-# 1. 创建 worktree
-git worktree add ../cat-cafe-{feature-name} -b feat/{feature-name}
+# 1. 创建 worktree（唯一入口；owner 默认取 $CAT_CAFE_CAT_ID，policy 默认 merged，登记随创建完成）
+#    满额时直接拒绝并按 owner 列出谁占着位置（见「异常」）；它从不挪动任何人的目录
+pnpm worktree:new ../cat-cafe-{feature-name} --branch feat/{feature-name}
 cd ../cat-cafe-{feature-name}
 
 # 2. 安装依赖（必须清除 NODE_ENV，否则跳过 devDeps 导致 build 失败！）
@@ -124,9 +127,10 @@ pnpm test           # 仅在跨包行为 / high-assurance 需要全量 baseline 
 | Redis | 端口 | 用途 |
 |-------|------|------|
 | **用户 Redis** | **6399** | operator的数据，🔴 圣域，只读 |
-| **开发 Redis** | **6398** | 猫猫开发测试，随便折腾 |
+| **开发 Redis** | **6398** | 共享开发实例；操作前核归属，不做全库清理 |
+| **Alpha Redis** | **6397** | 已合入 main 的隔离验收；数据在 Alpha checkout 内 |
 
-**Worktree 中启动服务 = 必须用 6398。**
+**普通功能 worktree 启动服务须用 6398 或隔离 offset；标准 Alpha 专用 6397。**
 不设置 REDIS_URL 就启动服务 = 回落到 6399 = 数据丢失风险（LL-015）。
 
 ## 多 Worktree 并发：WORKTREE_PORT_OFFSET
@@ -137,7 +141,7 @@ F182 大赛 / 多猫并发开发时，6 个 worktree 同时跑各自服务不打
 
 | OFFSET | Redis | API | Web | NEXT_PUBLIC_API_URL |
 |---|---|---|---|---|
-| 0（alpha 默认） | 6398 | 3102 | 5102 | http://localhost:3102 |
+| 0（worktree 默认） | 6398 | 3102 | 5102 | http://localhost:3102 |
 | -10 | 6388 | 3112 | 5112 | http://localhost:3112 |
 | -20 | 6378 | 3122 | 5122 | http://localhost:3122 |
 | ... | ... | ... | ... | ... |
@@ -183,9 +187,9 @@ pnpm check:worktree-port-offset   # 验证全部 7 个大赛 OFFSET 派生 + 端
 
 详细设计见 *(internal reference removed)*。
 
-## 合入后清理
+## 收工：合入后当场清理
 
-分支合入 main 后**当场清理**，不要留到下次：
+分支合入 main 后**当场清理**（merge-gate Step 8 同一套），不要留到下次：
 
 ```bash
 git worktree remove ../cat-cafe-{feature-name}
@@ -193,11 +197,26 @@ git branch -d feat/{feature-name}
 git worktree prune
 ```
 
-检查是否有积压未清理：
-```bash
-git worktree list             # 列出所有 worktree
-git branch --merged main      # 哪些分支已合入
-```
+**忘了清会怎样（如实说明）**：什么都不会自动发生——没有定时回收，`worktree:new` 也从不挪动任何目录。
+你忘清的目录会一直占你的名额，直到满额时它出现在拒绝消息的 owner 清单里。登记只是让工具**看得出**
+哪些已被主人放行（`merged`：内容已进 origin/main〔含 squash 合入〕且闲置 7 天；`ttl`：到期）；
+真正挪进隔离区（`pnpm worktree:reap --apply`）和删除（`--purge`）都是显式命令，由获授权的人执行。
+所以收工那三行是你的事。
+
+## 异常：满额、想保留、要恢复
+
+| 场景 | 你看到什么 | 怎么做 |
+|------|-----------|--------|
+| 满额被拒 | `capacity: 40/40 …` + 按 owner 列出的占位目录 | 先收掉自己列表里做完的；其余在对应 owner 的 thread 问一句。**不要去清别人的目录，也不用管 undeclared 老库存**（它们不占名额，由维护者一次性处理） |
+| 想长期保留 | — | 建时加 `--policy never`；已有的（包括已在隔离区里的）：`pnpm worktree:new <path> --declare-only --policy never`，之后不会被 purge |
+| 临时沙盒 | — | `--policy ttl --ttl-days N`（review 沙盒默认 7） |
+| 目录被挪走了 | 原路径不见了 | 在 `../.reaper-quarantine/ledger.jsonl` 按原路径找到那条，执行其 `restore` 命令（`git worktree move <隔离路径> <原路径>`） |
+| 隔离后又在里面干活了 / 改了登记 | — | 不用管：隔离后有改动、新提交或重新登记的目录**不会被 purge**（`review:changed-in-quarantine` / `redeclared-in-quarantine`），恢复回去即可 |
+
+规则细节留给工具（`scripts/lib/worktree-reaper-core.mjs`），这里只记要点：
+- **名额只算登记过的活跃 worktree**（上限 40）；隔离区里的、白名单的（`runtime`/`alpha`/`tutorials`/`sharing`/`recovery-backups`）、没登记的老目录都不算。`pnpm worktree:check` 看当前数字。
+- **只动出生时登记过的目录**；没登记的只进报告（`pnpm worktree:reap` dry-run，账本 `.cat-cafe/tmp/reaper-<date>.tsv`）。
+- **有未提交改动、locked、有进程在用的永远不动**；隔离满 14 天且期间没人动过，才进入 `--purge` 候选。
 
 ## Commit / Stash 溯源 Footer（F193 Phase E）
 

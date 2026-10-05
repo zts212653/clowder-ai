@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, delimiter, join } from 'node:path';
@@ -303,6 +304,111 @@ describe('workspace-security', () => {
       assert.equal(await mod.getWorktreeRoot('registered-public-root', publicRoot), publicRoot);
     } finally {
       await rm(publicRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('recovers a verified repo-scoped worktree alias without a warm registry', async () => {
+    const repoRoot = join(tmpdir(), `workspace-alias-repo-${Date.now()}`);
+    const linkedRoot = join(tmpdir(), `workspace-alias-linked-${Date.now()}`);
+    const otherParent = join(tmpdir(), `workspace-alias-other-${Date.now()}`);
+    const otherRepoRoot = join(otherParent, 'repo');
+    const otherLinkedRoot = join(otherParent, basename(linkedRoot));
+    const originalWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    await mkdir(repoRoot, { recursive: true });
+    await execFileAsync('git', ['init', repoRoot]);
+    await execFileAsync('git', ['-C', repoRoot, 'config', 'user.email', 'workspace-test@example.invalid']);
+    await execFileAsync('git', ['-C', repoRoot, 'config', 'user.name', 'Workspace Test']);
+    await writeFile(join(repoRoot, 'README.md'), 'workspace alias fixture\n');
+    await execFileAsync('git', ['-C', repoRoot, 'add', 'README.md']);
+    await execFileAsync('git', ['-C', repoRoot, 'commit', '-m', 'fixture']);
+    await execFileAsync('git', ['-C', repoRoot, 'worktree', 'add', '-b', 'alias-fixture', linkedRoot]);
+    await mkdir(otherRepoRoot, { recursive: true });
+    await execFileAsync('git', ['init', otherRepoRoot]);
+    await execFileAsync('git', ['-C', otherRepoRoot, 'config', 'user.email', 'workspace-test@example.invalid']);
+    await execFileAsync('git', ['-C', otherRepoRoot, 'config', 'user.name', 'Workspace Test']);
+    await writeFile(join(otherRepoRoot, 'README.md'), 'other workspace alias fixture\n');
+    await execFileAsync('git', ['-C', otherRepoRoot, 'add', 'README.md']);
+    await execFileAsync('git', ['-C', otherRepoRoot, 'commit', '-m', 'fixture']);
+    await execFileAsync('git', ['-C', otherRepoRoot, 'worktree', 'add', '-b', 'alias-fixture', otherLinkedRoot]);
+
+    try {
+      const entries = await mod.listWorktrees(repoRoot);
+      const linked = entries.find((entry) => entry.branch === 'alias-fixture');
+      assert.ok(linked, 'fixture linked worktree must be discoverable by its canonical id');
+      const otherEntries = await mod.listWorktrees(otherRepoRoot);
+      const otherLinked = otherEntries.find((entry) => entry.branch === 'alias-fixture');
+      assert.equal(otherLinked?.id, linked.id, 'fixture roots intentionally share a basename-derived canonical id');
+      const prefix = createHash('sha256').update(repoRoot).digest('hex').slice(0, 6);
+      const persistedAlias = `${prefix}_${linked.id}`;
+      const otherPrefix = createHash('sha256').update(otherRepoRoot).digest('hex').slice(0, 6);
+      const foreignAlias = `${otherPrefix}_${otherLinked.id}`;
+
+      process.env.CAT_CAFE_WORKSPACE_ROOT = repoRoot;
+      assert.equal(await mod.getWorktreeRoot(persistedAlias), linked.root);
+      await assert.rejects(
+        () => mod.getWorktreeRoot(`000000_${linked.id}`),
+        (err) => err.code === 'NOT_FOUND',
+      );
+      await assert.rejects(
+        () => mod.getWorktreeRoot(foreignAlias),
+        (err) => err.code === 'NOT_FOUND',
+      );
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      await assert.rejects(
+        () => mod.getWorktreeRoot(persistedAlias, repoRoot),
+        (err) => err.code === 'NOT_FOUND',
+      );
+    } finally {
+      if (originalWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspaceRoot;
+      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', linkedRoot]).catch(() => {});
+      await execFileAsync('git', ['-C', otherRepoRoot, 'worktree', 'remove', '--force', otherLinkedRoot]).catch(
+        () => {},
+      );
+      await Promise.all([
+        rm(linkedRoot, { recursive: true, force: true }),
+        rm(repoRoot, { recursive: true, force: true }),
+        rm(otherParent, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
+  it('does not let an exact linked root revive an unlinked sibling alias', async () => {
+    const repoRoot = join(tmpdir(), `workspace-exact-linked-repo-${Date.now()}`);
+    const siblingRoot = join(tmpdir(), `workspace-exact-linked-sibling-${Date.now()}`);
+    const originalWorkspaceRoot = process.env.CAT_CAFE_WORKSPACE_ROOT;
+    const originalLinkedRoots = process.env.WORKSPACE_LINKED_ROOTS;
+    await mkdir(repoRoot, { recursive: true });
+    await execFileAsync('git', ['init', repoRoot]);
+    await execFileAsync('git', ['-C', repoRoot, 'config', 'user.email', 'workspace-test@example.invalid']);
+    await execFileAsync('git', ['-C', repoRoot, 'config', 'user.name', 'Workspace Test']);
+    await writeFile(join(repoRoot, 'README.md'), 'exact linked root fixture\n');
+    await execFileAsync('git', ['-C', repoRoot, 'add', 'README.md']);
+    await execFileAsync('git', ['-C', repoRoot, 'commit', '-m', 'fixture']);
+    await execFileAsync('git', ['-C', repoRoot, 'worktree', 'add', '-b', 'exact-linked-sibling', siblingRoot]);
+
+    try {
+      const sibling = (await mod.listWorktrees(repoRoot)).find((entry) => entry.branch === 'exact-linked-sibling');
+      assert.ok(sibling, 'fixture sibling must be discoverable before the exact-linked-root guard denies it');
+      const prefix = createHash('sha256').update(repoRoot).digest('hex').slice(0, 6);
+      delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      process.env.WORKSPACE_LINKED_ROOTS = `exact:${repoRoot}`;
+
+      await assert.rejects(
+        () => mod.getWorktreeRoot(`${prefix}_${sibling.id}`),
+        (err) => err.code === 'NOT_FOUND',
+      );
+      assert.equal(await mod.getWorktreeRoot('linked_exact'), repoRoot);
+    } finally {
+      if (originalWorkspaceRoot === undefined) delete process.env.CAT_CAFE_WORKSPACE_ROOT;
+      else process.env.CAT_CAFE_WORKSPACE_ROOT = originalWorkspaceRoot;
+      if (originalLinkedRoots === undefined) delete process.env.WORKSPACE_LINKED_ROOTS;
+      else process.env.WORKSPACE_LINKED_ROOTS = originalLinkedRoots;
+      await execFileAsync('git', ['-C', repoRoot, 'worktree', 'remove', '--force', siblingRoot]).catch(() => {});
+      await Promise.all([
+        rm(siblingRoot, { recursive: true, force: true }),
+        rm(repoRoot, { recursive: true, force: true }),
+      ]);
     }
   });
 

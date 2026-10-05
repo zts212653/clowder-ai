@@ -18,12 +18,12 @@ import { formatPromptTime } from '../format-time.js';
 import type { ISessionChainStore } from '../stores/ports/SessionChainStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
-import { mapToPresentation } from './context-presentation.js';
+import { mapToPresentation } from './context/context-presentation.js';
 import {
   type ContextModeProjection,
   countPresentedTiers,
   type PresentationCounts,
-} from './context-surface-projection.js';
+} from './context/context-surface-projection.js';
 import { formatTaskSnapshot } from './formatTaskSnapshot.js';
 import type { TranscriptReader } from './TranscriptReader.js';
 import type { ExtractiveDigestV1 } from './TranscriptWriter.js';
@@ -358,7 +358,9 @@ export async function buildSessionBootstrap(
   toolLines.push(
     '- cat_cafe_read_session_events: Read detailed events (use view=handoff for per-invocation summaries)',
   );
-  toolLines.push('- cat_cafe_read_invocation_detail: Read all events for a specific invocation');
+  toolLines.push(
+    '- cat_cafe_read_invocation_detail: Read a bounded page for a specific invocation; follow nextCursor for more events',
+  );
   toolLines.push('');
   toolLines.push('When unsure about previous decisions, file changes, or context:');
   toolLines.push('1. Use cat_cafe_search_evidence to find relevant knowledge');

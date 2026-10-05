@@ -14,6 +14,8 @@ import type {
   ContinueActionSuccessorFreshRevisionResult,
   MarkActionSuccessorReturnDeliveredResult,
   RecordActionSuccessorReturnDeliveryAttemptResult,
+  RefreshHandledActionSuccessorInput,
+  RefreshHandledActionSuccessorResult,
   ReplaceActionSuccessorInput,
   ReplaceActionSuccessorResult,
   RetirePendingDispatchForFreshnessMismatchResult,
@@ -46,6 +48,10 @@ export type ActionSuccessorClaimStoreResult =
 
 export type ActionSuccessorReplaceStoreResult =
   | ReplaceActionSuccessorResult
+  | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
+
+export type ActionSuccessorRefreshStoreResult =
+  | RefreshHandledActionSuccessorResult
   | { outcome: 'subject_terminal'; lease: ActionSuccessorLease };
 
 export type ActionSuccessorReturnStoreResult =
@@ -157,6 +163,15 @@ export interface ActionSuccessorLeaseStore {
     input: ContinueActionSuccessorFreshRevisionInput,
   ): Promise<ContinueActionSuccessorFreshRevisionResult>;
   replace(leaseId: string, input: ReplaceActionSuccessorInput): Promise<ActionSuccessorReplaceStoreResult>;
+  /**
+   * Advance an active, outcome-free direct lease one generation so its handled carrier can be
+   * dispatched again. One CAS: of two concurrent refreshes exactly one commits, the other reads
+   * the advanced generation and gets `stale_generation`.
+   */
+  refreshHandledCarrier(
+    leaseId: string,
+    input: RefreshHandledActionSuccessorInput,
+  ): Promise<ActionSuccessorRefreshStoreResult>;
   returnToPredecessor(
     leaseId: string,
     input: {

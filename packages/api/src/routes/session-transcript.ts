@@ -10,8 +10,6 @@
 
 import type { FastifyInstance } from 'fastify';
 import { projectInvocationPromptInput } from '../domains/cats/services/session/InvocationPromptInputProjector.js';
-import { projectInvocationTrajectories } from '../domains/cats/services/session/InvocationTrajectoryProjector.js';
-import { mergeTranscriptEventSources } from '../domains/cats/services/session/TranscriptEventEnvelope.js';
 import { formatEventsChat } from '../domains/cats/services/session/TranscriptFormatter.js';
 import {
   canReadThreadRecord,
@@ -20,8 +18,14 @@ import {
   threadAccessDeniedBody,
   threadRecordAccessDeniedBody,
 } from '../domains/cats/services/session/thread-access-policy.js';
+import { TranscriptInvocationReader } from '../domains/cats/services/session/transcript-index/TranscriptInvocationReader.js';
 import { resolveUserId } from '../utils/request-identity.js';
 import { registerInvocationTrajectoryRoutes } from './invocation-trajectory-routes.js';
+import {
+  projectHandoffTranscriptPage,
+  projectRawTranscriptPage,
+  sliceTranscriptEvent,
+} from './session-transcript-response.js';
 import {
   checkTranscriptCatAccess,
   strictParseTranscriptInteger,
@@ -29,6 +33,7 @@ import {
   VALID_TRANSCRIPT_VIEWS,
 } from './session-transcript-route-helpers.js';
 import type { ReadableSession, SessionTranscriptRouteOptions } from './session-transcript-route-types.js';
+import { withTranscriptReadSignal } from './transcript-read-cancellation.js';
 
 export async function sessionTranscriptRoutes(
   app: FastifyInstance,
@@ -46,32 +51,15 @@ export async function sessionTranscriptRoutes(
     memoryCueSourceReader,
   } = opts;
 
-  async function readActiveSessionEvents(session: ReadableSession) {
-    if (session.status !== 'sealed' && transcriptWriter) {
-      return transcriptWriter.readActiveEvents({
-        sessionId: session.id,
-        threadId: session.threadId,
-        catId: session.catId,
-        ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-        seq: session.seq,
-      });
-    }
-    return [];
-  }
-
-  async function readSessionEvents(session: ReadableSession) {
-    const activeEvents = await readActiveSessionEvents(session);
-    const persistedEvents = await transcriptReader.readAllEvents(session.id, session.threadId, session.catId);
-    return mergeTranscriptEventSources(persistedEvents, activeEvents);
-  }
-
-  async function readInvocationEvents(session: ReadableSession, invocationId: string) {
-    return (await readSessionEvents(session)).filter((event) => event.invocationId === invocationId);
+  const invocationReader = new TranscriptInvocationReader(transcriptReader, transcriptWriter);
+  async function readInvocationEvents(sessions: ReadableSession[], invocationId: string, signal?: AbortSignal) {
+    const pages = await invocationReader.readInvocation(sessions, invocationId, {}, signal);
+    return new Map([...pages].map(([id, page]) => [id, page.events]));
   }
 
   registerInvocationTrajectoryRoutes(app, {
     stores: { invocationRecordStore, turnExecutionStore, sessionChainStore, threadStore },
-    readSessionEvents,
+    listInvocationSummaries: invocationReader.list.bind(invocationReader),
     readInvocationEvents,
     ...(messageStore ? { messageStore } : {}),
     ...(transcriptWriter ? { keyedContentDigest: transcriptWriter.keyedContentDigest.bind(transcriptWriter) } : {}),
@@ -82,7 +70,7 @@ export async function sessionTranscriptRoutes(
   // GET /api/sessions/:sessionId/events — Paginated event read (F98: view modes)
   app.get<{
     Params: { sessionId: string };
-    Querystring: { cursor?: string; limit?: string; view?: string };
+    Querystring: { cursor?: string; limit?: string; view?: string; charOffset?: string };
   }>('/api/sessions/:sessionId/events', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -137,6 +125,30 @@ export async function sessionTranscriptRoutes(
     }
     const limit = limitNum != null ? Math.min(limitNum, 200) : 50;
 
+    const charOffsetParam = request.query.charOffset;
+    const charOffset = charOffsetParam === undefined ? undefined : strictParseTranscriptInteger(charOffsetParam);
+    if (charOffset !== undefined) {
+      if (Number.isNaN(charOffset) || charOffset < 0 || view !== 'raw' || cursorNum === undefined || limit !== 1) {
+        reply.status(400);
+        return { error: 'charOffset requires raw view, exact cursor eventNo and limit=1' };
+      }
+      const one = await transcriptReader.readEvents(
+        sessionId,
+        session.threadId,
+        session.catId,
+        { eventNo: cursorNum },
+        1,
+      );
+      const event = one.events.find((candidate) => candidate.eventNo === cursorNum);
+      if (!event) return reply.status(404).send({ error: 'Event not found' });
+      const eventChars = JSON.stringify(event.event).length;
+      if (charOffset >= eventChars) {
+        reply.status(400);
+        return { error: 'charOffset is beyond this event' };
+      }
+      return reply.send(sliceTranscriptEvent(event, charOffset));
+    }
+
     // Handoff view: read all events, group into complete invocation summaries,
     // paginate by raw-event budget. The cursor is a genuine raw eventNo —
     // same semantics as raw/chat views — preserving the external API contract.
@@ -149,11 +161,7 @@ export async function sessionTranscriptRoutes(
         handoffCursor,
         limit,
       );
-      return reply.send({
-        invocations: handoffResult.invocations,
-        ...(handoffResult.nextCursor ? { nextCursor: handoffResult.nextCursor } : {}),
-        total: handoffResult.total,
-      });
+      return reply.send(projectHandoffTranscriptPage(handoffResult, sessionId));
     }
 
     // Raw and chat views: paginate by raw event number
@@ -161,19 +169,40 @@ export async function sessionTranscriptRoutes(
     const result = await transcriptReader.readEvents(sessionId, session.threadId, session.catId, cursor, limit);
 
     if (view === 'chat') {
+      const boundedRaw = projectRawTranscriptPage(result, sessionId);
+      const originalByEventNo = new Map(result.events.map((event) => [event.eventNo, event]));
+      const messages: Array<Record<string, unknown>> = [];
+      for (const event of boundedRaw.events) {
+        const original = originalByEventNo.get(event.eventNo);
+        if (!original) continue;
+        const [message] = formatEventsChat([original]);
+        if (!message) continue;
+        messages.push(
+          'oversized' in event && event.oversized
+            ? {
+                eventNo: event.eventNo,
+                role: message.role,
+                oversized: true,
+                contentLength: message.content.length,
+                drillDown: event.drillDown,
+              }
+            : { ...message, eventNo: event.eventNo },
+        );
+      }
       return reply.send({
-        messages: formatEventsChat(result.events),
-        nextCursor: result.nextCursor,
+        messages,
+        ...(boundedRaw.nextCursor ? { nextCursor: boundedRaw.nextCursor } : {}),
         total: result.total,
       });
     }
 
-    return reply.send(result);
+    return reply.send(projectRawTranscriptPage(result, sessionId));
   });
 
   // GET /api/sessions/:sessionId/digest — Extractive digest
   app.get<{
     Params: { sessionId: string };
+    Querystring: { charOffset?: string };
   }>('/api/sessions/:sessionId/digest', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -212,12 +241,37 @@ export async function sessionTranscriptRoutes(
       return reply.status(404).send({ error: 'Digest not found' });
     }
 
+    const serialized = JSON.stringify(digest);
+    if (request.query.charOffset !== undefined) {
+      const charOffset = strictParseTranscriptInteger(request.query.charOffset);
+      if (Number.isNaN(charOffset) || charOffset < 0 || charOffset >= serialized.length) {
+        return reply.status(400).send({ error: 'Invalid digest charOffset' });
+      }
+      const digestSlice = serialized.slice(charOffset, charOffset + 8_000);
+      const nextCharOffset = charOffset + digestSlice.length;
+      return reply.send({
+        digestSlice,
+        charOffset,
+        totalChars: serialized.length,
+        ...(nextCharOffset < serialized.length ? { nextCharOffset } : {}),
+      });
+    }
+
+    if (serialized.length > 24_000) {
+      return reply.send({
+        oversized: true,
+        digestChars: serialized.length,
+        drillDown: { tool: 'cat_cafe_read_session_digest', args: { sessionId, charOffset: 0 } },
+      });
+    }
+
     return reply.send(digest);
   });
 
   // GET /api/sessions/:sessionId/invocations/:invocationId — F98 Gap 2
   app.get<{
     Params: { sessionId: string; invocationId: string };
+    Querystring: { cursor?: string; limit?: string };
   }>('/api/sessions/:sessionId/invocations/:invocationId', async (request, reply) => {
     const userId = resolveUserId(request);
     if (!userId) {
@@ -251,10 +305,30 @@ export async function sessionTranscriptRoutes(
       return { error: callerCatIdErr3 };
     }
 
-    const events = await readInvocationEvents(session, invocationId);
-    if (events.length === 0) return reply.status(404).send({ error: 'Invocation not found' });
+    const paginated = request.query.cursor !== undefined || request.query.limit !== undefined;
+    let pageOptions: { cursor?: number; limit?: number } = {};
+    if (paginated) {
+      const cursor = request.query.cursor === undefined ? 0 : strictParseTranscriptInteger(request.query.cursor);
+      const limit = request.query.limit === undefined ? 50 : strictParseTranscriptInteger(request.query.limit);
+      if (Number.isNaN(cursor) || cursor < 0 || Number.isNaN(limit) || limit < 1 || limit > 200) {
+        return reply.status(400).send({ error: 'Invalid invocation cursor or limit' });
+      }
+      pageOptions = { cursor, limit };
+    }
+    const pages = await withTranscriptReadSignal(request, reply, (signal) =>
+      invocationReader.readInvocation([session], invocationId, pageOptions, signal),
+    );
+    const page = pages.get(session.id);
+    if (!page || page.total === 0) return reply.status(404).send({ error: 'Invocation not found' });
+    const { events } = page;
+    if (paginated) {
+      return reply.send({
+        invocationId,
+        ...projectRawTranscriptPage(page, sessionId),
+      });
+    }
 
-    const summary = projectInvocationTrajectories(events, session)[0];
+    const summary = page.summary;
     const promptInput = await projectInvocationPromptInput(
       { messageStore, turnExecutionStore },
       session,

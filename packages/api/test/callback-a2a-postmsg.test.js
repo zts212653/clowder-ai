@@ -207,6 +207,83 @@ describe('post_message A2A mention invocation', () => {
     assert.deepEqual(invocationRecordStore.getRecords()[0].targetCats, ['codex']);
   });
 
+  test('an admitted private Work owner stamps an exact same-thread home delegation on the A2A source', async () => {
+    const app = await createApp();
+    registry.setCollectiveWorkAuthorityValidator(async (record) => {
+      assert.equal(record.ownerAuthProvenance, 'unknown');
+      assert.equal(record.collectiveWorkBinding.taskId, 'task-private');
+      assert.equal(record.collectiveWorkBinding.executionRevision, 2);
+    });
+    const workTrigger = messageStore.append({
+      userId: 'user-1',
+      threadId: 't1',
+      catId: null,
+      content: 'Run admitted private Work',
+      mentions: [],
+      timestamp: 1,
+      extra: {
+        collectiveWorkInvocationV1: {
+          v: 1,
+          taskId: 'task-private',
+          observedRevision: 4,
+          resultRevision: 1,
+          executionRevision: 2,
+          executionRef: 'message:owner-admission',
+        },
+      },
+    });
+    const { invocationId, callbackToken } = await registry.create(
+      'user-1',
+      'opus',
+      't1',
+      undefined,
+      undefined,
+      {
+        mode: 'collective_work',
+        taskId: 'task-private',
+        threadId: 't1',
+        executionRevision: 2,
+        executionRef: 'message:owner-admission',
+        workspaceRoot: '/tmp/task-private-workspace',
+        readOnlyRoots: [],
+      },
+      workTrigger.id,
+      'unknown',
+      undefined,
+      undefined,
+      {
+        v: 1,
+        taskId: 'task-private',
+        observedRevision: 4,
+        resultRevision: 1,
+        executionRevision: 2,
+        executionRef: 'message:owner-admission',
+        sourceRef: 'message:collective-source',
+        authorityRef: 'message:owner-admission',
+      },
+    );
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: { content: '@缅因猫\n请在家内接住这个已准入的工作。' },
+    });
+
+    assert.equal(response.statusCode, 200, response.payload);
+    const delegated = messageStore.getRecent(10).find((message) => message.catId === 'opus');
+    assert.deepEqual(delegated.extra.collectiveWorkDelegationV1, {
+      v: 1,
+      taskId: 'task-private',
+      observedRevision: 4,
+      resultRevision: 1,
+      executionRevision: 2,
+      executionRef: 'message:owner-admission',
+      ownerCatId: 'opus',
+      targetCatIds: ['codex'],
+    });
+  });
+
   test('post-message duplicate retry recovers a queued A2A callback before returning duplicate', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const queueProcessor = {

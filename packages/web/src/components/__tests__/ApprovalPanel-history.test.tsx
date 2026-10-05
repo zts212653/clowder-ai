@@ -38,6 +38,8 @@ const SETTLED_ITEMS: SettledApprovalHubItem[] = [
 
 const mockFetchPending = vi.fn();
 const mockFetchSettled = vi.fn();
+let mockSettledItems: SettledApprovalHubItem[] = SETTLED_ITEMS;
+let mockSettledError: string | null = null;
 
 vi.mock('@/stores/approvalHubStore', () => ({
   useApprovalHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -47,9 +49,9 @@ vi.mock('@/stores/approvalHubStore', () => ({
       isLoading: false,
       error: null,
       fetchPending: mockFetchPending,
-      settledItems: SETTLED_ITEMS,
+      settledItems: mockSettledItems,
       settledIsLoading: false,
-      settledError: null,
+      settledError: mockSettledError,
       fetchSettled: mockFetchSettled,
       selectedIds: new Set<string>(),
       selectAllInline: vi.fn(),
@@ -84,6 +86,8 @@ describe('F246 history inbox integration', () => {
   beforeEach(() => {
     mockFetchPending.mockClear();
     mockFetchSettled.mockClear();
+    mockSettledItems = SETTLED_ITEMS;
+    mockSettledError = null;
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -122,5 +126,36 @@ describe('F246 history inbox integration', () => {
     expect(container.querySelector('[data-testid="settled-card-taste-1"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="settled-card-dispatch-1"]')).toBeNull();
     expect(container.querySelector('[data-testid="approval-history-filter-active-F221"]')).not.toBeNull();
+  });
+
+  async function openHistoryTab() {
+    await act(async () => {
+      root.render(React.createElement(ApprovalPanel));
+    });
+    await act(async () => {
+      container
+        .querySelector('[data-testid="approval-tab-history"]')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+  }
+
+  it('keeps cached history visible with an honest stale note when a refresh fails', async () => {
+    mockSettledError = 'Network failed';
+    await openHistoryTab();
+
+    const errorBlock = container.querySelector('[data-testid="approval-history-error"]');
+    expect(errorBlock?.textContent).toContain('正在显示最近一次成功读取的内容');
+    expect(container.querySelector('[data-testid="settled-card-taste-1"]')).not.toBeNull();
+    expect(errorBlock?.textContent).not.toContain('已保留现有内容');
+  });
+
+  it('says history is simply unreadable when the first fetch fails with no cache', async () => {
+    mockSettledItems = [];
+    mockSettledError = 'Network failed';
+    await openHistoryTab();
+
+    const errorBlock = container.querySelector('[data-testid="approval-history-error"]');
+    expect(errorBlock?.textContent).toContain('暂时无法读取审批记录');
+    expect(errorBlock?.textContent).not.toContain('最近一次成功读取');
   });
 });

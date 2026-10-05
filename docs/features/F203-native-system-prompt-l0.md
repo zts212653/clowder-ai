@@ -1,9 +1,9 @@
 ---
 feature_ids: [F203]
-related_features: [F086, F128, F167, F198, F210, F211, F061]
+related_features: [F086, F128, F167, F198, F210, F211, F061, F325]
 topics: [system-prompt, governance, prompt-engineering, compression-immunity, l0-injection]
 doc_kind: spec
-tips_exempt: internal native L0 cache freshness fix; no user-facing capability surface
+tips_exempt: "Renewed 2026-10-02: F325 successor ownership and the pending capability-wakeup measurement binding are internal L0/eval coordination; neither creates a user-facing command or an active Evolution Program."
 created: 2026-05-15
 updated: 2026-08-01
 ---
@@ -11,6 +11,8 @@ updated: 2026-08-01
 # F203: Native System Prompt L0 — 压缩免疫核心规则注入
 
 > **Status**: done（operator 签字降级 2026-06-19，AC-I8 deferred）| **Owner**: Ragdoll Opus 4.7 | **Priority**: P1
+
+**2026-09-29 AGY L0 successor**：历史 done/签字裁定保留。官方独立 ACP 与当前 CLI 主 agent 候选入口出现后，Google/AGY 原生 L0 的重新验证由 [F325](F325-antigravity-native-parity.md) A3/B1 承接；继续复用本 F 单源 compiler，不把 Rules/prepend 当压缩免疫，也不在本 F 重开旧载体 Phase。
 
 ## Current State Snapshot（2026-06-19）
 
@@ -20,6 +22,13 @@ updated: 2026-08-01
 - **OpenCode 金渐层**: implementation done, runtime validation **deferred — operator signed 2026-06-19**. Phase I 已合入（PR #2069）：`opencode.json` `instructions` 注入 compiled L0 + `OPENCODE.md`，全链守护测试 139/139。AC-I8 alpha runtime 体感验收 deferred 原因：**家里 runtime 没接入 OpenCode invocation flow（无 API/subscription）**——本地 opencode v1.2.27 已装但不在产线 carrier。retraction condition：OpenCode API/subscription 接入产线 carrier flow 时重开。
 
 F203 整体 **close（带 deferred AC-I8）**。BACKLOG 状态从 `runtime-validation` → `done`；OpenCode runtime 验收等 API/subscription 接入再开新 mini-spec（不留 stub 尾巴，retraction condition 写明）。
+
+## Eval binding: `eval:capability-wakeup`（2026-10-01 并入 F311 Program，待建）
+
+- **Domain registry**：`docs/harness-feedback/eval-domains/eval-capability-wakeup.yaml`（`handoffTargetResolver.featureId: F203`）
+- **处置**：并入 F311 Program 做量尺（Program slug 由 F311 owner Maine Coon / You 按真实目标定，不替建）
+- **Consumer**：**skill owner**——SKILL.md 的作者 / 维护者是 weekly verdict 的消费者，随结论迭代 skill 的 trigger / scope / examples；L0 §8 本就引用 `eval:capability-wakeup weekly verdict 驱动 iterate`
+- **决定接入**：F311 Program 开出来后接新的 F267 证书，正式脱离 `keep_observe_only`；在此之前继续按 F267 fail-closed 产 keep_observe，但不再独立排期（见讨论文档）
 
 ## Why
 

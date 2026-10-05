@@ -8,7 +8,7 @@ description: "按真实 runtime continuity 区分冷启动与热续，并让上�
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-31T16:45:00-07:00
-tips_exempt: "续租 2026-09-28 / PR #1543：spawn-time --settings 注入与 launch-plan readiness 只修复 #1542 的 carrier 契约真相源（AC-B8 措辞同步），不新增用户可操作入口。"
+tips_exempt: "Renewed 2026-10-02: the remaining public delta moves the existing telemetry module into session/context; launch-plan continuity behavior is already present upstream, and no user entry or configuration is added."
 ---
 
 # F296: Continuity-Aware Context Injection — 冷启动可信定向包 + 热续增量
@@ -211,7 +211,7 @@ unrecognized 各自的 count/bytes、delivery latency ms 与 bounded ledger outc
 也禁止把这些字段放进 metric labels。
 
 代码唯一可导入字段合同是
-`packages/api/src/domains/cats/services/session/context-projection-telemetry-contract.ts`。当前 producer 与后续
+`packages/api/src/domains/cats/services/session/context/context-projection-telemetry-contract.ts`。当前 producer 与后续
 Alpha consumer 必须共同导入它；plan、discussion 与 BACKLOG 只导航本节，不再复制字段清单。
 
 ## Current State / 现状基线

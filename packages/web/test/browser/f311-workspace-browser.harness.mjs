@@ -242,12 +242,14 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
     thread,
     handleRequest: options.handleRequest,
   });
+  const disposeApi = options.configureApi?.(api);
   let nextDev;
   let web;
   const close = async () => {
     try {
       if (web) await stopChild(web);
     } finally {
+      await disposeApi?.();
       api.closeAllConnections();
       if (api.listening) await new Promise((resolve) => api.close(resolve));
       await nextDev?.cleanup();
@@ -264,7 +266,7 @@ export async function startEvolutionWorkspaceBrowserFixture(projection, options 
     const apiUrl = `http://127.0.0.1:${api.address().port}`;
     const webUrl = `http://127.0.0.1:${options.webPort ?? (await availablePort())}`;
     nextDev = await createNextDevTestEnvironment('f311-workspace', {
-      NEXT_PUBLIC_API_URL: webUrl,
+      NEXT_PUBLIC_API_URL: options.browserApiUrl ?? webUrl,
       API_SERVER_PORT: new URL(apiUrl).port,
       CAT_CAFE_DEPLOYMENT_ID: 'feature-test',
     });

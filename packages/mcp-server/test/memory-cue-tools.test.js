@@ -58,9 +58,16 @@ describe('F287 memory cue MCP tools', () => {
 
     assert.match(drill.description, /owner-authenticated/i);
     assert.match(drill.description, /current source revision/i);
+    assert.match(drill.description, /source_read_failed/i);
+    assert.match(drill.description, /retryable/i);
     assert.match(drill.description, /not for.*raw/i);
     assert.match(outcome.description, /applied.*dismissed/i);
     assert.match(outcome.description, /no rationale/i);
     assert.match(outcome.description, /presented/i);
+    assert.match(outcome.description, /late_after_drill/i);
+    assert.match(outcome.description, /successful drill/i);
+    assert.match(outcome.description, /410 expired/i);
+    assert.match(outcome.description, /source_read_failed/i);
+    assert.match(outcome.description, /corrected.*forgotten.*revoked/i);
   });
 });

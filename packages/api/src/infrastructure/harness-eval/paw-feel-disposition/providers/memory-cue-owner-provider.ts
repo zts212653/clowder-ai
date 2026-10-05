@@ -21,6 +21,7 @@ import {
   isMemoryCueOutcomeLifecyclePath,
   type MemoryCuePawFeelGitTruth,
 } from './memory-cue-git-truth.js';
+import { verifyPawFeelOwnerRepairGitProof } from './owner-repair-git-proof.js';
 
 const MEMORY_CUE_TOOL_NAME = 'cat_cafe_record_memory_cue_outcome';
 const MEMORY_CUE_TOOL_REF = ownerTruthRefV1Schema.parse({
@@ -145,22 +146,14 @@ export class MemoryCuePawFeelDirectRepairOwnerProvider implements PawFeelDirectR
     const baselineRevision = assertMemoryCueGitCommit(binding.targetVersionRef.version);
     const loadedRevision = canonicalMemoryCueGitCommit(this.options.gitTruth.loadedRevision);
     const mainRevision = canonicalMemoryCueGitCommit(await this.options.gitTruth.currentMainRevision());
-    if (!loadedRevision || !mainRevision || baselineRevision === loadedRevision) {
-      throw new Error('memory-cue outcome has no newer loaded repair revision');
-    }
-    if (
-      !(await this.options.gitTruth.isAncestor(baselineRevision, loadedRevision)) ||
-      !(await this.options.gitTruth.isAncestor(loadedRevision, mainRevision))
-    ) {
-      throw new Error('memory-cue loaded repair is not on the current main ancestry');
-    }
-    const changedFiles = [...new Set(await this.options.gitTruth.changedFiles(baselineRevision, loadedRevision))]
-      .map((path) => path.trim())
-      .filter(Boolean)
-      .sort();
-    if (changedFiles.length === 0 || changedFiles.length > 200 || !changedFiles.some(isMemoryCueOutcomeLifecyclePath)) {
-      throw new Error('memory-cue outcome has no bounded outcome-lifecycle delta');
-    }
+    const gitProof = await verifyPawFeelOwnerRepairGitProof({
+      label: 'memory-cue',
+      baselineRevision,
+      loadedRevision,
+      mainRevision,
+      gitTruth: this.options.gitTruth,
+      isRelevantPath: isMemoryCueOutcomeLifecyclePath,
+    });
 
     const eventId = ownerOutcomeRef.ownerStateRef.startsWith('memory-cue-consumption:')
       ? ownerOutcomeRef.ownerStateRef.slice('memory-cue-consumption:'.length)
@@ -181,7 +174,9 @@ export class MemoryCuePawFeelDirectRepairOwnerProvider implements PawFeelDirectR
       throw new Error('memory-cue owner outcome event is missing, stale, or belongs to another owner');
     }
 
-    const deltaDigest = contentSha256(JSON.stringify([baselineRevision, loadedRevision, changedFiles]));
+    const proofDigest = contentSha256(
+      JSON.stringify([gitProof.mode, baselineRevision, loadedRevision, gitProof.changedFiles]),
+    );
     return {
       schemaVersion: 1,
       bindingRef: binding.bindingRef,
@@ -203,8 +198,8 @@ export class MemoryCuePawFeelDirectRepairOwnerProvider implements PawFeelDirectR
         }),
         ownerTruthRefV1Schema.parse({
           ownerFeatureId: 'F287',
-          ownerStateRef: `memory-cue-owner-delta:sha256:${deltaDigest}`,
-          version: `${baselineRevision}..${loadedRevision}`,
+          ownerStateRef: `memory-cue-owner-proof:sha256:${proofDigest}`,
+          version: `${gitProof.mode}:${baselineRevision}..${loadedRevision}`,
         }),
       ],
       disposition: 'verified_changed',

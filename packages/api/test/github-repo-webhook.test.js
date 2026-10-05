@@ -101,6 +101,67 @@ describe('RedisDeliveryDedup', () => {
   });
 });
 
+describe('RepoInboxOwnerResolver', () => {
+  it('reads the canonical community guard on every call and overrides the stale fallback', async () => {
+    const { createRepoInboxOwnerResolver } = await import(
+      '../dist/infrastructure/connectors/github-repo-event/RepoInboxOwnerResolver.js'
+    );
+    let guardCatId = 'codex-sol';
+    const resolveOwner = createRepoInboxOwnerResolver(
+      {
+        async getByRepo() {
+          return { guardCatId };
+        },
+      },
+      'stale-env-owner',
+    );
+
+    assert.equal(await resolveOwner('zts212653/clowder-ai'), 'codex-sol');
+    guardCatId = 'codex61-sol';
+    assert.equal(await resolveOwner('zts212653/clowder-ai'), 'codex61-sol');
+  });
+
+  it('uses the environment owner only when the repo has no canonical config', async () => {
+    const { createRepoInboxOwnerResolver } = await import(
+      '../dist/infrastructure/connectors/github-repo-event/RepoInboxOwnerResolver.js'
+    );
+    const warnings = [];
+    const resolveOwner = createRepoInboxOwnerResolver({ getByRepo: async () => null }, 'fallback-owner', {
+      warn(context, message) {
+        warnings.push({ context, message });
+      },
+    });
+
+    assert.equal(await resolveOwner('unregistered/repo'), 'fallback-owner');
+    assert.deepEqual(warnings, [
+      {
+        context: { repoFullName: 'unregistered/repo', fallbackCatId: 'fallback-owner' },
+        message: '[repo-inbox] Canonical repo owner missing; using GITHUB_REPO_INBOX_CAT_ID fallback',
+      },
+    ]);
+  });
+
+  it('propagates canonical-store failures instead of silently using the fallback owner', async () => {
+    const { createRepoInboxOwnerResolver } = await import(
+      '../dist/infrastructure/connectors/github-repo-event/RepoInboxOwnerResolver.js'
+    );
+    const warnings = [];
+    const storeFailure = new Error('repo config unavailable');
+    const resolveOwner = createRepoInboxOwnerResolver(
+      {
+        async getByRepo() {
+          throw storeFailure;
+        },
+      },
+      'stale-env-owner',
+      { warn: (...args) => warnings.push(args) },
+    );
+
+    await assert.rejects(() => resolveOwner('zts212653/clowder-ai'), storeFailure);
+    assert.deepEqual(warnings, []);
+  });
+});
+
 // ── Task 6: GitHubRepoWebhookHandler ──
 
 describe('GitHubRepoWebhookHandler', () => {
@@ -326,6 +387,36 @@ describe('GitHubRepoWebhookHandler', () => {
     const [threadId, catId] = triggeredCalls[0];
     assert.ok(threadId.startsWith('thread-'));
     assert.equal(catId, 'cat-maine-coon');
+  });
+
+  it('re-resolves the repo inbox owner for every delivery and wake', async () => {
+    let currentOwner = 'codex-sol';
+    const resolverCalls = [];
+    const { deps, deliveredMessages, triggeredCalls } = createMockDeps();
+    deps.resolveInboxCatId = async (repoFullName) => {
+      resolverCalls.push(repoFullName);
+      return currentOwner;
+    };
+    const handler = new GitHubRepoWebhookHandler({ ...CONFIG, inboxCatId: 'stale-env-owner' }, deps);
+
+    const firstBody = makePRPayload('opened');
+    const firstRequest = makeHeaders('pull_request', 'delivery-owner-before', firstBody);
+    await handler.handleWebhook(firstBody, firstRequest.headers, firstRequest.raw);
+
+    currentOwner = 'codex61-sol';
+    const secondBody = makeIssuePayload('opened');
+    const secondRequest = makeHeaders('issues', 'delivery-owner-after', secondBody);
+    await handler.handleWebhook(secondBody, secondRequest.headers, secondRequest.raw);
+
+    assert.deepEqual(resolverCalls, ['zts212653/clowder-ai', 'zts212653/clowder-ai']);
+    assert.deepEqual(
+      deliveredMessages.map((message) => message.catId),
+      ['codex-sol', 'codex61-sol'],
+    );
+    assert.deepEqual(
+      triggeredCalls.map((call) => call[1]),
+      ['codex-sol', 'codex61-sol'],
+    );
   });
 
   it('skips unhandled event types', async () => {

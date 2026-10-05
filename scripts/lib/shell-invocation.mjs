@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 
-import { commandName, tokenizeSimpleShellCommand } from '../native-effect-shell-tokenizer.mjs';
+import { commandName, shellInvocation, tokenizeSimpleShellCommand } from '../native-effect-shell-tokenizer.mjs';
 import { extractSubstitutions, SUBSTITUTION, splitCommandLines, splitPipelineStages, unquote } from './shell-text.mjs';
 import { afterWrapper, WRAPPERS } from './shell-wrappers.mjs';
 
@@ -76,6 +76,7 @@ export function executedInvocations(raw, { depth = 0, cwd } = {}) {
   if (depth > MAX_RECURSION) return { pipelines: [], complete: false };
 
   const pipelines = [];
+  const directInvocations = [];
   let complete = true;
 
   for (const line of splitCommandLines(String(raw ?? ''))) {
@@ -85,13 +86,16 @@ export function executedInvocations(raw, { depth = 0, cwd } = {}) {
       if (!parsed.complete) complete = false;
       // Every stage keeps its place, even one whose insides we read separately.
       // Dropping it would hand the next stage a stdin that never came from here.
-      if (parsed.invocation) pipeline.push(parsed.invocation);
+      if (parsed.invocation) {
+        pipeline.push(parsed.invocation);
+        directInvocations.push(parsed.invocation);
+      }
       pipelines.push(...parsed.nested);
     }
     if (pipeline.length > 0) pipelines.push(pipeline);
   }
 
-  return { pipelines, complete };
+  return { pipelines, complete, directInvocations };
 }
 
 function nestedFrom(source, depth, cwd) {
@@ -132,29 +136,38 @@ function moveCoordinate(value, base) {
 function programTokens(tokens, outerCwd) {
   let rest = tokens;
   let cwd = outerCwd;
+  const directoryOperands = [];
+  let coordinateKnown = true;
+  const finish = (rest, complete) => ({ rest, complete, cwd, directoryOperands, coordinateKnown });
   for (let guard = 0; guard <= MAX_RECURSION; guard++) {
-    rest = skipNoise(rest);
-    if (rest.length === 0) return { rest: [], complete: true, cwd };
+    const clean = skipNoise(rest);
+    coordinateKnown &&= !rest
+      .slice(0, rest.length - clean.length)
+      .some((word) => /^GIT_(?:DIR|WORK_TREE|COMMON_DIR)=/.test(word));
+    rest = clean;
+    if (rest.length === 0) return finish([], true);
     const spec = WRAPPERS.get(commandName(rest[0]) ?? '');
-    if (!spec) return { rest, complete: true, cwd };
+    if (!spec) return finish(rest, true);
     const consumed = afterWrapper(spec, rest.slice(1));
-    if (!consumed.complete) return { rest: [], complete: false, cwd };
+    if (!consumed.complete) return finish([], false);
     if (consumed.cwd !== undefined) {
+      // Each wrapper applies its selected chdir once; nested wrappers compose.
+      directoryOperands.push(consumed.cwd);
       const moved = moveCoordinate(consumed.cwd, cwd);
-      if (moved === undefined) return { rest: [], complete: false, cwd };
+      if (moved === undefined) return finish([], false);
       cwd = moved;
     }
     if (consumed.splitString !== undefined) {
       // `-S` splits a string into argv words. It is not a shell: a `;` in there
       // is an argument, not a separator, and nothing after it is a command.
       const words = tokenizeSimpleShellCommand(consumed.splitString);
-      if (!words) return { rest: [], complete: false, cwd };
+      if (!words) return finish([], false);
       rest = [...words, ...consumed.rest];
       continue;
     }
     rest = consumed.rest;
   }
-  return { rest: [], complete: false, cwd };
+  return finish([], false);
 }
 
 /** Nothing here can be read as a name: an expansion, or a substitution's output. */
@@ -190,7 +203,11 @@ function scriptFileInvocation(operands, stage, cwd) {
  */
 function inlineExecution({ script, name, stage, depth, cwd, nested, complete }) {
   const stageInvocation = invocation(name, [], stage, cwd);
-  if (!script || unreadableProgram(script)) {
+  stageInvocation.script = script;
+  // An unknown operand does not hide a known executable: `kill "$PID"`
+  // still identifies a signal operation. The nested parser decides which
+  // program names it can read, including a wholly unknown `$COMMAND`.
+  if (!script || script === SUBSTITUTION) {
     return { invocation: stageInvocation, nested, complete: false };
   }
   const result = nestedFrom(unquote(script) ?? '', depth, cwd);
@@ -212,8 +229,10 @@ function parseStage(stage, depth, outerCwd) {
   }
   const unreadable = { invocation: undefined, nested, complete: false };
 
-  const tokens = tokenizeSimpleShellCommand(substitutions.text);
-  if (!tokens || tokens.length === 0) return unreadable;
+  const words = shellInvocation(substitutions.text);
+  const tokens = words.words.map(({ value }) => value);
+  complete &&= words.syntaxComplete;
+  if (tokens.length === 0) return unreadable;
 
   // A wrapper that moved the coordinate moved it for everything it runs.
   const program = programTokens(tokens, outerCwd);
@@ -226,21 +245,34 @@ function parseStage(stage, depth, outerCwd) {
 
   const name = commandName(rest[0]);
   const operands = rest.slice(1);
+  const annotate = (result) => annotateCoordinate(result, program, words.complete && substitutions.inner.length === 0);
 
   // `bash -c "<script>"` and `eval "<script>"` run the string they were handed.
   const inlineScript = inlineScriptOf(name, operands);
   if (inlineScript !== undefined) {
-    return inlineExecution({ script: inlineScript, name, stage, depth, cwd, nested, complete });
+    return annotate(inlineExecution({ script: inlineScript, name, stage, depth, cwd, nested, complete }));
   }
 
-  if (SHELLS.has(name ?? '')) return { invocation: scriptFileInvocation(operands, stage, cwd), nested, complete };
+  if (SHELLS.has(name ?? ''))
+    return annotate({ invocation: scriptFileInvocation(operands, stage, cwd), nested, complete });
 
   if (name === 'node') {
     // `node -e '<js>'` executes code this module does not model.
     if (operands.some((token) => ['-e', '--eval', '-p', '--print'].includes(token))) return unreadable;
     const invocation = scriptFileInvocation(operands, stage, cwd);
-    if (invocation) return { invocation, nested, complete };
+    if (invocation) return annotate({ invocation, nested, complete });
   }
 
-  return { invocation: invocation(name, operands, stage, cwd), nested, complete };
+  return annotate({ invocation: invocation(name, operands, stage, cwd), nested, complete });
+}
+
+/** Preserve raw directory operands; cwd is an observation, not physical path proof. */
+function annotateCoordinate(result, program, argvComplete) {
+  if (result.invocation)
+    Object.assign(result.invocation, {
+      directoryOperands: program.directoryOperands,
+      coordinateKnown: program.coordinateKnown,
+      argvComplete,
+    });
+  return result;
 }

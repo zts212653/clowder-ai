@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { type BigIntStats, constants } from 'node:fs';
-import { type FileHandle, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { type FileHandle, link, mkdir, open, opendir, readFile, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateContentPublication } from './publication.js';
 import type { ContentPublicationScopeV1, ContentSettlementReceiptV1, ProjectContentRevisionV1 } from './types.js';
@@ -55,6 +55,58 @@ export class ProjectContentOwnerStore {
       if (isErrno(error, 'ENOENT')) return undefined;
       throw error;
     }
+  }
+
+  /** Enumerate primary manifests, including owner commits not yet projected into an application ledger.
+   * No URL/byte index is an authority, and an incomplete read must never become "no prior publication".
+   */
+  async findSourcePublications(input: {
+    ownerUserId: string;
+    sourceRef: string;
+    artifactRef: string;
+    revisions: string[];
+  }) {
+    const matches: { contentRef: string; ownerRevision: number; sourceRevision: string }[] = [];
+    let directory;
+    try {
+      directory = await opendir(this.rootDir);
+    } catch (error) {
+      if (isErrno(error, 'ENOENT')) return matches;
+      throw error;
+    }
+    for await (const entry of directory) {
+      if (!entry.isDirectory() || !/^[a-f0-9]{64}$/.test(entry.name)) continue;
+      let raw: string;
+      try {
+        raw = await readFile(join(this.rootDir, entry.name, 'state.json'), 'utf8');
+      } catch (error) {
+        if (isErrno(error, 'ENOENT')) continue;
+        throw error;
+      }
+      const identity: unknown = JSON.parse(raw);
+      if (
+        !isRecord(identity) ||
+        typeof identity.contentRef !== 'string' ||
+        contentKey(identity.contentRef) !== entry.name
+      )
+        throw new Error('Invalid content owner manifest identity');
+      const state = parseState(raw, identity.contentRef);
+      if (state.publicationScope?.ownerUserId !== input.ownerUserId) continue;
+      for (const revision of state.revisions) {
+        const source = revision.sourcePublication;
+        if (
+          source?.sourceRef === input.sourceRef &&
+          source.artifactRef === input.artifactRef &&
+          input.revisions.includes(source.revision)
+        )
+          matches.push({
+            contentRef: state.contentRef,
+            ownerRevision: revision.ownerRevision,
+            sourceRevision: source.revision,
+          });
+      }
+    }
+    return matches.sort((a, b) => a.contentRef.localeCompare(b.contentRef) || a.ownerRevision - b.ownerRevision);
   }
 
   async writeState(contentRef: string, state: ProjectContentStateV1): Promise<void> {

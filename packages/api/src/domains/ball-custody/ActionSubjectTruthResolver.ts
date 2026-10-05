@@ -4,6 +4,12 @@ import {
   type CanonicalActionTerminalPredicate,
   getActionTerminalCapabilityForPredicateKind,
 } from './ActionTerminalPredicateCatalog.js';
+import type {
+  ApprovedDelegate,
+  TaskActionSnapshot,
+  TaskActionTruthProvider,
+  TaskApprovedDelegateProvider,
+} from './action-subject-delegate-contract.js';
 import {
   type ActionCompletionCandidateSnapshot,
   type ActionCompletionVerdict,
@@ -12,6 +18,10 @@ import {
 import { canonicalizeActionSubjectRef } from './action-successor-state-machine.js';
 import { resolveProjectedActionCompletion } from './action-terminal-predicate-truth.js';
 import { type LivePrFreshnessProvider, resolveLivePrFreshnessObservation } from './LivePrFreshnessObservation.js';
+
+// Re-export for backward compatibility — consumers that imported from this
+// module continue to work unchanged.
+export type { ApprovedDelegate, TaskActionSnapshot, TaskActionTruthProvider, TaskApprovedDelegateProvider };
 
 type TerminalResolution = {
   terminal: true;
@@ -35,6 +45,12 @@ export type ActionFreshnessResolution =
       ownerCatId?: string;
       holderThreadId?: string;
       tenantScope?: string;
+      /**
+       * F167 × F322: operator-approved (catId, threadId) pairs that pass standing
+       * checks even though they differ from the canonical ownerCatId /
+       * holderThreadId. Tenant must still match exactly.
+       */
+      approvedDelegates?: ReadonlyArray<ApprovedDelegate>;
     }
   | { status: 'mismatch'; reason: string; evidenceRef: string }
   | { status: 'insufficient'; reason: string };
@@ -62,19 +78,6 @@ export interface TrackingFreshnessSnapshot {
 
 export interface TrackingFreshnessProvider {
   getBySubject(subjectKey: string): Promise<TrackingFreshnessSnapshot | null>;
-}
-
-export interface TaskActionSnapshot {
-  id: string;
-  status: 'todo' | 'doing' | 'blocked' | 'done';
-  ownerCatId: string | null;
-  threadId: string;
-  userId?: string;
-  updatedAt: number;
-}
-
-export interface TaskActionTruthProvider {
-  get(taskId: string): Promise<TaskActionSnapshot | null>;
 }
 
 export interface ActionCompletionLeaseContext {
@@ -113,6 +116,7 @@ export class ActionSubjectTruthResolver {
     private readonly trackingFreshnessProvider?: TrackingFreshnessProvider,
     private readonly taskActionTruthProvider?: TaskActionTruthProvider,
     private readonly livePrFreshnessProvider?: LivePrFreshnessProvider,
+    private readonly taskApprovedDelegateProvider?: TaskApprovedDelegateProvider,
   ) {}
 
   async resolve(subjectRefInput: string, _now: number): Promise<ActionSubjectTruthResolution> {
@@ -232,6 +236,17 @@ export class ActionSubjectTruthResolver {
       }
       if (!task.ownerCatId) return { status: 'insufficient', reason: 'task has no named owner' };
       if (!task.userId) return { status: 'insufficient', reason: 'task has no tenant owner' };
+      // F167 × F322: resolve operator-approved delegates from the authoritative
+      // proposal store, scoped to this exact task and current owner.
+      // Fail-closed: provider absence, errors, or owner mismatch yield empty.
+      const approvedDelegates =
+        (await this.taskApprovedDelegateProvider?.getForTask(
+          taskId,
+          task.threadId,
+          task.ownerCatId,
+          task.userId,
+          task.developmentScope,
+        )) ?? [];
       return {
         status: 'verified',
         evidenceRef: taskEvidenceRef(task, 'active'),
@@ -239,6 +254,7 @@ export class ActionSubjectTruthResolver {
         ownerCatId: task.ownerCatId,
         holderThreadId: task.threadId,
         tenantScope: task.userId,
+        ...(approvedDelegates.length > 0 ? { approvedDelegates } : {}),
       };
     }
     if (capability.freshnessResolver !== 'community_current_head') {

@@ -128,6 +128,18 @@ describe('F254 FreshnessNoticeService', () => {
     assert.ok(result.text.includes('2'), 'notice should include unseen count');
   });
 
+  it('F324: notice body is bounded before delivery is recorded', async () => {
+    mockUnseenChecker.checkUnseen = async () => ({
+      count: 100,
+      senders: Array.from({ length: 100 }, (_, index) => `sender-${index}-${'x'.repeat(200)}`),
+      maxMessageId: 'message-100',
+    });
+    const result = await service.checkAndMaybeNotice(baseParams);
+    assert.ok(result.text.length <= 1_500);
+    assert.match(result.text, /cat_cafe_get_thread_context/);
+    assert.equal(stateStoreCalls.filter((call) => call.method === 'recordNoticeDelivered').length, 1);
+  });
+
   it('returns null when no unseen messages', async () => {
     // Override unseen checker to return null
     mockUnseenChecker.checkUnseen = async () => null;

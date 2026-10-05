@@ -43,3 +43,9 @@ metricGlossaryRef: eval-sop.metrics.yaml
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 336
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Deterministic SOP violations are covered by merge-gate, quality-gate and pre-commit hooks; following the spirit of the SOP has no Program or consumer."
+  revivalPath: "Revive when a development-process-quality Program names a consumer."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

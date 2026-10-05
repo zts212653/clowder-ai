@@ -1,10 +1,11 @@
 'use client';
 import { type EvolutionExplorationNodeV1, refIdentity } from '@cat-cafe/shared';
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { useEvolutionAssetReview } from '../evolution-asset-resource';
 import type { EvolutionProgramProjection } from '../evolution-program-projection';
 import { DEFAULT_READING, useEvolutionReading } from '../evolution-reading-state';
 import { compareExplorationRecords, comparisonScopeKey } from './exploration-comparison';
+import { suggestedComparison, suggestedExperiment } from './exploration-decision-model';
 import { clearExplorationSelection, DEFAULT_EXPLORATION, type ExplorationReading } from './exploration-reading';
 import { useEvolutionExploration } from './exploration-resource';
 
@@ -15,10 +16,13 @@ export function useExplorationWorkspace(projection: EvolutionProgramProjection) 
   const update = useEvolutionReading((state) => state.update);
   const reading = saved.exploration ?? DEFAULT_EXPLORATION;
   const asset = useEvolutionAssetReview(projection, saved.selectedVersionRef);
-  const change = (patch: Partial<ExplorationReading>) =>
-    update(id, {
-      exploration: { ...(useEvolutionReading.getState().programs[id]?.exploration ?? DEFAULT_EXPLORATION), ...patch },
-    });
+  const change = useCallback(
+    (patch: Partial<ExplorationReading>) =>
+      update(id, {
+        exploration: { ...(useEvolutionReading.getState().programs[id]?.exploration ?? DEFAULT_EXPLORATION), ...patch },
+      }),
+    [id, update],
+  );
   const resource = useEvolutionExploration(projection, {
     selectedNodeRef: reading.selectedNodeRef,
     selectedExperimentRef: reading.selectedExperimentRef,
@@ -40,9 +44,16 @@ export function useExplorationWorkspace(projection: EvolutionProgramProjection) 
   );
   const experiment = reading.selectedExperimentRef
     ? experiments.find((run) => refIdentity(run.experimentRef) === refIdentity(reading.selectedExperimentRef!))
-    : experiments.at(-1);
+    : catalog
+      ? suggestedExperiment(catalog, experiments)
+      : undefined;
   const selectedNodeKey = node ? refIdentity(node.nodeRef) : undefined;
   const selectedExperimentKey = experiment ? refIdentity(experiment.experimentRef) : undefined;
+  useEffect(() => {
+    if (!catalog || !experiment || reading.comparisonExperimentRef || reading.comparisonChoice === 'manual') return;
+    const suggested = suggestedComparison(catalog, experiment);
+    if (suggested) change({ comparisonExperimentRef: suggested.experimentRef, comparisonChoice: 'auto' });
+  }, [catalog, experiment, reading.comparisonExperimentRef, reading.comparisonChoice, change]);
   useEffect(() => {
     if (!node) return;
     const current = useEvolutionReading.getState().programs[id]?.exploration ?? DEFAULT_EXPLORATION;
@@ -106,6 +117,8 @@ export function useExplorationWorkspace(projection: EvolutionProgramProjection) 
         selectedCaseId: undefined,
         comparisonScope: 'full',
         comparisonScopeKey: undefined,
+        comparisonChoice: 'auto',
+        caseFilter: 'all',
       },
       ...(next.kind === 'owner_version' ? { selectedVersionRef: next.versionRef } : {}),
     });
@@ -136,6 +149,7 @@ export function useExplorationWorkspace(projection: EvolutionProgramProjection) 
     compareExperiment,
     compareDetail,
     pairedMediaVisible,
+    comparison,
     acceptComparisonScope,
     selectNode,
     currentKeys,

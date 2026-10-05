@@ -3,9 +3,11 @@
  * Extracted from publish-verdict.test.js per AGENTS.md 350-line hard limit.
  */
 
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { ensureMeasurementBundleCensusFile } from '../../dist/infrastructure/harness-eval/measurement/measurement-bundle-census-file.js';
+import { reviveActiveEraRegistry } from './measurement-census-active-era.js';
 
 const REPO_ROOT = resolve(import.meta.dirname, '../../../..');
 
@@ -26,6 +28,10 @@ export function seedCanonicalMeasurementCensusState(isolatedRepoRoot) {
     mkdirSync(resolve(target, '..'), { recursive: true });
     cpSync(resolve(REPO_ROOT, relativePath), target, { recursive: true });
   }
+  // Publisher tests exercise actionable publishing on active domains; the
+  // 2026-10-01 dormancy batch is revived here and covered by its own tests.
+  reviveActiveEraRegistry(resolve(isolatedRepoRoot, 'docs/harness-feedback/eval-domains'));
+  ensureMeasurementBundleCensusFile(isolatedRepoRoot, '2026-09-30T00:00:00.000Z');
 }
 
 /**
@@ -49,6 +55,33 @@ export function markMeasurementCensusDomainCertifiedUsable(isolatedRepoRoot, dom
     hardBlockReason: null,
   };
   writeFileSync(censusPath, stringifyYaml(census));
+}
+
+/**
+ * R6 helper: create a mock FreshMainReader that reads from the live tree.
+ * Used by handler-level tests where the preflight needs a mainReader but
+ * the temp dir is not a git repo. Main-first scanning sees the same data
+ * as the live tree — appropriate for handler plumbing tests (unit tests
+ * with separate main/live data are in the designGateReplayPreflight describe).
+ */
+export function createLiveTreeAsMainReader(harnessFeedbackRoot) {
+  return {
+    listBundleEntries() {
+      const bundlesDir = resolve(harnessFeedbackRoot, 'bundles');
+      try {
+        return readdirSync(bundlesDir);
+      } catch {
+        return [];
+      }
+    },
+    readFile(relativePath) {
+      try {
+        return readFileSync(resolve(harnessFeedbackRoot, relativePath), 'utf-8');
+      } catch {
+        return null;
+      }
+    },
+  };
 }
 
 /**

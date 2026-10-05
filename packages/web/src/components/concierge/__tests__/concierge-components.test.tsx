@@ -15,7 +15,8 @@ vi.mock('@/hooks/useCatData', () => ({
       id === 'gemini25'
         ? {
             id,
-            displayName: '烁烁',
+            displayName: '暹罗猫',
+            nickname: '烁烁',
             name: 'Gemini',
             breed: 'siamese',
             color: { primary: '#000', secondary: '#fff' },
@@ -81,6 +82,12 @@ vi.mock('../useConciergeConfirmations', () => ({
   useConciergeConfirmations: () => ({ confirmations: restoredConfirmations, loading: false, error: null }),
 }));
 
+import {
+  refreshConciergeDesktop,
+  reopenConciergeDesktopLossNotice,
+  resetConciergeDesktopObservation,
+  useConciergeDesktopStore,
+} from '@/stores/conciergeDesktopStore';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { apiFetch } from '@/utils/api-client';
 import { ConciergeBall } from '../ConciergeBall';
@@ -129,6 +136,8 @@ async function flushEffects() {
 }
 
 beforeEach(() => {
+  window.sessionStorage.clear();
+  resetConciergeDesktopObservation();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -156,13 +165,102 @@ beforeEach(() => {
   });
 });
 
+it('a visible desktop owns the main body; losing it restores the Hub body without altering preferences', async () => {
+  await render(<ConciergeHost />);
+  expect(container.querySelector('[data-testid="concierge-ball-wrapper"]')).not.toBeNull();
+  const before = useConciergeStore.getState();
+  act(() => useConciergeDesktopStore.setState({ visible: true, available: true }));
+  expect(container.querySelector('[data-testid="concierge-ball-wrapper"]')).toBeNull();
+  act(() => useConciergeDesktopStore.setState({ visible: false, available: false }));
+  expect(container.querySelector('[data-testid="concierge-ball-wrapper"]')).not.toBeNull();
+  mockApiFetch.mockImplementation(async (path) =>
+    path === '/api/concierge/desktop'
+      ? ({ ok: true, json: async () => ({ presence: null, desktopLost: true }) } as Response)
+      : configOk(),
+  );
+  await act(async () => {
+    await refreshConciergeDesktop();
+  });
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')?.textContent).toContain('桌面');
+  expect(useConciergeStore.getState().ballPosition).toEqual(before.ballPosition);
+  expect(useConciergeStore.getState().muted).toBe(before.muted);
+  expect(useConciergeStore.getState().dutyCatProfileId).toBe(before.dutyCatProfileId);
+});
+
+it('closing the web panel retires the current loss notice while the original cat entry can reopen its details', async () => {
+  mockApiFetch.mockImplementation(async (path) =>
+    path === '/api/concierge/desktop'
+      ? ({ ok: true, json: async () => ({ presence: null, desktopLost: true, lossId: 'loss-A' }) } as Response)
+      : configOk(),
+  );
+  await render(<ConciergeHost />);
+  await act(async () => {
+    await refreshConciergeDesktop();
+  });
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).not.toBeNull();
+
+  act(() => useConciergeStore.getState().setSurfaceState('bubble'));
+  act(() => useConciergeStore.getState().setSurfaceState('toolbar'));
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).toBeNull();
+  expect(useConciergeDesktopStore.getState().desktopLost).toBe(true);
+  await act(async () => {
+    await refreshConciergeDesktop();
+  });
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).toBeNull();
+
+  const reopen = container.querySelector<HTMLButtonElement>('button[aria-label="查看桌面猫猫球状态"]');
+  expect(reopen).not.toBeNull();
+  act(() => reopen?.click());
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).not.toBeNull();
+
+  act(() => useConciergeStore.getState().setSurfaceState('collapsed'));
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).toBeNull();
+
+  act(() => reopenConciergeDesktopLossNotice());
+  act(() => useConciergeStore.setState({ muted: true }));
+  expect(useConciergeDesktopStore.getState().noticeVisible).toBe(false);
+  act(() => useConciergeStore.setState({ muted: false }));
+  expect(container.querySelector('[data-testid="concierge-desktop-fallback"]')).toBeNull();
+});
+
 afterEach(() => {
   act(() => root.unmount());
+  window.sessionStorage.clear();
   container.remove();
+  document.querySelectorAll('[data-concierge-reserved-rect="test"]').forEach((element) => {
+    element.remove();
+  });
   vi.clearAllMocks();
 });
 
 describe('Concierge host lifecycle', () => {
+  it('keeps a colliding persisted home while resolving only its displayed position', async () => {
+    const marker = document.createElement('div');
+    marker.dataset.conciergeReservedRect = 'test';
+    vi.spyOn(marker, 'getBoundingClientRect').mockReturnValue({
+      left: 800,
+      top: 500,
+      right: 1024,
+      bottom: 768,
+      width: 224,
+      height: 268,
+      x: 800,
+      y: 500,
+      toJSON: () => ({}),
+    });
+    document.body.appendChild(marker);
+    const persistedHome = { x: 900, y: 600 };
+    useConciergeStore.setState({ configLoaded: true, ballPosition: persistedHome, ballSize: 72 });
+
+    await render(<ConciergeHost />);
+    await flushEffects();
+
+    expect(useConciergeStore.getState().ballPosition).toEqual(persistedHome);
+    expect(mockApiFetch.mock.calls).toEqual([['/api/concierge/desktop', { signal: expect.any(AbortSignal) }]]);
+    const wrapper = container.querySelector<HTMLElement>('[data-testid="concierge-ball-wrapper"]');
+    expect(wrapper).not.toBeNull();
+  });
+
   it('renders one ball only after config resolves', async () => {
     await render(<ConciergeHost />);
     await flushEffects();
@@ -190,7 +288,7 @@ describe('Concierge host lifecycle', () => {
     expect(useConciergeStore.getState()).toMatchObject({ muted: false, surfaceState: 'toolbar' });
   });
 
-  it('uses the three-layer collapsed → toolbar → bubble lifecycle', async () => {
+  it('preserves the text conversation escape route from the desktop launch entry', async () => {
     useConciergeStore.setState({ configLoaded: true });
     await render(<ConciergeHost />);
     act(() => (container.querySelector('button[aria-haspopup="dialog"]') as HTMLButtonElement).click());
@@ -198,6 +296,9 @@ describe('Concierge host lifecycle', () => {
     expect(container.querySelector('[data-testid="concierge-toolbar"]')).not.toBeNull();
 
     act(() => (container.querySelector('button[aria-label="聊聊"]') as HTMLButtonElement).click());
+    await flushEffects();
+    expect(document.body.textContent).toContain('和猫猫在桌面聊聊');
+    act(() => [...document.querySelectorAll('button')].find((button) => button.textContent === '先用文字')?.click());
     await flushEffects();
     expect(useConciergeStore.getState().surfaceState).toBe('bubble');
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
@@ -252,7 +353,21 @@ describe('Concierge compact chat adapter', () => {
     await render(<ConciergePanel />);
     expect(container.querySelector('[role="dialog"]')?.getAttribute('aria-modal')).toBe('false');
     expect(container.querySelector('[data-testid="concierge-resize-grip"]')).not.toBeNull();
-    expect(container.textContent).toContain('猫猫球 · 值班：烁烁');
+    expect(container.textContent).toContain('猫猫球');
+    expect(container.textContent).toContain('烁烁陪伴中');
+    expect(container.textContent).toContain('Live 快端：载体待确认 · 型号未核实');
+    expect(container.textContent).toContain('已选深思端：烁烁 · 型号未核实');
+    expect(
+      container.querySelector('[data-testid="concierge-status-avatar"]')?.getAttribute('data-companion-cat-id'),
+    ).toBe('gemini25');
+    act(() => useConciergeStore.setState({ skin: 'yanyan-codex' }));
+    expect(
+      container.querySelector('[data-testid="concierge-status-avatar"]')?.getAttribute('data-companion-cat-id'),
+    ).toBe('gemini25');
+    act(() => useConciergeStore.setState({ dutyCatProfileId: 'fable-5' }));
+    expect(
+      container.querySelector('[data-testid="concierge-status-avatar"]')?.getAttribute('data-companion-cat-id'),
+    ).toBe('fable-5');
   });
 
   it('preserves the two-level Escape path', async () => {

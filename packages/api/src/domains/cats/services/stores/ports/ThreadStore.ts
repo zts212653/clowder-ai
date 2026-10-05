@@ -15,6 +15,7 @@ import type {
   ThreadPhase,
 } from '@cat-cafe/shared';
 import { generateThreadId, normalizeThreadGoalObjective } from '@cat-cafe/shared';
+import { type OwnedThreadSeed, ownedThreadFromSeed, requireOwnedThread } from './OwnedThreadSeed.js';
 import type { StoreReadOptions } from './StoreReadOptions.js';
 import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 
@@ -286,7 +287,7 @@ export interface Thread {
   /** #872: Thread metadata anchor for session recovery (worktrees, PRs, issues, features, notes). */
   threadMetadata?: ThreadMetadataV1;
   /** F229 / F167: Thread kind marker.
-   *  'concierge' = 专属前台猫载体（per-user，sidebar 默认隐藏，F229）
+   *  'concierge' = 专属前台猫载体（per-user，canonical 载体在 sidebar 可发现，F317）
    *  'gate-keeping' = 守门 thread (per-repo inbox / community ops 看板载体，F167 trigger-time guard)
    *  undefined/absence = 普通 thread。 */
   threadKind?: ThreadKind;
@@ -694,6 +695,7 @@ export interface ILabelStore {
  * Common interface for thread stores (in-memory and future Redis).
  */
 export interface IThreadStore {
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread | Promise<Thread>;
   create(
     userId: string,
     title?: string,
@@ -705,6 +707,12 @@ export interface IThreadStore {
   get(threadId: string, options?: StoreReadOptions): Thread | null | Promise<Thread | null>;
   list(userId: string, options?: StoreReadOptions): Thread[] | Promise<Thread[]>;
   listByProject(userId: string, projectPath: string): Thread[] | Promise<Thread[]>;
+  listProjectCandidates?(
+    userId: string,
+    projectPath: string,
+    threadIds: readonly string[],
+  ): Thread[] | Promise<Thread[]>;
+  hasByProject?(userId: string, projectPath: string): boolean | Promise<boolean>;
   addParticipants(threadId: string, catIds: CatId[]): void | Promise<void>;
   getParticipants(threadId: string): CatId[] | Promise<CatId[]>;
   /** F032 Phase C: Get participants sorted by activity (lastMessageAt desc) */
@@ -903,7 +911,7 @@ export interface IThreadStore {
    */
   indexForUser(threadId: string, userId: string): void | Promise<void>;
   /** F229 / F167: Set or clear threadKind marker.
-   *  'concierge' = 专属前台猫载体（sidebar 默认隐藏）。
+   *  'concierge' = 专属前台猫载体（canonical 载体在 sidebar 可发现）。
    *  'gate-keeping' = 守门 thread (per-repo inbox / community ops)，F167 guard 用此标记 default-block 三端点。
    *  null 清除。 */
   updateThreadKind(threadId: string, kind: ThreadKind | null): void | Promise<void>;
@@ -918,6 +926,7 @@ const MAX_THREADS = 100;
  */
 export class ThreadStore implements IThreadStore {
   private threads: Map<string, Thread> = new Map();
+  private ownedThreadTombstones = new Set<string>();
   /** F032 Phase C: Track participant activity per thread. Key: `${threadId}:${catId}` */
   private participantActivity: Map<
     string,
@@ -977,6 +986,16 @@ export class ThreadStore implements IThreadStore {
 
     this.threads.set(thread.id, thread);
     return thread;
+  }
+
+  ensureOwnedThread(seed: OwnedThreadSeed): Thread {
+    const candidate = ownedThreadFromSeed(seed);
+    if (this.ownedThreadTombstones.has(candidate.id)) return requireOwnedThread(null, seed.userId);
+    const existing = this.threads.get(candidate.id);
+    if (existing) return requireOwnedThread(existing, seed.userId);
+    this.evictIfNeeded();
+    this.threads.set(candidate.id, candidate);
+    return candidate;
   }
 
   ensureThread(threadId: string, title: string): Thread {
@@ -1544,6 +1563,7 @@ export class ThreadStore implements IThreadStore {
   }
 
   delete(threadId: string): boolean {
+    if (threadId.startsWith('thread_owned_') && this.threads.has(threadId)) this.ownedThreadTombstones.add(threadId);
     if (threadId === DEFAULT_THREAD_ID) return false; // Cannot delete default
     // Cloud Codex R3 P2 fix: Clean up activity entries to prevent memory leak
     this.clearActivityForThread(threadId);

@@ -118,7 +118,7 @@ if ARGV[7] == 'wait' then
     or not hashFieldEquals(KEYS[2], 'threadId', ARGV[10])
     or not hashFieldEquals(KEYS[2], 'userId', ARGV[11])
     or not hashFieldEquals(KEYS[2], 'ownerCatId', ARGV[12])
-    or not hashFieldEquals(KEYS[2], 'automationState', ARGV[13]) then
+    or not hashFieldEquals(KEYS[2], ARGV[9] == 'work' and 'deploymentWait' or 'automationState', ARGV[13]) then
     return 'authority_witness_changed'
   end
   if ARGV[14] ~= '' then
@@ -129,6 +129,10 @@ end
 
 local transitionCount = tonumber(ARGV[16])
 if not transitionCount or transitionCount < 1 then return redis.error_reply('INVALID_RETRY_TRANSITION_COUNT') end
+if ARGV[7] == 'wait' and ARGV[9] == 'work'
+  and not hashFieldEquals(KEYS[2], 'status', ARGV[17 + transitionCount * 2]) then
+  return 'authority_witness_changed'
+end
 for index = 1, transitionCount do
   local messageKey = KEYS[4 + index]
   local expectedRevision = tonumber(ARGV[15 + index * 2])
@@ -298,7 +302,7 @@ export class WaitContinuationRetryCommitter {
       taskRaw.threadId ?? '',
       taskRaw.userId ?? '',
       taskRaw.ownerCatId ?? '',
-      taskRaw.automationState ?? '',
+      (taskRaw.kind === 'work' ? taskRaw.deploymentWait : taskRaw.automationState) ?? '',
       leaseRaw,
       terminalRaw,
       String(input.transitions.length),
@@ -306,6 +310,7 @@ export class WaitContinuationRetryCommitter {
         String(transition.current.revision),
         JSON.stringify(transition.next),
       ]),
+      taskRaw.status ?? '',
     ];
     const outcome = String(await redis.eval(COMMIT_RETRY_WITH_AUTHORITY_WITNESS_LUA, keys.length, ...keys, ...args));
     if (outcome === 'committed') return { outcome };

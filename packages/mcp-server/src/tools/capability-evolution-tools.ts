@@ -25,7 +25,8 @@ const bounded = (max: number) => z.string().trim().min(1).max(max);
 const ownerRef = z
   .object({
     ownerFeatureId: bounded(120),
-    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s{}[\]"']+$/),
+    // biome-ignore lint/complexity/noUselessEscapeInRegex: Serialized MCP patterns also reach engines with nested character classes.
+    ownerStateRef: bounded(500).regex(/^[a-z][a-z0-9-]*:[^\s\[\]{}"']+$/),
     version: bounded(240).optional(),
   })
   .strict();
@@ -113,7 +114,8 @@ const ownerSurfaceBinding = z
   .object({
     sourceKind: bounded(120).regex(/^[a-z0-9][a-z0-9-]*$/),
     ownerSurfaceRef: ownerRef,
-    joinKey: bounded(500).regex(/^(?:thread|message|subject):[^\s{}[\]"']+$/),
+    // biome-ignore lint/complexity/noUselessEscapeInRegex: Serialized MCP patterns also reach engines with nested character classes.
+    joinKey: bounded(500).regex(/^(?:thread|message|subject):[^\s\[\]{}"']+$/),
     namedConsumerRef: ownerRef,
     instrumentationRef: ownerRef,
   })

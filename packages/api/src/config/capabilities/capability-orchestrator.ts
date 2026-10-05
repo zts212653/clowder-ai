@@ -10,12 +10,17 @@
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { chmod, lstat, mkdir, readdir, readFile, rename, rm, stat as statPath, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, dirname, extname, join, relative, resolve, sep } from 'node:path';
-import type { CapabilitiesConfig, CapabilityEntry, McpServerDescriptor } from '@cat-cafe/shared';
+import type {
+  CapabilitiesConfig,
+  CapabilityConfigUnreadableCause,
+  CapabilityEntry,
+  McpServerDescriptor,
+} from '@cat-cafe/shared';
 import { catRegistry } from '@cat-cafe/shared';
 import { resolveCatCafeSkillsSource } from '../../utils/skill-source.js';
 import { migrateCapabilitiesV1ToV2 } from '../governance/capabilities-migration.js';
@@ -599,28 +604,86 @@ function safePath(projectRoot: string, ...segments: string[]): string {
  * Use `migrateAndPersistCapabilities()` for explicit owner-gated migration.
  */
 export async function readCapabilitiesConfig(projectRoot: string): Promise<CapabilitiesConfig | null> {
-  const filePath = safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
+  const state = await readCapabilitiesConfigState(projectRoot);
+  return state.kind === 'present' ? state.config : null;
+}
+
+/**
+ * What reading capabilities.json actually found.
+ *
+ * `readCapabilitiesConfig` answers `null` both when the file does not exist and
+ * when it exists but cannot be parsed. Its writers are fine with that -- they
+ * are about to bootstrap either way -- but a reader reporting what the home has
+ * must not: "this project has no capability config" is a fact, while "there is
+ * a config and I could not read it" is an unknown, and a cat told the first when
+ * the second is true would describe an empty home that is not empty.
+ */
+export type CapabilitiesConfigState =
+  | { readonly kind: 'present'; readonly path: string; readonly sha256: string; readonly config: CapabilitiesConfig }
+  | { readonly kind: 'absent'; readonly path: string }
+  | {
+      readonly kind: 'unreadable';
+      readonly path: string;
+      readonly cause: CapabilityConfigUnreadableCause;
+      /** errno code only (e.g. `EACCES`) — never an error message, which can quote file bytes. */
+      readonly errno?: string;
+    };
+
+export function capabilitiesConfigPath(projectRoot: string): string {
+  return safePath(projectRoot, CONFIG_SUBDIR, CAPABILITIES_FILENAME);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Read-only: never creates, migrates on disk, or rewrites the file. */
+export async function readCapabilitiesConfigState(projectRoot: string): Promise<CapabilitiesConfigState> {
+  const filePath = capabilitiesConfigPath(projectRoot);
+  let raw: string;
   try {
-    const raw = await readFile(filePath, 'utf-8');
-    const data = JSON.parse(raw) as CapabilitiesConfig;
-    if ((data.version !== 1 && data.version !== 2) || !Array.isArray(data.capabilities)) return null;
-    let config: CapabilitiesConfig;
-    if (data.version === 1) {
-      config = await migrateCapabilitiesV1ToV2(projectRoot, data, await resolveCatCafeSkillsSource());
-    } else {
-      config = data;
-    }
-    // F228/F249: Fill globalEnabled for entries that lack it (field migration).
-    // Client-side app — we migrate once at read time, no runtime compat needed.
-    for (const cap of config.capabilities) {
-      if (cap.globalEnabled === undefined && cap.enabled !== undefined) {
-        cap.globalEnabled = cap.enabled;
-      }
-    }
-    return config;
-  } catch {
-    return null;
+    raw = await readFile(filePath, 'utf-8');
+  } catch (error) {
+    const errno = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (errno === 'ENOENT') return { kind: 'absent', path: filePath };
+    return { kind: 'unreadable', path: filePath, cause: 'io_error', ...(errno ? { errno } : {}) };
   }
+  const sha256 = createHash('sha256').update(raw).digest('hex');
+  let data: CapabilitiesConfig;
+  try {
+    data = JSON.parse(raw) as CapabilitiesConfig;
+  } catch {
+    // The parser's message quotes the bytes around the error; only the cause leaves.
+    return { kind: 'unreadable', path: filePath, cause: 'parse_error' };
+  }
+  if (
+    !isPlainObject(data) ||
+    (data.version !== 1 && data.version !== 2) ||
+    !Array.isArray(data.capabilities) ||
+    // Every consumer below reads fields off each entry; a null or scalar entry
+    // is a shape we do not understand, not an exception (review R2 P1-3).
+    !data.capabilities.every(isPlainObject)
+  ) {
+    return { kind: 'unreadable', path: filePath, cause: 'unsupported_shape' };
+  }
+  let config: CapabilitiesConfig;
+  if (data.version === 1) {
+    try {
+      config = await migrateCapabilitiesV1ToV2(projectRoot, data, await resolveCatCafeSkillsSource());
+    } catch {
+      return { kind: 'unreadable', path: filePath, cause: 'unsupported_shape' };
+    }
+  } else {
+    config = data;
+  }
+  // F228/F249: Fill globalEnabled for entries that lack it (field migration).
+  // Client-side app — we migrate once at read time, no runtime compat needed.
+  for (const cap of config.capabilities) {
+    if (cap.globalEnabled === undefined && cap.enabled !== undefined) {
+      cap.globalEnabled = cap.enabled;
+    }
+  }
+  return { kind: 'present', path: filePath, sha256, config };
 }
 
 /**

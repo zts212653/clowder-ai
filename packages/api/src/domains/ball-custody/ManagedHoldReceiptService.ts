@@ -25,6 +25,50 @@ export class ManagedHoldReceiptError extends Error {
   }
 }
 
+/** Ball terminals and Queue receipts commit separately; inspect the exact receipt. */
+export async function readManagedHoldReceiptState(
+  messageStore: Pick<IMessageStore, 'getById'>,
+  input: Omit<ManagedHoldReceiptInput, 'handledAt'>,
+): Promise<'pending' | 'settled' | 'unknown'> {
+  try {
+    const source = await messageStore.getById(input.sourceMessageId);
+    const custody = source?.queueCustody;
+    const target = input.catId as CatId;
+    if (
+      !source ||
+      source.id !== input.sourceMessageId ||
+      source.threadId !== input.threadId ||
+      source.source?.connector !== 'hold-ball' ||
+      source.source.meta?.wakeWhen !== true ||
+      source.source.meta.taskId !== input.taskId ||
+      source.source.meta.threadId !== input.threadId ||
+      source.source.meta.catId !== target ||
+      !custody ||
+      custody.ownerUserId !== input.userId ||
+      !custody.allTargetCats.includes(target)
+    )
+      return 'unknown';
+    if (
+      custody.handledByCatIds.includes(target) ||
+      custody.withdrawnByCatIds?.includes(target) ||
+      source.deliveryStatus === 'canceled' ||
+      source.deletedAt !== undefined ||
+      source._tombstone === true
+    )
+      return 'settled';
+    const exposure = custody.bodyExposures?.some(
+      (item) => item.targetCatId === target && item.invocationId === input.invocationId && Number.isFinite(item.seenAt),
+    );
+    return custody.pendingTargetCats.includes(target) &&
+      custody.seenInvocationIdByCatId[target] === input.invocationId &&
+      exposure
+      ? 'pending'
+      : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 interface ManagedHoldReceiptDeps {
   readonly queue: Pick<InvocationQueue, 'getEntrySnapshot' | 'removeEntrySnapshotIfUnchanged'>;
   readonly messageStore: Pick<IMessageStore, 'getById'>;
@@ -78,7 +122,9 @@ export class ManagedHoldReceiptService {
       if (!exactOutcomeMatches(existingOutcome, input.invocationId)) {
         throw new ManagedHoldReceiptError('managed_hold_receipt_replay_mismatch');
       }
-      await this.removeResidualCarrier(custody.entryId, input.userId, input);
+      if (await this.removeResidualCarrier(custody.entryId, input.userId, input)) {
+        await this.deps.onSettled?.({ ...input, entryId: custody.entryId });
+      }
       return { outcome: 'replayed', entryId: custody.entryId };
     }
 
@@ -146,12 +192,13 @@ export class ManagedHoldReceiptService {
     entryId: string,
     messageUserId: string,
     input: ManagedHoldReceiptInput,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const entry = this.deps.queue.getEntrySnapshot(input.threadId, messageUserId, entryId);
-    if (!entry) return;
+    if (!entry) return false;
     this.assertExactCarrier(entry, input);
     if (!this.deps.queue.removeEntrySnapshotIfUnchanged(entry)) {
       throw new ManagedHoldReceiptError('managed_hold_receipt_carrier_changed');
     }
+    return true;
   }
 }

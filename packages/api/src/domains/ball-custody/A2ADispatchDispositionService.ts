@@ -1,21 +1,24 @@
 import { type BallCustodyEvent, isCrossThreadProvenance } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../cats/services/agents/invocation/InvocationRegistry.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import type { LiveCarrierOperationLease } from '../concierge/live/LiveCarrierOperationGate.js';
 import {
   type A2ADispatchHandoffInspection,
   type A2ADispatchHandoffSource,
-  type A2ADispatchReplacement,
   resolveA2ADispatchHandoff,
 } from './A2ADispatchReplacementResolver.js';
+import { A2ADispatchDispositionError, dispatchReplayMismatch } from './a2a-dispatch-disposition-error.js';
 import type { IBallCustodyEventLog } from './BallCustodyEventLog.js';
 import type { IBallCustodyFencedIngest } from './BallCustodyIngest.js';
 import type { IBallCustodyProjectionStore } from './BallCustodyProjectionStore.js';
+import type { DispatchDispositionEventInput } from './ball-custody-events.js';
 import {
   type A2ADispatchDisposition,
   buildDispatchDispositionEvent,
   dispatchDispositionEventSourceId,
   handedEventSourceId,
 } from './ball-custody-events.js';
+import { findDispatchTerminal } from './dispatch-terminal.js';
 
 export interface A2ADispatchDispositionResult {
   readonly outcome: 'applied' | 'replayed';
@@ -29,17 +32,48 @@ export interface A2ADispatchDispositionResult {
 
 export type { A2ADispatchHandoffInspection, A2ADispatchReplacement } from './A2ADispatchReplacementResolver.js';
 
-export class A2ADispatchDispositionError extends Error {
-  constructor(
-    readonly code: string,
-    readonly replacement?: A2ADispatchReplacement,
-  ) {
-    super(code);
-    this.name = 'A2ADispatchDispositionError';
-  }
+export { A2ADispatchDispositionError };
+
+/**
+ * Evidence kinds accepted for adopted dispatch read-witness.
+ * Only durable, server-recorded contiguous reads qualify — partial,
+ * queue-exact, or client-asserted kinds are rejected.
+ */
+const ALLOWED_ADOPTED_EVIDENCE_KINDS: ReadonlySet<string> = new Set(['full_contiguous_thread_context']);
+
+/** Query shape for the Live carrier predicate (F317 dispatch adoption). */
+export interface LiveCarrierQuery {
+  readonly invocationId: string;
+  readonly catId: string;
+  readonly threadId: string;
+}
+
+/** Durable, invocation-bound read-evidence witness for adopted dispatch. */
+export interface ReadEvidenceWitness {
+  readonly messageId: string;
+  /** Unix ms when the invocation's contiguous/exact read covered this message. */
+  readonly seenAt: number;
+  /** Evidence provenance, e.g. 'full_contiguous_thread_context' or 'queue_exact_read'. */
+  readonly evidenceKind: string;
+}
+
+export interface DispatchAdoptionProof {
+  readonly carrierKind: 'ordinary' | 'live';
+  readonly witness: ReadEvidenceWitness;
+  readonly assertSourceCurrent?: () => Promise<void>;
+}
+
+interface DispatchAdoptionAuthorityPort {
+  run<T>(
+    auth: A2ADispatchDispositionAuth,
+    messageId: string,
+    consume: (proof: DispatchAdoptionProof) => Promise<T>,
+  ): Promise<T>;
+  candidates(auth: A2ADispatchDispositionAuth, messageIds: readonly string[]): Promise<string[]>;
 }
 
 interface A2ADispatchDispositionDeps {
+  readonly adoptionAuthority?: DispatchAdoptionAuthorityPort;
   readonly registry: { isLatest(invocationId: string): Promise<boolean> };
   readonly messageStore: Pick<IMessageStore, 'getById'>;
   readonly ballCustodyEventLog: Pick<IBallCustodyEventLog, 'read'>;
@@ -48,12 +82,42 @@ interface A2ADispatchDispositionDeps {
   readonly log?: { warn(obj: unknown, msg?: string): void };
   readonly repairProjection?: (subjectKey: string) => Promise<void>;
   readonly now?: () => number;
+  /** Durable event precedes the exact-source Queue receipt; replay must repair a partial write. */
+  readonly projectAdoptedDisposition?: (input: {
+    threadId: string;
+    catId: string;
+    sourceMessageId: string;
+  }) => Promise<void>;
+  readonly withLiveCarrierOperation?: <T>(
+    query: LiveCarrierQuery,
+    operation: (lease: LiveCarrierOperationLease) => Promise<T>,
+  ) => Promise<T>;
+  /**
+   * F317 Live dispatch adoption: server-owned predicate backed by
+   * LiveCompanionSessions. Returns true only when the invocation is currently
+   * bound to an active (non-terminal) live session. When undefined, the adopted
+   * dispatch path is unavailable (503 fail-closed).
+   */
+  readonly isLiveCarrierInvocation?: (query: LiveCarrierQuery) => Promise<boolean>;
+  /**
+   * F317 dispatch adoption read-evidence gate: returns durable, invocation-bound
+   * evidence that this invocation has read a specific message. Must cover the
+   * adopted dispatch source message and have been recorded after the handoff.
+   * When undefined, the adopted dispatch path is unavailable (503 fail-closed).
+   */
+  readonly getReadEvidenceForMessage?: (query: {
+    invocationId: string;
+    catId: string;
+    threadId: string;
+    messageId: string;
+  }) => Promise<ReadEvidenceWitness | null>;
 }
 
-type A2ADispatchDispositionAuth = Pick<
+export type A2ADispatchDispositionAuth = Pick<
   InvocationRecord,
   'invocationId' | 'catId' | 'threadId' | 'a2aTriggerMessageId' | 'originTriggerMessageId'
->;
+> &
+  Partial<Pick<InvocationRecord, 'userId'>>;
 
 type DispatchSource = A2ADispatchHandoffSource;
 
@@ -144,13 +208,167 @@ export class A2ADispatchDispositionService {
     }
 
     const source = await this.resolveSource(auth);
-    return this.completeResolved(auth, source, 'completed');
+    return this.completeResolved(auth, source, 'completed', undefined, undefined, 'coordination_terminal');
+  }
+
+  /**
+   * Complete a dispatch that was not the invocation's own trigger, admitted by
+   * its exact carrier/read authority. Bypasses the trigger identity fence (Fence B)
+   * but validates: (1) Live carrier credential, (2) source targets this cat,
+   * (3) invocation is latest. Records `adopted` provenance on the event.
+   *
+   * @throws adopted_dispatch_unavailable — isLiveCarrierInvocation dep missing
+   * @throws adopted_dispatch_not_live_carrier — invocation is not an active Live session
+   * @throws a2a_dispatch_disposition_source_mismatch — source does not target this cat/thread
+   */
+  async completeAdopted(
+    auth: A2ADispatchDispositionAuth,
+    adoptedSourceMessageId: string,
+    disposition: A2ADispatchDisposition,
+  ): Promise<A2ADispatchDispositionResult> {
+    if (this.deps.adoptionAuthority) {
+      const attempt = () =>
+        this.deps.adoptionAuthority!.run(auth, adoptedSourceMessageId, async (proof) => {
+          await this.assertLatestInvocation(auth.invocationId);
+          return this.completeReadSource(auth, adoptedSourceMessageId, disposition, proof);
+        });
+      try {
+        return await attempt();
+      } catch (error) {
+        if (!(error instanceof A2ADispatchDispositionError) || error.code !== 'a2a_dispatch_disposition_fence_conflict')
+          throw error;
+        return attempt();
+      }
+    }
+    const complete = (lease?: LiveCarrierOperationLease) =>
+      this.completeAdoptedWithinCarrier(auth, adoptedSourceMessageId, disposition, lease);
+    return this.deps.withLiveCarrierOperation ? this.deps.withLiveCarrierOperation(auth, complete) : complete();
+  }
+
+  private async completeAdoptedWithinCarrier(
+    auth: A2ADispatchDispositionAuth,
+    adoptedSourceMessageId: string,
+    disposition: A2ADispatchDisposition,
+    lease?: LiveCarrierOperationLease,
+  ): Promise<A2ADispatchDispositionResult> {
+    if (!this.deps.isLiveCarrierInvocation || !this.deps.getReadEvidenceForMessage) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_unavailable');
+    }
+    await this.assertLatestInvocation(auth.invocationId);
+    // Host admission checked exact active credentials before close. Its scoped
+    // proof survives draining, never another operation or an outer terminal.
+    const isLive = lease
+      ? lease.matches(auth)
+      : await this.deps.isLiveCarrierInvocation({
+          invocationId: auth.invocationId,
+          catId: auth.catId,
+          threadId: auth.threadId,
+        });
+    if (!isLive) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_not_live_carrier');
+    }
+    // Verify the Live carrier has durable, invocation-bound read-evidence for the
+    // adopted dispatch message. Prevents completing dispatches that were never consumed.
+    const readEvidence = await this.deps.getReadEvidenceForMessage({
+      invocationId: auth.invocationId,
+      catId: auth.catId,
+      threadId: auth.threadId,
+      messageId: adoptedSourceMessageId,
+    });
+    if (!readEvidence) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_not_read');
+    }
+    return this.completeReadSource(auth, adoptedSourceMessageId, disposition, {
+      carrierKind: 'live',
+      witness: readEvidence,
+    });
+  }
+
+  async describe(auth: A2ADispatchDispositionAuth, messageIds: readonly string[]) {
+    if (!this.deps.adoptionAuthority) return undefined;
+    await this.assertLatestInvocation(auth.invocationId);
+    const candidates = [];
+    for (const sourceMessageId of await this.deps.adoptionAuthority.candidates(auth, messageIds)) {
+      const source = await this.resolveSourceCoordinates({ ...auth, sourceMessageId });
+      const events = await this.deps.ballCustodyEventLog.read(`ball:thread:${auth.threadId}`);
+      if (findDispatchTerminal(events, { ...auth, sourceMessageId, fromCatId: source.fromCatId })) continue;
+      if ((await this.inspectResolvedHandoff(auth.threadId, auth.catId, source, events)).outcome !== 'live') continue;
+      candidates.push({
+        sourceMessageId,
+        tool: 'cat_cafe_complete_a2a_dispatch',
+        arguments: { disposition: 'handled' as const, adoptSourceMessageId: sourceMessageId },
+      });
+    }
+    return candidates.length
+      ? {
+          state: 'pending' as const,
+          instruction:
+            'Complete each exact source only after its requested work is handled. Reading alone is not completion.',
+          candidates,
+        }
+      : undefined;
+  }
+
+  private async completeReadSource(
+    auth: A2ADispatchDispositionAuth,
+    adoptedSourceMessageId: string,
+    disposition: A2ADispatchDisposition,
+    proof: DispatchAdoptionProof,
+  ): Promise<A2ADispatchDispositionResult> {
+    const readEvidence = proof.witness;
+    // Exact message match: evidence must cover the adopted dispatch source, not
+    // any other message the invocation may have read.
+    if (readEvidence.messageId !== adoptedSourceMessageId) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_not_read');
+    }
+    // Evidence kind whitelist: only durable, server-recorded full reads qualify.
+    if (
+      !(proof.carrierKind === 'ordinary'
+        ? readEvidence.evidenceKind === 'queued_body_exposure'
+        : ALLOWED_ADOPTED_EVIDENCE_KINDS.has(readEvidence.evidenceKind))
+    ) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_evidence_kind_rejected');
+    }
+    // Temporal ordering: read evidence must be AFTER the ball.handed event that
+    // created the dispatch. Prevents completing dispatches using stale reads
+    // recorded before the handoff.
+    const adoptionSubjectKey = `ball:thread:${auth.threadId}`;
+    const handoffId = handedEventSourceId(adoptedSourceMessageId, auth.catId);
+    const custodyEvents = await this.deps.ballCustodyEventLog.read(adoptionSubjectKey);
+    const handoffEvent = custodyEvents.find((e) => e.sourceEventId === handoffId);
+    if (!handoffEvent || !Number.isFinite(readEvidence.seenAt) || readEvidence.seenAt <= handoffEvent.at) {
+      throw new A2ADispatchDispositionError('adopted_dispatch_evidence_before_handoff');
+    }
+    // Bypass Fence B (trigger identity check) — resolve source directly by
+    // adopted message ID, still validating thread/cat targeting.
+    const source = await this.resolveSourceCoordinates({
+      threadId: auth.threadId,
+      catId: auth.catId,
+      sourceMessageId: adoptedSourceMessageId,
+    });
+    return this.completeResolved(
+      auth,
+      source,
+      disposition,
+      {
+        adoptedSourceMessageId,
+        ...(proof.carrierKind === 'ordinary'
+          ? { carrierKind: 'ordinary' as const, invocationId: auth.invocationId }
+          : { liveInvocationId: auth.invocationId }),
+        witnessTimestamp: readEvidence.seenAt,
+        readEvidenceKind: readEvidence.evidenceKind,
+      },
+      proof.assertSourceCurrent,
+    );
   }
 
   private async completeResolved(
     auth: A2ADispatchDispositionAuth,
     source: DispatchSource,
     disposition: A2ADispatchDisposition,
+    adopted?: DispatchDispositionEventInput['adopted'],
+    assertSourceCurrent?: () => Promise<void>,
+    via: NonNullable<DispatchDispositionEventInput['via']> = 'direct',
   ): Promise<A2ADispatchDispositionResult> {
     const subjectKey = `ball:thread:${auth.threadId}`;
     const events = await this.deps.ballCustodyEventLog.read(subjectKey);
@@ -158,13 +376,34 @@ export class A2ADispatchDispositionService {
       invocationId: auth.invocationId,
       sourceMessageId: source.sourceMessageId,
     });
-    const prior = events.find((event) => event.sourceEventId === eventSourceId);
+    const prior = adopted
+      ? findDispatchTerminal(events, {
+          threadId: auth.threadId,
+          catId: auth.catId,
+          sourceMessageId: source.sourceMessageId,
+          fromCatId: source.fromCatId,
+        })
+      : events.find((event) => event.sourceEventId === eventSourceId);
     if (prior) {
-      this.assertMatchingDispositionEvent(prior, auth, source, disposition);
+      await assertSourceCurrent?.();
+      const canonicalDisposition =
+        adopted && prior.payload.invocationId !== auth.invocationId
+          ? (prior.payload.disposition as A2ADispatchDisposition)
+          : disposition;
+      if (!adopted || prior.payload.invocationId === auth.invocationId)
+        this.assertMatchingDispositionEvent(prior, auth, source, disposition);
       await this.repairProjectionIfNeeded(subjectKey, events, prior);
+      // A canonical ordinary terminal is replayable, but its Queue settlement
+      // remains ordinary; only an adopted terminal has a Live receipt to repair.
+      if (adopted && prior.payload.adopted !== undefined)
+        await this.deps.projectAdoptedDisposition?.({
+          threadId: auth.threadId,
+          catId: auth.catId,
+          sourceMessageId: source.sourceMessageId,
+        });
       return {
         outcome: 'replayed',
-        disposition,
+        disposition: canonicalDisposition,
         invocationId: auth.invocationId,
         sourceMessageId: source.sourceMessageId,
         fromCatId: source.fromCatId,
@@ -177,11 +416,31 @@ export class A2ADispatchDispositionService {
       throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replaced', inspection.replacement);
     }
     const retired = await this.resolveRetired(subjectKey, auth.catId, source.handoffSourceEventId, events);
-    await this.recordDisposition(auth, source, disposition, subjectKey, eventSourceId, events.length, retired);
+    if (assertSourceCurrent) {
+      await this.assertLatestInvocation(auth.invocationId);
+      await assertSourceCurrent();
+    }
+    await this.recordDisposition(
+      auth,
+      source,
+      disposition,
+      subjectKey,
+      eventSourceId,
+      events.length,
+      retired,
+      adopted,
+      via,
+    );
     const committed = (await this.deps.ballCustodyEventLog.read(subjectKey)).find(
       (event) => event.sourceEventId === eventSourceId,
     );
     this.assertMatchingDispositionEvent(committed, auth, source, disposition);
+    if (adopted)
+      await this.deps.projectAdoptedDisposition?.({
+        threadId: auth.threadId,
+        catId: auth.catId,
+        sourceMessageId: source.sourceMessageId,
+      });
     return {
       outcome: 'applied',
       disposition,
@@ -313,7 +572,7 @@ export class A2ADispatchDispositionService {
       event.payload.sourceMessageId !== source.sourceMessageId ||
       event.payload.disposition !== disposition
     ) {
-      throw new A2ADispatchDispositionError('a2a_dispatch_disposition_replay_mismatch');
+      throw dispatchReplayMismatch(event);
     }
   }
 
@@ -325,6 +584,8 @@ export class A2ADispatchDispositionService {
     eventSourceId: string,
     expectedSequence: number,
     retired: boolean,
+    adopted?: DispatchDispositionEventInput['adopted'],
+    via: NonNullable<DispatchDispositionEventInput['via']> = 'direct',
   ): Promise<void> {
     let conflictSequence: number | undefined;
     try {
@@ -337,7 +598,9 @@ export class A2ADispatchDispositionService {
           sourceMessageId: source.sourceMessageId,
           disposition,
           retired,
+          via,
           at: this.now(),
+          ...(adopted ? { adopted } : {}),
         }),
         expectedSequence,
       );

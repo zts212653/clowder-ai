@@ -616,6 +616,21 @@ describe('F100 request-review owner adapter', () => {
       assert.doesNotMatch(extracted, /immutable fence/);
     });
 
+    it('recognizes the ordinary exact-HEAD review packet without a use-measurement handle', () => {
+      const content = [
+        'Review-Subject-Ref: <pr:owner/repo#N>',
+        'Reviewed-Head-Sha: <exact full Git OID>',
+        'Accepted-Source-Ref: <canonical source>',
+        'Accepted-Revision: <exact revision>',
+        '',
+        'Feature 以 canonical docs/features/F*.md 为 anchor。',
+      ].join('\n');
+
+      const extracted = extractRequestReviewMutableAnchor(content);
+      assert.match(extracted, /Reviewed-Head-Sha:/);
+      assert.doesNotMatch(extracted, /Request-Review-Consumption-Handle:/);
+    });
+
     it('derives one experiment version from the semantic anchor, not unrelated skill metadata', () => {
       const common = [
         'Review-Subject-Ref: <pr:owner/repo#N>',

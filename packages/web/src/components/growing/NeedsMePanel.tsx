@@ -1,13 +1,16 @@
 'use client';
 
-import type { ArtifactReviewView, GlobalArtifactDTO } from '@cat-cafe/shared';
-import { useEffect, useMemo, useRef } from 'react';
+import type { ArtifactReviewView, EntrustedWorkOwnerReadV1, GlobalArtifactDTO } from '@cat-cafe/shared';
+import { type ReactNode, useEffect, useMemo, useRef } from 'react';
 import { ReviewArtifactButton } from '@/components/content-review/ReviewArtifactButton';
 import { reviewSurfaceFromPreparedRef } from '@/components/workbench/artifact-review-surface';
 import { useEntrustedWorkProjection } from '@/hooks/useEntrustedWorkProjection';
+import { useChatStore } from '@/stores/chatStore';
 import { EntrustedWorkBrief } from './EntrustedWorkBrief';
 import { type EligibleNeedsMeReceipt, selectNeedsMeItems } from './needs-me-items';
 import { type PreparedArtifactCoordinate, PreparedArtifactPreview } from './PreparedArtifactPreview';
+import { preparedArtifactPresentation, preparedReviewCoordinate } from './prepared-artifact-presentation';
+import { usePreparedReviewTitle } from './prepared-review-presentation';
 import { resolvePreparedArtifact } from './resolve-prepared-artifact';
 
 export { needsMeItemRef } from './needs-me-items';
@@ -16,6 +19,45 @@ function whyNow(receipt: EligibleNeedsMeReceipt): string {
   if (receipt.salience === 'near_deadline') return '临近业务时间，需要你现在判断';
   if (receipt.salience === 'high_risk') return '来源 owner 标记为高风险，需要你判断';
   return receipt.kind === 'repair' ? '来源卡住了，需要你补齐信息' : '猫已准备到需要你定方向的地方';
+}
+
+/** Brief and preview name the same work: a cat-prepared review is titled by the review itself. */
+function NeedsMePreparedWork({
+  ownerRead,
+  coordinate,
+  artifact,
+  loading,
+  onOpen,
+  reviewAction,
+}: {
+  ownerRead: EntrustedWorkOwnerReadV1;
+  coordinate: PreparedArtifactCoordinate;
+  artifact?: GlobalArtifactDTO;
+  loading: boolean;
+  /** Receives the review title when known, so the opened tab carries the same name as the card. */
+  onOpen: (title?: string) => void;
+  reviewAction?: ReactNode;
+}) {
+  const review = artifact ? null : preparedReviewCoordinate(coordinate.previewRef);
+  const reviewTitle = usePreparedReviewTitle(review?.reviewId ?? null);
+  return (
+    <>
+      <EntrustedWorkBrief
+        ownerRead={ownerRead}
+        artifactLabel={preparedArtifactPresentation(coordinate, artifact, reviewTitle).label}
+      />
+      <div className="mt-3">
+        <PreparedArtifactPreview
+          coordinate={coordinate}
+          artifact={artifact}
+          reviewTitle={reviewTitle}
+          loading={loading}
+          onOpen={() => onOpen(reviewTitle)}
+          reviewAction={reviewAction}
+        />
+      </div>
+    </>
+  );
 }
 
 export function NeedsMePanel({
@@ -29,7 +71,7 @@ export function NeedsMePanel({
   artifacts: GlobalArtifactDTO[];
   artifactsLoading?: boolean;
   selectedItemRef?: string | null;
-  onOpenArtifact?: (artifact: PreparedArtifactCoordinate, itemRef: string) => void;
+  onOpenArtifact?: (artifact: PreparedArtifactCoordinate, itemRef: string, title?: string) => void;
   onOpenAction?: (actionRef: string, itemRef: string) => void;
   onOpenReview?: (review: ArtifactReviewView, itemRef: string) => void;
 }) {
@@ -46,7 +88,17 @@ export function NeedsMePanel({
     <section className="min-w-0 overflow-x-hidden p-4 sm:p-5" data-testid="needs-me-panel" aria-label="Needs Me">
       <header className="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-accent">Needs Me · {items.length}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-micro font-bold uppercase tracking-[0.16em] text-cafe-muted">Needs Me</p>
+            {projection.loading || projection.error ? null : (
+              <span
+                data-testid="needs-me-count"
+                className="rounded-full bg-cafe-surface px-2 py-0.5 text-micro font-semibold text-cafe-secondary"
+              >
+                {items.length}
+              </span>
+            )}
+          </div>
           <h2 className="mt-1 text-lg font-semibold tracking-tight text-cafe-black">只留下真正需要你的判断</h2>
           <p className="mt-1 max-w-xl text-xs leading-5 text-cafe-secondary">
             猫会先把能做的做好；只有真的需要你决定时，才带着准备好的内容回来。
@@ -54,7 +106,7 @@ export function NeedsMePanel({
         </div>
         <button
           type="button"
-          className="shrink-0 rounded-lg border border-cafe-subtle bg-cafe-surface px-3 py-1.5 text-xs font-medium text-cafe-secondary hover:border-cafe-accent/35 hover:text-cafe-accent"
+          className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-cafe-muted transition-colors hover:bg-cafe-surface hover:text-cafe-secondary"
           onClick={projection.refetch}
         >
           刷新
@@ -68,8 +120,22 @@ export function NeedsMePanel({
         </div>
       ) : null}
       {!projection.loading && !projection.error && items.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-cafe-subtle p-6 text-center">
-          <p className="text-sm font-medium text-cafe-black">暂时没有要你判断的事</p>
+        <div className="mt-6 rounded-xl border border-dashed border-cafe-subtle px-6 py-12 text-center">
+          <p
+            className="text-cafe-black text-[length:var(--console-font-2xl)] leading-[1.25]"
+            style={{ fontFamily: 'var(--evolution-title-font)' }}
+          >
+            暂时没有要你判断的事
+          </p>
+          <p className="mt-2 text-xs leading-5 text-cafe-muted">工作安排和进展都在工作日历。</p>
+          <button
+            type="button"
+            data-testid="needs-me-goto-schedule"
+            className="mt-4 rounded-lg px-3 py-2 text-xs font-medium text-cafe-secondary transition-colors hover:bg-cafe-surface hover:text-cafe-black"
+            onClick={() => useChatStore.getState().setWorkspaceMode('product-schedule')}
+          >
+            去工作日历看看
+          </button>
         </div>
       ) : null}
 
@@ -99,7 +165,10 @@ export function NeedsMePanel({
                   <p className="text-micro font-bold uppercase tracking-[0.12em] text-cafe-muted">为什么现在需要你</p>
                   <h3 className="mt-1 text-sm font-semibold text-cafe-black">{whyNow(receipt)}</h3>
                   <p className="mt-2 text-xs leading-5 text-cafe-secondary">建议：{receipt.recommendation}</p>
-                  <p className="mt-1 break-words text-micro text-cafe-muted">来源判断：{receipt.reasonCode}</p>
+                  <details className="mt-1 text-micro text-cafe-muted">
+                    <summary className="cursor-pointer">来源判断</summary>
+                    <p className="mt-1 break-all">{receipt.reasonCode}</p>
+                  </details>
                 </div>
                 <button
                   type="button"
@@ -111,23 +180,21 @@ export function NeedsMePanel({
                   {receipt.kind === 'repair' ? '回到原处修复' : '回到原处判断'}
                 </button>
               </div>
-              <EntrustedWorkBrief ownerRead={ownerRead} />
-              <div className="mt-3">
-                <PreparedArtifactPreview
-                  coordinate={coordinate}
-                  artifact={artifact}
-                  loading={artifactsLoading && !reviewSurfaceFromPreparedRef(coordinate.openInWorkspaceRef)}
-                  onOpen={() => onOpenArtifact?.(coordinate, itemRef)}
-                  reviewAction={
-                    onOpenReview ? (
-                      <ReviewArtifactButton
-                        ownerRead={ownerRead}
-                        onPrepared={(review) => onOpenReview(review, itemRef)}
-                      />
-                    ) : undefined
-                  }
-                />
-              </div>
+              <NeedsMePreparedWork
+                ownerRead={ownerRead}
+                coordinate={coordinate}
+                artifact={artifact}
+                loading={artifactsLoading && !reviewSurfaceFromPreparedRef(coordinate.openInWorkspaceRef)}
+                onOpen={(title) => onOpenArtifact?.(coordinate, itemRef, title)}
+                reviewAction={
+                  onOpenReview ? (
+                    <ReviewArtifactButton
+                      ownerRead={ownerRead}
+                      onPrepared={(review) => onOpenReview(review, itemRef)}
+                    />
+                  ) : undefined
+                }
+              />
             </article>
           );
         })}

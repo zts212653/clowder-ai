@@ -224,6 +224,61 @@ describe('Gate 5 retry authority Redis linearization', { skip: redisIsolationSki
     );
   });
 
+  test('a completed deployment work Task cannot mint a retry at the Redis commit boundary', async () => {
+    const ownerFence = { kind: 'containing_task', generation: 4 };
+    const outcomeId = 'wait:deployment:abc123:runtime:g4:matched';
+    const current = failedCustody();
+    const message = await messageStore.append({
+      userId: USER_ID,
+      catId: null,
+      content: 'resume deployment acceptance',
+      mentions: [TARGET_CAT_ID],
+      timestamp: 1_100,
+      threadId: THREAD_ID,
+      deliveryStatus: 'queued',
+      source: {
+        connector: 'deployment-wait',
+        label: 'Deployment wait',
+        icon: 'refresh-cw',
+        meta: { waitContinuationCarrier: { v: 1, waitId: TASK_ID, outcomeId, ownerFence } },
+      },
+      queueCustody: current,
+    });
+    await redis.hset(
+      TaskKeys.detail(TASK_ID),
+      serializeTask(
+        waitTask(ownerFence, {
+          kind: 'work',
+          subjectKey: null,
+          status: 'blocked',
+          automationState: undefined,
+          deploymentWait: {
+            waitOutcome: {
+              v: 1,
+              domain: 'deployment',
+              outcomeId,
+              generation: 4,
+              subjectRef: 'deployment:abc123:runtime',
+              ownerFence,
+              reason: 'matched',
+              at: 1_000,
+              delivery: 'delivered',
+              nextStep: 'verify',
+            },
+          },
+        }),
+      ),
+    );
+    const fixture = { current, message, transition: retryTransition(message.id, current) };
+    const decision = await commit(fixture, async () => {
+      const done = await taskStore.update(TASK_ID, { status: 'done' });
+      assert.equal(done.deploymentWait.waitOutcome.reason, 'subject_terminal');
+    });
+    assert.deepEqual(decision, { outcome: 'authority_stale', reason: 'authority_witness_changed' });
+    await assertAttemptWasNotMinted(fixture);
+    assert.deepEqual(await commit(fixture), { outcome: 'authority_stale', reason: 'subject_terminal' });
+  });
+
   test('preserves authenticated user retry without inventing a Task witness', async () => {
     const current = failedCustody();
     const message = await messageStore.append({

@@ -14,7 +14,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mapCodexAppServerCompactionObservation } from '../dist/domains/cats/services/agents/providers/CodexAppServerEventMapper.js';
-import { resolveAuthoritativeCompactionSupport } from '../dist/domains/cats/services/session/authoritative-compaction.js';
+import { resolveAuthoritativeCompactionSupport } from '../dist/domains/cats/services/session/context/authoritative-compaction.js';
 
 function capability(provider, carrier, observesCompression = false) {
   return {
@@ -231,7 +231,7 @@ test('a mid-turn compaction on the bound runtime is emitted as a typed event', a
 // the mechanism was reached, not that its effect survived to the projection.
 
 test('a compaction cold survives into the next projection, and is consumed exactly once', async () => {
-  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
   const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
   const owner = new ContextEpochOwner(new InMemoryContextEpochStore());
@@ -283,7 +283,7 @@ test('a compaction cold survives into the next projection, and is consumed exact
 });
 
 test('a superseded generation cannot consume a newer cold', async () => {
-  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
   const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
   const owner = new ContextEpochOwner(new InMemoryContextEpochStore());
@@ -308,7 +308,7 @@ test('a superseded generation cannot consume a newer cold', async () => {
 });
 
 test('a replayed compaction does not re-arm the cold', async () => {
-  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/ContextEpochOwner.js');
+  const { ContextEpochOwner } = await import('../dist/domains/cats/services/session/context/ContextEpochOwner.js');
   const { InMemoryContextEpochStore } = await import('../dist/domains/cats/services/stores/ports/ContextEpochStore.js');
 
   const owner = new ContextEpochOwner(new InMemoryContextEpochStore());

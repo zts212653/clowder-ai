@@ -166,7 +166,8 @@ export interface ActiveExecutionServiceDeps {
   readonly draftStore?: IDraftStore;
   readonly turnExecutionStore?: Pick<ITurnExecutionStore, 'listByParent' | 'listRunningByUser'>;
   readonly invocationRegistry?: InvocationRegistryPort;
-  readonly dynamicTaskStore?: Pick<DynamicTaskStore, 'getAll'>;
+  readonly dynamicTaskStore?: Pick<DynamicTaskStore, 'getAll'> &
+    Partial<Pick<DynamicTaskStore, 'listManagedCommandCandidates'>>;
   readonly log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void };
 }
 
@@ -220,7 +221,9 @@ export function createActiveExecutionService(deps: ActiveExecutionServiceDeps): 
   // 占用算进 working 是独立设计决策，不在 rebase 合流里夹带。
   const listManaged = (userId: string): ManagedCommandExecution[] =>
     deps.dynamicTaskStore
-      ? listManagedCommandExecutions(deps.dynamicTaskStore.getAll()).filter((e) => e.userId === userId)
+      ? listManagedCommandExecutions(
+          deps.dynamicTaskStore.listManagedCommandCandidates?.() ?? deps.dynamicTaskStore.getAll(),
+        ).filter((e) => e.userId === userId)
       : [];
 
   const listRunningChildren = async (userId: string): Promise<RunningChildExecutionProjection[]> => {

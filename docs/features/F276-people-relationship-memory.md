@@ -4,7 +4,7 @@ related_features: [F102, F152, F186, F188, F192, F200, F209, F227, F231, F255, F
 topics: [memory, people, relationship, privacy, provenance, lifecycle]
 doc_kind: spec
 created: 2026-07-25
-updated: 2026-09-04
+updated: 2026-09-24
 description: "为每位用户私域维护第三方人物、第一等关系与互动事件，并以有界关系卡按需解引用。"
 description_source: model
 description_author: codex-sol
@@ -446,7 +446,13 @@ You 与所有 owner-authorized cats。Activation = 已 materialize person 在新
   authenticated invocation，决定卡片留在哪个 thread；typed source bundle 中每条
   `sourceRef` 独立保留真实历史 thread/message，决定证据 drill 去哪里。server 不接受 caller
   伪造 thread，且对跨 owner、cat-authored、connector、undelivered、deleted/tombstoned、
-  excerpt/digest drift 与不合法 assertion role fail closed。真实 Alden route E2E 必须证明
+  excerpt/digest drift 与不合法 assertion role fail closed。owner-authored outer message 的 quote
+  `comment` 属于 owner direct text；被引用的 `text` 仍属于原 source author，禁止借外层 owner
+  身份把引用原文洗成 owner assertion。comment evidence 的 digest 必须同时绑定 outer body、
+  comment 与 quote attachment 的完整坐标（原文、source、selection、id、block position）；任一漂移
+  在 immediate/deferred revalidation 中 fail closed，同时纯 body 历史消息维持既有 digest。若同一
+  excerpt 同时命中 body 与一个或多个 comment，server 不猜 speaker segment，整条 source 拒绝。
+  真实 Alden route E2E 必须证明
   “当前 thread 发起 + 其他 thread 的 who/what/assessment 原话”产生有信息量的当前卡，
   不能用 proposal-success ToolEvent 或零信息卡冒充验收。
 - [x] AC-A19: proactive outcome 是互斥的 `propose | capture/defer | abstain`；defer 是

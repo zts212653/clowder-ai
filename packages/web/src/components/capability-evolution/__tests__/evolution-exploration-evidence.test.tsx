@@ -7,9 +7,13 @@ import { ExplorationCaseList } from '../exploration/ExplorationCaseList';
 import { ExplorationComparison } from '../exploration/ExplorationComparison';
 import { ExplorationMedia } from '../exploration/ExplorationMedia';
 
+const collaboration = vi.hoisted(() => ({ open: vi.fn() }));
+vi.mock('@/components/workbench/evolution-media-navigation', () => ({ openEvolutionMedia: collaboration.open }));
+
 let host: HTMLDivElement;
 let root: Root;
 beforeEach(() => {
+  collaboration.open.mockReset();
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   host = document.createElement('div');
   document.body.append(host);
@@ -29,6 +33,55 @@ function fixture() {
     record: data.details[0].records[0]!,
   };
 }
+it('opens each comparison side using its own experiment, record and media rather than the globally selected run', async () => {
+  const { programId, record } = fixture();
+  const media = {
+    mediaRef: source('left-image', 'a'.repeat(64)),
+    kind: 'image' as const,
+    contentType: 'image/png' as const,
+    label: '左原件',
+    provenance: 'original' as const,
+    sourceRecordRef: record.evidenceRef,
+  };
+  const left = { ...record, experimentRef: source('older-run'), media: [media] };
+  await act(async () =>
+    root.render(<ExplorationMedia programId={programId} record={left} sideLabel="之前" onRetry={() => {}} />),
+  );
+  // F311 reading enlarges the image in place; it never opens collaboration by itself.
+  await act(async () => host.querySelector('img')!.dispatchEvent(new Event('load')));
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="放大"]')!.click());
+  expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toContain('左原件');
+  expect(collaboration.open).not.toHaveBeenCalled();
+  await act(async () => host.querySelector<HTMLButtonElement>('button[aria-label^="打开并讨论"]')!.click());
+  expect(collaboration.open).toHaveBeenLastCalledWith(
+    { programId, experimentRef: left.experimentRef, recordRef: left.recordRef, mediaRef: media.mediaRef },
+    expect.stringContaining('左原件'),
+  );
+  const right = {
+    ...record,
+    recordRef: source('new-record'),
+    experimentRef: source('newer-run'),
+    media: [{ ...media, kind: 'video' as const, contentType: 'video/webm' as const, label: '右回放' }],
+  };
+  await act(async () =>
+    root.render(<ExplorationMedia key="right" programId={programId} record={right} onRetry={() => {}} />),
+  );
+  const opened = collaboration.open.mock.calls.length;
+  // F311 reads the replay in place; only the explicit discussion action opens the shared landing.
+  await act(async () =>
+    [...host.querySelectorAll('button')].find((button) => button.textContent === '在原地打开回放')!.click(),
+  );
+  expect(host.querySelector('video')?.getAttribute('aria-label')).toContain('右回放');
+  expect(collaboration.open).toHaveBeenCalledTimes(opened);
+  await act(async () =>
+    [...host.querySelectorAll('button')].find((button) => button.textContent === '打开并讨论')!.click(),
+  );
+  expect(host.querySelector('video')).not.toBeNull();
+  expect(collaboration.open).toHaveBeenLastCalledWith(
+    { programId, experimentRef: right.experimentRef, recordRef: right.recordRef, mediaRef: media.mediaRef },
+    expect.stringContaining('右回放'),
+  );
+});
 it('withdrawal preserves the chosen media identity until the reader explicitly selects another original', async () => {
   const { programId, record } = fixture();
   record.media = ['a', 'b'].map((id) => ({

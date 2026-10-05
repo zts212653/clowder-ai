@@ -2,6 +2,7 @@ import {
   parseWaitContinuationCarrier,
   type TaskItem,
   type WaitContinuationCarrierV1,
+  type WaitOutcomeV1,
   type WaitOwnerFence,
 } from '@cat-cafe/shared';
 import type { StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
@@ -50,6 +51,44 @@ function ownerFencesMatch(left: WaitOwnerFence, right: WaitOwnerFence): boolean 
   return left.kind === 'containing_task' || (right.kind === 'action_successor' && left.leaseId === right.leaseId);
 }
 
+function waitOutcome(task: TaskItem): WaitOutcomeV1 | undefined {
+  return task.kind === 'work' ? task.deploymentWait?.waitOutcome : task.automationState?.waitOutcome;
+}
+
+function isRetryableOutcome(
+  outcome: WaitOutcomeV1 | undefined,
+  carrier: WaitContinuationCarrierV1,
+): outcome is WaitOutcomeV1 {
+  return (
+    outcome?.outcomeId === carrier.outcomeId &&
+    ownerFencesMatch(outcome.ownerFence, carrier.ownerFence) &&
+    outcome.reason === 'matched' &&
+    (outcome.delivery === 'pending' || outcome.delivery === 'delivered')
+  );
+}
+
+function isSubjectTerminal(outcome: WaitOutcomeV1 | undefined): boolean {
+  return (
+    outcome?.reason === 'subject_terminal' ||
+    (outcome !== undefined && 'terminalSubjectState' in outcome && !!outcome.terminalSubjectState)
+  );
+}
+
+function evaluateActionSuccessorLease(
+  lease: ActionSuccessorOutputPreflightResult | { ok: false; reason: 'lease_missing' } | undefined,
+): RetryAuthorityDecision {
+  if (!lease) return { ok: false, reason: 'lease_missing' };
+  if (lease.ok) {
+    return lease.reason === 'active'
+      ? { ok: true, kind: 'wait_action_successor' }
+      : { ok: false, reason: 'holder_terminal' };
+  }
+  return {
+    ok: false,
+    reason: lease.reason === 'predicate_mismatch' ? 'stale_generation' : lease.reason,
+  };
+}
+
 export function resolveRetryAuthorityMessageSubject(
   input: WaitContinuationRetryPreflightInput,
 ): RetryAuthorityMessageSubject {
@@ -62,7 +101,7 @@ export function resolveRetryAuthorityMessageSubject(
   ) {
     return { ok: true, kind: 'user' };
   }
-  if (input.message.source?.connector !== 'github-wait') {
+  if (input.message.source?.connector !== 'github-wait' && input.message.source?.connector !== 'deployment-wait') {
     return { ok: false, reason: 'legacy_unattributed' };
   }
   const carrier = parseWaitContinuationCarrier(input.message.source.meta?.waitContinuationCarrier);
@@ -79,7 +118,7 @@ export function evaluateWaitRetryAuthoritySnapshot(input: {
   const { carrier, request, task } = input;
   if (!task) return { ok: false, reason: 'task_missing' };
   if (
-    (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking') ||
+    (task.kind !== 'pr_tracking' && task.kind !== 'issue_tracking' && task.kind !== 'work') ||
     task.threadId !== request.message.threadId ||
     task.userId !== request.message.userId ||
     task.userId !== request.requestingUserId
@@ -87,19 +126,16 @@ export function evaluateWaitRetryAuthoritySnapshot(input: {
     return { ok: false, reason: 'task_identity_mismatch' };
   }
   if (task.ownerCatId !== request.targetCatId) return { ok: false, reason: 'owner_mismatch' };
-
-  const outcome = task.automationState?.waitOutcome;
   if (
-    !outcome ||
-    outcome.outcomeId !== carrier.outcomeId ||
-    !ownerFencesMatch(outcome.ownerFence, carrier.ownerFence) ||
-    outcome.reason !== 'matched' ||
-    (outcome.delivery !== 'pending' && outcome.delivery !== 'delivered')
+    task.kind === 'work' &&
+    (task.status === 'done' || (task.entrustedWork && task.entrustedWork.closure.state !== 'open'))
   ) {
-    if (outcome?.reason === 'subject_terminal' || outcome?.terminalSubjectState) {
-      return { ok: false, reason: 'subject_terminal' };
-    }
-    return { ok: false, reason: 'outcome_mismatch' };
+    return { ok: false, reason: 'subject_terminal' };
+  }
+
+  const outcome = waitOutcome(task);
+  if (!isRetryableOutcome(outcome, carrier)) {
+    return { ok: false, reason: isSubjectTerminal(outcome) ? 'subject_terminal' : 'outcome_mismatch' };
   }
   if (carrier.ownerFence.kind === 'containing_task') {
     if (outcome.generation !== carrier.ownerFence.generation) {
@@ -107,16 +143,7 @@ export function evaluateWaitRetryAuthoritySnapshot(input: {
     }
     return { ok: true, kind: 'wait_containing_task' };
   }
-
-  const lease = input.lease;
-  if (!lease) return { ok: false, reason: 'lease_missing' };
-  if (lease.ok) {
-    return lease.reason === 'active'
-      ? { ok: true, kind: 'wait_action_successor' }
-      : { ok: false, reason: 'holder_terminal' };
-  }
-  if (lease.reason === 'predicate_mismatch') return { ok: false, reason: 'stale_generation' };
-  return { ok: false, reason: lease.reason };
+  return evaluateActionSuccessorLease(input.lease);
 }
 
 /**

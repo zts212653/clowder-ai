@@ -258,7 +258,10 @@ export class EventMemoryStore implements IEventMemoryStore {
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
-    const limit = filter.limit ?? -1; // SQLite: LIMIT -1 = unbounded
+    const limit = filter.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 201) {
+      throw new RangeError('Event memory limit must be between 1 and 201');
+    }
     const offset = filter.offset ?? 0;
 
     const rows = db

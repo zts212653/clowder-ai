@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { AwaitStateV1, TaskItem } from '@cat-cafe/shared';
+import {
+  type AwaitStateV1,
+  type DeploymentAwaitStateV1,
+  deploymentWaitPredicateSchema,
+  type TaskItem,
+} from '@cat-cafe/shared';
 import { z } from 'zod';
 
 const nonEmpty = z.string().min(1);
@@ -19,7 +24,7 @@ const receiptSchema = z
       .strict()
       .refine((source) => source.kind !== 'adopted_hold' || source.holdTaskId !== undefined),
     taskId: nonEmpty,
-    taskKind: z.enum(['pr_tracking', 'issue_tracking']),
+    taskKind: z.enum(['work', 'pr_tracking', 'issue_tracking']),
     userId: nonEmpty,
     catId: nonEmpty,
     threadId: nonEmpty,
@@ -30,9 +35,26 @@ const receiptSchema = z
     expiresAt: z.number().int().positive().optional(),
     registeredAt: z.number().int().nonnegative(),
     predicateDigest: z.string().regex(/^[a-f0-9]{64}$/),
-    proofKind: z.enum(['typed_predicates', 'anchored_review']),
+    proofKind: z.enum(['typed_predicates', 'anchored_review', 'deployment_predicate']),
   })
-  .strict();
+  .strict()
+  .superRefine((receipt, context) => {
+    const deployment = receipt.proofKind === 'deployment_predicate';
+    const subjectMatchesKind = deployment
+      ? receipt.taskKind === 'work' && receipt.subjectRef.startsWith('deployment:')
+      : receipt.taskKind !== 'work' &&
+        (receipt.subjectRef.startsWith('pr:') || receipt.subjectRef.startsWith('issue:'));
+    if (!subjectMatchesKind) {
+      context.addIssue({
+        code: 'custom',
+        path: ['proofKind'],
+        message: 'wait proof does not match Task/subject domain',
+      });
+    }
+    if (deployment && receipt.expiresAt !== undefined) {
+      context.addIssue({ code: 'custom', path: ['expiresAt'], message: 'deployment waits are persistent' });
+    }
+  });
 
 /** Private Task aggregate field, atomically installed with its await generation. */
 export type TypedWaitRegistration = z.infer<typeof receiptSchema>;
@@ -67,39 +89,55 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function typedWaitPredicateDigest(active: AwaitStateV1): string {
+type SupportedAwaitState = AwaitStateV1 | DeploymentAwaitStateV1;
+
+const PR_PREDICATE_KINDS = new Set([
+  'pr_head_changed',
+  'pr_review_result_available',
+  'pr_review_decision_changed',
+  'pr_review_thread_changed',
+  'pr_ci_terminal',
+  'pr_became_conflicting',
+  'pr_conversation_comment_added',
+  'pr_inline_comment_added',
+]);
+const ISSUE_PREDICATE_KINDS = new Set(['issue_comment_added', 'issue_author_commented']);
+
+export function typedWaitPredicateDigest(active: SupportedAwaitState): string {
   // A predicate is relative to its registered baseline (including the covered review HEAD).
   return createHash('sha256')
     .update(canonical({ when: active.continuation.when, baseline: active.baseline }))
     .digest('hex');
 }
 
-function proofKind(active: AwaitStateV1): TypedWaitRegistration['proofKind'] | null {
+function deploymentProofKind(active: SupportedAwaitState): TypedWaitRegistration['proofKind'] | null {
+  return active.autoRenew === false &&
+    active.continuation.when.length === 1 &&
+    deploymentWaitPredicateSchema.safeParse(active.continuation.when[0]).success
+    ? 'deployment_predicate'
+    : null;
+}
+
+function githubProofKind(active: SupportedAwaitState): TypedWaitRegistration['proofKind'] | null {
   let review = false;
-  if (active.continuation.when.length === 0) return null;
   const kinds = active.subjectRef.startsWith('pr:')
-    ? [
-        'pr_head_changed',
-        'pr_review_result_available',
-        'pr_review_decision_changed',
-        'pr_review_thread_changed',
-        'pr_ci_terminal',
-        'pr_became_conflicting',
-        // #1392 AC-7: the normal registration arms both comment surfaces.
-        'pr_conversation_comment_added',
-        'pr_inline_comment_added',
-      ]
+    ? PR_PREDICATE_KINDS
     : active.subjectRef.startsWith('issue:')
-      ? ['issue_comment_added', 'issue_author_commented']
-      : [];
+      ? ISSUE_PREDICATE_KINDS
+      : new Set<string>();
   for (const predicate of active.continuation.when) {
-    if (!kinds.includes(predicate.kind)) return null;
+    if (!kinds.has(predicate.kind)) return null;
     if (predicate.kind === 'pr_review_result_available') {
       if (!Number.isSafeInteger(predicate.triggerCommentId) || (predicate.triggerCommentId ?? 0) <= 0) return null;
       review = true;
     }
   }
   return review ? 'anchored_review' : 'typed_predicates';
+}
+
+function proofKind(active: SupportedAwaitState): TypedWaitRegistration['proofKind'] | null {
+  if (active.continuation.when.length === 0) return null;
+  return active.subjectRef.startsWith('deployment:') ? deploymentProofKind(active) : githubProofKind(active);
 }
 
 export function parseTypedWaitRegistration(raw: unknown): TypedWaitRegistration | null {
@@ -114,13 +152,15 @@ export function parseTypedWaitRegistration(raw: unknown): TypedWaitRegistration 
 /** Called only after the registration producer has verified every anchored review trigger. */
 export function createTypedWaitRegistration(input: {
   readonly task: TaskItem;
-  readonly active: AwaitStateV1;
+  readonly active: SupportedAwaitState;
   readonly invocationId: string;
   readonly source: TypedWaitSource;
 }): TypedWaitRegistration | null {
   const { task, active, source, invocationId } = input;
   const kind = proofKind(active);
   if (!kind) return null;
+  const isDeployment = active.subjectRef.startsWith('deployment:');
+  if ((isDeployment && task.kind !== 'work') || (!isDeployment && task.kind === 'work')) return null;
   return parseTypedWaitRegistration({
     v: 1,
     invocationId,
@@ -148,21 +188,22 @@ export function isLiveTypedWaitRegistration(
 ): boolean {
   if (!snapshot?.receipt) return false;
   const { task, receipt } = snapshot;
-  const active = task.automationState?.await;
-  const terminal = task.automationState?.waitOutcome;
+  const isDeployment = receipt.subjectRef.startsWith('deployment:');
+  const active = isDeployment ? task.deploymentWait?.await : task.automationState?.await;
+  const terminal = isDeployment ? task.deploymentWait?.waitOutcome : task.automationState?.waitOutcome;
   return (
     !!active &&
     task.status !== 'done' &&
     task.id === receipt.taskId &&
     task.kind === receipt.taskKind &&
-    task.kind === (receipt.subjectRef.startsWith('pr:') ? 'pr_tracking' : 'issue_tracking') &&
+    task.kind === (isDeployment ? 'work' : receipt.subjectRef.startsWith('pr:') ? 'pr_tracking' : 'issue_tracking') &&
     task.userId === receipt.userId &&
     receipt.userId === identity.userId &&
     task.ownerCatId === receipt.catId &&
     receipt.catId === identity.catId &&
     task.threadId === receipt.threadId &&
     receipt.threadId === identity.threadId &&
-    task.subjectKey === receipt.subjectRef &&
+    (isDeployment || task.subjectKey === receipt.subjectRef) &&
     active.subjectRef === receipt.subjectRef &&
     receipt.invocationId === identity.invocationId &&
     receipt.source.sourceMessageId === identity.sourceMessageId &&

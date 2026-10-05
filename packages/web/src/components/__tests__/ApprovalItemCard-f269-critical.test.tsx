@@ -72,11 +72,17 @@ const CASES = [
   {
     name: 'F221 taste evidence',
     item: approvalItem('F221', {
+      takeaway: '我们以为 You 喜欢有温度又清楚的画面。',
       scene: '当审批卡需要支持不可逆决定时，依据必须完整可达。',
       quote: '省略号不能成为信息终点。',
       tags: ['overflow'],
     }),
-    expected: ['当审批卡需要支持不可逆决定时，依据必须完整可达。', '省略号不能成为信息终点。'],
+    expected: [
+      '猫的判断（假设）',
+      '我们以为 You 喜欢有温度又清楚的画面。',
+      '当审批卡需要支持不可逆决定时，依据必须完整可达。',
+      '省略号不能成为信息终点。',
+    ],
   },
   {
     name: 'F193 dispatch content',
@@ -139,5 +145,13 @@ describe('F269 ApprovalItemCard critical text recovery', () => {
 
     expect(card?.querySelector('button[aria-expanded="true"]')).not.toBeNull();
     for (const detail of expected) expect(card?.textContent).toContain(detail);
+    if (item.sourceFeatureId === 'F221') {
+      const recommendation = card?.querySelector('[data-testid="approval-recommendation"]');
+      const text = recommendation?.textContent ?? '';
+      expect(text).toContain('猫的判断（假设）');
+      expect(text).toContain(item.detail.takeaway);
+      expect(text.indexOf('猫的判断（假设）')).toBeLessThan(text.indexOf('场景'));
+      expect(text.indexOf('场景')).toBeLessThan(text.indexOf('引用'));
+    }
   });
 });

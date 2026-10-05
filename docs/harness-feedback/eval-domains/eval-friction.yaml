@@ -45,4 +45,9 @@ sla:
 # can't publish (501 / silent-broken fire, same failure eval:sop hit 2026-06-06).
 # Flipped to true in PR1b (P1-7) after the end-to-end live sink is wired + verified
 # green (publish_verdict eval:friction → friction-rollup-snapshot → live verdict).
-enabled: true
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Merged into the F278 paw-feel view as a data flow; no separate schedule until the problem-family contract exists."
+  revivalPath: "After the F278 problem-family contract lands, the owner decides whether a Program measure is needed."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

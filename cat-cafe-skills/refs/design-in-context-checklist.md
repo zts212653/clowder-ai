@@ -19,6 +19,7 @@
 - [ ] 系统已经知道什么、能先给出什么建议或默认值？不得把系统能判断的事重新推给用户填表。
 - [ ] 主操作无需滚动即可发现；不参与当前决定的内容按需展开。
 - [ ] 产品主体只使用用户完成任务所需的语言。Feature ID、ADR、Gate、stage、状态机、架构、评审术语等内部概念不得出现在产品文案或示例数据中，除非它本来就是目标用户的任务词汇。
+- [ ] 界面上的每个名字（标题、面板名、入口名、按钮、菜单项、状态、报错）先用英文写出成熟产品做同一件事时怎么叫：东西用短名词，动作用动词加宾语；再译成正式的产品中文。不用口语短句当名字；同一件事优先沿用已经确认、符合该规则的用户可见产品词，代码里的状态值不直接当文案，旧词不合规时在这次动到的界面和同一概念处一起改。不暴露无助于当前任务的内部术语和实现细节，但人做判断需要的行为、权限和操作后果要用产品语言说清楚。对话里猫和人说的话不在此列。规则与样本见 [`DESIGN.md`「界面上的字」](../../DESIGN.md#界面上的字)。
 - [ ] 把设计说明、对比控制和开发标签全部遮住后，第一次看到页面的人仍能回答：发生了什么、要不要我行动、下一步是什么？不能 → 退回重做内容与层级。
 - [ ] URI、revision、绝对路径、Raw、内部映射语法等工程细节是否默认折叠，并且需要时仍可找到？
 
@@ -44,7 +45,7 @@
 普通详情页、设置页和一次性流程跳过本节；不要把 Workspace 清单变成所有页面都要补齐的功能表。
 
 - [ ] 明确当前交付是 feature surface、对象详情还是 product shell；单个资产页、Channel 页或右栏不能冒充整个产品工作区。
-- [ ] 若声称“已接入现有产品 / Collective”，必须给出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**；独立 `/dev` route、另造导航与 **独立复制壳**只能标为组件实验，不能据此推进正式后端阶段。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full。
+- [ ] 若声称“已接入现有产品 / Collective”，必须给出**真实产品宿主**的用户入口、目标宿主组件路径与**宿主挂载证据**；独立 `/dev` route、另造导航与 **独立复制壳**只能标为组件实验，不能据此推进正式后端阶段。**默认入口即门**：每个 `claims.productIntegration` 一律要带 `defaultEntryJourney`（`testPath` / `journeyId` / `surfaceTestId`）——一条用 `registerDefaultEntryJourney` 注册在 `packages/web/test/browser/` 下、由 `test:browser` 执行的真实浏览器旅程：从不带任何查询参数的默认入口 `enter`，做用户动作，`arrive` 时断言最终 surface 唯一的 `data-testid` 可见。`?experienceGate=f290-assembly` 这种只能手输 URL 的候选页写不出这条旅程，只能登记为 opt-in 候选。checker 核静态绑定形状（文件在 canonical runner 里、旅程体不用 `setContent` / `goto` / `evaluate` 注入 DOM 或 URL、final surface 位于 `packages/web/src` 或 `packages/collective-client/src`，且 testid 跨两处产品源码唯一）；runtime harness 在进程收尾时逐条对账绑定当前 `testPath` 的 claim，要求 exact `journeyId` 真实注册并完成，藏在未执行分支或只让文件退出都不能通过。可达性由 full gate 实跑旅程证明，不做静态推断（2026-09-10 起，静态 prover 已被 runtime journey 取代）。claim 或旅程文件一改，gate 强制 full（此处的 full 指不能只走文档校验；S2 #4669 起 canonical gate 按冻结 diff 生成 `VerificationPlan`——旅程文件或其宿主源码变化即把该 journey 列入 merge 前必跑的 `requiredUnitIds`，覆盖缺口退出码 3 不标绿；全套旅程留给显式 `test:browser` 的 Design Gate 验收与 alpha 逐 revision 验证，细则以 `merge-gate` skill「浏览器验证政策」为准）。
 - [ ] 用户能从真实入口把 fixture 外的新对象加入 working set；新增 tab / pane 来自用户动作，不是预写场景切换。
 - [ ] 至少两类职责不同的 surface 能共存或快速切回，例如 Channel + Artifact、Chat + Review、File + Browser；它们不共用一张万能卡皮肤。
 - [ ] inspector / sidecar 只承载临时上下文、短动作或窥视；需要持续阅读、编辑、对比、独立导航的对象可以晋升为 tab / split pane。

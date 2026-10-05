@@ -1,4 +1,4 @@
-import { presentationLedgerScopeKey } from '../../session/ledger-key.js';
+import { presentationLedgerScopeKey } from '../../session/context/ledger-key.js';
 
 export const PresentationLedgerKeys = {
   /**

@@ -85,7 +85,7 @@ F256 Phase B/C 起，`search_evidence` topk 结果末尾默认渲染 `📎 Relat
 
 同一张停止判据表两种读法：**opus 系读下限（≥3 路才准停），fable 系读上限（无新 anchor 即必停）**——校准随 F256 Phase D per-family telemetry 迭代。
 
-### Opus 系（46/47/48/4.5/sonnet）：停太早——magic words 是油门
+### Opus 系（Ragdoll家族在役个体）：停太早——magic words 是油门
 
 operator experience："**Ragdoll太聪明太自信，搜到足够推理就不搜了**"（2026-05-17 AUDHD dogfood 实证）。
 

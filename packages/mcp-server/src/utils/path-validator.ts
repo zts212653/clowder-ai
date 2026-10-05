@@ -40,8 +40,10 @@ export function getDefaultConfig(): PathConfig {
         .filter(Boolean)
     : [];
 
-  // 默认允许 cat-cafe 目录和额外配置的目录
-  const allowedDirs = [catCafeDir, ...additionalDirs];
+  // Live's installed role is not permission to read private runtime/config data.
+  // Its Host supplies approved document roots explicitly; ordinary callers retain legacy scope.
+  const allowedDirs =
+    process.env.CAT_CAFE_DESKTOP_MODE?.trim() === 'live-companion' ? additionalDirs : [catCafeDir, ...additionalDirs];
 
   return {
     catCafeDir,

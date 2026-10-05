@@ -1,25 +1,39 @@
-import type { CollectiveConnector } from '@cat-cafe/collective-connector';
+import { type CollectiveConnector, desiredParticipationSchema } from '@cat-cafe/collective-connector';
 import { type CatId, collectiveSourceIdentitySchema } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import { containsEntrustedWorkTimeSignal } from '../domains/growing/EntrustedWorkSourceSignals.js';
 import type { CollectiveCurrentContext } from '../domains/plugin/builtin-runtime/collective-current-context.js';
+import {
+  type ParticipationCat,
+  reconcileParticipation,
+} from '../domains/plugin/builtin-runtime/collective-participation-reconciler.js';
 import type { CollectiveWorkAuthority } from '../domains/plugin/builtin-runtime/collective-work-authority.js';
 import type { CollectiveWorkDispatcher } from '../domains/plugin/builtin-runtime/collective-work-dispatcher.js';
+import { sendCollectiveOwnerError } from './collective-owner-errors.js';
+import { registerCollectiveOwnerListeningRoutes } from './collective-owner-listening-routes.js';
+import { prepareManualCollectiveAdmission } from './collective-owner-manual-admission.js';
+import { collectiveOwnerParticipationView } from './collective-owner-participation-view.js';
+import { collectiveWorkContinuation } from './collective-owner-work-continuation.js';
+import { registerCollectiveOwnerWorkPolicyRoutes } from './collective-owner-work-policy-routes.js';
+import {
+  type CollectiveWorkReconsiderationRuntime,
+  registerCollectiveOwnerWorkReconsiderationRoutes,
+} from './collective-owner-work-reconsideration.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
 interface OwnerParticipationOptions {
   readonly connector: () => CollectiveConnector | undefined;
-  readonly cats: () => readonly { id: string; displayName: string; supported: boolean }[];
+  readonly cats: () => readonly ParticipationCat[];
   readonly threads: Pick<IThreadStore, 'get' | 'list' | 'create' | 'addParticipants'>;
   readonly messages: IMessageStore;
   readonly tasks: ITaskStore;
   readonly context: CollectiveCurrentContext;
   readonly work: CollectiveWorkAuthority;
   readonly dispatcher: CollectiveWorkDispatcher;
+  readonly reconsideration?: CollectiveWorkReconsiderationRuntime;
 }
 const base = '/api/plugins/collective-connector/:connectionId';
 type Request<Body = unknown> = { Params: { connectionId: string }; Body: Body };
@@ -39,6 +53,13 @@ const participationInput = z
       .optional(),
   })
   .strict();
+const reconcileInput = z
+  .object({
+    expectedRevision: z.number().int().nonnegative(),
+    channelIds: z.array(z.string().trim().min(1).max(160)).min(1).max(100),
+  })
+  .strict();
+const policyInput = reconcileInput.extend({ policy: desiredParticipationSchema }).strict();
 const workInput = z
   .object({
     sourceMessageId: z.string().min(1).max(240),
@@ -56,6 +77,9 @@ const resumeInput = z
   .strict();
 
 export function registerCollectiveOwnerParticipationRoutes(app: FastifyInstance, options: OwnerParticipationOptions) {
+  registerCollectiveOwnerWorkPolicyRoutes(app, options.connector);
+  registerCollectiveOwnerListeningRoutes(app, options.connector);
+  registerCollectiveOwnerWorkReconsiderationRoutes(app, options);
   // Serialize Host setup effects for one connection. Durable authority stays in Connector/Task.
   const mutationTails = new Map<string, Promise<void>>();
   const mutate =
@@ -99,52 +123,62 @@ export function registerCollectiveOwnerParticipationRoutes(app: FastifyInstance,
     try {
       const auth = await authorize(request, reply, 'read');
       if (!auth) return;
-      const inbox = await auth.connector.listInbox(auth.connection.connectionId);
-      const sources = new Set(
-        inbox.flatMap((item) =>
-          item.routeReceipt?.kind === 'thread_message' ? [`message:${item.routeReceipt.messageId}`] : [],
-        ),
-      );
-      const tasks = (await options.tasks.listByKind('work')).filter(
-        (task) =>
-          task.userId === auth.userId && task.entrustedWork?.admission.sourceRefs.some((ref) => sources.has(ref)),
-      );
-      const published = await auth.connector.isParticipationPublished(auth.connection.connectionId).catch(() => false);
-      return {
-        connection: auth.connection,
-        revision: auth.route?.revision ?? 0,
-        cats: options.cats(),
-        bindings: auth.route?.agentRoutes ?? {},
-        published,
-        threads: (await options.threads.list(auth.userId))
-          .filter((thread) => !thread.deletedAt)
-          .map((thread) => ({ id: thread.id, title: thread.title, participants: thread.participants })),
-        requests: inbox
-          .filter(
-            (item) =>
-              item.event.recipient?.kind === 'agent' &&
-              item.event.recipient.connectionId === auth.connection.connectionId,
-          )
-          .map((item) => ({
-            event: item.event,
-            delivery: item.disposition,
-            failure: item.routeFailure,
-            messageId: item.routeReceipt?.kind === 'thread_message' ? item.routeReceipt.messageId : undefined,
-          })),
-        tasks: tasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          threadId: task.threadId,
-          status: task.status,
-          revision: task.entrustedWork!.revision,
-          closure: task.entrustedWork!.closure.state,
-          sourceRefs: task.entrustedWork!.admission.sourceRefs,
-        })),
-      };
+      return await collectiveOwnerParticipationView(options, auth);
     } catch (error) {
       return ownerError(reply, error);
     }
   });
+  app.post<Request>(
+    `${base}/participation/reconcile`,
+    mutate(async (request, reply) => {
+      try {
+        const auth = await authorize(request, reply, 'write');
+        if (!auth) return;
+        const input = reconcileInput.parse(request.body);
+        requireConnected(auth.connection);
+        const route = await reconcileParticipation({
+          connector: auth.connector,
+          threads: options.threads,
+          connectionId: auth.connection.connectionId,
+          ownerUserId: auth.userId,
+          route: auth.route,
+          expectedRevision: input.expectedRevision,
+          channelIds: input.channelIds,
+          cats: options.cats(),
+          initialExcludedCatIds: auth.connection.initialExcludedCatIds,
+        });
+        return { revision: route.revision, published: true };
+      } catch (error) {
+        return ownerError(reply, error);
+      }
+    }),
+  );
+  app.put<Request>(
+    `${base}/participation/policy`,
+    mutate(async (request, reply) => {
+      try {
+        const auth = await authorize(request, reply, 'write');
+        if (!auth) return;
+        const input = policyInput.parse(request.body);
+        requireConnected(auth.connection);
+        const route = await reconcileParticipation({
+          connector: auth.connector,
+          threads: options.threads,
+          connectionId: auth.connection.connectionId,
+          ownerUserId: auth.userId,
+          route: auth.route,
+          expectedRevision: input.expectedRevision,
+          channelIds: input.channelIds,
+          cats: options.cats(),
+          policy: input.policy,
+          initialExcludedCatIds: auth.connection.initialExcludedCatIds,
+        });
+        return { revision: route.revision, published: true };
+      } catch (error) {
+        return ownerError(reply, error);
+      }
+    }),
+  );
   app.put<Request>(
     `${base}/participation`,
     mutate(async (request, reply) => {
@@ -174,13 +208,6 @@ export function registerCollectiveOwnerParticipationRoutes(app: FastifyInstance,
                 standingWork: {
                   ...input.standingWork,
                   channelIds: input.channelIds,
-                  threadId: await ownedThread(
-                    options,
-                    auth.userId,
-                    cat.id,
-                    input.standingWork.threadId,
-                    'Collective 私人工作',
-                  ),
                 },
               }
             : {}),
@@ -218,51 +245,30 @@ export function registerCollectiveOwnerParticipationRoutes(app: FastifyInstance,
           source.userId !== auth.userId
         )
           return reply.code(409).send({ code: 'RETURN_UNAVAILABLE' });
-        await options.context.resolvePublic({
+        const publicSource = await options.context.resolvePublic({
           userId: auth.userId,
           threadId: source.threadId,
           catId: identity.data.catId,
           originTriggerMessageId: source.id,
         });
-        if (containsEntrustedWorkTimeSignal(source.content) && !input.businessDeadline)
-          return reply.code(422).send({ result: 'needs_clarification' });
-        const existing = (await options.tasks.listByKind('work')).find(
-          (task) =>
-            task.userId === auth.userId &&
-            task.ownerCatId === identity.data.catId &&
-            task.entrustedWork?.admission.sourceRefs.length === 1 &&
-            task.entrustedWork.admission.sourceRefs[0] === `message:${source.id}`,
-        );
-        if (existing && input.threadId && existing.threadId !== input.threadId)
-          return reply.code(409).send({ code: 'OWNER_ADMISSION_CONFLICT' });
-        const threadId = await ownedThread(
-          options,
-          auth.userId,
-          identity.data.catId,
-          existing?.threadId ?? input.threadId,
-          'Collective 私人工作',
-        );
-        const result = await options.work.admit({
+        if (!publicSource) return reply.code(409).send({ code: 'RETURN_UNAVAILABLE' });
+        const result = await prepareManualCollectiveAdmission({
+          connector: auth.connector,
+          connectionId: auth.connection.connectionId,
           ownerUserId: auth.userId,
-          ownerAuthProvenance: 'strict',
           source,
-          catId: identity.data.catId as CatId,
-          threadId,
+          identity: identity.data,
           requestId: input.requestId,
-          title: source.content.slice(0, 160),
-          intendedOutcome: source.content,
-          ...(input.businessDeadline
-            ? { time: { businessDeadline: { value: input.businessDeadline, sourceRef: `message:${source.id}` } } }
-            : {}),
-          closure: {
-            condition: 'A reviewable result answers the entrusted request at its original Collective location',
-            expectedSignal: 'collective:accepted-result',
-          },
+          ...(input.threadId ? { threadId: input.threadId } : {}),
+          ...(input.businessDeadline ? { businessDeadline: input.businessDeadline } : {}),
+          messages: options.messages,
+          tasks: options.tasks,
+          authority: options.work,
+          resolveThread: (catId, preferred) =>
+            ownedThread(options, auth.userId, catId, preferred, 'Collective 私人工作'),
         });
         if (result.result === 'needs_clarification') return reply.code(422).send(result);
-        const task = await options.tasks.get(result.subjectRef.slice('task:work:'.length));
-        if (!task) throw new Error('Admitted Task is unavailable');
-        return await options.dispatcher.dispatch(task, auth.userId, result.revision, { kind: 'admission' });
+        return await options.dispatcher.dispatch(result.task, auth.userId, result.revision, { kind: 'admission' });
       } catch (error) {
         return ownerError(reply, error);
       }
@@ -281,15 +287,34 @@ export function registerCollectiveOwnerParticipationRoutes(app: FastifyInstance,
         const identity = collectiveSourceIdentitySchema.safeParse(source.source?.meta?.participation);
         if (!identity.success || identity.data.connectionId !== auth.connection.connectionId)
           return reply.code(409).send({ code: 'RETURN_UNAVAILABLE' });
-        return await options.dispatcher.dispatch(task, auth.userId, input.observedRevision, {
-          kind: 'resume',
-          requestId: input.requestId,
-        });
+        const prepared = await auth.connector.withSynchronizedAssignedWorkAuthority(
+          auth.connection.connectionId,
+          identity.data.eventId,
+          async (scope) => {
+            const execution = await options.work.executionPointerForWork(task, scope.work);
+            const currentSource = await options.work.sourceForTask(task, execution.sourceRef);
+            const currentIdentity = collectiveSourceIdentitySchema.parse(currentSource.source?.meta?.participation);
+            const continuation = collectiveWorkContinuation(scope, currentIdentity, currentSource.id);
+            return {
+              kind: 'resume' as const,
+              requestId: input.requestId,
+              ...continuation,
+              ...execution,
+            };
+          },
+        );
+        return await options.dispatcher.dispatch(task, auth.userId, input.observedRevision, prepared);
       } catch (error) {
         return ownerError(reply, error);
       }
     }),
   );
+}
+
+function requireConnected(connection: { authorizedHumanId?: string; authorityStatus: string }) {
+  if (!connection.authorizedHumanId || connection.authorityStatus !== 'connected') {
+    throw Object.assign(new Error('Collective participation authority is revoked'), { code: 'PARTICIPATION_REVOKED' });
+  }
 }
 
 async function ownedThread(
@@ -306,12 +331,5 @@ async function ownedThread(
   return thread.id;
 }
 function ownerError(reply: FastifyReply, error: unknown) {
-  if (error instanceof z.ZodError) return reply.code(400).send({ code: 'INVALID_PARTICIPATION_REQUEST' });
-  const code =
-    error instanceof Error && 'code' in error && typeof error.code === 'string'
-      ? error.code
-      : 'PARTICIPATION_UNAVAILABLE';
-  return reply
-    .code(409)
-    .send({ code, error: error instanceof Error ? error.message : 'Collective action is unavailable' });
+  return sendCollectiveOwnerError(reply, error, 'INVALID_PARTICIPATION_REQUEST', 'PARTICIPATION_UNAVAILABLE');
 }

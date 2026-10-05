@@ -122,8 +122,8 @@ describe('personal Chrome extension contract', () => {
       readFile(join(apiRoot, 'src/domains/cats/services/cloud-bridge/personal-chrome-host/protocol.ts'), 'utf8'),
     ]);
 
-    assert.equal(manifest.version, '0.2.11');
-    for (const source of [worker, contentScriptEntry, contentScript, protocol]) assert.match(source, /0\.2\.11/);
+    assert.equal(manifest.version, '0.2.12');
+    for (const source of [worker, contentScriptEntry, contentScript, protocol]) assert.match(source, /0\.2\.12/);
   });
 
   it('checks in deterministic normalized icons derived from the formal gpt-pro repository asset', async () => {
@@ -145,6 +145,7 @@ describe('personal Chrome extension contract', () => {
         'chatgpt-page-adapter.mjs',
         'chatgpt-page-contract.mjs',
         'chatgpt-composer-transaction.mjs',
+        'chatgpt-composer-controls.mjs',
       ].map((name) => readFile(join(extensionRoot, name), 'utf8')),
     );
     const source = sources.join('\n');

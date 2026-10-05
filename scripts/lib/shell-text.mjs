@@ -79,13 +79,18 @@ export function extractSubstitutions(stage) {
   let quote;
   for (let index = 0; index < stage.length; index++) {
     const char = stage[index];
-    if (quote) {
-      text += char;
-      if (char === quote && stage[index - 1] !== '\\') quote = undefined;
+    if (char === '\\' && quote !== "'") {
+      text += stage.slice(index, index + 2);
+      index += 1;
       continue;
     }
-    if (char === "'" || char === '"') {
-      quote = char;
+    if (quote === "'") {
+      text += char;
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || (!quote && char === "'")) {
+      quote = quote === char ? undefined : char;
       text += char;
       continue;
     }

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, posix, relative, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import type { TasteRepository } from '../../taste/services/TasteRepository.js';
+import { resolveCanonicalTasteRoot, type TasteRepository } from '../../taste/services/TasteRepository.js';
 
 export const MAX_TASTE_DECISION_PAYLOAD_CHARS = 16_384;
 export const TASTE_MEMORY_READER_CONTRACT_REF = 'packages/api/src/domains/memory/taste/TasteMemoryReader.ts';
@@ -34,6 +35,7 @@ export type TasteMemoryVisibility = 'public' | 'private';
 export interface TasteDecisionPayload {
   when: string;
   quotes: string[];
+  takeaway?: string;
   scene: string;
   tags: string[];
   dimension?: string;
@@ -76,6 +78,7 @@ export function buildTasteDecisionPassage(payload: TasteDecisionPayload): string
   const lines = [
     'Taste decision vignette',
     `When: ${payload.when}`,
+    ...(payload.takeaway ? [`Takeaway hypothesis: ${payload.takeaway}`] : []),
     ...(payload.dimension ? [`Dimension: ${payload.dimension}`] : []),
     `Tags: ${payload.tags.join(', ')}`,
     ...(payload.catId ? [`Cat: ${payload.catId}`] : []),
@@ -96,35 +99,34 @@ export class TasteMemoryReader {
     if (!ownerUserId.trim()) throw new Error('TasteMemoryReader requires an ownerUserId');
   }
 
-  read(request: TasteMemoryReadRequest): TasteMemoryReadResult | null {
+  async read(request: TasteMemoryReadRequest): Promise<TasteMemoryReadResult | null> {
     if (request.ownerUserId !== this.ownerUserId) return null;
     const visibility = classifyTasteSourcePath(request.sourcePath);
     if (!visibility) return null;
-
     try {
-      const root = realpathSync(this.repository.canonicalRoot());
+      const root = await realpath(await resolveCanonicalTasteRoot(this.repository));
       const candidate = resolve(root, request.sourcePath);
-      const canonicalFile = realpathSync(candidate);
-      // Source coordinates are exact provenance, not aliases. Reject symlinks
-      // (including symlinked parent directories) before reading any content.
+      const canonicalFile = await realpath(candidate);
       if (canonicalFile !== candidate) return null;
       const rootRelativePath = relative(root, canonicalFile);
       if (!rootRelativePath || rootRelativePath.startsWith('..') || isAbsolute(rootRelativePath)) return null;
-      if (!statSync(canonicalFile).isFile()) return null;
-
-      const content = readFileSync(canonicalFile, 'utf8');
+      const handle = await open(canonicalFile, constants.O_RDONLY | constants.O_NOFOLLOW);
+      let content: string;
+      try {
+        const opened = await handle.stat();
+        const current = await lstat(canonicalFile);
+        if (!opened.isFile() || current.dev !== opened.dev || current.ino !== opened.ino) return null;
+        if ((await realpath(canonicalFile)) !== canonicalFile) return null;
+        content = await handle.readFile('utf8');
+      } finally {
+        await handle.close();
+      }
       const revision = `sha256:${createHash('sha256').update(content).digest('hex')}`;
       if (request.revision !== undefined && request.revision !== revision) return null;
       const payload = parseApprovedTasteVignette(content, visibility);
-      if (!payload) return null;
-
-      return {
-        ownerUserId: this.ownerUserId,
-        visibility,
-        sourcePath: request.sourcePath,
-        revision,
-        payload,
-      };
+      return payload
+        ? { ownerUserId: this.ownerUserId, visibility, sourcePath: request.sourcePath, revision, payload }
+        : null;
     } catch {
       return null;
     }
@@ -181,12 +183,16 @@ function matchesVisibility(parsed: Record<string, unknown>, visibility: TasteMem
 
 function parseTasteCore(
   parsed: Record<string, unknown>,
-): Pick<TasteDecisionPayload, 'when' | 'quotes' | 'scene' | 'tags'> | null {
+): Pick<TasteDecisionPayload, 'when' | 'quotes' | 'scene' | 'tags' | 'takeaway'> | null {
   const when = requiredBoundedString(parsed.when, MAX_WHEN_CHARS);
   const quotes = boundedStringArray(parsed.quotes, MAX_QUOTES, MAX_QUOTE_CHARS, true);
   const scene = requiredBoundedString(parsed.scene, MAX_SCENE_CHARS);
+  const takeaway = optionalBoundedString(parsed.takeaway, 500);
+  if (parsed.takeaway !== undefined && takeaway === undefined) return null;
   const tags = boundedStringArray(parsed.tags, MAX_TAGS, MAX_TAG_CHARS, false);
-  return when && quotes !== null && scene && tags !== null ? { when, quotes, scene, tags } : null;
+  return when && quotes !== null && scene && tags !== null
+    ? { when, quotes, scene, tags, ...(takeaway ? { takeaway } : {}) }
+    : null;
 }
 
 function parseTasteMetadata(

@@ -11,6 +11,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
 
 const REDIS_URL = process.env.REDIS_URL;
 const HAS_REDIS = REDIS_URL?.includes(':6398') === true;
@@ -31,48 +32,52 @@ describe('F174 Phase B — restart resilience (AC-B3, AC-B5)', () => {
       '../dist/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.js'
     );
 
-    // === Process 1 ===
-    const redis1 = createRedisClient({ url: REDIS_URL, keyPrefix: 'cat-cafe-test:' });
-    // Cleanup any leftovers from prior runs (test keyspace isolated by prefix)
-    const leftovers = await redis1.keys('cat-cafe-test:auth:*');
-    if (leftovers.length > 0) {
-      await redis1.del(...leftovers.map((k) => k.replace('cat-cafe-test:', '')));
-    }
+    // Both simulated processes share one namespace — that is the point of the
+    // test — but no other suite does. See helpers/redis-auth-namespace.js.
+    const namespace = createAuthTestNamespace('auth-restart');
 
-    const backend1 = new RedisAuthInvocationBackend(redis1);
-    await backend1.create(
-      {
-        invocationId: 'survive-restart-1',
-        callbackToken: 'tok-survive',
-        userId: 'u-1',
-        ownerAuthProvenance: 'strict',
-        catId: 'opus',
-        threadId: 't-1',
-        clientMessageIds: new Set(),
-        createdAt: Date.now(),
-      },
-      60_000,
-    );
-    await redis1.quit(); // simulate process exit — in-process state gone
+    // === Process 1 ===
+    const redis1 = createRedisClient({ url: REDIS_URL, keyPrefix: namespace });
+    try {
+      const backend1 = new RedisAuthInvocationBackend(redis1);
+      await backend1.create(
+        {
+          invocationId: 'survive-restart-1',
+          callbackToken: 'tok-survive',
+          userId: 'u-1',
+          ownerAuthProvenance: 'strict',
+          catId: 'opus',
+          threadId: 't-1',
+          clientMessageIds: new Set(),
+          createdAt: Date.now(),
+        },
+        60_000,
+      );
+      await backend1.setExpectedCompactionCarrier('survive-restart-1', 'f296-node-v1');
+    } finally {
+      await redis1.quit(); // simulate process exit — in-process state gone
+    }
 
     // === Process 2 (fresh client, no prior in-memory state) ===
-    const redis2 = createRedisClient({ url: REDIS_URL, keyPrefix: 'cat-cafe-test:' });
-    const backend2 = new RedisAuthInvocationBackend(redis2);
+    const redis2 = createRedisClient({ url: REDIS_URL, keyPrefix: namespace });
+    try {
+      const backend2 = new RedisAuthInvocationBackend(redis2);
 
-    const result = await backend2.verify('survive-restart-1', 'tok-survive', 60_000);
-    assert.equal(result.ok, true, 'token must verify after simulated process restart');
-    if (result.ok) {
-      assert.equal(result.record.userId, 'u-1');
-      assert.equal(result.record.ownerAuthProvenance, 'strict');
-      assert.equal(result.record.catId, 'opus');
-      assert.equal(result.record.threadId, 't-1');
+      const result = await backend2.verify('survive-restart-1', 'tok-survive', 60_000);
+      assert.equal(result.ok, true, 'token must verify after simulated process restart');
+      if (result.ok) {
+        assert.equal(result.record.userId, 'u-1');
+        assert.equal(result.record.ownerAuthProvenance, 'strict');
+        assert.equal(result.record.catId, 'opus');
+        assert.equal(result.record.threadId, 't-1');
+        assert.equal(result.record.expectedCompactionCarrier, 'f296-node-v1');
+      }
+    } finally {
+      // A failed assertion above must still release the connection: without
+      // this the client stays open and the test runner hangs instead of
+      // reporting the failure.
+      await clearAuthTestNamespace(redis2, namespace);
+      await redis2.quit();
     }
-
-    // Cleanup
-    const keys = await redis2.keys('cat-cafe-test:auth:*');
-    if (keys.length > 0) {
-      await redis2.del(...keys.map((k) => k.replace('cat-cafe-test:', '')));
-    }
-    await redis2.quit();
   });
 });

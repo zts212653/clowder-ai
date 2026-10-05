@@ -55,6 +55,8 @@ const secondaryClass =
 
 function recoveryHeading(props: CloudBindingRecoveryCardViewProps): [string, string] {
   if (props.deliveryStatus === 'sent') return ['已发送到 ChatGPT', '砚砚 Pro 已收到这条消息，回复会回到这里。'];
+  if (props.deliveryStatus === 'failed')
+    return ['这条消息未发送', `请处理投递提示中的问题后，重新 @${props.targetCatId} 发一条新消息。`];
   if (props.phase === 'binding') return ['正在连接砚砚 Pro…', '正在保存当前对话的连接。'];
   if (props.phase === 'retrying') return ['已连接，正在提交发送…', '正在继续发送原来的这条消息。'];
   if (
@@ -204,7 +206,7 @@ function ReadyRecovery(
 
 export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardViewProps) {
   const [title, description] = recoveryHeading(props);
-  const sent = props.deliveryStatus === 'sent';
+  const terminal = props.deliveryStatus === 'sent' || props.deliveryStatus === 'failed';
   return (
     <section
       aria-label="砚砚 Pro 会话连接"
@@ -218,11 +220,13 @@ export function CloudBindingRecoveryCardView(props: CloudBindingRecoveryCardView
             <p className="text-sm font-semibold">{title}</p>
             <p className="mt-1 text-xs text-cafe-secondary">{description}</p>
           </div>
-          {!sent && props.loadState.kind === 'ready' ? <ReadyRecovery {...props} loadState={props.loadState} /> : null}
-          {!sent && props.loadState.kind === 'unauthorized' ? (
+          {!terminal && props.loadState.kind === 'ready' ? (
+            <ReadyRecovery {...props} loadState={props.loadState} />
+          ) : null}
+          {!terminal && props.loadState.kind === 'unauthorized' ? (
             <p className="mt-3 text-xs text-cafe-muted">仅对话所有者可以连接会话。</p>
           ) : null}
-          {!sent && props.loadState.kind === 'error' ? (
+          {!terminal && props.loadState.kind === 'error' ? (
             <div className="mt-3">
               <p role="alert" className="text-xs text-conn-red-text">
                 {props.loadState.message}

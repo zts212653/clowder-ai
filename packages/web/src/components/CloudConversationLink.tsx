@@ -125,7 +125,7 @@ export function CloudConversationLink({ threadId }: { threadId: string }) {
   return (
     <div className="console-list-card mt-2 min-w-0 rounded-xl p-2.5" data-testid="cloud-conversation-link">
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-cafe">ChatGPT Conversation</span>
+        <span className="text-xs font-semibold text-cafe">ChatGPT 对话</span>
         <span className="shrink-0 rounded-full bg-[var(--console-hover-bg)] px-1.5 py-0.5 text-micro font-medium text-cafe-secondary">
           云端砚砚
         </span>
@@ -164,7 +164,7 @@ export function CloudConversationLink({ threadId }: { threadId: string }) {
         </div>
       ) : binding.kind === 'empty' ? (
         <div className="mt-1.5 text-micro text-cafe-muted">
-          <p>先在目标会话点击扩展的「授权此会话」，再为当前 thread 选择它。</p>
+          <p>先在目标会话点击扩展的「授权此会话」，再为当前对话选择它。</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <a
               className="font-medium text-cafe-secondary transition-colors hover:text-cafe"

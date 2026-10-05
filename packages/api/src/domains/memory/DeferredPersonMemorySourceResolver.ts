@@ -4,6 +4,7 @@ import {
   deferredPersonMemoryResolvedSourceSchema,
 } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import { ownerMessageTextDigestMaterial } from './people/owner-message-text-projection.js';
 import {
   digestPersonMemorySourceMaterial,
   eligibleOwnerMessage,
@@ -83,7 +84,7 @@ export class DeferredPersonMemorySourceResolver {
     return deferredPersonMemoryResolvedSourceSchema.parse({
       kind: 'message',
       sourceRef: ownerMessageSourceRef(message),
-      resolvedDigest: digestPersonMemorySourceMaterial(message.content),
+      resolvedDigest: digestPersonMemorySourceMaterial(ownerMessageTextDigestMaterial(message)),
     });
   }
 

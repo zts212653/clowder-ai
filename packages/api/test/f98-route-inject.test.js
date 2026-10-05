@@ -8,7 +8,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -109,6 +110,160 @@ describe('F98 Route Inject: session-transcript', () => {
 
     return { record, invId };
   }
+
+  it('F324: raw event pages are bounded and a large event has exact character continuation', async () => {
+    const { sessionChainStore, writer, transcriptReader } = await setup();
+    const record = sessionChainStore.create({
+      cliSessionId: 'cli-large',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    const info = { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-large', seq: 0 };
+    writer.appendEvent(info, { type: 'assistant', content: 'x'.repeat(250_000) }, 'inv-large');
+    for (let index = 0; index < 200; index += 1) {
+      writer.appendEvent(info, { type: 'assistant', content: `small-${index}-${'y'.repeat(300)}` }, 'inv-large');
+    }
+    sessionChainStore.update(record.id, { status: 'sealed' });
+    await writer.flush(info, { createdAt: 1000, sealedAt: 2000 });
+    const headers = { 'x-cat-cafe-user': 'user-1' };
+    const first = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/events?cursor=0&limit=200`,
+      headers,
+    });
+    assert.equal(first.statusCode, 200, first.body.slice(0, 500));
+    assert.ok(first.body.length <= 24_000, `raw page used ${first.body.length} chars`);
+    assert.equal(first.json().events[0].oversized, true);
+    assert.ok(first.json().nextCursor.eventNo > 0 && first.json().nextCursor.eventNo < 201);
+
+    const expected = JSON.stringify(
+      (await transcriptReader.readEvents(record.id, 'thread-1', 'opus', { eventNo: 0 }, 1)).events[0].event,
+    );
+    let offset = 0;
+    let recovered = '';
+    for (let page = 0; page < 40; page += 1) {
+      const slice = await app.inject({
+        method: 'GET',
+        url: `/api/sessions/${record.id}/events?cursor=0&limit=1&charOffset=${offset}`,
+        headers,
+      });
+      assert.equal(slice.statusCode, 200);
+      const body = slice.json();
+      assert.ok(slice.body.length <= 24_000);
+      recovered += body.eventSlice;
+      if (body.nextCharOffset === undefined) break;
+      assert.ok(body.nextCharOffset > offset);
+      offset = body.nextCharOffset;
+    }
+    assert.equal(recovered.length, expected.length);
+    assert.equal(
+      createHash('sha256').update(recovered).digest('hex'),
+      createHash('sha256').update(expected).digest('hex'),
+    );
+  });
+
+  it('F324: invocation detail cursor pages the exact invocation event stream', async () => {
+    const { sessionChainStore, writer } = await setup();
+    const record = sessionChainStore.create({
+      cliSessionId: 'cli-page',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    const info = { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-page', seq: 0 };
+    for (let index = 0; index < 100; index += 1) {
+      writer.appendEvent(info, { type: 'text', content: `inv-${index}-${'x'.repeat(400)}` }, 'inv-page');
+    }
+    sessionChainStore.update(record.id, { status: 'sealed' });
+    await writer.flush(info, { createdAt: 1000, sealedAt: 2000 });
+    const headers = { 'x-cat-cafe-user': 'user-1' };
+    const first = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/invocations/inv-page?cursor=0&limit=100`,
+      headers,
+    });
+    assert.equal(first.statusCode, 200);
+    assert.ok(first.body.length <= 24_000);
+    assert.ok(first.json().nextCursor.eventNo > 0 && first.json().nextCursor.eventNo < 100);
+    const second = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/invocations/inv-page?cursor=${first.json().nextCursor.eventNo}&limit=100`,
+      headers,
+    });
+    assert.equal(second.json().events[0].eventNo, first.json().nextCursor.eventNo);
+  });
+
+  it('F324: oversized digest has exact character continuation', async () => {
+    const { sessionChainStore, writer } = await setup();
+    const { record } = await createSessionWithEvents(sessionChainStore, writer);
+    const digest = { v: 1, body: 'z'.repeat(250_000) };
+    await writeFile(
+      join(tmpDir, 'threads', 'thread-1', 'opus', 'sessions', record.id, 'digest.extractive.json'),
+      JSON.stringify(digest),
+    );
+    const headers = { 'x-cat-cafe-user': 'user-1' };
+    const first = await app.inject({ method: 'GET', url: `/api/sessions/${record.id}/digest`, headers });
+    assert.equal(first.statusCode, 200);
+    assert.ok(first.body.length <= 24_000);
+    assert.equal(first.json().oversized, true);
+    let offset = 0;
+    let recovered = '';
+    for (let page = 0; page < 40; page += 1) {
+      const slice = await app.inject({
+        method: 'GET',
+        url: `/api/sessions/${record.id}/digest?charOffset=${offset}`,
+        headers,
+      });
+      assert.equal(slice.statusCode, 200);
+      const body = slice.json();
+      assert.ok(slice.body.length <= 24_000);
+      recovered += body.digestSlice;
+      if (body.nextCharOffset === undefined) break;
+      offset = body.nextCharOffset;
+    }
+    const expected = JSON.stringify(digest);
+    assert.equal(recovered.length, expected.length);
+    assert.equal(
+      createHash('sha256').update(recovered).digest('hex'),
+      createHash('sha256').update(expected).digest('hex'),
+    );
+  });
+
+  it('F324: chat and handoff projections stay bounded with source drills', async () => {
+    const { sessionChainStore, writer } = await setup();
+    const record = sessionChainStore.create({
+      cliSessionId: 'cli-views',
+      threadId: 'thread-1',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    const info = { sessionId: record.id, threadId: 'thread-1', catId: 'opus', cliSessionId: 'cli-views', seq: 0 };
+    for (let index = 0; index < 200; index += 1) {
+      writer.appendEvent(info, { type: 'assistant', content: `chat-${index}-${'x'.repeat(400)}` }, 'inv-views');
+      writer.appendEvent(info, { type: 'tool_use', toolName: `tool-${index}` }, 'inv-views');
+    }
+    sessionChainStore.update(record.id, { status: 'sealed' });
+    await writer.flush(info, { createdAt: 1000, sealedAt: 2000 });
+    const headers = { 'x-cat-cafe-user': 'user-1' };
+    const chat = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/events?view=chat&limit=200`,
+      headers,
+    });
+    assert.ok(chat.body.length <= 24_000, `chat page used ${chat.body.length} chars`);
+    assert.equal(chat.json().messages[0].eventNo, 0);
+    assert.ok(chat.json().nextCursor.eventNo > 0);
+    const handoff = await app.inject({
+      method: 'GET',
+      url: `/api/sessions/${record.id}/events?view=handoff&limit=200`,
+      headers,
+    });
+    assert.ok(handoff.body.length <= 24_000, `handoff page used ${handoff.body.length} chars`);
+    assert.equal(handoff.json().invocations[0].invocationId, 'inv-views');
+    assert.ok(handoff.json().invocations[0].oversized);
+    assert.equal(handoff.json().invocations[0].drillDown.tool, 'cat_cafe_read_invocation_detail');
+  });
 
   // --- Auth tests ---
 

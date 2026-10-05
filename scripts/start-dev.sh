@@ -122,6 +122,7 @@ done
 CLI_FRONTEND_PORT_OVERRIDE="${FRONTEND_PORT-}"
 CLI_API_SERVER_PORT_OVERRIDE="${API_SERVER_PORT-}"
 CLI_REDIS_PORT_OVERRIDE="${REDIS_PORT-}"
+CLI_REDIS_KEY_PREFIX_OVERRIDE="${REDIS_KEY_PREFIX-}"
 CLI_REDIS_DATA_DIR_OVERRIDE="${REDIS_DATA_DIR-}"
 CLI_REDIS_BACKUP_DIR_OVERRIDE="${REDIS_BACKUP_DIR-}"
 CLI_NEXT_PUBLIC_API_URL_OVERRIDE="${NEXT_PUBLIC_API_URL-}"
@@ -141,6 +142,12 @@ CLI_CAT_CAFE_RUNTIME_BRANCH_OVERRIDE="${CAT_CAFE_RUNTIME_BRANCH-}"
 CLI_CAT_CAFE_MCP_SERVER_PATH_OVERRIDE="${CAT_CAFE_MCP_SERVER_PATH-}"
 CLI_CAT_CAFE_STRICT_PROFILE_DEFAULTS_OVERRIDE="${CAT_CAFE_STRICT_PROFILE_DEFAULTS-}"
 CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE="${CAT_CAFE_DEPLOYMENT_ID-}"
+CLI_CAT_CAFE_ALPHA_COORDINATES_OVERRIDE="${CAT_CAFE_ALPHA_COORDINATES-}"
+CLI_PREVIEW_EXPIRES_AT_OVERRIDE="${CAT_CAFE_PREVIEW_EXPIRES_AT-}"
+CLI_CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS_OVERRIDE="${CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS-}"
+CLI_CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED_OVERRIDE="${CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED-}"
+export -n CLI_CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED_OVERRIDE
+unset CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED
 
 clear_inherited_profile_env() {
     [ "${CAT_CAFE_STRICT_PROFILE_DEFAULTS:-0}" = "1" ] || return 0
@@ -167,6 +174,10 @@ if [ -f .env.local ]; then
     set +a
 fi
 
+# This launcher-only proof must never be inherited by the API or an agent
+# command it spawns. Dotenv cannot grant it; only the pre-dotenv wrapper can.
+unset CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED
+
 PREFER_DOTENV_PORTS="${CLI_CAT_CAFE_RESPECT_DOTENV_PORTS_OVERRIDE:-${CAT_CAFE_RESPECT_DOTENV_PORTS:-0}}"
 
 restore_cli_override() {
@@ -190,6 +201,9 @@ if [ "$PREFER_DOTENV_PORTS" != "1" ]; then
     restore_cli_override "LLM_POSTPROCESS_PORT" "$CLI_LLM_POSTPROCESS_PORT_OVERRIDE"
     restore_cli_override "WORKTREE_PORT_OFFSET" "$CLI_WORKTREE_PORT_OFFSET_OVERRIDE"
 fi
+if [ "$CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE" = "alpha" ]; then
+    restore_cli_override "REDIS_KEY_PREFIX" "$CLI_REDIS_KEY_PREFIX_OVERRIDE"
+fi
 
 if [ -n "$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE" ]; then
     export CAT_CAFE_PROVISION_GLOBAL_SIDECAR="$CLI_CAT_CAFE_PROVISION_GLOBAL_SIDECAR_OVERRIDE"
@@ -208,6 +222,65 @@ if [ -n "$CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE" ]; then
 else
     unset CAT_CAFE_DEPLOYMENT_ID
 fi
+# Only the entrypoint may make an explicit empty-Alpha-data decision. A stale
+# checkout dotenv must not turn a guarded migration into an empty launch.
+if [ -n "$CLI_CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS_OVERRIDE" ]; then
+    export CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS="$CLI_CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS_OVERRIDE"
+else
+    unset CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS
+fi
+
+# A named Alpha tuple belongs to the pre-dotenv canonical launcher. Dotenv
+# cannot mint one or redirect its current build, roots, ports or disabled sidecars.
+if [ -n "$CLI_CAT_CAFE_ALPHA_COORDINATES_OVERRIDE" ]; then
+    NAMED_ALPHA_EXPORTS="$(node "$SCRIPT_DIR/lib/alpha-coordinates.mjs" env \
+        --record "$CLI_CAT_CAFE_ALPHA_COORDINATES_OVERRIDE" --installation-root "$PROJECT_DIR")" || exit 2
+    while IFS=$'\t' read -r coordinate_key coordinate_value; do
+        export "$coordinate_key=$coordinate_value"
+    done <<< "$NAMED_ALPHA_EXPORTS"
+    unset NAMED_ALPHA_EXPORTS COLLECTIVE_GITHUB_CLIENT_ID COLLECTIVE_GITHUB_CLIENT_SECRET
+else
+    unset CAT_CAFE_ALPHA_COORDINATES
+fi
+
+is_linked_git_worktree() {
+    local git_dir common_dir
+    git_dir="$(git -C "$PROJECT_DIR" rev-parse --absolute-git-dir 2>/dev/null)" || return 1
+    common_dir="$(git -C "$PROJECT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+    [ "$git_dir" != "$common_dir" ]
+}
+
+is_official_runtime_data_owner() {
+    [ "$PROD_WEB" = "true" ] || return 1
+    if [ -n "$CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE" ] && [ "$CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE" != "runtime" ]; then
+        return 1
+    fi
+    [ -n "$CLI_CAT_CAFE_RUNTIME_ROOT_OVERRIDE" ] || return 1
+
+    local runtime_root project_root
+    runtime_root="$(cd "$CLI_CAT_CAFE_RUNTIME_ROOT_OVERRIDE" 2>/dev/null && pwd -P)" || return 1
+    project_root="$(cd "$PROJECT_DIR" 2>/dev/null && pwd -P)" || return 1
+    [ "$runtime_root" = "$project_root" ]
+}
+
+apply_development_data_root_isolation() {
+    # The official runtime is itself a linked worktree, but it owns the user's
+    # canonical data root. Every other linked/offset development checkout must
+    # replace ambient shell state with checkout-local persistence before any
+    # service starts, so a managed runner cannot join production SQLite files.
+    is_official_runtime_data_owner && return 0
+
+    if is_linked_git_worktree || [ "${WORKTREE_PORT_OFFSET:-0}" != "0" ]; then
+        local isolated_root="$PROJECT_DIR/.cat-cafe"
+        if [ -L "$isolated_root" ]; then
+            echo "[start-dev] checkout-local data root must not be a symlink: $isolated_root" >&2
+            return 2
+        fi
+        export CAT_CAFE_DATA_DIR="$isolated_root"
+    fi
+}
+
+apply_development_data_root_isolation
 
 is_legacy_managed_runtime_handoff() {
     # Launchers before clowder-ai#1282 sync the runtime worktree before
@@ -465,8 +538,13 @@ print_config_summary() {
 # 默认端口 (not profile-dependent)
 API_PORT=${API_SERVER_PORT:-3004}
 WEB_PORT=${FRONTEND_PORT:-3003}
+export CAT_CAFE_RUNTIME_WEB_PORT="$WEB_PORT"
 REDIS_PORT=${REDIS_PORT:-$(default_redis_port)}
 normalize_raw_dev_redis_defaults
+if [ "$REDIS_PORT" = "6397" ] && [ "${CAT_CAFE_DEPLOYMENT_ID:-}" != "alpha" ]; then
+    echo "[start-dev] Alpha Redis port 6397 is reserved for the Alpha deployment" >&2
+    exit 2
+fi
 
 # Profile-aware config resolution
 resolve_config "ANTHROPIC_PROXY_ENABLED"
@@ -575,6 +653,8 @@ REDIS_DBFILE=${REDIS_DBFILE:-dump.rdb}
 REDIS_PIDFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.pid"
 REDIS_LOGFILE="${REDIS_DATA_DIR}/redis-${REDIS_PORT}.log"
 STARTED_REDIS=false
+NAMED_ALPHA_REDIS_IDENTITY=""
+NAMED_ALPHA_REDIS_LEASE_FILE=""
 F247_CLOUD_OWNER_FILE=""
 REDIS_DEV_LEASE_FILE=""
 CLEANUP_RUNNING=false
@@ -649,6 +729,7 @@ probe_port_with_nc() {
 # macOS / minimal images may not have `timeout` (coreutils); without the guard,
 # `timeout` returns 127 and healthy Redis is incorrectly seen as down.
 redis_ping() {
+    named_alpha_redis_is_owned || return 1
     if command -v timeout >/dev/null 2>&1; then
         timeout 2 redis-cli -p "$REDIS_PORT" ping &> /dev/null
     else
@@ -656,13 +737,47 @@ redis_ping() {
     fi
 }
 
+named_alpha_redis_is_owned() {
+    [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ] || return 0
+    [ -n "$NAMED_ALPHA_REDIS_IDENTITY" ] || return 1
+    node "$SCRIPT_DIR/lib/alpha-redis-process.mjs" verify \
+        "$CAT_CAFE_ALPHA_COORDINATES" "$NAMED_ALPHA_REDIS_IDENTITY" >/dev/null 2>&1
+}
+
+named_alpha_capture_redis_identity() {
+    [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ] &&
+        [ "$1" = "$REDIS_PORT" ] && [ "$2" = "$REDIS_DATA_DIR" ] && [ "$3" = "$REDIS_PIDFILE" ] || return 1
+    NAMED_ALPHA_REDIS_IDENTITY="$(node "$SCRIPT_DIR/lib/alpha-redis-process.mjs" capture \
+        "$CAT_CAFE_ALPHA_COORDINATES")" || return 1
+    # Cleanup owns this proven process even if PING/AOF setup subsequently fails.
+    STARTED_REDIS=true
+    NAMED_ALPHA_REDIS_LEASE_FILE="$(node "$SCRIPT_DIR/lib/alpha-redis-leases.mjs" register \
+        "$CAT_CAFE_ALPHA_COORDINATES" "$NAMED_ALPHA_REDIS_IDENTITY" "$$" \
+        "$CLI_PREVIEW_EXPIRES_AT_OVERRIDE")" || return 1
+}
+
+remove_named_alpha_redis_lease() {
+    [ -n "$NAMED_ALPHA_REDIS_LEASE_FILE" ] || return 0
+    node "$SCRIPT_DIR/lib/alpha-redis-leases.mjs" remove "$NAMED_ALPHA_REDIS_LEASE_FILE" "$$" || return 1
+    NAMED_ALPHA_REDIS_LEASE_FILE=""
+}
+
+# All named-Alpha Redis commands revalidate the same OS incarnation first.
+# The wrapper is shell-local: it does not grant Redis access to descendants.
+if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
+    redis-cli() {
+        named_alpha_redis_is_owned || { echo "[start-dev] refusing unproven named Alpha Redis command" >&2; return 1; }
+        command redis-cli "$@"
+    }
+fi
+
 register_redis_dev_lease() {
     [ "$USE_REDIS" = true ] || return 0
     case "$DAEMON_DEPLOYMENT_ID" in
         runtime|alpha) return 0 ;;
     esac
     case "$REDIS_PORT" in
-        6099|6398|6399|6401) return 0 ;;
+        6099|6397|6398|6399|6401) return 0 ;;
     esac
 
     local redis_pid
@@ -861,7 +976,7 @@ kill_port() {
     local pids
     pids=$(port_listen_pids "$port" || true)
     if [ -n "$pids" ]; then
-        if [ "$DAEMON_DEPLOYMENT_ID" = "runtime" ]; then
+        if [ "$DAEMON_DEPLOYMENT_ID" = "runtime" ] || [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
             echo -e "${RED}  ✗ 端口 $port ($name) 已被进程占用；runtime 入口没有该进程的受管归属，已拒绝终止：${NC}"
             echo "$pids" | sed 's/^/    - pid /'
             echo "  请先确认占用来源；受管实例请使用 pnpm runtime:restart。"
@@ -948,6 +1063,88 @@ wait_for_port_or_exit() {
     return 1
 }
 
+# Port listen only proves the HTTP socket exists. /api/ready also fences
+# startup Queue recovery and dependency health, so use it for the final claim.
+wait_for_api_readiness() {
+    local port=$1
+    local pid=$2
+    local max_wait=${3:-600}
+    local elapsed=0
+    local status
+    while [ "$elapsed" -lt "$max_wait" ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo -e "${RED}  ✗ API 进程已退出，未能就绪${NC}"
+            return 1
+        fi
+        status=$(curl --silent --max-time 2 --output /dev/null --write-out '%{http_code}' \
+            "http://127.0.0.1:${port}/api/ready" 2>/dev/null || true)
+        if [ "$status" = "200" ]; then
+            echo -e "${GREEN}  ✓ API 已就绪 (${elapsed}s)${NC}"
+            return 0
+        fi
+        if [ $((elapsed % 30)) -eq 0 ]; then
+            echo -e "${YELLOW}  … API 已监听，仍在恢复中 (/api/ready=$status)${NC}"
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    echo -e "${YELLOW}  ⚠ API 在 ${max_wait}s 内未就绪；服务继续运行，请查看 /api/ready 与日志${NC}"
+    return 1
+}
+
+# A listening socket is not a ready Web app. Require an HTTP response before
+# publishing the F323 service fact to the exact API boot that observed it.
+wait_for_frontend_readiness() {
+    local port=$1
+    local pid=$2
+    local max_wait=${3:-60}
+    local elapsed=0
+    local status
+    while [ "$elapsed" -lt "$max_wait" ]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo -e "${RED}  ✗ Frontend 进程已退出，未能就绪${NC}"
+            return 1
+        fi
+        status=$(curl --silent --max-time 2 --output /dev/null --write-out '%{http_code}' \
+            "http://127.0.0.1:${port}/" 2>/dev/null || true)
+        case "$status" in
+            2*|3*)
+                echo -e "${GREEN}  ✓ Frontend HTTP 已就绪 (${elapsed}s)${NC}"
+                return 0
+                ;;
+        esac
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    echo -e "${RED}  ✗ Frontend HTTP 就绪超时 (${max_wait}s)${NC}"
+    return 1
+}
+
+record_runtime_web_readiness() {
+    [ -n "${CAT_CAFE_DEPLOYMENT_ID:-}" ] || return 0
+    local health boot_id status payload
+    health=$(curl --silent --max-time 3 "http://127.0.0.1:${API_PORT}/api/health" 2>/dev/null || true)
+    boot_id=$(printf '%s' "$health" | node -e '
+let body = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => { body += chunk; });
+process.stdin.on("end", () => {
+  try { process.stdout.write(JSON.parse(body).deploymentBootId || ""); } catch {}
+});
+' 2>/dev/null || true)
+    if [ -z "$boot_id" ]; then
+        echo -e "${YELLOW}  ⚠ 未取得 deployment boot identity；不登记 Web ready${NC}"
+        return 0
+    fi
+    payload=$(printf '{"bootId":"%s","service":"web"}' "$boot_id")
+    status=$(curl --silent --max-time 3 --output /dev/null --write-out '%{http_code}' \
+        -X POST -H 'content-type: application/json' --data "$payload" \
+        "http://127.0.0.1:${API_PORT}/api/runtime-deployment/readiness" 2>/dev/null || true)
+    if [ "$status" != "200" ]; then
+        echo -e "${YELLOW}  ⚠ Web ready 证据未持久化 (HTTP $status)；部署等待保持未知${NC}"
+    fi
+}
+
 # 后台 Node dev 进程（tsx watch / next dev）在 macOS + Node 25 下若继承 TTY stdin，
 # 可能在读取 fd0 时抛出 `TTY.onStreamRead` EIO。统一把后台任务 stdin 切到 /dev/null。
 background_eval_with_null_stdin() {
@@ -994,10 +1191,16 @@ api_launch_command() {
 }
 
 frontend_launch_command() {
+    local web_bind="0.0.0.0"
+    local dev_bind_option=""
+    if [ "${CAT_CAFE_F317_LOCAL_NOTE_LAB:-0}" = "1" ] || [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then
+        web_bind="127.0.0.1"
+        dev_bind_option=" -H 127.0.0.1"
+    fi
     if [ "$PROD_WEB" = true ]; then
-        printf 'cd packages/web && pnpm run sync:vendor-assets && PORT=%s exec pnpm exec next start -p %s -H 0.0.0.0' "$WEB_PORT" "$WEB_PORT"
+        printf 'cd packages/web && pnpm run sync:vendor-assets && PORT=%s exec pnpm exec next start -p %s -H %s' "$WEB_PORT" "$WEB_PORT" "$web_bind"
     else
-        printf 'cd packages/web && NODE_ENV=development NEXT_IGNORE_INCORRECT_LOCKFILE=1 PORT=%s exec pnpm exec node scripts/sync-vendor-assets.mjs --watch -- next dev -p %s' "$WEB_PORT" "$WEB_PORT"
+        printf 'cd packages/web && NODE_ENV=development NEXT_IGNORE_INCORRECT_LOCKFILE=1 PORT=%s exec pnpm exec node scripts/sync-vendor-assets.mjs --watch -- next dev -p %s%s' "$WEB_PORT" "$WEB_PORT" "$dev_bind_option"
     fi
 }
 
@@ -1027,6 +1230,19 @@ clean_cache() {
     if [ -f "packages/web/tsconfig.tsbuildinfo" ]; then
         /bin/rm -f packages/web/tsconfig.tsbuildinfo
         echo -e "${GREEN}  ✓ 清理 web tsconfig.tsbuildinfo${NC}"
+    fi
+}
+
+verified_runtime_artifacts_for_current_tree() {
+    [ "$PROD_WEB" = true ] && \
+    [ "$CLI_CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED_OVERRIDE" = "1" ] && \
+    [ "$CLI_CAT_CAFE_DEPLOYMENT_ID_OVERRIDE" = "runtime" ] && \
+    is_official_runtime_data_owner
+}
+
+reuse_verified_runtime_artifacts() {
+    if verified_runtime_artifacts_for_current_tree; then
+        QUICK_MODE=true
     fi
 }
 
@@ -1344,6 +1560,46 @@ print_f247_cloud_status_summary() {
 # 检查/启动 Redis
 # USE_REDIS=true (默认): 尝试启动 Redis, 失败则拒绝启动
 # USE_REDIS=false (--memory): 跳过 Redis, 强制内存存储
+assert_alpha_redis_runtime_dir() {
+    [ "$DAEMON_DEPLOYMENT_ID" = "alpha" ] || return 0
+    local raw_dir actual_dir expected_dir appendonly_raw appendonly dump_size dbsize
+    raw_dir="$(redis-cli -h 127.0.0.1 -p "$REDIS_PORT" --raw config get dir 2>/dev/null)" || {
+        echo "[start-dev] cannot verify Alpha Redis data directory on port $REDIS_PORT" >&2
+        return 1
+    }
+    actual_dir="$(printf '%s\n' "$raw_dir" | sed -n '2p' | tr -d '\r')"
+    expected_dir="$(cd "$REDIS_DATA_DIR" && pwd -P)" || return 1
+    if [ -z "$actual_dir" ] || [ ! -d "$actual_dir" ] || [ "$(cd "$actual_dir" && pwd -P)" != "$expected_dir" ]; then
+        echo "[start-dev] Alpha Redis data directory mismatch on port $REDIS_PORT" >&2
+        return 1
+    fi
+    appendonly_raw="$(redis-cli -h 127.0.0.1 -p "$REDIS_PORT" --raw config get appendonly 2>/dev/null)" || return 1
+    appendonly="$(printf '%s\n' "$appendonly_raw" | sed -n '2p' | tr -d '\r')"
+    if [ "$appendonly" != "yes" ]; then
+        echo "[start-dev] Alpha Redis requires AOF persistence on port $REDIS_PORT" >&2
+        return 1
+    fi
+    dump_size="$(cat_cafe_file_size_bytes "$REDIS_DATA_DIR/dump.rdb")"
+    if [ "$dump_size" -ge 1024 ] && [ "${CAT_CAFE_ALPHA_ALLOW_EMPTY_REDIS:-0}" != "1" ]; then
+        dbsize="$(redis-cli -h 127.0.0.1 -p "$REDIS_PORT" dbsize 2>/dev/null)" || dbsize=""
+        if ! [[ "$dbsize" =~ ^[0-9]+$ ]] || [ "$dbsize" -eq 0 ]; then
+            echo "[start-dev] Alpha Redis loaded an empty database or dbsize is unreadable from a nonempty snapshot on port $REDIS_PORT" >&2
+            # The directory identity was verified above. An ordinary shutdown
+            # would rewrite the RDB with this empty state and destroy the copy
+            # we need for recovery, so stop only this Alpha instance nosave.
+            redis-cli -h 127.0.0.1 -p "$REDIS_PORT" shutdown nosave >/dev/null 2>&1 || true
+            for _ in $(seq 1 20); do
+                if ! redis-cli -h 127.0.0.1 -p "$REDIS_PORT" ping >/dev/null 2>&1; then
+                    return 1
+                fi
+                sleep 0.1
+            done
+            echo "[start-dev] Alpha Redis is still listening; do not use an ordinary shutdown on port $REDIS_PORT" >&2
+            return 1
+        fi
+    fi
+}
+
 setup_storage() {
     if [ "$USE_REDIS" = false ]; then
         echo -e "${YELLOW}  ⚡ 内存模式 (--memory)，重启丢数据${NC}"
@@ -1352,13 +1608,19 @@ setup_storage() {
         return
     fi
 
+    if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ] && port_is_listening "$REDIS_PORT"; then
+        echo "[start-dev] named Alpha Redis port is occupied; refusing replacement or protocol reads" >&2
+        exit 2
+    fi
+
     ensure_redis_dirs
     archive_redis_snapshot "pre-start"
 
     # 默认: 尝试 Redis 持久化 (专属端口，避免与系统 Redis 冲突)
     if redis_ping; then
+        assert_alpha_redis_runtime_dir || exit 1
         echo -e "${GREEN}  ✓ Redis 已运行 (端口 $REDIS_PORT)${NC}"
-        export REDIS_URL="redis://localhost:$REDIS_PORT"
+        if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
         print_redis_runtime_info
         return
     fi
@@ -1366,6 +1628,8 @@ setup_storage() {
     echo -e "${YELLOW}  ⚠ Redis 未运行，尝试在端口 $REDIS_PORT 启动...${NC}"
     if command -v redis-server &> /dev/null; then
         maybe_quarantine_stale_aof_dir
+        local ownership_args=()
+        if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then ownership_args+=(--named-alpha-ownership); fi
         cat_cafe_redis_start_daemon \
             --port "$REDIS_PORT" \
             --bind 127.0.0.1 \
@@ -1377,13 +1641,14 @@ setup_storage() {
             --appendfsync everysec \
             --daemonize yes \
             --pidfile "$REDIS_PIDFILE" \
-            --logfile "$REDIS_LOGFILE" \
-            || true
+            --logfile "$REDIS_LOGFILE" "${ownership_args[@]}" \
+            || { if [ -n "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then exit 1; fi; }
         sleep 1
         if redis_ping; then
-            echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"
-            export REDIS_URL="redis://localhost:$REDIS_PORT"
+            assert_alpha_redis_runtime_dir || exit 1
             STARTED_REDIS=true
+            echo -e "${GREEN}  ✓ Redis 已启动 (端口 $REDIS_PORT)${NC}"
+            if [ -z "${CAT_CAFE_ALPHA_COORDINATES:-}" ]; then export REDIS_URL="redis://localhost:$REDIS_PORT"; fi
             print_redis_runtime_info
         else
             echo -e "${RED}  ✗ Redis 启动失败${NC}"
@@ -1423,12 +1688,17 @@ cleanup() {
     F247_CLOUD_OWNER_FILE=""
 
     # 关闭我们启动的专属 Redis (不影响其他 Redis 实例)
-    if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ] && redis_ping; then
-        archive_redis_snapshot "pre-stop"
-        redis-cli -p "$REDIS_PORT" shutdown save &> /dev/null || true
-        echo "  Redis (端口 $REDIS_PORT) 已关闭"
+    if [ "$USE_REDIS" = true ] && [ "$STARTED_REDIS" = true ]; then
+        if ! named_alpha_redis_is_owned; then
+            echo "[start-dev] preserving unproven or replaced named Alpha Redis; no protocol command or signal sent" >&2
+        elif redis_ping; then
+            archive_redis_snapshot "pre-stop"
+            redis-cli -p "$REDIS_PORT" shutdown save &> /dev/null || true
+            echo "  Redis (端口 $REDIS_PORT) 已关闭"
+        fi
     fi
     remove_redis_dev_lease
+    remove_named_alpha_redis_lease || echo "[start-dev] preserving named Alpha lease after failed owner verification" >&2
     wait 2>/dev/null || true
     # Only remove PID file if we are the daemon that wrote it (avoid orphaning a parallel daemon)
     if [ -f "$DAEMON_PID_FILE" ] && [ "$(cat "$DAEMON_PID_FILE" 2>/dev/null)" = "$$" ]; then
@@ -1555,6 +1825,7 @@ main() {
     guard_main_branch_start
     guard_runtime_redis_sanctuary
     check_runtime_account_bindings || return $?
+    reuse_verified_runtime_artifacts
 
     # 1. 杀掉残余进程
     echo ""
@@ -1665,6 +1936,19 @@ main() {
     WEB_PID=$!
     wait_for_port_or_exit "$WEB_PORT" "Frontend" "$WEB_PID" 30 || exit 1
 
+    WEB_READY=false
+    if wait_for_frontend_readiness "$WEB_PORT" "$WEB_PID" "${WEB_READY_WAIT_TIMEOUT:-60}"; then
+        WEB_READY=true
+    fi
+
+    API_READY=false
+    if wait_for_api_readiness "$API_PORT" "$API_PID" "${API_READY_WAIT_TIMEOUT:-600}"; then
+        API_READY=true
+    fi
+    if [ "$API_READY" = true ] && [ "$WEB_READY" = true ]; then
+        record_runtime_web_readiness
+    fi
+
     # 显示存储模式
     if [ -n "$REDIS_URL" ]; then
         STORAGE_INFO="${GREEN}Redis 持久化${NC} ($REDIS_URL)"
@@ -1681,7 +1965,11 @@ main() {
 
     echo ""
     echo "========================"
-    echo -e "${GREEN}🎉 Clowder AI 已启动！${NC}"
+    if [ "$API_READY" = true ]; then
+        echo -e "${GREEN}🎉 Clowder AI 已就绪！${NC}"
+    else
+        echo -e "${YELLOW}Clowder AI 已监听，但 API 尚未就绪${NC}"
+    fi
     [ -n "$PROFILE" ] && echo -e "  Profile: ${CYAN}${PROFILE}${NC}"
     echo ""
     print_config_summary
@@ -1699,6 +1987,20 @@ main() {
 
     # 等待所有后台进程
     wait
+}
+
+launch_daemon_child() {
+    local script_path=$1
+    local launch_token=$2
+    shift 2
+    if verified_runtime_artifacts_for_current_tree; then
+        # Only the self re-exec receives this one-shot proof. Its startup
+        # snapshots and unsets the variable before launching the API.
+        CAT_CAFE_RUNTIME_ARTIFACTS_VERIFIED=1 nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" > "$DAEMON_LOG_FILE" 2>&1 &
+    else
+        nohup "$script_path" "$@" --cat-cafe-daemon-token="$launch_token" > "$DAEMON_LOG_FILE" 2>&1 &
+    fi
+    DAEMON_PID=$!
 }
 
 # Allow sourcing for testing without executing main
@@ -1745,8 +2047,7 @@ if [ "$DAEMON_MODE" = true ]; then
     echo "🐱 Clowder AI 以后台模式启动..."
     echo "  Deployment: $DAEMON_DEPLOYMENT_ID"
     echo "  日志输出: $DAEMON_LOG_FILE"
-    nohup "$0" "${RESTART_ARGS[@]}" --cat-cafe-daemon-token="$DAEMON_LAUNCH_TOKEN" > "$DAEMON_LOG_FILE" 2>&1 &
-    DAEMON_PID=$!
+    launch_daemon_child "$0" "$DAEMON_LAUNCH_TOKEN" "${RESTART_ARGS[@]}"
     disown "$DAEMON_PID"
     if ! daemon_state write \
         --pid "$DAEMON_PID" \

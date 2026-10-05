@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { generateA2aLiveVerdict } from '../a2a/eval-a2a-live-verdict.js';
-import { loadDomains, loadEvalHubSummary } from '../hub/eval-hub-read-model.js';
+import { loadDomains, loadEvalHubSummaryAsync } from '../hub/eval-hub-read-model.js';
 import { resolveSafeRawPath } from '../safe-path.js';
 import type { HandlerError, ManualTriggerDeps } from './types.js';
 
@@ -46,7 +46,7 @@ export interface GenerateNowSuccess {
 /**
  * F192 OQ-21: Manually generate a live verdict for eval:a2a using existing
  * `generateA2aLiveVerdict` (PR #1856). Writes verdict.md + bundle/ to
- * `docs/harness-feedback/` and verifies roundtrip through `loadEvalHubSummary()`.
+ * `docs/harness-feedback/` and verifies roundtrip through `loadEvalHubSummaryAsync()`.
  *
  * Unsupported domains (memory/sop/task-outcome/capability-wakeup) return 501
  * — NOT a stub `keep_observe`. 砚砚 directive: 低质量 keep_observe 比无报告更坏
@@ -173,7 +173,7 @@ export async function handleGenerateNow(
 
   // Roundtrip — verify hub read model includes the new verdict (砚砚 R0 P1 e2e).
   // Match by verdictId (hub item.id = basename, no .md) to avoid Mac /tmp symlink issues.
-  const summary = loadEvalHubSummary({ harnessFeedbackRoot: deps.harnessFeedbackRoot });
+  const summary = await loadEvalHubSummaryAsync({ harnessFeedbackRoot: deps.harnessFeedbackRoot });
   const found = summary.items.find((item) => item.id === input.verdictId);
 
   return {

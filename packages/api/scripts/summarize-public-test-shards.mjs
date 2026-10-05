@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { validatePublicTestShardPlan } from './plan-public-test-shards.mjs';
 import { normalizePublicTestCliArgv } from './public-test-cli-args.mjs';
+import { validateIsolationAttestation } from './public-test-isolation-preflight.mjs';
 import {
   samePublicTestProvenance,
   stablePublicTestValue,
@@ -72,6 +73,20 @@ export function summarizePublicTestShardReports({ plan, reports, maxCriticalPath
     invariant(!byLane.has(report.lane), `duplicate report for lane ${report.lane}`);
     invariant(report.status === 'succeeded', `${report.lane} report is not green`);
     invariant(report.provenance && typeof report.provenance === 'object', `${report.lane} report lacks provenance`);
+    // Isolation attestation: a distributable lane's timings are only admissible
+    // as evidence if that lane actually proved the kernel boundary its
+    // classification claims. Without this check a locally produced report is
+    // byte-compatible with a target-CI one and can enter measurement history.
+    const laneScope = report.lane === plan.sharedSerialLane.id ? 'shared' : 'distributable';
+    const attestationProblems = validateIsolationAttestation(report.isolation, laneScope);
+    invariant(attestationProblems.length === 0, `${report.lane}: ${attestationProblems.join('; ')}`);
+    if (laneScope === 'distributable') {
+      invariant(
+        report.isolation.boundary === 'verified' && report.isolation.targetGrade === true,
+        `${report.lane} ran without a verified kernel network boundary; its report is development-only ` +
+          'evidence and cannot be summarized as a target-grade public-test result',
+      );
+    }
     byLane.set(report.lane, report);
   }
   invariant(byLane.size === expectedLanes.length, 'missing public-test shard report');

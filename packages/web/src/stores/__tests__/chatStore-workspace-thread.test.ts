@@ -265,7 +265,7 @@ describe('presentation lock (AC-PL1~PL5)', () => {
   it('AC-PL5: navigate events suppressed when locked', () => {
     const actions = {
       setWorkspaceWorktreeId: vi.fn(),
-      setWorkspaceRevealPath: vi.fn(),
+      revealWorkspacePath: vi.fn(() => true),
       setWorkspaceOpenFile: vi.fn(),
       setWorkspaceMode: vi.fn(),
     };

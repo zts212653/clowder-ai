@@ -12,6 +12,7 @@ import type {
   TranscriptLine,
 } from './audio-transcript-contract';
 import { FloatingTranscriptLines } from './FloatingTranscriptLines';
+import { MeetingShareControl } from './MeetingShareControl';
 
 interface InterventionAdvisory {
   type: 'intervention_advisory';
@@ -259,6 +260,7 @@ export function FloatingTranscriptWindow({
         </div>
 
         {status && <AudioHealthStrip status={status} />}
+        {recording && <MeetingShareControl />}
 
         {/* Advisory hint */}
         {advisory && (

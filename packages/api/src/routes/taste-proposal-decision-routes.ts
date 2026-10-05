@@ -18,8 +18,10 @@ import {
 import { SessionMutex } from '../domains/cats/services/agents/invocation/SessionMutex.js';
 import {
   approveTasteProposal as defaultApproveTasteProposal,
+  type TasteApprovalCoordinator,
   type VignetteWriterFn,
 } from '../domains/taste/services/approveTasteProposal.js';
+import { tasteDecisionSnapshot } from '../domains/taste/services/taste-decision-snapshot.js';
 import type { ITasteProposalStore } from '../domains/taste/stores/ports/TasteProposalStore.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { resolveStrictUserId } from '../utils/request-identity.js';
@@ -31,8 +33,7 @@ export interface TasteDecisionDeps {
   tasteProposalStore: ITasteProposalStore;
   socketManager: Pick<SocketManager, 'emitToUser'>;
   writeVignette: VignetteWriterFn;
-  approvalLock?: SessionMutex;
-  approvalLockKey?: () => string;
+  approvalCoordinator?: TasteApprovalCoordinator;
   approveTasteProposal?: typeof defaultApproveTasteProposal;
 }
 
@@ -41,8 +42,7 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
     tasteProposalStore,
     socketManager,
     writeVignette,
-    approvalLock = new SessionMutex(),
-    approvalLockKey = () => 'taste-vignette-writer',
+    approvalCoordinator = { lock: new SessionMutex(), lockKey: () => 'taste-vignette-writer' },
     approveTasteProposal = defaultApproveTasteProposal,
   } = deps;
 
@@ -69,6 +69,40 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
       return { error: 'Proposal does not belong to the current user' };
     }
     return { proposalId: proposal.id, status: proposal.status };
+  });
+
+  // Read-only input to the F317 Host confirmation candidate. Never decides a proposal.
+  app.get('/api/taste-proposals/:id/decision-preview', async (request, reply) => {
+    const params = paramsSchema.safeParse(request.params);
+    if (!params.success) {
+      reply.status(400);
+      return { error: 'Invalid proposal id' };
+    }
+    const userId = resolveStrictUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+    const proposal = await tasteProposalStore.get(params.data.id);
+    if (!proposal) {
+      reply.status(404);
+      return { error: 'Proposal not found' };
+    }
+    if (proposal.userId !== userId) {
+      reply.status(403);
+      return { error: 'Proposal does not belong to the current user' };
+    }
+    let preview: ReturnType<typeof tasteDecisionSnapshot>;
+    try {
+      preview = tasteDecisionSnapshot(proposal);
+    } catch {
+      preview = null;
+    }
+    if (!preview) {
+      reply.status(409);
+      return { error: 'Proposal is not an anchored pending decision', code: 'candidate_unavailable' };
+    }
+    return preview;
   });
 
   // POST /api/taste-proposals/:id/approve
@@ -107,8 +141,8 @@ export function registerTasteProposalDecisionRoutes(app: FastifyInstance, deps: 
 
     const result = await approveTasteProposal(params.data.id, userId, {
       store: tasteProposalStore,
-      lock: approvalLock,
-      lockKey: approvalLockKey,
+      lock: approvalCoordinator.lock,
+      lockKey: approvalCoordinator.lockKey,
       writeVignette,
     });
     if (result.ok) {

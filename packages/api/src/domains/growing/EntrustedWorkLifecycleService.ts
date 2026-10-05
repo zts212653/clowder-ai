@@ -18,8 +18,14 @@ import {
   type TaskItem,
 } from '@cat-cafe/shared';
 import { z } from 'zod';
-import type { EntrustedWorkTerminalClosure, ITaskStore } from '../cats/services/stores/ports/TaskStoreContract.js';
-import { containsEntrustedWorkTimeSignal } from './EntrustedWorkSourceSignals.js';
+import type {
+  AdmitEntrustedWorkStoreInput,
+  EntrustedWorkTerminalClosure,
+  ITaskStore,
+} from '../cats/services/stores/ports/TaskStoreContract.js';
+import { captureCompletionArtifact } from './EntrustedWorkCompletion.js';
+import type { PreparedArtifactReader } from './EntrustedWorkOwnerReadService.js';
+import { classifyEntrustedWorkSourceTime } from './EntrustedWorkSourceSignals.js';
 
 const boundedRef = z.string().trim().min(1).max(1_000);
 
@@ -81,6 +87,7 @@ export interface EntrustedWorkLifecycleOptions {
   readonly now?: () => number;
   readonly custodyGrantRegistry?: F310CustodyGrantRegistryV1;
   readonly onChanged?: (ownerUserId: string) => void;
+  readonly artifactReader?: PreparedArtifactReader;
 }
 
 export interface EntrustedWorkAdmissionSourceContext {
@@ -92,6 +99,7 @@ export class EntrustedWorkLifecycleService {
   private readonly now: () => number;
   private readonly custodyGrantRegistry: F310CustodyGrantRegistryV1;
   private readonly onChanged: EntrustedWorkLifecycleOptions['onChanged'];
+  private readonly artifactReader: PreparedArtifactReader | undefined;
 
   constructor(
     private readonly tasks: ITaskStore,
@@ -99,6 +107,7 @@ export class EntrustedWorkLifecycleService {
   ) {
     this.now = options.now ?? Date.now;
     this.onChanged = options.onChanged;
+    this.artifactReader = options.artifactReader;
     const registry = options.custodyGrantRegistry ?? PHASE_B_INITIAL_CUSTODY_GRANT_REGISTRY;
     this.custodyGrantRegistry = Object.fromEntries(
       Object.entries(registry).map(([grantRef, grant]) => [grantRef, registeredCustodyGrantV1Schema.parse(grant)]),
@@ -109,6 +118,24 @@ export class EntrustedWorkLifecycleService {
     input: EntrustedWorkAdmissionCommandV1,
     sourceContext?: EntrustedWorkAdmissionSourceContext,
   ): Promise<CustodyAdmissionResultV1> {
+    const prepared = this.prepareAdmission(input, sourceContext);
+    if ('result' in prepared) return prepared;
+    const result = await this.tasks.admitEntrustedWork(prepared);
+    if (result.kind === 'admitted') this.notifyChanged(result.task);
+    return custodyAdmissionResultV1Schema.parse({
+      result: result.kind,
+      subjectRef: `task:work:${result.task.id}`,
+      ownerRef: `task:item:${result.task.id}`,
+      revision: result.task.entrustedWork?.revision,
+      receiptRef: result.task.entrustedWork?.admission.receiptRef,
+    });
+  }
+
+  /** Shared source/time/closure preparation; it creates no Task or custody side effect. */
+  prepareAdmission(
+    input: EntrustedWorkAdmissionCommandV1,
+    sourceContext?: EntrustedWorkAdmissionSourceContext,
+  ): AdmitEntrustedWorkStoreInput | Extract<CustodyAdmissionResultV1, { result: 'needs_clarification' }> {
     const command = entrustedWorkAdmissionCommandV1Schema.parse(input);
     if (!command.admission.intendedOutcome) {
       return {
@@ -125,17 +152,23 @@ export class EntrustedWorkLifecycleService {
     if (command.admission.basis === 'authorized_source') {
       this.assertCurrentAuthorization(command.admission);
     }
-    const canonicalTimeFacts = [command.time?.businessDeadline, command.time?.reviewBy].filter(
+    const canonicalTimeFacts = Object.values(command.time ?? {}).filter(
       (fact): fact is NonNullable<typeof fact> => fact != null,
     );
-    const sourceRequiresCanonicalTime =
-      (command.admission.timeHints?.length ?? 0) > 0 ||
-      (sourceContext !== undefined && containsEntrustedWorkTimeSignal(sourceContext.content));
-    if (sourceRequiresCanonicalTime && canonicalTimeFacts.length === 0) {
+    const sourceTimeRelation = sourceContext ? classifyEntrustedWorkSourceTime(sourceContext.content) : 'none';
+    if (sourceTimeRelation === 'ambiguous') {
       return {
         result: 'needs_clarification',
         clarificationReason:
-          'Source time requires a canonical businessDeadline or reviewBy before Task can claim custody.',
+          'Relative time in the source could be a deadline or a past reference; clarify before Task can claim custody.',
+      };
+    }
+    const sourceRequiresCanonicalTime =
+      (command.admission.timeHints?.length ?? 0) > 0 || sourceTimeRelation === 'deadline';
+    if (sourceRequiresCanonicalTime && canonicalTimeFacts.length === 0) {
+      return {
+        result: 'needs_clarification',
+        clarificationReason: 'Source time requires a canonical typed time fact before Task can claim custody.',
       };
     }
     const canonicalTimeSourceRefs = sourceContext ? [sourceContext.sourceRef] : command.admission.sourceRefs;
@@ -170,7 +203,7 @@ export class EntrustedWorkLifecycleService {
         evidenceRefs: [],
       },
     });
-    const result = await this.tasks.admitEntrustedWork({
+    return {
       subjectKey: `entrusted:${digest}`,
       task: {
         ...command.task,
@@ -178,22 +211,16 @@ export class EntrustedWorkLifecycleService {
         ownerCatId: command.task.ownerCatId as CreateTaskInput['ownerCatId'],
       },
       entrustedWork,
-    });
-    if (result.kind === 'admitted') this.notifyChanged(result.task);
-    return custodyAdmissionResultV1Schema.parse({
-      result: result.kind,
-      subjectRef: `task:work:${result.task.id}`,
-      ownerRef: `task:item:${result.task.id}`,
-      revision: result.task.entrustedWork?.revision,
-      receiptRef: result.task.entrustedWork?.admission.receiptRef,
-    });
+    };
   }
 
   async close(input: CloseEntrustedWorkCommandV1): Promise<TaskItem> {
     const command = closeEntrustedWorkCommandV1Schema.parse(input);
+    const artifactSnapshot = await captureCompletionArtifact(this.tasks, this.artifactReader, command);
     const result = await this.tasks.closeEntrustedWork(command.taskId, {
       expectedRevision: command.expectedRevision,
       closure: command.closure as EntrustedWorkTerminalClosure,
+      ...(artifactSnapshot ? { artifactSnapshot } : {}),
     });
     switch (result.kind) {
       case 'closed':
@@ -218,10 +245,13 @@ export class EntrustedWorkLifecycleService {
 
   async update(input: EntrustedWorkUpdateActionV1): Promise<TaskItem> {
     const command = entrustedWorkUpdateActionV1Schema.parse(input);
-    const hasTimePatch =
-      command.time !== undefined &&
-      (Object.hasOwn(command.time, 'businessDeadline') || Object.hasOwn(command.time, 'reviewBy'));
-    if (command.status === undefined && command.artifactRefs === undefined && !hasTimePatch) {
+    const hasTimePatch = command.time !== undefined && Object.values(command.time).some((value) => value !== undefined);
+    if (
+      command.status === undefined &&
+      command.artifactRefs === undefined &&
+      command.progress === undefined &&
+      !hasTimePatch
+    ) {
       throw new EntrustedWorkLifecycleError('ENTRUSTED_WORK_NO_OP', 'Entrusted-work update has no mutation');
     }
     const result = await this.tasks.updateEntrustedWork(command.taskId, {
@@ -229,6 +259,7 @@ export class EntrustedWorkLifecycleService {
       ...(command.status !== undefined ? { status: command.status } : {}),
       ...(command.time !== undefined ? { time: command.time } : {}),
       ...(command.artifactRefs !== undefined ? { artifactRefs: command.artifactRefs } : {}),
+      ...(command.progress !== undefined ? { progress: command.progress } : {}),
     });
     switch (result.kind) {
       case 'updated':

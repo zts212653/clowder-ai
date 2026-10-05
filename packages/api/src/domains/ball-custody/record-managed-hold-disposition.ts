@@ -17,12 +17,20 @@ interface RecordDeps {
   readonly log?: { warn(fields: Record<string, unknown>, message: string): void };
 }
 
+/**
+ * What became of the exact terminal in the projection, as reported by the write itself:
+ *  - `accepted` / `rejected`: the projection applied it and the state machine accepted / refused it;
+ *  - `repaired`: the append landed but the apply threw, and the projection was rebuilt from the log;
+ *  - `unknown`: the ingest could not say (a duplicate, or an ingest that does not report it).
+ */
+export type ManagedHoldProjectionOutcome = 'accepted' | 'rejected' | 'repaired' | 'unknown';
+
 /** Preserve append-before-receipt ordering and identify bounded retry evidence. */
 export async function recordManagedHoldDisposition(
   deps: RecordDeps,
   event: BallCustodyEvent,
   expectedSequence: number,
-): Promise<void> {
+): Promise<ManagedHoldProjectionOutcome> {
   let conflictSequence: number | undefined;
   try {
     const result = await deps.ballCustody.recordFenced(event, expectedSequence);
@@ -30,6 +38,7 @@ export async function recordManagedHoldDisposition(
       conflictSequence = result.actualSequence;
       throw new ManagedHoldDispositionError('managed_hold_disposition_fence_conflict');
     }
+    return result.outcome === 'appended' ? (result.projection ?? 'unknown') : 'unknown';
   } catch (error) {
     const events = await deps.ballCustodyEventLog.read(event.subjectKey);
     if (conflictSequence !== undefined) {
@@ -59,5 +68,6 @@ export async function recordManagedHoldDisposition(
     const appended = events.find((candidate) => candidate.sourceEventId === event.sourceEventId);
     if (!appended || !deps.repairProjection) throw error;
     await deps.repairProjection(event.subjectKey);
+    return 'repaired';
   }
 }

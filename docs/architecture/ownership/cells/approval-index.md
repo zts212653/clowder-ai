@@ -55,6 +55,7 @@ code_anchors:
   - packages/web/src/components/ApprovalHubDrawer.tsx  # deprecated: replaced by ApprovalPanel
 doc_anchors:
   - docs/features/F246-approval-hub.md
+  - feature-discussions/2026-09-14-memory-m3-front-door-design-gate.md
   - feature-specs/2026-06-20-f246-phase-a-approval-hub.md
   - feature-specs/2026-06-20-f246-phase-b-f193-dispatch-adapter.md
   - feature-specs/2026-06-21-f246-phase-c-workspace-integration.md
@@ -78,6 +79,7 @@ cited_by:
   - {feature: F306, date: 2026-08-28, delta: "operator permission-funnel correction — production command/file approvals use upstream auto_review and never create routine human script cards; explicit user-reviewed canonical records remain projection-compatible."}
   - {feature: F306, date: 2026-08-28, delta: "Danger coordinate correction — authorized cross-directory capability does not enter Approval Hub; irreversible/sanctuary effects belong to structural target guards and recoverability, not a Codex-only workspace jail. No current Clowder AI guard intercepts Codex native shell; AC-C7 remains open."}
   - {feature: F313, date: 2026-09-02, delta: "Phase C — canonical Resolution × Materialization projection, durable per-producer writer epoch, and F266 ref-only Approval/dispatch extension with production cutover fail-closed."}
+  - {feature: F246, date: 2026-09-17, delta: "PROPOSED ONLY — M3 batch issuer/finalized manifest and TTL=0 command custody with CAS/lease recovery; feature-owner implementation custody still required; no child resolution or memory authority transfer."}
 ---
 
 # Approval Index
@@ -210,6 +212,36 @@ ActivityBar (bell icon + badge count)
 - Terminal, stale, restarted, transport-lost, and provider-cancelled records disappear from pending reads while remaining readable in their source thread.
 
 ## Evolution Path
+
+### Proposed M3 batch command/recovery delta — not implemented
+
+The current read-through aggregation/publication ingress described above does **not** own a durable batch executor.
+The M3 candidate §4.1/B1 proposes a new F246-owned boundary:
+
+```text
+authenticated begin(client key, complete member descriptors[1..32])
+  → F246 validates + computes count/digest → opaque batch ref/revision
+  → append(ref, revision, segmentIndex, items[1..4]) to declared positions only
+  → explicit finalize(ref, revision) after every position is prepared
+  → one anchored batch card → user-confirmed selected child revisions
+  → F246 TTL=0 command record: registered → claimed(lease/fence) → reconciling → terminal
+  → original feature attempt CAS/fence → canonical resolution/effect proof
+  → proof-first reconciliation / read-through per-row outcome
+```
+
+F246 owns only batch membership and command custody; it does not copy child decisions or memory bodies into a second
+proposal database. A leased worker is the sole dispatcher; startup and expiry recovery acquire a new fence through the
+same CAS and read owner attempts/effect proofs before redispatch. The original feature must fence/idempotently commit
+effects, including joining an existing child attempt reached from a different operation key. Unknown outcome stays
+unknown; an expired lease cannot authorize a second effect. Incomplete manifests cannot publish decidable cards, and
+finalized membership cannot silently grow. Count/digest are recomputed by the server; payload commitments are checked
+against actual append inputs and are never authorization. Complete-four and first-four-of-six differ in the initial
+begin manifest, and neither the first nor the last append automatically publishes. The remember tool remains a
+hard-capped complete 1–4 item wrapper; larger producer batches use the explicit ingress protocol in M3 §4.1.
+
+This is an explicit **map delta**, not a description of existing production behavior. F246 owner implementation custody
+is required before B1 implementation/activation; no current writer epoch, routing, code anchor, or producer authority
+is changed by this documentation. See the [F246 proposed-delta record](../../../features/F246-approval-hub.md).
 
 - ~~Phase B: add F193 E3 adapter~~ ✅ merged PR #2454
 - ~~Phase C: workspace integration~~ ✅ merged PR #2463

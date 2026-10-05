@@ -8,7 +8,8 @@
  * 4. Attached images survive thread remount, stay thread-scoped, and flow into onSend
  */
 import React, { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, type Root } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ChatInput,
@@ -456,6 +457,29 @@ describe('ChatInput draft persistence', () => {
       expect.arrayContaining([existingAttachment, attachment]),
     );
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  // F309 text quotes: a chip added from a file must survive a reload without breaking hydration (the server has
+  // no browser session; sessionStorage restores the chip only on the client).
+  it('shows a session-restored context chip after hydration, not inside it', async () => {
+    const attachment = {
+      v: 1 as const,
+      id: 'ctx-hydrated',
+      kind: 'thread' as const,
+      threadId: 'thread-source',
+      title: 'Source Thread',
+    };
+    const element = React.createElement(ChatInput, { threadId: 'thread-HYDRATE', onSend: vi.fn() });
+    act(() => root.unmount());
+    container.innerHTML = renderToString(element);
+    threadContextAttachmentDrafts.set('thread-HYDRATE', [attachment]);
+    const errors: unknown[] = [];
+    await act(async () => {
+      root = hydrateRoot(container, element, { onRecoverableError: (error) => errors.push(error) });
+    });
+    expect(errors).toEqual([]);
+    expect(container.querySelector('[data-context-kind="thread"]')?.textContent).toContain('Source Thread');
+    expect(threadContextAttachmentDrafts.get('thread-HYDRATE')).toEqual([attachment]);
   });
 
   it('restores and sends structured context attachments without Markdown text', async () => {

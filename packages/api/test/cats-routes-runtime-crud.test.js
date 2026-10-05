@@ -171,6 +171,105 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     }
   });
 
+  it('POST and PATCH accept an existing breedId and preserve member identity', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'default-user' };
+    const createBody = (catId, breedId) => ({
+      catId,
+      ...(breedId ? { breedId } : {}),
+      name: `Member ${catId}`,
+      displayName: `Display ${catId}`,
+      nickname: `Nick ${catId}`,
+      avatar: `/avatars/${catId}.png`,
+      color: { primary: '#123456', secondary: '#abcdef' },
+      mentionPatterns: [`@${catId}`],
+      roleDescription: 'Independent role',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      mcpSupport: true,
+    });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-new', 'ragdoll')),
+    });
+    assert.equal(created.statusCode, 201, created.body);
+    assert.equal(JSON.parse(created.body).cat.breedId, 'ragdoll');
+    assert.equal(JSON.parse(created.body).cat.relationshipKey, 'family-new');
+    assert.equal(JSON.parse(created.body).cat.roster.family, 'ragdoll');
+
+    const invalidCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-unknown', 'missing-breed')),
+    });
+    assert.equal(invalidCreate.statusCode, 400, invalidCreate.body);
+    assert.match(JSON.parse(invalidCreate.body).error, /Unknown breedId "missing-breed"/);
+
+    const standalone = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify(createBody('family-move')),
+    });
+    assert.equal(standalone.statusCode, 201, standalone.body);
+    const before = JSON.parse(standalone.body).cat;
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/family-move',
+      headers,
+      body: JSON.stringify({ breedId: 'ragdoll' }),
+    });
+    assert.equal(moved.statusCode, 200, moved.body);
+    const after = JSON.parse(moved.body).cat;
+    assert.equal(after.breedId, 'ragdoll');
+    assert.equal(after.relationshipKey, before.relationshipKey);
+    assert.equal(after.roster.family, 'ragdoll');
+    for (const key of [
+      'id',
+      'name',
+      'displayName',
+      'nickname',
+      'avatar',
+      'color',
+      'mentionPatterns',
+      'clientId',
+      'defaultModel',
+      'accountRef',
+    ]) {
+      assert.deepEqual(after[key], before[key], `${key} must survive the API move`);
+    }
+
+    const listAfterMove = await app.inject({ method: 'GET', url: '/api/cats' });
+    assert.ok(
+      JSON.parse(listAfterMove.body).cats.some((cat) => cat.id === 'family-move'),
+      `moved member must remain in resolved catalog: ${listAfterMove.body}`,
+    );
+
+    const invalid = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/family-move',
+      headers,
+      body: JSON.stringify({ breedId: 'missing-breed' }),
+    });
+    assert.equal(invalid.statusCode, 400, invalid.body);
+    assert.match(JSON.parse(invalid.body).error, /Unknown breedId "missing-breed"/);
+    const list = await app.inject({ method: 'GET', url: '/api/cats' });
+    const cats = JSON.parse(list.body).cats;
+    assert.equal(cats.find((cat) => cat.id === 'family-move').breedId, 'ragdoll');
+    assert.equal(cats.find((cat) => cat.id === 'opus').breedId, 'ragdoll');
+    await app.close();
+  });
+
   it('POST /api/cats creates a normal runtime member and PATCH updates aliases immediately', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
@@ -4178,5 +4277,305 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     const getRes = await app.inject({ method: 'GET', url: '/api/cats' });
     const fetched = JSON.parse(getRes.body).cats.find((cat) => cat.id === 'transition-cat');
     assert.equal(fetched.cli, undefined, 'GET confirms cli removed after PATCH cli:null');
+  });
+
+  it('F247: built-in gpt-pro rejects identity mutation atomically while profile edits remain available', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+
+    const before = readFileSync(catalogPath, 'utf-8');
+    const rejected = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({
+        provider: null,
+        mcpSupport: false,
+        cli: { command: 'codex', outputFormat: 'json' },
+      }),
+    });
+
+    assert.equal(rejected.statusCode, 409, rejected.body);
+    const rejection = JSON.parse(rejected.body);
+    assert.equal(rejection.code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    assert.match(rejection.error, /云端成员 @gpt-pro/);
+    assert.match(rejection.error, /新建另一位成员/);
+    assert.equal(readFileSync(catalogPath, 'utf-8'), before, 'a rejected mutation must not touch the catalog');
+
+    const profileEdit = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ nickname: '砚砚 Pro' }),
+    });
+    assert.equal(profileEdit.statusCode, 200, profileEdit.body);
+    const edited = JSON.parse(profileEdit.body).cat;
+    assert.equal(edited.nickname, '砚砚 Pro');
+    assert.equal(edited.clientId, 'openai');
+    assert.equal(edited.defaultModel, 'gpt-pro');
+    assert.equal(edited.provider, 'openai-chatgpt-pro');
+    assert.equal(edited.mcpSupport, true);
+    assert.equal(edited.cli, undefined);
+    assert.deepEqual(edited.identityProtection, {
+      kind: 'builtin-cloud',
+      state: 'healthy',
+      lockedFields: [
+        'breedId',
+        'clientId',
+        'defaultModel',
+        'provider',
+        'mcpSupport',
+        'accountRef',
+        'cli',
+        'commandArgs',
+        'cliConfigArgs',
+        'acp',
+      ],
+      driftedFields: [],
+    });
+
+    const deleteResult = await app.inject({
+      method: 'DELETE',
+      url: '/api/cats/gpt-pro',
+      headers,
+    });
+    assert.equal(deleteResult.statusCode, 409, deleteResult.body);
+    assert.equal(JSON.parse(deleteResult.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+    await app.close();
+  });
+
+  it('F247: built-in gpt-pro keeps its breed and canonical handle without rejected-write side effects', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+
+    for (const unsafePatch of [{ breedId: 'maine-coon' }, { mentionPatterns: ['@yanyan-pro'] }]) {
+      const before = readFileSync(catalogPath, 'utf-8');
+      const rejected = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/gpt-pro',
+        headers,
+        body: JSON.stringify(unsafePatch),
+      });
+      assert.equal(rejected.statusCode, 409, rejected.body);
+      assert.equal(JSON.parse(rejected.body).code, 'BUILTIN_CLOUD_IDENTITY_PROTECTED');
+      assert.equal(
+        readFileSync(catalogPath, 'utf-8'),
+        before,
+        'rejected invariant changes must be byte-for-byte inert',
+      );
+
+      const listed = await app.inject({ method: 'GET', url: '/api/cats' });
+      assert.ok(
+        JSON.parse(listed.body).cats.some((cat) => cat.id === 'gpt-pro'),
+        'a rejected family move must not make gpt-pro disappear',
+      );
+    }
+
+    const addAlias = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ mentionPatterns: ['@gpt-pro', '@yanyan-pro'] }),
+    });
+    assert.equal(addAlias.statusCode, 200, addAlias.body);
+    assert.deepEqual(JSON.parse(addAlias.body).cat.mentionPatterns, ['@gpt-pro', '@yanyan-pro']);
+    assert.deepEqual(parseA2AMentions('@gpt-pro 请继续', createCatId('opus')), [createCatId('gpt-pro')]);
+    await app.close();
+  });
+
+  it('F247: reserves the gpt-pro id and canonical handle at the create boundary', async () => {
+    const projectRoot = createProjectRoot();
+    const templatePath = join(projectRoot, 'cat-template.json');
+    process.env.CAT_TEMPLATE_PATH = templatePath;
+    catRegistry.reset();
+    for (const [id, config] of Object.entries(toAllCatConfigs(loadCatConfig(templatePath)))) {
+      catRegistry.register(id, config);
+    }
+
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+    const base = {
+      name: '成员',
+      displayName: '成员',
+      avatar: '/avatars/default.png',
+      color: { primary: '#123456', secondary: '#abcdef' },
+      roleDescription: '测试成员',
+      clientId: 'openai',
+      accountRef: 'codex',
+      mcpSupport: true,
+    };
+
+    for (const unsafeCreate of [
+      {
+        ...base,
+        catId: 'gpt-pro',
+        mentionPatterns: ['@gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+      {
+        ...base,
+        catId: 'local-codex',
+        mentionPatterns: ['@gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+      {
+        ...base,
+        catId: 'bare-handle-local',
+        mentionPatterns: ['gpt-pro'],
+        defaultModel: 'gpt-5.6-sol',
+      },
+    ]) {
+      const before = readFileSync(catalogPath, 'utf-8');
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/api/cats',
+        headers,
+        body: JSON.stringify(unsafeCreate),
+      });
+      assert.equal(rejected.statusCode, 409, rejected.body);
+      assert.equal(readFileSync(catalogPath, 'utf-8'), before, 'rejected creates must not touch the catalog');
+    }
+
+    const localCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...base,
+        catId: 'local-codex',
+        mentionPatterns: ['@local-codex'],
+        defaultModel: 'gpt-5.6-sol',
+      }),
+    });
+    assert.equal(localCreate.statusCode, 201, localCreate.body);
+    for (const reservedPattern of ['@gpt-pro', 'gpt-pro']) {
+      const beforeHandleClaim = readFileSync(catalogPath, 'utf-8');
+      const reservedHandlePatch = await app.inject({
+        method: 'PATCH',
+        url: '/api/cats/local-codex',
+        headers,
+        body: JSON.stringify({ mentionPatterns: [reservedPattern] }),
+      });
+      assert.equal(reservedHandlePatch.statusCode, 409, reservedHandlePatch.body);
+      assert.equal(JSON.parse(reservedHandlePatch.body).code, 'BUILTIN_CLOUD_HANDLE_RESERVED');
+      assert.equal(readFileSync(catalogPath, 'utf-8'), beforeHandleClaim);
+    }
+
+    const canonicalCreate = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers,
+      body: JSON.stringify({
+        ...base,
+        catId: 'gpt-pro',
+        breedId: 'gpt-pro',
+        mentionPatterns: ['@gpt-pro', '@yanyan-pro'],
+        defaultModel: 'gpt-pro',
+        provider: 'openai-chatgpt-pro',
+      }),
+    });
+    assert.equal(canonicalCreate.statusCode, 201, canonicalCreate.body);
+    assert.equal(JSON.parse(canonicalCreate.body).cat.identityProtection.state, 'healthy');
+    await app.close();
+  });
+
+  it('F247: drifted gpt-pro remains visible across startup and recovers only through the explicit repair action', async () => {
+    const projectRoot = createProjectRootFromRepoTemplate();
+    const catalogPath = join(projectRoot, '.cat-cafe', 'cat-catalog.json');
+    const catalog = JSON.parse(readFileSync(catalogPath, 'utf-8'));
+    const breed = catalog.breeds.find((candidate) => candidate.id === 'gpt-pro' || candidate.catId === 'gpt-pro');
+    assert.ok(breed, 'repo template must contain the built-in gpt-pro breed');
+    const variant = breed.variants.find(
+      (candidate) => candidate.catId === 'gpt-pro' || candidate.id === breed.defaultVariantId,
+    );
+    assert.ok(variant, 'repo template must contain the built-in gpt-pro variant');
+    variant.defaultModel = 'gpt-5.6-sol';
+    delete variant.provider;
+    variant.mcpSupport = false;
+    variant.cli = { command: 'codex', outputFormat: 'json' };
+    variant.mentionPatterns = ['@yanyan-pro'];
+    writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`, 'utf-8');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const headers = { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' };
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const beforeRepair = await app.inject({ method: 'GET', url: '/api/cats' });
+    const drifted = JSON.parse(beforeRepair.body).cats.find((cat) => cat.id === 'gpt-pro');
+    assert.equal(drifted.defaultModel, 'gpt-5.6-sol', 'startup must not silently overwrite operator state');
+    assert.equal(drifted.identityProtection.state, 'drifted');
+    assert.deepEqual(
+      [...drifted.identityProtection.driftedFields].sort(),
+      ['cli', 'defaultModel', 'mcpSupport', 'mentionPatterns', 'provider'].sort(),
+    );
+
+    const profileOnlyEdit = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ nickname: '漂移中仍可改资料' }),
+    });
+    assert.equal(profileOnlyEdit.statusCode, 200, profileOnlyEdit.body);
+    assert.equal(JSON.parse(profileOnlyEdit.body).cat.nickname, '漂移中仍可改资料');
+    assert.equal(JSON.parse(profileOnlyEdit.body).cat.identityProtection.state, 'drifted');
+
+    const partialRepair = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ provider: 'openai-chatgpt-pro' }),
+    });
+    assert.equal(partialRepair.statusCode, 409, partialRepair.body);
+    assert.equal(JSON.parse(partialRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_REPAIR_REQUIRED');
+
+    const mixedRepair = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ restoreBuiltinCloudIdentity: true, nickname: '不要混写' }),
+    });
+    assert.equal(mixedRepair.statusCode, 400, mixedRepair.body);
+    assert.equal(JSON.parse(mixedRepair.body).code, 'BUILTIN_CLOUD_IDENTITY_RESTORE_MIXED_PATCH');
+
+    const repaired = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/gpt-pro',
+      headers,
+      body: JSON.stringify({ restoreBuiltinCloudIdentity: true }),
+    });
+    assert.equal(repaired.statusCode, 200, repaired.body);
+    const repairedCat = JSON.parse(repaired.body).cat;
+    assert.equal(repairedCat.defaultModel, 'gpt-pro');
+    assert.equal(repairedCat.provider, 'openai-chatgpt-pro');
+    assert.equal(repairedCat.mcpSupport, true);
+    assert.equal(repairedCat.cli, undefined);
+    assert.deepEqual(repairedCat.mentionPatterns, ['@gpt-pro', '@yanyan-pro']);
+    assert.equal(repairedCat.identityProtection.state, 'healthy');
+    await app.close();
+
+    const restarted = Fastify();
+    await restarted.register(catsRoutes);
+    const afterRestart = await restarted.inject({ method: 'GET', url: '/api/cats' });
+    const persisted = JSON.parse(afterRestart.body).cats.find((cat) => cat.id === 'gpt-pro');
+    assert.equal(persisted.identityProtection.state, 'healthy');
+    assert.equal(persisted.provider, 'openai-chatgpt-pro');
+    assert.equal(persisted.cli, undefined);
+    await restarted.close();
   });
 });

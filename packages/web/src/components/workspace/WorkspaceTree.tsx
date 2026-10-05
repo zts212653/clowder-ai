@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TreeNode } from '@/hooks/useWorkspace';
 import { DirIcon, FileIcon } from './FileIcons';
 import { InlineTreeInput } from './InlineTreeInput';
@@ -97,6 +97,11 @@ function TreeItem({
   const isDir = node.type === 'directory';
   const isExpanded = expandedPaths.has(node.path);
   const isSelected = node.path === selectedPath;
+  const rowRef = useRef<HTMLButtonElement>(null);
+  // A selection made from outside the tree (a reveal) may sit below the fold; bring it into view once.
+  useEffect(() => {
+    if (isSelected) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [isSelected]);
   const isRenaming = pendingAction?.type === 'rename' && pendingAction.targetPath === node.path;
   const showInlineInput =
     pendingAction &&
@@ -147,7 +152,9 @@ function TreeItem({
         onDrop={handleDrop}
       >
         <button
+          ref={rowRef}
           type="button"
+          aria-current={isSelected ? 'true' : undefined}
           onClick={() => (isDir ? toggleExpand(node.path) : onSelect(node.path))}
           className={`flex-1 text-left py-1 text-xs flex items-center gap-1.5 rounded-md transition-colors duration-100 truncate relative ${
             isSelected

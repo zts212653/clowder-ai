@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
+import { parse, stringify } from 'yaml';
 import { checkCapabilityTipsEnablementForRepo } from './check-capability-tips-enablement.mjs';
+import { rootCheckChain } from './lib/root-check-chain.mjs';
 
 const repoRoot = resolve(import.meta.dirname, '..');
 const apiDistRoot = resolve(repoRoot, 'packages/api/dist');
@@ -12,7 +14,7 @@ describe('F268 production enablement check wiring', () => {
   it('is part of the root pnpm check chain', () => {
     const packageJson = JSON.parse(readFileSync(resolve(repoRoot, 'package.json'), 'utf8'));
 
-    assert.match(packageJson.scripts.check, /pnpm check:capability-tips-enablement/);
+    assert.match(rootCheckChain(packageJson.scripts), /pnpm check:capability-tips-enablement/);
     assert.match(packageJson.scripts['check:capability-tips-enablement'], /check-capability-tips-enablement\.mjs/);
   });
 
@@ -36,7 +38,12 @@ describe('F268 production enablement check wiring', () => {
       resolve(repoRoot, 'docs/harness-feedback/eval-domains/eval-capability-tips.yaml'),
       'utf8',
     );
-    const enabledDomain = checkedInDomain.replace(/^enabled: false$/m, 'enabled: true');
+    // Enabling is an explicit revival under the F267 dormancy contract: drop the
+    // dormancy block and flip the flag, otherwise the registry fails closed first.
+    const revived = parse(checkedInDomain);
+    delete revived.dormancy;
+    revived.enabled = true;
+    const enabledDomain = stringify(revived);
     assert.notEqual(enabledDomain, checkedInDomain);
     writeFileSync(resolve(fixtureRoot, 'docs/harness-feedback/eval-domains/eval-capability-tips.yaml'), enabledDomain);
     writeFileSync(

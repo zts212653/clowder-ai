@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Redis } from 'ioredis';
-import type { GitPublisher } from '../infrastructure/harness-eval/publish-verdict/publish-verdict.js';
 import { handleRefreshPublishedVerdict } from '../infrastructure/harness-eval/publish-verdict/refresh-published-verdict.js';
+import type { GitPublisher } from '../infrastructure/harness-eval/publish-verdict/types.js';
 import { requireCallbackPrincipal } from './callback-auth-prehandler.js';
 
 export function registerPublishVerdictRefreshRoute(

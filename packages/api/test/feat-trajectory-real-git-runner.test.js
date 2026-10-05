@@ -155,11 +155,11 @@ describe('RealGitRunner', () => {
 
     test('falls back to display name when email has no recognizable handle', async () => {
       const { RealGitRunner } = await import('../dist/domains/feat-trajectory/RealGitRunner.js');
-      const showOutput = '1700000000|t09020670356@gmail.com|Lysander\n';
+      const showOutput = '1700000000|contributor@example.invalid|you\n';
       const stub = async (args) => (args[0] === 'show' ? showOutput : '');
       const runner = new RealGitRunner('/fake/repo', stub);
       const meta = await runner.getCommitMeta('sha', 'b');
-      assert.strictEqual(meta.authorIdentity, 'Lysander', 'fall back to commit display name');
+      assert.strictEqual(meta.authorIdentity, 'you', 'fall back to commit display name');
     });
 
     test('throws on invalid timestamp (corrupted git output)', async () => {
@@ -198,7 +198,7 @@ describe('RealGitRunner', () => {
     test('null when email matches no known cat handle', async () => {
       const { __internal } = await import('../dist/domains/feat-trajectory/RealGitRunner.js');
       const { extractCatHandle } = __internal;
-      assert.strictEqual(extractCatHandle('t09020670356@gmail.com'), null);
+      assert.strictEqual(extractCatHandle('contributor@example.invalid'), null);
       assert.strictEqual(extractCatHandle('user@example.com'), null);
       assert.strictEqual(extractCatHandle(''), null);
     });

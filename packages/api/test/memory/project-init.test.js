@@ -48,12 +48,13 @@ describe('project-init (F-1)', () => {
     const { runProjectInit } = await import('../../dist/scripts/project-init.js');
     await runProjectInit(tmpDir);
 
-    const backlog = readFileSync(join(tmpDir, 'docs', 'ROADMAP.md'), 'utf-8');
+    const projectDocsRoot = join(tmpDir, 'docs');
+    const backlog = readFileSync(join(projectDocsRoot, 'BACKLOG.md'), 'utf-8');
     assert.ok(backlog.startsWith('---'), 'BACKLOG.md should have frontmatter');
     assert.ok(backlog.includes('doc_kind: plan'), 'BACKLOG.md should have doc_kind');
     assert.ok(backlog.includes('# Backlog'), 'BACKLOG.md should have title');
 
-    const vision = readFileSync(join(tmpDir, 'docs', 'VISION.md'), 'utf-8');
+    const vision = readFileSync(join(projectDocsRoot, 'VISION.md'), 'utf-8');
     assert.ok(vision.startsWith('---'), 'VISION.md should have frontmatter');
     assert.ok(vision.includes('# Vision'), 'VISION.md should have title');
   });

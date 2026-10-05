@@ -46,9 +46,14 @@ export const explorationReadingSchema = evolutionExplorationSelectionSchema
         y: z.number().finite().min(-1_000_000).max(1_000_000),
         zoom: z.number().finite().min(0.001).max(2.5),
         collapsed: z.array(z.string().max(1_200)).max(512),
+        framing: z.enum(['fit', 'manual']).optional(),
       })
       .strict(),
     lineageCollapsed: z.boolean().optional(),
+    lineageLayout: z.enum(['map', 'vertical']).optional(),
+    comparisonChoice: z.enum(['auto', 'manual']).optional(),
+    caseFilter: z.enum(['all', 'improved', 'regressed', 'unchanged', 'unknown']).optional(),
+    inspector: z.enum(['results', 'changes', 'conditions']).optional(),
     draft: explorationDraftSchema,
   })
   .strict();
@@ -69,5 +74,6 @@ export function clearExplorationSelection(reading: ExplorationReading): Explorat
     comparisonScope: 'full',
     draft: reading.draft,
     ...(reading.lineageCollapsed === undefined ? {} : { lineageCollapsed: reading.lineageCollapsed }),
+    ...(reading.lineageLayout === undefined ? {} : { lineageLayout: reading.lineageLayout }),
   };
 }

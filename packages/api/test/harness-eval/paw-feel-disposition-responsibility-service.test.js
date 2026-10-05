@@ -100,9 +100,10 @@ describe('F278 responsibility transitions', () => {
       }),
     );
     assert.equal(blocked.projection.state, 'blocked');
-    assert.equal(blocked.projection.ownerCatId, undefined);
-    assert.equal(blocked.projection.taskId, undefined);
-    assert.equal(blocked.projection.actionLeaseRef, undefined);
+    assert.equal(blocked.projection.ownerCatId, 'opus');
+    assert.equal(blocked.projection.taskId, 'task-old');
+    assert.deepEqual(blocked.projection.actionLeaseRef, { leaseId: 'lease-old', generation: 1 });
+    assert.ok(blocked.projection.directRepairBinding);
   });
 
   it('lets a legacy routed receipt advance to a current business exit', async () => {
@@ -220,14 +221,17 @@ describe('F278 responsibility transitions', () => {
         eventId: 'signature-blocked',
         blockerCode: 'independent_signer_unavailable',
         blockerRef: 'thread:thread_eval_friction:signature-request-before-blocker',
-        resume: { kind: 'bounded_time', recheckAt: '2026-07-27T00:00:00.000Z' },
+        resume: {
+          kind: 'owner_event',
+          ref: { ownerFeatureId: 'F278', ownerStateRef: 'signature-request:signature-request-before-blocker' },
+        },
       }),
     );
     assert.equal(blocked.projection.state, 'blocked');
     assert.equal(blocked.projection.signatureRequest, undefined);
     assert.equal(blocked.projection.blocker.code, 'independent_signer_unavailable');
     assert.equal(blocked.projection.blocker.ref, 'thread:thread_eval_friction:signature-request-before-blocker');
-    assert.equal(blocked.projection.blocker.resumeCondition.selector.kind, 'bounded_time');
+    assert.equal(blocked.projection.blocker.resumeCondition.selector.kind, 'owner_event');
   });
 
   it('rejects forged bundle membership before writing any member', async () => {

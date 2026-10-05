@@ -2,6 +2,7 @@ import type { CatId } from '@cat-cafe/shared';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
 import type { StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import { requiresDispatchDisposition } from './queue-source-completion-policy.js';
 
 export type RestartExecutionWitness =
   | 'child_execution'
@@ -24,7 +25,12 @@ export async function resolveRestartExecutionWitness(
       if (child.threadId !== message.threadId || child.userId !== message.userId || child.catId !== catId) {
         return null;
       }
-      if (child.status === 'succeeded') return 'child_execution';
+      if (child.status === 'succeeded') {
+        return child.queueCompletionPolicy === 'explicit_source' ||
+          requiresDispatchDisposition(message, catId, invocationId, child)
+          ? 'retryable_terminal_child'
+          : 'child_execution';
+      }
       if (child.status === 'running') return 'live_child';
       if (child.status === 'interrupted' && child.terminalReason === 'process_restart') return 'interrupted_child';
       return 'retryable_terminal_child';

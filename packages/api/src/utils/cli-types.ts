@@ -32,6 +32,8 @@ export interface CliSpawnOptions {
   signal?: AbortSignal;
   /** Environment overrides. `null` means delete inherited var from child env. */
   env?: Record<string, string | null>;
+  /** Start from only env overrides, never the API process environment. Defaults to inheritance for existing providers. */
+  inheritParentEnv?: boolean;
   /** False for probes/non-invocation commands that must never create an execution-owner manifest. */
   bindExecutionOwner?: boolean;
   /** F118: Invocation context for diagnostic enrichment of __cliTimeout */
@@ -82,6 +84,13 @@ export interface CliSpawnOptions {
    * event counts.
    */
   onSuccessfulExitStderr?: (summary: { stderrPresent: boolean; stderrExcerpt?: string }) => void;
+  /**
+   * F319: observe child stderr one complete line at a time (trailing partial
+   * line is flushed at stream end). Consumers must not retain lines: providers
+   * running trace-level logging emit megabytes per turn. Never resets the
+   * timeout or the liveness probe — stderr stays transport noise for those.
+   */
+  onStderrLine?: (line: string) => void;
 }
 
 /**

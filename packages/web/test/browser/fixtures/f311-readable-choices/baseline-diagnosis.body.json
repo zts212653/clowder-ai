@@ -1,0 +1,149 @@
+{
+  "kind": "baseline_diagnosis",
+  "summary": "按八项具体对象解释既有基线：固定权重与执行条件组合已有触球，旧摆位问题有定向复现，state仍多场未尝试；猫指令确实进入执行，但观察到接收有秒级时差。PR4492/Terra413已完成有限实现与素材审阅；本次没有新比赛，基线仍为公开探索草案。",
+  "baselineState": "draft",
+  "observationUnit": "公开60秒对局、120/240秒真实猫在环回合",
+  "facts": [
+    {
+      "factId": "live-one",
+      "label": "第一场120s：4指令1接受3拒绝，0:0，无指定脚命中；墙钟120.041s。",
+      "state": "reported",
+      "sourceRefs": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live1/summary.json"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live1/events.jsonl"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+        }
+      ],
+      "limitation": "只是一场；不代表长期胜负或协调能力。"
+    },
+    {
+      "factId": "live-two",
+      "label": "第二场240s：8指令6接受2拒绝，0:1；一次蓝鸭左脚接触，随后经金鸭脚偏转越门线；墙钟240.037s。",
+      "state": "reported",
+      "sourceRefs": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/summary.json"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/events.jsonl"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+        }
+      ],
+      "limitation": "双方换成state局部反馈；不能归因猫策略，不是已完成传接。"
+    },
+    {
+      "factId": "fresh-seeds",
+      "label": "新seed801–808：sensor 13踢腿0命中/0球6摔；state 3踢腿3命中/3球3摔，5场无踢腿。",
+      "state": "reported",
+      "sourceRefs": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+        },
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+        }
+      ],
+      "limitation": "旧公开复验结果未变；新场景现已暴露，非正式holdout，不能把3/3接触报成稳定踢球率或整体净收益。"
+    },
+    {
+      "factId": "evidence-review",
+      "label": "PR4492已合入；Terra413核26测试、31文件hash、56条件、18000轨迹tick和字幕可重建。2026-09-16准备修订记录归档复算一致。",
+      "state": "reported",
+      "sourceRefs": [
+        {
+          "ownerFeatureId": "F117",
+          "ownerStateRef": "message:0001789038735370-000413-ae17665a"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/verify_evidence.py"
+        }
+      ],
+      "limitation": "证明有限实现/归档链条已审；不新增物理样本、不签测量或Goal证书，不证明用户满意、协作或采用。"
+    }
+  ],
+  "competingExplanations": [
+    {
+      "explanationId": "stale-local-target",
+      "hypothesis": "局部控制对已移动的球仍使用旧摆位，导致踢空。",
+      "evidenceFor": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/state_skill.py"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/test_state_skill.py"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+        }
+      ],
+      "evidenceAgainst": [],
+      "discriminatingNextStep": "旧摆位机制已有RED→GREEN；依据当前局部控制代码与公开样本区分5/8未尝试场景的贴墙、拥挤、朝向和起脚窗口。输入域与持续反馈共同变化；这一分析方向不是新干预已执行或完整根因已确定。"
+    },
+    {
+      "explanationId": "motor-incapable",
+      "hypothesis": "固定动作模型本身无法触球。",
+      "evidenceFor": [],
+      "evidenceAgainst": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-kick-calibration-v2.json"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/runs.json.gz"
+        }
+      ],
+      "discriminatingNextStep": "18点摆球和3次新场景触球反驳当前组合绝对不能触球，不单独证明权重或执行配置的贡献。沿316/720固定两者；若出现可复核身体瓶颈，再另核模型选版、训练分支及资源。"
+    },
+    {
+      "explanationId": "cat-latency",
+      "hypothesis": "猫现场反应延迟和局势变化使合理战术到达时已失效。",
+      "evidenceFor": [
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/evidence/20260910/cortex-793-live2-state/events.jsonl"
+        },
+        {
+          "ownerFeatureId": "F311",
+          "ownerStateRef": "git:35dfed114be3ca292aac304a888d4a9519d0dbea:docs/videos/f311-microduck-roadshow/pipeline/cortex/report.md"
+        }
+      ],
+      "evidenceAgainst": [],
+      "discriminatingNextStep": "live2已接受指令的观察年龄10.58–19.70秒，约58秒迟到选择被拒。沿720保持现行协议边界，并区分现场逐次指令与尚未形成的软战术方法；后续持续目标与同信息对照须有明确方法/加载证据，不暂停物理或换revision伪装新鲜。"
+    }
+  ],
+  "unknowns": [
+    "可靠传接、两猫配合、比赛净收益和人的体验价值仍未证明。",
+    "Terra已完成实现/素材审阅；正式独立校准、采用角色、Goal/经济/测量证书仍未绑定或签发。",
+    "训练预算、完整比赛/协作判据与真实观看反馈未知。",
+    "猫的独立版本化战术prompt/skill及逐轮加载证据尚缺；不能把单次reason/assignments或协议代码补成该资产。来源message:0001789635982467-000720-8ada8be9、message:0001789709613092-000029-b97dfee1。"
+  ],
+  "nextAction": "沿316/720固定权重、身体执行、有限协议、场景、现有判定与记录；在既有权限内准备局部控制候选和公开数据派生分析，先核战术方法载体。旧物理数据与历史修订保留，后续实际干预另存版本和独立结果。"
+}

@@ -1,6 +1,7 @@
 const { spawnSync } = require('node:child_process');
-const { readFileSync, writeFileSync } = require('node:fs');
+const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
+const { publishWitness } = require('./atomic-witness.cjs');
 
 const config = JSON.parse(readFileSync(join(__dirname, 'control.json'), 'utf8'));
 const args = process.argv.slice(2);
@@ -11,7 +12,7 @@ if (creation) {
   const index = args.findIndex((arg) => arg.startsWith("const {symlinkSync}=require('node:fs')"));
   if (index < 0) throw new Error('The production claim publisher must be present');
   gate = args[index + 1];
-  const barrier = `require('node:fs').writeFileSync(${JSON.stringify(config.barrier)},process.argv[1]);
+  const barrier = `require(${JSON.stringify(join(__dirname, 'atomic-witness.cjs'))}).publishWitness(${JSON.stringify(config.barrier)},process.argv[1]);
     const stopAt=Date.now()+8000;
     while(!require('node:fs').existsSync(${JSON.stringify(config.release)})) {
       if(Date.now()>stopAt) throw new Error('claim fixture release timeout');
@@ -33,7 +34,7 @@ const finish = () => {
 };
 if (creation && result.status === 0) {
   const [paneId, panePid] = result.stdout.trim().split(' ');
-  writeFileSync(config.witness, JSON.stringify({ paneId, panePid, gate, clientPid: process.pid }));
+  publishWitness(config.witness, { paneId, panePid, gate, clientPid: process.pid });
   if (config.mode !== 'normal') setTimeout(finish, 22000);
   else finish();
 } else finish();

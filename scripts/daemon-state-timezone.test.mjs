@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,17 +19,15 @@ async function withFakeDaemon(run) {
   mkdirSync(runtimeRoot, { recursive: true });
   const child = spawn(
     process.execPath,
-    ['-e', 'setInterval(() => {}, 1000)', '--', `--cat-cafe-daemon-token=${launchToken}`],
-    { cwd: runtimeRoot, stdio: 'ignore' },
+    ['-e', 'process.send("ready"); setInterval(() => {}, 1000)', '--', `--cat-cafe-daemon-token=${launchToken}`],
+    { cwd: runtimeRoot, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
   );
-  await new Promise((resolve, reject) => {
-    child.once('spawn', resolve);
-    child.once('error', reject);
-  });
   try {
+    const [ready] = await once(child, 'message', { signal: AbortSignal.timeout(10_000) });
+    assert.equal(ready, 'ready');
     await run({ child, homeDir, runtimeRoot, launchToken });
   } finally {
-    if (child.exitCode === null && child.signalCode === null) {
+    if (child.pid && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
       await new Promise((resolve) => child.once('exit', resolve));
     }
@@ -39,14 +38,16 @@ async function withFakeDaemon(run) {
 function captureIdentityInEnvironment(pid, { timezone, locale }) {
   const source = `
     const [modulePath, pid] = process.argv.slice(1);
-    const { captureProcessIdentity } = await import(modulePath);
-    console.log(JSON.stringify(captureProcessIdentity(Number(pid))));
+    const { captureReadableIdentity } = await import(modulePath);
+    const identity = captureReadableIdentity(Number(pid));
+    if (identity.argvAvailable !== true) throw new Error('fixture argv remains unavailable: ' + JSON.stringify(identity));
+    console.log(JSON.stringify(identity));
   `;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', source, daemonStateModule, String(pid)], {
-    encoding: 'utf8',
-    env: { ...process.env, TZ: timezone, LANG: locale, LC_ALL: locale },
-    timeout: 10_000,
-  });
+  const result = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', source, join(import.meta.dirname, 'lib/process-identity.mjs'), String(pid)],
+    { encoding: 'utf8', env: { ...process.env, TZ: timezone, LANG: locale, LC_ALL: locale }, timeout: 10_000 },
+  );
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -81,7 +82,7 @@ function writeLegacyV1State({ homeDir, runtimeRoot, launchToken, child }) {
 }
 
 test('process birth identity is stable across caller timezone and locale', () =>
-  withFakeDaemon(async ({ child }) => {
+  withFakeDaemon(async ({ child, launchToken }) => {
     const losAngeles = captureIdentityInEnvironment(child.pid, {
       timezone: 'America/Los_Angeles',
       locale: 'en_US.UTF-8',
@@ -91,6 +92,10 @@ test('process birth identity is stable across caller timezone and locale', () =>
       locale: 'ja_JP.UTF-8',
     });
 
+    assert.equal(losAngeles.argvAvailable, true);
+    assert.equal(tokyo.argvAvailable, true);
+    assert.ok(losAngeles.command.includes(`--cat-cafe-daemon-token=${launchToken}`));
+    assert.ok(tokyo.command.includes(`--cat-cafe-daemon-token=${launchToken}`));
     assert.equal(losAngeles.startedAt, tokyo.startedAt);
     assert.equal(losAngeles.startedAtEpochMs, tokyo.startedAtEpochMs);
     assert.ok(Number.isSafeInteger(losAngeles.startedAtEpochMs));

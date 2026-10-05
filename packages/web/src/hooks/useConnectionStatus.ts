@@ -8,6 +8,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { API_URL, apiFetch } from '@/utils/api-client';
 
@@ -141,14 +142,22 @@ export function deriveSocketLevel(
   return socketConnected ? 'online' : 'degraded';
 }
 
-function getInitialBrowserOnline(): boolean {
-  if (typeof navigator === 'undefined') return true;
-  return navigator.onLine;
+function readBrowserOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false;
 }
 
-function getInitialConnectionLevel(): ConnectionLevel {
-  return shouldForceBrowserOffline(getInitialBrowserOnline(), API_URL) ? 'offline' : 'online';
+function subscribeBrowserOnline(onChange: () => void): () => void {
+  window.addEventListener('online', onChange);
+  window.addEventListener('offline', onChange);
+  return () => {
+    window.removeEventListener('online', onChange);
+    window.removeEventListener('offline', onChange);
+  };
 }
+
+// No browser observation exists on the server (Node also exposes navigator).
+// Hydration reuses this snapshot, then subscribes to the real browser signal.
+const readServerOnline = () => true;
 
 interface PublicProbeResult {
   level: ConnectionLevel;
@@ -201,9 +210,10 @@ function mergeUpstreamSignal(ready: ConnectionLevel, cats: ConnectionLevel): Con
 
 export function useConnectionStatus(socketConnected?: boolean | null): ConnectionProbeState {
   const probesEnabled = process.env.NODE_ENV !== 'test';
-  const [browserOnline, setBrowserOnline] = useState<boolean>(getInitialBrowserOnline);
-  const [api, setApi] = useState<ConnectionLevel>(getInitialConnectionLevel);
-  const [upstream, setUpstream] = useState<ConnectionLevel>(getInitialConnectionLevel);
+  const browserOnline = useSyncExternalStore(subscribeBrowserOnline, readBrowserOnline, readServerOnline);
+  const initialLevel = shouldForceBrowserOffline(browserOnline, API_URL) ? 'offline' : 'online';
+  const [api, setApi] = useState<ConnectionLevel>(initialLevel);
+  const [upstream, setUpstream] = useState<ConnectionLevel>(initialLevel);
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const [deploymentRevision, setDeploymentRevision] = useState<DeploymentRevisionState>(() =>
     pageDeploymentRevision.read(),
@@ -284,24 +294,6 @@ export function useConnectionStatus(socketConnected?: boolean | null): Connectio
   useEffect(() => {
     if (socketConnected === true) void runProbe();
   }, [socketConnected, runProbe]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const handleOnline = () => {
-      setBrowserOnline(true);
-    };
-    const handleOffline = () => {
-      setBrowserOnline(false);
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
 
   const socket = deriveSocketLevel(browserOnline, socketConnected, API_URL);
 

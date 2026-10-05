@@ -46,7 +46,7 @@ describe('#780 ClaudeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('test raw archive', { invocationId: 'inv-claude-1' }));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-1' },
       { type: 'result', subtype: 'success' },
     ]);
@@ -73,7 +73,7 @@ describe('#780 ClaudeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('no invocation id'));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       { type: 'system', subtype: 'init', session_id: 'ses-2' },
       { type: 'result', subtype: 'success' },
     ]);
@@ -96,7 +96,7 @@ describe('#780 ClaudeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('redact test', { invocationId: 'inv-claude-redact' }));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       {
         type: 'system',
         subtype: 'init',
@@ -128,7 +128,7 @@ describe('#780 OpenCodeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('test raw archive', { invocationId: 'inv-oc-1' }));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       {
         type: 'step_start',
         timestamp: Date.now(),
@@ -163,7 +163,7 @@ describe('#780 OpenCodeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('no invocation id'));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       {
         type: 'text',
         timestamp: Date.now(),
@@ -188,7 +188,7 @@ describe('#780 OpenCodeAgentService raw archive', () => {
 
     const promise = collect(service.invoke('redact test', { invocationId: 'inv-oc-redact' }));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       {
         type: 'text',
         timestamp: Date.now(),
@@ -223,7 +223,7 @@ describe('#780 KimiAgentService raw archive', () => {
 
     const promise = collect(service.invoke('test raw archive', { invocationId: 'inv-kimi-1' }));
 
-    emitEvents(proc, [{ role: 'assistant', content: 'hello from kimi' }]);
+    await emitEvents(proc, [{ role: 'assistant', content: 'hello from kimi' }]);
 
     await promise;
 
@@ -247,7 +247,7 @@ describe('#780 KimiAgentService raw archive', () => {
 
     const promise = collect(service.invoke('no invocation id'));
 
-    emitEvents(proc, [{ role: 'assistant', content: 'hello' }]);
+    await emitEvents(proc, [{ role: 'assistant', content: 'hello' }]);
 
     await promise;
 
@@ -267,7 +267,7 @@ describe('#780 KimiAgentService raw archive', () => {
 
     const promise = collect(service.invoke('redact test', { invocationId: 'inv-kimi-redact' }));
 
-    emitEvents(proc, [
+    await emitEvents(proc, [
       {
         role: 'assistant',
         content: 'hello',

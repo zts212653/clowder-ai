@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { daemonStatePaths } from './daemon-state.mjs';
+import { isSelfOrDescendantOf } from './process-tree.mjs';
 
 /**
  * F300 Task 1.3 -- resolve "what is hosting me" cheaply enough to run on every
@@ -21,8 +23,8 @@ import { daemonStatePaths } from './daemon-state.mjs';
  * situations. Only the first one means we are unhosted. The other two are
  * missing evidence, and missing evidence is not a licence.
  *
- * It reads files and nothing else: no `ps`, no port probe, no API call, because
- * this runs inside a PreToolUse hook with a five second budget.
+ * readSelfHostFacet reads files only. Explicit process targets additionally
+ * use createHostProcessObserver below, lazily and within the hook's budget.
  */
 
 /** @returns {{confidence: 'exact'|'ambiguous'|'unreadable'|'none', facet?: object}} */
@@ -45,6 +47,77 @@ export function readSelfHostFacet({ env = process.env, homeDir = homedir(), now 
   // Every candidate stays in the facet. Until a candidate is ruled out, a target
   // that matches it has not been shown to be someone else's.
   return { confidence, facet: facetFromDaemonStates(preferred, states, deploymentId, env, now()) };
+}
+
+/**
+ * A call-local observation of listener ownership and parent links. No I/O until
+ * the policy encounters an explicit process target. Two bounded read-only
+ * commands replace one ps per target/dependency/depth; ordinary tools pay none.
+ * Nothing is cached between hook calls, and no process is signalled.
+ */
+export function createHostProcessObserver(self, { run = execFileSync, observerPid = process.pid } = {}) {
+  let listeners;
+  let parents;
+  let parentsRead = false;
+  const read = (command, args) =>
+    run(command, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 1_000,
+      maxBuffer: 1024 * 1024,
+    });
+  return {
+    observerPid,
+    readHostPids() {
+      listeners ??= readHostListeners(self, read);
+      return listeners;
+    },
+    isHostDescendant(pid, ancestor) {
+      if (pid === ancestor) return true;
+      if (!parentsRead) {
+        parentsRead = true;
+        parents = readParents(read);
+      }
+      return isSelfOrDescendantOf(pid, ancestor, { readParent: (candidate) => parents?.get(candidate) });
+    },
+  };
+}
+
+function readHostListeners(self, read) {
+  const ports = [...new Set([self.runtime?.apiPort, ...(self.hostDependencies ?? []).map((d) => d.port)])].filter(
+    (port) => port !== undefined && port !== null,
+  );
+  const unknown = { pids: [], complete: false };
+  if (ports.length > 64 || ports.some((p) => !Number.isSafeInteger(p) || p < 1 || p > 65535)) return unknown;
+  if (ports.length === 0) return { pids: [], complete: true };
+  try {
+    const output = read('lsof', ['-nP', ...ports.map((p) => `-iTCP:${p}`), '-sTCP:LISTEN', '-t']);
+    const lines = output.trim().split('\n');
+    if (lines.some((line) => !/^\d+$/.test(line) || Number(line) <= 1 || !Number.isSafeInteger(Number(line))))
+      return unknown;
+    return { pids: [...new Set(lines.map(Number))], complete: true };
+  } catch (error) {
+    // Exit 1 and no diagnostics means a complete search with no listeners.
+    return error?.status === 1 && !error?.stdout?.length && !error?.stderr?.length
+      ? { pids: [], complete: true }
+      : unknown;
+  }
+}
+
+function readParents(read) {
+  try {
+    const parents = new Map();
+    for (const line of read('ps', ['-e', '-o', 'pid=,ppid=']).trim().split('\n')) {
+      const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+      if (!match) return undefined;
+      const [pid, parent] = match.slice(1).map(Number);
+      if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(parent) || pid < 1 || parents.has(pid)) return undefined;
+      parents.set(pid, parent);
+    }
+    return parents;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

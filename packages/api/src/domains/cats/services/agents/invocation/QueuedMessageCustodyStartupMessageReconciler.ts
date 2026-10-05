@@ -53,6 +53,7 @@ export async function reconcileStartupCustodyMessage(
   messageId: string,
   now: () => number,
 ): Promise<ReconciledMessage | null> {
+  await deps.repairDispatchReceipts?.(messageId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const message = await deps.messageStore.getById(messageId);
     const current = message?.queueCustody;

@@ -2,12 +2,9 @@ import type { ArtifactReviewAnnotation, ReviewedMediaAsset } from '@cat-cafe/sha
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { WorkspaceContentReviewMedia } from '@/components/workbench/content-review/WorkspaceContentReviewMedia';
 import type { ReviewCanvasMode } from '../ReviewCanvasToolbar';
-import { ReviewMedia } from '../ReviewMedia';
 
-vi.mock('../useReviewMediaSource', () => ({
-  useReviewMediaSource: () => ({ src: 'blob:retained-video', error: null, setError: vi.fn() }),
-}));
 const asset: ReviewedMediaAsset = {
   contentRef: 'media',
   ownerRevision: 1,
@@ -50,7 +47,7 @@ const annotation: ArtifactReviewAnnotation = {
 let root: ReturnType<typeof createRoot>, container: HTMLDivElement;
 let video: HTMLVideoElement, playhead: number, seeking: boolean;
 let callbacks: Map<number, VideoFrameRequestCallback>, callbackId: number;
-let focusRequest: { annotationId: string } | null;
+let focusRequest: { annotationId: string; requestId: number } | null;
 let frameDescriptor: PropertyDescriptor | undefined, cancelDescriptor: PropertyDescriptor | undefined;
 const assigned = vi.fn(),
   onActive = vi.fn(),
@@ -106,25 +103,47 @@ async function render(
     selectionKey = 'annotation:one',
   }: { mode?: ReviewCanvasMode; canAnnotate?: boolean; selectionKey?: string } = {},
 ) {
-  if (activeId !== (focusRequest?.annotationId ?? null)) focusRequest = activeId ? { annotationId: activeId } : null;
+  if (activeId !== (focusRequest?.annotationId ?? null))
+    focusRequest = activeId ? { annotationId: activeId, requestId: 1 } : null;
   await act(async () =>
     root.render(
-      createElement(ReviewMedia, {
+      createElement(WorkspaceContentReviewMedia, {
         reviewId: 'review',
-        round: 1,
-        asset: fresh ? structuredClone(asset) : asset,
-        annotations: [fresh ? structuredClone(annotation) : annotation],
+        sourceRevision: asset.blobDigest,
+        src: 'blob:retained-video',
+        media: fresh ? structuredClone(asset.media) : asset.media,
+        annotations: [
+          {
+            ...(fresh ? structuredClone(annotation) : annotation),
+            anchor: { baseRevision: asset.blobDigest, anchor: annotation.anchor },
+          },
+        ],
+        annotationResolutions: [{ annotationId: annotation.id, status: 'attached' }],
+        visualMarks: [],
+        visualMarkResolutions: [],
         selected: null,
-        focusRequest,
-        canAnnotate,
-        onSelect,
-        onActive,
-        mode,
-        selectionKey,
-        onUnavailable: vi.fn(),
+        composer: null,
+        activeAnnotationId: activeId,
+        discussionFocusRequest: focusRequest,
+        canWrite: canAnnotate,
+        onAnchorSelected: onSelect,
+        onAnnotationActive: onActive,
+        onSaveVisualMarks: vi.fn(),
+        onDeleteVisualMark: vi.fn(),
+        onOpenDiscussion: vi.fn(),
+        draftKey: selectionKey,
       }),
     ),
   );
+  const currentMode = container.querySelector('[data-review-mode]')?.getAttribute('data-review-mode');
+  if (currentMode !== mode) {
+    if (currentMode !== 'view')
+      await act(async () =>
+        container.querySelector<HTMLButtonElement>('[aria-label="退出评论"],[aria-label="退出标注"]')?.click(),
+      );
+    if (mode !== 'view')
+      await act(async () => container.querySelector<HTMLButtonElement>(`[data-mode="${mode}"]`)?.click());
+  }
   if (!video || video !== container.querySelector('video')) {
     video = container.querySelector('video')!;
     Object.defineProperties(video, {
@@ -176,7 +195,7 @@ function prepareSelectionSurface() {
     configurable: true,
     value: () => ({ left: 0, top: 0, width: 360, height: 640 }),
   });
-  const surface = container.querySelector<SVGSVGElement>('[aria-label="标注区域"]')!;
+  const surface = container.querySelector<SVGSVGElement>('[aria-label="图片或视频上的批注"]')!;
   const captures = new Set<number>();
   Object.defineProperties(surface, {
     setPointerCapture: { configurable: true, value: (pointerId: number) => captures.add(pointerId) },
@@ -229,7 +248,7 @@ it('a repeated explicit focus on the same annotation still returns to its frame'
   playhead = 2.84;
   await present(2.84);
   assigned.mockClear();
-  focusRequest = { annotationId: 'mark' };
+  focusRequest = { annotationId: 'mark', requestId: 2 };
   await render('mark');
   expect(assigned).toHaveBeenLastCalledWith(2.12);
   expect(button().disabled).toBe(true);
@@ -272,7 +291,7 @@ it('ends a transient selection when mode, write access, or pointer ownership cha
 
   await render();
   await beginSelection();
-  const selectionSurface = container.querySelector<SVGSVGElement>('[aria-label="标注区域"]');
+  const selectionSurface = container.querySelector<SVGSVGElement>('[aria-label="图片或视频上的批注"]');
   await act(async () => selectionSurface?.dispatchEvent(new Event('pointercancel', { bubbles: true })));
   expect(mark()?.getAttribute('role')).toBe('button');
 });
@@ -290,8 +309,10 @@ it('accepts a comment selection only from its original pointer and draft key', a
   expect(onSelect).not.toHaveBeenCalled();
   await act(async () => surface.dispatchEvent(pointer('pointerup', 1, 140, 160)));
   expect(onSelect).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[data-review-mode]')?.getAttribute('data-review-mode')).toBe('comment');
 
   onSelect.mockClear();
+  await render(null, false, { mode: 'view' });
   await act(async () => button().dispatchEvent(new MouseEvent('click', { bubbles: true })));
   await act(async () => surface.dispatchEvent(pointer('pointerdown', 3, 20, 20)));
   await render(null, false, { selectionKey: 'annotation:two' });

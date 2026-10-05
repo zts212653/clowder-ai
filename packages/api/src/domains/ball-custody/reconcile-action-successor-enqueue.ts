@@ -7,7 +7,9 @@ export type ActionSuccessorCarrierAdmissionOutcome =
   | 'reattached'
   | 'replayed'
   | 'returned'
-  | 'continued';
+  | 'continued'
+  /** A handled direct carrier was re-dispatched onto a new generation (F167 carrier refresh). */
+  | 'refreshed';
 export type ActionSuccessorCarrierDisposition = 'successor_dispatch' | 'return';
 
 export { actionSuccessorFencesMatch };

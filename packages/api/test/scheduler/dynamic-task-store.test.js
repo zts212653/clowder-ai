@@ -6,6 +6,7 @@ import { beforeEach, describe, test } from 'node:test';
 import Database from 'better-sqlite3';
 import { applyMigrations, SCHEMA_V5 } from '../../dist/domains/memory/schema.js';
 import { DynamicTaskStore } from '../../dist/infrastructure/scheduler/DynamicTaskStore.js';
+import { installV43CueLedgerSchemaFixture } from '../helpers/v43-memory-cue-ledger-fixture.js';
 
 // --- Task 1: Schema V8 ---
 
@@ -61,6 +62,7 @@ test('V44 preserves legacy tasks and private owner auth across a database restar
   const dbPath = join(root, 'scheduler.sqlite');
   let db = new Database(dbPath);
   db.exec(SCHEMA_V5);
+  installV43CueLedgerSchemaFixture(db);
   db.exec(`
     CREATE TABLE schema_version (
       version INTEGER PRIMARY KEY,

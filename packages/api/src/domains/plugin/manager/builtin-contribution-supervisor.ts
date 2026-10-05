@@ -8,6 +8,7 @@ import {
   StdioClientTransport,
   type StdioServerParameters,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { PluginInventoryStore, PluginInventoryTransaction } from '../host-inventory/ports.js';
 import type {
   PluginGrantRecord,
@@ -107,9 +108,12 @@ export class BuiltinPluginContributionError extends Error {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string, onTimeout?: () => void): Promise<T> {
   return new Promise<T>((resolvePromise, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+      onTimeout?.();
+    }, timeoutMs);
     timer.unref?.();
     promise.then(
       (value) => {
@@ -146,6 +150,24 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
     };
     const transport = new StdioClientTransport(server);
     const client = new Client({ name: `cat-cafe-plugin-${spec.pluginId}`, version: '0.1.0' }, { capabilities: {} });
+    const pendingRequests = new Set<AbortController>();
+    client.onclose = () => {
+      for (const controller of pendingRequests) {
+        controller.abort(new McpError(ErrorCode.ConnectionClosed, 'MCP contribution transport closed'));
+      }
+      pendingRequests.clear();
+    };
+    const runRequest = async <T>(invoke: (signal: AbortSignal) => Promise<T>, timeoutMs: number, label: string) => {
+      const controller = new AbortController();
+      pendingRequests.add(controller);
+      try {
+        return await withTimeout(invoke(controller.signal), timeoutMs, label, () => {
+          controller.abort(new McpError(ErrorCode.RequestTimeout, `${label} timed out after ${timeoutMs}ms`));
+        });
+      } finally {
+        pendingRequests.delete(controller);
+      }
+    };
     let settleClosed: ((result: { readonly error?: Error }) => void) | undefined;
     const closed = new Promise<{ readonly error?: Error }>((resolveClosed) => {
       settleClosed = resolveClosed;
@@ -154,9 +176,13 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
     transport.onerror = (error) => settleClosed?.({ error });
     try {
       const startTimeoutMs = this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
-      await withTimeout(client.connect(transport), startTimeoutMs, `MCP contribution ${spec.contributionId} connect`);
-      const listed = await withTimeout(
-        client.listTools(),
+      await runRequest(
+        (signal) => client.connect(transport, { signal }),
+        startTimeoutMs,
+        `MCP contribution ${spec.contributionId} connect`,
+      );
+      const listed = await runRequest(
+        (signal) => client.listTools(undefined, { signal }),
         startTimeoutMs,
         `MCP contribution ${spec.contributionId} tools/list`,
       );
@@ -169,8 +195,8 @@ export class StdioMcpContributionRuntime implements McpContributionRuntimePort {
         tools,
         closed,
         callTool: (name, args) =>
-          withTimeout(
-            client.callTool({ name, arguments: { ...args } }),
+          runRequest(
+            (signal) => client.callTool({ name, arguments: { ...args } }, undefined, { signal }),
             this.options.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS,
             `MCP contribution ${spec.contributionId}/${name}`,
           ),

@@ -14,10 +14,11 @@ import {
  * registerFullToolset) must keep CAT_CAFE_READONLY=true strict even when
  * CAT_CAFE_AGENT_KEY_* vars leak in from the parent environment.
  *
- * Evidence: the L1 gate probe observed exactly READONLY ∪ AGENT_KEY (66 tools)
- * under CAT_CAFE_READONLY=true because the probe env carried agent-key vars —
- * the union is by design, but only for explicit opt-in (antigravity), never
- * for incidental env inheritance (third-party MCP mounts).
+ * Evidence: the L1 gate probe observed the canonical READONLY ∪ AGENT_KEY
+ * projection under CAT_CAFE_READONLY=true because the probe env carried
+ * agent-key vars. The exact set is derived from the home registry below; the
+ * union is allowed only for explicit opt-in (antigravity), never for incidental
+ * env inheritance (third-party MCP mounts).
  */
 function registeredNames(env?: ToolsetEnv): Set<string> {
   const server = new McpServer({ name: 'readonly-legacy-entry-test', version: '0.0.1' });

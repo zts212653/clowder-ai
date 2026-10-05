@@ -7,13 +7,16 @@
  * bubble chrome, size, concierge-thread discovery and read-only pet activity.
  */
 
+import { projectCompanionIdentity } from '@cat-cafe/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
-import { resolveCatDisplayName } from '@/lib/cat-display-name';
+import { resolveCompanionPartnerName } from '@/lib/companion-partner-name';
 import { useConciergeStore } from '@/stores/conciergeStore';
 import { type ThreadChatActivity, ThreadChatSurface } from '../thread-chat';
 import { ConciergePanelHeader, ConciergePanelResizeHandles } from './ConciergePanelChrome';
+import { OwnerPageActionControl } from './OwnerPageActionControl';
 import { useConciergeConfirmations } from './useConciergeConfirmations';
+import { useCurrentCompanionIdentity } from './useCurrentCompanionIdentity';
 import { usePanelWidth } from './usePanelWidth';
 
 export function ConciergePanel() {
@@ -21,7 +24,6 @@ export function ConciergePanel() {
   const setSurfaceState = useConciergeStore((state) => state.setSurfaceState);
   const setInputFocused = useConciergeStore((state) => state.setInputFocused);
   const fetchThreadId = useConciergeStore((state) => state.fetchThreadId);
-  const displayName = useConciergeStore((state) => state.displayName);
   const dutyCatProfileId = useConciergeStore((state) => state.dutyCatProfileId);
   const invocationStatus = useConciergeStore((state) => state.invocationStatus);
   const setInvocationStatus = useConciergeStore((state) => state.setInvocationStatus);
@@ -32,7 +34,10 @@ export function ConciergePanel() {
   const pendingPrompt = useConciergeStore((state) => state.pendingPrompt);
   const clearPendingPrompt = useConciergeStore((state) => state.clearPendingPrompt);
   const { getCatById } = useCatData();
-  const dutyCatDisplayName = dutyCatProfileId ? resolveCatDisplayName(dutyCatProfileId, getCatById) : undefined;
+  const dutyCatDisplayName = dutyCatProfileId ? resolveCompanionPartnerName(dutyCatProfileId, getCatById) : undefined;
+  const hostIdentity = useCurrentCompanionIdentity(dutyCatProfileId, surfaceState === 'bubble');
+  const hostIdentityView = hostIdentity ? projectCompanionIdentity(hostIdentity) : null;
+  const partnerName = hostIdentity?.partner.displayName ?? dutyCatDisplayName;
   const seenMessageCountRef = useRef<number | null>(null);
   const seedSequenceRef = useRef(0);
   const [composerSeed, setComposerSeed] = useState<{ id: string; text: string }>();
@@ -104,7 +109,7 @@ export function ConciergePanel() {
   return (
     <div
       role="dialog"
-      aria-label={`${displayName} 对话气泡`}
+      aria-label="猫猫球 对话气泡"
       aria-modal="false"
       style={{
         backgroundColor: 'var(--cafe-surface-canvas)',
@@ -159,7 +164,9 @@ export function ConciergePanel() {
       />
       <div data-testid="concierge-inner-content" className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
         <ConciergePanelHeader
-          title={dutyCatProfileId ? `${displayName} · 值班：${dutyCatDisplayName ?? dutyCatProfileId}` : displayName}
+          title="猫猫球"
+          partnerCatId={dutyCatProfileId}
+          partnerName={dutyCatProfileId ? (partnerName ?? dutyCatProfileId) : undefined}
           invocationStatus={invocationStatus}
           muted={muted}
           isExpanded={isExpanded}
@@ -167,6 +174,16 @@ export function ConciergePanel() {
           onToggleExpanded={toggleExpanded}
           onClose={handleClose}
         />
+        <details className="border-b border-cafe-divider px-3 py-1.5 text-micro text-cafe-muted">
+          <summary className="w-fit cursor-pointer">身份详情</summary>
+          <div className="mt-1 pl-3">
+            <p>{hostIdentityView?.liveLabel ?? 'Live 快端：载体待确认 · 型号未核实'}</p>
+            <p>
+              {hostIdentityView?.deepLabel ?? `已选深思端：${partnerName || dutyCatProfileId || '待确认'} · 型号未核实`}
+            </p>
+          </div>
+        </details>
+        <OwnerPageActionControl />
         {threadId ? (
           <ThreadChatSurface
             threadId={threadId}

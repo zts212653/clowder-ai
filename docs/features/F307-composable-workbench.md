@@ -1,14 +1,15 @@
 ---
 feature_ids: [F307]
-related_features: [F063, F120, F131, F138, F223, F284, F290, F299, F306, F309, F311]
-topics: [workspace, workbench, working-set, tabs, split, sidecar, restore, multi-agent, subagent, continuity]
+related_features: [F063, F120, F131, F138, F223, F284, F290, F299, F306, F309, F311, F322]
+topics: [workspace, workbench, working-set, tabs, focus-mode, split, sidecar, restore, multi-agent, subagent, continuity]
 doc_kind: spec
 created: 2026-08-26
 description: "把现有 Chat 右侧的 Workspace 升级为用户拥有的持续工作台，让 File、Artifact、Browser、Review 与 Agent Run 共存、组合与恢复，不被页面切换或后台行动静默覆盖。"
 description_source: human
 description_author: codex-sol
-description_updated_at: 2026-09-14T00:00:00Z
+description_updated_at: 2026-10-02T00:00:00Z
 design_gate_claim_contracts: [docs/design-gate-claims/f307-phase-a-real-shell.json]
+tips_exempt: "普通 surface 的专注入口持续显示；真实 Thread Host 中的 Artifact/Review 由同位置整窗动作替代，退出动作持续可见；额外 capability tip 会重复可见控件。"
 ---
 
 # F307: Composable Workbench — 用户拥有的多上下文工作台
@@ -27,7 +28,9 @@ a parallel Store, Queue, Router, or ownership cell.
 
 Post-activation delta: `hub-action-surface` additionally owns temporary main-area attention for every mounted
 Workspace tab. Eligibility derives from being the active tab, not from a domain opt-in; domain owners do not
-create a second layout shell, portal, modal, or feature-owned full-screen state.
+create a second layout shell, portal, modal, or feature-owned full-screen state. The operator-approved Artifact / Studio
+variant may temporarily collapse the conversation-history column while preserving the canonical Chat runtime and
+mounted Chat tree; it remains the same transient F307 attention/return owner, not a second full-screen store.
 
 Why: 当前 cell 已登记 Workspace 导航、Preview、rich block 与 F284 右侧上下文 Workspace，却把全局
 typed working set 的 ownership 错挂在 F284/F290 关系上。F307 将 application-level Workbench 的
@@ -101,6 +104,83 @@ Program 等领域 owner 各自声明 capability。schema v2 中既有的 `mainAr
 分别从窄栏进入真实主内容 rectangle，保持 Chat 与 owner DOM identity、领域内状态及滚动；split 中
 只展开 exact active surface，再从 tab `×` 返回，active surface、working set 与保存的 split 均不改变。
 
+### Artifact full-window work view contract
+
+Delivery truth: **operator accepted; implementation pending**（R10 / AC-D5 未勾选）。
+
+Architecture cell: `hub-action-surface`
+
+Map delta: `none` — 这是现有 F307 transient attention / return boundary 的 Artifact / Studio 投影，不新增
+Workspace、Chat runtime、layout store、领域 writer 或持久 full-screen topology。F309 继续拥有作品输入、
+批注与版本协作语义；Chat owner 继续拥有消息、草稿、发送与定位，Agent/runtime owner 继续拥有执行状态；
+F307 只安排可见几何和返回。
+
+Canonical source: 本文 `#artifact-full-window-work-view-contract`；
+
+Consumer evidence: `rg -n "mainAreaAttention|ChatContainer|thread-chat-host|artifact.*full.window|workspace.*attention" packages/web/src docs/features docs/evidence`；同一 Chat DOM、owner composer 与消息定位是跨 Host / F309 / Chat owner 的语义关系，不能只靠 import graph 自动推断。
+
+Claim guard: “整窗只改变瞬态 projection，不复制或丢失 Chat / owner state” →
+`F307 artifact full-window work view > keeps canonical Chat mounted, preserves the prior ratio and returns to the exact message`
+and real-shell browser journey `f307-artifact-full-window-work-view`（implementation pending）→ Chat 或 owner
+被重挂、草稿/滚动/选择/用户比例丢失、后台消息抢焦点、预览无法回 exact message 时 RED。
+
+- 默认仍是 Chat 在左、作品在右的可拖动布局；只由人的显式展开动作进入整窗。该状态是瞬态 projection，
+  不写入 persisted working-set topology；用户调过的左右比例独立保留。
+- 整窗时 conversation history column 可以在视觉与可访问性上让开，但 canonical Chat runtime 和原 Chat DOM
+  必须继续 mounted，不销毁；F307 不得为整窗另起 socket / history / composer store。被让开的历史区必须
+  `inert` / 不可聚焦，不能只缩成 0px 却把隐藏控件留在键盘与读屏顺序里。
+- 作品 owner 的真实输入入口留在底部，并继续把发送写入同一 Thread；F307 只提供摆放，不复制草稿或发送
+  语义。聚焦输入时，上方可用 canonical Chat 的只读投影展示最后两条消息（含说话者名牌），并复用同一
+  execution truth 展示“执行中”；它不是第二份 message history 或运行状态。
+- 整窗期间的新回复只显示一行被动提示，不自动展开、不改 active surface、不抢键盘焦点。点击该提示先
+  退出整窗，再定位 canonical Chat 中的 exact message；消息已撤回、不可见或 Thread 已变时 fail closed，
+  不猜最近一条替代。
+- 再点展开动作或按 `Escape` 回到原左右布局；恢复同一 Chat / owner component identity、用户调过的比例、
+  两边草稿、Chat 与作品滚动、选择和当前版本。后台 Artifact / Agent 更新继续只记 activity，不得进入整窗。
+- 本轮只冻结桌面 Artifact / Studio 旅程；现有 390px full-screen Workspace 与 Focus Mode 合同不因此改写，
+  也不能拿现有 generic main-area attention（会停止 Chat 可见交互）冒充本条已交付。
+
+### In-place focus mode contract
+
+Architecture cell: `hub-action-surface`
+
+Map delta: `none` — F307 继续拥有 application-level presentation；F063/F120 既有 focus chrome 与
+`BrowserPanel.previewOnly` 作为 owner consumer 被默认 Workbench 复用，没有新增 layout owner、store 或
+领域 lifecycle writer。
+
+Canonical source: `packages/web/src/components/workspace/WorkspaceFocusShell.tsx#WorkspaceFocusExitButton`,
+`packages/web/src/components/workspace/BrowserPanel.tsx#BrowserPanel`, 本文 `#in-place-focus-mode-contract`。
+
+Consumer evidence: `rg -n "FocusModeButton|WorkspaceFocusExitButton|previewOnly" packages/web/src/components/{workbench,workspace}`
+必须同时命中 F307 pane/renderer 与 F120 Browser owner；自动 ownership scan 不表达这一瞬态 UI 组合关系。
+
+Claim guard: “只改变 chrome projection，不重挂 owner 或改 topology” →
+`F307 surface focus mode > keeps the owner DOM mounted while hiding and restoring the pane chrome` +
+`F307 zero-surface canonical Home invariant > focuses the exact active surface without mutating its working set, split, or sidecar`
+→ owner node 被替换、layout 变化或 chrome 未恢复时 RED。
+
+右侧 Workspace 保持与 Chat 并排时，active surface 还需要一个更轻的“专注”动作：它不把 Workspace
+搬进主区，而是在原位暂时收起 F307 与领域 surface 的导航 chrome，把纵向空间还给棋盘、Preview、
+文档或其他当前内容。这是 F063 已验收 Focus Mode 在 F307 默认宿主中的恢复，不是第三种 layout truth。
+
+- 入口属于当前 pane header，不属于 tab view-mode switch；stack/split 中任一可见主 pane 都可被选中并进入专注。
+  唯一例外是具备真实 Thread Host 的 active Artifact / Review：同一 pane header 位置显示“整窗”，并隐藏
+  generic main-area 入口，避免同一作品同时暴露两套竞争的 presentation；standalone 或 host-ineligible
+  Artifact / Review 仍沿用原位专注。
+- 专注只投影 exact focused surface；F307 tabs/control rail、Activity、sidecar、Recently Closed 与 pane
+  header 暂时不可见。Browser owner 同时消费既有 `previewOnly`，收起其 toolbar、Browser tabs、console
+  与状态条；其他领域 owner 不需要复制 focus store。
+- 外层 `ContextualWorkspaceChrome` 保留，因此 Workspace 的折叠/召回仍可见；内容上方提供既有暖色
+  `退出专注` 按钮，父文档焦点下也可按 Escape 退出，不能把恢复藏成 iframe 内快捷键。
+- `focusSurfaceId` 只是 F307 瞬态 projection state，不持久化，也不改 active/order/pin/split/sidecar。
+  未聚焦 surface 与 sidecar 的 owner DOM 继续 mounted；退出后恢复同一 working set、同一 owner 实例与
+  Browser 内部状态。
+- active surface 被替换/关闭、回到 Home、折叠 Workspace 或离开当前 host 时自动退出；这些边界只
+  清理 focus projection，不终止 Browser/Terminal/Agent Run 或改写 owner lifecycle。
+
+验收必须测量真实内容 rectangle，而非只检查按钮或 `display:none`：桌面和 390px 都要证明专注后
+Preview 获得显著纵向空间、所有导航 chrome 消失、owner DOM identity 与 topology 不变，退出后完整恢复。
+
 ## Product Thesis — Workbench，不是 Tabification
 
 一个 surface 进入 Workbench，需要同时满足四个关系：
@@ -117,13 +197,14 @@ Collective 的多人多 Café 多 Agent 工作，不要求两个世界复制两�
 
 这里的 **Workbench 就是现有 Clowder AI 右侧 Workspace 本体的升级方向**，不是 Workspace launcher
 里再出现一张“共同工作集”卡，也不是用户先进入的独立页面。现有左侧对话列表和中间 Chat 是
-真实 shell 基线；F307 只让右侧 Workspace 从一次只能容纳一个对象的槽位，成长为用户拥有的持续
-working set。
+默认 shell 基线；F307 让右侧 Workspace 从一次只能容纳一个对象的槽位，成长为用户拥有的持续
+working set，并只在人的显式 Artifact / Studio 整窗动作下瞬态重排同一 shell。
 
 因此 Chat 与 Workbench 是同一产品壳里的相邻协作区域，不是同一种 surface。Chat 保持中栏沟通
-现场，可以通过用户动作把 File、Artifact、Review 等对象打开到右侧；但 Chat 本身不进入
-`WorkspaceSurfaceDescriptor`，也不被 F307 排成 tab、split 或 sidecar。F307 的 application-level
-含义是右侧 working set 可随用户跨 Thread / Café / Collective 持续存在，不是 F307 接管整个三栏壳。
+现场，可以通过用户动作把 File、Artifact、Review 等对象打开到右侧；整窗作品视图只让 Chat history
+column 暂时让开，不把 Chat 变成 Workbench surface。Chat 本身不进入 `WorkspaceSurfaceDescriptor`，
+也不被 F307 排成 tab、split 或 sidecar。F307 的 application-level 含义是右侧 working set 可随用户
+跨 Thread / Café / Collective 持续存在，并拥有同一宿主内的瞬态几何恢复，不是 F307 接管 Chat truth。
 
 Workbench tabs/actions 区的 `+` 回到 **canonical Workspace Home**，不是某个领域对象的快捷键，
 也不另造 chooser、drawer 或 sheet。Home 直接复用现有“正在发生 / 你想打开什么？ / 搜索 / 最近轨迹 /
@@ -148,6 +229,8 @@ Workspace owner 持有，Home 本身不进入 tab 集合或 persistence。
 - working set 不设静默上限、不自动驱逐；用户可显式收起其他未固定页面，保留 active 与 pinned，
   且批量收起与单页关闭一样只 detach host，不停止运行、不删除 Task / Artifact / owner object。
 - 桌面 split、窄屏 stack / full-screen host 与 fold / reopen 使用同一 working-set truth。
+- 桌面 Artifact / Studio 可显式进入整窗 projection：Chat history column 暂时让开，但同一 Chat runtime / DOM、
+  owner 输入与恢复现场保活；消息预览只读 canonical Chat truth，后台更新不抢焦点。
 - 从 F284 右侧 Workspace 状态迁移、坏持久化 fail closed、悬挂 objectRef 安全降级与可恢复验证；
   被否决的 F290 prototype state 不迁入未来 Workbench。
 
@@ -159,7 +242,8 @@ Workspace owner 持有，Home 本身不进入 tab 集合或 persistence。
 - SelectionAnchor、human edit/change awareness、annotation thread、Agent patch/disposition、remap/orphan
   或协作 metadata ledger；这些属于 F309，F307 只保存 surface topology，也不依据内容变化唤醒猫。
 - 把所有页面机械塞进 tab，或用预设 tab、头像/presence、独立 `/dev` 壳冒充产品整合。
-- 把中间 Chat 搬进 Workbench、降成普通 tab，或让 F307 接管左侧对话导航与 Chat 生命周期。
+- 把中间 Chat 搬进 Workbench、降成普通 tab，复制消息/草稿/执行状态，或让 F307 接管左侧对话导航与
+  Chat 生命周期；整窗 projection 只重排/隐藏同一 mounted Chat 的可见区域，不改变这条 owner 边界。
 - 在现有 Workspace 内再注册一个“共同工作集”模式或入口，把整体容器错误地降成容器里的功能卡。
 - 让关闭 tab 隐式删除文件、终止 Agent run、关闭 Browser session 或撤销领域承诺。
 - 在没有真实产品入口、非 fixture 行为与恢复证据时宣布“可组合工作台已完成”。
@@ -192,6 +276,11 @@ Scope unit: **一个用户跨 Thread / Café / Collective 持有的右侧 applic
 5. 用户切换 Thread、折叠 Workspace、改成窄屏或刷新；合法 surface、layout 与 owner state 恢复，
    坏 owner payload 或悬挂对象只降级该 surface，不把整个 Workbench 打崩。
 6. 用户关闭一个 tab；视觉现场消失，但领域对象与后台运行只按其 owner 的显式 lifecycle 处理。
+7. 用户与猫在 Browser surface 中下棋或操作纵向内容；点击 pane header 的“专注”后，Chat 仍在左侧，
+   右侧只保留当前棋盘与显式退出动作。退出后 tabs、sidecar 与 Browser 工具栏原样回来，棋局不重载。
+8. 用户在默认左右布局查看作品，显式进入整窗后 Chat history column 暂时让开，作品与原 owner 输入占据
+   主窗口。聚焦输入可查看最后两条 canonical 消息和同源“执行中”；新回复只给一行、不抢焦点。点击提示
+   回到左右布局并定位 exact message，或按 `Escape` 恢复用户比例、两边草稿、滚动、选择与当前版本。
 
 ## Requirements Checklist
 
@@ -205,6 +294,8 @@ Scope unit: **一个用户跨 Thread / Café / Collective 持有的右侧 applic
 | R6 | 单人多 Agent 使用同一 Workbench；F290 未来 Collective adapter 作为下游 owner consumer 接入，不阻塞 generic host 交付 | AC-C1, AC-C2 | [x] |
 | R7 | 桌面与窄屏共享 truth，响应式变化不终止 owner lifecycle | AC-B2, AC-D1 | [x] |
 | R8 | 主 agent 与 linked 子 agent 使用 typed identity 分层呈现；子 final 不冒充主 final，刷新与 Agent Run 恢复同一身份 | AC-D3 | [x] |
+| R9 | 右侧 active surface 可原位收起宿主与 Browser chrome，增加内容高度且不重挂 owner 或改写 working set | AC-D4 | [x] |
+| R10 | 桌面作品可显式整窗；Chat history 暂时让开但 canonical runtime/DOM 保活，owner 输入、消息预览、无焦点劫持与 exact return 同时成立 | AC-D5 | [ ] |
 
 ## Acceptance Criteria
 
@@ -262,6 +353,14 @@ Scope unit: **一个用户跨 Thread / Café / Collective 持有的右侧 applic
   `01a0a0a3-76ed-79a1-b2e6-65c285f14d30`；浏览器 observation / 截图位于
   `/tmp/cat-cafe-evidence/f307-root-child-alpha-20260914-postfix/`。验收后 3011/3012/4111 已停止，
   production runtime 3003/3004 与 Redis 6399 未触碰。
+- [x] **AC-D4**：从真实 Thread shell 的 Browser surface 进入原位专注；桌面与 390px 都隐藏 F307 tab /
+  control rail、pane header 与 Browser toolbar/tabs/status，内容 rectangle 获得显著纵向空间。focused owner
+  DOM、active/order/pin/split/sidecar 保持不变；点击可见“退出专注”后完整恢复且棋局/Preview 不重载。
+- [ ] **AC-D5**：从真实桌面 Thread shell 的默认左右作品布局显式进入整窗；同一 Chat runtime / mounted
+  DOM 与同一 owner surface 不重挂，底部 owner 输入继续写入当前 Thread。聚焦输入显示 canonical 最后两条
+  消息与同源执行状态；后台新回复只给一行且不展开/不抢焦点，点击后退出整窗并定位 exact message。
+  再点展开或按 `Escape` 恢复用户比例、两边草稿、Chat / 作品滚动、选择与当前版本；invalid message / route
+  fail closed。组件身份断言与真实浏览器旅程均通过后才能勾选，北极星稿或 generic attention 不能代替。
 
 ## Phases
 
@@ -293,7 +392,7 @@ Artifact 与多 Café 信任闭环；需要进入 Workbench 的对象通过 adap
 | KD-4 | 各领域 owner 保留 canonical object、权限、renderer 和 lifecycle；F307 只保存 projection topology | ownership audit / PR #3981 review |
 | KD-5 | PR #3981 只作为被否决方向的历史原型证据，不是 F290 交付、F307 Gate pass 或既定 merge 路径；不得继续合入 | `private-source-id`, `private-source-id` |
 | KD-6 | F290 不等待完整 Workbench；先恢复 5102 baseline 的 Collective 产品主线 | `private-source-id`, `private-source-id` |
-| KD-7 | “共同工作台”就是现有右侧 Workspace 的整体升级，不是 Workspace 内一个叫“共同工作集”的独立入口；左侧对话列表与中间 Chat 保持现有壳位置，Chat 不进入 F307 typed surface 集合 | `private-source-id` |
+| KD-7 | “共同工作台”就是现有右侧 Workspace 的整体升级，不是 Workspace 内一个叫“共同工作集”的独立入口；左侧对话列表与中间 Chat 是默认壳位置，Chat 不进入 F307 typed surface 集合。其“物理位置始终不让开”部分已被 KD-25 的显式 Artifact 整窗 projection 收窄，identity / ownership 边界不变 | `private-source-id`; KD-25 |
 | KD-8 | `+` 不直接打开 Browser；TUNE-2 曾误收敛为临时 drawer/sheet chooser，已被 KD-9 supersede | `private-source-id`, `private-source-id` |
 | KD-9 | `+` 打开的新页面就是 canonical Workspace Home 本身；直接复用真实进行中、搜索、最近轨迹与领域入口，桌面/窄屏都不另造 drawer、modal 或 sheet | `private-source-id` |
 | KD-10 | Phase A 候选必须同时通过显式 opt-in、非生产/非 runtime 构建许可与 query 请求；production 或 deployment=`runtime` 时许可恒为关闭。Phase B/C 只在 worktree/测试/受控 Alpha 取证，普通 runtime 等 Phase D KEEP 后才激活 | `private-source-id`, `private-source-id` |
@@ -310,3 +409,5 @@ Artifact 与多 Café 信任闭环；需要进入 Workbench 的对象通过 adap
 | KD-21 | operator 认可现有展开图标，并要求它成为 F307 / Workspace 全部 Tab 的共享宿主能力。桌面 eligibility 只由 active mounted tab 推导；主区只投影 exact active surface，不改 split/sidecar topology，不重挂 owner 或 Chat，不接管领域生命周期。Home 不是 tab，390px 已是 full-screen，二者不显示冗余入口 | `[thread-id]#private-source-id` |
 | KD-22 | 窄屏宿主只投影 F307 的 canonical working-set truth；legacy `workspaceMode` 不得隐藏 active surface、另挂 Approval sheet，或让相邻 Listen Mode 误判 Workspace 未显示。全局 Approval 入口在桌面与 390px 都打开同一个 `workspace:mode:approval` owner surface | Alpha counterexample `[thread-id]#private-source-id`; Task `private-source-id` |
 | KD-23 | F306 保留 root/child 生命周期与 provider-neutral identity；F307 只消费 typed subexecution 做 Chat 与 Agent Run 分层投影，不保存第二份 child truth。主 reply 是普通猫消息，child final 是嵌套回报；没有 typed role 就不猜 author/reviewer | operator `[thread-id]#private-source-id`; F306 PR #4544; F307 Task `private-source-id` |
+| KD-24 | F307 默认宿主恢复 F063 已验收的 pane-level Focus Mode：右栏原位只保留 exact active content 与显式退出，不搬主区、不新建 owner、不改 topology；Browser 复用 `previewOnly` 同步收起内部 chrome。外层 Workspace header 保留召回，桌面与 390px 必须以内容高度和 DOM identity 验收 | `[thread-id]#private-source-id`; F063 Focus Mode PR #966 / UX R2 #975 |
+| KD-25 | 桌面 Artifact / Studio 默认仍为 Chat + 作品左右布局；人可显式进入整窗，让 conversation history column 暂时让开。canonical Chat runtime / mounted DOM、owner 输入、草稿/滚动/选择与用户比例保活；聚焦输入只读投影最后两条消息和同源执行状态，新回复不自动展开或抢焦点，点击提示回 exact message。它复用 F307 transient attention/return owner，不新增 full-screen store，也不把 Chat 变成 typed surface | operator `[thread-id]#private-source-id`; Studio §0.9 commit `fcbfc2b0fd` |

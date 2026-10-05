@@ -32,14 +32,14 @@ import { BRIEFING_TIMEZONE } from '../../duty-briefing/constants.js';
 import { formatPromptTime } from '../../format-time.js';
 import { isSameUserWaveSiblingReply } from '../../freshness/FreshnessRelevancePolicy.js';
 import type { DegradationResult } from '../../orchestration/DegradationPolicy.js';
-import { mapToPresentation } from '../../session/context-presentation.js';
+import { mapToPresentation } from '../../session/context/context-presentation.js';
 import {
   type ContextModeProjection,
   type ContextSurfaceProjection,
   countPresentedTiers,
   projectContextMode,
   withSurfaceShape,
-} from '../../session/context-surface-projection.js';
+} from '../../session/context/context-surface-projection.js';
 import { cursorFor } from '../../stores/cursor.js';
 import { DeliveryCursorStore } from '../../stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../../stores/ports/DraftStore.js';
@@ -241,6 +241,7 @@ export function mergePersistedPromptMessages(
 
 /** Common options for both strategies */
 export interface RouteOptions {
+  liveCompanion?: import('../../types.js').AgentServiceOptions['liveCompanion'];
   /** Route-owned intent plus whether the user explicitly selected it. */
   routeIntent?: AgentRouteIntent;
   /** F293: deterministic scope used to resolve sparse routing cognition. */
@@ -2661,4 +2662,22 @@ async function assembleSmartWindowContext(
         }
       : {}),
   };
+}
+
+/**
+ * F309: a publication names a message by its stored time, which the live bubble cannot know on its
+ * own clock. Read it back with the stored id; an unreadable time is left unknown, never guessed.
+ */
+export async function storedMessageTimestamp(
+  store: Pick<IMessageStore, 'getById'>,
+  messageId: string | undefined,
+): Promise<{ messageTimestamp: number } | Record<string, never>> {
+  if (!messageId) return {};
+  try {
+    const stored = await store.getById(messageId);
+    return stored?.id === messageId ? { messageTimestamp: stored.timestamp } : {};
+  } catch (err) {
+    log.warn({ err, messageId }, 'stored message time unreadable; done leaves it unknown');
+    return {};
+  }
 }

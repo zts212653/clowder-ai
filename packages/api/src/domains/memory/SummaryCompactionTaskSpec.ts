@@ -77,6 +77,7 @@ export function createSummaryCompactionTaskSpec(deps: SummaryCompactionDeps): Ta
     profile: 'awareness',
     trigger: { type: 'interval', ms: config.schedulerIntervalMs },
     admission: {
+      dependsOnThreadActivity: true,
       async gate() {
         backfillSummaryState(deps.db);
 

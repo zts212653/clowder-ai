@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Thread } from '@/stores/chat-types';
 import { useLabelStore } from '@/stores/label-store';
 import { useSidebarProjectionStore } from '@/stores/sidebarProjectionStore';
 import {
@@ -136,6 +137,53 @@ describe('Group member sorting and reading stability', () => {
     await presence('', 0);
     expect(allIds()).toEqual(before);
     expect(ids()).toEqual(['a', 'b', 'c']);
+  });
+
+  it.each([
+    ['置顶', 0],
+    ['项目', 0],
+    ['置顶', 250],
+    ['项目', 250],
+  ] as const)('promotes outside work in %s with %i extra rows, preserving the open Group session', async (tab, extra) => {
+    mockStore.threads = [
+      ...(mockStore.threads as Thread[]).map((thread) =>
+        thread.id === 'other' ? { ...thread, lastActiveAt: 2 } : thread,
+      ),
+      ...Array.from({ length: extra }, (_, index) => ({
+        id: `extra-${index}`,
+        title: `历史 ${index}`,
+        participants: [],
+        createdBy: 'user',
+        createdAt: 1,
+        lastActiveAt: 1,
+        pinned: true,
+        projectPath: '/project',
+      })),
+    ];
+    await harness.render();
+    if (tab === '项目') {
+      await act(async () =>
+        [...harness.container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          .find((element) => element.textContent?.includes(tab))
+          ?.click(),
+      );
+      await harness.flush();
+      await act(async () => harness.container.querySelector<HTMLButtonElement>('[aria-label="展开全部项目"]')?.click());
+      await harness.flush();
+    }
+    await presence('c');
+    await select('running-first');
+    expect(allIds()[0]).toBe('c');
+    const memberIds = ids();
+
+    await presence('other');
+    expect(allIds()[0]).toBe('other');
+    expect(ids()).toEqual(memberIds);
+    expect(header()?.dataset.expanded).toBe('true');
+
+    await presence('', 0);
+    expect(allIds()[0]).toBe('c');
+    expect(ids()).toEqual(memberIds);
   });
 
   it('keeps the confirmed mode and reading position when saving fails', async () => {

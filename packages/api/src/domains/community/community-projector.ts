@@ -136,13 +136,23 @@ export class CommunityProjector {
     if (isExternalReviewEventKind(event.kind)) {
       const result = applyExternalReviewProjectionEvent(proj.externalReview, event);
       if (!result.ok) return followUps;
-      await this.objectStore.save({
+      const externalReviewUpdated: CommunityObjectProjection = {
         ...proj,
         externalReview: result.value,
         appliedEventCount: proj.appliedEventCount + 1,
         lastRejectedEvent: null,
         updatedAt: now,
-      });
+      };
+      // F168 fix (clowder-ai#1511): case.external_review_assigned carries reviewer
+      // identity that must be projected as top-level ownership. Without this,
+      // coordinator-admitted cases (no preceding case.routed) have null ownership
+      // and verdict bootstrap Case 1 fails with 503 projection_unavailable.
+      if (event.kind === 'case.external_review_assigned') {
+        const p = event.payload as Record<string, unknown>;
+        if (typeof p.reviewerThreadId === 'string') externalReviewUpdated.ownerThreadId = p.reviewerThreadId;
+        if (typeof p.reviewerCatId === 'string') externalReviewUpdated.ownerRole = p.reviewerCatId;
+      }
+      await this.objectStore.save(externalReviewUpdated);
       return followUps;
     }
 

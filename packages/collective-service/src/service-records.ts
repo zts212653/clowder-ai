@@ -1,4 +1,12 @@
-import type { CollectiveEventEnvelope } from '@cat-cafe/shared';
+import type {
+  CollectiveBindingVoteRecord,
+  CollectiveDecisionRecord,
+  CollectiveEventEnvelope,
+  CollectiveReactionEmoji,
+  CollectiveRoadmapRecord,
+  CollectiveVoteRecord,
+  CollectiveWorkRecord,
+} from '@cat-cafe/shared';
 import type { HumanAuthAttemptRecord, HumanAuthBindingRecord, HumanAuthCompletionRecord } from './human-auth-state.js';
 import type { ParticipationRecord } from './participation-store.js';
 
@@ -28,6 +36,17 @@ export interface MembershipRecord {
   readonly humanId: string;
   readonly role: 'steward' | 'member';
   readonly joinedAt: string;
+  readonly status: 'active' | 'left';
+  readonly revision: number;
+  readonly leftAt?: string;
+  readonly leaveReason?: 'self_left';
+  readonly history: readonly {
+    readonly revision: number;
+    readonly action: 'joined' | 'left';
+    readonly at: string;
+    readonly role: 'steward' | 'member';
+    readonly reason?: 'self_left';
+  }[];
 }
 
 export interface InviteRecord {
@@ -58,11 +77,39 @@ export interface ConnectionRecord {
   readonly credentialDigest: string;
   readonly authorizedHumanId?: string;
   readonly status: 'connected' | 'revoked';
-  readonly revocationReason?: 'owner_revoked' | 'self_revoked' | 'identity_rebind_required';
+  readonly revocationReason?: 'owner_revoked' | 'self_revoked' | 'identity_rebind_required' | 'membership_left';
   readonly lastDeliveredSequence: number;
   readonly lastAckedSequence: number;
   readonly createdAt: string;
   readonly revokedAt?: string;
+}
+
+export interface CollaborationOperationReceipt {
+  readonly actorScope: string;
+  readonly fingerprint: string;
+  readonly resourceKind: 'work' | 'roadmap' | 'vote' | 'binding_vote' | 'reaction';
+  readonly resourceId: string;
+  readonly revision: number;
+  readonly recordedAt: string;
+}
+
+export interface ReactionRecord {
+  readonly v: 1;
+  readonly reactionId: string;
+  readonly serviceInstanceId: string;
+  readonly collectiveId: string;
+  readonly eventId: string;
+  readonly emoji: CollectiveReactionEmoji;
+  readonly humanId: string;
+  readonly active: boolean;
+  readonly revision: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly history: readonly {
+    readonly revision: number;
+    readonly active: boolean;
+    readonly at: string;
+  }[];
 }
 
 export interface ServiceState {
@@ -87,6 +134,13 @@ export interface ServiceState {
   readonly connections: Record<string, ConnectionRecord>;
   readonly events: Record<string, CollectiveEventEnvelope[]>;
   readonly participations: Record<string, ParticipationRecord>;
+  readonly works: Record<string, CollectiveWorkRecord>;
+  readonly roadmaps: Record<string, CollectiveRoadmapRecord>;
+  readonly votes: Record<string, CollectiveVoteRecord>;
+  readonly bindingVotes: Record<string, CollectiveBindingVoteRecord>;
+  readonly decisions: Record<string, CollectiveDecisionRecord>;
+  readonly reactions: Record<string, ReactionRecord>;
+  readonly collaborationOperations: Record<string, CollaborationOperationReceipt>;
   readonly legacyEvents: Record<string, unknown[]>;
   readonly clientEventIndex: Record<string, string>;
 }

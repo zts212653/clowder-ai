@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { defineConfig } from 'vitest/config';
+import { vitestReporters } from '../../scripts/test-file-timing/vitest-file-timing-reporter.mjs';
 
 export default defineConfig({
   define: {
@@ -10,6 +11,7 @@ export default defineConfig({
     jsxImportSource: 'react',
   },
   test: {
+    reporters: vitestReporters(),
     environment: 'jsdom',
     include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx'],
     setupFiles: ['src/test-setup.ts'],

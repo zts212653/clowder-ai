@@ -273,6 +273,7 @@ export function createMainHealthTemplate(options: MainHealthTemplateOptions = {}
         trigger: p.trigger,
         actor: { role: 'health-monitor', costTier: 'cheap' },
         admission: {
+          dependsOnThreadActivity: false,
           async gate() {
             if (!repo || !branch || !healthCommand || !guardianCatId) {
               return { run: false, reason: 'repo, branch, healthCommand, and guardianCatId are required' };

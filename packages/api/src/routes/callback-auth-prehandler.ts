@@ -11,6 +11,7 @@ import type { InvocationRecord, VerifyResult } from '../domains/cats/services/ag
 import { toolExecutionPolicyDenial } from '../domains/cats/services/agents/invocation/tool-execution-policy.js';
 import type { CallbackAuthSystemMessageNotifier } from './callback-auth-system-message.js';
 import { recordCallbackAuthFailure, recordLegacyFallbackHit } from './callback-auth-telemetry.js';
+import { allowCollectiveWorkScope } from './callback-collective-work-scope.js';
 import { makeCallbackAuthError } from './callback-errors.js';
 import { derivePrincipal } from './callback-scope-helpers.js';
 
@@ -27,7 +28,12 @@ function callbackToolFromUrl(url: string): string {
 }
 
 function allowToolExecution(request: FastifyRequest, reply: FastifyReply, record: InvocationRecord): boolean {
-  const denial = toolExecutionPolicyDenial(record.toolExecutionPolicy, callbackToolFromUrl(request.url));
+  const denial = toolExecutionPolicyDenial(
+    record.toolExecutionPolicy,
+    record.toolExecutionPolicy?.mode === 'callback_allowlist'
+      ? `${request.method} ${request.url}`
+      : callbackToolFromUrl(request.routeOptions.url ?? ''),
+  );
   if (!denial) return true;
   reply.status(403).send({
     error: 'tool_policy_violation',
@@ -101,7 +107,12 @@ export function registerCallbackAuthHook(
     // refresh-token does its own atomic verifyLatest in preValidation and
     // pre-populates callbackAuth. Preserve that atomic freshness decision.
     if (request.callbackAuth) {
-      if (options.enforceToolExecutionPolicy !== false) allowToolExecution(request, reply, request.callbackAuth);
+      if (!allowCollectiveWorkScope(request, reply, request.callbackAuth)) return;
+      if (
+        options.enforceToolExecutionPolicy !== false ||
+        request.callbackAuth.toolExecutionPolicy?.mode === 'callback_allowlist'
+      )
+        allowToolExecution(request, reply, request.callbackAuth);
       return;
     }
 
@@ -182,7 +193,13 @@ export function registerCallbackAuthHook(
         '[#476 DEPRECATED] Callback credentials received via body/query — migrate to X-Invocation-Id / X-Callback-Token headers',
       );
     }
-    if (options.enforceToolExecutionPolicy !== false && !allowToolExecution(request, reply, result.record)) return;
+    if (!allowCollectiveWorkScope(request, reply, result.record)) return;
+    if (
+      (options.enforceToolExecutionPolicy !== false ||
+        result.record.toolExecutionPolicy?.mode === 'callback_allowlist') &&
+      !allowToolExecution(request, reply, result.record)
+    )
+      return;
     request.callbackAuth = result.record;
     request.callbackPrincipal = derivePrincipal(result.record);
   });

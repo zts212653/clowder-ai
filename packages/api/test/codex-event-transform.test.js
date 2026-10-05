@@ -178,14 +178,26 @@ test('app-server mapper preserves envelope identity for downstream scope fences'
       params: {
         threadId: 'child-1',
         turnId: 'child-turn-1',
-        item: { id: 'msg-1', type: 'agentMessage', text: 'child result' },
+        item: {
+          id: 'msg-1',
+          type: 'agentMessage',
+          text: 'child result',
+          delivery: 'async',
+          questions: [{ title: 'Continue?', options: ['Yes', 'No'] }],
+        },
       },
     }),
     {
       type: 'item.completed',
       thread_id: 'child-1',
       turn_id: 'child-turn-1',
-      item: { id: 'msg-1', type: 'agent_message', text: 'child result' },
+      item: {
+        id: 'msg-1',
+        type: 'agent_message',
+        text: 'child result',
+        delivery: 'async',
+        questions: [{ title: 'Continue?', options: ['Yes', 'No'] }],
+      },
     },
   );
 });

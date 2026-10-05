@@ -45,8 +45,8 @@ for (const existing of [false, true]) {
   ]) {
     test(
       `${existing ? 'existing' : 'fresh'} server: ${fault.name} rolls back only its actual creation`,
-      { timeout: 10000 },
-      async () => {
+      { timeout: 30000 },
+      async (t) => {
         const gateway = new TmuxGateway();
         const wt = `test-create-failure-${randomUUID()}`;
         const dir = mkdtempSync(join(tmpdir(), 'catcafe-create-failure-'));
@@ -55,7 +55,8 @@ for (const existing of [false, true]) {
         const witness = join(dir, 'witness.json');
         const proxy = join(dir, 'tmux-proxy.cjs');
         try {
-          if (existing) await gateway.createAgentPaneLease(wt, { cwd: dir, command: ['/bin/sleep', '30'] });
+          if (existing)
+            await gateway.createAgentPaneLease(wt, { cwd: dir, command: ['/bin/sleep', '60'], signal: t.signal });
           const siblings = panes(gateway, wt);
           writeFileSync(
             join(dir, 'control.json'),
@@ -67,7 +68,8 @@ for (const existing of [false, true]) {
           await assert.rejects(
             gateway.createAgentPaneLease(wt, {
               cwd: dir,
-              command: ['/bin/sh', '-c', `echo $$ > '${ready}'; exec /bin/sleep 30`],
+              command: ['/bin/sh', '-c', `echo $$ > '${ready}'; exec /bin/sleep 60`],
+              signal: t.signal,
             }),
             fault.exitCode ? /Command failed/ : /valid pane identity/,
           );

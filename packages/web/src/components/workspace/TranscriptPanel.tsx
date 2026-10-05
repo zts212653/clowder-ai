@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { API_URL, apiFetch } from '@/utils/api-client';
-import { AudioHealthStrip } from './AudioHealthStrip';
 import { AudioInputPicker } from './AudioInputPicker';
 import type {
   AudioInputRequest,
@@ -12,16 +11,12 @@ import type {
   AudioStatus,
   TranscriptLine,
 } from './audio-transcript-contract';
+import { revokeMeetingShareBeforeCapture } from './revokeMeetingShareBeforeCapture';
+import { TranscriptCaptureHeader } from './TranscriptCaptureHeader';
 import { TranscriptLineRow } from './TranscriptLineRow';
 
 export type { TranscriptLine } from './audio-transcript-contract';
 export { TranscriptLineRow } from './TranscriptLineRow';
-
-function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
 
 export function TranscriptPanel() {
   const [lines, setLines] = useState<TranscriptLine[]>([]);
@@ -168,6 +163,7 @@ export function TranscriptPanel() {
 
   const handleStop = useCallback(async () => {
     try {
+      await revokeMeetingShareBeforeCapture();
       const resp = await apiFetch('/api/audio/stop', { method: 'POST' });
       if (resp.ok) {
         const data = (await resp.json()) as {
@@ -189,6 +185,7 @@ export function TranscriptPanel() {
 
   const handlePause = useCallback(async () => {
     try {
+      await revokeMeetingShareBeforeCapture();
       const resp = await apiFetch('/api/audio/pause', { method: 'POST' });
       if (resp.ok) setStatus((prev) => ({ ...prev, paused: true }));
     } catch {}
@@ -243,57 +240,16 @@ export function TranscriptPanel() {
         : '—';
 
   return (
-    <div className="flex h-full flex-col bg-cafe-surface-primary">
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-cafe-border px-3 py-2">
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${status.running ? (status.paused ? 'bg-[var(--semantic-warning)]' : 'bg-conn-green-text animate-pulse') : 'bg-cafe-text-muted'}`}
-        />
-        <span className="flex-1 truncate text-sm font-medium text-cafe-text-primary">
-          {status.running ? (status.paused ? 'Paused' : sourceLabel) : 'Not monitoring'}
-        </span>
-        {status.running && (
-          <>
-            <span className="font-mono text-xs text-cafe-text-secondary">{formatDuration(elapsed)}</span>
-            {status.paused ? (
-              <button
-                type="button"
-                onClick={handleResume}
-                className="rounded px-1.5 py-0.5 text-xs text-conn-emerald-text hover:bg-conn-green-text/10"
-              >
-                Resume
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handlePause}
-                className="rounded px-1.5 py-0.5 text-xs text-conn-amber-text hover:bg-[var(--console-hover-bg)]"
-              >
-                Pause
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleStop}
-              className="rounded px-1.5 py-0.5 text-xs text-conn-red-text hover:bg-conn-red-text/10"
-            >
-              Stop
-            </button>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => {
-            setFloatingTranscriptVisible(true);
-          }}
-          className="rounded px-1 py-0.5 text-xs text-cafe-text-muted hover:text-cafe-text-primary"
-          title="Pop out to floating window"
-        >
-          &#8599;
-        </button>
-      </div>
-
-      <AudioHealthStrip status={status} />
+    <div className="flex h-full min-w-0 w-full flex-col bg-cafe-surface-primary">
+      <TranscriptCaptureHeader
+        status={status}
+        sourceLabel={sourceLabel}
+        elapsed={elapsed}
+        onResume={handleResume}
+        onPause={handlePause}
+        onStop={handleStop}
+        onPopOut={() => setFloatingTranscriptVisible(true)}
+      />
 
       {!status.running && (
         <div className="border-b border-cafe-border bg-cafe-surface-secondary px-3 py-2 space-y-2">

@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises';
 import type { PawFeelDispositionProjection } from '@cat-cafe/shared';
 import type {
   IMessageStore,
@@ -10,6 +11,7 @@ import {
   derivePawFeelSourceSignalRef,
   type VerifiedPawFeelSourceIdentityContext,
 } from '../direct-repair/direct-repair-source.js';
+import { awaitPawFeelRead, mapPawFeelReads } from './bounded-reads.js';
 
 export type PawFeelReadSourceSnapshot =
   | {
@@ -29,30 +31,38 @@ type MessageRead = { message: PawFeelSourceMessageProjection } | { reason: strin
 async function readMessages(
   messageStore: PawFeelSourceMessageStore,
   messageIds: readonly string[],
+  signal?: AbortSignal,
 ): Promise<Map<string, MessageRead>> {
   const reads = new Map<string, MessageRead>();
   const uniqueIds = [...new Set(messageIds)];
   if (messageStore.getPawFeelSourceProjections) {
     try {
-      const projected = await messageStore.getPawFeelSourceProjections(uniqueIds);
-      for (const messageId of uniqueIds) {
-        const read: PawFeelSourceProjectionRead | undefined = projected.get(messageId);
-        if (!read || read.kind === 'unavailable') {
-          reads.set(messageId, {
-            reason: read?.reason === 'not_found' ? 'source message unavailable' : 'source read failed',
-          });
-        } else {
-          reads.set(messageId, { message: read.message });
+      for (let offset = 0; offset < uniqueIds.length; offset += 100) {
+        signal?.throwIfAborted();
+        const batch = uniqueIds.slice(offset, offset + 100);
+        const projected = await awaitPawFeelRead(messageStore.getPawFeelSourceProjections(batch), signal);
+        for (const messageId of batch) {
+          const read: PawFeelSourceProjectionRead | undefined = projected.get(messageId);
+          if (!read || read.kind === 'unavailable') {
+            reads.set(messageId, {
+              reason: read?.reason === 'not_found' ? 'source message unavailable' : 'source read failed',
+            });
+          } else {
+            reads.set(messageId, { message: read.message });
+          }
         }
+        await setImmediate();
       }
       return reads;
     } catch {
+      signal?.throwIfAborted();
       for (const messageId of uniqueIds) reads.set(messageId, { reason: 'source read failed' });
       return reads;
     }
   }
-  await Promise.all(
-    uniqueIds.map(async (messageId) => {
+  await mapPawFeelReads(
+    uniqueIds,
+    async (messageId) => {
       try {
         const message = await messageStore.getById(messageId);
         reads.set(
@@ -62,7 +72,8 @@ async function readMessages(
       } catch {
         reads.set(messageId, { reason: 'source read failed' });
       }
-    }),
+    },
+    signal,
   );
   return reads;
 }
@@ -70,14 +81,21 @@ async function readMessages(
 export async function loadPawFeelReadSourceSnapshots(
   messageStore: PawFeelSourceMessageStore,
   projections: readonly PawFeelDispositionProjection[],
+  signal?: AbortSignal,
 ): Promise<Map<string, PawFeelReadSourceSnapshot>> {
   const reads = await readMessages(
     messageStore,
     projections.map((projection) => projection.sourceMessageId),
+    signal,
   );
   const inspections = new Map<string, ReturnType<typeof inspectPawFeelMessage>>();
   const snapshots = new Map<string, PawFeelReadSourceSnapshot>();
+  let inspected = 0;
   for (const projection of projections) {
+    if (inspected++ % 100 === 0) {
+      signal?.throwIfAborted();
+      await setImmediate();
+    }
     const read = reads.get(projection.sourceMessageId);
     if (!read || !('message' in read)) {
       snapshots.set(projection.signalId, { availability: 'unavailable', reason: read?.reason ?? 'source read failed' });
@@ -106,6 +124,8 @@ export async function loadPawFeelReadSourceSnapshots(
       candidate,
       sourceMarkerCount: inspection.kind === 'canonical' ? inspection.candidates.length : 0,
       identity: {
+        sourceMessageId: projection.sourceMessageId,
+        sourceThreadId: projection.sourceThreadId,
         sourceSignalRef: derivePawFeelSourceSignalRef(projection),
         markerDigest: projection.markerDigest,
         sameDigestOrdinal: projection.sameDigestOrdinal,

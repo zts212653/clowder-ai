@@ -29,3 +29,9 @@ handoffTargetResolver:
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 336
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Thirteen of thirteen verdicts were keep_observe and never actionable; QC runs as the deterministic merge-gate E1-E5 guards."
+  revivalPath: "Revive when a Program asks whether review really catches bugs and names a consumer."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

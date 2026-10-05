@@ -4,7 +4,7 @@ related_features: [F102, F188, F200, F192, F208, F211]
 topics: [memory, evidence-recall, passage-vector, entity-anchor, drill-down, perspective, eval]
 doc_kind: spec
 created: 2026-05-21
-tips_exempt: "2026-09-02 public identity and feature-history projection only; evidence-recall behavior and its existing memory-search entry surface are unchanged."
+tips_exempt: "2026-09-28 F324 Phase B narrows residual-term relevance in the existing alias search path; it adds no new user action or memory capability."
 ---
 
 # F209: Evidence Recall Optimization — 消息级语义、实体门牌号与活查询藤
@@ -104,6 +104,12 @@ Phase B 隐私模型：entity registry 跟随所属 evidence store / collection 
 - [x] AC-B5: 隐私实体默认受 scope 控制，不跨域泄漏。
 - [x] AC-B6: **transferred to F208 AC-A5** (2026-05-23 post-Phase-C reflection). F209 不再阻塞此 AC；F208 spec 持有对偶 AC `cat-dossier consumes F209 entity_id; no parallel namespace`。这是 ownership cleanup，不是新决策——47 / Maine Coon owner 对齐即可，不需 ping operator。
 
+#### 2026-09-28 F324 Phase B：多词 query 的实体相关性边界
+
+Alias expansion 只能满足 query 中由该 alias 表达的实体约束，不能顺手吞掉其余查询词。纯 alias query（如 `operator`）继续允许跨 alias 找到只写“operator”的证据；多词 query（如 `Sol 命名`）中的 entity mention 候选与 entity-aware substring backfill 还必须满足 alias 之外的 residual terms，不能让所有“曾提过 Sol”的文档占满 top-k。summary 候选可由 doc metadata，或同一条同时命中实体与 residual terms 的 source passage 证明，且 relevance filter 必须发生在 mention pool limit 之前；alias 周围的逗号等边界标点不算 residual term。无实体 query 的检索路径及原 semantic/hybrid、scope/privacy、A 的 24k envelope 与 source drill 均保持。
+
+回归：`entity-alias-search.test.js` 同时锁住纯 alias expansion、`Sol 命名` passage-only summary、filter-before-limit 与 `operator, 命名` 标点反例。
+
 ## Phase B.1: Minimal Entity Seed Follow-up
 
 Phase B 机制完成（registry + alias expansion + mention index）后，**生产 entity_registry 仍为空**——`upsertEntities` 只有测试在调，对真实用户来说 alias 召回功能 inert。Phase D Perspective 若建在空 registry 上会继承 Phase B 的空心状态。B.1 在 D.0 readiness sprint 之前先填这个坑。
@@ -116,7 +122,7 @@ Phase B 机制完成（registry + alias expansion + mention index）后，**生�
 ### Acceptance Criteria
 
 - [x] AC-B1.1: explicit seed 真相源存在并 git-tracked（`config/entity-seeds.json`）。
-- [x] AC-B1.2: 至少 1 个真实 `person:` 实体 seeded，覆盖 ≥ 4 个 alias（`person:operator ← operator / operator / operator / l.s. / L.S. / Lysander / @co-creator / @co-creator / @you`）。
+- [x] AC-B1.2: 至少 1 个真实 `person:` 实体 seeded，覆盖 ≥ 4 个 alias（`person:operator ← operator / operator / operator / l.s. / L.S. / you / @co-creator / @co-creator / @you`）。
 - [x] AC-B1.3: 真实 `search_evidence("operator")` / `search_evidence("operator")` 能命中只提及另一 alias 的旧消息（`entity-seeds.test.js` 通过 `/api/evidence/search?q=operator` 覆盖 dogfood 路径）。
 - [x] AC-B1.4: 猫 roster aliases 同步是 **roster → registry 单向**，registry 不反写 cat-config.json / AgentRegistry。
 - [x] AC-B1.5: seed 真相源带 provenance（来源 + 日期 + 维护者），编辑历史进 git log。

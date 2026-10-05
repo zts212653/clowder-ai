@@ -1,15 +1,17 @@
 import type { ReactNode } from 'react';
+import { MemoryBookStarIcon } from '@/components/shell/ShellIcons';
 import type { WorkspaceMode } from '@/lib/workspace-modes';
 
-export function WorkspaceLauncherMark({
-  mode,
-}: {
-  mode: WorkspaceMode | 'status' | 'theater' | 'capability-evolution';
-}) {
-  const paths: Record<WorkspaceMode | 'status' | 'theater' | 'capability-evolution', ReactNode> = {
+type LauncherMarkMode = WorkspaceMode | 'status' | 'theater' | 'capability-evolution';
+
+export function WorkspaceLauncherMark({ mode }: { mode: LauncherMarkMode }) {
+  // 记忆 is the decided D icon and has exactly one definition (shell/ShellIcons), shared with the sidebar entry.
+  // Keep the 20px box this tile has always used; the glyph stays decorative (aria-hidden) like its neighbours.
+  if (mode === 'recall') return <MemoryBookStarIcon className="h-5 w-5" />;
+
+  const paths: Record<Exclude<LauncherMarkMode, 'recall'>, ReactNode> = {
     dev: <path d="M8 4 3 8l5 4M12 4l5 4-5 4M11 2 9 14" />,
     'capability-evolution': <path d="M5 2c6 3 6 9 0 12M11 2c-6 3-6 9 0 12M5.8 5h4.4M5 8h6M5.8 11h4.4" />,
-    recall: <path d="M8 3a3 3 0 0 0-3 3 3 3 0 0 0 0 6 3 3 0 0 0 3-3m0-6a3 3 0 0 1 3 3 3 3 0 0 1-3-3" />,
     'needs-me': (
       <>
         <path d="M8 2.5a4 4 0 0 0-4 4v2.25L2.75 11h10.5L12 8.75V6.5a4 4 0 0 0-4-4Z" />

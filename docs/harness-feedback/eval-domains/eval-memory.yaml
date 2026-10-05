@@ -30,3 +30,9 @@ handoffTargetResolver:
 sla:
   acknowledgeHours: 48
   reevalWithinHours: 168
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Silent since 2026-08-09; recall quality did drive a real fix (#2962), so stop the empty weekly runs while the owner investigates why it stopped."
+  revivalPath: "After the owner root-cause task, restart as a Program measure (candidates F188, F276) or retire."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

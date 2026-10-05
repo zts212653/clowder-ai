@@ -130,6 +130,20 @@ fixtures: []
       featureId: 'F192',
     }),
   );
+  write(
+    'eval-design-gate.yaml',
+    yamlFor({
+      domainId: 'eval:design-gate',
+      displayName: 'Design Gate Eval',
+      threadId: 'thread_eval_design_gate',
+      catId: 'opus',
+      model: 'claude-opus-4-6',
+      frequency: 'daily',
+      sourceAdapter: 'design-gate-episode-source',
+      sourceRefsKind: 'design-gate-episode-source-map',
+      featureId: 'F303',
+    }),
+  );
 
   return root;
 }

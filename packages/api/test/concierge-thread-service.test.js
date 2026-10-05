@@ -76,21 +76,51 @@ describe('ConciergeThreadService', () => {
     const thread = await threadStore.get(threadId);
     assert.ok(thread, 'thread should exist in store');
     assert.equal(thread.threadKind, 'concierge');
+    assert.equal(thread.title, '猫猫球 · 伴随对话');
   });
 
-  it('thread is user-indexed with threadKind=concierge (route layer hides it by default)', async () => {
+  it('migrates the generated legacy title without replacing a title chosen by the user', async () => {
+    const { service, threadStore } = makeService();
+    const threadId = await service.getOrCreate('user-legacy');
+    await threadStore.updateTitle(threadId, '前台猫·user-legacy');
+    assert.equal(await service.getOrCreate('user-legacy'), threadId);
+    assert.equal((await threadStore.get(threadId)).title, '猫猫球 · 伴随对话');
+    await threadStore.updateTitle(threadId, '我的散步聊天');
+    assert.equal(await service.getOrCreate('user-legacy'), threadId);
+    assert.equal((await threadStore.get(threadId)).title, '我的散步聊天');
+  });
+
+  it('repairs an empty canonical title but preserves a literal user title', async () => {
+    const { service, threadStore } = makeService();
+    const threadId = await service.getOrCreate('user-empty');
+    const thread = await threadStore.get(threadId);
+    thread.title = null;
+    assert.equal(await service.getOrCreate('user-empty'), threadId);
+    assert.equal((await threadStore.get(threadId)).title, '猫猫球 · 伴随对话');
+    await threadStore.updateTitle(threadId, '未命名对话');
+    assert.equal(await service.getOrCreate('user-empty'), threadId);
+    assert.equal((await threadStore.get(threadId)).title, '未命名对话');
+  });
+
+  it('finds a stored legacy carrier whose creator predates per-user thread indexing', async () => {
+    const { service, threadStore } = makeService();
+    const threadId = await service.getOrCreate('legacy-owner');
+    const thread = await threadStore.get(threadId);
+    thread.createdBy = 'concierge-system';
+    thread.title = null;
+    assert.equal(await service.findThreadId('legacy-owner'), threadId);
+    assert.equal((await threadStore.get(threadId)).title, '猫猫球 · 伴随对话');
+  });
+
+  it('thread is user-indexed with threadKind=concierge for canonical route discovery', async () => {
     const { service, threadStore } = makeService();
     await service.getOrCreate('user-4');
 
-    // P1 fix: createdBy=userId means threadStore.list(userId) DOES include the concierge thread.
-    // Route layer filters it out when !includeConcierge (threadKind='concierge' signal).
+    // createdBy=userId keeps the canonical carrier in its owner's list.
+    // The route uses threadKind plus the stored key to hide only noncanonical orphans.
     const threads = await threadStore.list('user-4');
     const conciergeThreads = threads.filter((t) => t.threadKind === 'concierge');
-    assert.equal(
-      conciergeThreads.length,
-      1,
-      'concierge thread is in list() — hidden at route level via threadKind filter',
-    );
+    assert.equal(conciergeThreads.length, 1, 'canonical concierge thread is in the owner list');
   });
 
   it('getOrCreate returns existing threadId even after multiple calls', async () => {

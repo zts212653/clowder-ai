@@ -357,7 +357,45 @@ describe('StopOperationRecord: adversarial', () => {
     writeFileSync(join(paths.namespaceDir, 'stop-operation.claim'), JSON.stringify({ pid: 2147483647, at: 1 }));
 
     const record = await executeStop({ ...owner, opId });
-    assert.equal(record.state, 'stopped');
+    assert.equal(record.state, 'stopped', JSON.stringify(record));
+  });
+
+  it('re-observes a transient argv miss before execution and after the recovery probe', async (t) => {
+    const { owner, child, restart } = await fixture();
+    const { opId } = request(owner);
+    let targetPid = child.pid;
+    let pending = true;
+    let misses = 0;
+    const original = childProcess.execFileSync;
+    const mocked = t.mock.method(childProcess, 'execFileSync', (command, args, options) => {
+      if (pending && command === 'ps' && args.includes(String(targetPid)) && args.includes('command=')) {
+        pending = false;
+        misses += 1;
+        return '(node)\n';
+      }
+      return original(command, args, options);
+    });
+    syncBuiltinESMExports();
+    try {
+      const stopped = await executeStop({ ...owner, opId });
+      assert.equal(stopped.state, 'stopped', JSON.stringify(stopped));
+      authorizeRestart({ ...owner, opId, authorizedBy: 'user:fixture' });
+      targetPid = await restart();
+      recordRestart({ ...owner, opId, pid: targetPid });
+      const verified = await reverifyStop({
+        ...owner,
+        opId,
+        probeHealth: async () => {
+          pending = true;
+          return { ok: true, ref: 'fixture:owned-health' };
+        },
+      });
+      assert.equal(verified.state, 'reverified', JSON.stringify(verified));
+      assert.equal(misses, 2);
+    } finally {
+      mocked.mock.restore();
+      syncBuiltinESMExports();
+    }
   });
 
   it('refuses a second concurrent stop against the same process set', async () => {
@@ -412,7 +450,8 @@ describe('StopOperationRecord: adversarial', () => {
   const restartedOperation = async () => {
     const setup = await fixture();
     const { opId } = request(setup.owner);
-    await executeStop({ ...setup.owner, opId });
+    const stopped = await executeStop({ ...setup.owner, opId });
+    assert.equal(stopped.state, 'stopped', JSON.stringify(stopped));
     authorizeRestart({ ...setup.owner, opId, authorizedBy: 'user:operator' });
     const pid = await setup.restart();
     recordRestart({ ...setup.owner, opId, pid });

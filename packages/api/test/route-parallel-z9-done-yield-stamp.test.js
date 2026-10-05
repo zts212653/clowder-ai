@@ -111,5 +111,7 @@ describe('F194 Phase Z9 砚砚 R2 P1 — routeParallel done yield stamps ownInvo
     assert.equal(doneMsg.messageId, 'msg-1', 'parallel done must expose the durable output message ID');
     const stored = await deps.messageStore.getById(doneMsg.messageId);
     assert.equal(stored?.content, 'persist me', 'the emitted ID must resolve immediately');
+    // F309 entry 20: a publication of this message names the stored time, not the client's.
+    assert.equal(doneMsg.messageTimestamp, stored.timestamp);
   });
 });

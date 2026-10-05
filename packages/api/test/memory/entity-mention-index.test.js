@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
+// Synthetic aliases stay distinct when exported to the public distribution.
 describe('F209 entity mention indexing', () => {
   it('indexes thread message passages as entity mentions during rebuild', async () => {
     const { IndexBuilder } = await import('../../dist/domains/memory/IndexBuilder.js');
@@ -17,10 +18,10 @@ describe('F209 entity mention indexing', () => {
     await store.initialize();
     await store.upsertEntities([
       {
-        entityId: 'person:operator',
+        entityId: 'person:fixtureowner',
         type: 'person',
-        canonicalName: 'You',
-        aliases: ['operator', 'co-creator', 'operator'],
+        canonicalName: 'FixtureOwner',
+        aliases: ['fixtureowner', '读者甲', 'OWNERROLE'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -38,7 +39,7 @@ describe('F209 entity mention indexing', () => {
     const messageListFn = () => [
       {
         id: 'm1',
-        content: 'co-creator要求 alias registry 不能变成 classifier。',
+        content: '读者甲要求 alias registry 不能变成 classifier。',
         catId: 'codex',
         timestamp: Date.parse('2026-05-22T02:00:00Z'),
       },
@@ -54,18 +55,18 @@ describe('F209 entity mention indexing', () => {
     assert.ok(
       rows.some(
         (r) =>
-          r.entity_id === 'person:operator' &&
+          r.entity_id === 'person:fixtureowner' &&
           r.doc_anchor === 'thread-thread_entity_index' &&
           r.passage_id === 'msg-m1' &&
-          r.surface === 'co-creator' &&
+          r.surface === '读者甲' &&
           r.source === 'passage',
       ),
     );
 
-    const results = await store.search('operator', { depth: 'raw', scope: 'threads', limit: 5 });
+    const results = await store.search('OWNERROLE', { depth: 'raw', scope: 'threads', limit: 5 });
     assert.equal(results[0].anchor, 'thread-thread_entity_index');
     assert.equal(results[0].passages?.[0]?.messageId, 'm1');
-    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:operator');
+    assert.equal(results[0].entityMatches?.[0]?.entityId, 'person:fixtureowner');
   });
 
   it('skips orphan passage rows when rebuilding entity mentions', async () => {
@@ -75,10 +76,10 @@ describe('F209 entity mention indexing', () => {
     await store.initialize();
     await store.upsertEntities([
       {
-        entityId: 'person:operator',
+        entityId: 'person:fixtureowner',
         type: 'person',
-        canonicalName: 'You',
-        aliases: ['operator', 'co-creator', 'operator'],
+        canonicalName: 'FixtureOwner',
+        aliases: ['fixtureowner', '读者甲', 'OWNERROLE'],
         provenance: [{ source: 'F209 Phase B test' }],
         updatedAt: '2026-05-22T00:00:00Z',
       },
@@ -92,7 +93,7 @@ describe('F209 entity mention indexing', () => {
     ).run(
       'deleted-thread-anchor',
       'msg-orphan',
-      'co-creator mentioned in an orphan passage row.',
+      '读者甲 mentioned in an orphan passage row.',
       'codex',
       0,
       '2026-05-22T03:00:00Z',
@@ -114,16 +115,16 @@ describe('F209 entity mention indexing', () => {
         kind: 'thread',
         status: 'active',
         title: 'Entity seed no-op thread',
-        summary: 'co-creator asked whether restart should reindex every entity mention.',
+        summary: '读者甲 asked whether restart should reindex every entity mention.',
         updatedAt: '2026-05-23T00:00:00.000Z',
       },
     ]);
 
     const seed = {
-      entityId: 'person:operator',
+      entityId: 'person:fixtureowner',
       type: 'person',
-      canonicalName: 'You',
-      aliases: ['operator', 'co-creator', 'operator'],
+      canonicalName: 'FixtureOwner',
+      aliases: ['fixtureowner', '读者甲', 'OWNERROLE'],
       provenance: [{ source: 'F209 Phase B.1 test seed' }],
       updatedAt: '2026-05-23T00:00:00Z',
     };
@@ -133,7 +134,7 @@ describe('F209 entity mention indexing', () => {
     db.exec(`
       CREATE TEMP TABLE mention_delete_log(entity_id TEXT NOT NULL);
       CREATE TEMP TRIGGER log_entity_mention_delete
-      AFTER DELETE ON entity_mentions
+      AFTER DELETE ON entity_mentions_legacy
       BEGIN
         INSERT INTO mention_delete_log(entity_id) VALUES (OLD.entity_id);
       END;
@@ -196,7 +197,7 @@ describe('F209 entity mention indexing', () => {
     db.exec(`
       CREATE TEMP TABLE mention_delete_log(entity_id TEXT NOT NULL);
       CREATE TEMP TRIGGER log_f260_mention_delete
-      AFTER DELETE ON entity_mentions
+      AFTER DELETE ON entity_mentions_legacy
       BEGIN
         INSERT INTO mention_delete_log(entity_id) VALUES (OLD.entity_id);
       END;

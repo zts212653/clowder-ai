@@ -45,7 +45,7 @@ export const reviewedMediaAssetSchema = z
     blobDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     mediaType: z.enum(['image/png', 'video/mp4']),
     media: immutableMediaSchema,
-    sourcePublication: z.object({ artifactRef: ref, sourceRef: ref, revision: ref }).strict(),
+    sourcePublication: z.object({ artifactRef: ref, sourceRef: ref, revision: ref, threadId: ref.optional() }).strict(),
     ownerReceiptRef: ref,
   })
   .strict();
@@ -143,6 +143,10 @@ export type ArtifactReviewVisualMark = z.infer<typeof artifactReviewVisualMarkSc
 
 export const artifactReviewRoundSchema = z
   .object({
+    /** Version 3 rounds retain only this canonical F309 ledger coordinate. */
+    ledgerRef: id.optional(),
+    /** Read projection only; never persisted with the round. */
+    ledgerRevision: positive.optional(),
     number: positive,
     asset: reviewedMediaAssetSchema,
     openedAt: timestamp,
@@ -172,7 +176,7 @@ export type ArtifactReviewRound = z.infer<typeof artifactReviewRoundSchema>;
 
 export const artifactReviewSchema = z
   .object({
-    version: z.union([z.literal(1), z.literal(2)]),
+    version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     reviewId: id,
     revision: positive,
     title: z.string().trim().min(1).max(300),
@@ -185,7 +189,7 @@ export const artifactReviewSchema = z
   .strict()
   .refine(
     (review) =>
-      review.version === 2 ||
+      review.version >= 2 ||
       review.rounds.every(
         (round) =>
           round.visualMarks === undefined &&
@@ -197,10 +201,23 @@ export const artifactReviewSchema = z
           ),
       ),
     'Artwork extensions require record version 2',
+  )
+  .refine(
+    (review) => review.version === 3 || review.rounds.every((round) => !round.ledgerRef),
+    'Linked ledgers require record version 3',
   );
 export type ArtifactReview = z.infer<typeof artifactReviewSchema>;
 
 export const artifactReviewActionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('request_media_edit'),
+      mediaType: z.enum(['image/png', 'video/mp4']),
+      annotationId: id,
+      body: text,
+      anchor: artifactReviewAnchorSchema.optional(),
+    })
+    .strict(),
   z
     .object({ kind: z.literal('add_visual_marks'), marks: z.array(artifactReviewDrawingSchema).min(1).max(100) })
     .strict(),
@@ -236,6 +253,7 @@ export type ArtifactReviewAction = z.infer<typeof artifactReviewActionSchema>;
 
 export const artifactReviewCommandSchema = z
   .object({
+    expectedLedgerRevision: positive.optional(),
     reviewId: id,
     expectedRevision: positive,
     expectedTaskRevision: positive,
@@ -260,6 +278,8 @@ export type PreparedMediaReviewContext = Omit<PrepareArtifactReview, 'operationI
 
 export const respondWithMediaVersionSchema = z
   .object({
+    requestId: id.optional(),
+    expectedLedgerRevision: positive.optional(),
     reviewId: id,
     expectedRevision: positive,
     expectedTaskRevision: positive,
@@ -284,6 +304,8 @@ export interface ArtifactReviewReceipt {
 
 export interface ArtifactReviewView {
   review: ArtifactReview;
+  /** Exact current request, derived from the atomic journal binding and canonical review audit. */
+  modificationRequest?: { requestId: string; receiptRef: string };
   pendingVersion: boolean;
   authority: {
     state: 'current' | 'task_changed' | 'task_closed' | 'asset_changed';
@@ -301,10 +323,35 @@ export interface ArtifactReviewView {
       state: 'pending' | 'queued' | 'retired';
       receiptRef: string;
       messageId?: string;
-      kind?: 'submit_feedback' | 'decide' | 'reopen' | 'request_image_edit';
+      kind?:
+        | 'submit_feedback'
+        | 'decide'
+        | 'reopen'
+        | 'request_image_edit'
+        | 'request_media_edit'
+        | 'supersede_request';
     };
   };
 }
+
+/** A verified existing context; it never grants access or creates a Task on open. */
+export const publicationReviewContextSchema = z
+  .object({
+    reviewId: id,
+    round: positive,
+    taskId: id,
+    threadId: id,
+    title: text,
+    taskTitle: text,
+    threadTitle: text,
+    targetCatId: id.nullable(),
+    targetName: text,
+    ledgerRef: id.optional(),
+    state: z.enum(['draft', 'awaiting_human', 'approved', 'changes_requested', 'superseded']).optional(),
+    taskState: z.enum(['active', 'closed']).optional(),
+  })
+  .strict();
+export type PublicationReviewContext = z.infer<typeof publicationReviewContextSchema>;
 
 export interface ArtifactReviewAuditEntry {
   receipt: ArtifactReviewReceipt;

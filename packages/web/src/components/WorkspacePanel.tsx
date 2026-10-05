@@ -1,9 +1,13 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { useChatStore } from '@/stores/chatStore';
+import { scrollToMessage } from '@/utils/scrollToMessage';
+import { kickTeleportResolve, planTeleport } from '@/utils/teleport';
 import { worktreeBasename } from '@/utils/worktree-label';
+import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { useF307ExperienceWorkbenchStore } from './workbench/experience-workbench-store';
 import { F307ExperienceWorkbench } from './workbench/F307ExperienceWorkbench';
 import { createBrowserSurface, createFileSurface } from './workbench/real-surface-adapters';
@@ -13,11 +17,13 @@ export function WorkspacePanel({
   defaultCatId = 'opus',
   visible = true,
   statusSurface,
+  artifactWorkHostAvailable = false,
 }: {
   threadId?: string;
   defaultCatId?: string;
   visible?: boolean;
   statusSurface?: ReactNode;
+  artifactWorkHostAvailable?: boolean;
 }) {
   const {
     worktrees,
@@ -30,6 +36,8 @@ export function WorkspacePanel({
     search,
     resetSearch,
   } = useWorkspace({ loadContent: false });
+  const router = useRouter();
+  const currentWorktree = worktrees.find((worktree) => worktree.id === worktreeId);
   const setOpenFile = useChatStore((state) => state.setWorkspaceOpenFile);
   const openFilePath = useChatStore((state) => state.workspaceOpenFilePath);
   const openFileLine = useChatStore((state) => state.workspaceOpenFileLine);
@@ -45,7 +53,9 @@ export function WorkspacePanel({
   const setViewMode = useChatStore((state) => state.setWorkspaceSurface);
   const workspacePreview = useChatStore((state) => state.workspacePreview);
   const setWorkspacePreview = useChatStore((state) => state.setWorkspacePreview);
+  const closeRightPanel = useChatStore((state) => state.closeRightPanel);
   const lastWorkspaceFileSetAtRef = useRef(workspaceFileSetAt.ts);
+  const lastWorkspaceSearchQueryRef = useRef('');
 
   useEffect(() => {
     if (!pendingPreviewAutoOpen) return;
@@ -67,22 +77,39 @@ export function WorkspacePanel({
     setViewMode('files');
     useF307ExperienceWorkbenchStore.getState().dispatch({
       type: 'open-surface',
-      surface: createFileSurface({ worktreeId, path: openFilePath, scrollToLine: openFileLine }),
+      surface: createFileSurface({
+        worktreeId,
+        path: openFilePath,
+        scrollToLine: openFileLine,
+        navigationOrigin: workspaceFileSetAt.navigationOrigin,
+        ...(currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
+          ? {
+              rootSelection: {
+                root: currentWorktree.resolvedRoot,
+                branch: currentWorktree.branch,
+                expectedEpoch: currentWorktree.rootEpoch,
+              },
+            }
+          : {}),
+      }),
       entitlement: { kind: 'user', reason: 'open-from-chat' },
     });
   }, [
     currentThreadId,
+    currentWorktree,
     openFileLine,
     openFilePath,
     setViewMode,
     workspaceFileSetAt.threadId,
+    workspaceFileSetAt.navigationOrigin,
     workspaceFileSetAt.ts,
     worktreeId,
   ]);
 
   const handleSearchResultClick = useCallback(
     (path: string, line: number) => {
-      setOpenFile(path, line);
+      const query = lastWorkspaceSearchQueryRef.current.trim();
+      setOpenFile(path, line, undefined, undefined, query ? { kind: 'workspace-home-search', query } : undefined);
       setViewMode('files');
       resetSearch();
     },
@@ -90,9 +117,30 @@ export function WorkspacePanel({
   );
   const handleLauncherSearch = useCallback(
     async (query: string) => {
+      lastWorkspaceSearchQueryRef.current = query;
       await search(query, 'all');
     },
     [search],
+  );
+  // Architecture cell: hub-action-surface. F307 returns origin intent; this host executes it.
+  const restoreWorkspaceSearch = useCallback(
+    (query: string) => {
+      lastWorkspaceSearchQueryRef.current = query;
+      void search(query, 'all');
+    },
+    [search],
+  );
+  const returnToChatMessage = useCallback(
+    ({ threadId: originThreadId, messageId }: { threadId: string; messageId: string }) => {
+      const plan = planTeleport({ threadId: originThreadId, messageId, currentThreadId });
+      closeRightPanel();
+      if (plan.navigateTo && typeof window !== 'undefined') pushThreadRouteWithHistory(plan.navigateTo, window);
+      if (plan.scrollNow) {
+        scrollToMessage(plan.scrollNow);
+        kickTeleportResolve();
+      }
+    },
+    [closeRightPanel, currentThreadId],
   );
   const launcherWorkspaceSearch = useMemo(
     () => ({
@@ -104,10 +152,13 @@ export function WorkspacePanel({
       onReset: resetSearch,
       onOpenResult: handleSearchResultClick,
       onViewAll: handleLauncherSearch,
+      fileNavigationOrigin: () => {
+        const query = lastWorkspaceSearchQueryRef.current.trim();
+        return query ? ({ kind: 'workspace-home-search', query } as const) : undefined;
+      },
     }),
     [handleLauncherSearch, handleSearchResultClick, resetSearch, searchError, searchLoading, searchResults, worktreeId],
   );
-  const currentWorktree = worktrees.find((worktree) => worktree.id === worktreeId);
   const activeWorktreeId = currentWorktree?.id ?? null;
 
   return (
@@ -116,8 +167,18 @@ export function WorkspacePanel({
       defaultCatId={defaultCatId}
       visible={visible}
       statusSurface={statusSurface}
+      artifactWorkHostAvailable={artifactWorkHostAvailable}
       onSelectDevSurface={setViewMode}
       worktreeId={activeWorktreeId}
+      rootSelection={
+        currentWorktree?.resolvedRoot && currentWorktree.rootEpoch !== undefined
+          ? {
+              root: currentWorktree.resolvedRoot,
+              branch: currentWorktree.branch,
+              expectedEpoch: currentWorktree.rootEpoch,
+            }
+          : undefined
+      }
       worktreeLoading={worktreesLoading}
       worktreeError={worktreesError}
       openFilePath={openFilePath}
@@ -145,6 +206,9 @@ export function WorkspacePanel({
       }
       workspaceOpenRequest={workspaceOpenRequest}
       onWorkspaceOpenRequestConsumed={consumeWorkspaceOpenRequest}
+      onRestoreWorkspaceSearch={restoreWorkspaceSearch}
+      onReturnToChatMessage={returnToChatMessage}
+      onOpenAppRoute={(href) => router.push(href)}
     />
   );
 }

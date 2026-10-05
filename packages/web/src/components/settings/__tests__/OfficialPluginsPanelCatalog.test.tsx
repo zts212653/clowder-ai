@@ -134,6 +134,64 @@ describe('OfficialPluginsPanel catalog refresh', () => {
     expect(container.textContent).toContain('0.1.0-alpha.3');
   });
 
+  it('keeps an incompatible update failure visible through polling and exposes recovery of the old cat', async () => {
+    vi.useFakeTimers();
+    const old = {
+      ...plugin({
+        pluginInstanceId: 'pi_companion',
+        installedVersion: '0.1.0-alpha.4',
+        lifecycleState: 'installed',
+        configReadiness: 'ready',
+        activationState: 'enabled',
+        runtimeState: 'healthy',
+        lifecycleRevision: 9,
+        installedAt: 1,
+        updatedAt: 2,
+      }),
+      catalogId: 'companion',
+      pluginId: 'official.companion',
+      packageName: '@clowder-ai/companion',
+      availableVersion: '0.1.0-alpha.8',
+      updateAvailable: true,
+    };
+    const stopped = {
+      ...old,
+      instance: {
+        ...old.instance,
+        activationState: 'error',
+        runtimeState: 'stopped',
+        lifecycleRevision: 10,
+        lastRuntimeError: {
+          code: 'UPDATE_ROLLBACK_RESUME_FAILED',
+          exitCode: null,
+          signal: null,
+          occurredAt: 3,
+        },
+      },
+    };
+    let reads = 0;
+    mockApiFetch.mockImplementation(async (url) => {
+      if (url === '/api/plugins/official') return jsonResponse({ plugins: [++reads === 1 ? old : stopped] });
+      if (url.endsWith('/update')) return jsonResponse({ code: 'INVALID_PACKAGE_ARCHIVE' }, 422);
+      return jsonResponse({}, 404);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    await act(async () => root.render(<OfficialPluginsPanel />));
+    await flushEffects();
+    await act(async () => findButton(container, '更新到 0.1.0-alpha.8')?.click());
+    await flushEffects();
+    expect(container.textContent).toContain('当前宿主无法验证');
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+      await Promise.resolve();
+    });
+    expect(container.textContent).toContain('当前宿主无法验证');
+    expect(container.textContent).toContain('需修复');
+    expect(findButton(container, '重试恢复')).not.toBeUndefined();
+  });
+
   it('updates a healthy enabled plugin directly and explains the brief reconnect', async () => {
     const nextDigest = 'sha512-TkVYVA==';
     const old = {

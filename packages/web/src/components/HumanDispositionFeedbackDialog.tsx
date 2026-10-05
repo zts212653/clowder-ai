@@ -11,6 +11,11 @@ export interface HumanDispositionFeedbackDialogProps {
   reasonCodes: readonly HumanDispositionReasonCode[];
   subjectLabel: string;
   submitting: boolean;
+  /**
+   * A host has locked writes (what is shown may not be what is true). Typing, choosing, cancel and Escape keep working;
+   * nothing can be sent until it unlocks, and what was typed stays.
+   */
+  submitLocked?: boolean;
   error: string | null;
   onCancel: () => void;
   onSubmit: (feedback: HumanDispositionFeedbackInput | undefined) => void;
@@ -21,6 +26,7 @@ export function HumanDispositionFeedbackDialog({
   reasonCodes,
   subjectLabel,
   submitting,
+  submitLocked = false,
   error,
   onCancel,
   onSubmit,
@@ -28,20 +34,33 @@ export function HumanDispositionFeedbackDialog({
   const titleId = useId();
   const descriptionId = useId();
   const firstReasonRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [selectedReason, setSelectedReason] = useState<HumanDispositionReasonCode | null>(null);
   const [detail, setDetail] = useState('');
 
+  // A new question starts clean, and only when the dialog opens. A refresh of the same question underneath (a new subject
+  // line, or the same reasons handed over as a fresh array) is not a new question: what was picked and typed stays, and
+  // focus stays where the user is.
   useEffect(() => {
     if (!open) return;
     setSelectedReason(null);
     setDetail('');
     firstReasonRef.current?.focus();
-  }, [open, reasonCodes, subjectLabel]);
+  }, [open]);
+
+  // A picked reason that is no longer offered must not be submittable. Only the pick goes; the typed text stays.
+  useEffect(() => {
+    setSelectedReason((current) => (current !== null && !reasonCodes.includes(current) ? null : current));
+  }, [reasonCodes]);
 
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onCancel();
+      if (event.key !== 'Escape' || submitting) return;
+      // A host that hides a card (or makes it inert) while keeping it mounted for its draft leaves this listener on the
+      // document. Escape then belongs to whatever the user can actually see, not to a dialog they cannot.
+      if (rootRef.current?.closest('[hidden], [inert]')) return;
+      onCancel();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
@@ -55,7 +74,7 @@ export function HumanDispositionFeedbackDialog({
     (selectedReason !== 'other' || (normalizedDetail.length >= 1 && normalizedDetail.length <= MAX_DETAIL_LENGTH));
 
   const submitFeedback = () => {
-    if (!selectedReason || !hasValidSelection || submitting) return;
+    if (!selectedReason || !hasValidSelection || submitting || submitLocked) return;
     onSubmit(
       selectedReason === 'other'
         ? { reasonCode: selectedReason, detail: normalizedDetail }
@@ -65,6 +84,7 @@ export function HumanDispositionFeedbackDialog({
 
   return (
     <div
+      ref={rootRef}
       className="fixed inset-0 z-[110] flex items-center justify-center bg-[var(--console-overlay-backdrop)] px-4 py-6 backdrop-blur-sm"
       data-testid="feedback-dialog-backdrop"
       onClick={(event) => {
@@ -142,6 +162,16 @@ export function HumanDispositionFeedbackDialog({
             </div>
           )}
 
+          {submitLocked && (
+            <p
+              aria-live="polite"
+              data-testid="feedback-dialog-locked"
+              className="mt-4 rounded-lg border border-cafe px-3 py-2 text-sm text-cafe-secondary"
+            >
+              正在确认这一件现在的状态，稍候再提交。已填的内容会保留。
+            </p>
+          )}
+
           {error && (
             <p
               role="alert"
@@ -156,8 +186,10 @@ export function HumanDispositionFeedbackDialog({
           <button
             type="button"
             data-testid="feedback-skip"
-            disabled={submitting}
-            onClick={() => onSubmit(undefined)}
+            disabled={submitting || submitLocked}
+            onClick={() => {
+              if (!submitLocked) onSubmit(undefined);
+            }}
             className="mr-auto rounded-lg px-3 py-2 text-sm text-cafe-secondary transition-colors hover:bg-cafe-surface-elevated disabled:cursor-not-allowed disabled:opacity-50"
           >
             跳过原因
@@ -174,7 +206,7 @@ export function HumanDispositionFeedbackDialog({
           <button
             type="button"
             data-testid="feedback-submit"
-            disabled={!hasValidSelection || submitting}
+            disabled={!hasValidSelection || submitting || submitLocked}
             onClick={submitFeedback}
             className="rounded-lg bg-semantic-critical px-4 py-2 text-sm font-medium text-[var(--cafe-surface)] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >

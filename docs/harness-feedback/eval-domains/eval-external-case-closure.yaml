@@ -95,3 +95,9 @@ fixtures:
     path: packages/api/test/harness-eval/fixtures/review-completion-routing.json
     skill: cross-cat-handoff
     signal: external-vs-local-cat-review-completion-routing
+# 2026-10-01 dormant: see feature-discussions/2026-10-01-eval-into-f311/README.md
+dormancy:
+  reason: "Never ran and has no consumer; the registered owner is no longer in cat-config."
+  revivalPath: "Revive when a Program targets external case closure with a routable owner and consumer."
+  decisionRef: "private-thread-id#private-source-id"
+enabled: false

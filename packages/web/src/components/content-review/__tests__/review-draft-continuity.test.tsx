@@ -120,6 +120,30 @@ it('reanchoring never replaces an existing new-version draft, even if it is from
   expect(startReviewReanchor('round:2', draft)).toBe('created');
   expect(JSON.parse(localStorage.getItem('round:2') ?? '{}')).toEqual(draft);
 });
+it('a new-version draft the reader emptied no longer blocks reanchoring', () => {
+  const draft = { body: '旧版意见', anchor: null, reanchoredFrom: { round: 1, annotationId: 'mark' } };
+  // The shared composer clears by emptying its text; the stored draft then protects nothing.
+  for (const emptied of [
+    { body: '', anchor: null },
+    { body: '  \n', anchor: null },
+  ]) {
+    localStorage.setItem('round:2', JSON.stringify(emptied));
+    expect(startReviewReanchor('round:2', draft)).toBe('created');
+    expect(JSON.parse(localStorage.getItem('round:2') ?? '{}')).toEqual(draft);
+  }
+  // A pending reanchor seed or a chosen position is still something to keep.
+  for (const kept of [
+    { body: '', anchor: null, reanchoredFrom: { round: 1, annotationId: 'other' } },
+    { body: '', anchor: { kind: 'image-region', x: 1, y: 1, width: 2, height: 2 } },
+    { body: '', anchor: null, futureField: true },
+  ]) {
+    const saved = JSON.stringify(kept);
+    localStorage.setItem('round:2', saved);
+    expect(startReviewReanchor('round:2', draft)).toBe('existing');
+    expect(localStorage.getItem('round:2')).toBe(saved);
+  }
+  localStorage.removeItem('round:2');
+});
 it('a browser storage failure leaves the source annotation available for a retry', () => {
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
     throw new Error('quota');

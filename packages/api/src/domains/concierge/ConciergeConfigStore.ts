@@ -32,6 +32,9 @@ function resolveDefaultDutyCatProfileId(): string {
 export interface IConciergeConfigStore {
   /** 获取用户配置；不存在则返回 defaults（含 dutyCatProfileId 解析） */
   get(userId: string): Promise<ConciergeConfig>;
+  /** Settings must show the saved selection even if the profile was removed.
+   * Older adapters without this read capability cannot claim that projection. */
+  getSaved?(userId: string): Promise<ConciergeConfig>;
   /** 覆盖写入用户配置（TTL=0，持久化） */
   put(userId: string, config: ConciergeConfig): Promise<void>;
 }
@@ -48,6 +51,15 @@ export class RedisConciergeConfigStore implements IConciergeConfigStore {
   }
 
   async get(userId: string): Promise<ConciergeConfig> {
+    const config = await this.getSaved(userId);
+    // Ordinary routing retains its existing default-selection semantics.
+    if (!config.dutyCatProfileId || !catRegistry.has(config.dutyCatProfileId)) {
+      config.dutyCatProfileId = resolveDefaultDutyCatProfileId();
+    }
+    return config;
+  }
+
+  async getSaved(userId: string): Promise<ConciergeConfig> {
     const raw = await this.redis.get(ConciergeKeys.config(userId));
     if (!raw) {
       return {
@@ -55,14 +67,7 @@ export class RedisConciergeConfigStore implements IConciergeConfigStore {
         dutyCatProfileId: resolveDefaultDutyCatProfileId(),
       };
     }
-    const config = JSON.parse(raw) as ConciergeConfig;
-    // FIX-3: validate stored dutyCatProfileId — stale/missing values (e.g., config
-    // saved before resolution logic existed, or cat removed from roster) should
-    // re-resolve to the plan default (gemini35 → first available → sonnet).
-    if (!config.dutyCatProfileId || !catRegistry.has(config.dutyCatProfileId)) {
-      config.dutyCatProfileId = resolveDefaultDutyCatProfileId();
-    }
-    return config;
+    return JSON.parse(raw) as ConciergeConfig;
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {
@@ -79,6 +84,14 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
   private readonly store = new Map<string, ConciergeConfig>();
 
   async get(userId: string): Promise<ConciergeConfig> {
+    const config = await this.getSaved(userId);
+    if (!config.dutyCatProfileId || !catRegistry.has(config.dutyCatProfileId)) {
+      config.dutyCatProfileId = resolveDefaultDutyCatProfileId();
+    }
+    return config;
+  }
+
+  async getSaved(userId: string): Promise<ConciergeConfig> {
     const entry = this.store.get(userId);
     if (!entry) {
       return {
@@ -86,12 +99,7 @@ export class MemoryConciergeConfigStore implements IConciergeConfigStore {
         dutyCatProfileId: resolveDefaultDutyCatProfileId(),
       };
     }
-    const config = { ...entry };
-    // FIX-3: same validation as Redis impl
-    if (!config.dutyCatProfileId || !catRegistry.has(config.dutyCatProfileId)) {
-      config.dutyCatProfileId = resolveDefaultDutyCatProfileId();
-    }
-    return config;
+    return { ...entry };
   }
 
   async put(userId: string, config: ConciergeConfig): Promise<void> {

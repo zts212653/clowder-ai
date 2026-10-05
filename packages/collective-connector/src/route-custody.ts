@@ -1,3 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
+import { participationScopeStarts } from '@cat-cafe/shared';
+import { defaultDesiredParticipation } from './host-route-state.js';
+import { participationDeclaration, resolveMaterializedParticipation } from './participation-custody.js';
 import type { ConnectorPersistence } from './persistence.js';
 import {
   type ConnectorConnectionState,
@@ -10,7 +14,14 @@ import {
   setHostRouteInputSchema,
 } from './state.js';
 
-const RETRYABLE_ROUTE_FAILURE_CODES = new Set(['ROUTE_QUEUE_FULL', 'ROUTE_CAT_UNAVAILABLE']);
+const RETRYABLE_ROUTE_FAILURE_CODES = new Set([
+  'ROUTE_QUEUE_FULL',
+  'ROUTE_CAT_UNAVAILABLE',
+  // The Host may start before its local Collective Service. Keep the exact
+  // event/revision in custody and retry once the Service is reachable.
+  'ECONNREFUSED',
+  'COLLECTIVE_SERVICE_UNAVAILABLE',
+]);
 
 export async function setHostRoute(input: {
   persistence: ConnectorPersistence;
@@ -21,7 +32,7 @@ export async function setHostRoute(input: {
 }): Promise<HostRouteConfig> {
   const routeInput = setHostRouteInputSchema.parse(input.unsafeInput);
   return input.persistence.transaction((state) => {
-    requireConnection(state.connections[input.connectionId]);
+    const connection = requireConnection(state.connections[input.connectionId]);
     const existing = state.hostRoutes[input.connectionId];
     if (input.expectedRevision !== undefined && (existing?.revision ?? 0) !== input.expectedRevision) {
       throw Object.assign(new Error('Collective Host route configuration changed'), {
@@ -37,12 +48,42 @@ export async function setHostRoute(input: {
       defaultIngressThreadId: routeInput.defaultIngressThreadId,
       humanNotificationThreadId: routeInput.humanNotificationThreadId,
       agentRoutes: structuredClone(routeInput.agentRoutes),
+      desiredParticipation: structuredClone(
+        routeInput.desiredParticipation ?? existing?.desiredParticipation ?? defaultDesiredParticipation(),
+      ),
+      observedEligibility: structuredClone(routeInput.observedEligibility ?? existing?.observedEligibility ?? {}),
+      publicProfiles: structuredClone(routeInput.publicProfiles ?? existing?.publicProfiles ?? {}),
+      channelRoutes: structuredClone(routeInput.channelRoutes ?? existing?.channelRoutes ?? {}),
+      standingInterests: structuredClone(routeInput.standingInterests ?? existing?.standingInterests ?? {}),
+      channelListening: structuredClone(routeInput.channelListening ?? existing?.channelListening ?? {}),
+      attentionRevision: routeInput.attentionRevision ?? existing?.attentionRevision ?? 0,
       revision: (existing?.revision ?? 0) + 1,
+      scopeStarts: {},
       updatedAt: new Date(input.now()).toISOString(),
     };
+    for (const [channelId, listening] of Object.entries(route.channelListening)) {
+      if (
+        !route.channelRoutes[channelId] ||
+        (listening.mode === 'all' &&
+          !resolveMaterializedParticipation(route, connection.authorizedHumanId ?? '', listening.dutyCatId, channelId))
+      ) {
+        delete route.channelListening[channelId];
+        route.attentionRevision += 1;
+      }
+    }
+    route.scopeStarts = participationScopeStarts(
+      priorParticipation(connection, existing),
+      participationDeclaration(connection, route),
+    );
+    stampStandingWorkRevisions(route, existing);
     state.hostRoutes[input.connectionId] = route;
     return structuredClone(route);
   });
+}
+
+function permissionScope(scope: NonNullable<HostRouteConfig['agentRoutes'][string]['standingWork']>) {
+  const { threadId: _legacyAddress, ...permission } = scope;
+  return permission;
 }
 
 export function getHostRoute(persistence: ConnectorPersistence, connectionId: string): HostRouteConfig | undefined {
@@ -171,4 +212,22 @@ function requireRoutingAttempt(item: ConnectorInboxItem, routeConfigRevision: nu
 
 function isRetryableRouteFailure(failure: ConnectorRouteFailure | undefined): boolean {
   return failure !== undefined && RETRYABLE_ROUTE_FAILURE_CODES.has(failure.code);
+}
+
+function stampStandingWorkRevisions(route: HostRouteConfig, existing: HostRouteConfig | undefined) {
+  for (const [key, binding] of Object.entries(route.agentRoutes)) {
+    if (!binding.standingWork) continue;
+    const prior = existing?.agentRoutes[key];
+    const current =
+      prior?.standingWork &&
+      isDeepStrictEqual(permissionScope(prior.standingWork), permissionScope(binding.standingWork));
+    // This scalar is derived by the owner, even when a caller sends a retained route snapshot.
+    Object.assign(binding, {
+      standingWorkRevision: current && existing ? (prior.standingWorkRevision ?? existing.revision) : route.revision,
+    });
+  }
+}
+
+function priorParticipation(connection: ConnectorConnectionState, route: HostRouteConfig | undefined) {
+  return route ? { ...participationDeclaration(connection, route), scopeStarts: route.scopeStarts } : undefined;
 }

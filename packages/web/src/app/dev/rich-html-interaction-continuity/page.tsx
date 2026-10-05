@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ChatContainer } from '@/components/ChatContainer';
 import { type ChatMessage, DEFAULT_THREAD_STATE, type Thread, useChatStore } from '@/stores/chatStore';
+import { useConciergeStore } from '@/stores/conciergeStore';
 
 const THREAD_A = 'rich-html-continuity-a';
 const THREAD_B = 'rich-html-continuity-b';
@@ -122,14 +123,18 @@ function makeThread(id: string, title: string): Thread {
   };
 }
 
-function seedFixture(): void {
+function seedFixture(independentPanel = false): void {
   const stateA = { ...DEFAULT_THREAD_STATE, messages: THREAD_A_MESSAGES, hasMore: false };
   const stateB = { ...DEFAULT_THREAD_STATE, messages: THREAD_B_MESSAGES, hasMore: false };
   useChatStore.setState({
     ...stateA,
     currentThreadId: THREAD_A,
     threads: [makeThread(THREAD_A, 'Continuity A'), makeThread(THREAD_B, 'Continuity B')],
-    threadStates: { [THREAD_A]: stateA, [THREAD_B]: stateB },
+    threadStates: {
+      [THREAD_A]: stateA,
+      [THREAD_B]: stateB,
+      ...(independentPanel ? { 'independent-ball': stateA } : {}),
+    },
   });
 }
 
@@ -139,7 +144,11 @@ export default function RichHtmlInteractionContinuityFixture() {
   const [widgetVersion, setWidgetVersion] = useState('A-v1');
 
   useEffect(() => {
-    seedFixture();
+    const independent = new URLSearchParams(location.search).has('independent');
+    seedFixture(independent);
+    if (independent) {
+      useConciergeStore.setState({ surfaceState: 'bubble', threadId: 'independent-ball', threadIdLoaded: true });
+    }
     setHydrated(true);
   }, []);
 

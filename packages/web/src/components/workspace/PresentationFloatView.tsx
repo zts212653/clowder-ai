@@ -160,6 +160,7 @@ export function PresentationFloatView({
                 disableCommandPrefix
                 worktreeId={c.worktreeId ?? undefined}
                 basePath={c.filePath.split('/').slice(0, -1).join('/')}
+                sourcePath={c.filePath}
               />
             ) : (
               <pre className="whitespace-pre-wrap break-words font-mono text-xs text-cafe-text-primary">

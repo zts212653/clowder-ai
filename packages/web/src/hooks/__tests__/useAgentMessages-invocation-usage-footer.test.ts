@@ -37,6 +37,7 @@ const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
+const mockMergeMessageServedFacts = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -61,6 +62,7 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
+  mergeMessageServedFacts: mockMergeMessageServedFacts,
 
   addMessageToThread: mockAddMessageToThread,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
@@ -159,6 +161,53 @@ describe('F230 footer-parity: invocation_usage → setMessageMetadata (active pa
     const metaOrder = mockSetMessageMetadata.mock.invocationCallOrder[0];
     const usageOrder = mockSetMessageUsage.mock.invocationCallOrder[0];
     expect(metaOrder).toBeLessThan(usageOrder);
+  });
+
+  it('F319 Phase E.1: served facts on invocation_usage are merged onto the live bubble (setMessageMetadata is first-write-wins)', () => {
+    setActiveBubble(getThreadRuntimeLedger(), 'thread-1', 'codex-sol', {
+      messageId: 'msg-sol-live',
+      invocationId: 'inv-sol-live',
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'codex-sol',
+        content: JSON.stringify({
+          type: 'invocation_usage',
+          catId: 'codex-sol',
+          usage: { inputTokens: 10, outputTokens: 2 },
+          model: 'gpt-5.6-sol',
+          provider: 'openai',
+          served: { servedModel: 'gpt-5.6-sol', servedModelSource: 'ws_response_object', upstreamTurnStateLength: 312 },
+        }),
+      });
+    });
+    expect(mockMergeMessageServedFacts).toHaveBeenCalledWith('msg-sol-live', {
+      servedModel: 'gpt-5.6-sol',
+      servedModelSource: 'ws_response_object',
+      upstreamTurnStateLength: 312,
+    });
+  });
+
+  it('F319 Phase E.1: no served facts → merge not called', () => {
+    setActiveBubble(getThreadRuntimeLedger(), 'thread-1', 'opus', {
+      messageId: 'msg-opus-live',
+      invocationId: 'inv-opus-live',
+    });
+    act(() => {
+      root.render(React.createElement(Harness));
+    });
+    act(() => {
+      captured?.handleAgentMessage({
+        type: 'system_info',
+        catId: 'opus',
+        content: JSON.stringify({ type: 'invocation_usage', catId: 'opus', usage: { inputTokens: 1 } }),
+      });
+    });
+    expect(mockMergeMessageServedFacts).not.toHaveBeenCalled();
   });
 
   it('invocation_usage WITHOUT model/provider → setMessageMetadata NOT called (backward compat)', () => {

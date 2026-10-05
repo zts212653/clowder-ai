@@ -270,9 +270,10 @@ cat_cafe_register_pr_tracking(
 |------|------|------|
 | `GITHUB_WEBHOOK_SECRET` | webhook secret（同 GitHub 配置页的 Secret） | `whsec_xxx` |
 | `GITHUB_REPO_ALLOWLIST` | 逗号分隔的授权仓库列表 | `zts212653/cat-cafe,zts212653/clowder-ai` |
-| `GITHUB_REPO_INBOX_CAT_ID` | 收件猫 ID（所有 inbox 通知发给这只猫） | `cat-maine-coon` |
+| `GITHUB_REPO_INBOX_CAT_ID` | 启动必填；仅在 repo 未登记时作为 fallback，正常路由以 Community Repo `guardCatId` 为准 | `cat-maine-coon` |
 
 三个变量 + Redis 全部配置后，`GitHubRepoWebhookHandler` 才注册到 webhook 路由。
+handler 与 reconciliation scanner 会在**每次投递前**读取该 repo 当前的 `guardCatId`，并让消息 mention 与 event wake 共用同一个结果；更新负责人后无需重建 schedule 或 connector gateway。若仓库未登记而实际使用 env fallback，runtime 会显式记 warn，避免负责人回退静默发生。
 
 ### 故障恢复
 

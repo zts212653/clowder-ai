@@ -1,4 +1,7 @@
-export async function ensureWorkspaceOpen(page, { attempts = 5, waitMs = 1_000, readinessTimeoutMs = 30_000 } = {}) {
+export async function ensureWorkspaceOpen(
+  page,
+  { attempts = 5, waitMs = 1_000, readinessTimeoutMs = 30_000, actionTimeoutMs = 1_000 } = {},
+) {
   const toggle = page.getByTestId('workspace-panel-toggle');
   const workbench = page.getByTestId('f307-experience-workbench');
   await toggle.waitFor();
@@ -15,7 +18,14 @@ export async function ensureWorkspaceOpen(page, { attempts = 5, waitMs = 1_000, 
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (await workbench.isVisible()) return;
-    if ((await toggle.getAttribute('aria-label')) === '打开 Workspace') await toggle.click();
+    if ((await toggle.getAttribute('aria-label')) === '打开 Workspace' && !(await workbench.isVisible())) {
+      try {
+        await toggle.click({ timeout: actionTimeoutMs });
+      } catch (error) {
+        if (await workbench.isVisible()) return;
+        throw error;
+      }
+    }
     if (
       await workbench
         .waitFor({ state: 'visible', timeout: waitMs })
