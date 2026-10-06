@@ -37,6 +37,9 @@ export function buildCrossThreadNoObligationWake(input: unknown): TurnCustodyWak
   if (record.effectClass === 'coordinate') {
     return { kind: 'non_obligation', source: 'cross_thread_coordinate' };
   }
+  if (record.effectClass === 'investigate') {
+    return { kind: 'non_obligation', source: 'cross_thread_investigate' };
+  }
   return undefined;
 }
 

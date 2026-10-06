@@ -15,7 +15,11 @@ export type TurnCustodyWakeProvenance =
     }
   | {
       readonly kind: 'non_obligation';
-      readonly source: 'cross_thread_fyi' | 'cross_thread_coordinate' | 'coordination_terminal';
+      readonly source:
+        | 'cross_thread_fyi'
+        | 'cross_thread_coordinate'
+        | 'cross_thread_investigate'
+        | 'coordination_terminal';
     }
   | {
       readonly kind: 'action_successor';
