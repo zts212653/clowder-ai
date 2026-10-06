@@ -11,6 +11,7 @@ import { resolve } from 'node:path';
 import { catRegistry } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { appSettingEnvKeys } from '../config/app-settings.js';
 import { collectConfigSnapshot } from '../config/ConfigRegistry.js';
 import { configStore } from '../config/ConfigStore.js';
 import {
@@ -181,12 +182,35 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
 
     const before = collectConfigSnapshot();
     const oldValue = getSnapshotValue(before, parsed.data.key);
+    const normalized = String(parsed.data.value).trim();
+    let persisted = false;
     try {
-      configStore.set(parsed.data.key, parsed.data.value);
+      configStore.set(parsed.data.key, normalized);
     } catch (err) {
       reply.status(400);
       return { error: (err as Error).message };
     }
+
+    // Persist to the config-root .env so the change survives restart — the
+    // boot loader (project-env-loader) reapplies it next start. Eligibility is
+    // the shared fail-closed app-setting allowlist: capability/permission keys
+    // (Codex sandbox / approval / auth) are NOT persisted and stay runtime-only,
+    // exactly as they behaved before this feature, so a project file can never
+    // re-arm what the launcher owns. Best-effort: an ineligible key or a write
+    // failure only means the hot update stays process-local, and the response
+    // reports it via `persisted: false` so callers can say "生效但未保存".
+    const envKey = configStore.getEnvKey(parsed.data.key);
+    if (envKey && appSettingEnvKeys().has(envKey)) {
+      try {
+        const current = existsSync(envFilePath) ? readFileSync(envFilePath, 'utf8') : '';
+        const next = applyEnvUpdatesToFile(current, new Map([[envKey, normalized]]));
+        writeFileSync(envFilePath, next, 'utf8');
+        persisted = true;
+      } catch (err) {
+        request.log.warn({ err, key: parsed.data.key, envFilePath }, 'config patch persistence failed');
+      }
+    }
+
     const after = collectConfigSnapshot();
     const newValue = getSnapshotValue(after, parsed.data.key);
     const riskLevel = configStore.getRiskLevel(parsed.data.key) ?? 'standard';
@@ -217,7 +241,7 @@ export async function configRoutes(app: FastifyInstance, opts: ConfigRoutesOptio
       request.log.warn({ err, key: parsed.data.key }, 'config audit append failed');
     }
 
-    return { config: after };
+    return { config: after, persisted };
   });
 
   const handleCoCreatorPatch = async (request: FastifyRequest, reply: FastifyReply) => {

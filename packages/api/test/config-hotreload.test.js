@@ -4,6 +4,9 @@
  */
 
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
 import { configStore } from '../dist/config/ConfigStore.js';
@@ -19,6 +22,9 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
 
   async function setup(routeOptions = {}, options = {}) {
     app = Fastify();
+    // PATCH persists to the config-root .env — always isolate it to a temp
+    // file so tests never write through to the repo's .env.
+    const envFilePath = routeOptions.envFilePath ?? join(mkdtempSync(join(tmpdir(), 'cc-hotreload-')), '.env');
     const warnSink = Array.isArray(options.warnSink) ? options.warnSink : null;
     if (warnSink) {
       app.addHook('onRequest', (request, _reply, done) => {
@@ -30,7 +36,7 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
         done();
       });
     }
-    await app.register(configRoutes, routeOptions);
+    await app.register(configRoutes, { envFilePath, ...routeOptions });
     await app.ready();
     return app;
   }
@@ -184,5 +190,72 @@ describe('PATCH /api/config (F4 hot-reload)', () => {
     for (const key of keys) {
       assert.ok(configStore.getSnapshotPath(key), `missing snapshot path for ${key}`);
     }
+  });
+
+  it('persists the patch to .env so it survives restart', async () => {
+    const envFilePath = join(mkdtempSync(join(tmpdir(), 'cc-persist-')), '.env');
+    await setup({ envFilePath });
+
+    const res = await patchConfig({ key: 'ui.bubble.cliOutput', value: 'expanded' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().persisted, true);
+
+    const envContent = readFileSync(envFilePath, 'utf8');
+    assert.ok(
+      envContent.includes('UI_BUBBLE_CLI_OUTPUT_DEFAULT=expanded'),
+      `expected persisted key, got: ${envContent}`,
+    );
+  });
+
+  it('keeps permission keys hot-updatable but runtime-only (never persisted)', async () => {
+    const envFilePath = join(mkdtempSync(join(tmpdir(), 'cc-perm-')), '.env');
+    writeFileSync(envFilePath, 'SEED=1\n', 'utf8');
+    await setup({ envFilePath });
+
+    const ineligible = [
+      ['cli.codexSandboxMode', 'danger-full-access'],
+      ['cli.codexApprovalPolicy', 'never'],
+      ['codex.execution.authMode', 'api_key'],
+      ['codex.execution.model', 'gpt-5.3-codex'],
+      ['codex.execution.passModelArg', 'true'],
+      ['cli.timeoutMs', '60000'],
+      ['a2a.maxDepth', '5'],
+    ];
+    for (const [key, value] of ineligible) {
+      const res = await patchConfig({ key, value });
+      assert.equal(res.statusCode, 200, `${key} must stay hot-updatable`);
+      assert.equal(res.json().persisted, false, `${key} must not claim .env persistence`);
+    }
+
+    // Runtime behaviour is unchanged: the hot update is still live in-process.
+    const snapshot = (await app.inject({ method: 'GET', url: '/api/config' })).json().config;
+    assert.equal(snapshot.cli.codexApprovalPolicy, 'never');
+    assert.equal(snapshot.cli.codexSandboxMode, 'danger-full-access');
+    assert.equal(snapshot.codexExecution.authMode, 'api_key');
+
+    // ...and the config-root .env was not touched at all.
+    assert.equal(readFileSync(envFilePath, 'utf8'), 'SEED=1\n');
+  });
+
+  it('reports persisted:false when the .env write fails, keeping the hot update', async () => {
+    // Parent directory does not exist -> writeFileSync throws ENOENT.
+    const missingParent = join(mkdtempSync(join(tmpdir(), 'cc-persist-fail-')), 'missing', '.env');
+    const warnSink = [];
+    await setup({ envFilePath: missingParent }, { warnSink });
+
+    const res = await patchConfig({ key: 'ui.bubble.cliOutput', value: 'expanded' });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().persisted, false, 'a failed write must not claim persistence');
+    assert.equal(
+      res.json().config.ui.bubbleDefaults.cliOutput,
+      'expanded',
+      'the hot update still applies in-process, which is what the UI must disclose',
+    );
+    assert.equal(existsSync(missingParent), false);
+    assert.ok(
+      warnSink.some((args) => args.at(-1) === 'config patch persistence failed'),
+      'the write failure must be logged',
+    );
   });
 });
