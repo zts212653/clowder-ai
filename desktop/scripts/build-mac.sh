@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # build-mac.sh — Produces macOS DMG installers for Clowder AI.
 #
-# Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs two DMGs
-# (arm64 + x64) under dist/:
+# Mirrors desktop/scripts/build-desktop.ps1 for macOS. Outputs a native-arch DMG
+# under dist/ (build arm64 and x64 on separate native runners):
 #   ClowderAI-0.10.1-arm64.dmg
 #   ClowderAI-0.10.1-x64.dmg
 #
 # Prerequisites on the build machine:
 #   - macOS 13+ (Xcode Command Line Tools: xcode-select --install)
-#   - pnpm, node (any LTS), bash, curl, tar, make
+#   - pnpm, node (matching package.json engines.node), bash, curl, tar, make
 #   - For x64 Redis on Apple Silicon: Rosetta 2 (softwareupdate --install-rosetta)
 #
 # Usage:
@@ -32,14 +32,14 @@ SKIP_WEB=0
 SKIP_DEPLOY=0
 SKIP_REDIS=0
 SKIP_NODE=0
-ARCHS=("arm64" "x64")
+ARCHS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-web)    SKIP_WEB=1; shift ;;
     --skip-deploy) SKIP_DEPLOY=1; shift ;;
     --skip-redis)  SKIP_REDIS=1; shift ;;
     --skip-node)   SKIP_NODE=1; shift ;;
-    --arch)        ARCHS=("$2"); shift 2 ;;
+    --arch)        [[ $# -ge 2 ]] || { echo "--arch needs arm64 or x64" >&2; exit 2; }; ARCHS=("$2"); shift 2 ;;
     *) echo "Unknown flag: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,6 +60,20 @@ err()   { printf "  \033[0;31m[ERR]\033[0m %s\n" "$*" >&2; }
 die()   { err "$*"; exit 1; }
 
 [[ "$(uname -s)" == "Darwin" ]] || die "build-mac.sh must run on macOS (detected: $(uname -s))"
+
+# One install/deploy is architecture-specific. Cross-arch packaging needs a
+# separate native runner, not a second label on the same node_modules tree.
+HOST_ARCH="$(node -p 'process.arch')" || die "Cannot detect build Node; install a supported Node on PATH"
+case "$(uname -m)" in
+  arm64) MACHINE_ARCH=arm64 ;;
+  x86_64) MACHINE_ARCH=x64 ;;
+  *) die "Unsupported macOS host architecture" ;;
+esac
+[[ "$HOST_ARCH" == "$MACHINE_ARCH" ]] || die "Node architecture $HOST_ARCH differs from shell host $MACHINE_ARCH; use native Node"
+if [[ ${#ARCHS[@]} -eq 0 ]]; then ARCHS=("$HOST_ARCH"); fi
+[[ "${ARCHS[0]}" == "$HOST_ARCH" ]] || die "Build ${ARCHS[0]} on its own native runner; this host is $HOST_ARCH"
+NODE_VERIFIER="${SCRIPT_DIR}/verify-build-node.mjs"
+BUILD_NODE_VERSION="$(node "$NODE_VERIFIER" host "$PROJECT_ROOT" darwin "$HOST_ARCH")" || die "Build Node validation failed"
 
 # ─── Step 1: Build web app ──────────────────────────────────────────────
 bold "Step 1/6 — Build web application"
@@ -106,34 +120,22 @@ else
 fi
 
 # ─── Step 3: Bundle Node.js portable (both archs) ──────────────────────
-bold "Step 3/6 — Bundle Node.js portable (arm64 + x64)"
-# Detect build-machine Node version so native modules (better-sqlite3) ABI
-# matches the bundled runtime. Same rationale as the Windows build.
-BUILD_NODE_VERSION="$(node --version 2>/dev/null || echo '')"
-if [[ -z "$BUILD_NODE_VERSION" ]]; then
-  warn "node not on PATH; defaulting to v24.16.0"
-  BUILD_NODE_VERSION="v24.16.0"
-fi
-BUILD_NODE_MAJOR="${BUILD_NODE_VERSION#v}"
-BUILD_NODE_MAJOR="${BUILD_NODE_MAJOR%%.*}"
-echo "  Build-machine Node: ${BUILD_NODE_VERSION} (major=${BUILD_NODE_MAJOR})"
+bold "Step 3/6 — Bundle Node.js portable (${HOST_ARCH})"
+echo "  Build-machine Node: ${BUILD_NODE_VERSION} (${HOST_ARCH})"
 
 download_node() {
   local arch="$1"  # arm64 | x64
   local dest="${BUNDLED_DIR}/node-darwin-${arch}"
-  if [[ $SKIP_NODE -eq 1 && -x "${dest}/bin/node" ]]; then
-    ok "node-darwin-${arch} reused (--skip-node)"
-    return
-  fi
   if [[ -x "${dest}/bin/node" ]]; then
-    local existing; existing="$("${dest}/bin/node" --version 2>/dev/null || echo '')"
-    local existing_major="${existing#v}"; existing_major="${existing_major%%.*}"
-    if [[ "$existing_major" == "$BUILD_NODE_MAJOR" ]]; then
-      ok "node-darwin-${arch} already present (${existing})"
+    if node "$NODE_VERIFIER" node "$PROJECT_ROOT" darwin "$arch" "${dest}/bin/node"; then
+      ok "node-darwin-${arch} matches build ${BUILD_NODE_VERSION}"
       return
     fi
-    warn "node-darwin-${arch} version ${existing} != build ${BUILD_NODE_VERSION}, re-downloading"
+    [[ $SKIP_NODE -eq 0 ]] || die "Cached Node is incompatible; rerun without --skip-node"
+    warn "node-darwin-${arch} mismatches build ${BUILD_NODE_VERSION}; re-downloading"
     rm -rf "$dest"
+  elif [[ $SKIP_NODE -eq 1 ]]; then
+    die "Cached Node missing; rerun without --skip-node"
   fi
   mkdir -p "$dest"
   local archive="node-${BUILD_NODE_VERSION}-darwin-${arch}"
@@ -141,12 +143,14 @@ download_node() {
   echo "  Downloading ${archive} ..."
   curl -fsSL "$url" | tar xz -C "$dest" --strip-components=1 || die "Node ${arch} download failed"
   [[ -x "${dest}/bin/node" ]] || die "node binary missing in ${dest} after extract"
+  node "$NODE_VERIFIER" node "$PROJECT_ROOT" darwin "$arch" "${dest}/bin/node" || die "Downloaded Node validation failed"
   ok "node-darwin-${arch} bundled"
 }
 
 for arch in "${ARCHS[@]}"; do
   download_node "$arch"
 done
+node "$NODE_VERIFIER" artifact "$PROJECT_ROOT" darwin "$HOST_ARCH" "${BUNDLED_DIR}/node-darwin-${HOST_ARCH}/bin/node" "${DEPLOY_ROOT}/api" || die "Deployed Node/native modules failed"
 
 # ─── Step 4: Build Redis portable (both archs) ─────────────────────────
 bold "Step 4/6 — Build Redis portable from source"
@@ -259,6 +263,7 @@ for arch in "${ARCHS[@]}"; do
     *) continue ;;
   esac
   app_bundle="${app_dir}/Clowder AI.app"
+  [[ -d "$app_bundle" ]] || die "Expected app bundle missing: $app_bundle"
   if [[ -d "$app_bundle" ]]; then
     echo "  Ad-hoc signing ${arch} bundle ..."
     codesign -s - --deep --force "$app_bundle" || die "codesign ${arch} failed"
@@ -266,6 +271,8 @@ for arch in "${ARCHS[@]}"; do
     # ../packages/api/node_modules), so use basic --deep verification only.
     codesign --verify --deep "$app_bundle" || die "codesign verify ${arch} failed"
     ok "Ad-hoc signed and verified ${arch}"
+    resources="${app_bundle}/Contents/Resources"
+    node "$NODE_VERIFIER" artifact "$resources" darwin "$arch" "${resources}/node/bin/node" "${resources}/packages/api" || die "Signed installed-layout Node/native validation failed"
   fi
 done
 

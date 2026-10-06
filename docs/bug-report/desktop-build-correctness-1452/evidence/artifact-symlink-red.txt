@@ -1,0 +1,17 @@
+file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:60
+      throw new Error(`Bundle symlink escapes app: ${relative}`);
+            ^
+
+Error: Bundle symlink escapes app: Contents/Resources/packages/api/node_modules/.bin/anthropic-ai-sdk
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:60:13)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at walk (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:65:48)
+    at inspectBundle (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/desktop/scripts/lib/mac-bundle-arch.mjs:84:3)
+    at file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/[eval1]:1:102
+
+Node.js v24.15.0

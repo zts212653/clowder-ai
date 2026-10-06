@@ -1,0 +1,71 @@
+✖ local JS entries cannot borrow a missing sqlite-vec platform binary from an ancestor (2338.654708ms)
+✖ a missing transitive sharp dependency cannot resolve from the host (2053.54775ms)
+✖ the SQLite extension path and native dlopen symlinks cannot escape (1748.743417ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6240.253125
+
+✖ failing tests:
+
+test at .acceptance/r1-native-red/native-artifact.test.mjs:78:1
+✖ local JS entries cannot borrow a missing sqlite-vec platform binary from an ancestor (2338.654708ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:93:14
+      at withFixture (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:51:5)
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:82:5)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /escapes deployed node_modules/,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at .acceptance/r1-native-red/native-artifact.test.mjs:98:1
+✖ a missing transitive sharp dependency cannot resolve from the host (2053.54775ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:101:12
+      at withFixture (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:51:5)
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:99:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /escapes deployed node_modules/,
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at .acceptance/r1-native-red/native-artifact.test.mjs:105:1
+✖ the SQLite extension path and native dlopen symlinks cannot escape (1748.743417ms)
+  AssertionError [ERR_ASSERTION]: Missing expected exception.
+      at file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:111:12
+      at withFixture (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:51:5)
+      at TestContext.<anonymous> (file:///Users/lang/workspace/github-lab/clowder-1452-build-correctness/.acceptance/r1-native-red/native-artifact.test.mjs:106:3)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /escapes deployed node_modules/,
+    operator: 'throws',
+    diff: 'simple'
+  }

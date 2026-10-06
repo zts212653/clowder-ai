@@ -7,7 +7,7 @@
     "predev": "pnpm run sync:vendor-assets",
     "dev": "node scripts/sync-vendor-assets.mjs --watch -- next dev",
     "prebuild": "pnpm run sync:vendor-assets",
-    "build": "node ../../scripts/run-preserving-signal-exit.mjs next build",
+    "build": "node ../../scripts/run-preserving-signal-exit.mjs node ./node_modules/next/dist/bin/next build",
     "postbuild": "node scripts/write-build-stamp.cjs && pnpm run test:production-cache-policy",
     "prestart": "pnpm run sync:vendor-assets",
     "start": "next start",
