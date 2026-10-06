@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
+
+const { createCliExecutionOwnerService } = await import('../dist/utils/cli-process-ownership.js');
 
 const { InMemoryTurnExecutionStore } = await import(
   '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js'
@@ -22,6 +27,47 @@ function runningInput(invocationId, startedAt) {
 }
 
 describe('TurnExecutionStartupReconciler', () => {
+  test('Windows startup without manifests interrupts stale children while preserving current turns', async (t) => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'cat-cafe-windows-startup-recovery-'));
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    t.after(() => Object.defineProperty(process, 'platform', platform));
+    try {
+      const store = new InMemoryTurnExecutionStore();
+      await store.createRunning(runningInput('windows-old-child', 50));
+      await store.createRunning(runningInput('windows-current-child', 101));
+      const reconciler = new TurnExecutionStartupReconciler({ store, now: () => 200 });
+      const owners = createCliExecutionOwnerService({ dataDir });
+
+      await listenBeforeTurnExecutionRecovery({
+        listen: async () => 'isolated-test-listener',
+        recover: async () => {
+          const snapshot = await owners.listLive();
+          if (snapshot.complete) {
+            await reconciler.reconcile({
+              processStartedAt: 100,
+              protectedInvocationIds: snapshot.owners.map((owner) => owner.invocationId),
+            });
+          }
+        },
+        onRecoveryError: (error) => assert.fail(error),
+      });
+
+      assert.deepEqual(await store.get('windows-old-child'), {
+        ...runningInput('windows-old-child', 50),
+        status: 'interrupted',
+        endedAt: 200,
+        terminalReason: 'process_restart',
+      });
+      assert.deepEqual(
+        (await store.listRunningByUser('user-restart')).map((child) => child.invocationId),
+        ['windows-current-child'],
+      );
+    } finally {
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   test('failed listen preserves running child truth by never entering recovery', async () => {
     const store = new InMemoryTurnExecutionStore();
     await store.createRunning(runningInput('ordinary-live-owner', 50));
