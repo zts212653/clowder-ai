@@ -6,6 +6,7 @@ import { join, relative } from 'node:path';
 import { extractAnchor, extractFeatureIdKeywords, extractFrontmatter } from './CatCafeScanner.js';
 import type { EvidenceKind, ProvenanceTier, RepoScanner, ScannedEvidence } from './interfaces.js';
 import { buildMarkdownDocumentPassages, stripYamlFrontmatter } from './MarkdownPassageIndexer.js';
+import { toPosixPath } from './path-utils.js';
 
 /** Directories to always skip */
 const SKIP_DIRS = new Set([
@@ -74,7 +75,7 @@ export class GenericRepoScanner implements RepoScanner {
 
   /** Parse a single file — used by IndexBuilder.incrementalUpdate() */
   parseSingle(filePath: string, projectRoot: string): ScannedEvidence | null {
-    const rel = relative(projectRoot, filePath);
+    const rel = toPosixPath(relative(projectRoot, filePath));
     const basename = rel.split('/').pop() ?? '';
     const nameNoExt = basename.replace(/\.[^.]+$/, '');
 
@@ -146,7 +147,7 @@ export class GenericRepoScanner implements RepoScanner {
         if (seen.has(fullPath)) continue;
         try {
           const content = readFileSync(fullPath, 'utf-8');
-          const sourcePath = relative(root, fullPath);
+          const sourcePath = toPosixPath(relative(root, fullPath));
           const parsed = this.parseManifest(entry, content);
           results.push({
             item: {
@@ -243,7 +244,7 @@ export class GenericRepoScanner implements RepoScanner {
       return null;
     }
 
-    const sourcePath = relative(root, filePath);
+    const sourcePath = toPosixPath(relative(root, filePath));
     const fm = extractFrontmatter(content);
     const anchor = (fm ? extractAnchor(fm, sourcePath) : null) ?? `doc:${sourcePath.replace(/\.md$/, '')}`;
 

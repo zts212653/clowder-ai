@@ -26,6 +26,7 @@ import { MarkerQueue } from './MarkerQueue.js';
 import { MaterializationService } from './MaterializationService.js';
 import { MemoryEmbeddingLifecycle } from './MemoryEmbeddingLifecycle.js';
 import type { PassageVectorStore } from './PassageVectorStore.js';
+import { isPathInside, toPosixPath } from './path-utils.js';
 import { createPersonalMemoryStore, registerPrivateAndExternalCollections } from './private-collection-bindings.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
@@ -99,9 +100,10 @@ export function computeChildExcludes(parentRoot: string, children: Array<{ root:
   const excludes: string[] = [];
   for (const child of children) {
     const absChild = resolve(child.root);
-    if (absChild.startsWith(absParent + '/') && absChild !== absParent) {
-      const rel = relative(absParent, absChild);
-      excludes.push(`${rel}/**`);
+    // Containment must be separator-agnostic: `${absParent}/` never matches a win32 child path, so
+    // a parent collection used to receive no exclude at all and re-indexed its children's documents.
+    if (absChild !== absParent && isPathInside(absParent, absChild)) {
+      excludes.push(`${toPosixPath(relative(absParent, absChild))}/**`);
     }
   }
   return excludes;
