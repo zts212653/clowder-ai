@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { DEFAULT_ABSTRACTIVE_MODEL } from './AbstractiveSummaryClient.js';
 import type { SummaryCompactionDeps } from './SummaryCompactionTask.js';
 
 type GeneratedSummary = NonNullable<Awaited<ReturnType<SummaryCompactionDeps['generateAbstractive']>>>;
@@ -70,7 +71,7 @@ export function commitSummaryProjection(
         segment.boundaryConfidence,
         segment.relatedSegmentIds ? JSON.stringify(segment.relatedSegmentIds) : null,
         segment.candidates ? JSON.stringify(segment.candidates) : null,
-        'claude-opus-4-6',
+        result.model ?? DEFAULT_ABSTRACTIVE_MODEL,
         'g2-thread-abstract-v1',
         now,
       );

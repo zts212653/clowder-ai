@@ -56,6 +56,8 @@ export interface SummaryCompactionDeps {
       relatedSegmentIds?: string[];
       candidates?: unknown[];
     }>;
+    /** Model the summary was requested with; defaults to DEFAULT_ABSTRACTIVE_MODEL when absent. */
+    model?: string;
   } | null>;
   /** Re-embed a thread after summary update (for semantic search). Optional — fail-open. */
   reEmbed?: (anchor: string, text: string) => Promise<void>;
