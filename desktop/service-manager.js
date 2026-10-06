@@ -564,11 +564,19 @@ class ServiceManager {
     let cmd, args;
     if (nextJs) {
       cmd = nodeExe;
-      args = [nextJs, 'start', '--port', String(this.frontendPort)];
+      args = [nextJs, 'start', '--port', String(this.frontendPort), '--hostname', '127.0.0.1'];
     } else if (IS_WIN) {
       cmd = 'cmd.exe';
       const localNext = path.join(webDir, 'node_modules', '.bin', 'next.cmd');
-      args = ['/c', fs.existsSync(localNext) ? localNext : 'next.cmd', 'start', '--port', String(this.frontendPort)];
+      args = [
+        '/c',
+        fs.existsSync(localNext) ? localNext : 'next.cmd',
+        'start',
+        '--port',
+        String(this.frontendPort),
+        '--hostname',
+        '127.0.0.1',
+      ];
     } else {
       // macOS/Linux fallback: spawn node against any next binary on PATH.
       // In practice 'deployed' above is always found after pnpm deploy, so

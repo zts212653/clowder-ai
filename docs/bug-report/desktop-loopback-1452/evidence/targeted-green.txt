@@ -1,0 +1,42 @@
+✔ darwin deployed: Next binds only IPv4 loopback (46.130708ms)
+✔ darwin pnpm: Next binds only IPv4 loopback (2.072667ms)
+✔ darwin hoisted: Next binds only IPv4 loopback (2.076875ms)
+✔ linux deployed: Next binds only IPv4 loopback (1.366292ms)
+✔ linux pnpm: Next binds only IPv4 loopback (0.994792ms)
+✔ linux hoisted: Next binds only IPv4 loopback (1.373125ms)
+✔ win32 deployed: Next binds only IPv4 loopback (2.369292ms)
+✔ win32 pnpm: Next binds only IPv4 loopback (1.713459ms)
+✔ win32 hoisted: Next binds only IPv4 loopback (0.991917ms)
+✔ win32 shim: Next binds only IPv4 loopback (8.371916ms)
+✔ win32 path-shim: Next binds only IPv4 loopback (0.939583ms)
+✔ missing POSIX Next entry fails without opening a listener (1.071583ms)
+✔ declares the packaged Web frontend ready only after an HTTP response (81.35575ms)
+✔ settles the packaged Web readiness probe when the HTTP response stalls (2.378708ms)
+[2026-09-30T17:05:01.877Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/.claude -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/.claude
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/assets -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/assets
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/cat-cafe-skills -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/cat-cafe-skills
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/docs -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/docs
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/guides -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/guides
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/packages -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/packages
+[2026-09-30T17:05:01.878Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/plugins -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/plugins
+[2026-09-30T17:05:01.881Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-ddBaRb/project/scripts -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-gEcMHH/scripts
+✔ mirrors bundled plugins into the writable API project root (32.900083ms)
+[2026-09-30T17:05:01.918Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/.claude -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/.claude
+[2026-09-30T17:05:01.919Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/assets -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/assets
+[2026-09-30T17:05:01.919Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/cat-cafe-skills -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/cat-cafe-skills
+[2026-09-30T17:05:01.919Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/docs -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/docs
+[2026-09-30T17:05:01.919Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/guides -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/guides
+[2026-09-30T17:05:01.919Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/packages -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/packages
+[2026-09-30T17:05:01.920Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/plugins -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/plugins
+[2026-09-30T17:05:01.920Z] Mirror dir created: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/scripts -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/scripts
+[2026-09-30T17:05:01.920Z] Junction probe FAILED for /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/plugins/github/plugin.yaml: simulated unreadable plugin junction — rebuilding
+[2026-09-30T17:05:01.920Z] Junction rebuilt and verified: /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-user-bnSAmH/project/plugins -> /var/folders/1z/8dpvll5d2fq7brlf2qk4kkw40000gn/T/service-manager-install-OEC1KG/plugins
+✔ probes bundled plugin mirror and rebuilds it when the first read fails (34.214916ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 873.000209
