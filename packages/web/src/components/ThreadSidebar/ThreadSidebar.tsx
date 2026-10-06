@@ -34,6 +34,7 @@ import {
 import { orderAttentionList } from './attention-list-order';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { LabelFilterBar } from './LabelFilterBar';
+import { countThreadsByLabel } from './label-counts';
 import {
   SearchGroupAction,
   SearchGroupFeedback,
@@ -684,8 +685,8 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
 
   const labelAssignableThreads = useMemo(() => liveThreads.filter((t) => t.id !== 'default'), [liveThreads]);
 
-  const uncategorizedCount = useMemo(
-    () => labelAssignableThreads.filter((t) => !t.labels || t.labels.length === 0).length,
+  const { byLabel: labelCounts, uncategorized: uncategorizedCount } = useMemo(
+    () => countThreadsByLabel(labelAssignableThreads),
     [labelAssignableThreads],
   );
 
@@ -1704,6 +1705,7 @@ export function ThreadSidebar({ onClose, className, routeThreadId, activeDestina
                 selectedFilter={labelFilter}
                 onSelect={setLabelFilter}
                 uncategorizedCount={uncategorizedCount}
+                labelCounts={labelCounts}
               />
               {canScrollRight && (
                 <button

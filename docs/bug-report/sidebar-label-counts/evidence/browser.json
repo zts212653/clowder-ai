@@ -1,0 +1,18 @@
+{
+  "base": "b1fe2966fa0a97d1e3cd2e174ed59fd1477b4fc4",
+  "scope": "Real LabelFilterBar + countThreadsByLabel, synthetic data, project Tailwind/tokens, headless Chromium",
+  "checks": [
+    "inline/overflow counts",
+    "zero hidden",
+    "long name/count non-overlap",
+    "selected trigger name only",
+    "relabel counts update"
+  ],
+  "bounds": {
+    "nameRight": 247.609375,
+    "countLeft": 253.609375,
+    "countRight": 259,
+    "itemRight": 267
+  },
+  "pageErrors": []
+}
