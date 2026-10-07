@@ -12,6 +12,11 @@
  * Quota admission is atomic: tryAdmit() serializes check+insert via Lua script
  * (Redis) or IMMEDIATE transaction (SQLite), preventing TOCTOU races.
  * holdQuotaStore is a required dependency (no in-memory fallback).
+ *
+ * #1471 (F167 owner decision 2026-09-16, option A): the window counts TIMER holds
+ * (wakeAfterMs) only. A managed command (wakeWhen) is self-grounded — the command's
+ * completion is the wake signal — so it neither reserves a window slot nor is blocked
+ * by one. KD-23 single-slot replacement still applies to both modes.
  */
 
 import type { SchedulerAwaitStateV1, WaitOwnerFence } from '@cat-cafe/shared';
@@ -768,8 +773,13 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // share the same time reference, preventing clock-skew window divergence.
     // SQLite: IMMEDIATE transaction with local Date.now().
     // Both prevent the TOCTOU race where concurrent requests overcommit.
-    const admission = await deps.holdQuotaStore.tryAdmit(threadId, catIdStr, MAX_HOLDS_PER_WINDOW, HOLD_WINDOW_MS);
-    if (!admission.admitted) {
+    // #1471: the sliding window guards TIMER holds — a cat stalling on timers
+    // instead of passing. A managed command (wakeWhen) is self-grounded with its
+    // own completion signal, so it neither reserves a slot nor is blocked by one.
+    const admission = wakeWhen
+      ? null
+      : await deps.holdQuotaStore.tryAdmit(threadId, catIdStr, MAX_HOLDS_PER_WINDOW, HOLD_WINDOW_MS);
+    if (admission && !admission.admitted) {
       // Both retryAtMs and retryAfterMs come from the same authority clock
       // (Redis TIME for Redis mode, local now for SQLite). Route must NOT
       // recompute retryAfterMs from Date.now() — cross-clock subtraction
@@ -796,13 +806,29 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     // Event ID for exact compensation on any post-admission failure.
     // Using the rowid ensures interleaving A/B admissions are correctly compensated:
     // A's eventId targets only A's reservation, never B's.
-    const eventId = admission.eventId!;
+    // A wakeWhen hold holds no reservation (#1471), so there is nothing to compensate.
+    const eventId = admission?.eventId;
+    // #1471: for a command hold the window count is observability only. Read it here —
+    // before any materialization, runner preparation or prior-hold replacement — and
+    // tolerate read failure: the quota store must never sit on the command path's
+    // critical section, and an unobservable count is reported as absent, never as 0.
+    let observedTimerCount: number | undefined;
+    if (!admission) {
+      try {
+        observedTimerCount = await deps.holdQuotaStore.getCount(threadId, catIdStr, HOLD_WINDOW_MS);
+      } catch (err) {
+        log.warn(
+          { threadId, catId: catIdStr, err },
+          '#1471: timer window count unobservable for command hold — proceeding without holdsInWindow',
+        );
+      }
+    }
 
     const template = templateRegistry.get('reminder');
     if (!template) {
       log.error('F167 C1: reminder template not found');
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      if (eventId) await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
       reply.status(500);
       return { error: 'Internal error: reminder template not found' };
     }
@@ -859,7 +885,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         'F280 Phase D: canonical hold owner fence is unavailable',
       );
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      if (eventId) await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
       reply.status(503);
       // An error that is none of the five stays unnamed: it is not folded into one of them.
       return {
@@ -974,7 +1000,7 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       taskRunner.unregister(taskId);
       dynamicTaskStore.remove(taskId);
       // Compensate the exact quota reservation by eventId.
-      await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
+      if (eventId) await deps.holdQuotaStore.releaseByEventId(eventId, threadId, catIdStr);
       log.error(
         { threadId, catId: catIdStr, taskId, err },
         'F167 Phase G: hold materialization failed — rolled back store + quota; prior hold retained',
@@ -1060,9 +1086,10 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       }
     }
 
-    // Quota already reserved atomically by tryAdmit() above (line ~716).
-    // admission.count is the post-admission count.
-    const newCount = admission.count;
+    // Timer hold: quota already reserved atomically by tryAdmit() above and
+    // admission.count is the post-admission count. Command hold (#1471): the
+    // read-only timer count observed before materialization (absent if unobservable).
+    const newCount: number | undefined = admission ? admission.count : observedTimerCount;
 
     // ── Visibility message — F280 cancellation window ──
     // Post BEFORE launch to preserve F280 pre-launch cancellation fence (lines 834–837):

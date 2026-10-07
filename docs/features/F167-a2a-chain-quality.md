@@ -4,8 +4,8 @@ related_features: [F064, F027, F055, F122, F168, F246, F280]
 topics: [a2a, collaboration, harness-engineering, agent-readiness]
 doc_kind: spec
 created: 2026-04-17
-updated: 2026-10-03
-tips_exempt: "Renewed 2026-10-02: adopted-dispatch fencing and review/coordination case records refine existing internal completion protocols; no new end-user action is added, and exact completion guidance remains in MCP responses."
+updated: 2026-10-06
+tips_exempt: "Renewed 2026-10-06 for #1471 (KD-33), on top of the 2026-10-02 renewal: the hold_ball sliding window now counts wakeAfterMs timer holds only and wakeWhen managed commands are exempt — cat-side A2A protocol behavior with no user-invokable action or discovery surface. The 2026-10-02 scope (adopted-dispatch fencing and review/coordination case records refining existing completion protocols) stays covered."
 user_journey_exempt: protocol behavior has no direct UI surface; end-to-end custody is dogfooded through the real MCP/task path
 mcp_admission_status: accepted
 mcp_admission_ref: "file:docs/features/F167-a2a-chain-quality.md"
@@ -245,7 +245,7 @@ cat_cafe_hold_ball({
 > 球仍在你手上。现在执行：{nextStep}
 > 若条件仍未满足：再持一次或升级；禁止无限持球。
 
-**Guard**：`maxHoldsPerWindow`（默认 3，~1h sliding window，per thread×cat），超限强制接/退/升 + 审计日志。
+**Guard**：`maxHoldsPerWindow`（默认 3，~1h sliding window，per thread×cat，**只计 `wakeAfterMs` 定时 hold**——`wakeWhen` 命令托管不计入也不受阻，KD-33），超限强制接/退/升 + 审计日志。
 *实现注记*（gpt52 review on PR #1289 P1/P2）：语义是"窗口内累计"而非"真·连续"；状态进程内 in-memory，best-effort，重启会重置。要做硬约束得把计数下沉到与 reminder scheduler 同源的持久化存储，当前不做。
 
 **并发语义**（Phase G / KD-23 补充）：
@@ -623,6 +623,7 @@ operator experience：
 | KD-30 | 迁移用三态判据（covered_active / covered_empty / unknown_legacy），unknown 走旧 guard fail-closed；不做 big-bang cutover | 二态（有球拦/没球放）隐含"账本 day one 完备"假设——记账覆盖渐进期"查不到=放行"会把未记账真实责任放生（重演 74 分钟）。Sol 三态方案胜出 fable 二态方案的并行裁决记录：`0001784211771626` | 2026-07-16 |
 | KD-31 | 减法红线：cutover 后 guard 总拦截次数不降反升 = 方案失败回滚；礼貌不产生新工作（terminal 后 ACK 不 re-enqueue）为服务端硬保证，不识别自然语言 | operator 反补锅条款（"我害怕你们一本正经补锅"）制度化——锅变少是验收标准本身，不是愿望。ACK 抑制不依赖猫行为改变，是机制兜底 | 2026-07-16 |
 | KD-32 | 失败关闭的错误必须说清自己落在哪一支，且只带原因码与已存终态的事实（disposition / invocationId / at / 来源），不带正文，不放宽任何护栏；猫读不到账本时，另给一个只读、有界、只看自己 thread 的诊断入口（PR-2），范围见下 | Phase T 把停止判据换成球权账本，猫却被一本自己读不到的账本判定；多种原因折成同一个 409 / 503（F322 的 `a2a_dispatch_disposition_replay_mismatch`、F306 的 `HOLD_OWNER_FENCE_UNAVAILABLE`），每次出事只能多只猫跨 thread 读代码、读日志去猜，结论停在 unknown，还会反复盲试。决策人 opus55（`[thread-id]#private-source-id`），不升 operator：两件都只是加法、只读、只看调用者自己的 thread，不放宽护栏、不改现有契约。PR-A：`replay_mismatch` 附带已存终态与来源（direct / `completeFromCoordinationTerminal` / 写入前未记来源则为 unknown），读回失败是另一支且不声称终态存在；managed-hold 三处同口径；`HOLD_OWNER_FENCE_UNAVAILABLE` 带五种原因码之一（parent 缺失 / thread / user / targetCats / store 读失败），仍失败关闭。PR-2（`cat_cafe_get_custody_events` → `GET /api/callbacks/custody-events`，合入后待授权重启生效）：仅 invocation 身份、thread 取自调用者的 invocation、没有 thread 参数（多传任何参数 = 400）、v1 的 agent-key 返回 403；入参 `sourceMessageId` 必填 + `limit`（默认 20、上限 50、超界拒绝不截断）；锚点 = 本 thread 账本里第一条引用该 source 的事件——`payload.sourceMessageId` 匹配，或该 source 的 `ball.handed`（handed 的 payload 不存消息 id，只在 `sourceEventId` 里），从锚点起向后取 `limit` 条；字段白名单只有 id / 码 / 时间（sequence、kind、at、catId、from/to、invocationId、sourceMessageId、taskId、disposition、adopted、retired、retiredReason、via），无正文；白名单管的是**键也是值**（#5031 审查 P1：账本 payload 是 `Record<string, unknown>`，Redis 读回只是类型断言）：码只有在该事件类型定义的闭集里才放行（`ball.dispatch_dispositioned` 的 disposition / via、`ball.hold_dispositioned` 的 disposition / retiredReason，集合与写入端类型同源），id 必须是单个无空白、至多 200 字符的记号，时间必须是有限数字，kind / 投影 state 必须是已知值；不合格的值不返回、不替换成默认或“终态”，字段名记入该事件的 `unrecognizedFields`，投影里有不合格值则整体 `unavailable: projection_malformed`、事件照常返回；附投影摘要（state、holder、lastStateChangeAt、lastRejectedEvent 的 kind/sequence/at）；`found:false`（200）/ 账本读失败 `status:unavailable`+原因（503）/ `truncated:true` 三态显式，空列表不替任何一态说话；carrier custody 与 child ledger 不在范围，不长成通用事件日志读取器。准入声明：本文件 frontmatter `mcp_admission_claims` 新增 `cat_cafe_get_custody_events` | 2026-10-03 |
+| KD-33 | 滑动窗口（`MAX_HOLDS_PER_WINDOW`=3 / 1h，#1449 slice 2 的 durable HoldQuotaStore）只对 `wakeAfterMs` 定时 hold 做 tryAdmit；`wakeWhen` 命令托管不预留槽位、不被 429 拦截，失败补偿只释放真实存在的预留；命令分支的窗口计数只读观测在任何副作用之前读取且容错——读失败则省略 holdsInWindow、不伪造 0、命令流程照常（#1471，F167 owner 2026-09-16 裁定 option A）。KD-23 单槽替换对两种模式照旧 | issue #1471（发现于 fakexxx 全史反省，三份红队唯一一致查实的产品阻断）：admission 坐在两种模式共用路径上，同一 thread 连续托管 4 条正常测试/构建命令即被踢出——窗口限的是登记次数不是进展。命令自带完成信号（self-grounded，PR-O3 已免 waitSourceRef），与"用 hold 替代传球"的 C1 滥用画像无关；B（第二配额无证据 N）与 C（语义化）被 owner 否决。锁测：`callback-hold-ball-window-wakewhen.test.js` | 2026-10-06 |
 
 ## Behavioral Evidence（Phase B 观察记录）
 
