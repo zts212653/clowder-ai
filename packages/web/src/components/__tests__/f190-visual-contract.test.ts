@@ -276,9 +276,10 @@ describe('F190 visual contract — no hard borders in card/panel components', ()
     expect(src).toContain('focus:ring-[var(--console-input-stroke)]');
   });
 
-  it('PluginsContent shows GitHub config only, no ServiceStatusPanel', () => {
+  it('PluginsContent uses the generic Manager without a provider-specific page', () => {
     const src = readSrc('settings/PluginsContent.tsx');
-    expect(src).toContain('GitHub');
+    expect(src).toContain('PluginManagerLiveContent');
+    expect(src).not.toContain('GitHub');
     expect(src).not.toContain('ServiceStatusPanel');
     expect(src).not.toContain('adaptServiceToPlugin');
   });

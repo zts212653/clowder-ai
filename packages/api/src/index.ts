@@ -8,15 +8,7 @@ import './settos-guard.js';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import {
-  type CatConfig,
-  type CatId,
-  CORE_COMMANDS,
-  catRegistry,
-  type EventMemoryRecord,
-  type ILimbNode,
-} from '@cat-cafe/shared';
+import { type CatConfig, type CatId, CORE_COMMANDS, catRegistry, type EventMemoryRecord } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { createRedisClient, SessionStore } from '@cat-cafe/shared/utils';
 import fastifyCookie from '@fastify/cookie';
@@ -38,7 +30,11 @@ import {
 import { getCatModel } from './config/cat-models.js';
 import { resolveCodexCarrierTruth } from './config/codex-cli.js';
 import { configEventBus } from './config/config-event-bus.js';
-import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
+import {
+  createThreadDeepLinkUrl,
+  resolveFrontendBaseUrl,
+  resolveFrontendCorsOrigins,
+} from './config/frontend-origin.js';
 import { readMountRules } from './config/mount/mount-rules-store.js';
 import {
   resolveRuntimeDeploymentCandidate,
@@ -247,6 +243,15 @@ import { RedisWriteOpportunityTerminalLedger } from './domains/memory/people/Red
 import { EvidenceStoreWorkspacePersonResolver } from './domains/memory/people/WorkspacePersonResolver.js';
 import { refreshCanonicalProfileIndex } from './domains/memory/private-collection-bindings.js';
 import { RedisDeferredPersonMemoryReceiptStore } from './domains/memory/RedisDeferredPersonMemoryReceiptStore.js';
+import {
+  createHostMediaPathResolver,
+  hostMediaPathRootsFromEnv,
+} from './domains/messaging/outbound-media/host-media-paths.js';
+import { OutboundMediaPublication } from './domains/messaging/outbound-media/publication.js';
+import { createListenAssetSpeech } from './domains/messaging/outbound-media/speech.js';
+import { createPublishingMessageStore } from './domains/messaging/publishing-message-store.js';
+import { createMessagingStores } from './domains/messaging/stores/factory.js';
+import { SubscriptionDrainScheduler } from './domains/messaging/subscription-drain-scheduler.js';
 import { PortDiscoveryService } from './domains/preview/port-discovery.js';
 import { collectRuntimePorts } from './domains/preview/port-validator.js';
 import { PreviewGateway } from './domains/preview/preview-gateway.js';
@@ -303,13 +308,9 @@ import { createRequestReviewCommitVersionVerifier } from './infrastructure/capab
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
-import {
-  loadConnectorGatewayConfig,
-  type PreconfiguredConnectorAutostartStatus,
-  startConnectorGateway,
-} from './infrastructure/connectors/connector-gateway-bootstrap.js';
-import { restartConnectorGateway } from './infrastructure/connectors/connector-gateway-lifecycle.js';
-import { createConnectorReloadSubscriber } from './infrastructure/connectors/connector-reload-subscriber.js';
+import type { RepoIssueComment } from './infrastructure/connectors/github-repo-event/RepoCommentPollTaskSpec.js';
+import { registerGitHubRepoWebhook } from './infrastructure/connectors/github-repo-event/register-github-repo-webhook.js';
+import { catRegistryMentionPatterns } from './infrastructure/connectors/mention-parser.js';
 import { fetchPrCiStatuses, type PrCiStatusTarget } from './infrastructure/email/ci-status-batch-fetcher.js';
 import { IssueCommentRouter } from './infrastructure/email/IssueCommentRouter.js';
 import {
@@ -422,9 +423,7 @@ import {
   communityRepoConfigRoutes,
   conciergeRoutes,
   configRoutes,
-  connectorHubRoutes,
   connectorMediaRoutes,
-  connectorPluginRoutes,
   debugInvocationExportRoutes,
   distillationOpportunityRoutes,
   distillationRoutes,
@@ -515,6 +514,7 @@ import {
 } from './routes/index.js';
 import { knowledgeFeedRoutes } from './routes/knowledge-feed.js';
 import { marketplaceRoutes } from './routes/marketplace.js';
+import { mediaRoutes } from './routes/media-routes.js';
 import { registerPersonMemoryDecisionRoutes } from './routes/person-memory-decision-routes.js';
 import { previewRoutes } from './routes/preview.js';
 import { resolveActiveInvocations } from './routes/queue.js';
@@ -971,10 +971,28 @@ async function main(): Promise<void> {
     | ReturnType<typeof import('./domains/growing/CustodyOpportunityRuntime.js').startCustodyOpportunityObservation>
     | undefined;
 
-  const messageStore = createMessageStore(redis, {
+  const rawMessageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
       custodyOpportunityObservation?.notifySourceChanged(msg);
+    },
+  });
+  const messagingStores = createMessagingStores(redis);
+  const subscriptionDrainScheduler = new SubscriptionDrainScheduler((error, threadId) => {
+    app.log.error({ error, threadId }, '[messaging] subscriber delivery drain failed');
+  });
+  // W2-5b: bound once the media ledger and TTS exist (below); until then media blocks publish as before.
+  let outboundMediaPublication: OutboundMediaPublication | undefined;
+  const messageStore = createPublishingMessageStore(rawMessageStore, {
+    events: messagingStores.events,
+    publications: messagingStores.publications,
+    outboundMedia: () => outboundMediaPublication,
+    onPublished: subscriptionDrainScheduler.schedule,
+    onPublishFailure: (error, stored) => {
+      app.log.error(
+        { error, messageId: stored.id, threadId: stored.threadId },
+        '[messaging] publish failed; subscribers will not see this message',
+      );
     },
   });
   const runtimeInteractionRuntime = await createRuntimeInteractionRuntime({
@@ -1720,22 +1738,16 @@ async function main(): Promise<void> {
       })
     : undefined;
 
-  // F247: gpt-pro is a separate credential boundary from the shared local-agent map.
-  // Reconcile it only on the global sidecar owner and only when the runtime catalog
-  // actually has the cloud cat installed. Never export its path into process.env.
-  if (ownsGlobalAgentKeySidecars && catRegistry.has('gpt-pro')) {
-    try {
-      const { ensureGptProAgentKeySidecar, resolveGptProAgentKeyFile } = await import(
-        './domains/cats/services/agents/agent-key/gpt-pro-agent-key-sidecar.js'
-      );
-      const disposition = await ensureGptProAgentKeySidecar(agentKeyRegistry);
-      app.log.info(
-        `[api] gpt-pro agent-key sidecar ${disposition.kind}: ${resolveGptProAgentKeyFile()} (${disposition.agentKeyId})`,
-      );
-    } catch (err) {
-      app.log.warn(`[api] gpt-pro agent-key sidecar reconciliation failed (cloud MCP disabled): ${String(err)}`);
-    }
-  }
+  // F247 / F202 W2-3 h3c-2: the configured cloud cat's key is a separate credential boundary from the
+  // shared local-agent map, issued in the cloud scope. Reconcile it only on the global sidecar owner;
+  // never export its path into process.env; revoke the cloud keys of a cat that is no longer the cloud cat.
+  const reconcileCloudCatKeys = async () => {
+    const { reconcileCloudCatAgentKeys } = await import(
+      './domains/cats/services/agents/agent-key/cloud-cat-agent-key-sidecar.js'
+    );
+    await reconcileCloudCatAgentKeys({ registry: agentKeyRegistry, cats: catRegistry, log: app.log });
+  };
+  if (ownsGlobalAgentKeySidecars) await reconcileCloudCatKeys();
 
   if (ownsGlobalAgentKeySidecars) {
     const { AgentKeySidecarRenewalLoop, reconcileSidecarsIndependently } = await import(
@@ -1754,17 +1766,7 @@ async function main(): Promise<void> {
             },
           },
         ];
-        if (catRegistry.has('gpt-pro')) {
-          reconciliations.push({
-            name: 'gpt-pro',
-            reconcile: async () => {
-              const { ensureGptProAgentKeySidecar } = await import(
-                './domains/cats/services/agents/agent-key/gpt-pro-agent-key-sidecar.js'
-              );
-              await ensureGptProAgentKeySidecar(agentKeyRegistry);
-            },
-          });
-        }
+        reconciliations.push({ name: 'cloud-cat', reconcile: reconcileCloudCatKeys });
         await reconcileSidecarsIndependently(reconciliations);
       },
       onError: (error) => {
@@ -2288,16 +2290,6 @@ async function main(): Promise<void> {
     },
   });
 
-  // F136 Phase 3A: Cat catalog subscriber — syncs AgentRegistry when cats CRUD emits cat-config events
-  const { createCatCatalogSubscriber } = await import('./config/cat-catalog-subscriber.js');
-  const catCatalogSubscriber = createCatCatalogSubscriber({
-    async onReconcile() {
-      app.log.info('[api] F136: Cat catalog changed, syncing agent registry...');
-      await syncAgentRegistry(catRegistry.getAllConfigs());
-    },
-    log: app.log,
-  });
-
   // F136 Phase 4c: Account binding subscriber — rebinds provider profiles when accounts change
   const { createAccountBindingSubscriber } = await import('./config/account-binding-subscriber.js');
   const accountBindingSubscriber = createAccountBindingSubscriber({
@@ -2450,14 +2442,6 @@ async function main(): Promise<void> {
   // (the legacy PinchTab bridge was removed, issue #1538).
   const { CloudInvokeBridge } = await import('./domains/cats/services/cloud-bridge/cloud-invoke-bridge.js');
   const bridgeLogger = (await import('./infrastructure/logger.js')).createModuleLogger('cloud-bridge');
-  const { createRefreshablePersonalChromeHostAdapter } = await import(
-    './domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-host-adapter.js'
-  );
-  const personalChromeHostAdapter = createRefreshablePersonalChromeHostAdapter({
-    projectRoot: resolveActiveProjectRoot(),
-    env: process.env,
-    logger: bridgeLogger,
-  });
   const { CloudReturnBindingSigner, loadOrCreateCloudReturnBindingSigner } = await import(
     './domains/cats/services/cloud-bridge/cloud-return-binding.js'
   );
@@ -2467,28 +2451,44 @@ async function main(): Promise<void> {
   const { MemoryCloudReturnGrantStore, RedisCloudReturnGrantStore } = await import(
     './domains/cats/services/cloud-bridge/cloud-return-grant.js'
   );
-  const cloudReturnGrantStore = redis ? new RedisCloudReturnGrantStore(redis) : new MemoryCloudReturnGrantStore();
+  // Without Redis, source bindings live as long as this process: its start is the history boundary.
+  const cloudReturnGrantStore = redis
+    ? new RedisCloudReturnGrantStore(redis)
+    : new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: Date.now() });
+  if (cloudReturnGrantStore instanceof RedisCloudReturnGrantStore) {
+    // F202 h3c-2: sources of grants persisted before sources were bound get their owner before any
+    // dispatch is admitted. A failure here is retried by the store itself, which refuses until done.
+    await cloudReturnGrantStore.bindPersistedSources().catch((error: unknown) => {
+      app.log.warn(`[api] binding persisted cloud return sources failed; retried on first use: ${String(error)}`);
+    });
+  }
   const { CloudAssistantReturnIngestService } = await import(
     './domains/cats/services/cloud-bridge/cloud-assistant-return-ingest.js'
   );
-  const { PersonalChromeAssistantReturnPoller } = await import(
-    './domains/cats/services/cloud-bridge/personal-chrome-host/personal-chrome-assistant-return-poller.js'
+  const { createCloudConversationComposition } = await import(
+    './domains/cats/services/cloud-bridge/plugin-conversation-host/cloud-conversation-composition.js'
   );
-  const personalChromeAssistantReturnPoller = new PersonalChromeAssistantReturnPoller({
-    adapter: personalChromeHostAdapter,
+  const cloudConversations = createCloudConversationComposition({
+    catalogLog: app.log,
+    async reconcileCats() {
+      app.log.info('[api] F136: Cat catalog changed, syncing agent registry...');
+      await syncAgentRegistry(catRegistry.getAllConfigs());
+    },
+    cats: catRegistry,
     ingestService: new CloudAssistantReturnIngestService({
       messageStore,
       grantStore: cloudReturnGrantStore,
       socketManager: getSocketManager(),
       logger: bridgeLogger,
+      cats: catRegistry,
     }),
     logger: bridgeLogger,
     grantPersistence: redis ? 'durable' : 'ephemeral',
   });
-  personalChromeAssistantReturnPoller.start();
-  app.addHook('onClose', async () => personalChromeAssistantReturnPoller.stop());
+  cloudConversations.start();
+  app.addHook('onClose', async () => cloudConversations.stop());
   const cloudInvokeBridge = new CloudInvokeBridge({
-    hostAdapter: personalChromeHostAdapter,
+    hostAdapter: cloudConversations.adapter,
     emitFallback: async ({ threadId: fbThreadId, catId: fbCatId, reason }) => {
       // invokeSingleCat owns the one user-visible status so route persistence,
       // F167 disposition, and Queue settlement share one child invocation.
@@ -2741,8 +2741,10 @@ async function main(): Promise<void> {
   let collectiveContext:
     | import('./domains/plugin/builtin-runtime/collective-current-context.js').CollectiveCurrentContext
     | undefined;
+  let trustedImagePathResolver: (hmrId: string) => Promise<string | undefined> = async () => undefined;
   let collectivePreparedArtifactReader: PreparedArtifactReader | undefined;
   router = new AgentRouter({
+    resolveTrustedImagePath: async (hmrId) => trustedImagePathResolver(hmrId),
     collectiveContext: () => collectiveContext,
     agentRegistry,
     registry,
@@ -4419,9 +4421,6 @@ async function main(): Promise<void> {
       host: liveCompanionSessions,
     });
   }
-  const connectorHubOpts: Parameters<typeof connectorHubRoutes>[1] = { threadStore, redis: redisClient ?? undefined };
-  await app.register(connectorHubRoutes, connectorHubOpts);
-  await app.register(connectorPluginRoutes);
   await app.register(dossierRoutes, { projectRoot: resolveActiveProjectRoot() });
 
   // F208 Phase D: operator observation staging layer (AC-D1)
@@ -4745,25 +4744,20 @@ async function main(): Promise<void> {
   };
 
   let loadRepositoryPluginInfo: (() => Promise<readonly import('@cat-cafe/shared').PluginInfo[]>) | undefined;
+  let runInstalledPluginTest:
+    | ((
+        pluginId: string,
+      ) => Promise<import('./domains/plugin/operations/plugin-operation-routes.js').InstalledPluginOperationResult>)
+    | undefined;
 
   // F202: Plugin framework — discovery + config + resource activation
   {
     const { join } = await import('node:path');
     const { PluginRegistry } = await import('./domains/plugin/PluginRegistry.js');
-    const { PluginResourceActivator, rehydrateEnabledPluginLimbs, rehydrateEnabledPluginSchedules } = await import(
+    const { PluginResourceActivator, rehydrateEnabledPluginSchedules } = await import(
       './domains/plugin/PluginResourceActivator.js'
     );
     const { ScheduleFactoryRegistry } = await import('./domains/plugin/ScheduleFactoryRegistry.js');
-    const { PluginLimbAdapter } = await import('./domains/limb/PluginLimbAdapter.js');
-    const { loadLimbDeclaration } = await import('./domains/limb/limb-yaml-loader.js');
-    const { weixinMpHandlers } = await import('./plugins/weixin-mp/index.js');
-    const {
-      WeChatVisibleReaderArmStore,
-      WeChatVisibleReaderMetrics,
-      createWeChatVisibleReaderNativeRunner,
-      registerWeChatVisibleReaderArmRoutes,
-      registerWeChatVisibleReaderLimbFactory,
-    } = await import('./plugins/wechat-visible-reader/index.js');
     const { registerPluginRoutes } = await import('./routes/plugin-routes.js');
     const { generateCliConfigs, readCapabilitiesConfig, writeCapabilitiesConfig, withCapabilityLock } = await import(
       './config/capabilities/capability-orchestrator.js'
@@ -4786,20 +4780,14 @@ async function main(): Promise<void> {
       const projectRoot = resolveActiveProjectRoot();
       const capabilities = await readCapabilitiesConfig(projectRoot);
       const envSnapshot = readPluginEnvSnapshot(projectRoot, manifests);
-      return manifests.map((manifest) => pluginRegistry.getPluginInfo(manifest, capabilities, envSnapshot));
+      return manifests.map((manifest) =>
+        pluginRegistry.getPluginInfo(manifest, capabilities, envSnapshot, { includeNonSensitiveValues: true }),
+      );
     };
     getGitHubPluginEnv = () => {
       const githubManifest = pluginRegistry.getManifest('github');
       return githubManifest ? resolvePluginEnv([githubManifest]) : {};
     };
-    const limbAdapterRegistry = new Map<
-      string,
-      (yamlPath: string, pluginConfig: Record<string, string>) => Promise<ILimbNode>
-    >();
-    const weChatVisibleReaderArmStore = new WeChatVisibleReaderArmStore();
-    const weChatVisibleReaderMetrics = new WeChatVisibleReaderMetrics();
-    const weChatVisibleReaderRunner = createWeChatVisibleReaderNativeRunner();
-
     // F202 Phase 2: Schedule factory registry + GitHub factories
     const scheduleFactoryRegistry = new ScheduleFactoryRegistry();
     const { registerGitHubScheduleFactories } = await import('./domains/plugin/github-schedule-factories.js');
@@ -4807,16 +4795,6 @@ async function main(): Promise<void> {
 
     // F202-2B: Mutable deps ref — starts with just log, populated with full GitHub deps later
     const scheduleFactoryDeps: Record<string, unknown> = { log: app.log };
-
-    limbAdapterRegistry.set('weixin-mp', async (yamlPath, pluginConfig) => {
-      const declaration = loadLimbDeclaration(yamlPath);
-      return new PluginLimbAdapter({ declaration, pluginConfig, redis, handlers: weixinMpHandlers });
-    });
-    registerWeChatVisibleReaderLimbFactory(limbAdapterRegistry, {
-      armStore: weChatVisibleReaderArmStore,
-      metrics: weChatVisibleReaderMetrics,
-      runner: weChatVisibleReaderRunner,
-    });
 
     const pluginActivator = new PluginResourceActivator({
       resolveProjectRoot: () => resolveActiveProjectRoot(),
@@ -4832,16 +4810,6 @@ async function main(): Promise<void> {
         await generateCliConfigs(config, paths, projectRoot);
       },
       withCapabilityLock: (fn) => withCapabilityLock(resolveActiveProjectRoot(), fn),
-      limbAdapterFactory: async (pluginId, limbYamlPath, pluginConfig) => {
-        const factory = limbAdapterRegistry.get(pluginId);
-        if (!factory) {
-          throw new Error(
-            `No platform-specific limb adapter registered for plugin '${pluginId}'. ` +
-              `Limb resources require a concrete adapter (see Phase 2 for examples).`,
-          );
-        }
-        return factory(limbYamlPath, pluginConfig);
-      },
       // F202 Phase 2: schedule resource activation deps
       scheduleFactoryRegistry,
       taskRunner: {
@@ -4851,16 +4819,6 @@ async function main(): Promise<void> {
       // F202-2B: Mutable deps ref — populated via rehydrateGitHubSchedules after GitHub services created
       scheduleFactoryDeps:
         scheduleFactoryDeps as import('./domains/plugin/ScheduleFactoryRegistry.js').ScheduleFactoryDeps,
-    });
-
-    const startupCaps = await readCapabilitiesConfig(resolveActiveProjectRoot());
-    await rehydrateEnabledPluginLimbs({
-      capabilities: startupCaps,
-      pluginRegistry,
-      pluginsDir,
-      limbAdapterRegistry,
-      limbRegistry,
-      log: app.log,
     });
 
     // F202-2B: Schedule rehydration deferred — GitHub factories need deps created later.
@@ -4972,29 +4930,15 @@ async function main(): Promise<void> {
       });
     };
 
-    const isWeChatVisibleReaderEnabled = async (): Promise<boolean> => {
-      if (process.platform !== 'darwin') return false;
-      const capabilities = await readCapabilitiesConfig(resolveActiveProjectRoot());
-      return Boolean(
-        capabilities?.capabilities.some(
-          (capability) =>
-            capability.type === 'limb' && capability.pluginId === 'wechat-visible-reader' && capability.enabled,
-        ),
-      );
-    };
-    registerWeChatVisibleReaderArmRoutes(app, {
-      armStore: weChatVisibleReaderArmStore,
-      metrics: weChatVisibleReaderMetrics,
-      isPluginEnabled: isWeChatVisibleReaderEnabled,
-    });
     registerPluginRoutes(app, {
       pluginRegistry,
       pluginActivator,
       limbRegistry,
       pluginsDir,
-      beforePluginDisable: (pluginId) => {
-        if (pluginId === 'wechat-visible-reader') weChatVisibleReaderArmStore.disarm();
-      },
+      runInstalledTest: async (pluginId) =>
+        runInstalledPluginTest
+          ? runInstalledPluginTest(pluginId)
+          : { matched: false, status: 404, body: { error: `Plugin '${pluginId}' is not installed` } },
     });
   }
   // F174 D2b-1 — single notifier instance shared between callback auth preHandler
@@ -5119,6 +5063,14 @@ async function main(): Promise<void> {
   }
 
   const callbackOpts = {
+    resolveTrustedImagePath: async (hmrId: string) => {
+      try {
+        return await trustedImagePathResolver(hmrId);
+      } catch {
+        // A damaged private blob cannot become a path hint or fail the whole context read.
+        return undefined;
+      }
+    },
     ...(liveCompanionSessions ? { companionProjectPath: resolveActiveProjectRoot() } : {}),
     ...(liveCompanionSessions
       ? { withLiveCarrierOperation: liveCompanionSessions.withCarrierOperation.bind(liveCompanionSessions) }
@@ -5423,9 +5375,18 @@ async function main(): Promise<void> {
     `[api] official plugin Host routes ready ` +
       `(created=${officialSignalRouteBootstrap.created}, preserved=${officialSignalRouteBootstrap.preserved})`,
   );
-  const { createDormantPluginRuntimeComposition, createPluginManagerRuntimeComposition } = await import(
-    './domains/plugin/runtime-composition.js'
+  // Shared generic binding index: plugin thread lookup, thread cats and the legacy connector path
+  // must observe one truth while the legacy path still exists during cutover.
+  const { RedisConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
   );
+  const { MemoryConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/ConnectorThreadBindingStore.js'
+  );
+  const connectorBindingStore = redisClient
+    ? new RedisConnectorThreadBindingStore(redisClient)
+    : new MemoryConnectorThreadBindingStore();
+  const { createPluginManagerRuntimeComposition } = await import('./domains/plugin/runtime-composition.js');
   const { createCollectiveAgentVerifier } = await import(
     './domains/plugin/builtin-runtime/collective-agent-verifier.js'
   );
@@ -5453,6 +5414,33 @@ async function main(): Promise<void> {
   const { resolveCollectiveStandingGrant } = await import(
     './domains/plugin/builtin-runtime/collective-standing-grant.js'
   );
+  const { buildDeliveryPresentation } = await import('./domains/messaging/lifecycle-delivery.js');
+  const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
+  const deliveryThreadMeta = async (threadId: string) => {
+    const thread = await threadStore.get(threadId);
+    if (!thread) return undefined;
+    return {
+      threadShortId: threadId.slice(0, 15),
+      ...(thread.title == null ? {} : { threadTitle: thread.title }),
+      deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
+    };
+  };
+  const deliveryPresentation = async (
+    threadId: string,
+    actor: { kind: 'cat' | 'user' | 'plugin' | 'device' | 'system'; id: string },
+  ) =>
+    buildDeliveryPresentation(
+      threadId,
+      {
+        ...actor,
+        ...(actor.kind === 'cat'
+          ? { displayName: catRegistry.tryGet(actor.id as CatId)?.config.displayName ?? actor.id }
+          : actor.kind === 'user'
+            ? { displayName: getCoCreatorConfig().name }
+            : {}),
+      },
+      await deliveryThreadMeta(threadId),
+    );
   const collectiveWorkAuthority = new CollectiveWorkAuthority({
     messageStore,
     taskStore,
@@ -5503,9 +5491,14 @@ async function main(): Promise<void> {
     desktopRoot: companionDesktopRoot,
     cacheRoot: join(resolveActiveProjectRoot(), '.cat-cafe', 'components', 'desktop-window'),
   });
-  const pluginRuntime = createDormantPluginRuntimeComposition({
+  const pluginRuntime = cloudConversations.createRuntime({
     projectRoot: pluginProjectRoot,
-    editorParentOrigin: new URL(resolveFrontendBaseUrl(process.env, app.log)).origin,
+    limbRegistry,
+    taskRunner: {
+      registerPostStart: (task) => taskRunnerV2.registerPostStart(task),
+      unregister: (taskId) => taskRunnerV2.unregister(taskId),
+    },
+    editorParentOrigin: new URL(frontendBaseUrl).origin,
     desktopExecutor: {
       open: async (launch) =>
         new ElectronDesktopWindowExecutor({
@@ -5559,7 +5552,45 @@ async function main(): Promise<void> {
     routes: signalRouteStore,
     intakes: meetingIntakeStore,
     messageStore,
+    lifecyclePresentation: (threadId, catId) => deliveryPresentation(threadId, { kind: 'cat', id: catId }),
+    // P1.3: a v2 subscription's started names the message the invocation answers (origin, else A2A).
+    lifecycleTriggerMessageId: async (invocationId) => {
+      const record = await registry.getRecord(invocationId);
+      return record?.originTriggerMessageId ?? record?.a2aTriggerMessageId;
+    },
+    deliveryPresentation,
+    messagingStores,
+    onMessagePublished: subscriptionDrainScheduler.schedule,
+    taskStore,
     ...(redis ? { redis } : {}),
+    // F202 C1 gap B: the Host collaborators an authenticated connector ingress needs, in the
+    // process that actually ships. `invokeTrigger` is constructed further down this file, so it
+    // is resolved late through the same holder the eval-hub manual trigger route uses — the
+    // composition only ever calls it while serving a request, never during construction.
+    invokeTrigger: {
+      async trigger(threadId, catId, userId, message, messageId) {
+        const trigger = invokeTriggerHolder.get();
+        if (!trigger) throw new Error('connector invoke trigger is not wired yet');
+        return trigger.trigger(threadId, catId, userId, message, messageId);
+      },
+    },
+    socketManager: { broadcastToRoom: (room, event, data) => socketManager?.broadcastToRoom(room, event, data) },
+    threadStore,
+    threadBindingStore: connectorBindingStore,
+    threadOwnerUserId: privateUserId,
+    threadDeepLinkUrl: createThreadDeepLinkUrl(frontendBaseUrl),
+    threadProjections: {
+      backlogStore,
+      cats: {
+        getAllCatIds: () => [...catRegistry.getAllIds()],
+        getCatDisplayName: (id) => catRegistry.tryGet(id)?.config.displayName ?? id,
+        getCatAliases: (id) => catRegistryMentionPatterns().get(id) ?? [],
+        isCatAvailable,
+        getRegisteredServices: () => agentRegistry.getAllEntries(),
+      },
+    },
+    getDefaultCatId,
+    getMentionPatterns: catRegistryMentionPatterns,
     collectiveConnector: {
       verifyAgent: createCollectiveAgentVerifier({
         resolveCatDisplayName: (catId) => resolveCollectiveAgentIdentity(catId)?.displayName,
@@ -5614,6 +5645,9 @@ async function main(): Promise<void> {
         }),
     },
   });
+  trustedImagePathResolver = (hmrId) => pluginRuntime.mediaLedger.resolveTrustedBlobPath(hmrId);
+  await app.register(mediaRoutes, { ledger: pluginRuntime.mediaLedger, ownerUserId: privateUserId });
+  subscriptionDrainScheduler.attach(pluginRuntime.subscriptionDelivery);
   const { CollectiveCurrentContext } = await import('./domains/plugin/builtin-runtime/collective-current-context.js');
   collectiveContext = new CollectiveCurrentContext({
     connector: () => pluginRuntime.collectiveConnectorRuntime?.connector(),
@@ -5657,29 +5691,18 @@ async function main(): Promise<void> {
     MachineOfficialPluginCatalog,
     OFFICIAL_PLUGIN_CATALOG_URL,
     loadMachinePluginCatalog,
+    resolveLocalPluginEffectiveGrants,
     resolveRepositoryReplacementPluginIds,
   } = await import('./domains/plugin/manager/machine-catalog-provider.js');
-  const pluginManagerHostPolicies = [
-    {
-      pluginId: 'dev.clowder.video-analysis',
-      replacesRepositoryPluginId: 'video-analysis',
-      effectiveGrants: ['plugin.config.read', 'secret.read'] as const,
-    },
-  ];
+  // F202 W2-6: the Host-owned grant table lives in its own module so the policy the Host actually
+  // applies is the one the tests and the cross-repo gate exercise.
+  const { OFFICIAL_PLUGIN_HOST_POLICIES } = await import('./domains/plugin/manager/official-plugin-host-policies.js');
+  const pluginManagerHostPolicies = OFFICIAL_PLUGIN_HOST_POLICIES;
   const pluginManagerCatalog = new MachineOfficialPluginCatalog({
     loadCatalog: () => loadMachinePluginCatalog(OFFICIAL_PLUGIN_CATALOG_URL),
     validateCatalog: validatePluginCatalog,
     hostPolicies: pluginManagerHostPolicies,
   });
-  const { FilesystemBuiltinPluginPackageMaterializer } = await import(
-    './domains/plugin/manager/builtin-package-materializer.js'
-  );
-  const { readPluginConfig } = await import('./domains/plugin/plugin-config-store.js');
-  const readBuiltinPluginValue = async (pluginInstanceId: string, key: string) => {
-    const snapshot = await pluginRuntime.inventoryStore.snapshot();
-    const instance = snapshot.instances.find((candidate) => candidate.pluginInstanceId === pluginInstanceId);
-    return instance ? readPluginConfig(pluginProjectRoot, instance.pluginId)[key] : undefined;
-  };
   if (loadRepositoryPluginInfo === undefined) {
     throw new Error('Repository plugin discovery must be ready before Plugin Manager composition');
   }
@@ -5713,16 +5736,32 @@ async function main(): Promise<void> {
     catalogManifests: [],
     compatibility: repositoryPluginManagerCompatibility,
     auth: officialPluginAuth,
-    builtinContributions: {
-      materializer: new FilesystemBuiltinPluginPackageMaterializer({
-        packagesRoot: pluginRuntime.paths.packagesRoot,
-      }),
-      configuration: {
-        readConfig: readBuiltinPluginValue,
-        readSecret: readBuiltinPluginValue,
-      },
-    },
+    localGrantPolicy: (manifest) => resolveLocalPluginEffectiveGrants(pluginManagerHostPolicies, manifest),
   });
+  const { InstalledPluginOperations, pluginOperationRoutes } = await import(
+    './domains/plugin/operations/plugin-operation-routes.js'
+  );
+  const installedPluginOperations = new InstalledPluginOperations({
+    inventory: pluginRuntime.inventoryStore,
+    configuration: pluginManagerRuntime.configuration,
+    invocation: pluginRuntime.supervisor,
+  });
+  runInstalledPluginTest = (pluginId) => installedPluginOperations.runTest(pluginId);
+  await app.register(pluginOperationRoutes, { operations: installedPluginOperations });
+  // F202 W2-6: grants follow the Host policy for instances installed before a policy change too;
+  // done before recovery so every resumed runtime starts with the grants it will run with.
+  const { reconcileOfficialPluginGrants } = await import('./domains/plugin/manager/official-plugin-grants.js');
+  const officialGrantChanges = await reconcileOfficialPluginGrants({
+    store: pluginRuntime.inventoryStore,
+    inventory: pluginRuntime.inventory,
+    hostPolicies: pluginManagerHostPolicies,
+  });
+  if (officialGrantChanges.length > 0) {
+    app.log.info(
+      { changes: officialGrantChanges },
+      '[api] F202 official plugin grants reconciled with the Host policy',
+    );
+  }
   // Released once app.listen resolves. A resumed desktop window's bridge calls
   // app.inject; before Fastify has booted that breaks the remaining app.register
   // calls (AVV_ERR_ROOT_PLG_BOOTED). Other plugins resume immediately.
@@ -5738,12 +5777,12 @@ async function main(): Promise<void> {
       `live=${externalPluginRecovery.resumeRequested > 0 ? 'reconciling' : 'dormant'})`,
   );
   const { pluginManagerUploadRoutes, registerPluginManagerRoutes } = await import('./routes/plugin-manager-routes.js');
+  const { PluginManagerBindings } = await import('./domains/plugin/manager/plugin-manager-bindings.js');
   await app.register(async (managerApp) => {
     registerPluginManagerRoutes(managerApp, {
       manager: pluginManagerRuntime.manager,
-      ...(pluginManagerRuntime.builtinSupervisor === undefined
-        ? {}
-        : { contributions: pluginManagerRuntime.builtinSupervisor }),
+      bindings: new PluginManagerBindings(connectorBindingStore, threadStore),
+      contributions: pluginRuntime.supervisor,
       asset: pluginManagerRuntime.assets,
       documentation: pluginManagerRuntime.assets,
       callbackRegistry: registry,
@@ -5871,17 +5910,8 @@ async function main(): Promise<void> {
     connector: () => pluginRuntime.collectiveConnectorRuntime?.connector(),
     reconciler: collectiveWorkResultReconciler,
   });
-  const { registerPersonalChromePluginRoutes } = await import('./routes/personal-chrome-plugin-routes.js');
-  const personalChromeInstallModule = (await import(
-    pathToFileURL(join(findMonorepoRoot(process.cwd()), 'packages/api/scripts/f247-personal-chrome-install.mjs')).href
-  )) as unknown as {
-    createPersonalChromePluginPort(options: {
-      projectRoot: string;
-    }): import('./routes/personal-chrome-plugin-routes.js').PersonalChromePluginPort;
-  };
-  registerPersonalChromePluginRoutes(app, {
-    port: personalChromeInstallModule.createPersonalChromePluginPort({ projectRoot: resolveActiveProjectRoot() }),
-  });
+  const { pluginWebhookForwardingRoutes } = await import('./routes/plugin/plugin-webhook-forwarding-routes.js');
+  await app.register(pluginWebhookForwardingRoutes, { webhooks: pluginRuntime.supervisor });
 
   // F246/F313: one registry and one renderer projection. The F266 writer stays
   // fenced until an owner-backed resolver/dispatcher and a v1_active epoch are
@@ -6435,16 +6465,7 @@ async function main(): Promise<void> {
     });
   }
 
-  // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
-  const { RedisConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
-  );
-  const { MemoryConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/ConnectorThreadBindingStore.js'
-  );
-  const connectorBindingStore = redisClient
-    ? new RedisConnectorThreadBindingStore(redisClient)
-    : new MemoryConnectorThreadBindingStore();
+  // F142: the shared binding store above is reused by threadCatsRoutes AND connector gateway.
   {
     const allCatConfigs = catRegistry.getAllConfigs();
     await app.register(threadCatsRoutes, {
@@ -7305,6 +7326,27 @@ async function main(): Promise<void> {
   await documentListenRepository.initialize();
   await app.register(ttsRoutes, { ttsRegistry, cacheDir: ttsCacheDir, documentListenRepository });
   initVoiceBlockSynthesizer(ttsRegistry, ttsCacheDir);
+  // F202 W2-5b: Host messages carrying audio / file / gallery blocks reach the plugin stream as Host
+  // media references, published once after materialization (text-only audio via outbound speech).
+  const outboundSpeech = createListenAssetSpeech(ttsRegistry, ttsCacheDir);
+  app.addHook('onClose', async () => outboundSpeech.close());
+  outboundMediaPublication = new OutboundMediaPublication({
+    store: pluginRuntime.outboundMedia,
+    messages: rawMessageStore,
+    events: messagingStores.events,
+    ledger: pluginRuntime.mediaLedger,
+    resolvePath: createHostMediaPathResolver(
+      hostMediaPathRootsFromEnv(process.env, process.env.CONNECTOR_MEDIA_DIR ?? './data/connector-media'),
+    ),
+    speech: outboundSpeech,
+    onPublished: subscriptionDrainScheduler.schedule,
+    onPublishFailure: (error, messageId) => {
+      app.log.error({ error, messageId }, '[messaging] outbound media publication failed; recovered at next start');
+    },
+  });
+  void outboundMediaPublication
+    .recover()
+    .catch((error: unknown) => app.log.error({ error }, '[messaging] outbound media recovery failed'));
   initStreamingTtsRegistry(ttsRegistry);
   startTtsCacheCleaner(ttsCacheDir, documentListenRepository);
   app.addHook('onClose', async () => documentListenRepository.close());
@@ -7679,7 +7721,6 @@ async function main(): Promise<void> {
   }
 
   // F140 Phase 3b: connector invoke trigger (auto-invoke cat after review feedback delivery via polling)
-  const frontendBaseUrl = resolveFrontendBaseUrl(process.env, app.log);
   const invokeTrigger = new ConnectorInvokeTrigger({
     router,
     socketManager,
@@ -7691,17 +7732,49 @@ async function main(): Promise<void> {
     messageStore,
     actionSuccessorLeaseStore,
     deploymentWaitStartGuard,
-    threadMetaLookup: async (threadId) => {
-      const thread = await threadStore.get(threadId);
-      if (!thread) return undefined;
-      return {
-        threadShortId: threadId.slice(0, 15),
-        threadTitle: thread.title ?? undefined,
-        deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
-      };
-    },
+    threadMetaLookup: deliveryThreadMeta,
     log: app.log,
   });
+
+  type StreamingHookPort = Parameters<typeof queueProcessor.setStreamingHook>[0];
+  const composeStreamingHook = (): StreamingHookPort => {
+    const lifecycle = pluginRuntime.lifecycleDelivery;
+    const project = async (operation: string, call: () => Promise<void>): Promise<void> => {
+      try {
+        await call();
+      } catch (err) {
+        app.log.warn({ err, operation }, '[messaging] streaming projection failed');
+      }
+    };
+    return {
+      async onStreamStart(threadId, catId, invocationId) {
+        if (catId && invocationId)
+          await project('lifecycle.started', () => lifecycle.onStreamStart(threadId, catId, invocationId));
+      },
+      async onStreamChunk() {},
+      async onStreamEnd(threadId, text, invocationId) {
+        if (invocationId) await project('lifecycle.ended', () => lifecycle.onStreamEnd(threadId, text, invocationId));
+      },
+      async onClosureCatchingUp(threadId, catId, invocationId) {
+        if (invocationId)
+          await project('lifecycle.catching_up', () => lifecycle.onClosureCatchingUp(threadId, catId, invocationId));
+      },
+      async onClosureBlocked(threadId, catId, reason, invocationId) {
+        if (invocationId)
+          await project('lifecycle.blocked', () => lifecycle.onClosureBlocked(threadId, catId, reason, invocationId));
+      },
+      async cleanupPlaceholders() {},
+      async notifyDeliveryBatchDone(threadId, chainDone, status, invocationId) {
+        await project('lifecycle.settled', () =>
+          lifecycle.notifyDeliveryBatchDone(threadId, chainDone, status, invocationId),
+        );
+      },
+    };
+  };
+  const pluginLifecycleHook = composeStreamingHook();
+  invokeTrigger.setStreamingHook(pluginLifecycleHook);
+  queueProcessor.setStreamingHook(pluginLifecycleHook);
+  (messagesOpts as { streamingHook?: StreamingHookPort }).streamingHook = pluginLifecycleHook;
 
   const { LimbTranscriptCatDelivery } = await import('./domains/limb/LimbTranscriptCatDelivery.js');
   limbTranscriptDelivery = new LimbTranscriptCatDelivery({
@@ -7715,6 +7788,22 @@ async function main(): Promise<void> {
     bindingStore: limbEmbodimentBindingStore,
     limbRegistry,
   });
+
+  // Physical embodiment is independent of IM packages and their subscriptions.
+  const embodimentOutbound: NonNullable<typeof callbackOpts.outboundHook> = {
+    async deliver(threadId, content, catId, _rich, _meta, _origin, triggerMessageId) {
+      try {
+        await limbOutboundDelivery.deliver(threadId, content, catId as CatId | undefined, triggerMessageId);
+      } catch (err) {
+        app.log.error({ err, threadId, catId }, 'Physical limb outbound delivery failed');
+      }
+    },
+  };
+  invokeTrigger.setOutboundHook(embodimentOutbound);
+  queueProcessor.setOutboundHook(embodimentOutbound);
+  callbackOpts.outboundHook = embodimentOutbound;
+  (messagesOpts as { outboundHook?: typeof embodimentOutbound }).outboundHook = embodimentOutbound;
+  queueProcessor.setThreadMetaLookup(deliveryThreadMeta);
 
   // F167 Phase P: late-bind invokeTrigger into holdBallDeps for wakeWhen command completion.
   // holdBallDeps is defined before invokeTrigger exists, but the route handler reads
@@ -8772,138 +8861,20 @@ async function main(): Promise<void> {
   taskRunnerV2.start();
   app.log.info(`[api] F139: unified scheduler started (${taskRunnerV2.getRegisteredTasks().join(', ')})`);
 
-  // F088: Start connector gateway (best-effort, after listen)
-  const gatewayDeps = {
-    messageStore: {
-      async append(input: Parameters<typeof messageStore.append>[0]) {
-        const result = await messageStore.append(input);
-        return { id: result.id };
-      },
-      async getById(id: string) {
-        const msg = messageStore.getById?.(id);
-        if (!msg) return null;
-        const resolved = msg instanceof Promise ? await msg : msg;
-        return resolved ? { source: resolved.source } : null;
-      },
-      async getByThreadBefore(threadId: string, timestamp: number, limit?: number) {
-        return messageStore.getByThreadBefore(threadId, timestamp, limit);
-      },
-    },
-    threadStore,
-    invokeTrigger,
-    socketManager,
-    defaultUserId: 'default-user' as const,
-    // clowder-ai#910 + cloud P1: pass a getter (not a value) so runtime
-    // `PUT /api/config/default-cat` (which calls `setRuntimeDefaultCatId` →
-    // updates `_runtimeDefaultCatId`) propagates to ConnectorRouter's
-    // per-message parseMentions resolve, without needing a gateway restart.
-    // An object getter or a one-shot value would still be copied as a
-    // string into `new ConnectorRouter({ defaultCatId, ... })` and frozen.
-    defaultCatId: getDefaultCatId,
+  // Repo Inbox is a separate W3 consumer. It survives IM gateway retirement.
+  await registerGitHubRepoWebhook(connectorWebhookHandlers, {
     redis: redisClient ?? undefined,
     log: app.log,
-    agentRegistry,
-    commandRegistry,
+    defaultUserId: process.env.DEFAULT_OWNER_USER_ID || 'default-user',
     bindingStore: connectorBindingStore,
+    threadStore,
+    invokeTrigger,
     repoConfigStore: communityRepoConfigStore,
     classifyGitHubIssueComment,
-    frontendBaseUrl,
-  };
-
-  /** Re-wire all hook consumers after gateway (re)start */
-  function syncConnectorWebhookHandlers(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
-    // P1-1 fix: clear stale handlers before re-populating (hot-reload may remove connectors)
-    connectorWebhookHandlers.clear();
-    for (const [id, handler] of handle.webhookHandlers) {
-      connectorWebhookHandlers.set(id, handler);
-    }
-  }
-
-  function wireGatewayHooks(handle: NonNullable<Awaited<ReturnType<typeof startConnectorGateway>>>): void {
-    handle.outboundHook.setLimbDelivery(limbOutboundDelivery);
-    invokeTrigger.setOutboundHook(handle.outboundHook);
-    invokeTrigger.setStreamingHook(handle.streamingHook);
-    queueProcessor.setOutboundHook(handle.outboundHook as Parameters<typeof queueProcessor.setOutboundHook>[0]);
-    queueProcessor.setStreamingHook(handle.streamingHook as Parameters<typeof queueProcessor.setStreamingHook>[0]);
-    (callbackOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
-    (messagesOpts as { outboundHook?: typeof handle.outboundHook }).outboundHook = handle.outboundHook;
-    (messagesOpts as { streamingHook?: typeof handle.streamingHook }).streamingHook = handle.streamingHook;
-    syncConnectorWebhookHandlers(handle);
-    (connectorHubOpts as { weixinAdapter?: unknown }).weixinAdapter = handle.weixinAdapter;
-    (connectorHubOpts as { startWeixinPolling?: () => void }).startWeixinPolling = handle.startWeixinPolling;
-    // F132 Phase E: WeCom Bot dynamic start/stop
-    (
-      connectorHubOpts as { startWeComBotStream?: (botId: string, secret: string) => Promise<void> }
-    ).startWeComBotStream = handle.startWeComBotStream;
-    (connectorHubOpts as { stopWeComBot?: () => Promise<void> }).stopWeComBot = handle.stopWeComBot;
-    // F132 bugfix: live health getter for status endpoint
-    (connectorHubOpts as { getWeComBotAdapter?: () => unknown }).getWeComBotAdapter = handle.getWeComBotAdapter;
-    (connectorHubOpts as { permissionStore?: unknown }).permissionStore = handle.permissionStore;
-    // F240: generic manifest action endpoint needs the live gateway registries/lifecycle hooks.
-    (connectorHubOpts as { pluginRegistry?: typeof handle.pluginRegistry }).pluginRegistry = handle.pluginRegistry;
-    (connectorHubOpts as { adapterRegistry?: typeof handle.adapterRegistry }).adapterRegistry = handle.adapterRegistry;
-    (connectorHubOpts as { activateConnector?: typeof handle.activateConnector }).activateConnector =
-      handle.activateConnector;
-    (connectorHubOpts as { deactivateConnector?: typeof handle.deactivateConnector }).deactivateConnector =
-      handle.deactivateConnector;
-  }
-
-  let connectorGatewayHandle: Awaited<ReturnType<typeof startConnectorGateway>> = null;
-  let connectorReloadUnsub: (() => void) | null = null;
-  const logConnectorAutostartStatus = (autostartStatus: PreconfiguredConnectorAutostartStatus) => {
-    if (autostartStatus === 'disabled-credentials-suppressed') {
-      app.log.warn(
-        { nodeEnv: process.env.NODE_ENV ?? '(unset)', autostartStatus },
-        '[api] Preconfigured connector credentials present but suppressed by lifecycle policy; use the managed `pnpm start` runtime or intentionally set CONNECTOR_GATEWAY_AUTOSTART=1 in the launching process',
-      );
-    } else if (autostartStatus === 'disabled-no-credentials') {
-      app.log.info(
-        { nodeEnv: process.env.NODE_ENV ?? '(unset)', autostartStatus },
-        '[api] Preconfigured connector autostart disabled; no preconfigured credentials detected; starting connector gateway in QR-only mode',
-      );
-    }
-  };
-  const startGatewayWithAutostartPolicy = async () => {
-    const handle = await startConnectorGateway(loadConnectorGatewayConfig(), gatewayDeps);
-    if (handle) logConnectorAutostartStatus(handle.preconfiguredAutostartStatus);
-    return handle;
-  };
-  try {
-    connectorGatewayHandle = await startGatewayWithAutostartPolicy();
-    if (connectorGatewayHandle) {
-      wireGatewayHooks(connectorGatewayHandle);
-      queueProcessor.setThreadMetaLookup(async (threadId) => {
-        const thread = await threadStore.get(threadId);
-        if (!thread) return undefined;
-        return {
-          threadShortId: threadId.slice(0, 15),
-          threadTitle: thread.title ?? undefined,
-          deepLinkUrl: buildThreadDeepLink(frontendBaseUrl, threadId),
-        };
-      });
-
-      app.log.info('[api] Connector gateway started');
-    }
-  } catch (err) {
-    app.log.warn(`[api] Connector gateway startup failed (best-effort): ${String(err)}`);
-  }
-
-  // F136 Phase 2: Always subscribe — enables self-healing when initial startup fails (P1-2)
-  const reloadSubscriber = createConnectorReloadSubscriber({
-    log: app.log,
-    debounceMs: 500,
-    async onRestart() {
-      app.log.info('[api] F136: Hot-reloading connector gateway...');
-      const newHandle = await restartConnectorGateway(connectorGatewayHandle, startGatewayWithAutostartPolicy);
-      if (newHandle) {
-        connectorGatewayHandle = newHandle;
-        wireGatewayHooks(newHandle);
-      }
-      app.log.info('[api] F136: Connector gateway hot-reload complete');
-    },
+    deliveryDeps: { messageStore, socketManager },
+  }).catch((err: unknown) => {
+    app.log.error({ err }, 'GitHub Repo Inbox webhook initialization failed');
   });
-  connectorReloadUnsub = () => reloadSubscriber.unsubscribe();
-  app.log.info('[api] Connector hot-reload subscriber active');
 
   // Graceful shutdown handler: persist Redis before exit
   let shuttingDown = false;
@@ -8944,16 +8915,10 @@ async function main(): Promise<void> {
       taskRunnerV2.stop();
 
       // Stop event bus subscribers
-      catCatalogSubscriber.unsubscribe();
+      cloudConversations.stop();
       accountBindingSubscriber.unsubscribe();
       pushConfigUnsub?.();
       pushConfigUnsub = null;
-      connectorReloadUnsub?.();
-      try {
-        await connectorGatewayHandle?.stop();
-      } catch (err) {
-        app.log.error(`[api] ConnectorGateway stop failed: ${String(err)}`);
-      }
 
       // Stop preview gateway (F120)
       try {

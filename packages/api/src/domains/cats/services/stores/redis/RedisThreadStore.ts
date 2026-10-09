@@ -29,6 +29,7 @@ import type {
   ThreadMetadataPatch,
   ThreadMetadataV1,
   ThreadParticipantActivity,
+  ThreadPluginOwnershipV1,
   ThreadRoutingPolicyV1,
   ThreadSystemKind,
   VotingStateV1,
@@ -38,6 +39,7 @@ import {
   DEFAULT_THREAD_ID,
   deriveAutoThreadTitle,
   isThreadGoalStateV1,
+  isThreadPluginOwnershipV1,
   mergeThreadMetadata,
   parseThreadMetadataJson,
   validateMergedTotals,
@@ -879,6 +881,18 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async updatePluginOwnership(threadId: string, ownership: ThreadPluginOwnershipV1 | null): Promise<void> {
+    if (ownership !== null && !isThreadPluginOwnershipV1(ownership)) {
+      throw new TypeError('invalid plugin thread ownership');
+    }
+    const key = ThreadKeys.detail(threadId);
+    if (ownership === null) {
+      await this.deleteDetailFields(key, 'pluginOwnership');
+    } else {
+      await this.setDetailFields(key, 'pluginOwnership', JSON.stringify(ownership));
+    }
+  }
+
   async updatePreferredWorkspaceMode(
     threadId: string,
     mode:
@@ -1374,6 +1388,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.connectorHubState) {
       result.connectorHubState = JSON.stringify(thread.connectorHubState);
     }
+    if (thread.pluginOwnership) {
+      result.pluginOwnership = JSON.stringify(thread.pluginOwnership);
+    }
     if (thread.externalRuntimeAnchorState) {
       result.externalRuntimeAnchorState = JSON.stringify(thread.externalRuntimeAnchorState);
     }
@@ -1556,6 +1573,16 @@ export class RedisThreadStore implements IThreadStore {
         }
       } catch {
         /* ignore malformed JSON */
+      }
+    }
+    if (data.pluginOwnership) {
+      try {
+        const parsed: unknown = JSON.parse(data.pluginOwnership);
+        if (isThreadPluginOwnershipV1(parsed)) {
+          result.pluginOwnership = parsed;
+        }
+      } catch {
+        /* ignore malformed plugin ownership */
       }
     }
     if (data.externalRuntimeAnchorState) {

@@ -12,8 +12,7 @@ import { dispatchBoundConversationThroughHost } from '../dist/domains/cats/servi
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
-import { safeAdapterDiagnostic } from '../src/plugins/cloud-cat-personal-host/native-host/native-results.mjs';
-import { createUnsupportedNodeHarness } from './helpers/f247-unsupported-node-harness.js';
+import { boundedFailureDiagnostic } from './helpers/f202-cloud-failure-diagnostic.js';
 
 function ensureGptProRegistered() {
   if (catRegistry.has('gpt-pro')) return;
@@ -48,7 +47,7 @@ describe('F247 normal owner-Chrome product chain', () => {
       timestamp: 1_000,
       extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
     });
-    const grantStore = new MemoryCloudReturnGrantStore();
+    const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
     const bridgeCalls = [];
     const dispositionCalls = [];
     const events = await drain(
@@ -150,7 +149,7 @@ describe('F247 normal owner-Chrome product chain', () => {
     assert.deepEqual(durableReceipt.source.meta.cloudBridgeOutboundReceipt, status.outboundReceipt);
 
     const agentKeyRegistry = new AgentKeyRegistry({ ttlMs: 86_400_000 });
-    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice');
+    const { secret } = await agentKeyRegistry.issue('gpt-pro', 'alice', { scope: 'cloud-conversation' });
     const app = Fastify();
     await app.register(callbacksRoutes, {
       registry: new InvocationRegistry(),
@@ -210,31 +209,7 @@ describe('F247 normal owner-Chrome product chain', () => {
       timestamp: 1_000,
       extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
     });
-    const harness = createUnsupportedNodeHarness();
-    let pageDiagnostic;
-    await assert.rejects(
-      harness.adapter.appendMessage({
-        requestId: 'comment-node-failure',
-        conversationId: 'conversation-product-chain',
-        text: 'must never enter diagnostics',
-        idempotencyKey: source.id,
-      }),
-      (error) => {
-        assert.equal(error.code, 'COMPOSER_DOM_UNSUPPORTED');
-        pageDiagnostic = error.diagnostic;
-        return true;
-      },
-    );
-    assert.equal(harness.getSendCount(), 0);
-    assert.equal(harness.document.querySelectorAll('[data-message-id]').length, 0);
-    assert.equal(harness.composer.textContent, '');
-    assert.equal(pageDiagnostic.fingerprint.firstUnsupportedPath, 'composer/#node-8[0]');
-    assert.deepEqual(
-      pageDiagnostic.fingerprint.nodes.map((node) => node.path),
-      ['composer', 'composer/#node-8[0]', 'composer/h1[1]'],
-    );
-    const diagnostic = safeAdapterDiagnostic(pageDiagnostic);
-    assert.ok(diagnostic, 'native Helper must preserve the adapter path grammar');
+    const diagnostic = boundedFailureDiagnostic('composer/#node-8[0]');
     assert.equal(isCloudBridgeFailureDiagnosticV1(diagnostic), true);
     for (const firstUnsupportedPath of [
       'composer/#node-8[0]/prompt_secret[0]',
@@ -246,7 +221,6 @@ describe('F247 normal owner-Chrome product chain', () => {
         ...diagnostic,
         fingerprint: { ...diagnostic.fingerprint, firstUnsupportedPath },
       };
-      assert.equal(safeAdapterDiagnostic(unsafeDiagnostic), null);
       assert.equal(isCloudBridgeFailureDiagnosticV1(unsafeDiagnostic), false);
     }
     const oversizedCountDiagnostic = {
@@ -256,7 +230,6 @@ describe('F247 normal owner-Chrome product chain', () => {
         nodes: [{ path: 'composer', kind: 'element', tag: 'DIV', childCount: 0x1_0000_0000 }],
       },
     };
-    assert.equal(safeAdapterDiagnostic(oversizedCountDiagnostic), null);
     assert.equal(isCloudBridgeFailureDiagnosticV1(oversizedCountDiagnostic), false);
     const hostError = Object.assign(new Error('ChatGPT composer DOM is unsupported'), {
       code: 'COMPOSER_DOM_UNSUPPORTED',

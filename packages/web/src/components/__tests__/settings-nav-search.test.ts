@@ -46,7 +46,7 @@ describe('SettingsNav search filtering', () => {
       root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn() }));
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(14);
+    expect(buttons).toHaveLength(13);
     expect(container.textContent).toContain('协作与规则');
   });
 
@@ -56,7 +56,7 @@ describe('SettingsNav search filtering', () => {
     });
 
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
-    expect(buttons).toHaveLength(14);
+    expect(buttons).toHaveLength(13);
     for (const button of buttons) {
       expect(button.querySelector('svg.h-4.w-4')).toBeTruthy();
     }
@@ -73,15 +73,15 @@ describe('SettingsNav search filtering', () => {
     expect(buttons[0].textContent).toContain('语音管理');
   });
 
-  it('filters by keyword match (e.g. telegram matches IM 对接)', () => {
+  it('routes integration searches to the unified plugin section', () => {
     act(() => {
       root.render(
-        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'telegram' }),
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'connector' }),
       );
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);
-    expect(buttons[0].textContent).toContain('IM 对接');
+    expect(buttons[0].textContent).toContain('插件集成');
   });
 
   it('filters governance keywords to the rules and SOP section', () => {

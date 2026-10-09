@@ -10,6 +10,7 @@ import { readCapabilitiesConfig } from '../config/capabilities/capability-orches
 import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { LimbRegistry } from '../domains/limb/LimbRegistry.js';
 import { loadLimbDeclaration } from '../domains/limb/limb-yaml-loader.js';
+import type { InstalledPluginOperationResult } from '../domains/plugin/operations/plugin-operation-routes.js';
 import type { PluginRegistry } from '../domains/plugin/PluginRegistry.js';
 import { normalizeCapId, resolvePluginResourcePath, resourceCapId } from '../domains/plugin/PluginRegistry.js';
 import type { PluginResourceActivator as PluginResourceActivatorType } from '../domains/plugin/PluginResourceActivator.js';
@@ -30,6 +31,7 @@ interface PluginRoutesOpts {
   limbRegistry: LimbRegistry;
   pluginsDir: string;
   beforePluginDisable?: (pluginId: string) => void | Promise<void>;
+  runInstalledTest?: (pluginId: string) => Promise<InstalledPluginOperationResult>;
 }
 
 function refreshPluginRegistry(pluginRegistry: PluginRegistry) {
@@ -219,6 +221,8 @@ export function registerPluginRoutes(app: FastifyInstance, opts: PluginRoutesOpt
     const { operator } = access;
 
     const { id } = request.params;
+    const installed = await opts.runInstalledTest?.(id);
+    if (installed?.matched) return reply.status(installed.status).send(installed.body);
     refreshPluginRegistry(pluginRegistry);
     const manifest = pluginRegistry.getManifest(id);
     if (!manifest) {

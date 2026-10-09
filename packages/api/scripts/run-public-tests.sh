@@ -21,6 +21,11 @@ if [[ -z "${files}" ]]; then
   exit 1
 fi
 
+# This serial public lane, like distributable shards, has no shared Redis.
+# with-test-home pins a safe development default, but that is not evidence a
+# test Redis was allocated. Deny implicit access; test:redis owns opt-in servers.
+export REDIS_URL='redis://127.0.0.1:0'
+
 # shellcheck disable=SC2086 # $files is intentionally word-split into argv
 exec node \
   --import "$(pwd)/test/helpers/setup-cat-registry.js" \

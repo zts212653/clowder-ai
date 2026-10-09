@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { createCatId } from '@cat-cafe/shared';
+import { type AgentKeyScope, createCatId } from '@cat-cafe/shared';
 import type { AgentKeyRegistry } from './AgentKeyRegistry.js';
 
 const DEFAULT_RENEW_BEFORE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -22,6 +22,8 @@ export interface EnsureAgentKeySidecarOptions {
   readonly catId: string;
   readonly userId: string;
   readonly keyFile: string;
+  /** The boundary the published key belongs to; a key of another scope in the file is replaced. */
+  readonly scope?: AgentKeyScope;
   readonly renewBeforeMs?: number;
   readonly leaseStaleMs?: number;
   readonly leaseWaitMs?: number;
@@ -224,12 +226,18 @@ async function requireIssuedRecord(registry: AgentKeyRegistry, agentKeyId: strin
 
 async function reconcileUnderLease(options: EnsureAgentKeySidecarOptions): Promise<AgentKeySidecarDisposition> {
   const { registry, catId, userId, keyFile } = options;
+  const scope = options.scope ?? 'user-bound';
   const now = options.now ?? Date.now;
   const renewBeforeMs = options.renewBeforeMs ?? DEFAULT_RENEW_BEFORE_MS;
   const snapshot = await readSidecar(keyFile);
   const verified = snapshot.secret ? await registry.verify(snapshot.secret) : null;
   const matchingRecord =
-    verified?.ok && verified.record.catId === catId && verified.record.userId === userId ? verified.record : null;
+    verified?.ok &&
+    verified.record.catId === catId &&
+    verified.record.userId === userId &&
+    verified.record.scope === scope
+      ? verified.record
+      : null;
 
   if (matchingRecord && matchingRecord.graceUntil === undefined && matchingRecord.expiresAt - now() > renewBeforeMs) {
     await enforceStrictFileMode(keyFile);
@@ -251,7 +259,7 @@ async function reconcileUnderLease(options: EnsureAgentKeySidecarOptions): Promi
   const issued =
     disposition === 'rotated'
       ? await registry.rotate(matchingRecord?.agentKeyId ?? '')
-      : await registry.issue(createCatId(catId), userId);
+      : await registry.issue(createCatId(catId), userId, { scope });
 
   let publicationComplete = false;
   try {

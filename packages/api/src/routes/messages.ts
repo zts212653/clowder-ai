@@ -164,7 +164,7 @@ interface StreamingHookLike {
   onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId?: string): Promise<void>;
   cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
   /** F151: Signal adapters that an invocation's delivery batch is complete. */
-  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
+  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean, status?: string, invocationId?: string): Promise<void>;
 }
 
 import { normalizeErrorMessage } from '../utils/normalize-error.js';
@@ -1545,6 +1545,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         let startupWatchdogFired = false;
         let startupTimeoutFailureRecorded = false;
         let queueCompletionNotified = false;
+        let outboundScheduled = false;
 
         const notifyQueueCompletion = (status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user') => {
           if (queueCompletionNotified) return;
@@ -2099,6 +2100,7 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
             // F088 ISSUE-15: Outbound delivery to connector platforms (Feishu/Telegram)
             // P2 fix: fire-and-forget so delivery latency doesn't block invocationTracker.complete()
+            outboundScheduled = true;
             deliverOutboundFromWeb(
               resolvedThreadId,
               primaryCat,
@@ -2249,6 +2251,16 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
             }
           } finally {
             if (queueCompletionWatchdog) clearTimeout(queueCompletionWatchdog);
+            if (!outboundScheduled && opts.streamingHook?.notifyDeliveryBatchDone) {
+              const threadStillBusy =
+                (opts.invocationTracker?.has(resolvedThreadId) ?? false) ||
+                (opts.queueProcessor?.isThreadBusy(resolvedThreadId) ?? false);
+              await opts.streamingHook
+                .notifyDeliveryBatchDone(resolvedThreadId, !threadStillBusy, finalStatus, createResult.invocationId)
+                .catch((err) =>
+                  log.warn({ err, threadId: resolvedThreadId }, '[messages] lifecycle settlement failed'),
+                );
+            }
             // F39: Notify queue processor for auto-dequeue chain.
             notifyQueueCompletion(finalStatus);
           }
@@ -3008,8 +3020,10 @@ export async function deliverOutboundFromWeb(
   if (opts.streamingHook?.notifyDeliveryBatchDone) {
     const threadStillBusy =
       (opts.invocationTracker?.has(threadId) ?? false) || (opts.queueProcessor?.isThreadBusy(threadId) ?? false);
-    await opts.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
-      logger.warn({ err, threadId }, '[messages] notifyDeliveryBatchDone failed');
-    });
+    await opts.streamingHook
+      .notifyDeliveryBatchDone(threadId, !threadStillBusy, 'succeeded', invocationId)
+      .catch((err) => {
+        logger.warn({ err, threadId }, '[messages] notifyDeliveryBatchDone failed');
+      });
   }
 }

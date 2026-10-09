@@ -1,10 +1,11 @@
+import { canonicalSettingsSectionId } from '@/lib/settings-section-id';
 import type { WorkspaceMode } from '@/lib/workspace-modes';
 import { SETTINGS_SECTIONS } from './settings-nav-config';
 
 /**
  * F322 设置与管理 — the 11 first-level destinations (home-northstar README 1.6 §3, 旧入口 → 新位置).
  *
- * This is a MAP over what already exists, not new pages: every one of the 14 old settings sections keeps its id,
+ * This is a MAP over what already exists, not new pages: each current settings section keeps its id,
  * renderer, `/settings?s=` deep link and extra positioning params; the other entries open the object that already owns
  * them (a full route, or the conversation's Workspace panel). Nothing here stores data.
  *
@@ -65,7 +66,7 @@ export const SETTINGS_IA: readonly SettingsEntry[] = [
     label: '连接与扩展',
     icon: 'plug',
     group: 2,
-    destination: sections('accounts', 'im', 'marketplace', 'skills', 'mcp', 'plugins'),
+    destination: sections('accounts', 'marketplace', 'skills', 'mcp', 'plugins'),
   },
   {
     id: 'system',
@@ -100,7 +101,7 @@ export function findEntry(entryId: string): SettingsEntry | undefined {
   return SETTINGS_IA.find((entry) => entry.id === entryId);
 }
 
-/** Which first-level entry owns an old settings section (every one of the 14 has exactly one). */
+/** Which first-level entry owns a current settings section (each has exactly one). */
 export function entryForSection(sectionId: string): SettingsEntry | undefined {
   return SETTINGS_IA.find(
     (entry) =>
@@ -137,6 +138,6 @@ export function resolvePin(pinId: string): ResolvedPin | null {
     const entry = findEntry(pinId.slice(DEST_PREFIX.length));
     return entry ? { kind: 'entry', id: pinId, label: entry.label, icon: entry.icon, entry } : null;
   }
-  const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === pinId);
-  return section ? { kind: 'section', id: pinId, label: section.label, icon: section.icon } : null;
+  const section = SETTINGS_SECTIONS.find((candidate) => candidate.id === canonicalSettingsSectionId(pinId));
+  return section ? { kind: 'section', id: section.id, label: section.label, icon: section.icon } : null;
 }

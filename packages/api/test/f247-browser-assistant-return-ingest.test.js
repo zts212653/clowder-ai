@@ -23,13 +23,16 @@ function fixture() {
     mentions: ['gpt-pro'],
     timestamp: 1_000,
   });
-  const grantStore = new MemoryCloudReturnGrantStore();
+  const grantStore = new MemoryCloudReturnGrantStore(Date.now, { historyBoundary: 0 });
   const broadcasts = [];
   const service = new CloudAssistantReturnIngestService({
     messageStore: store,
     grantStore,
     socketManager: { broadcastAgentMessage: (message, threadId) => broadcasts.push({ message, threadId }) },
     logger: { error() {}, warn() {} },
+    cats: {
+      getAllConfigs: () => ({ 'gpt-pro': { provider: 'openai-chatgpt-pro' }, 'codex-sol': { provider: 'openai' } }),
+    },
   });
   return { store, source, grantStore, broadcasts, service };
 }
@@ -46,6 +49,7 @@ describe('F247 browser-captured assistant return ingest', () => {
     await grantStore.issue({ ...scope, dispatchInvocationId: 'dispatch-browser-return-1' });
 
     const outcome = await service.ingest({
+      provider: 'chatgpt',
       sourceMessageId: source.id,
       content: 'ordinary ChatGPT assistant final without an MCP callback',
     });
@@ -64,7 +68,7 @@ describe('F247 browser-captured assistant return ingest', () => {
     assert.equal(broadcasts[0].threadId, source.threadId);
     assert.equal(broadcasts[0].message.messageId, stored.id);
 
-    const replay = await service.ingest({ sourceMessageId: source.id, content: stored.content });
+    const replay = await service.ingest({ provider: 'chatgpt', sourceMessageId: source.id, content: stored.content });
     assert.equal(replay.status, 'duplicate');
     assert.equal(replay.messageId, stored.id);
     assert.equal((await store.getByThread(source.threadId)).filter((message) => message.catId === 'gpt-pro').length, 1);
@@ -93,6 +97,7 @@ describe('F247 browser-captured assistant return ingest', () => {
     await grantStore.issue({ ...scope, dispatchInvocationId: 'dispatch-browser-return-2' });
 
     const outcome = await service.ingest({
+      provider: 'chatgpt',
       sourceMessageId: source.id,
       content: 'browser fallback must not create a second reply',
     });
@@ -104,10 +109,13 @@ describe('F247 browser-captured assistant return ingest', () => {
 
   it('rejects a browser return without a server grant or for a non-public source', async () => {
     const { store, source, grantStore, service } = fixture();
-    assert.deepEqual(await service.ingest({ sourceMessageId: source.id, content: 'no dispatch grant' }), {
-      status: 'rejected',
-      reason: 'grant_not_found',
-    });
+    assert.deepEqual(
+      await service.ingest({ provider: 'chatgpt', sourceMessageId: source.id, content: 'no dispatch grant' }),
+      {
+        status: 'rejected',
+        reason: 'grant_not_found',
+      },
+    );
 
     const whisper = store.append({
       userId: source.userId,
@@ -127,10 +135,13 @@ describe('F247 browser-captured assistant return ingest', () => {
       dispatchInvocationId: 'dispatch-browser-return-private',
     });
 
-    assert.deepEqual(await service.ingest({ sourceMessageId: whisper.id, content: 'must remain rejected' }), {
-      status: 'rejected',
-      reason: 'source_ineligible',
-    });
+    assert.deepEqual(
+      await service.ingest({ provider: 'chatgpt', sourceMessageId: whisper.id, content: 'must remain rejected' }),
+      {
+        status: 'rejected',
+        reason: 'source_ineligible',
+      },
+    );
     assert.equal((await store.getByThread(source.threadId)).filter((message) => message.catId === 'gpt-pro').length, 0);
   });
 });

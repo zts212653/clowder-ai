@@ -1,11 +1,15 @@
-import { createCatId } from '@cat-cafe/shared';
+import type { CatId } from '@cat-cafe/shared';
 import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../stores/ports/MessageStore.js';
 import { resolveVisibleReplyParent } from '../stores/visibility.js';
 import type { AgentMessage } from '../types.js';
+import {
+  type CloudCatConfigSource,
+  type CloudConversationProvider,
+  resolveCloudConversationCat,
+} from './cloud-conversation-identity.js';
 import type { CloudReturnGrantClaim, CloudReturnGrantStore } from './cloud-return-grant.js';
 import { buildCloudReturnMessageIdempotencyKey } from './cloud-return-message.js';
 
-const TARGET_CAT_ID = createCatId('gpt-pro');
 const MAX_CONTENT_BYTES = 128 * 1024;
 
 interface AssistantReturnLogger {
@@ -23,6 +27,11 @@ export type CloudAssistantReturnIngestOutcome =
   | { readonly status: 'rejected'; readonly reason: string };
 
 export interface CloudAssistantReturnIngestInput {
+  /**
+   * The provider whose conversation produced the return. The reply belongs to that provider's cloud
+   * cat as the Host configuration resolves it now (F202 h3c-2) — never to a cat the package names.
+   */
+  readonly provider: CloudConversationProvider;
   readonly sourceMessageId: string;
   readonly content: string;
 }
@@ -38,18 +47,19 @@ export class CloudAssistantReturnIngestService {
       readonly grantStore: Pick<CloudReturnGrantStore, 'claim' | 'commit' | 'release'>;
       readonly socketManager: AssistantReturnSocketManager;
       readonly logger: AssistantReturnLogger;
+      readonly cats: CloudCatConfigSource;
       readonly now?: () => number;
     },
   ) {}
 
-  private async broadcast(message: StoredMessage): Promise<void> {
+  private async broadcast(message: StoredMessage, catId: CatId): Promise<void> {
     const replyPreview = message.replyTo
       ? await hydrateReplyPreview(this.deps.messageStore, message.replyTo)
       : undefined;
     this.deps.socketManager.broadcastAgentMessage(
       {
         type: 'text',
-        catId: TARGET_CAT_ID,
+        catId,
         content: message.content,
         origin: 'callback',
         messageId: message.id,
@@ -83,11 +93,24 @@ export class CloudAssistantReturnIngestService {
     if (!input.sourceMessageId || input.sourceMessageId.length > 512 || !validContent(input.content)) {
       return { status: 'rejected', reason: 'invalid_browser_return' };
     }
+    // One resolution serves the source's visibility, the grant scope, the idempotency key, the append
+    // and the broadcast. A grant issued for a cat that is no longer the resolved one finds no match
+    // below: the return is refused, never re-attributed to whichever cat holds the role now.
+    const cloudCat = resolveCloudConversationCat(this.deps.cats, input.provider);
+    if (cloudCat.status === 'ambiguous') {
+      this.deps.logger.warn(
+        { provider: input.provider, catIds: cloudCat.catIds, sourceMessageId: input.sourceMessageId },
+        '[F202] refused a cloud conversation return: several cats are configured for its provider; configure exactly one',
+      );
+      return { status: 'rejected', reason: 'cloud_cat_ambiguous' };
+    }
+    if (cloudCat.status === 'unavailable') return { status: 'rejected', reason: 'cloud_cat_unavailable' };
+    const targetCatId = cloudCat.catId;
     const rawSource = await this.deps.messageStore.getById(input.sourceMessageId);
     if (!rawSource) return { status: 'rejected', reason: 'source_not_found' };
     const source = await resolveVisibleReplyParent(this.deps.messageStore, input.sourceMessageId, {
       threadId: rawSource.threadId,
-      viewer: { type: 'cat', catId: TARGET_CAT_ID },
+      viewer: { type: 'cat', catId: targetCatId },
       publicReply: true,
     });
     if (!source || source.userId !== rawSource.userId) {
@@ -97,7 +120,7 @@ export class CloudAssistantReturnIngestService {
       threadId: source.threadId,
       userId: source.userId,
       sourceMessageId: source.id,
-      targetCatId: String(TARGET_CAT_ID),
+      targetCatId: String(targetCatId),
     };
     const idempotencyKey = buildCloudReturnMessageIdempotencyKey(scope);
     const durableWinner = await this.deps.messageStore.getByIdempotencyKey(
@@ -106,7 +129,7 @@ export class CloudAssistantReturnIngestService {
       idempotencyKey,
     );
     if (durableWinner) {
-      await this.broadcast(durableWinner);
+      await this.broadcast(durableWinner, targetCatId);
       return { status: 'duplicate', messageId: durableWinner.id };
     }
     const claimed = await this.deps.grantStore.claim(scope);
@@ -119,7 +142,7 @@ export class CloudAssistantReturnIngestService {
       const append = await this.deps.messageStore.appendIdempotent({
         threadId: source.threadId,
         userId: source.userId,
-        catId: TARGET_CAT_ID,
+        catId: targetCatId,
         content: input.content,
         mentions: [],
         origin: 'callback',
@@ -129,7 +152,7 @@ export class CloudAssistantReturnIngestService {
         idempotencyKey,
       });
       await this.commitAfterPersistence(claimed, append.message);
-      await this.broadcast(append.message);
+      await this.broadcast(append.message, targetCatId);
       return { status: append.idempotent ? 'duplicate' : 'persisted', messageId: append.message.id };
     } catch (error) {
       await this.deps.grantStore.release(claimed).catch(() => false);

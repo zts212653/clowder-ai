@@ -23,7 +23,7 @@ export function desktopWindowContribution(manifest: PluginManifest): DesktopWind
   const feature = manifest.features[0];
   const contribution = contributions[0];
   if (
-    manifest.runtime.transport !== 'builtin' ||
+    manifest.runtime?.transport !== 'builtin' ||
     manifest.runtime.entrypoint !== undefined ||
     (manifest.configuration?.length ?? 0) !== 0 ||
     (manifest.data?.length ?? 0) !== 0 ||

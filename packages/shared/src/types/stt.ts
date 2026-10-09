@@ -5,6 +5,7 @@
 
 export interface SttTranscribeRequest {
   readonly audioPath: string;
+  readonly signal?: AbortSignal;
   readonly language?: string;
   readonly format?: string;
 }

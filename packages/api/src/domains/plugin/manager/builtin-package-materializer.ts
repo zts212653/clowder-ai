@@ -2,13 +2,30 @@ import { execFile } from 'node:child_process';
 import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { isDeepStrictEqual, promisify } from 'node:util';
+import type { PluginManifest } from '@clowder-ai/plugin-contract';
 import { packageDirectoryName } from '../external-runtime/filesystem-package-locator.js';
 import type { PluginManifestValidator } from '../external-runtime/package-staging.js';
 import { stageVerifiedPackageArchive } from '../external-runtime/package-staging.js';
-import type {
-  BuiltinPluginPackageMaterializer,
-  MaterializedBuiltinPluginPackage,
-} from './builtin-contribution-supervisor.js';
+import type { PluginPackageProvenance } from '../host-inventory/types.js';
+
+export interface MaterializedBuiltinPluginPackage {
+  readonly rootDir: string;
+  /** Installed dependency tree visible to the staged package through Node's ancestor lookup. */
+  readonly dependencyRoot?: string;
+  readonly manifest: PluginManifest;
+  verifyIntegrity(): Promise<void>;
+  release(): Promise<void>;
+}
+
+export interface BuiltinPluginPackageMaterializer {
+  resolve(input: {
+    readonly pluginInstanceId: string;
+    readonly pluginId: string;
+    readonly packageDigest: string;
+    readonly packageName?: string;
+    readonly sourceKind: PluginPackageProvenance['kind'];
+  }): Promise<MaterializedBuiltinPluginPackage>;
+}
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_INSTALL_TIMEOUT_MS = 5 * 60_000;
@@ -113,6 +130,21 @@ async function readRuntimePackageJson(rootDir: string): Promise<RuntimePackageJs
   }
 }
 
+async function dependencyDirectory(rootDir: string): Promise<string | undefined> {
+  const path = resolve(rootDir, 'node_modules');
+  try {
+    const directory = await lstat(path);
+    if (!directory.isDirectory() || directory.isSymbolicLink()) {
+      throw metadataError('builtin plugin node_modules must be a real directory');
+    }
+    return path;
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return undefined;
+    if (error instanceof BuiltinPluginPackageMaterializationError) throw error;
+    throw metadataError('builtin plugin node_modules could not be read', error);
+  }
+}
+
 function assertSafeDependencyClosure(packageJson: RuntimePackageJson): void {
   const entries = [...Object.entries(packageJson.dependencies), ...Object.entries(packageJson.optionalDependencies)];
   if (entries.length > MAX_DIRECT_DEPENDENCIES) {
@@ -161,14 +193,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function assertRegistryLockPackage(path: string, value: unknown): void {
+function assertLockPackage(path: string, value: unknown, registryOnly: boolean): void {
   if (!path.startsWith('node_modules/') || !isRecord(value) || value.link === true) {
     throw lockError('builtin plugin shrinkwrap contains a non-registry package');
   }
   if (typeof value.version !== 'string' || !EXACT_REGISTRY_VERSION.test(value.version)) {
     throw lockError('builtin plugin shrinkwrap contains an invalid package version');
   }
-  if (typeof value.resolved !== 'string' || !value.resolved.startsWith('https://registry.npmjs.org/')) {
+  if (
+    typeof value.resolved !== 'string' ||
+    value.resolved.length === 0 ||
+    (registryOnly && !value.resolved.startsWith('https://registry.npmjs.org/'))
+  ) {
     throw lockError('builtin plugin shrinkwrap leaves the canonical npm registry boundary');
   }
   if (!canonicalSha512Integrity(value.integrity)) {
@@ -223,24 +259,35 @@ function assertShrinkwrapRoot(parsed: Record<string, unknown>, packageJson: Runt
   }
 }
 
-async function readDependencyShrinkwrap(rootDir: string, packageJson: RuntimePackageJson): Promise<string> {
+async function readDependencyShrinkwrap(
+  rootDir: string,
+  packageJson: RuntimePackageJson,
+  registryOnly: boolean,
+): Promise<string> {
   const contents = await readShrinkwrapContents(rootDir);
   const parsed = parseShrinkwrap(contents);
   assertShrinkwrapRoot(parsed, packageJson);
   const packages = parsed.packages as Record<string, unknown>;
   for (const [packagePath, value] of Object.entries(packages)) {
-    if (packagePath.length > 0) assertRegistryLockPackage(packagePath, value);
+    if (packagePath.length > 0) assertLockPackage(packagePath, value, registryOnly);
   }
   return contents;
 }
 
-function installEnvironment(root: string): Record<string, string> {
+function hostEnvironment(): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+}
+
+function installEnvironment(root: string, registryOnly: boolean): Record<string, string> {
   const home = resolve(root, '.npm-home');
   return {
+    ...(registryOnly ? {} : hostEnvironment()),
     PATH: process.env.PATH ?? '/usr/bin:/bin',
-    HOME: home,
+    ...(registryOnly ? { HOME: home } : {}),
     npm_config_cache: resolve(home, 'cache'),
-    npm_config_registry: 'https://registry.npmjs.org/',
+    ...(registryOnly ? { npm_config_registry: 'https://registry.npmjs.org/' } : {}),
     npm_config_ignore_scripts: 'true',
     npm_config_audit: 'false',
     npm_config_fund: 'false',
@@ -269,10 +316,10 @@ function defaultDependencyInstaller(npmBin: string, timeoutMs: number): BuiltinD
 }
 
 /**
- * Builds an ephemeral runtime closure beside a freshly verified package tree.
- * npm never receives Host credentials or lifecycle scripts. Dependency-bearing
- * packages must carry a publisher-owned shrinkwrap whose registry origins and
- * sha512 integrity records are verified before npm ci.
+ * Resolves a verified package tree and its runtime dependencies. Owner-admitted
+ * packages may ship a physical node_modules tree; otherwise dependencies are
+ * installed without lifecycle scripts. Catalog packages retain the publisher
+ * shrinkwrap, canonical registry, and sha512 integrity boundary.
  */
 export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPluginPackageMaterializer {
   private readonly packagesRoot: string;
@@ -297,6 +344,7 @@ export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPlugin
     readonly pluginId: string;
     readonly packageDigest: string;
     readonly packageName?: string;
+    readonly sourceKind: PluginPackageProvenance['kind'];
   }): Promise<MaterializedBuiltinPluginPackage> {
     await mkdir(this.materializationsRoot, { recursive: true, mode: 0o700 });
     const root = await mkdtemp(resolve(this.materializationsRoot, '.builtin-'));
@@ -319,25 +367,25 @@ export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPlugin
       assertSafeDependencyClosure(packageJson);
       const dependencyCount =
         Object.keys(packageJson.dependencies).length + Object.keys(packageJson.optionalDependencies).length;
-      const shrinkwrap =
-        dependencyCount === 0 ? undefined : await readDependencyShrinkwrap(located.rootDir, packageJson);
-      const env = installEnvironment(root);
-      await mkdir(env.HOME, { recursive: true, mode: 0o700 });
-      await writeFile(
-        resolve(root, 'package.json'),
-        `${JSON.stringify({
-          private: true,
-          name: packageJson.name,
-          version: packageJson.version,
-          dependencies: packageJson.dependencies,
-          optionalDependencies: packageJson.optionalDependencies,
-        })}\n`,
-        { mode: 0o600, flag: 'wx' },
-      );
-      if (shrinkwrap !== undefined) {
+      const registryOnly = input.sourceKind === 'catalog';
+      const shippedDependencyRoot =
+        dependencyCount > 0 && !registryOnly ? await dependencyDirectory(located.rootDir) : undefined;
+      if (dependencyCount > 0 && shippedDependencyRoot === undefined) {
+        const shrinkwrap = await readDependencyShrinkwrap(located.rootDir, packageJson, registryOnly);
+        const env = installEnvironment(root, registryOnly);
+        if (registryOnly) await mkdir(env.HOME, { recursive: true, mode: 0o700 });
+        await writeFile(
+          resolve(root, 'package.json'),
+          `${JSON.stringify({
+            private: true,
+            name: packageJson.name,
+            version: packageJson.version,
+            dependencies: packageJson.dependencies,
+            optionalDependencies: packageJson.optionalDependencies,
+          })}\n`,
+          { mode: 0o600, flag: 'wx' },
+        );
         await writeFile(resolve(root, 'npm-shrinkwrap.json'), shrinkwrap, { mode: 0o600, flag: 'wx' });
-      }
-      if (dependencyCount > 0) {
         await this.installDependencies({
           cwd: root,
           dependencies: packageJson.dependencies,
@@ -349,6 +397,8 @@ export class FilesystemBuiltinPluginPackageMaterializer implements BuiltinPlugin
       let released = false;
       return {
         rootDir: located.rootDir,
+        ...(dependencyCount === 0 ? {} : { dependencyRoot: shippedDependencyRoot ?? resolve(root, 'node_modules') }),
+        manifest: located.manifest,
         verifyIntegrity: located.verifyIntegrity,
         release: async () => {
           if (released) return;

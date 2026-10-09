@@ -1,16 +1,27 @@
 'use client';
 
 import { pluginDescriptionVariants } from '@cat-cafe/shared';
-import { useEffect, useMemo, useState } from 'react';
-import { ConnectorPluginInstallButton } from '../../ConnectorPluginInstallButton';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { HubIcon } from '../../hub-icons';
 import { settingsResourceCardClass } from '../../SettingsResourceCard';
 import { SettingsText } from '../primitives/SettingsText';
+import { PluginArchiveInstallButton } from './PluginArchiveInstallButton';
+import { PluginGitInstallButton } from './PluginGitInstallButton';
 import { PluginManagerDetailCard } from './PluginManagerDetailCard';
 import { PluginListRow, PluginListSection } from './PluginManagerList';
+import { installedPluginGroups, type PluginManagerPresentation } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 const DEFAULT_RECOMMENDATION_LIMIT = 3;
+
+function PluginManagerToolbar({ onGitInstall }: { onGitInstall?: (url: string) => Promise<void> }) {
+  return (
+    <div data-plugin-manager-toolbar className="flex flex-wrap justify-end gap-2">
+      {onGitInstall && <PluginGitInstallButton onInstall={onGitInstall} />}
+      <PluginArchiveInstallButton />
+    </div>
+  );
+}
 
 function PluginManagerError({ message }: { message: string | null | undefined }) {
   if (!message) return null;
@@ -66,14 +77,18 @@ export function PluginManagerContent({
   error,
   busyPluginId = null,
   selectedPluginId,
+  initialDetailPluginId,
   onPluginSelect,
   onSearchChange,
   onInstall,
+  onGitInstall,
   onSetEnabled,
   onUninstall,
   onConfigure,
+  onOperationChange,
   configurationSavedPluginId = null,
   locale = 'zh-CN',
+  presentation = 'v1',
 }: {
   fixtures: readonly PluginManagerDesignFixture[];
   catalogStatus?: 'fresh' | 'stale' | 'degraded' | 'unavailable';
@@ -82,35 +97,48 @@ export function PluginManagerContent({
   error?: string | null;
   busyPluginId?: string | null;
   selectedPluginId?: string | null;
+  /** A validated deep link opens detail once; later refreshes preserve the user's panel. */
+  initialDetailPluginId?: string | null;
   onPluginSelect?: (pluginId: string | null) => void;
   onSearchChange?: (query: string) => void;
   onInstall?: (pluginId: string) => void;
+  onGitInstall?: (url: string) => Promise<void>;
   onSetEnabled?: (pluginId: string, enabled: boolean) => void;
   onUninstall?: (pluginId: string) => void;
   onConfigure?: (pluginId: string, updates: readonly { key: string; value: string | null }[]) => void;
+  onOperationChange?: (pluginId: string) => void;
   configurationSavedPluginId?: string | null;
   locale?: string;
+  /** Selected by the host shell; omitted for the frozen classic presentation. */
+  presentation?: PluginManagerPresentation;
 }) {
   const [query, setQuery] = useState('');
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const initialDetailOpened = useRef(false);
   const [configurationValidation, setConfigurationValidation] = useState({ pluginId: '', request: 0 });
 
   const filtered = useMemo(() => fixtures.filter((plugin) => matchesSearch(plugin, query)), [fixtures, query]);
-  const installedPlugins = filtered.filter((plugin) => plugin.artifact === 'installed');
+  const leadingGroups = installedPluginGroups(filtered, presentation);
   const recommendationPool = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source === 'catalog');
   const recommendedPlugins =
     query.trim().length > 0 ? recommendationPool : recommendationPool.slice(0, DEFAULT_RECOMMENDATION_LIMIT);
-  const attentionPlugins = filtered.filter((plugin) => plugin.artifact !== 'installed' && plugin.artifact !== 'absent');
   const otherPlugins = filtered.filter((plugin) => plugin.artifact === 'absent' && plugin.source !== 'catalog');
-  const visible = [...installedPlugins, ...attentionPlugins, ...recommendedPlugins, ...otherPlugins];
+  const visible = [...leadingGroups.flatMap((group) => group.plugins), ...recommendedPlugins, ...otherPlugins];
   const selection = usePluginSelection(visible, selectedPluginId, onPluginSelect);
   const selected = selection.selected;
+  useEffect(() => {
+    if (!initialDetailOpened.current && initialDetailPluginId && selected?.id === initialDetailPluginId) {
+      initialDetailOpened.current = true;
+      setMobileDetailOpen(true);
+    }
+  }, [initialDetailPluginId, selected?.id]);
 
   const renderRows = (plugins: readonly PluginManagerDesignFixture[]) =>
     plugins.map((plugin) => (
       <PluginListRow
         key={plugin.id}
         plugin={plugin}
+        presentation={presentation}
         selected={plugin.id === selected?.id}
         locale={locale}
         onSelect={() => {
@@ -131,13 +159,7 @@ export function PluginManagerContent({
 
   return (
     <section data-testid="plugin-manager" className="flex h-full min-h-0 flex-1 flex-col gap-3.5 overflow-hidden">
-      <div data-plugin-manager-toolbar className="flex justify-end">
-        <ConnectorPluginInstallButton
-          endpoint="/api/plugin-manager/plugins/install/upload"
-          label="离线安装"
-          docsHref={false}
-        />
-      </div>
+      <PluginManagerToolbar onGitInstall={onGitInstall} />
 
       {catalogStatus !== 'fresh' && (
         <div className="flex items-start gap-2 rounded-xl bg-conn-amber-bg px-3 py-2.5">
@@ -187,18 +209,15 @@ export function PluginManagerContent({
             )}
             {!loading && (
               <>
-                <PluginListSection
-                  kind="installed"
-                  title="已安装"
-                  ariaLabel="已安装插件"
-                  rows={renderRows(installedPlugins)}
-                />
-                <PluginListSection
-                  kind="attention"
-                  title="需要处理"
-                  ariaLabel="需要处理的插件"
-                  rows={renderRows(attentionPlugins)}
-                />
+                {leadingGroups.map(({ kind, title, ariaLabel, plugins }) => (
+                  <PluginListSection
+                    key={kind}
+                    kind={kind}
+                    title={title}
+                    ariaLabel={ariaLabel}
+                    rows={renderRows(plugins)}
+                  />
+                ))}
                 <PluginListSection
                   kind="recommended"
                   title="推荐"
@@ -229,6 +248,7 @@ export function PluginManagerContent({
                 key={selected.id}
                 plugin={selected}
                 locale={locale}
+                presentation={presentation}
                 busy={busyPluginId === selected.id}
                 configurationValidationRequest={
                   configurationValidation.pluginId === selected.id ? configurationValidation.request : 0
@@ -237,6 +257,7 @@ export function PluginManagerContent({
                 onSaveConfig={
                   selected.configFields?.length ? (updates) => onConfigure?.(selected.id, updates) : undefined
                 }
+                onOperationChange={() => onOperationChange?.(selected.id)}
               />
             ) : loading ? (
               <div className={`${settingsResourceCardClass} min-h-48 animate-pulse`} />

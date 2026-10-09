@@ -1,6 +1,7 @@
 import type { SignalSchemaCatalog } from '@clowder-ai/plugin-contract';
 import { DEFAULT_PLUGIN_CONTRACT_RUNTIME, requestedCapabilitiesForManifest } from './contract-policy.js';
 import type { PackageAdmissionContractRuntime } from './manifest-verifier.js';
+import { parseRuntimeErrorDetail } from './runtime-failure-record.js';
 import type {
   ActivationState,
   ConfigReadiness,
@@ -108,7 +109,12 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
   const raw = object(value, label);
   const kind = enumValue(
     raw.kind,
-    new Set<'catalog' | 'local-directory' | 'local-archive'>(['catalog', 'local-directory', 'local-archive']),
+    new Set<'catalog' | 'local-directory' | 'local-archive' | 'git'>([
+      'catalog',
+      'local-directory',
+      'local-archive',
+      'git',
+    ]),
     `${label}.kind`,
   );
   if (kind === 'catalog') {
@@ -121,9 +127,34 @@ function packageProvenance(value: unknown, label: string): PluginPackageRecord['
         : { ownerAuthRequired: boolean(raw.ownerAuthRequired, `${label}.ownerAuthRequired`) }),
     };
   }
+  if (kind === 'git') {
+    return {
+      kind,
+      url: string(raw.url, `${label}.url`),
+      ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+      ...(raw.dependencyClosure === undefined
+        ? {}
+        : {
+            dependencyClosure: enumValue(
+              raw.dependencyClosure,
+              new Set(['shipped', 'materialized'] as const),
+              `${label}.dependencyClosure`,
+            ),
+          }),
+    };
+  }
   return {
     kind,
     ...(raw.packageName === undefined ? {} : { packageName: string(raw.packageName, `${label}.packageName`) }),
+    ...(raw.dependencyClosure === undefined
+      ? {}
+      : {
+          dependencyClosure: enumValue(
+            raw.dependencyClosure,
+            new Set(['shipped', 'materialized'] as const),
+            `${label}.dependencyClosure`,
+          ),
+        }),
   };
 }
 
@@ -201,7 +232,7 @@ function parsePackage(value: unknown, index: number, contract: PackageAdmissionC
   return record;
 }
 
-function parseInstance(value: unknown, index: number): PluginInstanceRecord {
+function parseInstance(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginInstanceRecord {
   const raw = object(value, `instances[${index}]`);
   const record: PluginInstanceRecord = {
     pluginInstanceId: string(raw.pluginInstanceId, `instances[${index}].pluginInstanceId`),
@@ -220,11 +251,12 @@ function parseInstance(value: unknown, index: number): PluginInstanceRecord {
       ? {}
       : { lastRuntimeError: runtimeError(raw.lastRuntimeError, `instances[${index}].lastRuntimeError`) }),
   };
+  const detail = parseRuntimeErrorDetail(raw, `instances[${index}]`, record, contract);
   if (!isCanonicalPackageDigest(record.packageDigest)) corrupt(`instances[${index}].packageDigest is not canonical`);
   if (record.lifecycleState === 'retired' && record.retiredAt === undefined) {
     corrupt(`instances[${index}] retired state requires retiredAt`);
   }
-  return record;
+  return detail === undefined ? record : { ...record, lastRuntimeErrorDetail: detail };
 }
 
 function parseGrant(value: unknown, index: number, contract: PackageAdmissionContractRuntime): PluginGrantRecord {
@@ -353,7 +385,7 @@ export function parsePluginInventorySnapshot(
   const raw = object(value, 'inventory');
   requireSupportedCollections(raw);
   const packages = raw.packages.map((entry, index) => parsePackage(entry, index, contract));
-  const instances = raw.instances.map(parseInstance);
+  const instances = raw.instances.map((entry, index) => parseInstance(entry, index, contract));
   const grants = raw.grants.map((entry, index) => parseGrant(entry, index, contract));
   const packageByDigest = indexPackages(packages);
   const instanceById = indexInstances(instances, packageByDigest);

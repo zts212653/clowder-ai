@@ -160,6 +160,8 @@ function catalogDetail(
     ...(contributions === undefined
       ? {}
       : { contributions: contributions.map((contribution) => ({ ...contribution })) }),
+    ...(installedManifest?.steps === undefined ? {} : { steps: installedManifest.steps.map((step) => step.text) }),
+    ...(installedManifest === undefined ? {} : { testable: installedManifest.test !== undefined }),
   };
 }
 

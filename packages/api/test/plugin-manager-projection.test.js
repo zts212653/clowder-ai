@@ -128,6 +128,24 @@ describe('F202 terminal Plugin Manager projection', () => {
           bridgeVersion: '1.0.0',
           operations: ['load', 'settle', 'comment', 'tracked-change'],
         },
+        {
+          type: 'desktop-window',
+          id: 'companion-window',
+          role: 'companion',
+          surface: {
+            entrypoint: 'dist/window.html',
+            integrity: 'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          },
+          bridgeVersion: '1.0.0',
+          presentation: {
+            width: 420,
+            height: 720,
+            transparent: true,
+            frame: false,
+            alwaysOnTop: true,
+            skipTaskbar: true,
+          },
+        },
       ],
     };
 
@@ -142,6 +160,7 @@ describe('F202 terminal Plugin Manager projection', () => {
       { id: 'daily-video-summary', kind: 'schedule', name: 'daily-video-summary' },
       { id: 'video-analysis-guide', kind: 'skill', name: 'video-analysis-guide' },
       { id: 'docx-editor', kind: 'content-editor-provider', name: 'docx-editor' },
+      { id: 'companion-window', kind: 'desktop-window', name: 'companion-window' },
     ]);
   });
 
@@ -184,6 +203,26 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
   });
 
+  it('projects owner dependency closure provenance for shipped and materialized packages', () => {
+    for (const dependencyClosure of ['shipped', 'materialized']) {
+      const snapshot = installedSnapshot();
+      snapshot.packages[0].provenance = {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        dependencyClosure,
+      };
+
+      const projected = projectPluginManagerCatalogCandidate(candidate, snapshot);
+
+      assert.deepEqual(projected.source, {
+        kind: 'local-archive',
+        packageName: candidate.packageName,
+        trust: 'local-trusted',
+        dependencyClosure,
+      });
+    }
+  });
+
   it('allows disable and uninstall after a crash without inventing repair', () => {
     const projected = projectPluginManagerCatalogCandidate(candidate, installedSnapshot({ runtimeState: 'crashed' }), {
       activeCapabilityIds: [],
@@ -194,6 +233,31 @@ describe('F202 terminal Plugin Manager projection', () => {
     assert.equal(projected.actions.setEnabled, true);
     assert.equal(projected.actions.uninstall, true);
     assert.equal(Object.hasOwn(projected.actions, 'repair'), false);
+  });
+
+  it('exposes current activation failure independently of intent and historical diagnostics', () => {
+    const lastRuntimeError = { code: 'UNEXPECTED_RUNTIME_FAILURE', occurredAt: 1_050, exitCode: null, signal: null };
+    for (const activationState of ['error', 'disabled', 'enabled']) {
+      const projected = projectPluginManagerCatalogCandidate(
+        candidate,
+        installedSnapshot({
+          activationState,
+          runtimeState: activationState === 'enabled' ? 'healthy' : 'stopped',
+          lastRuntimeError,
+        }),
+      );
+      assert.equal(projected.activationFailed, activationState === 'error' ? true : undefined);
+      assert.equal(projected.intent, activationState === 'enabled' ? 'enabled' : 'disabled');
+      assert.equal(projected.diagnostic.code, lastRuntimeError.code);
+      assert.equal(projected.actions.setEnabled, true);
+    }
+    const withIntentOverride = projectPluginManagerCatalogCandidate(
+      candidate,
+      installedSnapshot({ activationState: 'error', runtimeState: 'stopped' }),
+      { intentState: 'enabled' },
+    );
+    assert.equal(withIntentOverride.activationFailed, true);
+    assert.equal(withIntentOverride.intent, 'enabled');
   });
 
   it('blocks enable until config and typed owner auth are ready', () => {

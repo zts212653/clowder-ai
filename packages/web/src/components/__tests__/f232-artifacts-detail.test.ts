@@ -67,7 +67,7 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
         catId: 'opus-48',
         createdAt: Date.now(),
         sourceMessageId: null,
-        ref: 'zts212653/cat-cafe#2247',
+        ref: 'example/project#2247',
       },
     ];
     const { container } = renderPanel();
@@ -86,7 +86,7 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
     const back = [...container.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '返回');
     expect(back, '详情视图应有返回按钮').toBeTruthy();
     const gh = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href')?.includes('github.com'));
-    expect(gh?.getAttribute('href')).toBe('https://github.com/zts212653/clowder-ai/pull/2247');
+    expect(gh?.getAttribute('href')).toBe('https://github.com/example/project/pull/2247');
 
     // 返回 → 回列表
     act(() => {

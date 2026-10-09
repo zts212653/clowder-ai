@@ -1,3 +1,5 @@
+import type { CloudBridgeFailureDiagnosticV1 } from '@clowder-ai/plugin-contract';
+
 export interface HostAppendMessageReceipt {
   readonly hostMessageId: string;
   readonly idempotentReplay?: boolean;
@@ -12,6 +14,31 @@ export interface HostAppendMessageReceipt {
  */
 export interface IConversationHostAdapter {
   append_message(conversationId: string, text: string, idempotencyKey: string): Promise<HostAppendMessageReceipt>;
+}
+
+/**
+ * A conversation Host failure carrying the code the dispatch maps (frozen h3 (d)): NEEDS_BINDING /
+ * BOUND_CONVERSATION_MISMATCH → needs-binding, HOST_UNAVAILABLE → no adapter (nothing was sent),
+ * any other code → host-append-failed. `idempotentReplay` and `diagnostic` reach the receipt.
+ */
+export class ConversationHostError extends Error {
+  readonly idempotentReplay?: boolean;
+  readonly diagnostic?: CloudBridgeFailureDiagnosticV1;
+
+  constructor(
+    readonly code: string,
+    message: string,
+    details: {
+      readonly idempotentReplay?: boolean;
+      readonly diagnostic?: CloudBridgeFailureDiagnosticV1;
+      readonly cause?: unknown;
+    } = {},
+  ) {
+    super(message, details.cause === undefined ? undefined : { cause: details.cause });
+    this.name = 'ConversationHostError';
+    if (details.idempotentReplay !== undefined) this.idempotentReplay = details.idempotentReplay;
+    if (details.diagnostic !== undefined) this.diagnostic = details.diagnostic;
+  }
 }
 
 export class HostAdapterUnavailableError extends Error {

@@ -5,31 +5,14 @@ import { persistUserFacingSystemInfoNotices } from '../dist/domains/cats/service
 import { buildCloudBridgeStatusContent } from '../dist/domains/cats/services/cloud-bridge/cloud-bridge-fallback.js';
 import { dispatchBoundConversationThroughHost } from '../dist/domains/cats/services/cloud-bridge/conversation-host-dispatch.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
-import { safeAdapterDiagnostic } from '../src/plugins/cloud-cat-personal-host/native-host/native-results.mjs';
-import { createUnsupportedNodeHarness } from './helpers/f247-unsupported-node-harness.js';
+import { boundedFailureDiagnostic } from './helpers/f202-cloud-failure-diagnostic.js';
 
 const BOUNDARY_FIXTURES = [
-  {
-    id: 'long-custom-tag',
-    expectedPath: 'composer/#node-1[0]',
-    privateDomText: `x-${'a'.repeat(31)}`,
-    mutateAfterInsert({ composer, document }) {
-      composer.replaceChildren(document.createElement(`x-${'a'.repeat(31)}`));
-    },
-  },
-  {
-    id: 'high-child-index',
-    expectedPath: 'composer/#node-8[10000]',
-    privateDomText: 'comment body must stay private',
-    mutateAfterInsert({ composer, document }) {
-      const nodes = Array.from({ length: 10_000 }, () => document.createTextNode(''));
-      nodes.push(document.createComment('comment body must stay private'));
-      composer.replaceChildren(...nodes);
-    },
-  },
+  { id: 'long-custom-tag', expectedPath: 'composer/#node-1[0]' },
+  { id: 'high-child-index', expectedPath: 'composer/#node-8[10000]' },
 ];
 
-describe('F247 DOM fingerprint producer bounds', () => {
+describe('Host persistence of bounded plugin failure diagnostics', () => {
   it('persists representable diagnostics for long tags and high child indexes', async () => {
     for (const fixture of BOUNDARY_FIXTURES) {
       const threadId = `thread-failed-dispatch-${fixture.id}`;
@@ -43,30 +26,7 @@ describe('F247 DOM fingerprint producer bounds', () => {
         timestamp: 1_000,
         extra: { stream: { invocationId: 'inv-source', turnInvocationId: 'inv-source' } },
       });
-      const harness = createUnsupportedNodeHarness({ mutateAfterInsert: fixture.mutateAfterInsert });
-      let pageDiagnostic;
-      await assert.rejects(
-        harness.adapter.appendMessage({
-          requestId: `${fixture.id}-failure`,
-          conversationId: 'conversation-product-chain',
-          text: 'must never enter diagnostics',
-          idempotencyKey: source.id,
-        }),
-        (error) => {
-          assert.equal(error.code, 'COMPOSER_DOM_UNSUPPORTED');
-          pageDiagnostic = error.diagnostic;
-          return true;
-        },
-      );
-      assert.equal(harness.getSendCount(), 0);
-      assert.equal(harness.document.querySelectorAll('[data-message-id]').length, 0);
-      assert.equal(harness.composer.textContent, '');
-      assert.equal(pageDiagnostic.fingerprint.firstUnsupportedPath, fixture.expectedPath);
-      assert.equal(pageDiagnostic.fingerprint.truncated, true);
-      assert.equal(JSON.stringify(pageDiagnostic).includes(fixture.privateDomText), false);
-
-      const diagnostic = safeAdapterDiagnostic(pageDiagnostic);
-      assert.ok(diagnostic, `${fixture.id}: native Helper must preserve the producer diagnostic`);
+      const diagnostic = boundedFailureDiagnostic(fixture.expectedPath);
       assert.equal(isCloudBridgeFailureDiagnosticV1(diagnostic), true);
       const decision = await dispatchBoundConversationThroughHost({
         adapter: {

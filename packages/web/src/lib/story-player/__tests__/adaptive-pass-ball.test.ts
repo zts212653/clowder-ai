@@ -124,8 +124,8 @@ describe('F252 adaptive pacing — pass-ball detection', () => {
     expect(isPassBallEvent(event)).toBe(true);
   });
 
-  it('detects @mention with punctuation-ending handle (e.g. @co-creator)', () => {
-    const event = makeEvent({ timestamp: 1000, type: 'message', content: '@co-creator 请看一下这个' });
+  it('detects @mention with punctuation-ending handle (e.g. @l.s.)', () => {
+    const event = makeEvent({ timestamp: 1000, type: 'message', content: '@l.s. 请看一下这个' });
     expect(isPassBallEvent(event)).toBe(true);
   });
 

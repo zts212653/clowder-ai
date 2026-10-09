@@ -27,13 +27,14 @@ import {
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import type { FastifyBaseLogger } from 'fastify';
 import { isCatAvailable } from '../../config/cat-config-loader.js';
-import { resolveTtsCacheDir } from '../../domains/cats/services/tts/document-listen-paths.js';
 import type { IssueCommentClassification } from '../../domains/community/issue-analysis/issue-comment-classifier.js';
+import {
+  createHostMediaPathResolver,
+  hostMediaPathRootsFromEnv,
+} from '../../domains/messaging/outbound-media/host-media-paths.js';
 import type { ConnectorWebhookHandler } from '../../routes/connector-webhooks.js';
 import { resolveActiveProjectRoot } from '../../utils/active-project-root.js';
-import { getDefaultUploadDir } from '../../utils/upload-paths.js';
 import { encodeDefault } from '../config-field-parser.js';
-import { deliverConnectorMessage } from '../email/deliver-connector-message.js';
 import { ConnectorCommandLayer, type ConnectorCommandLayerDeps } from './ConnectorCommandLayer.js';
 import {
   type IConnectorPermissionStore,
@@ -42,13 +43,8 @@ import {
 } from './ConnectorPermissionStore.js';
 import { ConnectorRouter } from './ConnectorRouter.js';
 import { type IConnectorThreadBindingStore, MemoryConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
-import { GitHubRepoWebhookHandler } from './github-repo-event/GitHubRepoWebhookHandler.js';
-import { ReconciliationDedup } from './github-repo-event/ReconciliationDedup.js';
-import { RedisDeliveryDedup } from './github-repo-event/RedisDeliveryDedup.js';
-import {
-  createRepoInboxOwnerResolver,
-  type RepoInboxOwnerConfigStore,
-} from './github-repo-event/RepoInboxOwnerResolver.js';
+import type { RepoInboxOwnerConfigStore } from './github-repo-event/RepoInboxOwnerResolver.js';
+import { registerGitHubRepoWebhook } from './github-repo-event/register-github-repo-webhook.js';
 import { InboundMessageDedup } from './InboundMessageDedup.js';
 import {
   clearConnectorConfigCache,
@@ -842,68 +838,16 @@ export async function startConnectorGateway(
     }
   }
 
-  // ── F141: GitHub Repo Inbox webhook handler (not an IM connector) ──
-  const ghWebhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
-  const ghRepoAllowlist = process.env.GITHUB_REPO_ALLOWLIST;
-  const ghInboxCatId = process.env.GITHUB_REPO_INBOX_CAT_ID;
-
-  if (ghWebhookSecret && ghRepoAllowlist && ghInboxCatId && deps.redis) {
-    const ghDedup = new RedisDeliveryDedup(deps.redis as import('./github-repo-event/RedisDeliveryDedup.js').RedisLike);
-    const ghReconciliationDedup = new ReconciliationDedup(
-      deps.redis as import('./github-repo-event/ReconciliationDedup.js').ReconciliationRedisLike,
-    );
-
-    // F168 Phase A P1-1b: create community event services from deps.redis for webhook handler
-    let ghEventLog: import('../../domains/community/CommunityEventLog.js').ICommunityEventLog | undefined;
-    let ghProjector: { apply(event: unknown): Promise<void> } | undefined;
-    try {
-      const [elMod, osMod, pjMod] = await Promise.all([
-        import('../../domains/community/CommunityEventLog.js'),
-        import('../../domains/community/CommunityObjectStore.js'),
-        import('../../domains/community/community-projector.js'),
-      ]);
-      const ghObjectStore = new osMod.RedisCommunityObjectStore(deps.redis);
-      ghEventLog = new elMod.RedisCommunityEventLog(deps.redis);
-      ghProjector = new pjMod.CommunityProjector(ghEventLog, ghObjectStore);
-    } catch (err) {
-      log.warn({ err }, '[F168] Failed to initialize community event services for webhook handler — events disabled');
-    }
-
-    const ghHandler = new GitHubRepoWebhookHandler(
-      {
-        webhookSecret: ghWebhookSecret,
-        repoAllowlist: ghRepoAllowlist.split(',').map((r) => r.trim()),
-        inboxCatId: ghInboxCatId,
-        defaultUserId: effectiveUserId,
-      },
-      {
-        bindingStore,
-        threadStore: deps.threadStore,
-        deliverFn: deliverConnectorMessage,
-        invokeTrigger: deps.invokeTrigger,
-        dedup: ghDedup,
-        reconciliationDedup: ghReconciliationDedup,
-        ...(deps.repoConfigStore
-          ? { resolveInboxCatId: createRepoInboxOwnerResolver(deps.repoConfigStore, ghInboxCatId, log) }
-          : {}),
-        redis: deps.redis as import('./github-repo-event/RedisDeliveryDedup.js').RedisLike,
-        deliveryDeps: {
-          messageStore:
-            deps.messageStore as import('../../domains/cats/services/stores/ports/MessageStore.js').IMessageStore,
-          socketManager: deps.socketManager,
-        },
-        // F168 Phase A P1-1b: pass community event services to webhook handler
-        eventLog: ghEventLog,
-        projector:
-          ghProjector as import('./github-repo-event/GitHubRepoWebhookHandler.js').GitHubRepoHandlerDeps['projector'],
-        classifyIssueComment: deps.classifyGitHubIssueComment,
-      },
-    );
-    webhookHandlers.set('github-repo-event', ghHandler);
-    log.info('[F141] GitHub Repo Inbox webhook handler registered');
-  } else if (ghWebhookSecret || ghRepoAllowlist || ghInboxCatId) {
-    log.warn('[F141] GitHub Repo Inbox partially configured — set all 3 env vars + Redis to enable');
-  }
+  await registerGitHubRepoWebhook(webhookHandlers, {
+    ...deps,
+    bindingStore,
+    defaultUserId: effectiveUserId,
+    deliveryDeps: {
+      messageStore:
+        deps.messageStore as import('../../domains/cats/services/stores/ports/MessageStore.js').IMessageStore,
+      socketManager: deps.socketManager,
+    },
+  });
 
   const streamableAdapters = new Map<string, IStreamableOutboundAdapter>();
   const syncStreamableAdapter = (connectorId: string, adapter: IOutboundAdapter): void => {
@@ -975,25 +919,9 @@ export async function startConnectorGateway(
     log.info('[ConnectorGateway] No pre-configured connectors — gateway created for WeChat QR login support');
   }
 
-  // R3-P1: Resolve route URLs to local file paths for real media delivery
-  const uploadDir = getDefaultUploadDir(process.env.UPLOAD_DIR);
-  const ttsCacheDir = resolve(resolveTtsCacheDir());
+  // R3-P1: Resolve route URLs to local file paths for real media delivery (shared whitelist, W2-5b)
   const resolvedMediaDir = resolve(mediaDir);
-  const webPublicDir = resolve(process.env.WEB_PUBLIC_DIR ?? '../web/public');
-  const mediaPathResolver = (url: string): string | undefined => {
-    // Phase J P1: guard against path traversal (e.g. /uploads/../../etc/passwd)
-    const safeResolve = (base: string, suffix: string): string | undefined => {
-      const resolved = resolve(base, suffix);
-      if (!(resolved.startsWith(base + '/') || resolved === base)) return undefined;
-      return existsSync(resolved) ? resolved : undefined;
-    };
-    if (url.startsWith('/uploads/')) return safeResolve(uploadDir, url.slice('/uploads/'.length));
-    if (url.startsWith('/api/tts/audio/')) return safeResolve(ttsCacheDir, url.slice('/api/tts/audio/'.length));
-    if (url.startsWith('/api/connector-media/'))
-      return safeResolve(resolvedMediaDir, url.slice('/api/connector-media/'.length));
-    if (url.startsWith('/avatars/')) return safeResolve(webPublicDir, url.slice(1));
-    return undefined;
-  };
+  const mediaPathResolver = createHostMediaPathResolver(hostMediaPathRootsFromEnv(process.env, mediaDir));
 
   const messageLookup = deps.messageStore.getById
     ? async (messageId: string) => deps.messageStore.getById!(messageId)

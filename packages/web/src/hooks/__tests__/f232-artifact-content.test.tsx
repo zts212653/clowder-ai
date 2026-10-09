@@ -121,7 +121,7 @@ describe('F232 AC-A7 useArtifactContent', () => {
   it('repo 文件（ref + worktreeId）→ workspace API 返回正文', async () => {
     vi.mocked(apiFetch).mockResolvedValue({
       ok: true,
-      json: async () => ({ content: 'backlog body', mime: 'text/markdown' }),
+      json: async () => ({ content: 'document body', mime: 'text/markdown' }),
     } as Response);
     const states: S[] = [];
     await act(async () => {
@@ -129,8 +129,8 @@ describe('F232 AC-A7 useArtifactContent', () => {
         createElement(Probe, {
           artifact: {
             type: 'file',
-            name: 'BACKLOG.md',
-            ref: 'docs/ROADMAP.md',
+            name: 'example.md',
+            ref: 'docs/example.md',
             createdAt: 1,
             catId: null,
             sourceMessageId: null,
@@ -144,9 +144,9 @@ describe('F232 AC-A7 useArtifactContent', () => {
       await flush();
     });
     const last = states[states.length - 1];
-    expect(last.content).toBe('backlog body');
+    expect(last.content).toBe('document body');
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
-      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2FBACKLOG.md'),
+      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2Fexample.md'),
     );
   });
 

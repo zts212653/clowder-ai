@@ -293,6 +293,12 @@ export interface StoredMessage {
       invocationId: string;
     };
     rich?: RichMessageExtra;
+    /**
+     * F202 W2-5b: written once with the message, never updated. `deferred` means the plugin-stream
+     * publication of this message is owned by the outbound media job (its audio / file / gallery
+     * blocks must first become Host media references); the append seam does not publish it.
+     */
+    mediaPublication?: 'deferred';
     /** #814/F224: explicit post_message callback bubble; history hydration must not merge it into stream output. */
     isExplicitPost?: boolean;
     /** F081 + F194 Phase Z3 dual id:
@@ -309,7 +315,7 @@ export interface StoredMessage {
       speechContent?: string;
     };
     /** Typed causal origin for cat output; freshness must never infer this from prose or timing. */
-    causal?: { kind: 'invocation_reply'; triggerMessageId: string };
+    causal?: { kind: 'invocation_reply'; triggerMessageId: string; triggerThreadId?: string };
     /** #1371: immutable prompt boundary written with initial formal output; generic patches cannot replace it. */
     deliveryBoundary?: MessageDeliveryBoundary;
     /** F272: one canonical home message projected from a durable proactive visit. */
@@ -671,6 +677,8 @@ export type AppendMessageInput = Omit<
    * Reusing the same token returns the original stored message.
    */
   idempotencyKey?: string;
+  /** Host-owned deferred publication only. Reserved while the draft is outside the message store. */
+  reservedId?: string;
 };
 
 /**
@@ -1393,15 +1401,21 @@ export class MessageStore {
       }
     }
 
-    const { idempotencyKey, ...payload } = normalizedMessage;
+    const { idempotencyKey, reservedId, ...payload } = normalizedMessage;
     void idempotencyKey;
+    if (reservedId !== undefined && !/^\d{16}-\d{6,}-[0-9a-f]{8}$/.test(reservedId)) {
+      throw new TypeError('reserved message id has invalid shape');
+    }
+    if (reservedId !== undefined && this.getById(reservedId)) {
+      throw new Error('reserved message id collision');
+    }
     const stored: StoredMessage = {
       ...payload,
       ...(payload.queueCustody ? { queueCustody: cloneQueuedMessageCustody(payload.queueCustody) } : {}),
       ...(payload.queueCustodyAdmission
         ? { queueCustodyAdmission: cloneQueueCustodyAdmissionIntent(payload.queueCustodyAdmission) }
         : {}),
-      id: generateSortableId(normalizedMessage.timestamp),
+      id: reservedId ?? generateSortableId(normalizedMessage.timestamp),
       threadId,
     };
     this.messages.push(stored);
@@ -1809,9 +1823,11 @@ export class MessageStore {
     const matches: StoredMessage[] = [];
     const isVisible = resolveThreadMessageVisibility(options, userId);
 
-    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
-      if (msg.threadId !== threadId) continue;
+    const timeline = this.messages
+      .filter((message) => message.threadId === threadId)
+      .sort((a, b) => getTimelineOrderTime(a) - getTimelineOrderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (let i = timeline.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = timeline[i]!;
       if (msg.deletedAt) continue;
       if (!isVisible(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;
@@ -2041,9 +2057,11 @@ export class MessageStore {
     const matches: StoredMessage[] = [];
     const isVisible = resolveThreadMessageVisibility(options, userId);
 
-    for (let i = this.messages.length - 1; i >= 0 && matches.length < n; i--) {
-      const msg = this.messages[i]!;
-      if (msg.threadId !== threadId) continue;
+    const timeline = this.messages
+      .filter((message) => message.threadId === threadId)
+      .sort((a, b) => getTimelineOrderTime(a) - getTimelineOrderTime(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (let i = timeline.length - 1; i >= 0 && matches.length < n; i--) {
+      const msg = timeline[i]!;
       if (msg.deletedAt) continue;
       if (!isVisible(msg)) continue;
       if (userId && msg.userId !== userId && !isSystemUserMessage(msg)) continue;

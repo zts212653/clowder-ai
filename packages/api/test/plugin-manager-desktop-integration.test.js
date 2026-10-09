@@ -67,6 +67,11 @@ async function desktopManager(
     routes: new MemorySignalRouteStore(),
     intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
+    builtinPackages: {
+      resolve: async () => {
+        throw new Error('desktop packages must keep their dedicated runtime');
+      },
+    },
     desktopExecutor: {
       open: async () => {
         observed.opens++;
@@ -94,14 +99,6 @@ async function desktopManager(
     },
     catalogManifests: [],
     fetchOfficialArchive: async () => archive.bytes,
-    builtinContributions: {
-      materializer: {
-        resolve: async () => {
-          throw new Error('desktop packages must keep their dedicated runtime');
-        },
-      },
-      configuration: { readConfig: async () => undefined, readSecret: async () => undefined },
-    },
     prepareDesktopComponent: async () => {
       observed.prepared++;
       if (preparationFails) throw new Error('desktop component unavailable');

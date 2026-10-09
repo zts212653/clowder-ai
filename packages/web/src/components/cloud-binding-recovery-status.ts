@@ -3,11 +3,7 @@ export interface PersonalChromeRecoveryStatus {
   titleSyncMessage?: string;
 }
 
-interface PluginStatus {
-  artifact?: { helper?: string };
-  live?: { status?: string };
-  titleSync?: { status?: string; errorCode?: string; updatedCount?: number; requestedCount?: number };
-}
+type PluginStatus = import('./authorized-conversations').PersonalChromeStateResponse;
 
 const syncFailureMessages: Record<string, string> = {
   HELPER_UPDATE_REQUIRED: '连接组件需要更新，已有会话授权仍保留。请在插件设置中修复后再刷新。',
@@ -22,17 +18,16 @@ const syncFailureMessages: Record<string, string> = {
 };
 
 function connectionIssueFor(state: PluginStatus): string | undefined {
-  let connectionIssue: string | undefined;
-  if (state.artifact?.helper === 'stale' || state.artifact?.helper === 'invalid') {
-    connectionIssue = syncFailureMessages.HELPER_UPDATE_REQUIRED;
-  } else if (state.artifact?.helper === 'absent') {
-    connectionIssue = syncFailureMessages.HELPER_NOT_INSTALLED;
-  } else if (state.live?.status === 'stale_adapter' || state.live?.status === 'restart_required') {
-    connectionIssue = syncFailureMessages.EXTENSION_RELOAD_REQUIRED;
-  } else if (state.live?.status === 'degraded' || state.live?.status === 'failed') {
-    connectionIssue = syncFailureMessages.CHROME_DISCONNECTED;
-  }
-  return connectionIssue;
+  const status = state.status;
+  if (status?.helper?.state === 'not_installed') return syncFailureMessages.HELPER_NOT_INSTALLED;
+  if (
+    status?.helper?.state === 'invalid_installation' ||
+    ['INVALID_INSTALLATION', 'PERMISSION_DENIED', 'DELIVERY_IO'].includes(status?.delivery?.failure ?? '')
+  )
+    return syncFailureMessages.HELPER_UPDATE_REQUIRED;
+  if (status?.delivery?.reloadRequired === true) return syncFailureMessages.EXTENSION_RELOAD_REQUIRED;
+  if (status?.helper?.state === 'unreachable') return syncFailureMessages.CHROME_DISCONNECTED;
+  return undefined;
 }
 
 function titleSyncMessageFor(sync: PluginStatus['titleSync']): string | undefined {

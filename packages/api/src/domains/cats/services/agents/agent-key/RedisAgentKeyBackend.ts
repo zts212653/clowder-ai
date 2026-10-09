@@ -26,7 +26,7 @@ function optionalNumber(value: string | undefined): number | undefined {
 
 function recordFromHash(fields: Record<string, string>): AgentKeyRecord | null {
   if (!fields.agentKeyId || !fields.catId || !fields.userId || !fields.secretHash || !fields.salt) return null;
-  if (fields.scope !== 'user-bound') return null;
+  if (fields.scope !== 'user-bound' && fields.scope !== 'cloud-conversation') return null;
   const issuedAt = Number(fields.issuedAt ?? 0);
   const expiresAt = Number(fields.expiresAt ?? 0);
   if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt)) return null;

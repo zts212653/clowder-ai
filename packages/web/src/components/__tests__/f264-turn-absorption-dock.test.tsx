@@ -171,8 +171,8 @@ describe('F264 AC-42/43 terminal absorption dock', () => {
       );
     });
 
-    // The shared chat image renders a localized "附件" preview inside a "查看附件" button.
-    expect(container.querySelector('button[aria-label="查看附件"] img[alt="附件"]')?.getAttribute('src')).toContain(
+    // The shared media component renders an accessible, openable image.
+    expect(container.querySelector('img[role="button"][alt="attached image"]')?.getAttribute('src')).toContain(
       '/uploads/absorbed-proof.png',
     );
     expect(container.textContent).toContain('定位原消息 ↑');

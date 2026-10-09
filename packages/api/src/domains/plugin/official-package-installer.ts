@@ -6,6 +6,7 @@ import { desktopWindowContribution } from './desktop-window-runtime/admission.js
 import { FilesystemVerifiedPluginPackageLocator, type VerifiedPluginPackage } from './external-runtime/index.js';
 import type { PluginManifestValidator } from './external-runtime/package-staging.js';
 import { snapshotPluginSurfaceAssets } from './external-runtime/package-surface-assets.js';
+import { grantsWithinRequest } from './host-inventory/contract-policy.js';
 import type { HostInventoryControlPlane } from './host-inventory/control-plane.js';
 import { type PackageAdmissionCandidate, PluginInventoryError } from './host-inventory/types.js';
 import {
@@ -31,7 +32,7 @@ import {
   publishPluginPackageArchive,
   verifyPluginPackageDigest,
 } from './official-package-archive.js';
-import { OfficialPluginInstallError } from './official-package-errors.js';
+import { OfficialPluginInstallError, throwDataDirectoryConflict } from './official-package-errors.js';
 
 export interface OfficialPluginPackageInstallerOptions {
   readonly inventory: HostInventoryControlPlane;
@@ -135,6 +136,7 @@ export class OfficialPluginPackageInstaller {
             const raced = await this.existingExactInstall(entry);
             if (raced) return raced;
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory admission failed', {
             cause: error,
           });
@@ -219,6 +221,7 @@ export class OfficialPluginPackageInstaller {
               cause: error,
             });
           }
+          throwDataDirectoryConflict(error);
           throw new OfficialPluginInstallError('INVENTORY_REJECTED', 'official package inventory update failed', {
             cause: error,
           });
@@ -326,7 +329,11 @@ export class OfficialPluginPackageInstaller {
           'package presentation metadata differs from the official catalog',
         );
       }
-      if (located.manifest.runtime.transport !== 'stdio' && located.manifest.runtime.transport !== 'builtin') {
+      if (
+        located.manifest.runtime !== undefined &&
+        located.manifest.runtime.transport !== 'stdio' &&
+        located.manifest.runtime.transport !== 'builtin'
+      ) {
         throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'official package has no supported Host runtime');
       }
       const staticEditors = staticEditorContributions(located.manifest);
@@ -373,7 +380,7 @@ export class OfficialPluginPackageInstaller {
         computedPackageDigest: entry.packageDigest,
         expectedPackageDigest: entry.packageDigest,
         packagePluginId: entry.pluginId,
-        effectiveGrants: entry.effectiveGrants,
+        effectiveGrants: grantsWithinRequest(entry.effectiveGrants, located.manifest),
         signalSchemas,
         provenance: {
           kind: 'catalog',
@@ -407,7 +414,7 @@ export class OfficialPluginPackageInstaller {
         'bundled manifest identity differs from catalog',
       );
     }
-    if (manifest.runtime.transport !== 'builtin') {
+    if (manifest.runtime?.transport !== 'builtin') {
       throw new OfficialPluginInstallError('UNSUPPORTED_TRANSPORT', 'bundled package is not a builtin runtime');
     }
     if (bundledManifestDigest(manifest) !== entry.packageDigest) {
@@ -418,7 +425,7 @@ export class OfficialPluginPackageInstaller {
       computedPackageDigest: entry.packageDigest,
       expectedPackageDigest: entry.packageDigest,
       packagePluginId: entry.pluginId,
-      effectiveGrants: entry.effectiveGrants,
+      effectiveGrants: grantsWithinRequest(entry.effectiveGrants, manifest),
       signalSchemas: {},
     });
   }

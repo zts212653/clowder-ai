@@ -73,6 +73,15 @@ describe('F322 设置与管理 shell (v2)', () => {
     expect(host.querySelector('[data-testid="content"]')?.getAttribute('data-section')).toBe('members');
   });
 
+  it('gives the plugin Manager a bounded height without an extra URL gate', () => {
+    render('s=plugins');
+    expect(host.querySelector('[data-trajectory-origin-scroll]')?.className).toContain('overflow-hidden');
+    expect(host.querySelector('[role="tabpanel"]')?.className).toContain('min-h-0 flex-1');
+    render('s=accounts');
+    expect(host.querySelector('[data-trajectory-origin-scroll]')?.className).toContain('overflow-y-auto');
+    expect(host.querySelector('[role="tabpanel"]')?.className).toContain('space-y-5');
+  });
+
   it('old /settings?s= links and extra positioning params keep working, including deep-linked cat editing', () => {
     render('s=accounts&cat=opus');
     expect(host.querySelector('[data-testid="settings-entry-connect"]')?.getAttribute('aria-current')).toBe('page');

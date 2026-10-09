@@ -1,9 +1,10 @@
 import { WIRE_VERSION } from '@clowder-ai/plugin-contract';
-import type { BuiltinPluginRuntime } from '../builtin-runtime/hybrid-supervisor.js';
+import type { BundledPluginRuntime } from '../builtin-runtime/carriers/bundled-runtime-carrier.js';
 import { startStaticSurfaceServer } from '../external-runtime/static-surface-server.js';
 import type { VerifiedPluginPackage } from '../external-runtime/types.js';
 import type { BuiltinBrokerConnection } from '../host-broker/builtin-loopback.js';
 import { StaticFeatureAuthority } from '../host-broker/static-feature-authority.js';
+import type { PluginPackageRecord } from '../host-inventory/types.js';
 import { desktopWindowContribution } from './admission.js';
 import { unexpectedDesktopLossId } from './desktop-loss.js';
 import { DesktopWindowObserver } from './observer.js';
@@ -16,7 +17,7 @@ import type {
 } from './types.js';
 
 /** One owner desktop body; observations are ephemeral, while installation, grants and leases remain in their stores. */
-export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
+export class DesktopWindowPluginRuntime implements BundledPluginRuntime {
   readonly features: StaticFeatureAuthority;
   private active: ActiveWindow | undefined;
   private starting: { id: string; controller: AbortController; promise: Promise<void> } | undefined;
@@ -39,6 +40,10 @@ export class DesktopWindowPluginRuntime implements BuiltinPluginRuntime {
         await run.package.verifyIntegrity();
       },
     });
+  }
+
+  claims(packageRecord: Pick<PluginPackageRecord, 'manifest'>): boolean {
+    return desktopWindowContribution(packageRecord.manifest) !== undefined;
   }
 
   start(id: string): Promise<void> {

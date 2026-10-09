@@ -11,8 +11,10 @@ import { randomUUID } from 'node:crypto';
 import type { MessageOutputEvent } from '@clowder-ai/plugin-contract';
 import type { HandleScope, MessageOutputEventInput } from '../contract/host-types.js';
 import type {
+  AddressHandleRecord,
   AppendLease,
   AppendLock,
+  EventAppendOptions,
   EventLogAppendResult,
   EventLogStore,
   HandleRecord,
@@ -85,6 +87,16 @@ export class MemoryHandleStore implements HandleStore {
 
   async get(handleId: string): Promise<HandleRecord | null> {
     return this.records.get(handleId) ?? null;
+  }
+
+  async getOrCreateAddressHandle(
+    record: AddressHandleRecord,
+  ): Promise<{ record: AddressHandleRecord; created: boolean }> {
+    const existing = this.records.get(record.handleId);
+    if (existing) return { record: existing as AddressHandleRecord, created: false };
+    const stored = { ...record, scope: cloneScope(record.scope) };
+    this.records.set(record.handleId, stored);
+    return { record: stored, created: true };
   }
 
   /**
@@ -167,6 +179,12 @@ interface ThreadLog {
 
 export class MemoryEventLogStore implements EventLogStore {
   private readonly threads = new Map<string, ThreadLog>();
+  /** Durable publication fences: thread + key → first sequence; never trimmed, only released. */
+  private readonly fences = new Map<string, number>();
+
+  async releaseFence(threadId: string, eventKey: string): Promise<void> {
+    this.fences.delete(`${threadId}\u0000${eventKey}`);
+  }
 
   private logFor(threadId: string): ThreadLog {
     let log = this.threads.get(threadId);
@@ -183,6 +201,7 @@ export class MemoryEventLogStore implements EventLogStore {
     event: MessageOutputEventInput,
     retentionCount: number,
     lease?: AppendLease,
+    options?: EventAppendOptions,
   ): Promise<EventLogAppendResult> {
     if (lease !== undefined) {
       const messageId = event.type === 'message.publish' ? event.envelope.messageId : event.messageId;
@@ -193,8 +212,12 @@ export class MemoryEventLogStore implements EventLogStore {
     const log = this.logFor(threadId);
     const existing = log.events.find((entry) => entry.key === eventKey);
     if (existing) return { sequence: existing.event.sequence, deduped: true, fencedOut: false };
+    const fenceKey = `${threadId}\u0000${eventKey}`;
+    const fenced = options?.durableFence ? this.fences.get(fenceKey) : undefined;
+    if (fenced !== undefined) return { sequence: fenced, deduped: true, fencedOut: false };
     log.head += 1;
     log.events.push({ key: eventKey, event: { ...event, sequence: log.head } as MessageOutputEvent });
+    if (options?.durableFence) this.fences.set(fenceKey, log.head);
     if (log.events.length > retentionCount) {
       log.events.splice(0, log.events.length - retentionCount);
     }

@@ -6,6 +6,7 @@ import {
   MachineOfficialPluginCatalog,
   OfficialPluginManagerCatalogAdapter,
   RepositoryPluginManagerCompatibilityProvider,
+  resolveLocalPluginEffectiveGrants,
   resolveRepositoryReplacementPluginIds,
 } from '../dist/domains/plugin/index.js';
 
@@ -111,6 +112,52 @@ test('projects canonical machine catalog release truth while Host policy remains
     ownerAuthRequired: false,
     capabilities: [],
   });
+});
+
+test('uses the same Host-owned grants for local development archives as catalog releases', () => {
+  const policies = [
+    {
+      pluginId: 'official.weixin-mp',
+      replacesRepositoryPluginId: 'weixin-mp',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+    {
+      pluginId: 'dev.clowder.video-generation',
+      replacesRepositoryPluginId: 'video-gen',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+    {
+      pluginId: 'dev.clowder.video-analysis',
+      effectiveGrants: ['plugin.config.read', 'secret.read'],
+    },
+  ];
+
+  // The package's request bounds the grant too (F202 W2-6): less than the entry gets less, more gets no more.
+  const requesting = (pluginId, ...capabilities) => ({ pluginId, features: [{ capabilities }] });
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('official.weixin-mp', 'plugin.config.read', 'secret.read')),
+    ['plugin.config.read', 'secret.read'],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(
+      policies,
+      requesting('dev.clowder.video-generation', 'plugin.config.read', 'secret.read', 'messaging.send'),
+    ),
+    ['plugin.config.read', 'secret.read'],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('untrusted.local', 'plugin.config.read', 'secret.read')),
+    [],
+  );
+  assert.deepEqual(
+    resolveLocalPluginEffectiveGrants(policies, requesting('dev.clowder.video-analysis', 'secret.read')),
+    ['secret.read'],
+  );
+  assert.deepEqual(resolveRepositoryReplacementPluginIds(policies, [], ['dev.clowder.video-generation']), [
+    'video-gen',
+  ]);
+  assert.deepEqual(resolveRepositoryReplacementPluginIds(policies, [], ['official.weixin-mp']), ['weixin-mp']);
+  assert.deepEqual(resolveRepositoryReplacementPluginIds(policies, [], ['dev.clowder.video-analysis']), []);
 });
 
 test('selects the newest validated release independently of catalog array order', async () => {

@@ -12,6 +12,7 @@ import { SettingsDeleteButton } from '../primitives/SettingsDeleteButton';
 import { SettingsPrimaryButton } from '../primitives/SettingsPrimaryButton';
 import { SettingsText } from '../primitives/SettingsText';
 import { PluginVisual } from './PluginVisual';
+import { type PluginManagerPresentation, pluginAttentionReason } from './plugin-manager-attention';
 import type { PluginManagerDesignFixture } from './plugin-manager-fixtures';
 
 export function PluginListSection({
@@ -50,6 +51,7 @@ function PluginListActions({
   onSetEnabled,
   onBlockedToggle,
   onUninstall,
+  quietUninstall,
 }: {
   plugin: PluginManagerDesignFixture;
   installed: boolean;
@@ -62,6 +64,7 @@ function PluginListActions({
   onSetEnabled: ((enabled: boolean) => void) | undefined;
   onBlockedToggle: (() => void) | undefined;
   onUninstall: (() => void) | undefined;
+  quietUninstall: boolean;
 }) {
   if (canInstall) {
     return (
@@ -90,11 +93,20 @@ function PluginListActions({
         />
       )}
       {canUninstall && (
-        <SettingsDeleteButton
-          onClick={() => onUninstall?.()}
-          disabled={busy}
-          aria-label={`${plugin.artifact === 'quarantined' ? '移除' : '卸载'}${plugin.displayName}`}
-        />
+        <span
+          data-plugin-uninstall
+          className={
+            quietUninstall
+              ? 'pointer-events-none opacity-0 group-hover/plugin-row:pointer-events-auto group-hover/plugin-row:opacity-100 group-focus-within/plugin-row:pointer-events-auto group-focus-within/plugin-row:opacity-100'
+              : 'contents'
+          }
+        >
+          <SettingsDeleteButton
+            onClick={() => onUninstall?.()}
+            disabled={busy}
+            aria-label={`${plugin.artifact === 'quarantined' ? '移除' : '卸载'}${plugin.displayName}`}
+          />
+        </span>
       )}
     </>
   );
@@ -110,6 +122,7 @@ export function PluginListRow({
   onUninstall,
   busy,
   locale,
+  presentation = 'v1',
 }: {
   plugin: PluginManagerDesignFixture;
   selected: boolean;
@@ -120,6 +133,7 @@ export function PluginListRow({
   onUninstall?: () => void;
   busy: boolean;
   locale: string;
+  presentation?: PluginManagerPresentation;
 }) {
   const installed = plugin.artifact === 'installed';
   const canInstall = plugin.actions?.install ?? !installed;
@@ -127,12 +141,13 @@ export function PluginListRow({
   const canUninstall = plugin.actions?.uninstall ?? installed;
   const showLifecycleToggle = installed && plugin.sourceAdapter === undefined;
   const description = resolvePluginDescription(plugin.description, locale);
+  const reason = presentation === 'v2' ? pluginAttentionReason(plugin) : undefined;
   return (
     <li
       data-plugin-id={plugin.id}
       data-plugin-list-row="true"
       aria-current={selected ? 'true' : undefined}
-      className={`${settingsResourceCardClass} min-h-[88px] transition-colors ${
+      className={`${settingsResourceCardClass} group/plugin-row min-h-[88px] transition-colors ${
         selected ? '' : 'hover:bg-[var(--console-hover-bg)]'
       }`}
       style={selected ? { backgroundColor: 'var(--console-active-bg)' } : undefined}
@@ -144,11 +159,22 @@ export function PluginListRow({
             <SettingsText as="span" variant="sm" tone="default" className="block truncate font-semibold">
               {plugin.displayName}
             </SettingsText>
-            <span data-plugin-description="true" className="mt-0.5 line-clamp-2 block overflow-hidden">
+            <span
+              data-plugin-description="true"
+              className={`mt-0.5 block overflow-hidden ${presentation === 'v2' ? 'truncate' : 'line-clamp-2'}`}
+            >
               <SettingsText as="span" variant="xs" tone="secondary">
                 {description}
               </SettingsText>
             </span>
+            {reason && (
+              <span data-plugin-attention className="mt-1 flex items-center gap-1.5 text-xs text-cafe-secondary">
+                <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full bg-conn-amber-text" />
+                <span className="truncate" title={reason}>
+                  {reason}
+                </span>
+              </span>
+            )}
           </span>
         </button>
         <div className={settingsResourceActionGroupClass}>
@@ -164,6 +190,7 @@ export function PluginListRow({
             onSetEnabled={onSetEnabled}
             onBlockedToggle={onBlockedToggle}
             onUninstall={onUninstall}
+            quietUninstall={presentation === 'v2' && !selected}
           />
         </div>
       </div>

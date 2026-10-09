@@ -424,36 +424,6 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: false,
   },
   {
-    name: 'CAT_CAFE_PERSONAL_CHROME_SOCKET',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome Host Adapter — operator-provisioned Unix socket path；仅与 pairing secret 同时存在时启用。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_PERSONAL_CHROME_PAIRING_SECRET',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome Host Adapter — 本地 API ↔ Native Messaging helper 配对密钥；仅 operator/dev seam，禁止日志输出。',
-    category: 'server',
-    sensitive: true,
-    hubVisible: false,
-    runtimeEditable: false,
-  },
-  {
-    name: 'CAT_CAFE_PERSONAL_CHROME_WEB_STORE_URL',
-    defaultValue: '(空)',
-    description:
-      'F247 Personal Chrome 安装旅程 — 已公开发布且扩展 ID 匹配的 Chrome Web Store listing URL；为空时诚实阻断产品安装。',
-    category: 'server',
-    sensitive: false,
-    hubVisible: false,
-    runtimeEditable: false,
-  },
-  {
     name: 'CAT_CAFE_REMOTE_TOKEN',
     defaultValue: '(空)',
     description:

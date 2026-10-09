@@ -42,7 +42,10 @@ import {
   createInitialQueuedMessageCustody,
   type QueuedMessageCustodyCoordinator,
 } from '../../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import type { QueueProcessor } from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
+import type {
+  QueueProcessor,
+  StreamingOutboundHookLike,
+} from '../../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { requireInvocationRecordUpdate } from '../../domains/cats/services/agents/invocation/require-invocation-record-update.js';
 import { stampVisibleTurn } from '../../domains/cats/services/agents/invocation/visible-turn.js';
 import type { AgentRouter } from '../../domains/cats/services/agents/routing/AgentRouter.js';
@@ -74,7 +77,6 @@ import type { SocketManager } from '../../infrastructure/websocket/index.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../../utils/queue-enrichment.js';
 
 import type { OutboundDeliveryHook, ThreadMeta } from '../connectors/OutboundDeliveryHook.js';
-import type { StreamingOutboundHook } from '../connectors/StreamingOutboundHook.js';
 
 export type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
@@ -165,8 +167,8 @@ export interface ConnectorInvokeTriggerOptions {
   readonly queueProcessor?: QueueProcessor;
   /** Gate 2: exact queued-source CAS used when recovery must replace an absent carrier. */
   readonly queueCustodyCoordinator?: QueuedMessageCustodyCoordinator;
-  readonly outboundHook?: OutboundDeliveryHook;
-  readonly streamingHook?: StreamingOutboundHook;
+  readonly outboundHook?: Pick<OutboundDeliveryHook, 'deliver'>;
+  readonly streamingHook?: StreamingOutboundHookLike;
   readonly threadMetaLookup?: (threadId: string) => ThreadMeta | undefined | Promise<ThreadMeta | undefined>;
   /** Per-cat outbound deliver timeout in ms (default 10000). Prevents hanging deliver from blocking cleanup. */
   readonly deliverTimeoutMs?: number;
@@ -238,13 +240,13 @@ export class ConnectorInvokeTrigger {
   }
 
   /** Late-bind outbound hook (set after gateway bootstrap) */
-  setOutboundHook(hook: OutboundDeliveryHook): void {
-    (this.opts as { outboundHook?: OutboundDeliveryHook }).outboundHook = hook;
+  setOutboundHook(hook: Pick<OutboundDeliveryHook, 'deliver'>): void {
+    (this.opts as { outboundHook?: Pick<OutboundDeliveryHook, 'deliver'> }).outboundHook = hook;
   }
 
   /** Late-bind streaming hook (set after gateway bootstrap) */
-  setStreamingHook(hook: StreamingOutboundHook): void {
-    (this.opts as { streamingHook?: StreamingOutboundHook }).streamingHook = hook;
+  setStreamingHook(hook: StreamingOutboundHookLike): void {
+    (this.opts as { streamingHook?: StreamingOutboundHookLike }).streamingHook = hook;
   }
 
   /**
@@ -1307,7 +1309,7 @@ export class ConnectorInvokeTrigger {
             const scopedInvocationId = createResult.invocationId;
             Promise.allSettled(inflightDeliverPromises).then((results) => {
               if (results.every((r) => r.status === 'fulfilled')) {
-                cleanupHook.cleanupPlaceholders(threadId, scopedInvocationId).catch((err) => {
+                cleanupHook.cleanupPlaceholders?.(threadId, scopedInvocationId).catch((err) => {
                   log.warn(
                     { err, threadId },
                     '[ConnectorInvokeTrigger] Placeholder cleanup failed after late-success delivery',
@@ -1355,7 +1357,7 @@ export class ConnectorInvokeTrigger {
             const scopedInvocationId = createResult.invocationId;
             silentDeliverPromise
               .then(() => {
-                cleanupHook.cleanupPlaceholders(threadId, scopedInvocationId).catch((err) => {
+                cleanupHook.cleanupPlaceholders?.(threadId, scopedInvocationId).catch((err) => {
                   log.warn(
                     { err, threadId },
                     '[ConnectorInvokeTrigger] Silent late-success placeholder cleanup failed',
@@ -1467,9 +1469,11 @@ export class ConnectorInvokeTrigger {
       if (this.opts.streamingHook?.notifyDeliveryBatchDone) {
         const threadStillBusy =
           invocationTracker.has(threadId) || (this.opts.queueProcessor?.isThreadBusy(threadId) ?? false);
-        this.opts.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
-          log.warn({ err, threadId }, '[ConnectorInvokeTrigger] notifyDeliveryBatchDone failed');
-        });
+        this.opts.streamingHook
+          .notifyDeliveryBatchDone(threadId, !threadStillBusy, finalStatus, invocationId)
+          .catch((err) => {
+            log.warn({ err, threadId }, '[ConnectorInvokeTrigger] notifyDeliveryBatchDone failed');
+          });
       }
     }
   }

@@ -1,7 +1,7 @@
 import { type CatId, catRegistry } from '@cat-cafe/shared';
 import type { FastifyBaseLogger } from 'fastify';
+import { pickReceiptLine } from '../../domains/messaging/presentation/receipt-lines.js';
 import type { IConnectorThreadBindingStore } from './ConnectorThreadBindingStore.js';
-import { pickReceiptLine } from './feishu-receipt-lines.js';
 import type { IStreamableOutboundAdapter } from './OutboundDeliveryHook.js';
 
 const DEFAULT_UPDATE_INTERVAL_MS = 2000;

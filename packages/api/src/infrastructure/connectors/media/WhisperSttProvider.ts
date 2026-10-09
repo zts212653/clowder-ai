@@ -51,6 +51,7 @@ export class WhisperSttProvider implements ISttProvider {
     const response = await this.fetchFn(`${this.resolveBaseUrl()}/v1/audio/transcriptions`, {
       method: 'POST',
       body: formData,
+      ...(request.signal ? { signal: request.signal } : {}),
     });
 
     if (!response.ok) {

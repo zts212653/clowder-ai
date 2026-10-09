@@ -198,6 +198,7 @@ type ExtraCarrierPersistence = ExtraCarrierPersistenceClassification<{
   liveCompanion: 'parsed';
   rich: 'parsed';
   isExplicitPost: 'parsed';
+  mediaPublication: 'parsed';
   stream: 'parsed';
   causal: 'parsed';
   deliveryBoundary: 'parsed';
@@ -675,6 +676,12 @@ export function safeParseExtra(raw: string | undefined): StoredMessage['extra'] 
 
     if (parsed.isExplicitPost === true) {
       result.isExplicitPost = true;
+      hasField = true;
+    }
+
+    // F202 W2-5b: write-once marker — the outbound media job owns this message's publication.
+    if (parsed.mediaPublication === 'deferred') {
+      result.mediaPublication = 'deferred';
       hasField = true;
     }
 

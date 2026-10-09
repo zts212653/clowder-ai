@@ -16,14 +16,21 @@ import { type PlatformOperationStatus } from '../../HubConfigIcons';
 import { ActionPanelBody, type ActionPhase, ConnectedBanner, type ResultState } from './ActionRendererParts';
 import {
   type ActionApiResult,
+  type ActionRendererTarget,
+  actionCallFailure,
+  actionRequest,
   classifyPollResult,
   deriveActionState,
+  operationResetRequest,
   phaseForAction,
   toResultState,
 } from './ActionRendererState';
+import { awaitingOwnerMessage, invocationAllowed, useActionConfirmation } from './actionConfirmation';
+import { LiveStatusActionRenderer } from './LiveStatusActionRenderer';
+import { OperationRowsRenderer } from './OperationRowsRenderer';
 
 export interface ActionRendererProps {
-  connectorId: string;
+  target: ActionRendererTarget;
   /** Operation definition + state from the status API. */
   operation: PlatformOperationStatus;
   /** Platform-level configured state; used when legacy config exists before operation state. */
@@ -38,8 +45,33 @@ export interface ActionRendererProps {
 
 // ── Main component ──
 
-export function ActionRenderer({
-  connectorId,
+export function ActionRenderer(props: ActionRendererProps) {
+  const actions = props.operation.actions;
+  // F202 W2-3 h1: an operation that lists rows is rendered as a row list with per-row actions.
+  const listAction = actions.find((action) => action.resultRender === 'rows');
+  if (listAction) return <OperationRowsRenderer {...props} listAction={listAction} />;
+  const firstAction = actions[0];
+  const revokeAction = actions.find(
+    (action) => action.render === 'button' && action.next === firstAction?.id && firstAction.next === action.id,
+  );
+  const statusAction = actions.find((action) => action.render === 'status' || action.render === 'polling');
+  // The live-status renderer checks its status action by itself, so it cannot take one that asks
+  // for confirmation; such an operation stays on the sequenced renderer, which never runs it alone.
+  if (firstAction?.render === 'button' && statusAction && statusAction.confirm === undefined && revokeAction) {
+    return (
+      <LiveStatusActionRenderer
+        {...props}
+        armAction={firstAction}
+        statusAction={statusAction}
+        revokeAction={revokeAction}
+      />
+    );
+  }
+  return <SequencedActionRenderer {...props} />;
+}
+
+function SequencedActionRenderer({
+  target,
   operation,
   configured,
   pendingConfigValues,
@@ -60,6 +92,7 @@ export function ActionRenderer({
   const expireRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortedRef = useRef(false);
   const autoStartedRef = useRef(false);
+  const confirmAction = useActionConfirmation();
 
   const stopTimers = useCallback(() => {
     if (pollRef.current) {
@@ -84,16 +117,16 @@ export function ActionRenderer({
     setErrorMsg(null);
   }, [actions, configured, disconnectId, firstAction?.id, operation, stopTimers]);
 
+  /** Every request goes through here; `confirmed` is true only right after the owner confirmed. */
   const executeAction = useCallback(
-    async (actionId: string): Promise<ActionApiResult | null> => {
+    async (actionId: string, confirmed = false): Promise<ActionApiResult | null> => {
+      const action = actions.find((a) => a.id === actionId);
+      if (action && !invocationAllowed(action.confirm, confirmed)) {
+        return { ok: false, label: awaitingOwnerMessage(action.label) };
+      }
       try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/actions/${encodeURIComponent(operation.name)}/${encodeURIComponent(actionId)}`;
-        const requestInit: RequestInit = { method: 'POST' };
-        if (pendingConfigValues && Object.keys(pendingConfigValues).length > 0) {
-          requestInit.headers = { 'content-type': 'application/json' };
-          requestInit.body = JSON.stringify({ values: pendingConfigValues });
-        }
-        const res = await apiFetch(url, requestInit);
+        const request = actionRequest(target, operation.name, actionId, pendingConfigValues);
+        const res = await apiFetch(request.url, request.init);
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           return { ok: false, label: (err as { error?: string }).error ?? 'Request failed' };
@@ -103,24 +136,20 @@ export function ActionRenderer({
         return null;
       }
     },
-    [connectorId, operation.name, pendingConfigValues],
+    [actions, operation.name, pendingConfigValues, target],
   );
 
   const resetOperation = useCallback(
     async (currentAction: string): Promise<boolean> => {
       try {
-        const url = `/api/connectors/${encodeURIComponent(connectorId)}/operations/${encodeURIComponent(operation.name)}/reset`;
-        const res = await apiFetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ currentAction }),
-        });
+        const request = operationResetRequest(target, operation.name, currentAction);
+        const res = await apiFetch(request.url, request.init);
         return res.ok;
       } catch {
         return false;
       }
     },
-    [connectorId, operation.name],
+    [operation.name, target],
   );
 
   /** Transition to the next action's phase after a successful result. */
@@ -229,15 +258,15 @@ export function ActionRenderer({
   const handleAction = useCallback(
     async (actionId: string) => {
       const action = actions.find((a) => a.id === actionId);
-      if (!action) return;
+      if (!action || !(await confirmAction(action.label, action.confirm))) return;
 
       setPhase('loading');
       setErrorMsg(null);
-      const result = await executeAction(actionId);
-
-      if (!result || !result.ok) {
+      const result = await executeAction(actionId, true);
+      const failure = actionCallFailure(result);
+      if (!result || failure !== null) {
         setPhase('error');
-        setErrorMsg(result?.label ?? 'Network error');
+        setErrorMsg(failure);
         return;
       }
       setLastResult(toResultState(result));
@@ -254,15 +283,15 @@ export function ActionRenderer({
         setPhase('result');
       }
     },
-    [actions, advanceTo, executeAction, startPolling],
+    [actions, advanceTo, confirmAction, executeAction, startPolling],
   );
 
   const handleDisconnect = useCallback(async () => {
-    if (!disconnectAction) return;
+    if (!disconnectAction || !(await confirmAction(disconnectAction.label, disconnectAction.confirm))) return;
     setPhase('disconnecting');
     setErrorMsg(null);
 
-    const result = await executeAction(disconnectAction.id);
+    const result = await executeAction(disconnectAction.id, true);
     if (!result || !result.ok) {
       setPhase('connected');
       return;
@@ -271,14 +300,14 @@ export function ActionRenderer({
     setLastResult(undefined);
     setPhase('idle');
     onStatusChange?.();
-  }, [disconnectAction, executeAction, firstAction, onStatusChange]);
+  }, [confirmAction, disconnectAction, executeAction, firstAction, onStatusChange]);
 
   // ── Dispatch to the appropriate sub-view ──
 
   if (phase === 'connected' || phase === 'disconnecting') {
     return (
       <ConnectedBanner
-        connectorId={connectorId}
+        connectorId={target.id}
         label={lastResult?.label ?? 'Connected'}
         disconnectLabel={disconnectAction?.label}
         disconnecting={phase === 'disconnecting'}
@@ -291,7 +320,7 @@ export function ActionRenderer({
 
   return (
     <ActionPanelBody
-      connectorId={connectorId}
+      connectorId={target.id}
       phase={phase}
       currentAction={currentAction}
       lastResult={lastResult}

@@ -96,7 +96,11 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
         subscriptionId,
         first.snapshotId,
         { offset: 0, tokenId: 'forged' },
-        { offset: 0, traversalComplete: true },
+        {
+          offset: 0,
+          traversalComplete: true,
+          lease: { sessionId: 'forged', pageOffset: 0, expiresAt: Date.now() + 120_000 },
+        },
       ),
       false,
     );
@@ -106,7 +110,12 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
         subscriptionId,
         first.snapshotId,
         { offset: 0 },
-        { offset: 0, tokenId: 'page-2', traversalComplete: false },
+        {
+          offset: 0,
+          tokenId: 'page-2',
+          traversalComplete: false,
+          lease: { sessionId: 'page-2', pageOffset: 0, expiresAt: Date.now() + 120_000 },
+        },
       ),
       true,
     );
@@ -116,7 +125,11 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
         subscriptionId,
         first.snapshotId,
         { offset: 0 },
-        { offset: 0, traversalComplete: true },
+        {
+          offset: 0,
+          traversalComplete: true,
+          lease: { sessionId: 'wrong', pageOffset: 0, expiresAt: Date.now() + 120_000 },
+        },
       ),
       false,
     );
@@ -126,7 +139,11 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
         subscriptionId,
         first.snapshotId,
         { offset: 0, tokenId: 'page-2' },
-        { offset: 0, traversalComplete: true },
+        {
+          offset: 0,
+          traversalComplete: true,
+          lease: { sessionId: 'final', pageOffset: 0, expiresAt: Date.now() + 120_000 },
+        },
       ),
       true,
     );
@@ -146,6 +163,53 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
       'final ack must reclaim the frozen item list',
     );
     assert.equal(await store.ackSnapshot('inst-a', subscriptionId, first.snapshotId, 11), 'replayed');
+  });
+
+  it('persists snapshot lease rotation across store restart and rejects stale or expired acks', async () => {
+    const subscriptionId = `sub-lease-${Date.now()}`;
+    const snapshotId = `snap-lease-${Date.now()}`;
+    await store.put({
+      subscriptionId,
+      pluginInstanceId: 'inst-a',
+      handleId: `handle-lease-${Date.now()}`,
+      threadId: 'thread-lease',
+      ackedSequence: 0,
+      lastDeliveredSequence: 0,
+    });
+    await stageAndCommit(store, 'inst-a', subscriptionId, {
+      snapshotId,
+      headSequence: 1,
+      items: [],
+      createdAt: Date.now(),
+      nextOffset: 0,
+      traversalComplete: false,
+    });
+    assert.equal(
+      await store.consumeSnapshotPage(
+        'inst-a',
+        subscriptionId,
+        snapshotId,
+        { offset: 0 },
+        {
+          offset: 0,
+          traversalComplete: true,
+          lease: { sessionId: 'lease-1', pageOffset: 0, expiresAt: 2000 },
+        },
+      ),
+      true,
+    );
+    const { RedisCursorStore } = await import('../dist/domains/messaging/stores/redis.js');
+    const restarted = new RedisCursorStore(redis);
+    assert.equal((await restarted.get('inst-a', subscriptionId)).snapshotView.activePageLease.sessionId, 'lease-1');
+    assert.equal(
+      await restarted.rotateSnapshotPageLease('inst-a', subscriptionId, snapshotId, 'lease-1', {
+        lease: { sessionId: 'lease-2', pageOffset: 0, expiresAt: 3000 },
+      }),
+      true,
+    );
+    assert.equal(await restarted.ackSnapshot('inst-a', subscriptionId, snapshotId, 1, 'lease-1', 1500), 'rejected');
+    assert.equal(await restarted.ackSnapshot('inst-a', subscriptionId, snapshotId, 1, 'lease-2', 3000), 'rejected');
+    assert.equal(await restarted.ackSnapshot('inst-a', subscriptionId, snapshotId, 1, 'lease-2', 2999), 'applied');
   });
 
   it('keeps snapshot projections out of the durable subscription identity during revocation', async () => {
@@ -227,7 +291,11 @@ describe('M0-C Redis snapshot cursor', { skip: redisIsolationSkipReason(REDIS_UR
         subscriptionId,
         snapshot.snapshotId,
         { offset: 0 },
-        { offset: 1, traversalComplete: true },
+        {
+          offset: 1,
+          traversalComplete: true,
+          lease: { sessionId: 'final', pageOffset: 0, expiresAt: Date.now() + 120_000 },
+        },
       ),
       true,
     );

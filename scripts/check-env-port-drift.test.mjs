@@ -728,24 +728,6 @@ describe(
   'Sync transform rules match convention',
   { skip: !isHomeRepo && 'sync infrastructure not present (open-source repo)' },
   () => {
-    it('exports the Git attribute that keeps the deterministic F247 bundle LF-only on Windows', () => {
-      const attributesPath = resolve(ROOT, '.gitattributes');
-      assert.ok(existsSync(attributesPath), '.gitattributes must define the generated bundle checkout contract');
-
-      const attributes = readFileSync(attributesPath, 'utf8');
-      assert.match(
-        attributes,
-        /^packages\/api\/src\/plugins\/cloud-cat-personal-host\/extension\/content-script\.js text eol=lf$/mu,
-        'the checked-in bundle must retain LF on Windows so the deterministic build comparison is byte-stable',
-      );
-
-      const managedFiles = readYamlTopLevelList('sync-manifest.yaml', 'managed_files');
-      assert.ok(
-        managedFiles.includes('.gitattributes'),
-        'sync-manifest must export .gitattributes so the public Windows checkout keeps the same bundle contract',
-      );
-    });
-
     it('_sanitize-rules.pl transforms 3002→3004 (API)', () => {
       const content = readFileSync(resolve(ROOT, 'scripts/_sanitize-rules.pl'), 'utf-8');
       assert.ok(

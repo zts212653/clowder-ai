@@ -10,6 +10,7 @@ import {
   isPreconfiguredConnectorAutostartEnabled,
   startConnectorGateway,
 } from '../dist/infrastructure/connectors/connector-gateway-bootstrap.js';
+import { registerGitHubRepoWebhook } from '../dist/infrastructure/connectors/github-repo-event/register-github-repo-webhook.js';
 import {
   clearConnectorConfigCache,
   writeConnectorConfig,
@@ -69,7 +70,7 @@ describe('ConnectorGateway Bootstrap', () => {
     await result.stop();
   });
 
-  it('routes GitHub Repo Inbox delivery and wake to the current community guard', async () => {
+  it('routes GitHub Repo Inbox delivery and wake without starting the retired IM gateway', async () => {
     const envKeys = ['GITHUB_WEBHOOK_SECRET', 'GITHUB_REPO_ALLOWLIST', 'GITHUB_REPO_INBOX_CAT_ID'];
     const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     const secret = 'repo-inbox-owner-test-secret';
@@ -128,10 +129,13 @@ describe('ConnectorGateway Bootstrap', () => {
       },
     };
 
-    let handle;
     try {
-      handle = await startConnectorGateway({}, deps);
-      const handler = handle.webhookHandlers.get('github-repo-event');
+      const handlers = new Map();
+      await registerGitHubRepoWebhook(handlers, {
+        ...deps,
+        deliveryDeps: { messageStore: deps.messageStore, socketManager: deps.socketManager },
+      });
+      const handler = handlers.get('github-repo-event');
       assert.ok(handler, 'GitHub Repo Inbox webhook handler should be registered');
 
       const body = {
@@ -160,7 +164,6 @@ describe('ConnectorGateway Bootstrap', () => {
       assert.deepEqual(appended[0].mentions, ['codex61-sol']);
       assert.equal(triggered[0][1], 'codex61-sol');
     } finally {
-      await handle?.stop();
       for (const key of envKeys) {
         if (previousEnv[key] === undefined) delete process.env[key];
         else process.env[key] = previousEnv[key];

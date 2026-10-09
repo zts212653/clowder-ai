@@ -191,8 +191,7 @@ export class RedisConnectorThreadBindingStore implements IConnectorThreadBinding
 
   async listByUser(connectorId: string, userId: string, limit?: number): Promise<ConnectorThreadBinding[]> {
     const userKey = ConnectorBindingKeys.byUser(connectorId, userId);
-    const effectiveLimit = limit ?? 20;
-    const memberKeys = await this.redis.zrevrange(userKey, 0, effectiveLimit - 1);
+    const memberKeys = await this.redis.zrevrange(userKey, 0, limit === undefined ? -1 : limit - 1);
     if (memberKeys.length === 0) return [];
 
     const pipeline = this.redis.multi();
@@ -209,10 +208,34 @@ export class RedisConnectorThreadBindingStore implements IConnectorThreadBinding
       const [err, data] = entry;
       if (err || !data || typeof data !== 'object') continue;
       const d = data as Record<string, string>;
-      if (!d.connectorId) continue;
+      if (d.connectorId !== connectorId || d.userId !== userId) continue;
       bindings.push(this.hydrate(d));
     }
     return bindings;
+  }
+
+  async removeIfMatches(binding: ConnectorThreadBinding): Promise<boolean> {
+    const key = ConnectorBindingKeys.detail(binding.connectorId, binding.externalChatId);
+    const removed = await this.redis.eval(
+      `
+      if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[2]
+        or redis.call('HGET', KEYS[1], 'threadId') ~= ARGV[3]
+        or redis.call('HGET', KEYS[1], 'createdAt') ~= ARGV[4] then return 0 end
+      redis.call('DEL', KEYS[1])
+      redis.call('SREM', KEYS[2], ARGV[1])
+      redis.call('ZREM', KEYS[3], ARGV[1])
+      return 1
+    `,
+      3,
+      key,
+      ConnectorBindingKeys.byThread(binding.threadId),
+      ConnectorBindingKeys.byUser(binding.connectorId, binding.userId),
+      key,
+      binding.userId,
+      binding.threadId,
+      String(binding.createdAt),
+    );
+    return removed === 1;
   }
 
   async setHubThread(

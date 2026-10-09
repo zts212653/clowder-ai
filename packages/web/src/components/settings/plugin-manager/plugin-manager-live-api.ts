@@ -43,8 +43,11 @@ function fixtureDetail(detail: ConsolePluginManagerDetail | undefined): Partial<
         }),
     readme: detail.readme,
     ...(detail.setupSteps === undefined ? {} : { setupSteps: detail.setupSteps }),
+    ...(detail.steps === undefined ? {} : { steps: detail.steps }),
+    ...(detail.testable === undefined ? {} : { testable: detail.testable }),
     ...(detail.docsUrl === undefined ? {} : { docsUrl: detail.docsUrl }),
     ...(detail.configFields === undefined ? {} : { configFields: detail.configFields }),
+    ...(detail.bindings === undefined ? {} : { bindings: detail.bindings }),
   };
 }
 
@@ -64,6 +67,9 @@ export function designFixture(
     packageName: packageName(plugin),
     source: plugin.source.kind === 'catalog' ? 'catalog' : 'local',
     trust: plugin.source.trust === 'official' ? 'official' : 'local-trusted',
+    ...('dependencyClosure' in plugin.source && plugin.source.dependencyClosure !== undefined
+      ? { dependencyClosure: plugin.source.dependencyClosure }
+      : {}),
     ...(plugin.source.kind === 'compatibility' ? { sourceAdapter: plugin.source.adapter } : {}),
     availableVersion: plugin.availableVersion ?? plugin.installedVersion ?? 'unknown',
     installedVersion: plugin.installedVersion,
@@ -72,6 +78,7 @@ export function designFixture(
     auth: plugin.auth,
     intent: plugin.intent,
     live: plugin.live,
+    ...(plugin.activationFailed === undefined ? {} : { activationFailed: plugin.activationFailed }),
     readme,
     capabilities: capabilities.map((capability) => ({
       name: capability.name,

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -11,6 +11,7 @@ import {
   createDormantPluginRuntimeComposition,
   createPluginManagerRuntimeComposition,
 } from '../dist/domains/plugin/index.js';
+import { InstalledPluginOperations } from '../dist/domains/plugin/operations/plugin-operation-routes.js';
 import { MemoryMeetingIntakeStore, MemorySignalRouteStore } from '../dist/domains/signal-intake/index.js';
 import { registerOfficialPluginRoutes } from '../dist/routes/plugin-official-routes.js';
 import { catalogEntry, manifest, packageArchive } from './plugin-official-package-installer.fixture.js';
@@ -32,9 +33,10 @@ async function harness({
   offline = () => false,
   contract,
   machinePresentation = false,
+  extraFiles = {},
 } = {}) {
   const projectRoot = await root('cat-cafe-f202-manager-composition-');
-  const archive = await packageArchive({ packageManifest });
+  const archive = await packageArchive({ packageManifest, extraFiles });
   const entry = catalogEntry(archive.integrity, {
     pluginId: packageManifest.pluginId,
     version: packageManifest.version,
@@ -55,12 +57,20 @@ async function harness({
       return { entries: [entry], status: 'fresh', checkedAt: 8_000 };
     },
   };
+  let mcpConfig = null;
   const runtime = createDormantPluginRuntimeComposition({
     projectRoot,
     routes: new MemorySignalRouteStore(),
     intakes: new MemoryMeetingIntakeStore(),
     messageStore: new MessageStore(),
     now: () => 9_000,
+    mcpConfigIO: {
+      readConfig: async () => structuredClone(mcpConfig),
+      writeAndRegenCli: async (config) => {
+        mcpConfig = structuredClone(config);
+      },
+      withLock: async (fn) => fn(),
+    },
     ...(contract === undefined ? {} : { contract }),
   });
   const composition = createPluginManagerRuntimeComposition({
@@ -300,6 +310,242 @@ describe('F202 Plugin Manager runtime composition', () => {
     );
   });
 
+  it('projects hidden and conditional fields and derives readiness from the effective selector', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'mode', label: 'Mode', kind: 'string', required: false, default: 'webhook' },
+        { key: 'internalFlag', label: 'Internal', kind: 'boolean', required: false, hidden: true, default: false },
+        {
+          key: 'token',
+          label: 'Token',
+          kind: 'string',
+          required: true,
+          requiredWhen: { key: 'mode', value: ['webhook', 'hybrid'] },
+        },
+      ],
+    });
+    const { composition, entry } = await harness({ packageManifest, contract: contributionContractRuntime() });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const before = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(before.config, 'incomplete');
+    assert.equal(before.configFields.find((field) => field.key === 'internalFlag').hidden, true);
+    assert.deepEqual(before.configFields.find((field) => field.key === 'token').requiredWhen, {
+      key: 'mode',
+      value: ['webhook', 'hybrid'],
+    });
+    assert.equal(before.configFields.find((field) => field.key === 'token').requiredNow, true);
+    await composition.manager.configure(entry.pluginId, {
+      expectedRevision: before.lifecycleRevision,
+      updates: [{ key: 'mode', value: 'polling' }],
+    });
+    const after = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(after.config, 'ready');
+    assert.equal(after.configFields.find((field) => field.key === 'token').requiredNow, false);
+  });
+
+  it('projects declared operations, persisted operation state, setup steps, and testability', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'provider', label: 'Provider', kind: 'string', required: false },
+        {
+          key: 'login',
+          label: 'Log in',
+          kind: 'operation',
+          required: false,
+          target: ['provider'],
+          actions: [
+            {
+              id: 'begin',
+              label: 'Begin',
+              render: 'button',
+              action: { method: 'login.begin', params: { private: true } },
+              next: 'status',
+            },
+            { id: 'status', label: 'Status', render: 'polling', action: { method: 'login.status' } },
+          ],
+        },
+      ],
+      test: { action: { method: 'self.test' } },
+      steps: [{ text: 'Open the login page.' }, { text: 'Approve access.' }],
+    });
+    const { composition, entry } = await harness({
+      packageManifest,
+      contract: contributionContractRuntime(),
+    });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    await composition.configuration.writeOperationState(entry.pluginId, 'login', {
+      currentAction: 'status',
+      updatedAt: 12,
+      lastResult: { render: 'polling', data: { waiting: true } },
+    });
+
+    const plugin = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.deepEqual(plugin.steps, ['Open the login page.', 'Approve access.']);
+    assert.equal(plugin.testable, true);
+    const operation = plugin.configFields.find((field) => field.key === 'login');
+    assert.deepEqual(operation, {
+      key: 'login',
+      label: 'Log in',
+      kind: 'operation',
+      required: false,
+      currentValue: null,
+      sensitive: false,
+      target: ['provider'],
+      configured: false,
+      actions: [
+        { id: 'begin', label: 'Begin', render: 'button', next: 'status' },
+        { id: 'status', label: 'Status', render: 'polling' },
+      ],
+      operationState: {
+        currentAction: 'status',
+        updatedAt: 12,
+        lastResult: { render: 'polling', data: { waiting: true } },
+      },
+    });
+    assert.equal(JSON.stringify(operation).includes('login.begin'), false);
+    assert.equal(JSON.stringify(operation).includes('private'), false);
+    await composition.manager.configure(entry.pluginId, {
+      expectedRevision: plugin.lifecycleRevision,
+      updates: [{ key: 'provider', value: 'feishu' }],
+    });
+    const configured = (await composition.manager.get(entry.pluginId)).plugin.configFields.find(
+      (field) => field.key === 'login',
+    );
+    assert.equal(configured.configured, true);
+  });
+
+  it('projects operation configured only for declared targets with all effective values', async () => {
+    const packageManifest = manifest({
+      configuration: [
+        { key: 'account', label: 'Account', kind: 'string', required: false, default: 'fixture' },
+        { key: 'token', label: 'Token', kind: 'secret', required: false },
+        { key: 'mode', label: 'Mode', kind: 'string', required: false },
+        {
+          key: 'connect',
+          label: 'Connect',
+          kind: 'operation',
+          required: false,
+          target: ['account', 'token'],
+          actions: [{ id: 'start', label: 'Start', render: 'button', action: { method: 'connect.start' } }],
+        },
+        {
+          key: 'inspect',
+          label: 'Inspect',
+          kind: 'operation',
+          required: false,
+          actions: [{ id: 'check', label: 'Check', render: 'button', action: { method: 'inspect.check' } }],
+        },
+      ],
+    });
+    const { composition, entry } = await harness({ packageManifest, contract: contributionContractRuntime() });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const before = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(before.configFields.find((field) => field.key === 'connect').configured, false);
+    assert.equal(
+      Object.hasOwn(
+        before.configFields.find((field) => field.key === 'inspect'),
+        'configured',
+      ),
+      false,
+    );
+    await composition.configuration.configureOperationTargets(entry.pluginId, before.pluginInstanceId, 'connect', {
+      token: 'secret',
+    });
+    const after = (await composition.manager.get(entry.pluginId)).plugin;
+    assert.equal(after.configFields.find((field) => field.key === 'connect').configured, true);
+    assert.equal(after.configFields.find((field) => field.key === 'token').currentValue, '••••••');
+  });
+
+  it('invokes operation and test handlers through an installed and enabled builtin fixture package', async () => {
+    const packageManifest = manifest({
+      runtime: { transport: 'builtin', entrypoint: 'dist/entrypoint.js' },
+      configuration: [
+        { key: 'token', label: 'Token', kind: 'secret', required: false },
+        {
+          key: 'login',
+          label: 'Log in',
+          kind: 'operation',
+          required: false,
+          target: ['token'],
+          actions: [{ id: 'begin', label: 'Begin', render: 'button', action: { method: 'login.begin' } }],
+        },
+      ],
+      test: { action: { method: 'self.test' } },
+    });
+    const entrypoint = `
+export default {
+  create() {
+    return {
+      async start() {
+        return {
+          actions: {
+            async 'login.begin'() {
+              return { render: 'img', data: { url: 'fixture://qr' }, targetValues: { token: 'fixture-secret' } };
+            },
+            async 'self.test'() { return { ok: true }; },
+          },
+          stop() {},
+        };
+      },
+    };
+  },
+};
+`;
+    const { composition, entry, runtime } = await harness({
+      packageManifest,
+      contract: contributionContractRuntime(),
+      extraFiles: { 'dist/entrypoint.js': entrypoint },
+    });
+    await composition.manager.install({
+      source: { kind: 'catalog', catalogId: entry.catalogId },
+      expectedVersion: entry.version,
+      expectedDigest: entry.packageDigest,
+    });
+    const installed = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.setEnabled(entry.pluginId, {
+      enabled: true,
+      expectedRevision: installed.lifecycleRevision,
+    });
+    const operations = new InstalledPluginOperations({
+      inventory: runtime.inventoryStore,
+      configuration: composition.configuration,
+      invocation: runtime.supervisor,
+    });
+
+    const action = await operations.runAction(entry.pluginId, 'login', 'begin', {});
+    assert.equal(action.status, 200);
+    assert.deepEqual(action.body.data, { url: 'fixture://qr' });
+    assert.deepEqual(await operations.runTest(entry.pluginId), {
+      matched: true,
+      status: 200,
+      body: { ok: true },
+    });
+    assert.equal(
+      (await composition.configuration.fields(entry.pluginId)).find((field) => field.key === 'token').currentValue,
+      '••••••',
+    );
+
+    const running = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.setEnabled(entry.pluginId, {
+      enabled: false,
+      expectedRevision: running.lifecycleRevision,
+    });
+    const disabled = (await composition.manager.get(entry.pluginId)).plugin;
+    await composition.manager.uninstall(entry.pluginId, { expectedRevision: disabled.lifecycleRevision });
+  });
+
   it('keeps an installed catalog plugin manageable while discovery is offline and fences uninstall', async () => {
     let offline = false;
     const { composition, entry, runtime } = await harness({ offline: () => offline });
@@ -368,11 +614,14 @@ describe('F202 Plugin Manager runtime composition', () => {
     const listed = await composition.manager.get(packageManifest.pluginId);
 
     assert.equal(installed.pluginId, packageManifest.pluginId);
-    assert.deepEqual(snapshot.packages[0].provenance, { kind: 'local-archive' });
+    assert.deepEqual(snapshot.packages[0].provenance, {
+      kind: 'local-archive',
+      packageName: '@clowder-ai/official-test-source',
+    });
     assert.deepEqual(snapshot.grants[0].effectiveGrants, []);
     assert.deepEqual(listed.plugin.source, {
       kind: 'local-archive',
-      packageName: null,
+      packageName: '@clowder-ai/official-test-source',
       trust: 'local-trusted',
     });
     assert.equal(JSON.stringify(snapshot).includes(archivePath), false);
@@ -420,11 +669,11 @@ describe('F202 Plugin Manager runtime composition', () => {
     assert.equal(snapshot.grants.length, 1);
   });
 
-  it('routes builtin contribution packages through the Host-owned materializer and supervisor', async () => {
+  it('projects runtime-less declared MCP capabilities from the canonical capability state', async () => {
     let catalogOffline = false;
     const packageManifest = manifest({
       runtime: { transport: 'builtin' },
-      description: 'Runs the fixture capability through a Host-supervised contribution.',
+      description: 'Installs the fixture capability through the canonical MCP pipeline.',
       icon: 'github',
       contributions: [
         {
@@ -450,10 +699,6 @@ describe('F202 Plugin Manager runtime composition', () => {
       offline: () => catalogOffline,
       machinePresentation: true,
     });
-    const materializedRoot = await root('cat-cafe-f202-builtin-materialized-');
-    await mkdir(join(materializedRoot, 'dist'), { recursive: true });
-    await writeFile(join(materializedRoot, 'dist/entrypoint.js'), '// builtin fixture\n', 'utf8');
-    const launches = [];
     const composition = createPluginManagerRuntimeComposition({
       runtime,
       catalogProvider: provider,
@@ -461,39 +706,6 @@ describe('F202 Plugin Manager runtime composition', () => {
       // becomes authoritative after inventory admission.
       catalogManifests: [],
       fetchOfficialArchive: async () => archive.bytes,
-      builtinContributions: {
-        materializer: {
-          resolve: async () => ({
-            rootDir: materializedRoot,
-            verifyIntegrity: async () => {},
-            release: async () => {},
-          }),
-        },
-        configuration: {
-          readConfig: async () => undefined,
-          readSecret: async () => undefined,
-        },
-        runtime: {
-          start: async (spec) => {
-            launches.push(structuredClone(spec));
-            return {
-              tools: [
-                {
-                  name: 'fixture_tool',
-                  description: 'Run the fixture capability.',
-                  inputSchema: {
-                    type: 'object',
-                    properties: { value: { type: 'string' } },
-                    required: ['value'],
-                  },
-                },
-              ],
-              callTool: async (name, args) => ({ ok: true, name, args }),
-              close: async () => {},
-            };
-          },
-        },
-      },
     });
     await composition.manager.install({
       source: { kind: 'catalog', catalogId: entry.catalogId },
@@ -502,31 +714,16 @@ describe('F202 Plugin Manager runtime composition', () => {
     });
     await composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 });
 
-    assert.equal(launches.length, 1);
-    assert.equal(launches[0].contributionId, 'fixture-tools');
-    assert.equal(launches[0].cwd, await realpath(materializedRoot));
     const running = (await composition.manager.get(entry.pluginId)).plugin;
     assert.equal(running.live, 'running');
     assert.deepEqual(running.capabilitySummary, [
       { id: 'events.publish', kind: 'events', name: 'Source', active: true },
     ]);
-    assert.deepEqual(await composition.builtinSupervisor.listPluginTools(entry.pluginId), [
-      {
-        contributionId: 'fixture-tools',
-        name: 'fixture_tool',
-        description: 'Run the fixture capability.',
-        inputSchema: {
-          type: 'object',
-          properties: { value: { type: 'string' } },
-          required: ['value'],
-        },
-      },
-    ]);
-    assert.deepEqual(
-      await composition.builtinSupervisor.callPluginTool(entry.pluginId, 'fixture-tools', 'fixture_tool', {
-        value: 'real-call',
-      }),
-      { ok: true, name: 'fixture_tool', args: { value: 'real-call' } },
+    assert.equal(
+      (await runtime.mcpConfigIO.readConfig()).capabilities.find(
+        (capability) => capability.id === `plugin:${entry.pluginId}:fixture-tools`,
+      )?.enabled,
+      true,
     );
 
     catalogOffline = true;
@@ -543,77 +740,5 @@ describe('F202 Plugin Manager runtime composition', () => {
     assert.deepEqual(stopped.capabilitySummary, [
       { id: 'events.publish', kind: 'events', name: 'Source', active: false },
     ]);
-    await assert.rejects(composition.builtinSupervisor.listPluginTools(entry.pluginId), /is not active/);
-  });
-
-  it('surfaces a typed diagnostic when a builtin contribution cannot start', async () => {
-    const packageManifest = manifest({
-      runtime: { transport: 'builtin' },
-      description: 'Runs the fixture capability through a Host-supervised contribution.',
-      icon: 'github',
-      contributions: [
-        {
-          type: 'mcp',
-          id: 'fixture-tools',
-          runtime: { transport: 'stdio', entrypoint: 'dist/entrypoint.js' },
-        },
-      ],
-      features: [
-        {
-          id: 'source',
-          name: 'Source',
-          resources: [],
-          contributions: [{ type: 'mcp', id: 'fixture-tools' }],
-          capabilities: ['events.publish'],
-        },
-      ],
-    });
-    const contract = contributionContractRuntime();
-    const { archive, entry, provider, runtime } = await harness({
-      packageManifest,
-      contract,
-      machinePresentation: true,
-    });
-    const materializedRoot = await root('cat-cafe-f202-builtin-start-failure-');
-    await mkdir(join(materializedRoot, 'dist'), { recursive: true });
-    await writeFile(join(materializedRoot, 'dist/entrypoint.js'), '// builtin fixture\n', 'utf8');
-    const composition = createPluginManagerRuntimeComposition({
-      runtime,
-      catalogProvider: provider,
-      catalogManifests: [],
-      fetchOfficialArchive: async () => archive.bytes,
-      builtinContributions: {
-        materializer: {
-          resolve: async () => ({
-            rootDir: materializedRoot,
-            verifyIntegrity: async () => {},
-            release: async () => {},
-          }),
-        },
-        configuration: {
-          readConfig: async () => undefined,
-          readSecret: async () => undefined,
-        },
-        runtime: {
-          start: async () => {
-            throw new Error('secret-bearing child failure');
-          },
-        },
-      },
-    });
-    await composition.manager.install({
-      source: { kind: 'catalog', catalogId: entry.catalogId },
-      expectedVersion: entry.version,
-      expectedDigest: entry.packageDigest,
-    });
-
-    await assert.rejects(
-      () => composition.manager.setEnabled(entry.pluginId, { enabled: true, expectedRevision: 2 }),
-      (error) => error?.code === 'RUNTIME_START_FAILED',
-    );
-    const failed = (await composition.manager.get(entry.pluginId)).plugin;
-    assert.equal(failed.live, 'stopped');
-    assert.equal(failed.diagnostic?.code, 'UNEXPECTED_RUNTIME_FAILURE');
-    assert.equal(failed.diagnostic?.revision, 5);
   });
 });

@@ -418,7 +418,7 @@ describe('writeGeminiMcpConfig', () => {
       JSON.stringify({
         mcpServers: {
           'foo:bar': { command: 'user-owned', args: [] },
-          'plugin:video-gen:protocol-server': { command: 'legacy-plugin', args: [] },
+          'plugin:fixture-media:protocol-server': { command: 'legacy-plugin', args: [] },
         },
       }),
     );
@@ -426,8 +426,8 @@ describe('writeGeminiMcpConfig', () => {
     await writeGeminiMcpConfig(file, [
       { name: 'foo__bar', command: 'external', args: [], enabled: true, source: 'external' },
       {
-        name: 'plugin__video-gen__protocol-server',
-        capabilityId: 'plugin:video-gen:protocol-server',
+        name: 'plugin__fixture-media__protocol-server',
+        capabilityId: 'plugin:fixture-media:protocol-server',
         command: 'managed-plugin',
         args: [],
         enabled: true,
@@ -437,8 +437,8 @@ describe('writeGeminiMcpConfig', () => {
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
     assert.ok(data.mcpServers['foo:bar'], 'name similarity alone must not prove ownership');
-    assert.equal(data.mcpServers['plugin:video-gen:protocol-server'], undefined);
-    assert.ok(data.mcpServers['plugin__video-gen__protocol-server']);
+    assert.equal(data.mcpServers['plugin:fixture-media:protocol-server'], undefined);
+    assert.ok(data.mcpServers['plugin__fixture-media__protocol-server']);
   });
 
   it('retires known GitHub MCP entries while preserving unrelated custom servers', async () => {
@@ -963,7 +963,7 @@ describe('writeAntigravityMcpConfig', () => {
       JSON.stringify({
         mcpServers: {
           'foo:bar': { command: 'user-owned', args: [] },
-          'plugin:video-gen:protocol-server': { command: 'legacy-plugin', args: [] },
+          'plugin:fixture-media:protocol-server': { command: 'legacy-plugin', args: [] },
         },
       }),
     );
@@ -971,8 +971,8 @@ describe('writeAntigravityMcpConfig', () => {
     await writeAntigravityMcpConfig(file, [
       { name: 'foo__bar', command: 'external', args: [], enabled: true, source: 'external' },
       {
-        name: 'plugin__video-gen__protocol-server',
-        capabilityId: 'plugin:video-gen:protocol-server',
+        name: 'plugin__fixture-media__protocol-server',
+        capabilityId: 'plugin:fixture-media:protocol-server',
         command: 'managed-plugin',
         args: [],
         enabled: true,
@@ -982,8 +982,8 @@ describe('writeAntigravityMcpConfig', () => {
 
     const data = JSON.parse(await readFile(file, 'utf-8'));
     assert.ok(data.mcpServers['foo:bar'], 'name similarity alone must not prove ownership');
-    assert.equal(data.mcpServers['plugin:video-gen:protocol-server'], undefined);
-    assert.ok(data.mcpServers['plugin__video-gen__protocol-server']);
+    assert.equal(data.mcpServers['plugin:fixture-media:protocol-server'], undefined);
+    assert.ok(data.mcpServers['plugin__fixture-media__protocol-server']);
   });
 
   it('F061 Bug-F: respects ALLOWED_WORKSPACE_DIRS env override when set', async () => {

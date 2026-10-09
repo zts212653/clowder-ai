@@ -10,14 +10,9 @@ vi.mock('@/utils/api-client', () => ({
 import { apiFetch } from '@/utils/api-client';
 import { PluginsContent } from '../settings/PluginsContent';
 
-const mockApiFetch = vi.mocked(apiFetch);
+import { github, jsonResponse, managerResponse } from './plugin-manager-compat-fixture';
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
+const mockApiFetch = vi.mocked(apiFetch);
 
 async function flushEffects() {
   await act(async () => {
@@ -58,40 +53,10 @@ describe('PluginsContent GitHub configuration', () => {
 
   it('opens editable GitHub config fields and saves via plugin path', async () => {
     mockApiFetch.mockImplementation(async (url, init) => {
-      if (url === '/api/plugins') {
-        return jsonResponse({
-          plugins: [
-            {
-              id: 'github',
-              name: 'GitHub',
-              version: '1.0.0',
-              icon: 'github',
-              iconBg: '#24292e',
-              status: 'configured',
-              hasHealthCheck: false,
-              config: [
-                {
-                  envName: 'GITHUB_TOKEN',
-                  label: 'Personal Access Token',
-                  sensitive: true,
-                  currentValue: null,
-                },
-                {
-                  envName: 'GITHUB_SETUP_NOISE_BOT_LOGINS',
-                  label: 'Noise Bot Login List',
-                  sensitive: false,
-                  currentValue: 'chatgpt-codex-connector[bot]',
-                },
-              ],
-              resources: [],
-            },
-          ],
-        });
-      }
       if (url === '/api/plugins/github/config' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
-      return jsonResponse({}, 404);
+      return managerResponse(String(url));
     });
 
     await act(async () => {
@@ -109,9 +74,9 @@ describe('PluginsContent GitHub configuration', () => {
     });
     await flushEffects();
 
-    const tokenInput = container.querySelector('[data-testid="field-GITHUB_TOKEN"]') as HTMLInputElement | null;
+    const tokenInput = container.querySelector('#plugin-manager-github-GITHUB_TOKEN') as HTMLInputElement | null;
     const noiseInput = container.querySelector(
-      '[data-testid="field-GITHUB_SETUP_NOISE_BOT_LOGINS"]',
+      '#plugin-manager-github-GITHUB_SETUP_NOISE_BOT_LOGINS',
     ) as HTMLInputElement | null;
     expect(tokenInput).toBeTruthy();
     expect(noiseInput).toBeTruthy();
@@ -147,29 +112,21 @@ describe('PluginsContent GitHub configuration', () => {
   });
 
   it('keeps the disable toggle visible for enabled plugins after config is removed', async () => {
+    const plugin = {
+      ...github,
+      pluginId: 'fixture-plugin',
+      displayName: 'Fixture Plugin',
+      source: { kind: 'local-archive' as const, packageName: 'fixture-plugin', trust: 'local-trusted' as const },
+      config: 'incomplete' as const,
+      intent: 'enabled' as const,
+      live: 'crashed' as const,
+      configFields: [],
+    };
     mockApiFetch.mockImplementation(async (url, init) => {
-      if (url === '/api/plugins') {
-        return jsonResponse({
-          plugins: [
-            {
-              id: 'weixin-mp',
-              name: '微信公众号',
-              version: '1.0.0',
-              icon: 'message-circle',
-              iconBg: '#10b981',
-              status: 'enabled',
-              configured: false,
-              hasHealthCheck: true,
-              config: [],
-              resources: [{ type: 'limb', path: 'limbs/weixin-mp.yml' }],
-            },
-          ],
-        });
-      }
-      if (url === '/api/plugins/weixin-mp/disable' && init?.method === 'POST') {
+      if (url === '/api/plugin-manager/plugins/fixture-plugin/set-enabled' && init?.method === 'POST') {
         return jsonResponse({ ok: true });
       }
-      return jsonResponse({}, 404);
+      return managerResponse(String(url), plugin);
     });
 
     await act(async () => {
@@ -177,7 +134,7 @@ describe('PluginsContent GitHub configuration', () => {
     });
     await flushEffects();
 
-    const disableToggle = container.querySelector('button[title="禁用"]');
+    const disableToggle = container.querySelector('button[aria-label="禁用Fixture Plugin"]');
     expect(disableToggle).toBeTruthy();
     expect(disableToggle?.parentElement?.closest('button')).toBeNull();
 
@@ -186,6 +143,10 @@ describe('PluginsContent GitHub configuration', () => {
     });
     await flushEffects();
 
-    expect(mockApiFetch.mock.calls.some((call) => call[0] === '/api/plugins/weixin-mp/disable')).toBe(true);
+    const call = mockApiFetch.mock.calls.find(
+      ([path]) => path === '/api/plugin-manager/plugins/fixture-plugin/set-enabled',
+    );
+    expect(call).toBeTruthy();
+    expect(JSON.parse((call?.[1] as { body: string }).body)).toEqual({ enabled: false, expectedRevision: 1 });
   });
 });

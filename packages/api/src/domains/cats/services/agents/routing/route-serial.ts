@@ -1151,6 +1151,7 @@ export async function* routeSerial(
       const streamReplyTo = activeA2ATriggerMessageId ?? queueTriggerReplyTo;
       const turnTriggerMessageId = streamReplyTo ?? currentUserMessageId ?? a2aTriggerMessageId;
       const turnTriggerMessage = turnTriggerMessageId ? await deps.messageStore.getById(turnTriggerMessageId) : null;
+      const turnTriggerThreadId = turnTriggerMessage?.threadId === threadId ? threadId : undefined;
       const collectiveBoundTurn =
         options.executionScope === 'collective-work' ||
         options.executionScope === 'collective-participation' ||
@@ -2063,6 +2064,7 @@ export async function* routeSerial(
             ? { persistedInvocationId: options.parentInvocationId ?? visibleTurnInvocationId }
             : {}),
           ...(turnTriggerMessageId ? { turnTriggerMessageId } : {}),
+          ...(turnTriggerThreadId ? { turnTriggerThreadId } : {}),
           ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
           executionProjections: await readTurnExecutionProjections(visibleTurnInvocationId),
         });
@@ -4251,7 +4253,13 @@ export async function* routeSerial(
                     }
                   : {}),
                 ...(turnTriggerMessageId
-                  ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                  ? {
+                      causal: {
+                        kind: 'invocation_reply' as const,
+                        triggerMessageId: turnTriggerMessageId,
+                        ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                      },
+                    }
                   : {}),
                 ...executionProjections,
                 ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -5056,7 +5064,13 @@ export async function* routeSerial(
                       }
                     : {}),
                   ...(turnTriggerMessageId
-                    ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                    ? {
+                        causal: {
+                          kind: 'invocation_reply' as const,
+                          triggerMessageId: turnTriggerMessageId,
+                          ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                        },
+                      }
                     : {}),
                   ...executionProjections,
                   ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),
@@ -5223,7 +5237,13 @@ export async function* routeSerial(
                           }
                         : {}),
                       ...(turnTriggerMessageId
-                        ? { causal: { kind: 'invocation_reply' as const, triggerMessageId: turnTriggerMessageId } }
+                        ? {
+                            causal: {
+                              kind: 'invocation_reply' as const,
+                              triggerMessageId: turnTriggerMessageId,
+                              ...(turnTriggerThreadId ? { triggerThreadId: turnTriggerThreadId } : {}),
+                            },
+                          }
                         : {}),
                       ...executionProjections,
                       ...(doneMsg?.tracing ? { tracing: doneMsg.tracing } : {}),

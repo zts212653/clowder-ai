@@ -2,8 +2,8 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback } from 'react';
+import { canonicalSettingsSectionId } from '@/lib/settings-section-id';
 import { useShellPresentation } from '../shell/shell-presentation';
-import { usesFixedPluginManagerLayout } from './plugin-manager/plugin-manager-design-gate';
 import { SettingsContent } from './SettingsContent';
 import { SettingsNav } from './SettingsNav';
 import { SettingsShellV2 } from './SettingsShellV2';
@@ -13,11 +13,11 @@ function SettingsShellInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isV2 = useShellPresentation() === 'v2';
-  const activeSection = searchParams.get('s') ?? (searchParams.get('ops') ? 'ops' : DEFAULT_SECTION);
+  const requestedSection = searchParams.get('s') ?? (searchParams.get('ops') ? 'ops' : DEFAULT_SECTION);
+  const activeSection = canonicalSettingsSectionId(requestedSection);
   const initialEditCatId = searchParams.get('cat') ?? undefined;
   const standalone = searchParams.get('standalone') === '1';
-  const fixedPluginManagerLayout =
-    activeSection === 'plugins' && usesFixedPluginManagerLayout(`?${searchParams.toString()}`);
+  const fixedPluginManagerLayout = activeSection === 'plugins';
 
   const handleSelect = useCallback(
     (sectionId: string) => {

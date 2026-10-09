@@ -31,7 +31,7 @@ import type {
   PreparedProviderRequestV1,
 } from '../../../types.js';
 import { appendLocalImagePathHints, buildImageMediaItems } from '../image-cli-bridge.js';
-import { extractImagePaths } from '../image-paths.js';
+import { extractTrustedImagePaths } from '../image-paths.js';
 import {
   AntigravityBridge,
   type AntigravityDrainOptions,
@@ -537,7 +537,11 @@ export class AntigravityAgentService implements AgentService {
         ? `\n[Workspace: ${sanitizedDir}]\nAll file paths must be relative to this workspace root. Do not use absolute paths.`
         : '';
       const callbackFallback = buildCallbackFallbackInstructions(options?.callbackEnv);
-      const imagePaths = extractImagePaths(options?.contentBlocks, options?.uploadDir);
+      const imagePaths = await extractTrustedImagePaths(
+        options?.contentBlocks,
+        options?.uploadDir,
+        options?.resolveTrustedImagePath,
+      );
       const promptBody = appendLocalImagePathHints(prompt, imagePaths);
       // F211 REG3 Layer C: read the image bytes into Antigravity media items so the cascade can
       // actually SEE the image (delivered via SendUserCascadeMessage.media), not just a path hint.

@@ -26,7 +26,10 @@ async function fixture(t) {
       agentKeyRegistry: {
         verify: async (secret) =>
           secret === 'agent-test'
-            ? { ok: true, record: { agentKeyId: 'key', userId: 'owner', catId: 'gpt-pro', scope: 'user-bound' } }
+            ? {
+                ok: true,
+                record: { agentKeyId: 'key', userId: 'owner', catId: 'gpt-pro', scope: 'cloud-conversation' },
+              }
             : { ok: false, reason: 'agent_key_unknown' },
       },
     },

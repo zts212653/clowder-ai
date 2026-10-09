@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { MessageContent } from '@/stores/chatStore';
 import { API_URL } from '@/utils/api-client';
+import { AuthenticatedMediaImage } from './AuthenticatedMediaImage';
 import { ContextAttachmentView } from './ContextAttachmentView';
 import {
   messagePublicationSource,
@@ -49,20 +50,19 @@ export function ContentBlocks({
           return <MarkdownContent key={i} content={block.text} />;
         }
         if (block.type === 'image') {
-          const src = resolveUrl(block.url);
           const source = messagePublicationSource(publication, { kind: 'content-block', index: i }, block.url);
           return (
-            <button
-              type="button"
+            <AuthenticatedMediaImage
               key={i}
-              disabled={published.busy}
-              aria-label={source ? '打开作品 图片' : '查看附件'}
-              className="block max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe hover:opacity-90 transition-opacity"
-              onClick={() => (source ? void published.open(source, '图片') : setLightboxSrc(src))}
-            >
-              {/* biome-ignore lint/performance/noImgElement: original uploaded dimensions are unknown at the chat entry */}
-              <img src={src} alt="附件" className="max-w-full rounded-lg" />
-            </button>
+              url={block.url}
+              alt="attached image"
+              className="max-w-full sm:max-w-sm rounded-lg mt-2 border border-cafe cursor-pointer hover:opacity-90 transition-opacity"
+              onOpen={
+                published.busy
+                  ? undefined
+                  : (src) => (source ? void published.open(source, '图片') : setLightboxSrc(src))
+              }
+            />
           );
         }
         if (block.type === 'file') {

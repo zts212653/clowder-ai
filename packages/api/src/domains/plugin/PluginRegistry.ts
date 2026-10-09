@@ -135,6 +135,7 @@ export class PluginRegistry {
     manifest: PluginManifest,
     capabilities: CapabilitiesConfig | null,
     env: Record<string, string | undefined>,
+    options: { includeNonSensitiveValues?: boolean } = {},
   ): PluginInfo {
     const status = this.deriveStatus(manifest, capabilities, env);
     const allConfigured = isPluginConfigured(manifest, env);
@@ -143,7 +144,12 @@ export class PluginRegistry {
     const configWithValues = manifest.config.map((f) => ({
       ...f,
       sensitive: isSensitive(f),
-      currentValue: maskValue(env[f.envName], isSensitive(f)),
+      // Editable Manager fields must round-trip without saving a display mask.
+      // Legacy reads retain their masking; secrets are masked in every view.
+      currentValue:
+        options.includeNonSensitiveValues && !isSensitive(f)
+          ? env[f.envName] || null
+          : maskValue(env[f.envName], isSensitive(f)),
     }));
 
     const resourceStatuses: PluginResourceStatus[] = manifest.resources.map((r) => {
