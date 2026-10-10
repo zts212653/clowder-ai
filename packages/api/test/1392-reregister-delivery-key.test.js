@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
  * stands in for a process dying mid-delivery, are hand-built.
  */
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 
 const SUBJECT = 'pr:owner/repo#7';
@@ -69,8 +69,8 @@ const ciPass = (lifecycle, taskId) =>
 describe('#1392 — a re-registered task’s notifications are not swallowed by the old task’s', () => {
   it('the same PR re-tracked in the same thread gets its own first notification delivered', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
-    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+    const connector = connectorDeliveryHarness();
+    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
 
     const first = await registerTask(taskStore);
     const firstResult = await ciPass(lifecycle, first.id);
@@ -88,7 +88,7 @@ describe('#1392 — a re-registered task’s notifications are not swallowed by 
       firstResult.messageId,
       'the new task’s notification must be a new message, not the old one handed back as a replay',
     );
-    assert.equal(messageStore.getByThread(THREAD).length, 2, 'both notifications are in the thread');
+    assert.equal(connector.deliveries(THREAD).length, 2, 'both notifications have durable Queue admission');
   });
 
   // Delivery is two writes: store the notification, then mark the outcome delivered. A process that
@@ -96,7 +96,7 @@ describe('#1392 — a re-registered task’s notifications are not swallowed by 
   // is what the key's idempotency is for: it must reach the stored notification, not add a copy.
   it('a retry after the notification was stored but before it was marked delivered adds no copy', async () => {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const replace = taskStore.replaceAutomationStateIfGeneration.bind(taskStore);
     let dieBeforeMarking = true;
     taskStore.replaceAutomationStateIfGeneration = (taskId, input) => {
@@ -108,18 +108,18 @@ describe('#1392 — a re-registered task’s notifications are not swallowed by 
     };
 
     const task = await registerTask(taskStore);
-    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
     await assert.rejects(ciPass(lifecycle, task.id), /before marking the outcome delivered/);
-    const stored = messageStore.getByThread(THREAD);
+    const stored = connector.deliveries(THREAD);
     assert.equal(stored.length, 1, 'the notification was stored before the process died');
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'pending');
 
-    const restarted = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+    const restarted = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
     await ciPass(restarted, task.id);
 
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'delivered');
     assert.deepEqual(
-      messageStore.getByThread(THREAD).map((message) => message.id),
+      connector.deliveries(THREAD).map((message) => message.id),
       [stored[0].id],
       'the retry reuses the key, so the store hands back the stored notification instead of adding a copy',
     );

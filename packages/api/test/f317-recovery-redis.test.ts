@@ -9,7 +9,7 @@ import { isolatedRecoveryRedisUrl, redisRecoverySources } from './helpers/f317-r
 
 test(
   'a separate process recovers 130 TTL-0 tasks and a settled approval while withholding 130 unproven recaps',
-  { skip: !process.env.F317_INBOX_TEST_REDIS_URL, timeout: 30_000 },
+  { skip: !process.env.F317_INBOX_TEST_REDIS_URL || process.env.CAT_CAFE_REDIS_TEST_ISOLATED !== '1', timeout: 30_000 },
   async () => {
     const url = isolatedRecoveryRedisUrl();
     const keyPrefix = `f317-recovery-${randomUUID()}:`;
@@ -39,7 +39,7 @@ test(
       const message = await messages.append({
         userId: scope.userId,
         threadId: scope.threadId,
-        catId: scope.catId,
+        from: { kind: 'agent', catId: scope.catId },
         content: 'proposal origin',
         mentions: [],
         timestamp: 1,

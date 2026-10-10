@@ -30,6 +30,7 @@ describe('InMemoryTurnExecutionStore', () => {
 
     assert.deepEqual(await store.get('child-1'), {
       ...earlier,
+      outputFence: 'open',
       status: 'running',
     });
     assert.deepEqual(
@@ -51,13 +52,13 @@ describe('InMemoryTurnExecutionStore', () => {
     assert.equal(first.outcome, 'created');
     assert.equal(replay.outcome, 'replayed');
     assert.equal(conflict.outcome, 'conflict');
-    assert.deepEqual(await store.get(input.invocationId), { ...input, status: 'running' });
+    assert.deepEqual(await store.get(input.invocationId), { ...input, outputFence: 'open', status: 'running' });
   });
 
   test('causal field insertion order does not turn an idempotent create into an identity conflict', async () => {
     const store = new InMemoryTurnExecutionStore();
     const input = runningInput({
-      executionKind: 'freshness_supplement',
+      executionKind: 'routing_guard',
       causal: { triggerMessageId: 'msg-1', freshnessSupplementId: 'supplement-1' },
     });
     assert.equal((await store.createRunning(input)).outcome, 'created');
@@ -220,5 +221,59 @@ describe('InMemoryTurnExecutionStore', () => {
       ['orphan'],
       'the enumerator must not depend on parent-side reachability',
     );
+  });
+  test('F117 KD-21: every terminal transition enters the response-pending ledger until cleared', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput({ invocationId: 'ended', startedAt: 100 }));
+    await store.createRunning(runningInput({ invocationId: 'interrupted', startedAt: 50 }));
+    await store.createRunning(runningInput({ invocationId: 'running', startedAt: 300 }));
+    assert.deepEqual(await store.listResponsePending(), [], 'a running turn has no response to settle yet');
+
+    await store.transitionTerminal('ended', { status: 'succeeded', endedAt: 150 });
+    await store.interruptRunningBefore(200, { endedAt: 250, terminalReason: 'process_restart' });
+    assert.deepEqual(
+      (await store.listResponsePending()).map((record) => [record.invocationId, record.status]),
+      [
+        ['interrupted', 'interrupted'],
+        ['ended', 'succeeded'],
+      ],
+    );
+
+    await store.clearResponsePending('ended');
+    await store.clearResponsePending('never-pending');
+    // A replayed terminal transition must not re-enter a turn whose R was already confirmed.
+    const replay = await store.transitionTerminal('ended', { status: 'failed', endedAt: 160, terminalReason: 'late' });
+    assert.equal(replay.outcome, 'already_terminal');
+    assert.deepEqual(
+      (await store.listResponsePending()).map((record) => record.invocationId),
+      ['interrupted'],
+    );
+  });
+
+  test('F117 KD-21: every child records its fence; a gated fence only moves forward and an open one stays open', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput({ invocationId: 'fenced', outputFence: 'gated' }));
+    await store.createRunning(runningInput({ invocationId: 'open' }));
+    await store.createRunning(runningInput({ invocationId: 'explicit-open', outputFence: 'open' }));
+    assert.equal((await store.get('fenced')).outputFence, 'gated');
+    assert.equal((await store.get('open')).outputFence, 'open', 'an omitted fence is recorded open');
+    assert.equal((await store.get('explicit-open')).outputFence, 'open');
+
+    assert.equal((await store.settleOutputFence('fenced', 'allowed')).outputFence, 'allowed');
+    assert.equal((await store.settleOutputFence('fenced', 'rejected')).outputFence, 'rejected');
+    assert.equal((await store.settleOutputFence('fenced', 'allowed')).outputFence, 'rejected', 'a rejection is final');
+    assert.equal((await store.settleOutputFence('open', 'rejected')).outputFence, 'open');
+    assert.equal(await store.settleOutputFence('missing', 'rejected'), null);
+
+    await store.transitionTerminal('fenced', { status: 'succeeded', endedAt: 150 });
+    assert.equal((await store.listResponsePending())[0].outputFence, 'rejected');
+    const replay = await store.createRunning(runningInput({ invocationId: 'fenced', outputFence: 'gated' }));
+    assert.equal(replay.outcome, 'replayed', 'the fence is late-bound state, not part of the identity');
+    assert.equal(replay.record.outputFence, 'rejected');
+    assert.throws(
+      () => store.createRunning(runningInput({ invocationId: 'born-allowed', outputFence: 'allowed' })),
+      /can only be created open or gated/,
+    );
+    assert.throws(() => store.settleOutputFence('fenced', 'gated'), /invalid output fence verdict/);
   });
 });

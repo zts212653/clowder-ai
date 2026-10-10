@@ -35,10 +35,13 @@ describe('Heartbeat emission', () => {
     globalThis.clearInterval = originalClearInterval;
   });
 
-  it('messages.ts sets up 30s heartbeat interval', async () => {
+  it('QueueProcessor sets up a 30s heartbeat interval for canonical execution', async () => {
     // Read the source to verify the constant
     const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../src/routes/messages.ts', import.meta.url), 'utf8');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
 
     // Verify HEARTBEAT_INTERVAL_MS is defined as 30000
     assert.ok(
@@ -50,15 +53,28 @@ describe('Heartbeat emission', () => {
     assert.ok(source.includes("'heartbeat'"), 'Should broadcast heartbeat event');
   });
 
-  it('heartbeat interval is cleared in finally block', async () => {
+  it('canonical execution clears its heartbeat interval in finally', async () => {
     const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../src/routes/messages.ts', import.meta.url), 'utf8');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
 
     // Verify clearInterval is called in finally
     assert.ok(source.includes('clearInterval(heartbeatInterval)'), 'Should clear heartbeat interval in finally block');
 
     // Verify finally block exists
     assert.ok(source.includes('} finally {'), 'Should have finally block');
+  });
+
+  it('canonical heartbeat does not keep an abandoned test or shutdown process alive', async () => {
+    const fs = await import('node:fs/promises');
+    const source = await fs.readFile(
+      new URL('../src/domains/cats/services/agents/invocation/QueueProcessor.ts', import.meta.url),
+      'utf8',
+    );
+
+    assert.ok(source.includes('heartbeatInterval.unref()'), 'Heartbeat timer should not own process liveness');
   });
 });
 
@@ -74,53 +90,39 @@ describe('SocketManager heartbeat listener', () => {
 });
 
 describe('Frontend timeout logic (source verification)', () => {
-  it('useAgentMessages.ts has 5-minute timeout constant', async () => {
+  it('socket message projection owns no client deadline for the server execution', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../web/src/hooks/useAgentMessages.ts', import.meta.url), 'utf8');
 
-    // 5 * 60 * 1000 = 300000
-    assert.ok(source.includes('DONE_TIMEOUT_MS = 5 * 60 * 1000'), 'Should have 5-minute timeout constant');
+    assert.doesNotMatch(source, /DONE_TIMEOUT_MS|setTimeout\(/);
+    assert.match(source, /handleActiveAgentMessage\(msg, ctx\)/);
   });
 
-  it('useAgentMessages.ts resets timeout on each message', async () => {
+  it('every socket message dispatches to its exact active or background thread', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../web/src/hooks/useAgentMessages.ts', import.meta.url), 'utf8');
 
-    // Should call resetTimeout() at the start of handleAgentMessage
-    assert.ok(source.includes('resetTimeout()'), 'Should reset timeout on message');
+    assert.match(source, /msg.threadId === store.currentThreadId/);
+    assert.match(source, /handleBackgroundAgentMessage\(/);
+    assert.doesNotMatch(source, /resetTimeout\(/);
   });
 
-  it('useAgentMessages.ts clears timeout on done with isFinal', async () => {
+  // Loading and terminal behaviour is verified by the web useAgentMessages-loading suite.
+
+  it('timeout diagnostics settle the named result without a second reconciliation notice', async () => {
     const fs = await import('node:fs/promises');
     const source = await fs.readFile(new URL('../../web/src/hooks/useAgentMessages.ts', import.meta.url), 'utf8');
-
-    // Should call clearDoneTimeout() when msg.isFinal
-    assert.ok(
-      source.includes('if (msg.isFinal)') && source.includes('clearDoneTimeout()'),
-      'Should clear timeout on isFinal',
-    );
-  });
-
-  it('useAgentMessages.ts projects timeout through identity-preserving system_info', async () => {
-    const fs = await import('node:fs/promises');
-    const source = await fs.readFile(new URL('../../web/src/hooks/useAgentMessages.ts', import.meta.url), 'utf8');
-    const reconciliationSource = await fs.readFile(
-      new URL('../../web/src/hooks/invocation-timeout-reconciliation.ts', import.meta.url),
+    const terminalSource = await fs.readFile(
+      new URL('../../web/src/hooks/agent-messages/active-terminal.ts', import.meta.url),
       'utf8',
     );
 
-    assert.ok(
-      source.includes('reconcileTimedOutInvocations(timeoutThreadId)'),
-      'Should reconcile canonical invocation truth when the client wait window ends',
-    );
-
-    assert.ok(
-      reconciliationSource.includes('`invocation-status-${candidate.invocationId}`') &&
-        reconciliationSource.includes('Client wait window ended') &&
-        reconciliationSource.includes("type: 'system'") &&
-        reconciliationSource.includes("let variant: ChatMessage['variant'] = 'info'") &&
-        reconciliationSource.includes('variant,'),
-      'Should preserve invocation identity in a system info reconciliation notice',
+    assert.doesNotMatch(source, /reconcileTimedOutInvocations|invocation-status-/);
+    assert.match(terminalSource, /timeoutDiagnostics.take\(threadId, msg.catId\)/);
+    assert.match(terminalSource, /if \(!stale && !target\) upsertUnansweredErrorRow/);
+    await assert.rejects(
+      fs.access(new URL('../../web/src/hooks/invocation-timeout-reconciliation.ts', import.meta.url)),
+      { code: 'ENOENT' },
     );
   });
 });

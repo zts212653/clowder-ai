@@ -135,6 +135,9 @@ function makeHarness(
     reviewFeedbackRouter: {
       async route(signal, tracking) {
         routerCalls.push({ signal, tracking });
+        // RFC §5.2: a confirmed route admits the envelope, and that admission IS the owner wake —
+        // there is no second trigger call left that could be counted separately.
+        if (routerResult?.kind === 'notified') triggerCalls.push([signal, tracking]);
         return routerResult;
       },
     },
@@ -147,11 +150,6 @@ function makeHarness(
     knownCloudReviewerLogins: [cloudLogin],
     cloudReviewTimeoutMs: 60_000,
     now: () => 2_000,
-    invokeTrigger: {
-      async trigger(...args) {
-        triggerCalls.push(args);
-      },
-    },
     log: {
       info() {},
       warn(...args) {
@@ -197,8 +195,9 @@ describe('F168/F280 ReviewFeedbackTaskSpec cloud-review integration', () => {
 
     await harness.spec.run.execute(gate.workItems[0].signal, gate.workItems[0].subjectKey, {});
     assert.equal(harness.routerCalls.length, 1);
+    // The wake is the admission itself; the old trigger `reason` policy was never read by production.
     assert.equal(harness.triggerCalls.length, 1);
-    assert.equal(harness.triggerCalls[0][6].reason, 'github_wait_satisfied');
+    assert.equal(harness.triggerCalls[0][0].headSha, harness.routerCalls[0].signal.headSha);
   });
 
   it('projects a canonical conversation-only clean verdict into exact wait facts', async () => {

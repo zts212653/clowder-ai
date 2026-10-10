@@ -3,11 +3,6 @@ import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 import { doesAssistantMessageRenderBubble } from './assistant-message-renderability';
 import { isKnownReason } from './CliDiagnosticsPanel';
 import { isLinkedCloudBindingRecoveryNotice } from './cloud-binding-recovery';
-import {
-  foldedSourceInvocationIdInTimeline,
-  projectTurnAbsorptionSummary,
-  terminalSurfaceMessageId,
-} from './turn-absorption-summary';
 
 /**
  * F322 B segment 1 (human message) — does this row put anything on screen?
@@ -19,14 +14,6 @@ import {
  * and fails on any disagreement: a new early exit there that is not here is a named mismatch, not a silent drift.
  */
 
-/** The execution ids a message projects (also what `ChatMessage` projects a turn-absorption dock from). */
-export function projectedExecutionIds(message: ChatMessage): string[] {
-  return [
-    ...(message.extra?.turnExecution ? [message.extra.turnExecution.invocationId] : []),
-    ...(message.extra?.auxiliaryTurnExecutions?.map((execution) => execution.invocationId) ?? []),
-  ];
-}
-
 export function isConnectorSystemNotice(message: ChatMessage): boolean {
   if (message.type !== 'connector' || !message.source?.meta) return false;
   return (message.source.meta as Record<string, unknown>).presentation === 'system_notice';
@@ -37,15 +24,9 @@ interface VisibilityContext {
   currentThreadId?: string;
 }
 
-/** A CLI-diagnostics duplicate the list collapses is drawn as a zero-height anchor, unless a turn-absorption dock rides on it. */
+/** The real system renderer keeps a zero-height anchor for duplicate CLI diagnostics. */
 function isCollapsedDiagnosticsDuplicate(message: ChatMessage, timeline: readonly ChatMessage[]): boolean {
-  if (!computeCliDiagnosticsDedup(timeline).get(message.id)?.hideDiagnosticsPanel) return false;
-  if (message.isStreaming) return true;
-  const docks = projectedExecutionIds(message)
-    .filter((invocationId) => terminalSurfaceMessageId(timeline, invocationId) === message.id)
-    .map((invocationId) => projectTurnAbsorptionSummary(timeline, invocationId))
-    .filter((projection) => projection !== null);
-  return docks.length === 0;
+  return computeCliDiagnosticsDedup(timeline).get(message.id)?.hideDiagnosticsPanel === true;
 }
 
 /** `true` when `ChatMessage` draws nothing visible for this row (a null, or a zero-height aria-hidden anchor). */
@@ -54,7 +35,7 @@ export function messageRendersNothing(
   timeline: readonly ChatMessage[],
   context: VisibilityContext = {},
 ): boolean {
-  const isOwn = message.type === 'user' && !message.catId;
+  const isOwn = message.from?.kind === 'user';
 
   // The first thing ChatMessage does: a summary with its content is a card (without it, the row falls through to nothing).
   if (message.type === 'summary' && message.summary) return false;
@@ -74,13 +55,12 @@ export function messageRendersNothing(
     return false;
   }
 
-  if (message.type === 'connector' && message.source) {
+  if (message.from?.kind === 'external' || message.from?.kind === 'plugin' || message.type === 'connector') {
     return isConnectorSystemNotice(message) && isLinkedCloudBindingRecoveryNotice(message, timeline);
   }
 
   if (isOwn) {
-    if (message.extra?.recall?.exposure === 'none') return true;
-    return foldedSourceInvocationIdInTimeline(message, timeline) !== undefined;
+    return message.extra?.recall?.exposure === 'none';
   }
 
   // Everything else goes through the assistant bubble: a connector with no source, or any other record, is not

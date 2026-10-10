@@ -29,7 +29,7 @@ function entry(id: string, createdAt: number, over: Partial<QueueEntry> = {}): Q
     content: `message ${id}`,
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'u1' },
     targetCats: ['opus'],
     intent: 'execute',
     status: 'queued',
@@ -37,18 +37,6 @@ function entry(id: string, createdAt: number, over: Partial<QueueEntry> = {}): Q
     ...over,
   };
 }
-
-const STUCK = entry('stuck', 1, {
-  status: 'processing',
-  recoveryActions: [
-    {
-      id: 'queue-force-reset:stuck:1',
-      entryId: 'stuck',
-      kind: 'force_reset',
-      request: { method: 'POST', path: `/api/threads/${THREAD}/force-reset` },
-    },
-  ],
-});
 
 let commands: ReturnType<typeof useQueueCommands> | null = null;
 
@@ -90,7 +78,7 @@ describe('reordering the queue while a stuck message is on show', () => {
       messages: [],
       activeInvocations: {},
       catInvocations: {},
-      queue: [STUCK, entry('a', 2), entry('b', 3)],
+      queue: [entry('a', 2), entry('b', 3)],
       queuePaused: false,
     } as never);
   });
@@ -99,7 +87,7 @@ describe('reordering the queue while a stuck message is on show', () => {
     container.remove();
   });
 
-  it('sends only queued entries: the server refuses a processing one with a 400', async () => {
+  it('reorders the pending inputs with exact positions', async () => {
     await act(async () => root.render(<Harness />));
     await act(async () => commands?.handleDragEnd(drag('b', 'a')));
     expect(lastPatchBody()).toEqual({
@@ -113,7 +101,7 @@ describe('reordering the queue while a stuck message is on show', () => {
     });
   });
 
-  it('dropping on the stuck message does nothing', async () => {
+  it('dropping on an entry that already left Queue does nothing', async () => {
     await act(async () => root.render(<Harness />));
     await act(async () => commands?.handleDragEnd(drag('a', 'stuck')));
     expect(lastPatchBody()).toBeNull();

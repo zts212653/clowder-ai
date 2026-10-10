@@ -1,102 +1,85 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetThreadRuntimeSingleton } from '@/hooks/thread-runtime-singleton';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
-import type { ChatMessage } from '@/stores/chat-types';
+import type { ChatMessage, ChatMessagePatch } from '@/stores/chat-types';
 
-// Spy on invariant violation reporter (F183 hot-path gate)
-const recordViolationSpy = vi.fn();
-vi.mock('@/debug/bubbleInvariantDiagnostics', () => ({
-  recordBubbleInvariantViolation: (...args: unknown[]) => recordViolationSpy(...args),
-}));
+// Active text stream chunks write into the message they name (msg.messageId = the turn's
+// response R) through the thread-scoped named-message writes; a post_message callback is its
+// own message under its own server id. No bubble id is invented, guessed, renamed or merged.
 
-// Forwarding-contract test (round 1 P1 #2): replace reducer with a stub that
-// returns a synthetic violation, prove handler calls recordBubbleInvariantViolation.
-const forwardingTestReducerStub = vi.fn();
-vi.mock('@/stores/bubble-reducer', async (importOriginal) => {
-  const actual = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...actual,
-    applyBubbleEvent: (input: unknown) => {
-      if (forwardingTestReducerStub.getMockImplementation()) {
-        return forwardingTestReducerStub(input);
-      }
-      return (actual.applyBubbleEvent as (i: unknown) => unknown)(input);
-    },
-  };
-});
+function updateMessage(id: string, update: (message: ChatMessage) => ChatMessage) {
+  storeState.messages = storeState.messages.map((m) => (m.id === id ? update(m) : m));
+}
 
-// F183 Phase B1.2.2 — verify active text stream chunks into an EXISTING bubble
-// route through `replaceMessages` (reducer-driven write), not the legacy
-// `appendToMessage`/`patchMessage` direct mutation.
+/** Thread-scoped writes (hooks/named-message-writer.ts); the current thread's messages are the flat list. */
+function forCurrentThread(threadId: string, write: () => void) {
+  if (threadId === storeState.currentThreadId) write();
+}
 
 const mockAddMessage = vi.fn();
-const mockAppendToMessage = vi.fn();
-const mockAppendToolEvent = vi.fn();
-const mockAppendRichBlock = vi.fn();
-const mockSetStreaming = vi.fn();
-const mockSetLoading = vi.fn();
-const mockSetHasActiveInvocation = vi.fn();
-const mockSetIntentMode = vi.fn();
-const mockSetCatStatus = vi.fn();
-const mockClearCatStatuses = vi.fn();
 const mockSetCatInvocation = vi.fn((catId: string, info: Record<string, unknown>) => {
   storeState.catInvocations = {
     ...storeState.catInvocations,
     [catId]: { ...storeState.catInvocations[catId], ...info },
   };
 });
-const mockSetMessageUsage = vi.fn();
-const mockSetMessageMetadata = vi.fn();
-const mockSetMessageThinking = vi.fn();
-const mockRequestStreamCatchUp = vi.fn();
-const mockReplaceMessageId = vi.fn();
-const mockPatchMessage = vi.fn();
-const mockSetMessageStreamInvocation = vi.fn();
-const mockRemoveActiveInvocation = vi.fn();
-const mockReplaceMessages = vi.fn((...args: unknown[]) => {
-  storeState.messages = args[0] as ChatMessage[];
+// Whole-list rewrites are not a streaming write path; kept only as a spy.
+const mockReplaceMessages = vi.fn();
+const mockAddMessageToThread = vi.fn((threadId: string, msg: ChatMessage) => {
+  forCurrentThread(threadId, () => {
+    if (!storeState.messages.some((m) => m.id === msg.id)) storeState.messages = [...storeState.messages, msg];
+  });
 });
-
-const mockAddMessageToThread = vi.fn();
-const mockClearThreadActiveInvocation = vi.fn();
-const mockResetThreadInvocationState = vi.fn();
-const mockSetThreadMessageStreaming = vi.fn();
-const mockGetThreadState = vi.fn(() => ({ messages: [] }));
 
 const storeState = {
   messages: [] as ChatMessage[],
   addMessage: mockAddMessage,
-  appendToMessage: mockAppendToMessage,
-  appendToolEvent: mockAppendToolEvent,
-  appendRichBlock: mockAppendRichBlock,
-  setStreaming: mockSetStreaming,
-  setLoading: mockSetLoading,
-  setHasActiveInvocation: mockSetHasActiveInvocation,
-  setIntentMode: mockSetIntentMode,
-  setCatStatus: mockSetCatStatus,
-  clearCatStatuses: mockClearCatStatuses,
+  appendToMessage: vi.fn(),
+  appendToolEvent: vi.fn(),
+  appendRichBlock: vi.fn(),
+  setStreaming: vi.fn(),
+  setLoading: vi.fn(),
+  setHasActiveInvocation: vi.fn(),
+  setIntentMode: vi.fn(),
+  setCatStatus: vi.fn(),
+  clearCatStatuses: vi.fn(),
   setCatInvocation: mockSetCatInvocation,
-  setMessageUsage: mockSetMessageUsage,
-  requestStreamCatchUp: mockRequestStreamCatchUp,
-  setMessageMetadata: mockSetMessageMetadata,
-  setMessageThinking: mockSetMessageThinking,
-  replaceMessageId: mockReplaceMessageId,
-  patchMessage: mockPatchMessage,
-  setMessageStreamInvocation: mockSetMessageStreamInvocation,
+  setMessageUsage: vi.fn(),
+  requestStreamCatchUp: vi.fn(),
+  setMessageMetadata: vi.fn(),
+  setMessageThinking: vi.fn(),
+  patchMessage: vi.fn(),
   replaceMessages: mockReplaceMessages,
 
+  getThreadState: vi.fn((threadId: string): { messages: ChatMessage[] } => ({
+    messages: threadId === storeState.currentThreadId ? storeState.messages : [],
+  })),
   addMessageToThread: mockAddMessageToThread,
-  clearThreadActiveInvocation: mockClearThreadActiveInvocation,
-  resetThreadInvocationState: mockResetThreadInvocationState,
-  setThreadMessageStreaming: mockSetThreadMessageStreaming,
-  getThreadState: mockGetThreadState,
+  appendToThreadMessage: vi.fn((threadId: string, id: string, content: string) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, content: m.content + content })));
+  }),
+  patchThreadMessage: vi.fn((threadId: string, id: string, patch: ChatMessagePatch) => {
+    forCurrentThread(threadId, () =>
+      updateMessage(id, (m) => ({ ...m, ...patch, ...(patch.extra ? { extra: { ...m.extra, ...patch.extra } } : {}) })),
+    );
+  }),
+  appendToolEventToThread: vi.fn(),
+  setThreadMessageThinking: vi.fn(),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageStreaming: vi.fn((threadId: string, id: string, streaming: boolean) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, isStreaming: streaming })));
+  }),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
+  clearThreadActiveInvocation: vi.fn(),
+  resetThreadInvocationState: vi.fn(),
   currentThreadId: 'thread-1',
   catInvocations: {} as Record<string, { invocationId?: string }>,
   activeInvocations: {} as Record<string, { catId: string; mode: string }>,
   hasMore: true,
-  removeActiveInvocation: mockRemoveActiveInvocation,
+  removeActiveInvocation: vi.fn(),
 };
 
 let captured: ReturnType<typeof useAgentMessages> | undefined;
@@ -111,7 +94,22 @@ function Harness() {
   return null;
 }
 
-describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
+/** The turn's response as the store holds it mid-stream. */
+function streamingResponse(content: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'resp-1',
+    type: 'assistant',
+    catId: 'codex',
+    content,
+    isStreaming: true,
+    origin: 'stream',
+    extra: { stream: { invocationId: 'inv-1' } },
+    timestamp: 1000,
+    ...overrides,
+  };
+}
+
+describe('active text stream writes into the named message', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -134,8 +132,6 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
     storeState.catInvocations = {};
     storeState.activeInvocations = {};
     storeState.hasMore = true;
-    recordViolationSpy.mockClear();
-    resetThreadRuntimeSingleton();
     vi.clearAllMocks();
   });
 
@@ -146,19 +142,8 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
     container.remove();
   });
 
-  it('appends text to existing bubble via replaceMessages (B1.2.2 wire-up)', () => {
-    // Pre-state: existing streaming bubble for inv-1
-    const existing: ChatMessage = {
-      id: 'msg-inv-1-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'hello',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-1' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
+  it('appends text to the response the chunk names', () => {
+    storeState.messages = [streamingResponse('hello')];
     storeState.catInvocations = { codex: { invocationId: 'inv-1' } };
 
     act(() => {
@@ -172,39 +157,27 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         threadId: 'thread-1',
         content: ' world',
         origin: 'stream',
+        messageId: 'resp-1',
         invocationId: 'inv-1',
         timestamp: 1100,
       });
     });
 
-    // GREEN expectation: replaceMessages called with reducer-computed next state
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages).toHaveLength(1);
-    expect(nextMessages[0]).toMatchObject({
-      id: 'msg-inv-1-codex',
+    expect(storeState.messages).toHaveLength(1);
+    expect(storeState.messages[0]).toMatchObject({
+      id: 'resp-1',
       catId: 'codex',
       content: 'hello world',
       isStreaming: true,
     });
-
-    // Side-effect guard: legacy appendToMessage MUST NOT be called for this branch
-    expect(mockAppendToMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps typed child execution identity on the live stream bubble before F5', () => {
-    const existing: ChatMessage = {
-      id: 'msg-child-ordinary-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'visible reply',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'parent-1', turnInvocationId: 'child-ordinary' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
+  it('keeps typed child execution identity on the live response before F5', () => {
+    storeState.messages = [
+      streamingResponse('visible reply', {
+        extra: { stream: { invocationId: 'parent-1', turnInvocationId: 'child-ordinary' } },
+      }),
+    ];
     storeState.catInvocations = { codex: { invocationId: 'parent-1' } };
 
     act(() => {
@@ -218,6 +191,7 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         threadId: 'thread-1',
         content: ' complete',
         origin: 'stream',
+        messageId: 'resp-1',
         invocationId: 'parent-1',
         turnInvocationId: 'child-ordinary',
         extra: {
@@ -238,14 +212,14 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
       });
     });
 
-    const liveBubble = storeState.messages.find((message) => message.id === existing.id);
-    expect(liveBubble?.content).toBe('visible reply complete');
-    expect(liveBubble?.extra?.turnExecution).toEqual({
+    const liveResponse = storeState.messages.find((message) => message.id === 'resp-1');
+    expect(liveResponse?.content).toBe('visible reply complete');
+    expect(liveResponse?.extra?.turnExecution).toEqual({
       invocationId: 'child-ordinary',
       parentInvocationId: 'parent-1',
       executionKind: 'ordinary',
     });
-    expect(liveBubble?.extra?.auxiliaryTurnExecutions).toEqual([
+    expect(liveResponse?.extra?.auxiliaryTurnExecutions).toEqual([
       {
         invocationId: 'child-routing-guard',
         parentInvocationId: 'parent-1',
@@ -254,19 +228,8 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
     ]);
   });
 
-  it('preserves hasMore when applying reducer result (round 1 P1, cloud codex)', () => {
-    // Pre-state: existing streaming bubble + hasMore=true (older history still loadable)
-    const existing: ChatMessage = {
-      id: 'msg-inv-1-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'hello',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-1' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
+  it('streams into the response in place, leaving hasMore (history pagination) alone (round 1 P1, cloud codex)', () => {
+    storeState.messages = [streamingResponse('hello')];
     storeState.hasMore = true;
 
     act(() => {
@@ -280,139 +243,21 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         threadId: 'thread-1',
         content: ' world',
         origin: 'stream',
+        messageId: 'resp-1',
         invocationId: 'inv-1',
         timestamp: 1100,
       });
     });
 
     // 关键：hasMore 不能被强制设为 false（否则 useChatHistory gates on hasMore，
-    // 老历史 pagination 死掉）。复用既有 store hasMore。
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    expect(lastCall[1]).toBe(true);
+    // 老历史 pagination 死掉）。流式写入只改 R 本身，不整表重写消息列表。
+    expect(storeState.messages[0]?.content).toBe('hello world');
+    expect(mockReplaceMessages).not.toHaveBeenCalled();
+    expect(storeState.hasMore).toBe(true);
   });
 
-  it('forwards reducer violations to invariant gate (round 1 P1 #2, 砚砚)', () => {
-    // Forwarding contract: stub reducer to return a synthetic violation, verify
-    // handler forwards to recordBubbleInvariantViolation. Triggering a real
-    // violation through real reducer requires hard-to-stage state (canonical-split
-    // 需要 same messageId + different invocationId 同时落到一条线上); 这里测的是
-    // contract not detection — detection 已在 bubble-reducer.test 覆盖。
-    forwardingTestReducerStub.mockImplementation(() => ({
-      nextMessages: [],
-      violations: [
-        {
-          threadId: 'thread-1',
-          actorId: 'codex',
-          canonicalInvocationId: 'inv-1',
-          bubbleKind: 'assistant_text',
-          eventType: 'stream_chunk',
-          violationKind: 'canonical-split',
-          sourcePath: 'active',
-          originPhase: 'stream',
-          messageId: 'msg-shared',
-          existingMessageId: 'msg-other',
-          existingOriginPhase: 'stream',
-          timestamp: 1100,
-          seq: null,
-        },
-      ],
-      recoveryAction: 'sot-override',
-    }));
-
-    // Pre-state: minimal bubble that getOrRecover can find — same invocation,
-    // streaming, so wire-up enters the reducer path.
-    const existing: ChatMessage = {
-      id: 'msg-inv-1-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'first',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-1' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
-    storeState.hasMore = true;
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: ' second',
-        origin: 'stream',
-        invocationId: 'inv-1',
-        timestamp: 1100,
-      });
-    });
-
-    // 关键：reducer 返回 violations 必须被 forward 到 recordBubbleInvariantViolation；
-    // 否则 canonical-split / duplicate / phase-regression 在 hot path 静默。
-    expect(recordViolationSpy).toHaveBeenCalled();
-    const violations = recordViolationSpy.mock.calls.map((c) => c[0]);
-    expect(violations.some((v) => v?.violationKind === 'canonical-split')).toBe(true);
-
-    forwardingTestReducerStub.mockReset();
-  });
-
-  it('requests stream catch-up when reducer returns catch-up for an active late stream chunk', () => {
-    forwardingTestReducerStub.mockImplementation(() => ({
-      nextMessages: storeState.messages,
-      violations: [],
-      recoveryAction: 'catch-up',
-    }));
-
-    const existing: ChatMessage = {
-      id: 'msg-inv-catchup-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: '',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-catchup' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: 'late stdout tail',
-        origin: 'stream',
-        invocationId: 'inv-catchup',
-        timestamp: 1100,
-      });
-    });
-
-    expect(mockRequestStreamCatchUp).toHaveBeenCalledWith('thread-1');
-
-    forwardingTestReducerStub.mockReset();
-  });
-
-  it('replaces text content via replaceMessages when textMode=replace (B1.2.2 + round 5 P1)', () => {
-    // Pre-state: existing streaming bubble for inv-1
-    const existing: ChatMessage = {
-      id: 'msg-inv-1-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'old draft text',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-1' } },
-      timestamp: 1000,
-    };
-    storeState.messages = [existing];
+  it('replaces the response text when textMode=replace (round 5 P1)', () => {
+    storeState.messages = [streamingResponse('old draft text')];
     storeState.catInvocations = { codex: { invocationId: 'inv-1' } };
 
     act(() => {
@@ -426,25 +271,18 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         threadId: 'thread-1',
         content: 'rewritten output',
         origin: 'stream',
+        messageId: 'resp-1',
         invocationId: 'inv-1',
         textMode: 'replace',
         timestamp: 1100,
       });
     });
 
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages[0].content).toBe('rewritten output');
-
-    // legacy patchMessage path for replace must NOT be called for this branch
-    expect(mockPatchMessage).not.toHaveBeenCalled();
+    expect(storeState.messages).toHaveLength(1);
+    expect(storeState.messages[0]?.content).toBe('rewritten output');
   });
 
-  // B1.2.3 — active text stream NEW-bubble creation wire-up
-  it('creates new stream bubble via reducer + replaceMessages (B1.2.3)', () => {
-    // No pre-existing bubble; activeInvocations carries the slot so wire-up
-    // can derive invocationId fallback even if msg.invocationId is missing.
+  it('creates the response under its server id when this client has not seen it yet', () => {
     storeState.messages = [];
     storeState.activeInvocations = { 'inv-1': { catId: 'codex', mode: 'stream' } };
 
@@ -459,18 +297,16 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         threadId: 'thread-1',
         content: 'hello world',
         origin: 'stream',
+        messageId: 'resp-1',
         invocationId: 'inv-1',
         timestamp: 1000,
       });
     });
 
-    // 关键：new stream bubble 必须通过 reducer + replaceMessages，不直接 addMessage
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    expect(mockAddMessage).not.toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages).toHaveLength(1);
-    expect(nextMessages[0]).toMatchObject({
+    expect(mockAddMessageToThread).toHaveBeenCalledWith('thread-1', expect.objectContaining({ id: 'resp-1' }));
+    expect(storeState.messages).toHaveLength(1);
+    expect(storeState.messages[0]).toMatchObject({
+      id: 'resp-1',
       type: 'assistant',
       catId: 'codex',
       content: 'hello world',
@@ -478,76 +314,9 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
       origin: 'stream',
       extra: { stream: { invocationId: 'inv-1' } },
     });
-    // ID 与 deriveBubbleId('msg-${inv}-${cat}') 兼容（不带 bubbleKind 后缀）
-    expect(nextMessages[0].id).toBe('msg-inv-1-codex');
   });
 
-  // B1.2.4 — callback wire-up with explicit invocationId only (砚砚 verdict)
-  // invocationless callback 留 legacy（reducer 没有 activeId / finalized ref / rich
-  // placeholder ref 等上下文，硬塞会引入 heuristic merge）
-
-  it('callback with explicit invocationId + matching stream bubble: defers until done, then upgrades via reducer', () => {
-    const streaming: ChatMessage = {
-      id: 'msg-inv-cb-1-codex',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'streaming...',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-cb-1' } },
-      timestamp: 1500,
-    };
-    storeState.messages = [streaming];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: 'final answer',
-        origin: 'callback',
-        invocationId: 'inv-cb-1',
-        messageId: 'msg-inv-cb-1-codex',
-        timestamp: 1600,
-      });
-    });
-
-    expect(mockReplaceMessages).not.toHaveBeenCalled();
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'done',
-        catId: 'codex',
-        threadId: 'thread-1',
-        invocationId: 'inv-cb-1',
-        isFinal: true,
-        timestamp: 1700,
-      });
-    });
-
-    // Z11 correction: stream work-log and callback speech are separate bubbles.
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages).toHaveLength(2);
-    const stream = nextMessages.find((m) => m.origin === 'stream')!;
-    const callback = nextMessages.find((m) => m.origin === 'callback')!;
-    expect(stream.content).toContain('streaming...'); // stream raw preserved
-    expect(callback.id).toBe('msg-inv-cb-1-codex');
-    expect(callback.isStreaming).toBe(false);
-    expect(callback.content).toContain('final answer'); // callback content
-    // legacy patchMessage(content/origin/isStreaming) MUST NOT be invoked
-    const contentPatchCalls = mockPatchMessage.mock.calls.filter(
-      (c) => c[1]?.content !== undefined || c[1]?.origin !== undefined || c[1]?.isStreaming !== undefined,
-    );
-    expect(contentPatchCalls).toHaveLength(0);
-  });
-
-  it('callback with explicit invocationId + no target: creates standalone via reducer (B1.2.4)', () => {
+  it('a post_message callback is stored whole as its own message under its server id', () => {
     storeState.messages = [];
 
     act(() => {
@@ -562,17 +331,14 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         content: 'standalone callback',
         origin: 'callback',
         invocationId: 'inv-cb-2',
-        messageId: 'msg-inv-cb-2-codex',
+        messageId: 'post-cb-2',
         timestamp: 2000,
       });
     });
 
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    expect(mockAddMessage).not.toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    expect(nextMessages).toHaveLength(1);
-    expect(nextMessages[0]).toMatchObject({
+    expect(storeState.messages).toHaveLength(1);
+    expect(storeState.messages[0]).toMatchObject({
+      id: 'post-cb-2',
       type: 'assistant',
       catId: 'codex',
       content: 'standalone callback',
@@ -581,196 +347,8 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
     });
   });
 
-  // 砚砚 round 2 P1 (云端 codex): when reducer returns quarantine, wire-up must fall
-  // back to legacy to preserve callback content + skip markReplacedInvocation
-  // (otherwise visible missing final answer + suppress later stream chunks).
-  it('callback wire-up falls back when reducer quarantines (round 2 P1)', () => {
-    forwardingTestReducerStub.mockImplementation(() => ({
-      nextMessages: [], // 模拟 quarantine — reducer 没有应用 callback content
-      violations: [
-        {
-          threadId: 'thread-1',
-          actorId: 'codex',
-          canonicalInvocationId: 'inv-q',
-          bubbleKind: 'assistant_text',
-          eventType: 'callback_final',
-          violationKind: 'duplicate',
-          sourcePath: 'callback',
-          originPhase: 'callback/history',
-          messageId: 'msg-q',
-          existingMessageId: 'msg-other',
-          existingOriginPhase: 'callback/history',
-          timestamp: 2000,
-          seq: null,
-        },
-      ],
-      recoveryAction: 'quarantine',
-    }));
-
-    storeState.messages = [];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: 'callback authoritative content',
-        origin: 'callback',
-        invocationId: 'inv-q',
-        messageId: 'msg-q',
-        timestamp: 2000,
-      });
-    });
-
-    // 关键：reducer quarantine 时，callback 内容必须通过 legacy fallback 落到 store
-    const calledAddMessage = mockAddMessage.mock.calls.some(
-      ([m]) => m.origin === 'callback' && m.content === 'callback authoritative content',
-    );
-    const calledPatchMessage = mockPatchMessage.mock.calls.some(
-      (c) =>
-        (c[1] as Record<string, unknown>)?.origin === 'callback' &&
-        (c[1] as Record<string, unknown>)?.content === 'callback authoritative content',
-    );
-    expect(calledAddMessage || calledPatchMessage, 'callback content must be delivered via legacy fallback').toBe(true);
-
-    forwardingTestReducerStub.mockReset();
-  });
-
-  // 云端 round 4 P1: fallback addMessage(finalId, ...) 在 canonical-split 时与既有
-  // bubble id 撞 → store dedup drops insert → callback content 丢。fallback 必须用
-  // non-conflicting id 保证 content 一定落到 store。
-  it('callback fallback uses non-conflicting id when reducer rejects (round 4 P1)', () => {
-    forwardingTestReducerStub.mockImplementation(() => ({
-      nextMessages: [],
-      violations: [
-        {
-          threadId: 'thread-1',
-          actorId: 'codex',
-          canonicalInvocationId: 'inv-collision',
-          bubbleKind: 'assistant_text',
-          eventType: 'callback_final',
-          violationKind: 'canonical-split',
-          sourcePath: 'callback',
-          originPhase: 'callback/history',
-          messageId: 'msg-existing-collision',
-          existingMessageId: 'msg-existing-collision',
-          existingOriginPhase: 'callback/history',
-          timestamp: 3000,
-          seq: null,
-        },
-      ],
-      recoveryAction: 'sot-override',
-    }));
-
-    // Pre-state: existing bubble with id == msg.messageId (canonical-split)
-    const colliding: ChatMessage = {
-      id: 'msg-existing-collision',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'pre-existing different content',
-      isStreaming: false,
-      origin: 'callback',
-      timestamp: 2900,
-    };
-    storeState.messages = [colliding];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: 'callback authoritative content',
-        origin: 'callback',
-        invocationId: 'inv-collision',
-        messageId: 'msg-existing-collision',
-        timestamp: 3000,
-      });
-    });
-
-    // 关键：fallback addMessage 不能用 msg-existing-collision（撞 id 被 dedup 丢弃）
-    const addCall = mockAddMessage.mock.calls.find(
-      ([m]) => m.origin === 'callback' && m.content === 'callback authoritative content',
-    );
-    expect(addCall, 'fallback addMessage must be called for callback content').toBeDefined();
-    expect(addCall?.[0]?.id, 'fallback id must NOT collide with existing bubble id').not.toBe('msg-existing-collision');
-
-    forwardingTestReducerStub.mockReset();
-  });
-
-  // 砚砚 round 2 follow-up: recoveryAction='sot-override' (canonical-split) 与 quarantine
-  // 同样代表 reducer 没采纳事件，wire-up 必须 fallback 保 content 且 不 markReplaced
-  it('callback wire-up falls back when reducer returns sot-override (round 2 follow-up)', () => {
-    forwardingTestReducerStub.mockImplementation(() => ({
-      nextMessages: [],
-      violations: [
-        {
-          threadId: 'thread-1',
-          actorId: 'codex',
-          canonicalInvocationId: 'inv-split',
-          bubbleKind: 'assistant_text',
-          eventType: 'callback_final',
-          violationKind: 'canonical-split',
-          sourcePath: 'callback',
-          originPhase: 'callback/history',
-          messageId: 'msg-split',
-          existingMessageId: 'msg-collision',
-          existingOriginPhase: 'callback/history',
-          timestamp: 2500,
-          seq: null,
-        },
-      ],
-      recoveryAction: 'sot-override',
-    }));
-
-    storeState.messages = [];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'text',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: 'callback content during sot-override',
-        origin: 'callback',
-        invocationId: 'inv-split',
-        messageId: 'msg-split',
-        timestamp: 2500,
-      });
-    });
-
-    // 关键：sot-override 时 callback 内容也必须通过 legacy fallback 落到 store
-    const calledAddMessage = mockAddMessage.mock.calls.some(
-      ([m]) => m.origin === 'callback' && m.content === 'callback content during sot-override',
-    );
-    expect(calledAddMessage, 'callback content must be delivered via legacy fallback during sot-override').toBe(true);
-
-    forwardingTestReducerStub.mockReset();
-  });
-
-  it('callback with explicit invocationId does NOT hijack contentful unrelated live stream (B1.2.4 narrow guard)', () => {
-    // Pre-state: live invocationless stream from a different (untracked) invocation
-    const liveStream: ChatMessage = {
-      id: 'msg-live',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'I am still streaming',
-      isStreaming: true,
-      origin: 'stream',
-      extra: { stream: {} }, // invocationless
-      timestamp: 1000,
-    };
-    storeState.messages = [liveStream];
+  it('a post_message callback does NOT hijack the contentful live response', () => {
+    storeState.messages = [streamingResponse('I am still streaming', { extra: { stream: {} } })];
 
     act(() => {
       root.render(React.createElement(Harness));
@@ -784,19 +362,18 @@ describe('F183 Phase B1.2.2 — active text stream wire-up to reducer', () => {
         content: 'callback for different invocation',
         origin: 'callback',
         invocationId: 'inv-different',
-        messageId: 'msg-different-cb',
+        messageId: 'post-different-cb',
         timestamp: 2000,
       });
     });
 
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    const lastCall = mockReplaceMessages.mock.calls[mockReplaceMessages.mock.calls.length - 1];
-    const nextMessages = lastCall[0] as ChatMessage[];
-    // 关键：live stream bubble 必须保留，callback 创建 standalone（narrow guard）
-    expect(nextMessages).toHaveLength(2);
-    const liveAfter = nextMessages.find((m) => m.id === 'msg-live');
+    // 关键：live response 必须保留，callback 是它自己的 message
+    expect(storeState.messages).toHaveLength(2);
+    const liveAfter = storeState.messages.find((m) => m.id === 'resp-1');
     expect(liveAfter?.content, 'live stream content must NOT be hijacked').toBe('I am still streaming');
-    const cbAfter = nextMessages.find((m) => m.id === 'msg-different-cb');
-    expect(cbAfter, 'standalone callback bubble must be created').toBeDefined();
+    expect(liveAfter?.isStreaming).toBe(true);
+    const cbAfter = storeState.messages.find((m) => m.id === 'post-different-cb');
+    expect(cbAfter, 'standalone callback message must be created').toBeDefined();
+    expect(cbAfter?.content).toBe('callback for different invocation');
   });
 });

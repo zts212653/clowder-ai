@@ -7,14 +7,16 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
 import { ensureFakeCliOnPath } from './helpers/fake-cli-path.js';
 import { fakeL0Compiler } from './helpers/fake-l0-compiler.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 ensureFakeCliOnPath('claude');
 ensureFakeCliOnPath('codex');
@@ -28,7 +30,7 @@ describe('saveUploadedImages', () => {
   });
 
   afterEach(async () => {
-    if (uploadDir) await rm(uploadDir, { recursive: true, force: true });
+    if (uploadDir) console.log('retained own upload fixture:', uploadDir);
   });
 
   it('saves a valid PNG file and returns metadata', async () => {
@@ -283,17 +285,19 @@ describe('contentBlocks in GET /api/messages', () => {
   });
 
   it('returns contentBlocks when present', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'check this image',
-      contentBlocks: [
-        { type: 'text', text: 'check this image' },
-        { type: 'image', url: '/uploads/test.png' },
-      ],
-      mentions: ['opus'],
-      timestamp: 1000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'check this image',
+        contentBlocks: [
+          { type: 'text', text: 'check this image' },
+          { type: 'image', url: '/uploads/test.png' },
+        ],
+        mentions: ['opus'],
+        timestamp: 1000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -305,13 +309,15 @@ describe('contentBlocks in GET /api/messages', () => {
   });
 
   it('omits contentBlocks when not present', async () => {
-    messageStore.append({
-      userId: 'default-user',
-      catId: null,
-      content: 'text only',
-      mentions: [],
-      timestamp: 1000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'default-user',
+        catId: null,
+        content: 'text only',
+        mentions: [],
+        timestamp: 1000,
+      }),
+    );
 
     const res = await app.inject({ method: 'GET', url: '/api/messages' });
     const body = JSON.parse(res.body);
@@ -324,14 +330,14 @@ describe('multipart image target routing', () => {
   let app;
   let uploadDir;
   let messageStore;
-  const routeExecutionCalls = [];
+  let invocationQueue;
   const broadcastedAgentMessages = [];
 
   beforeEach(async () => {
     uploadDir = await mkdtemp(join(tmpdir(), 'cat-cafe-image-target-'));
-    routeExecutionCalls.length = 0;
     broadcastedAgentMessages.length = 0;
 
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
@@ -342,6 +348,7 @@ describe('multipart image target routing', () => {
     const { messagesRoutes } = await import('../dist/routes/messages.js');
 
     messageStore = new MessageStore();
+    invocationQueue = new InvocationQueue();
     const mockRouter = {
       async resolveTargetsAndIntent() {
         return {
@@ -349,15 +356,6 @@ describe('multipart image target routing', () => {
           intent: { intent: 'execute', explicit: false, promptTags: [] },
         };
       },
-      async *routeExecution(_userId, _content, _threadId, _userMessageId, targetCats, _intent, routeOptions) {
-        routeExecutionCalls.push({
-          targetCats: [...targetCats],
-          contentBlocks: routeOptions?.contentBlocks,
-          uploadDir: routeOptions?.uploadDir,
-        });
-        yield { type: 'done', catId: targetCats[0], timestamp: Date.now(), isFinal: true };
-      },
-      async ackCollectedCursors() {},
     };
 
     app = Fastify();
@@ -373,6 +371,8 @@ describe('multipart image target routing', () => {
       },
       router: mockRouter,
       invocationRecordStore: new InvocationRecordStore(),
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
       uploadDir,
     });
     await app.ready();
@@ -380,7 +380,7 @@ describe('multipart image target routing', () => {
 
   afterEach(async () => {
     if (app) await app.close();
-    if (uploadDir) await rm(uploadDir, { recursive: true, force: true });
+    if (uploadDir) console.log('retained own upload fixture:', uploadDir);
   });
 
   const sendImageMessage = () => {
@@ -406,7 +406,7 @@ describe('multipart image target routing', () => {
   it('returns the stored upload URLs and time so the sender can replace its local preview', async () => {
     const res = await sendImageMessage();
 
-    assert.equal(res.statusCode, 200);
+    assert.equal(res.statusCode, 202);
     const body = res.json();
     const stored = messageStore.getById(body.userMessageId);
     assert.ok(stored, 'the user message is stored');
@@ -426,20 +426,14 @@ describe('multipart image target routing', () => {
   it('routes multipart image messages to the mentioned cat (not forced to codex)', async () => {
     const res = await sendImageMessage();
 
-    assert.equal(res.statusCode, 200);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    assert.equal(routeExecutionCalls.length, 1);
-    // P1 regression guard: targetCats must match router resolution, not be overridden to codex
-    assert.deepEqual(
-      routeExecutionCalls[0].targetCats,
-      ['opus'],
-      'image message should route to the resolved target cat, not forced to codex',
-    );
-    assert.equal(routeExecutionCalls[0].uploadDir, uploadDir);
-    assert.ok(Array.isArray(routeExecutionCalls[0].contentBlocks), 'routeExecution should receive contentBlocks');
+    assert.equal(res.statusCode, 202);
+    const [entry] = invocationQueue.list('default', 'alice');
+    assert.deepEqual(entry.targets, ['opus'], 'image message should retain the resolved target at Queue ingress');
+    const stored = await messageStore.getById(JSON.parse(res.body).userMessageId);
+    assert.ok(Array.isArray(stored.contentBlocks), 'canonical source message should retain contentBlocks');
     assert.ok(
-      routeExecutionCalls[0].contentBlocks.some((b) => b.type === 'image'),
-      'routeExecution should receive image content block',
+      stored.contentBlocks.some((block) => block.type === 'image'),
+      'canonical source message should retain the image content block for provider admission',
     );
     // No forced-to-codex notice should be broadcast
     const notice = broadcastedAgentMessages.find(

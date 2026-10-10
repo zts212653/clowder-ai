@@ -95,7 +95,7 @@ function harness(catIds = ['sol', 'terra']) {
 }
 
 describe('F293 controlled human recovery journey', () => {
-  it('runs real dispatch across three threads with a failing then recovered fake provider, without replaying old work', async () => {
+  it('runs each requested thread despite an earlier provider failure or legacy availability signal, without replaying old work', async () => {
     const h = harness(['opus', 'codex']);
     h.time(Date.now());
     let providerFails = true;
@@ -118,6 +118,20 @@ describe('F293 controlled human recovery journey', () => {
       },
     };
     const { deps, messages } = routingJourneyDeps(h.preflight, h.adapter, provider);
+    let preflightCalls = 0;
+    let terminalObservations = 0;
+    deps.routingDispatchPreflight = {
+      preflight: async (input) => {
+        preflightCalls++;
+        return h.preflight.preflight(input);
+      },
+    };
+    deps.invocationDeps.routingDispatchSignalObserver = {
+      observeTerminal: async (input) => {
+        terminalObservations++;
+        return h.adapter.observeTerminal(input);
+      },
+    };
     const send = async (threadId, human = false) => {
       h.time(Date.now());
       const result = [];
@@ -131,28 +145,31 @@ describe('F293 controlled human recovery journey', () => {
       h.time(Date.now());
       return result;
     };
-    await send('thread-a', true);
+    const firstFailure = await send('thread-a', true);
     assert.equal(calls, 1);
-    assert.equal((await h.decide()).targets[0].disposition, 'rejected', 'real failed terminal updates routing truth');
+    assert.ok(firstFailure.some((event) => event.type === 'error' && event.error === 'quota exhausted'));
+    assert.equal(h.events.length, 0, 'an invocation failure must not publish global member availability');
+    await h.negative('legacy-quota', { observedAt: Date.now(), validUntil: Date.now() + 300_000 });
     for (const threadId of ['thread-b', 'thread-c']) {
       const events = await send(threadId);
-      assert.ok(events.some((event) => event.errorCode === 'routing_preflight_rejected'));
+      assert.ok(events.some((event) => event.type === 'error' && event.error === 'quota exhausted'));
+      assert.ok(!events.some((event) => event.type === 'system_info' && event.content?.includes('routing_preflight')));
     }
-    assert.equal(calls, 1, 'automatic retries are blocked before invoking the provider');
+    assert.equal(calls, 3, 'each cross-thread request reaches the provider and receives its actual failure');
     providerFails = false;
-    const attempted = await send('thread-a', true);
-    assert.ok(
-      attempted.some(
-        (event) => event.type === 'system_info' && JSON.parse(event.content).target?.ownerAttempt === true,
-      ),
+    for (const threadId of ['thread-a', 'thread-b', 'thread-c']) {
+      const events = await send(threadId, threadId === 'thread-a');
+      assert.ok(events.some((event) => event.type === 'text' && event.content.includes('completed')));
+    }
+    assert.equal(calls, 6, 'only the six explicit requests execute; success does not replay failed work');
+    assert.equal(preflightCalls, 0, 'ordinary delivery never queries legacy availability');
+    assert.equal(terminalObservations, 0, 'ordinary terminal outcomes never update global availability');
+    assert.equal(h.events.length, 1, 'the legacy signal remains readable without affecting ordinary dispatch');
+    assert.equal(
+      messages.filter((message) => message.extra?.systemInfo?.payload.retryInvocationId).length,
+      0,
+      'actual provider failures must not manufacture availability rejection receipts',
     );
-    assert.equal(calls, 2, 'a human attempt reaches the recovered provider');
-    assert.equal((await h.decide()).targets[0].disposition, 'allowed');
-    assert.equal(calls, 2, 'recovery does not replay either blocked request');
-    assert.equal(messages.filter((message) => message.extra?.systemInfo?.payload.retryInvocationId).length, 3);
-    await send('thread-b');
-    await send('thread-c');
-    assert.equal(calls, 4, 'both other threads can send again through the same resolver');
   });
 
   it('warns and really permits an owner attempt while the same automatic target remains rejected', async () => {

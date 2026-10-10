@@ -43,6 +43,7 @@ describe('F128 proposal card realtime socket journey', () => {
   let messageStore: import('../../../../api/src/domains/cats/services/stores/ports/MessageStore').MessageStore;
   let ingress: import('../../../../api/src/domains/approval-hub/ApprovalIngress').ApprovalIngress;
   let useSocket: typeof import('../useSocket').useSocket;
+  let useThreadMessages: typeof import('../useThreadScopedSelectors').useThreadMessages;
   let mergeReplaceHydrationMessages: typeof import('../useChatHistory').mergeReplaceHydrationMessages;
   let useChatStore: typeof import('@/stores/chatStore').useChatStore;
   let RichBlocks: typeof import('@/components/rich/RichBlocks').RichBlocks;
@@ -51,6 +52,7 @@ describe('F128 proposal card realtime socket journey', () => {
   let root: Root;
   let socketReady: Promise<void>;
   let resolveSocketReady: (() => void) | undefined;
+  let clientConnected = false;
   let canonicalStatus: 'pending' | 'withdrawn';
   let publicationStore: FakePublicationStore;
   let publishDraft: ApprovalPublishDraft;
@@ -73,6 +75,7 @@ describe('F128 proposal card realtime socket journey', () => {
     if (httpServer?.listening) {
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
     }
+    vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
 
@@ -104,6 +107,7 @@ describe('F128 proposal card realtime socket journey', () => {
     vi.stubEnv('NEXT_PUBLIC_API_URL', `http://127.0.0.1:${port}`);
 
     ({ useSocket } = await import('../useSocket'));
+    ({ useThreadMessages } = await import('../useThreadScopedSelectors'));
     ({ mergeReplaceHydrationMessages } = await import('../useChatHistory'));
     ({ useChatStore } = await import('@/stores/chatStore'));
     ({ RichBlocks } = await import('@/components/rich/RichBlocks'));
@@ -143,8 +147,9 @@ describe('F128 proposal card realtime socket journey', () => {
   }
 
   function Journey({ activeThreadId }: { activeThreadId: string }) {
-    const messages = useChatStore((state) => state.messages);
+    const messages = useThreadMessages(activeThreadId);
     const { socketConnected } = useSocket({ onMessage: () => {} }, activeThreadId, [activeThreadId]);
+    clientConnected = socketConnected;
     useEffect(() => {
       if (!socketConnected) return;
       resolveSocketReady?.();
@@ -166,8 +171,8 @@ describe('F128 proposal card realtime socket journey', () => {
 
   async function publishProposal(): Promise<string> {
     const origin = messageStore.append({
+      from: { kind: 'user', userId: 'default-user' },
       userId: 'default-user',
-      catId: null,
       content: '请开一个新 thread',
       mentions: [],
       timestamp: Date.now() - 500,
@@ -218,7 +223,11 @@ describe('F128 proposal card realtime socket journey', () => {
 
     const initialSocketId = [...socketManager.getIO().sockets.sockets.keys()][0];
     for (const socket of socketManager.getIO().sockets.sockets.values()) socket.conn.close();
+    await waitFor(() => !clientConnected);
     await act(async () => {
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+      // Wake the existing recovery mechanism; no Socket.IO manager retry is enabled.
+      document.dispatchEvent(new Event('visibilitychange'));
       await waitFor(() => {
         const socketIds = [...socketManager.getIO().sockets.sockets.keys()];
         return socketIds.length === 1 && socketIds[0] !== initialSocketId;
@@ -232,7 +241,10 @@ describe('F128 proposal card realtime socket journey', () => {
     const snapshotCard = currentMessages.find((message) => message.id === cardMessageId);
     expect(snapshotCard).toBeDefined();
     if (!snapshotCard) throw new Error('Expected the persisted proposal card in the active thread snapshot');
-    const replay = mergeReplaceHydrationMessages([snapshotCard], currentMessages, {});
+    expect(snapshotCard.type).toBe('assistant');
+    expect(snapshotCard.from).toEqual({ kind: 'agent', catId: 'codex-sol' });
+    expect(snapshotCard.catId).toBe('codex-sol');
+    const replay = mergeReplaceHydrationMessages([snapshotCard], currentMessages);
     act(() => useChatStore.getState().hydrateThread(THREAD_ID, replay.messages, false));
     expect(container.querySelectorAll(`[data-message-id="${cardMessageId}"]`)).toHaveLength(1);
     expect(

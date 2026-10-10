@@ -64,6 +64,7 @@ const SESSION_BOOTSTRAP_TIMEOUT_MS = 10_000;
 const API_REQUEST_TIMEOUT_MS = 30_000;
 
 let sessionGate: Promise<void> | null = null;
+let sessionRefresh: Promise<void> | null = null;
 let lastSessionFailureToastAt = 0;
 
 export interface ApiFetchOptions {
@@ -122,6 +123,35 @@ function ensureSession(): Promise<void> {
       throw err;
     });
   sessionGate = gate;
+  return gate;
+}
+
+/** Revalidate the HttpOnly cookie before a new physical Socket handshake.
+ * Parallel surfaces share one refresh; an older bootstrap finishes first so
+ * its late Set-Cookie cannot overwrite the new server's session.
+ */
+export function refreshApiSession(): Promise<void> {
+  if (sessionRefresh) return sessionRefresh;
+  const previous = sessionGate;
+  const gate = (previous ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const res = await boundedFetch(
+        `${API_URL}/api/session`,
+        { credentials: 'include' },
+        SESSION_BOOTSTRAP_TIMEOUT_MS,
+      );
+      if (!res.ok) throw new Error(`session bootstrap failed (${res.status})`);
+    })
+    .catch((err) => {
+      if (sessionGate === gate) sessionGate = null;
+      throw err;
+    })
+    .finally(() => {
+      if (sessionRefresh === gate) sessionRefresh = null;
+    });
+  sessionGate = gate;
+  sessionRefresh = gate;
   return gate;
 }
 

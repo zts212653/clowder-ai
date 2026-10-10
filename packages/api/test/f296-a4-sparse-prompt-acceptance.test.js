@@ -5,6 +5,7 @@
 // asserts that nothing new filled the space back in.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
@@ -127,25 +128,29 @@ function createStaleThenRecoveringService(catId, captured, capability = CODEX_EX
 function seedColdThread(messageStore, count = 60) {
   const baseTs = Date.now() - (count + 1) * 60_000;
   for (let i = 0; i < count; i++) {
-    messageStore.append({
-      threadId: 'thread-a4',
-      userId: 'user-1',
-      catId: null,
-      content: `message ${i} about the delivery cursor contract`,
-      mentions: [],
-      timestamp: baseTs + i * 60_000,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-a4',
+        userId: 'user-1',
+        catId: null,
+        content: `message ${i} about the delivery cursor contract`,
+        mentions: [],
+        timestamp: baseTs + i * 60_000,
+      }),
+    );
   }
   // The trigger message must exist in the store: incremental (cold-window) mode
   // only engages when the route knows which message is the current one.
-  return messageStore.append({
-    threadId: 'thread-a4',
-    userId: 'user-1',
-    catId: null,
-    content: '@opus 看看这个',
-    mentions: ['opus'],
-    timestamp: baseTs + count * 60_000,
-  });
+  return messageStore.append(
+    canonicalTestMessageInput({
+      threadId: 'thread-a4',
+      userId: 'user-1',
+      catId: null,
+      content: '@opus 看看这个',
+      mentions: ['opus'],
+      timestamp: baseTs + count * 60_000,
+    }),
+  );
 }
 
 function createRouteDeps(catIds, captured, capability = CODEX_EXEC, messageCount = 60) {

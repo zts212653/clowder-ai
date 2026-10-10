@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type CatData, formatCatName, useCatData } from '@/hooks/useCatData';
+import { type CatData, useCatData } from '@/hooks/useCatData';
 import type { ChatUserScrollGesture } from '@/hooks/useChatHistory';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { catColorVar } from '@/lib/cat-slug';
-import { CAT_COLORS } from '@/lib/color-defaults';
+import { resolveMessageSender } from '@/lib/resolve-sender';
 import type { ChatMessage as ChatMessageData } from '@/stores/chatStore';
-import { foldedSourceInvocationIdInTimeline } from './turn-absorption-summary';
+import type { CoCreatorConfig } from './config-viewer-types';
+import { messageRendersNothing } from './message-render-visibility';
 
 /** Maximum dots rendered on the track — prevents clutter in long conversations */
 const MAX_DOTS = 18;
@@ -20,56 +20,8 @@ function wheelDeltaPx(event: WheelEvent, container: HTMLElement): number {
   return event.deltaY;
 }
 
-// Some variants use non-hyphen catIds (e.g. gpt52/sonnet/spark/gemini25 in the runtime cat config).
-// During the brief pre-/api/cats state, the cat list may be empty, so we map
-// variant ids to a base color only. Identity text keeps the raw-id fallback
-// until the runtime roster can resolve the exact member.
-const VARIANT_BASE_FALLBACK: Record<string, string> = {
-  gpt52: 'codex',
-  spark: 'codex',
-  sonnet: 'opus',
-  gemini25: 'gemini',
-};
-
-const FALLBACK_CAT_COLORS: Record<string, string> = {
-  opus: CAT_COLORS.opus.primary,
-  codex: CAT_COLORS.codex.primary,
-  gemini: CAT_COLORS.gemini.primary,
-  kimi: CAT_COLORS.kimi.primary,
-};
-
-function resolveFallbackCatColor(catId: string): string | undefined {
-  const normalizedId = catId.toLowerCase();
-  const direct = FALLBACK_CAT_COLORS[normalizedId];
-  if (direct) return direct;
-
-  const base = normalizedId.split('-')[0];
-  if (base && base !== normalizedId && FALLBACK_CAT_COLORS[base]) return FALLBACK_CAT_COLORS[base];
-
-  const mappedBase = VARIANT_BASE_FALLBACK[normalizedId];
-  if (mappedBase && FALLBACK_CAT_COLORS[mappedBase]) return FALLBACK_CAT_COLORS[mappedBase];
-
-  return undefined;
-}
-
-function resolveCatById(getCatById: CatLookup, catId: string): CatData | undefined {
-  return getCatById(catId.toLowerCase());
-}
-
-function getSenderLabel(
-  msg: ChatMessageData,
-  resolveCat: (catId: string) => CatData | undefined,
-  ownerName: string,
-): string {
-  const catId = msg.catId;
-  const isOwner = msg.type === 'user' && !catId;
-  if (isOwner) return ownerName;
-
-  const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!catId);
-  if (!isAssistant) return '系统';
-  if (!catId) return '系统';
-  const cat = resolveCat(catId);
-  return cat ? formatCatName(cat) : catId;
+function getSenderLabel(msg: ChatMessageData, resolveCat: CatLookup, coCreator: CoCreatorConfig): string {
+  return resolveMessageSender(msg, resolveCat, coCreator).label;
 }
 
 function formatTime(ts: number): string {
@@ -84,7 +36,8 @@ export function messageNavigatorPreviewText(
   message: ChatMessageData,
   messages: readonly ChatMessageData[],
 ): string | null {
-  return foldedSourceInvocationIdInTimeline(message, messages) ? null : truncateContent(message.content, 40);
+  void messages;
+  return truncateContent(message.content, 40);
 }
 
 interface MessageNavigatorProps {
@@ -105,15 +58,23 @@ export function MessageNavigator({
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
+  const resolveCat = useCallback((catId: string) => getCatById(catId), [getCatById]);
 
   const getSenderName = useCallback(
-    (msg: ChatMessageData) => getSenderLabel(msg, resolveCat, coCreator.name),
-    [coCreator.name, resolveCat],
+    (msg: ChatMessageData) => getSenderLabel(msg, resolveCat, coCreator),
+    [coCreator, resolveCat],
   );
 
-  // Filter to user + assistant only
-  const navItems = useMemo(() => messages.filter((m) => m.type === 'user' || m.type === 'assistant'), [messages]);
+  // Navigate the same visible message surfaces as the timeline, including external inputs.
+  const navItems = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          (m.type === 'user' || m.type === 'assistant' || m.type === 'connector') &&
+          !messageRendersNothing(m, messages),
+      ),
+    [messages],
+  );
 
   // Sample at fixed intervals when too many messages
   const sampledItems = useMemo(() => {
@@ -174,25 +135,15 @@ export function MessageNavigator({
         {/* Sampled dots */}
         {sampledItems.map(({ msg, sourceIdx }, idx) => {
           const top = sampledItems.length <= 1 ? 50 : (idx / (sampledItems.length - 1)) * 100;
-          const isOwner = msg.type === 'user' && !msg.catId;
-          const isAssistant = msg.type === 'assistant' || (msg.type === 'user' && !!msg.catId);
-          const cat = isAssistant && msg.catId ? resolveCat(msg.catId) : undefined;
-          const fallbackColor = isAssistant && msg.catId ? resolveFallbackCatColor(msg.catId) : undefined;
-          const className = isOwner ? 'bg-cafe-accent' : cat || fallbackColor ? '' : 'bg-gray-400';
-          const style = isOwner
-            ? undefined
-            : cat
-              ? { backgroundColor: catColorVar(cat.id, 'primary') }
-              : fallbackColor
-                ? { backgroundColor: fallbackColor }
-                : undefined;
+          const sender = resolveMessageSender(msg, resolveCat, coCreator);
+          const style = { backgroundColor: sender.color };
 
           return (
             <button
               type="button"
               key={`${msg.id}-${sourceIdx}`}
-              className={`absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-150 hover:scale-[2] ${className}`}
-              style={{ top: `${top}%`, left: '50%', ...(style ?? {}) }}
+              className={`absolute w-2 h-2 rounded-full -translate-x-1/2 -translate-y-1/2 transition-all duration-150 hover:scale-[2]`}
+              style={{ top: `${top}%`, left: '50%', ...style }}
               onClick={() => onJumpToMessage(msg.id)}
               onMouseEnter={() => setHoveredIdx(idx)}
               onMouseLeave={() => setHoveredIdx(null)}
@@ -227,11 +178,10 @@ function NavTooltip({
   ownerName: string;
 }) {
   const { getCatById } = useCatData();
-  const resolveCat = useCallback((catId: string) => resolveCatById(getCatById, catId), [getCatById]);
+  const resolveCat = useCallback((catId: string) => getCatById(catId), [getCatById]);
 
-  const senderName = useMemo(() => {
-    return getSenderLabel(message, resolveCat, ownerName);
-  }, [message, ownerName, resolveCat]);
+  const coCreator = useCoCreatorConfig();
+  const senderName = getSenderLabel(message, resolveCat, { ...coCreator, name: ownerName });
   const previewText = messageNavigatorPreviewText(message, messages);
 
   return (

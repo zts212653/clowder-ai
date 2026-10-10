@@ -146,12 +146,11 @@ describe('F167 production repair wiring goes through the ingest', () => {
   // behavioural test of the service can see the production wiring, so this reads it.
   const index = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
 
-  test('every repairProjection in index.ts is the ingest rebuild, and none is the projector rebuild', () => {
+  test('ordinary lifecycle startup does not resurrect Ball repair services; any remaining repairs use ingest', () => {
     const wirings = [...index.matchAll(/repairProjection:\s*\(subjectKey: string\)\s*=>\s*([^\n]+)/g)].map((m) => m[1]);
-    assert.ok(
-      wirings.length >= 2,
-      `expected the managed-hold and A2A dispatch services to be wired: ${wirings.length}`,
-    );
+    assert.doesNotMatch(index, /new ManagedHoldBallService\(|new A2ADispatchBallService\(/);
+    assert.match(index, /startupRecovery.queueResumeScopes/);
+    assert.match(index, /queueProcessor.requestDrain\(scope.threadId\)/);
     for (const wiring of wirings) {
       assert.match(
         wiring,

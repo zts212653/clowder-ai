@@ -1,5 +1,4 @@
 import EventEmitter from 'node:events';
-import type { QueueMessageReceipt } from '@cat-cafe/shared';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +24,7 @@ vi.mock('socket.io-client', () => ({ io: () => mockSocket }));
 
 const apiFetchMock = vi.hoisted(() => vi.fn());
 vi.mock('@/utils/api-client', () => ({
+  refreshApiSession: vi.fn(async () => {}),
   API_URL: 'http://localhost:3100',
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }));
@@ -32,6 +32,7 @@ vi.mock('@/utils/offline-store', () => ({ saveThreadActiveState: vi.fn().mockRes
 vi.mock('@/utils/userId', () => ({ getUserId: () => 'test-user' }));
 
 const THREAD_ID = 'thread-queue-exact-live';
+let serverQueue: QueueEntry[];
 
 const QUEUED_SEEN_ENTRY: QueueEntry = {
   id: 'q-exact-live',
@@ -40,18 +41,10 @@ const QUEUED_SEEN_ENTRY: QueueEntry = {
   content: 'already read by this exact child',
   messageId: 'm-exact-live',
   mergedMessageIds: [],
-  source: 'agent',
+  from: { kind: 'agent', catId: 'codex' },
   sourceCategory: 'a2a',
   autoExecute: true,
-  callerCatId: 'codex',
   targetCats: ['codex-sol'],
-  targetStates: { 'codex-sol': 'seen' },
-  queueReceipt: {
-    version: 1,
-    entryId: 'q-exact-live',
-    targets: [{ catId: 'codex-sol', state: 'seen', invocationId: 'turn-sol', seenAt: 1234 }],
-    reminderAttempts: [],
-  },
   intent: 'execute',
   status: 'queued',
   createdAt: 1200,
@@ -95,6 +88,7 @@ describe('dispatch receipt Queue publication', () => {
         return Promise.resolve(
           new Response(
             JSON.stringify({
+              queue: serverQueue,
               activeInvocations: [
                 {
                   catId: 'codex-sol',
@@ -113,8 +107,6 @@ describe('dispatch receipt Queue publication', () => {
     useChatStore.setState({
       messages: [],
       queue: [],
-      queuePaused: false,
-      queuePauseReason: undefined,
       hasActiveInvocation: false,
       isLoading: false,
       intentMode: null,
@@ -135,83 +127,94 @@ describe('dispatch receipt Queue publication', () => {
 
   it.each([
     'consumed',
-    'coalesced',
+    'sibling',
     'multi-target',
-  ])('replaces live Queue and retains the original receipt with F5 parity: %s', async (mode) => {
-    const initial = {
+  ])('Queue updates replace pending work while lifecycle events alone publish read facts: %s', async (mode) => {
+    const initial: QueueEntry = {
       ...QUEUED_SEEN_ENTRY,
-      ...(mode === 'coalesced' ? { mergedMessageIds: ['sibling'] } : {}),
-      ...(mode === 'multi-target'
-        ? { targetCats: ['codex-sol', 'opus'], targetStates: { 'codex-sol': 'seen', opus: 'queued' } }
-        : {}),
-    } satisfies QueueEntry;
+      ...(mode === 'multi-target' ? { targetCats: ['codex-sol', 'opus'] } : {}),
+    };
     const remaining: QueueEntry[] =
       mode === 'consumed'
         ? []
         : [
             {
               ...initial,
-              ...(mode === 'coalesced' ? { messageId: 'sibling', mergedMessageIds: [] } : { targetCats: ['opus'] }),
-              targetStates: mode === 'coalesced' ? { 'codex-sol': 'queued' } : { opus: 'queued' },
-              queueReceipt: undefined,
+              ...(mode === 'sibling' ? { messageId: 'sibling' } : { targetCats: ['opus'] }),
             },
           ];
-    const receipt: QueueMessageReceipt = {
-      version: 1,
-      entryId: initial.id,
-      reminderAttempts: [],
-      targets: [
-        {
-          catId: 'codex-sol',
-          state: 'handled',
-          outcome: {
-            invocationId: 'turn-sol',
-            disposition: 'dispatch_disposition',
-            handledAt: 2100,
-            evidenceRef: {
-              kind: 'dispatch_disposition',
-              invocationId: 'turn-sol',
-              sourceMessageId: initial.messageId!,
-              handoffEventId: `route:${initial.messageId}:codex-sol`,
-              dispositionEventId: `dispatch-disposition:turn-sol:${initial.messageId}`,
-              disposition: 'completed',
-              dispositionAt: 2000,
-            },
-          },
-        },
-        ...(mode === 'multi-target' ? [{ catId: 'opus', state: 'queued' as const }] : []),
-      ],
+    const source = {
+      id: initial.messageId!,
+      from: initial.from,
+      catId: 'codex',
+      content: 'dispatch source',
+      timestamp: 1200,
+      lifecycle: { kind: 'input', orderKey: '1200:source' },
     };
-    useChatStore.setState({
-      messages: [
-        {
-          id: initial.messageId!,
-          type: 'assistant',
-          catId: 'codex',
-          content: 'dispatch source',
-          timestamp: 1200,
-          extra: { queueReceipt: initial.queueReceipt },
-        },
-      ],
-    });
+    serverQueue = [initial];
     useChatStore.getState().setQueue(THREAD_ID, [initial]);
     await act(async () => root.render(<Host />));
-    await act(async () => {
+    act(() => emitServerEvent('message_lifecycle_updated', { threadId: THREAD_ID, message: source }));
+    serverQueue = remaining;
+    await act(async () =>
       emitServerEvent('queue_updated', {
         threadId: THREAD_ID,
         action: 'queued_handled',
         queue: remaining,
-        messageReceipts: [{ messageId: initial.messageId, queueReceipt: receipt }],
+        // A stale peer's Queue receipt must not become a second History owner.
+        messageReceipts: [
+          { messageId: source.id, queueReceipt: { version: 1, targets: [{ catId: 'opus', state: 'handled' }] } },
+        ],
+      }),
+    );
+    expect(useChatStore.getState().getThreadState(THREAD_ID).queue).toEqual(remaining);
+    expect(useChatStore.getState().messages.find((message) => message.id === source.id)?.lifecycle).toEqual(
+      source.lifecycle,
+    );
+    expect(useChatStore.getState().messages[0]?.extra ?? {}).not.toHaveProperty('queueReceipt');
+    const settledSource = {
+      ...source,
+      lifecycle: {
+        ...source.lifecycle,
+        dispatchRefs: [
+          { targetId: 'codex-sol', phase: 'settled', statusMessageId: 'response-sol', dispatchedAt: 2000 },
+        ],
+      },
+    };
+    act(() => {
+      emitServerEvent('message_lifecycle_updated', { threadId: THREAD_ID, message: settledSource });
+      emitServerEvent('message_lifecycle_updated', {
+        threadId: THREAD_ID,
+        message: {
+          id: 'response-sol',
+          from: { kind: 'agent', catId: 'codex-sol' },
+          catId: 'codex-sol',
+          content: 'handled',
+          timestamp: 2100,
+          lifecycle: {
+            kind: 'response',
+            orderKey: '2000:response',
+            invocationId: 'child-sol',
+            targetId: 'codex-sol',
+            inputEntryIds: [initial.id],
+            inputMessageIds: [source.id],
+            status: 'completed',
+            startedAt: 2000,
+            completedAt: 2100,
+          },
+        },
       });
     });
     const live = useChatStore.getState().getThreadState(THREAD_ID).queue;
-    expect(live).toEqual(remaining);
-    expect(
-      useChatStore.getState().messages.find((message) => message.id === initial.messageId)?.extra?.queueReceipt,
-    ).toEqual(receipt);
     if (mode === 'consumed') expect(container.querySelector(`[data-testid="steer-${initial.id}"]`)).toBeNull();
-    if (mode === 'coalesced') expect(live[0]?.messageId).toBe('sibling');
-    if (mode === 'multi-target') expect(live[0]?.targetCats).toEqual(['opus']);
+    if (mode === 'sibling') {
+      expect(live[0]?.messageId).toBe('sibling');
+      expect(container.textContent).not.toContain('（已读）');
+    }
+    if (mode === 'multi-target') {
+      expect(live[0]?.targetCats).toEqual(['opus']);
+      expect(container.textContent).toContain('（已投递）');
+    }
     apiFetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ queue: remaining, paused: false, activeInvocations: [] })),
     );
@@ -219,8 +222,11 @@ describe('dispatch receipt Queue publication', () => {
       await reconcileThreadWithServer(THREAD_ID, () => false, 'Reconnect');
     });
     expect(useChatStore.getState().getThreadState(THREAD_ID).queue).toEqual(live);
+    expect(useChatStore.getState().messages.find((message) => message.id === source.id)?.lifecycle).toEqual(
+      settledSource.lifecycle,
+    );
     expect(
-      useChatStore.getState().messages.find((message) => message.id === initial.messageId)?.extra?.queueReceipt,
-    ).toEqual(receipt);
+      useChatStore.getState().messages.find((message) => message.id === source.id)?.extra ?? {},
+    ).not.toHaveProperty('queueReceipt');
   });
 });

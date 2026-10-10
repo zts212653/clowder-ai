@@ -75,7 +75,7 @@ async function buildScanSpec(extraOpts = {}) {
         externalId: 'owner/repo',
       }),
     },
-    deliverFn: async () => ({ messageId: 'msg-1', threadId: 'thread-inbox' }),
+    deliverFn: async (_deps, input) => ({ messageId: 'msg-1', content: input.content, admitted: true }),
     deliveryDeps: {},
     invokeTrigger: { trigger: () => {} },
     fetchOpenPRs: async () => [
@@ -152,11 +152,10 @@ describe('Task 7b — RepoScan emits community events', () => {
         },
       },
       projector: { apply: async (event) => applied.push(event.kind) },
-      invokeTrigger: {
-        trigger: async () => {
-          triggered.push('wake');
-          return 'dispatched';
-        },
+      // RFC §5.2: the scan's wake is the envelope reaching the Queue, not a second trigger call.
+      deliverFn: async () => {
+        triggered.push('wake');
+        return { messageId: 'msg-1', content: 'x', admitted: true };
       },
     });
     const gateResult = await spec.admission.gate({});
@@ -167,7 +166,7 @@ describe('Task 7b — RepoScan emits community events', () => {
       .catch(() => {});
 
     assert.deepEqual(applied, ['pr.opened']);
-    assert.deepEqual(triggered, ['wake']);
+    assert.deepEqual(triggered, ['wake'], 'admission is the wake owed by this scan');
   });
 
   it('scan discovers an issue → appends issue.opened event with scan sourceEventId', async () => {
@@ -202,6 +201,32 @@ describe('Task 7b — RepoScan emits community events', () => {
     }
     // No assertion on events — just verifies no crash
   });
+
+  for (const delivery of [
+    { messageId: 'unproven', content: 'x' },
+    { messageId: 'refused', content: 'x', admitted: false, rejection: 'unavailable' },
+  ]) {
+    it(`does not mark or project a scan without admission (${delivery.messageId})`, async () => {
+      const eventLog = makeInMemoryEventLog();
+      const projector = makeInMemoryProjector();
+      let calls = 0;
+      const { spec, notified } = await buildScanSpec({
+        eventLog,
+        projector,
+        deliverFn: async () => {
+          calls++;
+          return delivery;
+        },
+      });
+      const gate = await spec.admission.gate({});
+      const item = gate.workItems.find((work) => work.signal.subjectType === 'pr');
+      await assert.rejects(spec.run.execute(item.signal, item.subjectKey, {}), /admission refused/i);
+      assert.equal(calls, 1);
+      assert.equal(notified.size, 0);
+      assert.deepEqual(eventLog.events, []);
+      assert.deepEqual(projector.applied, []);
+    });
+  }
 
   // P1-1 factory wiring: GitHubScheduleDeps must thread eventLog through to spec
   it('P1-1: repoScanFactory passes eventLog through GitHubScheduleDeps to the spec', async () => {
@@ -248,7 +273,7 @@ describe('Task 7b — RepoScan emits community events', () => {
           externalId: 'owner/repo',
         }),
       },
-      deliverFn: async () => ({ messageId: 'msg-1', threadId: 'thread-1' }),
+      deliverFn: async (_deps, input) => ({ messageId: 'msg-1', content: input.content, admitted: true }),
       deliveryDeps: {},
       fetchOpenPRs: async () => [
         {

@@ -38,16 +38,23 @@ export async function requireCurrentReconsiderationSource(input: {
 }) {
   const unsafe = input.message.source?.meta?.reconsideration;
   if (unsafe === undefined) return;
+  // The Queue enforces restricted executionScope at admission/start. Once its
+  // target is dispatched the row is gone: current permission must be proven
+  // from the exact indexed producer envelope, never a second Message owner.
   const marker = collectiveReconsiderationMarkerSchema.safeParse(unsafe);
   if (
     !marker.success ||
     input.message.source?.connector !== 'collective' ||
-    input.message.catId !== null ||
+    input.message.from?.kind !== 'external' ||
+    input.message.from.connectorId !== 'collective' ||
     input.message.userId !== input.ownerUserId ||
-    input.message.queueCustody?.executionScope !== 'collective-participation' ||
-    input.message.queueCustody.ownerAuthProvenance !== 'unknown' ||
-    input.message.queueCustody.allTargetCats.length !== 1 ||
-    input.message.queueCustody.allTargetCats[0] !== input.source.catId
+    input.message.deletedAt ||
+    input.message.recall ||
+    input.message._tombstone ||
+    input.message.deliveryStatus === 'canceled' ||
+    input.message.mentions.length !== 1 ||
+    input.message.mentions[0] !== input.source.catId ||
+    !isDeepStrictEqual(input.message.source.meta?.participation, input.source)
   )
     throw collectiveContextError('RETURN_UNAVAILABLE', 'The reconsideration carrier has no exact Host producer schema');
   const winner = await input.messages.getByIdempotencyKey?.(
@@ -76,8 +83,6 @@ export async function requireCurrentReconsiderationSource(input: {
           scope.purposeKey !== marker.data.purposeKey ||
           !isDeepStrictEqual(scope.source, input.source) ||
           input.message.content !== scope.event.body ||
-          input.message.queueCustody?.executionScope !== 'collective-participation' ||
-          input.message.queueCustody.ownerAuthProvenance !== 'unknown' ||
           !original ||
           original.deletedAt ||
           original.recall ||

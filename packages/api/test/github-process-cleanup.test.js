@@ -3,12 +3,16 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
+import { setTimeout as timerDelay } from 'node:timers/promises';
+
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { createCiCdCheckTaskSpec } from '../dist/infrastructure/email/CiCdCheckTaskSpec.js';
 import { fetchPrCiStatuses } from '../dist/infrastructure/email/ci-status-batch-fetcher.js';
 import { executeGitHubRequest } from '../dist/infrastructure/github/request-budget.js';
 import { executeTaskPipeline } from '../dist/infrastructure/scheduler/execute-pipeline.js';
+
+// Readiness polling stays real while the scheduler deadline is controlled.
+const delay = timerDelay;
 
 async function waitFile(path) {
   for (let i = 0; i < 500; i++) {
@@ -24,12 +28,13 @@ async function fakeGh(ignoreTerm, run) {
   const dir = await mkdtemp(join(tmpdir(), 'cat-cafe-gh-cleanup-'));
   const started = join(dir, 'started'),
     term = join(dir, 'term'),
-    closed = join(dir, 'closed');
+    closed = join(dir, 'closed'),
+    release = join(dir, 'release');
   const oldPath = process.env.PATH;
   const oldLocalCommandFixtures = process.env.CAT_CAFE_PUBLIC_TEST_LOCAL_COMMAND_FIXTURES;
   await writeFile(
     join(dir, 'gh'),
-    `#!${process.execPath}\nconst fs=require('node:fs');\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(term)},'term');${ignoreTerm ? '' : `setTimeout(()=>process.exit(0),200);`}});\nprocess.on('exit',()=>fs.writeFileSync(${JSON.stringify(closed)},'closed'));\nfs.writeFileSync(${JSON.stringify(started)},String(process.pid));\nsetInterval(()=>{},1000);\n`,
+    `#!${process.execPath}\nconst fs=require('node:fs');\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(term)},'term');${ignoreTerm ? '' : `setInterval(()=>{if(fs.existsSync(${JSON.stringify(release)}))process.exit(0);},10);`}});\nprocess.on('exit',()=>fs.writeFileSync(${JSON.stringify(closed)},'closed'));\nfs.writeFileSync(${JSON.stringify(started)},String(process.pid));\nsetInterval(()=>{},1000);\n`,
     { mode: 0o755 },
   );
   process.env.PATH = `${dir}:${oldPath}`;
@@ -40,6 +45,7 @@ async function fakeGh(ignoreTerm, run) {
       started,
       term,
       closed,
+      release,
       setPid(value) {
         pid = value;
       },
@@ -62,7 +68,7 @@ const log = { info() {}, warn() {}, error() {} };
 test(
   'real gh abort retains the CI gate until the child close event, beyond execFile callback rejection',
   unixOnly,
-  async () => {
+  async (t) => {
     await fakeGh(false, async (paths) => {
       const store = new TaskStore();
       store.create({
@@ -90,19 +96,30 @@ test(
         tickCounts: new Map(),
         lastRunAt: new Map(),
       };
-      const pending = executeTaskPipeline(context).then(
-        () => null,
-        (error) => error,
-      );
-      paths.setPid(Number(await waitFile(paths.started)));
-      await waitFile(paths.term);
-      await delay(30);
-      const stillOwned = context.running.get(spec.id);
-      const error = await pending;
-      const closedAtReturn = await readFile(paths.closed, 'utf8').catch(() => undefined);
-      assert.equal(stillOwned, true, 'SIGTERM is not child close');
-      assert.equal(closedAtReturn, 'closed', 'promise must join real process cleanup');
-      assert.match(String(error), /admission timed out/);
+      t.mock.timers.enable({ apis: ['setTimeout'] });
+      try {
+        const pending = executeTaskPipeline(context).then(
+          () => null,
+          (error) => error,
+        );
+        paths.setPid(Number(await waitFile(paths.started)));
+        // The test owns the admission clock, not the subprocess startup speed.
+        // Exercise the real timeout callback only after the real child is ready.
+        t.mock.timers.tick(spec.admission.timeoutMs);
+        await waitFile(paths.term);
+        const stillOwned = context.running.get(spec.id);
+        const closedBeforeReturn = await readFile(paths.closed, 'utf8').catch(() => undefined);
+        assert.equal(stillOwned, true, 'SIGTERM is not child close');
+        assert.equal(closedBeforeReturn, undefined, 'the fixture must still be cleaning up');
+        await writeFile(paths.release, 'release');
+        const error = await pending;
+        const closedAtReturn = await readFile(paths.closed, 'utf8').catch(() => undefined);
+        assert.equal(closedAtReturn, 'closed', 'promise must join real process cleanup');
+        assert.match(String(error), /admission timed out/);
+        assert.equal(context.running.get(spec.id), false, 'close releases the gate');
+      } finally {
+        t.mock.timers.reset();
+      }
     });
   },
 );

@@ -48,6 +48,7 @@ test_print_alpha_env_exports() {
   assert_contains "$output" "export LLM_POSTPROCESS_ENABLED=0" "should disable LLM postprocess sidecar"
   assert_contains "$output" "export CONNECTOR_GATEWAY_AUTOSTART=0" "should disable preconfigured IM connector autostart"
   assert_contains "$output" "export CAT_CAFE_F247_CLOUD_AUTOSTART=0" "should disable F247 cloud supporting services autostart"
+  assert_contains "$output" "export REDIS_DATA_DIR=$ALPHA_DIR/.cat-cafe/redis" "should replace inherited Redis data dirs"
   if [[ "$output" == *"CAT_CAFE_F307_WORKBENCH_GATE_ACTIVATION"* ]]; then
     echo "FAIL: alpha should not need an F307-only activation export"
     return 1
@@ -82,7 +83,7 @@ test_apply_alpha_env_overrides_inherited_runtime_paths() (
 test_apply_alpha_env_pins_collective_service_to_alpha() (
   local tmp_root
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
   PROJECT_DIR="$tmp_root/cat-cafe"
   ALPHA_DIR="$tmp_root/cat-cafe-alpha"
   mkdir -p "$ALPHA_DIR/packages/web"
@@ -134,18 +135,17 @@ test_alpha_refuses_empty_target_when_legacy_redis_is_offline() {
   printf 'legacy data\n' > "$tmp_root/home/.cat-cafe/redis-worktree-6398/dump.rdb"
 
   if blocked_output="$(
-    HOME="$tmp_root/home"
     REDIS_DATA_DIR="$tmp_root/alpha/redis"
     ALPHA_REDIS_PORT=6397
     ALPHA_EMPTY_REDIS_ALLOWED=false
     redis-cli() { return 1; }
-    assert_alpha_redis_seeded 2>&1
+    assert_alpha_redis_seeded "$tmp_root/home/.cat-cafe/redis-worktree-6398" 2>&1
   )"; then
-    rm -rf "$tmp_root"
+    echo "Retained alpha test fixture: $tmp_root"
     echo "FAIL: Alpha must not silently start empty while offline legacy Redis data exists"
     return 1
   fi
-  rm -rf "$tmp_root"
+  echo "Retained alpha test fixture: $tmp_root"
   assert_contains "$blocked_output" "Alpha Redis migration required" "offline legacy data requires migration"
   echo "PASS: offline legacy Redis data blocks an empty Alpha target"
 }
@@ -153,7 +153,7 @@ test_alpha_refuses_empty_target_when_legacy_redis_is_offline() {
 test_apply_alpha_env_needs_no_f307_client_gate() (
   local tmp_root has_switch
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
 
   PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   ALPHA_DIR="$tmp_root/cat-cafe-alpha"
@@ -182,7 +182,7 @@ test_apply_alpha_env_needs_no_f307_client_gate() (
 test_init_and_sync_alpha_worktree_ff_only() {
   local tmp_root origin_dir src_dir alpha_dir initial_head expected_head synced_head
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"
@@ -236,7 +236,7 @@ test_init_and_sync_alpha_worktree_ff_only() {
 test_ensure_alpha_branch_repairs_detached_worktree() {
   local tmp_root origin_dir src_dir detached_dir branch_name
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"
@@ -275,7 +275,7 @@ test_ensure_alpha_branch_repairs_detached_worktree() {
 test_migrate_legacy_main_test_worktree_to_alpha_location() {
   local tmp_root origin_dir src_dir legacy_dir migrated_branch
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"
@@ -324,7 +324,7 @@ test_migrate_legacy_main_test_worktree_to_alpha_location() {
 test_resolve_env_source_file_falls_back_to_sibling_cat_cafe() {
   local tmp_root launcher_dir main_dir resolved
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   launcher_dir="$(abs_path "$tmp_root/cat-cafe-alpha-launcher")"
   main_dir="$(abs_path "$tmp_root/cat-cafe")"
@@ -361,7 +361,7 @@ test_is_api_running_checks_alpha_api_port() {
 test_stop_alpha_uses_owned_preview_lifecycle() (
   local tmp_root calls
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
   PROJECT_DIR="$tmp_root/cat-cafe"
   ALPHA_DIR="$tmp_root/cat-cafe-alpha"
   mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
@@ -391,7 +391,7 @@ test_stop_alpha_uses_owned_preview_lifecycle() (
 test_stop_alpha_reports_an_orphaned_service() (
   local tmp_root
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
   PROJECT_DIR="$tmp_root/cat-cafe"
   ALPHA_DIR="$tmp_root/cat-cafe-alpha"
   mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
@@ -414,7 +414,7 @@ test_stop_alpha_reports_an_orphaned_service() (
 test_stop_alpha_preserves_daemon_mode() (
   local tmp_root calls
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' EXIT
+  trap 'echo "Retained alpha test fixture: $tmp_root"' EXIT
   PROJECT_DIR="$tmp_root/cat-cafe"
   ALPHA_DIR="$tmp_root/cat-cafe-alpha"
   mkdir -p "$PROJECT_DIR" "$ALPHA_DIR"
@@ -440,7 +440,7 @@ test_stop_alpha_preserves_daemon_mode() (
 test_build_alpha_stale_packages_rebuilds_missing_dist() {
   local tmp_root origin_dir src_dir alpha_dir
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"
@@ -494,7 +494,7 @@ test_build_alpha_stale_packages_rebuilds_missing_dist() {
 test_build_alpha_stale_packages_skips_fresh_packages() {
   local tmp_root origin_dir src_dir alpha_dir
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"
@@ -544,7 +544,7 @@ test_build_alpha_stale_packages_skips_fresh_packages() {
 test_build_alpha_stale_packages_rebuilds_when_head_moved() {
   local tmp_root origin_dir src_dir alpha_dir
   tmp_root="$(mktemp -d)"
-  trap 'rm -rf "$tmp_root"' RETURN
+  trap 'echo "Retained alpha test fixture: $tmp_root"' RETURN
 
   origin_dir="$tmp_root/origin.git"
   src_dir="$tmp_root/src"

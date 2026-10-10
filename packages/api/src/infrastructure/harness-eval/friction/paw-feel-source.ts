@@ -10,6 +10,21 @@ import { extractPawFeelMarkers, isStandalonePawFeelMarker, type PawFeelMarker } 
 
 const DEFAULT_PAGE_SIZE = 200;
 
+function getProjectedTimelineOrderTime(message: PawFeelSourceMessageProjection): number {
+  if (message.timelineOrderAt !== undefined) return message.timelineOrderAt;
+  const queuedAgentSpeech =
+    message.deliveryStatus === 'queued' &&
+    message.catId !== null &&
+    message.source === undefined &&
+    message.sourceParseFailure !== true &&
+    !(
+      (message.userId === 'system' || message.userId === 'scheduler') &&
+      (message.catId === 'system' || message.catId === null)
+    ) &&
+    message.origin !== 'briefing';
+  return queuedAgentSpeech ? message.timestamp : (message.deliveredAt ?? message.timestamp);
+}
+
 export interface PawFeelSourceOptions {
   pageSize?: number;
 }
@@ -83,7 +98,7 @@ function inspectPawFeelMessageWithMode(
       markerDigest,
       sameDigestOrdinal,
       markerIndex,
-      occurredAt: new Date(getTimelineOrderTime(message)).toISOString(),
+      occurredAt: new Date(getProjectedTimelineOrderTime(message)).toISOString(),
       captureAssessment: 'ambiguous' as const,
       marker,
     };

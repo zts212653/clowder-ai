@@ -435,6 +435,7 @@ describe('F325 one-turn native AGY carrier', () => {
         provider: 'google',
         carrier: 'agy_stream_json',
         deliverySemantics: 'queued_internal_turn',
+        activeInvocationGuidance: 'unsupported',
       });
       const notice = { text: '📬 One new message. Read the current thread with cat_cafe_get_thread_context.' };
       const actions = [];

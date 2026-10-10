@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type CatId, type CliEffortPreset, createCatId, resolveCliEffortOverride } from '@cat-cafe/shared';
+import { summarizeMcpInjection } from '../../../../../config/capabilities/capability-orchestrator.js';
 import { getCatEffort } from '../../../../../config/cat-config-loader.js';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
@@ -225,7 +226,6 @@ function removePreCompactSettingsTempDir(path: string | undefined): void {
     log.warn({ err, settingsDir }, 'Failed to remove Claude PreCompact settings temp directory');
   }
 }
-
 /**
  * Build env overrides for spawning the `claude` CLI.
  *
@@ -364,7 +364,12 @@ export class ClaudeAgentService implements AgentService {
   }
 
   freshnessCarrierCapability(): AgentFreshnessCarrierCapability {
-    return { provider: 'anthropic', carrier: 'claude_print_sdk', deliverySemantics: 'unsupported' };
+    return {
+      provider: 'anthropic',
+      carrier: 'claude_print_sdk',
+      deliverySemantics: 'unsupported',
+      activeInvocationGuidance: 'unsupported',
+    };
   }
 
   contextCapability(): import('../../types.js').AgentContextCapability {
@@ -460,27 +465,38 @@ export class ClaudeAgentService implements AgentService {
     // #712: Inject ALL enabled MCP servers from capabilities.json at invoke time.
     // Built-in cat-cafe servers resolve paths from distDir; externals use descriptor values.
     // On Windows, Claude CLI treats inline JSON as a file path — write to temp file.
-    if (!readOnly && options?.callbackEnv && this.mcpServerPath) {
-      const mcpServers = await resolveClaudeMcpConfig({
-        callbackEnv: options.callbackEnv,
+    if (!readOnly) {
+      const mcpResolution = await resolveClaudeMcpConfig({
+        callbackEnv: options?.callbackEnv,
+        workingDirectory: options?.workingDirectory,
         mcpServerPath: this.mcpServerPath,
-        workingDirectory: options.workingDirectory,
       });
-      // #712: Always pass --mcp-config + --strict-mcp-config in managed invocations.
-      // --strict-mcp-config ensures only the merged config (capabilities.json +
-      // user project .mcp.json) is active — no auto-discovered entries leak through.
-      if (IS_WINDOWS) {
-        if (!this.mcpConfigFilePath) {
-          const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
-          this.mcpConfigFilePath = join(dir, 'mcp-config.json');
+      if (mcpResolution) {
+        const mcpServers = mcpResolution.servers;
+        log.debug(
+          summarizeMcpInjection(mcpServers, {
+            catId: options?.callbackEnv?.CAT_CAFE_CAT_ID,
+            resolvedFrom: mcpResolution.source,
+            provider: 'claude',
+          }),
+          '#712: MCP invoke-time injection',
+        );
+        // #712: Always pass --mcp-config + --strict-mcp-config in managed invocations.
+        // --strict-mcp-config ensures only the merged config (capabilities.json +
+        // user project .mcp.json) is active — no auto-discovered entries leak through.
+        if (IS_WINDOWS) {
+          if (!this.mcpConfigFilePath) {
+            const dir = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-'));
+            this.mcpConfigFilePath = join(dir, 'mcp-config.json');
+          }
+          writeFileSync(this.mcpConfigFilePath, JSON.stringify({ mcpServers }), 'utf-8');
+          args.push('--mcp-config', this.mcpConfigFilePath);
+        } else {
+          args.push('--mcp-config', JSON.stringify({ mcpServers }));
         }
-        writeFileSync(this.mcpConfigFilePath, JSON.stringify({ mcpServers }), 'utf-8');
-        args.push('--mcp-config', this.mcpConfigFilePath);
-      } else {
-        args.push('--mcp-config', JSON.stringify({ mcpServers }));
+        args.push('--strict-mcp-config');
+        declaredMcpServerNames = Object.keys(mcpServers).sort();
       }
-      args.push('--strict-mcp-config');
-      declaredMcpServerNames = Object.keys(mcpServers).sort();
     }
 
     const metadata: MessageMetadata = { provider: 'anthropic', model: effectiveModel };

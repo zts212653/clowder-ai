@@ -14,7 +14,7 @@ export async function publishDevelopmentReturnRetirement(
   const message = await deps.messages.append({
     userId: state.ownerUserId,
     threadId: state.ownerThreadId,
-    catId: null,
+    from: { kind: 'system', service: 'development-return' },
     mentions: [],
     timestamp: now,
     idempotencyKey: `${state.registrationId}:retirement-notice`,
@@ -30,6 +30,7 @@ export async function publishDevelopmentReturnRetirement(
     threadId: state.ownerThreadId,
     message: {
       id: message.id,
+      from: message.from,
       type: 'connector',
       content: message.content,
       source: message.source,

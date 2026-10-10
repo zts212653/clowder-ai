@@ -35,12 +35,10 @@ describe('schedule mutation principal routing', () => {
       logger: { info() {}, error() {} },
       ledger: new RunLedger(db),
       dynamicTaskStore: dynamicStore,
-      deliver: async () => 'message-owner-timer',
-      invokeTrigger: {
-        async trigger(...args) {
-          invokeCalls.push(args);
-          return 'enqueued';
-        },
+      // Admission is the wake, so the envelope the deliver seam receives IS the observable fact.
+      deliver: async (input) => {
+        invokeCalls.push(input);
+        return 'message-owner-timer';
       },
     });
     published = [];
@@ -273,10 +271,9 @@ describe('schedule mutation principal routing', () => {
 
     assert.equal(response.statusCode, 200, response.body);
     await runner.triggerNow('hold-ball-resume-owner', { manual: true });
-    assert.deepEqual(invokeCalls[0][6], {
-      sourceCategory: 'scheduled',
-      ownerAuthProvenance: 'strict',
-    });
+    assert.equal(invokeCalls[0].sourceCategory, 'scheduled');
+    assert.equal(invokeCalls[0].ownerAuthProvenance, 'strict', 'a resumed hold keeps its private owner proof');
+    assert.equal(invokeCalls[0].priority, 'urgent');
   });
 
   function createReminder(principal, trigger = { type: 'once', fireAt: Date.now() + 60_000 }) {

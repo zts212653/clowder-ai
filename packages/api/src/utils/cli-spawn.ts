@@ -35,7 +35,7 @@ import {
 import { invalidateCliCommand } from './cli-resolve.js';
 import { resolveWindowsSpawnPlan } from './cli-spawn-win.js';
 import { buildUnixSupervisedSpawnPlan } from './cli-supervised-process.js';
-import { resolveCliTimeoutMs } from './cli-timeout.js';
+import { registerProcessActivity } from './process-activity-registry.js';
 
 export { resolveCliSupervisorNodeArgs } from './cli-supervised-process.js';
 
@@ -354,8 +354,10 @@ export async function* spawnCli(
 ): AsyncGenerator<unknown, void, undefined> {
   const doSpawn: SpawnFn = deps?.spawnFn ?? defaultSpawn;
   const livenessWarningDrainIntervalMs = deps?.livenessWarningDrainIntervalMs ?? LIVENESS_WARNING_DRAIN_INTERVAL_MS;
-  // Default timeout is configurable via CLI_TIMEOUT_MS env var; 0 disables timeout.
-  const timeoutMs = resolveCliTimeoutMs(options.timeoutMs);
+  // Only a caller that asks for a response timeout gets one (probes and other one-off commands).
+  // F117 KD-22: a dispatched member's timeout is its invocation's, driven by CLI_TIMEOUT_MS — never
+  // a second one here.
+  const timeoutMs = options.timeoutMs ?? 0;
 
   // Log only flag names (--foo) and arg count — never raw values.
   // Multiple providers pass prompt text via different shapes (positional,
@@ -658,13 +660,17 @@ export async function* spawnCli(
   let localFinalTerminal: 'completed' | 'failed' | null = null;
 
   // F118 Phase B: Initialize liveness probe
+  let unregisterProcessActivity: (() => void) | undefined;
   if (options.livenessProbe && child.pid !== undefined) {
     probe = new ProcessLivenessProbe(child.pid, options.livenessProbe);
     probe.start();
     // F152: Register probe for OTel agentLiveness gauge
     if (options.invocationId) {
       const catId = options.env?.CAT_CAFE_CAT_ID ?? 'unknown';
-      registerLivenessProbe(options.invocationId, catId, () => probe!.getState());
+      const liveProbe = probe;
+      registerLivenessProbe(options.invocationId, catId, () => liveProbe.getState());
+      // F117 KD-22: the member output timeout defers while this process is still using CPU.
+      unregisterProcessActivity = registerProcessActivity(options.invocationId, () => liveProbe.activity());
     }
   }
 
@@ -1158,6 +1164,7 @@ export async function* spawnCli(
     probe?.stop();
     // F152: Unregister probe from OTel gauge
     if (options.invocationId) unregisterLivenessProbe(options.invocationId);
+    unregisterProcessActivity?.();
     killChild();
 
     // F153 Phase B: End CLI session span with appropriate status

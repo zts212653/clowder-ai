@@ -30,9 +30,9 @@ import { RESOLVER_MAP } from './resolvers/index.js';
 // The pipeline executes ALL hooks for a stage (producing full trace events),
 // but prompt output is filtered to match legacy scope for backward compat.
 //
-// Legacy architecture splits 46 hooks across multiple injection points:
+// Legacy architecture splits 45 active hooks across multiple injection points:
 //   buildStaticIdentity → S1-S13 only
-//   buildInvocationContext → D1-D21 only
+//   buildInvocationContext → D1-D19, D21 only (D20 retired)
 //   L0 compiler → L1-L7 (separate channel for native providers)
 //   route-serial/parallel → R1-R2
 //   route-helpers → N1
@@ -44,7 +44,7 @@ import { RESOLVER_MAP } from './resolvers/index.js';
 // ---------------------------------------------------------------------------
 
 const SCOPE_S = /^S\d/; // S1-S13: buildStaticIdentity
-const SCOPE_D = /^D\d/; // D1-D21: buildInvocationContext
+const SCOPE_D = /^D\d/; // D1-D19, D21: buildInvocationContext
 
 // ---------------------------------------------------------------------------
 // Singleton pipeline (lazy init on first call)
@@ -217,7 +217,7 @@ export function buildInvocationContextViaHookPipelineWithTrace(context: Invocati
  * Equivalent to legacy `buildSystemPrompt()`.
  *
  * Unlike the scoped builders above, this produces the FULL unfiltered pipeline
- * output — all 46 hooks. Use when the pipeline IS the single source (future).
+ * output — all 45 active hooks. Use when the pipeline IS the single source (future).
  *
  * @returns Combined prompt string with trace results for observability.
  */

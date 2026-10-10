@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { HandleBackgroundMessageOptions } from '@/hooks/useAgentMessages';
 import { consumeBackgroundSystemInfo } from '@/hooks/useAgentMessages';
+import { useChatStore } from '@/stores/chatStore';
 
 function createMockStore(overrides: Record<string, unknown> = {}) {
   return {
+    // Named-message writes (hooks/named-message-writer.ts) read these too.
+    currentThreadId: 'thread-current',
+    incrementUnread: vi.fn(),
     addMessageToThread: vi.fn(),
     removeThreadMessage: vi.fn(),
     appendToThreadMessage: vi.fn(),
@@ -13,7 +17,6 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
     setThreadMessageMetadata: vi.fn(),
     setThreadMessageUsage: vi.fn(),
     setThreadMessageThinking: vi.fn(),
-    setThreadMessageStreamInvocation: vi.fn(),
     setThreadMessageStreaming: vi.fn(),
     setThreadLoading: vi.fn(),
     setThreadHasActiveInvocation: vi.fn(),
@@ -22,7 +25,6 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
     updateThreadCatStatus: vi.fn(),
     batchStreamChunkUpdate: vi.fn(),
     clearThreadActiveInvocation: vi.fn(),
-    replaceThreadMessageId: vi.fn(),
     patchThreadMessage: vi.fn(),
     getThreadState: vi.fn(() => ({ messages: [], catStatuses: {}, catInvocations: {} })),
     ...overrides,
@@ -32,278 +34,15 @@ function createMockStore(overrides: Record<string, unknown> = {}) {
 function createMockOptions(storeOverrides: Record<string, unknown> = {}) {
   return {
     store: createMockStore(storeOverrides),
-    bgStreamRefs: new Map(),
-    finalizedBgRefs: new Map(),
     nextBgSeq: (() => {
       let i = 0;
       return () => ++i;
     })(),
     addToast: vi.fn(),
-    clearDoneTimeout: vi.fn(),
   } as unknown as HandleBackgroundMessageOptions;
 }
 
 describe('consumeBackgroundSystemInfo web_search', () => {
-  it('ADR-042 patches supplement lifecycle onto the published original without removing it', () => {
-    const original = {
-      id: 'msg-original',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'published answer',
-      timestamp: 100,
-      extra: { freshness: { kind: 'published_with_unseen', generatedWithUnseen: ['msg-late'] } },
-    };
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({ messages: [original], catStatuses: {}, catInvocations: {} })),
-    });
-    const projection = {
-      type: 'freshness_supplement',
-      supplementId: 'f254-supplement:msg-original:1',
-      lineageId: 'msg-original',
-      originalMessageId: 'msg-original',
-      threadId: 'thread-1',
-      catId: 'codex',
-      seq: 1,
-      status: 'declined',
-      requiredCount: 1,
-      terminalReason: 'checked_no_supplement_needed',
-      updatedAt: 200,
-    };
-
-    const result = consumeBackgroundSystemInfo(
-      {
-        type: 'system_info',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: JSON.stringify(projection),
-        timestamp: 200,
-      },
-      undefined,
-      options,
-    );
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.removeThreadMessage).not.toHaveBeenCalled();
-    expect(options.store.patchThreadMessage).toHaveBeenCalledWith('thread-1', 'msg-original', {
-      extra: {
-        ...original.extra,
-        freshnessSupplement: projection,
-      },
-    });
-  });
-
-  it('ADR-042 never attaches an older supplement projection to a newer same-cat bubble', () => {
-    const newerBubble = {
-      id: 'msg-newer',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'newer unrelated answer',
-      timestamp: 300,
-    };
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({ messages: [newerBubble], catStatuses: {}, catInvocations: {} })),
-    });
-    const projection = {
-      type: 'freshness_supplement',
-      supplementId: 'f254-supplement:msg-older:1',
-      lineageId: 'msg-older',
-      originalMessageId: 'msg-older',
-      threadId: 'thread-1',
-      catId: 'codex',
-      seq: 1,
-      status: 'running',
-      requiredCount: 1,
-      updatedAt: 400,
-    };
-
-    const result = consumeBackgroundSystemInfo(
-      {
-        type: 'system_info',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: JSON.stringify(projection),
-        timestamp: 400,
-      },
-      undefined,
-      options,
-    );
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.patchThreadMessage).not.toHaveBeenCalled();
-  });
-
-  it('F254 replaces a stale background stream with one identity-bound catching projection', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'stale-bubble',
-            type: 'assistant',
-            catId: 'codex',
-            extra: { stream: { invocationId: 'inv-old' } },
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    options.bgStreamRefs.set('thread-1::codex', {
-      id: 'stale-bubble',
-      threadId: 'thread-1',
-      catId: 'codex',
-    });
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      content: JSON.stringify({
-        type: 'freshness_closure',
-        closureId: 'closure-1',
-        status: 'catching_up',
-        sourceInvocationId: 'inv-old',
-        updatedAt: 123,
-      }),
-      timestamp: 123,
-    };
-
-    const result = consumeBackgroundSystemInfo(
-      msg,
-      { id: 'stale-bubble', threadId: 'thread-1', catId: 'codex' },
-      options,
-    );
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'stale-bubble');
-    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
-      'thread-1',
-      expect.objectContaining({ id: 'freshness-closure:closure-1', content: '正在重读新增消息…' }),
-    );
-    expect(options.bgStreamRefs.has('thread-1::codex')).toBe(false);
-  });
-
-  it('F254 background replay preserves a live successor ref while removing the stale source bubble', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'live-successor',
-            type: 'assistant',
-            catId: 'codex',
-            extra: { stream: { invocationId: 'parent-shared', turnInvocationId: 'turn-live' } },
-          },
-          {
-            id: 'stale-source',
-            type: 'assistant',
-            catId: 'codex',
-            extra: { stream: { invocationId: 'parent-shared', turnInvocationId: 'turn-stale' } },
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    const liveRef = { id: 'live-successor', threadId: 'thread-1', catId: 'codex' };
-    options.bgStreamRefs.set('thread-1::codex', liveRef);
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      content: JSON.stringify({
-        type: 'freshness_closure',
-        closureId: 'closure-replayed',
-        status: 'catching_up',
-        sourceInvocationId: 'parent-shared',
-        turnInvocationId: 'turn-stale',
-        updatedAt: 300,
-      }),
-      timestamp: 300,
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, liveRef, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'stale-source');
-    expect(options.store.removeThreadMessage).not.toHaveBeenCalledWith('thread-1', 'live-successor');
-    expect(options.bgStreamRefs.get('thread-1::codex')).toEqual(liveRef);
-  });
-
-  it('F254 removes the catching projection when the fresh final commits', () => {
-    const options = createMockOptions();
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      content: JSON.stringify({
-        type: 'freshness_closure',
-        closureId: 'closure-1',
-        status: 'committed',
-        updatedAt: 456,
-      }),
-      timestamp: 456,
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.removeThreadMessage).toHaveBeenCalledWith('thread-1', 'freshness-closure:closure-1');
-  });
-
-  it('F254 background hydration retains legacy time and exact source anchor metadata', () => {
-    const source = {
-      id: 'legacy-source',
-      type: 'assistant',
-      catId: 'codex',
-      content: 'old draft',
-      timestamp: 100,
-      extra: { stream: { invocationId: 'inv-legacy' } },
-    };
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [source],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-
-    const result = consumeBackgroundSystemInfo(
-      {
-        type: 'system_info',
-        catId: 'codex',
-        threadId: 'thread-1',
-        content: JSON.stringify({
-          type: 'freshness_closure',
-          closureId: 'closure-legacy',
-          status: 'blocked',
-          sourceInvocationId: 'inv-legacy',
-          turnInvocationId: 'turn-legacy',
-          originTriggerMessageId: null,
-          blockedReason: 'user_cancel',
-          updatedAt: 200,
-        }),
-        timestamp: 200,
-      },
-      undefined,
-      options,
-    );
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
-      'thread-1',
-      expect.objectContaining({
-        timestamp: 200,
-        extra: expect.objectContaining({
-          systemKind: 'freshness_closure',
-          freshnessClosure: expect.objectContaining({
-            sourceInvocationId: 'inv-legacy',
-            sourceMessageId: 'legacy-source',
-            updatedAt: 200,
-            legacy: true,
-          }),
-        }),
-      }),
-    );
-  });
-
   it('consumes web_search JSON (does not fall back to raw JSON system bubble)', () => {
     const options = createMockOptions();
 
@@ -311,11 +50,12 @@ describe('consumeBackgroundSystemInfo web_search', () => {
       type: 'system_info',
       catId: 'codex',
       threadId: 'thread-1',
+      messageId: 'resp-1',
       content: JSON.stringify({ type: 'web_search', catId: 'codex', count: 1 }),
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
   });
@@ -338,7 +78,7 @@ describe('consumeBackgroundSystemInfo web_search', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith(
@@ -376,7 +116,7 @@ describe('consumeBackgroundSystemInfo web_search', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith(
@@ -390,148 +130,6 @@ describe('consumeBackgroundSystemInfo web_search', () => {
           lastInvocationId: 'inv-new-2',
         }),
       }),
-    );
-  });
-
-  it('binds invocation identity onto an existing background streaming bubble', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'bg-msg-1',
-            type: 'assistant',
-            catId: 'codex',
-            content: 'partial chunk',
-            isStreaming: true,
-            timestamp: Date.now(),
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-new-3' }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.setThreadMessageStreamInvocation).toHaveBeenCalledWith(
-      'thread-1',
-      'bg-msg-1',
-      'inv-new-3',
-      undefined,
-    );
-  });
-
-  it('finalizes stale same-cat background stream before binding a new invocation', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'bg-old-bound',
-            type: 'assistant',
-            catId: 'codex',
-            content: 'previous invocation finished in backend',
-            isStreaming: true,
-            origin: 'stream',
-            extra: {
-              stream: {
-                invocationId: 'parent-old',
-                turnInvocationId: 'turn-old',
-              },
-            },
-            timestamp: Date.now() - 1_000,
-          },
-          {
-            id: 'bg-new-placeholder',
-            type: 'assistant',
-            catId: 'codex',
-            content: '',
-            isStreaming: true,
-            origin: 'stream',
-            timestamp: Date.now(),
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      invocationId: 'parent-new',
-      turnInvocationId: 'turn-new',
-      content: JSON.stringify({ type: 'invocation_created', invocationId: 'turn-new' }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(
-      msg,
-      { id: 'bg-old-bound', threadId: 'thread-1', catId: 'codex' },
-      options,
-    );
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.setThreadMessageStreaming).toHaveBeenCalledWith('thread-1', 'bg-old-bound', false);
-    expect(options.store.setThreadMessageStreamInvocation).toHaveBeenCalledWith(
-      'thread-1',
-      'bg-new-placeholder',
-      'parent-new',
-      'turn-new',
-    );
-  });
-
-  // F194 Phase Z3 R12 (砚砚 R13 RED requirement): background invocation_created with dual id
-  // (msg.invocationId=parent + msg.turnInvocationId=child) must call setThreadMessageStreamInvocation
-  // with parent + turnInvocationId, so existing stream bubble preserves dual id contract.
-  it('Z3 R12: background invocation_created with dual id rebinds existing stream bubble with turnInvocationId', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'bg-msg-z3',
-            type: 'assistant',
-            catId: 'codex',
-            content: 'partial chunk',
-            isStreaming: true,
-            timestamp: Date.now(),
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-
-    const msg = {
-      type: 'system_info',
-      catId: 'codex',
-      threadId: 'thread-1',
-      invocationId: 'parent-chain-z3',
-      turnInvocationId: 'turn-codex-z3',
-      content: JSON.stringify({ type: 'invocation_created', invocationId: 'turn-codex-z3' }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    // Critical: setThreadMessageStreamInvocation must be called with FOUR args (parent + turnInvocationId)
-    // so dual id contract (AC-Z8/Z9) survives background bind. Without this, bubble stays parent-only
-    // → same parent multi-turn merges in background path.
-    expect(options.store.setThreadMessageStreamInvocation).toHaveBeenCalledWith(
-      'thread-1',
-      'bg-msg-z3',
-      'parent-chain-z3',
-      'turn-codex-z3',
     );
   });
 
@@ -552,7 +150,7 @@ describe('consumeBackgroundSystemInfo web_search', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(false);
     expect(result.variant).toBe('info');
@@ -560,258 +158,58 @@ describe('consumeBackgroundSystemInfo web_search', () => {
   });
 });
 
-describe('consumeBackgroundSystemInfo rich_block placeholder', () => {
-  it('creates placeholder with origin:"stream" when no existing bubble (Bug B regression)', () => {
-    const options = createMockOptions();
-    const block = { id: 'rb-1', kind: 'audio', v: 1, url: '/api/tts/audio/test.wav', mimeType: 'audio/wav' };
-    const msg = {
-      type: 'system_info',
+describe('consumeBackgroundSystemInfo rich_block', () => {
+  it("a rich_block names its message: payload messageId (a post's own block) ?? envelope messageId (R)", () => {
+    // Real store, so the assertions hold whichever store the hook writes named messages through.
+    useChatStore.setState({ messages: [], threadStates: {}, currentThreadId: 'thread-current' });
+    useChatStore.getState().addMessageToThread('thread-1', {
+      id: 'post-1',
+      type: 'assistant',
       catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block }),
-      timestamp: Date.now(),
-    };
+      origin: 'callback',
+      content: 'posted',
+      isStreaming: false,
+      timestamp: 1000,
+      extra: { isExplicitPost: true },
+    });
+    const options: HandleBackgroundMessageOptions = { ...createMockOptions(), store: useChatStore.getState() };
+    const threadMessages = () => useChatStore.getState().getThreadState('thread-1').messages;
+    const postBlock = { id: 'rb-post', kind: 'audio', v: 1, url: '/api/tts/audio/post.wav', mimeType: 'audio/wav' };
+    const streamBlock = { id: 'rb-stream', kind: 'card', v: 1, title: 'stream card' };
+    const envelope = { type: 'system_info', catId: 'opus', threadId: 'thread-1', messageId: 'resp-1', timestamp: 2000 };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    // A post's own block names the post in its payload; the turn's R on the envelope does not redirect it,
+    // and the block neither creates R nor reopens the post.
+    const postResult = consumeBackgroundSystemInfo(
+      { ...envelope, content: JSON.stringify({ type: 'rich_block', block: postBlock, messageId: 'post-1' }) },
+      options,
+    );
+    expect(postResult.consumed).toBe(true);
+    expect(threadMessages().map((m) => m.id)).toEqual(['post-1']);
 
-    expect(result.consumed).toBe(true);
-    // Placeholder must be created with origin: 'stream' (not 'callback')
-    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
-      'thread-1',
+    // Without a payload messageId the block is R's stream output: R is created under its server id.
+    const streamResult = consumeBackgroundSystemInfo(
+      { ...envelope, content: JSON.stringify({ type: 'rich_block', block: streamBlock }) },
+      options,
+    );
+    expect(streamResult.consumed).toBe(true);
+
+    const messages = threadMessages();
+    expect(messages.map((m) => m.id)).toEqual(['post-1', 'resp-1']);
+    expect(messages[0]).toEqual(
+      expect.objectContaining({
+        isStreaming: false,
+        extra: expect.objectContaining({ rich: { v: 1, blocks: [postBlock] } }),
+      }),
+    );
+    expect(messages[1]).toEqual(
       expect.objectContaining({
         type: 'assistant',
         catId: 'opus',
-        content: '',
-        isStreaming: true,
         origin: 'stream',
+        extra: expect.objectContaining({ rich: { v: 1, blocks: [streamBlock] } }),
       }),
     );
-    // Rich block must be appended to the placeholder
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith(
-      'thread-1',
-      expect.stringContaining('bg-rich-'),
-      block,
-    );
-  });
-
-  it('appends rich block to existing callback bubble without creating placeholder', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [{ id: 'cb-msg-1', type: 'assistant', catId: 'opus', origin: 'callback', content: 'done' }],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    const block = { id: 'rb-2', kind: 'audio', v: 1, url: '/api/tts/audio/test2.wav', mimeType: 'audio/wav' };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    // Should NOT create a new placeholder
-    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
-    // Should append to existing callback bubble
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'cb-msg-1', block);
-  });
-
-  it('uses messageId correlation when provided', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          { id: 'target-msg', type: 'assistant', catId: 'opus', origin: 'callback', content: 'response' },
-          { id: 'other-msg', type: 'assistant', catId: 'opus', origin: 'callback', content: 'later' },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    const block = { id: 'rb-3', kind: 'audio', v: 1, url: '/api/tts/audio/test3.wav', mimeType: 'audio/wav' };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block, messageId: 'target-msg' }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'target-msg', block);
-  });
-
-  it('passes turn identity when a definitive background callback claims a stream preview', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [{ id: 'callback-owner', type: 'assistant', catId: 'opus', origin: 'callback', content: 'stored' }],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    const block = { id: 'background-preview', kind: 'card', v: 1, title: 'Moved' };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block, messageId: 'callback-owner' }),
-      invocationId: 'parent-1',
-      turnInvocationId: 'turn-1',
-      timestamp: Date.now(),
-    };
-
-    consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'callback-owner', block, {
-      catId: 'opus',
-      invocationId: 'parent-1',
-      turnInvocationId: 'turn-1',
-    });
-  });
-
-  it('keeps an identity-bound rich block on the current background stream after an independent callback', () => {
-    const parentInvocationId = 'parent-independent';
-    const turnInvocationId = 'turn-independent';
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'stream-independent',
-            type: 'assistant',
-            catId: 'opus',
-            origin: 'stream',
-            isStreaming: true,
-            content: 'current provider response',
-            extra: { stream: { invocationId: parentInvocationId, turnInvocationId } },
-          },
-          {
-            id: 'callback-independent',
-            type: 'assistant',
-            catId: 'opus',
-            origin: 'callback',
-            content: 'independent proactive update',
-            extra: {
-              isExplicitPost: true,
-              stream: { invocationId: parentInvocationId, turnInvocationId },
-            },
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {
-          opus: { invocationId: parentInvocationId, turnInvocationId },
-        },
-      })),
-    });
-    const block = { id: 'rb-independent', kind: 'card', v: 1, title: 'current final' };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block }),
-      invocationId: parentInvocationId,
-      turnInvocationId,
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'stream-independent', block);
-    expect(options.store.appendRichBlockToThread).not.toHaveBeenCalledWith('thread-1', 'callback-independent', block);
-  });
-
-  it('AC-Z17: reuses finalized background stream bubble for late rich_block instead of creating bg-rich placeholder', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'bg-finalized-msg',
-            type: 'assistant',
-            catId: 'opus',
-            origin: 'stream',
-            isStreaming: false,
-            content: '🎵 已发！',
-            timestamp: Date.now() - 1000,
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    options.finalizedBgRefs.set('thread-1::opus', 'bg-finalized-msg');
-    const block = { id: 'rb-z17-bg', kind: 'audio', v: 1, url: '/api/tts/audio/late.wav', mimeType: 'audio/wav' };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      content: JSON.stringify({ type: 'rich_block', block }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.addMessageToThread).not.toHaveBeenCalled();
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', 'bg-finalized-msg', block);
-  });
-
-  it('does not reuse a finalized background bubble for a rich_block with a new invocation id', () => {
-    const options = createMockOptions({
-      getThreadState: vi.fn(() => ({
-        messages: [
-          {
-            id: 'bg-finalized-old-msg',
-            type: 'assistant',
-            catId: 'opus',
-            origin: 'stream',
-            isStreaming: false,
-            content: 'old voice done',
-            timestamp: Date.now() - 1000,
-          },
-        ],
-        catStatuses: {},
-        catInvocations: {},
-      })),
-    });
-    options.finalizedBgRefs.set('thread-1::opus', 'bg-finalized-old-msg');
-    const block = {
-      id: 'rb-new-invocation',
-      kind: 'audio',
-      v: 1,
-      url: '/api/tts/audio/new.wav',
-      mimeType: 'audio/wav',
-    };
-    const msg = {
-      type: 'system_info',
-      catId: 'opus',
-      threadId: 'thread-1',
-      invocationId: 'inv-new-bg',
-      content: JSON.stringify({ type: 'rich_block', block }),
-      timestamp: Date.now(),
-    };
-
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
-
-    expect(result.consumed).toBe(true);
-    expect(options.store.appendRichBlockToThread).not.toHaveBeenCalledWith('thread-1', 'bg-finalized-old-msg', block);
-    expect(options.store.addMessageToThread).toHaveBeenCalledWith(
-      'thread-1',
-      expect.objectContaining({
-        catId: 'opus',
-        origin: 'stream',
-        extra: {
-          stream: { invocationId: 'inv-new-bg' },
-        },
-      }),
-    );
-    const targetId = vi.mocked(options.store.addMessageToThread).mock.calls[0]?.[1]?.id;
-    expect(targetId).toEqual(expect.stringMatching(/^bg-rich-/));
-    expect(options.store.appendRichBlockToThread).toHaveBeenCalledWith('thread-1', targetId, block);
   });
 });
 
@@ -838,10 +236,10 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
-    // Must update catStatus so ThinkingIndicator renders amber warning (not raw JSON)
+    // Must update catStatus for structured liveness surfaces (not raw JSON).
     expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith('thread-1', 'opus', 'alive_but_silent');
     // Must set invocation snapshot for the warning UI to display details
     expect(options.store.setThreadCatInvocation).toHaveBeenCalledWith(
@@ -881,7 +279,7 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.updateThreadCatStatus).toHaveBeenCalledWith('thread-2', 'codex', 'suspected_stall');
@@ -904,7 +302,7 @@ describe('consumeBackgroundSystemInfo liveness_warning', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     // Should NOT create any message bubble
@@ -931,7 +329,7 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
@@ -974,7 +372,7 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     const call = vi.mocked(options.store.setThreadCatInvocation).mock.calls[0];
@@ -1000,7 +398,7 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     const call = vi.mocked(options.store.setThreadCatInvocation).mock.calls[0];
@@ -1024,7 +422,7 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     // Should use msg.catId='kimi' because parsed.catId='' is falsy with ||
@@ -1033,13 +431,12 @@ describe('consumeBackgroundSystemInfo provider_capability (#966)', () => {
 });
 
 describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
-  it('patches a background reconnect notice to recovered with the same identity', () => {
+  it('keeps background reconnect evidence on the existing response', () => {
     const initial = {
-      id: 'provider-recovery:codex-sol:turn-bg',
-      type: 'system',
-      variant: 'info',
+      id: 'response-bg',
+      type: 'assistant',
       catId: 'codex-sol',
-      content: 'Reconnecting to codex (attempt 1)…',
+      content: 'working',
       timestamp: 100,
     };
     const options = createMockOptions({
@@ -1053,6 +450,7 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
         threadId: 'thread-bg',
         invocationId: 'parent-bg',
         turnInvocationId: 'turn-bg',
+        messageId: 'response-bg',
         content: JSON.stringify({
           type: 'provider_recovery',
           provider: 'codex',
@@ -1063,7 +461,6 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
         }),
         timestamp: 200,
       },
-      undefined,
       options,
     );
 
@@ -1071,9 +468,8 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
     expect(options.store.patchThreadMessage).toHaveBeenCalledWith(
       'thread-bg',
-      'provider-recovery:codex-sol:turn-bg',
+      'response-bg',
       expect.objectContaining({
-        content: 'Connection recovered.',
         extra: expect.objectContaining({
           providerRecovery: expect.objectContaining({
             phase: 'recovered',
@@ -1092,11 +488,15 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       type: 'system_info',
       catId: 'opus',
       threadId: 'thread-1',
-      content: JSON.stringify({ type: 'warning', message: 'API rate limit approaching' }),
+      content: JSON.stringify({
+        type: 'warning',
+        presentation: 'user_action_required',
+        message: 'API rate limit approaching',
+      }),
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     // warning is NOT consumed (it renders as a readable system message, not suppressed)
     expect(result.consumed).toBe(false);
@@ -1114,7 +514,7 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
@@ -1131,7 +531,7 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
@@ -1154,7 +554,7 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();
@@ -1171,7 +571,7 @@ describe('consumeBackgroundSystemInfo warning + telemetry suppression', () => {
       timestamp: Date.now(),
     };
 
-    const result = consumeBackgroundSystemInfo(msg, undefined, options);
+    const result = consumeBackgroundSystemInfo(msg, options);
 
     expect(result.consumed).toBe(true);
     expect(options.store.addMessageToThread).not.toHaveBeenCalled();

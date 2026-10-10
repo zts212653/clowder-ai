@@ -75,7 +75,7 @@
     "@fastify/static": "7",
     "@fastify/websocket": "^10.0.0",
     "@larksuiteoapi/node-sdk": "^1.59.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.214.0",
     "@opentelemetry/core": "^2.6.1",

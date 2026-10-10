@@ -110,7 +110,7 @@ export function ChatInputMenus({
       {showMentions && (
         <div
           ref={menuRef}
-          className="absolute bottom-full left-4 mb-2 bg-cafe-surface-elevated rounded-xl shadow-lg border border-cafe overflow-hidden w-64 z-10 max-h-80 flex flex-col"
+          className="absolute bottom-full left-4 mb-2 bg-cafe-surface-canvas rounded-xl shadow-lg border border-cafe overflow-hidden w-64 z-10 max-h-80 flex flex-col"
         >
           <div ref={scrollRef} className="overflow-y-auto flex-1">
             {catOptions.map((opt, i) => (
@@ -173,7 +173,7 @@ export function ChatInputMenus({
       {showGameMenu && gameStep === 'list' && (
         <div
           ref={menuRef}
-          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-cafe overflow-hidden w-72 z-10"
+          className="absolute bottom-full left-4 mb-2 bg-cafe-surface-canvas rounded-xl shadow-lg border border-cafe overflow-hidden w-72 z-10"
         >
           <div className="px-4 py-2 text-xs text-cafe-muted font-medium border-b border-cafe-subtle">选择游戏</div>
           {GAME_LIST.map((game, i) => (
@@ -208,7 +208,7 @@ export function ChatInputMenus({
       {showGameMenu && gameStep === 'modes' && (
         <div
           ref={menuRef}
-          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-cafe overflow-hidden w-72 z-10"
+          className="absolute bottom-full left-4 mb-2 bg-cafe-surface-canvas rounded-xl shadow-lg border border-cafe overflow-hidden w-72 z-10"
         >
           <button
             className="w-full text-left px-4 py-2 text-xs text-cafe-accent font-medium border-b border-cafe-subtle hover:bg-accent-50 transition-colors flex items-center gap-1"

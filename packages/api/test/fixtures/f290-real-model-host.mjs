@@ -6,8 +6,8 @@ import Redis from 'ioredis';
 import { InvocationQueue } from '../../src/domains/cats/services/agents/invocation/InvocationQueue.ts';
 import { InvocationRegistry } from '../../src/domains/cats/services/agents/invocation/InvocationRegistry.ts';
 import { InvocationTracker } from '../../src/domains/cats/services/agents/invocation/InvocationTracker.ts';
-import { QueuedMessageCustodyCoordinator } from '../../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.ts';
 import { QueueProcessor } from '../../src/domains/cats/services/agents/invocation/QueueProcessor.ts';
+import { RedisQueueLedgerStore } from '../../src/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.ts';
 import { RedisAuthInvocationBackend } from '../../src/domains/cats/services/agents/invocation/RedisAuthInvocationBackend.ts';
 import { CodexAgentService } from '../../src/domains/cats/services/agents/providers/CodexAgentService.ts';
 import { AgentRegistry } from '../../src/domains/cats/services/agents/registry/AgentRegistry.ts';
@@ -157,15 +157,21 @@ export async function createModelHost(world, cafe, db, config, evidence) {
     const deps = originalStrategyDeps();
     return { ...deps, invocationDeps: { ...deps.invocationDeps, apiUrl: callbackUrl } };
   };
-  const queue = new InvocationQueue();
   const tracker = new InvocationTracker();
+  const queue = new InvocationQueue(new RedisQueueLedgerStore(redis), {
+    invocationTracker: tracker,
+    resolveCarrierCapability: (target) => router.freshnessCarrierCapability(target),
+    onAdmitted: ({ threadId }) => {
+      void queueProcessor.requestDrain(threadId);
+    },
+  });
+  await queue.hydrateFromLedger(messages);
   const queueProcessor = new QueueProcessor({
     queue,
     invocationTracker: tracker,
     invocationRecordStore: parents,
     router,
     messageStore: messages,
-    queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: messages }),
     turnExecutionStore: turns,
     socketManager: sockets,
     log: {
@@ -193,7 +199,6 @@ export async function createModelHost(world, cafe, db, config, evidence) {
     threadStore: threads,
     messageStore: messages,
     invocationQueue: queue,
-    queueProcessor,
     socketManager: sockets,
     isCatAvailable: (id) => id === catId,
     admitStandingWork: (source, id) => admission.admit(source, id),

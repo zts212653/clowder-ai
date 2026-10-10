@@ -51,7 +51,7 @@ assert_alpha_redis_seeded() {
   else
     # The old instance may be stopped while its durable data still exists.
     # Never infer "fresh install" from a failed PING alone.
-    local legacy_dir="$HOME/.cat-cafe/redis-worktree-6398"
+    local legacy_dir="${1:-$HOME/.cat-cafe/redis-worktree-6398}"
     if [ -s "$legacy_dir/dump.rdb" ] \
       || [ -s "$legacy_dir/appendonlydir/appendonly.aof.manifest" ] \
       || [ -s "$legacy_dir/appendonly.aof" ]; then

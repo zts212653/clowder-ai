@@ -11,15 +11,14 @@ describe('F275 proposal approval owner-auth provenance', () => {
     const ctx = await createProposalTestContext({
       routerOverride: {
         async resolveTargetsAndIntent() {
-          return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
+          return {
+            targetCats: ['opus'],
+            intent: { intent: 'execute' },
+            hasMentions: false,
+          };
         },
       },
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: {
-        async processNext() {
-          return { started: true };
-        },
-      },
     });
     const source = await ctx.threadStore.create('default-user', 'Source');
     const { proposalId } = JSON.parse(
@@ -42,6 +41,6 @@ describe('F275 proposal approval owner-auth provenance', () => {
     assert.equal(response.statusCode, 200);
     const { threadId } = JSON.parse(response.body);
     const [entry] = invocationQueue.list(threadId, 'default-user');
-    assert.equal(entry.ownerAuthProvenance, 'compatibility_fallback');
+    assert.equal(entry.execution.ownerAuthProvenance, 'compatibility_fallback');
   });
 });

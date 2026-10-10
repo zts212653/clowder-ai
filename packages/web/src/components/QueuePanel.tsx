@@ -1,68 +1,32 @@
 'use client';
 
-import type { FreshnessCarrierCapability, QueueRecoveryAction } from '@cat-cafe/shared';
-import { type QueueReminderAttemptState, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
+import { type ActiveExecutionListResponse, SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { arrayMove, SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { useCallback, useMemo, useState } from 'react';
+import { useCatData } from '@/hooks/useCatData';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
+import { useThreadLiveness, useThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
-import { ForceResetDialog } from './ForceResetDialog';
-import { SortableQueueEntryRow } from './QueueEntryRow';
-import {
-  collectExactLiveInvocationIds,
-  collectSettlingInvocationIds,
-  projectQueueEntryForActions,
-  queueEntryNeedsRecovery,
-  queueTargetStateEntries,
-} from './queue-receipt-projection';
-import { SteerQueuedEntryModal } from './SteerQueuedEntryModal';
+import { scopedQueue } from './execution-row/thread-queue';
+import { deliveredTargetIdsFromHistory, SortableQueueEntryRow } from './QueueEntryRow';
+import { QueueSteerDialog } from './QueueSteerDialog';
 import { useQueueActionConvergence } from './useQueueActionConvergence';
 
 const COLLAPSE_THRESHOLD = 4;
+const EMPTY_TARGET_IDS: readonly string[] = [];
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, normal: 1 };
 
-const REMINDER_RESULT_COPY: Record<
-  QueueReminderAttemptState,
-  { type: 'success' | 'info'; title: string; message: string }
-> = {
-  requested: {
-    type: 'success',
-    title: '提醒已请求',
-    message: '不会打断当前工作；猫会在安全断点收到提示。',
-  },
-  delivered: { type: 'info', title: '提醒已送达', message: '猫已收到提示，尚未读取消息正文。' },
-  seen: { type: 'info', title: '提醒后已读取', message: '猫已在该轮完整读取这条消息。' },
-  missed: { type: 'info', title: '提醒未赶上本轮', message: '该轮已结束；回执保留本次未送达结果。' },
-};
-
-function reminderResultCopy(state: unknown) {
-  return typeof state === 'string' && state in REMINDER_RESULT_COPY
-    ? REMINDER_RESULT_COPY[state as QueueReminderAttemptState]
-    : REMINDER_RESULT_COPY.requested;
-}
-
-function recoveryNoStartCopy(refreshed: boolean, error: unknown) {
-  if (typeof error === 'string') {
-    return { type: refreshed ? ('info' as const) : ('error' as const), title: '队列未启动', message: error };
-  }
-  if (refreshed) {
-    return {
-      type: 'info' as const,
-      title: '队列状态已刷新',
-      message: '系统没有启动新的处理；请按当前条目显示的可用操作继续。',
-    };
-  }
+function queueClearFailureCopy(data: { code?: unknown; error?: unknown }) {
+  const partial = data.code === 'QUEUE_WITHDRAWAL_PARTIAL';
   return {
-    type: 'error' as const,
-    title: '队列未启动',
-    message: '系统没有启动新的处理，刷新也未完成；请稍后重试。',
+    title: partial ? '已停止部分消息' : '停止失败',
+    message: typeof data.error === 'string' ? `执行已停止；${data.error}` : '执行已停止，但待处理队列未能清空，请重试',
   };
 }
 
@@ -136,67 +100,32 @@ interface QueuePanelProps {
 
 export function QueuePanel({ threadId }: QueuePanelProps) {
   const coCreator = useCoCreatorConfig();
+  const { cats } = useCatData();
   const resolveCatName = useCatNameResolver();
-  const rawQueue = useChatStore((s) => s.queue);
+  const catAvatarById = useMemo(() => new Map(cats.map((cat) => [cat.id, cat.avatar])), [cats]);
+  const rawQueue = useChatStore((s) => scopedQueue(s, threadId));
   const queue = useMemo(() => rawQueue ?? [], [rawQueue]);
-  const queuePaused = useChatStore((s) => s.queuePaused) ?? false;
-  const queuePauseReason = useChatStore((s) => s.queuePauseReason);
+  const timelineMessages = useThreadMessages(threadId);
   const setQueue = useChatStore((s) => s.setQueue);
-  const { activeInvocations, catInvocations } = useThreadLiveness(threadId);
+  const { activeInvocations } = useThreadLiveness(threadId);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
 
-  const {
-    steerEntryId,
-    forceResetAction,
-    retryingAttemptIds,
-    resettingActionIds,
-    handleRetry,
-    refreshQueue,
-    handleSteerConfirm,
-    handleSteerOpen,
-    handleSteerCancel,
-    handleForceResetConfirm,
-    handleForceResetOpen,
-    handleForceResetCancel,
-  } = useQueueActionConvergence(threadId);
-  const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
+  const { steerEntryId, handleSteerConfirm, handleSteerOpen, handleSteerCancel } = useQueueActionConvergence(threadId);
   const [collapsed, setCollapsed] = useState<boolean | null>(null);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-  const settlingInvocationIds = useMemo(
-    () => collectSettlingInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
-  );
-  const activeInvocationIds = useMemo(
-    () => collectExactLiveInvocationIds(activeInvocations, catInvocations),
-    [activeInvocations, catInvocations],
-  );
-  const activeCatIds = useMemo(
-    () => new Set(Object.values(activeInvocations).map((invocation) => invocation.catId)),
-    [activeInvocations],
-  );
   const visibleEntries = useMemo(
     () =>
       queue
-        .filter((entry) => {
-          if (entry.source === 'connector' && entry.content.startsWith(SCHEDULER_TRIGGER_PREFIX)) {
-            const hasFailedTarget = queueTargetStateEntries(entry).some(([, state]) => state === 'failed');
-            if (!hasFailedTarget || !entry.recoveryActions?.length) return false;
-          }
-          if (entry.status === 'queued') return true;
-          const hasProjectedReset = entry.recoveryActions?.some((action) => action.kind === 'force_reset') ?? false;
-          const hasActiveTarget =
-            entry.targetCats.length === 0
-              ? activeInvocationIds.size > 0
-              : entry.targetCats.some((catId) => activeCatIds.has(catId));
-          return hasProjectedReset && !hasActiveTarget;
-        })
-        .map((entry) => projectQueueEntryForActions(entry, activeInvocationIds, settlingInvocationIds))
-        .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+        .filter(
+          (e) =>
+            e.status === 'queued' &&
+            !(e.sourceCategory === 'scheduled' && e.content.startsWith(SCHEDULER_TRIGGER_PREFIX)),
+        )
         .sort(compareQueueEntries),
-    [activeCatIds, activeInvocationIds, settlingInvocationIds, queue],
+    [queue],
   );
 
   // A2A queue visibility: explain WHY entries are queued (waiting behind the active turn) so the
@@ -205,55 +134,20 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
   // oldest active turn. Recomputed when activeInvocations/visibleEntries change; elapsed reflects
   // the last store update (acceptable for v1 — no per-second tick).
   const waitInfo = useMemo(() => {
-    const waitingEntries = visibleEntries.filter((entry) => entry.status === 'queued');
-    const dispatchTargetCatIds = waitingEntries.flatMap((entry) => {
-      const targetStates = queueTargetStateEntries(entry);
-      return targetStates.length > 0
-        ? targetStates
-            .filter(([, state]) => state !== 'seen' && state !== 'awakened' && state !== 'failed')
-            .map(([catId]) => catId)
-        : entry.targetCats;
-    });
-    const hasBroadcastEntry = waitingEntries.some(
-      (entry) => queueTargetStateEntries(entry).length === 0 && entry.targetCats.length === 0,
-    );
+    const dispatchTargetCatIds = visibleEntries.flatMap((entry) => entry.targetCats);
+    const hasBroadcastEntry = visibleEntries.some((entry) => entry.targetCats.length === 0);
     if (dispatchTargetCatIds.length === 0 && !hasBroadcastEntry) return null;
     return computeQueueWaitInfo(activeInvocations, dispatchTargetCatIds);
   }, [activeInvocations, visibleEntries]);
-  const canRecoverOrphanedQueue =
-    !queuePaused &&
-    visibleEntries.some(
-      (entry) =>
-        entry.status === 'queued' &&
-        queueEntryNeedsRecovery(entry, activeInvocationIds, activeCatIds, settlingInvocationIds),
-    );
-  const activeInvocationIdByCatId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.entries(activeInvocations ?? {}).map(([invocationId, invocation]) => [invocation.catId, invocationId]),
-      ),
-    [activeInvocations],
-  );
-  const activeCarrierCapabilityByCatId = useMemo(
-    () =>
-      Object.fromEntries(
-        Object.values(activeInvocations).map((invocation) => [
-          invocation.catId,
-          catInvocations[invocation.catId]?.freshnessCarrierCapability,
-        ]),
-      ) as Readonly<Record<string, FreshnessCarrierCapability | undefined>>,
-    [activeInvocations, catInvocations],
-  );
-
   const handleRemove = useCallback(
-    async (action: Extract<QueueRecoveryAction, { kind: 'withdraw' }>) => {
+    async (entryId: string) => {
       const prevQueue = queue;
       setQueue(
         threadId,
-        prevQueue.filter((e) => e.id !== action.entryId),
+        prevQueue.filter((e) => e.id !== entryId),
       );
       try {
-        const res = await apiFetch(action.request.path, { method: action.request.method });
+        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}`, { method: 'DELETE' });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setQueue(threadId, prevQueue);
@@ -269,7 +163,7 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         addToast({
           type: 'success',
           title: '已停止后续处理',
-          message: '原消息与已经发生的读取事实仍保留在历史中',
+          message: '原消息与已经发生的投递事实仍保留在历史中',
           threadId,
           duration: 3000,
         });
@@ -314,10 +208,10 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         if (insert) setPendingChatInsert(insert);
         addToast({
           type: result.verdict === 'exposed' ? 'info' : 'success',
-          title: result.verdict === 'exposed' ? '正文已撤回 · 猫曾读取' : '已撤回并回填输入框',
+          title: result.verdict === 'exposed' ? '正文已撤回 · 曾投递' : '已撤回并回填输入框',
           message:
             result.verdict === 'exposed'
-              ? '未读猫已停止后续处理；已读回合不会被普通撤回中断。'
+              ? '未投递目标已停止后续处理；正在处理的回合不会被普通撤回中断。'
               : '正文已从消息历史转移到持久草稿，可修改后重新发送。',
           threadId,
           duration: 4000,
@@ -336,49 +230,49 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     [addToast, queue, setPendingChatInsert, setQueue, threadId],
   );
 
-  const handleContinue = useCallback(async () => {
-    try {
-      const res = await apiFetch(`/api/threads/${threadId}/queue/next`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.started !== true) {
-        const refreshed = await refreshQueue();
-        const feedback = recoveryNoStartCopy(refreshed, data?.error);
-        addToast({
-          ...feedback,
-          threadId,
-          duration: 5000,
-        });
-      }
-    } catch {
-      addToast({
-        type: 'error',
-        title: '队列恢复失败',
-        message: '请求没有完成，请重试。',
-        threadId,
-        duration: 5000,
-      });
-    }
-  }, [addToast, refreshQueue, threadId]);
-
   const handleClear = useCallback(async () => {
     try {
+      const activeResponse = await apiFetch(`/api/threads/${threadId}/executions/active`);
+      if (!activeResponse.ok) throw new Error('active execution projection unavailable');
+      const active = (await activeResponse.json()) as ActiveExecutionListResponse;
+      const stopTargets = active.executions.filter(
+        (execution) =>
+          execution.threadId === threadId &&
+          execution.kind === 'live_invocation' &&
+          execution.cancelability.state === 'cancelable',
+      );
+      for (const execution of stopTargets) {
+        const target = execution.cancelability.state === 'cancelable' ? execution.cancelability.target : undefined;
+        if (!target || target.kind !== 'live_invocation') continue;
+        const stopped = await apiFetch(
+          `/api/threads/${threadId}/executions/live/${encodeURIComponent(target.executionId)}/cancel`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ catId: target.catId }),
+          },
+        );
+        if (!stopped.ok) throw new Error('active execution stop failed');
+      }
       const res = await apiFetch(`/api/threads/${threadId}/queue`, { method: 'DELETE' });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (Array.isArray(data?.queue)) setQueue(threadId, data.queue);
+        const failure = queueClearFailureCopy(data);
         addToast({
           type: 'error',
-          title: data?.code === 'QUEUE_WITHDRAWAL_PARTIAL' ? '已停止部分消息' : '停止失败',
-          message: data?.error ?? '停止后续处理失败，请重试',
+          title: failure.title,
+          message: failure.message,
           threadId,
           duration: 5000,
         });
         return;
       }
+      setQueue(threadId, []);
       addToast({
         type: 'success',
-        title: '已全部停止后续处理',
-        message: '原消息与已经发生的读取事实仍保留在历史中',
+        title: '已全部停止',
+        message: '运行中的执行已停止，待处理队列已清空；原消息与投递事实仍保留',
         threadId,
         duration: 3000,
       });
@@ -392,45 +286,6 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       });
     }
   }, [addToast, setQueue, threadId]);
-
-  const handleRemind = useCallback(
-    async (entryId: string, targetCatId: string) => {
-      const key = `${entryId}:${targetCatId}`;
-      setRemindingTargetKeys((current) => new Set(current).add(key));
-      try {
-        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}/remind`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetCatId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const message =
-            data?.code === 'NO_ACTIVE_INVOCATION'
-              ? '这只猫当前没有可接收提醒的工作轮次。'
-              : (data?.error ?? '提醒请求没有完成，请重试。');
-          addToast({ type: 'error', title: '提醒未送达', message, threadId, duration: 5000 });
-          return;
-        }
-        addToast({ ...reminderResultCopy(data?.state), threadId, duration: 3000 });
-      } catch {
-        addToast({
-          type: 'error',
-          title: '提醒未送达',
-          message: '提醒请求没有完成，请重试。',
-          threadId,
-          duration: 5000,
-        });
-      } finally {
-        setRemindingTargetKeys((current) => {
-          const next = new Set(current);
-          next.delete(key);
-          return next;
-        });
-      }
-    },
-    [addToast, threadId],
-  );
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -471,70 +326,41 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
     [addToast, queue, setQueue, threadId, visibleEntries],
   );
 
-  if (queue.length === 0) return null;
-  if (visibleEntries.length === 0 && !queuePaused) return null;
+  if (visibleEntries.length === 0) return null;
 
   const isCollapsed = collapsed ?? visibleEntries.length >= COLLAPSE_THRESHOLD;
-  const pauseLabel = queuePauseReason === 'canceled' ? '当前调用已取消' : '当前调用失败';
-  const entryIds = visibleEntries.filter((entry) => entry.status === 'queued').map((entry) => entry.id);
+  const entryIds = visibleEntries.map((e) => e.id);
 
   const selectedSteerEntry = steerEntryId ? (queue.find((e) => e.id === steerEntryId) ?? null) : null;
 
   return (
     <div
-      className={`border-t mx-4 mb-1 rounded-xl overflow-hidden ${
-        queuePaused ? 'border-conn-amber-ring bg-conn-amber-bg/50' : ''
-      }`}
-      style={
-        queuePaused
-          ? undefined
-          : {
-              borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
-              backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
-            }
-      }
+      className="border-t mx-4 mb-1 rounded-xl overflow-hidden"
+      style={{
+        borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)',
+        backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 5%, transparent)',
+      }}
     >
       {/* Header */}
       <div
-        className={`flex items-center justify-between px-3 py-2 ${queuePaused ? 'bg-conn-amber-bg/60' : ''}`}
-        style={
-          queuePaused
-            ? undefined
-            : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }
-        }
+        className="flex items-center justify-between px-3 py-2"
+        style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
+          <svg aria-hidden="true" className="w-4 h-4 text-cafe-secondary" viewBox="0 0 20 20" fill="currentColor">
             <path d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" />
           </svg>
-          <span className="text-xs font-medium text-cafe-secondary">{queuePaused ? '队列已暂停' : '待处理'}</span>
+          <span className="text-xs font-medium text-cafe-secondary">排队等待中</span>
           <span
-            className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-              queuePaused
-                ? 'bg-[var(--semantic-warning-surface)] text-conn-amber-text'
-                : 'text-[var(--color-cocreator-primary)]'
-            }`}
-            style={
-              queuePaused
-                ? undefined
-                : { backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }
-            }
+            className="text-xs px-1.5 py-0.5 rounded-full font-medium text-[var(--color-cocreator-primary)]"
+            style={{ backgroundColor: 'color-mix(in oklch, var(--color-cocreator-primary) 20%, transparent)' }}
           >
             {visibleEntries.length}
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {(queuePaused || canRecoverOrphanedQueue) && (
-            <button
-              type="button"
-              data-testid={canRecoverOrphanedQueue ? 'queue-recover' : undefined}
-              onClick={handleContinue}
-              className="text-xs px-2 py-1 rounded-md bg-[var(--semantic-success)] text-[var(--cafe-surface)] hover:opacity-90 transition-colors"
-            >
-              {queuePaused ? '继续' : '恢复'}
-            </button>
-          )}
           <button
+            type="button"
             onClick={() => setCollapsed(!isCollapsed)}
             className="text-xs text-cafe-muted hover:text-cafe-secondary transition-colors"
           >
@@ -551,29 +377,16 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         </div>
       </div>
 
-      {queuePaused && (
-        <div className="px-3 py-1.5 text-xs text-conn-amber-text border-b border-conn-amber-ring/60">{pauseLabel}</div>
-      )}
-
-      {!queuePaused && waitInfo && visibleEntries.length > 0 && (
+      {waitInfo?.kind === 'target_dispatch' && visibleEntries.length > 0 && (
         <div
           className="px-3 py-1.5 text-xs text-cafe-muted border-b"
           style={{ borderColor: 'color-mix(in oklch, var(--color-cocreator-primary) 10%, transparent)' }}
         >
-          {waitInfo.kind === 'active_turn' ? (
-            <>
-              等待 <span className="font-medium text-cafe-secondary">{resolveCatName(waitInfo.catId)}</span> 当前回合
-              {waitInfo.elapsedLabel ? `（已运行 ${waitInfo.elapsedLabel}）` : ''}
-            </>
-          ) : (
-            <>
-              等待{' '}
-              <span className="font-medium text-cafe-secondary">
-                {waitInfo.catIds.map((catId) => resolveCatName(catId)).join('、')}
-              </span>{' '}
-              调度
-            </>
-          )}
+          等待{' '}
+          <span className="font-medium text-cafe-secondary">
+            {waitInfo.catIds.map((catId) => resolveCatName(catId)).join('、')}
+          </span>{' '}
+          调度
         </div>
       )}
 
@@ -584,26 +397,23 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
               {visibleEntries.map((entry, idx) => {
                 // #706: Compute image count from server-enriched messagePreview
                 const imageCount = entry.messagePreview?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0;
+                const deliveredTargetIds = entry.messageId
+                  ? deliveredTargetIdsFromHistory(entry.messageId, timelineMessages)
+                  : EMPTY_TARGET_IDS;
                 return (
                   <SortableQueueEntryRow
                     key={entry.id}
                     entry={entry}
                     index={idx}
-                    isPaused={queuePaused}
                     imageCount={imageCount}
                     ownerName={coCreator.name}
+                    ownerAvatar={coCreator.avatar}
+                    deliveredTargetIds={deliveredTargetIds}
                     resolveCatName={resolveCatName}
+                    resolveCatAvatar={(catId) => catAvatarById.get(catId)}
                     onRemove={handleRemove}
                     onRecallEdit={handleRecallEdit}
                     onSteer={handleSteerOpen}
-                    onRetry={handleRetry}
-                    onForceReset={handleForceResetOpen}
-                    onRemind={handleRemind}
-                    activeInvocationIdByCatId={activeInvocationIdByCatId}
-                    activeCarrierCapabilityByCatId={activeCarrierCapabilityByCatId}
-                    remindingTargetKeys={remindingTargetKeys}
-                    retryingAttemptIds={retryingAttemptIds}
-                    resettingActionIds={resettingActionIds}
                   />
                 );
               })}
@@ -613,14 +423,15 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
       )}
 
       {selectedSteerEntry && selectedSteerEntry.status === 'queued' && (
-        <SteerQueuedEntryModal onCancel={handleSteerCancel} onConfirm={handleSteerConfirm} />
+        <QueueSteerDialog
+          key={`${threadId}:${selectedSteerEntry.id}`}
+          threadId={threadId}
+          entry={selectedSteerEntry}
+          queue={queue}
+          onCancel={handleSteerCancel}
+          onConfirm={handleSteerConfirm}
+        />
       )}
-      <ForceResetDialog
-        open={forceResetAction !== null}
-        busy={forceResetAction !== null && resettingActionIds.has(forceResetAction.id)}
-        onCancel={handleForceResetCancel}
-        onConfirm={handleForceResetConfirm}
-      />
     </div>
   );
 }

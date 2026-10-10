@@ -9,7 +9,7 @@ import {
   splitCommandArgs,
   splitMentionPatterns,
   splitStrengthTags,
-  usesCliTransport,
+  usesCliCarrier,
 } from './hub-cat-editor.model';
 
 function trimText(value: unknown): string {
@@ -118,9 +118,8 @@ function buildAcpTransportConfig(form: HubCatEditorFormState, cat?: CatData | nu
 }
 
 function buildAcpPatch(form: HubCatEditorFormState, cat?: CatData | null): Record<string, unknown> {
-  if (form.clientId === 'antigravity') return cat?.acp ? { acp: null } : {};
-  if (form.acpEnabled) return { acp: buildAcpTransportConfig(form, cat) };
-  return cat?.acp ? { acp: null } : {};
+  if (form.carrier === 'acp') return { acp: buildAcpTransportConfig(form, cat) };
+  return {};
 }
 
 /**
@@ -167,36 +166,23 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         : {};
   // #712: always send the form's mcpSupport value so the user can toggle it explicitly
   const mcpSupportPatch = { mcpSupport: form.mcpSupport };
-  const cliTransport = usesCliTransport(form);
+  const cliCarrier = usesCliCarrier(form);
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliFields: Record<string, unknown> = {};
-  if (cliTransport && trimmedCliEffort.length > 0) {
+  if (cliCarrier && trimmedCliEffort.length > 0) {
     cliFields.effort = trimmedCliEffort;
   } else if (cat?.cli?.effort) {
     cliFields.effort = null as null;
   }
   const nextServiceTier = form.codexSpeed ?? '';
   const currentServiceTier = cat?.cli?.serviceTier ?? '';
-  const serviceTierEligible = form.clientId === 'openai' && context.accountAuthType === 'oauth' && !form.acpEnabled;
+  const serviceTierEligible = form.clientId === 'openai' && context.accountAuthType === 'oauth';
   if (serviceTierEligible && (context.forceServiceTier || nextServiceTier !== currentServiceTier)) {
     cliFields.serviceTier = nextServiceTier || (null as null);
   }
-  // F254 D2: per-cat Codex carrier override. Only meaningful when the cat
-  // actually dispatches through the local Codex CLI — generic ACP wins over
-  // the carrier in the production assembly, so don't persist one under ACP.
-  if (cliTransport && form.clientId === 'openai') {
-    if (form.codexCarrier) {
-      cliFields.carrier = form.codexCarrier;
-    } else if (cat?.cli?.carrier) {
-      cliFields.carrier = null as null;
-    }
-  }
-  if (!cliTransport && cat?.cli?.carrier) {
-    cliFields.carrier = null as null;
-  }
   const cliPatch = Object.keys(cliFields).length > 0 ? { cli: cliFields } : {};
   const nextCliConfigArgs = (form.cliConfigArgs ?? []).filter((arg) => arg.trim().length > 0);
-  const cliConfigArgsPatch = cliTransport
+  const cliConfigArgsPatch = cliCarrier
     ? { cliConfigArgs: nextCliConfigArgs }
     : cat?.cliConfigArgs?.length
       ? { cliConfigArgs: [] as string[] }
@@ -223,6 +209,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     strengths: splitStrengthTags(form.strengths),
     ...contextWindowPatch,
     ...voiceConfigPatch,
+    carrier: form.carrier,
     ...buildAcpPatch(form, cat),
   };
 

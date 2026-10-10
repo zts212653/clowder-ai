@@ -41,15 +41,14 @@ import { syncLocalBootcampState } from './first-run-quest/syncLocalBootcampState
 import { useFirstProjectMistakeTipGate } from './first-run-quest/useFirstProjectMistakeTipGate';
 import { useFirstProjectPreviewAutoOpen } from './first-run-quest/useFirstProjectPreviewAutoOpen';
 import { GameOverlayConnector } from './game/GameOverlayConnector';
+import { IdeateHeader } from './IdeateHeader';
 import { BootcampIcon } from './icons/BootcampIcon';
 import { GameIcon } from './icons/GameIcon';
 import { PawIcon } from './icons/PawIcon';
-import { ParallelStatusBar } from './ParallelStatusBar';
 import { ProjectSetupCard } from './ProjectSetupCard';
 import { RightStatusPanel } from './RightStatusPanel';
 import { RuntimeUpdateRequiredDialog } from './RuntimeUpdateRequiredDialog';
 import { SplitPaneChatView } from './SplitPaneView';
-import { ThinkingIndicator } from './ThinkingIndicator';
 import { ThreadSidebar } from './ThreadSidebar';
 import { assignDocumentRoute, pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { ThreadChatExport, ThreadChatSurface, useThreadChatRuntime } from './thread-chat';
@@ -327,7 +326,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
         : [threadId],
     [viewMode, splitPaneThreadIds, threadId],
   );
-  const { socketConnected, resetAgentMessageRefs, registerIndexEventHandler } = useThreadChatRuntime(runtimeThreadIds);
+  const { socketConnected, registerIndexEventHandler } = useThreadChatRuntime(runtimeThreadIds);
   // F079: Vote modal
   const handleVoteSubmit = useCallback(
     async (config: VoteConfig) => {
@@ -603,9 +602,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
     if (prevThreadRef.current !== threadId) {
       // Thread switch: store saves/restores per-thread state automatically
       setCurrentThread(threadId);
-      // F173 A.12 — resetRefs no longer touches suppression markers (invocation-driven cleanup).
-      // It still clears activeRefs / finalizedStreamRef / sawStreamData per the original purpose.
-      resetAgentMessageRefs();
       clearTasks();
       prevThreadRef.current = threadId;
     }
@@ -616,7 +612,6 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
   }, [
     threadId,
     clearTasks, // Clean up non-thread-scoped refs
-    resetAgentMessageRefs, // First mount — sync threadId to store without save/restore
     setCurrentThread,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -888,9 +883,7 @@ function InteractiveChatContainer({ threadId }: ChatContainerProps) {
           />
         )}
 
-        {!artifactFullWindowActive && intentMode === 'ideate' && <ParallelStatusBar threadId={threadId} />}
-        {!artifactFullWindowActive && <ThinkingIndicator threadId={threadId} />}
-
+        {!artifactFullWindowActive && intentMode === 'ideate' && <IdeateHeader />}
         <ThreadChatSurface
           threadId={threadId}
           density="full"

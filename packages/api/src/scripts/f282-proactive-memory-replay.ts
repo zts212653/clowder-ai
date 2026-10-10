@@ -225,8 +225,8 @@ async function replayEpisode(fixture: ReplayEpisodeFixture): Promise<F282ReplayE
   let currentTimestamp = 0;
   for (const message of fixture.messages) {
     const stored = messageStore.append({
+      from: { kind: 'user', userId: OWNER_USER_ID },
       userId: OWNER_USER_ID,
-      catId: null,
       content: message.content,
       mentions: [],
       threadId: message.threadId,
@@ -290,8 +290,8 @@ async function replayEvidenceContract(): Promise<F282ProactiveMemoryReplayResult
     alt: '截图显示周玉晶负责 proactive memory pipeline',
   };
   const attachmentMessage = messageStore.append({
+    from: { kind: 'user', userId: OWNER_USER_ID },
     userId: OWNER_USER_ID,
-    catId: null,
     content: '周玉晶职责见附件。',
     contentBlocks: [attachment],
     mentions: [],
@@ -299,8 +299,8 @@ async function replayEvidenceContract(): Promise<F282ProactiveMemoryReplayResult
     timestamp: 1,
   });
   const confirmationMessage = messageStore.append({
+    from: { kind: 'user', userId: OWNER_USER_ID },
     userId: OWNER_USER_ID,
-    catId: null,
     content: '对，这份转写准确。',
     mentions: [],
     threadId: 'typed-evidence',

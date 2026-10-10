@@ -11,8 +11,6 @@ interface ExternalDeps {
   threadId: string;
   userId: string;
   handleAgentMessage: SocketCallbacks['onMessage'];
-  resetTimeout: () => void;
-  clearDoneTimeout: (threadId?: string) => void;
   onNavigateToThread?: (threadId: string) => void;
   onIndexEvent?: SocketCallbacks['onIndexEvent'];
 }
@@ -25,8 +23,6 @@ export function useChatSocketCallbacks({
   threadId,
   userId,
   handleAgentMessage,
-  resetTimeout,
-  clearDoneTimeout,
   onNavigateToThread,
   onIndexEvent,
 }: ExternalDeps): SocketCallbacks {
@@ -55,7 +51,6 @@ export function useChatSocketCallbacks({
 
   return useMemo<SocketCallbacks>(
     () => ({
-      clearDoneTimeout,
       onMessage: (msg) => {
         handleAgentMessage(msg);
         return true;
@@ -97,9 +92,6 @@ export function useChatSocketCallbacks({
         updateTask(task as unknown as TaskItem);
       },
       // onThreadSummary removed (clowder-ai#343): summaries no longer injected into chat flow.
-      onHeartbeat: (data) => {
-        if (data.threadId === threadId) resetTimeout();
-      },
       onMessageDeleted: (data: { messageId: string; threadId: string }) =>
         removeThreadMessage(data.threadId, data.messageId),
       onMessageRestored: (data: { messageId: string; threadId: string }) => {
@@ -149,8 +141,6 @@ export function useChatSocketCallbacks({
       updateTask,
       removeThreadMessage,
       requestStreamCatchUp,
-      resetTimeout,
-      clearDoneTimeout,
       onNavigateToThread,
       onIndexEvent,
       threadId,

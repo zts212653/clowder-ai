@@ -34,7 +34,7 @@ const PROSE_MIGRATIONS: ProseMigration[] = [
 
 const PRODUCER_MIGRATIONS = [
   {
-    path: '../../hooks/useAgentMessages.ts',
+    path: '../../hooks/agent-messages/background-handler.ts',
     legacy: "preview.slice(0, 80) + (preview.length > 80 ? '...' : '')",
     recovery: 'message: preview',
   },

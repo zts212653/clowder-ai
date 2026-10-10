@@ -120,6 +120,63 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
     return { el, top: geometry(el) };
   }
 
+  it('keeps an interleaved private failure and the exact dispatched failure separate in the actual history hook', async () => {
+    const source: ChatMessage = {
+      id: 'source',
+      type: 'user',
+      content: 'input',
+      timestamp: 100,
+      lifecycle: {
+        kind: 'input',
+        orderKey: '100',
+        dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'final' }],
+      },
+    };
+    const unrelated: ChatMessage = {
+      id: 'private-failure',
+      type: 'assistant',
+      catId: 'opus',
+      content: 'private work failed',
+      timestamp: 110,
+      extra: { freshness: { priorFrontierMessageId: source.id } },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '110',
+        invocationId: 'private-child',
+        targetId: 'opus',
+        inputEntryIds: ['private-entry'],
+        inputMessageIds: [],
+        status: 'failed',
+        startedAt: 110,
+        completedAt: 115,
+        reason: 'provider_error',
+      },
+    };
+    const final: ChatMessage = {
+      ...unrelated,
+      id: 'final',
+      content: 'dispatched work failed',
+      replyTo: source.id,
+      timestamp: 120,
+      extra: { freshness: { priorFrontierMessageId: unrelated.id } },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '120',
+        invocationId: 'dispatched-child',
+        targetId: 'opus',
+        inputEntryIds: ['source-entry'],
+        inputMessageIds: [source.id],
+        status: 'failed',
+        startedAt: 120,
+        completedAt: 125,
+        reason: 'provider_error',
+      },
+    };
+    await mount('independent-failures', [source, unrelated, final]);
+    expect(hook.messages.map((message) => message.id)).toEqual([source.id, unrelated.id, final.id]);
+    expect(hook.messages.map((message) => message.content)).toEqual([source.content, unrelated.content, final.content]);
+  });
+
   it('restores the persisted message offset in a cold page, without copying message content', async () => {
     saveChatScrollState('cold', {
       top: 400,
@@ -170,9 +227,9 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
     expect(top()).toBe(400);
   });
 
-  it('keeps a read streaming bubble anchored when the message owner replaces its id', async () => {
+  it('keeps a read response anchored when its own stored snapshot finishes streaming', async () => {
     const streaming = {
-      ...message('stream-placeholder', 100),
+      ...message('stored-message', 100),
       isStreaming: true,
       extra: { stream: { turnInvocationId: 'reading-turn' } },
     };
@@ -182,7 +239,9 @@ describe('reading recovery across cold history and obsolete callbacks', () => {
     boundary(el, streaming.id, 380, top);
     act(() => el.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })));
     act(() => hook.handleScroll());
-    act(() => useChatStore.getState().replaceMessageId(streaming.id, 'stored-message'));
+    act(() =>
+      useChatStore.getState().upsertLifecycleMessage('rekeyed', { ...streaming, isStreaming: false, timestamp: 120 }),
+    );
     expect(readChatScrollState('rekeyed')).toMatchObject({
       anchor: 'offset',
       messageAnchor: { messageId: 'stored-message', viewportOffsetPx: -20 },

@@ -1,4 +1,5 @@
 import type { CatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { catColorVar } from '@/lib/cat-slug';
 import { GROUP_MENTION_COLOR } from '@/lib/color-defaults';
 
@@ -74,7 +75,7 @@ function buildBreedGroupOptions(cats: CatData[]): CatOption[] {
  *  Filters out cats with no mentionPatterns (not routable via @mention). */
 /** Format display label with optional variant disambiguation */
 function formatCatLabel(cat: CatData): string {
-  return cat.variantLabel ? `@${cat.displayName} (${cat.variantLabel})` : `@${cat.displayName}`;
+  return `@${formatCatDisplayName(cat)}`;
 }
 
 function isAvailable(cat: CatData): boolean {

@@ -156,34 +156,29 @@ describe('F255 present-loop contract and scheduler template', () => {
         deliveries.push(message);
         return 'message-present-loop';
       },
-      invokeTrigger: {
-        trigger: async (...args) => {
-          invocations.push(args);
-          return 'dispatched';
-        },
-      },
     };
 
     await spec.run.execute(null, `thread-${THREAD}`, context);
     await spec.run.execute(null, `thread-${THREAD}`, context);
 
     assert.equal(deliveries.length, 1, 'same task slot must not dispatch twice');
-    assert.equal(invocations.length, 1);
+    assert.equal(deliveries[0].targetCatId, CAT, 'the envelope names the member');
+    assert.ok(deliveries[0].privateContent, 'the run prompt is the member exact input, not thread text');
     assert.equal(deliveries[0].extra.scheduler.hiddenTrigger, true);
     assert.equal(deliveries[0].extra.memoryCue.catOwnedSeed.producingCatId, CAT);
     assert.equal(deliveries[0].extra.memoryCue.catOwnedSeed.runId, deliveries[0].content.match(/runId=(\S+)/)?.[1]);
     assert.match(deliveries[0].extra.memoryCue.catOwnedSeed.sourceRevision, /^sha256:[0-9a-f]{64}$/);
     assert.match(deliveries[0].content, /runId=/);
     assert.doesNotMatch(deliveries[0].content, /窗边|月光去哪了|秘密愿望|私人时间才能读的线索/);
-    assert.match(invocations[0][3], /窗边/);
-    assert.match(invocations[0][3], /月光去哪了/);
-    assert.doesNotMatch(invocations[0][3], /秘密愿望/);
-    assert.match(invocations[0][3], /seedId/);
-    assert.match(invocations[0][3], /sourceRevision/);
-    assert.match(invocations[0][3], /私人时间才能读的线索/);
-    assert.match(invocations[0][3], /迟到 60 分钟/);
-    assert.match(invocations[0][3], /missedSlots=1/);
-    assert.doesNotMatch(invocations[0][3], /剩余额度|今日还可/);
+    assert.match(deliveries[0].privateContent, /窗边/);
+    assert.match(deliveries[0].privateContent, /月光去哪了/);
+    assert.doesNotMatch(deliveries[0].privateContent, /秘密愿望/);
+    assert.match(deliveries[0].privateContent, /seedId/);
+    assert.match(deliveries[0].privateContent, /sourceRevision/);
+    assert.match(deliveries[0].privateContent, /私人时间才能读的线索/);
+    assert.match(deliveries[0].privateContent, /迟到 60 分钟/);
+    assert.match(deliveries[0].privateContent, /missedSlots=1/);
+    assert.doesNotMatch(deliveries[0].privateContent, /剩余额度|今日还可/);
     assert.equal(await store.isOffDuty(OWNER, CAT), true);
     const handed = await store.getSleepPosture(OWNER, setupSettlement.sleepPosture.postureId);
     assert.equal(handed?.status, 'pending');
@@ -215,11 +210,9 @@ describe('F255 present-loop contract and scheduler template', () => {
     await assert.rejects(() =>
       spec.run.execute(null, `thread-${THREAD}`, {
         assignedCatId: null,
-        deliver: async () => 'message-failure',
-        invokeTrigger: {
-          trigger: async () => {
-            throw new Error('synthetic dispatch failure');
-          },
+        // Admission is the wake, so a refused admission is what marks the run wake_failed.
+        deliver: async () => {
+          throw new Error('synthetic dispatch failure');
         },
       }),
     );
@@ -230,7 +223,7 @@ describe('F255 present-loop contract and scheduler template', () => {
     assert.equal(preserved?.leasedByRunId, undefined);
   });
 
-  test('treats a full invocation queue as wake_failed instead of a successful wake', async () => {
+  test('treats a refused admission as wake_failed instead of a successful wake', async () => {
     const template = createPresentLoopTemplate({ service });
     const spec = template.createSpec('dyn-present-loop-queue-full', {
       trigger: { type: 'once', fireAt: Date.now() },
@@ -242,8 +235,9 @@ describe('F255 present-loop contract and scheduler template', () => {
       () =>
         spec.run.execute(null, `thread-${THREAD}`, {
           assignedCatId: null,
-          deliver: async () => 'message-queue-full',
-          invokeTrigger: { trigger: async () => 'full' },
+          deliver: async () => {
+            throw new Error('present loop invocation queue is full');
+          },
         }),
       /invocation queue is full/,
     );

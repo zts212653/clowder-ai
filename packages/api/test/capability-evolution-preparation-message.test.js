@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { adaptMessageStore } from './helpers/message-from-fixtures.js';
 
 const PROGRAM_ID = 'evolution-program:0123456789abcdef0123456789abcdef';
 const source = { ownerFeatureId: 'F117', ownerStateRef: 'message:source', version: 'v1' };
@@ -66,7 +67,7 @@ describe('F117 protected F311 preparation submission carrier', () => {
     const { MessageStore, deriveEvolutionPreparationSubmissionRevision } = await import(
       '../dist/domains/cats/services/stores/ports/MessageStore.js'
     );
-    const store = new MessageStore();
+    const store = adaptMessageStore(new MessageStore());
     const payload = draft();
     const submission = { ...payload, revision: deriveEvolutionPreparationSubmissionRevision(payload) };
     const stored = store.append({
@@ -99,7 +100,7 @@ describe('F117 protected F311 preparation submission carrier', () => {
     const payload = draft();
     const submission = { ...payload, revision: deriveEvolutionPreparationSubmissionRevision(payload) };
     assert.throws(() =>
-      new MessageStore().append({
+      adaptMessageStore(new MessageStore()).append({
         userId: 'operator',
         threadId: 'thread-preparation',
         catId: 'codex-terra',

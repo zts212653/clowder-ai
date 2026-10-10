@@ -17,10 +17,11 @@ redis.call('HSET', KEYS[1],
   'executionKind', ARGV[7],
   'startedAt', ARGV[8],
   'causal', ARGV[9],
-  'queueCompletionPolicy', ARGV[10] or '',
+  'queueCompletionPolicy', ARGV[11] or '',
   'status', 'running',
   'endedAt', '',
-  'terminalReason', '')
+  'terminalReason', '',
+  'outputFence', ARGV[10])
 redis.call('SADD', KEYS[2], ARGV[2])
 redis.call('SADD', KEYS[3], ARGV[2])
 return 1
@@ -36,6 +37,7 @@ redis.call('HSET', KEYS[1],
   'endedAt', ARGV[2],
   'terminalReason', ARGV[3])
 redis.call('SREM', KEYS[2], ARGV[4])
+redis.call('SADD', KEYS[3], ARGV[4])
 return 1
 `;
 
@@ -54,4 +56,21 @@ redis.call('HSET', KEYS[1],
   'coveredMessageIds', ARGV[1],
   'coveredMessageIdsIdentity', ARGV[2])
 return 1
+`;
+
+/**
+ * F117 KD-21: a gated fence's verdict only moves forward (gated → allowed → rejected). An open
+ * child, and a record written before the fence existed (no outputFence field), stay as they are.
+ */
+export const SETTLE_TURN_OUTPUT_FENCE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local current = redis.call('HGET', KEYS[1], 'outputFence')
+if not current or current == 'open' then return 2 end
+local rank = { gated = 0, allowed = 1, rejected = 2 }
+if rank[current] == nil or rank[ARGV[1]] == nil then return -1 end
+if rank[ARGV[1]] > rank[current] then
+  redis.call('HSET', KEYS[1], 'outputFence', ARGV[1])
+  return 1
+end
+return 2
 `;

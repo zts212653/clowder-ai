@@ -34,9 +34,12 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, TokenUsage } from '../../types.js';
 import { extractClaudeUsage, transformClaudeEvent } from './claude-ndjson-parser.js';
+import type { ClaudeTextBoundaryState } from './claude-text-boundaries.js';
 
 export interface TranscriptEntriesToAgentMessagesOptions {
   catId: CatId;
+  /** Reuse within one invocation to preserve text boundaries across tail batches. */
+  textBoundaryState?: ClaudeTextBoundaryState;
 }
 
 export interface TerminalMeta {
@@ -52,7 +55,8 @@ export interface TerminalMeta {
  * no done — caller manages lifecycle).
  *
  * Safe to call incrementally as new entries are tailed from transcript jsonl.
- * Each call gets fresh transformer state; partial-text streaming semantics
+ * Each call gets fresh partial-text state; pass invocation-local textBoundaryState
+ * to preserve message boundaries across batches. Partial-text streaming semantics
  * (currentMessageId / partialTextMessageIds) don't apply because transcript
  * is written at message_stop (per-message granularity, not per-token).
  */
@@ -70,6 +74,7 @@ export function transcriptEntriesToAgentMessages(
     partialTextMessageIds: new Set<string>(),
     lastTurnInputTokens: undefined as number | undefined,
     thinkingBuffer: '',
+    textBoundaryState: options.textBoundaryState ?? {},
   };
 
   for (const raw of entries) {

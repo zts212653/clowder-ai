@@ -5,7 +5,6 @@ import {
   createTypedWaitRegistration,
   isLiveTypedWaitRegistration,
 } from '../dist/domains/ball-custody/TypedWaitRegistration.js';
-import { WaitContinuationRetryPreflight } from '../dist/domains/ball-custody/WaitContinuationRetryPreflight.js';
 import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
@@ -14,6 +13,8 @@ import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.
 import { DeploymentWaitLifecycleService } from '../dist/domains/runtime-deployment/DeploymentWaitLifecycleService.js';
 import { DeploymentWaitRecoverySweep } from '../dist/domains/runtime-deployment/DeploymentWaitRecoverySweep.js';
 import { DeploymentWaitStartGuard } from '../dist/domains/runtime-deployment/DeploymentWaitStartGuard.js';
+
+import { connectorDeliveryHarness } from './helpers/connector-delivery-harness.js';
 
 const TARGET_REVISION = '1'.repeat(40);
 const RUNNING_REVISION = '2'.repeat(40);
@@ -40,6 +41,17 @@ function active(generation = 1) {
 async function harness(options = {}) {
   const taskStore = new TaskStore();
   const messageStore = new MessageStore();
+  const connector = connectorDeliveryHarness({ messageStore });
+  const executions = new InMemoryTurnExecutionStore();
+  executions.createRunning({
+    invocationId: 'invocation-1',
+    parentInvocationId: 'parent-1',
+    userId: 'user-1',
+    threadId: 'thread-deployment',
+    catId: 'codex-sol',
+    executionKind: 'ordinary',
+    startedAt: 100,
+  });
   const task = await taskStore.create({
     kind: 'work',
     threadId: 'thread-deployment',
@@ -68,12 +80,13 @@ async function harness(options = {}) {
   assert.ok(installed);
   const lifecycle = new DeploymentWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    messageStore,
+    deliveryDeps: connector.deliveryDeps,
     now: () => 500,
     log: { info() {}, warn() {}, error() {} },
     currentObservation: options.currentObservation ?? (async () => observation()),
   });
-  return { taskStore, messageStore, task: installed, lifecycle, receipt };
+  return { taskStore, messageStore, connector, executions, task: installed, lifecycle, receipt };
 }
 
 function observation(overrides = {}) {
@@ -183,18 +196,29 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.equal(stored.deploymentWait.waitOutcome.delivery, 'delivered');
     assert.equal(stored.deploymentWait.waitOutcome.domain, 'deployment');
     assert.equal(stored.deploymentWait.waitOutcome.registeredAt, 100, 'the Hub can retain truthful wait duration');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
-    const authorityMessage = h.messageStore.getByThread('thread-deployment')[0];
-    const retryAuthority = await new WaitContinuationRetryPreflight({ taskStore: h.taskStore }).preflight({
-      message: authorityMessage,
-      requestingUserId: 'user-1',
-      targetCatId: 'codex-sol',
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
+    const authorityMessage = h.connector.deliveries('thread-deployment', 'user-1')[0];
+    const startAuthority = await new DeploymentWaitStartGuard({
+      taskStore: h.taskStore,
+      messageStore: h.messageStore,
+      observationProvider: { observe: async () => observation() },
+    }).check({
+      messageId: authorityMessage.id,
+      threadId: 'thread-deployment',
+      userId: 'user-1',
+      catId: 'codex-sol',
+      expectedDeploymentWait: true,
     });
-    assert.deepEqual(retryAuthority, { ok: true, kind: 'wait_containing_task' });
+    assert.deepEqual(startAuthority, { ok: true });
+    assert.deepEqual(
+      await h.taskStore.get(h.task.id),
+      stored,
+      'start permission does not complete or rewrite the Task',
+    );
 
     const replay = await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
     assert.equal(replay.kind, 'deduped');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
   });
 
   it('keeps unknown or wrong-deployment evidence armed and silent', async () => {
@@ -208,7 +232,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       assert.equal(result.kind, 'state_only');
     }
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.await.generation, 1);
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
   });
 
   it('rechecks deployment truth before delivery and recovers the same outcome after readiness returns', async () => {
@@ -218,44 +242,38 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const stale = await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
     assert.deepEqual(stale, { kind: 'state_only', reason: 'deployment_evidence_stale' });
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'pending');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
 
     current = observation();
     const recovered = await h.lifecycle.recoverOutcome(h.task.id);
     assert.equal(recovered.kind, 'notified');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
   });
 
-  it('retries the same continuation message until the owner wake is admitted', async () => {
-    for (const failedAdmission of ['full', 'throw']) {
+  it('retries one stable attempt until atomic Queue admission succeeds, without a second wake', async () => {
+    for (const failure of ['unavailable', 'throw']) {
       const h = await harness();
+      const deliver = h.connector.delivery.deliver.bind(h.connector.delivery);
       let attempts = 0;
-      const lifecycle = new DeploymentWaitLifecycleService({
-        taskStore: h.taskStore,
-        deliveryDeps: { messageStore: h.messageStore },
-        now: () => 500,
-        log: { info() {}, warn() {}, error() {} },
-        currentObservation: async () => observation(),
-        wakeOwner: async () => {
-          attempts += 1;
-          if (attempts === 1) {
-            if (failedAdmission === 'throw') throw new Error('wake unavailable');
-            return 'full';
-          }
-          return 'enqueued';
-        },
-      });
-      const first = await lifecycle.observe({ taskId: h.task.id, observation: observation() });
-      assert.equal(first.kind, 'state_only');
-      assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'pending');
-      const firstMessage = h.messageStore.getByThread('thread-deployment')[0].id;
-
-      const sweep = new DeploymentWaitRecoverySweep(h.taskStore, { observe: async () => observation() }, lifecycle);
+      h.connector.delivery.deliver = async (input) => {
+        attempts++;
+        if (attempts === 1) {
+          if (failure === 'throw') throw Error('owned admission unavailable');
+          return { state: 'unavailable' };
+        }
+        return deliver(input);
+      };
+      const first = h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
+      if (failure === 'throw') await assert.rejects(first, /owned admission unavailable/);
+      else assert.equal((await first).kind, 'state_only');
+      const allocatedKey = h.taskStore.get(h.task.id).deploymentWait.transportAttempt.idempotencyKey;
+      assert.equal(h.connector.admitted('thread-deployment', 'user-1').length, 0);
+      const sweep = new DeploymentWaitRecoverySweep(h.taskStore, { observe: async () => observation() }, h.lifecycle);
       assert.deepEqual(await sweep.run(), { checked: 0, recovered: 1 });
       assert.equal(attempts, 2);
-      assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
-      assert.equal(h.messageStore.getByThread('thread-deployment')[0].id, firstMessage);
-      assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'delivered');
+      assert.equal(h.connector.admitted('thread-deployment', 'user-1').length, 1);
+      assert.equal(h.taskStore.get(h.task.id).deploymentWait.transportAttempt.idempotencyKey, allocatedKey);
+      assert.equal(h.connector.wakes.length, 1);
     }
   });
 
@@ -269,7 +287,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.equal(stored.deploymentWait.waitOutcome.reason, 'user_cancel');
     assert.equal(stored.deploymentWait.waitOutcome.delivery, 'not_applicable');
     assert.equal((await h.lifecycle.recoverOutcome(h.task.id)).kind, 'state_only');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
   });
 
   it('counts a pending outcome as recovered only after fresh evidence permits delivery', async () => {
@@ -302,23 +320,15 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.equal(stored.deploymentWait.await, undefined);
     assert.equal(stored.deploymentWait.waitOutcome.reason, 'user_cancel');
     assert.equal(stored.deploymentWait.waitOutcome.delivery, 'not_applicable');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
   });
 
   it('does not retarget a stranded outcome after the Task owner changes', async () => {
     const h = await harness();
-    const append = h.messageStore.append.bind(h.messageStore);
-    let fail = true;
-    h.messageStore.append = (input) => {
-      if (fail) {
-        fail = false;
-        throw new Error('message store unavailable');
-      }
-      return append(input);
-    };
+    h.connector.failNextDeliveries(1);
     await assert.rejects(
       h.lifecycle.observe({ taskId: h.task.id, observation: observation() }),
-      /message store unavailable/,
+      /queue admission unavailable/,
     );
     const stranded = await h.taskStore.get(h.task.id);
     assert.equal(stranded.deploymentWait.waitOutcome.delivery, 'pending');
@@ -326,7 +336,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
 
     const recovered = await h.lifecycle.recoverOutcome(h.task.id);
     assert.deepEqual(recovered, { kind: 'state_only', reason: 'owner_changed' });
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
   });
 
   it('atomically ends active and pending waits when a generic Task update completes or transfers custody', async () => {
@@ -349,7 +359,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       await h.taskStore.update(h.task.id, { status: 'doing' });
       const sweep = new DeploymentWaitRecoverySweep(h.taskStore, { observe: async () => observation() }, h.lifecycle);
       assert.deepEqual(await sweep.run(), { checked: 0, recovered: 0 });
-      assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+      assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
     }
   });
 
@@ -383,7 +393,8 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const h = await harness();
     const secondWorker = new DeploymentWaitLifecycleService({
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       now: () => 500,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
@@ -400,7 +411,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       ),
     );
     assert.equal(
-      h.messageStore.getByThread('thread-deployment').length,
+      h.connector.deliveries('thread-deployment', 'user-1').length,
       1,
       'the deployment-wait idempotency key converges the duplicate delivery',
     );
@@ -457,7 +468,8 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const warnings = [];
     const lifecycle = new DeploymentWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      messageStore,
+      deliveryDeps: connectorDeliveryHarness({ messageStore }).deliveryDeps,
       now: () => 500,
       log: { info() {}, warn: (...args) => warnings.push(args), error() {} },
       currentObservation: async () => observation(),
@@ -501,7 +513,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const stale = await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
     assert.equal(stale.kind, 'state_only', 'gen1 evidence must not match the gen2 predicate');
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.await.generation, 2);
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
 
     const own = await h.lifecycle.observe({
       taskId: h.task.id,
@@ -515,7 +527,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       }),
     });
     assert.equal(own.kind, 'notified', 'only gen2 evidence triggers the gen2 continuation');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
   });
 
   it('publishes the wake with a waitContinuationCarrier source meta and no line-start mention routing', async () => {
@@ -523,7 +535,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     const result = await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
     assert.equal(result.kind, 'notified');
 
-    const message = h.messageStore.getByThread('thread-deployment')[0];
+    const message = h.connector.deliveries('thread-deployment', 'user-1')[0];
     assert.equal(message.threadId, 'thread-deployment');
     assert.equal(message.userId, 'user-1');
     assert.equal(message.source.connector, 'deployment-wait');
@@ -542,7 +554,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
 
     assert.deepEqual(await sweep.run(), { checked: 0, recovered: 0 });
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.await.generation, 1);
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
   });
 
   it('periodic compensation revisits an initially unavailable deployment within the same boot', async () => {
@@ -563,7 +575,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
         assert.ok(Date.now() < deadline, 'the periodic sweep must eventually consume the ready evidence');
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+      assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
     } finally {
       sweep.stopPeriodic();
     }
@@ -622,7 +634,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.deepEqual(await sweep.run(), { checked: 1, recovered: 1 });
     assert.equal(warnings.length, 1, 'the failing task is counted once without stopping the sweep');
     assert.equal(warnings[0][0].taskId, bad.id);
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
     assert.equal(
       (await h.taskStore.get(bad.id)).deploymentWait.await.generation,
       1,
@@ -646,19 +658,22 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     let activeInvocation = true;
     const lifecycle = new DeploymentWaitLifecycleService({
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
-      turnExecutionStore: { get: async () => ({ status: activeInvocation ? 'running' : 'failed' }) },
+      turnExecutionStore: {
+        get: async () => ({ ...h.executions.get('invocation-1'), status: activeInvocation ? 'running' : 'failed' }),
+      },
     });
     assert.deepEqual(await lifecycle.observe({ taskId: h.task.id, observation: observation() }), {
       kind: 'state_only',
       reason: 'current_execution_claimed',
     });
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 0);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 0);
     activeInvocation = false;
     assert.equal((await lifecycle.observe({ taskId: h.task.id, observation: observation() })).kind, 'notified');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim, undefined);
   });
 
@@ -676,8 +691,10 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       }),
     );
     const currentTurn = new DeploymentWaitLifecycleService({
+      turnExecutionStore: h.executions,
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
     });
@@ -695,15 +712,31 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'delivered');
     const recovery = new DeploymentWaitLifecycleService({
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       bootId: 'boot-new',
-      turnExecutionStore: { get: async () => ({ status: 'running' }) },
+      turnExecutionStore: h.executions,
       currentObservation: async () => observation(),
-      wakeOwner: async () => 'enqueued',
     });
-    assert.equal((await recovery.recoverOutcome(h.task.id)).kind, 'notified');
-    assert.equal(h.messageStore.getByThread('thread-deployment').length, 1, 'recovery reuses the original message id');
+    const originalNotice = h.messageStore.getByThread('thread-deployment')[0];
+    assert.equal(
+      (await recovery.recoverOutcome(h.task.id)).kind,
+      'state_only',
+      'a different boot does not end a live child',
+    );
+    await h.executions.transitionTerminal('invocation-1', {
+      status: 'failed',
+      endedAt: 501,
+      terminalReason: 'owned failure',
+    });
+    const recovered = await recovery.recoverOutcome(h.task.id);
+    assert.equal(recovered.kind, 'notified');
+    assert.notEqual(recovered.messageId, originalNotice.id);
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
+    assert.deepEqual(h.messageStore.getById(originalNotice.id), originalNotice, 'old History is immutable');
+    assert.equal(h.taskStore.get(h.task.id).deploymentWait.currentExecutionReceipt.messageId, originalNotice.id);
+
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim, undefined);
   });
 
@@ -721,8 +754,10 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       }),
     );
     const currentTurn = new DeploymentWaitLifecycleService({
+      turnExecutionStore: h.executions,
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
     });
@@ -739,14 +774,12 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     );
     const recovery = new DeploymentWaitLifecycleService({
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       bootId: 'boot-5',
-      turnExecutionStore: { get: async () => ({ status: 'succeeded' }) },
+      turnExecutionStore: { get: async () => ({ ...h.executions.get('invocation-1'), status: 'succeeded' }) },
       currentObservation: async () => observation(),
-      wakeOwner: async () => {
-        throw new Error('must not wake');
-      },
     });
     assert.equal((await recovery.recoverOutcome(h.task.id)).kind, 'state_only');
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'delivered');
@@ -789,8 +822,10 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       }),
     );
     const currentTurn = new DeploymentWaitLifecycleService({
+      turnExecutionStore,
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
     });
@@ -805,21 +840,17 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       ).kind,
       'notified',
     );
-    let wakes = 0;
     const recovery = new DeploymentWaitLifecycleService({
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       bootId: 'boot-5',
       turnExecutionStore,
       currentObservation: async () => observation(),
-      wakeOwner: async () => {
-        wakes += 1;
-        return 'enqueued';
-      },
     });
     assert.equal((await recovery.recoverOutcome(h.task.id)).reason, 'current_execution_claimed');
-    assert.equal(wakes, 0);
+    assert.equal(h.connector.wakes.length, 0);
     assert.equal(
       (await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim.invocationId,
       child.invocationId,
@@ -828,7 +859,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
 
     await turnExecutionStore.transitionTerminal(child.invocationId, { status: 'succeeded', endedAt: 501 });
     assert.equal((await recovery.recoverOutcome(h.task.id)).kind, 'state_only');
-    assert.equal(wakes, 0, 'a successful child already consumed the current turn');
+    assert.equal(h.connector.wakes.length, 0, 'a successful child already consumed the current turn');
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim, undefined);
     assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.waitOutcome.delivery, 'delivered');
 
@@ -836,7 +867,7 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     assert.match(source, /bootId: runtimeDeploymentContext\.bootId,\s*turnExecutionStore,/);
   });
 
-  it('keeps an unresolved same-boot child claim until a later boot can recover it', async () => {
+  it('keeps an unresolved child claim across boots without inventing publication or terminal truth', async () => {
     const h = await harness();
     const before = await h.taskStore.get(h.task.id);
     assert.ok(
@@ -850,8 +881,10 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
       }),
     );
     const currentTurn = new DeploymentWaitLifecycleService({
+      turnExecutionStore: h.executions,
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       currentObservation: async () => observation(),
     });
@@ -864,33 +897,182 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
           wakeOwner: false,
         })
       ).kind,
-      'notified',
+      'state_only',
     );
-    let wakes = 0;
     const options = {
       taskStore: h.taskStore,
-      deliveryDeps: { messageStore: h.messageStore },
+      messageStore: h.messageStore,
+      deliveryDeps: h.connector.deliveryDeps,
       log: { info() {}, warn() {}, error() {} },
       turnExecutionStore: { get: async () => null },
       currentObservation: async () => observation(),
-      wakeOwner: async () => {
-        wakes += 1;
-        return 'enqueued';
-      },
     };
     const sameBoot = new DeploymentWaitLifecycleService({ ...options, bootId: 'boot-5' });
     assert.equal((await sameBoot.recoverOutcome(h.task.id)).reason, 'current_execution_claimed');
-    assert.equal(wakes, 0);
+    assert.equal(h.connector.wakes.length, 0);
     const nextBoot = new DeploymentWaitLifecycleService({ ...options, bootId: 'boot-6' });
-    assert.equal((await nextBoot.recoverOutcome(h.task.id)).kind, 'notified');
-    assert.equal(wakes, 1);
-    assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim, undefined);
+    assert.equal((await nextBoot.recoverOutcome(h.task.id)).kind, 'state_only');
+    assert.equal(h.connector.wakes.length, 0);
+    assert.equal(
+      (await h.taskStore.get(h.task.id)).deploymentWait.currentExecutionClaim.invocationId,
+      'child-without-record',
+    );
+    assert.equal((await h.taskStore.get(h.task.id)).deploymentWait.transportAttempt, undefined);
+  });
+
+  for (const [name, override] of [
+    ['cross-thread', { threadId: 'other-thread' }],
+    ['cross-user', { userId: 'other-user' }],
+    ['wrong owner', { catId: 'kimi' }],
+    ['missing carrier', { messageId: 'missing-deployment' }],
+  ]) {
+    it(`rejects ${name} deployment start without admission or Task writes`, async () => {
+      const h = await harness();
+      await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
+      const message = h.connector.deliveries('thread-deployment', 'user-1')[0];
+      const taskBefore = structuredClone(await h.taskStore.get(h.task.id));
+      const queueBefore = structuredClone(h.connector.admitted('thread-deployment', 'user-1'));
+      const guard = new DeploymentWaitStartGuard({
+        taskStore: h.taskStore,
+        messageStore: h.messageStore,
+        observationProvider: { observe: async () => observation() },
+      });
+      assert.deepEqual(
+        await guard.check({
+          messageId: message.id,
+          threadId: 'thread-deployment',
+          userId: 'user-1',
+          catId: 'codex-sol',
+          expectedDeploymentWait: true,
+          ...override,
+        }),
+        { ok: false, reason: 'authority_stale' },
+      );
+      assert.deepEqual(await h.taskStore.get(h.task.id), taskBefore);
+      assert.deepEqual(h.connector.admitted('thread-deployment', 'user-1'), queueBefore);
+      assert.equal(h.connector.wakes.length, 1);
+    });
+  }
+
+  // Corrupt/revoked private-store snapshots exercise the retained production guard, not a
+  // replacement permission protocol. The real Task, carrier and Queue remain immutable.
+  for (const [name, revoke] of [
+    [
+      'missing receipt',
+      (snapshot) => {
+        snapshot.receipt = null;
+      },
+    ],
+    [
+      'receipt subject',
+      (snapshot) => {
+        snapshot.receipt.subjectRef = 'deployment:other:runtime';
+      },
+    ],
+    [
+      'receipt generation',
+      (snapshot) => {
+        snapshot.receipt.generation += 1;
+      },
+    ],
+    [
+      'receipt owner fence',
+      (snapshot) => {
+        snapshot.receipt.ownerFence.generation += 1;
+      },
+    ],
+    [
+      'new generation',
+      (snapshot) => {
+        snapshot.task.deploymentWait.waitOutcome.generation += 1;
+        snapshot.task.deploymentWait.waitOutcome.ownerFence.generation += 1;
+        snapshot.receipt.generation += 1;
+        snapshot.receipt.ownerFence.generation += 1;
+      },
+    ],
+    [
+      'new logical outcome',
+      (snapshot) => {
+        snapshot.task.deploymentWait.waitOutcome.outcomeId += ':replacement';
+      },
+    ],
+    [
+      'terminal Task',
+      (snapshot) => {
+        snapshot.task.status = 'done';
+      },
+    ],
+    [
+      'current child claim',
+      (snapshot) => {
+        snapshot.task.deploymentWait.currentExecutionClaim = { invocationId: 'invocation-1' };
+      },
+    ],
+  ]) {
+    it(`rejects ${name} at canonical deployment start without reviving the transport`, async () => {
+      const h = await harness();
+      await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
+      const message = h.connector.deliveries('thread-deployment', 'user-1')[0];
+      const original = structuredClone(await h.taskStore.getWaitRegistration(h.task.id));
+      const revoked = structuredClone(original);
+      revoke(revoked);
+      const queueBefore = structuredClone(h.connector.admitted('thread-deployment', 'user-1'));
+      const guard = new DeploymentWaitStartGuard({
+        taskStore: {
+          getWaitRegistration: async () => revoked,
+          replaceDeploymentWaitIfGeneration: async () => assert.fail('authority rejection cannot write the Task'),
+        },
+        messageStore: h.messageStore,
+        observationProvider: { observe: async () => observation() },
+      });
+      assert.deepEqual(
+        await guard.check({
+          messageId: message.id,
+          threadId: 'thread-deployment',
+          userId: 'user-1',
+          catId: 'codex-sol',
+          expectedDeploymentWait: true,
+        }),
+        { ok: false, reason: 'authority_stale' },
+      );
+      assert.deepEqual(await h.taskStore.getWaitRegistration(h.task.id), original);
+      assert.deepEqual(h.connector.admitted('thread-deployment', 'user-1'), queueBefore);
+      assert.equal(h.connector.wakes.length, 1);
+    });
+  }
+
+  it('rejects a real Task owner transfer racing the deployment proof read', async () => {
+    const h = await harness();
+    await h.lifecycle.observe({ taskId: h.task.id, observation: observation() });
+    const message = h.connector.deliveries('thread-deployment', 'user-1')[0];
+    const guard = new DeploymentWaitStartGuard({
+      taskStore: h.taskStore,
+      messageStore: h.messageStore,
+      observationProvider: {
+        observe: async () => {
+          h.taskStore.update(h.task.id, { ownerCatId: 'kimi' });
+          return observation();
+        },
+      },
+    });
+    assert.deepEqual(
+      await guard.check({
+        messageId: message.id,
+        threadId: 'thread-deployment',
+        userId: 'user-1',
+        catId: 'codex-sol',
+        expectedDeploymentWait: true,
+      }),
+      { ok: false, reason: 'authority_stale' },
+    );
+    assert.equal(h.connector.deliveries('thread-deployment', 'user-1').length, 1);
+    assert.equal(h.connector.wakes.length, 1);
   });
 
   it('rechecks queued deployment continuation against owner, Task terminal state, and live proof', async () => {
     const h = await harness();
     assert.equal((await h.lifecycle.observe({ taskId: h.task.id, observation: observation() })).kind, 'notified');
-    const message = h.messageStore.getByThread('thread-deployment')[0];
+    const message = h.connector.deliveries('thread-deployment', 'user-1')[0];
     let ready = true;
     const guard = new DeploymentWaitStartGuard({
       taskStore: h.taskStore,
@@ -911,9 +1093,10 @@ describe('F323 Task-owned deployment wait lifecycle', () => {
     h.taskStore.update(h.task.id, { status: 'done' });
     assert.equal(await guard.canStart(identity), false, 'completed work revokes an admitted continuation');
     const githubMessage = h.messageStore.append({
+      from: { kind: 'external', connectorId: 'github-wait' },
       threadId: h.task.threadId,
       userId: 'user-1',
-      catId: null,
+      mentions: [],
       content: 'GitHub review ready',
       timestamp: 600,
       source: { connector: 'github-wait', label: 'GitHub Wait', icon: 'github' },

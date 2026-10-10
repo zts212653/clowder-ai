@@ -48,8 +48,9 @@ export async function reviewedExecution(
   assert.ok(prepared.ok);
   const handle = prepared.preparation.handle;
   const request = f.messages.append({
-    ...f.actor,
-    catId: f.actor.catId as CatId,
+    userId: f.actor.userId,
+    threadId: f.actor.threadId,
+    from: { kind: 'agent', catId: f.actor.catId as CatId },
     content: [
       `Review-Subject-Ref: ${tuple.reviewSubjectRef}`,
       `Reviewed-Head-Sha: ${tuple.reviewedHeadSha}`,
@@ -77,7 +78,7 @@ export async function reviewedExecution(
   const review = f.messages.append({
     userId: f.actor.userId,
     threadId: f.actor.threadId,
-    catId: 'opus',
+    from: { kind: 'agent', catId: 'opus' },
     content: 'Plan approved; execution and product acceptance remain outstanding.',
     mentions: [],
     timestamp: f.service.now(),

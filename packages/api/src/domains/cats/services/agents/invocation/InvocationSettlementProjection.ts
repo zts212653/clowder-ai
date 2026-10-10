@@ -15,12 +15,7 @@ export function projectInvocationSettlement(
       child.catId === scope.catId,
   );
   const active = owned.find((child) => child.invocationId === scope.turnInvocationId);
-  if (
-    !active ||
-    active.status !== 'running' ||
-    (active.executionKind !== 'routing_guard' && active.executionKind !== 'freshness_supplement')
-  )
-    return undefined;
+  if (!active || active.status !== 'running' || active.executionKind !== 'routing_guard') return undefined;
   const nativeOwner = { ...scope, invocationId: scope.turnInvocationId };
   if (getCliExecutionExit(nativeOwner)) return undefined;
   const protocol = getCodexChildLifecycle(scope.threadId, scope.catId, scope.executionId, scope.turnInvocationId);

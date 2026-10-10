@@ -8,10 +8,11 @@ type StructuredWakeLocator = Extract<TurnCustodyWakeProvenance, { kind: 'structu
 import { handedEventSourceId } from './ball-custody-events.js';
 
 /**
- * Single source of truth for "was this exact managed-hold wake superseded?".
+ * Read-only evidence for "was this exact managed-hold wake superseded?".
+ * A classification is neither Task continuation permission nor Queue cleanup.
  *
  * F167 × clowder-ai#1366: this predicate previously existed twice — once in
- * ManagedHoldDispositionService.assertWakeNotReplaced (write side) and once
+ * the now-retired ManagedHoldDispositionService.assertWakeNotReplaced and once
  * implicitly in TurnCustodyProjectionService.openStructured (read side). The two
  * diverged, so a wake could be judged "replaced, refuse to terminate" by the
  * writer while the reader still treated it as a live obligation. That divergence

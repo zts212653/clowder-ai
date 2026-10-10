@@ -1,3 +1,4 @@
+import type { MessageFrom } from '@cat-cafe/shared';
 import type Database from 'better-sqlite3';
 import type { OutputVerifiedSignalSources } from './output-verified-detector.js';
 import { SqliteSignalSources } from './SqliteSignalSources.js';
@@ -19,6 +20,7 @@ import { SqliteSignalSources } from './SqliteSignalSources.js';
 /** Minimal message shape needed for signal detection (subset of StoredMessage). */
 export interface SignalMessage {
   id: string;
+  from?: MessageFrom;
   userId?: string | null;
   catId?: string | null;
   /** Plain text content string (StoredMessage.content is a string, not parsed blocks). */
@@ -179,10 +181,8 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
     // Iterate newest→oldest so the latest operator decision takes precedence.
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      // Human (operator) message: catId is null/undefined/empty. Cat messages have catId set.
-      if (msg.catId) continue;
-      // Skip connector/system messages (e.g. CI notifications with "CI 通过").
-      if (msg.source) continue;
+      const operatorAuthored = msg.from ? msg.from.kind === 'user' : !msg.catId && !msg.source;
+      if (!operatorAuthored) continue;
       const text = extractText(msg);
       if (!text) continue;
       // Negation = explicit rejection → return false (latest decision is rejection).
@@ -207,10 +207,8 @@ export class ThreadAwareSignalSources implements OutputVerifiedSignalSources {
     // Iterate newest→oldest so the latest reviewer decision takes precedence.
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      // Cat (reviewer) message: catId is set. Human messages have catId null.
-      if (!msg.catId) continue;
-      // Skip connector/system messages — CiCdRouter sends with catId but also source.
-      if (msg.source) continue;
+      const agentAuthored = msg.from ? msg.from.kind === 'agent' : !!msg.catId && !msg.source;
+      if (!agentAuthored) continue;
       const text = extractText(msg);
       if (!text) continue;
       // Negation = explicit rejection → return false (latest decision is rejection).

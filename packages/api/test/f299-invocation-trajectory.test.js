@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function event(invocationId, eventNo, event, t = 1_000 + eventNo) {
   return {
@@ -337,20 +338,24 @@ describe('F299 active and sealed invocation routes', () => {
       userId: 'user-f299',
       cliSessionId: 'cli-generation-2',
     });
-    const availableSource = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: null,
-      content: 'available source',
-      timestamp: 900,
-    });
-    const hardDeletedSource = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: null,
-      content: 'hard-deleted source',
-      timestamp: 901,
-    });
+    const availableSource = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: null,
+        content: 'available source',
+        timestamp: 900,
+      }),
+    );
+    const hardDeletedSource = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: null,
+        content: 'hard-deleted source',
+        timestamp: 901,
+      }),
+    );
     await messageStore.hardDelete(hardDeletedSource.id, 'user-f299');
     const sourceIds = [availableSource.id, hardDeletedSource.id];
     const digest = `hmac-sha256:${'a'.repeat(64)}`;
@@ -822,35 +827,43 @@ describe('F299 active and sealed invocation routes', () => {
       cliSessionId: record.cliSessionId,
       seq: record.seq,
     };
-    const available = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: null,
-      content: 'canonical user request',
-      timestamp: 900,
-    });
-    const deleted = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: null,
-      content: 'must not survive deletion',
-      timestamp: 901,
-    });
+    const available = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: null,
+        content: 'canonical user request',
+        timestamp: 900,
+      }),
+    );
+    const deleted = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: null,
+        content: 'must not survive deletion',
+        timestamp: 901,
+      }),
+    );
     await messageStore.softDelete(deleted.id, 'user-f299');
-    const invisible = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'other-user',
-      catId: null,
-      content: 'foreign body must not leak',
-      timestamp: 902,
-    });
-    const context = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: 'opus',
-      content: 'covered prompt context must not be presented as the trigger',
-      timestamp: 903,
-    });
+    const invisible = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'other-user',
+        catId: null,
+        content: 'foreign body must not leak',
+        timestamp: 902,
+      }),
+    );
+    const context = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: 'opus',
+        content: 'covered prompt context must not be presented as the trigger',
+        timestamp: 903,
+      }),
+    );
     const cases = [
       {
         invocationId: 'inv-prompt-available',
@@ -928,20 +941,24 @@ describe('F299 active and sealed invocation routes', () => {
       userId: 'user-f299',
       cliSessionId: 'cli-prompt-scope',
     });
-    const trigger = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: null,
-      content: 'canonical trigger',
-      timestamp: 910,
-    });
-    const context = await messageStore.append({
-      threadId: 'thread-f299',
-      userId: 'user-f299',
-      catId: 'opus',
-      content: 'context only',
-      timestamp: 911,
-    });
+    const trigger = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: null,
+        content: 'canonical trigger',
+        timestamp: 910,
+      }),
+    );
+    const context = await messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-f299',
+        userId: 'user-f299',
+        catId: 'opus',
+        content: 'context only',
+        timestamp: 911,
+      }),
+    );
     const info = {
       sessionId: record.id,
       threadId: record.threadId,

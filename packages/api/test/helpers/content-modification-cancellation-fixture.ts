@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
@@ -76,7 +76,7 @@ export async function cancellationFixture(t: TestContext) {
     await f.dispatch.close();
     fileStore.close();
     f.store.close();
-    await rm(root, { recursive: true, force: true });
+    t.diagnostic(`Owned F309 fixture data retained at ${root}`);
   });
   const catRead = (id = requestId, options: Record<string, unknown> = {}) =>
     app.inject({

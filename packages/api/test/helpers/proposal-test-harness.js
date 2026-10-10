@@ -6,6 +6,7 @@
  */
 
 import Fastify from 'fastify';
+import { adaptMessageStore, canonicalTestMessageInput } from './message-from-fixtures.js';
 
 export async function createProposalTestContext({
   proposalStoreOverride,
@@ -13,7 +14,6 @@ export async function createProposalTestContext({
   taskStoreOverride,
   routerOverride,
   invocationQueueOverride,
-  queueProcessorOverride,
   fetchPrTrackingBoundaryOverride,
   sidebarPresenceSourceOverride,
   projectRoot,
@@ -29,7 +29,7 @@ export async function createProposalTestContext({
 
   const registry = new InvocationRegistry();
   const threadStore = new ThreadStore();
-  const messageStore = messageStoreOverride ?? new MessageStore();
+  const messageStore = adaptMessageStore(messageStoreOverride ?? new MessageStore());
   const proposalStore = proposalStoreOverride ?? new InMemoryProposalStore();
   const taskStore = taskStoreOverride ?? new TaskStore();
   const socketEvents = [];
@@ -67,7 +67,6 @@ export async function createProposalTestContext({
     socketManager,
     ...(routerOverride ? { router: routerOverride } : {}),
     ...(invocationQueueOverride ? { invocationQueue: invocationQueueOverride } : {}),
-    ...(queueProcessorOverride ? { queueProcessor: queueProcessorOverride } : {}),
     ...(fetchPrTrackingBoundaryOverride ? { fetchPrTrackingBoundary: fetchPrTrackingBoundaryOverride } : {}),
     ...(projectRoot ? { projectRoot } : {}),
   });
@@ -86,15 +85,17 @@ export async function createProposalTestContext({
     const dedupKey = body.clientRequestId ? `${userId}:${catId}:${threadId}:${body.clientRequestId}` : undefined;
     let origin = dedupKey ? originByRequest.get(dedupKey) : undefined;
     if (!origin) {
-      origin = messageStore.append({
-        userId,
-        catId: null,
-        content: 'Please propose a child thread',
-        contentBlocks: originContentBlocks,
-        mentions: [],
-        timestamp: Date.now(),
-        threadId,
-      });
+      origin = messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: 'Please propose a child thread',
+          contentBlocks: originContentBlocks,
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        }),
+      );
       if (dedupKey) originByRequest.set(dedupKey, origin);
     }
     const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
@@ -125,14 +126,16 @@ export async function createProposalTestContext({
   }
 
   async function withdraw({ userId, catId, threadId, proposalId }) {
-    const origin = await messageStore.append({
-      userId,
-      catId: null,
-      content: `Withdraw thread proposal ${proposalId}`,
-      mentions: [],
-      timestamp: Date.now(),
-      threadId,
-    });
+    const origin = await messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: `Withdraw thread proposal ${proposalId}`,
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+      }),
+    );
     const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);
     return app.inject({
       method: 'POST',
@@ -153,7 +156,6 @@ export async function createProposalTestContext({
     socketEvents,
     router: routerOverride,
     invocationQueue: invocationQueueOverride,
-    queueProcessor: queueProcessorOverride,
     propose,
     approve,
     reject,

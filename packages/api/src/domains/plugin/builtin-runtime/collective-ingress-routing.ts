@@ -100,6 +100,7 @@ export function emitConnectorMessage(
     threadId,
     message: {
       id: messageId,
+      from: { kind: 'external', connectorId: source.connector, sender: collectiveSender(event) },
       type: 'connector',
       content: event.body,
       source,

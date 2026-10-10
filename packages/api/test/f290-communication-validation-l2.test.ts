@@ -106,7 +106,7 @@ function probePrivateTrigger(host: Host, threadId: string, taskId: string, obser
   return host.messages.append({
     userId: host.userId,
     threadId,
-    catId: null,
+    from: { kind: 'system', service: 'collective-work' },
     mentions: [],
     timestamp: Date.now(),
     content: 'probe: private Work run',

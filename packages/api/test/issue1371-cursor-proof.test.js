@@ -1,29 +1,25 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildCallbackFinalReplacementMetadataPatch } from '../dist/domains/cats/services/agents/routing/callback-final-replacement.js';
 import { legacyBatonHasSucceededReply } from '../dist/domains/cats/services/agents/routing/delivery-boundary-recovery.js';
 import { cursorFor } from '../dist/domains/cats/services/stores/cursor.js';
 import { DeliveryCursorStore } from '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import { safeParseExtra, serializeExtra } from '../dist/domains/cats/services/stores/redis/redis-message-parsers.js';
 import { coldContext, proofFixture } from './helpers/issue1371-cursor-proof-harness.js';
 
-test('#1371: callback replacement and generic extra patches preserve append-owned proof', async () => {
+test('#1371: stream metadata and generic extra patches preserve append-owned proof', async () => {
   const { store, reply, proof } = await proofFixture();
-  const patch = buildCallbackFinalReplacementMetadataPatch({
-    thinkingChunks: ['finished'],
-    toolEvents: [],
-    richBlocks: [],
-    visibleTurnInvocationId: 'child-opus',
-    persistedInvocationId: 'parent',
-    turnTriggerMessageId: proof.sourceMessageId,
-    executionProjections: {},
+  await store.augmentStreamMetadata(reply.id, {
+    thinking: 'finished',
+    extra: {
+      stream: { invocationId: 'parent', turnInvocationId: 'child-opus' },
+      causal: { kind: 'invocation_reply', triggerMessageId: proof.sourceMessageId },
+    },
   });
-  await store.augmentStreamMetadata(reply.id, patch);
   assert.deepEqual((await store.getById(reply.id)).extra.deliveryBoundary, proof);
   await store.updateExtra(reply.id, { deliveryBoundary: { ...proof, cursor: 'forged' } });
   assert.deepEqual((await store.getById(reply.id)).extra.deliveryBoundary, proof, 'generic patch cannot rewrite proof');
   await store.augmentStreamMetadata(reply.id, { extra: { deliveryBoundary: undefined } });
-  assert.deepEqual((await store.getById(reply.id)).extra.deliveryBoundary, proof, 'replacement cannot erase proof');
+  assert.deepEqual((await store.getById(reply.id)).extra.deliveryBoundary, proof, 'a later patch cannot erase proof');
 });
 
 test('#1371: late metadata cannot manufacture proof on an old callback record', async () => {

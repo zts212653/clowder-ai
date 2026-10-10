@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { createMessagingOwner } from './plugin-m0d-messaging-owner.js';
 
 const THREAD_ID = 'thread-replay-retention';
@@ -54,14 +54,17 @@ async function seededOwner() {
   const owner = await createMessagingOwner(500);
   await seedSubscription(owner, 'plugin-a', 'subscription-a', 'handle-a');
   await seedSubscription(owner, 'plugin-b', 'subscription-b', 'handle-b');
-  owner.messageStore.append({
-    userId: 'fixture-user',
-    catId: null,
-    content: 'canonical message must survive replay cleanup',
-    mentions: [],
-    timestamp: Date.now(),
-    threadId: THREAD_ID,
-  });
+  // F117: append requires MessageFrom sender identity
+  owner.messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'fixture-user',
+      catId: null,
+      content: 'canonical message must survive replay cleanup',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId: THREAD_ID,
+    }),
+  );
   await owner.events.append(THREAD_ID, 'event-key-1', eventInput(), 500);
   return owner;
 }

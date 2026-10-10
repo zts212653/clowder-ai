@@ -67,7 +67,7 @@ describe('F232 AC-A7 ArtifactsPanel 内容查看交互', () => {
         catId: 'opus-48',
         createdAt: Date.now(),
         sourceMessageId: null,
-        ref: 'zts212653/cat-cafe#2247',
+        ref: 'zts212653/clowder-ai#2247',
       },
     ];
     const { container } = renderPanel();

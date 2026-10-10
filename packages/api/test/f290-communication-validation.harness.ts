@@ -17,7 +17,7 @@
 
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CollectiveConnector } from '@cat-cafe/collective-connector';
@@ -260,7 +260,9 @@ export async function createWorld(options: { now?: () => number } = {}) {
     },
     async close() {
       await server.close();
-      await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
+      // Preserve the owned Service/Connector state for fault/restart evidence.
+      // Closing an isolated fixture must not erase persistent storage.
+      console.info('F290 isolated persistent fixture directories retained:', JSON.stringify(directories));
     },
   };
   return world;

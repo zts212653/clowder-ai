@@ -6,6 +6,7 @@ import type { CliExecutionOwnerRef } from '../../../../../utils/cli-process-owne
 import { buildChildEnv } from '../../../../../utils/cli-spawn.js';
 import { buildUnixSupervisedSpawnPlan } from '../../../../../utils/cli-supervised-process.js';
 import { isParseError, parseNDJSON } from '../../../../../utils/ndjson-parser.js';
+import { excerptSanitizedStderr } from '../../../../../utils/sanitize-cli-stderr.js';
 import { createStderrTail, type StderrTail } from '../../../../../utils/stderr-tail.js';
 import type { AgentCarrierSession, AgentCarrierSessionOptions } from '../../types.js';
 import { codexHostServedModels } from './codex-served-model.js';
@@ -107,7 +108,7 @@ class DirectAgentCarrierSession implements AgentCarrierSession {
       const exit = await this.waitForExit();
       await Promise.race([this.stdioClosed, this.drainComplete]);
       if (exit.code !== 0 && !this.options.signal?.aborted) {
-        const excerpt = this.stderr.value.trim().slice(-1000);
+        const excerpt = excerptSanitizedStderr(this.stderr.value, { edge: 'tail', maxLength: 1_000 });
         throw new Error(`Codex app-server exited with code ${String(exit.code)}${excerpt ? `: ${excerpt}` : ''}`);
       }
     } finally {

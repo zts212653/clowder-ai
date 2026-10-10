@@ -116,7 +116,9 @@ export function TimeoutDiagnosticsPanel({ errorMessage, diagnostics, description
 
       {/* Diagnostics toggle */}
       <button
+        type="button"
         data-testid="diagnostics-toggle"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 cursor-pointer bg-transparent border-none p-0"
       >

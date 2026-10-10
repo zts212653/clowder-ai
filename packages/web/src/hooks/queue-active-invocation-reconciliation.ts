@@ -116,7 +116,9 @@ export function reconcileQueueActiveInvocationProjection({
   slots: readonly QueueActiveInvocationSlot[] | undefined;
   source: string;
 }): void {
-  if (slots && slots.length > 0) {
+  // An omitted or malformed projection is unknown; only an explicit empty array certifies idle.
+  if (!Array.isArray(slots)) return;
+  if (slots.length > 0) {
     hydrateQueueActiveProjection(threadId, slots, source);
     return;
   }

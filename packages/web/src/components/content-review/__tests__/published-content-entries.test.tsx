@@ -6,7 +6,7 @@ import { FileBlock } from '@/components/rich/FileBlock';
 import { MediaGalleryBlock } from '@/components/rich/MediaGalleryBlock';
 import { useF307ExperienceWorkbenchStore } from '@/components/workbench/experience-workbench-store';
 import { createPublicationSurface } from '@/components/workbench/publication-surface';
-import { projectCanonicalBubbles } from '@/stores/bubble-projection';
+import { writeStoredSnapshot } from '@/hooks/named-message-writer';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -104,7 +104,7 @@ it.each([
   expect(container.querySelector('a[download]')).toBeNull();
 });
 
-it('clicking a later folded attachment submits its original message coordinate and returns to that source', async () => {
+it('clicking a later same-invocation message attachment submits that exact stored coordinate and returns to its source', async () => {
   const first: ChatMessage = {
     id: 'first',
     type: 'assistant',
@@ -122,7 +122,11 @@ it('clicking a later folded attachment submits its original message coordinate a
     timestamp: 20,
     contentBlocks: [{ type: 'file', url: '/uploads/b.mp4', fileName: 'b.mp4', mimeType: 'video/mp4', fileSize: 24 }],
   };
-  const bubble = projectCanonicalBubbles({ records: [first, second] }).messages[0]!;
+  useChatStore.setState({ messages: [], threadStates: {} });
+  writeStoredSnapshot('host-thread', first);
+  writeStoredSnapshot('host-thread', second);
+  expect(useChatStore.getState().messages.map((message) => message.id)).toEqual(['first', 'second']);
+  const bubble = useChatStore.getState().messages[1]!;
   await act(async () =>
     root.render(
       <ContentBlocks

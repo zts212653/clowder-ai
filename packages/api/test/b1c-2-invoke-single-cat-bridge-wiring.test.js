@@ -64,11 +64,37 @@ function makeRecordingBridge({ throwInDispatch = false } = {}) {
 }
 
 function makeMinimalDeps(extraDeps = {}) {
+  // Controlled durable-source reads for this invocation unit seam. The serial
+  // cloud suite separately exercises real History + Queue admission.
+  const sources = new Map([
+    ['source-message-user-1', { from: { kind: 'user', userId: 'alice' }, catId: null }],
+    [
+      'msg-exact-source',
+      {
+        from: { kind: 'agent', catId: 'opus-47' },
+        catId: 'opus-47',
+        extra: { stream: { invocationId: 'inv-parent' } },
+      },
+    ],
+  ]);
   return {
     registry: new InvocationRegistry(),
     sessionManager: {},
     threadStore: makeMockThreadStore(),
     apiUrl: 'http://localhost:0',
+    messageStore: {
+      getById: async (id) =>
+        sources.has(id)
+          ? {
+              id,
+              threadId: 'thread_t1',
+              userId: 'alice',
+              content: 'persisted source',
+              timestamp: 1,
+              ...sources.get(id),
+            }
+          : null,
+    },
     cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
     ...extraDeps,
   };
@@ -260,10 +286,12 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
   it('maps a return-grant store exception to the typed fail-closed bridge outcome', async () => {
     ensureGptProRegistered();
     const bridge = makeRecordingBridge();
+    let grantAttempts = 0;
     const deps = makeMinimalDeps({
       cloudInvokeBridge: bridge,
       cloudReturnGrantStore: {
         issue: async () => {
+          grantAttempts++;
           throw new Error('redis unavailable');
         },
       },
@@ -278,6 +306,7 @@ describe('F247 AC-B1c-2 R1: invokeSingleCat × bridge wiring contract', () => {
     );
 
     assert.equal(bridge.calls.length, 0);
+    assert.equal(grantAttempts, 1, 'the injected grant failure must actually be reached');
     assert.equal(bridgeStatus(messages).status, 'unavailable');
     assert.equal(bridgeStatus(messages).reason, 'incomplete-dispatch-provenance');
     assert.equal(messages.at(-1).type, 'done');

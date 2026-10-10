@@ -7,7 +7,7 @@ import { build } from 'vite';
 import { chromium } from '../../../ppt-forge/node_modules/playwright/index.mjs';
 
 test(
-  'real Queue/receipt UI distinguishes guarded settling from unresolved owner loss without writes',
+  'real delivery UI keeps missing or replaced execution on original response and folds timeout diagnostics',
   { timeout: 60000 },
   async () => {
     const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -35,7 +35,12 @@ test(
       .filter((item) => item.type === 'asset' && item.fileName.endsWith('.css'))
       .map((item) => item.source)
       .join('\n');
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({
+      headless: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
     try {
       const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
       const writes = [];
@@ -67,14 +72,9 @@ test(
       });
       await page.goto(origin);
       await page.locator('main[data-ready="true"]').waitFor();
-      const agyTarget = page.locator('[data-receipt-target="gemini38"]');
-      await agyTarget.waitFor({ state: 'visible' });
-      assert.equal(await agyTarget.count(), 1);
-      assert.match(await agyTarget.innerText(), /下一件工作/);
-      assert.match(await agyTarget.innerText(), /排队内部轮次（非精确读取）/);
-      assert.doesNotMatch(await agyTarget.innerText(), /能力未声明/);
-      await page.getByRole('button', { name: '进入正常收尾', exact: true }).click();
-      await page.getByText('正在收尾 · 等待本轮完成', { exact: false }).waitFor();
+      const target = page.locator('[data-dispatch-target="codex-astra"]');
+      await target.waitFor({ state: 'visible' });
+      assert.equal(await target.getAttribute('data-dispatch-phase'), 'processing');
       assert.equal(await page.locator('[data-testid="queue-recover"]').count(), 0);
       assert.equal(await page.locator('[data-queue-target-row="codex-astra"]').count(), 0);
       for (const width of [1100, 360]) {
@@ -89,10 +89,34 @@ test(
         }
       }
       await page.getByRole('button', { name: '原执行结束但无回执', exact: true }).click();
-      await page.locator('[data-queue-target-row="codex-astra"]').waitFor();
-      assert.match(await page.locator('main').innerText(), /尚未确认处理完成/);
+      await page.waitForFunction(
+        () => document.querySelector('[data-dispatch-target]')?.getAttribute('data-dispatch-phase') === 'delivered',
+      );
+      assert.equal(await page.locator('[data-queue-target-row]').count(), 0);
       await page.getByRole('button', { name: '同猫开始其他工作', exact: true }).click();
-      assert.equal(await page.locator('[data-queue-target-row="codex-astra"]').count(), 1);
+      assert.equal(await target.getAttribute('data-dispatch-phase'), 'delivered');
+      assert.equal(await page.locator('[data-queue-target-row]').count(), 0);
+      await page.getByRole('button', { name: '原回复超时', exact: true }).click();
+      await page.getByText('回复失败。', { exact: true }).waitFor();
+      assert.equal(await page.getByText('回复失败。', { exact: true }).count(), 1);
+      assert.equal(await page.locator('[data-testid="diagnostics-panel"]').count(), 0);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      if (process.env.ISSUE1371_EVIDENCE_DIR) {
+        await page.screenshot({
+          path: path.join(process.env.ISSUE1371_EVIDENCE_DIR, 'timeout-collapsed-360.png'),
+          fullPage: true,
+        });
+      }
+      await page.locator('[data-testid="diagnostics-toggle"]').click();
+      await page.locator('[data-testid="diagnostics-panel"]').waitFor();
+      assert.match(await page.locator('main').innerText(), /1846576ms/);
+      assert.equal(await page.getByText('回复失败。', { exact: true }).count(), 1);
+      if (process.env.ISSUE1371_EVIDENCE_DIR) {
+        await page.screenshot({
+          path: path.join(process.env.ISSUE1371_EVIDENCE_DIR, 'timeout-expanded-360.png'),
+          fullPage: true,
+        });
+      }
       assert.deepEqual(writes, []);
       assert.deepEqual(errors, []);
     } finally {

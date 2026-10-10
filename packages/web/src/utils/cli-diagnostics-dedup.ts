@@ -8,19 +8,26 @@
  * away regardless of which emit path multiplied and is forward-compatible against future
  * emit additions (same panel → same dedup, no matter what added new emit paths).
  *
- * Strategy: walk chronologically, group adjacent cliDiagnostics-bearing messages sharing the
- * same reasonCode + publicSummary fingerprint within a sliding window. First message in a
- * group keeps the full panel + badge "×N"; subsequent messages hide their panel entirely
- * (the chat bubble and signature stay; only the duplicate panel is collapsed).
+ * Strategy: walk the rows in the order they render and group adjacent rows whose rendered CLI
+ * panel shares the same reasonCode + publicSummary fingerprint within a window on the
+ * presentation clock. The group head keeps
+ * the full panel + badge "×N"; later rows hide that panel only (the chat bubble and signature
+ * stay).
  *
- * Adjacency-only dedup: any non-cliDiagnostics message between two same-fingerprint
- * diagnostics breaks the group, so cliDiagnostics that legitimately reappear after later
- * conversation are NOT hidden.
+ * A row joins only with the CLI panel it actually renders (`projectRowTerminalDiagnostics`, the
+ * decision ChatMessage renders), never with the raw `cliDiagnostics` it carries: a row showing
+ * the timeout panel, no panel (any response) or nothing at all breaks the
+ * group like any other row, so a hidden panel is always one its group head visibly shows (F117).
+ *
+ * Adjacency-only dedup: any row between two same-fingerprint panels breaks the group, so
+ * diagnostics that legitimately reappear after later conversation are NOT hidden.
  */
 
+import { projectRowTerminalDiagnostics } from '../components/chat-row-surface';
 import type { ChatMessage as ChatMessageType } from '../stores/chat-types';
+import { getMessageTimelineOrderTime } from '../stores/message-timeline';
 
-const DEFAULT_WINDOW_MS = 30_000;
+const WINDOW_MS = 30_000;
 
 export interface CliDiagnosticsDedupInfo {
   /** Group size for the first message in the group (count includes itself + subsequent
@@ -41,47 +48,39 @@ function fingerprint(diag: CliDiagnostics): string {
 }
 
 /**
- * Compute per-message dedup info for cliDiagnostics-bearing messages. Returns a Map keyed
- * by messageId; messages absent from the map have no dedup info (render normally with
- * dedupCount=1, hideDiagnosticsPanel=false).
+ * Compute per-row dedup info for the rows a surface renders, in that order. `timelineMessages`
+ * is the thread timeline the rows render against (defaults to the rows themselves). Rows absent
+ * from the map have no dedup info (render normally with dedupCount=1, hideDiagnosticsPanel=false).
  */
 export function computeCliDiagnosticsDedup(
-  messages: readonly ChatMessageType[],
-  windowMs: number = DEFAULT_WINDOW_MS,
+  rows: readonly ChatMessageType[],
+  timelineMessages: readonly ChatMessageType[] = rows,
 ): Map<string, CliDiagnosticsDedupInfo> {
   const result = new Map<string, CliDiagnosticsDedupInfo>();
-  let groupAnchorId: string | null = null;
-  let groupAnchorFingerprint: string | null = null;
-  let groupAnchorTs = 0;
+  let head: { id: string; fingerprint: string; at: number } | null = null;
   let groupSize = 0;
 
   const flushGroup = () => {
-    if (groupAnchorId !== null && groupSize > 1) {
-      result.set(groupAnchorId, { dedupCount: groupSize, hideDiagnosticsPanel: false });
-    }
+    if (head && groupSize > 1) result.set(head.id, { dedupCount: groupSize, hideDiagnosticsPanel: false });
   };
 
-  for (const msg of messages) {
-    const diag = msg.extra?.cliDiagnostics;
-    if (!diag) {
+  for (const row of rows) {
+    const panel = projectRowTerminalDiagnostics(row, timelineMessages);
+    if (panel?.kind !== 'cli') {
       flushGroup();
-      groupAnchorId = null;
-      groupAnchorFingerprint = null;
+      head = null;
       groupSize = 0;
       continue;
     }
 
-    const fp = fingerprint(diag);
-    const ts = msg.timestamp ?? 0;
-
-    if (groupAnchorId !== null && groupAnchorFingerprint === fp && ts - groupAnchorTs <= windowMs) {
+    const fp = fingerprint(panel.diagnostics);
+    const at = getMessageTimelineOrderTime(row);
+    if (head && head.fingerprint === fp && Math.abs(at - head.at) <= WINDOW_MS) {
       groupSize++;
-      result.set(msg.id, { dedupCount: 0, hideDiagnosticsPanel: true });
+      result.set(row.id, { dedupCount: 0, hideDiagnosticsPanel: true });
     } else {
       flushGroup();
-      groupAnchorId = msg.id;
-      groupAnchorFingerprint = fp;
-      groupAnchorTs = ts;
+      head = { id: row.id, fingerprint: fp, at };
       groupSize = 1;
     }
   }

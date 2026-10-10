@@ -82,15 +82,19 @@ async function notifyAlphaFailure(
   ownerUserId: string,
   targetCatId: string,
   content: string,
+  idempotencyKey: string,
 ): Promise<void> {
-  if (!ctx.deliver || !ctx.invokeTrigger) throw new Error('Alpha failure delivery and trigger are required');
-  const source = await ctx.deliver({ threadId, content, userId: 'scheduler' });
-  const outcome = await ctx.invokeTrigger.trigger(threadId, targetCatId, ownerUserId, content, source, undefined, {
-    reason: 'scheduled_alpha_browser_triage',
+  if (!ctx.deliver) throw new Error('Alpha failure delivery is required');
+  await ctx.deliver({
+    threadId,
+    content,
+    userId: ownerUserId,
+    targetCatId,
+    idempotencyKey,
+    deliveryStatus: 'queued',
     sourceCategory: 'scheduled',
     priority: 'urgent',
   });
-  if (outcome !== 'dispatched' && outcome !== 'enqueued') throw new Error(`Alpha wake not accepted: ${outcome}`);
 }
 
 async function reportFailures(
@@ -136,12 +140,16 @@ async function reportFailures(
         title: `[P1] Alpha ${draft.kind}: ${draft.testedHeadSha.slice(0, 10)}`,
         why: `Alpha full verification requires triage.\nRevision: ${draft.testedHeadSha}\nExecution: ${draft.jobId}:${draft.generation}\nUnits: ${draft.unitIds.join(', ')}\nOwner source: ${draft.ownerSourceRef ?? 'unresolved'}\nOwnership: ${draft.ownership}. A failing journey is evidence to investigate, not proof that its feature code is the root cause.`,
       }));
-    // Task identity and notification completion are different facts. Replays
-    // retain the one Task but retry delivery/trigger until both have succeeded.
-    // Duplicate notifications after a crash are preferable to silently losing
-    // the owner/guardian wake and settling an unhandled revision.
+    // Retry the same atomic admission: one source and target, never a second trigger.
     const content = `Alpha 浏览器验证未通过：${draft.testedHeadSha}\n内部 P1：${task.id}\n${task.why}`;
-    await notifyAlphaFailure(ctx, threadId, options.ownerUserId, draft.ownerCatId ?? guardianCatId, content);
+    await notifyAlphaFailure(
+      ctx,
+      threadId,
+      options.ownerUserId,
+      draft.ownerCatId ?? guardianCatId,
+      content,
+      `alpha-triage:${draft.jobId}:${draft.generation}:${task.id}`,
+    );
     refs.push(`task:${task.id}`);
   }
   return refs;

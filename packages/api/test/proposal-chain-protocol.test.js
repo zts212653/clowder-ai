@@ -18,10 +18,18 @@ import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 describe('F128 chain protocol injection', () => {
   test('approve injects chain protocol with order + handoff instructions when preferredCats has multiple cats', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: [],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -32,7 +40,6 @@ describe('F128 chain protocol injection', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -49,7 +56,7 @@ describe('F128 chain protocol injection', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
     assert.ok(enqueued.includes('## 接力链路'), 'must include chain protocol section');
 
@@ -92,10 +99,18 @@ describe('F128 chain protocol injection', () => {
     // regardless of what the user typed in initialMessage. Pin the contract:
     // user intent comes from the raw user-typed initialMessage only.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: [],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -106,7 +121,6 @@ describe('F128 chain protocol injection', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     // Parent thread title intentionally contains the literal `#ideate` tag.
     const source = await ctx.threadStore.create('alice', 'Parent #ideate title');
@@ -132,17 +146,17 @@ describe('F128 chain protocol injection', () => {
     // must stay faithful. The fix is that dispatch parseIntent ignores
     // this header text entirely.
     assert.ok(
-      entries[0].content.includes('#ideate'),
+      entries[0].payload.content.includes('#ideate'),
       'enriched content faithfully echoes parent title (contains `#ideate`)',
     );
 
     assert.deepEqual(
-      entries[0].targetCats,
+      entries.flatMap((entry) => entry.targets),
       ['kimi'],
       'serial proposal stays serial — only preferredCats[0] is woken, parent-title `#ideate` does NOT leak into parseIntent',
     );
     assert.equal(
-      entries[0].intent,
+      entries[0].execution.intent,
       'execute',
       'intent stays execute (chain starter) — explicit-tag path requires user-typed `#ideate` in raw initialMessage',
     );
@@ -168,7 +182,11 @@ describe('F128 chain protocol injection', () => {
     // to assert addParticipants was never invoked with `opus`; we rely on
     // the input-boundary assertion as the necessary and sufficient cut.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     let routerReceivedMessage = null;
     const router = {
       async resolveTargetsAndIntent(message) {
@@ -180,6 +198,7 @@ describe('F128 chain protocol injection', () => {
           targetCats,
           intent: { intent: 'execute' },
           hasMentions: targetCats.length > 0,
+          // real-router contract: a parser ALWAYS hands over its batch (zero attempts on no @)
         };
       },
     };
@@ -191,7 +210,6 @@ describe('F128 chain protocol injection', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     // Parent thread title intentionally contains a `@opus` mention.
     const source = await ctx.threadStore.create('alice', 'Parent @opus thread');
@@ -253,10 +271,18 @@ describe('F128 chain protocol injection', () => {
 
   test('approve omits chain protocol when preferredCats is empty (no chain to orchestrate)', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: true };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -267,7 +293,6 @@ describe('F128 chain protocol injection', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -284,7 +309,7 @@ describe('F128 chain protocol injection', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
     assert.ok(enqueued.includes('## 主 Thread'), 'main thread header still injected even without preferredCats');
     assert.ok(!enqueued.includes('接力链路'), 'chain protocol section must be omitted when preferredCats is empty');

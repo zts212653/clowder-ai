@@ -1,153 +1,187 @@
-import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import {
-  assertRedisIsolationOrThrow,
-  cleanupClientKeyspace,
-  redisIsolationSkipReason,
-} from './helpers/redis-test-helpers.js';
+import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.ts';
+import { RedisQueueLedgerStore } from '../src/domains/cats/services/agents/invocation/queue-ledger/RedisQueueLedgerStore.ts';
+import { settleLifecycleResponseInputs } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
+import { RedisMessageStore } from '../src/domains/cats/services/stores/redis/RedisMessageStore.ts';
+import { RedisTurnExecutionStore } from '../src/domains/cats/services/stores/redis/RedisTurnExecutionStore.ts';
+import { commitFailedResponseAndEnqueueA2ACaller } from '../src/routes/callback-a2a-trigger.ts';
+import { failedResponseFixture } from './helpers/1398-failed-response-fixture.mjs';
+import { createCanonicalLiveSourceFixture as fixture } from './helpers/1398-live-source-fixture.mjs';
+import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
-for (const carrier of ['live', 'ordinary'])
+const owned = ownedRedisFixture('a2a-live-delivery');
+for (const content of ['\n\nfailure explanation \n', '\n \t\n']) {
   test(
-    `Redis ${carrier} event-before-receipt crash recovers from canonical stores without another dispatch terminal`,
-    { skip: redisIsolationSkipReason(process.env.REDIS_URL) },
+    'Redis normal failed transaction and lost settlement ack replays the exact durable snapshot: ' +
+      JSON.stringify(content),
     async () => {
-      assertRedisIsolationOrThrow(process.env.REDIS_URL, 'F317 dispatch recovery');
-      const { createRedisClient } = await import('@cat-cafe/shared/utils');
-      const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
-      const { RedisTurnExecutionStore } = await import(
-        '../dist/domains/cats/services/stores/redis/RedisTurnExecutionStore.js'
-      );
-      const { RedisBallCustodyEventLog } = await import('../dist/domains/ball-custody/BallCustodyEventLog.js');
-      const { RedisBallCustodyProjectionStore } = await import(
-        '../dist/domains/ball-custody/BallCustodyProjectionStore.js'
-      );
-      const { BallCustodyProjector } = await import('../dist/domains/ball-custody/BallCustodyProjector.js');
-      const { BallCustodyIngest } = await import('../dist/domains/ball-custody/BallCustodyIngest.js');
-      const { A2ADispatchDispositionService } = await import(
-        '../dist/domains/ball-custody/A2ADispatchDispositionService.js'
-      );
-      const { DispatchReceiptService } = await import('../dist/domains/ball-custody/DispatchReceiptService.js');
-      const { buildHandedEvent } = await import('../dist/domains/ball-custody/ball-custody-events.js');
-      const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-      const { QueuedMessageCustodyCoordinator, createInitialQueuedMessageCustody } = await import(
-        '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js'
-      );
-      const { getQueueReadEvidence, recordLiveFullReadEvidence } = await import(
-        '../dist/domains/cats/services/agents/invocation/QueueReadEvidence.js'
-      );
-      const { DispatchAdoptionAuthority } = await import('../dist/domains/ball-custody/DispatchAdoptionAuthority.js');
-      const { TurnCustodyAdoptionRegistry } = await import(
-        '../dist/domains/ball-custody/TurnCustodyAdoptionRegistry.js'
-      );
-      const adoptions = new TurnCustodyAdoptionRegistry();
-      let unregister;
-      const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `f317-dispatch:${randomUUID()}:` });
+      const redis = owned.client('normal-failed-replay-' + randomUUID() + ':');
+      const messages = new RedisMessageStore(redis);
+      const turns = new RedisTurnExecutionStore(redis);
+      const f = await failedResponseFixture({ messages, turns, ledger: new RedisQueueLedgerStore(redis) });
       try {
-        const messages = new RedisMessageStore(redis);
-        const executions = new RedisTurnExecutionStore(redis);
-        const events = new RedisBallCustodyEventLog(redis);
-        const projections = new RedisBallCustodyProjectionStore(redis);
-        const projector = new BallCustodyProjector(events, projections);
-        const ingest = new BallCustodyIngest(events, projector);
-        const queue = new InvocationQueue();
-        const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages });
-        const scope = {
-          threadId: 'home',
-          userId: 'owner',
-          catId: 'codex-sol',
-          invocationId: 'live-child',
-          parentInvocationId: 'live-parent',
-        };
-        const at = Date.now() - 10_000;
-        const source = await messages.append({
-          userId: 'owner',
-          threadId: 'home',
-          catId: 'opus',
-          content: 'synthetic dispatch',
-          mentions: ['codex-sol'],
-          timestamp: at,
-          deliveryStatus: 'queued',
-        });
-        await ingest.record(
-          buildHandedEvent({
-            threadId: 'home',
-            fromCatId: 'opus',
-            toCatId: 'codex-sol',
-            messageId: source.id,
-            at: at + 1,
-          }),
-        );
-        const admitted = queue.enqueue({
-          threadId: 'home',
-          userId: 'owner',
-          messageId: source.id,
-          content: source.content,
-          source: 'agent',
-          targetCats: ['codex-sol'],
-          intent: 'execute',
-          ownerAuthProvenance: 'strict',
-        });
-        assert.equal(admitted.outcome, 'enqueued');
-        await messages.initializeQueueCustody(source.id, createInitialQueuedMessageCustody(admitted.entry));
-        queue.markQueuedSeen('home', 'owner', admitted.entry.id, 'codex-sol', scope.invocationId, at + 2);
-        await coordinator.persistEntry(queue.getEntrySnapshot('home', 'owner', admitted.entry.id));
-        await executions.createRunning({
-          ...scope,
-          executionKind: 'ordinary',
-          ...(carrier === 'live' ? { queueCompletionPolicy: 'explicit_source' } : {}),
-          startedAt: at,
-        });
-        await recordLiveFullReadEvidence(
-          messages,
-          executions,
-          { ...scope, messageIds: [source.id], seenAt: at + 3 },
-          events,
-        );
-        unregister = adoptions.register(scope.invocationId, async () => {});
-        const service = new A2ADispatchDispositionService({
-          ...(carrier === 'ordinary'
-            ? { adoptionAuthority: new DispatchAdoptionAuthority({ executions, messages, adoptions }) }
-            : {}),
-          registry: { isLatest: async () => true },
-          messageStore: messages,
-          ballCustodyEventLog: events,
-          ballCustodyProjectionStore: projections,
-          ballCustody: ingest,
-          isLiveCarrierInvocation: async () => true,
-          getReadEvidenceForMessage: (query) => getQueueReadEvidence(messages, query),
-          projectAdoptedDisposition: async () => {
-            throw new Error('synthetic crash after event');
+        await commitFailedResponseAndEnqueueA2ACaller(f.deps, {
+          responseMessageId: f.response.id,
+          invocationId: 'child',
+          terminal: { status: 'failed', completedAt: 120, reason: 'provider_error' },
+          message: {
+            from: { kind: 'agent', catId: 'opus' },
+            userId: 'owner',
+            threadId: 'thread',
+            content,
+            mentions: [],
+            timestamp: 110,
+            replyTo: f.input.id,
+            origin: 'stream',
+            contentBlocks: [{ type: 'text', text: 'original block' }],
+            toolEvents: [{ id: 'tool', type: 'tool_result', label: 'original tool', timestamp: 115 }],
+            extra: { rich: { v: 1, blocks: [{ id: 'card', kind: 'card', v: 1, title: 'Original', tone: 'info' }] } },
+            metadata: { provider: 'openai', model: 'original-model' },
+            thinking: '\noriginal thinking\n',
           },
+          userId: 'owner',
+          threadId: 'thread',
+          reporterCatId: 'opus',
+          predecessorCatId: 'codex',
+          ownerAuthProvenance: 'strict',
+          parentInvocationId: 'parent',
         });
-        await assert.rejects(service.completeAdopted(scope, source.id, 'completed'), /synthetic crash/);
-        assert.deepEqual((await messages.getById(source.id)).queueCustody.handledByCatIds, []);
-        const restartedMessages = new RedisMessageStore(redis);
-        const restartedEvents = new RedisBallCustodyEventLog(redis);
-        const receipt = new DispatchReceiptService({
-          messageStore: restartedMessages,
-          queue: new InvocationQueue(),
-          coordinator: new QueuedMessageCustodyCoordinator({ messageStore: restartedMessages }),
-          eventLog: restartedEvents,
-        });
-        await Promise.all([receipt.repairSource(source.id), receipt.repairSource(source.id)]);
-        const recovered = await restartedMessages.getById(source.id);
-        assert.equal(recovered.deliveryStatus, 'delivered');
-        assert.deepEqual(recovered.queueCustody.handledByCatIds, ['codex-sol']);
-        assert.equal(recovered.queueCustody.targetOutcomeByCatId['codex-sol'].evidenceRef.kind, 'dispatch_disposition');
-        assert.equal(recovered.queueCustody.readEvidenceWitnesses?.length ?? 0, carrier === 'live' ? 1 : 0);
-        assert.equal(await redis.ttl(`msg:${source.id}`), -1);
-        assert.equal(
-          (await restartedEvents.read('ball:thread:home')).filter(
-            (event) => event.kind === 'ball.dispatch_dispositioned',
-          ).length,
-          1,
-        );
+        const before = await messages.getById(f.response.id);
+        assert.equal(before.content, content);
+        assert.equal((await turns.listResponsePending()).length, 1);
+        const restoredMessages = new RedisMessageStore(redis);
+        const restoredQueue = new InvocationQueue(new RedisQueueLedgerStore(redis));
+        await restoredQueue.hydrateFromLedger(restoredMessages);
+        const outcome = await f
+          .recovery({ messageStore: restoredMessages, queueOwner: restoredQueue })
+          .reconcile({ processStartedAt: 200 });
+        assert.deepEqual(outcome.responseSettlementFailures, []);
+        assert.deepEqual(await restoredMessages.getById(f.response.id), before);
+        assert.deepEqual(await turns.listResponsePending(), []);
+        assert.equal((await restoredQueue.listAllDurable('thread')).length, 1);
+        assert.equal((await restoredMessages.getByThread('thread', 30, 'owner')).length, 2);
       } finally {
-        await unregister?.();
-        await cleanupClientKeyspace(redis);
         await redis.quit();
       }
     },
   );
+}
+for (const lostAcknowledgement of [false, true]) {
+  test(
+    'Redis failed child crash recovery retains exact result and one caller wake, lost ack=' + lostAcknowledgement,
+    async () => {
+      const redis = owned.client('failed-recovery-' + randomUUID() + ':');
+      const messages = new RedisMessageStore(redis);
+      const turns = new RedisTurnExecutionStore(redis);
+      const ledger = new RedisQueueLedgerStore(redis);
+      const f = await failedResponseFixture({ messages, turns, ledger });
+      try {
+        if (lostAcknowledgement) {
+          await f
+            .recovery({
+              afterCommit: () => {
+                throw new Error('lost acknowledgement');
+              },
+            })
+            .reconcile({ processStartedAt: 200 });
+          assert.equal((await turns.listResponsePending()).length, 1);
+        }
+        const restoredMessages = new RedisMessageStore(redis);
+        const restoredQueue = new InvocationQueue(new RedisQueueLedgerStore(redis));
+        await restoredQueue.hydrateFromLedger(restoredMessages);
+        await f
+          .recovery({ messageStore: restoredMessages, queueOwner: restoredQueue })
+          .reconcile({ processStartedAt: 200 });
+        const rows = await restoredQueue.listAllDurable('thread');
+        assert.equal(rows.length, 1);
+        assert.equal(rows[0].sourceCategory, 'a2a_failure');
+        assert.deepEqual(rows[0].targets, ['codex']);
+        assert.equal(rows[0].payload.messageId, f.response.id);
+        assert.equal(rows[0].execution.ownerAuthProvenance, 'strict');
+        assert.equal((await restoredMessages.getById(f.response.id)).lifecycle.status, 'failed');
+        assert.deepEqual(await turns.listResponsePending(), []);
+        await f
+          .recovery({ messageStore: restoredMessages, queueOwner: restoredQueue })
+          .reconcile({ processStartedAt: 200 });
+        assert.equal((await restoredQueue.listAllDurable('thread')).length, 1);
+        assert.equal((await restoredMessages.getByThread('thread', 30, 'owner')).length, 2);
+      } finally {
+        await redis.quit();
+      }
+    },
+  );
+}
+for (const status of ['completed', 'failed', 'interrupted']) {
+  test(
+    'Redis crash after History commit recovers one exact Live result and only pending sibling: ' + status,
+    async () => {
+      const redis = owned.client('f317-delivery-' + randomUUID() + ':');
+      const store = new RedisMessageStore(redis);
+      const ledger = new RedisQueueLedgerStore(redis);
+      const f = await fixture({ requested: 'continue_current', boundParentInvocationId: 'live-parent' }, 'agent', {
+        messageStore: store,
+        ledgerStore: ledger,
+        turnExecutionStore: new RedisTurnExecutionStore(redis),
+      });
+      try {
+        const commit = store.commitLifecycleAppendAdmission.bind(store);
+        const get = store.getById.bind(store);
+        let unreadable = false;
+        store.getById = async (id) => {
+          if (unreadable) throw new Error('fixture read outage');
+          return get(id);
+        };
+        store.commitLifecycleAppendAdmission = async (input) => {
+          await commit(input);
+          unreadable = true;
+          throw new Error('fixture lost acknowledgement after durable commit');
+        };
+        assert.equal((await f.read()).statusCode, 503);
+        assert.equal((await ledger.get('home', f.entry.id)).status, 'claimed');
+        const restartedStore = new RedisMessageStore(redis);
+        const restartedQueue = new InvocationQueue(new RedisQueueLedgerStore(redis));
+        await restartedQueue.hydrateFromLedger(restartedStore);
+        assert.deepEqual(
+          restartedQueue.list('home', 'owner').map((e) => e.targets),
+          [['kimi']],
+        );
+        const terminal = await restartedStore.commitLifecycleResponseTerminal(f.response.id, {
+          invocationId: f.auth.invocationId,
+          status,
+          completedAt: Date.now(),
+          content: status === 'completed' ? 'one exact result' : '',
+          reason: 'fixture_' + status,
+          extra: f.response.extra,
+          mentions: [],
+          origin: 'stream',
+        });
+        assert.equal(terminal.kind, 'applied');
+        await settleLifecycleResponseInputs(restartedStore, terminal.message, f.response.id);
+        await restartedQueue.hydrateFromLedger(restartedStore);
+        const input = await restartedStore.getById(f.message.id);
+        assert.equal(input.lifecycle.dispatchRefs.length, 1);
+        assert.equal(input.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
+        assert.equal(input.lifecycle.dispatchRefs[0].phase, 'settled');
+        assert.equal(Object.hasOwn(input, 'queueCustody'), false);
+        assert.deepEqual(
+          restartedQueue.list('home', 'owner').map((e) => e.targets),
+          [['kimi']],
+        );
+        const rows = await restartedStore.getByThread('home', 30, 'owner');
+        assert.equal(rows.filter((m) => m.lifecycle?.kind === 'response').length, 1);
+        assert.equal(rows.filter((m) => m.from.kind === 'system').length, 0);
+        assert.equal(await redis.ttl('msg:' + f.message.id), -1);
+        assert.equal(await redis.ttl('msg:' + f.response.id), -1);
+        assert.equal(
+          (await new RedisTurnExecutionStore(redis).get(f.auth.invocationId)).queueCompletionPolicy,
+          'explicit_source',
+        );
+      } finally {
+        await f.close();
+        await redis.quit();
+      }
+    },
+  );
+}

@@ -17,7 +17,6 @@ const SNAPSHOT: MessageDispositionPreferenceSnapshot = {
   thread: null,
   effective: 'continue_current',
   source: 'global',
-  onboardingSeen: false,
 };
 
 describe('useMessageDispositionPreference settlement', () => {

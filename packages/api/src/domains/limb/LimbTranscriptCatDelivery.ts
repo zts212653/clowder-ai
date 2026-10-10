@@ -1,39 +1,20 @@
 import type { CatId, ConnectorSource } from '@cat-cafe/shared';
 
+import type {
+  ConnectorDeliveryDeps,
+  ConnectorDeliveryInput,
+  ConnectorDeliveryResult,
+} from '../../infrastructure/email/deliver-connector-message.js';
 import type { LimbTranscriptDelivery } from './LimbObservationRouter.js';
-
-type TriggerOutcome = 'dispatched' | 'enqueued' | 'full';
 
 export interface LimbTranscriptCatDeliveryOptions {
   readonly isKnownCat: (catId: string) => boolean;
-  readonly messageStore: {
-    append(input: {
-      readonly threadId: string;
-      readonly userId: string;
-      readonly catId: null;
-      readonly content: string;
-      readonly source: ConnectorSource;
-      readonly mentions: readonly CatId[];
-      readonly timestamp: number;
-      readonly idempotencyKey: string;
-    }): Promise<{ readonly id: string }> | { readonly id: string };
-  };
-  readonly invokeTriggerProvider: {
-    get():
-      | {
-          trigger(
-            threadId: string,
-            catId: CatId,
-            userId: string,
-            message: string,
-            messageId: string,
-          ): Promise<TriggerOutcome>;
-        }
-      | undefined;
-  };
-  readonly socketManager?: {
-    broadcastToRoom(room: string, event: string, data: unknown): void;
-  };
+  /**
+   * The one seam that owns atomic Message + Queue admission. Injected rather than imported so the
+   * delivery port stays a composition decision, exactly as the other connector producers have it.
+   */
+  readonly deliverFn: (deps: ConnectorDeliveryDeps, input: ConnectorDeliveryInput) => Promise<ConnectorDeliveryResult>;
+  readonly deliveryDeps: ConnectorDeliveryDeps;
 }
 
 const STACKCHAN_SOURCE: ConnectorSource = {
@@ -42,6 +23,16 @@ const STACKCHAN_SOURCE: ConnectorSource = {
   icon: 'robot',
 };
 
+/**
+ * A spoken transcript from a physical limb is an ordinary external input, so it takes the ordinary
+ * path: one atomic Message + Queue admission keyed by the observation.
+ *
+ * It used to append a `deliveryStatus:'queued'` message and then call a separate invoke trigger to
+ * enqueue it. Those are two writes, and the window between them is not theoretical for this
+ * producer: `LimbObservationRouter` releases the ingress claim only when `deliverTranscript`
+ * *throws*, so a crash after the append left a queued message that no Queue row referenced and no
+ * retry would ever re-deliver — the utterance was captured, shown as pending, and silently dropped.
+ */
 export class LimbTranscriptCatDelivery implements LimbTranscriptDelivery {
   constructor(private readonly options: LimbTranscriptCatDeliveryOptions) {}
 
@@ -51,13 +42,8 @@ export class LimbTranscriptCatDelivery implements LimbTranscriptDelivery {
     if (!this.options.isKnownCat(input.binding.catId)) {
       throw new Error(`unknown bound cat: ${input.binding.catId}`);
     }
-    const trigger = this.options.invokeTriggerProvider.get();
-    if (!trigger) {
-      throw new Error('cat invocation runtime is not ready');
-    }
 
     const catId = input.binding.catId as CatId;
-    const timestamp = Date.parse(input.observation.occurredAt);
     const source: ConnectorSource = {
       ...STACKCHAN_SOURCE,
       meta: {
@@ -70,38 +56,24 @@ export class LimbTranscriptCatDelivery implements LimbTranscriptDelivery {
         rawMediaTransferred: false,
       },
     };
-    const stored = await this.options.messageStore.append({
+
+    const result = await this.options.deliverFn(this.options.deliveryDeps, {
       threadId: input.binding.threadId,
       userId: input.binding.userId,
-      catId: null,
+      catId,
       content: input.observation.payload.text,
       source,
-      mentions: [catId],
-      timestamp,
+      // Same key the append used, so an observation already admitted replays instead of speaking twice.
       idempotencyKey: `limb:${input.observation.nodeId}:${input.observation.observationId}`,
+      // The device captured the utterance at this instant; admission is merely when we caught up.
+      timestamp: Date.parse(input.observation.occurredAt),
     });
 
-    this.options.socketManager?.broadcastToRoom(`thread:${input.binding.threadId}`, 'connector_message', {
-      threadId: input.binding.threadId,
-      message: {
-        id: stored.id,
-        type: 'connector',
-        content: input.observation.payload.text,
-        source,
-        timestamp,
-      },
-    });
-
-    const outcome = await trigger.trigger(
-      input.binding.threadId,
-      catId,
-      input.binding.userId,
-      input.observation.payload.text,
-      stored.id,
-    );
-    if (outcome === 'full') {
-      throw new Error('cat invocation queue is full');
+    // The router releases the ingress claim on a throw and only on a throw. Returning a messageId
+    // for an envelope that never reached the Queue would burn the claim on work nobody will run.
+    if (!result.admitted) {
+      throw new Error(`limb transcript was not admitted to the queue: ${input.observation.observationId}`);
     }
-    return { messageId: stored.id };
+    return { messageId: result.messageId };
   }
 }

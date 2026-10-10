@@ -18,6 +18,6 @@ test('F233 index wiring uses configured owner for duty briefing collectDeps', ()
 test('F233 collect source contains no literal NUL byte', () => {
   const raw = readFileSync(collectSourcePath);
   assert.equal(raw.includes(0), false, 'source file must remain plain text, not binary');
-  const text = raw.toString('utf8');
-  assert.match(text, /\\0/);
+  // Positive control: the file read is the collector (F117 KD-23 removed the draft key that used a \\0 separator).
+  assert.match(raw.toString('utf8'), /export async function collectZombies\(/);
 });

@@ -14,27 +14,17 @@
 // reservation's expiry is a FIELD checked in Lua, never a Redis TTL, so no
 // user-facing record can silently evaporate.
 //
-// Test Redis only: port 6398, never the 6399 sanctuary.
+// Runs only against an isolated test Redis (test:redis); an inherited address never qualifies.
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Redis from 'ioredis';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const TEST_PREFIX = `test:presentation-ledger:${Date.now()}:`;
-const SANCTUARY_PORT = '6399';
-const DEV_TEST_REDIS_URL = 'redis://localhost:6398';
 
-/** Never let an ambient sanctuary URL become the test target. */
-function resolveTestRedisUrl(envUrl) {
-  if (!envUrl) return DEV_TEST_REDIS_URL;
-  try {
-    if (new URL(envUrl).port === SANCTUARY_PORT) return DEV_TEST_REDIS_URL;
-  } catch {
-    return DEV_TEST_REDIS_URL;
-  }
-  return envUrl;
-}
+const REDIS_URL = process.env.REDIS_URL;
 
-describe('F296 B3a gate 4: RedisPresentationLedgerStore', () => {
+describe('F296 B3a gate 4: RedisPresentationLedgerStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   /** @type {import('ioredis').default} */
   let redis;
   let makeLedger;
@@ -50,13 +40,12 @@ describe('F296 B3a gate 4: RedisPresentationLedgerStore', () => {
   const INVALIDATOR = { owner: 'task-store', ref: 'task-42' };
 
   before(async () => {
-    // Iron Rule #1. A developer shell legitimately has REDIS_URL=...:6399 (the
-    // sanctuary) exported, and the isolated-redis harness legitimately overrides
-    // it with its own port. Inheriting the env blindly is what would point a
-    // test at the sanctuary, so the sanctuary is filtered out here rather than
-    // trusted to be absent.
-    const redisUrl = resolveTestRedisUrl(process.env.REDIS_URL);
-    assert.equal(redisUrl.includes('6399'), false, 'refusing to run against the 6399 sanctuary');
+    // Iron Rule #1. A shell launched from a running instance legitimately has
+    // that instance's REDIS_URL exported; inheriting it blindly would point this
+    // test at live data. Only the isolated-redis harness's address, vouched for
+    // by CAT_CAFE_REDIS_TEST_ISOLATED, is ever used.
+    assertRedisIsolationOrThrow(REDIS_URL, 'F296 B3a gate 4: RedisPresentationLedgerStore');
+    const redisUrl = REDIS_URL;
     redis = new Redis(redisUrl, { keyPrefix: TEST_PREFIX, lazyConnect: true, retryStrategy: () => null });
     try {
       await redis.connect();

@@ -55,7 +55,11 @@ vi.mock('@/hooks/useGlobalArtifacts', () => ({
 vi.mock('@/hooks/useCatData', () => ({
   useCatData: () => ({
     getCatById: (id: string) =>
-      id === 'opus' ? { nickname: '宪宪' } : id === 'codex' ? { nickname: '砚砚' } : undefined,
+      id === 'opus'
+        ? { displayName: '布偶猫', nickname: '宪宪' }
+        : id === 'codex'
+          ? { displayName: '缅因猫', nickname: '砚砚' }
+          : undefined,
   }),
 }));
 

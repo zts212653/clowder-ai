@@ -27,10 +27,6 @@ const mockSetCatInvocation = vi.fn();
 const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockRemoveActiveInvocation = vi.fn();
-// F183 Phase B1.3 — done event now routes through reducer's replaceMessages
-// (single-writer wire-up). Mock as no-op so legacy slot-cleanup tests still
-// pass; the reducer's bubble-finalization is covered in bubble-reducer.test.ts.
-const mockReplaceMessages = vi.fn();
 
 const mockAddMessageToThread = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
@@ -70,10 +66,18 @@ const storeState: Record<string, unknown> = {
   setMessageUsage: mockSetMessageUsage,
   requestStreamCatchUp: mockRequestStreamCatchUp,
   removeActiveInvocation: mockRemoveActiveInvocation,
-  replaceMessages: mockReplaceMessages,
-  hasMore: true,
 
+  // Named-message writes (hooks/named-message-writer.ts) — thread-scoped. done names its
+  // response; the response is not in the store here, so finishing it is a no-op.
   addMessageToThread: mockAddMessageToThread,
+  appendToThreadMessage: vi.fn(),
+  patchThreadMessage: vi.fn(),
+  appendToolEventToThread: vi.fn(),
+  setThreadMessageThinking: vi.fn(),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -172,14 +176,15 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
         type: 'done',
         catId: 'codex',
         invocationId: 'inv-001',
+        messageId: 'resp-codex',
         isFinal: false,
       });
     });
 
     // Codex's primary slot should be removed
     expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-001');
-    // Also attempts secondary slot cleanup
-    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-001-codex');
+    // Exact invocation owns the slot; never invent a second id from the cat suffix.
+    expect(mockRemoveActiveInvocation).toHaveBeenCalledTimes(1);
 
     // Global state must NOT be cleared — isFinal=false means more cats coming
     expect(mockSetLoading).not.toHaveBeenCalledWith(false);
@@ -196,6 +201,7 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
         type: 'done',
         catId: 'codex',
         invocationId: 'inv-001',
+        messageId: 'resp-codex',
         isFinal: false,
       });
     });
@@ -211,6 +217,7 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
         type: 'done',
         catId: 'opus',
         invocationId: 'inv-001',
+        messageId: 'resp-opus',
         isFinal: true,
       });
     });
@@ -234,6 +241,7 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
       captured?.handleAgentMessage({
         type: 'done',
         catId: 'codex',
+        messageId: 'resp-codex',
         isFinal: false,
       });
     });
@@ -267,6 +275,7 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
         type: 'done',
         catId: 'opus',
         invocationId: 'turn-opus',
+        messageId: 'resp-opus',
         isFinal: false,
       });
     });
@@ -294,6 +303,7 @@ describe('Sequential multi-cat: non-final done removes own slot', () => {
       captured?.handleAgentMessage({
         type: 'done',
         catId: 'codex',
+        messageId: 'resp-codex',
         isFinal: false,
       });
     });

@@ -12,9 +12,10 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const REDIS_URL = process.env.REDIS_URL;
-const HAS_REDIS = REDIS_URL?.includes(':6398') === true;
+const REDIS_SKIP = redisIsolationSkipReason(REDIS_URL);
 
 describe('auth-invocation test keyspace isolation', () => {
   test('namespaces are unique per call, so two suites cannot share one prefix', () => {
@@ -29,21 +30,22 @@ describe('auth-invocation test keyspace isolation', () => {
   });
 
   test('the old shared prefix let one suite delete another suite record', async (t) => {
-    if (!HAS_REDIS) {
-      t.skip('requires the isolated development Redis');
+    if (REDIS_SKIP) {
+      t.skip(REDIS_SKIP);
       return;
     }
+    assertRedisIsolationOrThrow(REDIS_URL, 'auth-invocation-namespace');
     const { createRedisClient } = await import('@cat-cafe/shared/utils');
 
     // Reproduces the pre-fix arrangement: both clients on `cat-cafe-test:`,
     // one of them wiping `cat-cafe-test:auth:*` as its fixture setup.
-    const shared = 'cat-cafe-test:';
+    const shared = createAuthTestNamespace('auth-legacy-witness');
     const writer = createRedisClient({ url: REDIS_URL, keyPrefix: shared });
     const wiper = createRedisClient({ url: REDIS_URL, keyPrefix: shared });
     try {
       await writer.set('auth:shared-prefix-witness', 'written-not-yet-read', 'EX', 60);
 
-      const victims = await wiper.keys('cat-cafe-test:auth:*');
+      const victims = await wiper.keys(`${shared}auth:*`);
       if (victims.length > 0) {
         await wiper.del(...victims.map((key) => key.replace(shared, '')));
       }
@@ -61,10 +63,11 @@ describe('auth-invocation test keyspace isolation', () => {
   });
 
   test('a per-suite namespace survives the other suite cleanup', async (t) => {
-    if (!HAS_REDIS) {
-      t.skip('requires the isolated development Redis');
+    if (REDIS_SKIP) {
+      t.skip(REDIS_SKIP);
       return;
     }
+    assertRedisIsolationOrThrow(REDIS_URL, 'auth-invocation-namespace');
     const { createRedisClient } = await import('@cat-cafe/shared/utils');
 
     const restartNs = createAuthTestNamespace('auth-restart');

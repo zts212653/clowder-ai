@@ -276,30 +276,6 @@ describe('InvocationRecordStore', () => {
     assert.equal(store.get(invocationId).userMessageId, 'msg-123');
   });
 
-  test('F254 Phase E persists typed closure custody fields', async () => {
-    const { InvocationRecordStore } = await import(
-      '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'
-    );
-    const store = new InvocationRecordStore();
-    const { invocationId } = store.create({
-      threadId: 'thread-f254',
-      userId: 'user-f254',
-      targetCats: ['opus'],
-      intent: 'execute',
-      idempotencyKey: 'f254-custody',
-      actionLeaseCarrier: { kind: 'none' },
-    });
-    const updated = store.update(invocationId, {
-      freshnessClosureId: 'closure-1',
-      freshnessInputFrontierMessageId: 'msg-frontier',
-      freshnessClosureStatus: 'running',
-    });
-
-    assert.equal(updated.freshnessClosureId, 'closure-1');
-    assert.equal(updated.freshnessInputFrontierMessageId, 'msg-frontier');
-    assert.equal(updated.freshnessClosureStatus, 'running');
-  });
-
   test('persists a durable connector execution-start receipt while running', async () => {
     const { InvocationRecordStore } = await import(
       '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js'

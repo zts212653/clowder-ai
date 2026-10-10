@@ -104,6 +104,7 @@ test('SDK notice reaches ordinary native tool chain; input enqueue alone is not 
     provider: 'anthropic',
     carrier: 'claude_agent_sdk',
     deliverySemantics: 'queued_internal_turn',
+    activeInvocationGuidance: 'supported',
   });
 });
 

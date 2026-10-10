@@ -38,10 +38,17 @@ export function eventWaitWake(waitContinuationCarrier, { holderCatId, subjectKey
 }
 
 /** The event_wait wake that a real wait outcome with this reason produces. */
-export function realWaitWake(reason, { holderCatId, subjectKey, subjectRef = 'pr:zts212653/cat-cafe#3300' }) {
+export function realWaitOutcome(reason, subjectRef = 'pr:zts212653/cat-cafe#3300') {
   const result = transitionWaitState({ await: activeAwait(subjectRef) }, TRANSITIONS[reason]);
   assert.equal(result.applied, true, `${reason} must be a real applied transition`);
-  return eventWaitWake(createWaitContinuationCarrier('wait-1', result.state.waitOutcome), { holderCatId, subjectKey });
+  return result.state.waitOutcome;
+}
+
+export function realWaitWake(reason, { holderCatId, subjectKey, subjectRef }) {
+  return eventWaitWake(createWaitContinuationCarrier('wait-1', realWaitOutcome(reason, subjectRef)), {
+    holderCatId,
+    subjectKey,
+  });
 }
 
 /** A wake around an arbitrary outcomeId, for shapes the real producer never emits. */

@@ -460,6 +460,7 @@ export function transformTrajectorySteps(
               catId,
               content: JSON.stringify({
                 type: 'warning',
+                presentation: 'transient_status',
                 message: humanErrorMessage(upstreamError.kind),
               }),
               metadata: { ...metadata, upstreamError },

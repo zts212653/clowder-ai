@@ -4,6 +4,7 @@ import {
   type ApprovalProducerRuntimeBindings,
 } from '../../src/domains/approval-hub/ApprovalProducerRegistry.js';
 import { F128ApprovalAdapter } from '../../src/domains/approval-hub/adapters/F128ApprovalAdapter.js';
+import { InvocationQueue } from '../../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { ContextEpochOwner } from '../../src/domains/cats/services/session/context/ContextEpochOwner.js';
 import { InMemoryContextEpochStore } from '../../src/domains/cats/services/stores/ports/ContextEpochStore.js';
 import { MessageStore } from '../../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -44,19 +45,20 @@ export function recoveryFixture() {
   const tasks = new TaskStore();
   const summaries = new SummaryStore({ maxSummaries: 500 });
   const messages = new MessageStore();
+  const queue = new InvocationQueue();
   const proposals = new InMemoryProposalStore();
   const epochs = new InMemoryContextEpochStore();
   const epochOwner = new ContextEpochOwner(epochs);
   let allowed = true;
   const authorize = async () => allowed;
   const approvals = fixtureApprovalRegistry(proposals);
-  const inbox = new MessageLiveInboxSource({ store: messages, authorize });
+  const inbox = new MessageLiveInboxSource({ store: messages, queue, authorize });
   const options = { tasks, messages, epochs, approvals, inbox, authorize };
   const message = (content = 'source') =>
     messages.append({
       userId: scope.userId,
       threadId: scope.threadId,
-      catId: null,
+      from: { kind: 'user', userId: scope.userId },
       content,
       mentions: [],
       timestamp: Date.now(),
@@ -110,6 +112,7 @@ export function recoveryFixture() {
   };
   return {
     ...options,
+    queue,
     summaries,
     options,
     epochOwner,

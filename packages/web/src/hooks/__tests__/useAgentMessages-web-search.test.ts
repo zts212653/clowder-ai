@@ -23,11 +23,15 @@ const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
 const mockPatchMessage = vi.fn();
 
-const mockAddMessageToThread = vi.fn();
+const mockAddMessageToThread = vi.fn((_threadId: string, message: (typeof storeState.messages)[number]) => {
+  if (!storeState.messages.some((m) => m.id === message.id)) storeState.messages = [...storeState.messages, message];
+});
+const mockAppendToolEventToThread = vi.fn();
+const mockPatchThreadMessage = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
-const mockGetThreadState = vi.fn(() => ({ messages: [] }));
+const mockGetThreadState = vi.fn(() => ({ messages: storeState.messages }));
 
 const storeState = {
   messages: [] as Array<{
@@ -57,12 +61,16 @@ const storeState = {
   setMessageThinking: mockSetMessageThinking,
   patchMessage: mockPatchMessage,
 
+  // Named-message writes (hooks/named-message-writer.ts) — thread-scoped
   addMessageToThread: mockAddMessageToThread,
-  // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
-  replaceMessages: vi.fn((msgs: unknown[]) => {
-    storeState.messages = msgs as typeof storeState.messages;
-  }),
-  hasMore: true,
+  appendToThreadMessage: vi.fn(),
+  patchThreadMessage: mockPatchThreadMessage,
+  appendToolEventToThread: mockAppendToolEventToThread,
+  setThreadMessageThinking: vi.fn(),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -110,6 +118,9 @@ describe('useAgentMessages system_info web_search', () => {
     });
     mockAppendToolEvent.mockClear();
     mockPatchMessage.mockClear();
+    mockAddMessageToThread.mockClear();
+    mockAppendToolEventToThread.mockClear();
+    mockPatchThreadMessage.mockClear();
     mockClearAllActiveInvocations.mockClear();
   });
 
@@ -120,7 +131,7 @@ describe('useAgentMessages system_info web_search', () => {
     container.remove();
   });
 
-  it('consumes web_search JSON and appends a tool event (no raw JSON system bubble)', () => {
+  it('consumes web_search JSON and appends a tool event to the named response (no raw JSON system bubble)', () => {
     act(() => {
       root.render(React.createElement(Harness));
     });
@@ -130,28 +141,26 @@ describe('useAgentMessages system_info web_search', () => {
         type: 'text',
         catId: 'codex',
         content: 'hello',
+        origin: 'stream',
+        messageId: 'resp-1',
       });
     });
 
-    // F183 B1.2.3: new stream bubble may go via reducer + replaceMessages instead of addMessage
-    const replaceMessagesMock = storeState.replaceMessages as ReturnType<typeof vi.fn>;
-    const assistantMsgId =
-      (mockAddMessage.mock.calls.find((call) => call[0]?.type === 'assistant')?.[0]?.id as string | undefined) ??
-      (replaceMessagesMock.mock.calls
-        .flatMap((c) => c[0] as Array<{ type?: string; id?: string }>)
-        .find((m) => m.type === 'assistant')?.id as string | undefined);
-    expect(typeof assistantMsgId).toBe('string');
+    // The first body event creates the response under its server id.
+    expect(storeState.messages.filter((m) => m.type === 'assistant').map((m) => m.id)).toEqual(['resp-1']);
 
     act(() => {
       captured?.handleAgentMessage({
         type: 'system_info',
         catId: 'codex',
+        messageId: 'resp-1',
         content: JSON.stringify({ type: 'web_search', catId: 'codex', count: 1 }),
       });
     });
 
-    expect(mockAppendToolEvent).toHaveBeenCalledWith(
-      assistantMsgId,
+    expect(mockAppendToolEventToThread).toHaveBeenCalledWith(
+      'thread-1',
+      'resp-1',
       expect.objectContaining({
         type: 'tool_use',
         label: expect.stringContaining('web_search'),
@@ -198,6 +207,7 @@ describe('useAgentMessages system_info web_search', () => {
     });
 
     expect(mockPatchMessage).not.toHaveBeenCalled();
+    expect(mockPatchThreadMessage).not.toHaveBeenCalled();
     expect(mockAddMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'system', content: expect.stringContaining('freshness_supplement') }),
     );

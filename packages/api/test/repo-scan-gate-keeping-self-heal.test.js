@@ -97,7 +97,7 @@ describe('F167 R2 P1#2: RepoScanTaskSpec self-heals gate-keeping marker', () => 
       reconciliationDedup: createMockReconciliationDedup(),
       bindingStore: createMockBindingStore('thread-inbox-1'),
       threadStore,
-      deliverFn: async (_d, input) => ({ messageId: 'msg-1', content: input.content }),
+      deliverFn: async (_d, input) => ({ messageId: 'msg-1', content: input.content, admitted: true }),
       deliveryDeps: {},
       invokeTrigger: { trigger() {} },
       fetchOpenPRs: async () => [],
@@ -153,7 +153,7 @@ describe('F167 R2 P1#2: RepoScanTaskSpec self-heals gate-keeping marker', () => 
     });
     opts.deliverFn = async () => {
       delivered = true;
-      return { messageId: 'msg-1', content: 'x' };
+      return { messageId: 'msg-1', content: 'x', admitted: true };
     };
 
     const spec = createRepoScanTaskSpec(opts);

@@ -12,19 +12,12 @@ import { ExecutionCancelButton } from '../ExecutionCancelButton';
  */
 import { managedCommandActivityLabel } from '../managed-command-activity-label';
 import { QueueEntryList } from './QueueEntryList';
-import { formatClock, PAUSE_REASON_COPY } from './row-model';
+import { formatClock } from './row-model';
 import type { ExecutionRowController } from './useExecutionRow';
 
 function WaitLine({ controller }: { controller: ExecutionRowController }) {
   const { model, resolveCatName } = controller;
   const wait = model.waitInfo;
-  if (model.queuePaused && model.pauseReason) {
-    return (
-      <div data-testid="execution-row-pause-reason" className="px-3 py-1 text-xs text-conn-amber-text">
-        {PAUSE_REASON_COPY[model.pauseReason]}
-      </div>
-    );
-  }
   if (!wait || model.visibleQueueCount === 0) return null;
   return (
     <div data-testid="execution-row-wait" className="px-3 py-1 text-xs text-cafe-muted">
@@ -82,7 +75,7 @@ function RunningSection({ controller }: { controller: ExecutionRowController }) 
 
 function QueueSection({ controller }: { controller: ExecutionRowController }) {
   const { model, view, commands, convergence, resolveCatName } = controller;
-  if (model.visibleQueueCount === 0 && !model.queuePaused) return null;
+  if (model.visibleQueueCount === 0) return null;
   return (
     <section aria-label="排队" data-testid="execution-row-queue">
       <div className="flex items-center gap-2 px-3 pt-2 pb-1 text-xs">
@@ -95,7 +88,7 @@ function QueueSection({ controller }: { controller: ExecutionRowController }) {
               onClick={() => void commands.handleContinue()}
               className="rounded-md bg-[var(--semantic-success)] px-2 py-1 text-[var(--cafe-surface)] hover:opacity-90"
             >
-              {model.resume === 'continue' ? '继续' : '恢复'}
+              恢复
             </button>
           ) : null}
           <button

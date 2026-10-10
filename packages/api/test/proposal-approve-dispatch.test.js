@@ -24,7 +24,11 @@ import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 describe('F128 approve dispatch — initialMessage routing', () => {
   test('approve dispatches initialMessage through the queue processor', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const resolveCalls = [];
     const processCalls = [];
     const router = {
@@ -42,7 +46,6 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source', '/projects/source-repo');
     const { proposalId } = JSON.parse(
@@ -89,12 +92,18 @@ describe('F128 approve dispatch — initialMessage routing', () => {
 
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    assert.ok(entries[0].content.startsWith('Kick this off'), 'enqueued content should start with user-typed content');
-    assert.deepEqual(entries[0].targetCats, ['opus']);
-    assert.equal(entries[0].intent, 'execute');
-    assert.equal(entries[0].ownerAuthProvenance, 'strict');
-    assert.ok(entries[0].messageId);
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    assert.ok(
+      entries[0].payload.content.startsWith('Kick this off'),
+      'enqueued content should start with user-typed content',
+    );
+    assert.deepEqual(
+      entries.flatMap((entry) => entry.targets),
+      ['opus'],
+    );
+    assert.equal(entries[0].execution.intent, 'execute');
+    assert.equal(entries[0].execution.ownerAuthProvenance, 'strict');
+    assert.ok(entries[0].payload.messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
     assert.equal(stored.deliveryStatus, 'queued');
     assert.deepEqual(stored.mentions, ['opus']);
     const timeline = await ctx.messageStore.getByThread(body.threadId, 20, 'alice', {
@@ -112,7 +121,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // user's next manual message. With fallback, the proposal's chosen members get woken up
     // immediately as the user intended when picking them on the card.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         // Simulate the real router behaviour for a no-@-mention message: 0 targets.
@@ -129,7 +142,6 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source', '/projects/source-repo');
     const { proposalId } = JSON.parse(
@@ -151,12 +163,12 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
     assert.deepEqual(
-      entries[0].targetCats,
+      entries.flatMap((entry) => entry.targets),
       ['kimi'],
       'dispatch wakes ONLY preferredCats[0] (first cat); subsequent cats are driven by cat-side @-mentions ("他们自己决定下一个要把谁叫出来" — owner spec 2026-05-27)',
     );
-    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial (intent execute)');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    assert.equal(entries[0].execution.intent, 'execute', 'first-cat dispatch is always serial (intent execute)');
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
     assert.deepEqual(
       stored.mentions,
       ['kimi'],
@@ -169,7 +181,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // explicitly in initialMessage. Fallback must NOT clobber that intent down
     // to execute — explicit user tags always win.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         return { targetCats: [], intent: { intent: 'ideate' }, hasMentions: false };
@@ -183,7 +199,6 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -203,7 +218,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
-    assert.equal(entries[0].intent, 'ideate', 'explicit #ideate must override the proposal-card serial default');
+    assert.equal(
+      entries[0].execution.intent,
+      'ideate',
+      'explicit #ideate must override the proposal-card serial default',
+    );
   });
 
   test('approve injects "## 主 Thread" header into sub-thread first message (fork-and-return loop)', async () => {
@@ -212,7 +231,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // Server defensively injects the header so cats who forget to write it in
     // initialMessage still preserve the fork-and-return loop.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
@@ -226,7 +249,6 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Strategy Discussion');
     const { proposalId } = JSON.parse(
@@ -244,7 +266,7 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
     assert.ok(
       enqueued.includes('## 主 Thread'),
       `enqueued content must include "## 主 Thread" header; got:\n${enqueued}`,
@@ -291,7 +313,11 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     // "@opus46 把球传过去" inside instructions). They must NOT override the
     // card's first-picked member.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         return { targetCats: ['codex'], intent: { intent: 'execute' }, hasMentions: true };
@@ -305,7 +331,6 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -326,10 +351,10 @@ describe('F128 approve dispatch — initialMessage routing', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.deepEqual(
-      entries[0].targetCats,
+      entries.flatMap((entry) => entry.targets),
       ['kimi'],
       'preferredCats[0]=kimi wakes first, even though message body @s @codex — message @s are prompt-level narrative, dispatch follows card order',
     );
-    assert.equal(entries[0].intent, 'execute', 'first-cat dispatch is always serial');
+    assert.equal(entries[0].execution.intent, 'execute', 'first-cat dispatch is always serial');
   });
 });

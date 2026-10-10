@@ -181,63 +181,16 @@ describe('MCP Callback Tools', () => {
     assert.equal(attempts, 0, 'unsupported action metadata must not reach callback transport');
   });
 
-  test('handlePostMessage forwards replace_final disposition to the callback API', async () => {
+  test('retired replace_final metadata cannot replace the canonical response', async () => {
     const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
-
-    let capturedOptions;
+    let body;
     globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return {
-        ok: true,
-        json: async () => ({ status: 'ok' }),
-      };
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ status: 'ok' }) };
     };
-
-    const result = await handlePostMessage({
-      content: 'Canonical callback response',
-      streamDisposition: 'replace_final',
-    });
-
+    const result = await handlePostMessage({ content: 'Independent message', streamDisposition: 'replace_final' });
     assert.equal(result.isError, undefined);
-    assert.equal(JSON.parse(capturedOptions.body).streamDisposition, 'replace_final');
-  });
-
-  test('handleCompleteManagedHold exposes only the invocation-bound disposition input', async () => {
-    const { handleCompleteManagedHold } = await import('../dist/tools/callback-tools.js');
-    let capturedUrl;
-    let capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ outcome: 'applied' }) };
-    };
-
-    const result = await handleCompleteManagedHold({ disposition: 'completed' });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.endsWith('/api/callbacks/complete-managed-hold'));
-    assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'completed' });
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
-  });
-
-  test('handleCompleteA2ADispatch exposes only the invocation-bound disposition input', async () => {
-    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
-    let capturedUrl;
-    let capturedOptions;
-    globalThis.fetch = async (url, options) => {
-      capturedUrl = url;
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ outcome: 'applied' }) };
-    };
-
-    const result = await handleCompleteA2ADispatch({ disposition: 'handled' });
-
-    assert.equal(result.isError, undefined);
-    assert.ok(capturedUrl.endsWith('/api/callbacks/complete-a2a-dispatch'));
-    assert.deepEqual(JSON.parse(capturedOptions.body), { disposition: 'handled' });
-    assert.equal(capturedOptions.headers['x-invocation-id'], 'test-invocation');
-    assert.equal(capturedOptions.headers['x-callback-token'], 'test-token');
+    assert.equal(Object.hasOwn(body, 'streamDisposition'), false);
   });
 
   test('handleGetCustodyEvents asks only for a source message and a limit, with the invocation credentials', async () => {
@@ -288,42 +241,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /503/);
     assert.match(result.content[0].text, /event_log_read_failed/);
-  });
-
-  test('handleCompleteA2ADispatch forwards adoptSourceMessageId in POST body for adopted dispatch', async () => {
-    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ outcome: 'applied' }) };
-    };
-
-    const result = await handleCompleteA2ADispatch({
-      disposition: 'completed',
-      adoptSourceMessageId: 'msg-adopt-123',
-    });
-
-    assert.equal(result.isError, undefined);
-    assert.deepEqual(JSON.parse(capturedOptions.body), {
-      disposition: 'completed',
-      adoptSourceMessageId: 'msg-adopt-123',
-    });
-  });
-
-  test('handleCompleteA2ADispatch omits adoptSourceMessageId when not provided', async () => {
-    const { handleCompleteA2ADispatch } = await import('../dist/tools/callback-tools.js');
-    let capturedOptions;
-    globalThis.fetch = async (_url, options) => {
-      capturedOptions = options;
-      return { ok: true, json: async () => ({ outcome: 'applied' }) };
-    };
-
-    const result = await handleCompleteA2ADispatch({ disposition: 'handled' });
-
-    assert.equal(result.isError, undefined);
-    const body = JSON.parse(capturedOptions.body);
-    assert.deepEqual(body, { disposition: 'handled' });
-    assert.equal(body.adoptSourceMessageId, undefined, 'adoptSourceMessageId must not be present when omitted');
   });
 
   test('handleUpdateEntrustedWork forwards one typed nonterminal Task-owner action', async () => {
@@ -434,7 +351,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(attempts, 1);
     assert.deepEqual(JSON.parse(capturedOptions.body), {
       content: '@codex\n\nAPPROVED for the exact reviewed HEAD.',
-      streamDisposition: 'independent',
       threadId: 'thread-review',
       clientMessageId: 'typed-local-review-agent-key',
       targetCats: ['codex'],
@@ -553,29 +469,6 @@ describe('MCP Callback Tools', () => {
     assert.equal(result.isError, undefined);
     const body = JSON.parse(capturedOptions.body);
     assert.equal(body.threadId, 'thread-123');
-  });
-
-  test('handlePostMessage rejects replace_final without an invocation stream', async () => {
-    delete process.env.CAT_CAFE_INVOCATION_ID;
-    delete process.env.CAT_CAFE_CALLBACK_TOKEN;
-    const { handlePostMessage } = await import('../dist/tools/callback-tools.js');
-
-    let attempts = 0;
-    globalThis.fetch = async () => {
-      attempts += 1;
-      return { ok: true, json: async () => ({ status: 'ok' }) };
-    };
-
-    const result = await handlePostMessage({
-      content: 'There is no provider final to replace',
-      threadId: 'thread-123',
-      streamDisposition: 'replace_final',
-      agentKeyCatId: 'antigravity',
-    });
-
-    assert.equal(result.isError, true);
-    assert.match(result.content[0].text, /requires invocation-token credentials/);
-    assert.equal(attempts, 0);
   });
 
   test('agent-key action rejection is not retried or queued to the outbox', async () => {

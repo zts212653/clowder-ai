@@ -58,14 +58,15 @@ describe('Tasks Routes', () => {
   }
 
   async function createWaitLifecycle() {
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
     const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
     const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
+    const messageStore = connector.messageStore;
     const eventLog = new MemoryWaitLifecycleEventLog();
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: connector.deliveryDeps,
       eventLog,
       log: { info() {}, warn() {}, error() {} },
     });

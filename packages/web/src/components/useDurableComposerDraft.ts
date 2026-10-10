@@ -1,6 +1,6 @@
 'use client';
 
-import type { ContextAttachment, MessageContent } from '@cat-cafe/shared';
+import type { ContextAttachment, MessageContent, ReplyPreview } from '@cat-cafe/shared';
 import { type Dispatch, type RefObject, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { loadOwnerComposerDraft } from '@/utils/true-recall';
@@ -19,10 +19,8 @@ import { removeDraftImage, useDraftImageRestoration } from './use-durable-compos
 import { usePendingComposerDraftInsert } from './use-pending-composer-draft-insert';
 import { usePendingComposerSelection } from './use-pending-composer-selection';
 
-interface ReplyDraft {
+interface ReplyDraft extends ReplyPreview {
   id: string;
-  content: string;
-  senderCatId: string | null;
   threadId: string;
 }
 

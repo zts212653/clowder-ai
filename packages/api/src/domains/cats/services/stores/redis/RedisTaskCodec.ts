@@ -1,4 +1,16 @@
 import { type CatId, entrustedWorkV1Schema, type TaskItem, type TaskKind } from '@cat-cafe/shared';
+import {
+  parseTypedWaitRegistration,
+  TYPED_WAIT_REGISTRATION_FIELD,
+  type TypedWaitRegistrationSnapshot,
+} from '../../../../ball-custody/TypedWaitRegistration.js';
+
+/** Hydrate the task and its co-located typed wait receipt from one atomic read. */
+export function hydrateWaitRegistration(data: Record<string, string>): TypedWaitRegistrationSnapshot | null {
+  return data.id
+    ? { task: hydrateTask(data), receipt: parseTypedWaitRegistration(data[TYPED_WAIT_REGISTRATION_FIELD]) }
+    : null;
+}
 
 export function serializeTask(task: TaskItem): Record<string, string> {
   const out: Record<string, string> = {

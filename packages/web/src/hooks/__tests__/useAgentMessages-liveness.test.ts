@@ -191,6 +191,7 @@ describe('F118 useAgentMessages liveness warning', () => {
 
     // Should NOT add a system message bubble
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('stores app-server lifecycle without rendering raw JSON', () => {
@@ -230,6 +231,7 @@ describe('F118 useAgentMessages liveness warning', () => {
       }),
     );
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('stores app-server lifecycle from the backward-compatible status channel without a bubble', () => {
@@ -273,6 +275,7 @@ describe('F118 useAgentMessages liveness warning', () => {
       }),
     );
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('stores background app-server lifecycle from status without a bubble', () => {
@@ -314,6 +317,7 @@ describe('F118 useAgentMessages liveness warning', () => {
         appServerLifecycle: expect.objectContaining({ stage: 'active', turnId: 'turn-1' }),
       }),
     );
+    expect(mockAddMessage).not.toHaveBeenCalled();
     expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
@@ -350,6 +354,7 @@ describe('F118 useAgentMessages liveness warning', () => {
       }),
     );
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('projects pre-turn recovery as spawning status without a bubble', () => {
@@ -367,6 +372,7 @@ describe('F118 useAgentMessages liveness warning', () => {
 
     expect(mockSetCatStatus).toHaveBeenCalledWith('codex', 'spawning');
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('projects pre-turn recovery from the backward-compatible status channel without a bubble', () => {
@@ -391,5 +397,6 @@ describe('F118 useAgentMessages liveness warning', () => {
 
     expect(mockSetCatStatus).toHaveBeenCalledWith('codex', 'spawning');
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 });

@@ -1,13 +1,14 @@
 /**
- * F045 P1 regression: thinking-first placeholder must receive metadata from subsequent text chunks.
+ * F045 P1 regression: a thinking-first response must receive metadata from subsequent text chunks.
  *
- * Sequence under test (foreground active thread):
- *   1. system_info(thinking) → creates placeholder assistant bubble (no metadata)
- *   2. text(with metadata) → appends content + merges metadata onto placeholder
- *   3. system_info(invocation_usage) → sets usage inside metadata
+ * Sequence under test (foreground active thread), on the named-message write path:
+ *   1. system_info(thinking, messageId R) → R exists without metadata (created empty by the
+ *      server / its lifecycle snapshot or by this first body event) and gains thinking
+ *   2. text(with metadata, messageId R) → appends content + merges metadata onto R
+ *   3. system_info(invocation_usage, messageId R) → sets usage inside metadata
  *
- * Bug: Before the fix, step 2 only called appendToMessage (content-only),
- * so the placeholder never got metadata, and step 3's setMessageUsage no-op'd.
+ * Bug: Before the fix, step 2 only appended content, so the message never got
+ * metadata, and step 3's usage write no-op'd (usage lands inside metadata).
  *
  * Uses real useChatStore (no mocks) to verify store state transitions.
  */
@@ -17,7 +18,13 @@ import { useChatStore } from '@/stores/chatStore';
 
 const THREAD_ID = 'thread-active';
 const CAT_ID = 'opus';
-const MSG_ID = 'msg-thinking-test';
+const MSG_ID = 'resp-1';
+
+function findResponse() {
+  const message = useChatStore.getState().messages.find((m) => m.id === MSG_ID);
+  if (!message) throw new Error(`expected message ${MSG_ID}`);
+  return message;
+}
 
 describe('F045: thinking-first placeholder metadata flow', () => {
   beforeEach(() => {
@@ -47,9 +54,8 @@ describe('F045: thinking-first placeholder metadata flow', () => {
   it('RED→GREEN: metadata and usage survive the thinking→text→usage sequence', () => {
     const store = useChatStore.getState();
 
-    // Step 1: thinking creates placeholder (metadata may be present if msg carries it;
-    // this test covers the worst case where it's absent)
-    store.addMessage({
+    // Step 1: the response exists without metadata (worst case) and receives thinking
+    store.addMessageToThread(THREAD_ID, {
       id: MSG_ID,
       type: 'assistant',
       catId: CAT_ID,
@@ -58,30 +64,30 @@ describe('F045: thinking-first placeholder metadata flow', () => {
       timestamp: Date.now(),
       isStreaming: true,
     });
-    store.setMessageThinking(MSG_ID, 'I am planning my response...');
+    store.setThreadMessageThinking(THREAD_ID, MSG_ID, 'I am planning my response...');
 
-    // Verify: placeholder has thinking but no metadata
-    const afterThinking = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    // Verify: the response has thinking but no metadata
+    const afterThinking = findResponse();
     expect(afterThinking.thinking).toBe('I am planning my response...');
     expect(afterThinking.metadata).toBeUndefined();
 
-    // Step 2: text chunk arrives with metadata → merge onto placeholder
+    // Step 2: text chunk arrives with metadata → merge onto the response
     const metadata = { provider: 'anthropic', model: 'claude-opus-4-5-20250514' };
-    store.appendToMessage(MSG_ID, 'Hello, I am responding.');
-    store.setMessageMetadata(MSG_ID, metadata);
+    store.appendToThreadMessage(THREAD_ID, MSG_ID, 'Hello, I am responding.');
+    store.setThreadMessageMetadata(THREAD_ID, MSG_ID, metadata);
 
     // Verify: metadata is now present
-    const afterText = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    const afterText = findResponse();
     expect(afterText.content).toBe('Hello, I am responding.');
     expect(afterText.metadata).toBeDefined();
     expect(afterText.metadata?.provider).toBe('anthropic');
 
-    // Step 3: invocation_usage arrives → setMessageUsage should succeed (not no-op)
+    // Step 3: invocation_usage arrives → the usage write should succeed (not no-op)
     const usage: TokenUsage = { inputTokens: 100, outputTokens: 50 };
-    store.setMessageUsage(MSG_ID, usage);
+    store.setThreadMessageUsage(THREAD_ID, MSG_ID, usage);
 
     // Verify: usage is set inside metadata
-    const afterUsage = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    const afterUsage = findResponse();
     expect(afterUsage.metadata).toBeDefined();
     expect(afterUsage.metadata?.usage).toEqual(usage);
   });
@@ -102,7 +108,7 @@ describe('F045: thinking-first placeholder metadata flow', () => {
     // Second call should be a no-op (guard prevents per-chunk re-render)
     store.setMessageMetadata(MSG_ID, { provider: 'openai', model: 'gpt-4' });
 
-    const msg = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    const msg = findResponse();
     // Original metadata preserved, not overwritten
     expect(msg.metadata?.provider).toBe('anthropic');
     expect(msg.metadata?.model).toBe('claude-opus-4-5-20250514');
@@ -122,10 +128,10 @@ describe('F045: thinking-first placeholder metadata flow', () => {
     });
 
     store.setMessageMetadata(MSG_ID, metadata);
-    const after1 = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    const after1 = findResponse();
 
     store.setMessageMetadata(MSG_ID, metadata);
-    const after2 = useChatStore.getState().messages.find((m) => m.id === MSG_ID)!;
+    const after2 = findResponse();
 
     expect(after1.metadata).toEqual(after2.metadata);
   });

@@ -48,6 +48,7 @@ function catMessage(overrides: Partial<ChatMessageData> = {}): ChatMessageData {
   return {
     id: 'cat-msg-1',
     type: 'assistant',
+    from: { kind: 'agent', catId: 'opus' },
     catId: 'opus',
     content: '小太阳先把封面做三版。',
     timestamp: Date.UTC(2026, 9, 1, 12, 41),
@@ -149,6 +150,8 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
       const name = plate()?.querySelector('[data-testid="cat-nameplate-name"]') as HTMLElement;
 
       expect(name.style.color).toBe('var(--color-opus-text)');
+      expect(name.textContent).toBe('布偶猫');
+      expect(name.textContent).not.toContain('@');
       expect(name.style.opacity).toBe('');
       expect(name.className.split(/\s+/)).toEqual(
         expect.arrayContaining(['text-compact', 'font-semibold', 'truncate']),
@@ -251,7 +254,13 @@ describe('F322 B segment 1 — cat nameplate, no outer bubble', () => {
     });
 
     it('does not touch the co-creator message', () => {
-      render({ id: 'u-1', type: 'user', content: '三版封面，暖一点', timestamp: Date.UTC(2026, 9, 1, 12, 40) });
+      render({
+        id: 'u-1',
+        type: 'user',
+        from: { kind: 'user', userId: 'test-user' },
+        content: '三版封面，暖一点',
+        timestamp: Date.UTC(2026, 9, 1, 12, 40),
+      });
 
       expect(plate()).toBeNull();
       expect(container.textContent).toContain('三版封面，暖一点');

@@ -75,7 +75,7 @@ test('a foreign assignment and superseded Service execution cannot birth Work in
     const copy = f.host.messages.append({
       userId: f.host.userId,
       threadId: f.host.endpoint.id,
-      catId: null,
+      from: { kind: 'external', connectorId: 'collective' },
       content: foreignSource.content,
       mentions: [],
       timestamp: Date.now(),
@@ -123,7 +123,7 @@ test('an actual Agent commitment cannot be humanized or manually born without it
     const tampered = f.host.messages.append({
       userId: f.host.userId,
       threadId: source.threadId,
-      catId: null,
+      from: { kind: 'external', connectorId: 'collective' },
       timestamp: Date.now(),
       content: source.content,
       mentions: [],
@@ -247,7 +247,7 @@ test('manual Human v2 resume dispatches outside the fence with exact feedback, a
     const publication = f.host.messages.append({
       userId: f.host.userId,
       threadId: task.threadId,
-      catId: CAT,
+      from: { kind: 'agent', catId: CAT },
       mentions: [],
       timestamp: Date.now(),
       content: 'v1 reviewable guide publication',

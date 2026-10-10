@@ -11,7 +11,6 @@ import { describe, test } from 'node:test';
 import { BallCustodyIngest } from '../dist/domains/ball-custody/BallCustodyIngest.js';
 import { BallCustodyProjector } from '../dist/domains/ball-custody/BallCustodyProjector.js';
 import { buildHeldEvent, buildHoldDispositionEvent } from '../dist/domains/ball-custody/ball-custody-events.js';
-import { recordManagedHoldDisposition } from '../dist/domains/ball-custody/record-managed-hold-disposition.js';
 
 function stack() {
   const events = [];
@@ -121,45 +120,5 @@ describe('F167 recordFenced carries the projection outcome out of the write', ()
     const conflict = await ingest.recordFenced(terminal('cat-z', 3_000), 0);
     assert.equal(conflict.outcome, 'conflict');
     assert.equal('projection' in conflict, false);
-  });
-});
-
-describe('F167 the managed-hold recording helper hands the outcome to the service', () => {
-  const deps = (s, extra = {}) => ({
-    ballCustody: s.ingest,
-    ballCustodyEventLog: s.eventLog,
-    repairProjection: (key) => s.ingest.rebuild(key),
-    ...extra,
-  });
-
-  test('accepted and rejected are passed through', async () => {
-    const s = stack();
-    await s.ingest.record(held('cat-a', 1_000));
-    assert.equal(await recordManagedHoldDisposition(deps(s), terminal('cat-b', 2_000), 1), 'rejected');
-    assert.equal(await recordManagedHoldDisposition(deps(s), terminal('cat-a', 2_100), 2), 'accepted');
-  });
-
-  test('an append that landed but whose apply threw is repaired and reported as repaired', async () => {
-    const s = stack();
-    await s.ingest.record(held('cat-a', 1_000));
-    s.store.failNextSave = true;
-
-    assert.equal(await recordManagedHoldDisposition(deps(s), terminal('cat-a', 2_000), 1), 'repaired');
-    assert.equal((await s.store.get(SUBJECT)).state, 'resolved', 'the projection was rebuilt from the log');
-  });
-
-  test('an ingest that cannot report an outcome, and a duplicate, are unknown, never accepted', async () => {
-    const s = stack();
-    await s.ingest.record(held('cat-a', 1_000));
-    const silent = {
-      record: (event) => s.ingest.record(event),
-      async recordFenced(event, expected) {
-        const { projection: _dropped, ...result } = await s.ingest.recordFenced(event, expected);
-        return result;
-      },
-    };
-    const first = terminal('cat-a', 2_000);
-    assert.equal(await recordManagedHoldDisposition(deps(s, { ballCustody: silent }), first, 1), 'unknown');
-    assert.equal(await recordManagedHoldDisposition(deps(s), first, 2), 'unknown', 'a duplicate');
   });
 });

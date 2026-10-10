@@ -65,6 +65,6 @@ export interface A2AAgentConfig {
   url: string;
   /** API key for simple bearer token auth */
   apiKey?: string;
-  /** Request timeout in ms (default: 120000) */
+  /** Legacy whole-turn request timeout. Ignored: member output timeout owns the execution deadline. */
   timeoutMs?: number;
 }

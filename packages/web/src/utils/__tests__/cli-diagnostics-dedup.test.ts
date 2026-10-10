@@ -106,3 +106,119 @@ describe('computeCliDiagnosticsDedup', () => {
     expect(result.get('b')?.hideDiagnosticsPanel).toBe(true);
   });
 });
+
+describe('computeCliDiagnosticsDedup groups only the CLI panel each row renders (F117)', () => {
+  type Extra = NonNullable<ChatMessage['extra']>;
+  const classified = {
+    reasonCode: 'auth_failed',
+    publicSummary: 'API 认证失败',
+    publicHint: '',
+    debugRef: { command: 'codex', exitCode: 1, signal: null },
+  } as Extra['cliDiagnostics'];
+  // A timeout the classifier could not name: the timeout panel explains it wherever one exists.
+  const unclassified = {
+    publicSummary: '未识别的 CLI 错误',
+    publicHint: '',
+    debugRef: { command: 'codex', exitCode: null, signal: 'SIGTERM' },
+  } as Extra['cliDiagnostics'];
+  const timeoutDiagnostics = {
+    silenceDurationMs: 1_800_000,
+    processAlive: true,
+    lastEventType: 'thread.started',
+    invocationId: 'turn',
+  } as Extra['timeoutDiagnostics'];
+
+  function response(
+    id: string,
+    extra: Extra,
+    opts: {
+      status?: 'processing' | 'completed' | 'failed' | 'interrupted';
+      admittedAt?: number;
+      completedAt?: number;
+    } = {},
+  ): ChatMessage {
+    const { status = 'failed', admittedAt = 1000, completedAt = admittedAt + 500 } = opts;
+    return {
+      id,
+      type: 'assistant',
+      catId: 'opus',
+      threadId: 't1',
+      content: '',
+      timestamp: admittedAt,
+      lifecycle: {
+        kind: 'response',
+        orderKey: `${admittedAt}:${id}`,
+        invocationId: id,
+        targetId: 'opus',
+        inputEntryIds: [`entry-${id}`],
+        inputMessageIds: [`source-${id}`],
+        status,
+        startedAt: admittedAt,
+        ...(status === 'processing' ? {} : { completedAt }),
+      },
+      extra,
+    } as unknown as ChatMessage;
+  }
+
+  function errorRow(id: string, extra: Extra, timestamp = 1000): ChatMessage {
+    return {
+      id,
+      type: 'system',
+      variant: 'error',
+      threadId: 't1',
+      timestamp,
+      content: 'Error: x',
+      extra,
+    } as ChatMessage;
+  }
+
+  it.each([
+    ['responses', response],
+    ['error rows', errorRow],
+  ])('a CLI panel after a row that shows the timeout panel stays visible (%s)', (_label, row) => {
+    const result = computeCliDiagnosticsDedup([
+      row('shows-timeout', { cliDiagnostics: unclassified, timeoutDiagnostics }),
+      row('shows-cli', { cliDiagnostics: unclassified }),
+    ]);
+
+    expect(result.size).toBe(0);
+  });
+
+  it.each([
+    'completed',
+    'processing',
+    'failed',
+    'interrupted',
+  ] as const)('a %s response shows no panel, so it never heads a group', (status) => {
+    const result = computeCliDiagnosticsDedup([
+      response('no-panel', { cliDiagnostics: classified }, { status }),
+      response('failed', { cliDiagnostics: classified }),
+    ]);
+
+    expect(result.size).toBe(0);
+  });
+
+  it('failed and interrupted responses never collapse independent response bodies', () => {
+    const result = computeCliDiagnosticsDedup([
+      response('first', { cliDiagnostics: classified }),
+      response('second', { cliDiagnostics: classified }, { status: 'interrupted', completedAt: 1600 }),
+    ]);
+    expect(result.size).toBe(0);
+  });
+
+  it('a hidden protocol row carrying diagnostics never heads a group', () => {
+    const guard = {
+      ...errorRow('guard', { cliDiagnostics: classified }),
+      from: { kind: 'system', service: 'routing-guard' },
+    } as ChatMessage;
+
+    expect(computeCliDiagnosticsDedup([guard, errorRow('visible', { cliDiagnostics: classified }, 2000)]).size).toBe(0);
+  });
+
+  it('only rows that are drawn take part; the timeline only resolves how each row renders', () => {
+    const head = errorRow('head', { cliDiagnostics: classified });
+    const later = errorRow('later', { cliDiagnostics: classified }, 2000);
+
+    expect(computeCliDiagnosticsDedup([later], [head, later]).size).toBe(0);
+  });
+});

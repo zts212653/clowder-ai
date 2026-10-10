@@ -243,8 +243,10 @@ describe('#770: curated System Settings projection', () => {
     }
   });
 
-  it('defines exactly 25 registered, labelled, grouped, explicitly classified System variables', () => {
-    assert.equal(SYSTEM_VARS.size, 25);
+  it('defines exactly 24 registered, labelled, grouped, explicitly classified System variables', () => {
+    // 24 since F117 KD-23 removed DRAFT_TTL_SECONDS: a draft lives until its R ends, so nothing expires it.
+    assert.equal(SYSTEM_VARS.size, 24);
+    assert.equal(SYSTEM_VARS.has('DRAFT_TTL_SECONDS'), false);
     for (const name of SYSTEM_VARS) {
       const definition = ENV_VARS.find((candidate) => candidate.name === name);
       assert.ok(definition, `${name} must remain in the full registry`);

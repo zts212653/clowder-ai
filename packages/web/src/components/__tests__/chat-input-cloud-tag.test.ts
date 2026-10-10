@@ -15,6 +15,7 @@ const LOCAL_CAT: CatData = {
   color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
   mentionPatterns: ['opus', '布偶猫'],
   clientId: 'anthropic',
+  carrier: 'cli',
   defaultModel: 'claude-opus-4-6',
   avatar: '/avatars/opus.png',
   roleDescription: '主架构师',
@@ -30,6 +31,7 @@ const CLOUD_CAT: CatData = {
   color: { primary: '#2196F3', secondary: '#90CAF9' },
   mentionPatterns: ['gpt-pro', '砚砚pro'],
   clientId: 'openai',
+  carrier: 'cli',
   defaultModel: 'gpt-pro',
   avatar: '/avatars/gpt-pro.png',
   roleDescription: '云端 ChatGPT Pro',
@@ -71,6 +73,6 @@ describe('AC-C-4: cloud cat tag in @ mention picker', () => {
   it('cloud cat label includes variant in @ format', () => {
     const options = buildCatOptions([CLOUD_CAT]);
     const cloudOpt = options.find((o) => o.id === 'gpt-pro');
-    expect(cloudOpt?.label).toBe('@缅因猫Pro (Pro Cloud (ChatGPT))');
+    expect(cloudOpt?.label).toBe('@缅因猫Pro（Pro Cloud (ChatGPT)）');
   });
 });

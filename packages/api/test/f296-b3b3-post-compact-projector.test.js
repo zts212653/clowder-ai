@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { createPostCompactContextProjector } = await import(
   '../dist/domains/cats/services/agents/routing/post-compact-context-projector.js'
@@ -12,22 +13,26 @@ describe('F296 B3b-3: post-compact projection reuses the cold packet without rep
   test('only the unread tail is projected and both durable cursors remain unchanged', async () => {
     const messageStore = new MessageStore();
     const deliveryCursorStore = new DeliveryCursorStore();
-    const old = messageStore.append({
-      threadId: 'thread-1',
-      userId: 'user-1',
-      catId: null,
-      content: 'READ-HISTORY-MUST-NOT-REPLAY',
-      mentions: [],
-      timestamp: 1_000,
-    });
-    const unread = messageStore.append({
-      threadId: 'thread-1',
-      userId: 'user-1',
-      catId: null,
-      content: 'UNREAD-TAIL-MUST-RETURN',
-      mentions: [],
-      timestamp: 2_000,
-    });
+    const old = messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: null,
+        content: 'READ-HISTORY-MUST-NOT-REPLAY',
+        mentions: [],
+        timestamp: 1_000,
+      }),
+    );
+    const unread = messageStore.append(
+      canonicalTestMessageInput({
+        threadId: 'thread-1',
+        userId: 'user-1',
+        catId: null,
+        content: 'UNREAD-TAIL-MUST-RETURN',
+        mentions: [],
+        timestamp: 2_000,
+      }),
+    );
     const boundary = cursorFor(old);
     await deliveryCursorStore.ackCursor('user-1', 'opus', 'thread-1', boundary);
     await deliveryCursorStore.ackSeenCursor('user-1', 'opus', 'thread-1', boundary);

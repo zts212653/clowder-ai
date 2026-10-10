@@ -21,9 +21,10 @@ import { loadCatConfig, toAllCatConfigs } from '../src/config/cat-config-loader.
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.js';
-import { QueuedMessageCustodyCoordinator } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../src/domains/cats/services/agents/invocation/QueueProcessor.js';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
+import type { RouteOptions } from '../src/domains/cats/services/agents/routing/route-helpers.js';
+import { InMemoryTurnExecutionStore } from '../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
+import { MessageStore, settleLifecycleResponseInputs } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../src/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { F232PreparedArtifactReader } from '../src/domains/growing/F232PreparedArtifactReader.js';
@@ -104,8 +105,13 @@ export async function createHost(world: World, cafe: Cafe) {
     workAuthority: authority,
     artifactReader: new F232PreparedArtifactReader({ messages }),
   });
-  const queue = new InvocationQueue();
+  const queue = new InvocationQueue(undefined, {
+    onAdmitted: ({ threadId }) => {
+      void queueProcessor.requestDrain(threadId);
+    },
+  });
   const tracker = new InvocationTracker();
+  const turnExecutions = new InMemoryTurnExecutionStore();
   const registry = new InvocationRegistry();
   const runs: HostRun[] = [];
   let active = 0;
@@ -115,7 +121,13 @@ export async function createHost(world: World, cafe: Cafe) {
     holdPrivateRun?: (task: TaskItem) => Promise<void> | undefined;
   } = {};
 
-  const runPublic = async (trigger: NonNullable<Awaited<ReturnType<typeof messages.getById>>>, catId: CatId) => {
+  type ReceiverStart = (invocationId: string) => Promise<(failed: boolean) => Promise<void>>;
+  const runPublic = async (
+    trigger: NonNullable<Awaited<ReturnType<typeof messages.getById>>>,
+    catId: CatId,
+    start: ReceiverStart,
+  ) => {
+    await context.resolvePublic({ userId, threadId: trigger.threadId, catId, originTriggerMessageId: trigger.id });
     const source = collectiveSourceIdentitySchema.parse(trigger.source?.meta?.participation);
     const run: HostRun = { scope: 'public', threadId: trigger.threadId, outcome: 'completed' };
     runs.push(run);
@@ -135,6 +147,7 @@ export async function createHost(world: World, cafe: Cafe) {
     if (!verified.ok) throw new Error('public invocation record was not verifiable');
     const auth = verified.record;
     world.turns.set(auth.invocationId, { catId, status: 'running' });
+    const finish = await start(auth.invocationId);
     try {
       const current = await context.current(auth);
       // The scripted Cat follows the public skill: accept only with an adopted, automatic delegation.
@@ -156,11 +169,16 @@ export async function createHost(world: World, cafe: Cafe) {
       run.error = describe(error);
       throw error;
     } finally {
+      await finish(run.outcome === 'refused');
       world.endTurn(auth.invocationId);
     }
   };
 
-  const runPrivate = async (trigger: NonNullable<Awaited<ReturnType<typeof messages.getById>>>, catId: CatId) => {
+  const runPrivate = async (
+    trigger: NonNullable<Awaited<ReturnType<typeof messages.getById>>>,
+    catId: CatId,
+    start: ReceiverStart,
+  ) => {
     const carrier = trigger.extra?.collectiveWorkInvocationV1;
     const run: HostRun = {
       scope: 'private',
@@ -216,6 +234,8 @@ export async function createHost(world: World, cafe: Cafe) {
       if (!verified.ok) throw new Error('private invocation record was not verifiable');
       const auth = verified.record;
       world.turns.set(auth.invocationId, { catId, status: 'running' });
+      const finish = await start(auth.invocationId);
+      let failed = true;
       try {
         const current = await context.current(auth);
         await context.reply(
@@ -224,7 +244,9 @@ export async function createHost(world: World, cafe: Cafe) {
           current.replyOperationRef,
           `Result v${carrier.resultRevision} for ${binding.work.task.title}`,
         );
+        failed = false;
       } finally {
+        await finish(failed);
         world.endTurn(auth.invocationId);
       }
     } catch (error) {
@@ -235,6 +257,12 @@ export async function createHost(world: World, cafe: Cafe) {
   };
 
   const router = {
+    async resolveExplicitTargets(targets: readonly string[]) {
+      return [...targets];
+    },
+    async resolveConversationTargetsAtAdmission(targets: readonly string[]) {
+      return [...targets];
+    },
     async *routeExecution(
       routedUserId: string,
       _content: string,
@@ -242,34 +270,66 @@ export async function createHost(world: World, cafe: Cafe) {
       messageId: string | null,
       targetCats: string[],
       _intent: { intent: string },
-      options?: Record<string, unknown>,
+      options?: RouteOptions,
     ) {
       const catId = createCatId(targetCats[0] ?? CAT);
       const trigger = messageId ? await messages.getById(messageId) : null;
       active++;
       try {
-        // Like invokeSingleCat, expose the exact queued prompt bodies before the provider starts: the real
-        // QueueProcessor refuses to count a success that never exposed its Queue body.
-        const exposed = options?.onPromptMessagesExposed as
-          | ((input: {
-              threadId: string;
-              userId: string;
-              catId: string;
-              invocationId: string;
-              messageIds: readonly string[];
-              seenAt: number;
-            }) => Promise<unknown> | unknown)
-          | undefined;
-        await exposed?.({
-          threadId: routedThreadId,
-          userId: routedUserId,
-          catId,
-          invocationId: String(options?.parentInvocationId ?? ''),
-          messageIds: (options?.persistedPromptMessageIds as string[] | undefined) ?? (messageId ? [messageId] : []),
-          seenAt: Date.now(),
-        });
-        if (trigger && options?.executionScope === 'collective-participation') await runPublic(trigger, catId);
-        else if (trigger && options?.executionScope === 'collective-work') await runPrivate(trigger, catId);
+        const start: ReceiverStart = async (invocationId) => {
+          const parentInvocationId = String(options?.parentInvocationId);
+          const startedAt = Date.now();
+          turnExecutions.createRunning({
+            invocationId,
+            parentInvocationId,
+            userId: routedUserId,
+            threadId: routedThreadId,
+            catId,
+            startedAt,
+            executionKind: 'ordinary',
+            causal: { triggerMessageId: messageId ?? undefined },
+          });
+          const receiver = await options?.onLifecycleInvocationStarted?.({
+            threadId: routedThreadId,
+            userId: routedUserId,
+            catId,
+            invocationId,
+            parentInvocationId,
+            startedAt,
+          });
+          if (!receiver) throw new Error('Fixture requires actual child History admission');
+          await options?.onPromptMessagesExposed?.({
+            threadId: routedThreadId,
+            userId: routedUserId,
+            catId,
+            invocationId,
+            messageIds: options.persistedPromptMessageIds ?? (messageId ? [messageId] : []),
+            seenAt: Date.now(),
+          });
+          return async (failed) => {
+            const outcome = failed
+              ? ({ turn: 'failed', response: 'failed', content: 'Scripted Host failure' } as const)
+              : ({ turn: 'succeeded', response: 'completed', content: 'Scripted Host classification' } as const);
+            turnExecutions.transitionTerminal(invocationId, {
+              status: outcome.turn,
+              terminalReason: 'scripted_host_turn',
+              endedAt: Date.now(),
+            });
+            const terminal = await messages.commitLifecycleResponseTerminal(receiver.responseMessageId, {
+              invocationId,
+              status: outcome.response,
+              completedAt: Date.now(),
+              content: outcome.content,
+              mentions: [],
+              origin: 'stream',
+            });
+            if (terminal.kind !== 'applied' && terminal.kind !== 'replayed')
+              throw new Error('Fixture terminal CAS failed');
+            await settleLifecycleResponseInputs(messages, terminal.message, receiver.responseMessageId);
+          };
+        };
+        if (trigger && options?.executionScope === 'collective-participation') await runPublic(trigger, catId, start);
+        else if (trigger && options?.executionScope === 'collective-work') await runPrivate(trigger, catId, start);
       } finally {
         active--;
       }
@@ -304,7 +364,7 @@ export async function createHost(world: World, cafe: Cafe) {
     router: router as never,
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
     messageStore: messages,
-    queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: messages }),
+    turnExecutionStore: turnExecutions,
     log,
   });
   const dispatcher = new CollectiveWorkDispatcher({
@@ -346,7 +406,6 @@ export async function createHost(world: World, cafe: Cafe) {
     threadStore: threads,
     messageStore: messages,
     invocationQueue: queue,
-    queueProcessor,
     socketManager: { broadcastToRoom() {}, emitToUser() {} },
     isCatAvailable: () => true,
     // Mirrors api/src/index.ts admitStandingWork / resumeWorkRevision.

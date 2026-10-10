@@ -1,0 +1,54 @@
+{
+  "resource": {
+    "kind": "family",
+    "resourceFamily": "task-workflow"
+  },
+  "retiredNames": ["cat_cafe_complete_a2a_dispatch", "cat_cafe_complete_managed_hold"],
+  "canonicalNames": [],
+  "expectedProfiles": {},
+  "rollbackRevision": "47f716cac016eca3211e4f0754ae18607f4ada45",
+  "layers": {
+    "mcp-definition": {
+      "status": "covered",
+      "consumers": ["packages/mcp-server/src/tools/callback-tools.ts", "packages/mcp-server/src/tools/index.ts"]
+    },
+    "runtime-catalog-profile": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/src/canonical-server-tools.ts",
+        "packages/mcp-server/governance/mcp-surface-baseline.json"
+      ]
+    },
+    "prompt-l0": {
+      "status": "not-applicable",
+      "rationale": "Ordinary A2A and managed-hold completion now follow the persisted Message/Queue lifecycle; no completion instruction is injected into a model prompt.",
+      "absenceEvidence": ["cat_cafe_complete_a2a_dispatch", "cat_cafe_complete_managed_hold"]
+    },
+    "skill-convention": {
+      "status": "not-applicable",
+      "rationale": "The retired manual completion operations are no longer agent decisions or skill steps; hold_ball remains only for registering a persistent continuation.",
+      "absenceEvidence": ["cat_cafe_complete_a2a_dispatch", "cat_cafe_complete_managed_hold"]
+    },
+    "fixture-test": {
+      "status": "covered",
+      "consumers": [
+        "packages/mcp-server/test/tool-registration.test.js",
+        "packages/api/test/turn-custody-projection.test.js",
+        "packages/api/test/managed-command-wake-recovery-sweep.test.js"
+      ]
+    },
+    "eval": {
+      "status": "not-applicable",
+      "rationale": "The cutover removes a duplicate manual terminal declaration; the canonical Message/Queue lifecycle tests are the behavioral proof.",
+      "absenceEvidence": ["cat_cafe_complete_a2a_dispatch", "cat_cafe_complete_managed_hold"]
+    },
+    "observability": {
+      "status": "covered",
+      "consumers": [
+        "packages/api/src/domains/cats/services/stores/visibility.ts",
+        "packages/api/src/domains/cats/services/context/ContextAssembler.ts",
+        "packages/api/src/domains/ball-custody/managed-command-wake-task-projection.ts"
+      ]
+    }
+  }
+}

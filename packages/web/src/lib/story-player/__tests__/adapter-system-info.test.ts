@@ -86,7 +86,12 @@ describe('F252 adapter — system_info thinking events', () => {
     const events = [
       makeEvent(1, 1000, {
         type: 'system_info',
-        content: JSON.stringify({ type: 'warning', catId: 'codex', message: 'Tool output was truncated' }),
+        content: JSON.stringify({
+          type: 'warning',
+          presentation: 'user_action_required',
+          catId: 'codex',
+          message: 'Tool output was truncated',
+        }),
       }),
     ];
     const result = adaptTranscriptEvents(events);
@@ -119,7 +124,7 @@ describe('F252 adapter — system_info thinking events', () => {
     });
   });
 
-  it('preserves visible session seal system_info as formatted system replay content', () => {
+  it('excludes internal session continuity from replay speech', () => {
     const events = [
       makeEvent(1, 1000, {
         type: 'system_info',
@@ -133,12 +138,7 @@ describe('F252 adapter — system_info thinking events', () => {
     ];
     const result = adaptTranscriptEvents(events);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      type: 'system',
-      role: 'system',
-      content: 'codex 的会话 #3 已封存（上下文 82%），下次调用将自动创建新会话',
-    });
+    expect(result).toEqual([]);
   });
 
   it('preserves visible governance blocked system_info as formatted system replay content', () => {
@@ -162,7 +162,7 @@ describe('F252 adapter — system_info thinking events', () => {
     });
   });
 
-  it('preserves visible silent completion system_info as formatted system replay content', () => {
+  it('excludes completion diagnostics from replay speech', () => {
     const events = [
       makeEvent(1, 1000, {
         type: 'system_info',
@@ -174,12 +174,7 @@ describe('F252 adapter — system_info thinking events', () => {
     ];
     const result = adaptTranscriptEvents(events);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      type: 'system',
-      role: 'system',
-      content: 'codex completed without a text response after using tools.',
-    });
+    expect(result).toEqual([]);
   });
 
   it('skips system_info with non-JSON content instead of rendering internal status text', () => {

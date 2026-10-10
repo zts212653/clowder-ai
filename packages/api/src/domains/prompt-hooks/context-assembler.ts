@@ -147,37 +147,6 @@ function flattenWorldContext(wc: WorldContextEnvelope): WorldContextInput {
 }
 
 // ---------------------------------------------------------------------------
-// Signal articles block formatting
-// ---------------------------------------------------------------------------
-
-function formatSignalsBlock(
-  signals: readonly {
-    id: string;
-    title: string;
-    source: string;
-    tier: number;
-    contentSnippet: string;
-    note?: string;
-    relatedDiscussions?: readonly { sessionId: string; snippet: string }[];
-  }[],
-): string {
-  return signals
-    .map((s) => {
-      const parts = [`### [${s.id}] ${s.title} (${s.source}/T${s.tier})`];
-      if (s.note) parts.push(`Note: ${s.note}`);
-      parts.push(s.contentSnippet);
-      if (s.relatedDiscussions && s.relatedDiscussions.length > 0) {
-        parts.push('Related past discussions:');
-        for (const d of s.relatedDiscussions) {
-          parts.push(`- [session:${d.sessionId}] ${d.snippet}`);
-        }
-      }
-      return parts.join('\n');
-    })
-    .join('\n');
-}
-
-// ---------------------------------------------------------------------------
 // Teammates resolution
 // ---------------------------------------------------------------------------
 
@@ -243,7 +212,6 @@ export {
   flattenWorldContext,
   formatAlwaysOnDocs,
   formatHandleFreeLabel,
-  formatSignalsBlock,
   resolveActiveParticipants,
   resolveDirectMessage,
   resolveModel,

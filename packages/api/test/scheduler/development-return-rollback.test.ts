@@ -18,7 +18,7 @@ for (const phase of ['waiting', 'ready'] as const) {
     const registered = await f.service.register(f.actor, execution.input, 'strict');
     const report = f.messages.append({
       userId: f.actor.userId,
-      catId: f.actor.catId,
+      from: { kind: 'agent', catId: f.actor.catId },
       threadId: execution.child.id,
       content: 'Implementation complete',
       mentions: [],

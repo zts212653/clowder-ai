@@ -3,6 +3,7 @@
 import type { ActiveExecutionProjection } from '@cat-cafe/shared';
 import { activeExecutionKey } from '@/stores/activeExecutionStore';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
+import { executionActivityLabel } from '../execution-kind-label';
 import { managedCommandActivityLabel } from '../managed-command-activity-label';
 import { ThreadChatLink } from './ThreadChatLink';
 import type { RunningWork } from './workspace-running-work';
@@ -79,11 +80,7 @@ export function WorkspaceRunningWork({
               className="flex flex-wrap items-center gap-2"
               data-testid="workspace-running-activity"
             >
-              <span className="min-w-0 flex-1 text-micro text-cafe-secondary">
-                {execution.kind === 'managed_command'
-                  ? `后台 · ${managedCommandActivityLabel(execution.activity)}`
-                  : '实时回合'}
-              </span>
+              <span className="min-w-0 flex-1 text-micro text-cafe-secondary">{executionActivityLabel(execution)}</span>
               <ExecutionActions execution={execution} onSelectExecution={onSelectExecution} />
             </div>
           ))}

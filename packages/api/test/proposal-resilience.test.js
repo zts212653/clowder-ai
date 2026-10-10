@@ -6,17 +6,20 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 
 async function createInvocationWithOrigin(ctx, threadId) {
-  const origin = await ctx.messageStore.append({
-    userId: 'alice',
-    catId: null,
-    content: 'Please propose this child thread',
-    mentions: [],
-    timestamp: Date.now(),
-    threadId,
-  });
+  const origin = await ctx.messageStore.append(
+    canonicalTestMessageInput({
+      userId: 'alice',
+      catId: null,
+      content: 'Please propose this child thread',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    }),
+  );
   return ctx.registry.create('alice', 'opus', threadId, undefined, origin.id);
 }
 
@@ -76,14 +79,16 @@ describe('F128 partial-commit + dedup + self-heal', () => {
     const first = await send();
     assert.equal(first.statusCode, 500);
     for (let i = 0; i < 60; i++) {
-      await ctx.messageStore.append({
-        userId: 'alice',
-        catId: null,
-        content: `filler ${i}`,
-        mentions: [],
-        timestamp: Date.now() + i,
-        threadId: source.id,
-      });
+      await ctx.messageStore.append(
+        canonicalTestMessageInput({
+          userId: 'alice',
+          catId: null,
+          content: `filler ${i}`,
+          mentions: [],
+          timestamp: Date.now() + i,
+          threadId: source.id,
+        }),
+      );
     }
     const second = await send();
     assert.equal(second.statusCode, 200, `retry must self-heal old card, got ${second.statusCode}`);
@@ -122,20 +127,22 @@ describe('F128 partial-commit + dedup + self-heal', () => {
       projectPath: 'default',
       createdBy: 'alice',
     });
-    const legacyCard = await ctx.messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'Legacy approval card',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: source.id,
-      extra: {
-        rich: {
-          v: 1,
-          blocks: [{ id: `proposal-${legacy.proposalId}`, kind: 'card', v: 1, title: 'Legacy proposal' }],
+    const legacyCard = await ctx.messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'Legacy approval card',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: source.id,
+        extra: {
+          rich: {
+            v: 1,
+            blocks: [{ id: `proposal-${legacy.proposalId}`, kind: 'card', v: 1, title: 'Legacy proposal' }],
+          },
         },
-      },
-    });
+      }),
+    );
     proposalStore.reserveDedup('alice', 'legacy-f128-key', legacy.proposalId);
 
     const response = await ctx.app.inject({

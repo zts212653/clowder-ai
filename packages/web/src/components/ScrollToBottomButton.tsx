@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const CHAT_LAYOUT_CHANGED_EVENT = 'catcafe:chat-layout-changed';
 
@@ -26,12 +26,21 @@ export function ScrollToBottomButton({
   observerKey?: unknown;
 }) {
   const [visible, setVisible] = useState(false);
+  // The visibility last handed to React. While a reply streams, `recomputeSignal` changes on nearly every commit; a
+  // same-value setState from an effect is still a scheduled update while this component has work pending, and a
+  // long chain of those trips React's nested-update limit (F117 baseline B). Only a real change goes to React.
+  const visibleRef = useRef(false);
+  const applyVisible = useCallback((next: boolean) => {
+    if (visibleRef.current === next) return;
+    visibleRef.current = next;
+    setVisible(next);
+  }, []);
 
   const update = useCallback(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
-    setVisible(!isAtBottom(el, thresholdPx));
-  }, [scrollContainerRef, thresholdPx]);
+    applyVisible(!isAtBottom(el, thresholdPx));
+  }, [applyVisible, scrollContainerRef, thresholdPx]);
 
   useEffect(() => {
     const el = scrollContainerRef.current;
@@ -59,7 +68,7 @@ export function ScrollToBottomButton({
         if (!entry) return;
         // When the end sentinel is not intersecting the viewport (+threshold margin),
         // the user is no longer near bottom → show the button.
-        setVisible(!entry.isIntersecting);
+        applyVisible(!entry.isIntersecting);
       },
       {
         root: scrollEl,
@@ -70,7 +79,7 @@ export function ScrollToBottomButton({
 
     observer.observe(endEl);
     return () => observer.disconnect();
-  }, [scrollContainerRef, messagesEndRef, thresholdPx]);
+  }, [applyVisible, scrollContainerRef, messagesEndRef, thresholdPx]);
 
   // Cloud P2: local UI toggles can change scrollHeight without scroll/resize events.
   useEffect(() => {

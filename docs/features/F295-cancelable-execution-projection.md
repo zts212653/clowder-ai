@@ -56,28 +56,15 @@ Why: F295 adds the canonical live/managed-command execution read-and-cancel proj
 - 合法 shared/indexed thread 继续显示 foreign scheduler/system masked occupancy；session record 的
   per-user filter 不适用于 occupancy，精确取消仍由 execution/principal fence 决定。
 
-### Post-close: Project resource convergence ✅
+### Post-close: Stop reconciles confirmed-dead executions（2026-09-03，ADR-043 D9）
 
-- project-wide 投影使用稳定的 `GET /api/executions/active?projectPath=...`；服务端先规范化
-  project selector，再以当前用户的 durable thread index 校验 scope，不信任 caller 提供的数据边界。
-- Web 同 project 的 A→B 导航复用同一 exact-GET resource；既有 request generation 继续阻止晚到结果
-  覆盖新 anchor，4 秒 background-discovery、online、visibility、reconnect 与 exact cancel 保持不变。
-- canonical `buildActiveExecutionList` 外层按 `userId + canonical projectPath` single-flight；不同 user/project
-  独立，foreign principal 仍只投影 masked occupancy。
-- F153 structured trace 记录 `candidate_enumeration`、`owner_truth`、`classification_assembly`、`total`
-  与 `single_flight_join`；耗时只作运行健康证据，不进入确定性单测阈值。
-
-F303 evidence:
-
-Architecture cell: dispatch
-Map delta: none
-Why: 只把既有 canonical read projection 的资源 identity 与 project-wide 数据范围对齐；不改变 lifecycle owner、writer 或 execution truth。
-- Canonical source: `packages/api/src/routes/active-execution-routes.ts#buildActiveExecutionList`
-- Consumer evidence: `rg -n "useActiveExecutionProjection\\(|executions/active" packages/web packages/api/test`
-- Claim guard: stable resource + late-generation guard → `useActiveExecutionProjection.test.tsx`; per-key single-flight
-  and user/project isolation → `f295-active-execution-projection.test.js`
-- Characterization/contract test: `pnpm exec vitest run src/hooks/__tests__/useActiveExecutionProjection.test.tsx`
-  and API F295/F297 sparse route tests; code-derived census is the `rg` command above.
+- exact live cancel 找不到可控候选时不再 409 `EXECUTION_NOT_ACTIVE`：同一请求对该 target 就地对账
+  （pre-start 退回 / running 记录置 canceled / 孤儿锁与槽位释放 / 终态广播），返回
+  `{ ok, cancelled: false, reconciled }`。foreign occupancy 与更新回合替代仍是 409。
+- 进程快照不完整时不再让用户面对「不可取消」：服务端有界重试后按 dispatch terminal 将该执行终局为 failed
+  （reason `control_plane_unavailable`）并返回 200，失败沿 F117 Phase C 失败传播回溯上游；不做平台兼容分支（Windows 子进程不可观测同样走这条 fail 分支收敛）。`ForceResetDialog` 退役；503 只保留给持久层不可用。
+- Primary Journey 第 3 步收窄为「仅 liveness 未知时显示原因」；旧 `useExecutionRecoveryVerification` 的
+  「运行状态待确认」死角与基于 `suspected_stall` 上浮的强制重置入口退役。
 
 ## User Journey
 

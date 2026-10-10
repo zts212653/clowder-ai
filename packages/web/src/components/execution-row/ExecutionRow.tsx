@@ -11,12 +11,12 @@ import { useEffect, useRef, useState } from 'react';
 import { CatAvatar } from '../CatAvatar';
 import { ExecutionCancelButton } from '../ExecutionCancelButton';
 import { ForceResetDialog } from '../ForceResetDialog';
-import { SteerQueuedEntryModal } from '../SteerQueuedEntryModal';
+import { QueueSteerDialog } from '../QueueSteerDialog';
 import { ExecutionRowPanel } from './ExecutionRowPanel';
-import { FORCE_RESET_REASON_COPY, PAUSE_REASON_COPY, rowStatusText } from './row-model';
+import { FORCE_RESET_REASON_COPY, rowStatusText } from './row-model';
 import { type ExecutionRowController, useExecutionRow } from './useExecutionRow';
 
-const ATTENTION = new Set(['silent', 'unverified', 'stuck', 'paused']);
+const ATTENTION = new Set(['silent', 'unverified']);
 
 function Avatars({ controller }: { controller: ExecutionRowController }) {
   const { model, executions } = controller;
@@ -54,7 +54,6 @@ function Chevron({ open }: { open: boolean }) {
 function Body({ controller, open }: { controller: ExecutionRowController; open: boolean }) {
   const { model, resolveCatName } = controller;
   const attention = ATTENTION.has(model.status);
-  const title = model.pauseReason ? PAUSE_REASON_COPY[model.pauseReason] : undefined;
   return (
     <>
       {attention ? (
@@ -67,7 +66,7 @@ function Body({ controller, open }: { controller: ExecutionRowController; open: 
       ) : (
         <Avatars controller={controller} />
       )}
-      <span data-testid="execution-row-text" title={title} className="min-w-0 truncate font-medium text-cafe-secondary">
+      <span data-testid="execution-row-text" className="min-w-0 truncate font-medium text-cafe-secondary">
         {rowStatusText(model, resolveCatName)}
       </span>
       {model.staleNote ? (
@@ -148,7 +147,7 @@ export function ExecutionRow({ threadId }: { threadId: string }) {
             onClick={() => void controller.commands.handleContinue()}
             className="flex-none rounded-md bg-[var(--semantic-success)] px-2 py-1 text-[var(--cafe-surface)] hover:opacity-90"
           >
-            {model.resumeOnRow === 'continue' ? '继续' : '恢复'}
+            恢复
           </button>
         ) : null}
         {model.stop.kind === 'button' ? (
@@ -159,7 +158,14 @@ export function ExecutionRow({ threadId }: { threadId: string }) {
       </div>
       {panelOpen ? <ExecutionRowPanel controller={controller} /> : null}
       {steerEntry && steerEntry.status === 'queued' ? (
-        <SteerQueuedEntryModal onCancel={convergence.handleSteerCancel} onConfirm={convergence.handleSteerConfirm} />
+        <QueueSteerDialog
+          key={`${threadId}:${steerEntry.id}`}
+          threadId={threadId}
+          entry={steerEntry}
+          queue={controller.view.queue}
+          onCancel={convergence.handleSteerCancel}
+          onConfirm={convergence.handleSteerConfirm}
+        />
       ) : null}
       <ForceResetDialog {...forceReset.dialog} />
     </div>

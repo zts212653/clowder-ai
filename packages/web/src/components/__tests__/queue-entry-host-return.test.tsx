@@ -31,7 +31,7 @@ function entry(connector?: string): QueueEntry {
     content: HOST_RETURN,
     messageId: 'message-host-return',
     mergedMessageIds: [],
-    source: 'connector',
+    from: { kind: 'external', connectorId: connector ?? 'unknown' },
     targetCats: ['gpt52'],
     intent: 'execute',
     status: 'queued',
@@ -79,7 +79,6 @@ describe('QueueEntryRow Host content-review return', () => {
       messages: [],
       currentThreadId: 'thread-f309',
       queue: [queueEntry],
-      queuePaused: false,
     });
     await act(async () => {
       root.render(<QueuePanel threadId="thread-f309" />);

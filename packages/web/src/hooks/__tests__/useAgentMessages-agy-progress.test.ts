@@ -112,8 +112,9 @@ describe('F210-H1 agy_trajectory_progress frontend', () => {
         }),
       });
     });
-    // H1: consumed silently — no raw-JSON system bubble spam (one per step).
+    // H1: consumed silently — no raw-JSON system bubble spam (one per step), on either write path.
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     // H3: 进度累积到 thread 级 catStatusDetails（折叠单行 "AGY working · N steps · latest"），不刷 bubble。
     expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith(
       'thread-1',

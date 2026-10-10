@@ -102,7 +102,11 @@ describe('F128 proposal legacy seed cancel — terminal state', () => {
 
   test('legacy seed is canceled when no target cats resolve', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         return { targetCats: [], intent: { intent: 'execute' }, hasMentions: false };
@@ -116,7 +120,6 @@ describe('F128 proposal legacy seed cancel — terminal state', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const { proposalId, childId, seedId } = await createApprovedProposalWithLegacySeed(ctx, {
       initialMessage: 'No targets here',

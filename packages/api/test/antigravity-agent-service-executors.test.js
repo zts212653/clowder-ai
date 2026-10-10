@@ -4,6 +4,34 @@ import { AntigravityAgentService } from '../dist/domains/cats/services/agents/pr
 import { collect, createMockBridge } from './antigravity-agent-service-test-helpers.js';
 
 describe('AntigravityAgentService (Bridge) — native executors', () => {
+  test('G1: pre-launch cancellation never sends or registers a remote cascade attempt', async () => {
+    const bridge = createMockBridge();
+    const controller = new AbortController();
+    const dispatched = [];
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    await collect(
+      service.invoke('work', {
+        signal: controller.signal,
+        beforeProviderLaunch: async () => controller.abort('user_cancel'),
+        onRemoteExecutionDispatched: (execution) => dispatched.push(execution),
+      }),
+    );
+    assert.equal(bridge.sendMessage.mock.callCount(), 0);
+    assert.deepEqual(dispatched, []);
+  });
+  test('F117: default bridge polling has no independent no-step deadline', async () => {
+    const bridge = createMockBridge();
+    const originalPoll = bridge.pollForSteps;
+    let observedTimeout;
+    bridge.pollForSteps = function (...args) {
+      observedTimeout = args[2];
+      return originalPoll.apply(this, args);
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    await collect(service.invoke('hello'));
+    assert.equal(observedTimeout, Number.POSITIVE_INFINITY);
+  });
+
   test('aborted signal prevents execution', async () => {
     const bridge = createMockBridge();
     const controller = new AbortController();
@@ -14,6 +42,35 @@ describe('AntigravityAgentService (Bridge) — native executors', () => {
     assert.equal(bridge.sendMessage.mock.callCount(), 0);
     assert.equal(messages[0].type, 'error');
     assert.ok(messages[0].error.includes('Aborted'));
+  });
+
+  test('F117: member abort reaches polling without claiming the remote cascade stopped', async () => {
+    const bridge = createMockBridge();
+    const controller = new AbortController();
+    bridge.pollForSteps = async function* (_cascadeId, _fromStep, timeoutMs, _intervalMs, signal) {
+      assert.equal(timeoutMs, Number.POSITIVE_INFINITY);
+      assert.equal(signal, controller.signal);
+      controller.abort('timeout');
+      throw new Error('Aborted');
+    };
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    const messages = await collect(service.invoke('test', { signal: controller.signal }));
+    assert.ok(messages.some((message) => message.type === 'error' && /termination is unconfirmed/.test(message.error)));
+    assert.equal(bridge.sendMessage.mock.callCount(), 1);
+    assert.equal(bridge.resetSession.mock.callCount(), 0);
+  });
+
+  test('F117: abort immediately after sending reports remote termination as unconfirmed', async () => {
+    const bridge = createMockBridge();
+    const controller = new AbortController();
+    bridge.sendMessage = mock.fn(async () => {
+      controller.abort('timeout');
+      return { stepsBefore: 0, wasBusy: false };
+    });
+    const service = new AntigravityAgentService({ catId: 'antigravity', model: 'gemini-3.1-pro', bridge });
+    const messages = await collect(service.invoke('test', { signal: controller.signal }));
+    assert.ok(messages.some((message) => message.type === 'error' && /termination is unconfirmed/.test(message.error)));
+    assert.equal(bridge.pollForSteps.mock.callCount(), 0);
   });
 
   test('dispatches WAITING RUN_COMMAND steps to bridge.nativeExecuteAndPush', async () => {

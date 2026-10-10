@@ -254,7 +254,7 @@ describe('GitHubRepoWebhookHandler', () => {
         },
         deliverFn: async (_deps, input) => {
           deliveredMessages.push(input);
-          return { messageId: `msg-${deliveredMessages.length}`, content: input.content };
+          return { messageId: `msg-${deliveredMessages.length}`, content: input.content, admitted: true };
         },
         invokeTrigger: {
           trigger(...args) {
@@ -289,7 +289,7 @@ describe('GitHubRepoWebhookHandler', () => {
   }
 
   it('processes pull_request.opened event (AC-A1)', async () => {
-    const { deps, deliveredMessages, triggeredCalls } = createMockDeps();
+    const { deps, deliveredMessages } = createMockDeps();
     const handler = new GitHubRepoWebhookHandler(CONFIG, deps);
     const body = makePRPayload('opened');
     const { headers, raw } = makeHeaders('pull_request', 'delivery-001', body);
@@ -299,7 +299,6 @@ describe('GitHubRepoWebhookHandler', () => {
     assert.equal(result.kind, 'processed');
     assert.equal(deliveredMessages.length, 1);
     assert.ok(deliveredMessages[0].content.includes('#42'));
-    assert.equal(triggeredCalls.length, 1);
   });
 
   it('processes issues.opened event (AC-A2)', async () => {
@@ -375,18 +374,20 @@ describe('GitHubRepoWebhookHandler', () => {
     assert.ok(source.url.includes('/pull/42'));
   });
 
-  it('calls invokeTrigger.trigger after delivery (KD-17)', async () => {
-    const { deps, triggeredCalls } = createMockDeps();
+  // KD-17 is structural now: one admitted envelope IS the inbox cat's wake, so the fact under
+  // test is the admission itself — there is no second trigger call that could be skipped.
+  it('admits the inbox envelope that starts the cat (KD-17)', async () => {
+    const { deps, deliveredMessages } = createMockDeps();
     const handler = new GitHubRepoWebhookHandler(CONFIG, deps);
     const body = makeIssuePayload('opened');
     const { headers, raw } = makeHeaders('issues', 'delivery-trig', body);
 
     await handler.handleWebhook(body, headers, raw);
 
-    assert.equal(triggeredCalls.length, 1);
-    const [threadId, catId] = triggeredCalls[0];
-    assert.ok(threadId.startsWith('thread-'));
-    assert.equal(catId, 'cat-maine-coon');
+    assert.equal(deliveredMessages.length, 1);
+    assert.ok(deliveredMessages[0].threadId.startsWith('thread-'));
+    assert.equal(deliveredMessages[0].catId, 'cat-maine-coon');
+    assert.ok(deliveredMessages[0].idempotencyKey.includes('delivery-trig'));
   });
 
   it('re-resolves the repo inbox owner for every delivery and wake', async () => {
@@ -413,10 +414,7 @@ describe('GitHubRepoWebhookHandler', () => {
       deliveredMessages.map((message) => message.catId),
       ['codex-sol', 'codex61-sol'],
     );
-    assert.deepEqual(
-      triggeredCalls.map((call) => call[1]),
-      ['codex-sol', 'codex61-sol'],
-    );
+    assert.deepEqual(triggeredCalls, [], 'Queue admission must not dispatch the same source through a second trigger');
   });
 
   it('skips unhandled event types', async () => {

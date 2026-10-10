@@ -6934,7 +6934,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     assert.ok(promptsSeen[0].includes('user message'), 'original user prompt still present');
   });
 
-  it('F293: fresh sparse routing context reaches a resumed provider session with deterministic intent', async () => {
+  it('normal delivery does not resolve or inject routing availability advice on resume', async () => {
     const promptsSeen = [];
     const resolutions = [];
     const service = {
@@ -6970,12 +6970,12 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
       }),
     );
 
-    assert.deepEqual(resolutions, [{ ownerId: 'owner-f293', intent: 'review' }]);
-    assert.ok(promptsSeen[0].includes('F293-SPARSE'));
+    assert.deepEqual(resolutions, [], 'normal delivery does not consult the availability projection');
+    assert.ok(!promptsSeen[0].includes('F293-SPARSE'));
     assert.ok(!promptsSeen[0].includes('static identity here'), 'dynamic projection is independent of static identity');
   });
 
-  it('F293: projection failure omits dynamic bytes, preserves invocation, and writes a bounded audit event', async () => {
+  it('normal delivery does not invoke or audit a failing legacy availability projection', async () => {
     const promptsSeen = [];
     const service = {
       l0CompilerFn: dummyL0CompilerFn,
@@ -7008,12 +7008,7 @@ describe('invokeSingleCat audit events (P1 fix)', () => {
     const { getEventAuditLog } = await import('../dist/domains/cats/services/orchestration/EventAuditLog.js');
     const events = await getEventAuditLog().readByThread('thread-routing-context-projection-failure');
     const failure = events.find((event) => event.type === 'routing_context_projection_failed');
-    assert.ok(failure, 'projection failure must be auditable');
-    assert.deepEqual(failure.data, {
-      catId: 'opus',
-      invocationId: 'inv-1',
-      errorName: 'RangeError',
-    });
+    assert.equal(failure, undefined, 'unused availability projection cannot create invocation audit noise');
   });
 
   it('F053: Gemini (sessionChain=true) skips systemPrompt on resume like other cats', async () => {

@@ -34,9 +34,9 @@ function ChevronDown() {
 export function ThreadTitleResetMenu({ threadId }: { threadId: string }) {
   const executionsByKey = useActiveExecutionStore((state) => state.executionsByKey);
   const running = Object.values(executionsByKey).some((execution) => execution.threadId === threadId);
-  const convergence = useQueueActionConvergence(threadId, { resetDoneSurvivesRereadFailure: true });
+  const convergence = useQueueActionConvergence(threadId);
   // No floating reasons and no stuck message here: this is the ordinary, thread-level reset.
-  const reset = useRowForceReset({ threadId, reasons: [], stuckAction: null, convergence });
+  const reset = useRowForceReset({ threadId, convergence });
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLSpanElement>(null);
 

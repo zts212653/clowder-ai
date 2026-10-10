@@ -1,5 +1,8 @@
 /**
- * Retire or settle: the one decision a managed-hold wake needs before it can reach a terminal.
+ * Read-only Ball classification of one managed-hold wake.
+ * Historical Ball settlement vocabulary is retained for event replay. This
+ * result cannot authorize Task continuation, write a receipt, or remove Queue
+ * work. Canonical Task/Queue/History owners must supply those separate proofs.
  *
  * A wake is a timed notification, not custody of the ball. When it fires the wake cat holds the ball
  * (`wake_condition_met` is only accepted from `active`). It can be settled normally (the disposition

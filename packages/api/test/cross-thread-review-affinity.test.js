@@ -271,6 +271,49 @@ describe('cross-thread review action affinity', () => {
     assert.equal(result.contentDedupCoordinationKey, 'minted-active-root');
   });
 
+  it('treats an explicit line-start mention after terminal as a new active hop', () => {
+    const result = resolveCrossThreadCoordination({
+      incoming: {
+        ...boundIncoming,
+        coordination: { ...boundIncoming.coordination, phase: 'terminal' },
+      },
+      targetThreadId: 'thread-ancestor',
+      hasExplicitRoutingIntent: true,
+      mintId: () => 'coord-mentioned-after-terminal',
+    });
+
+    assert.deepEqual(result.coordination, {
+      id: 'coord-mentioned-after-terminal',
+      phase: 'active',
+      hop: 0,
+    });
+    assert.equal(result.suppressRouting, false);
+    assert.equal(result.contentDedupCoordinationKey, 'minted-active-root');
+  });
+
+  it('routes explicit terminal replies with authored targets as fresh active work', () => {
+    for (const explicit of [{ phase: 'terminal' }, { phase: 'terminal', id: 'coord-task-ancestor' }]) {
+      const result = resolveCrossThreadCoordination({
+        explicit,
+        incoming: {
+          ...boundIncoming,
+          coordination: { ...boundIncoming.coordination, phase: 'terminal' },
+        },
+        targetThreadId: 'thread-ancestor',
+        hasExplicitRoutingIntent: true,
+        mintId: () => 'coord-targeted-after-terminal',
+      });
+
+      assert.deepEqual(result.coordination, {
+        id: 'coord-targeted-after-terminal',
+        phase: 'active',
+        hop: 0,
+      });
+      assert.equal(result.suppressRouting, false);
+      assert.equal(result.contentDedupCoordinationKey, 'minted-active-root');
+    }
+  });
+
   it('allows an explicit or minted standalone terminal only when no incoming id exists', () => {
     const explicitTerminal = resolveCrossThreadCoordination({
       explicit: { phase: 'terminal', id: 'coord-explicit', subjectRef: 'subject:task:done' },

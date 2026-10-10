@@ -3,20 +3,22 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
+import { adaptInvocationQueue } from './helpers/message-from-fixtures.js';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-const { saveMessageDispositionPreference } = await import('../dist/config/user-preferences-store.js');
-const {
-  resolveFreshnessCarrierCapabilityOrUndeclared,
-  resolveMessageDispositionForAdmission,
-  resolveQueueAuthorIntentByCatId,
-} = await import('../dist/routes/message-disposition-admission.js');
+const { saveMessageDispositionPreference, resolveMessageDispositionPreference } = await import(
+  '../dist/config/user-preferences-store.js'
+);
+const { resolveFreshnessCarrierCapabilityOrUndeclared, resolveQueueAuthorIntentByCatId } = await import(
+  '../dist/routes/message-disposition-admission.js'
+);
 const { sendMessageSchema } = await import('../dist/routes/messages.schema.js');
 
 function entry(overrides = {}) {
   return {
     threadId: 'thread-1',
     userId: 'user-1',
+    kind: 'conversation_input',
     ownerAuthProvenance: 'strict',
     content: 'queued body',
     source: 'user',
@@ -30,7 +32,7 @@ describe('F264 author-declared message disposition', () => {
   let queue;
 
   beforeEach(() => {
-    queue = new InvocationQueue();
+    queue = adaptInvocationQueue(new InvocationQueue());
   });
 
   test('missing author intent is fail-closed next-work and never enters a live parent context', () => {
@@ -68,7 +70,7 @@ describe('F264 author-declared message disposition', () => {
     );
   });
 
-  test('current-parent exposure is source-domain aware and ignores author intent outside user messages', () => {
+  test('current-parent exposure obeys the same saved strategy and parent for every source', () => {
     const cases = [
       {
         name: 'legacy user without intent stays next-work',
@@ -96,29 +98,29 @@ describe('F264 author-declared message disposition', () => {
         readable: true,
       },
       {
-        name: 'agent A2A remains readable without author intent',
+        name: 'agent A2A uses the saved product next-work default',
         entry: entry({ content: 'agent custody', source: 'agent', sourceCategory: 'a2a' }),
-        readable: true,
+        readable: false,
       },
       {
-        name: 'connector event remains readable without author intent',
+        name: 'connector event uses the saved product next-work default',
         entry: entry({ content: 'connector custody', source: 'connector', sourceCategory: 'review' }),
-        readable: true,
+        readable: false,
       },
       {
-        name: 'non-user custody ignores a stray next-work-shaped field',
+        name: 'non-user explicit next-work stays isolated',
         entry: entry({
           content: 'connector with polluted field',
           source: 'connector',
           sourceCategory: 'ci',
           authorIntentByCatId: { opus: { requested: 'next_work' } },
         }),
-        readable: true,
+        readable: false,
       },
     ];
 
     for (const row of cases) {
-      const isolated = new InvocationQueue();
+      const isolated = adaptInvocationQueue(new InvocationQueue());
       isolated.enqueue(row.entry);
       const body = isolated.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a');
       const freshness = isolated.getQueuedFreshnessMessagesForCat('thread-1', 'user-1', 'opus', {
@@ -129,7 +131,7 @@ describe('F264 author-declared message disposition', () => {
     }
   });
 
-  test('an unread continue-current user message closes its parent window but stays eligible for successor work', () => {
+  test('an unread continue-current user message stays durable for successor work', () => {
     const result = queue.enqueue(
       entry({
         authorIntentByCatId: {
@@ -146,9 +148,6 @@ describe('F264 author-declared message disposition', () => {
       'the active parent first owns the opportunity to read',
     );
 
-    queue.fallbackAuthorIntentsForParentAcrossUsers('thread-1', 'opus', 'parent-a', 2_000);
-
-    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a'), []);
     assert.equal(queue.peekNextQueued('thread-1', 'user-1')?.id, result.entry.id);
     assert.equal(queue.hasPendingForCat('thread-1', 'opus', { userId: 'user-1' }), true);
   });
@@ -182,6 +181,7 @@ describe('F264 author-declared message disposition', () => {
       resolveCarrierCapability: () => ({
         provider: 'openai_codex',
         carrier: 'codex_app_server',
+        activeInvocationGuidance: 'supported',
         deliverySemantics: 'exact_active_turn',
       }),
       now: 1_000,
@@ -194,6 +194,7 @@ describe('F264 author-declared message disposition', () => {
         carrierCapability: {
           provider: 'openai_codex',
           carrier: 'codex_app_server',
+          activeInvocationGuidance: 'supported',
           deliverySemantics: 'exact_active_turn',
         },
       },
@@ -202,10 +203,43 @@ describe('F264 author-declared message disposition', () => {
         carrierCapability: {
           provider: 'openai_codex',
           carrier: 'codex_app_server',
+          activeInvocationGuidance: 'supported',
           deliverySemantics: 'exact_active_turn',
         },
         fallbackAt: 1_000,
         fallbackReason: 'no_active_parent',
+      },
+    });
+  });
+
+  test('admission binds queued-internal carriers to the active invocation without claiming exact-turn reading', () => {
+    const authorIntentByCatId = resolveQueueAuthorIntentByCatId({
+      targetCats: ['opus'],
+      requested: 'continue_current',
+      threadId: 'thread-1',
+      userId: 'user-1',
+      invocationTracker: {
+        has: () => true,
+        getUserId: () => 'user-1',
+        getExecutionId: () => 'parent-opus',
+      },
+      resolveCarrierCapability: () => ({
+        provider: 'anthropic',
+        carrier: 'claude_agent_sdk',
+        activeInvocationGuidance: 'supported',
+        deliverySemantics: 'queued_internal_turn',
+      }),
+      now: 1_000,
+    });
+
+    assert.deepEqual(authorIntentByCatId.opus, {
+      requested: 'continue_current',
+      boundParentInvocationId: 'parent-opus',
+      carrierCapability: {
+        provider: 'anthropic',
+        carrier: 'claude_agent_sdk',
+        activeInvocationGuidance: 'supported',
+        deliverySemantics: 'queued_internal_turn',
       },
     });
   });
@@ -224,6 +258,7 @@ describe('F264 author-declared message disposition', () => {
       resolveCarrierCapability: () => ({
         provider: 'openai_codex',
         carrier: 'codex_app_server',
+        activeInvocationGuidance: 'supported',
         deliverySemantics: 'exact_active_turn',
       }),
       now: 1_000,
@@ -235,6 +270,7 @@ describe('F264 author-declared message disposition', () => {
         carrierCapability: {
           provider: 'openai_codex',
           carrier: 'codex_app_server',
+          activeInvocationGuidance: 'supported',
           deliverySemantics: 'exact_active_turn',
         },
         fallbackAt: 1_000,
@@ -245,6 +281,7 @@ describe('F264 author-declared message disposition', () => {
         carrierCapability: {
           provider: 'openai_codex',
           carrier: 'codex_app_server',
+          activeInvocationGuidance: 'supported',
           deliverySemantics: 'exact_active_turn',
         },
         fallbackAt: 1_000,
@@ -266,9 +303,10 @@ describe('F264 author-declared message disposition', () => {
       userId: 'user-1',
       invocationTracker,
       resolveCarrierCapability: () => ({
-        provider: 'anthropic',
-        carrier: 'claude_print_sdk',
-        deliverySemantics: 'unsupported',
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        activeInvocationGuidance: 'unsupported',
+        deliverySemantics: 'exact_active_turn',
       }),
       now: 1_000,
     });
@@ -284,9 +322,10 @@ describe('F264 author-declared message disposition', () => {
     assert.deepEqual(unsupported.opus, {
       requested: 'continue_current',
       carrierCapability: {
-        provider: 'anthropic',
-        carrier: 'claude_print_sdk',
-        deliverySemantics: 'unsupported',
+        provider: 'openai_codex',
+        carrier: 'codex_app_server',
+        activeInvocationGuidance: 'unsupported',
+        deliverySemantics: 'exact_active_turn',
       },
       fallbackAt: 1_000,
       fallbackReason: 'unsupported_carrier',
@@ -296,6 +335,7 @@ describe('F264 author-declared message disposition', () => {
       carrierCapability: {
         provider: 'other',
         carrier: 'other',
+        activeInvocationGuidance: 'undeclared',
         deliverySemantics: 'undeclared',
       },
       fallbackAt: 1_000,
@@ -307,54 +347,26 @@ describe('F264 author-declared message disposition', () => {
     assert.deepEqual(resolveFreshnessCarrierCapabilityOrUndeclared({}, 'opus'), {
       provider: 'other',
       carrier: 'other',
+      activeInvocationGuidance: 'undeclared',
       deliverySemantics: 'undeclared',
     });
   });
 
-  test('server admission resolves thread over global while an explicit one-shot wins', async () => {
+  test('scoped preference resolves thread over global without materializing author intent', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'f264-disposition-admission-'));
     try {
       saveMessageDispositionPreference(projectRoot, { scope: 'global', disposition: 'continue_current' });
-      assert.equal(resolveMessageDispositionForAdmission({ projectRoot, threadId: 'thread-a' }), 'continue_current');
+      assert.equal(resolveMessageDispositionPreference(projectRoot, 'thread-a').effective, 'continue_current');
 
       saveMessageDispositionPreference(projectRoot, {
         scope: 'thread',
         threadId: 'thread-a',
         disposition: 'next_work',
       });
-      assert.equal(resolveMessageDispositionForAdmission({ projectRoot, threadId: 'thread-a' }), 'next_work');
-      assert.equal(
-        resolveMessageDispositionForAdmission({
-          explicit: 'continue_current',
-          projectRoot,
-          threadId: 'thread-a',
-        }),
-        'continue_current',
-      );
+      assert.equal(resolveMessageDispositionPreference(projectRoot, 'thread-a').effective, 'next_work');
     } finally {
       await rm(projectRoot, { recursive: true, force: true });
     }
-  });
-
-  test('terminal parent appends a fallback fact and permanently closes the exposure window', () => {
-    const result = queue.enqueue(
-      entry({
-        authorIntentByCatId: {
-          opus: { requested: 'continue_current', boundParentInvocationId: 'parent-a' },
-        },
-      }),
-    );
-
-    const changed = queue.fallbackAuthorIntentsForParentAcrossUsers('thread-1', 'opus', 'parent-a', 2_000);
-
-    assert.deepEqual(changed, [{ entryId: result.entry.id, userId: 'user-1' }]);
-    assert.deepEqual(queue.getQueuedBodyMessagesForCat('thread-1', 'user-1', 'opus', 'parent-a'), []);
-    assert.deepEqual(queue.getEntrySnapshot('thread-1', 'user-1', result.entry.id).authorIntentByCatId.opus, {
-      requested: 'continue_current',
-      boundParentInvocationId: 'parent-a',
-      fallbackAt: 2_000,
-      fallbackReason: 'parent_terminal_before_exposure',
-    });
   });
 
   test('send schema accepts only the two typed dispositions', () => {

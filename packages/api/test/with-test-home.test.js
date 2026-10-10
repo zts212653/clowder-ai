@@ -95,7 +95,7 @@ test('with-test-home pins REDIS_URL when the outer shell has none', () => {
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'redis://127.0.0.1:6398');
+  assert.equal(result.stdout.trim(), 'redis://127.0.0.1:0');
 });
 
 test('with-test-home overrides an inherited REDIS_URL instead of trusting it', () => {
@@ -109,5 +109,5 @@ test('with-test-home overrides an inherited REDIS_URL instead of trusting it', (
   });
 
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stdout.trim(), 'redis://127.0.0.1:6398');
+  assert.equal(result.stdout.trim(), 'redis://127.0.0.1:0');
 });

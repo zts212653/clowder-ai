@@ -217,4 +217,3 @@ Phase A 实现已于 2026-09-30 通过 [#4853](https://github.com/zts212653/clow
 [最终 E1–E5 证据](https://github.com/zts212653/clowder-ai/pull/4853#issuecomment-5918264917) 使用 operator `[thread-id]#private-source-id` 授权的手动完整检查车道：五项 canonical stage receipt、49/49 native S3 浏览器、guards/lint、完整产物检查的剩余定向修复验证均通过。原 canonical whole-run failed 保持原样；主机压力只获本次准入豁免，不声称主机健康或 whole-run PASS。
 
 运行事实：合后 `/health` 返回 deploymentRevision `78c9389604bcb4641c695e05e971c884c01afbf4`，未包含本次 merge；`live=dormant`。当前实例未暴露部署等待登记工具，`registration=unavailable`，不得冒称取得原 Task/generation 回执。独立手机图修改 Task 已 done/satisfied，未要求重复视觉签字。AC-A11、真实壳 Design Gate、Alpha/运行验收与 Phase A 终验仍未完成；原指挥 Task 及 owner 不变。
-

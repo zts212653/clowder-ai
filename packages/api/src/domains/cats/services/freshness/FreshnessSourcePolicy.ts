@@ -1,17 +1,17 @@
-import { isCrossThreadProvenance } from '@cat-cafe/shared';
+import { isCrossThreadProvenance, type MessageFrom } from '@cat-cafe/shared';
+import { messageFrom } from '../stores/message-from.js';
 
 export interface FreshnessSourceMessage {
   threadId?: string;
+  from?: MessageFrom;
   catId: string | null;
   extra?: { crossPost?: { sourceThreadId: string } };
 }
 
 export interface FreshnessQueueSourceEntry {
-  source: string;
-  callerCatId?: string;
+  from: MessageFrom;
   sourceCategory?: string;
   messageId?: string | null;
-  mergedMessageIds?: string[];
 }
 
 export interface FreshnessSourceMessageReader {
@@ -33,7 +33,9 @@ export function isFreshnessSelfSourceMessage(
   catId: string,
   targetThreadId: string,
 ): boolean {
-  return message.catId === catId && !hasCrossThreadFreshnessProvenance(message, targetThreadId);
+  const from = messageFrom(message as unknown as Parameters<typeof messageFrom>[0]);
+  const authorCatId = from.kind === 'agent' ? from.catId : null;
+  return authorCatId === catId && !hasCrossThreadFreshnessProvenance(message, targetThreadId);
 }
 
 /**
@@ -48,15 +50,15 @@ export async function isFreshnessSelfSourceQueueEntry(
   targetThreadId: string,
   messageStore: FreshnessSourceMessageReader,
 ): Promise<boolean> {
-  if (!(entry.source === 'agent' && entry.callerCatId === catId)) return false;
+  if (!(entry.from.kind === 'agent' && entry.from.catId === catId)) return false;
   if (entry.sourceCategory !== 'a2a' || !messageStore.getById) return true;
 
-  const messageIds = [entry.messageId ?? '', ...(entry.mergedMessageIds ?? [])].filter(
-    (messageId, index, all) => messageId.length > 0 && all.indexOf(messageId) === index,
-  );
+  const messageIds = entry.messageId ? [entry.messageId] : [];
   for (const messageId of messageIds) {
     const message = await messageStore.getById(messageId);
-    if (message?.catId === catId && hasCrossThreadFreshnessProvenance(message, targetThreadId)) {
+    const from = message ? messageFrom(message as unknown as Parameters<typeof messageFrom>[0]) : null;
+    const authorCatId = from?.kind === 'agent' ? from.catId : null;
+    if (message && authorCatId === catId && hasCrossThreadFreshnessProvenance(message, targetThreadId)) {
       return false;
     }
   }

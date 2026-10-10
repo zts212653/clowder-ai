@@ -6,7 +6,11 @@
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
+import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { InMemoryQueueLedgerStore } from '../dist/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { messagesRoutes } from '../dist/routes/messages.js';
 
 /** In-memory GameStore stub */
@@ -49,19 +53,15 @@ function createStubGameStore() {
 /** Stub message store — tracks appended messages */
 function createStubMessageStore() {
   const messages = [];
-  let idCounter = 0;
-  return {
-    messages,
-    async append(msg) {
-      const id = `msg-${++idCounter}`;
-      const stored = { ...msg, id };
-      messages.push(stored);
-      return stored;
-    },
-    async getMessages() {
-      return messages;
-    },
+  const store = new MessageStore();
+  const append = store.append.bind(store);
+  store.recordedMessages = messages;
+  store.append = (input) => {
+    const message = append(input);
+    messages.push(message);
+    return message;
   };
+  return store;
 }
 
 function createStubSocket() {
@@ -160,6 +160,8 @@ describe('/game command bridge in POST /api/messages', () => {
     routerStub = createStubRouter();
 
     await app.register(messagesRoutes, {
+      invocationQueue: new InvocationQueue(new InMemoryQueueLedgerStore()),
+      queueProcessor: { async requestDrain() {} },
       registry: createStubRegistry(),
       messageStore,
       socketManager: socketStub,
@@ -207,9 +209,11 @@ describe('/game command bridge in POST /api/messages', () => {
     assert.ok(body.userMessageId, 'should return userMessageId');
 
     // User message stored in the game thread (not source thread)
-    assert.equal(messageStore.messages.length, 1);
-    assert.equal(messageStore.messages[0].content, '/game werewolf god-view voice');
-    assert.equal(messageStore.messages[0].threadId, body.gameThreadId);
+    const userMessages = messageStore.recordedMessages.filter((message) => message.from.kind === 'user');
+    assert.equal(userMessages.length, 1, JSON.stringify(userMessages.map(({ from, content }) => ({ from, content }))));
+    assert.equal(userMessages[0].content, '/game werewolf god-view voice');
+    assert.equal(userMessages[0].threadId, body.gameThreadId);
+    assert.equal(userMessages[0].from.userId, 'you');
 
     // Game created in store — runs in the new game thread
     assert.equal(gameStore.games.size, 1);
@@ -241,7 +245,9 @@ describe('/game command bridge in POST /api/messages', () => {
       },
     });
 
-    // Should go through normal routing (may fail due to minimal stubs, but router should be called)
+    assert.equal(res.statusCode, 202, res.body);
+    assert.equal(res.json().status, 'queued');
+    assert.equal(messageStore.getById(res.json().userMessageId).content, 'hello world');
     assert.equal(routerStub.routeCalled, true, 'AI router should be called for normal messages');
   });
 
@@ -341,6 +347,12 @@ describe('/game command bridge in POST /api/messages', () => {
     const autoPlayer = createStubAutoPlayer();
 
     await localApp.register(messagesRoutes, {
+      invocationQueue: new InvocationQueue(new InMemoryQueueLedgerStore()),
+      queueProcessor: {
+        requestDrain() {
+          assert.fail('game command must not dispatch an agent');
+        },
+      },
       registry: createStubRegistry(),
       messageStore: createStubMessageStore(),
       socketManager: createStubSocket(),

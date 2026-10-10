@@ -119,6 +119,16 @@ describe('Invocation stall cancel invariant', () => {
     storeState.catStatuses = { codex: 'alive_but_silent' };
     storeState.catInvocations = {
       codex: {
+        activeRun: {
+          threadId: 'thread-1',
+          targetId: 'codex',
+          invocationId: 'inv-1',
+          responseMessageId: 'response-inv-1',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: Date.now() - 300_000,
+        },
         livenessWarning: {
           level: 'alive_but_silent',
           state: 'busy-silent',
@@ -130,19 +140,9 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
-      import('../ThinkingIndicator'),
-      import('../ThreadExecutionBar'),
-    ]);
+    const { ThreadExecutionBar } = await import('../ThreadExecutionBar');
     act(() => {
-      root.render(
-        React.createElement(
-          React.Fragment,
-          null,
-          React.createElement(ThinkingIndicator),
-          React.createElement(ThreadExecutionBar),
-        ),
-      );
+      root.render(React.createElement(ThreadExecutionBar));
     });
 
     const cancelButtons = container.querySelectorAll('[aria-label="Stop codex live_invocation inv-1"]');
@@ -157,6 +157,16 @@ describe('Invocation stall cancel invariant', () => {
     storeState.catStatuses = { codex: 'alive_but_silent' };
     storeState.catInvocations = {
       codex: {
+        activeRun: {
+          threadId: 'thread-1',
+          targetId: 'codex',
+          invocationId: 'inv-1',
+          responseMessageId: 'response-inv-1',
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: Date.now() - 300_000,
+        },
         livenessWarning: {
           level: 'alive_but_silent',
           state: 'busy-silent',
@@ -168,19 +178,9 @@ describe('Invocation stall cancel invariant', () => {
       },
     };
 
-    const [{ ThinkingIndicator }, { ThreadExecutionBar }] = await Promise.all([
-      import('../ThinkingIndicator'),
-      import('../ThreadExecutionBar'),
-    ]);
+    const { ThreadExecutionBar } = await import('../ThreadExecutionBar');
     act(() => {
-      root.render(
-        React.createElement(
-          React.Fragment,
-          null,
-          React.createElement(ThinkingIndicator),
-          React.createElement(ThreadExecutionBar),
-        ),
-      );
+      root.render(React.createElement(ThreadExecutionBar));
     });
 
     const cancelBtn = container.querySelector('[aria-label="Stop codex live_invocation inv-1"]') as HTMLButtonElement;

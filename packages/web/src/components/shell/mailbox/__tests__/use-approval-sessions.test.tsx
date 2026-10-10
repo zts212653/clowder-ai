@@ -121,7 +121,7 @@ describe('useApprovalSessions', () => {
       });
     });
     expect(fake.refetch).toHaveBeenCalledTimes(1);
-    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/approval-hub/pending');
+    expect(mocks.apiFetch).toHaveBeenCalledWith('/api/approval-hub/pending', undefined, { afterCurrentGet: true });
   });
 
   it('judges the read once it settles and React has committed it', async () => {

@@ -46,7 +46,7 @@ export async function persistModificationSource(
       await messages.appendIdempotent({
         userId: record.ownerUserId,
         threadId: record.payload.threadId,
-        catId: null,
+        from: { kind: 'user', userId: record.ownerUserId },
         mentions: [],
         timestamp: now,
         content,
@@ -56,6 +56,10 @@ export async function persistModificationSource(
     ).message;
   const accepted = source.extra?.contentModificationRequestV1;
   if (
+    source.userId !== record.ownerUserId ||
+    source.threadId !== record.payload.threadId ||
+    source.from?.kind !== 'user' ||
+    source.from.userId !== record.ownerUserId ||
     !accepted ||
     accepted.v !== 1 ||
     accepted.requestId !== extra.requestId ||

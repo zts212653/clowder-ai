@@ -26,7 +26,6 @@ import { isTrackingKind } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import {
   assertTypedWaitRegistrationInstallation,
-  parseTypedWaitRegistration,
   TYPED_WAIT_REGISTRATION_FIELD,
   type TypedWaitRegistrationSnapshot,
 } from '../../../../ball-custody/TypedWaitRegistration.js';
@@ -60,7 +59,7 @@ import {
 import { buildTaskWaitReplacement } from '../ports/TaskWaitReplacement.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 import { DEPLOYMENT_WAIT_INDEX, listDeploymentWaitProjectionCandidates } from './deployment-wait-index.js';
-import { hydrateTask, serializeTask } from './RedisTaskCodec.js';
+import { hydrateTask, hydrateWaitRegistration, serializeTask } from './RedisTaskCodec.js';
 import { fetchRedisTasksByIds } from './RedisTaskCollectionReader.js';
 import { RedisTaskDevelopmentWorkStore } from './RedisTaskDevelopmentWorkStore.js';
 import { RedisTaskEntrustedWorkMutationStore } from './RedisTaskEntrustedWorkMutationStore.js';
@@ -107,10 +106,7 @@ async function replaceDeploymentWaitInSession(
 
 export class RedisTaskStore implements ITaskStore {
   async getWaitRegistration(taskId: string): Promise<TypedWaitRegistrationSnapshot | null> {
-    const raw = await this.redis.hgetall(TaskKeys.detail(taskId));
-    return raw.id
-      ? { task: hydrateTask(raw), receipt: parseTypedWaitRegistration(raw[TYPED_WAIT_REGISTRATION_FIELD]) }
-      : null;
+    return hydrateWaitRegistration(await this.redis.hgetall(TaskKeys.detail(taskId)));
   }
   private readonly redis: RedisClient;
   private readonly developmentWork: RedisTaskDevelopmentWorkStore;
@@ -415,6 +411,12 @@ export class RedisTaskStore implements ITaskStore {
         this.redis,
         key,
         async (session) => {
+          // Read the private binding before the Task aggregate. A concurrent
+          // atomic registration may otherwise pair an old Task snapshot with
+          // its new binding and throw before WATCH can reject the stale CAS.
+          const binding = input.trackingRegistration?.managedWorkBinding;
+          if (binding) await session.watch(TaskKeys.managedWorkBinding(taskId));
+          const currentBinding = binding ? await new RedisTaskManagedWorkBindingStore(session).get(taskId) : null;
           const data = await session.hgetall(key);
           if (!data || !data.id) {
             return null;
@@ -424,9 +426,6 @@ export class RedisTaskStore implements ITaskStore {
           if (!this.matchesAutomationReplacementExpectation(existing, input)) {
             return null;
           }
-          const binding = input.trackingRegistration?.managedWorkBinding;
-          if (binding) await session.watch(TaskKeys.managedWorkBinding(taskId));
-          const currentBinding = binding ? await new RedisTaskManagedWorkBindingStore(session).get(taskId) : null;
           const updated = buildTaskWaitReplacement(existing, input, currentBinding);
           if (input.waitRegistration) assertTypedWaitRegistrationInstallation(updated, input.waitRegistration);
           const pipeline = session.multi();

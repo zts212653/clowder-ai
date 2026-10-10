@@ -1,49 +1,44 @@
-import type { QueueMessageReceipt } from '@cat-cafe/shared';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { expect, it, vi } from 'vitest';
+import { expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
-import { MessageReceiptDock } from '../MessageReceiptDock';
+import { projectCloudBindingRecovery } from '../cloud-binding-recovery';
 
-vi.mock('../CatAvatar', () => ({ CatAvatar: () => null }));
-
-const receipt: QueueMessageReceipt = {
-  version: 1,
-  entryId: 'entry-1',
-  reminderAttempts: [],
-  targets: [
-    {
-      catId: 'gpt-pro',
-      state: 'failed',
-      retryable: true,
-      attempts: [
-        {
-          id: 'attempt-1',
-          targetCatId: 'gpt-pro',
-          sequence: 1,
-          state: 'failed',
-          createdAt: 2,
-          updatedAt: 3,
-          invocationId: 'dispatch-1',
-        },
-      ],
+const source: ChatMessage = { id: 'source', type: 'user', content: 'hello', timestamp: 1 };
+const recovery: ChatMessage = {
+  id: 'recovery',
+  type: 'connector',
+  content: 'connect',
+  timestamp: 2,
+  replyTo: source.id,
+  source: {
+    connector: 'cloud-bridge-status',
+    label: 'cloud',
+    icon: '',
+    meta: {
+      cloudBridgeRecovery: {
+        v: 1,
+        kind: 'needs_binding',
+        sourceMessageId: source.id,
+        targetCatId: 'gpt-pro',
+        dispatchInvocationId: 'dispatch',
+      },
     },
-  ],
+  },
 };
-function notice(invocationId = 'dispatch-1', transport: 'host' | 'none' = 'host'): ChatMessage {
+function notice(invocationId = 'dispatch', transport: 'host' | 'none' = 'host'): ChatMessage {
   return {
-    id: 'notice-1',
+    id: 'receipt',
     type: 'connector',
-    content: '未发送',
+    content: 'not sent',
     timestamp: 3,
-    replyTo: 'source-1',
+    replyTo: source.id,
     source: {
       connector: 'cloud-bridge-status',
-      label: '云端投递',
+      label: 'cloud',
       icon: '',
       meta: {
         cloudBridgeOutboundReceipt: {
           v: 1,
-          sourceMessageId: 'source-1',
+          sourceMessageId: source.id,
           sourceSender: { kind: 'user', id: 'owner' },
           targetCatId: 'gpt-pro',
           dispatchInvocationId: invocationId,
@@ -55,23 +50,19 @@ function notice(invocationId = 'dispatch-1', transport: 'host' | 'none' = 'host'
     },
   };
 }
-function render(messages: ChatMessage[]) {
-  return renderToStaticMarkup(
-    <MessageReceiptDock messageId="source-1" receipt={receipt} messages={messages} getCatLabel={() => '砚砚 Pro'} />,
-  );
-}
-it('does not offer the generic queue retry for a terminal failed Host source', () => {
-  expect(render([notice()])).not.toContain('data-retry-target');
-  expect(render([notice()])).not.toContain('已回队列');
-  expect(render([notice()])).toContain('未发送 · 需要新消息');
+it('a terminal Host failure stays on the original source and never offers the prior attempt as Queue retry', () => {
+  expect(projectCloudBindingRecovery(source, [source, recovery, notice()])).toEqual({
+    targetCatId: 'gpt-pro',
+    deliveryStatus: 'failed',
+  });
 });
-it('keeps non-Host binding failures retryable and ignores stale or cross-source Host receipts', () => {
-  for (const message of [
-    notice('dispatch-old'),
-    notice('dispatch-1', 'none'),
-    { ...notice(), replyTo: 'other-source' },
-    { ...notice(), timestamp: 1 },
-  ]) {
-    expect(render([message])).toContain('data-retry-target');
-  }
+it.each([
+  notice('stale'),
+  notice('dispatch', 'none'),
+  { ...notice(), replyTo: 'foreign-source' },
+])('does not borrow an unrelated Host terminal fact', (receipt) => {
+  expect(projectCloudBindingRecovery(source, [source, recovery, receipt])).toEqual({
+    targetCatId: 'gpt-pro',
+    attemptId: 'dispatch',
+  });
 });

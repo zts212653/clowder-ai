@@ -41,7 +41,13 @@ afterEach(() => {
   resetCoCreatorConfigCacheForTest();
 });
 
-const own = (id: string): Message => ({ id, type: 'user', content: id, timestamp: 1 });
+const own = (id: string): Message => ({
+  id,
+  type: 'user',
+  from: { kind: 'user', userId: 'test-user' },
+  content: id,
+  timestamp: 1,
+});
 function renderTimeline(messages: Message[]) {
   act(() =>
     root.render(
@@ -77,7 +83,18 @@ it('skips an unseen recall and keeps one visible human run', () => {
 });
 
 it('skips an empty finished cat message, which the renderer draws nothing for', () => {
-  renderTimeline([own('a'), { id: 'hidden', type: 'assistant', catId: 'opus', content: '', timestamp: 2 }, own('b')]);
+  renderTimeline([
+    own('a'),
+    {
+      id: 'hidden',
+      type: 'assistant',
+      from: { kind: 'agent', catId: 'opus' },
+      catId: 'opus',
+      content: '',
+      timestamp: 2,
+    },
+    own('b'),
+  ]);
   expect(container.querySelector('[data-message-id="hidden"]')).toBeNull();
   expectOneVisibleRun();
 });
@@ -86,6 +103,7 @@ it('skips a cloud notice that is carried inside the message it answers', () => {
   const notice: Message = {
     id: 'hidden',
     type: 'connector',
+    from: { kind: 'external', connectorId: 'cloud-bridge-status' },
     content: 'not sent',
     timestamp: 2,
     replyTo: 'a',
@@ -110,34 +128,15 @@ it('skips a cloud notice that is carried inside the message it answers', () => {
   expectOneVisibleRun();
 });
 
-it('steps over a body that real receipt lineage folded into the reply', () => {
+it('steps over an unexposed recalled body while preserving its anchor', () => {
   const folded: Message = {
     ...own('folded'),
-    extra: {
-      queueReceipt: {
-        version: 1,
-        entryId: 'entry-folded',
-        reminderAttempts: [],
-        targets: [
-          {
-            catId: 'opus',
-            state: 'handled',
-            invocationId: 'child-1',
-            seenAt: 1,
-            outcome: {
-              invocationId: 'child-1',
-              disposition: 'responded',
-              handledAt: 2,
-              evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-1' },
-            },
-          },
-        ],
-      },
-    },
+    extra: { recall: { version: 1, exposure: 'none', recalledAt: 2 } },
   };
   const terminal: Message = {
     id: 'terminal',
     type: 'assistant',
+    from: { kind: 'agent', catId: 'opus' },
     catId: 'opus',
     content: '已回复',
     timestamp: 3,
@@ -145,15 +144,30 @@ it('steps over a body that real receipt lineage folded into the reply', () => {
   };
   renderTimeline([own('a'), folded, own('b'), terminal]);
   const anchor = container.querySelector('[data-message-id="folded"]');
-  expect(anchor?.getAttribute('aria-hidden')).toBe('true');
-  expect(anchor?.querySelector('[data-testid="message-bubble"]')).toBeNull();
+  expect(anchor).toBeNull();
   expect(time('a')).toBeNull();
   expect(time('b')).not.toBeNull();
 });
 
 it.each([
-  { id: 'active', type: 'assistant', catId: 'opus', content: '', timestamp: 2, isStreaming: true },
-  { id: 'thinking', type: 'assistant', catId: 'opus', content: '', timestamp: 2, thinking: '正在想' },
+  {
+    id: 'active',
+    type: 'assistant',
+    from: { kind: 'agent', catId: 'opus' },
+    catId: 'opus',
+    content: '正在回答',
+    timestamp: 2,
+    isStreaming: true,
+  },
+  {
+    id: 'thinking',
+    type: 'assistant',
+    from: { kind: 'agent', catId: 'opus' },
+    catId: 'opus',
+    content: '',
+    timestamp: 2,
+    thinking: '正在想',
+  },
 ] satisfies Message[])('a visible cat surface ($id) still ends the human run', (middle) => {
   renderTimeline([own('a'), middle, own('b')]);
   expect(container.querySelector(`[data-message-id="${middle.id}"] [data-testid="message-bubble"]`)).not.toBeNull();

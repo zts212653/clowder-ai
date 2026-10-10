@@ -7,6 +7,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import type { AgentMessage, TokenUsage } from '../../types.js';
 import { extractClaudeMcpStatusSnapshot } from './claude-mcp-status.js';
+import { type ClaudeTextBoundaryState, withClaudeMessageBoundary } from './claude-text-boundaries.js';
 
 /**
  * Transform a raw Claude CLI NDJSON event into AgentMessage(s).
@@ -22,6 +23,7 @@ export function transformClaudeEvent(
     lastTurnInputTokens: number | undefined;
     /** F045: Accumulate thinking_delta chunks until content_block_stop */
     thinkingBuffer: string;
+    textBoundaryState?: ClaudeTextBoundaryState;
   },
 ): AgentMessage | AgentMessage[] | null {
   if (typeof event !== 'object' || event === null) return null;
@@ -122,10 +124,11 @@ export function transformClaudeEvent(
       if (streamState.currentMessageId) {
         streamState.partialTextMessageIds.add(streamState.currentMessageId);
       }
+      streamState.textBoundaryState ??= {};
       return {
         type: 'text',
         catId,
-        content: d.text,
+        content: withClaudeMessageBoundary(d.text, streamState.currentMessageId, streamState.textBoundaryState),
         timestamp: Date.now(),
       };
     }
@@ -245,10 +248,11 @@ export function transformClaudeEvent(
 
       if (b.type === 'text' && typeof b.text === 'string' && b.text.length > 0) {
         if (skipFinalText) continue;
+        streamState.textBoundaryState ??= {};
         messages.push({
           type: 'text',
           catId,
-          content: b.text,
+          content: withClaudeMessageBoundary(b.text, messageId, streamState.textBoundaryState),
           timestamp: Date.now(),
         });
       } else if (b.type === 'tool_use' && typeof b.name === 'string') {

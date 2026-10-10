@@ -128,7 +128,11 @@ function fixture() {
     const message = messages.append({
       userId: 'owner',
       threadId: 'public-channel',
-      catId: null,
+      from: {
+        kind: 'external',
+        connectorId: 'collective',
+        sender: { id: source.actor.humanId, name: source.actor.displayName },
+      },
       content: event.body,
       mentions: [],
       timestamp: label === 'a' ? 1 : 2,
@@ -161,7 +165,7 @@ async function privateInvocation(fixture, entry, admission, observedRevision, re
   const trigger = fixture.messages.append({
     userId: 'owner',
     threadId: entry.privateThreadId,
-    catId: null,
+    from: { kind: 'system', service: 'collective-work' },
     content: `Run result ${resultRevision}`,
     mentions: [],
     timestamp: Date.now(),
@@ -253,7 +257,7 @@ test('two Works in one Channel keep private Threads, revisions, and return opera
   const artifactPublication = f.messages.append({
     userId: 'owner',
     threadId: 'private-a',
-    catId: 'codex-astra',
+    from: { kind: 'agent', catId: 'codex-astra' },
     content: 'Published result A',
     mentions: [],
     timestamp: Date.now(),

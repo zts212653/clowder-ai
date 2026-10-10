@@ -1,7 +1,7 @@
 /**
  * F233 Phase A — IO 层 collector 逻辑测试（mock store）。
  *
- * 覆盖最易错的 collector 判定逻辑：zombie freshness / hold 过期分类 / mention 启发式 /
+ * 覆盖最易错的 collector 判定逻辑：死球（failed 记录）/ hold 过期分类 / mention 启发式 /
  * safeCollect 降级 / activeCount 计算。store 真实查询行为另在 duty-briefing-collect-redis.test.js。
  * 用窄 mock（满足 Pick 接口）——collector 测的是"拿到 store 数据后的判定"，不是 store 实现。
  */
@@ -22,7 +22,6 @@ function mockDeps(over = {}) {
   return {
     taskStore: { listByKind: async () => [] },
     invocationRecordStore: { scanAll: async () => [] },
-    draftStore: { getByThread: async () => [] },
     dynamicTaskStore: { getAll: () => [] },
     threadStore: { list: async () => [] },
     messageStore: { getByThread: async () => [], getByThreadAfter: async () => [] },
@@ -33,55 +32,45 @@ function mockDeps(over = {}) {
   };
 }
 
-test('collectZombies: running 无 fresh draft 且超 grace → zombie；有 fresh draft → 不报；非 running → 忽略', async () => {
+test('collectZombies (F117 KD-23): failed records are dead balls; a running record is healthy however long it runs', async () => {
   const records = [
-    // 老 + 无 draft → 死球（spike opus-47 同型）
+    // 老 running、无 draft：KD-23 起不再按草稿新鲜度或心跳推断它已死 → 计入 healthy
     {
-      id: 'inv-dead',
+      id: 'inv-long',
       threadId: 'thr-1',
       userId: 'u',
       targetCats: ['opus-47'],
       status: 'running',
       updatedAt: NOW - 1 * HOUR,
     },
-    // 老 record 但有 fresh draft（健康长任务）→ 不报
+    { id: 'inv-new', threadId: 'thr-2', userId: 'u', targetCats: ['opus'], status: 'running', updatedAt: NOW - 1000 },
+    // failed → 死球，detail 取 error
     {
-      id: 'inv-alive',
-      threadId: 'thr-2',
-      userId: 'u',
-      targetCats: ['opus'],
-      status: 'running',
-      updatedAt: NOW - 1 * HOUR,
-    },
-    // 非 running → 忽略
-    {
-      id: 'inv-done',
+      id: 'inv-failed',
       threadId: 'thr-3',
       userId: 'u',
       targetCats: ['sonnet'],
-      status: 'succeeded',
-      updatedAt: NOW - 1 * HOUR,
+      status: 'failed',
+      error: 'provider_error',
+      updatedAt: NOW - 2 * HOUR,
     },
+    // 其余终态 → 忽略
+    { id: 'inv-done', threadId: 'thr-4', userId: 'u', targetCats: ['codex'], status: 'succeeded', updatedAt: NOW },
   ];
-  const draftsByThread = { 'thr-2': [{ invocationId: 'inv-alive', updatedAt: NOW - 1000 }] };
 
-  const { zombies, runningCount, runningZombieCount } = await collectZombies(
-    { scanAll: async () => records },
-    { getByThread: async (_u, tid) => draftsByThread[tid] ?? [] },
-    'u',
-    NOW,
+  const { zombies, runningCount, degraded } = await collectZombies({ scanAll: async () => records }, 'u');
+
+  assert.equal(degraded, false);
+  assert.equal(runningCount, 2, 'running = inv-long + inv-new');
+  assert.deepEqual(
+    zombies.map((z) => ({ invocationId: z.invocationId, catId: z.catId, detail: z.detail })),
+    [{ invocationId: 'inv-failed', catId: 'sonnet', detail: 'provider_error' }],
   );
-
-  assert.equal(runningCount, 2, 'running = inv-dead + inv-alive');
-  assert.equal(runningZombieCount, 1, '仅 running stale case 计入 runningZombieCount');
-  assert.equal(zombies.length, 1, '只 inv-dead 是死球');
-  assert.equal(zombies[0].invocationId, 'inv-dead');
-  assert.equal(zombies[0].catId, 'opus-47');
-  assert.ok(zombies[0].recordUpdatedAt === NOW - 1 * HOUR);
+  assert.equal(zombies[0].recordUpdatedAt, NOW - 2 * HOUR);
 });
 
 test('collectZombies: scanAll 不可用（in-memory store）→ degraded=true，空结果但不伪装完整数据面', async () => {
-  const { zombies, runningCount, degraded } = await collectZombies({}, { getByThread: async () => [] }, 'u', NOW);
+  const { zombies, runningCount, degraded } = await collectZombies({}, 'u');
   assert.deepEqual(zombies, []);
   assert.equal(runningCount, 0);
   assert.equal(degraded, true);
@@ -640,29 +629,46 @@ test('collectZombies: 只统计 briefing owner 的 invocation records', async ()
       invocationRecordStore: {
         scanAll: async () => [
           {
-            id: 'mine',
+            id: 'mine-failed',
             threadId: 'thr-1',
+            userId: 'u1',
+            targetCats: ['opus'],
+            status: 'failed',
+            updatedAt: NOW - HOUR,
+          },
+          {
+            id: 'other-failed',
+            threadId: 'thr-2',
+            userId: 'u2',
+            targetCats: ['sonnet'],
+            status: 'failed',
+            updatedAt: NOW - HOUR,
+          },
+          {
+            id: 'mine-running',
+            threadId: 'thr-3',
             userId: 'u1',
             targetCats: ['opus'],
             status: 'running',
             updatedAt: NOW - HOUR,
           },
           {
-            id: 'other',
-            threadId: 'thr-2',
+            id: 'other-running',
+            threadId: 'thr-4',
             userId: 'u2',
             targetCats: ['sonnet'],
             status: 'running',
-            updatedAt: NOW - HOUR,
+            updatedAt: NOW,
           },
         ],
       },
-      draftStore: { getByThread: async () => [] },
     }),
   );
-  assert.equal(input.zombies.length, 1);
-  assert.equal(input.zombies[0].invocationId, 'mine');
-  assert.equal(input.activeCount, 0);
+  assert.deepEqual(
+    input.zombies.map((z) => z.invocationId),
+    ['mine-failed'],
+  );
+  assert.equal(input.activeCount, 1, "only the owner's running invocation is active");
 });
 
 test('collectZombies: failed invocation 也进死球区（不是只看 running）', async () => {
@@ -682,7 +688,6 @@ test('collectZombies: failed invocation 也进死球区（不是只看 running�
           },
         ],
       },
-      draftStore: { getByThread: async () => [] },
     }),
   );
   assert.equal(input.zombies.length, 1);
@@ -766,14 +771,13 @@ test('activeCount: doing task + 活跃 hold + 健康 invocation 三源相加', a
           },
         ],
       },
-      draftStore: { getByThread: async () => [{ invocationId: 'inv-ok', updatedAt: NOW - 500 }] }, // fresh → 健康
     }),
   );
   assert.equal(input.activeCount, 3, '1 doing + 1 活跃hold + 1 健康invocation');
   assert.ok(input.oldestHeartbeatMs >= 2 * HOUR, 'oldestHeartbeat = doing task 龄');
 });
 
-test('oldestHeartbeatMs: 只有健康 invocation、无 doing task 时，仍保留 invocation 心跳年龄（非 0）', async () => {
+test('oldestHeartbeatMs (F117 KD-23): a running invocation counts as active but has no heartbeat age', async () => {
   const input = await collectDutyBriefingInput(
     mockDeps({
       invocationRecordStore: {
@@ -788,30 +792,9 @@ test('oldestHeartbeatMs: 只有健康 invocation、无 doing task 时，仍保�
           },
         ],
       },
-      draftStore: { getByThread: async () => [] },
     }),
   );
   assert.equal(input.activeCount, 1);
-  assert.ok(input.oldestHeartbeatMs >= 3 * MIN);
-});
-
-test('oldestHeartbeatMs: 有 fresh draft 时用 draft.updatedAt 而不是旧 record.updatedAt', async () => {
-  const input = await collectDutyBriefingInput(
-    mockDeps({
-      invocationRecordStore: {
-        scanAll: async () => [
-          {
-            id: 'inv-fresh',
-            threadId: 'thr-c',
-            userId: 'default-user',
-            targetCats: ['sonnet'],
-            status: 'running',
-            updatedAt: NOW - 5 * HOUR,
-          },
-        ],
-      },
-      draftStore: { getByThread: async () => [{ invocationId: 'inv-fresh', updatedAt: NOW - 5 * MIN }] },
-    }),
-  );
-  assert.ok(input.oldestHeartbeatMs < HOUR, 'fresh draft keeps healthy heartbeat fresh');
+  // record.updatedAt is not a heartbeat, and invocations no longer send one while silent.
+  assert.equal(input.oldestHeartbeatMs, 0, 'heartbeat age comes from tasks only');
 });

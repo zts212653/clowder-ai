@@ -5,8 +5,14 @@ import { registerPersonalChromePluginRoutes } from '../dist/routes/personal-chro
 
 test('only an explicit local-owner POST refreshes names; state reads and rejected callers cannot trigger it', async (t) => {
   const app = Fastify();
-  t.after(() => app.close());
-  const owner = process.env.DEFAULT_OWNER_USER_ID ?? 'owner-user';
+  const previousOwner = process.env.DEFAULT_OWNER_USER_ID;
+  process.env.DEFAULT_OWNER_USER_ID = 'owner-user';
+  t.after(async () => {
+    if (previousOwner === undefined) delete process.env.DEFAULT_OWNER_USER_ID;
+    else process.env.DEFAULT_OWNER_USER_ID = previousOwner;
+    await app.close();
+  });
+  const owner = 'owner-user';
   const state = { titleSync: { status: 'synced', updatedCount: 1, requestedCount: 2 } };
   let refreshes = 0;
   app.addHook('preHandler', async (request) => {

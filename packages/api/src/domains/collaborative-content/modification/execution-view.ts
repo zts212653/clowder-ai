@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { ContentModificationRecord, ContentModificationRequestView } from '@cat-cafe/shared';
-import { carrierEntryId } from '../../cats/services/agents/invocation/QueuedMessageCustodyCarrierProjection.js';
+import {
+  type QueueTargetExecutionReadPort,
+  readQueueTargetExecution,
+} from '../../cats/services/agents/invocation/queue-ledger/QueueTargetExecutionView.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
-import { projectQueueReceipt } from '../../cats/services/stores/ports/queued-message-receipt.js';
 import type { ITurnExecutionStore } from '../../cats/services/stores/ports/TurnExecutionStore.js';
 
 /** A queue carrier, a started executor and a returned result are separate owner facts. */
 export async function readModificationExecution(
   deps: {
-    messages: Pick<IMessageStore, 'getByIdempotencyKey'>;
+    messages: Pick<IMessageStore, 'getByIdempotencyKey' | 'getById'>;
+    queue?: QueueTargetExecutionReadPort;
     turnExecutions?: Pick<ITurnExecutionStore, 'get'>;
   },
   record: ContentModificationRecord,
@@ -27,26 +30,28 @@ export async function readModificationExecution(
     !message.mentions.includes(record.payload.targetCatId as (typeof message.mentions)[number])
   )
     return;
-  const target = message.queueCustody
-    ? projectQueueReceipt(message.queueCustody).targets.find((target) => target.catId === record.payload.targetCatId)
-    : undefined;
-  const latest = target?.attempts?.at(-1);
-  const invocationId = latest?.invocationId ?? target?.invocationId;
-  const queueEntryId = message.queueCustody
-    ? carrierEntryId(message.queueCustody, record.payload.targetCatId)
-    : undefined;
+  const execution = await readQueueTargetExecution(deps.messages, deps.queue, message, record.payload.targetCatId);
+  const invocationId = execution?.kind === 'response' ? execution.response.invocationId : undefined;
+  const queueEntryId = execution?.kind === 'pending' ? execution.entry.id : undefined;
   const evidence = {
     messageId: message.id,
     ...(queueEntryId ? { queueEntryId } : {}),
     targetCatId: record.payload.targetCatId,
     ...(invocationId ? { invocationId } : {}),
-    observedAt: latest?.updatedAt ?? message.timestamp,
-    evidenceRef: `message:${message.id}#queue-custody`,
+    observedAt:
+      execution?.kind === 'response'
+        ? (execution.response.completedAt ?? execution.response.startedAt)
+        : message.timestamp,
+    evidenceRef:
+      execution?.kind === 'response' ? `message:${execution.message.id}#response` : `message:${message.id}#input`,
   };
   if (invocationId && deps.turnExecutions) {
     const invocation = await deps.turnExecutions.get(invocationId);
     if (
       !invocation ||
+      invocation.invocationId !== invocationId ||
+      !invocation.parentInvocationId ||
+      invocation.parentInvocationId === invocationId ||
       invocation.userId !== record.ownerUserId ||
       invocation.threadId !== record.payload.threadId ||
       invocation.catId !== record.payload.targetCatId ||
@@ -71,12 +76,13 @@ export async function readModificationExecution(
       case 'interrupted':
         return { ...fact, state: 'interrupted' };
       case 'running':
-        return { ...fact, state: target?.state === 'withdrawn' ? 'withdrawn_running' : 'running' };
+        return {
+          ...fact,
+          state: message.deliveryStatus === 'canceled' || message.recall ? 'withdrawn_running' : 'running',
+        };
     }
   }
-  if (latest?.state === 'failed' || target?.state === 'failed') return { ...evidence, state: 'failed' };
-  if (latest?.state === 'interrupted' || target?.state === 'interrupted') return { ...evidence, state: 'interrupted' };
-  if (!invocationId && target?.state === 'withdrawn') return { ...evidence, state: 'cancelled' };
-  if (!invocationId && target && ['queued', 'notified'].includes(target.state)) return { ...evidence, state: 'queued' };
+  if (!invocationId && message.deliveryStatus === 'canceled') return { ...evidence, state: 'cancelled' };
+  if (execution?.kind === 'pending') return { ...evidence, state: 'queued' };
   return { ...evidence, state: 'unknown' };
 }

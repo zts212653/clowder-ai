@@ -31,6 +31,8 @@ export interface ThreadCatsRoutesOptions {
   getCatDisplayName: (catId: string) => string;
   getAllCatIds: () => string[];
   isCatAvailable: (catId: string) => boolean;
+  /** Read-only projection from the same head-time resolver used by Queue drain. */
+  resolveConversationFallbackTarget?: (threadId: string) => Promise<string | undefined>;
 }
 
 export const threadCatsRoutes: FastifyPluginAsync<ThreadCatsRoutesOptions> = async (app, opts) => {
@@ -64,9 +66,18 @@ export const threadCatsRoutes: FastifyPluginAsync<ThreadCatsRoutesOptions> = asy
       getCatDisplayName,
       isCatAvailable,
     });
+    let fallbackTargetCatId: string | null = null;
+    try {
+      fallbackTargetCatId = (await opts.resolveConversationFallbackTarget?.(id)) ?? null;
+    } catch (error) {
+      // Participants remain useful even when the exact Queue fallback read is
+      // temporarily unavailable. Return no fallback so the UI cannot guess.
+      request.log.warn({ error, threadId: id }, 'Failed to project exact conversation fallback target');
+    }
 
     return {
       ...result,
+      fallbackTargetCatId,
       routingPolicy: thread.routingPolicy ? `v${thread.routingPolicy.v}` : null,
     };
   });

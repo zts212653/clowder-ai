@@ -522,6 +522,20 @@ export interface GitHubWaitMatchedDelta {
 /** GitHub-specific result fields stay quarantined from other F280 wait domains. */
 export interface GitHubWaitOutcomeV1 extends WaitOutcomeBaseV1<GitHubWaitSubjectRef> {
   readonly domain?: 'github';
+  /**
+   * When a publisher claimed the exclusive right to send this outcome, if one has.
+   *
+   * This is a separate field rather than a `delivery` value, and that is a rollback requirement
+   * rather than a style choice. A claim taken by a new binary must still look DELIVERABLE to an
+   * older one: every pre-existing reader asks `delivery === 'pending'`, so encoding the claim in
+   * that union would make a downgrade treat a claimed-but-unsent outcome as terminal and strand
+   * the owner's wake forever — precisely the crash window the claim exists to make recoverable.
+   *
+   * Leaving `delivery: 'pending'` means an old reader drains and delivers it instead. Delivery is
+   * keyed on `outcomeId`, so that converges on the same Queue row rather than a second wake, and
+   * the worst a mixed-version window can produce is the owner being told — the safe direction.
+   */
+  readonly publishClaimedAt?: number;
   readonly matched?: readonly GitHubWaitMatchedDelta[];
   readonly terminalSubjectState?: 'merged' | 'closed';
   readonly deploymentMatch?: never;

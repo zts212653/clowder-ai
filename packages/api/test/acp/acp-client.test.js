@@ -986,6 +986,39 @@ describe('AcpClient', () => {
     assert.equal(thrownError.configuredIdleStallMs, 100, 'Should carry configured idleStallMs');
   });
 
+  it('F117: zero ACP prompt limits wait for explicit cancellation without inventing an idle failure', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.method === 'session/new') agentRespond(agentStdout, msg.id, { sessionId: 'f117-zero-sess' });
+      }
+    });
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.newSession();
+    const timer = setTimeout(() => client.cancelSession('f117-zero-sess'), 100);
+    const events = [];
+    let error;
+    try {
+      for await (const event of client.promptStream('f117-zero-sess', 'hello', {
+        timeoutMs: 0,
+        idleStallMs: 0,
+        idleWarningMs: 10,
+      }))
+        events.push(event);
+    } catch (caught) {
+      error = caught;
+    } finally {
+      clearTimeout(timer);
+    }
+    assert.ok(error, 'explicit cancellation settles the prompt');
+    assert.equal(error.code, 'SESSION_CANCELLED', 'explicit cancellation must not invent an idle timeout');
+    assert.match(error.message, /provider termination is unconfirmed/);
+    assert.ok(!events.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'));
+  });
+
   it('#1186: cancel settles prompt stream via sessionCancelCallbacks (real transport)', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
@@ -1044,9 +1077,8 @@ describe('AcpClient', () => {
 
     const elapsed = Date.now() - startMs;
 
-    // Should throw AcpStreamIdleError (from cancel callback)
     assert.ok(thrownError, 'Should throw after cancel');
-    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.code, 'SESSION_CANCELLED', `Expected SESSION_CANCELLED, got ${thrownError.code}`);
     assert.equal(
       client.isSafeForSingleFlightReuse,
       false,

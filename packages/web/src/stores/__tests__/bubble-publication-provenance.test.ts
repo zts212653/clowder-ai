@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
 import { messagePublicationSource } from '@/components/content-review/usePublishedContent';
-import { projectCanonicalBubbles } from '../bubble-projection';
+import { writeStoredSnapshot } from '@/hooks/named-message-writer';
 import { storedRevisionPatch } from '../bubble-publication-origins';
 import type { ChatMessage } from '../chat-types';
+import { useChatStore } from '../chatStore';
 
 it('once the stored time is known, a settled bubble opens its media under the stored revision (F309 entry 20)', () => {
   // Real page 2026-09-24: done carried the stored id, the bubble was rekeyed, but the gallery item
@@ -57,7 +58,7 @@ it('a bubble without folded origins only takes the stored time', () => {
   expect(storedRevisionPatch(plain, 2500)).toEqual({ timestamp: 2500 });
 });
 
-it('opens each folded media item using its own persisted message, revision and original item index', () => {
+it('keeps same-invocation messages separate and opens media under its own stored revision and index', () => {
   const first: ChatMessage = {
     id: 'first',
     type: 'assistant',
@@ -82,16 +83,19 @@ it('opens each folded media item using its own persisted message, revision and o
       rich: { v: 1, blocks: [{ kind: 'media_gallery', id: 'g2', v: 1, items: [{ url: '/uploads/c.png' }] }] },
     },
   };
-  const projected = projectCanonicalBubbles({ records: [first, second] }).messages;
-  expect(projected).toHaveLength(1);
-  const bubble = projected[0]!;
+  useChatStore.setState({ currentThreadId: 'thread', messages: [], threadStates: {} });
+  writeStoredSnapshot('thread', first);
+  writeStoredSnapshot('thread', second);
+  writeStoredSnapshot('thread', second);
+  expect(useChatStore.getState().messages.map((message) => message.id)).toEqual(['first', 'second']);
+  const bubble = useChatStore.getState().messages[1]!;
   const coordinate = {
     threadId: 'thread',
     messageId: bubble.id,
     messageRevision: String(bubble.timestamp),
     origins: bubble.projectionPublicationOrigins,
   };
-  expect(messagePublicationSource(coordinate, { kind: 'content-block', index: 1 }, '/uploads/b.mp4')).toEqual({
+  expect(messagePublicationSource(coordinate, { kind: 'content-block', index: 0 }, '/uploads/b.mp4')).toEqual({
     kind: 'message',
     threadId: 'thread',
     messageId: 'second',
@@ -109,7 +113,5 @@ it('opens each folded media item using its own persisted message, revision and o
     item: { kind: 'media-gallery', blockId: 'g2', itemIndex: 0 },
     expectedUrl: '/uploads/c.png',
   });
-  expect(projectCanonicalBubbles({ records: [bubble] }).messages[0]?.projectionPublicationOrigins).toEqual(
-    bubble.projectionPublicationOrigins,
-  );
+  expect(useChatStore.getState().messages[0]?.contentBlocks).toEqual(first.contentBlocks);
 });

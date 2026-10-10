@@ -11,10 +11,8 @@ function consume(content: string) {
     content,
     timestamp: Date.now(),
   };
-  return consumeBackgroundSystemInfo(msg, undefined, {
+  return consumeBackgroundSystemInfo(msg, {
     store,
-    bgStreamRefs: new Map(),
-    finalizedBgRefs: new Map(),
     nextBgSeq: () => 1,
     addToast: vi.fn(),
   });

@@ -4,7 +4,6 @@ import { test } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS } from '@cat-cafe/shared';
 import cookie from '@fastify/cookie';
 import Fastify from 'fastify';
-import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.ts';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.ts';
 import { ThreadStore } from '../src/domains/cats/services/stores/ports/ThreadStore.ts';
 import { MemoryConciergeConfigStore } from '../src/domains/concierge/ConciergeConfigStore.ts';
@@ -16,6 +15,8 @@ import { sessionAuthPlugin, sessionRoute } from '../src/infrastructure/session-a
 import { companionDecisionRoutes } from '../src/routes/companion-decision-routes.ts';
 import { conciergeLiveRoutes } from '../src/routes/concierge-live.ts';
 import { messagesRoutes } from '../src/routes/messages.ts';
+import './helpers/setup-cat-registry.js';
+import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.ts';
 
 test('Live surface enters ordinary messages with a real owner session and cannot replace or borrow a call', async (t) => {
   const app = Fastify();
@@ -45,8 +46,6 @@ test('Live surface enters ordinary messages with a real owner session and cannot
     dutyCatProfileId: 'opus',
     displayName: '宪宪',
   });
-  const tracker = new InvocationTracker();
-  const records = new Map();
   let passedPort;
   let sourceMessage;
   let startupItems;
@@ -58,7 +57,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
       hasMentions: true,
     }),
     ackCollectedCursors: async () => {},
-    routeExecution: async function* (userId, _content, threadId, messageId, targets, _intent, options) {
+    runNativeLive: async (userId, threadId, messageId, targets, options) => {
       passedPort = options.liveCompanion;
       sourceMessage = await messageStore.getById(messageId);
       await passedPort.configure({
@@ -90,9 +89,19 @@ test('Live surface enters ordinary messages with a real owner session and cannot
         },
       });
       await passedPort.finished;
-      yield { type: 'done', catId: targets[0], isFinal: true, timestamp: Date.now() };
     },
   };
+  const queueFixture = createPersistedQueueFixture(messageStore, {
+    liveCompanionSessions: sessions,
+    onExecution: (options) =>
+      router.runNativeLive(
+        'default-user',
+        messageStore.getById(options.persistedPromptMessageIds[0]).threadId,
+        options.persistedPromptMessageIds[0],
+        ['codex'],
+        options,
+      ),
+  });
   await app.register(cookie);
   await app.register(sessionAuthPlugin);
   await app.register(sessionRoute);
@@ -103,15 +112,10 @@ test('Live surface enters ordinary messages with a real owner session and cannot
     router,
     liveCompanionSessions: sessions,
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
-    invocationTracker: tracker,
-    invocationRecordStore: {
-      create: async ({ idempotencyKey }) => {
-        records.set(idempotencyKey, { invocationId: idempotencyKey, status: 'running' });
-        return { outcome: 'created', invocationId: idempotencyKey };
-      },
-      get: async (id) => records.get(id),
-      update: async (id, patch) => Object.assign(records.get(id), patch),
-    },
+    invocationTracker: queueFixture.tracker,
+    invocationQueue: queueFixture.queue,
+    queueProcessor: queueFixture.processor,
+    invocationRecordStore: queueFixture.records,
   });
   await app.register(companionDecisionRoutes, { ownerUserId: 'default-user' });
   await app.register(conciergeLiveRoutes, {
@@ -136,6 +140,7 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   });
   t.after(async () => {
     await sessions.close();
+    await queueFixture.close();
     await app.close();
   });
   const payload = { allowHomeReads: true };
@@ -192,6 +197,8 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   assert.equal(status.catId, 'codex', 'the real native carrier keeps its own principal');
   assert.equal(status.companion.duty.catId, 'opus');
   assert.equal(status.companion.displayName, '宪宪');
+  for (let attempt = 0; !passedPort && attempt < 100; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(passedPort, 'actual Queue must start the accepted Live handle');
   await passedPort.initialized.promise;
   const ready = await app.inject({ method: 'GET', url: `/api/concierge/live/${status.callId}`, headers });
   assert.equal(ready.json().state, 'ready');
@@ -206,13 +213,13 @@ test('Live surface enters ordinary messages with a real owner session and cannot
   assert.equal(sourceMessage.threadId, status.threadId);
   assert.equal(actionLedger.isHostAdmissionSource(sourceMessage.id), true);
   assert.equal(sessions.get(status.callId, 'other-owner'), undefined);
-  assert.throws(() => sessions.claim(status.callId, 'default-user', status.threadId, ['codex']), /mismatch/);
+  await assert.rejects(sessions.claim(status.callId, 'default-user', status.threadId, ['codex']), /mismatch/);
   const duplicate = await app.inject({ method: 'POST', url: '/api/concierge/live', headers, payload });
   assert.equal(duplicate.statusCode, 409);
   assert.equal(passedPort.status().state, 'ready');
   const remembered = messageStore.append({
     userId: 'default-user',
-    catId: null,
+    from: { kind: 'user', userId: 'default-user' },
     threadId: status.threadId,
     content: '刚才正在讨论合成模型的接缝',
     mentions: [],

@@ -19,7 +19,7 @@ const ROOT = join(__dirname, '..');
 // Phase 1 manifest data (inline since the YAML was removed from tree)
 // ---------------------------------------------------------------------------
 
-// Only include the 46 Tier 1 pipeline hooks (not N2, M1, M2, H1-H3)
+// Only include the 45 active Tier 1 pipeline hooks (not N2, M1, M2, H1-H3)
 const TIER1_HOOKS = [
   // Session-init stage: L1-L7, S1-S13, B1, C1 (22 hooks)
   {
@@ -324,7 +324,7 @@ const TIER1_HOOKS = [
     userExplanation: 'MCP 服务可用时注入的回调提示',
   },
 
-  // Per-turn stage: D1-D21, R1-R2, N1 (24 hooks)
+  // Per-turn stage: D1-D19, D21, R1-R2, N1 (23 hooks; D20 retired)
   {
     id: 'D1',
     name: '身份锚定',
@@ -481,17 +481,17 @@ const TIER1_HOOKS = [
   },
   {
     id: 'D12',
-    name: '活跃参与者',
+    name: '最近发言者',
     stage: 'per-turn',
     order: 1200,
-    template: 'd12-active-participants.md',
-    resolver: 'D12ActiveParticipantsResolver',
+    template: 'd12-recent-speaker.md',
+    resolver: 'D12Resolver',
     disableable: true,
     safetyTier: 'readonly',
     transparencyTier: 'opt-in-view',
     governanceTier: 'human-gated',
     inputs: ['activeParticipants'],
-    userExplanation: '当前 thread 中活跃的猫猫列表',
+    userExplanation: '最近在此 thread 发过言的成员（不表示正在执行）',
   },
   {
     id: 'D13',
@@ -590,20 +590,6 @@ const TIER1_HOOKS = [
     governanceTier: 'immutable',
     inputs: ['constitutionalKnowledge'],
     userExplanation: '核心治理知识和决策框架',
-  },
-  {
-    id: 'D20',
-    name: '信号文章',
-    stage: 'per-turn',
-    order: 2000,
-    template: 'd20-signal-articles.md',
-    resolver: 'D20SignalArticlesResolver',
-    disableable: true,
-    safetyTier: 'readonly',
-    transparencyTier: 'opt-in-view',
-    governanceTier: 'human-gated',
-    inputs: ['signalArticles'],
-    userExplanation: '相关的信号/知识文章摘要',
   },
   {
     id: 'D21',

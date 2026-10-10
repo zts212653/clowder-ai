@@ -9,7 +9,6 @@ import type { DevelopmentWorkActor } from '../../../domains/cats/services/stores
 import type { IMessageStore } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import { deriveGrowingSourceMessageRevision } from '../../../domains/cats/services/stores/ports/MessageStore.js';
 import type { IProposalStore } from '../../../domains/cats/services/stores/ports/ProposalStore.js';
-import { projectQueueReceipt } from '../../../domains/cats/services/stores/ports/queued-message-receipt.js';
 import type { ITaskStore } from '../../../domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../../../domains/cats/services/stores/ports/ThreadStore.js';
 import type {
@@ -247,17 +246,14 @@ export class DevelopmentReturnService {
     if (result.state === 'unavailable' || result.state === 'conflict' || !result.message) {
       throw new Error('Original owner return has not been accepted by durable Dispatch');
     }
-    const custody = result.message.queueCustody;
-    const withdrawn = custody?.withdrawnByCatIds?.some((cat) => cat === state.ownerCatId);
-    const failed = custody?.failedByCatIds.some((cat) => cat === state.ownerCatId);
-    const final =
-      withdrawn || failed
-        ? {
-            ...state,
-            status: 'retired' as const,
-            reason: withdrawn ? ('cancelled' as const) : ('delivery_failed' as const),
-          }
-        : { ...state, status: 'delivered' as const };
+    const withdrawn = result.message.deliveryStatus === 'canceled';
+    const final = withdrawn
+      ? {
+          ...state,
+          status: 'retired' as const,
+          reason: 'cancelled' as const,
+        }
+      : { ...state, status: 'delivered' as const };
     if (
       this.deps.definitions.replacePrivateExecutionReturn(id, state, { ...final, wakeMessageId: result.message.id })
     ) {
@@ -268,13 +264,16 @@ export class DevelopmentReturnService {
         messages: [
           {
             id: message.id,
+            from: message.from,
+            lifecycle: message.lifecycle,
+            deliveryStatus: message.deliveryStatus,
             content: message.content,
             catId: message.catId,
             timestamp: message.timestamp,
             mentions: message.mentions,
             userId: message.userId,
             source: message.source,
-            extra: { ...message.extra, ...(custody ? { queueReceipt: projectQueueReceipt(custody) } : {}) },
+            extra: message.extra,
           },
         ],
       });

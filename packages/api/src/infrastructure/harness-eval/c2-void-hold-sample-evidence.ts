@@ -2,7 +2,7 @@
  * F192 Phase D — C2 void-hold per-fire sample evidence extractor.
  *
  * Verdict 2026-06-10-eval-a2a-c2-void-hold-samples-build: labeled aggregate counters
- * (`{agent_id, thread_system_kind, trigger}`) tell us how many C2 void-hold-hint fires
+ * (`{agent_id, thread_system_kind, trigger}`) tell us how many C2 void-hold signals
  * happened but not which messages they were. Per-fire samples close that gap:
  * route-serial emits a `c2.void_hold_fired` span event at the same point as the
  * counter `add`, carrying raw IDs that RedactingSpanProcessor HMACs into

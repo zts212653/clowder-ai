@@ -5,6 +5,7 @@ import path from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 function createMockSocketManager() {
   const messages = [];
@@ -337,48 +338,102 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(messages[1].extra?.rich, undefined);
   });
 
-  // Regression (byte-identical duplicate bug): the shared Antigravity MCP posts via this agent-key
-  // path. Two concurrent identical deliveries must not both persist. Forces the check-then-act
-  // interleave by holding the winner's append open until the second request has run its dup check.
-  test('agent-key post-message does not double-store byte-identical concurrent posts (atomic dedup)', async () => {
+  test('agent-key callback concurrent same-ID retries share one durable message', async () => {
     const app = await createApp();
     const { secret } = await issueKey();
-
-    const realAppend = messageStore.append.bind(messageStore);
-    let releaseFirstAppend;
-    const firstAppendGate = new Promise((resolve) => {
-      releaseFirstAppend = resolve;
-    });
-    let signalFirstAppendEntered;
-    const firstAppendEntered = new Promise((resolve) => {
-      signalFirstAppendEntered = resolve;
-    });
-    let appendCount = 0;
-    messageStore.append = async (msg) => {
-      appendCount += 1;
-      if (appendCount === 1) {
-        signalFirstAppendEntered();
-        await firstAppendGate;
-      }
-      return realAppend(msg);
-    };
-
-    const payload = { content: 'concurrent identical agent-key report', threadId: ownedThreadId };
     const headers = { 'x-agent-key-secret': secret };
+    const realAppendIdempotent = messageStore.appendIdempotent.bind(messageStore);
+    let releaseFirst;
+    const gate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    let enteredFirst;
+    const entered = new Promise((resolve) => {
+      enteredFirst = resolve;
+    });
+    let calls = 0;
+    messageStore.appendIdempotent = async (input) => {
+      if (++calls === 1) {
+        enteredFirst();
+        await gate;
+      }
+      return realAppendIdempotent(input);
+    };
+    const payload = {
+      content: 'concurrent identical callback',
+      clientMessageId: 'concurrent-source-a',
+      threadId: ownedThreadId,
+    };
+    const firstPromise = app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    await entered;
+    let second;
+    try {
+      second = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { ...payload, clientMessageId: 'concurrent-source-a' },
+      });
+    } finally {
+      releaseFirst();
+    }
+    const first = await firstPromise;
+    assert.equal(first.statusCode, 200);
+    assert.equal(second.statusCode, 200);
+    assert.equal(first.json().status, 'duplicate');
+    assert.equal(second.json().status, 'ok');
+    assert.equal(first.json().messageId, second.json().messageId);
+    assert.equal(messageStore.size, 1);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 1);
+  });
 
-    const p1 = app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
-    await firstAppendEntered; // winner passed its dup check, now blocked inside append
-    const second = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
-    releaseFirstAppend();
-    await p1;
-
-    assert.equal(
-      JSON.parse(second.body).status,
-      'duplicate',
-      'concurrent identical agent-key post must be deduped even before the winner commits its append',
-    );
-    const recent = messageStore.getByThread(ownedThreadId, 10);
-    assert.equal(recent.length, 1, 'concurrent byte-identical agent-key posts must persist exactly ONE message');
+  test('agent-key callback concurrent different IDs preserve identical text', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+    const realAppendIdempotent = messageStore.appendIdempotent.bind(messageStore);
+    let releaseFirst;
+    const gate = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    let enteredFirst;
+    const entered = new Promise((resolve) => {
+      enteredFirst = resolve;
+    });
+    let calls = 0;
+    messageStore.appendIdempotent = async (input) => {
+      if (++calls === 1) {
+        enteredFirst();
+        await gate;
+      }
+      return realAppendIdempotent(input);
+    };
+    const payload = {
+      content: 'concurrent identical callback',
+      clientMessageId: 'concurrent-source-a',
+      threadId: ownedThreadId,
+    };
+    const firstPromise = app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    await entered;
+    let second;
+    try {
+      second = await app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { ...payload, clientMessageId: 'concurrent-source-b' },
+      });
+    } finally {
+      releaseFirst();
+    }
+    const first = await firstPromise;
+    assert.equal(first.statusCode, 200);
+    assert.equal(second.statusCode, 200);
+    assert.equal(first.json().status, 'ok');
+    assert.equal(second.json().status, 'ok');
+    assert.notEqual(first.json().messageId, second.json().messageId);
+    assert.equal(messageStore.size, 2);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 2);
   });
 
   test('post-message with agent-key + unowned threadId returns 403', async () => {
@@ -425,15 +480,17 @@ describe('Callback routes: agent-key auth path', () => {
 
   test('thread-context with agent-key can read owned soft-deleted thread tombstones', async () => {
     const deletedThread = await threadStore.create(TEST_USER, 'Deleted Readable Thread');
-    messageStore.append({
-      userId: TEST_USER,
-      catId: TEST_CAT,
-      content: 'context survives deletion',
-      mentions: [],
-      origin: 'callback',
-      timestamp: Date.now(),
-      threadId: deletedThread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: TEST_USER,
+        catId: TEST_CAT,
+        content: 'context survives deletion',
+        mentions: [],
+        origin: 'callback',
+        timestamp: Date.now(),
+        threadId: deletedThread.id,
+      }),
+    );
     assert.equal(await threadStore.softDelete(deletedThread.id), true);
     const app = await createApp();
     const { secret } = await issueKey();
@@ -470,6 +527,51 @@ describe('Callback routes: agent-key auth path', () => {
 
   // ---- P1-3 pipeline: dedup, mentions, replyTo ----
 
+  test('agent-key callback preserves different explicit message IDs with identical content', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+    const base = { content: 'independent same-text callback', threadId: ownedThreadId };
+    const post = (clientMessageId) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/callbacks/post-message',
+        headers,
+        payload: { ...base, clientMessageId },
+      });
+    const first = await post('distinct-source-a');
+    const retry = await post('distinct-source-a');
+    const second = await post('distinct-source-b');
+    assert.equal(first.json().status, 'ok');
+    assert.equal(retry.json().status, 'duplicate');
+    assert.equal(second.json().status, 'ok', 'A different client ID is a new source, not a body duplicate');
+    assert.notEqual(first.json().messageId, second.json().messageId);
+    assert.equal((await messageStore.getByThread(ownedThreadId)).length, 2);
+  });
+
+  test('agent-key callback retry restores an append that failed before persistence', async () => {
+    const app = await createApp();
+    const { secret } = await issueKey();
+    const headers = { 'x-agent-key-secret': secret };
+    const base = { content: 'independent same-text callback', threadId: ownedThreadId };
+    const originalAppend = messageStore.append.bind(messageStore);
+    let attempts = 0;
+    messageStore.append = (input) => {
+      if (++attempts === 1) throw new Error('isolated store failure before persistence');
+      return originalAppend(input);
+    };
+    const payload = { ...base, clientMessageId: 'retry-after-store-failure' };
+    const first = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(first.statusCode, 500);
+    assert.equal((await messageStore.getByThread(ownedThreadId)).length, 0);
+    const retry = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(retry.json().status, 'ok', 'Failed persistence must not consume the source identity');
+    const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
+    assert.equal(replay.json().status, 'duplicate');
+    assert.equal(replay.json().messageId, retry.json().messageId);
+    assert.equal((await messageStore.getByThread(ownedThreadId)).length, 1);
+  });
+
   test('post-message with agent-key deduplicates by clientMessageId', async () => {
     const app = await createApp();
     const { secret } = await issueKey();
@@ -492,7 +594,7 @@ describe('Callback routes: agent-key auth path', () => {
     assert.equal(JSON.parse(r2.body).status, 'duplicate');
   });
 
-  test('post-message with agent-key suppresses exact duplicate callback posts in the retry window', async () => {
+  test('agent-key callback without a client ID preserves repeated text as independent messages', async () => {
     const app = await createApp();
     const { secret } = await issueKey();
 
@@ -515,43 +617,49 @@ describe('Callback routes: agent-key auth path', () => {
     });
     assert.equal(r2.statusCode, 200);
     const secondBody = JSON.parse(r2.body);
-    assert.equal(secondBody.status, 'duplicate');
-    assert.equal(secondBody.messageId, firstBody.messageId);
+    assert.equal(secondBody.status, 'ok');
+    assert.notEqual(secondBody.messageId, firstBody.messageId);
 
     const messages = await messageStore.getByThread(ownedThreadId);
-    assert.equal(messages.length, 1);
-    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 1);
+    assert.equal(messages.length, 2);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 2);
   });
 
-  test('post-message with agent-key suppresses exact duplicate callback posts when first copy is queued', async () => {
+  test('agent-key callback new ID does not reuse a same-text queued source', async () => {
     const app = await createApp();
     const { secret } = await issueKey();
 
-    const queued = messageStore.append({
-      userId: TEST_USER,
-      catId: TEST_CAT,
-      content: 'same queued smoke report',
-      mentions: [],
-      origin: 'callback',
-      timestamp: Date.now(),
-      threadId: ownedThreadId,
-      deliveryStatus: 'queued',
-      extra: { isExplicitPost: true },
-    });
+    const queued = messageStore.append(
+      canonicalTestMessageInput({
+        userId: TEST_USER,
+        catId: TEST_CAT,
+        content: 'same queued smoke report',
+        mentions: [],
+        origin: 'callback',
+        timestamp: Date.now(),
+        threadId: ownedThreadId,
+        deliveryStatus: 'queued',
+        extra: { isExplicitPost: true },
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
       url: '/api/callbacks/post-message',
       headers: { 'x-agent-key-secret': secret },
-      payload: { content: 'same queued smoke report', threadId: ownedThreadId },
+      payload: {
+        clientMessageId: 'new-independent-source',
+        content: 'same queued smoke report',
+        threadId: ownedThreadId,
+      },
     });
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
-    assert.equal(body.status, 'duplicate');
-    assert.equal(body.messageId, queued.id);
+    assert.equal(body.status, 'ok');
+    assert.notEqual(body.messageId, queued.id);
 
-    assert.equal(messageStore.size, 1);
-    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 0);
+    assert.equal(messageStore.size, 2);
+    assert.equal(socketManager.getMessages().filter((m) => m.type === 'text').length, 1);
   });
 
   test('post-message with agent-key parses @mentions from content', async () => {

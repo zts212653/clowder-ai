@@ -99,16 +99,16 @@ describe('PersonalChromeAssistantReturnPoller', () => {
   it('retains a no-Redis restart return without head-blocking newer authorized returns', async () => {
     const messageStore = new MessageStore();
     const source = messageStore.append({
+      from: { kind: 'agent', catId: createCatId('codex-sol') },
       userId: 'alice',
-      catId: createCatId('codex-sol'),
       threadId: 'thread-f247-restart-return',
       content: '@gpt-pro recover this exact source after restart',
       mentions: [createCatId('gpt-pro')],
       timestamp: 1_000,
     });
     const newerSource = messageStore.append({
+      from: { kind: 'agent', catId: createCatId('codex-sol') },
       userId: 'alice',
-      catId: createCatId('codex-sol'),
       threadId: source.threadId,
       content: '@gpt-pro accept this newer source while the restart return remains recoverable',
       mentions: [createCatId('gpt-pro')],

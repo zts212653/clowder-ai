@@ -1,10 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearDebugEvents, configureDebug, dumpBubbleTimeline } from '@/debug/invocationEventDebug';
+import { clearDebugEvents, configureDebug } from '@/debug/invocationEventDebug';
+import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import type { ChatMessage } from '../chat-types';
-import { useChatStore } from '../chatStore';
+import { DEFAULT_THREAD_STATE, useChatStore } from '../chatStore';
 
 function makeMsg(id: string, content = 'hello'): ChatMessage {
   return { id, type: 'user', content, timestamp: Date.now() };
+}
+
+function responseLifecycle(
+  invocationId: string,
+  status: 'processing' | 'completed',
+  completedAt?: number,
+): Extract<NonNullable<ChatMessage['lifecycle']>, { kind: 'response' }> {
+  return {
+    kind: 'response',
+    orderKey: `1:${invocationId}`,
+    status,
+    targetId: 'codex',
+    invocationId,
+    inputEntryIds: [],
+    inputMessageIds: [],
+    startedAt: 1,
+    ...(completedAt === undefined ? {} : { completedAt }),
+  };
+}
+
+type MessageWriter = 'addMessage' | 'active addMessageToThread' | 'background addMessageToThread';
+
+function writeMessage(writer: MessageWriter, existing: ChatMessage[], incoming: ChatMessage): ChatMessage[] {
+  const background = writer === 'background addMessageToThread';
+  useChatStore.setState({
+    messages: background ? [] : existing,
+    threadStates: background ? { 'thread-b': { ...DEFAULT_THREAD_STATE, messages: existing } } : {},
+  });
+
+  if (writer === 'addMessage') {
+    useChatStore.getState().addMessage(incoming);
+  } else {
+    useChatStore.getState().addMessageToThread(background ? 'thread-b' : 'thread-a', incoming);
+  }
+
+  return selectThreadMessages(useChatStore.getState(), background ? 'thread-b' : 'thread-a');
 }
 
 describe('chatStore multi-thread state', () => {
@@ -153,6 +190,37 @@ describe('chatStore multi-thread state', () => {
       const ts = useChatStore.getState().threadStates['thread-b'];
       expect(ts?.messages).toHaveLength(1);
     });
+
+    it.each<MessageWriter>([
+      'addMessage',
+      'active addMessageToThread',
+      'background addMessageToThread',
+    ])('orders a newly appended message from %s on the shared presentation timeline', (writer) => {
+      const existing: ChatMessage[] = [
+        { id: 'first', type: 'user', content: 'first', timestamp: 1_000, timelineOrderAt: 1_000 },
+        { id: 'third', type: 'user', content: 'third', timestamp: 3_000, timelineOrderAt: 3_000 },
+      ];
+      const messages = writeMessage(writer, existing, {
+        id: 'second',
+        type: 'assistant',
+        catId: 'sol',
+        content: 'second',
+        timestamp: 500,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '500:inv-second',
+          invocationId: 'inv-second',
+          targetId: 'sol',
+          inputEntryIds: ['entry-second'],
+          inputMessageIds: ['input-second'],
+          status: 'completed',
+          startedAt: 500,
+          completedAt: 2_000,
+        },
+      });
+
+      expect(messages.map((message) => message.id)).toEqual(['first', 'second', 'third']);
+    });
   });
 
   describe('appendToThreadMessage', () => {
@@ -169,176 +237,7 @@ describe('chatStore multi-thread state', () => {
     });
   });
 
-  describe('replaceMessageId / replaceThreadMessageId', () => {
-    it('replaces an optimistic active-thread message id in place', () => {
-      useChatStore.getState().addMessage(makeMsg('temp-user-1', 'hello'));
-      useChatStore.getState().replaceMessageId('temp-user-1', 'msg-server-1');
-
-      const messages = useChatStore.getState().messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-1');
-      expect(messages[0].content).toBe('hello');
-    });
-
-    it('atomically rekeys active-thread projection source ids with the persisted message id', () => {
-      useChatStore.getState().addMessage({
-        ...makeMsg('temp-stream-1', 'visible CLI output'),
-        type: 'assistant',
-        projectionSourceMessageIds: ['stream-sibling', 'temp-stream-1'],
-      });
-
-      useChatStore.getState().replaceMessageId('temp-stream-1', 'msg-server-1');
-
-      expect(useChatStore.getState().messages).toEqual([
-        expect.objectContaining({
-          id: 'msg-server-1',
-          projectionSourceMessageIds: ['stream-sibling', 'msg-server-1'],
-        }),
-      ]);
-    });
-
-    it('rekeys the media origins a live record left on its bubble (F309 entry 20)', () => {
-      const gallery = { kind: 'media-gallery' as const, blockId: 'g1', itemIndex: 0 };
-      const sibling = { kind: 'content-block' as const, index: 0 };
-      useChatStore.getState().addMessage({
-        ...makeMsg('msg-live-codex-sol', ''),
-        type: 'assistant',
-        projectionSourceMessageIds: ['msg-live-codex-sol', 'callback-1'],
-        projectionPublicationOrigins: {
-          'media-gallery:g1:0': { messageId: 'msg-live-codex-sol', messageRevision: '2000', item: gallery },
-          'content-block:0': { messageId: 'callback-1', messageRevision: '1900', item: sibling },
-        },
-      });
-
-      useChatStore.getState().replaceMessageId('msg-live-codex-sol', 'msg-server-1');
-
-      expect(useChatStore.getState().messages[0]?.projectionPublicationOrigins).toEqual({
-        'media-gallery:g1:0': { messageId: 'msg-server-1', messageRevision: '2000', item: gallery },
-        'content-block:0': { messageId: 'callback-1', messageRevision: '1900', item: sibling },
-      });
-    });
-
-    it('drops the optimistic active-thread duplicate when the canonical id already exists', () => {
-      useChatStore.getState().addMessage(makeMsg('temp-user-1', 'hello'));
-      useChatStore.getState().addMessage(makeMsg('msg-server-1', 'hello'));
-
-      useChatStore.getState().replaceMessageId('temp-user-1', 'msg-server-1');
-
-      const messages = useChatStore.getState().messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-1');
-    });
-
-    it('TD112: merges duplicate assistant bubble at addMessage time instead of needing replaceMessageId drop', () => {
-      configureDebug({ enabled: true });
-      useChatStore.getState().addMessage({
-        id: 'temp-stream-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'hello',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: Date.now(),
-      });
-      useChatStore.getState().addMessage({
-        id: 'msg-server-1',
-        type: 'assistant',
-        catId: 'opus',
-        content: 'hello',
-        origin: 'callback',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: Date.now() + 1,
-      });
-
-      // TD112: second addMessage merges into first — only 1 message exists
-      expect(useChatStore.getState().messages).toHaveLength(1);
-      expect(useChatStore.getState().messages[0]!.id).toBe('temp-stream-1');
-      expect(useChatStore.getState().messages[0]!.origin).toBe('callback');
-
-      // The merge event should have been recorded
-      expect(dumpBubbleTimeline({ rawThreadId: true }).events).toEqual([
-        expect.objectContaining({
-          event: 'bubble_lifecycle',
-          threadId: 'thread-a',
-          action: 'merge',
-          reason: 'td112_store_dedup',
-          catId: 'opus',
-        }),
-      ]);
-    });
-
-    it('TD112: merges a server draft into an existing stream placeholder by invocation identity', () => {
-      useChatStore.getState().addMessage({
-        id: 'msg-inv-live-codex',
-        type: 'assistant',
-        catId: 'codex',
-        content: 'live partial',
-        origin: 'stream',
-        isStreaming: true,
-        extra: { stream: { invocationId: 'inv-live' } },
-        timestamp: Date.now(),
-      });
-      useChatStore.getState().addMessage({
-        id: 'draft-inv-live',
-        type: 'assistant',
-        catId: 'codex',
-        content: 'server draft partial',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-live' } },
-        timestamp: Date.now() + 1,
-      });
-
-      const messages = useChatStore.getState().messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0]).toEqual(
-        expect.objectContaining({
-          id: 'msg-inv-live-codex',
-          catId: 'codex',
-          content: 'server draft partial',
-          extra: { stream: { invocationId: 'inv-live' } },
-        }),
-      );
-    });
-
-    it('replaces an optimistic background-thread message id in place', () => {
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
-
-      useChatStore.getState().replaceThreadMessageId('thread-b', 'temp-user-2', 'msg-server-2');
-
-      const messages = useChatStore.getState().threadStates['thread-b']?.messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-2');
-      expect(messages[0].content).toBe('background');
-    });
-
-    it('atomically rekeys background-thread projection source ids with the persisted message id', () => {
-      useChatStore.getState().addMessageToThread('thread-b', {
-        ...makeMsg('temp-stream-2', 'visible CLI output'),
-        type: 'assistant',
-        projectionSourceMessageIds: ['stream-sibling', 'temp-stream-2'],
-      });
-
-      useChatStore.getState().replaceThreadMessageId('thread-b', 'temp-stream-2', 'msg-server-2');
-
-      expect(useChatStore.getState().threadStates['thread-b']?.messages).toEqual([
-        expect.objectContaining({
-          id: 'msg-server-2',
-          projectionSourceMessageIds: ['stream-sibling', 'msg-server-2'],
-        }),
-      ]);
-    });
-
-    it('drops the optimistic background-thread duplicate when the canonical id already exists', () => {
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('temp-user-2', 'background'));
-      useChatStore.getState().addMessageToThread('thread-b', makeMsg('msg-server-2', 'background'));
-
-      useChatStore.getState().replaceThreadMessageId('thread-b', 'temp-user-2', 'msg-server-2');
-
-      const messages = useChatStore.getState().threadStates['thread-b']?.messages;
-      expect(messages).toHaveLength(1);
-      expect(messages[0].id).toBe('msg-server-2');
-    });
-
+  describe('message patches and timeline order', () => {
     it('patchMessage merges callback fields without dropping stream invocation identity', () => {
       useChatStore.getState().addMessage({
         id: 'msg-stream-1',
@@ -370,6 +269,147 @@ describe('chatStore multi-thread state', () => {
           },
         }),
       ]);
+    });
+
+    it('keeps an active response in place during streaming and moves it only after an input is read', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 1_000,
+            timelineOrderAt: 1_000,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 2_000 },
+        ],
+      });
+
+      useChatStore.getState().patchMessage('response-live', { timestamp: 3_000, timelineOrderAt: 3_000 });
+
+      const state = useChatStore.getState();
+      expect(state.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
+        'response-live',
+        'user-later',
+      ]);
+
+      useChatStore.getState().patchMessage('response-live', {
+        lifecycle: { ...responseLifecycle('inv-live', 'processing'), latestInputTimelineOrderAt: 2_500 },
+      });
+      const readState = useChatStore.getState();
+      expect(readState.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(readState, 'thread-a').map((message) => message.id)).toEqual([
+        'user-later',
+        'response-live',
+      ]);
+    });
+
+    it('does not sort every stream token once the processing response is already at the live edge', () => {
+      useChatStore.setState({
+        messages: [
+          { id: 'user-earlier', type: 'user', content: 'context', timestamp: 1_000 },
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 2_000,
+            timelineOrderAt: 2_000,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+        ],
+      });
+      const sortSpy = vi.spyOn(Array.prototype, 'toSorted');
+      try {
+        useChatStore.getState().patchMessage('response-live', { timestamp: 3_000, timelineOrderAt: 3_000 });
+
+        expect(sortSpy).not.toHaveBeenCalled();
+        expect(useChatStore.getState().messages.map((message) => message.id)).toEqual([
+          'user-earlier',
+          'response-live',
+        ]);
+      } finally {
+        sortSpy.mockRestore();
+      }
+    });
+
+    it('reorders a lifecycle response when it becomes terminal, and it stops streaming', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-live',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'working',
+            timestamp: 1_000,
+            timelineOrderAt: 1_000,
+            isStreaming: true,
+            lifecycle: responseLifecycle('inv-live', 'processing'),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 2_000 },
+        ],
+      });
+
+      useChatStore.getState().upsertLifecycleMessage('thread-a', {
+        id: 'response-live',
+        type: 'assistant',
+        catId: 'codex',
+        content: 'done',
+        timestamp: 1_000,
+        timelineOrderAt: 1_000,
+        lifecycle: responseLifecycle('inv-live', 'completed', 3_000),
+      });
+
+      const state = useChatStore.getState();
+      expect(state.messages.map((message) => message.id)).toEqual(['response-live', 'user-later']);
+      expect(selectThreadMessages(state, 'thread-a').map((message) => message.id)).toEqual([
+        'user-later',
+        'response-live',
+      ]);
+      expect(state.messages[0]).toMatchObject({ content: 'done', isStreaming: false });
+    });
+
+    it('appends a late legacy chunk without moving a terminal response back to the live edge', () => {
+      useChatStore.setState({
+        messages: [
+          {
+            id: 'response-terminal',
+            type: 'assistant',
+            catId: 'codex',
+            content: 'done',
+            timestamp: 1_000,
+            timelineOrderAt: 1_500,
+            isStreaming: false,
+            lifecycle: responseLifecycle('inv-terminal', 'completed', 3_000),
+          },
+          { id: 'user-later', type: 'user', content: 'new context', timestamp: 4_000 },
+        ],
+      });
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(5_000);
+      try {
+        useChatStore.getState().batchStreamChunkUpdate({
+          threadId: 'thread-a',
+          messageId: 'response-terminal',
+          catId: 'codex',
+          content: ' + late chunk',
+          streaming: true,
+          catStatus: 'done',
+        });
+
+        const messages = useChatStore.getState().messages;
+        expect(messages.map((message) => message.id)).toEqual(['response-terminal', 'user-later']);
+        expect(messages[0]).toMatchObject({
+          content: 'done + late chunk',
+          timestamp: 1_000,
+          timelineOrderAt: 1_500,
+          isStreaming: false,
+        });
+      } finally {
+        nowSpy.mockRestore();
+      }
     });
   });
 

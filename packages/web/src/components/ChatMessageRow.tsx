@@ -1,5 +1,6 @@
 'use client';
 
+import type { CapabilityTipContext, LifecycleActiveRun } from '@cat-cafe/shared';
 import { memo } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
@@ -13,8 +14,7 @@ interface ChatMessageRowProps {
   compact?: boolean;
   threadId: string;
   timelineMessages: readonly ChatMessageData[];
-  activeInvocationIds?: ReadonlySet<string>;
-  settlingInvocationIds?: ReadonlySet<string>;
+  activeRuns?: readonly LifecycleActiveRun[];
   getCatById: (id: string) => CatData | undefined;
   onEditCat: (catId: string) => void;
   onEditCoCreator: () => void;
@@ -28,6 +28,8 @@ interface ChatMessageRowProps {
   forwardingDisabled: boolean;
   eager?: boolean;
   backgroundMountDelayMs?: number;
+  showCapabilityTip?: boolean;
+  capabilityTipContexts?: readonly CapabilityTipContext[];
   /** Routes interactive rich-block sends back to the surface that rendered this row. */
   sendContext?: string;
   confirmations?: CardConfirmationEntry[];
@@ -43,8 +45,7 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   compact = false,
   threadId,
   timelineMessages,
-  activeInvocationIds,
-  settlingInvocationIds,
+  activeRuns,
   getCatById,
   onEditCat,
   onEditCoCreator,
@@ -58,6 +59,8 @@ export const ChatMessageRow = memo(function ChatMessageRow({
   forwardingDisabled,
   eager,
   backgroundMountDelayMs,
+  showCapabilityTip,
+  capabilityTipContexts,
   sendContext,
   confirmations,
 }: ChatMessageRowProps) {
@@ -83,14 +86,15 @@ export const ChatMessageRow = memo(function ChatMessageRow({
           compact={compact}
           threadId={threadId}
           timelineMessages={timelineMessages}
-          activeInvocationIds={activeInvocationIds}
-          settlingInvocationIds={settlingInvocationIds}
+          activeRuns={activeRuns}
           getCatById={getCatById}
           onEditCat={onEditCat}
           onEditCoCreator={onEditCoCreator}
           hideDiagnosticsPanel={hideDiagnosticsPanel}
           dedupCount={dedupCount}
           forwardingDisabled={forwardingDisabled}
+          showCapabilityTip={showCapabilityTip}
+          capabilityTipContexts={capabilityTipContexts}
           sendContext={sendContext}
           confirmations={confirmations}
         />

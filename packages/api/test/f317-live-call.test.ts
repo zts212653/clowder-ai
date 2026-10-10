@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { createCatId } from '@cat-cafe/shared';
 import type { CodexAppServerJsonObject } from '../src/domains/cats/services/agents/providers/CodexAppServerEventMapper.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -12,7 +13,7 @@ test('a crashed desktop expires the Host call without needing another user messa
   const call = await LiveCompanionCall.create({
     binding: { userId: 'owner', threadId: 'home', catId: createCatId('codex-astra'), callId: 'expired' },
     messageStore: new MessageStore(),
-    mcpDistDir: resolve('../mcp-server/dist'),
+    mcpDistDir: fileURLToPath(new URL('../../mcp-server/dist/', import.meta.url)),
     allowedDirectories: [resolve('../../docs')],
     verifyNativeBinding: async () => true,
     publish() {},
@@ -31,7 +32,7 @@ test('voice-only startup tells the fast cat that household tools are not authori
   const call = await LiveCompanionCall.create({
     binding: { userId: 'owner', threadId: 'home', catId: createCatId('codex-astra'), callId: 'voice-only' },
     messageStore: new MessageStore(),
-    mcpDistDir: resolve('../mcp-server/dist'),
+    mcpDistDir: fileURLToPath(new URL('../../mcp-server/dist/', import.meta.url)),
     allowedDirectories: [resolve('../../docs')],
     householdToolsEnabled: false,
     loadConversation: async () => 'RECENT_OWN_CONVERSATION',
@@ -80,7 +81,7 @@ test('a Host call starts native V3, persists spoken items and revokes its creden
   const call = await LiveCompanionCall.create({
     binding: { userId: 'owner', threadId: 'home', catId: createCatId('codex-astra'), callId: 'call' },
     messageStore: store,
-    mcpDistDir: resolve('../mcp-server/dist'),
+    mcpDistDir: fileURLToPath(new URL('../../mcp-server/dist/', import.meta.url)),
     allowedDirectories: [resolve('../../docs')],
     verifyNativeBinding: async (id) => id === 'native',
     publish: (message) => published.push(message.id),
@@ -195,7 +196,7 @@ test('stop during history restoration never starts Realtime or revives the close
   const call = await LiveCompanionCall.create({
     binding: { userId: 'owner', threadId: 'home', catId: createCatId('codex-astra'), callId: 'stopped-context' },
     messageStore: new MessageStore(),
-    mcpDistDir: resolve('../mcp-server/dist'),
+    mcpDistDir: fileURLToPath(new URL('../../mcp-server/dist/', import.meta.url)),
     allowedDirectories: [resolve('../../docs')],
     loadConversation: () => {
       loaded();

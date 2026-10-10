@@ -1,6 +1,6 @@
 import type { CodexAppServerJsonObject } from '../../cats/services/agents/providers/CodexAppServerEventMapper.js';
 import type { CodexLiveNativeClient, CodexLiveRunPort } from '../../cats/services/agents/providers/CodexLiveRunPort.js';
-import type { FreshnessReadableMessage } from '../../cats/services/freshness/checkFreshnessForPostMessage.js';
+import type { FreshnessReadableMessage } from '../../cats/services/freshness/freshness-unseen-source.js';
 import { LiveBoundaryContexts } from './host/live-boundary-contexts.js';
 import { LiveContextGate, type LiveContextScope, type LiveControlledContext } from './host/live-controlled-context.js';
 import { startLiveRealtime } from './host/live-realtime-start.js';
@@ -101,6 +101,9 @@ export class LiveCompanionCall implements CodexLiveRunPort {
   }
   transcriptScope(): { callId: string; realtimeSessionId: string } | undefined {
     return this.realtimeSessionId ? { callId: this.id, realtimeSessionId: this.realtimeSessionId } : undefined;
+  }
+  acceptsAdmission(): boolean {
+    return !this.stopRequested && this.state === 'preparing';
   }
   acceptsInput(): boolean {
     return !this.stopRequested && this.state === 'talking';

@@ -6,15 +6,10 @@ const mockApiFetch = vi.fn();
 const mockAddMessageToThread = vi.fn();
 const mockSetThreadLoading = vi.fn();
 const mockSetThreadHasActiveInvocation = vi.fn();
-const mockResetRefs = vi.fn();
 const mockProcessCommand = vi.fn(async () => false);
 
 vi.mock('@/utils/api-client', () => ({
   apiFetch: (...args: unknown[]) => mockApiFetch(...args),
-}));
-
-vi.mock('@/hooks/useAgentMessages', () => ({
-  useAgentMessages: () => ({ resetRefs: mockResetRefs }),
 }));
 
 vi.mock('@/hooks/useChatCommands', () => ({
@@ -23,12 +18,15 @@ vi.mock('@/hooks/useChatCommands', () => ({
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: Object.assign(
-    () => ({
-      addMessageToThread: mockAddMessageToThread,
-      setThreadLoading: mockSetThreadLoading,
-      setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
-      currentThreadId: 'thread-stale',
-    }),
+    (selector?: (state: Record<string, unknown>) => unknown) => {
+      const state = {
+        addMessageToThread: mockAddMessageToThread,
+        setThreadLoading: mockSetThreadLoading,
+        setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
+        currentThreadId: 'thread-stale',
+      };
+      return selector ? selector(state) : state;
+    },
     {
       getState: () => ({ currentThreadId: 'thread-stale' }),
     },
@@ -60,7 +58,7 @@ function SendWithImageRunner({
     if (called.current) return;
     called.current = true;
     const file = new File([new Uint8Array([1, 2, 3])], 'cat.png', { type: 'image/png' });
-    handleSend('@布偶 看图', [file], undefined, undefined, 'queue', undefined, 'continue_current').then(onDone);
+    handleSend('@布偶 看图', [file]).then(onDone);
   }, [handleSend, onDone]);
 
   return null;
@@ -97,7 +95,6 @@ describe('useSendMessage upload status', () => {
     mockAddMessageToThread.mockReset();
     mockSetThreadLoading.mockReset();
     mockSetThreadHasActiveInvocation.mockReset();
-    mockResetRefs.mockReset();
     mockProcessCommand.mockReset();
     mockProcessCommand.mockResolvedValue(false);
 
@@ -160,8 +157,8 @@ describe('useSendMessage upload status', () => {
     );
   });
 
-  it('sends the typed author disposition in multipart admission', async () => {
-    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ userMessageId: 'message-1' }) });
+  it('leaves persisted disposition resolution to server admission for multipart sends', async () => {
+    mockApiFetch.mockResolvedValue({ ok: true, json: async () => ({ status: 'queued', entryId: 'entry-1' }) });
 
     await act(async () => {
       root.render(
@@ -175,6 +172,6 @@ describe('useSendMessage upload status', () => {
     });
 
     const form = mockApiFetch.mock.calls[0]?.[1]?.body as FormData;
-    expect(form.get('messageDisposition')).toBe('continue_current');
+    expect(form.get('messageDisposition')).toBeNull();
   });
 });

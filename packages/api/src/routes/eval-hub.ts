@@ -5,7 +5,6 @@ import {
   requireConnectorWriteNetworkGuard,
   requireConnectorWriteOwner,
 } from '../config/connector-secret-write-guards.js';
-import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveDesignGateReplayDeps } from '../infrastructure/harness-eval/design-gate/design-gate-replay-preflight.js';
 import { setEvalCatOverride } from '../infrastructure/harness-eval/domain/eval-domain-override.js';
@@ -24,11 +23,10 @@ import { registerCallbackAuthHook, requireCallbackPrincipal } from './callback-a
 import { registerPublishVerdictRefreshRoute } from './publish-verdict-refresh-route.js';
 
 export type {
+  EvalDeliveryLike,
   GenerateNowInput,
   GenerateNowSuccess,
   HandlerError,
-  InvokeTriggerLike,
-  InvokeTriggerOutcome,
   InvokeTriggerProvider,
   ManualTriggerDeps,
   TriggerNowInput,
@@ -49,7 +47,6 @@ export interface EvalHubRoutesOptions {
   /** F192 OQ-21: late-bound invokeTrigger for manual eval wake. */
   invokeTriggerProvider?: InvokeTriggerProvider;
   /** F192 OQ-21: message store for delivering invocation packet on manual trigger. */
-  messageStore?: IMessageStore;
   /** F192 Phase H: GitPublisher impl (real = git worktree + gh; tests inject mock). */
   gitPublisher?: GitPublisher;
   /**
@@ -199,7 +196,6 @@ export const evalHubRoutes: FastifyPluginAsync<EvalHubRoutesOptions> = async (ap
       {
         harnessFeedbackRoot: opts.harnessFeedbackRoot,
         invokeTriggerProvider: opts.invokeTriggerProvider,
-        messageStore: opts.messageStore,
         threadStore: opts.threadStore,
         redis: opts.redis,
         // cloud R5 P2 (PR-2): pass wired publish-verdict domain set so

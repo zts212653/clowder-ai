@@ -26,9 +26,11 @@ export function useApprovalHubSync() {
     };
     window.addEventListener('cat-cafe:proposal-updated', handler);
     window.addEventListener('cat-cafe:proposal-created', handler);
+    window.addEventListener('cat-cafe:socket-reconnected', handler);
     return () => {
       window.removeEventListener('cat-cafe:proposal-updated', handler);
       window.removeEventListener('cat-cafe:proposal-created', handler);
+      window.removeEventListener('cat-cafe:socket-reconnected', handler);
     };
   }, [fetchPending]);
 }

@@ -1,7 +1,6 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { projectCanonicalBubbles } from '@/stores/bubble-projection';
 import type { ChatMessage as ChatMessageData } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
@@ -110,11 +109,8 @@ describe('ChatMessageRow R21 cached stdout forwarding', () => {
         },
       },
     };
-    const [message] = projectCanonicalBubbles({ records: [rawMessage] }).messages;
-    if (!message) throw new Error('cached R21 bubble projection missing');
-    expect(message.content).toBe('CACHED_R21_SPEECH');
-    expect(message.extra?.stream?.cliStdout).toBeUndefined();
-    expect(message.extra?.stream?.speechContent).toBeUndefined();
+    // The stored record renders as is: no client projection rewrites it first.
+    const message = rawMessage;
 
     act(() => {
       root.render(

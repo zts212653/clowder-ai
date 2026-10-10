@@ -242,13 +242,11 @@ describe('RedisAgentKeyBackend', { skip: redisIsolationSkipReason(process.env.RE
       '../dist/domains/cats/services/agents/agent-key/RedisAgentKeyBackend.js'
     );
 
-    const redis = createRedisClient({ url: REDIS_URL, keyPrefix: 'cat-cafe-agent-key-registry-test:' });
+    const redis = createRedisClient({
+      url: REDIS_URL,
+      keyPrefix: `cat-cafe-agent-key-registry-test:${process.pid}:${Date.now()}:`,
+    });
     try {
-      const leftover = await redis.keys('cat-cafe-agent-key-registry-test:*');
-      if (leftover.length > 0) {
-        await redis.del(...leftover.map((k) => k.replace('cat-cafe-agent-key-registry-test:', '')));
-      }
-
       const issuer = new AgentKeyRegistry({ backend: new RedisAgentKeyBackend(redis) });
       const verifier = new AgentKeyRegistry({ backend: new RedisAgentKeyBackend(redis) });
       const issued = await issuer.issue('antig-opus', 'default-user');
@@ -261,10 +259,6 @@ describe('RedisAgentKeyBackend', { skip: redisIsolationSkipReason(process.env.RE
         assert.equal(result.record.userId, 'default-user');
       }
     } finally {
-      const leftover = await redis.keys('cat-cafe-agent-key-registry-test:*');
-      if (leftover.length > 0) {
-        await redis.del(...leftover.map((k) => k.replace('cat-cafe-agent-key-registry-test:', '')));
-      }
       await redis.quit();
     }
   });
@@ -278,11 +272,6 @@ describe('RedisAgentKeyBackend', { skip: redisIsolationSkipReason(process.env.RE
 
     const redis = createRedisClient({ url: REDIS_URL, keyPrefix: 'cat-cafe-agent-key-registry-test:' });
     try {
-      const leftover = await redis.keys('cat-cafe-agent-key-registry-test:*');
-      if (leftover.length > 0) {
-        await redis.del(...leftover.map((k) => k.replace('cat-cafe-agent-key-registry-test:', '')));
-      }
-
       await redis.sadd('auth:agent-key:index', 'stale-agent-key-id');
       const registry = new AgentKeyRegistry({ backend: new RedisAgentKeyBackend(redis) });
 
@@ -292,10 +281,6 @@ describe('RedisAgentKeyBackend', { skip: redisIsolationSkipReason(process.env.RE
       const isMember = await redis.sismember('auth:agent-key:index', 'stale-agent-key-id');
       assert.equal(isMember, 0);
     } finally {
-      const leftover = await redis.keys('cat-cafe-agent-key-registry-test:*');
-      if (leftover.length > 0) {
-        await redis.del(...leftover.map((k) => k.replace('cat-cafe-agent-key-registry-test:', '')));
-      }
       await redis.quit();
     }
   });

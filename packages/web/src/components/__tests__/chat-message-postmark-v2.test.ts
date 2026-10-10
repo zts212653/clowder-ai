@@ -75,6 +75,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
     const message = {
       id: 'm1',
       type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: '',
       timestamp: Date.now(),
@@ -130,6 +131,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
     const message = {
       id: 'm-thread-switch',
       type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: '',
       timestamp: Date.now(),
@@ -175,6 +177,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
     const message = {
       id: 'm1',
       type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: '',
       timestamp: Date.now(),
@@ -221,6 +224,7 @@ describe('ChatMessage Postmark v2 source pill', () => {
     const message = {
       id: 'm-self',
       type: 'assistant',
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: '',
       timestamp: Date.now(),

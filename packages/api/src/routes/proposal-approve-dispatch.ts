@@ -1,7 +1,6 @@
 import type { CatId, DeclaredWorkMode, ReportingMode } from '@cat-cafe/shared';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
-import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -20,13 +19,11 @@ import {
 export { enrichWithParentThreadHeader } from './proposal-enrich-header.js';
 
 type ProposalRouter = Pick<AgentRouter, 'resolveTargetsAndIntent'>;
-type ProposalInvocationQueue = Pick<InvocationQueue, 'enqueue' | 'backfillMessageId' | 'rollbackEnqueue'>;
-type ProposalQueueProcessor = Pick<QueueProcessor, 'processNext'>;
+type ProposalInvocationQueue = Pick<InvocationQueue, 'send' | 'enqueueExistingMessageDurable'>;
 
 export interface ProposalInitialMessageDispatchDeps {
   router?: ProposalRouter;
   invocationQueue?: ProposalInvocationQueue;
-  queueProcessor?: ProposalQueueProcessor;
 }
 
 export interface AppendApprovedInitialMessageInput extends ProposalInitialMessageDispatchDeps {
@@ -172,7 +169,6 @@ export async function appendApprovedInitialMessage({
   socketManager,
   router,
   invocationQueue,
-  queueProcessor,
   existingSeed,
 }: AppendApprovedInitialMessageInput): Promise<AppendApprovedInitialMessageResult> {
   // F128 source envelope: seed content uses the envelope only when there is no
@@ -211,7 +207,7 @@ export async function appendApprovedInitialMessage({
   };
   // Phase AA (AC-AA6): resolve source cat handle for routing credentials
   const sourceCatHandle = sourceCatId ? (primaryMentionHandleForCatId(sourceCatId) ?? `@${sourceCatId}`) : null;
-  if (!router || !invocationQueue || !queueProcessor) {
+  if (!router || !invocationQueue) {
     if (existingSeed) {
       // We cannot wake a target without dispatch dependencies. Cancel the existing
       // seed so the reconcile loop stops retrying a permanently unwakeable row.
@@ -230,8 +226,8 @@ export async function appendApprovedInitialMessage({
       declaredWorkMode,
     );
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4: source cat is the message author
       content: enrichedFallback,
       mentions: [],
       timestamp: Date.now(),
@@ -285,8 +281,8 @@ export async function appendApprovedInitialMessage({
       return cancelExistingSeed(existingSeed, messageStore, 'no target cats resolved');
     }
     const stored = await messageStore.append({
+      from: sourceCatId ? { kind: 'agent', catId: sourceCatId } : { kind: 'user', userId },
       userId,
-      catId: sourceCatId ?? null, // AC-AA4
       content,
       mentions: [],
       timestamp: Date.now(),
@@ -321,7 +317,6 @@ export async function appendApprovedInitialMessage({
     threadStore,
     socketManager,
     invocationQueue,
-    queueProcessor,
-    existingSeed,
+    ...(existingSeed ? { existingSeed } : {}),
   });
 }

@@ -164,6 +164,37 @@ describe('F296 B3b-3: declaration and routable event are separate capabilities',
     );
   });
 
+  test('Claude Agent SDK accepts its typed boundary once its in-process hook attested this invocation (F117 K2)', () => {
+    const sdk = capability('anthropic', 'agent_sdk', true);
+    for (const eventSource of ['claude_compact_boundary', 'claude_precompact_hook']) {
+      assert.equal(
+        resolveAuthoritativeCompactionSupport({
+          capability: sdk,
+          eventSource,
+          hookAuthenticationReady: true,
+          hookCarrierReady: true,
+          hookInvocationAttested: true,
+        }).status,
+        'supported',
+      );
+    }
+    assert.deepEqual(
+      resolveAuthoritativeCompactionSupport({
+        capability: sdk,
+        eventSource: 'claude_compact_boundary',
+        hookAuthenticationReady: true,
+        hookCarrierReady: true,
+        hookInvocationAttested: false,
+      }),
+      { status: 'unsupported', reason: 'hook_invocation_attestation_unavailable' },
+    );
+    assert.deepEqual(
+      resolveAuthoritativeCompactionSupport({ capability: sdk, eventSource: 'claude_compact_boundary' }),
+      { status: 'unsupported', reason: 'hook_authentication_unavailable' },
+      'without its in-process hooks the SDK carrier proves nothing',
+    );
+  });
+
   test('every other production carrier stays unsupported, including observesCompression declarations', () => {
     for (const candidate of [
       capability('openai', 'exec_json', true),

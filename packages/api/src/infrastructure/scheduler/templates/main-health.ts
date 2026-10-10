@@ -210,7 +210,6 @@ async function executeMainHealth(
   deps: MainHealthExecutionDeps,
 ): Promise<void> {
   if (!ctx.deliver) throw new Error('deliver not available');
-  if (!ctx.invokeTrigger) throw new Error('invokeTrigger not available');
   const observed = await readReceipt(input, deps.inspectReceipt, ctx.signal);
   const verified = await runCheckOnReceiptTree(input, observed.receipt, deps, ctx.signal);
   const project = await readProjectQuarantine(input, deps.readQuarantine, deps.now);
@@ -231,11 +230,16 @@ async function executeMainHealth(
     quarantine: project.quarantine,
   });
   const threadId = subjectKey.slice('thread-'.length);
-  const messageId = await ctx.deliver({ threadId, content, userId: 'scheduler' });
-  await ctx.invokeTrigger.trigger(threadId, input.guardianCatId, deps.triggerUserId, content, messageId, undefined, {
-    reason: 'scheduled_main_health_triage',
-    sourceCategory: 'scheduled',
+  // The stored owner and the Queue owner are the same tenant by construction now: one admission
+  // cannot disagree with itself, where the old two-step could persist under a different userId.
+  await ctx.deliver({
+    threadId,
+    content,
+    userId: deps.triggerUserId,
+    targetCatId: input.guardianCatId,
+    idempotencyKey: `main-health:${threadId}:${status}`,
     priority: status === 'red' ? 'urgent' : 'normal',
+    sourceCategory: 'scheduled',
   });
 }
 

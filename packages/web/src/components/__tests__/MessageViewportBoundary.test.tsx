@@ -63,6 +63,22 @@ describe('MessageViewportBoundary', () => {
     expect(boundary?.style.containIntrinsicSize).toBe('auto 240px');
   });
 
+  it('keeps its height when hover lifts the containment (no jitter under the pointer)', () => {
+    act(() => {
+      root.render(
+        <MessageViewportBoundary>
+          <p>message</p>
+        </MessageViewportBoundary>,
+      );
+    });
+
+    // `content-visibility: auto` contains the bubble's bottom margin; the hover/focus `visible` state alone would let
+    // it collapse out, so every row under the pointer lost 16px and, with native scroll anchoring off in the chat
+    // container, the view jumped. A block formatting context of its own keeps the height the same in both states.
+    const boundary = container.querySelector<HTMLElement>('[data-message-viewport-boundary]');
+    expect(boundary?.className.split(/\s+/)).toContain('flow-root');
+  });
+
   it('defers an old message subtree until its placeholder approaches the viewport', () => {
     act(() => {
       root.render(

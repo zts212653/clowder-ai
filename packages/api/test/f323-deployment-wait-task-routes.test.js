@@ -7,6 +7,7 @@ import { MessageStore } from '../dist/domains/cats/services/stores/ports/Message
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { DeploymentWaitLifecycleService } from '../dist/domains/runtime-deployment/DeploymentWaitLifecycleService.js';
 import { tasksRoutes } from '../dist/routes/tasks.js';
+import { connectorDeliveryHarness } from './helpers/connector-delivery-harness.js';
 
 const TARGET = 'a'.repeat(40);
 
@@ -71,7 +72,8 @@ async function fixture() {
   assert.ok(installed);
   const lifecycle = new DeploymentWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    messageStore,
+    deliveryDeps: connectorDeliveryHarness({ messageStore }).deliveryDeps,
     currentObservation: async () => observation(['api']),
     log: { info() {}, warn() {}, error() {} },
   });

@@ -1,9 +1,9 @@
 import type { ChatMessage } from '@/stores/chat-types';
 import { messageRendersNothing } from './message-render-visibility';
 
-/** Your own message: a user message with no cat author (the same test `ChatMessage` uses to pick its user branch). */
+/** The same canonical user identity that ChatMessage uses for its human branch. */
 export function isOwnHumanMessage(message: ChatMessage): boolean {
-  return message.type === 'user' && !message.catId;
+  return message.from?.kind === 'user';
 }
 
 interface RunContext {

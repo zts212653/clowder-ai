@@ -1,4 +1,3 @@
-import type { CatId } from '@cat-cafe/shared';
 import type { IMessageStore, StoredMessage } from '../stores/ports/MessageStore.js';
 
 interface NarrativeSocketLike {
@@ -16,8 +15,8 @@ export async function appendGameSystemMessage(params: {
   const stored = params.messageStore
     ? await Promise.resolve(
         params.messageStore.append({
+          from: { kind: 'system', service: 'game-orchestrator' },
           userId: 'system',
-          catId: 'system' as CatId,
           content: params.content,
           mentions: [],
           timestamp,

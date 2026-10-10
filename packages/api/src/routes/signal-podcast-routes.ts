@@ -1,11 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import type { AgentRouter } from '../domains/cats/services/agents/routing/AgentRouter.js';
-import type { InvocationTracker } from '../domains/cats/services/index.js';
 import type { AnyMessageStore } from '../domains/cats/services/stores/factories/MessageStoreFactory.js';
-import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveSignalPaths } from '../domains/signals/config/sources-loader.js';
 import { SignalArticleQueryService } from '../domains/signals/services/article-query-service.js';
@@ -24,10 +22,8 @@ const podcastBodySchema = z.object({
 export interface PodcastRouteOptions {
   messageStore: AnyMessageStore;
   threadStore: IThreadStore;
-  router: AgentRouter;
-  invocationRecordStore: IInvocationRecordStore;
-  invocationTracker: InvocationTracker;
-  queueProcessor: Pick<QueueProcessor, 'markPromptMessagesSeen'>;
+  invocationQueue: InvocationQueue;
+  queueProcessor: Pick<QueueProcessor, 'registerEntryCompleteHook' | 'unregisterEntryCompleteHook' | 'requestDrain'>;
 }
 
 /**
@@ -65,10 +61,7 @@ export const signalPodcastRoutes: FastifyPluginAsync<PodcastRouteOptions> = asyn
   const studyMeta = new StudyMetaService();
 
   const threadDeps: ThreadInvokeDeps = {
-    messageStore: opts.messageStore,
-    router: opts.router,
-    invocationRecordStore: opts.invocationRecordStore,
-    invocationTracker: opts.invocationTracker,
+    invocationQueue: opts.invocationQueue,
     queueProcessor: opts.queueProcessor,
   };
 

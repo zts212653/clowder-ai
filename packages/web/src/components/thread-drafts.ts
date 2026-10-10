@@ -1,4 +1,4 @@
-import { type ContextAttachment, ContextAttachmentsSchema } from '@cat-cafe/shared';
+import { type ContextAttachment, ContextAttachmentsSchema, type ReplyPreview } from '@cat-cafe/shared';
 
 const STORAGE_KEY = 'cat-cafe:thread-drafts';
 const REPLY_STORAGE_KEY = 'cat-cafe:thread-reply-drafts';
@@ -11,10 +11,8 @@ const contextAttachmentDraftListeners = new Set<() => void>();
  * Reply context persisted alongside the text draft so quoted messages survive
  * thread switching (#934).
  */
-export interface DraftReplyContext {
+export interface DraftReplyContext extends ReplyPreview {
   id: string;
-  content: string;
-  senderCatId: string | null;
   threadId: string;
 }
 

@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  CONTEXT_ATTACHMENT_MAX_COUNT,
-  type ContextAttachment,
-  ContextAttachmentSchema,
-  type FreshnessCarrierCapability,
-  type MessageWorkDisposition,
-} from '@cat-cafe/shared';
+import { CONTEXT_ATTACHMENT_MAX_COUNT, type ContextAttachment, ContextAttachmentSchema } from '@cat-cafe/shared';
 import {
   type Dispatch,
   KeyboardEvent,
@@ -20,7 +14,6 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { useCatData } from '@/hooks/useCatData';
-import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
 import { reconnectGame } from '@/hooks/useGameReconnect';
 import { useIMEGuard } from '@/hooks/useIMEGuard';
 import { useLiveExecutionCancelControl } from '@/hooks/useLiveExecutionCancelControl';
@@ -28,7 +21,7 @@ import { useMessageDispositionPreference } from '@/hooks/useMessageDispositionPr
 import { usePathCompletion } from '@/hooks/usePathCompletion';
 import type { UploadStatus, WhisperOptions } from '@/hooks/useSendMessage';
 import { useThreadLiveness } from '@/hooks/useThreadScopedSelectors';
-import type { DeliveryMode } from '@/stores/chat-types';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { useChatStore } from '@/stores/chatStore';
 import { useInputHistoryStore } from '@/stores/inputHistoryStore';
 import { apiFetch } from '@/utils/api-client';
@@ -44,8 +37,6 @@ import { buildCatOptions, type CatOption, detectMenuTrigger, GAME_LIST, WEREWOLF
 import { deriveImageLifecycleStatus, isImageLifecycleBlockingSend } from './chat-input-upload-state';
 import { GameLobby, type GameStartPayload } from './game/GameLobby';
 import { HistorySearchModal } from './HistorySearchModal';
-import { MessageDispositionSelector } from './MessageDispositionSelector';
-import { classifyFreshnessCarrierSupport } from './message-disposition-presentation';
 import { PathCompletionMenu } from './PathCompletionMenu';
 import { ReplyPreviewBar } from './ReplyPreviewBar';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
@@ -87,13 +78,7 @@ function useHydrated(): boolean {
 }
 
 interface ChatInputProps {
-  /**
-   * Which presentation the HOST gives this composer. `'v2'` only where the host also mounts the one execution row above
-   * it (ThreadChatSurface): the row then says who is running / whether the run can be verified / how to stop it, so the
-   * composer drops its "猫猫正在回复中… 取消" bar and the empty-draft stop becomes its last control. Every other host
-   * (the split view mounts a bare ChatInput) keeps the classic composer, whatever shell is chosen — nothing there would
-   * say those things in its place.
-   */
+  /** The v2 host keeps the stop as the last control for an empty draft; classic retains a side stop. */
   presentation?: 'classic' | 'v2';
   /** Thread ID for draft persistence — drafts are saved per-thread */
   threadId?: string;
@@ -101,10 +86,9 @@ interface ChatInputProps {
     content: string,
     images?: File[],
     whisper?: WhisperOptions,
-    deliveryMode?: DeliveryMode,
     replyToId?: string,
-    messageDisposition?: MessageWorkDisposition,
     contextAttachments?: ContextAttachment[],
+    explicitTargetCats?: string[],
   ) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
   hasActiveInvocation?: boolean;
@@ -159,54 +143,42 @@ export function ChatInput({
   // F122B AC-B10: track which cats are actively executing (for whisper disable)
   const currentThreadId = useChatStore((s) => s.currentThreadId);
   const {
+    hasActive: legacyHasActiveInvocation,
     activeInvocations,
-    catInvocations,
     targetCats: storeTargetCats,
   } = useThreadLiveness(threadId ?? currentThreadId);
   const effectiveThreadId = threadId ?? currentThreadId;
+  const legacyCancelTargets = useMemo(
+    () =>
+      Object.entries(activeInvocations).map(([executionId, invocation]) => ({ executionId, catId: invocation.catId })),
+    [activeInvocations],
+  );
   const {
     executions: canonicalExecutions,
     state: projectedCancelState,
     cancelAll: handleProjectedStop,
-  } = useLiveExecutionCancelControl(effectiveThreadId);
-  // Shared with ThreadExecutionBar: both surfaces must answer "can we verify this
-  // thread's run state?" identically, or their independent fail-closed choices can
-  // combine into a state with no cancel AND no recovery exit.
-  const { canonicalProjectionStale, hasUnverifiedLegacyExecution } = useExecutionRecoveryVerification(
-    threadId,
-    unscopedHasActiveInvocation,
-  );
-  const hasActiveInvocation = canonicalExecutions.length > 0 || hasUnverifiedLegacyExecution;
+  } = useLiveExecutionCancelControl(effectiveThreadId, legacyCancelTargets);
+  const effectiveLegacyActive = threadId
+    ? legacyHasActiveInvocation
+    : legacyHasActiveInvocation || unscopedHasActiveInvocation;
+  const hasActiveInvocation = canonicalExecutions.length > 0 || effectiveLegacyActive;
+  const stopState: 'available' | 'pending' | 'unavailable' | 'hidden' = hasActiveInvocation
+    ? projectedCancelState
+    : 'hidden';
   const shellV2 = presentation === 'v2';
-  const stopState: 'available' | 'pending' | 'unavailable' | 'hidden' =
-    canonicalExecutions.length === 0 ? (hasUnverifiedLegacyExecution ? 'unavailable' : 'hidden') : projectedCancelState;
   const activeCatIds = useMemo(() => {
     const ids = new Set<string>();
     for (const execution of canonicalExecutions) {
       ids.add(execution.catId);
     }
-    if (ids.size === 0 && hasUnverifiedLegacyExecution) {
+    if (ids.size === 0 && legacyHasActiveInvocation) {
       for (const inv of Object.values(activeInvocations ?? {})) ids.add(inv.catId);
       if (ids.size === 0 && storeTargetCats?.length) {
         for (const catId of storeTargetCats) ids.add(catId);
       }
     }
     return ids;
-  }, [activeInvocations, canonicalExecutions, hasUnverifiedLegacyExecution, storeTargetCats]);
-
-  // Stable identity key for the current execution set. Changes when any
-  // execution starts or ends, enabling the steer confirmation modal to
-  // detect same-render A→B invocation transitions.
-  const activeExecutionKey = useMemo(
-    () =>
-      canonicalExecutions.length > 0
-        ? canonicalExecutions
-            .map((e) => e.executionId)
-            .sort()
-            .join(',')
-        : undefined,
-    [canonicalExecutions],
-  );
+  }, [activeInvocations, canonicalExecutions, legacyHasActiveInvocation, storeTargetCats]);
 
   const [unscopedInput, setUnscopedInput] = useState('');
   const scopedInput = useSyncExternalStore(
@@ -228,6 +200,7 @@ export function ChatInput({
     [threadId],
   );
   const appliedSeedIdRef = useRef<string | null>(null);
+
   const [showMentions, setShowMentions] = useState(false);
   const [showGameMenu, setShowGameMenu] = useState(false);
   const [gameStep, setGameStep] = useState<'list' | 'modes'>('list');
@@ -252,22 +225,12 @@ export function ChatInput({
     if (!whisperMode || whisperTargets.size === 0) return false;
     return ![...whisperTargets].some((catId) => activeCatIds.has(catId));
   }, [whisperMode, whisperTargets, activeCatIds]);
-  const dispositionIsMeaningful = Boolean(hasActiveInvocation && !whisperTargetsAllIdle);
-  const messageDisposition = useMessageDispositionPreference(threadId, dispositionIsMeaningful);
-  const dispositionCarrierCapabilities = useMemo(() => {
-    const targetCatIds = whisperMode
-      ? [...whisperTargets].filter((catId) => activeCatIds.has(catId))
-      : [...activeCatIds];
-    return targetCatIds.map((catId) => catInvocations[catId]?.freshnessCarrierCapability) as (
-      | FreshnessCarrierCapability
-      | undefined
-    )[];
-  }, [activeCatIds, catInvocations, whisperMode, whisperTargets]);
-  const dispositionCarrierSupport = classifyFreshnessCarrierSupport(dispositionCarrierCapabilities);
-  const displayedDisposition =
-    messageDisposition.effective === 'continue_current' && dispositionCarrierSupport !== 'exact'
-      ? 'next_work'
-      : messageDisposition.effective;
+  const messageDisposition = useMessageDispositionPreference(effectiveThreadId, Boolean(effectiveThreadId));
+  const guideReplyNames = cats
+    .filter((cat) => activeCatIds.has(cat.id) && cat.messageDeliveryCapabilities?.guideReply === true)
+    .map(formatCatDisplayName);
+  const guideReplyHint =
+    guideReplyNames.length > 0 ? `想调整方向？可直接给${guideReplyNames.join('/')}发消息，引导回复。` : undefined;
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [contextPickerMode, setContextPickerMode] = useState<ContextPickerMode | null>(null);
@@ -343,102 +306,66 @@ export function ChatInput({
   // F080-P2: path completion
   const pathCompletion = usePathCompletion(input);
 
-  const doSend = useCallback(
-    (deliveryMode?: DeliveryMode) => {
-      if (sendTemporarilyDisabled) return;
-      if (whisperMode && whisperTargets.size === 0) return;
-      const trimmed = input.trim();
-      if ((trimmed || contextAttachments.length > 0) && !disabled) {
-        const draftSnapshot = {
-          text: input,
-          images: [...images],
-          contextAttachments: [...contextAttachments],
-          replyTo: replyToMessage,
-        };
-        if (trimmed) addHistoryEntry(trimmed);
-        const whisper =
-          whisperMode && whisperTargets.size > 0
-            ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
-            : undefined;
-        // Only a one-shot override belongs on this message. Thread/global/product
-        // inheritance resolves again at server admission, closing hydration races.
-        const declaredDisposition =
-          dispositionIsMeaningful && deliveryMode !== 'force'
-            ? dispositionCarrierSupport === 'exact'
-              ? (messageDisposition.oneShot ?? undefined)
-              : 'next_work'
-            : undefined;
-        const settleAdmission = beginComposerDraftAdmission(draftSnapshot);
-        let admission: ReturnType<ChatInputProps['onSend']>;
-        try {
-          admission =
-            contextAttachments.length > 0
-              ? onSend(
-                  trimmed,
-                  images.length > 0 ? images : undefined,
-                  whisper,
-                  deliveryMode,
-                  replyToMessage?.id,
-                  declaredDisposition,
-                  contextAttachments,
-                )
-              : onSend(
-                  trimmed,
-                  images.length > 0 ? images : undefined,
-                  whisper,
-                  deliveryMode,
-                  replyToMessage?.id,
-                  declaredDisposition,
-                );
-        } catch {
-          settleAdmission(false);
-          return;
-        }
-        void Promise.resolve(admission).then(
-          (accepted) => settleAdmission(accepted === false ? false : undefined),
-          () => settleAdmission(false),
-        );
-        if (declaredDisposition && messageDisposition.oneShot !== null) {
-          void Promise.resolve(admission).then((accepted) => {
-            if (accepted !== false) messageDisposition.clearOneShot();
-          });
-        }
-        markComposerDraftOptimisticallyCleared();
-        setInput('');
-        ghostRef.current = null;
-        setGhostSuggestion(null);
-        setImages([]);
-        setContextAttachments([]);
-        setShowMentions(false);
-        setShowGameMenu(false);
-        // Only clear the reply snapshot that was actually sent.
-        if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
+  const doSend = useCallback(() => {
+    if (sendTemporarilyDisabled) return;
+    if (whisperMode && whisperTargets.size === 0) return;
+    const trimmed = input.trim();
+    if ((trimmed || contextAttachments.length > 0) && !disabled) {
+      const draftSnapshot = {
+        text: input,
+        images: [...images],
+        contextAttachments: [...contextAttachments],
+        replyTo: replyToMessage,
+      };
+      if (trimmed) addHistoryEntry(trimmed);
+      const whisper =
+        whisperMode && whisperTargets.size > 0
+          ? { visibility: 'whisper' as const, whisperTo: [...whisperTargets] }
+          : undefined;
+      const settleAdmission = beginComposerDraftAdmission(draftSnapshot);
+      let admission: ReturnType<ChatInputProps['onSend']>;
+      try {
+        admission =
+          contextAttachments.length > 0
+            ? onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id, contextAttachments)
+            : onSend(trimmed, images.length > 0 ? images : undefined, whisper, replyToMessage?.id);
+      } catch {
+        settleAdmission(false);
+        return;
       }
-    },
-    [
-      input,
-      disabled,
-      onSend,
-      images,
-      contextAttachments,
-      sendTemporarilyDisabled,
-      whisperMode,
-      whisperTargets,
-      addHistoryEntry,
-      replyToMessage,
-      clearReplyTo,
-      dispositionIsMeaningful,
-      messageDisposition,
-      dispositionCarrierSupport,
-      beginComposerDraftAdmission,
-      markComposerDraftOptimisticallyCleared,
-      setInput,
-    ],
-  );
+      void Promise.resolve(admission).then(
+        (accepted) => settleAdmission(accepted === false ? false : undefined),
+        () => settleAdmission(false),
+      );
+      markComposerDraftOptimisticallyCleared();
+      setInput('');
+      ghostRef.current = null;
+      setGhostSuggestion(null);
+      setImages([]);
+      setContextAttachments([]);
+      setShowMentions(false);
+      setShowGameMenu(false);
+      // Only clear the reply snapshot that was actually sent.
+      if (replyToMessage && useChatStore.getState().replyToMessage?.id === replyToMessage.id) clearReplyTo();
+    }
+  }, [
+    input,
+    disabled,
+    onSend,
+    images,
+    contextAttachments,
+    sendTemporarilyDisabled,
+    whisperMode,
+    whisperTargets,
+    addHistoryEntry,
+    replyToMessage,
+    clearReplyTo,
+    beginComposerDraftAdmission,
+    markComposerDraftOptimisticallyCleared,
+    setInput,
+  ]);
 
-  const handleSend = useCallback(() => doSend(undefined), [doSend]);
-  const handleQueueSend = useCallback(() => doSend('queue'), [doSend]);
-  const handleForceSend = useCallback(() => doSend('force'), [doSend]);
+  const handleSend = useCallback(() => doSend(), [doSend]);
 
   const closeMenus = useCallback(() => {
     setShowMentions(false);
@@ -719,9 +646,7 @@ export function ChatInput({
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      // F39+F108B: Enter while cat running → queue send; whisper to idle targets → normal send
-      if (hasActiveInvocation && !whisperTargetsAllIdle) handleQueueSend();
-      else handleSend();
+      handleSend();
     }
   };
 
@@ -872,7 +797,7 @@ export function ChatInput({
     const isMobile = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 767px)').matches : false;
     const maxH = isMobile ? 120 : 200; // ~5 lines mobile, ~8 lines desktop
     ta.style.height = `${Math.min(ta.scrollHeight, maxH)}px`;
-  }, [input]);
+  }, [input, guideReplyHint]);
 
   useEffect(() => {
     if (!activeMenu) return;
@@ -892,46 +817,6 @@ export function ChatInput({
 
   return (
     <div className="relative bg-[var(--console-shell-bg)] safe-area-bottom">
-      {/* F39: Queue status bar — visible when cat is running. New shell (v2): the one execution row above the composer
-          says this and holds the stop; the classic interface keeps the bar unchanged. */}
-      {hasActiveInvocation && !shellV2 && (
-        <div data-testid="active-invocation-banner" className="px-4 pt-2 flex items-center gap-2">
-          <span className="inline-block w-2 h-2 rounded-full bg-[var(--color-cocreator-primary)] animate-pulse" />
-          <span className="text-xs text-[var(--color-cocreator-primary)] font-medium">
-            {canonicalExecutions.length > 0
-              ? canonicalProjectionStale
-                ? '猫猫正在回复中 · 状态暂不可核对'
-                : '猫猫正在回复中...'
-              : canonicalProjectionStale
-                ? '运行状态暂不可核对'
-                : '正在确认运行状态...'}
-          </span>
-          <span className="text-xs text-cafe-muted flex-1">
-            {displayedDisposition === 'continue_current' ? '当前轮可在安全断点读取' : '继续输入，消息会成为下一件工作'}
-          </span>
-          {stopState !== 'hidden' && (
-            <button
-              type="button"
-              data-testid="banner-cancel-btn"
-              onClick={() => void handleProjectedStop()}
-              disabled={stopState !== 'available'}
-              className="text-xs text-cafe-muted hover:text-cafe-primary transition-colors px-2 py-0.5 rounded-md hover:bg-cafe-surface-elevated flex-shrink-0 disabled:cursor-wait disabled:opacity-50"
-              aria-label="Stop generation"
-            >
-              {stopState === 'pending' ? '正在停止' : stopState === 'available' ? '取消' : '暂不可取消'}
-            </button>
-          )}
-        </div>
-      )}
-
-      {dispositionIsMeaningful && (
-        <MessageDispositionSelector
-          controller={messageDisposition}
-          carrierSupport={dispositionCarrierSupport}
-          carrierCapabilities={dispositionCarrierCapabilities}
-        />
-      )}
-
       {contextPickerMode && (
         <ChatContextPicker
           mode={contextPickerMode}
@@ -1035,6 +920,7 @@ export function ChatInput({
           onWhisperToggle={handleWhisperToggle}
           onGameClick={handleGameClick}
           onClose={() => setAddMenuOpen(false)}
+          messageDisposition={messageDisposition}
           triggerRef={addButtonRef}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
@@ -1088,11 +974,7 @@ export function ChatInput({
             placeholder={
               whisperMode
                 ? '悄悄话...'
-                : hasActiveInvocation && !whisperTargetsAllIdle
-                  ? displayedDisposition === 'continue_current'
-                    ? '接着当前工作补充...'
-                    : '继续输入，成为下一件工作...'
-                  : (placeholder ?? '输入消息... (@ 召唤猫猫 · /thread 引用对话)')
+                : (guideReplyHint ?? placeholder ?? '输入消息... (@ 召唤猫猫 · /thread 引用对话)')
             }
             className={`w-full resize-none rounded-xl border p-3 text-sm focus:outline-none focus:ring-2 placeholder:text-cafe-muted ${
               whisperMode
@@ -1119,12 +1001,10 @@ export function ChatInput({
           onSend={handleSend}
           onStop={() => void handleProjectedStop()}
           stopState={stopState}
-          onQueueSend={handleQueueSend}
-          onForceSend={handleForceSend}
+          onQueueSend={handleSend}
           disabled={disabled}
           sendDisabled={sendTemporarilyDisabled}
           hasActiveInvocation={whisperTargetsAllIdle ? false : hasActiveInvocation}
-          activeExecutionKey={whisperTargetsAllIdle ? undefined : activeExecutionKey}
           hasText={Boolean(input.trim() || shownContextAttachments.length > 0)}
           presentation={shellV2 ? 'v2' : 'classic'}
         />

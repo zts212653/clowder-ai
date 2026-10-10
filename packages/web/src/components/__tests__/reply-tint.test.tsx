@@ -32,12 +32,25 @@ const getCatById = (id: string) => (id === 'opus' ? opus : undefined);
 
 const pill = (senderCatId: string | null) =>
   renderToStaticMarkup(
-    <ReplyPill replyPreview={{ senderCatId, content: '内容' }} replyToId="m1" getCatById={getCatById} />,
+    <ReplyPill
+      replyPreview={{
+        from: senderCatId ? { kind: 'agent', catId: senderCatId } : { kind: 'user', userId: 'owner' },
+        senderCatId,
+        content: '内容',
+      }}
+      replyToId="m1"
+      getCatById={getCatById}
+    />,
   );
 const bar = (senderCatId: string | null) =>
   renderToStaticMarkup(
     <ReplyPreviewBar
-      replyToMessage={{ id: 'm1', senderCatId, content: '内容' }}
+      replyToMessage={{
+        id: 'm1',
+        from: senderCatId ? { kind: 'agent', catId: senderCatId } : { kind: 'user', userId: 'owner' },
+        senderCatId,
+        content: '内容',
+      }}
       cats={[opus]}
       onClear={() => undefined}
     />,

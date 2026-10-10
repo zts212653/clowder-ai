@@ -11,7 +11,6 @@
 import type { RuntimeEvalSnapshot } from '../../../../infrastructure/harness-eval/f167-eval.js';
 import type { DynamicTaskStore } from '../../../../infrastructure/scheduler/DynamicTaskStore.js';
 import type { IBallCustodyProjectionStore } from '../../../ball-custody/BallCustodyProjectionStore.js';
-import type { IDraftStore } from '../stores/ports/DraftStore.js';
 import type { IInvocationRecordStore } from '../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
@@ -25,12 +24,7 @@ import type {
   AggregatorZombie,
   DutyBriefingInput,
 } from './BallCustodyAggregator.js';
-import {
-  DEAD_BALL_FRESH_DRAFT_WINDOW_MS,
-  DEAD_BALL_ZOMBIE_GRACE_MS,
-  MENTION_SCAN_ACTIVE_WINDOW_MS,
-  TITLE_MAX,
-} from './constants.js';
+import { MENTION_SCAN_ACTIVE_WINDOW_MS, TITLE_MAX } from './constants.js';
 
 const HOLD_BALL_ID_PREFIX = 'hold-ball-';
 const HOLD_BALL_CREATED_BY_PREFIX = 'hold-ball:';
@@ -40,7 +34,6 @@ export interface CollectDutyBriefingDeps {
   // 完整接口（非 Pick）：scanAll 是 optional（仅 Redis 提供），Pick 会成 weak type
   // 致 in-memory store（无 scanAll）无法赋值；collectZombies 内部已 runtime check scanAll 缺失。
   invocationRecordStore: IInvocationRecordStore;
-  draftStore: Pick<IDraftStore, 'getByThread'>;
   dynamicTaskStore: Pick<DynamicTaskStore, 'getAll'>;
   threadStore: Pick<IThreadStore, 'list'>;
   messageStore: Pick<IMessageStore, 'getByThread' | 'getByThreadAfter'>;
@@ -123,63 +116,30 @@ async function collectHolds(
 }
 
 /**
- * invocation 死球：scanAll（Redis-only）filter running，对每个查 draft freshness 自判 zombie。
- * 复用 F194 判定（record.updatedAt 非心跳；draft.updatedAt 才是）；KD-4 只读，绝不调 reconcileZombies。
- * 返回 { zombies, runningCount }（runningCount-zombies 计入 healthy）。
+ * invocation 死球：scanAll（Redis-only）里本用户的 failed 记录。running 记录一律计入 healthy：
+ * F117 KD-23 起不再按草稿新鲜度或心跳推断运行中的调用是否已死（草稿不再续期，静默阶段也不发心跳），
+ * 卡住的一轮由超时（KD-22）或停止收尾。KD-4 只读，绝不调 reconcileZombies。
  */
 export async function collectZombies(
   invocationRecordStore: Pick<IInvocationRecordStore, 'scanAll'>,
-  draftStore: Pick<IDraftStore, 'getByThread'>,
   userId: string,
-  now: number,
-): Promise<{
-  zombies: AggregatorZombie[];
-  runningCount: number;
-  runningZombieCount: number;
-  degraded: boolean;
-  oldestHealthyAgeMs: number;
-}> {
+): Promise<{ zombies: AggregatorZombie[]; runningCount: number; degraded: boolean }> {
   if (!invocationRecordStore.scanAll) {
-    return { zombies: [], runningCount: 0, runningZombieCount: 0, degraded: true, oldestHealthyAgeMs: 0 };
+    return { zombies: [], runningCount: 0, degraded: true };
   }
   const records = await invocationRecordStore.scanAll();
   const ownerRecords = records.filter((r) => r.userId === userId);
-  const failed = ownerRecords.filter((r) => r.status === 'failed');
-  const running = ownerRecords.filter((r) => r.status === 'running');
-  const draftCache = new Map<string, Awaited<ReturnType<IDraftStore['getByThread']>>>();
-  const zombies: AggregatorZombie[] = failed.map((r) => ({
-    invocationId: r.id,
-    threadId: r.threadId,
-    catId: (r.targetCats[0] as string | undefined) ?? null,
-    recordUpdatedAt: r.updatedAt,
-    detail: r.error ?? 'invocation_failed',
-  }));
-  let oldestHealthyAgeMs = 0;
-  let runningZombieCount = 0;
-  for (const r of running) {
-    const key = `${r.userId}\\0${r.threadId}`;
-    let drafts = draftCache.get(key);
-    if (!drafts) {
-      drafts = await draftStore.getByThread(r.userId, r.threadId);
-      draftCache.set(key, drafts);
-    }
-    const draft = drafts.find((d) => d.invocationId === r.id);
-    const hasFreshDraft = draft != null && now - draft.updatedAt <= DEAD_BALL_FRESH_DRAFT_WINDOW_MS;
-    if (!hasFreshDraft && now - r.updatedAt > DEAD_BALL_ZOMBIE_GRACE_MS) {
-      zombies.push({
-        invocationId: r.id,
-        threadId: r.threadId,
-        catId: (r.targetCats[0] as string | undefined) ?? null,
-        recordUpdatedAt: r.updatedAt,
-        detail: 'no_tracker_no_fresh_draft',
-      });
-      runningZombieCount += 1;
-    } else {
-      const heartbeatAt = hasFreshDraft ? draft.updatedAt : r.updatedAt;
-      oldestHealthyAgeMs = Math.max(oldestHealthyAgeMs, now - heartbeatAt);
-    }
-  }
-  return { zombies, runningCount: running.length, runningZombieCount, degraded: false, oldestHealthyAgeMs };
+  const zombies: AggregatorZombie[] = ownerRecords
+    .filter((r) => r.status === 'failed')
+    .map((r) => ({
+      invocationId: r.id,
+      threadId: r.threadId,
+      catId: (r.targetCats[0] as string | undefined) ?? null,
+      recordUpdatedAt: r.updatedAt,
+      detail: r.error ?? 'invocation_failed',
+    }));
+  const runningCount = ownerRecords.filter((r) => r.status === 'running').length;
+  return { zombies, runningCount, degraded: false };
 }
 
 function collectVoidPasses(snapshot: RuntimeEvalSnapshot | null): AggregatorVoidPass[] {
@@ -402,8 +362,8 @@ export async function collectDutyBriefingInput(deps: CollectDutyBriefingDeps): P
   );
   const invocation = await safeCollect(
     'invocation',
-    () => collectZombies(deps.invocationRecordStore, deps.draftStore, userId, now),
-    { zombies: [], runningCount: 0, runningZombieCount: 0, degraded: true, oldestHealthyAgeMs: 0 },
+    () => collectZombies(deps.invocationRecordStore, userId),
+    { zombies: [], runningCount: 0, degraded: true },
     degradedSources,
   );
   if (invocation.degraded && !degradedSources.includes('invocation')) degradedSources.push('invocation');
@@ -436,8 +396,7 @@ export async function collectDutyBriefingInput(deps: CollectDutyBriefingDeps): P
   }
 
   const doingCount = tasks.filter((t) => t.status === 'doing').length;
-  const healthyInvocations = Math.max(0, invocation.runningCount - invocation.runningZombieCount);
-  const activeCount = doingCount + holds.activeCount + healthyInvocations;
+  const activeCount = doingCount + holds.activeCount + invocation.runningCount;
   const oldestTaskHeartbeatMs = oldestHeartbeat(tasks, now);
 
   return {
@@ -448,7 +407,7 @@ export async function collectDutyBriefingInput(deps: CollectDutyBriefingDeps): P
     mentionCandidates,
     threadTitles,
     activeCount,
-    oldestHeartbeatMs: Math.max(oldestTaskHeartbeatMs, invocation.oldestHealthyAgeMs),
+    oldestHeartbeatMs: oldestTaskHeartbeatMs,
     bindingStatus: deps.bindingStatus,
     degradedSources,
     now,

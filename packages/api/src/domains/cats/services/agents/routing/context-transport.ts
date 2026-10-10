@@ -440,7 +440,7 @@ export function formatAnchors(anchors: ScoredMessage[], truncateLimit: number): 
   return anchors.map((a, i) => {
     const content =
       a.message.content.length > truncateLimit ? `${a.message.content.slice(0, truncateLimit)}...` : a.message.content;
-    const speaker = a.message.source?.label || getMessageSpeakerName(a.message);
+    const speaker = getMessageSpeakerName(a.message);
     const label = a.isPrimacy ? 'Thread opener' : `Anchor ${i + 1}/${anchors.length}`;
     return `[${label} @${speaker}: ${a.message.id}] ${content}`;
   });

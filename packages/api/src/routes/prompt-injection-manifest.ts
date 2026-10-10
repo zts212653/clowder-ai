@@ -1,7 +1,7 @@
 /**
  * Prompt Injection Manifest Route — F237 Phase 2
  *
- * GET /api/prompt-injection/manifest — aggregate 46 hook.yaml manifests
+ * GET /api/prompt-injection/manifest — aggregate 45 active hook.yaml manifests
  * into the ManifestSegment[] shape the Console frontend expects.
  *
  * Replaces the old monolithic assets/prompt-injection-manifest.yaml

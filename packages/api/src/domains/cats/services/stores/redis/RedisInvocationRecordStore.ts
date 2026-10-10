@@ -368,13 +368,6 @@ export class RedisInvocationRecordStore implements IInvocationRecordStore {
     if (input.userMessageId !== undefined) pairs.push('userMessageId', input.userMessageId ?? '');
     if (input.error !== undefined) pairs.push('error', input.error);
     if (input.executionStartedAt !== undefined) pairs.push('executionStartedAt', String(input.executionStartedAt));
-    if (input.freshnessClosureId !== undefined) pairs.push('freshnessClosureId', input.freshnessClosureId);
-    if (input.freshnessInputFrontierMessageId !== undefined) {
-      pairs.push('freshnessInputFrontierMessageId', input.freshnessInputFrontierMessageId);
-    }
-    if (input.freshnessClosureStatus !== undefined) {
-      pairs.push('freshnessClosureStatus', input.freshnessClosureStatus);
-    }
     if (input.usageByCat !== undefined) {
       pairs.push('usageByCat', JSON.stringify(input.usageByCat));
       // F128: stamp usageRecordedAt on first usageByCat write (HSETNX semantics).

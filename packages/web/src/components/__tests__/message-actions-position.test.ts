@@ -113,4 +113,43 @@ describe('MessageActions position', () => {
     expect(host?.className).not.toContain('focus-within:pt-8');
     expect(host?.className).not.toContain('sm:hover:pt-0');
   });
+
+  it('does not paint a fallback dock before a processing response has a message bubble', async () => {
+    const { MessageActions } = await import('@/components/MessageActions');
+    const TestMessageActions = MessageActions as React.ComponentType<
+      Omit<React.ComponentProps<typeof MessageActions>, 'children'> & { children?: React.ReactNode }
+    >;
+
+    await act(async () => {
+      root.render(
+        React.createElement(
+          TestMessageActions,
+          {
+            message: {
+              id: 'msg-processing-empty',
+              type: 'assistant',
+              catId: 'codex',
+              content: '',
+              timestamp: Date.now(),
+              lifecycle: {
+                kind: 'response',
+                orderKey: '1:inv-processing',
+                invocationId: 'inv-processing',
+                targetId: 'codex',
+                inputEntryIds: ['entry-1'],
+                inputMessageIds: ['source-1'],
+                status: 'processing',
+                startedAt: Date.now(),
+              },
+            },
+            threadId: 'thread-1',
+          },
+          React.createElement('div', { 'data-testid': 'response-lifecycle-tip' }, '...'),
+        ),
+      );
+    });
+
+    expect(container.querySelector('[data-testid="message-actions-toolbar"]')).toBeNull();
+    expect(container.querySelector('[data-testid="message-actions-compact-trigger"]')).toBeNull();
+  });
 });

@@ -20,7 +20,7 @@ describe('browser-local thread reading memory', () => {
     const anchor = { messageId: 'm2', viewportOffsetPx: -20, timelineOrderAt: 100, bubbleKey: 'deleted-bubble' };
     expect(
       findChatReadingSuccessor(anchor, [point('m4', 101), point('m1', 100), point('m3', 100), point('draft-new', 100)]),
-    ).toEqual({ messageId: 'm3', viewportOffsetPx: -20, timelineOrderAt: 100, bubbleKey: undefined });
+    ).toEqual({ messageId: 'm3', viewportOffsetPx: -20, timelineOrderAt: 100 });
     expect(findChatReadingSuccessor({ ...anchor, timelineOrderAt: undefined }, [point('m4', 101)])).toBeUndefined();
     expect(findChatReadingSuccessor(anchor, [point('m1', 100)])).toBeUndefined();
   });
@@ -28,7 +28,13 @@ describe('browser-local thread reading memory', () => {
     const state = {
       top: 1234,
       anchor: 'offset' as const,
-      messageAnchor: { messageId: 'exact-id', viewportOffsetPx: -88 },
+      messageAnchor: {
+        messageId: 'exact-id',
+        viewportOffsetPx: -88,
+        blockIndex: 4,
+        blockFingerprint: 'p:当前阅读位置',
+        blockViewportOffsetPx: -18,
+      },
     };
     saveChatScrollState('one/world:thread', state);
     __resetChatScrollMemoryForTest();
@@ -59,7 +65,7 @@ describe('browser-local thread reading memory', () => {
     failure.mockRestore();
   });
 
-  it('resolves a cold transient id only through a unique identity from the bubble owner', () => {
+  it('never aliases a missing record to another message with the same child invocation', () => {
     const transient: ChatMessage = {
       id: 'draft-transient',
       type: 'assistant',
@@ -75,11 +81,12 @@ describe('browser-local thread reading memory', () => {
     const persisted = readChatScrollState('rekeyed');
     if (persisted?.anchor !== 'offset' || !persisted.messageAnchor) throw new Error('Missing persisted anchor');
     const formal = { ...transient, id: 'stored-message' };
-    expect(resolveChatReadingAnchor(persisted.messageAnchor, [formal])).toMatchObject({
-      messageId: formal.id,
+    expect(resolveChatReadingAnchor(persisted.messageAnchor, [transient])).toMatchObject({
+      messageId: transient.id,
       viewportOffsetPx: -20,
       timelineOrderAt: 100,
     });
+    expect(resolveChatReadingAnchor(persisted.messageAnchor, [formal])).toBeUndefined();
     expect(resolveChatReadingAnchor(persisted.messageAnchor, [formal, { ...formal, id: 'another' }])).toBeUndefined();
     expect(
       resolveChatReadingAnchor(persisted.messageAnchor, [

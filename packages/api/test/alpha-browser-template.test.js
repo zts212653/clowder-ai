@@ -95,64 +95,60 @@ test('alpha failure replay keeps one Task while allowing at-least-once owner not
   assert.match(task.why, /exact-job/);
   assert.match(task.why, /git:head:docs\/feature.md/);
   assert.equal(f.delivered.length, 2);
-  assert.equal(f.triggered.length, 2);
+  assert.equal(f.triggered.length, 0);
+  assert.equal(f.delivered[0].idempotencyKey, f.delivered[1].idempotencyKey);
+  assert.equal(f.delivered[0].targetCatId, 'fixture-cat');
+  assert.equal(f.delivered[0].userId, 'owner');
 });
 
-for (const phase of ['deliver', 'trigger']) {
-  for (const ownership of ['owner', 'guardian']) {
-    test(`alpha retries ${phase} failure after Task creation before settling (${ownership})`, async () => {
-      const f = fixture();
-      let attempts = 0,
-        settled = 0;
-      const run = f.runtime.runAlphaBrowserRevision;
-      f.runtime.runAlphaBrowserRevision = async (input) => {
-        const result = await run(input);
-        settled++;
-        return result;
-      };
-      if (ownership === 'guardian') {
-        const drafts = f.runtime.alphaBrowserFailureTasks;
-        f.runtime.alphaBrowserFailureTasks = async () =>
-          (await drafts()).map((draft) => ({ ...draft, ownerCatId: null, ownership: 'unresolved' }));
-      }
-      const failOnce = async () => {
-        if (++attempts === 1) throw new Error(`transient ${phase} outage`);
-      };
-      if (phase === 'deliver') {
-        const deliver = f.context.deliver;
-        f.context.deliver = async (input) => {
-          await failOnce();
-          return deliver(input);
-        };
-      } else {
-        const trigger = f.context.invokeTrigger.trigger;
-        f.context.invokeTrigger.trigger = async (...args) => {
-          await failOnce();
-          return trigger(...args);
-        };
-      }
-      const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
-      await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), /transient/);
-      assert.equal(settled, 0);
-      assert.equal(f.tasks.size, 1);
-      const taskId = [...f.tasks.values()][0].id;
-      await spec.run.execute('alpha', 'alpha', f.context);
-      assert.equal(settled, 1);
-      assert.equal(f.tasks.size, 1);
-      assert.equal([...f.tasks.values()][0].id, taskId);
-      assert.equal(f.triggered.length, 1, 'owner/guardian must be awakened before settlement');
-      assert.equal(f.triggered[0][1], 'fixture-cat');
-      assert.equal([...f.tasks.values()][0].ownerCatId, ownership === 'owner' ? 'fixture-cat' : null);
-    });
-  }
+for (const ownership of ['owner', 'guardian']) {
+  test(`alpha retries atomic delivery after Task creation before settling (${ownership})`, async () => {
+    const f = fixture();
+    let attempts = 0,
+      settled = 0;
+    const run = f.runtime.runAlphaBrowserRevision;
+    f.runtime.runAlphaBrowserRevision = async (input) => {
+      const result = await run(input);
+      settled++;
+      return result;
+    };
+    if (ownership === 'guardian') {
+      const drafts = f.runtime.alphaBrowserFailureTasks;
+      f.runtime.alphaBrowserFailureTasks = async () =>
+        (await drafts()).map((draft) => ({ ...draft, ownerCatId: null, ownership: 'unresolved' }));
+    }
+    const deliver = f.context.deliver;
+    f.context.deliver = async (input) => {
+      if (++attempts === 1) throw new Error('transient atomic delivery outage');
+      return deliver(input);
+    };
+    const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
+    await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), /transient/);
+    assert.equal(settled, 0);
+    assert.equal(f.tasks.size, 1);
+    const taskId = [...f.tasks.values()][0].id;
+    await spec.run.execute('alpha', 'alpha', f.context);
+    assert.equal(settled, 1);
+    assert.equal(f.tasks.size, 1);
+    assert.equal([...f.tasks.values()][0].id, taskId);
+    assert.equal(f.delivered.length, 1);
+    assert.equal(f.delivered[0].targetCatId, 'fixture-cat');
+    assert.equal(f.delivered[0].idempotencyKey, `alpha-triage:exact-job:1:${taskId}`);
+    assert.equal(f.triggered.length, 0, 'atomic admission never creates a second trigger');
+    assert.equal([...f.tasks.values()][0].ownerCatId, ownership === 'owner' ? 'fixture-cat' : null);
+  });
 }
 
 test('a full invocation queue cannot settle a revision and can retry the existing Task', async () => {
   const f = fixture();
   let attempts = 0;
-  f.context.invokeTrigger.trigger = async () => (++attempts === 1 ? 'full' : 'enqueued');
+  const deliver = f.context.deliver;
+  f.context.deliver = async (input) => {
+    if (++attempts === 1) throw new Error('queue full');
+    return deliver(input);
+  };
   const spec = createAlphaBrowserTemplate(f.options).createSpec('alpha-subscription', f.params);
-  await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), /wake not accepted/);
+  await assert.rejects(spec.run.execute('alpha', 'alpha', f.context), /queue full/);
   assert.equal(f.tasks.size, 1);
   await spec.run.execute('alpha', 'alpha', f.context);
   assert.equal(attempts, 2);

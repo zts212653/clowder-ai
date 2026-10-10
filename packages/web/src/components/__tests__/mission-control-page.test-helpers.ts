@@ -162,6 +162,7 @@ export function createMissionControlMockBackend(): MissionControlMockBackend {
             color: { primary: '#4B5563', secondary: '#E5E7EB' },
             mentionPatterns: ['@codex'],
             clientId: 'openai',
+            carrier: 'cli',
             defaultModel: 'gpt-5.3-codex',
             avatar: '/avatars/codex.png',
             roleDescription: 'review',

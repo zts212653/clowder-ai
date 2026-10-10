@@ -30,7 +30,7 @@ test('deliverBriefingCard: append origin=briefing + extra.rich card（照 format
   assert.equal(id, 'msg-1');
   assert.equal(appended.threadId, 'thr-x');
   assert.equal(appended.userId, 'system');
-  assert.equal(appended.catId, null);
+  assert.deepEqual(appended.from, { kind: 'system', service: 'duty-briefing' });
   assert.equal(appended.origin, 'briefing');
   assert.equal(appended.timestamp, NOW);
   assert.deepEqual(appended.extra.rich, { v: 1, blocks: [card()] });

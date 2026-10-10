@@ -2,7 +2,6 @@ import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
 import { humanChoiceBody, objectBody, successBody } from './helpers/capability-evolution-preparation-bodies.js';
-import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
 
 describe('F311 preparation saga recovery and invalidation', () => {
   let EvolutionProgramService;
@@ -115,10 +114,11 @@ describe('F311 preparation saga recovery and invalidation', () => {
   });
 
   function humanInput(overrides = {}) {
+    const userId = overrides.userId ?? 'operator';
     return messageStore.append({
-      userId: 'operator',
+      userId,
+      from: { kind: 'user', userId },
       threadId: thread.id,
-      catId: null,
       content: '保留当前预算，本轮继续比较路由策略。',
       mentions: [],
       timestamp: 1,
@@ -165,7 +165,7 @@ describe('F311 preparation saga recovery and invalidation', () => {
   it('rejects forged, wrong-author, cross-workspace and unavailable human input before any commit', async () => {
     const programId = (await createProgram()).projection.program.programId;
     for (const overrides of [
-      { catId: 'codex-terra' },
+      { from: { kind: 'agent', catId: 'codex-terra' } },
       { userId: 'another-user' },
       { origin: 'callback' },
       { sourceParseFailure: true },
@@ -253,31 +253,15 @@ describe('F311 preparation saga recovery and invalidation', () => {
     assert.equal(messageStore.getRecent(10, 'operator').length, 1);
   });
 
-  for (const loss of ['delete', 'recall']) {
+  for (const loss of ['delete']) {
     it(`recovers the committed human-backed body after a crash and input ${loss}`, async () => {
       const programId = (await createProgram()).projection.program.programId;
-      const queueCustody = makeQueuedMessageCustody({
-        status: 'terminal',
-        pendingTargetCats: [],
-        handledByCatIds: ['opus', 'codex'],
-      });
-      const input = humanInput({ deliveryStatus: 'queued', queueCustody });
+      const input = humanInput({ deliveryStatus: 'queued' });
       assert.equal(messageStore.markDelivered(input.id, 1).deliveryTransitioned, true);
       const command = submit(programId, { body: humanChoiceBody(input, thread.id) });
       await assert.rejects(() => createCrashingPreparation().submitPreparation(command), /simulated F117 outage/);
       const committed = (await eventLog.read(programId))[1];
-      if (loss === 'delete') messageStore.softDelete(input.id, 'operator');
-      else
-        assert.equal(
-          messageStore.recallMessageToComposerDraft(input.id, {
-            ownerUserId: 'operator',
-            threadId: thread.id,
-            expectedDraftRevision: 0,
-            merge: 'replace',
-            recalledAt: 2,
-          }).kind,
-          'recalled',
-        );
+      messageStore.softDelete(input.id, 'operator');
 
       const recovered = await createPreparation().submitPreparation(command);
       const current = recovered.projection.preparation.sections.object_map.current;

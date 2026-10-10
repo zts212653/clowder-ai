@@ -1,9 +1,10 @@
 export function mockMsg(overrides) {
   const ts = overrides.timestamp ?? Date.now();
+  const catId = overrides.catId ?? null;
   return {
     threadId: overrides.threadId ?? 'thread-1',
     userId: overrides.userId ?? 'user-1',
-    catId: overrides.catId ?? null,
+    from: overrides.from ?? (catId ? { kind: 'agent', catId } : { kind: 'user', userId: overrides.userId ?? 'user-1' }),
     content: overrides.content ?? 'test message',
     mentions: overrides.mentions ?? [],
     timestamp: ts,

@@ -60,4 +60,4 @@ The `.env` file supports key variables as a legacy fallback, but the UI approach
 |---------------------------|------------------|-------------|
 | `NEXT_PUBLIC_API_URL`     | *(auto-derived)* | API URL used by the frontend. Normally computed automatically from `API_SERVER_PORT`; override only if you use a reverse proxy or custom domain |
 | `NEXT_PUBLIC_BRAND_NAME`  | `Clowder AI`     | Brand name shown in the UI (界面显示的品牌名称) |
-| `CLI_TIMEOUT_MS`          | `1800000`        | CLI inactivity timeout in milliseconds (30 minutes). Set to `0` to disable (CLI 不活跃超时，0 为禁用) |
+| `CLI_TIMEOUT_MS`          | `0`              | Member no-output timeout in milliseconds: a member with no output (text, tool calls, thinking) for this long is stopped as if by Stop, and its reply fails as timed out; a member whose process is still using CPU gets at most twice as long. `0` (default) disables it, so only a manual stop ends a silent turn (成员无输出超时，默认 0 即不超时) |

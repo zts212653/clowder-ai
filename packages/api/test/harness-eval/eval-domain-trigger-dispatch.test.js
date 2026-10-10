@@ -90,7 +90,7 @@ function deps(store, nowMs, overrides = {}) {
       return () => `token-${++token}`;
     })(),
     deliver: mock.fn(async () => 'message-1'),
-    invokeTrigger: { trigger: mock.fn(async () => 'dispatched') },
+    invokeTrigger: { trigger: mock.fn(async () => 'enqueued') },
     defaultUserId: 'owner-user',
     ...overrides,
   };
@@ -140,15 +140,16 @@ describe('eval domain shared trigger dispatcher', () => {
   it('releases failed delivery ownership so replay reuses the stable message key', async () => {
     const store = new MemoryTriggerStore();
     const nowMs = Date.parse('2026-08-24T08:00:00Z');
+    // Admission is the wake, so a transient admission failure is the failure under test.
     let firstAttempt = true;
-    const trigger = mock.fn(async () => {
+    const deliverMock = mock.fn(async () => {
       if (firstAttempt) {
         firstAttempt = false;
         throw new Error('transient');
       }
-      return 'enqueued';
+      return 'msg-eval-1';
     });
-    const shared = deps(store, nowMs, { invokeTrigger: { trigger } });
+    const shared = deps(store, nowMs, { deliver: deliverMock });
     const input = {
       domain: thresholdDomain,
       invocation,
@@ -161,8 +162,8 @@ describe('eval domain shared trigger dispatcher', () => {
     assert.equal((await dispatchEvalDomainTrigger(input)).outcome, 'trigger_failed');
     assert.equal((await dispatchEvalDomainTrigger(input)).outcome, 'dispatched');
     assert.equal(
-      shared.deliver.mock.calls[0].arguments[0].idempotencyKey,
-      shared.deliver.mock.calls[1].arguments[0].idempotencyKey,
+      deliverMock.mock.calls[0].arguments[0].idempotencyKey,
+      deliverMock.mock.calls[1].arguments[0].idempotencyKey,
     );
   });
 

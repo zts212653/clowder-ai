@@ -107,14 +107,69 @@ describe('F167 L2: routeParallel mention suppression', () => {
 
     // Every persisted agent message in parallel mode must carry mentions=[].
     // Otherwise MessageStore.getMentionsFor / getRecentMentionsFor will surface parallel @ messages.
-    const agentAppends = appendCalls.filter((c) => c.catId && c.origin === 'stream');
+    // F117: persisted identity is the MessageFrom contract — agent sender lives in
+    // `from: { kind: 'agent', catId }` (route-parallel.ts stream append), not a top-level catId.
+    const agentAppends = appendCalls.filter((c) => c.from?.kind === 'agent' && c.origin === 'stream');
     assert.ok(agentAppends.length >= 2, 'expected at least two agent append calls');
     for (const call of agentAppends) {
       assert.deepStrictEqual(
         call.mentions,
         [],
-        `parallel-mode agent message must persist mentions=[], got ${JSON.stringify(call.mentions)} for catId=${call.catId}`,
+        `parallel-mode agent message must persist mentions=[], got ${JSON.stringify(call.mentions)} for catId=${call.from?.catId}`,
       );
     }
+  });
+  test('an earlier routed callback does not create a second carrier from parallel final prose', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createDeps(
+      {
+        opus: {
+          async *invoke() {
+            yield {
+              type: 'tool_use',
+              catId: 'opus',
+              toolName: 'cat_cafe_post_message',
+              toolUseId: 'callback',
+              toolInput: { content: '@codex\nCallback source handoff.', targetCats: ['codex'] },
+              timestamp: Date.now(),
+            };
+            yield {
+              type: 'tool_result',
+              catId: 'opus',
+              toolUseId: 'callback',
+              content: JSON.stringify({
+                status: 'ok',
+                threadId: 'thread1',
+                messageId: 'callback-source',
+                routed: ['codex'],
+              }),
+              timestamp: Date.now(),
+            };
+            yield {
+              type: 'text',
+              catId: 'opus',
+              content: '@codex\nParallel final stays reasoning-only.',
+              timestamp: Date.now(),
+            };
+            yield { type: 'done', catId: 'opus', timestamp: Date.now() };
+          },
+        },
+      },
+      { appendCalls },
+    );
+    const events = [];
+    for await (const event of routeParallel(deps, ['opus'], 'ideate', 'user1', 'thread1')) events.push(event);
+    const response = appendCalls.find((row) => row.from?.catId === 'opus' && row.origin === 'stream');
+    assert.ok(response.content.includes('Parallel final stays reasoning-only.'));
+    assert.deepEqual(response.mentions, [], 'parallel text still has no serial routing semantics');
+    assert.equal(
+      events.some((event) => event.type === 'a2a_handoff'),
+      false,
+    );
+    assert.equal(
+      events.some((event) => event.type === 'system_info' && event.content?.includes('a2a_followup_available')),
+      false,
+    );
   });
 });

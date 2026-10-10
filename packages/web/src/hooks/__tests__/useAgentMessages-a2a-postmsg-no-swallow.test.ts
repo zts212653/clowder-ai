@@ -1,52 +1,17 @@
 /**
  * F194 live A2A post_message no-swallow — ACTIVE-path incident regression net
  * (2026-06-10 incident; see bubble-speech-real-store-no-swallow.test.ts for
- * the full incident provenance). Fix landed via clowder-ai#834 intake
- * (isExplicitPost: explicit posts are invocationless → exempt from stable-key
- * merge/defer/replacement). These tests pin the active-thread behavior surface:
- * both posts visible as separate records, work-log bubble survives, posts are
+ * the full incident provenance). Under the named-message model every stream
+ * event of the turn names its response R, and a post_message callback names
+ * its own stored message P: the client writes each event into the message it
+ * names. These tests pin the active-thread behavior surface: both posts
+ * visible as separate records, the work-log response survives, posts are
  * idempotent by server messageId, and speech never flips the streaming state.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetThreadRuntimeSingleton } from '@/hooks/thread-runtime-singleton';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
-
-const mockSetStreaming = vi.fn((id: string, streaming: boolean) => {
-  storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, isStreaming: streaming } : m));
-});
-const mockSetCatInvocation = vi.fn((catId: string, info: Record<string, unknown>) => {
-  storeState.catInvocations = {
-    ...storeState.catInvocations,
-    [catId]: { ...storeState.catInvocations[catId], ...info },
-  };
-});
-const mockSetMessageStreamInvocation = vi.fn((messageId: string, invocationId: string, turnInvocationId?: string) => {
-  storeState.messages = storeState.messages.map((m) =>
-    m.id === messageId
-      ? {
-          ...m,
-          extra: {
-            ...m.extra,
-            stream: { ...m.extra?.stream, invocationId, ...(turnInvocationId ? { turnInvocationId } : {}) },
-          },
-        }
-      : m,
-  );
-});
-const mockAddMessage = vi.fn((msg: unknown) => {
-  storeState.messages.push(msg as (typeof storeState.messages)[number]);
-});
-const mockReplaceMessages = vi.fn((msgs: unknown[]) => {
-  storeState.messages = msgs as typeof storeState.messages;
-});
-const mockRemoveActiveInvocation = vi.fn((invocationId: string) => {
-  delete storeState.activeInvocations[invocationId];
-});
-const mockAddActiveInvocation = vi.fn((invocationId: string, catId: string, mode: string) => {
-  storeState.activeInvocations[invocationId] = { catId, mode };
-});
 
 interface TestMessage {
   id: string;
@@ -63,13 +28,38 @@ interface TestMessage {
   timestamp: number;
 }
 
+function updateMessage(id: string, update: (message: TestMessage) => TestMessage) {
+  storeState.messages = storeState.messages.map((m) => (m.id === id ? update(m) : m));
+}
+
+/** Thread-scoped writes (hooks/named-message-writer.ts); the current thread's messages are the flat list. */
+function forCurrentThread(threadId: string, write: () => void) {
+  if (threadId === storeState.currentThreadId) write();
+}
+
+const mockSetCatInvocation = vi.fn((catId: string, info: Record<string, unknown>) => {
+  storeState.catInvocations = {
+    ...storeState.catInvocations,
+    [catId]: { ...storeState.catInvocations[catId], ...info },
+  };
+});
+const mockAddMessage = vi.fn((msg: unknown) => {
+  storeState.messages.push(msg as TestMessage);
+});
+const mockRemoveActiveInvocation = vi.fn((invocationId: string) => {
+  delete storeState.activeInvocations[invocationId];
+});
+const mockAddActiveInvocation = vi.fn((invocationId: string, catId: string, mode: string) => {
+  storeState.activeInvocations[invocationId] = { catId, mode };
+});
+
 const storeState = {
   messages: [] as TestMessage[],
   addMessage: mockAddMessage,
   appendToMessage: vi.fn(),
   appendToolEvent: vi.fn(),
   appendRichBlock: vi.fn(),
-  setStreaming: mockSetStreaming,
+  setStreaming: vi.fn(),
   setLoading: vi.fn(),
   setHasActiveInvocation: vi.fn(),
   setIntentMode: vi.fn(),
@@ -79,18 +69,39 @@ const storeState = {
   setMessageUsage: vi.fn(),
   requestStreamCatchUp: vi.fn(),
   setMessageMetadata: vi.fn(),
-  setMessageThinking: vi.fn((id: string, thinking: string) => {
-    storeState.messages = storeState.messages.map((m) => (m.id === id ? { ...m, thinking } : m));
-  }),
-  replaceMessageId: vi.fn(),
+  setMessageThinking: vi.fn(),
   patchMessage: vi.fn(),
-  setMessageStreamInvocation: mockSetMessageStreamInvocation,
-  addMessageToThread: vi.fn(),
-  replaceMessages: mockReplaceMessages,
+  getThreadState: vi.fn((threadId: string): { messages: TestMessage[] } => ({
+    messages: threadId === storeState.currentThreadId ? storeState.messages : [],
+  })),
+  addMessageToThread: vi.fn((threadId: string, msg: TestMessage) => {
+    forCurrentThread(threadId, () => {
+      if (!storeState.messages.some((m) => m.id === msg.id)) storeState.messages.push(msg);
+    });
+  }),
+  appendToThreadMessage: vi.fn((threadId: string, id: string, content: string) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, content: m.content + content })));
+  }),
+  patchThreadMessage: vi.fn((threadId: string, id: string, patch: Partial<TestMessage>) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, ...patch })));
+  }),
+  appendToolEventToThread: vi.fn((threadId: string, id: string, event: unknown) => {
+    forCurrentThread(threadId, () =>
+      updateMessage(id, (m) => ({ ...m, toolEvents: [...(m.toolEvents ?? []), event] })),
+    );
+  }),
+  setThreadMessageThinking: vi.fn((threadId: string, id: string, thinking: string) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, thinking })));
+  }),
+  appendRichBlockToThread: vi.fn(),
+  setThreadMessageStreaming: vi.fn((threadId: string, id: string, streaming: boolean) => {
+    forCurrentThread(threadId, () => updateMessage(id, (m) => ({ ...m, isStreaming: streaming })));
+  }),
+  setThreadMessageMetadata: vi.fn(),
+  setThreadMessageUsage: vi.fn(),
+  incrementUnread: vi.fn(),
   clearThreadActiveInvocation: vi.fn(),
   resetThreadInvocationState: vi.fn(),
-  setThreadMessageStreaming: vi.fn(),
-  getThreadState: vi.fn(() => ({ messages: [] })),
   currentThreadId: 'thread-1',
   catInvocations: {} as Record<string, { invocationId?: string; turnInvocationId?: string }>,
   activeInvocations: {} as Record<string, { catId: string; mode: string }>,
@@ -115,16 +126,18 @@ function Harness() {
 
 const PARENT_INV = 'parent-chain-inv-1';
 const TURN_INV = 'turn-inv-1';
+/** The turn's response, stored empty by the server at dispatch; every stream event names it. */
+const RESPONSE_ID = 'resp-1';
 
-/** 复刻 A2A 复现时序的前奏：thinking + tool 建出 thinking/tools-only stream 泡（content=''）。 */
+/** 复刻 A2A 复现时序的前奏：thinking + tool 写进本轮 response（content=''，只有 thinking/tools）。 */
 function streamWorkLogPrelude() {
   captured?.handleAgentMessage({
-    type: 'thinking',
+    type: 'system_info',
     catId: 'sonnet',
-    content: '正在思考探针计划',
+    content: JSON.stringify({ type: 'thinking', catId: 'sonnet', text: '正在思考探针计划' }),
+    messageId: RESPONSE_ID,
     invocationId: PARENT_INV,
     turnInvocationId: TURN_INV,
-    origin: 'stream',
     threadId: 'thread-1',
     timestamp: 1000,
   });
@@ -132,6 +145,7 @@ function streamWorkLogPrelude() {
     type: 'tool_use',
     catId: 'sonnet',
     toolName: 'Read',
+    messageId: RESPONSE_ID,
     invocationId: PARENT_INV,
     turnInvocationId: TURN_INV,
     origin: 'stream',
@@ -159,7 +173,7 @@ function assistantRows(): TestMessage[] {
   return storeState.messages.filter((m) => m.type === 'assistant' && m.catId === 'sonnet');
 }
 
-describe('F194 live A2A post_message no-swallow (Z11 contract on live path)', () => {
+describe('F194 live A2A post_message no-swallow (named-message contract on live path)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -181,7 +195,6 @@ describe('F194 live A2A post_message no-swallow (Z11 contract on live path)', ()
     storeState.messages = [];
     storeState.catInvocations = {};
     storeState.activeInvocations = {};
-    resetThreadRuntimeSingleton();
     vi.clearAllMocks();
     act(() => {
       root.render(React.createElement(Harness));
@@ -203,31 +216,14 @@ describe('F194 live A2A post_message no-swallow (Z11 contract on live path)', ()
     });
 
     const contents = assistantRows().map((m) => m.content);
-    // RED now: 探针A is overwritten by 探针B via stable-key replacement.
     expect(contents).toContain('探针A：开场正式消息');
     expect(contents).toContain('探针B：收尾正式消息');
-    // Records carry their server ids (idempotency anchor + hydrate reconciliation).
+    // Records carry their server ids (idempotency anchor + hydrate reconciliation),
+    // beside the turn's response.
     const ids = assistantRows().map((m) => m.id);
     expect(ids).toContain('srv-msg-A');
     expect(ids).toContain('srv-msg-B');
-  });
-
-  it('speech lands via the reducer write path, NEVER via store addMessage (gpt52 R1 P1-1)', () => {
-    // The real store's addMessage runs the TD112 assistant dedup
-    // (findAssistantDuplicate Phase 1: same cat + same turn key → hard merge),
-    // which would silently fold a turn-stamped speech bubble back into the
-    // same-turn stream bubble. The reducer path (replaceMessages, bare array
-    // replace) is the only write path that preserves Z11 standalone speech.
-    act(() => {
-      streamWorkLogPrelude();
-    });
-    mockAddMessage.mockClear();
-    act(() => {
-      postMsg('探针A：开场正式消息', 'srv-msg-A', 2000);
-    });
-    expect(mockAddMessage).not.toHaveBeenCalled();
-    expect(mockReplaceMessages).toHaveBeenCalled();
-    expect(assistantRows().some((m) => m.id === 'srv-msg-A' && m.origin === 'callback')).toBe(true);
+    expect(ids).toContain(RESPONSE_ID);
   });
 
   it('replaying the same speech messageId is idempotent (no duplicate bubble)', () => {
@@ -240,27 +236,28 @@ describe('F194 live A2A post_message no-swallow (Z11 contract on live path)', ()
     expect(matches).toHaveLength(1);
   });
 
-  it('preserves the thinking/tools-only stream work-log record when post_message arrives mid-turn', () => {
+  it('preserves the thinking/tools-only work-log response when post_message arrives mid-turn', () => {
     act(() => {
       streamWorkLogPrelude();
       postMsg('探针A：开场正式消息', 'srv-msg-A', 2000);
     });
 
     const rows = assistantRows();
-    // RED now: the stream bubble (content='', thinking+tools) is replaced
-    // in-place by the callback row; no stream-origin row survives.
-    // (thinking CONTENT delivery has its own debounced pipeline + dedicated
-    // tests — this test asserts record survival/independence, the bug's
-    // actual behavior surface.)
+    // The response (content='', thinking+tools) is not replaced in-place by the callback row.
+    // (thinking CONTENT delivery has its own dedicated tests — this test asserts record
+    // survival/independence, the bug's actual behavior surface.)
     const streamRow = rows.find((m) => m.origin === 'stream');
     expect(streamRow, 'stream work-log row must survive post_message').toBeTruthy();
+    expect(streamRow?.id).toBe(RESPONSE_ID);
+    expect(streamRow?.toolEvents?.length ?? 0).toBeGreaterThan(0);
     // And the callback row is its own record, not an overwrite of the stream row.
     const callbackRow = rows.find((m) => m.origin === 'callback');
+    expect(callbackRow?.id).toBe('srv-msg-A');
     expect(callbackRow?.content).toBe('探针A：开场正式消息');
     expect(callbackRow?.id).not.toBe(streamRow?.id);
   });
 
-  it('post_message must not flip or hijack the streaming state of the work-log bubble', () => {
+  it('post_message must not flip or hijack the streaming state of the work-log response', () => {
     act(() => {
       streamWorkLogPrelude();
     });
@@ -271,10 +268,11 @@ describe('F194 live A2A post_message no-swallow (Z11 contract on live path)', ()
       postMsg('探针A：开场正式消息', 'srv-msg-A', 2000);
     });
 
-    // The turn is still running: the work-log bubble must still exist as a
+    // The turn is still running: the work-log response must still exist as a
     // stream-origin record (post_msg is speech, not the turn terminal).
     const streamRow = assistantRows().find((m) => m.origin === 'stream');
     expect(streamRow, 'work-log bubble must not be consumed by speech').toBeTruthy();
+    expect(streamRow?.id).toBe(RESPONSE_ID);
     expect(streamRow?.isStreaming).toBe(true);
   });
 });

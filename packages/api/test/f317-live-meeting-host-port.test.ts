@@ -48,7 +48,7 @@ test('the owner can attach one exact capture to one talking call without startin
     publish() {},
   });
   assert.equal(await sessions.observeCall('owner'), null, 'a prepared call is not a sharing target');
-  sessions.claim(call.id, 'owner', 'home', [catId]);
+  await sessions.claim(call.id, 'owner', 'home', [catId]);
   await call.configure({
     CAT_CAFE_API_URL: 'http://localhost:3012',
     CAT_CAFE_USER_ID: 'owner',

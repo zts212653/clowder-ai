@@ -17,7 +17,6 @@ import { createModuleLogger } from '../../infrastructure/logger.js';
 import { buildCliDiagnostics } from '../../utils/cli-diagnostics.js';
 import { withCatCliProcessContext } from '../../utils/cli-process-environment.js';
 import { maybeCollectStreamError } from '../../utils/cli-spawn.js';
-import { resolveCliTimeoutMs } from '../../utils/cli-timeout.js';
 import type { CliSpawnOptions } from '../../utils/cli-types.js';
 // parseNDJSON not used directly — we create readline inline for killability.
 import type { SpawnCliOverride } from '../cats/services/types.js';
@@ -94,7 +93,10 @@ export async function* spawnCliInTmux(
 ): AsyncGenerator<unknown, TmuxSpawnResult, undefined> {
   options.signal?.throwIfAborted();
   const { tmuxGateway } = deps;
-  const idleTimeoutMs = resolveCliTimeoutMs(options.timeoutMs);
+  // Only a caller that asks for an idle timeout gets one. F117 KD-22: a dispatched member's timeout
+  // is its invocation's, driven by CLI_TIMEOUT_MS; the first-event watchdog below still guards a
+  // member that never comes up.
+  const idleTimeoutMs = options.timeoutMs ?? 0;
   const firstEventTimeoutMs =
     options.firstEventTimeoutMs ??
     (options.outputMode === 'plainText' ? idleTimeoutMs : DEFAULT_FIRST_EVENT_TIMEOUT_MS);

@@ -13,7 +13,7 @@ test('object source reading preserves exact refs and fences missing, foreign and
   const message = messageStore.append({
     userId: 'operator',
     threadId: thread.id,
-    catId: 'codex-astra',
+    from: { kind: 'agent', catId: 'codex-astra' },
     content: 'Original method boundary',
     mentions: [],
     timestamp: 1,

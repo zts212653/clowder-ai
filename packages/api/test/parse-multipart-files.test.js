@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import './helpers/setup-cat-registry.js';
 
 describe('parseMultipart with mixed image + file attachments', () => {
   let uploadDir;
@@ -117,6 +118,20 @@ describe('parseMultipart with mixed image + file attachments', () => {
     assert.equal(result.contentBlocks[0].type, 'text');
     assert.equal(result.contentBlocks[1].type, 'file');
     assert.equal(result.contentBlocks[1].fileName, 'data.json');
+  });
+
+  it('preserves repeated explicit member targets for attachment sends', async () => {
+    const { parseMultipart } = await import('../dist/routes/parse-multipart.js');
+    const parts = [
+      { type: 'field', fieldname: 'content', value: 'targeted attachment context' },
+      { type: 'field', fieldname: 'mentions', value: 'opus' },
+      { type: 'field', fieldname: 'mentions', value: 'codex' },
+    ];
+
+    const result = await parseMultipart({ parts: () => createAsyncIterator(parts) }, uploadDir);
+
+    assert.ok(!('error' in result));
+    assert.deepEqual(result.mentions, ['opus', 'codex']);
   });
 });
 

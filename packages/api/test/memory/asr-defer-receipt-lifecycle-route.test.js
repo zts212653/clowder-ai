@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { before, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { adaptMessageStore } from '../helpers/message-from-fixtures.js';
 
 const LINEAGE = `write_lineage_${'a'.repeat(32)}`;
 const OPPORTUNITY = `write_opp_${'c'.repeat(32)}`;
@@ -25,7 +26,7 @@ describe('F276 deferred receipt lifecycle invalidates write-opportunity lineage'
       import('../../dist/routes/callback-auth-prehandler.js'),
     ]);
     registry = new registryMod.InvocationRegistry();
-    messageStore = new messageMod.MessageStore();
+    messageStore = adaptMessageStore(new messageMod.MessageStore());
     app = Fastify();
     authMod.registerCallbackAuthHook(app, registry);
     routeMod.registerCallbackDeferPersonMemoryRoutes(app, {

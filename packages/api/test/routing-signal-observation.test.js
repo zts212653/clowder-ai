@@ -38,7 +38,7 @@ function dispatchTerminal(overrides = {}) {
     evidenceRef: 'turn-execution:inv-1',
     catId: 'sol',
     status: 'failed',
-    failureClass: 'provider_timeout',
+    failureClass: 'provider_unreachable',
     preflightDecision: {
       v: 1,
       ownerId: 'owner-1',
@@ -140,7 +140,7 @@ describe('F293 automatic routing observation contracts', () => {
     );
     assert.equal(
       routingSignalObservationV1Schema.safeParse(
-        dispatchTerminal({ status: 'succeeded', failureClass: 'provider_timeout' }),
+        dispatchTerminal({ status: 'succeeded', failureClass: 'provider_unreachable' }),
       ).success,
       false,
     );

@@ -1,13 +1,17 @@
 import type { InvocationQueue } from '../../../cats/services/agents/invocation/InvocationQueue.js';
-import { isFreshnessRoutableMessage } from '../../../cats/services/freshness/checkFreshnessForPostMessage.js';
+import {
+  type QueueLedgerEntry,
+  queueEntryId,
+} from '../../../cats/services/agents/invocation/queue-ledger/QueueLedger.js';
+import { isFreshnessRoutableMessage } from '../../../cats/services/freshness/freshness-routable-message.js';
 import type { IMessageStore, StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
 import { canViewMessage, getTimelineOrderTime } from '../../../cats/services/stores/visibility.js';
 import type { LiveInboxReference, LiveInboxScope, LiveInboxSource } from './live-inbox-contract.js';
 
 export interface MessageLiveInboxOptions {
   store: Pick<IMessageStore, 'getByThreadAfter' | 'getById'>;
-  /** Current contiguous Queue body selection, including same-child metadata-only exposure. Missing means no notice. */
-  queue?: Pick<InvocationQueue, 'getQueuedBodyMessagesForCat'>;
+  /** Canonical pending owner plus ordinary full-body selection. No receipt shadow writes. */
+  queue?: Pick<InvocationQueue, 'getQueuedBodyMessagesForCat' | 'getDurableEntriesForMessages'>;
   /** Current Host scope/permission check; a stored message never grants permission to a new call. */
   authorize(scope: LiveInboxScope): Promise<boolean>;
   isSameCallExposure?(message: StoredMessage): boolean;
@@ -34,11 +38,16 @@ export class MessageLiveInboxSource implements LiveInboxSource {
       includeQueuedUserMessages: true,
       unresolvedCursorPolicy: 'rescan',
     });
+    const pending = await this.pending(
+      scope,
+      messages.map((message) => message.id),
+    );
+    const projected = await Promise.all(
+      messages.map((message) => this.project(scope, message, pending.get(message.id) ?? [])),
+    );
     await this.assertAuthorized(scope);
     return {
-      items: messages
-        .map((message) => this.project(scope, message))
-        .filter((item): item is LiveInboxReference => item !== null),
+      items: projected.filter((item): item is LiveInboxReference => item !== null),
       // This is an ephemeral raw-timeline cursor, never a seen cursor. A lost anchor rescans,
       // and a process restart always reads canonical custody again from the beginning.
       nextCursor: messages.at(-1)?.id,
@@ -48,16 +57,28 @@ export class MessageLiveInboxSource implements LiveInboxSource {
   async read(scope: LiveInboxScope, messageId: string): Promise<LiveInboxReference | null> {
     await this.assertAuthorized(scope);
     const message = await this.options.store.getById(messageId);
+    const pending = message ? await this.pending(scope, [messageId]) : new Map<string, QueueLedgerEntry[]>();
+    const projected = message ? await this.project(scope, message, pending.get(messageId) ?? []) : null;
     await this.assertAuthorized(scope);
-    return message ? this.project(scope, message) : null;
+    return projected;
+  }
+
+  private async pending(
+    scope: LiveInboxScope,
+    messageIds: readonly string[],
+  ): Promise<Map<string, QueueLedgerEntry[]>> {
+    return this.options.queue?.getDurableEntriesForMessages(scope.threadId, messageIds) ?? new Map();
   }
 
   private async assertAuthorized(scope: LiveInboxScope): Promise<void> {
     if (!(await this.options.authorize(scope))) throw new LiveInboxAuthorityUnavailableError();
   }
 
-  private project(scope: LiveInboxScope, message: StoredMessage): LiveInboxReference | null {
-    const custody = message.queueCustody;
+  private async project(
+    scope: LiveInboxScope,
+    message: StoredMessage,
+    entries: readonly QueueLedgerEntry[],
+  ): Promise<LiveInboxReference | null> {
     if (
       message.userId !== scope.userId ||
       message.threadId !== scope.threadId ||
@@ -66,57 +87,82 @@ export class MessageLiveInboxSource implements LiveInboxSource {
       message.deliveryStatus === 'canceled' ||
       !canViewMessage(message, { type: 'cat', catId: scope.catId }) ||
       !isFreshnessRoutableMessage(message) ||
-      this.options.isSameCallExposure?.(message) ||
-      !custody?.allTargetCats.includes(scope.catId) ||
-      custody.withdrawnByCatIds?.includes(scope.catId)
+      this.options.isSameCallExposure?.(message)
     )
       return null;
+    const owned = entries.filter(
+      (entry) =>
+        entry.threadId === scope.threadId &&
+        entry.owner.kind === 'user' &&
+        entry.owner.userId === scope.userId &&
+        entry.payload.messageId === message.id &&
+        entry.targets.includes(scope.catId),
+    );
+    const refs = message.lifecycle?.dispatchRefs?.filter((ref) => ref.targetId === scope.catId) ?? [];
+    // Ambiguous evidence never selects an owner. History delivery wins over a stale pending cache.
+    if (owned.length > 1 || refs.length > 1 || (owned.length === 0 && refs.length === 0)) return null;
+    const entry = owned[0];
+    const ref = refs[0];
+    const response = ref ? await this.options.store.getById(ref.statusMessageId) : null;
+    const lifecycle = response?.lifecycle;
+    const expectedEntryId = entry?.id ?? queueEntryId(message.id);
+    const exactResponse = Boolean(
+      response &&
+        response.userId === scope.userId &&
+        response.threadId === scope.threadId &&
+        response.catId === scope.catId &&
+        lifecycle?.kind === 'response' &&
+        lifecycle.targetId === scope.catId &&
+        lifecycle.inputMessageIds.includes(message.id) &&
+        lifecycle.inputEntryIds.includes(expectedEntryId),
+    );
+    const readByInvocationIds = exactResponse && lifecycle?.kind === 'response' ? [lifecycle.invocationId] : [];
+    const exactDeliveryFailure = Boolean(
+      response &&
+        response.threadId === scope.threadId &&
+        response.userId === 'system' &&
+        response.from?.kind === 'system' &&
+        response.from.service === 'message_delivery' &&
+        lifecycle?.kind === 'delivery_failure' &&
+        lifecycle.inputMessageId === message.id &&
+        lifecycle.sourceEntryId === expectedEntryId &&
+        lifecycle.requestedTargets.includes(scope.catId),
+    );
+    const handled =
+      ref?.phase === 'settled' &&
+      (exactDeliveryFailure || (exactResponse && lifecycle?.kind === 'response' && lifecycle.status !== 'processing'));
     // Durable visibility permits a sparse historical drill, not a contiguous replay. The
     // current Queue path must return actual body bytes, not an alreadyExposed marker.
     const availableForContiguousRead =
+      !ref &&
       this.options.queue
         ?.getQueuedBodyMessagesForCat(
           scope.threadId,
           scope.userId,
           scope.catId,
           scope.parentInvocationId ?? scope.invocationId,
-          scope.invocationId,
         )
-        .some(
-          (entry) =>
-            !entry.alreadyExposedToInvocation &&
-            (entry.messageId === message.id || entry.mergedMessageIds?.includes(message.id)),
-        ) === true;
+        .some((entry) => !entry.alreadyExposed && entry.messageId === message.id) === true;
     return {
       messageId: message.id,
-      queueEntryId: custody.carrierByTargetCatId?.[scope.catId]?.entryId ?? custody.entryId,
+      queueEntryId: expectedEntryId,
       threadId: message.threadId,
       sourceThreadId: message.extra?.crossPost?.sourceThreadId ?? message.threadId,
       authorCatId: message.catId,
       targetCatId: scope.catId,
       priority:
-        custody.priority === 'urgent' ? 'urgent' : message.extra?.crossPost?.effectClass === 'fyi' ? 'fyi' : 'normal',
+        entry?.priority === 'urgent' ? 'urgent' : message.extra?.crossPost?.effectClass === 'fyi' ? 'fyi' : 'normal',
       order: `${String(getTimelineOrderTime(message)).padStart(16, '0')}:${message.id}`,
       nextWork: !availableForContiguousRead,
       facts: {
         persisted: true,
-        notified: custody.notifiedByCatIds.includes(scope.catId),
-        readByInvocationIds: [
-          ...new Set(
-            (custody.bodyExposures ?? [])
-              .filter((exposure) => exposure.targetCatId === scope.catId)
-              .map((exposure) => exposure.invocationId),
-          ),
-        ],
+        // No canonical notification witness is available on this projection.
+        notified: false,
+        readByInvocationIds,
         readInCurrentContext:
           this.options.retainsCurrentInvocationReads?.(scope) === true &&
-          (custody.bodyExposures ?? []).some(
-            (exposure) => exposure.targetCatId === scope.catId && exposure.invocationId === scope.invocationId,
-          ),
-        handled:
-          custody.handledByCatIds.includes(scope.catId) ||
-          custody.targetOutcomeByCatId?.[scope.catId] !== undefined ||
-          (custody.status === 'terminal' && !custody.pendingTargetCats.includes(scope.catId)),
+          readByInvocationIds.includes(scope.invocationId),
+        handled,
         playback: 'unknown',
       },
     };

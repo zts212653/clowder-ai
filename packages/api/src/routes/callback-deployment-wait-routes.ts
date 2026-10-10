@@ -8,12 +8,12 @@ import {
 } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { ManagedHoldDispositionService } from '../domains/ball-custody/ManagedHoldDispositionService.js';
 import { createTypedWaitRegistration } from '../domains/ball-custody/TypedWaitRegistration.js';
 import type {
   InvocationRecord,
   InvocationRegistry,
 } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { deploymentWaitGeneration } from '../domains/cats/services/stores/ports/TaskDeploymentWaitState.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
@@ -47,7 +47,7 @@ export interface DeploymentWaitCallbackRouteDeps {
   readonly lifecycleHolder: {
     current?: Pick<DeploymentWaitLifecycleService, 'observe' | 'releaseCurrentExecutionClaim'>;
   };
-  readonly managedHoldDispositionService?: Partial<Pick<ManagedHoldDispositionService, 'describe'>>;
+  readonly invocationTracker?: Pick<InvocationTracker, 'getActiveSlots'>;
 }
 
 type RegistrationInput = z.infer<typeof schema>;
@@ -185,9 +185,7 @@ async function performRegistration(
 
   const source = await captureTypedWaitSource(auth, {
     messageStore: deps.messageStore,
-    ...(deps.managedHoldDispositionService
-      ? { managedHoldDispositionService: deps.managedHoldDispositionService }
-      : {}),
+    ...(deps.invocationTracker ? { invocationTracker: deps.invocationTracker } : {}),
   });
   if (!source) return result(409, { error: 'Invocation source is unavailable; no wait was registered' });
 
@@ -226,7 +224,7 @@ async function performRegistration(
   });
   if (!installed) return result(409, { error: 'Deployment wait changed concurrently; retry registration' });
 
-  let immediate;
+  let immediate: Awaited<ReturnType<DeploymentWaitLifecycleService['observe']>> | undefined;
   try {
     immediate = await lifecycle.observe({
       taskId: installed.id,
@@ -247,6 +245,16 @@ async function performRegistration(
     task: await deps.taskStore.get(installed.id),
     await: awaitState,
     observationState: immediate.kind,
+    ...(immediate.kind === 'notified'
+      ? {
+          notification: {
+            messageId: immediate.messageId,
+            content: immediate.content,
+            outcome: immediate.outcome,
+            delivery: 'current_execution_response',
+          },
+        }
+      : {}),
   });
 }
 

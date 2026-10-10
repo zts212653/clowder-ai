@@ -1,4 +1,4 @@
-import type { FreshnessReadableMessage } from '../../cats/services/freshness/checkFreshnessForPostMessage.js';
+import type { FreshnessReadableMessage } from '../../cats/services/freshness/freshness-unseen-source.js';
 import { liveMessageDigest } from './live-transcript.js';
 
 interface ExposureScope {

@@ -169,6 +169,32 @@ export interface MessageMetadata {
    *  Populated by providers when isCliError/isCliTimeout fires, consumed by Phase B folded panel.
    *  Carries `__cliError.cliDiagnostics` / `__cliTimeout.cliDiagnostics` from cli-spawn. */
   cliDiagnostics?: CliDiagnostics;
+  /** F118 AC-C3 / F117: what the provider observed when it gave up on a silent CLI. It explains
+   *  the failure of the turn's response, so it persists with that response's terminal state. */
+  timeoutDiagnostics?: TimeoutDiagnostics;
+  /** Local cancellation does not attest termination of a dispatched remote run. */
+  cancellationDiagnostics?: {
+    localWaitCancelled: true;
+    remoteTermination: 'unconfirmed';
+    remoteExecution: RemoteExecutionRef;
+  };
+}
+
+export interface RemoteExecutionRef {
+  kind: 'a2a_task' | 'antigravity_cascade';
+  id: string;
+}
+
+/** F118 AC-C3: the `timeout_diagnostics` system_info payload, reduced to its rendered fields. */
+export interface TimeoutDiagnostics {
+  silenceDurationMs: number;
+  processAlive: boolean;
+  lastEventType?: string;
+  firstEventAt?: number;
+  lastEventAt?: number;
+  cliSessionId?: string;
+  invocationId?: string;
+  rawArchivePath?: string;
 }
 
 /**
@@ -394,6 +420,12 @@ export interface AgentMessage {
   /** Exact durable child start time carried only by the typed invocation-created
    *  lifecycle event. Consumers must not recover it by parsing `content`. */
   turnExecutionStartedAt?: number;
+  /** Durable processing response created before provider startup for this exact child. */
+  lifecycleResponseMessageId?: string;
+  /** Raw message frontier observed before the processing response was published. */
+  lifecyclePriorFrontierMessageId?: string | null;
+  /** Exact server-owned working identity; dynamic clients must fail closed without it. */
+  activeRun?: import('@cat-cafe/shared').LifecycleActiveRun;
   /** Typed F167 Phase T proof that this exact child consumed a terminal
    *  coordination wake and correctly produced no reply. */
   turnCustodyTerminalWitness?: QueueTerminalConsumptionWitness;
@@ -485,12 +517,15 @@ export interface AgentContextCapability {
 
 /** F296 B0: concrete provider transport identity, independent of route/origin. */
 export type ProviderCarrier =
-  | { readonly provider: 'claude'; readonly carrier: 'print_sdk' | 'bg_daemon' | 'interactive_pty' | 'api_key' }
+  | {
+      readonly provider: 'claude';
+      readonly carrier: 'print_sdk' | 'agent_sdk' | 'bg_daemon' | 'interactive_pty' | 'api_key';
+    }
   | { readonly provider: 'codex'; readonly carrier: 'exec_json' | 'app_server' }
   | { readonly provider: 'gemini'; readonly carrier: 'gemini_cli' | 'antigravity_adapter' }
   | { readonly provider: 'antigravity'; readonly carrier: 'cdp_bridge' }
   | { readonly provider: 'kimi'; readonly carrier: 'stream_json' }
-  | { readonly provider: 'opencode'; readonly carrier: 'run_json' }
+  | { readonly provider: 'opencode'; readonly carrier: 'run_json' | 'server' }
   | { readonly provider: 'acp'; readonly carrier: 'acp'; readonly backend: 'opencode' | 'unknown' }
   | { readonly provider: 'catagent'; readonly carrier: 'direct_api' }
   | { readonly provider: 'a2a'; readonly carrier: 'remote' }
@@ -846,6 +881,54 @@ export interface AgentContextBinding {
   readonly source: 'service_spawn' | 'invocation_config';
 }
 
+/** Provider-native identity for one exact, still-open Agent Client run. */
+export interface AgentClientActiveRunHandle {
+  readonly provider: 'openai_codex' | 'anthropic' | 'anthropic_acp' | 'opencode' | 'other';
+  readonly carrier: 'codex_app_server' | 'claude_agent_sdk' | 'acp' | 'other';
+  readonly threadId: string;
+  readonly turnId: string;
+}
+
+/** Exact input that the lifecycle coordinator has already admitted durably. */
+export interface AgentClientDispatchInput {
+  readonly text: string;
+  readonly imagePaths?: readonly string[];
+  readonly messageIds: readonly string[];
+  /** Exact adapter evidence; delivery and Stop never wait for this callback. */
+  readonly onInputRead?: () => Promise<void>;
+}
+
+export interface AgentClientDispatchOptions {
+  /** Normal dispatch / Append = false; Steer = true. */
+  readonly force: boolean;
+  /** Server-owned lifecycle invocation fence, never a provider session id. */
+  readonly expectedInvocationId: string;
+}
+
+export type AgentClientDispatchResult =
+  | {
+      readonly accepted: true;
+      readonly handle: AgentClientActiveRunHandle;
+    }
+  | {
+      readonly accepted: false;
+      readonly reason: 'active_run_mismatch' | 'active_run_closed' | 'invalid_input' | 'provider_rejected';
+    };
+
+/** Live-only adapter. Durable Queue/History state must never be stored here. */
+export interface AgentClientActiveRunDispatcher {
+  readonly invocationId: string;
+  readonly capabilities: { readonly append: boolean; readonly steer: boolean; readonly inputReadReceipt?: boolean };
+  readonly handle: AgentClientActiveRunHandle;
+  dispatch(input: AgentClientDispatchInput, options: AgentClientDispatchOptions): Promise<AgentClientDispatchResult>;
+}
+
+export interface AgentClientActiveRunDispatchRegistration {
+  readonly invocationId: string;
+  /** Return a release hook that removes this exact live handle from its registry. */
+  register(dispatcher: AgentClientActiveRunDispatcher): (() => void) | undefined;
+}
+
 /** ADR-042 automatic supplement execution: provider + callback layers must enforce this, not prompt prose. */
 export type ToolExecutionPolicy =
   | {
@@ -878,7 +961,33 @@ export interface AgentRouteIntent {
 /**
  * Options for invoking an agent
  */
+/**
+ * F117 K2: the Claude compaction hooks the Agent SDK carrier registers in-process. The carrier then
+ * proves its own compaction to F296 (authoritative-compaction), instead of a project hook in the
+ * workspace: the seal observation is written before the provider compacts, by this invocation.
+ */
+export interface ClaudeCompactionHooks {
+  /** Before the provider compacts: record this invocation's compression observation and apply the session policy. */
+  preCompact(input: { readonly cliSessionId: string; readonly trigger: 'manual' | 'auto' }): Promise<void>;
+  /** After the provider compacted: the cold context packet to inject, when the epoch owner projected one. */
+  postCompactContext(input: { readonly cliSessionId: string }): Promise<string | undefined>;
+}
+
+/** Builds one invocation's in-process compaction hooks; the identity names whose observation they record. */
+export type ClaudeCompactionHooksFactory = (identity: {
+  readonly invocationId: string;
+  readonly userId: string;
+  readonly catId: string;
+  readonly threadId: string;
+}) => ClaudeCompactionHooks;
+
 export interface AgentServiceOptions {
+  /** Synchronous pre-send fact: survives abort racing the provider iterator. */
+  onRemoteExecutionDispatched?: (execution: RemoteExecutionRef) => void;
+  /** Provider-neutral interaction port bound to this invocation. */
+  runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
+  /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
+  resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
   /** F317 Host-only continuous companion port; no model-supplied configuration. */
   liveCompanion?: import('./agents/providers/CodexLiveRunPort.js').CodexLiveRunPort;
   /** Route-owned intent. Providers may project only explicit behavior intent onto native modes. */
@@ -939,10 +1048,10 @@ export interface AgentServiceOptions {
   agentCarrierSessionFactory?: AgentCarrierSessionFactory;
   /** F254 D2: per-invocation two-phase provider-native freshness controller. */
   activeInvocationFreshness?: import('./freshness/FreshnessNoticeBroker.js').ActiveInvocationFreshnessController;
-  /** F306: provider-neutral, invocation-bound human interaction port. */
-  runtimeInteractionPort?: import('../../runtime-interaction/ports/RuntimeInteractionPort.js').RuntimeInteractionPort;
-  /** F310: source-bound Task relation resolved from canonical Task truth for an F306 question. */
-  resolveEntrustedWorkTaskRef?: () => Promise<import('@cat-cafe/shared').EntrustedWorkTaskRefV1 | undefined>;
+  /** #1354: expose an exact provider-native active-turn dispatcher after turn acceptance. */
+  activeRunDispatch?: AgentClientActiveRunDispatchRegistration;
+  /** F117 K2: Claude compaction hooks for a carrier that runs them in-process (the Agent SDK carrier). */
+  claudeCompactionHooks?: ClaudeCompactionHooks;
   /** F210-H1b: Override AGY --log-file path (test seam for the trajectory progress observer). */
   agyLogPathOverride?: string;
   /** F118: Invocation ID for diagnostic enrichment of __cliTimeout */

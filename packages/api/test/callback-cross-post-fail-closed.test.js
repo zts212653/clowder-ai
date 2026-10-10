@@ -21,6 +21,7 @@ function createMockSocketManager() {
   return {
     broadcastAgentMessage() {},
     broadcastToRoom() {},
+    emitToUser() {},
   };
 }
 
@@ -111,14 +112,17 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
   let invocationRecordStore;
   let mockRouter;
   let threadStore;
+  let invocationQueue;
 
   beforeEach(async () => {
     const { InvocationRegistry } = await import(
       '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'
     );
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
 
     registry = new InvocationRegistry();
+    invocationQueue = new InvocationQueue();
     messageStore = new MessageStore();
     socketManager = createMockSocketManager();
     invocationRecordStore = createMockInvocationRecordStore();
@@ -145,6 +149,8 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
       socketManager,
       router: mockRouter,
       invocationRecordStore,
+      invocationQueue,
+      queueProcessor: { async requestDrain() {} },
       threadStore,
       ...opts,
     });
@@ -288,7 +294,7 @@ describe('F193 AC-A4: cross-post fail-closed when no routing credentials', () =>
   });
 
   test('codex P1 round 2 (2026-05-08): AC-A4 reject does not consume clientMessageId — corrected retry delivers', async () => {
-    // Closes Codex P1 round 2: AC-A4 reject MUST run before claimClientMessageId.
+    // AC-A4 validation must leave a corrected retry with the same message ID admissible.
     // Otherwise a malformed first attempt permanently consumes the idempotency
     // key, and the corrected retry with same key gets `duplicate` (silent drop).
     const app = await createApp();

@@ -1,13 +1,39 @@
-import { actionSuccessorInvocationIdempotencyKey } from '../cats/services/agents/invocation/InvocationQueue.js';
-import { actionSuccessorCarrierKey } from '../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import {
+  actionSuccessorCarrierKey,
+  actionSuccessorInvocationIdempotencyKey,
+  actionSuccessorInvocationKeyForTarget,
+} from '../cats/services/agents/invocation/InvocationQueue.js';
+import { queueEntryId } from '../cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import type { IInvocationRecordStore, InvocationRecord } from '../cats/services/stores/ports/InvocationRecordStore.js';
 import { classifyInvocationRecoveryStatus } from '../cats/services/stores/ports/invocation-state-machine.js';
-import type { ITurnExecutionStore } from '../cats/services/stores/ports/TurnExecutionStore.js';
+import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
+import type { ITurnExecutionStore, TurnExecutionRecord } from '../cats/services/stores/ports/TurnExecutionStore.js';
 import type { ActionSuccessorFence } from './ActionSuccessorAdmissionContract.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import type { DirectActionSuccessorCarrierDecision } from './DirectActionSuccessorCarrierRecovery.js';
 
 type ExecutionVerdict = 'ended' | 'canceled' | 'unconfirmed';
+export type ActionExecutionScope = Pick<
+  ActionSuccessorLease,
+  'leaseId' | 'generation' | 'holderThreadId' | 'tenantScope'
+>;
+
+function isExactActionRecord(
+  record: InvocationRecord,
+  lease: ActionExecutionScope,
+  holder: string,
+  key: string,
+): boolean {
+  return (
+    record.idempotencyKey === key &&
+    record.threadId === lease.holderThreadId &&
+    record.userId === lease.tenantScope &&
+    record.targetCats.includes(holder as (typeof record.targetCats)[number]) &&
+    record.actionLeaseCarrier?.kind === 'action_successor' &&
+    record.actionLeaseCarrier.leaseId === lease.leaseId &&
+    record.actionLeaseCarrier.generation === lease.generation
+  );
+}
 
 /** What the InvocationRecord created from this very carrier key proves about the holder's run. */
 function executionVerdict(record: InvocationRecord | null, holder: string): ExecutionVerdict {
@@ -56,12 +82,7 @@ async function readBoundRecord(
       continue;
     }
     const parent = await recordStore.get(child.parentInvocationId);
-    if (
-      parent &&
-      parent.idempotencyKey === key &&
-      parent.threadId === lease.holderThreadId &&
-      parent.userId === lease.tenantScope
-    ) {
+    if (parent && parent.id === child.parentInvocationId && isExactActionRecord(parent, lease, holder, key)) {
       return parent;
     }
   }
@@ -89,7 +110,7 @@ export async function confirmHandledExecutionsEnded(
       const key = actionSuccessorInvocationIdempotencyKey(actionSuccessorCarrierKey(fence, holder));
       const indexed = await recordStore.getByIdempotencyKey(lease.holderThreadId, lease.tenantScope, key);
       const record =
-        indexed ??
+        (indexed && isExactActionRecord(indexed, lease, holder, key) ? indexed : null) ??
         (await readBoundRecord(recordStore, lineage, lease, holder, key, handledChildInvocationIds.get(holder)));
       verdicts.push(executionVerdict(record, holder));
     }
@@ -99,4 +120,97 @@ export async function confirmHandledExecutionsEnded(
   if (verdicts.includes('canceled')) return { disposition: 'unavailable', reason: 'carrier_terminal' };
   if (verdicts.includes('unconfirmed')) return { disposition: 'unavailable', reason: 'execution_unconfirmed' };
   return { disposition: 'refresh_handled', fence };
+}
+
+export type ActionHistoryExecutionState = 'live' | 'handled' | 'interrupted' | 'canceled' | 'failed' | 'unconfirmed';
+
+function exactResponse(
+  response: StoredMessage | null | undefined,
+  responseMessageId: string,
+  scope: ActionExecutionScope,
+  source: StoredMessage,
+  holder: string,
+): boolean {
+  return (
+    !!response &&
+    response.id === responseMessageId &&
+    response.userId === scope.tenantScope &&
+    response.threadId === scope.holderThreadId &&
+    response.catId === holder &&
+    response.lifecycle?.kind === 'response' &&
+    response.lifecycle.targetId === holder &&
+    response.lifecycle.inputMessageIds.includes(source.id) &&
+    response.lifecycle.inputEntryIds.includes(queueEntryId(source.id))
+  );
+}
+
+function exactChild(
+  child: TurnExecutionRecord | null,
+  invocationId: string,
+  scope: ActionExecutionScope,
+  source: StoredMessage,
+  holder: string,
+): child is TurnExecutionRecord {
+  return (
+    !!child &&
+    child.invocationId === invocationId &&
+    child.threadId === scope.holderThreadId &&
+    child.userId === scope.tenantScope &&
+    child.catId === holder &&
+    (child.causal?.triggerMessageId === source.id || child.causal?.coveredMessageIds?.includes(source.id) === true)
+  );
+}
+
+function executionState(
+  status: string,
+  child: TurnExecutionRecord,
+  parent: InvocationRecord,
+  holder: string,
+): ActionHistoryExecutionState {
+  if (parent.status === 'canceled' || child.status === 'canceled' || status === 'canceled') return 'canceled';
+  if (status === 'completed' && child.status === 'succeeded')
+    return executionVerdict(parent, holder) === 'ended' ? 'handled' : 'unconfirmed';
+  if (status === 'processing' && child.status === 'running' && parent.status === 'running') return 'live';
+  if (
+    status === 'interrupted' &&
+    child.status === 'interrupted' &&
+    classifyInvocationRecoveryStatus(parent.status) === 'replayable'
+  )
+    return 'interrupted';
+  if (status === 'failed' && child.status === 'failed') return 'failed';
+  return 'unconfirmed';
+}
+
+/**
+ * Canonical source → response → child → parent proof. There is no Message custody receipt,
+ * no expiring idempotency-index dependency, and no read/adoption or scheduling side effect.
+ * Generation is the immutable lease identity; source × target is the executor's exact key.
+ * The old public codec is read-only compatibility for already persisted executions, never a
+ * second admission path. Every link, including the immutable action discriminator, must match.
+ */
+export async function readActionHistoryExecution(input: {
+  lease: ActionExecutionScope;
+  source: StoredMessage;
+  holder: string;
+  responseMessageId: string;
+  messages: Pick<IMessageStore, 'getById'>;
+  recordStore: Pick<IInvocationRecordStore, 'get'> | undefined;
+  lineage: ExecutionLineageReader | undefined;
+}): Promise<ActionHistoryExecutionState | null> {
+  const { lease, source, holder, recordStore, lineage } = input;
+  if (!recordStore || !lineage) return null;
+  const response = await input.messages.getById(input.responseMessageId);
+  const lifecycle = response?.lifecycle;
+  if (!exactResponse(response, input.responseMessageId, lease, source, holder) || lifecycle?.kind !== 'response')
+    return null;
+  const child = await lineage.get(lifecycle.invocationId);
+  if (!exactChild(child, lifecycle.invocationId, lease, source, holder)) return null;
+  const parent = await recordStore.get(child.parentInvocationId);
+  if (!parent || parent.id !== child.parentInvocationId) return null;
+  const keys = [
+    actionSuccessorInvocationKeyForTarget(source.id, holder),
+    actionSuccessorInvocationIdempotencyKey(actionSuccessorCarrierKey(lease, holder)),
+  ];
+  if (!keys.some((key) => isExactActionRecord(parent, lease, holder, key))) return null;
+  return executionState(lifecycle.status, child, parent, holder);
 }

@@ -1,44 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatSessionSealRequested, formatVisibleSystemInfo } from '../system-info-visible';
+import { formatVisibleSystemInfo } from '../system-info-visible';
 
-describe('formatSessionSealRequested', () => {
-  it('describes runtime replacement as an in-turn recovery instead of a context seal', () => {
+describe('internal session continuity has no visible notice formatter', () => {
+  it.each(['runtime_replacement', 'context_threshold'])('keeps %s outside chat', (reason) => {
     expect(
-      formatSessionSealRequested(
-        {
-          type: 'session_seal_requested',
-          catId: 'codex-sol',
-          sessionSeq: 2,
-          reason: 'cli_session_replaced',
-          continuityDiagnostics: {
-            source: 'runtime_replacement',
-            boundary: 'runtime_replacement',
-          },
-        },
-        () => '缅因猫 Sol',
-      ),
-    ).toEqual({
-      content: '缅因猫 Sol 的会话 #2 已自动接力；新会话已在本轮继续运行',
-      variant: 'info',
-    });
-  });
-
-  it('keeps context percentage copy for a real threshold seal', () => {
-    expect(
-      formatSessionSealRequested(
-        {
-          type: 'session_seal_requested',
-          catId: 'codex-sol',
-          sessionSeq: 3,
-          reason: 'context_threshold',
-          healthSnapshot: { fillRatio: 0.82 },
-        },
-        () => '缅因猫 Sol',
-      ),
-    ).toEqual({
-      content: '缅因猫 Sol 的会话 #3 已封存（上下文 82%），下次调用将自动创建新会话',
-      variant: 'info',
-    });
+      formatVisibleSystemInfo({ type: 'session_seal_requested', catId: 'codex-sol', sessionSeq: 3, reason }),
+    ).toBeNull();
   });
 });
 
@@ -57,7 +24,7 @@ describe('formatVisibleSystemInfo — a2a_multi_target_serialized', () => {
   };
 
   it('renders readable text instead of raw JSON', () => {
-    const visible = formatVisibleSystemInfo(payload, (c) => c, 'opus');
+    const visible = formatVisibleSystemInfo(payload, (c) => c);
     expect(visible, 'null here means the UI prints the raw payload').not.toBeNull();
     expect(visible?.content).not.toContain('a2a_multi_target_serialized');
     expect(visible?.content).toContain('串行');
@@ -71,7 +38,7 @@ describe('formatVisibleSystemInfo — a2a_multi_target_serialized', () => {
       mode: payload.mode,
       order: payload.order,
     };
-    const visible = formatVisibleSystemInfo(withoutMessage, (c) => (c === 'codex' ? '缅因猫' : '暹罗猫'), 'opus');
+    const visible = formatVisibleSystemInfo(withoutMessage, (c) => (c === 'codex' ? '缅因猫' : '暹罗猫'));
     expect(visible?.content).toContain('第 1 棒 缅因猫');
     expect(visible?.content).toContain('第 2 棒 暹罗猫');
     expect(visible?.content).toContain('cat_cafe_multi_mention');
@@ -79,7 +46,7 @@ describe('formatVisibleSystemInfo — a2a_multi_target_serialized', () => {
 });
 
 describe('formatVisibleSystemInfo — routing_preflight', () => {
-  it('turns warned and rejected receipts into owner-readable copy', () => {
+  it('turns rejected receipts into owner-readable copy', () => {
     const visible = formatVisibleSystemInfo(
       {
         type: 'routing_preflight',
@@ -112,7 +79,7 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     ).toBeNull();
   });
 
-  it('maps degraded routing reason codes to stable copy without exposing internal failure classes', () => {
+  it('keeps warned fail-open diagnostics out of chat', () => {
     const visible = formatVisibleSystemInfo({
       type: 'routing_preflight',
       v: 1,
@@ -159,5 +126,28 @@ describe('formatVisibleSystemInfo — routing_preflight', () => {
     expect(result?.content).toBe('Astra：近期遇到额度限制。这次仍会按你的选择尝试。');
     expect(result?.content).not.toContain('quota_exhausted');
     expect(result?.content).not.toContain('alternative-');
+  });
+});
+
+describe('formatVisibleSystemInfo — warning presentation', () => {
+  it('keeps unclassified provider diagnostics out of chat', () => {
+    expect(formatVisibleSystemInfo({ type: 'warning', message: 'model metadata missing' })).toBeNull();
+  });
+
+  it('shows actionable warnings and keeps automatic retries outside chat', () => {
+    expect(
+      formatVisibleSystemInfo({
+        type: 'warning',
+        presentation: 'user_action_required',
+        message: '请重新授权',
+      }),
+    ).toEqual({ content: '⚠️ 请重新授权', variant: 'info' });
+    expect(
+      formatVisibleSystemInfo({
+        type: 'warning',
+        presentation: 'transient_status',
+        message: '正在自动重试',
+      }),
+    ).toBeNull();
   });
 });

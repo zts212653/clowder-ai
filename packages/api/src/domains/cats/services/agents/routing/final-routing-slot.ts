@@ -10,7 +10,7 @@
  * - 豁免只走结构边界（fenced code / blockquote / URL），禁止动作词表 / 语义豁免表
  *
  * 与 verdict-detect.ts（AC-C7）同构，但更严格的纯机械判定，命中时 route-serial
- * 会 suppress AC-C7 + 既有 #417 inline-mention-hint（格式错是根因）。
+ * 会 suppress 后续重复 correction signal（格式错是根因）。
  */
 
 export interface ValidationInput {

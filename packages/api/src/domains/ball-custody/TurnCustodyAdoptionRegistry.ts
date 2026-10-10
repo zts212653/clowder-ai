@@ -26,9 +26,10 @@ interface AdoptionEntry {
 
 /**
  * Process-local bridge from an invocation-authenticated tool read back to the
- * route generator that owns the same child. Queue custody remains durable; the
- * bridge only ensures the stop-gate baseline is opened before the tool returns
- * the newly exposed body to the provider.
+ * route generator that owns the same child. QueueLedger and exact child History
+ * remain the durable owners. This bridge only serializes route-local preparation
+ * and teardown; its discovery snapshot is not Task continuation permission and
+ * cannot record a receipt or retire a Queue target.
  */
 export class TurnCustodyAdoptionRegistry {
   private readonly handlers = new Map<string, AdoptionEntry>();
@@ -60,9 +61,9 @@ export class TurnCustodyAdoptionRegistry {
   }
 
   /**
-   * Prepare every fallible route-local adoption before append-only Queue exposure
-   * is written. The returned commit holds the registry owner through route teardown,
-   * so a terminal race cannot turn a successful exposure into a later 409.
+   * Prepare fallible route-local adoption before canonical full-body delivery
+   * commits. The reservation holds the route through teardown, not a second
+   * durable Queue owner; only its caller may commit the canonical transaction.
    */
   async prepare(
     invocationId: string,

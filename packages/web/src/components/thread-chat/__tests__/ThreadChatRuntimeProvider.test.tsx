@@ -21,14 +21,12 @@ vi.mock('@/hooks/useAgentMessages', async () => {
       const instanceRef = React.useRef<symbol | null>(null);
       const handlersRef = React.useRef<{
         handleAgentMessage: ReturnType<typeof vi.fn>;
-        resetRefs: ReturnType<typeof vi.fn>;
         resetTimeout: ReturnType<typeof vi.fn>;
         clearDoneTimeout: ReturnType<typeof vi.fn>;
       } | null>(null);
       instanceRef.current ??= Symbol('agent-message-instance');
       handlersRef.current ??= {
         handleAgentMessage: vi.fn(),
-        resetRefs: vi.fn(),
         resetTimeout: vi.fn(),
         clearDoneTimeout: vi.fn(),
       };

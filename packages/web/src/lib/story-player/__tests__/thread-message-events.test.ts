@@ -421,7 +421,7 @@ describe('chatMessagesToTranscriptEvents', () => {
     expect(replayMessages[1]).toMatchObject({ type: 'user', content: '中途插一句。' });
   });
 
-  it('uses deliveredAt for projection ordering before grouping stream records', () => {
+  it('uses deliveredAt for projection ordering', () => {
     const events = chatMessagesToTranscriptEvents(
       [
         message({
@@ -447,15 +447,6 @@ describe('chatMessagesToTranscriptEvents', () => {
           content: 'another participant between chunks',
           timestamp: 2500,
         }),
-        message({
-          id: 'assistant-stream-end',
-          type: 'assistant',
-          catId: 'codex',
-          content: 'stdout chunk 2',
-          timestamp: 3000,
-          origin: 'stream',
-          extra: { stream: { invocationId: 'parent-1', turnInvocationId: 'turn-1' } },
-        }),
       ],
       'thread-1',
     );
@@ -467,7 +458,7 @@ describe('chatMessagesToTranscriptEvents', () => {
       type: 'assistant',
       catId: 'codex',
       invocationId: 'turn-1',
-      cliStdout: 'stdout chunk 1\n\nstdout chunk 2',
+      cliStdout: 'stdout chunk 1',
     });
     expect(replayMessages[1]).toMatchObject({
       type: 'assistant',

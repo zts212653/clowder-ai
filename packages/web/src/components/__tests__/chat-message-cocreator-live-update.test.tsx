@@ -76,6 +76,7 @@ describe('ChatMessage owner live update', () => {
           message: {
             id: 'owner-msg',
             type: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             content: '你好',
             timestamp: Date.now(),
             contentBlocks: [],

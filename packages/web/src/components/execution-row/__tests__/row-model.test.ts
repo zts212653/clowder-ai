@@ -45,7 +45,7 @@ function entry(id: string, status: QueueEntry['status'] = 'queued'): QueueEntry 
     content: `message ${id}`,
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'u1' },
     targetCats: ['opus'],
     intent: 'execute',
     status,
@@ -66,8 +66,6 @@ function input(
     hydrationStale: false,
     hasUnverifiedLegacyExecution: false,
     queue: {
-      total: entries.length,
-      paused: false,
       entries,
       canRecoverOrphaned: false,
       waitInfo: null,
@@ -168,23 +166,22 @@ describe('the ten states of the one row', () => {
     expect(model.visible).toBe(true);
   });
 
-  it('9  a processing message nobody holds: "N 件处理卡住 · 排队 M" + 强制重置', () => {
-    const i = input({ queue: { entries: [entry('stuck', 'processing'), entry('a'), entry('b')] } });
+  it('9 delivered work stays out of Queue; waiting inputs offer no execution reset', () => {
+    const i = input({ queue: { entries: [entry('a'), entry('b')] } });
     const model = deriveExecutionRow(i);
-    expect(model.status).toBe('stuck');
-    expect(text(i)).toBe('1 件处理卡住 · 排队 2');
-    expect(model.forceReset).toEqual(['processing_stuck']);
+    expect(model.status).toBe('waiting');
+    expect(text(i)).toBe('排队 2');
+    expect(model.forceReset).toEqual([]);
   });
 
-  it('10 paused: "排队已暂停 · N 条", 继续, and the reason kept for the title', () => {
+  it('pending work has one waiting state with no parallel pause result', () => {
     const i = input({
-      queue: { paused: true, pauseReason: 'canceled', entries: [entry('a'), entry('b'), entry('c')] },
+      queue: { entries: [entry('a'), entry('b'), entry('c')] },
     });
     const model = deriveExecutionRow(i);
-    expect(model.status).toBe('paused');
-    expect(text(i)).toBe('排队已暂停 · 3 条');
-    expect(model.resume).toBe('continue');
-    expect(model.pauseReason).toBe('canceled');
+    expect(model.status).toBe('waiting');
+    expect(text(i)).toBe('排队 3');
+    expect(model.resume).toBe(null);
     expect(model.forceReset).toEqual([]);
   });
 });
@@ -194,8 +191,8 @@ describe('rules the states do not state', () => {
     expect(deriveExecutionRow(input()).visible).toBe(false);
   });
 
-  it('a paused flag on an empty queue is not a paused queue', () => {
-    const model = deriveExecutionRow(input({ queue: { paused: true, total: 0, entries: [] } }));
+  it('an empty queue has no continuation or pause control', () => {
+    const model = deriveExecutionRow(input({ queue: { entries: [] } }));
     expect(model.visible).toBe(false);
     expect(model.resume).toBe(null);
   });
@@ -206,30 +203,26 @@ describe('rules the states do not state', () => {
     expect(deriveExecutionRow(i).panelToggle).toBe(true);
   });
 
-  it('force-reset floats for exactly the three abnormal classes, and only them', () => {
+  it('force-reset belongs to abnormal execution, never to waiting Queue entries', () => {
     const quiet = live('opus');
     const everything = deriveExecutionRow(
       input({
         executions: [quiet],
         silent: { [activeExecutionKey(quiet)]: { since: NOW - 1 } },
-        queue: { entries: [entry('stuck', 'processing')] },
+        queue: { entries: [entry('a')] },
       }),
     );
-    expect(everything.forceReset).toEqual(['silent_turn', 'processing_stuck']);
+    expect(everything.forceReset).toEqual(['silent_turn']);
     // A healthy run, a paused queue, an orphaned queue and a stale badge never float a reset.
     const calm = deriveExecutionRow(
       input({
         executions: [live('opus')],
         hydrationStale: true,
-        queue: { paused: true, canRecoverOrphaned: true, entries: [entry('a')] },
+        queue: { canRecoverOrphaned: true, entries: [entry('a')] },
       }),
     );
     expect(calm.forceReset).toEqual([]);
-    expect(Object.keys(FORCE_RESET_REASON_COPY).sort()).toEqual([
-      'processing_stuck',
-      'silent_turn',
-      'unverified_legacy',
-    ]);
+    expect(Object.keys(FORCE_RESET_REASON_COPY).sort()).toEqual(['silent_turn', 'unverified_legacy']);
   });
 
   it('an unverified legacy turn does not float a reset once the canonical projection shows runs', () => {
@@ -237,20 +230,17 @@ describe('rules the states do not state', () => {
     expect(model.forceReset).toEqual([]);
   });
 
-  it('an orphaned queue offers 恢复, a paused one offers 继续, never both', () => {
+  it('an orphaned queue offers one recovery action', () => {
     expect(deriveExecutionRow(input({ queue: { canRecoverOrphaned: true, entries: [entry('a')] } })).resume).toBe(
       'recover',
     );
-    expect(
-      deriveExecutionRow(input({ queue: { paused: true, canRecoverOrphaned: true, entries: [entry('a')] } })).resume,
-    ).toBe('continue');
   });
 
   it("a floating 强制重置 is not joined on the row by an orphaned queue's 恢复 (the panel header still offers it)", () => {
     const stuck = deriveExecutionRow(
-      input({ queue: { canRecoverOrphaned: true, entries: [entry('stuck', 'processing'), entry('a')] } }),
+      input({ hasUnverifiedLegacyExecution: true, queue: { canRecoverOrphaned: true, entries: [entry('a')] } }),
     );
-    expect(stuck.forceReset).toEqual(['processing_stuck']);
+    expect(stuck.forceReset).toEqual(['unverified_legacy']);
     expect(stuck.resume).toBe('recover');
     expect(stuck.resumeOnRow).toBe(null);
     // Without a floating reset the same orphaned queue shows 恢复 on the row.
@@ -263,17 +253,17 @@ describe('rules the states do not state', () => {
       input({
         executions: [quiet],
         silent: { [activeExecutionKey(quiet)]: { since: null } },
-        queue: { paused: true, entries: [entry('a')] },
+        queue: { canRecoverOrphaned: true, entries: [entry('a')] },
       }),
     );
     expect(both.forceReset).toEqual(['silent_turn']);
-    expect(both.resumeOnRow).toBe('continue');
+    expect(both.resumeOnRow).toBe(null);
   });
 
-  it('a paused queue is said even while something runs', () => {
-    const i = input({ executions: [live('opus')], queue: { paused: true, entries: [entry('a')] } });
-    expect(text(i)).toBe('宪宪 正在工作 2:05 · 排队已暂停');
-    expect(deriveExecutionRow(i).resume).toBe('continue');
+  it('pending Queue and live execution retain their separate facts', () => {
+    const i = input({ executions: [live('opus')], queue: { entries: [entry('a')] } });
+    expect(text(i)).toBe('宪宪 正在工作 2:05 · 排队 1');
+    expect(deriveExecutionRow(i).resume).toBe(null);
   });
 
   it('the stale-hydration badge needs something shown to attach to', () => {
@@ -298,8 +288,7 @@ describe('rules the states do not state', () => {
       input({ executions: [blocked] }),
       input({ executions: [quiet, blocked], silent: { [activeExecutionKey(quiet)]: { since: null } } }),
       input({ hasUnverifiedLegacyExecution: true }),
-      input({ queue: { entries: [entry('s', 'processing')] } }),
-      input({ queue: { paused: true, entries: [entry('a')] } }),
+      input({ queue: { entries: [entry('s')] } }),
       input({ queue: { entries: [entry('a')] } }),
     ];
     for (const c of cases) {

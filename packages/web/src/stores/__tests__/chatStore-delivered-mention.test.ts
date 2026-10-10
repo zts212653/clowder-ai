@@ -106,63 +106,6 @@ describe('markMessagesDelivered mentionsUser notification', () => {
     expect(useChatStore.getState().threadStates['thread-bg']?.hasUserMention).toBe(false);
   });
 
-  it('active thread: merges queued callback delivery into existing rich-block placeholder', () => {
-    const audioBlock = {
-      id: 'voice-1',
-      kind: 'audio' as const,
-      v: 1 as const,
-      url: '/api/tts/audio/voice-1.wav',
-      text: '五一快乐',
-    };
-
-    useChatStore.setState({
-      currentThreadId: 'thread-1',
-      messages: [
-        {
-          id: 'msg-inv-1-opus',
-          type: 'assistant',
-          catId: 'opus',
-          content: '',
-          origin: 'stream',
-          isStreaming: true,
-          timestamp: NOW - 10,
-          extra: {
-            stream: { invocationId: 'inv-1' },
-            rich: { v: 1, blocks: [audioBlock] },
-          },
-        },
-      ],
-      threadStates: {},
-    });
-
-    useChatStore.getState().markMessagesDelivered('thread-1', ['server-msg-1'], NOW + 1, [
-      {
-        id: 'server-msg-1',
-        content: '五一快乐',
-        catId: 'opus',
-        timestamp: NOW,
-        origin: 'callback',
-        extra: {
-          stream: { invocationId: 'inv-1' },
-          rich: { v: 1, blocks: [audioBlock] },
-        },
-      },
-    ]);
-
-    const messages = useChatStore.getState().messages;
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({
-      id: 'server-msg-1',
-      type: 'assistant',
-      catId: 'opus',
-      content: '五一快乐',
-      origin: 'callback',
-      isStreaming: false,
-      deliveredAt: NOW + 1,
-    });
-    expect(messages[0]?.extra?.rich?.blocks).toEqual([audioBlock]);
-  });
-
   it('keeps already-published cat speech at its publication position on terminal delivery', () => {
     useChatStore.setState({
       currentThreadId: 'thread-1',
@@ -210,14 +153,6 @@ describe('markMessagesDelivered mentionsUser notification', () => {
           type: 'user',
           content: 'follow-up',
           timestamp: NOW,
-          extra: {
-            queueReceipt: {
-              version: 1,
-              entryId: 'entry-1',
-              targets: [{ catId: 'opus', state: 'queued' }],
-              reminderAttempts: [],
-            },
-          },
         },
         {
           id: 'later-reply',
@@ -237,26 +172,12 @@ describe('markMessagesDelivered mentionsUser notification', () => {
         catId: null,
         timestamp: NOW,
         timelineOrderAt: NOW,
-        extra: {
-          queueReceipt: {
-            version: 1,
-            entryId: 'entry-1',
-            targets: [
-              {
-                catId: 'opus',
-                state: 'handled',
-                invocationId: 'inv-1',
-                seenAt: NOW + 20,
-                outcome: {
-                  invocationId: 'inv-1',
-                  disposition: 'completed_with_turn',
-                  evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-1' },
-                  handledAt: NOW + 50,
-                },
-              },
-            ],
-            reminderAttempts: [],
-          },
+        lifecycle: {
+          kind: 'input',
+          orderKey: `${NOW}:queued-user`,
+          dispatchRefs: [
+            { targetId: 'opus', phase: 'settled', statusMessageId: 'response-inv-1', dispatchedAt: NOW + 20 },
+          ],
         },
       },
     ]);
@@ -264,9 +185,10 @@ describe('markMessagesDelivered mentionsUser notification', () => {
     const messages = useChatStore.getState().messages;
     expect(messages.map((message) => message.id)).toEqual(['queued-user', 'later-reply']);
     expect(messages[0]?.deliveredAt).toBe(NOW + 50);
-    expect(messages[0]?.extra?.queueReceipt?.targets[0]).toMatchObject({
-      state: 'handled',
-      seenAt: NOW + 20,
+    expect(messages[0]?.lifecycle?.dispatchRefs?.[0]).toMatchObject({
+      targetId: 'opus',
+      phase: 'settled',
+      dispatchedAt: NOW + 20,
     });
   });
 });

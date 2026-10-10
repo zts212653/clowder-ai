@@ -65,7 +65,13 @@ const diag = {
   debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'inv-x' },
 } as NonNullable<Message['extra']>['cliDiagnostics'];
 
-const sourceOwn: Message = { id: 'src', type: 'user', content: 'src', timestamp: 1 };
+const sourceOwn: Message = {
+  id: 'src',
+  type: 'user',
+  from: { kind: 'user', userId: 'test-user' },
+  content: 'src',
+  timestamp: 1,
+};
 const noticeMeta = (linked: boolean) => ({
   presentation: 'system_notice',
   cloudBridgeRecovery: {
@@ -83,11 +89,18 @@ function cases(): Case[] {
 
   // Your own message.
   for (const content of ['', 'hi']) {
-    add(`own, content ${JSON.stringify(content)}`, { id: 'm', type: 'user', content, timestamp: 2 });
+    add(`own, content ${JSON.stringify(content)}`, {
+      id: 'm',
+      type: 'user',
+      from: { kind: 'user', userId: 'test-user' },
+      content,
+      timestamp: 2,
+    });
     for (const exposure of ['none', 'seen'] as const) {
       add(`own, recalled (${exposure}), content ${JSON.stringify(content)}`, {
         id: 'm',
         type: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         content,
         timestamp: 2,
         extra: { recall: { version: 1, exposure, recalledAt: 3 } },
@@ -95,43 +108,37 @@ function cases(): Case[] {
     }
   }
   add(
-    'own, body folded into the reply by real receipt lineage',
+    'own, delivered source remains visible in History',
     {
       id: 'm',
       type: 'user',
+      from: { kind: 'user', userId: 'test-user' },
       content: 'hi',
       timestamp: 2,
-      extra: {
-        queueReceipt: {
-          version: 1,
-          entryId: 'entry-folded',
-          reminderAttempts: [],
-          targets: [
-            {
-              catId: 'opus',
-              state: 'handled',
-              invocationId: 'child-1',
-              seenAt: 1,
-              outcome: {
-                invocationId: 'child-1',
-                disposition: 'responded',
-                handledAt: 2,
-                evidenceRef: { kind: 'invocation_lineage', invocationId: 'child-1' },
-              },
-            },
-          ],
-        },
+      lifecycle: {
+        kind: 'input',
+        orderKey: '2:m',
+        dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'terminal', dispatchedAt: 2 }],
       },
     },
     [
       {
         id: 'terminal',
         type: 'assistant',
+        from: { kind: 'agent', catId: 'opus' },
         catId: 'opus',
         content: '已回复',
         timestamp: 3,
-        extra: {
-          turnExecution: { invocationId: 'child-1', parentInvocationId: 'parent-1', executionKind: 'ordinary' },
+        lifecycle: {
+          kind: 'response',
+          orderKey: '3:terminal',
+          invocationId: 'child-1',
+          targetId: 'opus',
+          inputEntryIds: ['entry'],
+          inputMessageIds: ['m'],
+          status: 'completed',
+          startedAt: 2,
+          completedAt: 3,
         },
       },
     ],

@@ -4,9 +4,7 @@ import { collectiveSourceIdentitySchema, createCatId } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
-import { createInitialQueuedMessageCustody } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import { buildQueueEntry } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyStartupQueueEntry.js';
-import type { QueueProcessor } from '../domains/cats/services/agents/invocation/QueueProcessor.js';
+import { queueEntryId } from '../domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { collectiveSender, collectiveSource } from '../domains/plugin/builtin-runtime/collective-ingress-routing.js';
@@ -14,11 +12,7 @@ import { sendCollectiveOwnerError } from './collective-owner-errors.js';
 import { pluginAccessError, requirePluginOwnerLocalAccess } from './plugin-access-guards.js';
 
 export interface CollectiveWorkReconsiderationRuntime {
-  readonly queue: Pick<
-    InvocationQueue,
-    'enqueue' | 'backfillMessageId' | 'rollbackEnqueue' | 'getEntrySnapshot' | 'restoreDurableEntry'
-  >;
-  readonly processor: Pick<QueueProcessor, 'processNext'>;
+  readonly queue: Pick<InvocationQueue, 'send' | 'getDurableEntry'>;
 }
 interface ReconsiderationOptions {
   readonly connector: () => CollectiveConnector | undefined;
@@ -65,27 +59,15 @@ export function registerCollectiveOwnerWorkReconsiderationRoutes(
             scope.purposeKey,
           );
           await scope.assertCurrentPermission();
-          if (existing) return recoverWake(existing, scope, runtime, access.operator);
-          const queued = runtime.queue.enqueue({
-            userId: access.operator,
-            threadId: scope.threadId,
-            ownerAuthProvenance: 'unknown',
-            executionScope: 'collective-participation',
-            idempotencyKey: scope.purposeKey,
-            content: scope.event.body,
-            source: 'connector',
-            targetCats: [createCatId(input.catId)],
-            intent: 'execute',
-            senderMeta: collectiveSender(scope.event),
-            suggestedSkill: 'collective-participation',
-          });
-          if (!queued.entry || queued.outcome === 'full') throw unavailable('ROUTE_QUEUE_FULL');
-          try {
-            const source = collectiveSource(scope.event, scope.source);
-            const stored = await options.messages.appendIdempotent({
+          if (existing) return recoverWake(existing, scope, runtime, options.messages, access.operator);
+          const source = collectiveSource(scope.event, scope.source);
+          const from = { kind: 'external' as const, connectorId: 'collective', sender: collectiveSender(scope.event) };
+          const stored = await runtime.queue.send(
+            options.messages,
+            {
               userId: access.operator,
               threadId: scope.threadId,
-              catId: null,
+              from,
               content: scope.event.body,
               source: {
                 ...source,
@@ -104,19 +86,27 @@ export function registerCollectiveOwnerWorkReconsiderationRoutes(
               timestamp: Date.now(),
               idempotencyKey: scope.purposeKey,
               deliveryStatus: 'queued',
-              queueCustody: createInitialQueuedMessageCustody(queued.entry),
               extra: { targetCats: [input.catId] },
-            });
-            runtime.queue.backfillMessageId(scope.threadId, access.operator, queued.entry.id, stored.message.id);
-            return response(scope, stored.message, 'queued');
-          } catch (error) {
-            if (!queued.deduped) runtime.queue.rollbackEnqueue(scope.threadId, access.operator, queued.entry.id);
-            throw error;
-          }
+            },
+            {
+              userId: access.operator,
+              threadId: scope.threadId,
+              sourceId: scope.purposeKey,
+              kind: 'conversation_input',
+              from,
+              ownerAuthProvenance: 'unknown',
+              executionScope: 'collective-participation',
+              idempotencyKey: scope.purposeKey,
+              content: scope.event.body,
+              targetCats: [createCatId(input.catId)],
+              intent: 'execute',
+              suggestedSkill: 'collective-participation',
+            },
+          );
+          if (stored.outcome === 'full') throw unavailable('ROUTE_QUEUE_FULL');
+          return response(scope, stored.message, 'queued');
         },
       );
-      if (prepared.disposition !== 'already_classified')
-        void runtime.processor.processNext(prepared.threadId, access.operator).catch(() => {});
       return prepared;
     } catch (error) {
       return sendCollectiveOwnerError(
@@ -155,26 +145,62 @@ async function requireSource(options: ReconsiderationOptions, ownerUserId: strin
   return original;
 }
 
-function recoverWake(
+async function recoverWake(
   existing: StoredMessage,
   scope: ReconsiderationScope,
   runtime: CollectiveWorkReconsiderationRuntime,
+  messages: Pick<IMessageStore, 'getById'>,
   ownerUserId: string,
 ) {
-  const custody = existing.queueCustody;
-  if (existing.recall || existing._tombstone || existing.deliveryStatus === 'canceled')
+  if (existing.deletedAt || existing.recall || existing._tombstone || existing.deliveryStatus === 'canceled')
     throw unavailable('WORK_RECONSIDERATION_WITHDRAWN');
-  if (!custody || custody.ownerAuthProvenance !== 'unknown' || custody.executionScope !== 'collective-participation')
-    throw unavailable('WORK_RECONSIDERATION_CUSTODY_UNAVAILABLE');
-  if (custody.status === 'terminal' && !custody.handledByCatIds.includes(createCatId(scope.source.catId)))
-    throw unavailable('WORK_RECONSIDERATION_ALREADY_STOPPED');
   if (
-    custody.status === 'queued' &&
-    existing.deliveryStatus === 'queued' &&
-    !runtime.queue.getEntrySnapshot(scope.threadId, ownerUserId, custody.entryId)
+    existing.userId !== ownerUserId ||
+    existing.threadId !== scope.threadId ||
+    existing.content !== scope.event.body ||
+    existing.from?.kind !== 'external' ||
+    existing.from.connectorId !== 'collective' ||
+    !isDeepStrictEqual(existing.source?.meta?.participation, scope.source) ||
+    !isDeepStrictEqual(existing.source?.meta?.reconsideration, {
+      sourceMessageId: scope.sourceMessageId,
+      grantRef: scope.grantRef,
+      grantRevision: scope.grantRevision,
+      requestKind: scope.requestKind,
+      purposeKey: scope.purposeKey,
+    })
   )
-    runtime.queue.restoreDurableEntry(buildQueueEntry([existing], custody.entryId));
-  return response(scope, existing, custody.status === 'terminal' ? 'already_classified' : 'already_queued');
+    throw unavailable('WORK_RECONSIDERATION_CUSTODY_UNAVAILABLE');
+  const entry = await runtime.queue.getDurableEntry(scope.threadId, queueEntryId(existing.id));
+  if (entry) {
+    if (
+      entry.owner.kind !== 'user' ||
+      entry.owner.userId !== ownerUserId ||
+      entry.payload.messageId !== existing.id ||
+      entry.payload.content !== existing.content ||
+      entry.targets.length !== 1 ||
+      entry.targets[0] !== scope.source.catId ||
+      entry.execution.ownerAuthProvenance !== 'unknown' ||
+      entry.execution.executionScope !== 'collective-participation'
+    )
+      throw unavailable('WORK_RECONSIDERATION_CUSTODY_UNAVAILABLE');
+    return response(scope, existing, 'already_queued');
+  }
+  // History is an actual dispatch receipt, never a source for rebuilding work.
+  const dispatch = existing.lifecycle?.dispatchRefs?.find((ref) => ref.targetId === scope.source.catId);
+  if (!dispatch) throw unavailable('WORK_RECONSIDERATION_CUSTODY_UNAVAILABLE');
+  const child = await messages.getById(dispatch.statusMessageId);
+  if (
+    !child ||
+    child.threadId !== scope.threadId ||
+    child.userId !== ownerUserId ||
+    child.lifecycle?.kind !== 'response' ||
+    child.lifecycle.targetId !== scope.source.catId
+  )
+    throw unavailable('WORK_RECONSIDERATION_CUSTODY_UNAVAILABLE');
+  if (dispatch.phase === 'dispatched') return response(scope, existing, 'already_queued');
+  if (child.lifecycle.status !== 'completed' || !child.lifecycle.inputMessageIds.includes(existing.id))
+    throw unavailable('WORK_RECONSIDERATION_ALREADY_STOPPED');
+  return response(scope, existing, 'already_classified');
 }
 
 function response(

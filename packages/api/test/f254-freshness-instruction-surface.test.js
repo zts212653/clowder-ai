@@ -39,9 +39,7 @@ describe('F254 freshness instruction source contract', () => {
 
   it('every freshness read instruction selects unread independently from the full projection', () => {
     const paths = [
-      'domains/cats/services/freshness/FreshnessNoticeService.ts',
       'domains/cats/services/freshness/FreshnessNoticeBroker.ts',
-      'domains/cats/services/freshness/createFreshnessReinvokeCheck.ts',
       'domains/concierge/conversation-duty.ts',
     ];
     for (const path of paths) {

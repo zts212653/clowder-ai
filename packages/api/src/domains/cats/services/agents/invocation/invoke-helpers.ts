@@ -140,6 +140,15 @@ export function isCliTimeoutError(message: string | undefined): boolean {
   return /CLI (?:响应超时|idle-silent 超时)/i.test(message);
 }
 
+/**
+ * A CLI timeout before its first event (a startup watchdog such as tmux's): the member never came
+ * up. Silence after it started is the member output timeout's (F117 KD-22), which stops the member
+ * instead of surfacing here.
+ */
+export function isCliStartupTimeoutError(message: string | undefined): boolean {
+  return isCliTimeoutError(message) && /未收到首帧/.test(message ?? '');
+}
+
 /** F215: Detect malformed tool-call error emitted by ClaudeAgentService (form A / B).
  *  Used in invoke-single-cat to trigger seal+fresh-context+46接力 fallback chain. */
 export function isMalformedToolCallError(message: string | undefined): boolean {

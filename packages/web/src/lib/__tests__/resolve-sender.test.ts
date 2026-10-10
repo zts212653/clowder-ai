@@ -38,14 +38,14 @@ describe('resolveSender', () => {
 
   it('resolves known cat by ID', () => {
     const result = resolveSender('opus', mockGetCatById, mockCoCreator);
-    expect(result.label).toBe('@宪宪');
+    expect(result.label).toBe('宪宪');
     expect(result.color).toBe('#8B5CF6');
     expect(result.isCoCreator).toBe(false);
   });
 
   it('falls back for unknown cat ID', () => {
     const result = resolveSender('unknown-cat', mockGetCatById, mockCoCreator);
-    expect(result.label).toBe('@unknown-cat');
+    expect(result.label).toBe('unknown-cat');
     expect(result.color).toBe('#9B7EBD');
     expect(result.isCoCreator).toBe(false);
   });

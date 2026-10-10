@@ -17,6 +17,7 @@ const CLAUDE_PRINT = {
   observesCompression: true,
   reason: 'fixture',
 };
+const CLAUDE_SDK = { ...CLAUDE_PRINT, carrier: 'agent_sdk' };
 
 test('F296 B3b-3 typed compact_boundary consumes a same-invocation legacy unknown-count attestation', async () => {
   const observations = [];
@@ -122,12 +123,16 @@ test('F296 B3b-3 typed compact_boundary consumes a same-invocation legacy unknow
 async function invokeBoundaryWithReadiness({
   hookAuthenticationReady,
   carrierReady = true,
+  claudeProjectHookCarrierReady = () => carrierReady,
   threadStore,
   activeRecord: suppliedActiveRecord,
   boundaryCount = 1,
   observeCompaction,
+  carrierCapability = CLAUDE_PRINT,
+  claudeCompactionHooks,
 }) {
   let boundaryEmitted = false;
+  let receivedOptions;
   let postBoundarySessionReads = 0;
   const activeRecord = suppliedActiveRecord ?? {
     id: 'logical-session-no-hook',
@@ -143,8 +148,9 @@ async function invokeBoundaryWithReadiness({
     },
   };
   const service = {
-    contextCapability: () => CLAUDE_PRINT,
-    async *invoke() {
+    contextCapability: () => carrierCapability,
+    async *invoke(_prompt, options) {
+      receivedOptions = options;
       for (let index = 0; index < boundaryCount; index += 1) {
         boundaryEmitted = true;
         yield {
@@ -179,6 +185,8 @@ async function invokeBoundaryWithReadiness({
       update: async () => activeRecord,
     },
     hookAuthenticationReady,
+    claudeProjectHookCarrierReady,
+    ...(claudeCompactionHooks ? { claudeCompactionHooks } : {}),
     contextEpochOwner: {
       async resolve(input) {
         return {
@@ -219,7 +227,7 @@ async function invokeBoundaryWithReadiness({
     }
   });
   const terminalError = messages.find((message) => message.type === 'error');
-  return { terminalError, postBoundarySessionReads };
+  return { terminalError, postBoundarySessionReads, receivedOptions };
 }
 
 test('Claude compact_boundary fails actionably before sequence lookup when hook auth is unavailable', async () => {
@@ -353,4 +361,92 @@ test('one authenticated seal observation cannot authorize two compact boundaries
     String(terminalError?.error),
     /authoritative_compaction_unsupported:hook_invocation_attestation_unavailable/,
   );
+});
+
+function inProcessHooksFixture() {
+  const identities = [];
+  return {
+    identities,
+    claudeCompactionHooks(identity) {
+      identities.push(identity);
+      return { preCompact: async () => {}, postCompactContext: async () => undefined };
+    },
+  };
+}
+
+const ATTESTED_BY_THIS_INVOCATION = {
+  id: 'logical-session-sdk-hook',
+  cliSessionId: 'claude-runtime-1',
+  userId: 'owner-1',
+  catId: 'opus',
+  threadId: 'thread-f296',
+  compressionCount: 8,
+  compressionObservation: { invocationId: 'inv-f296-no-hook-auth', sequence: 8, observedAt: 1 },
+};
+
+test('F117 K2: the Agent SDK boundary is proven by the in-process hooks it was handed, not by the workspace', async () => {
+  const hooks = inProcessHooksFixture();
+  let observations = 0;
+  const { terminalError, receivedOptions } = await invokeBoundaryWithReadiness({
+    carrierCapability: CLAUDE_SDK,
+    claudeCompactionHooks: hooks.claudeCompactionHooks,
+    hookAuthenticationReady: false,
+    claudeProjectHookCarrierReady: () => false,
+    threadStore: null,
+    activeRecord: ATTESTED_BY_THIS_INVOCATION,
+    observeCompaction: async () => {
+      observations += 1;
+      return {
+        scopeKey: 'owner-1::opus::thread-f296',
+        contextEpoch: 2,
+        contextMode: 'cold',
+        lastTransitionRef: 'fixture',
+        consumedCompactionEventIds: ['context-compaction:logical-session-sdk-hook:8'],
+        transition: 'context_compacted',
+        replayed: false,
+      };
+    },
+  });
+
+  assert.equal(terminalError, undefined, String(terminalError?.error));
+  assert.equal(observations, 1, 'the boundary advances the epoch once');
+  assert.deepEqual(hooks.identities, [
+    { invocationId: 'inv-f296-no-hook-auth', userId: 'owner-1', catId: 'opus', threadId: 'thread-f296' },
+  ]);
+  assert.equal(typeof receivedOptions.claudeCompactionHooks?.preCompact, 'function');
+});
+
+test('F117 K2: without an in-process observation from this invocation the Agent SDK boundary still fails closed', async () => {
+  const hooks = inProcessHooksFixture();
+  const { terminalError, postBoundarySessionReads } = await invokeBoundaryWithReadiness({
+    carrierCapability: CLAUDE_SDK,
+    claudeCompactionHooks: hooks.claudeCompactionHooks,
+    hookAuthenticationReady: false,
+    claudeProjectHookCarrierReady: () => false,
+    threadStore: null,
+  });
+
+  assert.match(
+    String(terminalError?.error),
+    /authoritative_compaction_unsupported:hook_invocation_attestation_unavailable/,
+  );
+  assert.equal(
+    postBoundarySessionReads,
+    1,
+    'the observation is looked up, and one from a previous invocation does not count',
+  );
+});
+
+test('F117 K2: the print carrier is never handed in-process hooks and keeps its project-hook proof', async () => {
+  const hooks = inProcessHooksFixture();
+  const { terminalError, receivedOptions } = await invokeBoundaryWithReadiness({
+    claudeCompactionHooks: hooks.claudeCompactionHooks,
+    hookAuthenticationReady: false,
+    claudeProjectHookCarrierReady: () => true,
+    threadStore: null,
+  });
+
+  assert.deepEqual(hooks.identities, []);
+  assert.equal(receivedOptions.claudeCompactionHooks, undefined);
+  assert.match(String(terminalError?.error), /authoritative_compaction_unsupported:hook_authentication_unavailable/);
 });

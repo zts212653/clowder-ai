@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ChatInput, threadDrafts, threadImageDrafts } from '@/components/ChatInput';
 import { ThreadItem } from '@/components/ThreadSidebar/ThreadItem';
 import type { WhisperOptions } from '@/hooks/useSendMessage';
-import type { DeliveryMode, Thread } from '@/stores/chat-types';
+import type { Thread } from '@/stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/hooks/useCatData', () => ({
@@ -54,7 +54,7 @@ vi.mock('@/components/ThreadSidebar/thread-utils', () => ({
 
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://example.test',
-  apiFetch: vi.fn(),
+  apiFetch: vi.fn(async () => ({ ok: true, json: async () => ({ participants: [] }) })),
 }));
 
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
@@ -67,7 +67,7 @@ vi.mock('@/hooks/useCoCreatorConfig', () => ({
   }),
 }));
 
-type OnSend = (content: string, images?: File[], whisper?: WhisperOptions, deliveryMode?: DeliveryMode) => void;
+type OnSend = (content: string, images?: File[], whisper?: WhisperOptions) => void;
 
 function makeThread(id: string, title: string): Thread {
   const now = Date.now();
@@ -147,7 +147,6 @@ describe('ThreadItem draft badge', () => {
       catInvocations: {},
       currentGame: null,
       queue: [],
-      queuePaused: false,
       queueFull: false,
       threadStates: {
         'thread-1': { ...DEFAULT_THREAD_STATE },
@@ -223,7 +222,7 @@ describe('ThreadItem draft badge', () => {
       getTextarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     });
 
-    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('half typed message', undefined, undefined, undefined);
     expect(getThreadRow('thread-1').textContent).not.toContain('[草稿]');
   });
 

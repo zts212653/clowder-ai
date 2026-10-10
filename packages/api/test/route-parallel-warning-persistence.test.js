@@ -10,6 +10,7 @@ function createTextWithWarningService(catId) {
         catId,
         content: JSON.stringify({
           type: 'warning',
+          presentation: 'user_action_required',
           message: '当前 opencode/CodeAgent 适配器未返回 token 用量，自动 handoff 无法按上下文比例触发。',
         }),
         timestamp: Date.now(),
@@ -27,6 +28,7 @@ function createWarningOnlyService(catId) {
         catId,
         content: JSON.stringify({
           type: 'warning',
+          presentation: 'user_action_required',
           message: '当前 opencode/CodeAgent 适配器未返回 token 用量，自动 handoff 无法按上下文比例触发。',
         }),
         timestamp: Date.now(),
@@ -118,12 +120,17 @@ describe('route-parallel warning persistence (issue #1208 P2)', () => {
 
     assert.ok(yieldedTypes.includes('text'), 'text must reach the live stream');
     assert.ok(yieldedTypes.includes('system_info'), 'warning must reach the live stream');
-    assert.ok(appendCalls.some((msg) => msg.catId === 'opus' && msg.content === 'Parallel result.'));
+    assert.ok(
+      appendCalls.some(
+        (msg) => msg.from?.kind === 'agent' && msg.from.catId === 'opus' && msg.content === 'Parallel result.',
+      ),
+    );
 
     const warningAppend = appendCalls.find((msg) => msg.source?.connector === 'system-warning');
     assert.ok(warningAppend, 'warning must survive refresh in parallel mode');
     assert.equal(warningAppend.userId, 'system');
-    assert.equal(warningAppend.catId, null);
+    assert.deepEqual(warningAppend.from, { kind: 'system', service: 'system-info-warning' });
+    assert.equal(warningAppend.catId, undefined);
     assert.match(warningAppend.content, /未返回 token 用量/);
     assert.equal(warningAppend.source.meta.presentation, 'system_notice');
     assert.equal(warningAppend.source.meta.noticeTone, 'warning');

@@ -2,6 +2,7 @@ import { type CollectiveConnector, desiredParticipationSchema } from '@cat-cafe/
 import { type CatId, collectiveSourceIdentitySchema } from '@cat-cafe/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import type { QueueTargetExecutionReadPort } from '../domains/cats/services/agents/invocation/queue-ledger/QueueTargetExecutionView.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
@@ -29,6 +30,7 @@ interface OwnerParticipationOptions {
   readonly cats: () => readonly ParticipationCat[];
   readonly threads: Pick<IThreadStore, 'get' | 'list' | 'create' | 'addParticipants'>;
   readonly messages: IMessageStore;
+  readonly queue?: QueueTargetExecutionReadPort;
   readonly tasks: ITaskStore;
   readonly context: CollectiveCurrentContext;
   readonly work: CollectiveWorkAuthority;

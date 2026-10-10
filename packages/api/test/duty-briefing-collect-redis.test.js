@@ -2,8 +2,8 @@
  * F233 Phase A — collect 层 Redis-backed 测试（Task 2.5）。
  * 验证真实 Redis 查询行为（in-memory 遍历掩盖的索引选择 / scanAll），feedback_inmemory 教训。
  * - collectTasks: listByKind('work') Redis kind 索引
- * - collectZombies: scanAll(Redis-only) + draft freshness 判定（now 注入模拟老 record）
- * AC-A5 只读：collector 仅调读方法（listByKind/scanAll/getByThread），无写。
+ * - collectZombies: scanAll(Redis-only)；failed 记录为死球，running 一律计入 healthy（F117 KD-23）
+ * AC-A5 只读：collector 仅调读方法（listByKind/scanAll），无写。
  */
 
 import assert from 'node:assert/strict';
@@ -84,7 +84,7 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
     assert.ok(repoInbox.updatedAt > 0);
   });
 
-  it('collectZombies: scanAll(Redis-only) running 无 fresh draft 超 grace → zombie', async () => {
+  it('collectZombies (F117 KD-23): scanAll(Redis-only) counts a running record healthy however long it runs', async () => {
     const store = new RedisInvocationRecordStore(redis);
     const created = await store.create({
       threadId: 'thr-f167',
@@ -96,65 +96,10 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
     });
     await store.update(created.invocationId, { status: 'running' });
 
-    const emptyDraftStore = { getByThread: async () => [] };
-    const future = Date.now() + 700_000; // record age >600s grace
-    const { zombies, runningCount, runningZombieCount } = await collectZombies(
-      store,
-      emptyDraftStore,
-      'default-user',
-      future,
-    );
+    const { zombies, runningCount, degraded } = await collectZombies(store, 'default-user');
+    assert.equal(degraded, false);
     assert.equal(runningCount, 1, 'scanAll 找到 running record');
-    assert.equal(runningZombieCount, 1, 'stale running 计入 runningZombieCount');
-    assert.equal(zombies.length, 1, '无 fresh draft + 超 grace → zombie');
-    assert.equal(zombies[0].catId, 'opus-47');
-    assert.equal(zombies[0].threadId, 'thr-f167');
-    assert.equal(zombies[0].invocationId, created.invocationId);
-  });
-
-  it('collectZombies: running 在 grace 内（年轻）→ 不误判 zombie', async () => {
-    const store = new RedisInvocationRecordStore(redis);
-    const created = await store.create({
-      threadId: 'thr-x',
-      userId: 'default-user',
-      targetCats: ['opus'],
-      intent: 'execute',
-      idempotencyKey: 'idem-2',
-      actionLeaseCarrier: { kind: 'none' },
-    });
-    await store.update(created.invocationId, { status: 'running' });
-    const emptyDraftStore = { getByThread: async () => [] };
-    const soon = Date.now() + 100_000; // age 100s < 600s grace
-    const { zombies } = await collectZombies(store, emptyDraftStore, 'default-user', soon);
-    assert.equal(zombies.length, 0, 'grace 内不误判（liveness_pending）');
-  });
-
-  it('collectZombies: running 有 fresh draft → 非 zombie（心跳仍在）', async () => {
-    const store = new RedisInvocationRecordStore(redis);
-    const created = await store.create({
-      threadId: 'thr-y',
-      userId: 'default-user',
-      targetCats: ['sonnet'],
-      intent: 'execute',
-      idempotencyKey: 'idem-3',
-      actionLeaseCarrier: { kind: 'none' },
-    });
-    await store.update(created.invocationId, { status: 'running' });
-    const future = Date.now() + 700_000;
-    const freshDraftStore = {
-      getByThread: async () => [
-        {
-          invocationId: created.invocationId,
-          userId: 'default-user',
-          threadId: 'thr-y',
-          catId: 'sonnet',
-          content: '',
-          updatedAt: future - 100_000,
-        },
-      ],
-    };
-    const { zombies } = await collectZombies(store, freshDraftStore, 'default-user', future);
-    assert.equal(zombies.length, 0, 'fresh draft = 心跳仍在 → 非 zombie');
+    assert.equal(zombies.length, 0, 'no draft freshness or heartbeat decides a running invocation is dead');
   });
 
   it('collectZombies: failed invocation 也作为死球返回', async () => {
@@ -168,15 +113,8 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
       actionLeaseCarrier: { kind: 'none' },
     });
     await store.update(created.invocationId, { status: 'failed', error: 'spend-limit' });
-    const emptyDraftStore = { getByThread: async () => [] };
-    const { zombies, runningCount, runningZombieCount } = await collectZombies(
-      store,
-      emptyDraftStore,
-      'default-user',
-      Date.now(),
-    );
+    const { zombies, runningCount } = await collectZombies(store, 'default-user');
     assert.equal(runningCount, 0);
-    assert.equal(runningZombieCount, 0);
     assert.equal(zombies.length, 1);
     assert.equal(zombies[0].detail, 'spend-limit');
   });
@@ -284,7 +222,6 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
           throw new Error('legacy invocation collector should not run');
         },
       },
-      draftStore: { getByThread: async () => [] },
       dynamicTaskStore: {
         getAll: () => {
           throw new Error('legacy hold collector should not run');
@@ -360,7 +297,6 @@ describe('F233 collect 层 — Redis-backed (Task 2.5)', { skip: redisIsolationS
     const input = await collectDutyBriefingInput({
       taskStore,
       invocationRecordStore: new RedisInvocationRecordStore(redis),
-      draftStore: { getByThread: async () => [] },
       dynamicTaskStore: { getAll: () => [] },
       threadStore: { list: async () => [{ id: 'thr-pr4-owner-legacy', title: 'Owner Legacy' }] },
       messageStore: { getByThread: async () => [], getByThreadAfter: async () => [] },

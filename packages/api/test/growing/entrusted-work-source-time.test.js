@@ -107,7 +107,7 @@ async function ownerHarness(sourceContent) {
   threadStore.ensureThread('thread-f310', 'F310 source-time test');
   const source = messageStore.append({
     userId: 'owner-1',
-    catId: null,
+    from: { kind: 'user', userId: 'owner-1' },
     content: sourceContent,
     mentions: ['codex-sol'],
     timestamp: 1_788_170_000_000,
@@ -314,7 +314,7 @@ test('historical event narration is not a risk-targeted custody sample', () => {
     for (let i = 0; i < 30; i += 1) {
       const candidate = messageStore.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content,
         mentions: ['codex-sol'],
         timestamp: cohort.startedAt + 1,
@@ -332,7 +332,7 @@ test('historical event narration is not a risk-targeted custody sample', () => {
   for (let i = 0; i < 30; i += 1) {
     const candidate = messageStore.append({
       userId: 'owner-1',
-      catId: null,
+      from: { kind: 'user', userId: 'owner-1' },
       content: '回到发布之前继续处理',
       mentions: ['codex-sol'],
       timestamp: cohort.startedAt + 1,

@@ -28,7 +28,7 @@ export function createContentModificationIntegration(deps: {
   tasks: ITaskStore;
   messages: IMessageStore;
   turnExecutions?: Pick<ITurnExecutionStore, 'get'>;
-  queue?: Pick<InvocationQueue, 'getEntrySnapshot'>;
+  queue?: Pick<InvocationQueue, 'getEntrySnapshot' | 'getDurableEntriesForMessages'>;
   changed: (userId: string) => void;
   sourceChanged?: (ownerUserId: string, threadId: string, messageId: string) => void;
   onError: (error: unknown) => void;
@@ -46,6 +46,7 @@ export function createContentModificationIntegration(deps: {
     store,
     messages: deps.messages,
     tasks: deps.tasks,
+    ...(deps.queue ? { queue: deps.queue } : {}),
     ...(deps.turnExecutions ? { turnExecutions: deps.turnExecutions } : {}),
     lifecycle,
     content,

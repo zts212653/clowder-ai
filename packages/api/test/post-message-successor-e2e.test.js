@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import './helpers/setup-cat-registry.js';
 import Fastify from 'fastify';
+import { appendTestLifecycleResponseSource } from './helpers/message-from-fixtures.js';
 
 let app;
 let originalEnv;
@@ -40,15 +41,20 @@ async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = fals
   );
 
   const registry = new InvocationRegistry();
-  const invocationQueue = new InvocationQueue();
-  const originalEnqueue = invocationQueue.enqueue.bind(invocationQueue);
+  const drainNotifications = [];
+  const invocationQueue = new InvocationQueue(undefined, {
+    onAdmitted: ({ entries }) => {
+      drainNotifications.push(entries.map((entry) => entry.id));
+    },
+  });
+  const originalEnqueue = invocationQueue.send.bind(invocationQueue);
   let remainingEnqueueFailures = failEnqueueAttempts;
-  invocationQueue.enqueue = (input) => {
+  invocationQueue.send = async (...args) => {
     if (remainingEnqueueFailures > 0) {
       remainingEnqueueFailures -= 1;
-      throw new Error('simulated Queue admission failure');
+      return { outcome: 'full' };
     }
-    return originalEnqueue(input);
+    return originalEnqueue(...args);
   };
   const messageStore = new MessageStore();
   const useLedger = new MemoryRequestReviewOwnerLedger();
@@ -62,7 +68,6 @@ async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = fals
   const thread = await threadStore.create('user-1', 'Local review durable fact');
   const auth = await registry.create('user-1', 'opus', thread.id);
   const admissionCalls = [];
-  const autoExecuteCalls = [];
 
   app = Fastify();
   await app.register(callbacksRoutes, {
@@ -87,9 +92,7 @@ async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = fals
       },
     },
     queueProcessor: {
-      async tryAutoExecute(...args) {
-        autoExecuteCalls.push(args);
-      },
+      async requestDrain() {},
       async onInvocationComplete() {},
     },
     actionSuccessorAdmissionService: {
@@ -109,7 +112,7 @@ async function createHarness({ failEnqueueAttempts = 0, measurementRoutes = fals
 
   return {
     admissionCalls,
-    autoExecuteCalls,
+    drainNotifications,
     auth,
     apiUrl,
     handlePostMessage,
@@ -183,12 +186,39 @@ test('ordinary request, one typed reply, and author HTTP reads need no F100 meas
   assert.equal(replay.messageId, verdict.messageId);
   const authorEntries = harness.invocationQueue
     .list(harness.thread.id, 'user-1')
-    .filter((entry) => entry.targetCats.includes('codex'));
+    .filter((entry) => entry.targets.includes('codex'));
   assert.equal(authorEntries.length, 1);
-  // This harness has no Queue worker; settle its one carrier before testing
-  // the author's normal durable read surface.
-  harness.messageStore.markDelivered(verdict.messageId, Date.now());
-  harness.invocationQueue.remove(harness.thread.id, 'user-1', authorEntries[0].id);
+  // This read-surface fixture has no provider. Commit the same exact receiver
+  // and input ref that Queue admission uses, then retire only that target.
+  const entry = authorEntries[0];
+  assert.ok(await harness.invocationQueue.markProcessingByIdDurable(harness.thread.id, entry.id, 'codex'));
+  const response = appendTestLifecycleResponseSource(harness.messageStore, {
+    invocationId: author.invocationId,
+    catId: 'codex',
+    threadId: harness.thread.id,
+    userId: 'user-1',
+    timestamp: Date.now(),
+  });
+  assert.equal(
+    harness.messageStore.commitLifecycleAppendAdmission({
+      threadId: harness.thread.id,
+      entryId: entry.id,
+      inputMessageIds: [verdict.messageId],
+      runs: [
+        {
+          targetId: 'codex',
+          invocationId: author.invocationId,
+          responseMessageId: response.id,
+          dispatchedAt: Date.now(),
+        },
+      ],
+    }).kind,
+    'applied',
+  );
+  assert.equal(
+    (await harness.invocationQueue.retireClaimedLifecycleTarget(harness.thread.id, entry.id, 'codex')).outcome,
+    'retired',
+  );
 
   const single = await fetch(`${harness.apiUrl}/api/callbacks/get-message?messageId=${verdict.messageId}&mode=full`, {
     headers: authorHeaders,
@@ -208,7 +238,7 @@ test('ordinary request, one typed reply, and author HTTP reads need no F100 meas
   assert.equal(
     harness.messageStore
       .getByThreadIncludingQueued(harness.thread.id, 20, 'user-1')
-      .filter((message) => message.extra.localReviewVerdict).length,
+      .filter((message) => message.extra?.localReviewVerdict).length,
     1,
   );
 });
@@ -236,9 +266,13 @@ test('typed local review fact needs no action lease or inherited coordination to
     ...REVIEW_ANCHOR,
   });
   assert.deepEqual(visible[0].mentions, ['codex']);
-  assert.equal(visible[0].deliveryStatus, 'queued');
-  assert.deepEqual(harness.invocationQueue.list(harness.thread.id, 'user-1')[0].targetCats, ['codex']);
-  assert.equal(harness.autoExecuteCalls.length, 1);
+  assert.equal(
+    visible[0].deliveryStatus,
+    undefined,
+    'published Agent review remains visible while Queue owns wake admission in lifecycle metadata',
+  );
+  assert.deepEqual(harness.invocationQueue.list(harness.thread.id, 'user-1')[0].targets, ['codex']);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
 
   const replay = toolJson(await harness.handlePostMessage(input));
   assert.equal(replay.status, 'duplicate');
@@ -250,7 +284,7 @@ test('typed local review fact needs no action lease or inherited coordination to
   );
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
-  assert.equal(harness.autoExecuteCalls.length, 1);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
 });
 
 test('typed local review fact fails closed without an exact reviewed HEAD', async () => {
@@ -349,17 +383,15 @@ test('a durable review fact recovers one author wake after transient Queue failu
   assert.equal(first.statusCode, 503);
   assert.equal(first.json().kind, 'review_delivery_pending');
   const durable = harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1');
-  assert.equal(durable.length, 1);
-  assert.equal(durable[0].deliveryStatus, 'queued');
+  assert.equal(durable.length, 0, 'atomic Queue rejection must not publish a source without its wake');
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 0);
 
   const replay = await app.inject({ method: 'POST', url: '/api/callbacks/post-message', headers, payload });
   assert.equal(replay.statusCode, 200);
-  assert.equal(replay.json().status, 'duplicate');
-  assert.equal(replay.json().messageId, durable[0].id);
+  assert.equal(replay.json().status, 'ok');
   assert.equal(harness.messageStore.getByThreadIncludingQueued(harness.thread.id, 20, 'user-1').length, 1);
   assert.equal(harness.invocationQueue.list(harness.thread.id, 'user-1').length, 1);
-  assert.equal(harness.autoExecuteCalls.length, 1);
+  assert.equal(new Set(harness.drainNotifications.flat()).size, 1);
 });
 
 test('a new HEAD stores a fresh review fact while retaining the old HEAD as history', async () => {

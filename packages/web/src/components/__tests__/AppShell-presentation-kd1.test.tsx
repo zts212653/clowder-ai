@@ -34,6 +34,7 @@ vi.mock('../ActivityBar', () => ({ ActivityBar: () => null }));
 vi.mock('../ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('@/utils/api-client', () => ({
   API_URL: 'http://localhost:3112',
+  refreshApiSession: () => Promise.resolve(),
   apiFetch: () => Promise.resolve({ ok: false, json: () => Promise.resolve(null) }),
 }));
 

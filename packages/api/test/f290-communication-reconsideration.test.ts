@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { invokeSingleCat } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.js';
-import { QueuedMessageCustodyStartupReconciler } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js';
 import { fixture } from './f290-communication-reconsideration.fixture.js';
 import { CAT, until } from './f290-communication-validation.host.js';
 
@@ -16,9 +16,12 @@ test('manual once reconsiders the exact proposal through durable UNKNOWN public 
     assert.equal(replay.statusCode, 200, replay.body);
     assert.equal(first.json().messageId, replay.json().messageId);
     const wake = await f.host.messages.getById(first.json().messageId);
-    assert.ok(wake?.queueCustody);
-    assert.equal(wake.queueCustody.ownerAuthProvenance, 'unknown');
-    assert.equal(wake.queueCustody.executionScope, 'collective-participation');
+    assert.ok(wake);
+    assert.equal(wake.queueCustody, undefined);
+    const [pending] = f.queue.list(wake.threadId, f.host.userId);
+    assert.equal(pending.execution.ownerAuthProvenance, 'unknown');
+    assert.equal(pending.execution.executionScope, 'collective-participation');
+    assert.equal(pending.payload.messageId, wake.id);
     assert.equal((await f.host.tasks.listByKind('work')).length, 0);
     assert.equal(f.queue.list(f.host.endpoint.id, f.host.userId).length, 1);
     f.enable();
@@ -26,10 +29,10 @@ test('manual once reconsiders the exact proposal through durable UNKNOWN public 
     await until(() => f.runs.length === 1, `scripted model classified actual Work: ${f.logs}`);
     assert.equal(f.runs[0], proposal.workId);
     assert.equal(f.work(proposal.workId).lifecycle, 'committed');
-    await until(
-      async () => (await f.host.messages.getById(wake.id))?.queueCustody?.status === 'terminal',
-      'public wake settled',
-    );
+    await until(async () => {
+      const current = await f.host.messages.getById(wake.id);
+      return current?.lifecycle?.kind === 'input' && current.lifecycle.dispatchRefs?.[0]?.phase === 'settled';
+    }, 'public wake settled');
     const done = await f.post(grantRevision);
     assert.equal(done.json().disposition, 'already_classified');
     assert.equal(f.queue.list(f.host.endpoint.id, f.host.userId).length, 0);
@@ -49,30 +52,14 @@ test('lost response and restart recover the same durable wake; current revocatio
     const first = await f.post(grantRevision);
     assert.equal(first.statusCode, 200, first.body);
     const wake = await f.host.messages.getById(first.json().messageId);
-    assert.ok(wake?.queueCustody);
-    const queued = f.queue.getEntrySnapshot(wake.threadId, f.host.userId, wake.queueCustody.entryId);
+    assert.ok(wake);
+    const [queued] = f.queue.list(wake.threadId, f.host.userId);
     assert.ok(queued);
-    assert.ok(f.queue.removeEntrySnapshotIfUnchanged(queued), 'fixture simulates process-local Queue loss');
-    // In-memory Host fixture supplies the scan port; the reconciler reads and transitions the real stored custody.
-    const messages = Object.create(f.host.messages);
-    messages.scanByDeliveryStatus = () => [wake.id];
-    const startup = new QueuedMessageCustodyStartupReconciler({
-      messageStore: messages,
-      invocationQueue: f.queue,
-      invocationRecordStore: {
-        async get() {
-          return null;
-        },
-      },
-      log: {
-        info() {},
-        warn(message) {
-          f.logs.push(message);
-        },
-      },
-    });
-    const restored = await startup.reconcile();
-    assert.equal(restored.entriesRestored, 1, JSON.stringify({ restored, logs: f.logs }));
+    // Restart reads the same persisted ledger, not source-custody reconstruction.
+    const restarted = new InvocationQueue(f.ledger);
+    assert.equal(await restarted.hydrateFromLedger(f.host.messages), 1);
+    assert.equal(restarted.list(wake.threadId, f.host.userId)[0]?.id, queued.id);
+    assert.equal(await f.queue.hydrateFromLedger(f.host.messages), 1);
     await f.world.restartConnector(f.world.operator);
     await f.world.restartService();
     const retry = await f.post(grantRevision);
@@ -84,7 +71,7 @@ test('lost response and restart recover the same durable wake; current revocatio
     assert.equal(revoked.statusCode, 409, revoked.body);
     assert.equal((await f.host.tasks.listByKind('work')).length, 0);
     assert.equal(f.runs.length, 0);
-    assert.equal(f.queue.list(wake.threadId, f.host.userId)[0]?.targetCats[0], CAT);
+    assert.equal(f.queue.list(wake.threadId, f.host.userId)[0]?.targets[0], CAT);
   } finally {
     await f.close();
   }

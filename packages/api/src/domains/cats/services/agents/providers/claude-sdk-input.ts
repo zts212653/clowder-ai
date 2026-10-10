@@ -61,7 +61,7 @@ export class ClaudeSdkFreshness {
   private timer?: ReturnType<typeof setInterval>;
 
   constructor(
-    private readonly input: ClaudeSdkInput,
+    private readonly input: Pick<ClaudeSdkInput, 'push' | 'close'>,
     private readonly turnId: string,
     private readonly threadId: string,
     private readonly controller?: ActiveInvocationFreshnessController,

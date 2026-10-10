@@ -31,7 +31,9 @@ import { createRepoScanTaskSpec } from '../dist/infrastructure/connectors/github
 // TaskSpec factories (for custom id tests)
 import { createCiCdCheckTaskSpec } from '../dist/infrastructure/email/CiCdCheckTaskSpec.js';
 import { createConflictCheckTaskSpec } from '../dist/infrastructure/email/ConflictCheckTaskSpec.js';
+import { deliverConnectorMessage } from '../dist/infrastructure/email/deliver-connector-message.js';
 import { createReviewFeedbackTaskSpec } from '../dist/infrastructure/email/ReviewFeedbackTaskSpec.js';
+import { connectorDeliveryHarness } from './helpers/connector-delivery-harness.js';
 
 const stubLog = {
   info: () => {},
@@ -74,8 +76,8 @@ function makeGitHubDeps(overrides = {}) {
       markBaselineEstablished: async () => {},
     },
     bindingStore: { getByExternal: async () => null },
-    deliverFn: async () => ({ status: 'delivered', threadId: 't1' }),
-    deliveryDeps: { messageStore: {}, socketManager: {} },
+    deliverFn: deliverConnectorMessage,
+    deliveryDeps: connectorDeliveryHarness().deliveryDeps,
     fetchOpenPRs: async () => [],
     fetchOpenIssues: async () => [],
     // F202 Phase 2D: issue-tracking deps
@@ -172,8 +174,8 @@ describe('TaskSpec factory custom id (F202-2B Task 1)', () => {
         markBaselineEstablished: async () => {},
       },
       bindingStore: { getByExternal: async () => null },
-      deliverFn: async () => ({ status: 'delivered', threadId: 't1' }),
-      deliveryDeps: { messageStore: {}, socketManager: {} },
+      deliverFn: deliverConnectorMessage,
+      deliveryDeps: connectorDeliveryHarness().deliveryDeps,
       invokeTrigger: { trigger: () => {} },
       fetchOpenPRs: async () => [],
       fetchOpenIssues: async () => [],
@@ -411,7 +413,7 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
     assert.ok(factory);
 
     const delivered = [];
-    const triggered = [];
+    const connector = connectorDeliveryHarness();
     const resolverCalls = [];
     const spec = factory.createTaskSpec(
       'schedule:github:repo-scan',
@@ -434,15 +436,10 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
             draft: false,
           },
         ],
-        deliverFn: async (_deps, input) => {
+        deliveryDeps: connector.deliveryDeps,
+        deliverFn: async (deps, input) => {
           delivered.push(input);
-          return { messageId: 'message-7', content: input.content };
-        },
-        invokeTrigger: {
-          trigger(...args) {
-            triggered.push(args);
-            return 'dispatched';
-          },
+          return deliverConnectorMessage(deps, input);
         },
       }),
     );
@@ -453,7 +450,8 @@ describe('GitHub schedule factory registration (F202-2B Task 3)', () => {
 
     assert.deepEqual(resolverCalls, ['owner/repo']);
     assert.equal(delivered[0].catId, 'codex61-sol');
-    assert.equal(triggered[0][1], 'codex61-sol');
+    assert.equal(connector.wakes[0].catId, 'codex61-sol');
+    assert.equal(connector.admitted('thread-repo-inbox', 'user-1').length, 1);
   });
 
   test('github.repo-scan factory throws when repoAllowlist missing', () => {

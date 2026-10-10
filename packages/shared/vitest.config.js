@@ -11,6 +11,7 @@ export default defineConfig({
       'src/__tests__/companion-identity.test.ts',
       'test/pet-skin-projection.test.js',
       'src/__tests__/capability-tips.test.ts',
+      'src/__tests__/cat-display-name.test.ts',
       'src/__tests__/capability-evolution.test.ts',
       'src/__tests__/capability-evolution-name.test.ts',
       'src/__tests__/capability-evolution-diagnosis.test.ts',
@@ -66,6 +67,9 @@ export default defineConfig({
       'test/message-bundle-schema.test.ts',
       'test/markdown-readable-text.test.ts',
       'src/__tests__/profile-contract.test.ts',
+      'src/__tests__/timeline-message-kind.test.ts',
+      'src/__tests__/lifecycle-metadata-coercion.test.ts',
+      'src/__tests__/hold-card-cancelability.test.ts',
     ],
   },
 });

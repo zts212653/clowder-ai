@@ -136,8 +136,8 @@ function appendSevenDayCorpus(messageStore) {
     const ageMs = 5 * MINUTE + Math.floor((index * span) / (SIGNAL_COUNT - 1));
     messages.push(
       messageStore.append({
+        from: { kind: 'agent', catId: 'codex-sol' },
         userId: 'user-1',
-        catId: 'codex-sol',
         threadId: `thread-${index % 8}`,
         content: `[爪感差: tool-${index % 12}+capacity-signal-${index}]`,
         mentions: [],
@@ -367,7 +367,7 @@ describe('F278 seven-day capacity contract', () => {
         delivered.push(input);
         return 'capacity-notice-1';
       },
-      invokeTrigger: { async trigger() {} },
+      async deliverPrivate() {},
     });
     assert.equal(delivered.length, 1);
     assert.equal(watermarkStore.current.status, 'awaiting_receipt');

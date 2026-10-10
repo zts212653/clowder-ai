@@ -1,14 +1,4 @@
-/**
- * F322 original-B, composer side. In the new shell (v2) the stop button is the LAST control when the draft is empty
- * (the design's "send key becomes ■") and is gone while the draft has something to send (stopping lives on the one
- * execution row); the old "猫猫正在回复中… 取消" bar is not rendered. The classic interface is frozen: its stop button
- * stays beside the send controls, the bar stays, and rendering with no preference is identical to choosing classic.
- *
- * Who decides is the HOST: a composer only drops the bar / moves the stop when it is told `presentation="v2"`, which
- * ThreadChatSurface (the one host that also mounts the execution row) does. A composer mounted anywhere else — the split
- * view mounts a bare ChatInput — keeps the classic bar even while the new shell is chosen, because nothing there says
- * "the row will tell you" in its place.
- */
+/** Stop remains an exact icon action; execution status is not repeated in a composer banner. */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -79,7 +69,6 @@ function renderButton(props: Partial<ButtonProps>) {
         onStop: vi.fn(),
         stopState: 'available',
         hasActiveInvocation: true,
-        activeExecutionKey: 'exec-1',
         hasText: false,
         ...props,
       }),
@@ -92,16 +81,16 @@ const stopIndex = () => labels().indexOf('Stop generation');
 const micIndex = () => labels().findIndex((label) => label.startsWith('Start voice input'));
 
 describe('ChatInputActionButton: where the stop button sits', () => {
-  it('classic, empty draft, a cat running: the stop comes first, then the mic (unchanged)', () => {
+  it('classic, empty draft, a cat running: stop is available without another voice input', () => {
     renderButton({ presentation: 'classic' });
     expect(stopIndex()).toBe(0);
-    expect(micIndex()).toBe(1);
+    expect(micIndex()).toBe(-1);
   });
 
   it('classic, text in the draft, a cat running: the stop is still there beside queue-send (unchanged)', () => {
     renderButton({ presentation: 'classic', hasText: true });
     expect(labels()).toContain('Stop generation');
-    expect(labels()).toContain('排队发送');
+    expect(labels()).toContain('Send message');
   });
 
   it('no presentation given renders exactly what classic renders', () => {
@@ -113,17 +102,17 @@ describe('ChatInputActionButton: where the stop button sits', () => {
     }
   });
 
-  it('v2, empty draft, a cat running: the mic then the stop — the stop is the last control', () => {
+  it('v2, empty draft, a cat running: stop is the last control without another voice input', () => {
     renderButton({ presentation: 'v2' });
-    expect(micIndex()).toBe(0);
-    expect(stopIndex()).toBe(1);
+    expect(micIndex()).toBe(-1);
+    expect(stopIndex()).toBe(0);
     expect(stopIndex()).toBe(labels().length - 1);
   });
 
   it('v2, text in the draft: no stop button; queue-send is the way forward', () => {
     renderButton({ presentation: 'v2', hasText: true });
     expect(labels()).not.toContain('Stop generation');
-    expect(labels()).toContain('排队发送');
+    expect(labels()).toContain('Send message');
   });
 
   it('v2, no cat running: no stop button at all', () => {
@@ -149,7 +138,7 @@ describe('ChatInputActionButton: where the stop button sits', () => {
   });
 });
 
-describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
+describe('ChatInput: execution status stays outside the composer', () => {
   const ROUTE = 'v2-route-thread';
   const SELECTED = 'v2-selected-thread';
   const originalState = useChatStore.getState();
@@ -197,16 +186,20 @@ describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
 
   const banner = () => container.querySelector('[data-testid="active-invocation-banner"]');
 
-  it('classic: the bar is rendered, with its words (unchanged)', () => {
+  it('classic: no duplicate banner; an accessible stop icon stays in the input controls', () => {
     renderRunning();
-    expect(banner()?.textContent).toContain('运行状态暂不可核对');
+    expect(banner()).toBeNull();
+    const stop = container.querySelector('button[aria-label="Stop generation"]');
+    expect(stop).not.toBeNull();
+    expect(stop?.querySelector('svg rect')).not.toBeNull();
+    expect(stop?.textContent).not.toContain('取消');
   });
 
-  it('new shell chosen, but this composer has no row above it (split view): the bar and its words stay', () => {
+  it('split view: the redundant banner is removed regardless of shell preference', () => {
     act(() => writeShellPresentation('v2'));
     renderRunning();
-    // The split view mounts a bare ChatInput. Dropping the bar there would leave the unverifiable run unsaid anywhere.
-    expect(banner()?.textContent).toContain('运行状态暂不可核对');
+    expect(banner()).toBeNull();
+    expect(container.querySelector('button[aria-label="Stop generation"]')).not.toBeNull();
   });
 
   // The selected thread is B; the project snapshot is anchored at A and covers B's run; the re-read then fails.
@@ -237,7 +230,6 @@ describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
       currentThreadId: ROUTE,
       threads: [thread(ROUTE), thread(SELECTED)],
       queue: [],
-      queuePaused: false,
       hasActiveInvocation: false,
       activeInvocations: {},
       catStatuses: {},
@@ -250,7 +242,6 @@ describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
           catInvocations: {},
           catStatuses: {},
           queue: [],
-          queuePaused: false,
         },
       },
     });
@@ -266,9 +257,11 @@ describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
     );
   }
 
-  it('classic host: a same-project run whose snapshot could not be re-read is qualified by the bar', () => {
+  it('classic host: the member execution bar remains alongside one composer stop', () => {
     renderCoveredSurface('classic');
-    expect(banner()?.textContent).toContain('状态暂不可核对');
+    expect(banner()).toBeNull();
+    expect(container.textContent).toContain('执行中');
+    expect(container.querySelectorAll('button[aria-label="Stop generation"]')).toHaveLength(1);
   });
 
   it('v2 host (row mounted): the bar is gone and the row says the run could not be re-read', () => {
@@ -276,7 +269,7 @@ describe('ChatInput: the "猫猫正在回复中… 取消" bar', () => {
     expect(banner()).toBeNull();
     const row = container.querySelector('[data-testid="execution-row"]');
     expect(row).not.toBeNull();
-    // Not just "opus 正在工作": the stale qualifier the classic composer shows for the same state.
+    // Both shells preserve the stale qualifier on the execution row.
     expect(row?.textContent).toContain('状态暂不可核对');
   });
 });

@@ -20,7 +20,7 @@ for (const termination of ['stop', 'fail'])
       publish() {},
     });
     try {
-      sessions.claim(call.id, 'owner', 'home', ['codex-astra']);
+      await sessions.claim(call.id, 'owner', 'home', ['codex-astra']);
       await call.configure({
         CAT_CAFE_API_URL: 'http://localhost:3012',
         CAT_CAFE_USER_ID: 'owner',

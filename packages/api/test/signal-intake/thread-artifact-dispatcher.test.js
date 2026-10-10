@@ -51,12 +51,11 @@ describe('F292 private-thread artifact handoff', () => {
     const appended = [];
     const enqueued = [];
     const queue = {
-      enqueue(input) {
-        enqueued.push(input);
-        return { outcome: 'enqueued', entry: { id: 'q-1', messageId: null } };
+      async send(messageStore, messageInput, queueInput) {
+        const message = await messageStore.append(messageInput);
+        enqueued.push(queueInput);
+        return { outcome: 'enqueued', entry: { id: 'q-1' }, message };
       },
-      backfillMessageId() {},
-      rollbackEnqueue() {},
     };
     const dispatcher = new ThreadMeetingArtifactDispatcher({
       threadStore: { get: async () => ({ ...thread, participants: [] }) },
@@ -67,7 +66,6 @@ describe('F292 private-thread artifact handoff', () => {
         },
       },
       invocationQueue: queue,
-      queueProcessor: { processNext: async () => ({ started: true }) },
       socketManager: noopSocketManager,
       supportsPresentationRetry: () => true,
       now: () => 12_000,
@@ -97,7 +95,7 @@ describe('F292 private-thread artifact handoff', () => {
 
     assert.equal(enqueued.length, 1);
     assert.deepEqual(enqueued[0].targetCats, ['codex-sol']);
-    assert.equal(enqueued[0].source, 'connector');
+    assert.deepEqual(enqueued[0].from, { kind: 'user', userId: 'owner-1' });
     assert.deepEqual(appended[0].source, {
       connector: 'feishu',
       label: '飞书会议入站 / 录音豆',
@@ -128,30 +126,30 @@ describe('F292 private-thread artifact handoff', () => {
     assert.equal(buildMeetingArtifactPrompt(intake, artifact), appended[0].content);
   });
 
-  it('publishes the durable Host receipt before processNext even when execution does not start', async () => {
+  it('confirms the durable Host receipt without scheduling in the producer', async () => {
     const order = [];
-    const published = [];
+    const durableInputs = [];
     const dispatcher = new ThreadMeetingArtifactDispatcher({
       threadStore: { get: async () => thread },
       messageStore: {
-        append: async (input) => ({ ...input, id: 'meeting-message-visible', threadId: input.threadId }),
+        append: async (input) => {
+          durableInputs.push(input);
+          return { ...input, id: 'meeting-message-visible', threadId: input.threadId };
+        },
         getByIdempotencyKey: async () => null,
       },
       invocationQueue: {
-        enqueue: () => ({ outcome: 'enqueued', entry: { id: 'queue-visible', messageId: null } }),
-        backfillMessageId() {},
-        rollbackEnqueue() {},
-      },
-      queueProcessor: {
-        processNext: async () => {
-          order.push('processNext');
-          return { started: false };
+        // F117: the dispatcher now routes admission through the durable
+        // append+enqueue contract instead of enqueue + backfill.
+        async send(messageStore, messageInput) {
+          const message = await messageStore.append(messageInput);
+          order.push('durableAppend');
+          return { outcome: 'enqueued', entry: { id: 'queue-visible', messageId: message.id }, message };
         },
       },
       socketManager: {
-        emitToUser(userId, event, data) {
-          order.push(event);
-          published.push({ userId, event, data });
+        emitToUser() {
+          assert.fail('F117: admission publication is the durable ledger append, not a socket event');
         },
       },
       supportsPresentationRetry: () => true,
@@ -182,25 +180,25 @@ describe('F292 private-thread artifact handoff', () => {
     });
 
     assert.equal(receipt, undefined);
-    assert.deepEqual(order, ['messages_queued', 'processNext']);
-    assert.equal(published.length, 1);
-    assert.equal(published[0].userId, 'owner-1');
-    assert.equal(published[0].data.threadId, 'thread-1');
-    assert.deepEqual(published[0].data.messageIds, ['meeting-message-visible']);
-    assert.deepEqual(published[0].data.messages[0].source, {
+    // F117 new contract: the owner-visible admission anchor is the durable message
+    // append (via send); the shared Queue owner controls progress. The old
+    // 'messages_queued' socket publication was retired from this dispatcher.
+    assert.deepEqual(order, ['durableAppend']);
+    assert.equal(durableInputs.length, 1);
+    assert.equal(durableInputs[0].threadId, 'thread-1');
+    assert.equal(durableInputs[0].userId, 'owner-1');
+    assert.equal(durableInputs[0].deliveryStatus, 'queued');
+    assert.deepEqual(durableInputs[0].source, {
       connector: 'feishu',
       label: '飞书会议入站 / 录音豆',
       icon: 'feishu',
       meta: { sourceRevision: artifact.sourceRevision },
     });
-    assert.equal(published[0].data.messages[0].timestamp, 12_345);
-    assert.equal(published[0].data.messages[0].deliveredAt, undefined);
-    assert.equal(published[0].data.messages[0].timelineOrderAt, undefined);
+    assert.equal(durableInputs[0].timestamp, 12_345);
   });
 
   it('admits the Alpha canary through the canonical meeting write-opportunity producer', async () => {
     const appended = [];
-    const processed = [];
     const dispatcher = new ThreadMeetingArtifactDispatcher({
       threadStore: { get: async () => thread },
       messageStore: {
@@ -211,14 +209,10 @@ describe('F292 private-thread artifact handoff', () => {
         getByIdempotencyKey: async () => null,
       },
       invocationQueue: {
-        enqueue: () => ({ outcome: 'enqueued', entry: { id: 'q-alpha', messageId: null } }),
-        backfillMessageId() {},
-        rollbackEnqueue() {},
-      },
-      queueProcessor: {
-        processNext: async (...args) => {
-          processed.push(args);
-          return { started: true };
+        // F117: same durable append+enqueue contract as the production InvocationQueue.
+        async send(messageStore, messageInput) {
+          const message = await messageStore.append(messageInput);
+          return { outcome: 'enqueued', entry: { id: 'q-alpha', messageId: message.id }, message };
         },
       },
       socketManager: noopSocketManager,
@@ -237,9 +231,8 @@ describe('F292 private-thread artifact handoff', () => {
       sourceMessageId: 'msg-alpha',
       targetCatId: 'codex-sol',
       deduped: false,
-      started: true,
+      started: false,
     });
-    assert.deepEqual(processed, [['thread-1', 'owner-1']]);
     assert.equal(appended.length, 1);
     assert.deepEqual(appended[0].source, {
       connector: 'cat-cafe-alpha',
@@ -325,12 +318,11 @@ describe('F292 private-thread artifact handoff', () => {
     const enqueued = [];
     const published = [];
     const queue = {
-      enqueue(input) {
-        enqueued.push(input);
-        return { outcome: 'enqueued', entry: { id: 'q-retry', messageId: null } };
+      async send(messageStore, messageInput, queueInput) {
+        const message = await messageStore.append(messageInput);
+        enqueued.push(queueInput);
+        return { outcome: 'enqueued', entry: { id: 'q-retry' }, message };
       },
-      backfillMessageId() {},
-      rollbackEnqueue() {},
     };
     let now = 5_000;
     const dispatcher = new ThreadMeetingArtifactDispatcher({
@@ -339,7 +331,7 @@ describe('F292 private-thread artifact handoff', () => {
         getByIdempotencyKey: async (userId, _threadId, key) => {
           if (userId === 'owner-1' && key === `meeting-artifact:intake-1:${artifact.sourceRevision}`)
             return sourceMessage;
-          if (userId === 'scheduler') return appended.find((message) => message.idempotencyKey === key) ?? null;
+          if (userId === 'owner-1') return appended.find((message) => message.idempotencyKey === key) ?? null;
           return null;
         },
         append: async (input) => {
@@ -349,7 +341,6 @@ describe('F292 private-thread artifact handoff', () => {
         },
       },
       invocationQueue: queue,
-      queueProcessor: { processNext: async () => ({ started: true }) },
       socketManager: {
         emitToUser(...args) {
           published.push(args);
@@ -373,8 +364,8 @@ describe('F292 private-thread artifact handoff', () => {
     assert.equal(receipt.triggerMessageId, 'retry-message-1');
     assert.equal(receipt.queueEntryId, 'q-retry');
     assert.deepEqual(enqueued[0].targetCats, ['codex-sol']);
-    assert.equal(enqueued[0].source, 'connector');
-    assert.equal(appended[0].userId, 'scheduler');
+    assert.deepEqual(enqueued[0].from, { kind: 'system', service: 'meeting-write-opportunity' });
+    assert.equal(appended[0].userId, 'owner-1');
     assert.equal(appended[0].extra.scheduler.hiddenTrigger, true);
     assert.equal(
       appended[0].extra.writeOpportunityPresentationRetry.sourceOpportunityId,
@@ -467,16 +458,20 @@ describe('F292 private-thread artifact handoff', () => {
           appended.length > 0 ? { ...appended[0], id: 'meeting-message-1', threadId: appended[0].threadId } : null,
       },
       invocationQueue: {
-        enqueue() {
+        async send(messageStore, messageInput) {
           enqueueCalls += 1;
-          return enqueueCalls === 1
-            ? { outcome: 'enqueued', entry: { id: 'queue-1', messageId: null } }
-            : { outcome: 'enqueued', deduped: true, entry: { id: 'queue-1', messageId: 'meeting-message-1' } };
+          if (enqueueCalls === 1) {
+            const message = await messageStore.append(messageInput);
+            return { outcome: 'enqueued', entry: { id: 'queue-1' }, message };
+          }
+          return {
+            outcome: 'enqueued',
+            deduped: true,
+            entry: { id: 'queue-1' },
+            message: appended[0],
+          };
         },
-        backfillMessageId() {},
-        rollbackEnqueue() {},
       },
-      queueProcessor: { processNext: async () => ({ started: true }) },
       socketManager: noopSocketManager,
       supportsPresentationRetry: () => true,
       now: () => 2,
@@ -567,14 +562,11 @@ describe('F292 private-thread artifact handoff', () => {
         append: async () => assert.fail('must not append'),
       },
       invocationQueue: {
-        enqueue() {
+        send() {
           enqueueCount += 1;
-          return { outcome: 'enqueued', entry: { id: 'unexpected', messageId: null } };
+          return { outcome: 'enqueued', entry: { id: 'unexpected' } };
         },
-        backfillMessageId() {},
-        rollbackEnqueue() {},
       },
-      queueProcessor: { processNext: async () => ({ started: true }) },
       socketManager: noopSocketManager,
       supportsPresentationRetry: () => false,
     });

@@ -26,7 +26,7 @@ export async function createDevelopmentReturnFixture(t: TestContext) {
   let now = Date.now();
   const source = messages.append({
     userId: 'human',
-    catId: null,
+    from: { kind: 'user', userId: 'human' },
     threadId: original.id,
     content: '完成这个 B 子工作',
     mentions: [],
@@ -85,7 +85,8 @@ export async function createDevelopmentReturnFixture(t: TestContext) {
   const definitions = new DynamicTaskStore(db),
     events = [],
     wakes = [],
-    deliveries = new Map();
+    deliveries = new Map(),
+    admissions = [];
   let queueFull = false;
   const runner = new TaskRunnerV2({
     ledger: new RunLedger(db),
@@ -99,6 +100,7 @@ export async function createDevelopmentReturnFixture(t: TestContext) {
     async deliver(input) {
       if (queueFull) throw new Error('Owner queue is full');
       const result = await transport.delivery.deliver(input);
+      admissions.push({ input, result });
       if (result.message) {
         if (!deliveries.has(input.idempotencyKey))
           wakes.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, result.message.id]);
@@ -143,6 +145,7 @@ export async function createDevelopmentReturnFixture(t: TestContext) {
     events,
     wakes,
     deliveries,
+    admissions,
     transport,
     input,
     setQueueFull(value) {
@@ -154,7 +157,7 @@ export async function createDevelopmentReturnFixture(t: TestContext) {
     report() {
       return messages.append({
         userId: 'human',
-        catId: 'codex-sol',
+        from: { kind: 'agent', catId: 'codex-sol' },
         threadId: child.id,
         content: 'Accepted development result and validation',
         mentions: [],

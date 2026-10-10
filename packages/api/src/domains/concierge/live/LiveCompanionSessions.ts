@@ -1,4 +1,4 @@
-import type { FreshnessReadableMessage } from '../../cats/services/freshness/checkFreshnessForPostMessage.js';
+import type { FreshnessReadableMessage } from '../../cats/services/freshness/freshness-unseen-source.js';
 import type { F317LiveCallObservation, F317MeetingGrant } from '../meeting/f317-meeting-admission.js';
 import type { LiveMeetingDependencies } from './host/live-meeting-host.js';
 import { type LiveCarrierOperationLease, LiveCarrierUnavailableError } from './LiveCarrierOperationGate.js';
@@ -115,7 +115,33 @@ export class LiveCompanionSessions {
     }
   }
 
-  claim(id: string, userId: string, threadId: string, targetCats: readonly string[]): LiveCompanionCall {
+  async claim(id: string, userId: string, threadId: string, targetCats: readonly string[]): Promise<LiveCompanionCall> {
+    const entry = this.calls.get(id);
+    const matches = () => {
+      const scope = entry?.call.status();
+      return Boolean(
+        entry &&
+          this.calls.get(id) === entry &&
+          !entry.claimed &&
+          !this.changingPreferences.has(userId) &&
+          entry.call.acceptsAdmission() &&
+          entry.userId === userId &&
+          scope?.threadId === threadId &&
+          targetCats.length === 1 &&
+          targetCats[0] === scope.catId,
+      );
+    };
+    if (!matches() || !entry || !(await entry.call.hasCurrentCompanion()) || !matches())
+      throw new Error('Live admission mismatch');
+    // No await between the final scope/closing fence and single-winner acquisition.
+    entry.claimed = true;
+    return entry.call;
+  }
+
+  async close(): Promise<void> {
+    await Promise.all([...this.calls.values()].map(({ call }) => call.stop()));
+  }
+  async rejectUnclaimed(id: string, userId: string, threadId: string, targets: readonly string[]): Promise<void> {
     const entry = this.calls.get(id);
     const scope = entry?.call.status();
     if (
@@ -123,16 +149,12 @@ export class LiveCompanionSessions {
       entry.claimed ||
       entry.userId !== userId ||
       scope?.threadId !== threadId ||
-      targetCats.length !== 1 ||
-      targetCats[0] !== scope.catId
+      targets.length !== 1 ||
+      targets[0] !== scope.catId
     )
-      throw new Error('Live admission mismatch');
-    entry.claimed = true;
-    return entry.call;
-  }
-
-  async close(): Promise<void> {
-    await Promise.all([...this.calls.values()].map(({ call }) => call.stop()));
+      return;
+    // stop sets its closing fence synchronously; an in-flight claim must then revalidate.
+    await entry.call.stop();
   }
   signalInbox(userId: string, threadId: string): void {
     for (const entry of this.calls.values())

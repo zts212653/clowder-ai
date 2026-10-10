@@ -81,7 +81,7 @@ describe('F167 R2 P2: RepoScanTaskSpec.admission.gate self-heals quiet-repo bind
       reconciliationDedup: createMockReconciliationDedup({ notifiedAll }),
       bindingStore: createMockBindingStore('thread-inbox-1'),
       threadStore,
-      deliverFn: async () => ({ messageId: 'msg-1', content: 'x' }),
+      deliverFn: async () => ({ messageId: 'msg-1', content: 'x', admitted: true }),
       deliveryDeps: {},
       invokeTrigger: { trigger() {} },
       fetchOpenPRs: async () => [],

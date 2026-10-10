@@ -23,7 +23,11 @@ async function fixture() {
   const source = messages.append({
     userId: 'owner',
     threadId: 'thread_public',
-    catId: null,
+    from: {
+      kind: 'external',
+      connectorId: 'collective',
+      sender: { id: sourceIdentity.actor.humanId, name: sourceIdentity.actor.displayName },
+    },
     content: '完成第一版并沿同一 Work 接住反馈。',
     mentions: ['codex-sol'],
     timestamp: 1,

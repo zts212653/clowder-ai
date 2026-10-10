@@ -22,6 +22,7 @@ import {
   requireCallbackAuth,
 } from './callback-auth-prehandler.js';
 import { createSessionCompactionSurface, type SessionCompactionSurfaceDeps } from './session-compaction-surface.js';
+import { createSealOnPreCompact } from './session-seal-handler.js';
 
 const sealSchema = z.object({
   cliSessionId: z.string().min(1).max(500),
@@ -72,6 +73,7 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     ...opts,
     hookAuthenticationReady: () => callbackRegistry.isStartupRecoveryComplete?.() !== false,
   });
+  const sealOnPreCompact = createSealOnPreCompact({ sessionChainStore, sessionSealer, compactionSurface });
 
   registerCallbackAuthHook(app, callbackRegistry, { enforceToolExecutionPolicy: false });
   app.addHook('preHandler', async (request, reply) => {
@@ -111,144 +113,9 @@ export async function sessionHooksRoutes(app: FastifyInstance, opts: SessionHook
     }
 
     const { cliSessionId, reason } = parseResult.data;
-
-    // Look up Clowder AI session by CLI session ID
-    const record = await sessionChainStore.getByCliSessionId(cliSessionId);
-    if (!record) {
-      reply.status(404);
-      return { error: 'No session found for this CLI session ID' };
-    }
-
-    if (record.status !== 'active') {
-      reply.status(409);
-      return {
-        error: `Session already ${record.status}`,
-        sessionId: record.id,
-        status: record.status,
-      };
-    }
-
-    // #1329: the hook consumes the policy snapshot owned by this managed
-    // invocation. A config read here would let a mid-invocation settings edit
-    // change the action family and would re-introduce the policy/capability bug.
-    const policy = record.appliedPolicy;
-    if (!policy) {
-      return reply.send({
-        action: 'no_action',
-        sessionId: record.id,
-        compressionCount: record.compressionCount,
-        executionStatus: {
-          status: 'unavailable',
-          missingCapabilities: ['managed_invocation_boundary'],
-        },
-        contextEpoch: {
-          status: 'unsupported',
-          reason: 'managed_invocation_boundary_unavailable',
-        },
-      });
-    }
-
-    // Atomically update lifetime telemetry (when its origin is known) and the
-    // revision-scoped hybrid counter. A concurrent policy revision makes the
-    // event stale instead of attributing it to the new epoch.
-    const observed = await sessionChainStore.recordCompressionEvent(
-      record.id,
-      policy.revision,
-      invocation.invocationId,
-    );
-    if (!observed) {
-      reply.status(409);
-      return { error: 'Session disappeared during compression observation (race)', sessionId: record.id };
-    }
-    const updated = await sessionChainStore.get(record.id);
-    const contextEpoch = updated
-      ? await compactionSurface.observeAuthoritativeCompaction(updated, 'claude_precompact_hook')
-      : { status: 'unsupported' as const, reason: 'session_record_unavailable' as const };
-
-    if (!observed.revisionMatched) {
-      return reply.send({
-        action: 'no_action',
-        reason: 'stale_policy_revision',
-        sessionId: record.id,
-        compressionCount: observed.compressionCount,
-        strategy: policy.config.strategy,
-        policyRevision: policy.revision,
-        ...(updated?.appliedPolicy ? { activePolicyRevision: updated.appliedPolicy.revision } : {}),
-        contextEpoch,
-      });
-    }
-
-    const strategy = policy.config;
-    const canExecuteHandoff = policy.execution.status === 'active';
-    const maxCompressions = strategy.hybrid?.maxCompressions ?? 2;
-    const hybridCount = observed.hybridProgress?.observedCount ?? null;
-    // PreCompact arrives before the pending compaction and the store records
-    // that signal atomically before this decision. Count N is therefore the
-    // Nth compaction to allow; only signal N+1 exhausts an N-compaction policy.
-    const hybridShouldSeal =
-      strategy.strategy === 'hybrid' && canExecuteHandoff && hybridCount !== null && hybridCount > maxCompressions;
-
-    if (strategy.strategy === 'compress' || strategy.strategy === 'hybrid' || !canExecuteHandoff) {
-      if (!hybridShouldSeal) {
-        return reply.send({
-          action: canExecuteHandoff || strategy.strategy === 'compress' ? 'compress_allowed' : 'no_action',
-          sessionId: record.id,
-          compressionCount: observed.compressionCount,
-          hybridProgress: observed.hybridProgress,
-          ...(strategy.strategy === 'hybrid' ? { maxCompressions } : {}),
-          strategy: strategy.strategy,
-          executionStatus: policy.execution,
-          ...(updated ? { continuity: compactionSurface.compactContinuityFor(updated) } : {}),
-          contextEpoch,
-        });
-      }
-    }
-
-    // Hybrid only crosses into handoff after its active, revision-scoped count
-    // is exhausted. Degraded hybrid always stays in its own action family.
-    const sealReason = strategy.strategy === 'hybrid' ? 'max_compressions' : reason;
-
-    const sealResult = await sessionSealer.requestSeal({
-      sessionId: record.id,
-      reason: sealReason,
-      expectedPolicyRevision: policy.revision,
-    });
-
-    if (!sealResult.accepted) {
-      if (sealResult.rejectionReason === 'policy_revision_mismatch') {
-        const active = await sessionChainStore.get(record.id);
-        return reply.send({
-          action: 'no_action',
-          reason: 'stale_policy_revision',
-          sessionId: record.id,
-          compressionCount: observed.compressionCount,
-          strategy: policy.config.strategy,
-          policyRevision: policy.revision,
-          ...(active?.appliedPolicy ? { activePolicyRevision: active.appliedPolicy.revision } : {}),
-        });
-      }
-      reply.status(409);
-      return {
-        error: 'Seal request not accepted (race condition)',
-        sessionId: record.id,
-        status: sealResult.status,
-      };
-    }
-
-    // Slow path: async transcript flush (fire-and-forget)
-    sessionSealer.finalize({ sessionId: record.id }).catch(() => {
-      /* best-effort: finalize failure logged internally */
-    });
-
-    return reply.send({
-      sessionId: record.id,
-      threadId: record.threadId,
-      catId: record.catId,
-      status: 'sealing',
-      strategy: strategy.strategy,
-      executionStatus: policy.execution,
-      contextEpoch,
-    });
+    const outcome = await sealOnPreCompact(invocation.invocationId, cliSessionId, reason);
+    reply.status(outcome.status);
+    return outcome.body;
   });
 
   compactionSurface.registerLatestDigestRoute(app);

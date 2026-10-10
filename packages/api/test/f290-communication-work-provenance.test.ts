@@ -4,11 +4,7 @@ import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import {
-  createInitialQueuedMessageCustody,
-  QueuedMessageCustodyCoordinator,
-} from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import { buildQueueEntry } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupQueueEntry.js';
+import { InMemoryQueueLedgerStore } from '../src/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
 import { authRecordFromRedisHash } from '../src/domains/cats/services/agents/invocation/RedisAuthInvocationRecord.js';
 import { BacklogStore } from '../src/domains/cats/services/stores/ports/BacklogStore.js';
 import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
@@ -75,20 +71,22 @@ test('restart downgrades legacy private Work authentication while retaining exac
   assert.equal(authRecordFromRedisHash({ ...fields, originTriggerMessageId: '' }, new Set()), null);
 });
 
-test('a private Work queue producer cannot promote external origin to strict owner provenance', () => {
+test('a private Work queue producer cannot promote external origin to strict owner provenance', async () => {
   const queue = new InvocationQueue();
   const input = {
+    kind: 'conversation_input' as const,
+    sourceId: 'private-work-input',
+    from: { kind: 'external' as const, connectorId: 'collective-work' },
     userId: 'owner',
     threadId: 'private-A',
     content: 'Execute admitted A',
     targetCats: [catId],
-    source: 'connector' as const,
     intent: 'execute' as const,
     executionScope: 'collective-work' as const,
     ownerAuthProvenance: 'unknown' as const,
   };
-  assert.ok(queue.enqueue(input).entry);
-  assert.throws(() => queue.enqueue({ ...input, ownerAuthProvenance: 'strict' }), /scope|provenance/i);
+  assert.ok((await queue.enqueueDurable(input)).entry);
+  await assert.rejects(queue.enqueueDurable({ ...input, ownerAuthProvenance: 'strict' }), /scope|provenance/i);
 });
 
 test('a named home relay consumes the exact Work binding without owner control-plane authority', () => {
@@ -99,16 +97,15 @@ test('a named home relay consumes the exact Work binding without owner control-p
     ownerAuthProvenance: 'unknown' as const,
     collectiveWorkBinding: binding,
   };
-  const originMessage = {
-    id: 'trigger-A',
+  const originMessage = new MessageStore().append({
     userId: 'owner',
     threadId: 'private-A',
-    catId: null,
+    from: { kind: 'system' as const, service: 'collective-work' },
     content: 'Run A',
     mentions: [],
     timestamp: 1,
     extra: { collectiveWorkInvocationV1: carrier },
-  };
+  });
   const input = {
     record,
     originMessage,
@@ -200,38 +197,44 @@ test('a bound private Work cannot consume an external instruction to change owne
   }
 });
 
-test('legacy private Queue custody recovers executable delivery without rewriting its historical owner grade', async () => {
-  const queue = new InvocationQueue();
-  const entry = queue.enqueue({
-    userId: 'owner',
-    threadId: 'private-A',
-    content: 'Execute admitted A',
-    targetCats: [catId],
-    source: 'connector',
-    intent: 'execute',
-    executionScope: 'collective-work',
-    ownerAuthProvenance: 'unknown',
-  }).entry;
-  assert.ok(entry);
+test('canonical private Work Queue hydrate keeps immutable owner provenance without reconstructing Message custody', async () => {
+  const ledger = new InMemoryQueueLedgerStore();
+  const queue = new InvocationQueue(ledger);
   const messages = new MessageStore();
-  const message = messages.append({
-    userId: entry.userId,
-    threadId: entry.threadId,
-    content: entry.content,
-    catId: null,
-    mentions: [catId],
-    timestamp: 1,
-    deliveryStatus: 'queued',
-    queueCustody: { ...createInitialQueuedMessageCustody(entry), ownerAuthProvenance: 'strict' },
-    extra: { collectiveWorkInvocationV1: carrier },
-  });
-  const recovered = buildQueueEntry([message], entry.id);
-  assert.equal(recovered.ownerAuthProvenance, 'unknown');
-  const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages });
-  assert.deepEqual(await coordinator.persistEntry(recovered), [message.id]);
-  assert.equal(
-    messages.getById(message.id)?.queueCustody?.ownerAuthProvenance,
-    'strict',
-    'historical fact remains immutable',
+  const from = { kind: 'system' as const, service: 'collective-work' };
+  const admitted = await queue.send(
+    messages,
+    {
+      userId: 'owner',
+      threadId: 'private-A',
+      from,
+      content: 'Execute admitted A',
+      mentions: [catId],
+      timestamp: 1,
+      deliveryStatus: 'queued',
+      extra: { collectiveWorkInvocationV1: carrier },
+    },
+    {
+      kind: 'conversation_input',
+      userId: 'owner',
+      threadId: 'private-A',
+      from,
+      content: 'Execute admitted A',
+      targetCats: [catId],
+      intent: 'execute',
+      executionScope: 'collective-work',
+      ownerAuthProvenance: 'unknown',
+    },
   );
+  assert.ok(admitted.message && admitted.entry);
+  const recovered = new InvocationQueue(ledger);
+  assert.equal(await recovered.hydrateFromLedger(messages), 1);
+  const entry = recovered.getEntrySnapshot('private-A', 'owner', admitted.entry.id);
+  assert.equal(entry?.execution.ownerAuthProvenance, 'unknown');
+  assert.equal(entry?.execution.executionScope, 'collective-work');
+  assert.equal(entry?.payload.messageId, admitted.message.id);
+  assert.equal(messages.getById(admitted.message.id)?.queueCustody, undefined);
+  const durable = await ledger.get('private-A', admitted.entry.id);
+  assert.ok(durable);
+  assert.deepEqual(durable, await queue.getDurableEntry('private-A', admitted.entry.id));
 });

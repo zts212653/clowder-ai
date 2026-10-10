@@ -22,91 +22,53 @@ function wakeInput() {
 }
 
 describe('SchedulerBallCustodyWakeSender', () => {
-  it('returns typed admission receipts and reuses the exact persisted wake after invoke failure', async () => {
+  /*
+   * RFC §5.2: the wake is one atomic Message + Queue admission. The old shape persisted the wake,
+   * read it back to prove exactness, then admitted it — three steps whose only purpose was to patch
+   * the window between the first two. With no window there is nothing to read back, and the typed
+   * receipt is simply "was this envelope admitted".
+   */
+  it('returns a typed admission receipt and keeps one idempotency key across retries', async () => {
     const deliveries = [];
-    const triggeredContents = [];
-    let persistedContent;
-    let triggerCalls = 0;
+    let attempts = 0;
     const sender = new SchedulerBallCustodyWakeSender({
       async deliver(opts) {
         deliveries.push(opts);
-        persistedContent ??= opts.content;
+        attempts += 1;
+        if (attempts === 1) throw new Error('admission unavailable');
         return 'msg-wake-1';
-      },
-      async readPersistedContent() {
-        return persistedContent;
-      },
-      invokeTrigger: {
-        async trigger(_threadId, _catId, _userId, content) {
-          triggeredContents.push(content);
-          triggerCalls += 1;
-          if (triggerCalls === 1) throw new Error('admission unavailable');
-          return 'dispatched';
-        },
       },
       logger: { warn() {} },
     });
 
     const first = await sender.send(wakeInput());
     const changedTask = wakeInput();
-    changedTask.task.title = 'A title edited after the persisted wake';
+    changedTask.task.title = 'A title edited after the first attempt';
     const second = await sender.send(changedTask);
 
-    assert.deepEqual(first, {
-      kind: 'not_admitted',
-      messageId: 'msg-wake-1',
-      reason: 'invoke_failed',
-    });
-    assert.deepEqual(second, {
-      kind: 'admitted',
-      messageId: 'msg-wake-1',
-      outcome: 'dispatched',
-    });
+    assert.equal(first.kind, 'not_admitted', 'an unadmitted envelope is never reported as a wake');
+    assert.equal(first.reason, 'invoke_failed');
+    assert.deepEqual(second, { kind: 'admitted', messageId: 'msg-wake-1', outcome: 'enqueued' });
     assert.equal(deliveries.length, 2);
     assert.equal(deliveries[0].idempotencyKey, 'ball-custody-wake:task-1:1000');
-    assert.equal(deliveries[1].idempotencyKey, deliveries[0].idempotencyKey);
-    assert.deepEqual(triggeredContents, [persistedContent, persistedContent]);
+    assert.equal(
+      deliveries[1].idempotencyKey,
+      deliveries[0].idempotencyKey,
+      'the retry reuses the same admission identity, so the Queue converges on one wake',
+    );
+    assert.equal(deliveries[1].targetCatId, deliveries[0].targetCatId, 'and on the same member');
   });
 
-  it('reports queue-full, missing-trigger, and missing persisted truth as typed non-admission', async () => {
-    const deliver = async () => 'msg-wake-1';
-    const queueFull = new SchedulerBallCustodyWakeSender({
-      deliver,
-      readPersistedContent: async () => 'persisted wake',
-      invokeTrigger: {
-        async trigger() {
-          return 'full';
-        },
+  it('reports a refused admission as typed non-admission', async () => {
+    const refused = new SchedulerBallCustodyWakeSender({
+      async deliver() {
+        throw new Error('queue admission did not happen');
       },
-    });
-    const unavailable = new SchedulerBallCustodyWakeSender({
-      deliver,
-      readPersistedContent: async () => 'persisted wake',
-    });
-    const unreadable = new SchedulerBallCustodyWakeSender({
-      deliver,
-      readPersistedContent: async () => null,
-      invokeTrigger: {
-        async trigger() {
-          return 'dispatched';
-        },
-      },
+      logger: { warn() {} },
     });
 
-    assert.deepEqual(await queueFull.send(wakeInput()), {
-      kind: 'not_admitted',
-      messageId: 'msg-wake-1',
-      reason: 'queue_full',
-    });
-    assert.deepEqual(await unavailable.send(wakeInput()), {
-      kind: 'not_admitted',
-      messageId: 'msg-wake-1',
-      reason: 'trigger_unavailable',
-    });
-    assert.deepEqual(await unreadable.send(wakeInput()), {
-      kind: 'not_admitted',
-      messageId: 'msg-wake-1',
-      reason: 'persisted_message_unavailable',
-    });
+    const receipt = await refused.send(wakeInput());
+    assert.equal(receipt.kind, 'not_admitted');
+    assert.equal(receipt.reason, 'invoke_failed');
   });
 });

@@ -24,7 +24,7 @@ export function appendUser(store: MessageStore, content: string, idempotencyKey:
   return store.appendIdempotent({
     userId: 'owner',
     threadId: 'home',
-    catId: null,
+    from: { kind: 'user', userId: 'owner' },
     content,
     mentions: [],
     timestamp,

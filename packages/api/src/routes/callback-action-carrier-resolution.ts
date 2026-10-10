@@ -14,10 +14,13 @@ import {
   resolveDirectActionSuccessorCarrier,
 } from '../domains/ball-custody/DirectActionSuccessorCarrierRecovery.js';
 import type {
+  ActionHistoryExecutionState,
   ExecutionLineageReader,
   ExecutionRecordReader,
 } from '../domains/ball-custody/DirectActionSuccessorExecutionEvidence.js';
+import { readActionHistoryExecution } from '../domains/ball-custody/DirectActionSuccessorExecutionEvidence.js';
 import type { ActionSuccessorCarrierAdmissionOutcome } from '../domains/ball-custody/reconcile-action-successor-enqueue.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 
 /** Stable append identity of one generation's replacement carrier; a retry converges on one message. */
@@ -32,23 +35,112 @@ export function actionCarrierRecoveryKey(fence: Pick<ActionSuccessorFence, 'leas
  * the same clientMessageId can. A retry is always safe, because the message is appended under a
  * stable key and delivery is keyed by the generation's carrier key.
  */
-export async function carrierRecoveryPendingResponse(input: {
-  messageStore: Pick<IMessageStore, 'getById'>;
+interface CarrierRecoveryEvidenceInput {
+  invocationQueue: Pick<InvocationQueue, 'getDurableEntriesForMessages'>;
+  messageStore?: Pick<IMessageStore, 'getById'>;
+  invocationRecordStore?: ExecutionRecordReader;
+  turnExecutionStore?: ExecutionLineageReader;
+  threadId: string;
+  userId: string;
   messageId: string;
   holderCatIds: readonly string[];
   fence: ActionSuccessorFence;
   clientMessageId: string | undefined;
-}): Promise<{ statusCode: 503; body: Record<string, unknown> }> {
+}
+
+async function recoveryHistoryExecutions(
+  input: CarrierRecoveryEvidenceInput,
+): Promise<
+  { kind: 'none' | 'unverified' } | { kind: 'committed'; executions: Record<string, ActionHistoryExecutionState> }
+> {
+  if (!input.messageStore) return { kind: 'none' };
+  const source = await input.messageStore.getById(input.messageId);
+  if (
+    !source ||
+    source.id !== input.messageId ||
+    source.userId !== input.userId ||
+    source.threadId !== input.threadId ||
+    source.from?.kind !== 'agent'
+  )
+    return { kind: 'unverified' };
+  const refs = source.lifecycle?.dispatchRefs ?? [];
+  if (!refs.length) return { kind: 'none' };
+  if (!input.holderCatIds.length) return { kind: 'unverified' };
+  const executions: Record<string, ActionHistoryExecutionState> = {};
+  for (const holder of input.holderCatIds) {
+    const ref = refs.find((value) => value.targetId === holder);
+    if (!ref) return { kind: 'unverified' };
+    const state = await readActionHistoryExecution({
+      lease: {
+        leaseId: input.fence.leaseId,
+        generation: input.fence.generation,
+        holderThreadId: input.threadId,
+        tenantScope: input.userId,
+      },
+      source,
+      holder,
+      responseMessageId: ref.statusMessageId,
+      messages: input.messageStore,
+      recordStore: input.invocationRecordStore,
+      lineage: input.turnExecutionStore,
+    });
+    if (!state || state === 'unconfirmed') return { kind: 'unverified' };
+    executions[holder] = state;
+  }
+  return { kind: 'committed', executions };
+}
+
+export async function carrierRecoveryPendingResponse(
+  input: CarrierRecoveryEvidenceInput,
+): Promise<{ statusCode: 200 | 503; body: Record<string, unknown> }> {
   const admission = await readCarrierAdmissionEvidence(
-    input.messageStore,
+    input.invocationQueue,
     input.messageId,
     input.holderCatIds,
     input.fence,
+    { threadId: input.threadId, userId: input.userId },
   );
   const identity = {
     messageId: input.messageId,
     ...(input.clientMessageId ? { clientMessageId: input.clientMessageId } : {}),
   };
+  try {
+    const history = await recoveryHistoryExecutions(input);
+    if (history.kind === 'committed')
+      return {
+        statusCode: 200,
+        body: {
+          kind: 'action_carrier_delivery_committed',
+          ...identity,
+          executions: history.executions,
+          message:
+            'Canonical History confirms this carrier was delivered. No replacement is scheduled by this read; execution outcomes are reported separately.',
+        },
+      };
+    // A dispatched source with missing or mismatched lineage is not proof of non-admission.
+    if (history.kind === 'unverified')
+      return {
+        statusCode: 503,
+        body: {
+          kind: 'action_carrier_retry_required',
+          admission: 'unverified',
+          ...identity,
+          message:
+            'Carrier delivery could not be confirmed. Retry this exact clientMessageId to re-check canonical evidence; this result does not authorize a new delivery.',
+        },
+      };
+  } catch {
+    return {
+      statusCode: 503,
+      body: {
+        kind: 'action_carrier_retry_required',
+        admission: 'unverified',
+        ...identity,
+        message:
+          'Canonical History could not be read. Retry this exact clientMessageId; no delivery is inferred from unavailable storage.',
+      },
+    };
+  }
   if (admission === 'durable') {
     return {
       statusCode: 503,
@@ -66,7 +158,7 @@ export async function carrierRecoveryPendingResponse(input: {
       kind: 'action_carrier_retry_required',
       message:
         admission === 'not_persisted'
-          ? 'The replacement carrier message is durable, but its Queue admission was not persisted. Retry this exact clientMessageId to restore delivery.'
+          ? 'The replacement carrier message is durable, but no matching pending Queue admission is present. Retry this exact clientMessageId to re-check and reconcile delivery; absence alone does not prove it was never admitted.'
           : 'The replacement carrier message is durable, but its Queue admission could not be confirmed. Retry this exact clientMessageId to restore delivery.',
       admission,
       ...identity,
@@ -123,7 +215,8 @@ export const MAX_REFRESH_ATTEMPTS = 3;
  */
 export async function resolveSafeWaitCarrier(
   input: {
-    messageStore: Pick<IMessageStore, 'getByThreadAfter'>;
+    invocationQueue: Pick<InvocationQueue, 'listAllDurable'>;
+    messageStore: Pick<IMessageStore, 'getByThreadAfter' | 'getById'>;
     invocationRecordStore: ExecutionRecordReader | undefined;
     turnExecutionStore: ExecutionLineageReader | undefined;
     leaseStore: Pick<ActionSuccessorLeaseStore, 'refreshHandledCarrier' | 'getSubjectTerminal'> | undefined;
@@ -147,6 +240,7 @@ export async function resolveSafeWaitCarrier(
   if (attempt > MAX_REFRESH_ATTEMPTS) return unavailable('lease_changed');
 
   const carrier = await resolveDirectActionSuccessorCarrier({
+    invocationQueue: input.invocationQueue,
     messageStore: input.messageStore,
     invocationRecordStore: input.invocationRecordStore,
     turnExecutionStore: input.turnExecutionStore,

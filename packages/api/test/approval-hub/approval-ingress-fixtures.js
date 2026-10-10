@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { ApprovalIngress } from '../../dist/domains/approval-hub/ApprovalIngress.js';
 import { MessageStore } from '../../dist/domains/cats/services/stores/ports/MessageStore.js';
+import { canonicalTestMessageInput } from '../helpers/message-from-fixtures.js';
 
 export const ownerUserId = 'user-1';
 const requesterCatId = 'codex-sol';
@@ -37,15 +38,17 @@ export class FakePublicationStore {
 }
 
 function appendOrigin(messageStore, authorOverrides = {}) {
-  messageStore.append({
-    userId: ownerUserId,
-    catId: null,
-    content: 'please propose this',
-    mentions: [],
-    timestamp: 1_721_111_110_000,
-    threadId: originRef.threadId,
-    ...authorOverrides,
-  });
+  messageStore.append(
+    canonicalTestMessageInput({
+      userId: ownerUserId,
+      catId: null,
+      content: 'please propose this',
+      mentions: [],
+      timestamp: 1_721_111_110_000,
+      threadId: originRef.threadId,
+      ...authorOverrides,
+    }),
+  );
   const stored = messageStore.getByThread(originRef.threadId, 1)[0];
   stored.id = originRef.messageId;
   return stored;

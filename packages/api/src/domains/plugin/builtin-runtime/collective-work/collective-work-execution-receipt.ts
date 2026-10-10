@@ -121,7 +121,7 @@ export async function issueWorkExecutionReceipt(input: {
   const stored = await input.messages.appendIdempotent({
     userId: source.userId,
     threadId: task.threadId,
-    catId: null,
+    from: { kind: 'user', userId: source.userId },
     mentions: [],
     timestamp: Date.now(),
     content: `Continue admitted Work ${work.workId}, execution ${work.executionAuthority.revision}`,

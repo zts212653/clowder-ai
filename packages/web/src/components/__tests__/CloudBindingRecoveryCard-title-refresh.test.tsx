@@ -34,7 +34,6 @@ function harness(
     if (path === '/api/plugins/personal-chrome/refresh-titles') return json(refresh);
     if (path === '/api/plugins/personal-chrome') return json(plugin);
     if (path.endsWith('/cloud-bindings')) return json({ bindings: {} });
-    if (path.endsWith('/retry-authority')) return json({}, 404);
     throw new Error(`unexpected request ${path}`);
   });
 }
@@ -135,7 +134,7 @@ it('a delayed title refresh cannot overwrite a newly selected message identity',
   expect(fetch.mock.calls.filter(([path]) => path.endsWith('/refresh-titles'))).toHaveLength(1);
 });
 
-it('pending delivery polling stays read-only and never starts title observation', async () => {
+it('does not poll retired retry authority or start title observation', async () => {
   vi.useFakeTimers();
   try {
     fetch.mockImplementation(async (path) => {
@@ -145,7 +144,8 @@ it('pending delivery polling stays read-only and never starts title observation'
     });
     await render();
     await act(async () => vi.advanceTimersByTimeAsync(1500));
-    expect(fetch.mock.calls.filter(([path]) => path === '/api/plugins/personal-chrome')).toHaveLength(2);
+    expect(fetch.mock.calls.filter(([path]) => path === '/api/plugins/personal-chrome')).toHaveLength(1);
+    expect(fetch.mock.calls.some(([path]) => path.includes('retry-authority'))).toBe(false);
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   } finally {
     vi.useRealTimers();

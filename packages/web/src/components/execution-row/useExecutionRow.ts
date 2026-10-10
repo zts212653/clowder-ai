@@ -8,7 +8,6 @@
  * wires the row's buttons to the very same commands the old surfaces use (cancelProjectedExecution through
  * ExecutionCancelButton, useQueueCommands, useQueueActionConvergence). The 1s clock ticks only while something runs.
  */
-import type { QueueRecoveryAction } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { useCatNameResolver } from '@/hooks/useCatNameResolver';
 import { useExecutionRecoveryVerification } from '@/hooks/useExecutionRecoveryVerification';
@@ -32,8 +31,6 @@ function useNow(active: boolean): number {
   return now;
 }
 
-type ForceResetAction = Extract<QueueRecoveryAction, { kind: 'force_reset' }>;
-
 export function useExecutionRow(threadId: string) {
   const resolveCatName = useCatNameResolver();
   const { catInvocations, catStatuses } = useThreadLiveness(threadId);
@@ -46,7 +43,7 @@ export function useExecutionRow(threadId: string) {
 
   const view = useQueueView(threadId);
   // The new shell's row reports a reset that went through as done even when the re-read after it fails.
-  const convergence = useQueueActionConvergence(threadId, { resetDoneSurvivesRereadFailure: true });
+  const convergence = useQueueActionConvergence(threadId);
   const commands = useQueueCommands(threadId, view, convergence.refreshQueue);
 
   const executions = useMemo(
@@ -79,9 +76,6 @@ export function useExecutionRow(threadId: string) {
         hydrationStale: canonicalProjectionStale,
         hasUnverifiedLegacyExecution,
         queue: {
-          total: view.queue.length,
-          paused: view.queuePaused,
-          pauseReason: view.queuePauseReason,
           entries: view.visibleEntries,
           canRecoverOrphaned: view.canRecoverOrphanedQueue,
           waitInfo: view.waitInfo,
@@ -90,16 +84,7 @@ export function useExecutionRow(threadId: string) {
     [canonicalProjectionStale, cancelPendingKeys, executions, hasUnverifiedLegacyExecution, now, silent, view],
   );
 
-  const stuckAction = useMemo(
-    () =>
-      view.visibleEntries
-        .filter((entry) => entry.status === 'processing')
-        .flatMap((entry) => entry.recoveryActions ?? [])
-        .find((action): action is ForceResetAction => action.kind === 'force_reset') ?? null,
-    [view.visibleEntries],
-  );
-  const forceReset = useRowForceReset({ threadId, reasons: model.forceReset, stuckAction, convergence });
-
+  const forceReset = useRowForceReset({ threadId, convergence });
   return { model, executions, now, silent, view, convergence, commands, forceReset, resolveCatName };
 }
 

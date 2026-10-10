@@ -1,7 +1,7 @@
 /**
  * F322 original-B review findings (Sol6.1, #5015 typed changes_requested), pinned as regressions.
  *
- * P1-1 "show A, operate B": the row takes an explicit threadId. Its queue and pause state must come from THAT thread
+ * P1-1 "show A, operate B": the row takes an explicit threadId. Its pending Queue must come from THAT thread
  * (the same current-thread-or-threadStates rule thread liveness uses), never from whatever thread is current; with no
  * data for the target thread it shows and does nothing, it does not borrow the current thread's.
  *
@@ -45,7 +45,7 @@ function entry(id: string, threadId: string, over: Partial<QueueEntry> = {}): Qu
     content: `message ${id}`,
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'u1' },
     targetCats: ['opus'],
     intent: 'execute',
     status: 'queued',
@@ -54,30 +54,15 @@ function entry(id: string, threadId: string, over: Partial<QueueEntry> = {}): Qu
   };
 }
 
-const stuckIn = (threadId: string) =>
-  entry('q-stuck', threadId, {
-    status: 'processing',
-    recoveryActions: [
-      {
-        id: 'queue-force-reset:q-stuck:1',
-        entryId: 'q-stuck',
-        kind: 'force_reset',
-        request: { method: 'POST', path: `/api/threads/${threadId}/force-reset` },
-      },
-    ],
-  });
-
-const threadState = (queue: QueueEntry[], paused = false) => ({
+const threadState = (queue: QueueEntry[]) => ({
   queue,
-  queuePaused: paused,
-  queuePauseReason: paused ? 'failed' : undefined,
   activeInvocations: {},
   catInvocations: {},
   catStatuses: {},
   hasActiveInvocation: false,
 });
 
-function seedCurrent(queue: QueueEntry[], paused = false, others: Record<string, unknown> = {}) {
+function seedCurrent(queue: QueueEntry[], others: Record<string, unknown> = {}) {
   useActiveExecutionStore.getState().reset();
   useChatStore.setState({
     currentThreadId: A,
@@ -87,8 +72,6 @@ function seedCurrent(queue: QueueEntry[], paused = false, others: Record<string,
     catStatuses: {},
     hasActiveInvocation: false,
     queue,
-    queuePaused: paused,
-    queuePauseReason: paused ? 'canceled' : undefined,
     threadStates: others,
   } as never);
 }
@@ -138,13 +121,13 @@ describe('the row operates the thread it shows', () => {
     Array.from(document.querySelectorAll('[role="dialog"] button')).find((b) => b.textContent?.trim() === '强制重置');
   const renderRow = (threadId: string) => act(async () => root.render(<ExecutionRow threadId={threadId} />));
 
-  describe('P1-1 queue and pause come from the row’s own thread', () => {
-    it('a row for thread B shows B’s queue and pause, and its clear is sent to B', async () => {
-      seedCurrent([entry('a-only', A)], false, {
-        [B]: threadState([entry('b-one', B), entry('b-two', B)], true),
+  describe('P1-1 pending Queue comes from the row’s own thread', () => {
+    it('a row for thread B shows B’s Queue, and its clear is sent to B', async () => {
+      seedCurrent([entry('a-only', A)], {
+        [B]: threadState([entry('b-one', B), entry('b-two', B)]),
       });
       await renderRow(B);
-      expect($('execution-row-text')?.textContent).toBe('排队已暂停 · 2 条');
+      expect($('execution-row-text')?.textContent).toBe('排队 2');
       await click($('execution-row-toggle'));
       expect(container.textContent).toContain('message b-one');
       expect(container.textContent).not.toContain('message a-only');
@@ -153,22 +136,22 @@ describe('the row operates the thread it shows', () => {
       expect(calls()).not.toContain(`DELETE /api/threads/${A}/queue`);
     });
 
-    it('A’s pause does not leak into a calm thread B', async () => {
-      seedCurrent([entry('a-1', A)], true, { [B]: threadState([entry('b-one', B)], false) });
+    it('A’s Queue does not leak into thread B', async () => {
+      seedCurrent([entry('a-1', A)], { [B]: threadState([entry('b-one', B)]) });
       await renderRow(B);
       expect($('execution-row-text')?.textContent).toBe('排队 1');
-      // B's lone queued message has no live carrier, so the old rules offer 恢复 (orphaned) — never A's 继续 (paused).
+      // B's queued message has no live execution; recovery stays scoped to B.
       expect($('execution-row-resume')?.textContent).toBe('恢复');
     });
 
     it('control: the current thread is read from the flat state as before', async () => {
-      seedCurrent([entry('a-1', A), entry('a-2', A)], true, { [B]: threadState([entry('b-one', B)]) });
+      seedCurrent([entry('a-1', A), entry('a-2', A)], { [B]: threadState([entry('b-one', B)]) });
       await renderRow(A);
-      expect($('execution-row-text')?.textContent).toBe('排队已暂停 · 2 条');
+      expect($('execution-row-text')?.textContent).toBe('排队 2');
     });
 
     it('with nothing known about thread B the row shows nothing and no command sends anything', async () => {
-      seedCurrent([entry('a-only', A)], true, {});
+      seedCurrent([entry('a-only', A)], {});
       await renderRow(B);
       expect($('execution-row')).toBeNull();
       root.unmount();
@@ -178,7 +161,6 @@ describe('the row operates the thread it shows', () => {
       await act(async () => {
         await commands?.handleClear();
         await commands?.handleContinue();
-        await commands?.handleRemind('a-only', 'opus');
       });
       expect(calls()).toEqual([]);
     });
@@ -191,12 +173,16 @@ describe('the row operates the thread it shows', () => {
         if (path.endsWith('/queue') && !init?.method) throw new Error('reread offline');
         return json({ ok: true });
       });
-      seedCurrent([stuckIn(A)]);
+      seedCurrent([entry('a', A)]);
+      useChatStore.setState({
+        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
+        hasActiveInvocation: true,
+      });
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);
       expect(calls()).toContain(`POST /api/threads/${A}/force-reset`);
-      expect(toastTitles()).toEqual(['已恢复']);
+      expect(toastTitles()).toEqual(['已重置']);
       expect(document.querySelector('[role="dialog"]')).toBeNull();
     });
 
@@ -204,7 +190,11 @@ describe('the row operates the thread it shows', () => {
       mocks.apiFetch.mockImplementation(async (path: string) =>
         path.endsWith('/force-reset') ? json({ error: 'PRESTART_STATE_CHANGED' }, 409) : json({ ok: true }),
       );
-      seedCurrent([stuckIn(A)]);
+      seedCurrent([entry('a', A)]);
+      useChatStore.setState({
+        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
+        hasActiveInvocation: true,
+      });
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);
@@ -217,7 +207,11 @@ describe('the row operates the thread it shows', () => {
         if (path.endsWith('/force-reset')) throw new Error('network down');
         return json({ ok: true });
       });
-      seedCurrent([stuckIn(A)]);
+      seedCurrent([entry('a', A)]);
+      useChatStore.setState({
+        activeInvocations: { 'parent-opus': { catId: 'opus', mode: 'execute', startedAt: 1 } },
+        hasActiveInvocation: true,
+      });
       await renderRow(A);
       await click($('execution-row-force-reset'));
       await click(dialogConfirm() ?? null);
@@ -231,7 +225,7 @@ describe('the row operates the thread it shows', () => {
         if (path.endsWith('/queue') && !init?.method) throw new Error('reread offline');
         return json({ ok: true });
       });
-      seedCurrent([entry('a-1', A)], true);
+      seedCurrent([entry('a-1', A)]);
       await renderRow(A);
       await click($('execution-row-resume'));
       expect(toastTitles()).toEqual(['队列未启动']);

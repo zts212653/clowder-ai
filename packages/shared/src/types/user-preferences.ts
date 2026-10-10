@@ -13,8 +13,6 @@ export interface MessageDispositionPreferences {
   global?: MessageWorkDisposition;
   /** Per-thread override. Missing entry inherits global/product. */
   threads?: Record<string, MessageWorkDisposition>;
-  /** Monotonic JIT-onboarding receipt. */
-  onboardingSeen?: boolean;
 }
 
 export interface MessageDispositionPreferenceSnapshot {
@@ -23,7 +21,6 @@ export interface MessageDispositionPreferenceSnapshot {
   thread: MessageWorkDisposition | null;
   effective: MessageWorkDisposition;
   source: MessageDispositionPreferenceSource;
-  onboardingSeen: boolean;
 }
 
 /** F277: owner-scoped Group read model projected from per-thread metadata. */

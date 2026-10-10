@@ -96,14 +96,15 @@ export async function prepareClaudeSdkLaunch(input: {
     { body: l0, injectionDecision: 'native_l0_compiled' },
     ...(options?.systemPrompt ? [{ body: options.systemPrompt, injectionDecision: 'route_append_system_prompt' }] : []),
   ];
-  const mcpServers =
+  const mcpResolution =
     !readOnly && options?.callbackEnv && input.mcpServerPath
       ? await resolveClaudeMcpConfig({
           callbackEnv: options.callbackEnv,
           workingDirectory: options.workingDirectory,
           mcpServerPath: input.mcpServerPath,
         })
-      : {};
+      : undefined;
+  const mcpServers = mcpResolution?.servers ?? {};
   const operator = sdkOperatorArgs(readOnly ? [] : (options?.cliConfigArgs ?? []));
   const additionalDirectories = [
     ...new Set([...(operator.additionalDirectories ?? []), ...collectImageAccessDirectories(imagePaths)]),
@@ -172,7 +173,9 @@ export async function prepareClaudeSdkLaunch(input: {
                 : resolve(options?.workingDirectory ?? process.cwd(), settings),
           }
         : {}),
-      extraArgs: { ...operator.extraArgs, ...(readOnly ? {} : { chrome: null }) },
+      ...(!readOnly || Object.keys(operator.extraArgs).length > 0
+        ? { extraArgs: { ...operator.extraArgs, ...(readOnly ? {} : { chrome: null }) } }
+        : {}),
     },
   };
 }

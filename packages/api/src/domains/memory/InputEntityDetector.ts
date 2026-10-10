@@ -105,6 +105,14 @@ function compileAliasMatcher(aliasNorm: string): ((textNorm: string) => boolean)
   return (textNorm) => pattern.test(textNorm);
 }
 
+function isRoutingRequestThreadTitle(row: DocAliasRow, aliasNorm: string): boolean {
+  if (!row.source_path?.startsWith('threads/')) return false;
+  // A thread title derived from a direct @ routing request is conversation
+  // control text, not a document/entity mention. Content length is deliberately
+  // irrelevant: long, intentionally named documents remain discoverable.
+  return /^@[\p{L}\p{N}_-]+(?:\s|$)/u.test(aliasNorm);
+}
+
 // ── Internal row types ──────────────────────────────────────────────────
 
 interface EntityAliasRow {
@@ -307,6 +315,7 @@ export class InputEntityDetector {
       const aliasNorm = normalizeEntityAlias(row.alias_norm || row.alias);
       const matcher = compileAliasMatcher(aliasNorm);
       if (!matcher?.(textNorm)) continue;
+      if (isRoutingRequestThreadTitle(row, aliasNorm)) continue;
       if (contextAnchors.has(row.doc_anchor)) continue;
 
       seen.add(row.doc_anchor);

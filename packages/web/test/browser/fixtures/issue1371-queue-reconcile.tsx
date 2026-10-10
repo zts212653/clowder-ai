@@ -19,8 +19,6 @@ useChatStore.setState({
   catInvocations: {},
   hasActiveInvocation: false,
   queue,
-  queuePaused: true,
-  queuePauseReason: 'failed',
 });
 
 function QueueRecoveryProof() {

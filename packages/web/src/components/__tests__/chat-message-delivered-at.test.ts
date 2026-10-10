@@ -78,6 +78,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
           message: {
             id: 'msg-1',
             type: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             content: 'Hello from queue',
             timestamp: sendTime,
             deliveredAt: deliverTime,
@@ -106,6 +107,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
           message: {
             id: 'msg-2',
             type: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             content: 'Quick delivery',
             timestamp: sendTime,
             deliveredAt: deliverTime,
@@ -131,6 +133,7 @@ describe('ChatMessage dual timestamp (deliveredAt)', () => {
           message: {
             id: 'msg-3',
             type: 'user',
+            from: { kind: 'user', userId: 'test-user' },
             content: 'Immediate message',
             timestamp: sendTime,
           },

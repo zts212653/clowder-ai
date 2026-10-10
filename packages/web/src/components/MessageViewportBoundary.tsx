@@ -18,8 +18,12 @@ const OFFSCREEN_MESSAGE_STYLE: CSSProperties = {
 
 // `content-visibility: auto` also paint-contains descendants. The message toolbar floats above
 // its row, so lift that containment only while the real row is interactive.
+// `flow-root` keeps the row's height the same in both states: the containment of `auto` holds the
+// bubble's bottom margin inside the row, and without a block formatting context of its own the
+// hovered `visible` state let that margin collapse out, so each row under the pointer lost 16px.
+// With native scroll anchoring off in the chat container, that showed as the view jumping.
 const CONTENT_VISIBILITY_CLASS =
-  '[content-visibility:auto] hover:[content-visibility:visible] focus-within:[content-visibility:visible]';
+  'flow-root [content-visibility:auto] hover:[content-visibility:visible] focus-within:[content-visibility:visible]';
 
 /**
  * Keep the message DOM available for anchors/search while letting Chromium skip

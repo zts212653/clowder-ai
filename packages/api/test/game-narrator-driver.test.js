@@ -467,7 +467,10 @@ describe('GameNarratorDriver', () => {
 
     assert.ok(messageStore.appended.length > 0, 'should persist narrative into thread history');
     assert.equal(messageStore.appended[0].userId, 'system');
-    assert.equal(messageStore.appended[0].catId, 'system');
+    assert.deepEqual(messageStore.appended[0].from, {
+      kind: 'system',
+      service: 'game-orchestrator',
+    });
     assert.ok(
       socketManager.broadcasts.some((b) => b.event === 'game:narrative'),
       'should emit game:narrative',

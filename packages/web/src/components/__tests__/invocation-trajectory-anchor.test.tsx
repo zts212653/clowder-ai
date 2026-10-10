@@ -13,16 +13,18 @@ function message(phase: 'succeeded' | 'failed' | 'canceled' | 'running', withTim
     catId: 'codex-sol',
     content: 'reply',
     timestamp: 1,
+    lifecycle: {
+      kind: 'response',
+      orderKey: '1:response',
+      invocationId: `inv-${phase}`,
+      targetId: 'codex-sol',
+      inputEntryIds: [],
+      inputMessageIds: [],
+      startedAt: 1,
+      status: phase === 'running' ? 'processing' : phase === 'succeeded' ? 'completed' : phase,
+    },
     extra: {
       stream: { turnInvocationId: `inv-${phase}` },
-      invocationReconciliation: {
-        v: 1,
-        invocationId: `parent-${phase}`,
-        catIds: ['codex-sol'],
-        turnInvocationIds: [`inv-${phase}`],
-        phase,
-        updatedAt: 2,
-      },
       ...(withTimeout
         ? {
             timeoutDiagnostics: {
@@ -82,6 +84,34 @@ describe('F299 message invocation anchor', () => {
         },
       })?.status,
     ).toBe('error');
+  });
+
+  it('uses the response lifecycle when an empty canceled response has no reconciliation text evidence', () => {
+    const canceled: ChatMessage = {
+      id: 'response-canceled',
+      type: 'assistant',
+      catId: 'codex-sol',
+      content: '',
+      timestamp: 1,
+      extra: { stream: { turnInvocationId: 'turn-canceled' } },
+      lifecycle: {
+        kind: 'response',
+        orderKey: '1:turn-canceled',
+        invocationId: 'turn-canceled',
+        targetId: 'codex-sol',
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: ['source-1'],
+        startedAt: 1,
+        status: 'canceled',
+        completedAt: 2,
+        reason: 'user_cancel',
+      },
+    };
+
+    expect(describeMessageInvocationTrajectory(canceled)).toEqual({
+      invocationId: 'turn-canceled',
+      status: 'cancelled',
+    });
   });
 
   it('keeps done quiet but abnormal anchors persistent and both keyboard buttons', () => {

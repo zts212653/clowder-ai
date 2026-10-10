@@ -1,11 +1,11 @@
 /**
- * F109 Phase A — Toast error tests for all 4 MessageActions UI paths.
+ * F109 Phase A — Toast error tests for MessageActions UI paths.
  *
  * Ensures `!res.ok` (business-logic 403/400) AND `catch` (network error)
  * both show a toast. This was the main silent-failure bug: fetch succeeds
  * but res.ok === false, never enters catch, no user feedback.
  *
- * Covers: confirmSoftDelete, confirmHardDelete, confirmBranch, confirmBranchDirect
+ * Covers: confirmSoftDelete and the unified editable branch action.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -104,34 +104,9 @@ async function triggerAction(container: HTMLDivElement, buttonTitle: string, dia
   });
 }
 
-async function openOverflowAction(container: HTMLDivElement, label: string) {
-  const more = container.querySelector('button[aria-label="更多消息操作"]') as HTMLButtonElement | null;
-  expect(more).not.toBeNull();
-  if (!more) throw new Error('more-actions button not found');
-  await act(async () => {
-    more.click();
-  });
-
-  const action = Array.from(document.querySelectorAll('button')).find((button) => button.textContent?.trim() === label);
-  expect(action, `overflow action "${label}" should exist`).toBeTruthy();
-  if (!action) throw new Error(`overflow action "${label}" not found`);
-  await act(async () => {
-    action.click();
-  });
-}
-
-async function triggerOverflowDialogAction(container: HTMLDivElement, label: string, dialogTitle: string) {
-  await openOverflowAction(container, label);
-  const dialog = findOpenDialog(dialogTitle);
-  expect(dialog, `dialog "${dialogTitle}" should be open`).toBeTruthy();
-  await act(async () => {
-    await dialog!.onConfirm?.();
-  });
-}
-
 // ---------- suite ----------
 
-describe('F109: MessageActions toast on errors (4 UI paths)', () => {
+describe('F109: MessageActions toast on errors', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -189,65 +164,24 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
     });
   });
 
-  // ── 2. Hard Delete ──
+  // ── 2. Unified editable branch ──
 
-  describe('confirmHardDelete', () => {
-    it('shows toast on !res.ok', async () => {
-      // First call: GET thread info (for hard delete dialog setup)
-      // Second call: DELETE (the actual hard delete)
-      apiFetchMock
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ title: '测试对话' }) })
-        .mockResolvedValueOnce({
-          ok: false,
-          status: 400,
-          json: async () => ({ error: '确认标题不匹配' }),
-        });
-      renderActions(root);
+  describe('confirmBranch', () => {
+    async function triggerBranch(container: HTMLDivElement) {
+      const branchButtons = container.querySelectorAll('button[aria-label="创建分支"]');
+      expect(branchButtons).toHaveLength(1);
+      expect(container.querySelector('button[aria-label="编辑并创建分支"]')).toBeNull();
+      expect(container.querySelector('button[aria-label="撤回并重新编辑"]')).toBeNull();
+      await act(async () => (branchButtons[0] as HTMLButtonElement).click());
+      const textarea = container.querySelector('textarea') as HTMLTextAreaElement | null;
+      expect(textarea?.value).toBe('hello');
+      const createButton = Array.from(container.querySelectorAll('button')).find(
+        (button) => button.textContent === '创建分支',
+      ) as HTMLButtonElement | undefined;
+      expect(createButton).toBeTruthy();
+      await act(async () => createButton?.click());
+    }
 
-      // Hard delete has a two-step flow: open overflow action → GET thread → show dialog
-      await openOverflowAction(container, '永久删除');
-
-      // Wait for the async handleHardDelete to resolve (GET thread)
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-
-      const dialog = findOpenDialog('永久删除');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
-
-      expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '删除失败' });
-      expect(removeThreadMessageMock).not.toHaveBeenCalled();
-    });
-
-    it('shows toast on network error (catch path)', async () => {
-      apiFetchMock
-        .mockResolvedValueOnce({ ok: true, json: async () => ({ title: '测试对话' }) })
-        .mockRejectedValueOnce(new Error('Network error'));
-      renderActions(root);
-
-      await openOverflowAction(container, '永久删除');
-      await act(async () => {
-        await new Promise((r) => setTimeout(r, 0));
-      });
-
-      const dialog = findOpenDialog('永久删除');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
-
-      expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '删除失败' });
-    });
-  });
-
-  // ── 3. Branch (from edit) ──
-
-  describe('confirmBranch (edit → branch)', () => {
     it('shows toast on !res.ok', async () => {
       apiFetchMock.mockResolvedValue({
         ok: false,
@@ -255,82 +189,22 @@ describe('F109: MessageActions toast on errors (4 UI paths)', () => {
         json: async () => ({ error: '无权对此对话创建分支' }),
       });
       renderActions(root);
-
-      // Edit button → opens textarea modal (not a ConfirmDialog)
-      const editBtn = container.querySelector('button[title="编辑 (创建分支)"]') as HTMLButtonElement;
-      expect(editBtn).not.toBeNull();
-      await act(async () => {
-        editBtn.click();
-      });
-
-      // Click the "保存" button inside the edit modal to trigger branch-confirm dialog
-      const saveBtn = Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent === '保存',
-      ) as HTMLButtonElement | null;
-      expect(saveBtn).not.toBeNull();
-      await act(async () => {
-        saveBtn!.click();
-      });
-
-      // Now the branch-confirm dialog should be open
-      const dialog = findOpenDialog('创建分支');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
+      await triggerBranch(container);
 
       expect(addToastMock).toHaveBeenCalledOnce();
       expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
       expect(pushMock).not.toHaveBeenCalled();
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/threads/thread-1/branch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fromMessageId: 'msg-1', editedContent: undefined, userId: 'user-1' }),
+      });
     });
 
     it('shows toast on network error (catch path)', async () => {
       apiFetchMock.mockRejectedValue(new Error('Network error'));
       renderActions(root);
-
-      const editBtn = container.querySelector('button[title="编辑 (创建分支)"]') as HTMLButtonElement;
-      await act(async () => {
-        editBtn.click();
-      });
-      const saveBtn = Array.from(container.querySelectorAll('button')).find(
-        (b) => b.textContent === '保存',
-      ) as HTMLButtonElement;
-      await act(async () => {
-        saveBtn.click();
-      });
-
-      const dialog = findOpenDialog('创建分支');
-      expect(dialog).toBeTruthy();
-      await act(async () => {
-        await dialog!.onConfirm?.();
-      });
-
-      expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
-    });
-  });
-
-  // ── 4. Direct Branch ──
-
-  describe('confirmBranchDirect', () => {
-    it('shows toast on !res.ok', async () => {
-      apiFetchMock.mockResolvedValue({
-        ok: false,
-        status: 403,
-        json: async () => ({ error: '无权对此对话创建分支' }),
-      });
-      renderActions(root);
-      await triggerOverflowDialogAction(container, '从这里分支', '从这里分支');
-
-      expect(addToastMock).toHaveBeenCalledOnce();
-      expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });
-      expect(pushMock).not.toHaveBeenCalled();
-    });
-
-    it('shows toast on network error (catch path)', async () => {
-      apiFetchMock.mockRejectedValue(new Error('Network error'));
-      renderActions(root);
-      await triggerOverflowDialogAction(container, '从这里分支', '从这里分支');
+      await triggerBranch(container);
 
       expect(addToastMock).toHaveBeenCalledOnce();
       expect(addToastMock.mock.calls[0][0]).toMatchObject({ type: 'error', title: '分支创建失败' });

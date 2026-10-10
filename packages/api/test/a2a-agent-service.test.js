@@ -68,6 +68,7 @@ describe('A2A event transform', () => {
     const msgs = transformA2ATaskToMessages(task, TEST_CAT_ID);
     assert.equal(msgs.length, 1);
     assert.equal(msgs[0].type, 'error');
+    assert.equal(msgs[0].error, 'A2A task failed');
   });
 
   it('transforms input-required task', () => {
@@ -104,6 +105,73 @@ function mockFetchRpcError(code, message) {
 }
 
 describe('A2AAgentService', () => {
+  it('does not register a remote execution or send after pre-launch cancellation', async () => {
+    const controller = new AbortController();
+    const dispatched = [];
+    const service = new A2AAgentService({
+      catId: TEST_CAT_ID,
+      config: { url: 'http://mock.local' },
+      fetchFn: async () => {
+        assert.fail('cancelled request must not be sent');
+      },
+    });
+    const messages = [];
+    for await (const message of service.invoke('work', {
+      signal: controller.signal,
+      beforeProviderLaunch: async () => controller.abort('user_cancel'),
+      onRemoteExecutionDispatched: (execution) => dispatched.push(execution),
+    }))
+      messages.push(message);
+    assert.deepEqual(dispatched, []);
+    assert.match(messages.find((message) => message.type === 'error').error, /before remote dispatch/);
+  });
+  for (const status of ['submitted', 'working', 'canceled', 'input-required', 'TASK_STATE_WORKING']) {
+    it(`does not turn remote ${status} into successful completion`, async () => {
+      const service = new A2AAgentService({
+        catId: TEST_CAT_ID,
+        config: { url: 'http://mock.local' },
+        fetchFn: async () => ({
+          ok: true,
+          json: async () => ({ jsonrpc: '2.0', id: '1', result: { id: 'remote-task', status } }),
+        }),
+      });
+      const messages = [];
+      for await (const message of service.invoke('work')) messages.push(message);
+      assert.ok(!messages.some((message) => message.type === 'done'));
+      assert.ok(messages.some((message) => message.type === 'error'));
+      const error = messages.find((message) => message.type === 'error');
+      assert.equal(error.error, error.content, 'route collectors receive the same diagnostic');
+    });
+  }
+
+  it('does not impose a whole-turn deadline when the member timeout is disabled', async () => {
+    const service = new A2AAgentService({
+      catId: TEST_CAT_ID,
+      config: { url: 'http://mock.local', timeoutMs: 10 },
+      fetchFn: async (_url, init) => {
+        await new Promise((resolve) => setTimeout(resolve, 35));
+        init.signal?.throwIfAborted();
+        return {
+          ok: true,
+          json: async () => ({
+            jsonrpc: '2.0',
+            id: '1',
+            result: {
+              id: 'slow-task',
+              status: 'completed',
+              artifacts: [{ parts: [{ type: 'text', text: 'slow success' }] }],
+            },
+          }),
+        };
+      },
+    });
+
+    const messages = [];
+    for await (const message of service.invoke('slow work')) messages.push(message);
+    assert.ok(messages.some((message) => message.type === 'text' && message.content === 'slow success'));
+    assert.ok(!messages.some((message) => message.type === 'error'));
+  });
+
   it('yields session_init + text + done for completed task', async () => {
     const service = new A2AAgentService({
       catId: TEST_CAT_ID,
@@ -237,9 +305,10 @@ describe('A2AAgentService', () => {
       messages.push(msg);
     }
 
-    // Should get session_init then graceful done (not error)
+    // A local fetch abort does not prove that the remote task stopped.
     assert.equal(messages[0].type, 'session_init');
-    assert.equal(messages[1].type, 'done');
+    assert.equal(messages[1].type, 'error');
+    assert.match(messages[1].content, /remote task termination is unconfirmed/);
   });
 });
 

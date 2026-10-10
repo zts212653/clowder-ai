@@ -121,11 +121,6 @@ describe('F128 proposal source envelope', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: new InvocationQueue(),
-      queueProcessorOverride: {
-        async processNext() {
-          return { started: true };
-        },
-      },
     });
     const source = await ctx.threadStore.create('alice', 'Community gatekeeper');
 

@@ -17,12 +17,9 @@ describe('HubMemberOverviewCard action isolation', () => {
     expect(src).toMatch(/SettingsResourceIconButton[\s\S]*?onClick=\{[\s\S]*?stopPropagation/);
   });
 
-  it('codex cats show the effective carrier (APP SERVER) instead of the raw transport family', () => {
-    expect(src).toMatch(/codexCarrier\?\.effective === 'app_server'/);
-    expect(src).toContain("'APP SERVER'");
-  });
-
-  it('ACP takes precedence over the carrier badge (assembly checks getAcpConfig first)', () => {
-    expect(src).toMatch(/adapterMode === 'acp'\s*\?\s*'ACP'/);
+  it('renders the canonical carrier without provider-specific precedence rules', () => {
+    expect(src).toContain("cat.carrier.replace('_', ' ').toUpperCase()");
+    expect(src).not.toContain('codexCarrier');
+    expect(src).not.toContain('adapterMode');
   });
 });

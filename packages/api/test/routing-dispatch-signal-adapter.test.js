@@ -104,10 +104,10 @@ describe('RoutingDispatchSignalAdapter', () => {
     assert.equal(classifyRoutingDispatchFailure({ cliReasonCode: 'quota_exceeded' }), 'quota_exhausted');
     assert.equal(classifyRoutingDispatchFailure({ cliReasonCode: 'auth_failed' }), 'authentication_rejected');
     assert.equal(classifyRoutingDispatchFailure({ cliReasonCode: 'network_error' }), 'provider_unreachable');
-    assert.equal(classifyRoutingDispatchFailure({ cliReasonCode: 'cli_stall_timeout' }), 'provider_timeout');
+    assert.equal(classifyRoutingDispatchFailure({ cliReasonCode: 'cli_stall_timeout' }), undefined);
     assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'runtime_disconnected' }), 'provider_unreachable');
-    assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'stream_idle_stall' }), 'provider_timeout');
-    assert.equal(classifyRoutingDispatchFailure({ terminalReason: 'invocation_timeout' }), 'provider_timeout');
+    assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'stream_idle_stall' }), undefined);
+    assert.equal(classifyRoutingDispatchFailure({ terminalReason: 'invocation_timeout' }), undefined);
     assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'server_overloaded' }), undefined);
     assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'context_overflow' }), undefined);
     assert.equal(classifyRoutingDispatchFailure({ providerErrorCode: 'contains quota_exceeded text' }), undefined);
@@ -116,7 +116,7 @@ describe('RoutingDispatchSignalAdapter', () => {
   it('asserts stable failures only against the exact cat with bounded validity', async () => {
     const telemetryEvents = [];
     const { adapter, store } = createHarness({ record: (event) => telemetryEvents.push(event) });
-    const input = terminal({ status: 'failed', failureClass: 'provider_timeout' });
+    const input = terminal({ status: 'failed', failureClass: 'provider_unreachable' });
 
     await adapter.observeTerminal(input);
     await adapter.observeTerminal(input);
@@ -124,13 +124,31 @@ describe('RoutingDispatchSignalAdapter', () => {
     assert.equal(store.events.length, 1);
     assert.deepEqual(store.events[0].subjectRef, { type: 'cat', catId: 'sol' });
     assert.equal(store.events[0].source, 'provider_error');
-    assert.equal(store.events[0].reasonCode, 'provider_timeout');
+    assert.equal(store.events[0].reasonCode, 'provider_unreachable');
     assert.equal(store.events[0].state, 'unavailable');
     assert.equal(store.events[0].validUntil, NOW + 1_000 + 5 * 60_000);
     assert.deepEqual(telemetryEvents, [
       { source: 'provider_error', subjectKind: 'cat', transition: 'assert', outcome: 'appended' },
       { source: 'provider_error', subjectKind: 'cat', transition: 'assert', outcome: 'replayed' },
     ]);
+  });
+
+  it('a local execution timeout never asserts global member unavailability', async () => {
+    const { adapter, store } = createHarness();
+    for (const evidence of [
+      { cliReasonCode: 'cli_response_timeout' },
+      { cliReasonCode: 'cli_stall_timeout' },
+      { providerErrorCode: 'stream_idle_stall' },
+      { providerErrorCode: 'turn_budget_exceeded' },
+      { providerErrorCode: 'provider_timeout' },
+      { terminalReason: 'timeout' },
+      { terminalReason: 'invocation_timeout' },
+    ]) {
+      const failureClass = classifyRoutingDispatchFailure(evidence);
+      assert.equal(failureClass, undefined);
+      assert.deepEqual(await adapter.observeTerminal(terminal({ status: 'failed', failureClass })), []);
+    }
+    assert.deepEqual(store.events, [], 'other threads must not inherit this invocation’s timeout');
   });
 
   it('ignores canceled, interrupted, and unclassified failed terminals', async () => {

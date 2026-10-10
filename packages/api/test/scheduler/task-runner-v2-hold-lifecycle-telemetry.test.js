@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
 const { InMemorySpanExporter, SimpleSpanProcessor, NodeTracerProvider } = await import('@opentelemetry/sdk-trace-node');
@@ -154,16 +155,18 @@ describe('TaskRunnerV2 hold lifecycle telemetry', () => {
   });
 
   it('does not throw when best-effort hash telemetry has no salt', () => {
+    const sourceMode = process.execArgv.some((arg) => arg.endsWith('a2a-1577-api-source-test-loader.mjs'));
     const env = { ...process.env, NODE_ENV: 'production' };
     delete env.TELEMETRY_HMAC_SALT;
     assert.doesNotThrow(() => {
       execFileSync(
         process.execPath,
         [
+          ...(sourceMode ? ['--import', 'tsx'] : []),
           '--input-type=module',
           '-e',
           `
-            import { emitHoldExpiredAfterSatisfied } from './dist/infrastructure/scheduler/hold-lifecycle-telemetry.js';
+            import { emitHoldExpiredAfterSatisfied } from '${sourceMode ? './src/infrastructure/scheduler/hold-lifecycle-telemetry.ts' : './dist/infrastructure/scheduler/hold-lifecycle-telemetry.js'}';
             emitHoldExpiredAfterSatisfied({
               id: 'hold-ball-retired-regression',
               templateId: 'reminder',
@@ -194,7 +197,7 @@ describe('TaskRunnerV2 hold lifecycle telemetry', () => {
             });
           `,
         ],
-        { cwd: process.cwd(), env, stdio: 'pipe' },
+        { cwd: fileURLToPath(new URL('../../', import.meta.url)), env, stdio: 'pipe' },
       );
     });
   });

@@ -1,16 +1,9 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
-import { resetThreadRuntimeSingleton } from '@/hooks/thread-runtime-singleton';
-import {
-  type BackgroundAgentMessage,
-  type BackgroundStreamRef,
-  handleBackgroundAgentMessage,
-  useAgentMessages,
-} from '@/hooks/useAgentMessages';
+import { type BackgroundAgentMessage, handleBackgroundAgentMessage, useAgentMessages } from '@/hooks/useAgentMessages';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { resetSharedReplacedInvocations } from '../shared-replaced-invocations';
 
 type ActiveAgentMessage = Parameters<ReturnType<typeof useAgentMessages>['handleAgentMessage']>[0];
 
@@ -65,7 +58,6 @@ export function installActiveHarness(options: { beforeEach?: () => void } = {}) 
     root = createRoot(container);
     captured = undefined;
     cleanStoreState();
-    resetThreadRuntimeSingleton();
     options.beforeEach?.();
   });
 
@@ -91,34 +83,48 @@ export function installActiveHarness(options: { beforeEach?: () => void } = {}) 
 }
 
 export function installBackgroundHarness() {
-  const bgStreamRefs = new Map<string, BackgroundStreamRef>();
-  const bgFinalizedRefs = new Map<string, string>();
-  const bgPendingCallbacks = new Map<string, BackgroundAgentMessage>();
   let bgSeq = 0;
 
   beforeEach(() => {
     cleanStoreState('thread-active');
-    bgStreamRefs.clear();
-    bgFinalizedRefs.clear();
-    bgPendingCallbacks.clear();
     bgSeq = 0;
-    resetSharedReplacedInvocations();
   });
 
   return {
-    bgStreamRefs,
     dispatchBg(msg: BackgroundAgentMessage) {
       handleBackgroundAgentMessage(msg, {
         store: useChatStore.getState(),
-        bgStreamRefs,
-        finalizedBgRefs: bgFinalizedRefs,
-        pendingCallbacks: bgPendingCallbacks,
         nextBgSeq: () => bgSeq++,
         addToast: () => {},
-        clearDoneTimeout: () => {},
       });
     },
   };
+}
+
+/**
+ * The turn's response as the server stores it at dispatch and publishes it through its
+ * lifecycle snapshot: empty, processing, under its real id.
+ */
+export function seedProcessingResponse(threadId: string, id: string, catId: string, invocationId: string) {
+  useChatStore.getState().addMessageToThread(threadId, {
+    id,
+    type: 'assistant',
+    catId,
+    content: '',
+    origin: 'stream',
+    isStreaming: true,
+    timestamp: 1000,
+    lifecycle: {
+      kind: 'response',
+      orderKey: `1000:${invocationId}`,
+      invocationId,
+      targetId: catId,
+      inputEntryIds: [],
+      inputMessageIds: [],
+      status: 'processing',
+      startedAt: 1000,
+    },
+  });
 }
 
 export function flatCodexStreamBubbles(): ChatMessage[] {

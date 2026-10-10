@@ -12,7 +12,7 @@ test('real AutoSummarizer cannot launder another cat whisper through a same-thre
     f.messages.append({
       userId: scope.userId,
       threadId: scope.threadId,
-      catId: createCatId('kimi'),
+      from: { kind: 'agent', catId: createCatId('kimi') },
       content: `${secret}，第${i}次讨论`,
       mentions: [],
       timestamp: Date.now() + i,

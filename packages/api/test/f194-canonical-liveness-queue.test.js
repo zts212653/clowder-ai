@@ -1,20 +1,18 @@
 /**
- * F194 Phase B step 2 — canonical liveness consistency regression for /queue.
+ * F194 Phase B → F117 KD-23 — canonical liveness consistency for /queue.
  *
- * Locks the split-brain reproducer 砚砚 surfaced 2026-05-07: GET /queue.activeInvocations
- * must agree with /api/messages on canonical liveness rules (record + tracker + draft).
+ * GET /queue.activeInvocations lists a member only when someone verifiably runs its turn: this
+ * process's tracker slot, a live CLI owner, or (only while no complete owner snapshot can tell) a
+ * running child. Drafts and timestamps are not liveness.
  *
  * Coverage:
- * - AC-B3: record running + tracker missing + fresh draft → /queue.activeInvocations
- *   includes the invocation (pre-F194 was tracker-only → empty).
- * - AC-B4: record running + tracker missing + no fresh draft + age past zombie grace
- *   → /queue.activeInvocations does NOT include the invocation (zombie).
- * - record-missing recovery (R1 P1-1): record absent + tracker slot anchors a fresh draft
- *   → /queue.activeInvocations surfaces it via tracker+draft.
+ * - AC-B3: a running record with only a draft is not processing.
+ * - AC-B4: a running record nobody holds is not processing, however recently it was updated.
+ * - Pre-start window: a tracker slot whose record is not running yet surfaces as the member.
  * - Helper exception fail-open: invocationRecordStore.listRunningByThread throws →
  *   handler logs + falls back to tracker-only enumeration (endpoint never 500s).
- * - Legacy fallback: when invocationRecordStore + draftStore are not wired (embedded
- *   modes / older callers), GET /queue still returns tracker.getActiveSlots() unchanged.
+ * - Legacy fallback: when invocationRecordStore is not wired (embedded modes / older callers),
+ *   GET /queue still returns tracker.getActiveSlots() unchanged.
  */
 
 import assert from 'node:assert/strict';
@@ -31,6 +29,7 @@ const USER_ID = 'user-a';
 const UNDECLARED_FRESHNESS_CARRIER_CAPABILITY = {
   provider: 'other',
   carrier: 'other',
+  activeInvocationGuidance: 'undeclared',
   deliverySemantics: 'undeclared',
 };
 
@@ -173,7 +172,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
     app = undefined;
   });
 
-  it('AC-B3: record running + tracker missing + fresh draft → activeInvocations surfaces the invocation', async () => {
+  it('AC-B3 (F117 KD-23): a running record with only a draft is not processing', async () => {
     const now = 1_000_000;
     const record = makeRecord({ id: 'inv-running', updatedAt: now - 60_000 });
     const draft = makeDraft({ invocationId: 'inv-running', updatedAt: now - 100, createdAt: now - 50_000 });
@@ -188,64 +187,51 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       app = await makeApp(deps);
       const { statusCode, body } = await getQueue(app);
       assert.equal(statusCode, 200);
-      // Pre-F194: tracker.getActiveSlots() = [] → activeInvocations: []
-      // Post-F194: helper sees record+fresh-draft → activeInvocations contains opus
-      assert.equal(body.activeInvocations.length, 1, 'split-brain canonical: invocation must surface');
-      assert.equal(body.activeInvocations[0].catId, 'opus');
+      assert.deepEqual(body.activeInvocations, [], 'a streamed draft does not prove anyone still runs the turn');
     } finally {
       Date.now = origNow;
     }
   });
-
-  it('AC-B4: record running + tracker missing + no fresh draft + age past zombie grace → activeInvocations is empty', async () => {
+  it('AC-B4 (F117 KD-23): a running record nobody holds is not processing, however recently it was updated', async () => {
     const now = 10_000_000;
-    const record = makeRecord({
-      id: 'inv-zombie',
-      // record.updatedAt past 2× DraftStore TTL (600_000ms default zombie grace)
-      updatedAt: now - 700_000,
-      createdAt: now - 700_000,
-    });
+    const record = makeRecord({ id: 'inv-unheld', updatedAt: now - 1_000, createdAt: now - 2_000 });
     const deps = buildDeps({
       invocationRecordStore: makeRecordStore([record]),
       draftStore: makeDraftStore([]),
     });
-    // Override Date.now during this test so helper compares against the right "now"
     const origNow = Date.now;
     Date.now = () => now;
     try {
       app = await makeApp(deps);
       const { body } = await getQueue(app);
-      assert.equal(body.activeInvocations.length, 0, 'zombie record must not surface as active');
+      assert.equal(body.activeInvocations.length, 0, 'no grace window: a fresh record is not an owner');
     } finally {
       Date.now = origNow;
     }
   });
-
-  it('record-missing recovery: tracker slot + fresh draft anchors slot → activeInvocations surfaces tracker+draft', async () => {
+  it('F117 KD-23: a slot whose record is not running yet surfaces as the member (pre-start window)', async () => {
     const now = 1_000_000;
-    const draft = makeDraft({ invocationId: 'inv-recovery', createdAt: now - 5_000, updatedAt: now - 100 });
-    // tracker slot started before draft.createdAt → strongly anchors this draft
     const slot = { catId: 'opus', startedAt: now - 6_000 };
     const deps = buildDeps({
-      invocationRecordStore: makeRecordStore([]), // record absent (race / startup window)
-      draftStore: makeDraftStore([draft]),
+      invocationRecordStore: makeRecordStore([]), // the record turns running only after startAll
     });
     deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
     deps.invocationTracker.getUserId = mock.fn(() => USER_ID);
+    deps.invocationTracker.getExecutionId = mock.fn(() => 'inv-prestart');
 
     const origNow = Date.now;
     Date.now = () => now;
     try {
       app = await makeApp(deps);
       const { body } = await getQueue(app);
-      assert.equal(body.activeInvocations.length, 1, 'tracker+draft path must surface');
+      assert.equal(body.activeInvocations.length, 1, 'the slot this process holds is the member');
       assert.equal(body.activeInvocations[0].catId, 'opus');
+      assert.equal(body.activeInvocations[0].executionId, 'inv-prestart');
       assert.equal(body.activeInvocations[0].startedAt, slot.startedAt);
     } finally {
       Date.now = origNow;
     }
   });
-
   it('helper exception → fail-open to tracker.getActiveSlots() (endpoint never 500s)', async () => {
     const slot = { catId: 'opus', startedAt: Date.now() - 1_000 };
     const deps = buildDeps({
@@ -440,33 +426,43 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
       createdAt: now - 4_000,
       updatedAt: now - 100,
     });
-    const draft = makeDraft({
+    // F117 KD-23: the child turn is known from the tracker's bound activeRun, or from a durable running
+    // child when nothing verifies an owner; drafts and the registry namespace bridge are gone.
+    const activeRun = {
+      threadId: THREAD_ID,
+      targetId: 'codex',
       invocationId: childTurnId,
-      catId: 'codex',
-      createdAt: canonicalStartedAt,
-      updatedAt: now - 50,
-    });
+      responseMessageId: 'response-canonical',
+      inputEntryIds: [],
+      inputMessageIds: [],
+      privateInputEntryIds: [],
+      startedAt: canonicalStartedAt,
+    };
     let activeExecutionId = parentExecutionId;
     let trackerUserId = USER_ID;
     const deps = buildDeps({
       invocationRecordStore: makeRecordStore([record]),
-      draftStore: makeDraftStore([draft]),
-      invocationRegistry: {
-        getRecord: mock.fn(async (id) =>
-          id === childTurnId
-            ? {
-                parentInvocationId: parentExecutionId,
-                threadId: THREAD_ID,
-                userId: USER_ID,
-                catId: 'codex',
-                createdAt: canonicalStartedAt,
-              }
-            : null,
-        ),
-        getLatestId: mock.fn(() => childTurnId),
+      turnExecutionStore: {
+        listByParent: async (parentId) =>
+          parentId === parentExecutionId
+            ? [
+                {
+                  invocationId: childTurnId,
+                  parentInvocationId: parentExecutionId,
+                  threadId: THREAD_ID,
+                  userId: USER_ID,
+                  catId: 'codex',
+                  executionKind: 'ordinary',
+                  startedAt: canonicalStartedAt,
+                  status: 'running',
+                },
+              ]
+            : [],
       },
     });
-    deps.invocationTracker.getActiveSlots = mock.fn(() => [slot]);
+    deps.invocationTracker.getActiveSlots = mock.fn(() => [
+      activeExecutionId === parentExecutionId ? { ...slot, activeRun } : slot,
+    ]);
     deps.invocationTracker.getUserId = mock.fn(() => trackerUserId);
     deps.invocationTracker.getExecutionId = mock.fn(() => activeExecutionId);
     const closing = {
@@ -498,6 +494,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
           startedAt: canonicalStartedAt,
           executionId: parentExecutionId,
           turnInvocationId: childTurnId,
+          activeRun,
           appServerLifecycle: closing,
         }),
       ]);
@@ -509,7 +506,7 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
         [
           withUndeclaredCapability({
             catId: 'codex',
-            startedAt: canonicalStartedAt,
+            startedAt: slot.startedAt,
             executionId: replacementExecutionId,
           }),
         ],
@@ -538,39 +535,54 @@ describe('F194 Phase B — /queue canonical liveness regression', () => {
     }
   });
 
-  it('cloud R15 P2: duplicate catId entries deduped (keep earliest startedAt per cat)', async () => {
-    // Reproduces cloud Codex P2 (comment 3211748989, line 153): when canonical
-    // liveness yields multiple LiveInvocation entries for the same cat (e.g.,
-    // concurrent running records during recovery windows), the route must dedup
-    // by catId before returning. Web client uses replaceThreadTargetCats which
-    // is cat-level state; duplicate cats produce inconsistent UI.
+  it('cloud R15 P2: duplicate catId entries dedup to one slot, strongest evidence first, then earliest start', async () => {
+    // Reproduces cloud Codex P2 (comment 3211748989, line 153): canonical liveness can yield several
+    // entries for one cat (e.g. concurrent running records during recovery windows). The web client's
+    // replaceThreadTargetCats is cat-level state, so the route must return one slot per cat.
     const now = 1_000_000;
-    // Two records, both running, both targeting 'opus' — produces two helper outputs with same catId
     const r1 = makeRecord({ id: 'inv-opus-a', updatedAt: now - 60_000, createdAt: now - 60_000 });
     const r2 = makeRecord({ id: 'inv-opus-b', updatedAt: now - 30_000, createdAt: now - 30_000 });
-    const draft1 = makeDraft({ invocationId: 'inv-opus-a', updatedAt: now - 100, createdAt: now - 60_000 });
-    const draft2 = makeDraft({ invocationId: 'inv-opus-b', updatedAt: now - 100, createdAt: now - 30_000 });
+    const child = (id, parent, startedAt) => ({
+      invocationId: id,
+      parentInvocationId: parent,
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      catId: 'opus',
+      executionKind: 'ordinary',
+      startedAt,
+      status: 'running',
+    });
+    const children = {
+      'inv-opus-a': [child('child-a', 'inv-opus-a', now - 60_000)],
+      'inv-opus-b': [child('child-b', 'inv-opus-b', now - 30_000)],
+    };
     const deps = buildDeps({
       invocationRecordStore: makeRecordStore([r1, r2]),
-      draftStore: makeDraftStore([draft1, draft2]),
+      turnExecutionStore: { listByParent: async (parentId) => children[parentId] ?? [] },
     });
 
     const origNow = Date.now;
     Date.now = () => now;
     try {
       app = await makeApp(deps);
-      const { body } = await getQueue(app);
-      // Without fix: 2 entries for 'opus', frontend would show duplicated target cat
-      // With fix: dedup by catId, keep earliest startedAt
-      const opusSlots = body.activeInvocations.filter((s) => s.catId === 'opus');
+      // Both members stand only on unverified running children: the earliest start wins.
+      let opusSlots = (await getQueue(app)).body.activeInvocations.filter((s) => s.catId === 'opus');
       assert.equal(opusSlots.length, 1, 'duplicate catId entries must dedup to a single cat slot');
-      // Earliest startedAt wins (r1 createdAt=now-60_000 < r2 createdAt=now-30_000)
+      assert.equal(opusSlots[0].executionId, 'inv-opus-a');
       assert.equal(opusSlots[0].startedAt, now - 60_000, 'kept slot must have earliest startedAt');
+
+      // This process holds the later record's slot: verified evidence outranks the older child.
+      deps.invocationTracker.getActiveSlots = mock.fn(() => [{ catId: 'opus', startedAt: now - 35_000 }]);
+      deps.invocationTracker.getUserId = mock.fn(() => USER_ID);
+      deps.invocationTracker.getExecutionId = mock.fn(() => 'inv-opus-b');
+      opusSlots = (await getQueue(app)).body.activeInvocations.filter((s) => s.catId === 'opus');
+      assert.equal(opusSlots.length, 1);
+      assert.equal(opusSlots[0].executionId, 'inv-opus-b', 'the slot this process holds is the one shown');
+      assert.equal(opusSlots[0].startedAt, now - 30_000, 'before a run is bound, the running child names the start');
     } finally {
       Date.now = origNow;
     }
   });
-
   it('null catId is filtered (no phantom UI cat slot — 砚砚 R5 P2)', async () => {
     // Construct a record without targetCats so helper produces null catId
     const now = 1_000_000;

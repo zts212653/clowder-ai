@@ -4,14 +4,11 @@ import type { CollectiveConnector } from '@cat-cafe/collective-connector';
 import { collectiveSourceIdentitySchema, createCatId } from '@cat-cafe/shared';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.js';
-import {
-  createInitialQueuedMessageCustody,
-  QueuedMessageCustodyCoordinator,
-} from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor, type RouterLike } from '../src/domains/cats/services/agents/invocation/QueueProcessor.js';
+import { InMemoryQueueLedgerStore } from '../src/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
 import { InMemoryTurnExecutionStore } from '../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../src/domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
+import { MessageStore, settleLifecycleResponseInputs } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { CollectiveReconsiderationRefusalError } from '../src/domains/plugin/builtin-runtime/collective-work/collective-reconsideration-refusal.js';
 import { requireCurrentReconsiderationSource } from '../src/domains/plugin/builtin-runtime/collective-work/collective-reconsideration-source.js';
 import './helpers/setup-cat-registry.js';
@@ -28,15 +25,23 @@ export async function until(predicate: () => boolean, label: string) {
 }
 
 export function reconsiderationQueueFixture(useSourceGuard = true) {
-  const queue = new InvocationQueue();
+  const ledger = new InMemoryQueueLedgerStore();
+  const queue = new InvocationQueue(ledger);
   const messages = new MessageStore();
   const records = new InvocationRecordStore();
   const turns = new InMemoryTurnExecutionStore();
   const routed: string[] = [];
   const delivered: string[] = [];
   const parentIds: string[] = [];
+  const settlementErrors: unknown[][] = [];
   let unavailable = false;
   const router: RouterLike = {
+    async resolveExplicitTargets(targets) {
+      return [...targets];
+    },
+    async resolveConversationTargetsAtAdmission(targets) {
+      return [...targets];
+    },
     async *routeExecution(_user, content, _thread, messageId, targets, _intent, options) {
       routed.push(content);
       if (content === 'old-g1' || unavailable) {
@@ -83,6 +88,16 @@ export function reconsiderationQueueFixture(useSourceGuard = true) {
         executionKind: 'ordinary',
         causal: { triggerMessageId: messageId ?? undefined },
       });
+      // This is the real Queue-to-History receiver boundary. Prompt exposure
+      // is not allowed to substitute the parent for this exact child.
+      const receiver = await options?.onLifecycleInvocationStarted?.({
+        threadId,
+        userId,
+        catId,
+        invocationId,
+        parentInvocationId,
+        startedAt,
+      });
       yield {
         type: 'system_info',
         catId,
@@ -107,6 +122,17 @@ export function reconsiderationQueueFixture(useSourceGuard = true) {
         terminalReason: 'fixture_delivery_complete',
         endedAt: Date.now(),
       });
+      assert.ok(receiver);
+      const terminal = messages.commitLifecycleResponseTerminal(receiver.responseMessageId, {
+        invocationId,
+        status: 'completed',
+        completedAt: Date.now(),
+        content: 'Fixture classification',
+        mentions: [],
+        origin: 'stream',
+      });
+      assert.ok(terminal.kind === 'applied' || terminal.kind === 'replayed');
+      await settleLifecycleResponseInputs(messages, terminal.message, receiver.responseMessageId);
       yield { type: 'done', catId: targets[0], invocationId, timestamp: Date.now() };
     },
     async ackCollectedCursors() {},
@@ -115,7 +141,6 @@ export function reconsiderationQueueFixture(useSourceGuard = true) {
     queue,
     invocationTracker: new InvocationTracker(),
     messageStore: messages,
-    queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: messages }),
     turnExecutionStore: turns,
     router,
     invocationRecordStore: {
@@ -130,24 +155,16 @@ export function reconsiderationQueueFixture(useSourceGuard = true) {
       },
     },
     socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
-    log: { info() {}, warn() {}, error() {} },
+    log: {
+      info() {},
+      warn() {},
+      error(...args) {
+        settlementErrors.push(args);
+      },
+    },
   });
-  function enqueue(content: string, trusted = true) {
+  async function enqueue(content: string, trusted = true) {
     const purposeKey = `collective-reconsider:${(content === 'old-g1' ? '1' : content === 'new-g2' ? '2' : '3').repeat(64)}`;
-    const result = queue.enqueue({
-      threadId,
-      userId,
-      ownerAuthProvenance: 'unknown',
-      executionScope: 'collective-participation',
-      content,
-      source: 'connector',
-      targetCats: [catId],
-      intent: 'execute',
-      autoExecute: true,
-      idempotencyKey: purposeKey,
-    });
-    assert.ok(result.entry);
-    const entry = result.entry;
     const participation = {
       serviceInstanceId: 'svc_fixture000',
       collectiveId: 'col_fixture000',
@@ -158,47 +175,65 @@ export function reconsiderationQueueFixture(useSourceGuard = true) {
       participationRevision: 1,
       actor: { kind: 'human' as const, humanId: 'human_fixture000', displayName: 'Fixture Owner' },
     };
-    const message = messages.append({
-      userId,
-      threadId,
-      catId: null,
-      content,
-      mentions: [catId],
-      timestamp: entry.createdAt,
-      idempotencyKey: purposeKey,
-      deliveryStatus: 'queued',
-      queueCustody: createInitialQueuedMessageCustody(entry),
-      source: {
-        connector: 'collective',
-        label: 'Collective',
-        icon: 'collective',
-        meta: {
-          eventId: participation.eventId,
-          participation,
-          ...(trusted
-            ? {
-                reconsideration: {
-                  sourceMessageId: 'original-source',
-                  grantRef: 'guide-grant',
-                  grantRevision: content === 'old-g1' ? 1 : 2,
-                  requestKind: 'guide',
-                  purposeKey,
-                },
-              }
-            : {}),
+    const result = await queue.send(
+      messages,
+      {
+        userId,
+        threadId,
+        from: { kind: 'external', connectorId: 'collective' },
+        content,
+        mentions: [catId],
+        timestamp: Date.now(),
+        idempotencyKey: purposeKey,
+        deliveryStatus: 'queued',
+        source: {
+          connector: 'collective',
+          label: 'Collective',
+          icon: 'collective',
+          meta: {
+            eventId: participation.eventId,
+            participation,
+            ...(trusted
+              ? {
+                  reconsideration: {
+                    sourceMessageId: 'original-source',
+                    grantRef: 'guide-grant',
+                    grantRevision: content === 'old-g1' ? 1 : 2,
+                    requestKind: 'guide',
+                    purposeKey,
+                  },
+                }
+              : {}),
+          },
         },
       },
-    });
-    queue.backfillMessageId(threadId, userId, entry.id, message.id);
-    return { entry, message };
+      {
+        threadId,
+        userId,
+        from: { kind: 'external', connectorId: 'collective' },
+        kind: 'conversation_input',
+        sourceId: purposeKey,
+        idempotencyKey: purposeKey,
+        ownerAuthProvenance: 'unknown',
+        executionScope: 'collective-participation',
+        content,
+        targetCats: [catId],
+        intent: 'execute',
+        autoExecute: true,
+      },
+    );
+    assert.ok(result.entry);
+    return { entry: result.entry, message: result.message };
   }
   return {
     queue,
+    ledger,
     messages,
     records,
     processor,
     routed,
     delivered,
+    settlementErrors,
     enqueue,
     transportUnavailable(value: boolean) {
       unavailable = value;

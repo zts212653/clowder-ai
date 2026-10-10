@@ -8,15 +8,18 @@
  * revive a `hot` binding for a runtime that no longer holds that memory.
  * Iron Rule #5 (LL-048): recoverable state is persistent, TTL=0.
  *
- * Uses test Redis infrastructure (port 6398, never 6399).
+ * Runs only against an isolated test Redis (test:redis); an inherited address never qualifies.
  */
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Redis from 'ioredis';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const TEST_PREFIX = `test:context-epoch:${Date.now()}:`;
 
-describe('F296 B1: RedisContextEpochStore', () => {
+const REDIS_URL = process.env.REDIS_URL;
+
+describe('F296 B1: RedisContextEpochStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   /** @type {import('ioredis').default} */
   let redis;
   let store;
@@ -24,7 +27,8 @@ describe('F296 B1: RedisContextEpochStore', () => {
   let connectionFailed = false;
 
   before(async () => {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6398';
+    assertRedisIsolationOrThrow(REDIS_URL, 'F296 B1: RedisContextEpochStore');
+    const redisUrl = REDIS_URL;
     redis = new Redis(redisUrl, {
       keyPrefix: TEST_PREFIX,
       lazyConnect: true,

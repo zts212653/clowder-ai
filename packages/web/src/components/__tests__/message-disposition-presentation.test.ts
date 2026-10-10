@@ -16,13 +16,14 @@ describe('native AGY freshness presentation', () => {
     provider: 'google',
     carrier: 'agy_stream_json',
     deliverySemantics: 'queued_internal_turn',
+    activeInvocationGuidance: 'supported',
   };
 
   it('recognizes the declared AGY transport without enabling exact current-turn reads', () => {
     const parsed = parseFreshnessCarrierCapability(agyCapability);
     expect(parsed).toEqual(agyCapability);
-    expect(classifyFreshnessCarrierSupport([parsed])).toBe('unsupported');
-    expect(humanCarrierLabel(parsed)).toBe('排队内部轮次（非精确读取）');
+    expect(classifyFreshnessCarrierSupport([parsed])).toBe('queued');
+    expect(humanCarrierLabel(parsed)).toBe('支持引导当前运行（下一内部轮次，非精确同轮读取）');
   });
 
   it.each([
@@ -37,6 +38,8 @@ describe('native AGY freshness presentation', () => {
     { ...agyCapability, provider: 'unregistered-provider' },
     { ...agyCapability, carrier: 'unregistered-carrier' },
     { ...agyCapability, deliverySemantics: 'unregistered-delivery' },
+    { ...agyCapability, activeInvocationGuidance: 'unregistered-guidance' },
+    { provider: 'google', carrier: 'agy_stream_json', deliverySemantics: 'queued_internal_turn' },
   ])('keeps unknown carrier values undeclared: %j', (capability) => {
     const parsed = parseFreshnessCarrierCapability(capability);
     expect(parsed).toBeUndefined();

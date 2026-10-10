@@ -10,7 +10,7 @@ import {
   type RegisteredCustodyGrantV1,
 } from '@cat-cafe/shared';
 import type { StoredMessage } from '../../../cats/services/stores/ports/MessageStore.js';
-import { collectiveSource, ingressIdempotencyKey } from '../collective-ingress-routing.js';
+import { collectiveSender, collectiveSource, ingressIdempotencyKey } from '../collective-ingress-routing.js';
 import type { CollectiveWorkAuthority, CollectiveWorkAuthorityOptions } from '../collective-work-authority.js';
 import {
   executionError,
@@ -202,7 +202,7 @@ async function immutableAssignmentSource(
       await options.messageStore.appendIdempotent({
         userId: source.userId,
         threadId: source.threadId,
-        catId: null,
+        from: { kind: 'external', connectorId: 'collective', sender: collectiveSender(event) },
         mentions: [],
         timestamp: Date.parse(event.acceptedAt),
         content: event.body,

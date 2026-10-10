@@ -26,7 +26,10 @@ export interface CliSpawnOptions {
   outputMode?: 'ndjson' | 'plainText';
   /** Working directory for the process */
   cwd?: string;
-  /** Opt-in timeout in milliseconds before automatic termination (default: 0 = manual cancel only) */
+  /**
+   * Opt-in response timeout in milliseconds for probes and other one-off commands (default: 0 =
+   * none). A dispatched member never sets it: its one timeout is its invocation's (F117 KD-22).
+   */
   timeoutMs?: number;
   /** AbortSignal to cancel the process externally */
   signal?: AbortSignal;

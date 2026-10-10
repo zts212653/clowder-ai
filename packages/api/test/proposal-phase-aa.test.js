@@ -20,10 +20,18 @@ import { createProposalTestContext } from './helpers/proposal-test-harness.js';
 describe('F128 Phase AA — seed message source attribution', () => {
   test('AC-AA4: seed message catId = sourceCatId (proposing cat, not approver)', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -34,7 +42,6 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     // Cat 'codex' proposes, user 'alice' approves
@@ -55,7 +62,7 @@ describe('F128 Phase AA — seed message source attribution', () => {
 
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.ok(entries.length > 0, 'message was enqueued');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
 
     // AC-AA4: the seed message author should be the proposing cat, not the approver
     assert.equal(
@@ -67,10 +74,18 @@ describe('F128 Phase AA — seed message source attribution', () => {
 
   test('AC-AA5: seed message has extra.crossPost with sourceThreadId + sourceInvocationId', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: ['opus'], intent: { intent: 'execute' }, hasMentions: false };
+        return {
+          targetCats: ['opus'],
+          intent: { intent: 'execute' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -81,7 +96,6 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source Thread');
     const { proposalId } = JSON.parse(
@@ -100,7 +114,7 @@ describe('F128 Phase AA — seed message source attribution', () => {
     const body = JSON.parse(res.body);
 
     const entries = invocationQueue.list(body.threadId, 'alice');
-    const stored = await ctx.messageStore.getById(entries[0].messageId);
+    const stored = await ctx.messageStore.getById(entries[0].payload.messageId);
 
     // AC-AA5: crossPost metadata for frontend pill + jump-to-source
     assert.ok(stored.extra?.crossPost, 'AC-AA5: seed message must have extra.crossPost');
@@ -116,7 +130,7 @@ describe('F128 Phase AA — seed message source attribution', () => {
   });
 
   test('AC-AA4 fallback: no-router path still attributes to source cat', async () => {
-    // When router/invocationQueue/queueProcessor are unavailable (fallback path),
+    // When router/invocationQueue are unavailable (fallback path),
     // the seed message must still carry sourceCatId attribution.
     const ctx = await createProposalTestContext({
       // No router/queue overrides → hits the fallback path in dispatch

@@ -5,13 +5,13 @@ import type { DeliveryCursorStore } from '../stores/ports/DeliveryCursorStore.js
 import { isDelivered, type StoredMessage } from '../stores/ports/MessageStore.js';
 import type { IThreadStore } from '../stores/ports/ThreadStore.js';
 import { canViewMessage } from '../stores/visibility.js';
+import { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
+import { bindFreshnessNoticeBroker, FreshnessNoticeBroker } from './FreshnessNoticeBroker.js';
 import {
   createQueueChecker,
   type FreshnessMessageReader,
   type QueuedMessageChecker,
-} from './checkFreshnessForPostMessage.js';
-import { FreshnessAttentionEventLog } from './FreshnessAttentionEventLog.js';
-import { bindFreshnessNoticeBroker, FreshnessNoticeBroker } from './FreshnessNoticeBroker.js';
+} from './freshness-unseen-source.js';
 import { ThreadUnseenChecker } from './ThreadUnseenChecker.js';
 
 interface ProviderNativeFreshnessFactoryDeps {

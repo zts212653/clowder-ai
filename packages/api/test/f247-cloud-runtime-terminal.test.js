@@ -24,30 +24,26 @@ function makeThreadStore() {
   };
 }
 
-function makeDispositionRecorder() {
-  const calls = [];
-  return {
-    calls,
-    complete: async (auth, disposition) => {
-      calls.push({ auth, disposition });
-      return {
-        outcome: 'applied',
-        disposition,
-        invocationId: auth.invocationId,
-        sourceMessageId: auth.a2aTriggerMessageId,
-        fromCatId: 'codex-sol',
-      };
-    },
-  };
-}
-
 async function drain(generator) {
   const messages = [];
   for await (const message of generator) messages.push(message);
   return messages;
 }
 
-function makeParallelDeps({ bridge, disposition }) {
+function sourceRead(id) {
+  if (!['source-message-9', 'source-message-parallel-4', 'source-message-parallel-5'].includes(id)) return null;
+  return {
+    id,
+    threadId: 'thread-f247',
+    userId: 'alice',
+    from: { kind: 'agent', catId: 'codex-sol' },
+    catId: 'codex-sol',
+    content: '@gpt-pro verify the live bridge',
+    timestamp: 1,
+  };
+}
+
+function makeParallelDeps({ bridge }) {
   let messageSeq = 0;
   return {
     services: {
@@ -56,6 +52,7 @@ function makeParallelDeps({ bridge, disposition }) {
         freshnessCarrierCapability: () => ({
           provider: 'other',
           carrier: 'other',
+          activeInvocationGuidance: 'undeclared',
           deliverySemantics: 'undeclared',
         }),
         // biome-ignore lint/correctness/useYield: fail-fast sentinel for an unreachable provider path.
@@ -69,9 +66,9 @@ function makeParallelDeps({ bridge, disposition }) {
       sessionManager: {},
       threadStore: makeThreadStore(),
       apiUrl: 'http://localhost:0',
+      messageStore: { getById: async (id) => sourceRead(id) },
       cloudInvokeBridge: bridge,
       cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
-      a2aDispatchDispositionService: disposition,
     },
     messageStore: {
       append: async (message) => ({
@@ -79,7 +76,7 @@ function makeParallelDeps({ bridge, disposition }) {
         threadId: message.threadId ?? 'thread-f247',
         ...message,
       }),
-      getById: async () => null,
+      getById: async (id) => sourceRead(id),
       getRecent: async () => [],
       getMentionsFor: async () => [],
       getRecentMentionsFor: async () => [],
@@ -103,6 +100,7 @@ const baseParams = {
     freshnessCarrierCapability: () => ({
       provider: 'other',
       carrier: 'other',
+      activeInvocationGuidance: 'undeclared',
       deliverySemantics: 'undeclared',
     }),
   },
@@ -122,7 +120,6 @@ const baseParams = {
 describe('F247 cloud runtime terminal contract', () => {
   it('keeps an A2A needs-binding outcome terminally completed instead of exposing direct-user retry semantics', async () => {
     ensureGptProRegistered();
-    const disposition = makeDispositionRecorder();
     const messages = await drain(
       invokeSingleCat(
         {
@@ -130,29 +127,26 @@ describe('F247 cloud runtime terminal contract', () => {
           sessionManager: {},
           threadStore: makeThreadStore(),
           apiUrl: 'http://localhost:0',
+          messageStore: { getById: async (id) => sourceRead(id) },
           cloudInvokeBridge: {
             dispatch: async () => ({ kind: 'fallback', reason: 'needs-binding', detail: 'route absent' }),
           },
           cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
-          a2aDispatchDispositionService: disposition,
         },
         baseParams,
       ),
     );
 
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].disposition, 'completed');
     assert.equal(messages.at(-1).type, 'done');
     assert.equal(messages.at(-1).errorCode, undefined);
   });
 
-  it('waits for the Host bridge outcome, exposes one readable fallback, and terminalizes the exact A2A carrier', async () => {
+  it('waits for the Host bridge outcome and exposes one readable fallback before normal lifecycle completion', async () => {
     ensureGptProRegistered();
     let releaseBridge;
     const bridgeOutcome = new Promise((resolve) => {
       releaseBridge = resolve;
     });
-    const disposition = makeDispositionRecorder();
     const bridgeCalls = [];
     const exposed = [];
     let settled = false;
@@ -163,6 +157,7 @@ describe('F247 cloud runtime terminal contract', () => {
           sessionManager: {},
           threadStore: makeThreadStore(),
           apiUrl: 'http://localhost:0',
+          messageStore: { getById: async (id) => sourceRead(id) },
           cloudInvokeBridge: {
             dispatch: async (params) => {
               bridgeCalls.push(params);
@@ -170,7 +165,6 @@ describe('F247 cloud runtime terminal contract', () => {
             },
           },
           cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
-          a2aDispatchDispositionService: disposition,
         },
         {
           ...baseParams,
@@ -226,7 +220,7 @@ describe('F247 cloud runtime terminal contract', () => {
     assert.deepEqual(fallbackStatus.outboundReceipt, {
       v: 1,
       sourceMessageId: 'source-message-9',
-      sourceSender: { kind: 'cat', id: 'codex-sol', invocationId: 'parent-invocation' },
+      sourceSender: { kind: 'cat', id: 'codex-sol' },
       dispatchInvocationId: createdPayload.invocationId,
       targetCatId: 'gpt-pro',
       status: 'failed',
@@ -234,32 +228,13 @@ describe('F247 cloud runtime terminal contract', () => {
       idempotency: { keyKind: 'source_message_id', disposition: 'not_attempted' },
     });
 
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].disposition, 'completed');
-    assert.deepEqual(
-      {
-        invocationId: disposition.calls[0].auth.invocationId,
-        catId: disposition.calls[0].auth.catId,
-        threadId: disposition.calls[0].auth.threadId,
-        a2aTriggerMessageId: disposition.calls[0].auth.a2aTriggerMessageId,
-        originTriggerMessageId: disposition.calls[0].auth.originTriggerMessageId,
-      },
-      {
-        invocationId: createdPayload.invocationId,
-        catId: 'gpt-pro',
-        threadId: 'thread-f247',
-        a2aTriggerMessageId: 'source-message-9',
-        originTriggerMessageId: 'source-message-9',
-      },
-    );
     const done = messages.find((message) => message.type === 'done');
     assert.equal(done.invocationId, createdPayload.invocationId);
     assert.equal(done.errorCode, undefined);
   });
 
-  it('reports a real Host receipt as sent and still closes the source carrier exactly once', async () => {
+  it('reports a real Host receipt as sent and completes through the ordinary response lifecycle', async () => {
     ensureGptProRegistered();
-    const disposition = makeDispositionRecorder();
     const messages = await drain(
       invokeSingleCat(
         {
@@ -267,6 +242,7 @@ describe('F247 cloud runtime terminal contract', () => {
           sessionManager: {},
           threadStore: makeThreadStore(),
           apiUrl: 'http://localhost:0',
+          messageStore: { getById: async (id) => sourceRead(id) },
           cloudInvokeBridge: {
             dispatch: async () => ({
               kind: 'sent',
@@ -277,7 +253,6 @@ describe('F247 cloud runtime terminal contract', () => {
             }),
           },
           cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
-          a2aDispatchDispositionService: disposition,
         },
         {
           ...baseParams,
@@ -303,7 +278,6 @@ describe('F247 cloud runtime terminal contract', () => {
     assert.deepEqual(outboundReceipt.sourceSender, {
       kind: 'cat',
       id: 'codex-sol',
-      invocationId: 'parent-invocation',
     });
     assert.equal(outboundReceipt.status, 'sent');
     assert.equal(outboundReceipt.transport, 'host');
@@ -312,14 +286,11 @@ describe('F247 cloud runtime terminal contract', () => {
       keyKind: 'source_message_id',
       disposition: 'fresh',
     });
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].disposition, 'completed');
-    assert.equal(disposition.calls[0].auth.originTriggerMessageId, 'source-message-9');
+    assert.equal(messages.at(-1).type, 'done');
   });
 
   it('preserves the exact A2A source and caller through a parallel cloud route', async () => {
     ensureGptProRegistered();
-    const disposition = makeDispositionRecorder();
     const bridgeCalls = [];
     const messages = await drain(
       routeParallel(
@@ -330,7 +301,6 @@ describe('F247 cloud runtime terminal contract', () => {
               return { kind: 'fallback', reason: 'no-adapter', detail: 'host unavailable' };
             },
           },
-          disposition,
         }),
         ['gpt-pro'],
         '@gpt-pro inspect the exact carrier',
@@ -348,15 +318,11 @@ describe('F247 cloud runtime terminal contract', () => {
     assert.equal(bridgeCalls.length, 1);
     assert.equal(bridgeCalls[0].calledBy, 'codex-sol');
     assert.equal(bridgeCalls[0].sourceMessageId, 'source-message-parallel-4');
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].auth.a2aTriggerMessageId, 'source-message-parallel-4');
-    assert.equal(disposition.calls[0].auth.originTriggerMessageId, 'source-message-parallel-4');
     assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
   it('fails closed but still settles an A2A trigger whose caller identity is absent', async () => {
     ensureGptProRegistered();
-    const disposition = makeDispositionRecorder();
     const bridgeCalls = [];
     const messages = await drain(
       routeParallel(
@@ -367,7 +333,6 @@ describe('F247 cloud runtime terminal contract', () => {
               return { kind: 'sent', capturedUrl: 'https://chatgpt.com/c/should-not-send' };
             },
           },
-          disposition,
         }),
         ['gpt-pro'],
         '@gpt-pro caller provenance is missing',
@@ -382,8 +347,6 @@ describe('F247 cloud runtime terminal contract', () => {
     );
 
     assert.equal(bridgeCalls.length, 0, 'must not misattribute an A2A call to the thread owner');
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].auth.a2aTriggerMessageId, 'source-message-parallel-5');
     const status = messages
       .filter((message) => message.type === 'system_info' && message.content)
       .map((message) => JSON.parse(message.content))
@@ -393,9 +356,8 @@ describe('F247 cloud runtime terminal contract', () => {
     assert.equal(messages.filter((message) => message.type === 'done').length, 1);
   });
 
-  it('degrades a thread metadata read failure without skipping cloud status or exact disposition', async () => {
+  it('degrades a thread metadata read failure without skipping cloud status or lifecycle completion', async () => {
     ensureGptProRegistered();
-    const disposition = makeDispositionRecorder();
     const bridgeCalls = [];
     const messages = await drain(
       invokeSingleCat(
@@ -409,6 +371,7 @@ describe('F247 cloud runtime terminal contract', () => {
             },
           },
           apiUrl: 'http://localhost:0',
+          messageStore: { getById: async (id) => sourceRead(id) },
           cloudInvokeBridge: {
             dispatch: async (params) => {
               bridgeCalls.push(params);
@@ -416,7 +379,6 @@ describe('F247 cloud runtime terminal contract', () => {
             },
           },
           cloudReturnGrantStore: { issue: async () => ({ ok: true, status: 'issued' }) },
-          a2aDispatchDispositionService: disposition,
         },
         baseParams,
       ),
@@ -425,8 +387,6 @@ describe('F247 cloud runtime terminal contract', () => {
     assert.equal(bridgeCalls.length, 1);
     assert.equal(bridgeCalls[0].threadTitle, null);
     assert.deepEqual(bridgeCalls[0].participants, []);
-    assert.equal(disposition.calls.length, 1);
-    assert.equal(disposition.calls[0].auth.a2aTriggerMessageId, 'source-message-9');
     const statuses = messages
       .filter((message) => message.type === 'system_info' && message.content)
       .map((message) => JSON.parse(message.content))

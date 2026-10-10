@@ -20,6 +20,13 @@ export interface CliStderrSanitizerOptions {
   additionalHomePaths?: readonly string[];
 }
 
+export interface SanitizedStderrExcerptOptions extends CliStderrSanitizerOptions {
+  /** Which side of the sanitized diagnostic remains visible. */
+  edge: 'head' | 'tail';
+  /** Maximum number of UTF-16 code units returned to the caller. */
+  maxLength: number;
+}
+
 /**
  * Rough Shannon-style entropy estimate (unique chars over total).
  * High-entropy threshold tuned empirically: a 32-char string with ≥50% unique chars
@@ -94,4 +101,14 @@ export function sanitizeCliStderr(input: string, options: CliStderrSanitizerOpti
   out = out.replace(SANITIZER_PATTERNS.highEntropy, (m: string) => (looksHighEntropy(m) ? '[REDACTED]' : m));
 
   return out;
+}
+
+/**
+ * Produce a bounded user-visible diagnostic without allowing truncation to
+ * split a secret before the sanitizer sees its identifying prefix.
+ */
+export function excerptSanitizedStderr(input: string, options: SanitizedStderrExcerptOptions): string {
+  const { edge, maxLength, additionalHomePaths } = options;
+  const sanitized = sanitizeCliStderr(input, { additionalHomePaths }).trim();
+  return edge === 'head' ? sanitized.slice(0, maxLength) : sanitized.slice(-maxLength);
 }

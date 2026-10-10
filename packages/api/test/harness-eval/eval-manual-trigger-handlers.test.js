@@ -32,27 +32,34 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
       );
       assert.ok('error' in result);
       assert.equal(result.status, 503);
-      assert.match(result.error, /invokeTrigger not ready/);
+      assert.match(result.error, /delivery not ready/);
     });
 
-    it('returns 503 when messageStore not provided', async () => {
+    // The old `messageStore` guard outlived its reason: the packet is appended by the admission
+    // itself, so a wired delivery is the only real precondition. Keeping the guard rejected a
+    // perfectly serviceable request with 503.
+    it('admits without a separate messageStore — the admission owns the append', async () => {
       const result = await handleTriggerNow(
         {
           harnessFeedbackRoot: root,
-          invokeTriggerProvider: { get: () => ({ trigger: () => 'dispatched' }) },
+          invokeTriggerProvider: {
+            get: () => ({ deliver: async () => ({ state: 'started', message: { id: 'msg-manual' } }) }),
+          },
         },
         { domainId: 'eval:a2a', userId: 'test-user' },
       );
-      assert.ok('error' in result);
-      assert.equal(result.status, 503);
-      assert.match(result.error, /messageStore/);
+      assert.ok(!('error' in result), `expected success, got: ${JSON.stringify(result)}`);
+      assert.equal(result.messageId, 'msg-manual');
+      assert.equal(result.invocationTriggered, true);
     });
 
     it('returns 400 for unknown domainId', async () => {
       const result = await handleTriggerNow(
         {
           harnessFeedbackRoot: root,
-          invokeTriggerProvider: { get: () => ({ trigger: () => 'dispatched' }) },
+          invokeTriggerProvider: {
+            get: () => ({ deliver: async () => ({ state: 'started', message: { id: 'msg-manual' } }) }),
+          },
           messageStore: { append: async () => ({ id: 'msg-1' }) },
         },
         { domainId: 'eval:nonexistent', userId: 'test-user' },
@@ -71,9 +78,10 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
           harnessFeedbackRoot: root,
           invokeTriggerProvider: {
             get: () => ({
-              trigger: (...args) => {
-                triggerCalls.push(args);
-                return 'dispatched';
+              // Admission is the wake: one envelope crosses one seam.
+              deliver: async (input) => {
+                triggerCalls.push(input);
+                return { state: 'started', message: { id: `msg-${input.threadId}` } };
               },
             }),
           },
@@ -93,57 +101,190 @@ describe('Eval Manual Trigger Handlers (F192 OQ-21)', () => {
       assert.equal(result.threadId, 'thread_eval_a2a');
       assert.equal(result.evalCatId, 'codex');
       assert.equal(result.invocationTriggered, true);
-      assert.equal(result.triggerOutcome, 'dispatched');
+      assert.equal(result.admissionState, 'started');
       assert.equal(result.messageId, 'msg-thread_eval_a2a');
 
-      // 砚砚 R0 P1: trigger MUST be called — NOT just messageStore.append.
-      assert.equal(messageStoreCalls.length, 1);
-      assert.equal(messageStoreCalls[0].userId, 'scheduler');
-      assert.match(messageStoreCalls[0].content, /manual trigger by test-user/);
-      assert.equal(triggerCalls.length, 1);
-      const [threadId, catId, userId, reason, msgId] = triggerCalls[0];
-      assert.equal(threadId, 'thread_eval_a2a');
-      assert.equal(catId, 'codex');
-      assert.equal(userId, 'test-user');
-      assert.match(reason, /Manual eval trigger.*eval:a2a/);
-      assert.equal(msgId, 'msg-thread_eval_a2a');
+      // 砚砚 R0 P1 is structural now: the packet cannot be published without admitting it, so the
+      // one envelope IS both the message and the wake — there is no append-only failure mode left.
+      assert.equal(triggerCalls.length, 1, 'one envelope, one admission');
+      const envelope = triggerCalls[0];
+      assert.equal(envelope.threadId, 'thread_eval_a2a');
+      assert.equal(envelope.targetCatId, 'codex');
+      assert.equal(envelope.ownerUserId, 'test-user');
+      assert.match(envelope.content, /manual trigger by test-user/);
+      assert.ok(envelope.idempotencyKey, 'and it carries a stable admission identity');
     });
 
-    it('returns success with triggerOutcome: enqueued when thread busy', async () => {
+    it('returns success when the thread is busy — admission still settles the wake', async () => {
       const result = await handleTriggerNow(
         {
           harnessFeedbackRoot: root,
-          invokeTriggerProvider: { get: () => ({ trigger: () => 'enqueued' }) },
+          invokeTriggerProvider: {
+            get: () => ({ deliver: async () => ({ state: 'already_processing', message: { id: 'msg-busy' } }) }),
+          },
           messageStore: { append: async () => ({ id: 'msg-busy' }) },
         },
         { domainId: 'eval:a2a', userId: 'test-user' },
       );
       assert.ok(!('error' in result));
-      assert.equal(result.triggerOutcome, 'enqueued');
+      assert.equal(result.admissionState, 'already_processing', 'the real state, not a flattened label');
+      assert.equal(result.invocationTriggered, true, 'a run is genuinely in flight');
     });
 
-    // Cloud codex R2 P2: 'full' outcome must surface as 503, not silent success
-    it('returns 503 invocation_queue_full when trigger() returns "full"', async () => {
+    // Cloud codex R2 P2 still holds, in a stronger form: a refused admission surfaces as 503 AND
+    // publishes nothing — atomic admission leaves no packet in the thread with nobody woken for it.
+    it('returns 503 when the Queue refuses the admission, and publishes nothing', async () => {
       const messageStoreCalls = [];
       const result = await handleTriggerNow(
         {
           harnessFeedbackRoot: root,
-          invokeTriggerProvider: { get: () => ({ trigger: () => 'full' }) },
-          messageStore: {
-            append: async (msg) => {
-              messageStoreCalls.push(msg);
-              return { id: 'msg-dropped' };
-            },
+          invokeTriggerProvider: {
+            get: () => ({
+              deliver: async (input) => {
+                messageStoreCalls.push(input);
+                return { state: 'unavailable' };
+              },
+            }),
           },
+          messageStore: { append: async () => ({ id: 'msg-dropped' }) },
         },
         { domainId: 'eval:a2a', userId: 'test-user' },
       );
       assert.ok('error' in result);
       assert.equal(result.status, 503);
-      assert.equal(result.error, 'invocation_queue_full');
+      assert.equal(result.error, 'invocation_queue_unavailable');
       assert.match(result.detail, /queue/);
       assert.match(result.detail, /retry/i);
-      assert.equal(messageStoreCalls.length, 1, 'message delivered even though wake dropped');
+      assert.equal(messageStoreCalls.length, 1, 'admission was attempted');
+      assert.equal(
+        messageStoreCalls[0].targetCatId !== undefined,
+        true,
+        'the refused envelope named its member, so nothing was published half-woken',
+      );
+    });
+
+    // ds review of 24de668a5 (P2): `deliver()` refuses two different ways — by return value, and
+    // by throwing when the Queue is at capacity. Only the first was mapped, so a full queue
+    // escaped as a Fastify 500 that reads as a server fault instead of retryable back-pressure.
+    it('maps a throwing admission to the same 503, not an uncaught 500', async () => {
+      const result = await handleTriggerNow(
+        {
+          harnessFeedbackRoot: root,
+          invokeTriggerProvider: {
+            get: () => ({
+              deliver: async () => {
+                throw Object.assign(new Error('Producer return queue is full'), { code: 'ROUTE_QUEUE_FULL' });
+              },
+            }),
+          },
+        },
+        { domainId: 'eval:a2a', userId: 'test-user' },
+      );
+      assert.ok('error' in result, 'a full queue must not escape as an unhandled throw');
+      assert.equal(result.status, 503);
+      assert.equal(result.error, 'invocation_queue_unavailable');
+      assert.match(result.detail, /retry/i);
+    });
+
+    // The flip side: only the Queue's own typed refusal becomes 503. Blanket-catching would dress a
+    // genuine fault as retryable back-pressure, so the operator retries forever and the bug is
+    // never seen.
+    it('does not disguise an unexpected fault as queue back-pressure', async () => {
+      await assert.rejects(
+        handleTriggerNow(
+          {
+            harnessFeedbackRoot: root,
+            invokeTriggerProvider: {
+              get: () => ({
+                deliver: async () => {
+                  throw new TypeError('cannot read properties of undefined');
+                },
+              }),
+            },
+          },
+          { domainId: 'eval:a2a', userId: 'test-user' },
+        ),
+        /cannot read properties of undefined/,
+      );
+    });
+
+    // ds review of 24de668a5 (P2): collapsing every state into one success label told the operator
+    // a run was triggered when the row was already terminal and no wake would follow.
+    it('reports terminal_owned honestly — admitted, but no wake follows', async () => {
+      const result = await handleTriggerNow(
+        {
+          harnessFeedbackRoot: root,
+          invokeTriggerProvider: {
+            get: () => ({
+              deliver: async () => ({ state: 'terminal_owned', message: { id: 'msg-terminal' } }),
+            }),
+          },
+        },
+        { domainId: 'eval:a2a', userId: 'test-user' },
+      );
+      assert.ok(!('error' in result));
+      assert.equal(result.admissionState, 'terminal_owned');
+      assert.equal(result.invocationTriggered, false, 'no run is pending, so do not claim one');
+    });
+
+    // Same family: the row is admitted but auto-resume is off, so it will not run until the
+    // operator resumes the cat. Reporting it as triggered leaves them waiting on nothing.
+    it('reports a suppressed admission as not triggered', async () => {
+      const result = await handleTriggerNow(
+        {
+          harnessFeedbackRoot: root,
+          invokeTriggerProvider: {
+            get: () => ({
+              deliver: async () => ({ state: 'owned_deferred_suppressed', message: { id: 'msg-suppressed' } }),
+            }),
+          },
+        },
+        { domainId: 'eval:a2a', userId: 'test-user' },
+      );
+      assert.ok(!('error' in result));
+      assert.equal(result.admissionState, 'owned_deferred_suppressed');
+      assert.equal(result.invocationTriggered, false);
+    });
+
+    it('still reports a merely busy admission as triggered — it will run when the slot frees', async () => {
+      const result = await handleTriggerNow(
+        {
+          harnessFeedbackRoot: root,
+          invokeTriggerProvider: {
+            get: () => ({
+              deliver: async () => ({ state: 'owned_deferred_busy', message: { id: 'msg-busy' } }),
+            }),
+          },
+        },
+        { domainId: 'eval:a2a', userId: 'test-user' },
+      );
+      assert.ok(!('error' in result));
+      assert.equal(result.admissionState, 'owned_deferred_busy');
+      assert.equal(result.invocationTriggered, true);
+    });
+
+    // ds review of 24de668a5 (P3): a wall-clock stamp is not an identity. Two triggers inside the
+    // same millisecond produced one key, so the second run was silently dropped as a duplicate.
+    it('gives same-millisecond triggers distinct admission identities', async () => {
+      const keys = [];
+      const deps = {
+        harnessFeedbackRoot: root,
+        invokeTriggerProvider: {
+          get: () => ({
+            deliver: async (input) => {
+              keys.push(input.idempotencyKey);
+              return { state: 'started', message: { id: 'msg-dup' } };
+            },
+          }),
+        },
+      };
+      await Promise.all([
+        handleTriggerNow(deps, { domainId: 'eval:a2a', userId: 'test-user' }),
+        handleTriggerNow(deps, { domainId: 'eval:a2a', userId: 'test-user' }),
+      ]);
+      assert.equal(keys.length, 2);
+      assert.notEqual(keys[0], keys[1], 'two operator triggers are two occurrences, not one');
+      for (const key of keys) assert.match(key, /^manual-eval-trigger:eval:a2a:/);
     });
   });
 

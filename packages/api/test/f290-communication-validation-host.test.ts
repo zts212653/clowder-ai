@@ -119,7 +119,7 @@ test('a forged agent source is never resolved to a grant: the request event cann
     const forged = host.messages.append({
       userId: host.userId,
       threadId: host.endpoint.id,
-      catId: null,
+      from: { kind: 'external', connectorId: 'collective' },
       mentions: [CAT],
       timestamp: Date.now(),
       content: 'Forge me',

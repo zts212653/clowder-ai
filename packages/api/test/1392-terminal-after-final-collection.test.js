@@ -14,7 +14,7 @@ import { describe, it } from 'node:test';
  * fails once.
  */
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
 const { createReviewFeedbackTaskSpec } = await import('../dist/infrastructure/email/ReviewFeedbackTaskSpec.js');
@@ -67,7 +67,7 @@ describe('#1392 AC-2 — a merged PR is not closed out before its last feedback 
 
   async function mergedPr({ comments = [], reviews = [], when, failingItemId }) {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const task = await taskStore.create({
       kind: 'pr_tracking',
       subjectKey: SUBJECT,
@@ -96,18 +96,22 @@ describe('#1392 AC-2 — a merged PR is not closed out before its last feedback 
         },
       },
     });
-    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+    const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
     const eventLog = eventLogFailingOnceFor(failingItemId);
     const spec = createReviewFeedbackTaskSpec({
       taskStore,
       fetchPrMetadata: async () => ({ headSha: HEAD, prState: 'merged' }),
       fetchComments: async (_repo, _pr, cursors) => comments.filter((c) => c.id > cursors[c.commentType]),
       fetchReviews: async () => reviews,
-      reviewFeedbackRouter: new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log }),
+      reviewFeedbackRouter: new ReviewFeedbackRouter({
+        deliveryDeps: connector.deliveryDeps,
+        waitLifecycle: lifecycle,
+        log,
+      }),
       eventLog,
       log,
     });
-    const contents = () => messageStore.getByThread('thread_pr').map((message) => message.content);
+    const contents = () => connector.contents('thread_pr');
     return { spec, taskStore, task, contents, eventLog };
   }
 
@@ -170,7 +174,7 @@ describe('#1392 AC-2 — a merged PR is not closed out before its last feedback 
 describe('#1392 AC-2 — a closed issue is not closed out before its last comments are collected', () => {
   async function closedIssue() {
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const connector = connectorDeliveryHarness();
     const task = await taskStore.create({
       kind: 'issue_tracking',
       subjectKey: 'issue:owner/repo#861',
@@ -194,7 +198,7 @@ describe('#1392 AC-2 — a closed issue is not closed out before its last commen
         },
       },
     });
-    const waitLifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+    const waitLifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
     const comments = [
       { id: 101, author: 'someone', body: 'first', createdAt: '2026-09-25T00:00:00Z' },
       { id: 102, author: 'someone', body: 'second', createdAt: '2026-09-25T00:00:01Z' },
@@ -210,7 +214,7 @@ describe('#1392 AC-2 — a closed issue is not closed out before its last commen
       waitLifecycle,
       log,
     });
-    const contents = () => messageStore.getByThread('thread_issue').map((message) => message.content);
+    const contents = () => connector.contents('thread_issue');
     return { spec, taskStore, task, contents, eventLog };
   }
 

@@ -146,7 +146,7 @@ describe('F232 AC-A7 useArtifactContent', () => {
     const last = states[states.length - 1];
     expect(last.content).toBe('backlog body');
     expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
-      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2FBACKLOG.md'),
+      expect.stringContaining('/api/workspace/file?worktreeId=wt1&path=docs%2FROADMAP.md'),
     );
   });
 

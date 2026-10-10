@@ -7,7 +7,11 @@ describe('cat display-name projection', () => {
   });
 
   it('uses displayName without adding an empty suffix', () => {
-    expect(formatCatDisplayName({ displayName: '缅因猫' })).toBe('缅因猫');
+    expect(formatCatDisplayName({ displayName: ' 缅因猫 ', variantLabel: ' ' })).toBe('缅因猫');
+  });
+
+  it('does not repeat a variant already present in displayName', () => {
+    expect(formatCatDisplayName({ displayName: '布偶猫 Fable', variantLabel: 'fable' })).toBe('布偶猫 Fable');
   });
 
   it('falls back to the stable catId for unknown or unloaded members', () => {

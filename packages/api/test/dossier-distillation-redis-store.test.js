@@ -2,7 +2,7 @@
  * F208 Phase E: RedisDossierDistillationProposalStore integration test.
  *
  * Verifies Redis persistence (Iron Rule #5: TTL=0 user state).
- * Uses test Redis infrastructure (port 6398, never 6399).
+ * Runs only against an isolated test Redis (test:redis); an inherited address never qualifies.
  *
  * Covers: create + idempotency (sourceId), state transitions,
  * pending index cleanup on approve/reject, per-cat index.
@@ -10,10 +10,13 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Redis from 'ioredis';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const TEST_PREFIX = `test:distill:${Date.now()}:`;
 
-describe('RedisDossierDistillationProposalStore', () => {
+const REDIS_URL = process.env.REDIS_URL;
+
+describe('RedisDossierDistillationProposalStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   /** @type {import('ioredis').default} */
   let redis;
   /** @type {import('../src/domains/cats/services/stores/redis/RedisDossierDistillationProposalStore.js').RedisDossierDistillationProposalStore} */
@@ -21,7 +24,8 @@ describe('RedisDossierDistillationProposalStore', () => {
   let connectionFailed = false;
 
   before(async () => {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6398';
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisDossierDistillationProposalStore');
+    const redisUrl = REDIS_URL;
     redis = new Redis(redisUrl, {
       keyPrefix: TEST_PREFIX,
       lazyConnect: true,

@@ -1,8 +1,12 @@
+import { isDeepStrictEqual } from 'node:util';
+import { collectiveWorkInvocationV1Schema } from '@cat-cafe/shared';
 import { CollectiveReconsiderationRefusalError } from '../../../../plugin/builtin-runtime/collective-work/collective-reconsideration-refusal.js';
+import type { IInvocationRecordStore, UpdateInvocationInput } from '../../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import { CollectivePrivateWorkRefusalError } from './collective-private-refusal.js';
-import type { InvocationQueue, QueueEntry } from './InvocationQueue.js';
+import { type InvocationQueue, type QueueEntry, queueEntryOwnerId } from './InvocationQueue.js';
 import { requireRefusedReconsiderationCarrier } from './queue-reconsideration-refusal-disposition.js';
+import { requireInvocationRecordUpdate } from './require-invocation-record-update.js';
 
 export type PermanentCollectiveQueueRefusal = CollectivePrivateWorkRefusalError | CollectiveReconsiderationRefusalError;
 export function isPermanentCollectiveQueueRefusal(error: unknown): error is PermanentCollectiveQueueRefusal {
@@ -13,10 +17,51 @@ export function collectiveQueueRefusalError(refusal: PermanentCollectiveQueueRef
   return `${refusal.code}:${refusal.reason}:${refusal.message}`;
 }
 
+/** The catch/backstop may already have committed this exact failure. A terminal
+ * self-transition is rejected by real stores, so verify the durable evidence,
+ * never merely a failed status or a mock store's permissive update result. */
+export async function persistCollectiveRefusalRecord(input: {
+  store: Partial<Pick<IInvocationRecordStore, 'get'>> & {
+    update(invocationId: string, update: UpdateInvocationInput): unknown;
+  };
+  invocationId: string;
+  entry: QueueEntry;
+  refusal: PermanentCollectiveQueueRefusal;
+}): Promise<void> {
+  const error = collectiveQueueRefusalError(input.refusal);
+  const get = input.store.get?.bind(input.store);
+  if (!get) throw new Error('Collective refusal durable invocation reader is unavailable');
+  const readExactRecord = async () => {
+    const current = await get(input.invocationId);
+    if (
+      !current ||
+      current.id !== input.invocationId ||
+      current.threadId !== input.entry.threadId ||
+      current.userId !== queueEntryOwnerId(input.entry) ||
+      current.userMessageId !== input.entry.payload.messageId ||
+      !isDeepStrictEqual(current.targetCats, input.entry.targets)
+    )
+      throw new Error('Collective refusal invocation identity is unavailable');
+    return current;
+  };
+  const current = await readExactRecord();
+  if (current.status === 'failed' && current.error === error) return;
+  await requireInvocationRecordUpdate({
+    store: input.store,
+    invocationId: input.invocationId,
+    update: { status: 'failed', error },
+    writer: 'Collective permanent refusal',
+  });
+  const persisted = await readExactRecord();
+  if (persisted.status !== 'failed' || persisted.error !== error)
+    throw new Error('Collective refusal durable failure evidence did not commit');
+}
+
 /**
  * A proven Collective refusal cancels only its exact singleton source.
- * The Message cancellation atomically clears actionable custody and remains a
- * restart fence. It neither withdraws an author's request nor records handled Work.
+ * Durable failure evidence and canonical source cancellation precede pending
+ * ledger retirement. Cancellation is the restart fence if retirement fails.
+ * This is not an author's withdrawal or evidence of handled Work.
  */
 export async function retireRefusedCollectiveQueueCarrier(input: {
   entry: QueueEntry;
@@ -27,29 +72,41 @@ export async function retireRefusedCollectiveQueueCarrier(input: {
 }): Promise<boolean> {
   const { entry, queue, messages } = input;
   if (
-    entry.status !== 'processing' ||
-    entry.targetCats.length !== 1 ||
-    !entry.messageId ||
-    entry.mergedMessageIds.length !== 0 ||
-    entry.exactSteerBatch
+    entry.status !== 'claimed' ||
+    entry.targets.length !== 1 ||
+    !entry.payload.messageId ||
+    entry.execution.ownerAuthProvenance !== 'unknown' ||
+    entry.execution.actionSuccessorFence ||
+    entry.execution.waitContinuationCarrier
   )
-    throw new Error('Collective refusal requires one exact processing carrier');
+    throw new Error('Collective refusal requires one exact pre-provider claim');
 
-  const source = await messages.getById(entry.messageId);
+  const requireCurrentClaim = async () => {
+    const current = await queue.getDurableEntry(entry.threadId, entry.id);
+    if (!isDeepStrictEqual(current, entry)) throw new Error('Collective refusal exact claim changed');
+  };
+  await requireCurrentClaim();
+
+  const source = await messages.getById(entry.payload.messageId);
   if (
     !source ||
     source.threadId !== entry.threadId ||
-    source.userId !== entry.userId ||
+    source.userId !== queueEntryOwnerId(entry) ||
     source.deliveryStatus !== 'queued' ||
-    source.queueCustody?.entryId !== entry.id ||
-    source.queueCustody.executionScope !== entry.executionScope ||
-    source.queueCustody.allTargetCats.length !== 1 ||
-    source.queueCustody.allTargetCats[0] !== entry.targetCats[0]
+    source.extra?.collectiveAuthorizationInvalid ||
+    !isDeepStrictEqual(source.from, entry.from) ||
+    source.lifecycle?.kind !== 'input' ||
+    source.lifecycle.dispatchRefs?.some((ref) => entry.targets.includes(ref.targetId))
   )
     throw new Error('Collective refusal source/custody identity is unavailable');
 
   if (input.refusal instanceof CollectivePrivateWorkRefusalError) {
-    if (entry.executionScope !== 'collective-work' || !source.extra?.collectiveWorkInvocationV1)
+    if (
+      entry.execution.executionScope !== 'collective-work' ||
+      source.from?.kind !== 'system' ||
+      source.from.service !== 'collective-work' ||
+      !collectiveWorkInvocationV1Schema.safeParse(source.extra?.collectiveWorkInvocationV1).success
+    )
       throw new Error('Private refusal has no exact private admission carrier');
   } else await requireRefusedReconsiderationCarrier({ entry, source, refusal: input.refusal, messages });
 
@@ -57,9 +114,10 @@ export async function retireRefusedCollectiveQueueCarrier(input: {
   // canonical Message cancellation are durable. An unavailable writer retains
   // the existing source for retry rather than silently consuming it.
   await input.persistRefusal();
+  await requireCurrentClaim();
   const canceled = await messages.markCanceled(source.id);
-  if (canceled?.deliveryStatus !== 'canceled' || canceled.queueCustody !== undefined) {
+  if (canceled?.deliveryStatus !== 'canceled') {
     throw new Error('Collective refusal source cancellation did not commit');
   }
-  return queue.removeEntrySnapshotIfUnchanged(entry);
+  return (await queue.commitClaimedWithdrawal(entry.threadId, entry.id)) !== null;
 }

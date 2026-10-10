@@ -182,8 +182,14 @@ describe('Dual-path validation: AssembleBridge + HookPipeline', () => {
       assert.ok(firedIds.includes(id), `${id} should fire`);
     }
 
-    // 24 per-turn hooks → 24 events
-    assert.equal(result.events.length, 24, `Expected 24 per-turn events, got ${result.events.length}`);
+    // D20 automatic Signal article injection is retired; keep all 23 active hooks.
+    assert.equal(result.events.length, 23, `Expected 23 per-turn events, got ${result.events.length}`);
+    assert.ok(
+      result.events.some((event) => event.hookId === 'D21'),
+      'D21 session mailbox remains registered',
+    );
+    assert.ok(!result.events.some((event) => event.hookId === 'D20'), 'Retired article hook is absent from trace');
+    assert.ok(!result.patches.some((patch) => patch.hookId === 'D20'), 'Retired article hook produces no prompt patch');
   });
 
   it('combined pipeline output is substantial (AC-P2-14)', () => {

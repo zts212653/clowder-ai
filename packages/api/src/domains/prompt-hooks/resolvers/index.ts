@@ -1,7 +1,7 @@
 /**
  * Resolver Registry — F237 Phase 2-B
  *
- * Maps hookId → resolver instance. All 46 Tier 1 pipeline hooks.
+ * Maps hookId → resolver instance. All 45 active Tier 1 pipeline hooks.
  * Resolvers are stateless singletons — safe for concurrent invocations.
  */
 
@@ -54,7 +54,6 @@ import {
   D17Resolver,
   D18Resolver,
   D19Resolver,
-  D20Resolver,
   D21Resolver,
   N1Resolver,
   R1Resolver,
@@ -110,7 +109,6 @@ const RESOLVER_MAP: ReadonlyMap<string, HookResolver> = new Map<string, HookReso
   ['D17', new D17Resolver()],
   ['D18', new D18Resolver()],
   ['D19', new D19Resolver()],
-  ['D20', new D20Resolver()],
   ['D21', new D21Resolver()],
   ['R1', new R1Resolver()],
   ['R2', new R2Resolver()],

@@ -1,4 +1,4 @@
-import type { FreshnessReadableMessage } from '../../freshness/checkFreshnessForPostMessage.js';
+import type { FreshnessReadableMessage } from '../../freshness/freshness-unseen-source.js';
 import type { CodexAppServerJsonObject } from './CodexAppServerEventMapper.js';
 import type { CodexAppServerNativeRpcClient } from './CodexAppServerNativeRpc.js';
 

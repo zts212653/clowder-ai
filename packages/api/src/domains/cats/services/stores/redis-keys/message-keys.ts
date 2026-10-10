@@ -22,15 +22,12 @@ export const MessageKeys = {
   /** Idempotency index: msg:idem:{userId}:{threadId}:{key} -> messageId */
   idempotency: (userId: string, threadId: string, key: string) => `msg:idem:${userId}:${threadId}:${key}`,
 
-  /** Callback content-dedup claim (race-safe exact-duplicate gate): msg:cbdedup:{fingerprint} */
-  contentDedup: (fingerprint: string) => `msg:cbdedup:${fingerprint}`,
-
   /** F264 Gap F: TTL=0 owner+thread composer draft. */
   ownerComposerDraft: (ownerUserId: string, threadId: string) =>
     `msg:composer-draft:${encodeURIComponent(ownerUserId)}:${encodeURIComponent(threadId)}`,
 
-  /** F264 Gap F: content-free reverse index from exact child exposure to source message IDs. */
-  queueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
+  /** Legacy F264 index retained only so thread deletion removes pre-migration data. */
+  legacyQueueExposureIndex: (threadId: string) => `msg:queue-exposures:${threadId}`,
 
   /**
    * #1200 Visibility index: per-thread sorted set, member=messageId, score=visibilitySeq.

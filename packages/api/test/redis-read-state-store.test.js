@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { after, before, beforeEach, describe, it } from 'node:test';
-import { makeQueuedMessageCustody } from './helpers/queued-message-custody.js';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 import {
   assertRedisIsolationOrThrow,
   cleanupPrefixedRedisKeys,
@@ -175,30 +175,36 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
   it('getUnreadSummaries() counts cat messages as unread', async () => {
     const tid = uniqueId('t');
     // Cat messages share same userId as tenant — catId distinguishes them
-    const m1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now() - 3000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'world',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'test',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-    });
+    const m1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now() - 3000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'world',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'test',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+      }),
+    );
 
     await store.ack('user1', tid, m1.id);
 
@@ -211,42 +217,50 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('getUnreadSummaries() counts published queued cat speech but not queued user or system work', async () => {
     const tid = uniqueId('t-published');
-    const anchor = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'read anchor',
-      mentions: [],
-      timestamp: Date.now() - 4000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'queued user work',
-      mentions: ['opus'],
-      timestamp: Date.now() - 3000,
-      threadId: tid,
-      deliveryStatus: 'queued',
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'codex-sol',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: Date.now() - 2000,
-      threadId: tid,
-      deliveryStatus: 'queued',
-      mentionsUser: true,
-    });
-    await messageStore.append({
-      userId: 'system',
-      catId: 'system',
-      content: 'queued internal system event',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-      deliveryStatus: 'queued',
-    });
+    const anchor = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'read anchor',
+        mentions: [],
+        timestamp: Date.now() - 4000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'queued user work',
+        mentions: ['opus'],
+        timestamp: Date.now() - 3000,
+        threadId: tid,
+        deliveryStatus: 'queued',
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'codex-sol',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: Date.now() - 2000,
+        threadId: tid,
+        deliveryStatus: 'queued',
+        mentionsUser: true,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'system',
+        catId: 'system',
+        content: 'queued internal system event',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+        deliveryStatus: 'queued',
+      }),
+    );
     await store.ack('user1', tid, anchor.id);
 
     const [summary] = await store.getUnreadSummaries('user1', [tid], messageStore);
@@ -254,73 +268,47 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
     assert.equal(summary.hasUserMention, true);
   });
 
-  it('keeps a read published cat seed before replies when its execution custody terminalizes', async () => {
+  it('keeps a read published cat seed before replies when delivery terminalizes', async () => {
     const tid = uniqueId('t-published-cursor');
     const base = Date.now();
-    const seed = await messageStore.append({
-      userId: 'user1',
-      catId: 'codex-sol',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: base,
-      threadId: tid,
-      deliveryStatus: 'queued',
-      queueCustody: makeQueuedMessageCustody({
-        entryId: 'entry-published-cursor',
-        allTargetCats: ['opus'],
-        pendingTargetCats: ['opus'],
-        createdAt: base,
-        updatedAt: base,
+    const seed = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'codex-sol',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: base,
+        threadId: tid,
+        deliveryStatus: 'queued',
       }),
-    });
+    );
     await store.ack('user1', tid, seed.id);
-    const firstReply = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'first reply',
-      mentions: [],
-      timestamp: base + 10,
-      threadId: tid,
-    });
-    const secondReply = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'second reply',
-      mentions: [],
-      timestamp: base + 20,
-      threadId: tid,
-    });
+    const firstReply = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'first reply',
+        mentions: [],
+        timestamp: base + 10,
+        threadId: tid,
+      }),
+    );
+    const secondReply = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'second reply',
+        mentions: [],
+        timestamp: base + 20,
+        threadId: tid,
+      }),
+    );
 
-    const terminal = makeQueuedMessageCustody({
-      entryId: 'entry-published-cursor',
-      revision: 2,
-      status: 'terminal',
-      allTargetCats: ['opus'],
-      pendingTargetCats: [],
-      seenByCatIds: ['opus'],
-      seenInvocationIdByCatId: { opus: 'inv-published-cursor' },
-      bodyExposures: [{ targetCatId: 'opus', invocationId: 'inv-published-cursor', seenAt: base + 25 }],
-      handledByCatIds: ['opus'],
-      targetOutcomeByCatId: {
-        opus: {
-          invocationId: 'inv-published-cursor',
-          disposition: 'completed_with_turn',
-          evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-published-cursor' },
-          handledAt: base + 50,
-        },
-      },
-      createdAt: base,
-      updatedAt: base + 50,
-    });
-    const transitioned = await messageStore.transitionQueueCustody(seed.id, {
-      expectedRevision: 1,
-      next: terminal,
-      deliveredAt: base + 50,
-    });
+    const transitioned = await messageStore.markDelivered(seed.id, base + 50);
 
-    assert.equal(transitioned.kind, 'updated');
-    assert.equal(transitioned.message.deliveredAt, base + 50, 'execution delivery keeps its actual terminal time');
-    assert.equal(transitioned.message.timelineOrderAt, base, 'publication order is persisted separately');
+    assert.equal(transitioned.deliveryTransitioned, true);
+    assert.equal(transitioned.deliveredAt, base + 50, 'execution delivery keeps its actual terminal time');
+    assert.equal(transitioned.timelineOrderAt, base, 'publication order is persisted separately');
     assert.equal(
       await redis.zscore(`msg:thread:${tid}`, seed.id),
       String(base),
@@ -341,32 +329,38 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
   it('getUnreadSummaries() excludes user own messages (catId=null)', async () => {
     const tid = uniqueId('t');
     // Cat message (catId='opus') — should be counted
-    const m1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'cat reply',
-      mentions: [],
-      timestamp: Date.now() - 3000,
-      threadId: tid,
-    });
+    const m1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'cat reply',
+        mentions: [],
+        timestamp: Date.now() - 3000,
+        threadId: tid,
+      }),
+    );
     // User's own message (catId=null) — should NOT be counted
-    await messageStore.append({
-      userId: 'user1',
-      catId: null,
-      content: 'my question',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: tid,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: null,
+        content: 'my question',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: tid,
+      }),
+    );
     // Cat reply (catId='opus') — should be counted
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'cat reply 2',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'cat reply 2',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+      }),
+    );
 
     await store.ack('user1', tid, m1.id);
 
@@ -377,30 +371,36 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('getUnreadSummaries() excludes deleted messages from count', async () => {
     const tid = uniqueId('t');
-    const m1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now() - 3000,
-      threadId: tid,
-    });
-    const m2 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'to delete',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'keep',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-    });
+    const m1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now() - 3000,
+        threadId: tid,
+      }),
+    );
+    const m2 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'to delete',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'keep',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+      }),
+    );
 
     await store.ack('user1', tid, m1.id);
     await messageStore.softDelete(m2.id, 'user1');
@@ -412,23 +412,27 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('getUnreadSummaries() detects mentionsUser', async () => {
     const tid = uniqueId('t');
-    const m1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: '@co-creator look',
-      mentions: [],
-      mentionsUser: true,
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-    });
+    const m1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: '@co-creator look',
+        mentions: [],
+        mentionsUser: true,
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+      }),
+    );
 
     await store.ack('user1', tid, m1.id);
 
@@ -438,14 +442,16 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('getUnreadSummaries() returns 0 for fully read thread', async () => {
     const tid = uniqueId('t');
-    const m1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: tid,
-    });
+    const m1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: tid,
+      }),
+    );
     await store.ack('user1', tid, m1.id);
 
     const summaries = await store.getUnreadSummaries('user1', [tid], messageStore);
@@ -454,22 +460,26 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
 
   it('getUnreadSummaries() treats no cursor as fully read (cold-start guard)', async () => {
     const tid = uniqueId('t');
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tid,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'world',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: tid,
-    });
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tid,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'world',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: tid,
+      }),
+    );
 
     // No ack → no cursor → should return 0 (not "all unread")
     // Pre-F069 threads have no cursor; treating them as all-unread
@@ -482,30 +492,36 @@ describe('RedisThreadReadStateStore', { skip: redisIsolationSkipReason(REDIS_URL
   it('getUnreadSummaries() handles multiple threads (mixed cursor states)', async () => {
     const tA = uniqueId('t');
     const tB = uniqueId('t');
-    const mA1 = await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'a1',
-      mentions: [],
-      timestamp: Date.now() - 2000,
-      threadId: tA,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'a2',
-      mentions: [],
-      timestamp: Date.now() - 1000,
-      threadId: tA,
-    });
-    await messageStore.append({
-      userId: 'user1',
-      catId: 'opus',
-      content: 'b',
-      mentions: [],
-      timestamp: Date.now(),
-      threadId: tB,
-    });
+    const mA1 = await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'a1',
+        mentions: [],
+        timestamp: Date.now() - 2000,
+        threadId: tA,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'a2',
+        mentions: [],
+        timestamp: Date.now() - 1000,
+        threadId: tA,
+      }),
+    );
+    await messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'user1',
+        catId: 'opus',
+        content: 'b',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId: tB,
+      }),
+    );
 
     // Ack thread A at first message → 1 unread; thread B has no cursor → 0 (cold-start)
     await store.ack('user1', tA, mA1.id);

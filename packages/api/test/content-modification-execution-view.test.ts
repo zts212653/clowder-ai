@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import type { ContentModificationRecord } from '@cat-cafe/shared';
+import { PersistedQueueDelivery } from '../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { readModificationExecution } from '../src/domains/collaborative-content/modification/execution-view.js';
 import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.js';
 
@@ -33,7 +34,8 @@ test('execution projection consumes the exact canonical child and rejects missin
       review: { reviewId: 'review', receiptRef },
     },
   };
-  const delivered = await f.delivery.deliver({
+  const delivery = new PersistedQueueDelivery({ messages: f.messages, queue: f.queue, progress: async () => {} });
+  const delivered = await delivery.deliver({
     ownerAuthProvenance: 'strict',
     ownerUserId: 'operator',
     threadId: 'thread',
@@ -48,12 +50,25 @@ test('execution projection consumes the exact canonical child and rejects missin
     },
   });
   assert.ok(delivered.message);
+  const pending = await readModificationExecution(
+    { messages: f.messages, queue: f.queue, turnExecutions: f.turns },
+    record,
+  );
+  assert.equal(pending?.state, 'queued');
+  assert.equal(pending?.queueEntryId, delivered.entryId);
+  assert.equal(pending?.parentInvocationId, undefined);
+  assert.equal((await readModificationExecution({ messages: f.messages }, record))?.state, 'unknown');
+  assert.ok(delivered.entryId);
+  const entry = await f.queue.getDurableEntry('thread', delivered.entryId);
+  assert.ok(entry, 'read-only projection must not consume or retire Queue');
+  await f.processor.progressOwnedCarrier(entry, 'codex-astra');
   const childId = await f.waitForAwakening(delivered.message.id);
-  const child = f.turns.get(childId)!;
+  const child = f.turns.get(childId);
+  assert.ok(child);
   assert.notEqual(child.invocationId, child.parentInvocationId);
   const actual = await readModificationExecution({ messages: f.messages, turnExecutions: f.turns }, record);
   assert.equal(actual?.parentInvocationId, child.parentInvocationId);
-  assert.equal(actual?.queueEntryId, delivered.message.queueCustody?.entryId);
+  assert.equal(actual?.queueEntryId, undefined, 'started History is not a pending Queue control target');
   assert.equal(
     (await readModificationExecution({ messages: f.messages, turnExecutions: f.turns }, record))?.state,
     'running',
@@ -62,6 +77,8 @@ test('execution projection consumes the exact canonical child and rejects missin
     null,
     { ...child, userId: 'other' },
     { ...child, catId: 'other' as typeof child.catId },
+    { ...child, invocationId: 'different-child' },
+    { ...child, parentInvocationId: child.invocationId },
     { ...child, causal: { triggerMessageId: 'unrelated' } },
   ]) {
     const view = await readModificationExecution(
@@ -72,11 +89,32 @@ test('execution projection consumes the exact canonical child and rejects missin
     assert.equal(view?.parentInvocationId, undefined, 'a foreign/unrelated child must not provide a stop target');
   }
   assert.equal((await readModificationExecution({ messages: f.messages }, record))?.state, 'unknown');
-  f.turns.transitionTerminal(childId, { status: 'succeeded', endedAt: Date.now() });
+  for (const [status, state] of [
+    ['succeeded', 'finished'],
+    ['canceled', 'cancelled'],
+    ['failed', 'failed'],
+    ['interrupted', 'interrupted'],
+  ] as const) {
+    // Read-model status matrix; do not terminalize the still-running fixture provider twice.
+    assert.equal(
+      (
+        await readModificationExecution(
+          {
+            messages: f.messages,
+            turnExecutions: { get: () => ({ ...child, status, endedAt: Date.now() }) },
+          },
+          record,
+        )
+      )?.state,
+      state,
+    );
+  }
+  await f.close();
   assert.equal(
     (await readModificationExecution({ messages: f.messages, turnExecutions: f.turns }, record))?.state,
-    'finished',
+    'failed',
   );
-  delivered.message.source!.meta!.reviewReceiptRef = 'foreign-receipt';
+  assert.ok(delivered.message.source?.meta);
+  delivered.message.source.meta.reviewReceiptRef = 'foreign-receipt';
   assert.equal(await readModificationExecution({ messages: f.messages, turnExecutions: f.turns }, record), undefined);
 });

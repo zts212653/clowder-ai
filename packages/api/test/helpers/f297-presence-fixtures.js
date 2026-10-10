@@ -36,7 +36,6 @@ export async function realPresenceSource(deps, overrides = {}) {
   const service = createActiveExecutionService({
     invocationTracker: deps.invocationTracker,
     recordStore: deps.recordStore,
-    draftStore: deps.draftStore,
     turnExecutionStore: deps.turnExecutionStore,
     dynamicTaskStore: { getAll: () => deps.tasks },
     log: { info() {}, warn() {} },
@@ -81,7 +80,8 @@ export function runningManagedCommandTask({ id, threadId, catId, userId, state =
   };
 }
 
-export async function startRunningRecordWithDraft(deps, { threadId, userId, catId }) {
+/** A running InvocationRecord for one member, as QueueProcessor leaves it once the member started. */
+export async function startRunningRecord(deps, { threadId, userId, catId }) {
   const created = await deps.recordStore.create({
     threadId,
     userId,
@@ -92,13 +92,32 @@ export async function startRunningRecordWithDraft(deps, { threadId, userId, catI
   });
   // create() 落地是 `queued`；只有 running 才进 canonical liveness 与 running 索引。
   await deps.recordStore.update(created.invocationId, { status: 'running' });
-  await deps.draftStore.upsert({
-    userId,
-    threadId,
-    invocationId: created.invocationId,
-    catId,
-    content: 'thinking…',
-    updatedAt: Date.now(),
-  });
   return created.invocationId;
+}
+
+/**
+ * A running record whose slot the real tracker holds for that execution: how a member runs in this
+ * process, and what F117 KD-23 counts as processing (a streamed draft is not liveness).
+ */
+export async function startHeldRunningRecord(deps, { threadId, userId, catId }) {
+  const executionId = await startRunningRecord(deps, { threadId, userId, catId });
+  deps.invocationTracker.start(threadId, catId, userId, [catId], executionId);
+  return executionId;
+}
+
+/** A running durable child turn of `parentInvocationId`: the turn's own truth when no slot is held here. */
+export async function startRunningChild(
+  deps,
+  { parentInvocationId, threadId, userId, catId, invocationId, startedAt },
+) {
+  await deps.turnExecutionStore.createRunning({
+    invocationId,
+    parentInvocationId,
+    threadId,
+    userId,
+    catId,
+    executionKind: 'ordinary',
+    startedAt: startedAt ?? Date.now(),
+  });
+  return invocationId;
 }

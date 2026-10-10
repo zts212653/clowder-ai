@@ -317,7 +317,27 @@ function audienceOf(msg: StoredMessage): CanonicalAudience {
 }
 
 function hostRelayedEpistemic(msg: StoredMessage): EpistemicStatus {
+  if (msg.from?.kind === 'user') return 'user_intent';
+  if (msg.from?.kind === 'agent') return 'inference';
+  if (msg.from) return 'observation';
   return msg.catId === null ? 'user_intent' : 'inference';
+}
+
+function hostRelayedActor(msg: StoredMessage): MessageEnvelope['actor'] {
+  switch (msg.from?.kind) {
+    case 'user':
+      return { kind: 'user', id: msg.from.userId };
+    case 'agent':
+      return { kind: 'cat', id: msg.from.catId };
+    case 'external':
+      return { kind: 'user', id: msg.from.sender?.id ?? msg.from.connectorId };
+    case 'plugin':
+      return { kind: 'plugin', id: msg.from.instanceId };
+    case 'system':
+      return { kind: 'system', id: msg.from.service };
+    default:
+      return msg.catId === null ? { kind: 'user', id: msg.userId } : { kind: 'cat', id: msg.catId };
+  }
 }
 
 /**
@@ -361,7 +381,7 @@ export function projectEnvelope(msg: StoredMessage): MessageEnvelope | null {
   return {
     ...base,
     revision: 1,
-    actor: msg.catId === null ? { kind: 'user', id: msg.userId } : { kind: 'cat', id: msg.catId },
+    actor: hostRelayedActor(msg),
     payload: {
       provenance: { origin: { kind: 'host' }, epistemicStatus: hostRelayedEpistemic(msg) },
       elements: [{ elementId: `el_${msg.id}_0`, kind: 'text', payload: { text: msg.content } }],

@@ -77,6 +77,7 @@ describe('ChatMessage author precedence', () => {
     const msg = {
       id: 'm1',
       type: 'user' as const,
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: 'cross-posted review',
       timestamp: Date.now(),
@@ -119,6 +120,7 @@ describe('ChatMessage author precedence', () => {
     const msg = {
       id: 'm-no-variant',
       type: 'assistant' as const,
+      from: { kind: 'agent', catId: 'codex' },
       catId: 'codex',
       content: 'done',
       timestamp: Date.now(),
@@ -143,6 +145,7 @@ describe('ChatMessage author precedence', () => {
     const msg = {
       id: 'm2',
       type: 'user' as const,
+      from: { kind: 'user', userId: 'test-user' },
       content: '你好',
       timestamp: Date.now(),
       contentBlocks: [],
@@ -186,6 +189,7 @@ describe('ChatMessage author precedence', () => {
     const msg = {
       id: 'm-scheduler-reply',
       type: 'assistant' as const,
+      from: { kind: 'agent', catId: 'gpt52' },
       catId: 'gpt52',
       content: '该喝水了，去接一杯温水。',
       timestamp: Date.now(),
@@ -231,6 +235,7 @@ describe('ChatMessage author precedence', () => {
     const msg = {
       id: 'm-recovered',
       type: 'assistant' as const,
+      from: { kind: 'agent', catId: 'fable-5' },
       catId: 'fable-5',
       content: '买到了，正在回家。',
       timestamp: 1700000000000,

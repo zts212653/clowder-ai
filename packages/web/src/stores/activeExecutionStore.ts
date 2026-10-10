@@ -93,6 +93,8 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
     const current = get();
     if (!current.executionsByKey[key]) return;
     set({
+      // A response started before this confirmed cancellation cannot restore its slot.
+      requestVersion: current.requestVersion + 1,
       executionsByKey: Object.fromEntries(
         Object.entries(current.executionsByKey).filter(([entryKey]) => entryKey !== key),
       ),
@@ -109,6 +111,6 @@ export const useActiveExecutionStore = create<ActiveExecutionState>((set, get) =
     });
   },
   reset() {
-    set(INITIAL_STATE);
+    set({ ...INITIAL_STATE, requestVersion: get().requestVersion + 1 });
   },
 }));

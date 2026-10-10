@@ -3,12 +3,12 @@
  *
  * 砚砚 PR #1421 review P1: useSocket-thread-guard 测试只验 useSocket forward
  * 到 onMessage (vi.fn())，没真实跑 useAgentMessages.handleAgentMessage 的 active vs
- * background 分发。如果 dispatch 实现把 active/bg 路由反了 / bg refs 没接上 /
- * background 误写 flat state，旧测试仍会绿。
+ * background 分发。如果 dispatch 实现把 active/bg 路由反了 / background 误写 flat
+ * state，旧测试仍会绿。
  *
- * 这里钉真实 dispatch 行为：
- *   - currentThreadId=A，收 threadId=B 的 msg → background path（thread-scoped writer 被调）
- *   - currentThreadId=B，收 threadId=B 的 msg → active path（store.addMessage / setCatStatus 被调）
+ * 这里钉真实 dispatch 行为（正文在两条路径上都按 messageId 写入它指名的 response）：
+ *   - currentThreadId=A，收 threadId=B 的 msg → background path（thread-scoped status/slot writer 被调）
+ *   - currentThreadId=B，收 threadId=B 的 msg → active path（flat setCatStatus 被调）
  */
 
 import React, { act } from 'react';
@@ -41,7 +41,6 @@ const mockRemoveThreadActiveInvocation = vi.fn();
 const mockUpdateThreadCatStatus = vi.fn();
 const mockBatchStreamChunkUpdate = vi.fn();
 const mockPatchThreadMessage = vi.fn();
-const mockReplaceThreadMessageId = vi.fn();
 const mockReplaceThreadTargetCats = vi.fn();
 const mockRemoveThreadMessage = vi.fn();
 const mockAppendToThreadMessage = vi.fn();
@@ -50,7 +49,6 @@ const mockAppendRichBlockToThread = vi.fn();
 const mockSetThreadMessageMetadata = vi.fn();
 const mockSetThreadMessageUsage = vi.fn();
 const mockSetThreadMessageThinking = vi.fn();
-const mockSetThreadMessageStreamInvocation = vi.fn();
 const mockClearThreadActiveInvocation = vi.fn();
 const mockResetThreadInvocationState = vi.fn();
 const mockSetThreadMessageStreaming = vi.fn();
@@ -82,15 +80,10 @@ const storeState = {
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
 
+  // Thread-scoped: background status/slot writers + named-message body writes
+  // (hooks/named-message-writer.ts), which the active and background paths share.
   addMessageToThread: mockAddMessageToThread,
-  // F183 B1.2.3: active stream new-bubble path → reducer → replaceMessages
-  replaceMessages: vi.fn((msgs: unknown[]) => {
-    storeState.messages = msgs as typeof storeState.messages;
-  }),
-  // F183 B1.7+: bg path reducer wire-up → replaceThreadMessages (thread-scoped)
-  replaceThreadMessages: vi.fn(),
   incrementUnread: vi.fn(),
-  hasMore: true,
   setThreadLoading: mockSetThreadLoading,
   setThreadHasActiveInvocation: mockSetThreadHasActiveInvocation,
   setThreadCatInvocation: mockSetThreadCatInvocation,
@@ -99,7 +92,6 @@ const storeState = {
   updateThreadCatStatus: mockUpdateThreadCatStatus,
   batchStreamChunkUpdate: mockBatchStreamChunkUpdate,
   patchThreadMessage: mockPatchThreadMessage,
-  replaceThreadMessageId: mockReplaceThreadMessageId,
   replaceThreadTargetCats: mockReplaceThreadTargetCats,
   removeThreadMessage: mockRemoveThreadMessage,
   appendToThreadMessage: mockAppendToThreadMessage,
@@ -108,7 +100,6 @@ const storeState = {
   setThreadMessageMetadata: mockSetThreadMessageMetadata,
   setThreadMessageUsage: mockSetThreadMessageUsage,
   setThreadMessageThinking: mockSetThreadMessageThinking,
-  setThreadMessageStreamInvocation: mockSetThreadMessageStreamInvocation,
   clearThreadActiveInvocation: mockClearThreadActiveInvocation,
   resetThreadInvocationState: mockResetThreadInvocationState,
   setThreadMessageStreaming: mockSetThreadMessageStreaming,
@@ -184,25 +175,21 @@ describe('useAgentMessages — F173 Phase E single dispatch (KD-1 handler unific
           threadId: 'thread-background', // 不同于 currentThreadId
           content: 'hello from bg thread',
           invocationId: 'inv-bg',
+          origin: 'stream',
+          messageId: 'resp-1',
           timestamp: Date.now(),
         });
       });
 
-      // F183 B1.8: background path must write through thread-scoped writers — canonical
-      // invocationId 走 reducer 的 replaceThreadMessages（首选）或 legacy addMessageToThread
-      // (reducer no-op fallback)。两路都应使用 deterministic id `msg-{inv}-{cat}-assistant_text`
-      // (B1.8 reducer makePlaceholder via ensureMessageId) 或 `msg-{inv}-{cat}` (legacy
-      // deriveBubbleId)。两者都必须不写 active flat 状态。
-      const bgAddCalls = mockAddMessageToThread.mock.calls.filter((c) => c[0] === 'thread-background');
-      const bgReplaceCalls = (storeState.replaceThreadMessages as ReturnType<typeof vi.fn>).mock.calls.filter(
-        (c) => c[0] === 'thread-background',
+      // Background body writes go through the thread-scoped writer into the named response:
+      // created under the server id in thread-background, then appended. No client-derived
+      // bubble id (`msg-{inv}-{cat}`) is ever created.
+      expect(mockAddMessageToThread).toHaveBeenCalledWith(
+        'thread-background',
+        expect.objectContaining({ id: 'resp-1', type: 'assistant', catId: 'opus' }),
       );
-      expect(bgAddCalls.length + bgReplaceCalls.length).toBeGreaterThan(0);
-      const allBgIds = [
-        ...bgAddCalls.map((c) => (c[1] as { id?: string })?.id),
-        ...bgReplaceCalls.flatMap((c) => (c[1] as Array<{ id?: string }>) ?? []).map((m) => m?.id),
-      ].filter((id): id is string => !!id);
-      expect(allBgIds.some((id) => id.startsWith('msg-inv-bg-opus'))).toBe(true);
+      expect(mockAddMessageToThread.mock.calls.every((c) => (c[1] as { id?: string }).id === 'resp-1')).toBe(true);
+      expect(mockAppendToThreadMessage).toHaveBeenCalledWith('thread-background', 'resp-1', 'hello from bg thread');
       expect(mockAddThreadActiveInvocation).toHaveBeenCalledWith('thread-background', 'inv-bg', 'opus', 'execute');
       expect(mockUpdateThreadCatStatus).toHaveBeenCalledWith('thread-background', 'opus', 'streaming');
 
@@ -246,14 +233,21 @@ describe('useAgentMessages — F173 Phase E single dispatch (KD-1 handler unific
           catId: 'opus',
           threadId: 'thread-active', // same as current
           content: 'hello from active thread',
+          origin: 'stream',
+          messageId: 'resp-1',
           timestamp: Date.now(),
         });
       });
 
-      // background path NOT called
-      expect(mockAddMessageToThread).not.toHaveBeenCalled();
+      // background path NOT called (its thread-scoped status writer stays untouched)
+      expect(mockUpdateThreadCatStatus).not.toHaveBeenCalled();
       // active path must update cat status (text event → 'streaming')
       expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'streaming');
+      // the body lands in the named response of the open thread
+      expect(mockAddMessageToThread).toHaveBeenCalledWith(
+        'thread-active',
+        expect.objectContaining({ id: 'resp-1', type: 'assistant', catId: 'opus' }),
+      );
     });
 
     it('projects a typed context briefing into the active timeline', () => {

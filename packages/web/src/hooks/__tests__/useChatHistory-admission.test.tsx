@@ -62,7 +62,6 @@ describe('useChatHistory runtime admission', () => {
       threads: [],
       isLoadingThreads: false,
       queue: [],
-      queuePaused: false,
     });
     apiFetchMock.mockImplementation((url: string) => {
       if (url.includes('/api/messages')) {

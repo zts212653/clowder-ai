@@ -92,8 +92,8 @@ export async function closeVoteInternal(
   if (messageStore) {
     try {
       const stored = await messageStore.append({
+        from: { kind: 'system', service: 'vote' },
         userId: votingState.createdBy,
-        catId: null,
         content: `投票结果: ${votingState.question}`,
         mentions: [],
         timestamp: Date.now(),
@@ -105,6 +105,7 @@ export async function closeVoteInternal(
         threadId,
         message: {
           id: stored.id,
+          from: stored.from,
           type: 'connector',
           content: stored.content,
           source: VOTE_RESULT_SOURCE,
@@ -290,8 +291,8 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
       if (messageStore) {
         try {
           const stored = await messageStore.append({
+            from: { kind: 'system', service: 'vote' },
             userId: 'system',
-            catId: null,
             content: `投票结果: ${votingState.question}`,
             mentions: [],
             timestamp: Date.now(),
@@ -303,6 +304,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
             threadId,
             message: {
               id: stored.id,
+              from: stored.from,
               type: 'connector',
               content: stored.content,
               source: VOTE_RESULT_SOURCE,
@@ -399,8 +401,8 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
     if (messageStore) {
       try {
         const stored = await messageStore.append({
+          from: { kind: 'system', service: 'vote' },
           userId: result.createdBy,
-          catId: null,
           content: `投票结果: ${result.question}`,
           mentions: [],
           timestamp: Date.now(),
@@ -412,6 +414,7 @@ export const voteRoutes: FastifyPluginAsync<VoteRoutesOptions> = async (app, opt
           threadId,
           message: {
             id: stored.id,
+            from: stored.from,
             type: 'connector',
             content: stored.content,
             source: VOTE_RESULT_SOURCE,

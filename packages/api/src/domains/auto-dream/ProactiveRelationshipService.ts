@@ -1,4 +1,5 @@
 import type { CatId } from '@cat-cafe/shared';
+import { messageFrom } from '../cats/services/stores/message-from.js';
 import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
 import type { AutoDreamStore } from './AutoDreamStore.js';
 import { ownedSeedSourceRevision } from './private-seed-contract.js';
@@ -155,7 +156,9 @@ export class ProactiveRelationshipService {
     let reconciled = 0;
     for (let index = 0; index < messages.length; index += 1) {
       const message = messages[index];
-      if (!message || message.userId !== ownerUserId || message.catId !== null) continue;
+      if (!message || message.userId !== ownerUserId || messageFrom(message).kind !== 'user') {
+        continue;
+      }
       const existing = await this.options.store.proactive.findNaturalEchoBySource(
         ownerUserId,
         config.bedroomThreadId,
@@ -219,9 +222,9 @@ function buildCanonicalMessage(
   timestamp: number,
 ) {
   return {
+    from: { kind: 'agent' as const, catId: visit.catId as CatId },
     threadId: visit.homeThreadId,
     userId: visit.ownerUserId,
-    catId: visit.catId as CatId,
     content,
     mentions: [] as CatId[],
     origin: 'callback' as const,

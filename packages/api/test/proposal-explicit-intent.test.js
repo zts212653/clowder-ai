@@ -39,10 +39,18 @@ describe('F128 explicit intent override (round-5)', () => {
     // + duplicate report-back. Fix: detect explicit `#ideate` from raw
     // initialMessage in enrich, omit chain protocol in parallel mode.
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
-        return { targetCats: [], intent: { intent: 'ideate' }, hasMentions: false };
+        return {
+          targetCats: [],
+          intent: { intent: 'ideate' },
+          hasMentions: false,
+        };
       },
     };
     const queueProcessor = {
@@ -53,7 +61,6 @@ describe('F128 explicit intent override (round-5)', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -77,15 +84,15 @@ describe('F128 explicit intent override (round-5)', () => {
     const body = JSON.parse(res.body);
     const entries = invocationQueue.list(body.threadId, 'alice');
     assert.equal(entries.length, 1);
-    const enqueued = entries[0].content;
+    const enqueued = entries[0].payload.content;
 
     // Runtime behaviour: dispatch wakes ALL preferredCats in parallel.
     assert.deepEqual(
-      entries[0].targetCats,
-      ['kimi', 'gemini', 'codex'],
+      new Set(entries.flatMap((entry) => entry.targets)),
+      new Set(['kimi', 'gemini', 'codex']),
       'explicit #ideate must wake all preferredCats in parallel',
     );
-    assert.equal(entries[0].intent, 'ideate', 'intent must be ideate (parallel)');
+    assert.equal(entries[0].execution.intent, 'ideate', 'intent must be ideate (parallel)');
 
     // Message contract: cats receive the main thread header but NOT the
     // serial chain protocol section (woken in parallel, not as a chain).
@@ -136,12 +143,20 @@ describe('F128 explicit intent override (round-5)', () => {
     // them as serial multi-cat execution (the F088 router contract for
     // `#execute` outside F128-specific override).
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const router = {
       async resolveTargetsAndIntent() {
         // Simulate real router: raw `#execute @kimi @gemini @codex` →
         // resolved.targetCats = [kimi, gemini, codex].
-        return { targetCats: ['kimi', 'gemini', 'codex'], intent: { intent: 'execute' }, hasMentions: true };
+        return {
+          targetCats: ['kimi', 'gemini', 'codex'],
+          intent: { intent: 'execute' },
+          hasMentions: true,
+        };
       },
     };
     const queueProcessor = {
@@ -152,7 +167,6 @@ describe('F128 explicit intent override (round-5)', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const { proposalId } = JSON.parse(
@@ -175,10 +189,14 @@ describe('F128 explicit intent override (round-5)', () => {
     assert.equal(entries.length, 1);
 
     assert.deepEqual(
-      entries[0].targetCats,
-      ['kimi', 'gemini', 'codex'],
+      new Set(entries.flatMap((entry) => entry.targets)),
+      new Set(['kimi', 'gemini', 'codex']),
       'explicit #execute + preferredCats=[] + multi-target raw must preserve all router-resolved targets',
     );
-    assert.equal(entries[0].intent, 'execute', 'intent stays execute (serial multi-cat, not parallel ideation)');
+    assert.equal(
+      entries[0].execution.intent,
+      'execute',
+      'intent stays execute (serial multi-cat, not parallel ideation)',
+    );
   });
 });

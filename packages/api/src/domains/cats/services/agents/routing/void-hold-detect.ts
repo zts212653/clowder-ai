@@ -105,7 +105,7 @@ export interface VoidHoldInput {
 }
 
 export interface VoidHoldEvaluation {
-  /** True iff the void-hold-hint should fire (caller emits the connector + counter). */
+  /** True iff the internal void-hold correction signal and counter should fire. */
   readonly shouldEmit: boolean;
   /**
    * Matched HOLD_PATTERN id when text claims hold — preserved even when

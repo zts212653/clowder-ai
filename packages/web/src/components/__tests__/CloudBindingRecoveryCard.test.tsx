@@ -83,7 +83,6 @@ describe('CloudBindingRecoveryCard', () => {
   it('preselects one authorized conversation and binds before retrying the exact source attempt', async () => {
     const conversationId = '6a928d55-ed7c-83ee-adbf-56bef0ffe336';
     mockApiFetch.mockImplementation(async (path, init) => {
-      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(pluginState([{ conversationId, displayTitle: '太阳爪会话' }]));
       }
@@ -93,7 +92,7 @@ describe('CloudBindingRecoveryCard', () => {
       if (path === '/api/threads/thread-one/cloud-bindings' && init?.method === 'PATCH') {
         return jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } });
       }
-      if (path === '/api/messages/source-one/queue-targets/gpt-pro/retry') {
+      if (path === '/api/messages/source-one/delivery-targets/gpt-pro/retry') {
         return jsonResponse({ status: 'retry_queued', attemptId: 'attempt-two' }, 202);
       }
       throw new Error(`unexpected ${String(path)}`);
@@ -117,7 +116,7 @@ describe('CloudBindingRecoveryCard', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ catId: 'gpt-pro', chatUrl: `https://chatgpt.com/c/${conversationId}` }),
     });
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/queue-targets/gpt-pro/retry', {
+    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/delivery-targets/gpt-pro/retry', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ attemptId: 'attempt-one' }),
@@ -128,7 +127,6 @@ describe('CloudBindingRecoveryCard', () => {
 
   it('requires an explicit inline choice when multiple conversations are authorized', async () => {
     mockApiFetch.mockImplementation(async (path) => {
-      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(
           pluginState([
@@ -152,7 +150,7 @@ describe('CloudBindingRecoveryCard', () => {
     expect(container.querySelector<HTMLButtonElement>('button[data-recovery-primary]')?.disabled).toBe(false);
   });
 
-  it('hydrates a missing retry fence and makes title-less candidates distinguishable and inspectable', async () => {
+  it('does not invent a missing retry fence and keeps title-less candidates inspectable', async () => {
     const olderId = '6a883fad-1111-2222-3333-444444444444';
     const newerId = '6a928d55-aaaa-bbbb-cccc-dddddddddddd';
     mockApiFetch.mockImplementation(async (path, init) => {
@@ -172,16 +170,8 @@ describe('CloudBindingRecoveryCard', () => {
         ],
         ['GET /api/threads/thread-one/cloud-bindings', jsonResponse({ bindings: {} })],
         [
-          'GET /api/messages/source-one/queue-targets/gpt-pro/retry-authority',
-          jsonResponse({ attemptId: 'attempt-hydrated' }),
-        ],
-        [
           'PATCH /api/threads/thread-one/cloud-bindings',
           jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${newerId}` } }),
-        ],
-        [
-          'POST /api/messages/source-one/queue-targets/gpt-pro/retry',
-          jsonResponse({ status: 'retry_queued', attemptId: 'attempt-next' }, 202),
         ],
       ]);
       const response = responses.get(`${init?.method ?? 'GET'} ${path}`);
@@ -211,16 +201,14 @@ describe('CloudBindingRecoveryCard', () => {
     act(() => choices[0]?.click());
     const primary = container.querySelector<HTMLButtonElement>('button[data-recovery-primary]');
     expect(primary?.disabled).toBe(false);
+    expect(primary?.textContent).toBe('连接此会话');
+    expect(container.textContent).toContain('缺少可验证的发送记录');
     await act(async () => {
       primary?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(mockApiFetch).toHaveBeenCalledWith('/api/messages/source-one/queue-targets/gpt-pro/retry', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ attemptId: 'attempt-hydrated' }),
-    });
+    expect(mockApiFetch.mock.calls.some(([path]) => path.endsWith('/retry'))).toBe(false);
   });
 
   it('opens ChatGPT only by owner click when no conversation has been authorized', async () => {
@@ -249,7 +237,6 @@ describe('CloudBindingRecoveryCard', () => {
 
   it('ignores malformed conversation candidates instead of making them actionable', async () => {
     mockApiFetch.mockImplementation(async (path) => {
-      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') {
         return jsonResponse(
           pluginState([
@@ -271,12 +258,11 @@ describe('CloudBindingRecoveryCard', () => {
   it('continues an already persisted exact route without writing it again', async () => {
     const conversationId = 'conversation-bound';
     mockApiFetch.mockImplementation(async (path, init) => {
-      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState([{ conversationId }]));
       if (path === '/api/threads/thread-one/cloud-bindings') {
         return jsonResponse({ bindings: { 'gpt-pro': `https://chatgpt.com/c/${conversationId}` } });
       }
-      if (path === '/api/messages/source-one/queue-targets/gpt-pro/retry') {
+      if (path === '/api/messages/source-one/delivery-targets/gpt-pro/retry') {
         return jsonResponse({ status: 'retry_queued' }, 202);
       }
       throw new Error(`unexpected ${String(path)} ${String(init?.method)}`);
@@ -295,7 +281,7 @@ describe('CloudBindingRecoveryCard', () => {
       mockApiFetch.mock.calls.filter(([path, init]) => path.includes('/cloud-bindings') && init?.method === 'PATCH'),
     ).toHaveLength(0);
     expect(mockApiFetch).toHaveBeenCalledWith(
-      '/api/messages/source-one/queue-targets/gpt-pro/retry',
+      '/api/messages/source-one/delivery-targets/gpt-pro/retry',
       expect.any(Object),
     );
   });
@@ -304,7 +290,6 @@ describe('CloudBindingRecoveryCard', () => {
     const conversationId = 'conversation-route-kept';
     let retries = 0;
     mockApiFetch.mockImplementation(async (path, init) => {
-      if (path.endsWith('/retry-authority')) return jsonResponse({ attemptId: 'attempt-one' });
       if (path === '/api/plugins/personal-chrome') return jsonResponse(pluginState([{ conversationId }]));
       if (path.endsWith('/cloud-bindings'))
         return jsonResponse({
@@ -336,7 +321,7 @@ describe('CloudBindingRecoveryCard', () => {
       mockApiFetch.mock.calls.filter(([path, init]) => path.includes('/cloud-bindings') && init?.method === 'PATCH'),
     ).toHaveLength(1);
     expect(
-      mockApiFetch.mock.calls.filter(([path]) => path === '/api/messages/source-one/queue-targets/gpt-pro/retry'),
+      mockApiFetch.mock.calls.filter(([path]) => path === '/api/messages/source-one/delivery-targets/gpt-pro/retry'),
     ).toHaveLength(2);
   });
 });

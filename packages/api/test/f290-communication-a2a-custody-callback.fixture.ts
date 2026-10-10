@@ -3,7 +3,6 @@ import { createCatId } from '@cat-cafe/shared';
 import Fastify from 'fastify';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.js';
-import { QueuedMessageCustodyCoordinator } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../src/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { AgentRegistry } from '../src/domains/cats/services/agents/registry/AgentRegistry.js';
 import { AgentRouter } from '../src/domains/cats/services/agents/routing/AgentRouter.js';
@@ -14,7 +13,7 @@ import { documentWriterFixture } from './f290-communication-document-writer.fixt
 export const DELEGATE = createCatId('opus');
 export const NEXT_CAT = createCatId('codex');
 
-/** Real HTTP handler, router, Queue/custody and current Work authority. Busy slots prevent provider dispatch. */
+/** Real HTTP handler, router, canonical Queue and current Work authority. Busy slots prevent provider dispatch. */
 export async function callbackCustodyFixture() {
   const f = await documentWriterFixture();
   const queue = new InvocationQueue();
@@ -38,7 +37,6 @@ export async function callbackCustodyFixture() {
     invocationRecordStore: records as unknown as QueueDeps['invocationRecordStore'],
     router: router as unknown as QueueDeps['router'],
     messageStore: f.messages,
-    queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: f.messages }),
     socketManager: sockets as never,
     log: app.log,
   });

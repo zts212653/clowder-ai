@@ -117,8 +117,8 @@ export class ApprovalIngress {
     if (!stored) {
       try {
         stored = await this.deps.messageStore.append({
+          from: { kind: 'agent', catId: draft.requesterCatId },
           userId: draft.ownerUserId,
-          catId: draft.requesterCatId,
           content: draft.cardContent,
           mentions: [],
           timestamp: draft.createdAt,
@@ -300,6 +300,7 @@ export class ApprovalIngress {
         threadId: draft.cardThreadId,
         message: {
           id: stored.id,
+          from: stored.from,
           type: 'cat',
           catId: draft.requesterCatId,
           content: stored.content,

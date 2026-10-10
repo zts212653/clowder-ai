@@ -120,7 +120,7 @@ test('cloud schema distinguishes root sends from returns and rejects invocation-
     undefined,
   );
   assert.equal(bodies[1].replyTo, 'exact-source');
-  for (const extra of [{ action: {} }, { coordination: { phase: 'active' } }, { streamDisposition: 'replace_final' }]) {
+  for (const extra of [{ action: {} }, { coordination: { phase: 'active' } }]) {
     assert.equal((await client.callTool({ name: post.name, arguments: { ...root, ...extra } })).isError, true);
   }
   assert.equal(bodies.length, 2, 'unsupported fields must not be stripped into an ordinary write');

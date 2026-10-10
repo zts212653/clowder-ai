@@ -18,8 +18,10 @@ import {
   isCarrierRefreshGeneration,
   refreshHandledActionSuccessor,
 } from '../dist/domains/ball-custody/action-successor-state-machine.js';
-import { actionSuccessorInvocationIdempotencyKey } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { actionSuccessorCarrierKey } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
+import {
+  actionSuccessorCarrierKey,
+  actionSuccessorInvocationIdempotencyKey,
+} from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 
 const SUBJECT = 'subject:task:task-4058';
 const PREDICATE = canonicalizeActionTerminalPredicate({

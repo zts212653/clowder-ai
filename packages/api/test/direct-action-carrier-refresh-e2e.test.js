@@ -1,13 +1,13 @@
 /**
  * F167 carrier refresh — end to end, with a real provider boundary.
  *
- * Real: callback route, InvocationQueue, QueueProcessor, QueuedMessageCustodyCoordinator,
+ * Real: callback route, atomic InvocationQueue/History admission, QueueProcessor,
  * MessageStore, InvocationRecordStore, the lease transition and the carrier recognition.
  * Faked at the edges only: the admission service answers `safe_wait` for an existing lease, the lease
  * store runs the real state machine in memory, and the provider (`router.routeExecution`) is a counter.
  *
  * The first generation is NOT hand-built evidence: it runs through the real processor, so the
- * `handled` custody and the succeeded InvocationRecord the refresh relies on are what production
+ * exact response/dispatchRef and succeeded InvocationRecord the refresh relies on are what production
  * actually writes.
  */
 import assert from 'node:assert/strict';
@@ -23,19 +23,20 @@ import {
   recordActionSuccessorOutcome,
   refreshHandledActionSuccessor,
 } from '../dist/domains/ball-custody/action-successor-state-machine.js';
-import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
-import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import {
   actionSuccessorCarrierKey,
-  createInitialQueuedMessageCustody,
-  QueuedMessageCustodyCoordinator,
-} from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import { QueuedMessageCustodyStartupReconciler } from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupReconciler.js';
+  actionSuccessorInvocationKeyForTarget,
+  InvocationQueue,
+} from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { InvocationRegistry } from '../dist/domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { InvocationTracker } from '../dist/domains/cats/services/agents/invocation/InvocationTracker.js';
 import { QueueProcessor } from '../dist/domains/cats/services/agents/invocation/QueueProcessor.js';
 import { InMemoryTurnExecutionStore } from '../dist/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../dist/domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
+import {
+  MessageStore,
+  settleLifecycleResponseInputs,
+} from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
 import { callbacksRoutes } from '../dist/routes/callbacks.js';
 
@@ -128,10 +129,11 @@ function createLeaseStore(initial) {
  * The real record store, except what the route reads for the OLD carrier's execution: the exact-key lookup, and
  * optionally the one persistent record `hiddenRecordId` that custody's lineage would otherwise lead to.
  */
-function withRecordLookup(records, lookup, hiddenRecordId) {
+function withRecordLookup(records, lookup, hiddenRecordId, recordById) {
   return new Proxy(records, {
     get(target, property) {
       if (property === 'getByIdempotencyKey') return lookup;
+      if (property === 'get' && recordById) return recordById;
       if (property === 'get' && hiddenRecordId) return (id) => (id === hiddenRecordId ? null : target.get(id));
       const value = target[property];
       return typeof value === 'function' ? value.bind(target) : value;
@@ -157,77 +159,55 @@ describe('direct action carrier refresh, route to provider', () => {
   /** Resolved by default; a test replaces it to keep a provider run in flight until it releases it. */
   let providerGate;
 
-  function carrierCustody(entry, fence, text) {
-    const key = actionSuccessorCarrierKey(fence, HOLDER);
-    return {
-      ...createInitialQueuedMessageCustody(entry),
-      carrierByTargetCatId: {
-        [HOLDER]: {
-          entryId: entry.id,
-          idempotencyKey: key,
-          actionSuccessorFence: fence,
-          source: 'agent',
-          sourceCategory: 'a2a',
-          callerCatId: PREDECESSOR,
-          a2aTriggerMessageId: text,
-          autoExecute: true,
-          createdAt: entry.createdAt,
-        },
-      },
-    };
-  }
-
-  /** The ORIGINAL generation, dispatched exactly as a first dispatch would be, run by the real processor. */
+  /** Original generation uses the same atomic admission and response contract as the public route. */
   async function runOriginalGeneration(lease) {
     leaseStore.install(lease);
     const fence = buildActionSuccessorFence(lease, lease.dispatchId);
-    const queued = queue.enqueue({
-      threadId: target.id,
-      userId: 'user-1',
-      ownerAuthProvenance: 'strict',
-      content: 'Implement task (original)',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: [HOLDER],
-      callerCatId: PREDECESSOR,
-      intent: 'execute',
-      autoExecute: true,
-      idempotencyKey: actionSuccessorCarrierKey(fence, HOLDER),
-      actionSuccessorFence: fence,
-    });
-    const entry = queued.entry;
-    const message = messages.append({
-      userId: 'user-1',
-      threadId: target.id,
-      catId: PREDECESSOR,
-      content: 'Implement task (original)',
-      mentions: [HOLDER],
-      origin: 'callback',
-      timestamp: entry.createdAt,
-      deliveryStatus: 'queued',
-      queueCustody: carrierCustody(entry, fence, 'message-original'),
-    });
-    queue.backfillMessageId(target.id, 'user-1', entry.id, message.id);
-    entry.messageId = message.id;
-    assert.equal(await processor.progressOwnedCarrier(entry, HOLDER), 'started');
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      const handled = messages.getById(message.id)?.queueCustody?.handledByCatIds?.includes(HOLDER);
-      if (handled) return { message, fence };
+    const from = { kind: 'agent', catId: PREDECESSOR };
+    const queued = await queue.send(
+      messages,
+      {
+        userId: 'user-1',
+        threadId: target.id,
+        from,
+        content: 'Implement task (original)',
+        mentions: [HOLDER],
+        origin: 'callback',
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+        idempotencyKey: actionSuccessorCarrierKey(fence, HOLDER),
+      },
+      {
+        kind: 'conversation_input',
+        threadId: target.id,
+        userId: 'user-1',
+        from,
+        ownerAuthProvenance: 'strict',
+        content: 'Implement task (original)',
+        sourceCategory: 'a2a',
+        targetCats: [HOLDER],
+        intent: 'execute',
+        autoExecute: true,
+        actionSuccessorFence: fence,
+      },
+    );
+    assert.equal(queued.outcome, 'enqueued');
+    const { message, entry } = queued;
+    assert.ok(message && entry);
+    assert.ok(['started', 'already_processing'].includes(await processor.progressOwnedCarrier(entry, HOLDER)));
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const ref = messages.getById(message.id)?.lifecycle?.dispatchRefs?.[0];
+      if (ref?.phase === 'settled') return { message, fence };
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    const custody = messages.getById(message.id)?.queueCustody;
     assert.fail(
-      `the original generation was never handled by the real processor: ${JSON.stringify({
-        starts: starts.length,
-        warnings: warnings.map(
-          (args) => `${args[0]}: ${JSON.stringify(args[1])?.slice(0, 160)} ${String(args[2] ?? '')}`,
-        ),
-        entry: queue.getEntrySnapshot(target.id, 'user-1', entry.id)?.status ?? 'gone',
-        handled: custody?.handledByCatIds,
-        failed: custody?.failedByCatIds,
-        attempts: custody?.targetAttempts,
-        records: [...(records.scanAllSync?.() ?? [])].length,
-      })}`,
+      'original generation never settled: ' +
+        JSON.stringify({
+          starts,
+          warnings,
+          source: messages.getById(message.id),
+          entry: queue.list(target.id, 'user-1'),
+        }),
     );
   }
 
@@ -237,12 +217,20 @@ describe('direct action carrier refresh, route to provider', () => {
     leaseStore = createLeaseStore(undefined);
     app = Fastify();
     messages = new MessageStore();
-    queue = new InvocationQueue();
+    queue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId }) => {
+        void processor.requestDrain(threadId);
+      },
+    });
     records = new InvocationRecordStore();
     registry = new InvocationRegistry();
     unavailable = [];
     starts = [];
     warnings = [];
+    app.log.warn = (...args) =>
+      warnings.push(['route-warn', ...args.map((arg) => (arg?.err ? { ...arg, err: String(arg.err) } : arg))]);
+    app.log.error = (...args) =>
+      warnings.push(['route-error', ...args.map((arg) => (arg?.err ? { ...arg, err: String(arg.err) } : arg))]);
     providerGate = Promise.resolve();
     threadStore = new ThreadStore();
     source = await threadStore.create('user-1', 'Author');
@@ -265,7 +253,6 @@ describe('direct action carrier refresh, route to provider', () => {
       queue,
       invocationTracker: new InvocationTracker(),
       messageStore: messages,
-      queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: messages }),
       turnExecutionStore: turns,
       invocationRecordStore: records,
       actionSuccessorLeaseStore: leaseStore,
@@ -276,6 +263,12 @@ describe('direct action carrier refresh, route to provider', () => {
         error: (...args) => warnings.push(['error', ...args]),
       },
       router: {
+        async resolveExplicitTargets(targets) {
+          return [...targets];
+        },
+        async resolveConversationTargetsAtAdmission(targets) {
+          return [...targets];
+        },
         async *routeExecution(userId, _content, threadId, messageId, targets, _intent, options) {
           const catId = targets[0];
           const invocationId = randomUUID();
@@ -292,12 +285,23 @@ describe('direct action carrier refresh, route to provider', () => {
             executionKind: 'ordinary',
             causal: { triggerMessageId: messageId },
           });
+          const admission = await options.onLifecycleInvocationStarted({
+            threadId,
+            userId,
+            catId,
+            invocationId,
+            parentInvocationId,
+            startedAt,
+          });
           yield {
             type: 'system_info',
             catId,
+            lifecycleResponseMessageId: admission.responseMessageId,
+            activeRun: admission.activeRun,
             turnInvocationId: invocationId,
             turnExecutionStartedAt: startedAt,
             timestamp: startedAt,
+            content: JSON.stringify({ type: 'invocation_created', invocationId }),
             extra: { turnExecution: { executionKind: 'ordinary', invocationId, parentInvocationId } },
           };
           await options?.onPromptMessagesExposed?.({
@@ -316,6 +320,16 @@ describe('direct action carrier refresh, route to provider', () => {
             yield { type: 'text', catId, content: 'Continuing the implementation.', timestamp: Date.now() };
           }
           turns.transitionTerminal(invocationId, { status: 'succeeded', endedAt: Date.now() });
+          const terminal = messages.commitLifecycleResponseTerminal(admission.responseMessageId, {
+            invocationId,
+            status: 'completed',
+            completedAt: Date.now(),
+            content: 'Continuing the implementation.',
+            mentions: [],
+            origin: 'stream',
+          });
+          assert.equal(terminal.kind, 'applied');
+          await settleLifecycleResponseInputs(messages, terminal.message, admission.responseMessageId);
           yield { type: 'done', catId, invocationId, timestamp: Date.now() };
         },
         async ackCollectedCursors() {},
@@ -327,7 +341,7 @@ describe('direct action carrier refresh, route to provider', () => {
     await app.close();
   });
 
-  async function registerRoute({ withLeaseStore = true, executionRecord, hiddenRecordId } = {}) {
+  async function registerRoute({ withLeaseStore = true, executionRecord, hiddenRecordId, recordById } = {}) {
     await app.register(callbacksRoutes, {
       registry,
       messageStore: messages,
@@ -335,7 +349,9 @@ describe('direct action carrier refresh, route to provider', () => {
       invocationQueue: queue,
       socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
       router: { async *routeExecution() {}, getExecutions: () => [] },
-      invocationRecordStore: executionRecord ? withRecordLookup(records, executionRecord, hiddenRecordId) : records,
+      invocationRecordStore: executionRecord
+        ? withRecordLookup(records, executionRecord, hiddenRecordId, recordById)
+        : records,
       turnExecutionStore: turns,
       queueProcessor: processor,
       ...(withLeaseStore ? { actionSuccessorLeaseStore: leaseStore } : {}),
@@ -384,7 +400,7 @@ describe('direct action carrier refresh, route to provider', () => {
     const lease = initialLease(source.id, target.id);
     const original = await runOriginalGeneration(lease);
     assert.equal(starts.length, 1, 'the original generation ran once');
-    const oldKey = `action-successor:${actionSuccessorCarrierKey(original.fence, HOLDER)}`;
+    const oldKey = actionSuccessorInvocationKeyForTarget(original.message.id, HOLDER);
     const oldRecord = records.getByIdempotencyKey(target.id, 'user-1', oldKey);
     assert.equal(oldRecord?.status, 'succeeded');
     assert.deepEqual(oldRecord?.successfulCatIds, [HOLDER]);
@@ -392,14 +408,14 @@ describe('direct action carrier refresh, route to provider', () => {
 
     const response = await post('refresh-4058-first');
 
-    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(response.statusCode, 200, response.body + JSON.stringify(warnings));
     assert.deepEqual(response.json().actionLease, { leaseId: 'lease-4058', generation: 2, outcome: 'refreshed' });
     assert.equal(leaseStore.current.generation, 2);
     assert.equal(leaseStore.current.dispatchId, 'cross-post:refresh-4058-first');
 
     await settleExecutions(2);
     assert.equal(starts.length, 2, 'exactly one new provider start for the refreshed carrier');
-    const newKey = `action-successor:action:lease-4058:2:${HOLDER}`;
+    const newKey = actionSuccessorInvocationKeyForTarget(starts[1].messageId, HOLDER);
     const newRecord = records.getByIdempotencyKey(target.id, 'user-1', newKey);
     assert.ok(newRecord, 'the refreshed carrier created its own InvocationRecord');
     assert.notEqual(newRecord.id, oldRecord.id);
@@ -416,14 +432,14 @@ describe('direct action carrier refresh, route to provider', () => {
     const lease = initialLease(source.id, target.id);
     const original = await runOriginalGeneration(lease);
     assert.equal(starts.length, 1, 'the original generation ran once');
-    const oldKey = `action-successor:${actionSuccessorCarrierKey(original.fence, HOLDER)}`;
+    const oldKey = actionSuccessorInvocationKeyForTarget(original.message.id, HOLDER);
     const parent = records.getByIdempotencyKey(target.id, 'user-1', oldKey);
     assert.equal(parent?.id, starts[0].parentInvocationId, 'the Queue created the PARENT record from the carrier key');
-    const handledAttempt = messages
-      .getById(original.message.id)
-      ?.queueCustody?.targetAttempts?.find((attempt) => attempt.state === 'handled');
-    assert.equal(handledAttempt?.invocationId, starts[0].invocationId, 'custody names the CHILD turn');
-    assert.notEqual(handledAttempt?.invocationId, parent.id);
+    const ref = messages.getById(original.message.id).lifecycle.dispatchRefs[0];
+    const result = messages.getById(ref.statusMessageId);
+    assert.equal(result.lifecycle.invocationId, starts[0].invocationId, 'History names the exact child');
+    assert.notEqual(result.lifecycle.invocationId, parent.id);
+    assert.equal(ref.phase, 'settled');
 
     // What production showed after 5 minutes: the exact key no longer finds the run, the records do not expire.
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
@@ -452,30 +468,41 @@ describe('direct action carrier refresh, route to provider', () => {
     const original = await runOriginalGeneration(lease);
     assert.equal(starts.length, 1);
 
-    // What an unchanged generation would do: a fresh queue entry under the OLD carrier key.
-    const replay = queue.enqueue({
-      threadId: target.id,
-      userId: 'user-1',
-      ownerAuthProvenance: 'strict',
-      content: 'Please continue the implementation',
-      source: 'agent',
-      sourceCategory: 'a2a',
-      targetCats: [HOLDER],
-      callerCatId: PREDECESSOR,
-      intent: 'execute',
-      autoExecute: true,
-      idempotencyKey: actionSuccessorCarrierKey(original.fence, HOLDER),
-      actionSuccessorFence: original.fence,
-    });
-    assert.equal(replay.outcome, 'enqueued', 'the Queue itself happily accepts the entry...');
-    await processor.tryAutoExecute(target.id);
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    // ...and the InvocationRecord layer silently consumes it as a duplicate of the completed run.
-    assert.ok(
-      warnings.some((entry) => String(entry[2] ?? '').includes('Duplicate invocation, skipping')),
-      'the old key must hit the completed record and be skipped',
+    const from = { kind: 'agent', catId: PREDECESSOR };
+    await assert.rejects(
+      queue.send(
+        messages,
+        {
+          threadId: target.id,
+          userId: 'user-1',
+          from,
+          content: 'Implement task (original)',
+          mentions: [HOLDER],
+          origin: 'callback',
+          timestamp: original.message.timestamp,
+          deliveryStatus: 'queued',
+          idempotencyKey: actionSuccessorCarrierKey(original.fence, HOLDER),
+        },
+        {
+          kind: 'conversation_input',
+          threadId: target.id,
+          userId: 'user-1',
+          from,
+          ownerAuthProvenance: 'strict',
+          content: 'Implement task (original)',
+          sourceCategory: 'a2a',
+          targetCats: [HOLDER],
+          intent: 'execute',
+          autoExecute: true,
+          actionSuccessorFence: original.fence,
+        },
+      ),
+      /Queue admission identity conflict/,
+      'a retired delivery cannot be submitted as a fresh admission',
     );
-    assert.equal(starts.length, 1, 'an unchanged generation never reaches the provider again');
+    assert.equal(queue.list(target.id, 'user-1').length, 0);
+    await processor.requestDrain(target.id);
+    assert.equal(starts.length, 1, 'the same generation never reaches the provider again');
   });
   test('two concurrent refreshes of the same observed lease yield exactly one carrier and one new execution', async () => {
     const lease = initialLease(source.id, target.id);
@@ -590,6 +617,9 @@ describe('direct action carrier refresh, route to provider', () => {
     const again = await post('refresh-4058-crash');
     assert.equal(again.statusCode, 200, again.body);
     assert.equal(again.json().messageId, stored.id, 'a second retry names the same single message');
+    const changed = await post('refresh-4058-crash', { content: 'A different continuation' });
+    assert.equal(changed.statusCode, 409, changed.body);
+    assert.equal(changed.json().kind, 'action_carrier_idempotency_conflict');
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(carrierMessages().length, 2, 'and appends nothing new');
     assert.equal(starts.length, 2, 'and starts nothing new');
@@ -639,24 +669,31 @@ describe('direct action carrier refresh, route to provider', () => {
 
   test('without proof the old execution ended, nothing is refreshed: unconfirmed and canceled stay refused', async () => {
     const lease = initialLease(source.id, target.id);
-    await runOriginalGeneration(lease);
-    const key = `action-successor:action:lease-4058:1:${HOLDER}`;
+    const original = await runOriginalGeneration(lease);
+    const key = actionSuccessorInvocationKeyForTarget(original.message.id, HOLDER);
     const real = records.getByIdempotencyKey(target.id, 'user-1', key);
 
     // No evidence anywhere is unconfirmed: the exact key finds nothing AND the persistent parent record that custody's
     // child lineage leads to is not there either. (Hiding only the key now would leave the lineage to confirm it.)
     const cases = {
-      execution_unconfirmed: { lookup: async () => null, hiddenRecordId: real.id },
-      carrier_terminal: { lookup: async () => ({ ...real, status: 'canceled', successfulCatIds: [] }) },
+      carrier_missing: { lookup: async () => null, hiddenRecordId: real.id },
+      carrier_terminal: {
+        lookup: async () => ({ ...real, status: 'canceled', successfulCatIds: [] }),
+        recordById: (id) => (id === real.id ? { ...real, status: 'canceled', successfulCatIds: [] } : records.get(id)),
+      },
     };
-    for (const [reason, { lookup, hiddenRecordId }] of Object.entries(cases)) {
+    for (const [reason, { lookup, hiddenRecordId, recordById }] of Object.entries(cases)) {
       const probe = Fastify();
       const previous = app;
       app = probe;
-      await registerRoute({ executionRecord: lookup, hiddenRecordId });
+      await registerRoute({ executionRecord: lookup, hiddenRecordId, recordById });
       const response = await post(`refresh-4058-${reason}`);
       assert.equal(response.statusCode, 409, response.body);
-      assert.equal(response.json().reason, reason);
+      assert.equal(
+        response.json().reason,
+        reason,
+        'inconsistent, absent or canceled canonical execution cannot refresh a carrier',
+      );
       await probe.close();
       app = previous;
     }
@@ -702,136 +739,6 @@ describe('direct action carrier refresh, route to provider', () => {
       assert.equal(leaseStore.current.generation, 1);
       assert.equal(starts.length, 1);
       assert.deepEqual(queue.list(target.id, 'user-1'), []);
-    });
-  });
-
-  describe('a refreshed carrier whose delivery fails is restored by retrying the same clientMessageId', () => {
-    const RECOVERY_KEY = 'action-carrier-recovery:lease-4058:2';
-    const carrierMessage = () => messages.getByIdempotencyKey('user-1', target.id, RECOVERY_KEY);
-    // The in-memory store has no startup scan (#697), so without this the reconciler returns an empty
-    // result for EVERY window and proves nothing. Same pattern as f254-queue-restart-custody.
-    const startup = (restoredQueue) => {
-      messages.scanByDeliveryStatus = (status) =>
-        messages
-          .getRecent(2_000)
-          .filter((message) => message.deliveryStatus === status)
-          .map((message) => message.id);
-      return new QueuedMessageCustodyStartupReconciler({
-        messageStore: messages,
-        invocationRecordStore: records,
-        invocationQueue: restoredQueue,
-        // Production wires the real disposition service; here no handoff has been replaced.
-        a2aDispatchDispositionService: { inspectHandoff: async () => ({ outcome: 'live' }) },
-        log: { info() {}, warn() {} },
-      }).reconcile();
-    };
-
-    async function handledGenerationOne() {
-      const lease = initialLease(source.id, target.id);
-      await runOriginalGeneration(lease);
-      await registerRoute();
-      return lease;
-    }
-
-    test('consecutive failures keep the carrier queued, and the first healthy retry runs it exactly once', async () => {
-      await handledGenerationOne();
-      const healthyAdmission = messages.initializeQueueCustodyAdmission.bind(messages);
-      messages.initializeQueueCustodyAdmission = () => {
-        throw new Error('admission store unavailable');
-      };
-
-      const first = await post('refresh-4058-retry');
-      const second = await post('refresh-4058-retry');
-
-      assert.equal(first.statusCode, 503, first.body);
-      assert.equal(second.statusCode, 503, 'a retry that could not deliver is still pending, not a success');
-      assert.equal(second.json().messageId, first.json().messageId);
-      assert.equal(carrierMessage().deliveryStatus, 'queued', 'a failed retry must not mark the carrier delivered');
-      assert.equal(starts.length, 1);
-
-      messages.initializeQueueCustodyAdmission = healthyAdmission;
-      const third = await post('refresh-4058-retry');
-      assert.equal(third.statusCode, 200, third.body);
-      await settleExecutions(2);
-      assert.equal(starts.length, 2, 'the refreshed generation ran');
-
-      const again = await post('refresh-4058-retry');
-      assert.equal(again.statusCode, 200, again.body);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      assert.equal(starts.length, 2, 'and exactly once');
-    });
-
-    test('a failure BEFORE durable admission is not promised to startup reconciliation', async () => {
-      await handledGenerationOne();
-      const healthyAdmission = messages.initializeQueueCustodyAdmission.bind(messages);
-      messages.initializeQueueCustodyAdmission = () => {
-        throw new Error('admission write unavailable');
-      };
-
-      const response = await post('refresh-4058-no-admission');
-
-      assert.equal(response.statusCode, 503, response.body);
-      assert.equal(response.json().kind, 'action_carrier_retry_required');
-      assert.equal(response.json().admission, 'not_persisted');
-      assert.doesNotMatch(
-        response.json().message,
-        /startup/i,
-        'nothing was admitted, so startup has nothing to restore',
-      );
-      assert.equal(carrierMessage().queueCustodyAdmission, undefined);
-      assert.equal((await startup(new InvocationQueue())).entriesRestored, 0);
-
-      messages.initializeQueueCustodyAdmission = healthyAdmission;
-      const retry = await post('refresh-4058-no-admission');
-      assert.equal(retry.statusCode, 200, retry.body);
-      await settleExecutions(2);
-      assert.equal(starts.length, 2, 'the same-request retry is what restores it');
-    });
-
-    test('a failure AFTER durable admission names startup reconciliation, and the real reconciler restores it', async () => {
-      await handledGenerationOne();
-      const healthyCustody = messages.initializeQueueCustody.bind(messages);
-      messages.initializeQueueCustody = () => {
-        throw new Error('crash after durable admission');
-      };
-
-      const response = await post('refresh-4058-admitted');
-
-      assert.equal(response.statusCode, 503, response.body);
-      assert.equal(response.json().kind, 'action_carrier_recovery_pending');
-      assert.match(response.json().message, /durable Queue admission/);
-      assert.match(response.json().message, /startup reconciliation/);
-      assert.ok(carrierMessage().queueCustodyAdmission, 'the admission the response names really is durable');
-      assert.equal(carrierMessage().deliveryStatus, 'queued');
-      assert.equal(starts.length, 1);
-
-      messages.initializeQueueCustody = healthyCustody; // the restarted runtime has a healthy store
-      const restoredQueue = new InvocationQueue();
-      const restored = await startup(restoredQueue);
-      assert.equal(restored.entriesRestored, 1, 'the promised startup reconciliation restores the carrier');
-      const [entry] = restoredQueue.list(target.id, 'user-1');
-      assert.equal(entry.actionSuccessorFence.generation, 2);
-    });
-
-    test('when the admission cannot be read back, the response claims neither window', async () => {
-      await handledGenerationOne();
-      let admissionFailed = false;
-      const realGetById = messages.getById.bind(messages);
-      messages.initializeQueueCustodyAdmission = () => {
-        admissionFailed = true;
-        throw new Error('admission write unavailable');
-      };
-      messages.getById = (id) => {
-        if (admissionFailed) throw new Error('message store unavailable');
-        return realGetById(id);
-      };
-
-      const response = await post('refresh-4058-unverified');
-
-      assert.equal(response.statusCode, 503, response.body);
-      assert.equal(response.json().kind, 'action_carrier_retry_required');
-      assert.equal(response.json().admission, 'unverified');
-      assert.doesNotMatch(response.json().message, /startup/i);
     });
   });
 });

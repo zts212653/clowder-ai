@@ -1,27 +1,23 @@
 import {
-  createWaitContinuationCarrier,
   type DeploymentObservationV1,
   type DeploymentWaitOutcomeV1,
-  type DeploymentWaitStateV1,
   deploymentOutcomeMatchesObservation,
   evaluateDeploymentWait,
-  parseWaitOwnerFence,
   type TaskItem,
   type WaitTerminationActor,
 } from '@cat-cafe/shared';
-import type { TriggerOutcome } from '../../infrastructure/email/ConnectorInvokeTrigger.js';
 import type {
   ConnectorDeliveryDeps,
   ConnectorDeliveryInput,
 } from '../../infrastructure/email/deliver-connector-message.js';
-import { deliverConnectorMessage } from '../../infrastructure/email/deliver-connector-message.js';
 import type { IWaitLifecycleEventLog } from '../ball-custody/WaitLifecycleEventLog.js';
-import { deploymentWaitGeneration } from '../cats/services/stores/ports/TaskDeploymentWaitState.js';
+import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../cats/services/stores/ports/TaskStore.js';
 import type { ITurnExecutionStore } from '../cats/services/stores/ports/TurnExecutionStore.js';
-import { isDeploymentWaitTask, receiptOwnsOutcome } from './DeploymentWaitAuthority.js';
-import { type CurrentTurnClaimDisposition, DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
-import { lifecycleEvent, matchedOutcomeId, originalRegistration, renderOutcome } from './DeploymentWaitOutcome.js';
+import { isDeploymentWaitTask } from './DeploymentWaitAuthority.js';
+import { DeploymentWaitCurrentTurnClaim } from './DeploymentWaitCurrentTurnClaim.js';
+import { lifecycleEvent, matchedOutcomeId, originalRegistration } from './DeploymentWaitOutcome.js';
+import { DeploymentWaitPublisher } from './DeploymentWaitPublisher.js';
 
 export interface DeploymentWaitObservation {
   readonly taskId: string;
@@ -48,6 +44,7 @@ export type DeploymentWaitLifecycleResult =
 
 export interface DeploymentWaitLifecycleServiceOptions {
   readonly taskStore: ITaskStore;
+  readonly messageStore?: Pick<IMessageStore, 'appendIdempotent' | 'getByIdempotencyKey'>;
   readonly deliveryDeps: ConnectorDeliveryDeps;
   readonly eventLog?: IWaitLifecycleEventLog;
   readonly log: {
@@ -58,7 +55,6 @@ export interface DeploymentWaitLifecycleServiceOptions {
   readonly now?: () => number;
   /** Fresh deployment truth read immediately before a matched owner message is published. */
   readonly currentObservation: (outcome: DeploymentWaitOutcomeV1) => Promise<DeploymentObservationV1 | null>;
-  readonly wakeOwner?: (delivered: DeploymentWaitNotified) => TriggerOutcome | Promise<TriggerOutcome>;
   readonly bootId?: string;
   /** Callback invocation IDs name child TurnExecution records, not parent InvocationRecords. */
   readonly turnExecutionStore?: Pick<ITurnExecutionStore, 'get'>;
@@ -69,10 +65,14 @@ const MAX_WRITE_ATTEMPTS = 3;
 export class DeploymentWaitLifecycleService {
   private readonly now: () => number;
   private readonly currentTurnClaim: DeploymentWaitCurrentTurnClaim;
+  private readonly publisher: DeploymentWaitPublisher;
 
   constructor(private readonly opts: DeploymentWaitLifecycleServiceOptions) {
     this.now = opts.now ?? Date.now;
     this.currentTurnClaim = new DeploymentWaitCurrentTurnClaim(opts);
+    this.publisher = new DeploymentWaitPublisher(opts, this.currentTurnClaim, (outcome) =>
+      this.hasCurrentEvidence(outcome),
+    );
   }
 
   async observe(input: DeploymentWaitObservation): Promise<DeploymentWaitLifecycleResult> {
@@ -83,8 +83,8 @@ export class DeploymentWaitLifecycleService {
         task.deploymentWait?.currentExecutionClaim?.invocationId !== input.currentInvocationId &&
         task.deploymentWait?.currentExecutionClaim
       ) {
-        const disposition = await this.currentTurnClaim.disposition(task.deploymentWait.currentExecutionClaim);
-        if (disposition === 'active') {
+        const disposition = await this.currentTurnClaim.disposition(task.deploymentWait.currentExecutionClaim, task);
+        if (disposition === 'active' || disposition === 'unknown') {
           return { kind: 'state_only', reason: 'current_execution_claimed' };
         }
         if (
@@ -94,7 +94,7 @@ export class DeploymentWaitLifecycleService {
             disposition,
           ))
         ) {
-          continue;
+          return { kind: 'state_only', reason: 'claim_release_unverified' };
         }
         continue;
       }
@@ -123,11 +123,13 @@ export class DeploymentWaitLifecycleService {
         nextStep: active.continuation.then,
         actor: { kind: 'system' },
       };
+      const { await: _consumed, ...retained } = task.deploymentWait ?? {};
       const installed = await this.opts.taskStore.replaceDeploymentWaitIfGeneration(task.id, {
         expectedGeneration: active.generation,
         expectedDeploymentWait: task.deploymentWait,
         expectedUpdatedAt: task.updatedAt,
         deploymentWait: {
+          ...retained,
           waitOutcome: outcome,
           ...(task.deploymentWait?.currentExecutionClaim
             ? { currentExecutionClaim: task.deploymentWait.currentExecutionClaim }
@@ -147,12 +149,12 @@ export class DeploymentWaitLifecycleService {
     if (!isDeploymentWaitTask(task)) return { kind: 'not_tracked', reason: 'task_missing_or_unowned' };
     const claim = task.deploymentWait?.currentExecutionClaim;
     if (claim) {
-      const disposition = await this.currentTurnClaim.disposition(claim);
-      if (disposition === 'active') {
+      const disposition = await this.currentTurnClaim.disposition(claim, task);
+      if (disposition === 'active' || disposition === 'unknown') {
         return { kind: 'state_only', reason: 'current_execution_claimed' };
       }
       if (!(await this.releaseCurrentExecutionClaim(taskId, claim.invocationId, disposition))) {
-        return { kind: 'unrecorded', reason: 'generation_changed_concurrently' };
+        return { kind: 'state_only', reason: 'claim_release_unverified' };
       }
       return this.recoverOutcome(taskId);
     }
@@ -182,7 +184,7 @@ export class DeploymentWaitLifecycleService {
   async releaseCurrentExecutionClaim(
     taskId: string,
     invocationId: string,
-    disposition: Exclude<CurrentTurnClaimDisposition, 'active'> | 'release' = 'release',
+    disposition: 'succeeded' | 'recover' | 'release' = 'release',
   ): Promise<boolean> {
     return this.currentTurnClaim.release(taskId, invocationId, disposition);
   }
@@ -245,91 +247,8 @@ export class DeploymentWaitLifecycleService {
     wakeOwner = true,
     currentInvocationId?: string,
   ): Promise<DeploymentWaitLifecycleResult> {
-    if (!(await this.hasCurrentEvidence(outcome))) {
-      return { kind: 'state_only', reason: 'deployment_evidence_stale' };
-    }
-    if (!parseWaitOwnerFence(outcome.ownerFence)) {
-      return { kind: 'state_only', reason: 'legacy_unfenced' };
-    }
-    const snapshot = await this.opts.taskStore.getWaitRegistration(task.id);
-    const receipt = snapshot?.receipt;
-    const currentTask = snapshot?.task;
-    if (
-      !currentTask ||
-      !receiptOwnsOutcome(currentTask, outcome, receipt) ||
-      (currentTask.deploymentWait?.currentExecutionClaim &&
-        currentTask.deploymentWait.currentExecutionClaim.invocationId !== currentInvocationId)
-    ) {
-      this.opts.log.warn({ taskId: task.id, outcomeId: outcome.outcomeId }, '[F323] deployment wait authority stale');
-      return { kind: 'state_only', reason: 'authority_stale' };
-    }
-    const content = renderOutcome(outcome);
-    const waitContinuationCarrier = createWaitContinuationCarrier(task.id, outcome);
-    const delivered = await deliverConnectorMessage(this.opts.deliveryDeps, {
-      threadId: currentTask.threadId,
-      userId: currentTask.userId ?? '',
-      catId: currentTask.ownerCatId ?? '',
-      content,
-      idempotencyKey: `deployment-wait:${task.id}:${outcome.outcomeId}`,
-      source: {
-        connector: 'deployment-wait',
-        label: 'Deployment Wait',
-        icon: 'refresh-cw',
-        meta: { waitContinuationCarrier },
-      },
-      ...(deliveryExtra ? { extra: deliveryExtra } : {}),
-    });
-
-    const result: DeploymentWaitNotified = {
-      kind: 'notified',
-      task: currentTask,
-      outcome,
-      messageId: delivered.messageId,
-      content,
-    };
-    const beforeWake = await this.opts.taskStore.getWaitRegistration(task.id);
-    if (
-      !beforeWake ||
-      !receiptOwnsOutcome(beforeWake.task, outcome, beforeWake.receipt) ||
-      !(await this.hasCurrentEvidence(outcome))
-    ) {
-      return { kind: 'state_only', reason: 'authority_stale' };
-    }
-    if (wakeOwner && this.opts.wakeOwner) {
-      try {
-        const admission = await this.opts.wakeOwner(result);
-        if (admission === 'full') {
-          this.opts.log.warn({ taskId: task.id }, '[F323] deployment wait owner wake queue full');
-          return { kind: 'state_only', reason: 'wake_not_admitted' };
-        }
-      } catch (error) {
-        this.opts.log.warn({ error, taskId: task.id }, '[F323] deployment wait owner wake failed');
-        return { kind: 'state_only', reason: 'wake_not_admitted' };
-      }
-    }
-    // Delivery is an outbox admission receipt, not merely a persisted message.
-    // A failed wake keeps the same outcome pending so a later sweep reuses this messageId.
-    const current = await this.opts.taskStore.get(task.id);
-    if (current?.deploymentWait?.waitOutcome?.outcomeId === outcome.outcomeId) {
-      const state: DeploymentWaitStateV1 = {
-        waitOutcome: { ...current.deploymentWait.waitOutcome, delivery: 'delivered' },
-        ...(!wakeOwner && current.deploymentWait.currentExecutionClaim
-          ? { currentExecutionClaim: current.deploymentWait.currentExecutionClaim }
-          : {}),
-      };
-      const installed = await this.opts.taskStore.replaceDeploymentWaitIfGeneration(task.id, {
-        expectedGeneration: deploymentWaitGeneration(current.deploymentWait) ?? outcome.generation,
-        expectedDeploymentWait: current.deploymentWait,
-        expectedUpdatedAt: current.updatedAt,
-        deploymentWait: state,
-        status: 'blocked',
-      });
-      if (!installed) return { kind: 'state_only', reason: 'authority_stale' };
-    } else {
-      return { kind: 'state_only', reason: 'authority_stale' };
-    }
-    this.opts.log.info({ taskId: task.id, outcomeId: outcome.outcomeId }, '[F323] deployment wait delivered');
-    return result;
+    if (!(await this.hasCurrentEvidence(outcome))) return { kind: 'state_only', reason: 'deployment_evidence_stale' };
+    return this.publisher.publish(task, outcome, deliveryExtra, wakeOwner, currentInvocationId);
   }
 
   private async hasCurrentEvidence(outcome: DeploymentWaitOutcomeV1): Promise<boolean> {

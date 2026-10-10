@@ -26,7 +26,6 @@ const { InvocationQueue } = await import('../dist/domains/cats/services/agents/i
 const { queueRoutes } = await import('../dist/routes/queue.js');
 const { InvocationTracker } = await import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js');
 const { InvocationRecordStore } = await import('../dist/domains/cats/services/stores/ports/InvocationRecordStore.js');
-const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
 const { createActiveExecutionService } = await import(
   '../dist/domains/cats/services/agents/invocation/active-execution-service.js'
 );
@@ -39,6 +38,27 @@ const PROJECT = '/scale';
 const TOTAL_THREADS = 1760;
 const PINNED = 300;
 const ACTIVE = 20;
+
+/**
+ * Wraps a record store and records every thread whose running records the liveness read loads.
+ * That read runs once per qualified thread, so the distinct count is the qualification cost.
+ */
+function countingRunningReads(recordStore) {
+  const threads = new Set();
+  const store = new Proxy(recordStore, {
+    get(target, prop) {
+      if (prop === 'listRunningByThread') {
+        return (threadId, userId) => {
+          threads.add(threadId);
+          return target.listRunningByThread(threadId, userId);
+        };
+      }
+      const value = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { store, threads };
+}
 
 /** 真实 tracker + 真实 store —— snapshot 是真的，只有调用计数被观测。 */
 async function buildScaleFixture() {
@@ -56,34 +76,50 @@ async function buildScaleFixture() {
 
   const invocationTracker = new InvocationTracker();
   const recordStore = new InvocationRecordStore();
-  const draftStore = new DraftStore();
   const dynamicTaskStore = { getAll: mock.fn(() => []) };
 
-  // 20 个真正在跑的 thread：tracker slot + fresh draft = F194 的 tracker+draft canonical active
+  // 20 个真正在跑的 thread：running record + 本进程 tracker 为这次执行持有的槽位（F117 KD-23 的活性证据）
   const activeThreadIds = [];
   for (let i = 0; i < ACTIVE; i += 1) {
     const id = `thread-${i * 7}`; // 散布在 1760 里，不集中在头部
     activeThreadIds.push(id);
-    invocationTracker.start(id, 'opus5', USER_ID);
-    await draftStore.upsert({
-      userId: USER_ID,
+    const created = await recordStore.create({
       threadId: id,
-      invocationId: `inv-${id}`,
-      catId: 'opus5',
-      content: 'working…',
-      updatedAt: Date.now(),
+      userId: USER_ID,
+      targetCats: ['opus5'],
+      intent: 'execute',
+      idempotencyKey: `scale-${id}`,
+      actionLeaseCarrier: { kind: 'none' },
     });
+    await recordStore.update(created.invocationId, { status: 'running' });
+    invocationTracker.start(id, 'opus5', USER_ID, ['opus5'], created.invocationId);
+    assert.equal(
+      invocationTracker.bindLifecycleActiveRun(
+        {
+          threadId: id,
+          targetId: 'opus5',
+          invocationId: `child-${created.invocationId}`,
+          responseMessageId: `response-${created.invocationId}`,
+          inputEntryIds: [],
+          inputMessageIds: [],
+          privateInputEntryIds: [],
+          startedAt: Date.now(),
+        },
+        created.invocationId,
+      ),
+      true,
+      'scale fixture must publish an exact admitted member identity',
+    );
   }
 
   const service = createActiveExecutionService({
     invocationTracker,
     recordStore,
-    draftStore,
     dynamicTaskStore,
     log: { info() {}, warn() {} },
   });
 
-  return { threads, invocationTracker, recordStore, draftStore, dynamicTaskStore, service, activeThreadIds };
+  return { threads, invocationTracker, recordStore, dynamicTaskStore, service, activeThreadIds };
 }
 
 describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invariant`, () => {
@@ -116,19 +152,12 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
   });
 
   it('project scan: per-thread qualification runs A times, not T (AC-D3 — no second read pattern)', async () => {
-    const { threads, invocationTracker, service, activeThreadIds, recordStore, draftStore, dynamicTaskStore } =
+    const { threads, invocationTracker, service, activeThreadIds, recordStore, dynamicTaskStore } =
       await buildScaleFixture();
 
-    // 计数点选在 liveness 真相源上：resolveActiveInvocations 每定性一个 thread 就会读一次 draft。
-    // 这样计的是**生产路径**的实际定性次数，而不是我自己包的一层壳。
-    let liveCalls = 0;
-    const countingDraftStore = {
-      ...draftStore,
-      getByThread: (userId, threadId) => {
-        liveCalls += 1;
-        return draftStore.getByThread(userId, threadId);
-      },
-    };
+    // 计数点选在 liveness 真相源上：resolveActiveInvocations 每定性一个 thread 就会读一次它的 running
+    // records。这样计的是**生产路径**实际定性的 thread，而不是我自己包的一层壳。
+    const counting = countingRunningReads(recordStore);
     const app = Fastify();
     await app.register(queueRoutes, {
       threadStore: {
@@ -142,8 +171,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
       activeExecutionService: {
         buildLiveCandidateSnapshot: (userId) => service.buildLiveCandidateSnapshot(userId),
       },
-      invocationRecordStore: recordStore,
-      draftStore: countingDraftStore,
+      invocationRecordStore: counting.store,
       dynamicTaskStore: { ...dynamicTaskStore, getById: mock.fn(() => null) },
       queueProcessor: {
         canReleaseSlotForUser: mock.fn(() => true),
@@ -188,7 +216,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
     );
     // AC-D3：成本随 A 而非 T
     assert.equal(
-      liveCalls,
+      counting.threads.size,
       ACTIVE,
       `project scan must qualify A(${ACTIVE}) threads, not T(${TOTAL_THREADS}) — it runs every 4s`,
     );
@@ -203,7 +231,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
     // 漏报后果不同 ⇒ 降级方向相反：
     //   Sidebar 漏报 → 显示 idle（用户无损）→ fail-closed
     //   本列表漏报 → 正在跑的执行不在可取消列表里 → 用户停不掉 → **fail-open**
-    const { threads, invocationTracker, service, activeThreadIds, draftStore } = await buildScaleFixture();
+    const { threads, invocationTracker, service, activeThreadIds } = await buildScaleFixture();
 
     for (const [label, snapshotSource] of [
       ['complete=false', { buildLiveCandidateSnapshot: async () => ({ threadIds: [], complete: false }) }],
@@ -217,14 +245,8 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
       ],
       ['not wired at all', undefined],
     ]) {
-      let liveCalls = 0;
-      const countingDraftStore = {
-        ...draftStore,
-        getByThread: (userId, threadId) => {
-          liveCalls += 1;
-          return draftStore.getByThread(userId, threadId);
-        },
-      };
+      // A store without the fixture's records: every held slot reads as this process's pre-start window.
+      const counting = countingRunningReads(new InvocationRecordStore());
       const app = Fastify();
       await app.register(queueRoutes, {
         threadStore: {
@@ -236,8 +258,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
         invocationQueue: new InvocationQueue(),
         invocationTracker,
         ...(snapshotSource ? { activeExecutionService: snapshotSource } : {}),
-        invocationRecordStore: new InvocationRecordStore(),
-        draftStore: countingDraftStore,
+        invocationRecordStore: counting.store,
         dynamicTaskStore: { getAll: mock.fn(() => []), getById: mock.fn(() => null) },
         queueProcessor: {
           canReleaseSlotForUser: mock.fn(() => true),
@@ -269,7 +290,7 @@ describe(`F297 AC-B2/AC-D3 — ${TOTAL_THREADS}/${PINNED}/${ACTIVE} scale invari
 
       assert.equal(res.statusCode, 200, `${label}: still 200`);
       assert.equal(
-        liveCalls,
+        counting.threads.size,
         TOTAL_THREADS,
         `${label}: incomplete knowledge must fall back to the FULL scan, never a narrowed one`,
       );

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { ReviewFeedbackRouter, buildReviewFeedbackContent } = await import(
   '../dist/infrastructure/email/ReviewFeedbackRouter.js'
@@ -10,7 +10,7 @@ const { ReviewFeedbackRouter, buildReviewFeedbackContent } = await import(
 
 async function setup(when) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const harness = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'pr_tracking',
     subjectKey: 'pr:owner/repo#7',
@@ -44,16 +44,16 @@ async function setup(when) {
   });
   const lifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     now: () => 500,
     log: { info() {}, warn() {}, error() {} },
   });
   const router = new ReviewFeedbackRouter({
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     waitLifecycle: lifecycle,
     log: { info() {}, warn() {}, error() {} },
   });
-  return { router, task, messageStore, taskStore };
+  return { router, task, harness, taskStore };
 }
 
 function signal(overrides = {}) {
@@ -81,16 +81,16 @@ function signal(overrides = {}) {
 
 describe('ReviewFeedbackRouter F280 typed waits', () => {
   test('review decision change consumes one wait and emits compact content', async () => {
-    const { router, task, messageStore } = await setup([{ kind: 'pr_review_decision_changed' }]);
+    const { router, task, harness } = await setup([{ kind: 'pr_review_decision_changed' }]);
     const result = await router.route(signal(), { taskId: task.id });
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /review pending → CHANGES_REQUESTED/);
     assert.equal(result.content.includes('SOURCE_BODY_SHOULD_NEVER_RENDER'), false);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
   });
 
   test('ordinary conversation activity advances facts but never wakes a head-only waiter', async () => {
-    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_head_changed' }]);
+    const { router, task, harness, taskStore } = await setup([{ kind: 'pr_head_changed' }]);
     const result = await router.route(
       signal({
         newComments: [
@@ -109,12 +109,12 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
       { taskId: task.id },
     );
     assert.equal(result.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(harness.deliveries('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.review.lastConversationCommentCursor, 21);
   });
 
   test('conversation-only clean result consumes the exact wait once without a review decision cursor', async () => {
-    const { router, task, messageStore } = await setup([{ kind: 'pr_review_result_available' }]);
+    const { router, task, harness } = await setup([{ kind: 'pr_review_result_available' }]);
     const clean = signal({
       newComments: [],
       newDecisions: [],
@@ -127,15 +127,15 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
     const first = await router.route(clean, { taskId: task.id });
     assert.equal(first.kind, 'notified');
     assert.match(first.content, /RESULT_AVAILABLE/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
 
     const replay = await router.route(clean, { taskId: task.id });
     assert.equal(replay.kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
   });
 
   test('terminal PR truth observed by the review collector consumes an active wait', async () => {
-    const { router, task, messageStore, taskStore } = await setup([{ kind: 'pr_review_result_available' }]);
+    const { router, task, harness, taskStore } = await setup([{ kind: 'pr_review_result_available' }]);
     const result = await router.route(
       signal({
         newComments: [],
@@ -148,7 +148,7 @@ describe('ReviewFeedbackRouter F280 typed waits', () => {
 
     assert.equal(result.kind, 'notified');
     assert.match(result.content, /PR state: merged/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
     const stored = await taskStore.get(task.id);
     assert.equal(stored.status, 'done');
     assert.equal(stored.automationState.await, undefined);

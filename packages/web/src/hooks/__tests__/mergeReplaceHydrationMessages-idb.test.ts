@@ -3,9 +3,8 @@
  *
  * Goal: when API history hydration fires and a local message is `cachedFrom='idb'`,
  * it must be dropped (not preserved). Live state (no cachedFrom) is still
- * preserved via the existing stable-identity match. Invocation reconciliation
- * receipts are the narrow exception because server message history never owns
- * them; unresolved receipts are revalidated against canonical invocation truth.
+ * preserved via the existing stable-identity match. All cached rows yield to
+ * canonical history, including former client wait-window notices.
  *
  * Without this filter, an IDB cache message that the server has since deleted
  * would survive history hydration → ghost bubble.
@@ -28,42 +27,29 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
   it('drops cachedFrom=idb message when history does not contain it (server deleted)', () => {
     const history: ChatMessage[] = [];
     const current: ChatMessage[] = [makeMsg({ id: 'm-cached', cachedFrom: 'idb' })];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     expect(result.messages).toHaveLength(0);
     expect(result.stats.preservedLocalCount).toBe(0);
   });
 
-  it('preserves an invocation reconciliation receipt that server message history does not own', () => {
+  it('drops a former client wait-window notice when canonical history does not contain it', () => {
     const history: ChatMessage[] = [];
     const current: ChatMessage[] = [
       makeMsg({
         id: 'invocation-status-parent-1',
         type: 'system',
         cachedFrom: 'idb',
-        extra: {
-          invocationReconciliation: {
-            v: 1,
-            invocationId: 'parent-1',
-            catIds: ['opus'],
-            turnInvocationIds: ['turn-1'],
-            phase: 'unknown_running',
-            reason: 'record_unavailable',
-            updatedAt: 1000,
-          },
-        },
       }),
     ];
 
-    const result = mergeReplaceHydrationMessages(history, current, {});
-    expect(result.messages).toHaveLength(1);
-    expect(result.messages[0]?.id).toBe('invocation-status-parent-1');
-    expect(result.messages[0]?.cachedFrom).toBeUndefined();
+    const result = mergeReplaceHydrationMessages(history, current);
+    expect(result.messages).toHaveLength(0);
   });
 
   it('preserves live placeholder (no cachedFrom) when history does not contain it', () => {
     const history: ChatMessage[] = [];
     const current: ChatMessage[] = [makeMsg({ id: 'live-1', isStreaming: true })];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]!.id).toBe('live-1');
     expect(result.stats.preservedLocalCount).toBe(1);
@@ -72,7 +58,7 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
   it('cachedFrom=idb with id-match in history → reconciled (existing same-id merge wins)', () => {
     const history: ChatMessage[] = [makeMsg({ id: 'm1', content: 'fresh-from-server' })];
     const current: ChatMessage[] = [makeMsg({ id: 'm1', content: 'stale-from-idb', cachedFrom: 'idb' })];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     expect(result.messages).toHaveLength(1);
     // history version wins on id-match (same-id merge keeps history content baseline)
     expect(result.messages[0]!.content).toBe('fresh-from-server');
@@ -85,7 +71,7 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
       makeMsg({ id: 'cached-deleted', cachedFrom: 'idb' }), // dropped
       makeMsg({ id: 'live-pending', isStreaming: true }), // preserved
     ];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     const ids = result.messages.map((m) => m.id).sort();
     expect(ids).toEqual(['live-pending', 'survives']);
     expect(result.stats.preservedLocalCount).toBe(1);
@@ -107,46 +93,12 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
         timestamp: 2000,
       } as ChatMessage),
     ];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]!.content).toBe('thin server text');
     // Cache marker must not leak into the merged output
     expect(result.messages[0]!.cachedFrom).toBeUndefined();
     expect(result.messages[0]!.thinking).toBeUndefined();
-  });
-
-  it('砚砚 R1 P1: stream-key richer cached IDB does NOT replace history', () => {
-    // streamKey match path: history has a callback bubble keyed by (cat:inv);
-    // cached IDB carries the same (cat:inv) but as "richer-looking" stream form.
-    // Without the top-of-loop cachedFrom guard this would call
-    // shouldPreferCurrentMessage(msg, historyMsg) and write the cached msg verbatim.
-    const history: ChatMessage[] = [
-      makeMsg({
-        id: 'callback-srv-1',
-        catId: 'opus',
-        extra: { stream: { invocationId: 'inv-A' } },
-        content: 'server callback',
-        timestamp: 5000,
-      }),
-    ];
-    const current: ChatMessage[] = [
-      makeMsg({
-        id: 'msg-inv-A-opus', // different id → streamKey match wins
-        catId: 'opus',
-        cachedFrom: 'idb',
-        extra: { stream: { invocationId: 'inv-A' } },
-        // richer payload that would normally trigger replace
-        content: 'cached richer streaming text',
-        contentBlocks: [{ type: 'text', text: 'cached richer streaming text' }],
-        thinking: 'cache thinking',
-        timestamp: 6000,
-      } as ChatMessage),
-    ];
-    const result = mergeReplaceHydrationMessages(history, current, {});
-    expect(result.messages).toHaveLength(1);
-    expect(result.messages[0]!.id).toBe('callback-srv-1');
-    expect(result.messages[0]!.content).toBe('server callback');
-    expect(result.messages[0]!.cachedFrom).toBeUndefined();
   });
 
   it('draft-orphan-shaped cachedFrom=idb still dropped (top-of-loop guard catches it)', () => {
@@ -163,7 +115,7 @@ describe('mergeReplaceHydrationMessages — AC-D2 IDB-origin filter', () => {
         extra: { stream: { invocationId: 'inv-stale' } },
       }),
     ];
-    const result = mergeReplaceHydrationMessages(history, current, {});
+    const result = mergeReplaceHydrationMessages(history, current);
     expect(result.messages).toHaveLength(0);
   });
 });

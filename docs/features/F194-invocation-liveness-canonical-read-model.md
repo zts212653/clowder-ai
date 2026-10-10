@@ -11,6 +11,16 @@ tips_exempt: post-close R20/R21 live CLI ghost bugfix timeline; no new user-faci
 
 > **Status**: done | **Completed**: 2026-05-12 | **Owner**: Ragdoll/Opus-47 (Z8/Z9/Z10 author) + Maine Coon/Maine Coon (Z5/Z6/Z7 author + Z8/Z9/Z10 reviewer) | **Priority**: P1
 >
+> **2026-09-25 post-close correction（F117 KD-23，PR #1398）：** 草稿不再设过期、不再由 60 秒定时器续期，
+> 也不再是活性证据。「正在处理」只看两件事：调用记录为 running，并且有一个可以核实、不依赖时间戳的持有者：
+> 本进程 InvocationTracker 的槽位（executionId 一致），或 CLI owner 快照里这次执行的存活 owner。拿不到完整
+> 快照时，持久 TurnExecution 里的 running 子轮代替无法核实的 owner，成员仍显示为运行中（F117 KD-10 只有两态）。
+> 它的 R 若已建立，必须处于 processing。`record+draft`、`tracker+draft`、`parent+child-draft`、`record-only`
+> 的 600 秒宽限、Phase Z 的 registry namespace 桥接、`zombies[]` 以及 `record_zombie_detected` /
+> `liveness_pending` 事件随之删除。真正收尾仍由 F118 owner reaper、KD-21 启动结算与 active-execution 读取时的
+> read-repair 承担，三者都不读草稿。下文关于草稿新鲜度、300 秒 TTL、600 秒宽限、namespace 桥接的描述以此为准
+> 失效。设计见 F117 Phase J 的 J3。
+>
 > **2026-08-13 post-close cleanup-carrier correction:** `/messages` 与 `/queue` 仍使用本 feature 的 canonical helper 做 read classification，但 `zombies[]` 在 GET 路径只用于诊断/过滤，不再 fire-and-forget 写 `failed`。运行时 cleanup 已迁到 F118 serialized owner reaper：stale lease 只是候选，必须再有独立 provider/TurnExecution owner absent/terminal 证明，并以 exact `executionId` fence 收敛。下文 AC-B7/B8、KD-19 的 route-trigger cleanup 是历史交付记录，已被此 correction supersede。
 >
 >

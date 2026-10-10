@@ -1,7 +1,6 @@
-import type { FreshnessCarrierCapability } from '@cat-cafe/shared';
+import type { FreshnessCarrierCapability, LifecycleActiveRun } from '@cat-cafe/shared';
 import type { AppServerLifecycleSnapshot } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
-import { resumeInvocationReconciliationAfterHydration } from './invocation-timeout-reconciliation';
 
 /** Canonical `/queue` liveness shape shared by initial hydration and reconnect repair. */
 export interface QueueActiveInvocationSlot {
@@ -10,6 +9,7 @@ export interface QueueActiveInvocationSlot {
   startedAt: number;
   executionId?: string;
   turnInvocationId?: string;
+  activeRun?: LifecycleActiveRun;
   appServerLifecycle?: AppServerLifecycleSnapshot;
   freshnessCarrierCapability?: FreshnessCarrierCapability;
 }
@@ -60,11 +60,13 @@ export function hydrateQueueActiveInvocationSlots({
       // Explicit undefined prevents a same-parent snapshot from certifying an old child.
       invocationId: slot.executionId,
       turnInvocationId: slot.turnInvocationId,
+      activeRun: slot.activeRun,
       settlement: slot.settlement,
       freshnessCarrierCapability: slot.freshnessCarrierCapability ?? {
         provider: 'other',
         carrier: 'other',
         deliverySemantics: 'undeclared',
+        activeInvocationGuidance: 'undeclared',
       },
       ...(slot.appServerLifecycle ? { appServerLifecycle: slot.appServerLifecycle } : {}),
     });
@@ -77,11 +79,6 @@ export function hydrateQueueActiveInvocationSlots({
       startedAt: slot.startedAt,
     };
   }
-
-  // A five-minute presentation timeout is a rebuildable projection, not a
-  // terminal verdict. If F5 restored an unresolved notice, authoritative
-  // `/queue` identity resumes its InvocationRecord reconciliation immediately.
-  resumeInvocationReconciliationAfterHydration(threadId);
 
   return activeStateSnapshot;
 }

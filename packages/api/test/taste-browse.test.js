@@ -52,6 +52,7 @@ beforeEach(async () => {
         content: '先把真实东西摆出来',
         deliveryStatus: 'delivered',
         catId: null,
+        from: { kind: 'user', userId: 'owner' },
         timestamp: 100,
       },
     ],
@@ -236,10 +237,12 @@ test('source guards proposal owner/status/path, thread/message owner and deletio
   }
   threads.set(t.id, t);
   const m = messages.get('message-owner');
-  for (const changed of [{ userId: 'other' }, { threadId: 'other' }, { deletedAt: 1 }, { deliveryStatus: 'queued' }]) {
+  for (const changed of [{ userId: 'other' }, { threadId: 'other' }, { deletedAt: 1 }]) {
     messages.set(m.id, { ...m, ...changed });
     assert.equal((await get(url)).json().canOpen, false);
   }
+  messages.set(m.id, { ...m, deliveryStatus: 'queued' });
+  assert.equal((await get(url)).json().canOpen, true, 'the owner may open its queued source in History');
 });
 test('missing source coordinate and a failed source read are different states', async () => {
   const item = await first();

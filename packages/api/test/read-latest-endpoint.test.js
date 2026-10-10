@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 describe('POST /api/threads/:id/read/latest', () => {
   let app;
@@ -83,22 +84,26 @@ describe('POST /api/threads/:id/read/latest', () => {
   it('acks to the latest message in thread', async () => {
     const thread = threadStore.create('alice', 'Thread with messages');
 
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'first',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    const msg2 = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'second (latest)',
-      mentions: [],
-      timestamp: 2000,
-      threadId: thread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'first',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const msg2 = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'second (latest)',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -114,60 +119,34 @@ describe('POST /api/threads/:id/read/latest', () => {
 
   it("does not advance a foreign viewer through another owner's terminal managed hold", async () => {
     const thread = threadStore.create('system', 'Shared managed-hold thread');
-    const anchor = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'alice-visible anchor',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    const custody = {
-      version: 1,
-      entryId: 'entry-foreign-managed-hold',
-      revision: 1,
-      ownerUserId: 'bob',
-      intent: 'managed command wake',
-      status: 'queued',
-      allTargetCats: ['opus5'],
-      pendingTargetCats: ['opus5'],
-      notifiedByCatIds: [],
-      seenByCatIds: [],
-      seenInvocationIdByCatId: {},
-      failedByCatIds: [],
-      handledByCatIds: [],
-      priority: 'normal',
-      createdAt: 2000,
-      updatedAt: 2000,
-    };
-    const terminal = messageStore.append({
-      userId: 'scheduler',
-      catId: null,
-      content: 'bob command result',
-      mentions: [],
-      timestamp: 2000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-      queueCustody: custody,
-      source: {
-        connector: 'hold-ball',
-        label: '持球结果',
-        icon: '🏓',
-        meta: { taskId: 'task-foreign', threadId: thread.id, catId: 'opus5', wakeWhen: true },
-      },
-    });
-    messageStore.transitionQueueCustody(terminal.id, {
-      expectedRevision: 1,
-      next: {
-        ...custody,
-        revision: 2,
-        status: 'terminal',
-        pendingTargetCats: [],
-        failedByCatIds: ['opus5'],
-        updatedAt: 2100,
-      },
-      deliveredAt: 2100,
-    });
+    const anchor = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'alice-visible anchor',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const terminal = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'bob',
+        catId: null,
+        from: { kind: 'system', service: 'hold-ball' },
+        content: 'bob command result',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+        source: {
+          connector: 'hold-ball',
+          label: '持球结果',
+          icon: '🏓',
+          meta: { taskId: 'task-foreign', threadId: thread.id, catId: 'opus5', wakeWhen: true },
+        },
+      }),
+    );
+    await messageStore.markDelivered(terminal.id, 2100);
 
     const res = await app.inject({
       method: 'POST',
@@ -181,15 +160,17 @@ describe('POST /api/threads/:id/read/latest', () => {
 
   it('acks a queued cat-authored message already published to the timeline', async () => {
     const thread = threadStore.create('alice', 'Thread with source-cat seed');
-    const seed = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'published source-cat seed',
-      mentions: ['opus'],
-      timestamp: 1000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const seed = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'published source-cat seed',
+        mentions: ['opus'],
+        timestamp: 1000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -210,23 +191,27 @@ describe('POST /api/threads/:id/read/latest', () => {
   // getLatestVisibleCursor must return Q (later visibilitySeq), not A.
   it('mixed thread: queued cat speech Q after ordinary A — acks Q as latest', async () => {
     const thread = threadStore.create('alice', 'Mixed: ordinary + queued');
-    const a = messageStore.append({
-      userId: 'alice',
-      catId: null,
-      content: 'ordinary message A',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    const q = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'queued cat speech Q',
-      mentions: ['opus'],
-      timestamp: 2000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-    });
+    const a = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: null,
+        content: 'ordinary message A',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const q = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'queued cat speech Q',
+        mentions: ['opus'],
+        timestamp: 2000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+      }),
+    );
 
     const res = await app.inject({
       method: 'POST',
@@ -244,25 +229,29 @@ describe('POST /api/threads/:id/read/latest', () => {
 
   it('does not durably ack a mutable stream until its final delivery transition', async () => {
     const thread = threadStore.create('alice', 'Mutable stream read boundary');
-    const earlier = messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'earlier durable speech',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
-    const stream = messageStore.append({
-      userId: 'alice',
-      catId: 'codex-sol',
-      content: 'partial stream',
-      mentions: [],
-      timestamp: 2000,
-      threadId: thread.id,
-      deliveryStatus: 'queued',
-      origin: 'stream',
-      extra: { stream: { invocationId: 'inv-d4', turnInvocationId: 'turn-d4' } },
-    });
+    const earlier = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'earlier durable speech',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
+    const stream = messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'codex-sol',
+        content: 'partial stream',
+        mentions: [],
+        timestamp: 2000,
+        threadId: thread.id,
+        deliveryStatus: 'queued',
+        origin: 'stream',
+        extra: { stream: { invocationId: 'inv-d4', turnInvocationId: 'turn-d4' } },
+      }),
+    );
 
     const partialAck = await app.inject({
       method: 'POST',
@@ -291,14 +280,16 @@ describe('POST /api/threads/:id/read/latest', () => {
 
   it('is idempotent — second call returns advanced=false', async () => {
     const thread = threadStore.create('alice', 'Thread');
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'hello',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'hello',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
 
     // First call
     const res1 = await app.inject({
@@ -323,14 +314,16 @@ describe('POST /api/threads/:id/read/latest', () => {
   // The frontend must NOT clear unread suppression in this case.
   it('returns caughtUp=false when stored cursor does not match latest', async () => {
     const thread = threadStore.create('alice', 'Stale cursor thread');
-    messageStore.append({
-      userId: 'alice',
-      catId: 'opus',
-      content: 'visible message',
-      mentions: [],
-      timestamp: 1000,
-      threadId: thread.id,
-    });
+    messageStore.append(
+      canonicalTestMessageInput({
+        userId: 'alice',
+        catId: 'opus',
+        content: 'visible message',
+        mentions: [],
+        timestamp: 1000,
+        threadId: thread.id,
+      }),
+    );
 
     // Simulate a stale cursor that's lex-greater than latest (CAS rejects,
     // stored != latest → caughtUp=false). Using a v2 with seq=9999... which

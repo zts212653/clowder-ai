@@ -12,7 +12,7 @@ import {
 import type { IEvalDomainTriggerStore } from '../harness-eval/domain/eval-domain-trigger-store.js';
 import { buildEvalCatInvocation } from '../harness-eval/eval-cat-invocation.js';
 import { computeNextCronFire } from '../harness-eval/hub/eval-hub-read-model-helpers.js';
-import type { ExecuteContext, ScheduleInvokeTrigger } from '../scheduler/types.js';
+import type { ExecuteContext } from '../scheduler/types.js';
 
 const DOMAIN_ID = 'eval:capability-evolution';
 const DOMAIN_FILENAME = 'eval-capability-evolution.yaml';
@@ -69,7 +69,6 @@ interface DispatchEvolutionProgramThresholdTriggerInput {
   currentConnectedOwnerSurfaces: number;
   store?: IEvalDomainTriggerStore;
   deliver?: ExecuteContext['deliver'];
-  invokeTrigger?: ScheduleInvokeTrigger;
   defaultUserId?: string;
   nowMs?: number;
   wiredPublishDomains?: ReadonlySet<EvalDomainRegistryEntry['domainId']>;
@@ -101,7 +100,6 @@ export async function dispatchEvolutionProgramThresholdTrigger(
     triggerReason: `Capability Evolution owner surfaces ${input.previousConnectedOwnerSurfaces}→${input.currentConnectedOwnerSurfaces}`,
     store: input.store,
     deliver: input.deliver,
-    invokeTrigger: input.invokeTrigger,
     defaultUserId: input.defaultUserId,
     nowMs: input.nowMs,
   });
@@ -120,7 +118,6 @@ export async function dispatchEvolutionProgramRoundTrigger(input: {
   programId: string;
   store?: IEvalDomainTriggerStore;
   deliver?: DispatchEvolutionProgramThresholdTriggerInput['deliver'];
-  invokeTrigger?: DispatchEvolutionProgramThresholdTriggerInput['invokeTrigger'];
   defaultUserId?: string;
   wiredPublishDomains?: ReadonlySet<string>;
   nowMs?: number;
@@ -137,7 +134,6 @@ export async function dispatchEvolutionProgramRoundTrigger(input: {
     triggerReason: `Capability Evolution evaluation round for ${input.programId}`,
     store: input.store,
     deliver: input.deliver,
-    invokeTrigger: input.invokeTrigger,
     defaultUserId: input.defaultUserId,
     nowMs: input.nowMs,
   });

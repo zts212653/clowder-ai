@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -22,7 +22,7 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   t.after(async () => {
     await f.dispatch.close();
     f.store.close();
-    await rm(root, { recursive: true, force: true });
+    console.info('Retained artifact-review SQLite fixture:', root);
   });
   let view = await f.reviews.prepare(f.prepare, f.human);
   view = (
@@ -111,11 +111,9 @@ test('deployment-before-text pending artifact_review_returns JSON drains after r
     .getByThreadIncludingQueued(f.thread.id)
     .find((item) => item.source?.connector === 'content-review');
   assert.ok(winner);
-  assert.equal(
-    winner.queueCustody?.sourceCategory,
-    'producer_return',
-    'artifact-review producer must classify its wake',
-  );
+  assert.equal(winner.lifecycle?.kind, 'input');
+  assert.equal(Object.hasOwn(winner, 'queueCustody'), false);
+  assert.equal(f.dispatch.admissions[0]?.sourceCategory, 'producer_return');
   await f.dispatch.waitForAwakening(winner.id);
   const legacy = {
     receiptRef: decision.receipt.receiptRef,

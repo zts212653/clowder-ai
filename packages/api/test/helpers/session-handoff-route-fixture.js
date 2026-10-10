@@ -34,7 +34,7 @@ export function buildSessionHandoffDeps({ sealAccepted = true, sessionActive = t
   };
   const enqueueCalls = [];
   const invocationQueue = {
-    enqueue: (input) => {
+    enqueueDurable: async (input) => {
       enqueueCalls.push(input);
       return { outcome: 'enqueued', entry: { id: `entry_${enqueueCalls.length}` } };
     },

@@ -72,7 +72,7 @@ test('isolated owner HTTP can inspect, cancel and restore the labeled simulation
     publish() {},
   });
   t.after(() => realCall.stop());
-  sessions.claim(realCall.id, 'owner', threadId, [createCatId('codex-astra')]);
+  await sessions.claim(realCall.id, 'owner', threadId, [createCatId('codex-astra')]);
   await realCall.configure({
     CAT_CAFE_API_URL: simulationInput.apiUrl,
     CAT_CAFE_USER_ID: 'owner',

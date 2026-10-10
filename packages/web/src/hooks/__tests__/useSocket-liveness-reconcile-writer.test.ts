@@ -27,12 +27,6 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  collectExactLiveInvocationIds,
-  projectQueueEntryForActions,
-  receiptTargetStateLabel,
-} from '../../components/queue-receipt-projection';
-import type { QueueEntry } from '../../stores/chat-types';
 import { DEFAULT_THREAD_STATE, useChatStore } from '../../stores/chatStore';
 import { reconcileThreadWithServer } from '../useSocket';
 
@@ -107,7 +101,7 @@ describe('reconcileThreadWithServer — F173 PR-C Task 10 mirror invariant', () 
       expect(ts?.catStatuses.opus).toBe('streaming');
     });
 
-    it('preserves exact parent and child identity for F264 receipt liveness', async () => {
+    it('preserves exact parent and child execution identity after reconnect', async () => {
       mockApiFetchOnce({
         activeInvocations: [
           {
@@ -132,42 +126,6 @@ describe('reconcileThreadWithServer — F173 PR-C Task 10 mirror invariant', () 
         invocationId: 'parent-sol',
         turnInvocationId: 'child-sol',
       });
-
-      const activeInvocationIds = collectExactLiveInvocationIds(state.activeInvocations, state.catInvocations);
-      const receiptEntry: QueueEntry = {
-        id: 'q-reconnect-receipt',
-        threadId: ACTIVE_TID,
-        userId: 'u1',
-        content: 'reconnect must retain exact child liveness',
-        messageId: 'm-reconnect-receipt',
-        mergedMessageIds: [],
-        source: 'user',
-        targetCats: ['codex-sol'],
-        targetStates: { 'codex-sol': 'seen' },
-        queueReceipt: {
-          version: 1,
-          entryId: 'q-reconnect-receipt',
-          targets: [
-            {
-              catId: 'codex-sol',
-              state: 'seen',
-              invocationId: 'child-sol',
-              seenAt: 1100,
-            },
-          ],
-          reminderAttempts: [],
-        },
-        intent: 'execute',
-        status: 'queued',
-        createdAt: 900,
-      };
-
-      expect(activeInvocationIds).toContain('child-sol');
-      expect(projectQueueEntryForActions(receiptEntry, activeInvocationIds)).toBeNull();
-      const receiptTarget = receiptEntry.queueReceipt?.targets[0];
-      expect(receiptTarget).toBeDefined();
-      if (!receiptTarget) throw new Error('expected exact receipt target');
-      expect(receiptTargetStateLabel(receiptTarget, activeInvocationIds)).toBe('已读 · 当前轮处理中');
     });
   });
 

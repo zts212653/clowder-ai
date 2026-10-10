@@ -1,8 +1,6 @@
-import type { QueueReceiptTargetState } from '@cat-cafe/shared';
-import { actionSuccessorCarrierKey } from '../cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import type { IMessageStore, StoredMessage } from '../cats/services/stores/ports/MessageStore.js';
-import type { QueuedMessageCustody } from '../cats/services/stores/ports/queued-message-custody.js';
-import { projectQueueReceipt } from '../cats/services/stores/ports/queued-message-receipt.js';
+import type { InvocationQueue } from '../cats/services/agents/invocation/InvocationQueue.js';
+import type { QueueLedgerEntry } from '../cats/services/agents/invocation/queue-ledger/QueueLedger.js';
+import type { IMessageStore } from '../cats/services/stores/ports/MessageStore.js';
 import {
   type ActionSuccessorAdmissionInput,
   type ActionSuccessorFence,
@@ -12,14 +10,11 @@ import {
 import { canonicalizeActionTerminalPredicate } from './ActionTerminalPredicateCatalog.js';
 import type { ActionSuccessorLease } from './action-successor-state-machine.js';
 import {
-  confirmHandledExecutionsEnded,
+  type ActionHistoryExecutionState,
   type ExecutionLineageReader,
   type ExecutionRecordReader,
+  readActionHistoryExecution,
 } from './DirectActionSuccessorExecutionEvidence.js';
-
-const LIVE_TARGET_STATES = new Set<QueueReceiptTargetState>(['queued', 'notified', 'awakened', 'seen', 'steering']);
-
-type ObservedCarrierState = QueueReceiptTargetState | 'admitted';
 
 export type DirectActionSuccessorCarrierUnavailableReason =
   | 'authority_mismatch'
@@ -27,16 +22,12 @@ export type DirectActionSuccessorCarrierUnavailableReason =
   | 'carrier_terminal'
   | 'carrier_failed'
   | 'carrier_mixed'
-  /** Handled, but the execution record does not prove that run really ended in success. */
   | 'execution_unconfirmed'
-  /** The lease moved under this request (cancelled, completed, replaced, or still being refreshed). */
   | 'lease_changed'
   | 'lookup_failed';
-
 export type DirectActionSuccessorCarrierDecision =
   | { disposition: 'live'; fence: ActionSuccessorFence }
   | { disposition: 'restart_interrupted'; fence: ActionSuccessorFence }
-  /** The handled generation's execution ended; `fence` names that OLD generation, not the next one. */
   | { disposition: 'refresh_handled'; fence: ActionSuccessorFence }
   | { disposition: 'unavailable'; reason: DirectActionSuccessorCarrierUnavailableReason };
 
@@ -98,195 +89,172 @@ export function isExactDirectActionSuccessorReentry(
   }
 }
 
-function observeAdmission(
-  message: StoredMessage,
-  holders: readonly string[],
-  fence: ActionSuccessorFence,
-  observed: Map<string, Set<ObservedCarrierState>>,
-): void {
-  const admission = message.queueCustodyAdmission;
-  if (!admission || !actionSuccessorFencesMatch(admission.actionSuccessorFence, fence)) return;
-  if (!sameMembers(holders, admission.targetCats)) return;
-  for (const holder of holders) {
-    if (admission.targetCats.includes(holder as (typeof admission.targetCats)[number])) {
-      observed.get(holder)?.add('admitted');
-    }
-  }
-}
-
-/**
- * The CHILD invocation ids this carrier's own custody durably names as having handled `holder`: the F264 target
- * outcome and every handled delivery attempt. They are not InvocationRecord ids, only pointers into the durable
- * turn ledger; each is trusted only after its lineage reaches a record created from this exact carrier key.
- */
-function handledChildInvocationIdsOf(custody: QueuedMessageCustody, holder: string): string[] {
-  const ids = new Set<string>();
-  const outcomeId = custody.targetOutcomeByCatId?.[holder]?.invocationId;
-  if (outcomeId) ids.add(outcomeId);
-  for (const attempt of custody.targetAttempts ?? []) {
-    if (attempt.targetCatId === holder && attempt.state === 'handled' && attempt.invocationId) {
-      ids.add(attempt.invocationId);
-    }
-  }
-  return [...ids];
-}
-
-function observeCustody(
-  message: StoredMessage,
-  holders: readonly string[],
-  fence: ActionSuccessorFence,
-  observed: Map<string, Set<ObservedCarrierState>>,
-  handledChildInvocationIds: Map<string, Set<string>>,
-): void {
-  const custody = message.queueCustody;
-  if (!custody) return;
-  const receipt = projectQueueReceipt(custody);
-  for (const holder of holders) {
-    const binding = custody.carrierByTargetCatId?.[holder];
-    if (!actionSuccessorFencesMatch(binding?.actionSuccessorFence, fence)) continue;
-    if (binding?.idempotencyKey !== actionSuccessorCarrierKey(fence, holder)) continue;
-    const target = receipt.targets.find((candidate) => candidate.catId === holder);
-    if (!target) continue;
-    observed.get(holder)?.add(target.state);
-    if (target.state === 'handled') {
-      for (const id of handledChildInvocationIdsOf(custody, holder)) handledChildInvocationIds.get(holder)?.add(id);
-    }
-  }
-}
-
-interface CarrierObservation {
-  decision: DirectActionSuccessorCarrierDecision;
-  fence: ActionSuccessorFence;
-  /** Every holder's only observed custody state is `handled` (no withdrawn / failed / live mixed in). */
-  handledOnly: boolean;
-  /** Per holder, the child invocation ids this exact carrier's custody names as having handled it. */
-  handledChildInvocationIds: ReadonlyMap<string, ReadonlySet<string>>;
-}
-
-function observeDirectActionSuccessorCarrier(
-  lease: ActionSuccessorLease,
-  messages: readonly StoredMessage[],
-): CarrierObservation {
+function exactPendingEntries(lease: ActionSuccessorLease, entries: readonly QueueLedgerEntry[]): QueueLedgerEntry[] {
   const fence = buildActionSuccessorFence(lease, lease.dispatchId);
-  const observed = new Map(lease.holderCatIds.map((catId) => [catId, new Set<ObservedCarrierState>()]));
-  const handledChildInvocationIds = new Map(lease.holderCatIds.map((catId) => [catId, new Set<string>()]));
-
-  for (const message of messages) {
-    if (message.threadId !== lease.holderThreadId || message.userId !== lease.tenantScope) continue;
-    observeAdmission(message, lease.holderCatIds, fence, observed);
-    observeCustody(message, lease.holderCatIds, fence, observed, handledChildInvocationIds);
-  }
-
-  const holderStates = lease.holderCatIds.map((catId) => observed.get(catId) ?? new Set<ObservedCarrierState>());
-  const handledOnly = holderStates.every(
-    (states) => states.size > 0 && [...states].every((state) => state === 'handled'),
+  return entries.filter(
+    (entry) =>
+      entry.threadId === lease.holderThreadId &&
+      entry.owner.kind === 'user' &&
+      entry.owner.userId === lease.tenantScope &&
+      entry.status !== 'terminal' &&
+      actionSuccessorFencesMatch(entry.execution.actionSuccessorFence, fence),
   );
-  const decide = (decision: DirectActionSuccessorCarrierDecision): CarrierObservation => ({
-    decision,
-    fence,
-    handledOnly,
-    handledChildInvocationIds,
-  });
-  const everyHolderLive = holderStates.every((states) =>
-    [...states].some((state) => state === 'admitted' || LIVE_TARGET_STATES.has(state as QueueReceiptTargetState)),
-  );
-  if (everyHolderLive) return decide({ disposition: 'live', fence });
-
-  const everyHolderRestartInterrupted = holderStates.every(
-    (states) => states.size > 0 && [...states].every((state) => state === 'interrupted'),
-  );
-  if (everyHolderRestartInterrupted) return decide({ disposition: 'restart_interrupted', fence });
-
-  if (holderStates.some((states) => states.size === 0)) {
-    return decide({ disposition: 'unavailable', reason: 'carrier_missing' });
-  }
-  if (holderStates.some((states) => states.has('handled') || states.has('withdrawn'))) {
-    return decide({ disposition: 'unavailable', reason: 'carrier_terminal' });
-  }
-  if (holderStates.some((states) => states.has('failed'))) {
-    return decide({ disposition: 'unavailable', reason: 'carrier_failed' });
-  }
-  return decide({ disposition: 'unavailable', reason: 'carrier_mixed' });
 }
 
-/** Classify only durable, exact-fence custody; message recency and process state are irrelevant. */
+/** Pending-only projection. A missing Queue row is never terminal success. */
 export function classifyDirectActionSuccessorCarrier(
   lease: ActionSuccessorLease,
-  messages: readonly StoredMessage[],
+  entries: readonly QueueLedgerEntry[],
 ): DirectActionSuccessorCarrierDecision {
-  return observeDirectActionSuccessorCarrier(lease, messages).decision;
+  const pending = new Set(exactPendingEntries(lease, entries).flatMap((entry) => entry.targets));
+  return lease.holderCatIds.every((holder) => pending.has(holder))
+    ? { disposition: 'live', fence: buildActionSuccessorFence(lease, lease.dispatchId) }
+    : { disposition: 'unavailable', reason: 'carrier_missing' };
 }
 
-/**
- * What the store can prove about a carrier message's Queue admission. `unverified` is its own state:
- * a failed read says nothing about whether the admission exists, so it must never be folded into
- * either answer.
- */
 export type CarrierAdmissionEvidence = 'durable' | 'not_persisted' | 'unverified';
 
-/**
- * Read back whether `messageId` really holds durable Queue custody (an admission or a custody carrier
- * binding) for exactly this fence and holder set. Startup reconciliation can restore a delivery only
- * from that durable record, so this, not the fact that delivery failed, decides what a caller may be told.
- */
+/** Read canonical pending admission only; receipt shadows cannot promise startup recovery. */
 export async function readCarrierAdmissionEvidence(
-  messageStore: Pick<IMessageStore, 'getById'>,
+  queue: Pick<InvocationQueue, 'getDurableEntriesForMessages'>,
   messageId: string,
   holderCatIds: readonly string[],
   fence: ActionSuccessorFence,
+  scope: { threadId: string; userId: string },
 ): Promise<CarrierAdmissionEvidence> {
   try {
-    const message = await messageStore.getById(messageId);
-    if (!message) return 'unverified';
-    const admission = message.queueCustodyAdmission;
-    const admitted =
-      admission !== undefined &&
-      actionSuccessorFencesMatch(admission.actionSuccessorFence, fence) &&
-      sameMembers(holderCatIds, admission.targetCats);
-    const bound = holderCatIds.every((holder) =>
-      actionSuccessorFencesMatch(message.queueCustody?.carrierByTargetCatId?.[holder]?.actionSuccessorFence, fence),
+    const entries = (await queue.getDurableEntriesForMessages(scope.threadId, [messageId])).get(messageId) ?? [];
+    const pending = new Set(
+      entries
+        .filter(
+          (entry) =>
+            entry.threadId === scope.threadId &&
+            entry.owner.kind === 'user' &&
+            entry.owner.userId === scope.userId &&
+            entry.payload.messageId === messageId &&
+            entry.status !== 'terminal' &&
+            actionSuccessorFencesMatch(entry.execution.actionSuccessorFence, fence),
+        )
+        .flatMap((entry) => entry.targets),
     );
-    return admitted || bound ? 'durable' : 'not_persisted';
+    return holderCatIds.length > 0 && holderCatIds.every((holder) => pending.has(holder)) ? 'durable' : 'not_persisted';
   } catch {
     return 'unverified';
   }
 }
 
-export async function resolveDirectActionSuccessorCarrier(input: {
-  messageStore: Pick<IMessageStore, 'getByThreadAfter'>;
+function decideObservedExecutions(
+  lease: ActionSuccessorLease,
+  states: ReadonlyMap<string, ReadonlySet<ActionHistoryExecutionState>>,
+): DirectActionSuccessorCarrierDecision {
+  const observed = lease.holderCatIds.map((holder) => states.get(holder) ?? new Set<ActionHistoryExecutionState>());
+  // A proven old interruption does not outrank an exact replacement source. No timestamp
+  // establishes succession, and canceled/failed attempts remain terminal refusals.
+  const all = (state: ActionHistoryExecutionState) =>
+    observed.length > 0 &&
+    observed.every(
+      (values) => values.has(state) && [...values].every((value) => value === state || value === 'interrupted'),
+    );
+  const fence = buildActionSuccessorFence(lease, lease.dispatchId);
+  if (observed.some((values) => values.has('canceled')))
+    return { disposition: 'unavailable', reason: 'carrier_terminal' };
+  if (observed.some((values) => values.has('failed'))) return { disposition: 'unavailable', reason: 'carrier_failed' };
+  if (observed.some((values) => values.has('unconfirmed')))
+    return { disposition: 'unavailable', reason: 'execution_unconfirmed' };
+  if (all('live')) return { disposition: 'live', fence };
+  if (all('interrupted')) return { disposition: 'restart_interrupted', fence };
+  if (all('handled')) return { disposition: 'refresh_handled', fence };
+  return {
+    disposition: 'unavailable',
+    reason: observed.some((values) => values.size === 0) ? 'carrier_missing' : 'carrier_mixed',
+  };
+}
+
+function isPredecessorSource(
+  source: Awaited<ReturnType<IMessageStore['getByThreadAfter']>>[number],
+  lease: ActionSuccessorLease,
+) {
+  return (
+    source.userId === lease.tenantScope &&
+    source.threadId === lease.holderThreadId &&
+    source.from?.kind === 'agent' &&
+    source.from.catId === lease.predecessorCatId
+  );
+}
+
+interface CarrierRecoveryInput {
+  invocationQueue: Pick<InvocationQueue, 'listAllDurable'>;
+  messageStore?: Pick<IMessageStore, 'getByThreadAfter' | 'getById'>;
   invocationRecordStore?: ExecutionRecordReader;
-  /** The durable child ledger; without it a custody pointer cannot be followed and stays unconfirmed. */
   turnExecutionStore?: ExecutionLineageReader;
   lease: ActionSuccessorLease;
   admissionInput: ActionSuccessorAdmissionInput;
-}): Promise<DirectActionSuccessorCarrierDecision> {
-  if (!isExactDirectActionSuccessorReentry(input.lease, input.admissionInput)) {
-    return { disposition: 'unavailable', reason: 'authority_mismatch' };
+}
+
+const sourceKey = (holder: string, messageId: string) => JSON.stringify([holder, messageId]);
+
+async function observeHistoryExecutions(
+  input: CarrierRecoveryInput,
+  pendingSources: ReadonlySet<string>,
+  states: Map<string, Set<ActionHistoryExecutionState>>,
+): Promise<Set<string>> {
+  const historySources = new Set<string>();
+  if (!input.messageStore) return historySources;
+  const { lease } = input;
+  const sources = await input.messageStore.getByThreadAfter(
+    lease.holderThreadId,
+    undefined,
+    undefined,
+    lease.tenantScope,
+    { includeQueuedCatMessages: true, includeQueuedUserMessages: true },
+  );
+  for (const source of sources) {
+    if (!isPredecessorSource(source, lease)) continue;
+    for (const ref of source.lifecycle?.dispatchRefs ?? []) {
+      if (!states.has(ref.targetId)) continue;
+      const state = await readActionHistoryExecution({
+        lease,
+        source,
+        holder: ref.targetId,
+        responseMessageId: ref.statusMessageId,
+        messages: input.messageStore,
+        recordStore: input.invocationRecordStore,
+        lineage: input.turnExecutionStore,
+      });
+      const identity = sourceKey(ref.targetId, source.id);
+      if (state || pendingSources.has(identity)) {
+        historySources.add(identity);
+        states.get(ref.targetId)?.add(state ?? 'unconfirmed');
+      }
+    }
   }
-  let messages: readonly StoredMessage[];
+  return historySources;
+}
+
+/**
+ * QueueLedger is the only pending owner. History plus immutable child/parent execution records
+ * proves actual delivery and terminal outcomes. This read-only join admits nothing.
+ */
+export async function resolveDirectActionSuccessorCarrier(
+  input: CarrierRecoveryInput,
+): Promise<DirectActionSuccessorCarrierDecision> {
+  const { lease } = input;
+  if (!isExactDirectActionSuccessorReentry(lease, input.admissionInput))
+    return { disposition: 'unavailable', reason: 'authority_mismatch' };
   try {
-    messages = await input.messageStore.getByThreadAfter(
-      input.lease.holderThreadId,
-      undefined,
-      undefined,
-      input.lease.tenantScope,
-      { includeQueuedCatMessages: true, includeQueuedUserMessages: true },
+    const entries = await input.invocationQueue.listAllDurable(lease.holderThreadId);
+    const pending = exactPendingEntries(lease, entries);
+    const pendingSources = new Set(
+      pending.flatMap((entry) => entry.targets.map((holder) => sourceKey(holder, entry.payload.sourceRecordId))),
     );
+    const states = new Map(lease.holderCatIds.map((holder) => [holder, new Set<ActionHistoryExecutionState>()]));
+    const historySources = await observeHistoryExecutions(input, pendingSources, states);
+    // Actual History wins over stale pending caches; unknown lineage never proves success.
+    for (const entry of pending)
+      for (const holder of entry.targets)
+        if (!historySources.has(sourceKey(holder, entry.payload.sourceRecordId))) states.get(holder)?.add('live');
+    return decideObservedExecutions(lease, states);
   } catch {
     return { disposition: 'unavailable', reason: 'lookup_failed' };
   }
-  const { decision, fence, handledOnly, handledChildInvocationIds } = observeDirectActionSuccessorCarrier(
-    input.lease,
-    messages,
-  );
-  const handledCarrier =
-    decision.disposition === 'unavailable' && decision.reason === 'carrier_terminal' && handledOnly;
-  return handledCarrier
-    ? confirmHandledExecutionsEnded(
-        input.lease,
-        fence,
-        { recordStore: input.invocationRecordStore, lineage: input.turnExecutionStore },
-        handledChildInvocationIds,
-      )
-    : decision;
 }

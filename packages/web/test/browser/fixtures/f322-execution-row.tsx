@@ -62,7 +62,7 @@ function entry(id: string, createdAt: number, over: Partial<QueueEntry> = {}): Q
     content: `请帮我看看这个 PR 的第 ${id} 处改动是否合理`,
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'u' },
     targetCats: ['opus'],
     intent: 'execute',
     status: 'queued',
@@ -80,7 +80,6 @@ function entry(id: string, createdAt: number, over: Partial<QueueEntry> = {}): Q
 }
 
 const STUCK = entry('stuck', NOW - 10_000, {
-  status: 'processing',
   recoveryActions: [
     {
       id: 'queue-force-reset:stuck:1',

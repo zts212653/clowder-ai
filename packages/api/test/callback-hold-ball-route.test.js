@@ -53,7 +53,16 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
         getAll() {
           return insertedTasks;
         },
+        getById(id) {
+          return insertedTasks.find((task) => task.id === id);
+        },
         remove() {
+          return true;
+        },
+        updateParams(id, params) {
+          const task = insertedTasks.find((candidate) => candidate.id === id);
+          if (!task) return false;
+          task.params = params;
           return true;
         },
       },
@@ -64,6 +73,14 @@ describe('F167 C1: /api/callbacks/hold-ball auth + body validation', () => {
       },
       socketManager: {
         broadcastToRoom() {},
+      },
+      managedCommandWakeRecovery: {
+        async recordCompletion() {
+          return 'consumed';
+        },
+        async recordLost() {
+          return 'consumed';
+        },
       },
       holdQuotaStore,
       _insertedTasks: insertedTasks,

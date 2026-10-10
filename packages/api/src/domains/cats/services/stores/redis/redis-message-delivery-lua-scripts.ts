@@ -30,7 +30,7 @@
  * ARGV[2] = deliveredAt (string number)
  * ARGV[3] = keyPrefix (e.g. "cat-cafe:") — for constructing zset keys inside Lua
  *
- * Returns: {-1, {}} when missing, {0, HGETALL} on a state/custody no-op, or
+ * Returns: {-1, {}} when missing, {0, HGETALL} on a state no-op, or
  * {1, HGETALL} on a CAS win. Returning the canonical hash with the outcome
  * preserves Clowder AI's deliveryTransitioned receipt without a post-EVAL read gap.
  */
@@ -49,39 +49,18 @@ if status ~= 'queued' then
   return {0, redis.call('HGETALL', hash)}
 end
 
--- A durable pre-CAS fan-out intent is active Queue work, not legacy speech
--- whose visibility can be repaired by marking it delivered.
-local admission = redis.call('HGET', hash, 'queueCustodyAdmission')
-if admission and admission ~= '' then
-  return {0, redis.call('HGETALL', hash)}
-end
-
--- F254: legacy markDelivered must not bypass active execution custody.
-local custody = redis.call('HGET', hash, 'queueCustody')
-if custody and custody ~= '' then
-  local custodyProjection = cjson.decode(custody)
-  if custodyProjection.status ~= 'terminal' then
-    return {0, redis.call('HGETALL', hash)}
-  end
-end
-
 local userId = redis.call('HGET', hash, 'userId')
 local threadId = redis.call('HGET', hash, 'threadId')
 local timestamp = redis.call('HGET', hash, 'timestamp')
 local catId = redis.call('HGET', hash, 'catId')
 local origin = redis.call('HGET', hash, 'origin')
-local source = redis.call('HGET', hash, 'source')
 
--- Preserve Clowder AI publication order: already-published real-cat speech and
--- owner-visible queued user receipts keep their authored timestamp; private
--- queued work enters the timeline at delivery.
+-- Preserve Clowder AI publication order only for already-published real-cat
+-- speech. Undelivered owner work enters History at actual delivery.
 local isRealCatSpeech = catId and catId ~= '' and catId ~= 'system'
   and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
-local isQueuedUserReceipt = (not catId or catId == '') and (not source or source == '')
-  and userId ~= 'system' and userId ~= 'scheduler' and origin ~= 'briefing'
-  and custody and custody ~= ''
 local timelineScore = deliveredAt
-if isRealCatSpeech or isQueuedUserReceipt then
+if isRealCatSpeech then
   timelineScore = timestamp
 end
 
@@ -112,7 +91,6 @@ if status ~= 'queued' then
   return {0, redis.call('HGETALL', hash)}
 end
 redis.call('HSET', hash, 'deliveryStatus', 'canceled')
-redis.call('HDEL', hash, 'queueCustody', 'queueCustodyRevision', 'queueCustodyAdmission')
 return {1, redis.call('HGETALL', hash)}
 `;
 

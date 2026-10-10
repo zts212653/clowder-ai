@@ -929,7 +929,7 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(thrownError.configuredIdleStallMs, 100, 'HTTP zero-event error carries configured threshold');
   });
 
-  it('#1186: cancel settles HTTP prompt stream via sessionCancelCallbacks', async () => {
+  it('F117: zero prompt limits wait for explicit HTTP session cancellation', async () => {
     let promptResponse = null;
     let resolvePromptSeen;
     const promptSeen = new Promise((resolve) => {
@@ -992,9 +992,9 @@ describe('AcpHttpStreamClient', () => {
     let thrownError = null;
     const startMs = Date.now();
     const iterator = client.promptStream(session.sessionId, 'hello', {
-      idleWarningMs: 500,
-      idleStallMs: 5000, // Very high — cancel must fire before this
-      timeoutMs: 10000,
+      idleWarningMs: 10,
+      idleStallMs: 0,
+      timeoutMs: 0,
     });
 
     const firstResult = iterator.next();
@@ -1004,6 +1004,8 @@ describe('AcpHttpStreamClient', () => {
       // Get the first real event
       const first = await withTimeout(firstResult, 3000, 'HTTP cancel-cb first event');
       if (!first.done) events.push(first.value);
+
+      await new Promise((resolve) => setTimeout(resolve, 80));
 
       // Cancel the session — should settle promptStream immediately via callback
       client.cancelSession(session.sessionId);
@@ -1022,9 +1024,10 @@ describe('AcpHttpStreamClient', () => {
 
     const elapsed = Date.now() - startMs;
 
-    // Should throw AcpStreamIdleError (from cancel callback)
     assert.ok(thrownError, 'HTTP cancel should throw');
-    assert.equal(thrownError.code, 'STREAM_IDLE_STALL', `Expected STREAM_IDLE_STALL, got ${thrownError.code}`);
+    assert.equal(thrownError.code, 'SESSION_CANCELLED', `Expected SESSION_CANCELLED, got ${thrownError.code}`);
+    assert.match(thrownError.message, /provider termination is unconfirmed/);
+    assert.ok(!events.some((event) => event.update?.sessionUpdate === 'stream_idle_warning'));
     assert.equal(
       client.isSafeForSingleFlightReuse,
       false,
@@ -1033,7 +1036,7 @@ describe('AcpHttpStreamClient', () => {
     assert.equal(client.isSessionSafeForReuse('http-cancel-cb'), false);
     assert.equal(client.isSessionSafeForReuse('unrelated-sess'), true);
 
-    // Should settle promptly — not wait for idle stall (5s) or budget (10s)
+    // Should settle promptly once explicitly cancelled.
     assert.ok(elapsed < 2000, `HTTP cancel should settle within 2s, took ${elapsed}ms`);
   });
 

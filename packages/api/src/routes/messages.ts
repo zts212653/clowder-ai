@@ -13,121 +13,54 @@
  * POST 流程: 原子创建 InvocationRecord → 写入用户消息 → 回填 → reply 202 → background 执行
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   type CatId,
-  type CatRoutingError,
   catRegistry,
+  isCloudBridgeRecoveryV1,
   isCrossThreadProvenance,
-  type MessageBundleCarrierV1,
   type MessageContent,
   type MessageWorkDisposition,
-  type OutputCommitDecision,
+  timelineMessageKind,
 } from '@cat-cafe/shared';
-import type { SessionStore } from '@cat-cafe/shared/utils';
 import multipart from '@fastify/multipart';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import { getDefaultCatId } from '../config/cat-config-loader.js';
-import { resolveFrontendBaseUrl } from '../config/frontend-origin.js';
-import type { WaitContinuationRetryCommitter } from '../domains/ball-custody/WaitContinuationRetryCommitter.js';
-import type { WaitContinuationRetryPreflight } from '../domains/ball-custody/WaitContinuationRetryPreflight.js';
 import {
-  type CollaborationContinuityCapsuleV1,
-  extractContinuityCapsuleFromAgentMessage,
-} from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
-import {
-  ensureTerminalStatus,
-  RouteChainCompletionTracker,
-} from '../domains/cats/services/agents/invocation/ensureTerminalStatus.js';
-import { getThreadLiveInvocations } from '../domains/cats/services/agents/invocation/getThreadLiveInvocations.js';
-import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
+  type InvocationQueue,
+  queueEntryTargetCats,
+} from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
-import {
-  isTerminalDispositionEvent,
-  PerCatTerminalDispositionCollector,
-} from '../domains/cats/services/agents/invocation/PerCatTerminalDispositionCollector.js';
-import { createInitialQueuedMessageCustody } from '../domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import type {
-  QueueProcessor,
-  SessionContinuationCoordinatorLike,
-} from '../domains/cats/services/agents/invocation/QueueProcessor.js';
-import { requireInvocationRecordUpdate } from '../domains/cats/services/agents/invocation/require-invocation-record-update.js';
-import type { ConsumedContinuationToken } from '../domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
-import { stampVisibleTurn } from '../domains/cats/services/agents/invocation/visible-turn.js';
-import {
-  createA2ASlotTrackingBridge,
-  type PersistenceContext,
-  type RouteOptions,
-} from '../domains/cats/services/agents/routing/route-helpers.js';
+import type { OwnerAuthProvenance } from '../domains/cats/services/agents/invocation/owner-auth-provenance.js';
 import { resetStreak } from '../domains/cats/services/agents/routing/WorklistRegistry.js';
-import {
-  accumulateTextParts,
-  flattenTextParts,
-  flattenTurnTextParts,
-} from '../domains/cats/services/agents/text-aggregation.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
-import {
-  MessageBundlePromptUnavailableError,
-  resolveMessageBundlePrompt,
-} from '../domains/cats/services/context/MessageBundlePromptResolver.js';
 import {
   type MessageSelectionAdmissionResult,
   MessageSelectionResolver,
 } from '../domains/cats/services/context/MessageSelectionResolver.js';
-import type { FreshnessClosureStore } from '../domains/cats/services/freshness/closure/FreshnessClosureStore.js';
-import {
-  isLeakedSupplementDecline,
-  projectFreshnessSupplementForHistory,
-} from '../domains/cats/services/freshness/glass-box/freshness-supplement-history-projection.js';
 import { createGameDriver } from '../domains/cats/services/game/createGameDriver.js';
 import type { GameDriver } from '../domains/cats/services/game/GameDriver.js';
 import { GameOrchestrator } from '../domains/cats/services/game/GameOrchestrator.js';
 import { WerewolfLobby } from '../domains/cats/services/game/werewolf/WerewolfLobby.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-import { getPushNotificationService } from '../domains/cats/services/push/PushNotificationService.js';
-import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
 import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
-import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { isTimelinePublished } from '../domains/cats/services/stores/ports/MessageStore.js';
-import { projectQueueReceipt } from '../domains/cats/services/stores/ports/queued-message-receipt.js';
-import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import { deriveAutoThreadTitle, type IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
-import {
-  type ITurnExecutionStore,
-  projectTurnExecutionMessage,
-} from '../domains/cats/services/stores/ports/TurnExecutionStore.js';
 import {
   getTimelineOrderTime,
   isInternalNonQuotableParent,
-  isSystemUserMessage,
   resolveVisibleReplyParent,
 } from '../domains/cats/services/stores/visibility.js';
-import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
-import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
-import { buildCancelMessages, type SocketManager } from '../infrastructure/websocket/index.js';
+import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { normalizeJsonUnicode } from '../utils/json-unicode.js';
 import { getDefaultUploadDir } from '../utils/upload-paths.js';
-import { persistA2ARoutingMessage } from './a2a-routing-projection.js';
 import { admitThreadParticipants } from './thread-participant-admission.js';
-import { readUserMessageReceipt, userMessageReceipt } from './user-message-receipt.js';
-
-/** F088 ISSUE-15: Minimal outbound delivery interface — avoids importing full OutboundDeliveryHook. */
-interface OutboundDeliveryHookLike {
-  deliver(
-    threadId: string,
-    content: string,
-    catId?: string,
-    richBlocks?: unknown[],
-    threadMeta?: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string },
-    origin?: string,
-    triggerMessageId?: string,
-  ): Promise<void>;
-}
+import { readUserMessageReceipt } from './user-message-receipt.js';
 
 type StoredRecovery = NonNullable<StoredMessage['extra']>['recovery'];
 
@@ -141,60 +74,14 @@ function projectRecoveryForHistory(recovery: StoredRecovery) {
   };
 }
 
-function isConnectorDeliverable(decision: OutputCommitDecision | undefined): boolean {
-  return (
-    decision === undefined ||
-    decision.kind === 'committed_fresh' ||
-    decision.kind === 'committed_degraded_unknown' ||
-    decision.kind === 'published_with_unseen'
-  );
-}
-
-/** F088 ISSUE-15: Minimal streaming hook interface. */
-interface StreamingHookLike {
-  onStreamStart(
-    threadId: string,
-    catId?: string,
-    invocationId?: string,
-    senderHint?: { id: string; name?: string },
-  ): Promise<void>;
-  onStreamChunk(threadId: string, accumulatedText: string, invocationId?: string): Promise<void>;
-  onStreamEnd(threadId: string, finalText: string, invocationId?: string): Promise<void>;
-  onClosureCatchingUp?(threadId: string, catId: CatId, invocationId?: string): Promise<void>;
-  onClosureBlocked?(threadId: string, catId: CatId, reason: string, invocationId?: string): Promise<void>;
-  cleanupPlaceholders?(threadId: string, invocationId?: string): Promise<void>;
-  /** F151: Signal adapters that an invocation's delivery batch is complete. */
-  notifyDeliveryBatchDone?(threadId: string, chainDone: boolean): Promise<void>;
-}
-
-import { normalizeErrorMessage } from '../utils/normalize-error.js';
 import { emitQueueUpdated, enrichQueueEntries } from '../utils/queue-enrichment.js';
 import { resolveStrictUserId, resolveUserId } from '../utils/request-identity.js';
 import { buildGameSeats, parseGameCommand, sanitizeCatIds } from './game-command-interceptor.js';
 import type { HoldBallCancelDeps } from './hold-ball-cancel.js';
 import { cancelPendingHoldsForThread } from './hold-ball-cancel.js';
-import {
-  resolveFreshnessCarrierCapabilityOrUndeclared,
-  resolveMessageDispositionForAdmission,
-  resolveQueueAuthorIntentByCatId,
-} from './message-disposition-admission.js';
+import { formatHoldOwnerName, persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
 import { buildMessageContentBlocks, type SendMessageInput, sendMessageSchema } from './messages.schema.js';
 import { parseMultipart } from './parse-multipart.js';
-
-const STREAM_START_TIMEOUT_MS = 5_000;
-const INVOCATION_STARTUP_WATCHDOG_MS = 180_000;
-const QUEUE_COMPLETION_WATCHDOG_MS = 5_000;
-
-function currentRetryableAttemptId(message: StoredMessage, targetCatId: string): string | undefined {
-  const target = message.queueCustody
-    ? projectQueueReceipt(message.queueCustody).targets.find((candidate) => candidate.catId === targetCatId)
-    : undefined;
-  const latest = target?.attempts?.at(-1);
-  if (target?.state !== 'failed' || target.retryable === false || !latest) return undefined;
-  return latest.state === 'failed' || (latest.state === 'cancelled' && latest.terminalReason === 'invocation_cancelled')
-    ? latest.id
-    : undefined;
-}
 
 type ResolvedBundleAdmission = Extract<MessageSelectionAdmissionResult, { status: 'resolved' }>;
 
@@ -240,58 +127,28 @@ function bundleAdmissionErrorMessage(reason: MessageBundleAdmissionFailureReason
  * Dependencies injected via Fastify plugin options.
  * socketManager is injected to avoid circular import from index.ts.
  */
-/** F194 Phase Z3 (KD-23): process-singleton in-memory map tracking routeExecution chain
- *  completion signals for parent recordStore invocations. Producer sets pending/succeeded/failed;
- *  background async finally reads this to terminalize records that escaped explicit terminal write. */
-const routeChainTracker = new RouteChainCompletionTracker();
-
 export interface MessagesRoutesOptions {
-  liveCompanionSessions?: import('../domains/concierge/live/LiveCompanionSessions.js').LiveCompanionSessions;
-  /** Shared owner-preference root. Optional test harnesses retain product-default behavior. */
-  projectRoot?: string;
   registry: InvocationRegistry;
   messageStore: IMessageStore;
   socketManager: SocketManager;
   router: AgentRouter;
-  sessionStore?: SessionStore;
-  deliveryCursorStore?: DeliveryCursorStore;
   threadStore?: IThreadStore;
   uploadDir?: string;
   invocationTracker?: InvocationTracker;
-  invocationRecordStore?: IInvocationRecordStore;
-  /** Durable per-child lifecycle truth used to bridge tracker/draft handoff gaps. */
-  turnExecutionStore?: Pick<ITurnExecutionStore, 'get' | 'listByParent'>;
 
-  summaryStore?: ISummaryStore;
   /** #80: Streaming draft store for F5 recovery */
   draftStore?: IDraftStore;
-  /** F39: Message queue for delivery-mode routing */
+  /** Canonical durable ingress for every normal user message. */
   invocationQueue?: InvocationQueue;
-  /** F39: Queue processor for auto-dequeue on invocation complete */
-  queueProcessor?: QueueProcessor;
-  /** Gate 5: read-only canonical authority check before any retry mutation. */
-  retryAuthorityPreflight?: Pick<WaitContinuationRetryPreflight, 'preflight'>;
-  /** Gate 5: atomically bind current canonical authority to the custody attempt commit. */
-  retryAuthorityCommitter?: Pick<WaitContinuationRetryCommitter, 'commit'>;
-  /** ADR-042: canonical supplement truth used to hydrate original-bubble status on F5/history reads. */
-  freshnessClosureStore?: Pick<FreshnessClosureStore, 'listSupplementsByThread'>;
-  /** F224: Shared continuation lifecycle coordinator for direct immediate invocations. */
-  sessionContinuationCoordinator?: SessionContinuationCoordinatorLike;
-  /** Test/diagnostic override for releasing invocations that never produce a provider/session event. */
-  invocationStartupWatchdogMs?: number;
-  /** Bounded fallback for queue drain notification when terminal bookkeeping stalls. */
-  queueCompletionWatchdogMs?: number;
   /** F101: Game store for /game command interception */
   gameStore?: IGameStore;
   /** F101: Injectable auto-player for lifecycle-safe teardown in tests/routes */
   autoPlayer?: Pick<GameDriver, 'startLoop' | 'stopLoop' | 'stopAllLoops'>;
-  /** F233 PR3: ball-custody event sink for zombie reconciliation side effects. */
-  /** F088 ISSUE-15: Outbound delivery hook for connector platforms (late-bound after gateway bootstrap) */
-  outboundHook?: OutboundDeliveryHookLike;
-  /** F088 ISSUE-15: Streaming hook for connector platforms (late-bound after gateway bootstrap) */
-  streamingHook?: StreamingHookLike;
   /** F167 Phase J: deps for auto-cancelling pending hold-ball tasks on user message */
-  holdBallCancelDeps?: HoldBallCancelDeps;
+  holdBallCancelDeps?: HoldBallCancelDeps & {
+    messageStore?: IMessageStore;
+    socketManager?: SocketManager;
+  };
   /** F192 Phase G AC-G12 / F227 归一: callback when magic words detected in a user
    * message. messageId is the stored user-message id — the Event Memory teleport
    * coordinate. */
@@ -307,61 +164,10 @@ export interface MessagesRoutesOptions {
 
 const log = createModuleLogger('routes/messages');
 
-async function acquireRouteExecutionOwner(
-  opts: Pick<MessagesRoutesOptions, 'invocationTracker' | 'queueProcessor'>,
-  threadId: string,
-  targetCats: string[],
-  userId: string,
-  options: {
-    mode: 'non_preemptive' | 'replacement';
-    executionId?: string;
-    onOwnershipValidated?: () => void;
-  },
-): Promise<AbortController | null | undefined> {
-  const coordinated = await opts.queueProcessor?.acquireExternalExecution?.(threadId, targetCats, userId, options);
-  if (coordinated !== undefined) return coordinated;
-  const tracker = opts.invocationTracker;
-  if (!tracker) return undefined;
-  if (options.mode === 'non_preemptive') {
-    return tracker.tryStartThreadAll(threadId, targetCats, userId, options.executionId);
-  }
-  const getUserId = tracker.getUserId?.bind(tracker);
-  if (getUserId && targetCats.some((catId) => tracker.has(threadId, catId) && getUserId(threadId, catId) !== userId)) {
-    return null;
-  }
-  options.onOwnershipValidated?.();
-  return tracker.startAll(threadId, targetCats, userId, options.executionId);
-}
-
-async function shouldEnqueueDirectContinuation(
-  capsule: CollaborationContinuityCapsuleV1,
-  userId: string,
-  coordinator?: SessionContinuationCoordinatorLike,
-): Promise<boolean> {
-  if (!coordinator?.resolveSessionStrategy) return true;
-  try {
-    const strategy = await coordinator.resolveSessionStrategy(capsule.threadId, capsule.catId, userId);
-    if (strategy === 'reborn') {
-      log.info(
-        { threadId: capsule.threadId, catId: capsule.catId },
-        '[messages] F224: reborn session — skipping continuation enqueue',
-      );
-      return false;
-    }
-    return true;
-  } catch (err) {
-    log.warn(
-      { err, threadId: capsule.threadId, catId: capsule.catId },
-      '[messages] F224: resolveSessionStrategy failed for continuation enqueue, defaulting to enqueue',
-    );
-    return true;
-  }
-}
-
 /**
  * F192 Phase G AC-G12: detect magic words in user message content.
  * Best-effort, fire-and-forget — failures are silently swallowed.
- * Called from both queued and immediate message paths.
+ * Called only after the durable Queue source record exists.
  */
 async function tryDetectMagicWords(
   content: string | null | undefined,
@@ -397,34 +203,39 @@ async function tryDetectMagicWords(
   }
 }
 
-/**
- * F-invocation-stale-recovery P1-2: Format routing_warnings for user-visible system_info broadcast.
- * Mirrors the pattern in callbacks.ts buildPostMessageRoutingMessage.
- */
-function formatRoutingWarnings(warnings: CatRoutingError[]): string {
-  const parts: string[] = [];
-  for (const w of warnings) {
-    if (w.kind === 'cat_disabled') {
-      const alts = w.alternatives
-        .slice(0, 2)
-        .map((a) => a.mention)
-        .join('、');
-      parts.push(`@${w.catId} 已停用，已跳过${alts ? `（可用替代：${alts}）` : ''}。`);
-    } else if (w.kind === 'target_not_in_thread') {
-      parts.push(`@${w.catId} 不在目标 thread (${w.threadId}) 的参与者列表中，请确认 threadId 是否正确。`);
-    } else if (w.kind === 'suppressed_by_terminal_ack') {
-      parts.push(`${w.droppedMentions.map((id) => `@${id}`).join('、')} 因 terminal ACK 已记录但未触发新 invocation。`);
-    } else {
-      parts.push(`${w.mention} 不存在，已跳过。`);
-    }
-  }
-  return parts.join(' ');
-}
-
-export function tryAutoCancelPendingHolds(threadId: string, deps: HoldBallCancelDeps | undefined): void {
+export async function tryAutoCancelPendingHolds(
+  threadId: string,
+  deps:
+    | (HoldBallCancelDeps & {
+        messageStore?: IMessageStore;
+        socketManager?: SocketManager;
+      })
+    | undefined,
+): Promise<void> {
   if (!deps) return;
   try {
     const cancelled = cancelPendingHoldsForThread(threadId, deps);
+    if (cancelled.length > 0 && deps.messageStore && deps.socketManager) {
+      for (const task of cancelled) {
+        const userId = typeof task.params.triggerUserId === 'string' ? task.params.triggerUserId : null;
+        const catId = task.createdBy.startsWith('hold-ball:') ? task.createdBy.slice('hold-ball:'.length) : null;
+        if (!userId || !catId) {
+          log.error({ threadId, taskId: task.id }, 'auto-retired hold lacks canonical owner identity');
+          continue;
+        }
+        await persistHoldTerminalVisibility(
+          { messageStore: deps.messageStore, socketManager: deps.socketManager },
+          {
+            taskId: task.id,
+            threadId,
+            userId,
+            catId,
+            outcome: 'retired_by_user_message',
+            content: `🏓 ${formatHoldOwnerName(catId)} 持球已因新的用户消息结束`,
+          },
+        );
+      }
+    }
     if (cancelled.length > 0) {
       log.info(
         { threadId, cancelledCount: cancelled.length, taskIds: cancelled.map((t) => t.id) },
@@ -443,28 +254,38 @@ const getMessagesSchema = z.object({
   threadId: z.string().min(1).max(100).optional(),
 });
 
+const cloudDeliveryRetrySchema = z.object({
+  attemptId: z.string().min(1).max(512),
+});
+
+function cloudDeliveryRetryIdempotencyKey(sourceMessageId: string, targetCatId: string, attemptId: string): string {
+  const digest = createHash('sha256').update(`${sourceMessageId}\0${targetCatId}\0${attemptId}`).digest('hex');
+  return `cloud-delivery-retry:v1:${digest}`;
+}
+
+function hasExactCloudDeliveryRecoveryNotice(
+  messages: readonly StoredMessage[],
+  sourceMessageId: string,
+  targetCatId: string,
+  attemptId: string,
+): boolean {
+  return messages.some((message) => {
+    if (message.replyTo !== sourceMessageId || message.source?.connector !== 'cloud-bridge-status') return false;
+    const recovery = message.source.meta?.cloudBridgeRecovery;
+    return (
+      isCloudBridgeRecoveryV1(recovery) &&
+      recovery.sourceMessageId === sourceMessageId &&
+      recovery.targetCatId === targetCatId &&
+      recovery.dispatchInvocationId === attemptId
+    );
+  });
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
-const DECISION_NOTIFICATION_RE = /\b(review|lgtm|merge|pr)\b/i;
-
-export function shouldMarkDecisionNotification(content: string): boolean {
-  const lower = content.toLowerCase();
-  return (
-    DECISION_NOTIFICATION_RE.test(content) ||
-    content.includes('合入') ||
-    content.includes('审批') ||
-    content.includes('批准') ||
-    content.includes('决策') ||
-    content.includes('请确认') ||
-    content.includes('是否允许') ||
-    lower.includes('can merge')
-  );
-}
-
 export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (app, opts) => {
   const uploadDir = getDefaultUploadDir(opts.uploadDir ?? process.env.UPLOAD_DIR);
-  const turnExecutionStore = opts.turnExecutionStore;
 
   // Register multipart parser for image uploads
   await app.register(multipart, {
@@ -498,151 +319,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     });
   }
 
-  /**
-   * F247: hydrate the optimistic-concurrency fence after the connector notice
-   * arrives. The read is owner-scoped and runs the same transient authority
-   * preflight as the mutation; it never creates or advances Queue custody.
-   */
-  app.get<{ Params: { messageId: string; targetCatId: string } }>(
-    '/api/messages/:messageId/queue-targets/:targetCatId/retry-authority',
-    async (request, reply) => {
-      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
-      if (!userId) {
-        reply.status(401);
-        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
-      }
-      const retryAuthorityPreflight = opts.retryAuthorityPreflight;
-      if (!retryAuthorityPreflight) {
-        reply.status(503);
-        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
-      }
-      const message = await opts.messageStore.getById(request.params.messageId);
-      if (!message || message.userId !== userId || !message.queueCustody) {
-        reply.status(404);
-        return { error: 'Queued message was not found', code: 'QUEUE_MESSAGE_NOT_FOUND' };
-      }
-      const authority = await retryAuthorityPreflight.preflight({
-        message,
-        requestingUserId: userId,
-        targetCatId: request.params.targetCatId,
-      });
-      if (!authority.ok) {
-        reply.status(409);
-        return {
-          error: 'This target no longer has current retry authority',
-          code: 'QUEUE_RETRY_AUTHORITY_STALE',
-          reason: authority.reason,
-        };
-      }
-      const attemptId = currentRetryableAttemptId(message, request.params.targetCatId);
-      if (!attemptId) {
-        reply.status(409);
-        const target = projectQueueReceipt(message.queueCustody).targets.find(
-          (candidate) => candidate.catId === request.params.targetCatId,
-        );
-        return {
-          error: 'This target is no longer retryable',
-          code: 'QUEUE_TARGET_NOT_RETRYABLE',
-          targetState: target?.attempts?.at(-1)?.state,
-        };
-      }
-      return { attemptId };
-    },
-  );
-
-  /**
-   * F1308: retry one visible failed target without cloning or re-sending the
-   * authored message. `attemptId` is the optimistic-concurrency fence: once a
-   * retry is accepted, a second click still naming the old failed attempt gets
-   * a conflict instead of a second execution.
-   */
-  app.post<{ Params: { messageId: string; targetCatId: string }; Body: { attemptId?: unknown } }>(
-    '/api/messages/:messageId/queue-targets/:targetCatId/retry',
-    async (request, reply) => {
-      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
-      if (!userId) {
-        reply.status(401);
-        return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
-      }
-      const attemptId = request.body?.attemptId;
-      if (typeof attemptId !== 'string' || attemptId.length === 0) {
-        reply.status(400);
-        return { error: 'attemptId is required' };
-      }
-      const retryAuthorityPreflight = opts.retryAuthorityPreflight;
-      const retryAuthorityCommitter = opts.retryAuthorityCommitter;
-      if (!opts.invocationQueue || !opts.queueProcessor || !retryAuthorityPreflight || !retryAuthorityCommitter) {
-        reply.status(503);
-        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
-      }
-      const message = await opts.messageStore.getById(request.params.messageId);
-      if (!message || message.userId !== userId || !message.queueCustody) {
-        reply.status(404);
-        return { error: 'Queued message was not found', code: 'QUEUE_MESSAGE_NOT_FOUND' };
-      }
-      const authority = await retryAuthorityPreflight.preflight({
-        message,
-        requestingUserId: userId,
-        targetCatId: request.params.targetCatId,
-      });
-      if (!authority.ok) {
-        reply.status(409);
-        return {
-          error: 'This target no longer has current retry authority',
-          code: 'QUEUE_RETRY_AUTHORITY_STALE',
-          reason: authority.reason,
-        };
-      }
-      const targetCarrier = message.queueCustody.carrierByTargetCatId?.[request.params.targetCatId];
-      const carrierEntryId = targetCarrier?.entryId ?? message.queueCustody.entryId;
-      const carrier = targetCarrier
-        ? opts.invocationQueue.getEntrySnapshotForUserById(userId, carrierEntryId)
-        : undefined;
-      if (targetCarrier && !carrier) {
-        reply.status(409);
-        return { error: 'This target no longer has a retryable delivery carrier', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
-      }
-      const carrierThreadId = carrier?.threadId ?? message.threadId;
-      const result = await opts.queueProcessor.retryFailedTarget(
-        carrierThreadId,
-        userId,
-        carrierEntryId,
-        request.params.targetCatId,
-        attemptId,
-        (transitions) =>
-          retryAuthorityCommitter.commit({
-            authorityMessageId: request.params.messageId,
-            requestingUserId: userId,
-            targetCatId: request.params.targetCatId,
-            transitions,
-          }),
-      );
-      if (result.outcome === 'unavailable') {
-        reply.status(503);
-        return { error: 'Queue retry is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
-      }
-      if (result.outcome === 'authority_stale') {
-        reply.status(409);
-        return {
-          error: 'This target no longer has current retry authority',
-          code: 'QUEUE_RETRY_AUTHORITY_STALE',
-          reason: result.reason,
-        };
-      }
-      if (result.outcome !== 'retried') {
-        reply.status(409);
-        return { error: 'This target is no longer retryable', code: 'QUEUE_TARGET_NOT_RETRYABLE' };
-      }
-      reply.status(202);
-      return {
-        status: 'retry_queued',
-        entryId: carrierEntryId,
-        targetCatId: request.params.targetCatId,
-        attemptId: result.attemptId,
-      };
-    },
-  );
-
   // POST /api/messages - 发送消息（WebSocket 广播）
   app.post('/api/messages', async (request, reply) => {
     let content: string;
@@ -654,9 +330,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     let whisperVisibility: 'whisper' | undefined;
     let whisperRecipients: readonly CatId[] | undefined;
 
-    // F39: Delivery mode
-    let deliveryMode: 'immediate' | 'queue' | 'force' | undefined;
     let messageDisposition: MessageWorkDisposition | undefined;
+    let explicitMentionTargetCats: readonly CatId[] | undefined;
 
     // #699: Reply-to (quote) reference
     let replyTo: string | undefined;
@@ -678,11 +353,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         whisperVisibility = 'whisper';
         whisperRecipients = parsed.whisperTo as CatId[];
       }
-      // F39: Extract deliveryMode from multipart
-      if (parsed.deliveryMode) {
-        deliveryMode = parsed.deliveryMode;
-      }
       messageDisposition = parsed.messageDisposition;
+      explicitMentionTargetCats = parsed.mentions?.length ? (parsed.mentions as CatId[]) : undefined;
       // #699: Extract replyTo from multipart
       if (parsed.replyTo) {
         replyTo = parsed.replyTo;
@@ -698,8 +370,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       if (parseResult.data.contextAttachments?.length) {
         contentBlocks = buildMessageContentBlocks(content, parseResult.data.contextAttachments);
       }
-      deliveryMode = parseResult.data.deliveryMode;
       messageDisposition = parseResult.data.messageDisposition;
+      explicitMentionTargetCats = parseResult.data.mentions?.length
+        ? (parseResult.data.mentions as CatId[])
+        : undefined;
       // F35: Extract whisper fields from parsed body
       if (parseResult.data.visibility === 'whisper') {
         whisperVisibility = 'whisper';
@@ -718,11 +392,32 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       reply.status(401);
       return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
     }
-    const ownerAuthProvenance = resolveStrictUserId(request) === userId ? 'strict' : 'compatibility_fallback';
+    const ownerAuthProvenance: OwnerAuthProvenance =
+      resolveStrictUserId(request) === userId ? 'strict' : 'compatibility_fallback';
+    const liveSessionHeader = request.headers['x-cat-cafe-live-session'];
+    if (
+      liveSessionHeader !== undefined &&
+      (typeof liveSessionHeader !== 'string' ||
+        !liveSessionHeader ||
+        ownerAuthProvenance !== 'strict' ||
+        messageBundleRequest ||
+        whisperVisibility ||
+        messageDisposition === 'continue_current')
+    )
+      return reply.code(400).send({ error: 'Invalid Live admission', code: 'INVALID_LIVE_ADMISSION' });
+    const liveSessionId = typeof liveSessionHeader === 'string' ? liveSessionHeader : undefined;
 
     // Default to 'default' thread for lobby (prevents global broadcast)
     const resolvedThreadId = threadId ?? 'default';
+    if (!opts.invocationQueue) {
+      return reply.code(503).send({ error: 'Message delivery is unavailable', code: 'MESSAGE_DELIVERY_UNAVAILABLE' });
+    }
+    // Live owns an exact session receipt; ordinary retries are handled by shared send.
     const receiptOwner = { userId, threadId: resolvedThreadId };
+    const replayedSource =
+      idempotencyKey && opts.invocationQueue
+        ? await opts.messageStore.getByIdempotencyKey(userId, resolvedThreadId, idempotencyKey)
+        : null;
 
     let admittedMessageBundle: ResolvedBundleAdmission | undefined;
     let explicitBundleTargetCats: CatId[] | undefined;
@@ -889,8 +584,8 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
 
       // Store user message in the game thread
       const userMessage = await opts.messageStore.append({
+        from: { kind: 'user', userId },
         userId,
-        catId: null,
         content,
         mentions: [],
         timestamp: Date.now(),
@@ -946,28 +641,57 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // ADR-008 S1: Pre-resolve targets + intent, persisting @mentions as participants
     log.debug({ threadId: resolvedThreadId, contentLen: content.length }, 'Resolving targets and intent');
     const bundleRoutingTargetCats = explicitBundleTargetCats ?? [];
-    const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = admittedMessageBundle
+    const explicitRoutingTargetCats = explicitMentionTargetCats
+      ? await router.resolveExplicitTargets(explicitMentionTargetCats, resolvedThreadId, { persist: false })
+      : undefined;
+    if (explicitMentionTargetCats && explicitRoutingTargetCats?.length !== explicitMentionTargetCats.length) {
+      reply.status(400);
+      return { error: 'One or more selected member identities are invalid', code: 'INVALID_EXPLICIT_TARGETS' };
+    }
+    const structuredTargetCats = admittedMessageBundle ? bundleRoutingTargetCats : explicitRoutingTargetCats;
+    const routingResult: Awaited<ReturnType<AgentRouter['resolveTargetsAndIntent']>> = structuredTargetCats
       ? {
-          targetCats: bundleRoutingTargetCats,
-          intent: parseIntent('', bundleRoutingTargetCats.length),
+          targetCats: structuredTargetCats,
+          intent: parseIntent(admittedMessageBundle ? '' : content, structuredTargetCats.length),
           hasMentions: true,
           routing_warnings: [],
         }
       : await router.resolveTargetsAndIntent(content, resolvedThreadId, {
           persist: true,
+          allowFallback: false,
         });
-    const { targetCats: resolvedTargetCats, intent, hasMentions, routing_warnings } = routingResult;
+    const { targetCats: resolvedTargetCats, intent } = routingResult;
     // F35: When sending a whisper, override routing targets to only whisperTo recipients.
     // This prevents non-recipient cats from being invoked and seeing whisper content.
-    const targetCats =
+    const sourceTargetCats =
       whisperVisibility === 'whisper' && whisperRecipients?.length
         ? [...new Set(whisperRecipients)]
         : [...resolvedTargetCats];
-    if (targetCats.length === 0) {
-      reply.status(400);
-      return { error: '没有可用的猫猫成员，请先在设置中添加一只猫猫', code: 'NO_TARGETS' };
+    const targetCats: CatId[] =
+      liveSessionId && sourceTargetCats.length === 0
+        ? (((await opts.invocationQueue.resolveSendTargets([], resolvedThreadId, content)) ?? []) as CatId[])
+        : [...sourceTargetCats];
+    if (liveSessionId && targetCats.length !== 1)
+      return reply.code(400).send({ error: 'Live requires one exact member', code: 'INVALID_LIVE_ADMISSION' });
+    if (replayedSource && (liveSessionId || replayedSource.extra?.liveAdmission)) {
+      const receipt = replayedSource.extra?.liveAdmission;
+      if (
+        !receipt ||
+        receipt.sessionId !== liveSessionId ||
+        receipt.targetId !== targetCats[0] ||
+        replayedSource.content !== content ||
+        replayedSource.threadId !== resolvedThreadId ||
+        replayedSource.userId !== userId
+      )
+        return reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+      // Already accepted: return the same durable receipt before touching an ephemeral handle.
+      return reply.code(202).send({
+        status: 'queued',
+        merged: false,
+        userMessageId: replayedSource.id,
+        ...(await readUserMessageReceipt(opts.messageStore, replayedSource.id, receiptOwner, replayedSource)),
+      });
     }
-    const primaryCat = targetCats[0] ?? 'unknown';
 
     // Sidebar participant presence is canonical ThreadStore truth, not a
     // side-effect of the first CLI event. Persist every resolved target (the
@@ -975,12 +699,13 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     // intentionally idempotent) and publish the existing `thread_updated`
     // event through the user's always-joined room. This makes an unopened
     // thread update immediately without inventing another event or room.
-    const publishSidebarParticipants = async () => {
+    const publishSidebarParticipants = async (participantCats: readonly CatId[] = targetCats) => {
+      if (participantCats.length === 0) return;
       if (opts.threadStore?.addParticipants) {
         await admitThreadParticipants({
           userId,
           threadId: resolvedThreadId,
-          targetCats,
+          targetCats: participantCats,
           threadStore: opts.threadStore,
           socketManager: opts.socketManager,
           emitPolicy: 'always',
@@ -989,14 +714,14 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       }
       opts.socketManager.emitToUser(userId, 'thread_updated', {
         threadId: resolvedThreadId,
-        participants: [...targetCats],
+        participants: [...participantCats],
       });
     };
-    const publishAdmittedBundleParticipants = async () => {
+    const publishAdmittedParticipants = async () => {
       try {
         await publishSidebarParticipants();
       } catch (err) {
-        log.warn({ err, threadId: resolvedThreadId }, 'Bundle persisted but participant projection failed');
+        log.warn({ err, threadId: resolvedThreadId }, 'Message persisted but participant projection failed');
         opts.socketManager.emitToUser(userId, 'thread_updated', {
           threadId: resolvedThreadId,
           participants: [...targetCats],
@@ -1005,123 +730,87 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     };
     // Bundle admission defers this mutation until the canonical carrier write
     // succeeds, so validation/queue-capacity failures leave no false sidebar state.
-    if (!admittedMessageBundle) await publishSidebarParticipants();
-
-    // F-invocation-stale-recovery P1-2: Surface routing_warnings when user's explicit @mention
-    // silently fell back (e.g., @kimi → cat_not_found → default cat, user sees no feedback).
-    // Non-whisper only (whisper targets are overridden above; warning is not meaningful there).
-    if (routing_warnings && routing_warnings.length > 0 && whisperVisibility !== 'whisper') {
-      const warningMsg = formatRoutingWarnings(routing_warnings);
-      opts.socketManager.broadcastAgentMessage(
-        {
-          type: 'system_info',
-          catId: primaryCat,
-          // Use 'warning' type — recognized by system-info-visible.ts (reads parsed.message)
-          content: JSON.stringify({
-            type: 'warning',
-            message: warningMsg,
-          }),
-          timestamp: Date.now(),
-        },
-        resolvedThreadId,
-      );
-    }
+    // Participants follow the winning committed targets, including a conversation fallback.
 
     // Server-generated idempotency key if client didn't provide one
     const resolvedIdempotencyKey = idempotencyKey ?? randomUUID();
-    const messageBundleWrite: { extra: { messageBundle: MessageBundleCarrierV1 } } | Record<string, never> =
-      admittedMessageBundle ? { extra: { messageBundle: admittedMessageBundle.carrier } } : {};
+    const sourcePayloadExtra: NonNullable<StoredMessage['extra']> = {
+      ...(liveSessionId ? { liveAdmission: { sessionId: liveSessionId, targetId: targetCats[0]! } } : {}),
+      ...(admittedMessageBundle ? { messageBundle: admittedMessageBundle.carrier } : {}),
+    };
+    const sourcePayloadWrite: { extra: NonNullable<StoredMessage['extra']> } | Record<string, never> =
+      Object.keys(sourcePayloadExtra).length > 0 ? { extra: sourcePayloadExtra } : {};
 
-    // F39+F108B: Slot-aware delivery mode routing
-    // Whisper → check target cat's slot (side-dispatch to idle cat)
-    // Broadcast with explicit @mention → any target busy = queue (P1 review fix)
-    // Broadcast without @mention → thread-level check (any active → queue)
-    // #555: Cover the pre-start gap with QueueProcessor's live slot reservation.
-    // Queued leftovers are not an execution owner and cannot justify admitting
-    // another message behind a trigger that no longer exists.
-    const hasActive = (() => {
-      if (!opts.invocationTracker) {
-        return opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false;
-      }
-      if (whisperVisibility === 'whisper' && primaryCat !== 'unknown') {
-        return (
-          opts.queueProcessor?.hasActiveExecutionForCat?.(resolvedThreadId, primaryCat) ??
-          opts.invocationTracker.has(resolvedThreadId, primaryCat)
-        );
-      }
-      if (hasMentions) {
-        return targetCats.some(
-          (cat) =>
-            cat !== 'unknown' &&
-            (opts.queueProcessor?.hasActiveExecutionForCat?.(resolvedThreadId, cat) ??
-              opts.invocationTracker!.has(resolvedThreadId, cat)),
-        );
-      }
-      return (
-        opts.invocationTracker.has(resolvedThreadId) ||
-        (opts.queueProcessor?.hasActiveExecution?.(resolvedThreadId) ?? false)
-      );
-    })();
-    const mode = deliveryMode ?? (hasActive ? 'queue' : 'immediate');
-    const liveHandle = request.headers['x-cat-cafe-live-session'];
-    let liveCompanion: import('../domains/concierge/live/LiveCompanionCall.js').LiveCompanionCall | undefined;
-    if (liveHandle !== undefined) {
-      if (typeof liveHandle !== 'string' || !opts.liveCompanionSessions || request.sessionUserId !== userId)
-        return reply.code(403).send({ error: 'Live admission unavailable' });
-      if (mode !== 'immediate' || hasActive || !opts.invocationRecordStore)
-        return reply.code(409).send({ error: 'Live requires an idle Host execution' });
-      try {
-        liveCompanion = opts.liveCompanionSessions.claim(liveHandle, userId, resolvedThreadId, targetCats);
-      } catch {
-        return reply.code(403).send({ error: 'Live admission mismatch' });
-      }
-    }
-    const durableCloudAdmission =
-      mode !== 'force' &&
-      targetCats.some((catId) => catRegistry.tryGet(catId)?.config.provider === 'openai-chatgpt-pro');
-    log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent, mode, hasActive }, 'Dispatch decision');
+    log.debug({ threadId: resolvedThreadId, targetCats, intent: intent.intent }, 'Queue ingress accepted');
 
-    if (durableCloudAdmission) {
-      if (!opts.invocationQueue || !opts.queueProcessor) {
-        reply.status(503);
-        return { error: 'Cloud message recovery is temporarily unavailable', code: 'QUEUE_RETRY_UNAVAILABLE' };
-      }
-      const existing = await opts.messageStore.getByIdempotencyKey(userId, resolvedThreadId, resolvedIdempotencyKey);
-      if (existing) {
-        reply.status(202);
-        return { status: 'duplicate', userMessageId: existing.id, ...userMessageReceipt(existing, receiptOwner) };
-      }
-    }
-
-    if (admittedMessageBundle && mode !== 'queue' && !opts.invocationRecordStore) {
-      reply.status(503);
-      return { error: 'Message Bundle immediate routing is unavailable', code: 'MESSAGE_BUNDLE_UNAVAILABLE' };
-    }
-
-    if (((mode === 'queue' && hasActive) || durableCloudAdmission) && opts.invocationQueue) {
-      // ① Enqueue first (sync, capacity gatekeeper) — messageId is null at this point
-      const enqueueResult = opts.invocationQueue.enqueue({
+    if (opts.invocationQueue) {
+      const queueInput = {
+        ...(liveSessionId ? { liveSessionId } : {}),
+        from: { kind: 'user' as const, userId },
         threadId: resolvedThreadId,
         userId,
+        kind: 'conversation_input' as const,
         ownerAuthProvenance,
         idempotencyKey: resolvedIdempotencyKey,
         content,
-        source: 'user',
         targetCats,
-        authorIntentByCatId: resolveQueueAuthorIntentByCatId({
-          targetCats,
-          requested: resolveMessageDispositionForAdmission({
-            explicit: messageDisposition,
-            projectRoot: opts.projectRoot,
-            threadId: resolvedThreadId,
-          }),
-          threadId: resolvedThreadId,
-          userId,
-          invocationTracker: opts.invocationTracker,
-          resolveCarrierCapability: (catId) => resolveFreshnessCarrierCapabilityOrUndeclared(opts.router, catId),
-        }),
+        ...(messageDisposition ? { messageDisposition } : {}),
+        onQueueEntriesAdmitted: async (
+          entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[],
+        ) => {
+          targetCats.splice(0, targetCats.length, ...(entries.flatMap((entry) => entry.targets) as CatId[]));
+          await publishAdmittedParticipants();
+        },
         intent: intent.intent,
-      });
+      };
+      const enqueueResult = await opts.invocationQueue
+        .send(
+          opts.messageStore,
+          {
+            from: queueInput.from,
+            userId,
+            content,
+            // Routing fallback is server-owned metadata, not an @mention the user wrote.
+            mentions: sourceTargetCats,
+            timestamp: Date.now(),
+            threadId: resolvedThreadId,
+            idempotencyKey: resolvedIdempotencyKey,
+            deliveryStatus: 'queued',
+            ...(contentBlocks ? { contentBlocks } : {}),
+            ...(whisperVisibility && whisperRecipients
+              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
+              : {}),
+            ...(replyTo ? { replyTo } : {}),
+            ...sourcePayloadWrite,
+          },
+          queueInput,
+        )
+        .catch(async (error: unknown) => {
+          if (!liveSessionId) throw error;
+          // The preflight replay lookup may precede another request's atomic
+          // admission. Only the immutable committed source can prove a conflict;
+          // an unknown write/read outcome must retain its original error.
+          const committed = await opts.messageStore.getByIdempotencyKey(
+            userId,
+            resolvedThreadId,
+            resolvedIdempotencyKey,
+          );
+          if (!committed) throw error;
+          const receipt = committed.extra?.liveAdmission;
+          if (
+            !receipt ||
+            receipt.sessionId !== liveSessionId ||
+            receipt.targetId !== targetCats[0] ||
+            committed.content !== content ||
+            committed.threadId !== resolvedThreadId ||
+            committed.userId !== userId
+          ) {
+            reply.code(409).send({ error: 'Live admission identity conflict', code: 'LIVE_ADMISSION_CONFLICT' });
+            return null;
+          }
+          throw error;
+        });
+      if (!enqueueResult) return;
 
       // Queue full → 429, no message written (no ghost message)
       if (enqueueResult.outcome === 'full') {
@@ -1143,1246 +832,178 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
         };
       }
 
-      let storedUserMessageId: string | null = enqueueResult.entry?.messageId ?? null;
-      let appendedUserMessage: StoredMessage | null = null;
-
-      // ② Persist queued user work. F264 publishes it to the owner's timeline;
-      // deliveryStatus still keeps it out of cat context/mentions until dequeue.
-      // If enqueue returned a deduped active entry, reuse existing messageId and skip append.
-      if (!enqueueResult.deduped) {
-        try {
-          if (!enqueueResult.entry) throw new Error('successful queue admission is missing its entry');
-          const userMessage = await opts.messageStore.append({
-            userId,
-            catId: null,
-            content,
-            mentions: targetCats,
-            timestamp: Date.now(),
-            threadId: resolvedThreadId,
-            idempotencyKey: resolvedIdempotencyKey,
-            deliveryStatus: 'queued', // Browser-visible, but not cat-context delivered.
-            queueCustody: createInitialQueuedMessageCustody(enqueueResult.entry),
-            ...(contentBlocks ? { contentBlocks } : {}),
-            ...(whisperVisibility && whisperRecipients
-              ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-              : {}),
-            ...(replyTo ? { replyTo } : {}),
-            ...messageBundleWrite,
-          });
-          storedUserMessageId = userMessage.id;
-          appendedUserMessage = userMessage;
-
-          // F192 Phase G AC-G12 / F227: detect magic words → Event Memory (queued path)
-          void tryDetectMagicWords(
-            content,
-            resolvedThreadId,
-            targetCats,
-            storedUserMessageId,
-            userId,
-            opts.onMagicWordDetected,
-          );
-
-          const queueEntryId = enqueueResult.entry?.id;
-          if (queueEntryId) {
-            opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, userMessage.id);
-          }
-        } catch (err) {
-          const queueEntryId = enqueueResult.entry?.id;
-          if (queueEntryId) {
-            opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-          }
-          throw err;
-        }
+      const storedUserMessageId = enqueueResult.message?.id ?? null;
+      if (!enqueueResult.deduped && storedUserMessageId) {
+        // F192 Phase G AC-G12 / F227: detect magic words after the atomic admission commits.
+        void tryDetectMagicWords(
+          content,
+          resolvedThreadId,
+          targetCats,
+          storedUserMessageId,
+          userId,
+          opts.onMagicWordDetected,
+        );
       }
 
-      if (admittedMessageBundle) await publishAdmittedBundleParticipants();
+      const admittedEntries = enqueueResult.entries ?? (enqueueResult.entry ? [enqueueResult.entry] : []);
+      // Common send signals Queue progress; HTTP acknowledges durable admission only.
+      const admittedInvocationQueue = opts.invocationQueue;
+      const admittedEntryStillQueued =
+        admittedEntries.length === 0 ||
+        admittedEntries.some(
+          (admittedEntry) =>
+            admittedInvocationQueue.getEntrySnapshot(resolvedThreadId, userId, admittedEntry.id) !== null,
+        );
 
       // Emit queue update to this user only (privacy: scopeKey isolation)
-      await emitQueueUpdated(
-        opts.socketManager,
-        userId,
-        resolvedThreadId,
-        opts.invocationQueue.list(resolvedThreadId, userId),
-        opts.messageStore,
-        enqueueResult.outcome,
-      );
-
-      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
-
-      // The admitting request owns kickoff only after its source + custody commit.
-      // A concurrent replay may observe an entry whose messageId is still null.
-      if (durableCloudAdmission && !hasActive && !enqueueResult.deduped && storedUserMessageId && enqueueResult.entry) {
-        void opts.queueProcessor?.progressOwnedCarrier(enqueueResult.entry, primaryCat).catch((err) => {
-          log.error({ err, threadId: resolvedThreadId }, 'Durable cloud message remains queued after dispatch failure');
-        });
+      // appendExactEntry owns its own committed projection. Keep the generic
+      // enqueue event only when custody remains in Queue.
+      if (admittedEntryStillQueued) {
+        await emitQueueUpdated(
+          opts.socketManager,
+          userId,
+          resolvedThreadId,
+          opts.invocationQueue.list(resolvedThreadId, userId),
+          enqueueResult.outcome,
+        );
       }
+
+      await tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
 
       reply.status(202);
       return {
         status: 'queued',
         queuePosition: enqueueResult.queuePosition,
         entryId: enqueueResult.entry?.id,
+        entries: admittedEntries.flatMap((entry) =>
+          queueEntryTargetCats(entry).map((targetCatId) => ({ entryId: entry.id, targetCatId })),
+        ),
         merged: false,
         ...(storedUserMessageId ? { userMessageId: storedUserMessageId } : {}),
-        ...(await readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, appendedUserMessage)),
+        ...(await readUserMessageReceipt(opts.messageStore, storedUserMessageId, receiptOwner, enqueueResult.message)),
         ...(admittedMessageBundle && storedUserMessageId ? { messageBundleId: storedUserMessageId } : {}),
       };
     }
-
-    let cancelledCatIds: string[] = [];
-    const cancelValidatedForceOwner = () => {
-      if (mode !== 'force') return;
-      // F-parallel-cancel: once the joint owner fence has accepted the complete target set,
-      // preempt only the invocation batch(es) anchored by those targets. Keeping this inside
-      // the synchronous acquisition transaction prevents a mixed-user rejection from canceling
-      // the requester's subset before another target fails ownership validation. This must not
-      // depend on the pre-create hasActive snapshot: a same-user batch can arrive during create().
-      cancelledCatIds =
-        opts.invocationTracker?.cancelInvocation?.(resolvedThreadId, targetCats, userId, 'preempted') ?? [];
-    };
-
-    const publishValidatedForceCancellation = () => {
-      if (cancelledCatIds.length === 0) return;
-      for (const m of buildCancelMessages({ cancelled: true, catIds: cancelledCatIds })) {
-        opts.socketManager.broadcastAgentMessage(m, resolvedThreadId);
-      }
-      // QueueProcessor already supersedes pause state for requested targets during successful
-      // acquisition. Clear any additional same-batch siblings returned by cancelInvocation too.
-      for (const c of cancelledCatIds) opts.queueProcessor?.clearPause(resolvedThreadId, c);
-    };
-
-    // ① F122 A.1: Occupy tracker slot BEFORE creating InvocationRecord to close TOCTOU window.
-    // Non-force paths use tryStartThread (non-preemptive). Force validates the complete target set,
-    // cancels the accepted old owner, and installs the replacement in one synchronous acquisition below.
-    if (opts.invocationRecordStore) {
-      let controller: AbortController | undefined;
-
-      if (mode !== 'force' && opts.invocationTracker) {
-        // F122 AC-A8: Atomic thread-level busy gate + slot registration.
-        // If thread became busy since initial has() check at line 306, degrade to queue.
-        const tryResult = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
-          mode: 'non_preemptive',
-        });
-        if (tryResult === null) {
-          if (liveCompanion) return reply.code(409).send({ error: 'Live Host became busy' });
-          // TOCTOU: thread became busy between has() and here — degrade to queue
-          if (opts.invocationQueue) {
-            const enqueueResult = opts.invocationQueue.enqueue({
-              threadId: resolvedThreadId,
-              userId,
-              ownerAuthProvenance,
-              idempotencyKey: resolvedIdempotencyKey,
-              content,
-              source: 'user',
-              targetCats,
-              authorIntentByCatId: resolveQueueAuthorIntentByCatId({
-                targetCats,
-                requested: resolveMessageDispositionForAdmission({
-                  explicit: messageDisposition,
-                  projectRoot: opts.projectRoot,
-                  threadId: resolvedThreadId,
-                }),
-                threadId: resolvedThreadId,
-                userId,
-                invocationTracker: opts.invocationTracker,
-                resolveCarrierCapability: (catId) => resolveFreshnessCarrierCapabilityOrUndeclared(opts.router, catId),
-              }),
-              intent: intent.intent,
-            });
-            if (enqueueResult.outcome === 'full') {
-              const toctouFullQueue = await enrichQueueEntries(
-                opts.invocationQueue.list(resolvedThreadId, userId),
-                opts.messageStore,
-              );
-              opts.socketManager.emitToUser(userId, 'queue_full_warning', {
-                threadId: resolvedThreadId,
-                source: 'user',
-                queueSize: opts.invocationQueue.size(resolvedThreadId, userId),
-                queue: toctouFullQueue,
-              });
-              reply.status(429);
-              return { error: '消息队列已满', code: 'QUEUE_FULL' };
-            }
-            // F122 R1-gpt52 P1-1: Wrap append+backfill in try/catch with rollback,
-            // matching original queue path (lines 340-374) to prevent ghost queue entries.
-            let toctouUserMessageId: string | null = enqueueResult.entry?.messageId ?? null;
-            let toctouAppendedMessage: StoredMessage | null = null;
-            if (!enqueueResult.deduped) {
-              try {
-                if (!enqueueResult.entry) throw new Error('successful queue admission is missing its entry');
-                const toctouUserMessage = await opts.messageStore.append({
-                  userId,
-                  catId: null,
-                  content,
-                  mentions: targetCats,
-                  timestamp: Date.now(),
-                  threadId: resolvedThreadId,
-                  idempotencyKey: resolvedIdempotencyKey,
-                  deliveryStatus: 'queued',
-                  queueCustody: createInitialQueuedMessageCustody(enqueueResult.entry),
-                  ...(contentBlocks ? { contentBlocks } : {}),
-                  ...(whisperVisibility && whisperRecipients
-                    ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-                    : {}),
-                  ...(replyTo ? { replyTo } : {}),
-                  ...messageBundleWrite,
-                });
-                toctouUserMessageId = toctouUserMessage.id;
-                toctouAppendedMessage = toctouUserMessage;
-                const queueEntryId = enqueueResult.entry?.id;
-                if (queueEntryId) {
-                  opts.invocationQueue.backfillMessageId(resolvedThreadId, userId, queueEntryId, toctouUserMessage.id);
-                }
-              } catch (err) {
-                const queueEntryId = enqueueResult.entry?.id;
-                if (queueEntryId) {
-                  opts.invocationQueue.rollbackEnqueue(resolvedThreadId, userId, queueEntryId);
-                }
-                throw err;
-              }
-            }
-            if (admittedMessageBundle) await publishAdmittedBundleParticipants();
-            await emitQueueUpdated(
-              opts.socketManager,
-              userId,
-              resolvedThreadId,
-              opts.invocationQueue.list(resolvedThreadId, userId),
-              opts.messageStore,
-              enqueueResult.outcome,
-            );
-            tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
-            reply.status(202);
-            return {
-              status: 'queued',
-              queuePosition: enqueueResult.queuePosition,
-              entryId: enqueueResult.entry?.id,
-              merged: false,
-              ...(toctouUserMessageId ? { userMessageId: toctouUserMessageId } : {}),
-              ...(await readUserMessageReceipt(
-                opts.messageStore,
-                toctouUserMessageId,
-                receiptOwner,
-                toctouAppendedMessage,
-              )),
-              ...(admittedMessageBundle && toctouUserMessageId ? { messageBundleId: toctouUserMessageId } : {}),
-            };
-          }
-          // No queue available — thread is busy but we can't queue. Reject.
-          reply.status(409);
-          return { error: '猫猫正在忙', code: 'THREAD_BUSY' };
-        }
-        controller = tryResult;
-      }
-
-      // F122 R1 P1: Wrap create/update/append in try/catch to release slot on error.
-      // The background coroutine has its own finally for normal completion, but if we
-      // throw before entering it, the slot would leak (thread stuck as "busy").
-      let createResult: { outcome: string; invocationId: string };
-      try {
-        createResult = await opts.invocationRecordStore.create({
-          threadId: resolvedThreadId,
-          userId,
-          targetCats,
-          intent: intent.intent,
-          idempotencyKey: resolvedIdempotencyKey,
-          actionLeaseCarrier: { kind: 'none' },
-        });
-      } catch (createErr) {
-        // Release slots occupied by tryStartThreadAll — prevent "假忙" leak
-        if (controller) {
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-        }
-        throw createErr;
-      }
-
-      if (createResult.outcome === 'duplicate') {
-        // AC-A11: tryStartThreadAll succeeded but create returned duplicate — release slots
-        if (controller) {
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-        }
-        const existingRecord = await opts.invocationRecordStore.get(createResult.invocationId);
-        reply.status(200);
-        return {
-          status: 'duplicate',
-          invocationId: createResult.invocationId,
-          ...(existingRecord?.userMessageId ? { userMessageId: existingRecord.userMessageId } : {}),
-          ...(await readUserMessageReceipt(opts.messageStore, existingRecord?.userMessageId, receiptOwner)),
-          ...(admittedMessageBundle && existingRecord?.userMessageId
-            ? { messageBundleId: existingRecord.userMessageId }
-            : {}),
-        };
-      }
-
-      // Force path: the joint acquisition owns validation, scoped cancellation, and replacement install.
-      if (!controller) {
-        const acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
-          mode: 'replacement',
-          executionId: createResult.invocationId,
-          onOwnershipValidated: cancelValidatedForceOwner,
-        });
-        if (acquiredController === null) {
-          await opts.invocationRecordStore.update(createResult.invocationId, {
-            status: 'canceled',
-            error: 'invocation_owner_changed_before_route_start',
-          });
-          reply.status(409);
-          return {
-            error: 'Invocation owner changed before message routing could start',
-            code: 'INVOCATION_OWNER_CHANGED',
-          };
-        }
-        controller = acquiredController;
-        publishValidatedForceCancellation();
-      } else {
-        opts.invocationTracker?.bindExecutionId?.(resolvedThreadId, targetCats, controller, createResult.invocationId);
-      }
-
-      // Race: thread entered deleting between isDeleting() and start()
-      if (controller?.signal.aborted) {
-        await opts.invocationRecordStore.update(createResult.invocationId, {
-          status: 'canceled',
-        });
-        reply.status(409);
-        return {
-          error: '对话正在删除中',
-          detail: '请稍后重试，或新建一个对话继续',
-          code: 'THREAD_DELETING',
-        };
-      }
-
-      // F122 R1 P1 cont: wrap message write + update before background coroutine.
-      // If any of these throw, release the slot to prevent "假忙" leak.
-      let storedUserMessage: StoredMessage;
-      try {
-        // F39: only publish force-cleared after the replacement owner is installed. An explicit
-        // acquisition refusal must have zero queue/UI side effects.
-        if (mode === 'force' && cancelledCatIds.length > 0 && opts.invocationQueue) {
-          await emitQueueUpdated(
-            opts.socketManager,
-            userId,
-            resolvedThreadId,
-            opts.invocationQueue.list(resolvedThreadId, userId),
-            opts.messageStore,
-            'force_cleared',
-          );
-        }
-
-        // ② Write user message (decoupled from cat execution)
-        storedUserMessage = await opts.messageStore.append({
-          userId,
-          catId: null,
-          content,
-          mentions: targetCats,
-          timestamp: Date.now(),
-          threadId: resolvedThreadId,
-          ...(contentBlocks ? { contentBlocks } : {}),
-          ...(whisperVisibility && whisperRecipients
-            ? { visibility: whisperVisibility, whisperTo: whisperRecipients }
-            : {}),
-          ...(replyTo ? { replyTo } : {}),
-          ...messageBundleWrite,
-        });
-
-        // ③ Backfill InvocationRecord.userMessageId
-        await opts.invocationRecordStore.update(createResult.invocationId, {
-          userMessageId: storedUserMessage.id,
-        });
-        if (admittedMessageBundle) await publishAdmittedBundleParticipants();
-
-        // F192 Phase G AC-G12 / F227: detect magic words → Event Memory (immediate path)
-        void tryDetectMagicWords(
-          content,
-          resolvedThreadId,
-          targetCats,
-          storedUserMessage.id,
-          userId,
-          opts.onMagicWordDetected,
-        );
-      } catch (preExecErr) {
-        // Release slots — we haven't entered background coroutine yet
-        opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-        // Mark record as failed if it was created
-        try {
-          await opts.invocationRecordStore?.update(createResult.invocationId, { status: 'failed' });
-        } catch {
-          /* best-effort cleanup */
-        }
-        throw preExecErr;
-      }
-
-      // ④ Reply with invocationId
-      reply.send({
-        status: 'processing',
-        invocationId: createResult.invocationId,
-        userMessageId: storedUserMessage.id,
-        ...userMessageReceipt(storedUserMessage, receiptOwner),
-        ...(admittedMessageBundle ? { messageBundleId: storedUserMessage.id } : {}),
-        timestamp: Date.now(),
-      });
-
-      tryAutoCancelPendingHolds(resolvedThreadId, opts.holdBallCancelDeps);
-
-      // ⑤ Background: execute cat invocation via routeExecution
-      void (async () => {
-        const HEARTBEAT_INTERVAL_MS = 30_000;
-        const heartbeatInterval = setInterval(() => {
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'heartbeat', {
-            threadId: resolvedThreadId,
-            timestamp: Date.now(),
-          });
-        }, HEARTBEAT_INTERVAL_MS);
-
-        // F39: Track final status for queue auto-dequeue
-        let finalStatus: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user' = 'failed';
-        const terminalDispositions = new PerCatTerminalDispositionCollector({
-          targetCatIds: targetCats,
-          isCanceled: (catId) => opts.invocationTracker?.getSlotState?.(resolvedThreadId, catId) === 'canceled',
-        });
-
-        // F088 ISSUE-15: Hoisted so catch/abort branches can clean up streaming sessions
-        let streamStartPromise: Promise<void> | undefined;
-        let firstRouteEventSeen = false;
-        let startupWatchdogFired = false;
-        let startupTimeoutFailureRecorded = false;
-        let queueCompletionNotified = false;
-
-        const notifyQueueCompletion = (status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user') => {
-          if (queueCompletionNotified) return;
-          queueCompletionNotified = true;
-          const completedCatIds = status === 'succeeded' ? terminalDispositions.getSuccessfulCatIds() : [];
-          opts.queueProcessor
-            ?.onInvocationComplete(
-              resolvedThreadId,
-              primaryCat,
-              status,
-              createResult.invocationId,
-              completedCatIds,
-              false,
-              terminalDispositions.getTerminalInvocationIdByCatId(),
-              [],
-              terminalDispositions.getTerminalConsumptionByInvocationId(),
-            )
-            .catch((err) => {
-              log.error(
-                { err, threadId: resolvedThreadId, catId: primaryCat, finalStatus: status },
-                '[messages] onInvocationComplete failed — queued messages may be stuck (#595)',
-              );
-            });
-        };
-
-        // F148 fix: Hoisted so abort/catch branches can ack completed cats' cursors
-        const cursorBoundaries = new Map<string, string>();
-        const continuationCapsules = new Map<string, CollaborationContinuityCapsuleV1>();
-        let consumedContinuation: ConsumedContinuationToken | undefined;
-
-        // F194 Phase Z3 (AC-Z3): mark chain start for finally fallback. routeExecution may
-        // hang / silently exit / swallow exceptions and never reach explicit terminal write
-        // (root cause of bubble-still-split symptom). Without this signal, finally would
-        // fallback failed even on success. start→succeeded/failed → finally CAS terminal.
-        routeChainTracker.start(createResult.invocationId);
-
-        const markStartupTimeoutFailed = async () => {
-          if (startupTimeoutFailureRecorded) return;
-          startupTimeoutFailureRecorded = true;
-          finalStatus = 'failed';
-          routeChainTracker.fail(createResult.invocationId);
-          await opts.invocationRecordStore?.update(createResult.invocationId, {
-            status: 'failed',
-            error: 'Invocation startup timed out before provider/session initialized',
-          });
-          opts.socketManager.broadcastAgentMessage(
-            {
-              type: 'system_info',
-              catId: targetCats[0] ?? getDefaultCatId(),
-              content: JSON.stringify({
-                type: 'invocation_startup_timeout',
-                message: '猫猫启动超时，已释放卡住的调用。',
-                invocationId: createResult.invocationId,
-              }),
-              timestamp: Date.now(),
-            },
-            resolvedThreadId,
-          );
-          await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-        };
-
-        const startupWatchdogMs = opts.invocationStartupWatchdogMs ?? INVOCATION_STARTUP_WATCHDOG_MS;
-        const startupWatchdog: ReturnType<typeof setTimeout> | undefined =
-          startupWatchdogMs > 0
-            ? setTimeout(() => {
-                if (firstRouteEventSeen || controller?.signal.aborted) return;
-                startupWatchdogFired = true;
-                controller?.abort('startup_timeout');
-                opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-                notifyQueueCompletion('failed');
-                void markStartupTimeoutFailed().catch((err) => {
-                  log.warn(
-                    { err, invocationId: createResult.invocationId },
-                    '[messages] startup watchdog failed to mark invocation failed',
-                  );
-                });
-              }, startupWatchdogMs)
-            : undefined;
-
-        const clearStartupWatchdog = () => {
-          if (startupWatchdog) clearTimeout(startupWatchdog);
-        };
-
-        try {
-          await opts.invocationRecordStore?.update(createResult.invocationId, {
-            status: 'running',
-          });
-
-          // #768: intent_mode deferred to first CLI event (avoid "replying" when CLI never starts)
-          let intentModeBroadcast = false;
-          // P1-2: track persistence failures across generator boundary
-          const persistenceContext: PersistenceContext = { failed: false, errors: [] };
-          // F8: collect per-cat token usage from done events
-          const collectedUsage = new Map<string, TokenUsage>();
-          // F070: track governance block errorCode for recoverable failure marking
-          let governanceErrorCode: string | undefined;
-
-          // F088 ISSUE-15: Collect per-turn content for outbound delivery to connector platforms
-          const outboundTurns: Array<{
-            catId: string;
-            textParts: string[];
-            richBlocks?: unknown[];
-          }> = [];
-          let currentTurnCatId: string | undefined;
-          const collectedTextParts: string[] = [];
-
-          if (admittedMessageBundle) {
-            if (!opts.threadStore) throw new MessageBundlePromptUnavailableError('thread_store_unavailable');
-            const bundlePrompt = await resolveMessageBundlePrompt({
-              bundleMessageId: storedUserMessage.id,
-              forwarderUserId: userId,
-              carrier: admittedMessageBundle.carrier,
-              messageStore: opts.messageStore,
-              threadStore: opts.threadStore,
-            });
-            if (bundlePrompt.status !== 'ready') {
-              throw new MessageBundlePromptUnavailableError(bundlePrompt.reason);
-            }
-            content = bundlePrompt.content;
-          }
-
-          // F088 ISSUE-15: Start streaming placeholder on external platforms
-          if (opts.streamingHook) {
-            streamStartPromise = opts.streamingHook
-              .onStreamStart(resolvedThreadId, primaryCat, createResult.invocationId)
-              .catch((err) => {
-                log.warn({ err, threadId: resolvedThreadId }, '[messages] StreamingHook.onStreamStart failed');
-              });
-          }
-
-          // User stop can win the race before CLI produces the first event.
-          // Do not re-arm frontend state with spawn_started/intent_mode after abort.
-          if (controller?.signal.aborted) {
-            finalStatus =
-              controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
-                ? 'canceled_by_user'
-                : 'canceled';
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'canceled',
-            });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-            return;
-          }
-
-          // F224: direct immediate invocations must consume the same pending continuation
-          // as QueueProcessor. Only single-cat content is safe to rewrite with a cat-specific prompt.
-          if (opts.sessionContinuationCoordinator && targetCats.length === 1) {
-            const singleCatId = targetCats[0]!;
-            try {
-              const prepared = await opts.sessionContinuationCoordinator.prepareInvocationContext({
-                threadId: resolvedThreadId,
-                catId: singleCatId,
-                userId,
-                content,
-              });
-              content = prepared.content;
-              consumedContinuation = prepared.consumedContinuation;
-              if (prepared.sessionPolicy === 'reborn') {
-                log.info(
-                  { threadId: resolvedThreadId, catId: singleCatId },
-                  '[messages] F224: reborn session — coordinator skipped continuation consume',
-                );
-              } else if (prepared.consumedContinuation) {
-                log.info(
-                  { threadId: resolvedThreadId, catId: singleCatId },
-                  '[messages] F224: consumed pending continuation for direct invocation',
-                );
-              }
-            } catch (err) {
-              log.warn(
-                { err, threadId: resolvedThreadId, catId: singleCatId },
-                '[messages] F224: prepareInvocationContext failed, proceeding without continuation context',
-              );
-            }
-          }
-
-          // F118 D2: Broadcast spawn_started immediately — fills the intent_mode blind spot.
-          // intent_mode only fires after the first CLI NDJSON event (0–2 min delay).
-          // spawn_started fires here, before routeExecution, so the UI can show
-          // per-cat "spawning" indicators without waiting for CLI to come alive.
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'spawn_started', {
-            threadId: resolvedThreadId,
-            targetCats,
-            invocationId: createResult.invocationId,
-          });
-
-          for await (const msg of router.routeExecution(
-            userId,
-            content,
-            resolvedThreadId,
-            storedUserMessage.id,
-            targetCats,
-            intent,
-            {
-              ownerAuthProvenance,
-              humanDispositionInvocationOrigin: 'direct_owner',
-              ...(liveCompanion ? { liveCompanion } : {}),
-              turnCustodyWake: { kind: 'unstructured', source: 'user_chat' },
-              ...(contentBlocks ? { contentBlocks } : {}),
-              uploadDir,
-              ...(controller?.signal ? { signal: controller.signal } : {}),
-              // F-parallel-cancel: per-cat signal so a single-cat cancel on this direct execution
-              // path aborts only that cat — not the shared batch gate. Without this, route layer
-              // falls back to the batch controller and single-cat cancel never reaches the cat.
-              signalForCat: (catId: string) => opts.invocationTracker?.getController?.(resolvedThreadId, catId)?.signal,
-              ...(opts.invocationQueue
-                ? {
-                    queueHasQueuedMessages: (tid: string) =>
-                      opts.invocationQueue?.hasQueuedNonAgentForThread(tid) ?? false,
-                    getQueuedFreshnessMessagesForCat: (
-                      tid: string,
-                      uid: string,
-                      catId: string,
-                      parentInvocationId?: string,
-                    ) =>
-                      opts.invocationQueue?.getQueuedFreshnessMessagesForCat(tid, uid, catId, {
-                        parentInvocationId,
-                      }) ?? [],
-                    deferA2AEnqueue: (e) => opts.invocationQueue?.enqueue({ ...e, ownerAuthProvenance }),
-                    // F254 B3: freshness re-invoke enqueue for immediate (foreground) invocations.
-                    // Without this, freshnessReinvoke metadata from invoke-single-cat is silently
-                    // dropped in the immediate path — re-invoke only fires for queue-driven entries.
-                    // Matches QueueProcessor pattern: strip freshnessContext before enqueue.
-                    freshnessReinvokeEnqueue: (e: any) => {
-                      const { freshnessContext: _ctx, ...queueFields } = e;
-                      return opts.invocationQueue?.enqueue({ ...queueFields, ownerAuthProvenance });
-                    },
-                    hasQueuedOrActiveAgentForCat: (tid: string, catId: string) =>
-                      opts.invocationQueue?.hasActiveOrQueuedAgentForCat(tid, catId) ?? false,
-                    hasPendingForCat: (tid: string, uid: string, catId: string) =>
-                      opts.invocationQueue?.hasPendingForCat(tid, catId, { userId: uid }) ?? false,
-                  }
-                : {}),
-              ...createA2ASlotTrackingBridge(
-                opts.invocationTracker,
-                controller ?? new AbortController(),
-                createResult.invocationId,
-              ),
-              cursorBoundaries,
-              persistenceContext,
-              parentInvocationId: createResult.invocationId,
-              ...(admittedMessageBundle
-                ? {
-                    persistedPromptMessageIds: [storedUserMessage.id],
-                    persistedPromptMessages: [
-                      {
-                        messageId: storedUserMessage.id,
-                        content,
-                        forceExplicitProjection: true,
-                      },
-                    ],
-                  }
-                : {}),
-              onPromptMessagesExposed: (input) =>
-                opts.queueProcessor?.markPromptMessagesSeen(input) ?? Promise.resolve(),
-              // F222 P1: user direct entry → eligible for frustration auto-issue
-              frustrationAutoIssueEligible: true,
-            },
-          )) {
-            if (!firstRouteEventSeen) {
-              firstRouteEventSeen = true;
-              clearStartupWatchdog();
-            }
-            if (controller?.signal.aborted) {
-              break;
-            }
-            // #768: Broadcast intent_mode on first CLI event — proves CLI is alive.
-            if (!intentModeBroadcast) {
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'intent_mode', {
-                threadId: resolvedThreadId,
-                mode: intent.intent,
-                targetCats,
-                invocationId: createResult.invocationId,
-              });
-              intentModeBroadcast = true;
-            }
-            // F39 bugfix: stop broadcasting after cancel (drain pipe buffer silently)
-            if (controller?.signal.aborted) break;
-            const continuationCapsule = extractContinuityCapsuleFromAgentMessage(msg);
-            if (continuationCapsule) {
-              continuationCapsules.set(continuationCapsule.catId, continuationCapsule);
-            }
-            if (msg.type === 'done' && msg.catId && msg.metadata?.usage) {
-              collectedUsage.set(msg.catId, mergeTokenUsage(collectedUsage.get(msg.catId), msg.metadata.usage));
-            }
-            if (msg.type === 'done' && msg.errorCode) {
-              governanceErrorCode = msg.errorCode;
-            }
-            terminalDispositions.observe(msg);
-            if (isTerminalDispositionEvent(msg) && msg.catId) {
-              opts.invocationTracker?.completeSlot?.(resolvedThreadId, msg.catId, controller);
-            }
-
-            // F088 ISSUE-15: Collect outbound turns (same pattern as QueueProcessor)
-            if (msg.type === 'done' && msg.catId) {
-              if (persistenceContext.richBlocks) {
-                const turn = outboundTurns[outboundTurns.length - 1];
-                if (turn && turn.catId === msg.catId && currentTurnCatId === msg.catId) {
-                  turn.richBlocks = [...persistenceContext.richBlocks];
-                } else {
-                  outboundTurns.push({
-                    catId: msg.catId,
-                    textParts: [],
-                    richBlocks: [...persistenceContext.richBlocks],
-                  });
-                }
-                persistenceContext.richBlocks = undefined;
-              }
-              currentTurnCatId = undefined;
-            }
-            if (msg.type === 'text' && typeof (msg as unknown as Record<string, unknown>).content === 'string') {
-              const textContent = (msg as unknown as Record<string, unknown>).content as string;
-              const textMode = (msg as { textMode?: 'append' | 'replace' }).textMode;
-              accumulateTextParts(collectedTextParts, textContent, textMode);
-              if (msg.catId) {
-                if (msg.catId !== currentTurnCatId) {
-                  outboundTurns.push({ catId: msg.catId, textParts: [] });
-                  currentTurnCatId = msg.catId;
-                }
-                const turn = outboundTurns[outboundTurns.length - 1];
-                accumulateTextParts(turn.textParts, textContent, textMode);
-              }
-              // F088 ISSUE-15: Forward streaming chunks to external platforms
-              if (opts.streamingHook) {
-                const accumulated =
-                  outboundTurns.length > 0 ? flattenTurnTextParts(outboundTurns) : flattenTextParts(collectedTextParts);
-                opts.streamingHook
-                  .onStreamChunk(resolvedThreadId, accumulated, createResult.invocationId)
-                  .catch((streamErr) => {
-                    log.warn(
-                      { err: streamErr, threadId: resolvedThreadId },
-                      '[messages] StreamingHook.onStreamChunk failed',
-                    );
-                  });
-              }
-            }
-
-            // F194 Phase Z9 (砚砚 R1 P1-2): unified visible turn stamp via helper.
-            // Route layer (R1 P1-1 fix) now stamps msg.invocationId = ownInvocationId
-            // for assistant yielded events, so helper receives a defined turn id
-            // (no parent fallback firing in practice).
-            const broadcastPayload = {
-              ...msg,
-              ...stampVisibleTurn(createResult.invocationId, msg.invocationId),
-            };
-
-            if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(
-                opts.messageStore,
-                broadcastPayload,
-                resolvedThreadId,
-                log,
-              );
-              if (storedId) broadcastPayload.messageId = storedId;
-            }
-
-            opts.socketManager.broadcastAgentMessage(broadcastPayload, resolvedThreadId);
-          }
-
-          // F39 P1 fix (砚砚 R1): abort guard after loop — when signal is aborted
-          // and the generator ends normally (no throw), the break exits the loop but
-          // post-loop code would still run ack+succeeded. Guard explicitly.
-          // F-parallel-cancel: use AGGREGATE finalStatus — batch gate abort (whole invocation) OR
-          // every target cat singly cancelled → canceled. A single-cat cancel no longer aborts the
-          // batch gate, so raw controller.signal.aborted only covers the whole-invocation case.
-          // (completeAll runs in finally, AFTER this, so cancel tombstones are still visible here.)
-          const aggFinalStatus = startupWatchdogFired
-            ? 'failed'
-            : opts.invocationTracker?.resolveFinalStatus
-              ? opts.invocationTracker.resolveFinalStatus(resolvedThreadId, targetCats, {
-                  aborted: controller?.signal.aborted ?? false,
-                  reason: controller?.signal.reason as string | undefined,
-                })
-              : controller?.signal.aborted
-                ? // Fallback (tracker without resolveFinalStatus): whole-invocation abort → reason
-                  // decides canceled_by_user vs canceled (matches resolveFinalStatus semantics).
-                  controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
-                  ? 'canceled_by_user'
-                  : 'canceled'
-                : 'succeeded';
-          const primaryTerminalError = terminalDispositions.getPrimaryTerminalError();
-          const successfulCatIds = terminalDispositions.getSuccessfulCatIds() as CatId[];
-          if (aggFinalStatus === 'failed') {
-            await markStartupTimeoutFailed();
-          } else if (aggFinalStatus !== 'succeeded') {
-            finalStatus = aggFinalStatus;
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'canceled',
-            });
-            // Bugfix: silent-exit P2 — only broadcast diagnostic when preempted by
-            // a newer invocation (reason='preempted'). User-initiated cancel already
-            // broadcasts its own messages via buildCancelMessages; adding another here
-            // would cause a duplicate with misleading text.
-            if (controller?.signal.reason === 'preempted') {
-              opts.socketManager.broadcastAgentMessage(
-                {
-                  type: 'system_info',
-                  catId: targetCats[0] ?? getDefaultCatId(),
-                  content: JSON.stringify({
-                    type: 'invocation_preempted',
-                    detail: 'This response was superseded by a newer request.',
-                    invocationId: createResult.invocationId,
-                  }),
-                  timestamp: Date.now(),
-                },
-                resolvedThreadId,
-              );
-            }
-            // F148 fix: ack cursors for cats that completed before abort (monotonic CAS, safe to call)
-            if (cursorBoundaries.size > 0) {
-              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
-            }
-            // P1 fix: finalize streaming session on abort so external placeholders are cleaned up
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else if (
-            primaryTerminalError &&
-            (successfulCatIds.length === 0 || terminalDispositions.getPreflightRejectedCatIds().length > 0)
-          ) {
-            finalStatus = 'failed';
-            routeChainTracker.fail(createResult.invocationId);
-            if (cursorBoundaries.size > 0) {
-              await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
-            }
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'failed',
-              error: primaryTerminalError,
-              ...(successfulCatIds.length > 0 ? { successfulCatIds } : {}),
-            });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else if (persistenceContext.failed) {
-            const errorDetail = persistenceContext.errors.map((e) => `${e.catId}: ${e.error}`).join('; ');
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'failed',
-              error: `Message delivered but persistence failed: ${errorDetail}`,
-            });
-            opts.socketManager.broadcastAgentMessage(
-              {
-                type: 'error',
-                catId: getDefaultCatId(),
-                error: '消息已发送但未能保存，刷新后可能丢失。可点击重试。',
-                timestamp: Date.now(),
-              },
-              resolvedThreadId,
-            );
-
-            const pushSvcErr = getPushNotificationService();
-            if (pushSvcErr) {
-              pushSvcErr
-                .notifyUser(userId, {
-                  title: '猫猫消息保存失败',
-                  body: '消息已发送但未能保存，请检查',
-                  tag: `cat-error-${resolvedThreadId}`,
-                  data: { threadId: resolvedThreadId, url: `/?thread=${resolvedThreadId}` },
-                })
-                .catch(() => {});
-            }
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else if (governanceErrorCode) {
-            // F070: Governance gate blocked — mark as failed with errorCode for retry
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'failed',
-              error: governanceErrorCode,
-            });
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else {
-            // ADR-008 S3: ack cursors before marking succeeded so that if ack
-            // throws, the catch block sees running→failed (valid transition).
-            await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
-
-            if (!opts.invocationRecordStore) {
-              throw new Error('Invocation record store disappeared before terminal update');
-            }
-            await requireInvocationRecordUpdate({
-              store: opts.invocationRecordStore,
-              invocationId: createResult.invocationId,
-              update: {
-                status: 'succeeded',
-                successfulCatIds,
-                ...(collectedUsage.size > 0
-                  ? {
-                      usageByCat: Object.fromEntries(collectedUsage),
-                    }
-                  : {}),
-              },
-              writer: 'messages route',
-            });
-            finalStatus = 'succeeded';
-            // F194 Phase Z3: chain succeeded — signal for finally fallback
-            routeChainTracker.succeed(createResult.invocationId);
-
-            for (const continuationCapsule of continuationCapsules.values()) {
-              if (
-                !(await shouldEnqueueDirectContinuation(
-                  continuationCapsule,
-                  userId,
-                  opts.sessionContinuationCoordinator,
-                ))
-              ) {
-                continue;
-              }
-              await opts.queueProcessor
-                ?.enqueueContinuation({
-                  threadId: resolvedThreadId,
-                  userId,
-                  ownerAuthProvenance,
-                  catId: continuationCapsule.catId,
-                  capsule: continuationCapsule,
-                })
-                .catch((err) => {
-                  log.warn({ err, threadId: resolvedThreadId }, 'enqueueContinuation failed (best-effort)');
-                  return undefined;
-                });
-            }
-
-            // Push notification: cat(s) finished responding
-            const pushSvc = getPushNotificationService();
-            if (pushSvc) {
-              const catNames = targetCats.join(', ');
-              const pushTurns = outboundTurns.filter((turn) =>
-                isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[turn.catId]),
-              );
-              const assistantText = (
-                outboundTurns.length > 0
-                  ? flattenTurnTextParts(pushTurns)
-                  : isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[primaryCat])
-                    ? flattenTextParts(collectedTextParts)
-                    : ''
-              ).trim();
-              const hasKnownUndeliverableOutput = Object.values(persistenceContext.outputCommitDecisions ?? {}).some(
-                (decision) => !isConnectorDeliverable(decision),
-              );
-              if (!hasKnownUndeliverableOutput || assistantText.length > 0) {
-                const needsDecision = assistantText.length > 0 ? shouldMarkDecisionNotification(assistantText) : false;
-                const pushBodySource = assistantText || '猫猫已处理，请打开会话查看详情';
-                pushSvc
-                  .notifyUser(userId, {
-                    title: needsDecision ? `${catNames} 需要你决策` : `${catNames} 回复了`,
-                    body: pushBodySource.slice(0, 80),
-                    icon: targetCats.length === 1 ? `/avatars/${targetCats[0]}.png` : '/icons/icon-192x192.png',
-                    tag: `${needsDecision ? 'cat-decision' : 'cat-reply'}-${resolvedThreadId}`,
-                    data: {
-                      threadId: resolvedThreadId,
-                      url: `/?thread=${resolvedThreadId}`,
-                      ...(needsDecision ? { requiresDecision: true } : {}),
-                    },
-                  })
-                  .catch(() => {
-                    /* best-effort */
-                  });
-              }
-            }
-
-            // F088 ISSUE-15: Outbound delivery to connector platforms (Feishu/Telegram)
-            // P2 fix: fire-and-forget so delivery latency doesn't block invocationTracker.complete()
-            deliverOutboundFromWeb(
-              resolvedThreadId,
-              primaryCat,
-              createResult.invocationId,
-              collectedTextParts,
-              outboundTurns,
-              persistenceContext,
-              streamStartPromise,
-              opts,
-              log,
-            ).catch((deliverErr) => {
-              log.error({ err: deliverErr, threadId: resolvedThreadId }, '[messages] deliverOutboundFromWeb failed');
-            });
-          }
-        } catch (err) {
-          // F39 bugfix: detect abort (cancel/force) vs real failure
-          if (startupWatchdogFired) {
-            await markStartupTimeoutFailed();
-          } else if (controller?.signal.aborted) {
-            finalStatus =
-              controller.signal.reason === 'user_cancel' || controller.signal.reason === 'cancel_all'
-                ? 'canceled_by_user'
-                : 'canceled';
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'canceled',
-            });
-            // F148 fix: ack cursors for cats that completed before the exception
-            if (cursorBoundaries.size > 0) {
-              try {
-                await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
-              } catch {
-                /* best-effort — don't mask the original error */
-              }
-            }
-            // Don't broadcast error for intentional cancel
-            // P1-A fix: clean up streaming placeholder even on abort/cancel
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } else {
-            // F148 fix: ack cursors for cats that completed before the exception
-            if (cursorBoundaries.size > 0) {
-              try {
-                await router.ackCollectedCursors(userId, resolvedThreadId, cursorBoundaries);
-              } catch {
-                /* best-effort — don't mask the original error */
-              }
-            }
-            log.error({ err, invocationId: createResult.invocationId }, 'Background processing error');
-            const errorMsg = normalizeErrorMessage(err);
-            await opts.invocationRecordStore?.update(createResult.invocationId, {
-              status: 'failed',
-              error: errorMsg,
-            });
-            // F194 Phase Z3: chain failed — diagnostic signal for finally fallback
-            routeChainTracker.fail(createResult.invocationId);
-            opts.socketManager.broadcastAgentMessage(
-              {
-                type: 'error',
-                catId: getDefaultCatId(),
-                error: errorMsg,
-                isFinal: true,
-                timestamp: Date.now(),
-              },
-              resolvedThreadId,
-            );
-
-            const pushSvcCatch = getPushNotificationService();
-            if (pushSvcCatch) {
-              pushSvcCatch
-                .notifyUser(userId, {
-                  title: '猫猫出错了',
-                  body: errorMsg.slice(0, 100),
-                  tag: `cat-error-${resolvedThreadId}`,
-                  data: { threadId: resolvedThreadId, url: `/?thread=${resolvedThreadId}` },
-                })
-                .catch(() => {});
-            }
-            await cleanupStreamingOnFailure(resolvedThreadId, createResult.invocationId, streamStartPromise, opts, log);
-          } // end else (non-abort error)
-        } finally {
-          await liveCompanion?.fail(new Error('Host execution ended'));
-          clearStartupWatchdog();
-          clearInterval(heartbeatInterval);
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-          // Preserve the normal ordering (terminal truth + continuation commit before the next
-          // Queue turn), but never let an unbounded bookkeeping await erase the only drain signal.
-          // The callback is idempotent per route, so the watchdog and normal finally converge.
-          const queueCompletionWatchdogMs = opts.queueCompletionWatchdogMs ?? QUEUE_COMPLETION_WATCHDOG_MS;
-          const queueCompletionWatchdog =
-            queueCompletionWatchdogMs >= 0
-              ? setTimeout(() => {
-                  log.warn(
-                    {
-                      threadId: resolvedThreadId,
-                      invocationId: createResult.invocationId,
-                      queueCompletionWatchdogMs,
-                    },
-                    '[messages] terminal bookkeeping exceeded queue completion deadline; notifying drain',
-                  );
-                  notifyQueueCompletion(finalStatus);
-                }, queueCompletionWatchdogMs)
-              : undefined;
-          if (queueCompletionWatchdog && typeof queueCompletionWatchdog === 'object') {
-            queueCompletionWatchdog.unref();
-          }
-          try {
-            // F194 Phase Z3 (AC-Z3): defensive terminal write. If routeExecution silently exited
-            // without writing terminal (the runtime split symptom root cause), CAS expectedStatus=
-            // running guarded write based on chainCompletion signal. Skips if status already terminal.
-            // Reads chainTracker → succeeded/failed/missing → CAS update or fallback. (砚砚 R1 P1-3)
-            if (opts.invocationRecordStore) {
-              try {
-                await ensureTerminalStatus(
-                  createResult.invocationId,
-                  {
-                    invocationRecordStore: opts.invocationRecordStore,
-                    chainCompletion: routeChainTracker,
-                    log,
-                  },
-                  {
-                    reqId: request.id,
-                    successfulCatIds: terminalDispositions.getSuccessfulCatIds() as CatId[],
-                  },
-                );
-              } catch (err) {
-                log.warn(
-                  { err, invocationId: createResult.invocationId, feature: 'F194' },
-                  'F194 Z3 ensureTerminalStatus failed (background)',
-                );
-              }
-            }
-            routeChainTracker.release(createResult.invocationId);
-            if (opts.sessionContinuationCoordinator) {
-              try {
-                await opts.sessionContinuationCoordinator.commitInvocationOutcome({
-                  finalStatus,
-                  threadId: resolvedThreadId,
-                  catId: primaryCat,
-                  userId,
-                  consumedContinuation,
-                  producedCapsules: [...continuationCapsules.values()],
-                });
-              } catch (err) {
-                log.warn(
-                  { err, threadId: resolvedThreadId, targetCats },
-                  '[messages] F224: commitInvocationOutcome failed',
-                );
-              }
-            }
-          } finally {
-            if (queueCompletionWatchdog) clearTimeout(queueCompletionWatchdog);
-            // F39: Notify queue processor for auto-dequeue chain.
-            notifyQueueCompletion(finalStatus);
-          }
-        }
-      })();
-    } else {
-      // Fallback: no invocationRecordStore (legacy path, uses route())
-      // F122 A.1: Try non-preemptive first. The legacy root admission still cannot
-      // queue the incoming user message, so it falls back to replacement ownership.
-      // Its nested A2A handoffs do use InvocationQueue when available; an occupied
-      // target without queue custody now fails closed instead of invoking inline.
-      // TODO(F122 Phase B): Remove this legacy root-admission path.
-      let acquiredController: AbortController | null | undefined;
-      if (mode !== 'force' && opts.invocationTracker) {
-        acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
-          mode: 'non_preemptive',
-        });
-        if (acquiredController == null) {
-          acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
-            mode: 'replacement',
-          });
-        }
-      } else {
-        acquiredController = await acquireRouteExecutionOwner(opts, resolvedThreadId, targetCats, userId, {
-          mode: 'replacement',
-          onOwnershipValidated: cancelValidatedForceOwner,
-        });
-      }
-      if (acquiredController === null) {
-        reply.status(409);
-        return {
-          error: 'Invocation owner changed before message routing could start',
-          code: 'INVOCATION_OWNER_CHANGED',
-        };
-      }
-      const controller = acquiredController;
-      publishValidatedForceCancellation();
-      if (controller?.signal.aborted) {
-        reply.status(409);
-        return {
-          error: '对话正在删除中',
-          detail: '请稍后重试，或新建一个对话继续',
-          code: 'THREAD_DELETING',
-        };
-      }
-
-      if (mode === 'force' && cancelledCatIds.length > 0 && opts.invocationQueue) {
-        try {
-          await emitQueueUpdated(
-            opts.socketManager,
-            userId,
-            resolvedThreadId,
-            opts.invocationQueue.list(resolvedThreadId, userId),
-            opts.messageStore,
-            'force_cleared',
-          );
-        } catch (err) {
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-          throw err;
-        }
-      }
-
-      reply.send({ status: 'processing', timestamp: Date.now() });
-
-      void (async () => {
-        const HEARTBEAT_INTERVAL_MS = 30_000;
-        const heartbeatInterval = setInterval(() => {
-          opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'heartbeat', {
-            threadId: resolvedThreadId,
-            timestamp: Date.now(),
-          });
-        }, HEARTBEAT_INTERVAL_MS);
-
-        try {
-          // #768: intent_mode deferred to first CLI event (legacy path)
-          let intentModeBroadcast = false;
-
-          for await (const msg of router.route(
-            userId,
-            content,
-            resolvedThreadId,
-            contentBlocks,
-            uploadDir,
-            controller?.signal,
-            {
-              ownerAuthProvenance,
-              ...createA2ASlotTrackingBridge(opts.invocationTracker, controller ?? new AbortController()),
-              ...(opts.invocationQueue
-                ? {
-                    deferA2AEnqueue: (entry: Parameters<NonNullable<RouteOptions['deferA2AEnqueue']>>[0]) =>
-                      opts.invocationQueue?.enqueue({ ...entry, ownerAuthProvenance }),
-                  }
-                : {}),
-            },
-          )) {
-            // #768: Broadcast intent_mode on first CLI event (legacy path)
-            if (!intentModeBroadcast) {
-              opts.socketManager.broadcastToRoom(`thread:${resolvedThreadId}`, 'intent_mode', {
-                threadId: resolvedThreadId,
-                mode: intent.intent,
-                targetCats,
-                // Legacy path: no invocationId (no InvocationRecord). Frontend falls back gracefully.
-              });
-              intentModeBroadcast = true;
-            }
-            if (isTerminalDispositionEvent(msg) && msg.catId) {
-              opts.invocationTracker?.completeSlot?.(resolvedThreadId, msg.catId, controller);
-            }
-            const legacyPayload = { ...msg };
-            if (msg.type === 'a2a_handoff') {
-              const storedId = await persistA2ARoutingMessage(opts.messageStore, msg, resolvedThreadId, log);
-              if (storedId) legacyPayload.messageId = storedId;
-            }
-            opts.socketManager.broadcastAgentMessage(legacyPayload, resolvedThreadId);
-          }
-        } catch (err) {
-          log.error({ err }, 'Background processing error');
-          opts.socketManager.broadcastAgentMessage(
-            {
-              type: 'error',
-              catId: getDefaultCatId(),
-              error: normalizeErrorMessage(err),
-              isFinal: true,
-              timestamp: Date.now(),
-            },
-            resolvedThreadId,
-          );
-        } finally {
-          clearInterval(heartbeatInterval);
-          opts.invocationTracker?.completeAll(resolvedThreadId, targetCats, controller);
-        }
-      })();
-    }
   });
+
+  // Retry is a fresh source/attempt. The failed History delivery remains immutable;
+  // Queue receives only the new pending work and never reopens a terminal row.
+  app.post<{ Params: { sourceMessageId: string; targetCatId: string } }>(
+    '/api/messages/:sourceMessageId/delivery-targets/:targetCatId/retry',
+    async (request, reply) => {
+      const parsed = cloudDeliveryRetrySchema.safeParse(request.body);
+      if (!parsed.success) {
+        reply.status(400);
+        return { error: 'Retry 请求格式无效', code: 'INVALID_DELIVERY_RETRY_REQUEST' };
+      }
+      if (!opts.invocationQueue) {
+        reply.status(503);
+        return { error: '消息投递暂不可用', code: 'DELIVERY_RETRY_UNAVAILABLE' };
+      }
+
+      const userId = resolveUserId(request, { defaultUserId: 'default-user' });
+      if (!userId) {
+        reply.status(401);
+        return { error: 'Identity required', code: 'IDENTITY_REQUIRED' };
+      }
+
+      const { sourceMessageId, targetCatId } = request.params;
+      const source = await opts.messageStore.getById(sourceMessageId);
+      const sender = source ? messageFrom(source) : undefined;
+      if (
+        !source ||
+        source.deletedAt ||
+        sender?.kind !== 'user' ||
+        sender.userId !== userId ||
+        !isTimelinePublished(source)
+      ) {
+        reply.status(404);
+        return { error: '原消息不存在或不可重试', code: 'DELIVERY_RETRY_SOURCE_NOT_FOUND' };
+      }
+
+      const resolvedTargets = await router.resolveExplicitTargets([targetCatId], source.threadId, { persist: false });
+      if (resolvedTargets.length !== 1 || resolvedTargets[0] !== targetCatId) {
+        reply.status(409);
+        return { error: '目标成员当前不可用', code: 'DELIVERY_RETRY_AUTHORITY_STALE' };
+      }
+
+      const threadMessages = await opts.messageStore.getByThread(source.threadId, 10_000, userId);
+      if (!hasExactCloudDeliveryRecoveryNotice(threadMessages, sourceMessageId, targetCatId, parsed.data.attemptId)) {
+        reply.status(409);
+        return { error: '原发送记录已经变化', code: 'DELIVERY_RETRY_AUTHORITY_STALE' };
+      }
+
+      const idempotencyKey = cloudDeliveryRetryIdempotencyKey(sourceMessageId, targetCatId, parsed.data.attemptId);
+      const existingRetry = await opts.messageStore.getByIdempotencyKey(userId, source.threadId, idempotencyKey);
+      if (existingRetry) {
+        reply.status(409);
+        return {
+          error: '这次发送已经重试过',
+          code: 'DELIVERY_RETRY_AUTHORITY_STALE',
+          retryMessageId: existingRetry.id,
+        };
+      }
+
+      const target = resolvedTargets[0]!;
+      const queueInput = {
+        from: { kind: 'user' as const, userId },
+        threadId: source.threadId,
+        userId,
+        kind: 'conversation_input' as const,
+        ownerAuthProvenance: 'strict' as const,
+        idempotencyKey,
+        content: source.content,
+        targetCats: [target],
+        messageDisposition: 'next_work' as const,
+        intent: 'cloud_delivery_retry',
+      };
+      const admitted = await opts.invocationQueue.send(
+        opts.messageStore,
+        {
+          from: queueInput.from,
+          userId,
+          content: source.content,
+          mentions: [target],
+          timestamp: Date.now(),
+          threadId: source.threadId,
+          idempotencyKey,
+          deliveryStatus: 'queued',
+          ...(source.contentBlocks ? { contentBlocks: source.contentBlocks } : {}),
+          ...(source.visibility ? { visibility: source.visibility } : {}),
+          ...(source.whisperTo ? { whisperTo: source.whisperTo } : {}),
+          ...(source.replyTo ? { replyTo: source.replyTo } : {}),
+          extra: {
+            cloudBridgeRetry: {
+              v: 1,
+              sourceMessageId,
+              targetCatId,
+              priorDispatchInvocationId: parsed.data.attemptId,
+            },
+          },
+        },
+        queueInput,
+      );
+      if (admitted.outcome === 'full') {
+        reply.status(429);
+        return { error: '消息队列已满', code: 'QUEUE_FULL' };
+      }
+
+      await emitQueueUpdated(
+        opts.socketManager,
+        userId,
+        source.threadId,
+        opts.invocationQueue.list(source.threadId, userId),
+        admitted.outcome,
+      );
+
+      reply.status(202);
+      return {
+        status: 'queued',
+        retryMessageId: admitted.message.id,
+        entryId: admitted.entry?.id,
+      };
+    },
+  );
 
   // GET /api/messages - 获取历史消息
   app.get('/api/messages', async (request) => {
@@ -2433,7 +1054,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     const needed = limit + 1;
     const browserTimelineRead = {
       includeQueuedCatMessages: true,
-      includeQueuedUserMessages: true,
       includeRecalledUserMessages: true,
     } as const;
 
@@ -2463,9 +1083,10 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       // Filter only internal route-guard diagnostics. F148 ContextBriefing is a
       // contracted user-visible transparency card; its non-routing guarantee is
       // enforced by incremental-context assembly, not timeline hydration.
-      const batchVisible = rawBatch.filter(
-        (m) => m.source?.connector !== 'routing-guard-failure' && !isLeakedSupplementDecline(m),
-      );
+      // `routing-guard-failure` is a retired producer. Keep this read-boundary
+      // exclusion only so rows written by older releases never reappear after
+      // upgrade; current runtime code must not append or broadcast new rows.
+      const batchVisible = rawBatch.filter((m) => m.source?.connector !== 'routing-guard-failure');
 
       // Prepend: each subsequent batch is chronologically older
       allVisible.unshift(...batchVisible);
@@ -2488,30 +1109,6 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     const hasMore = allVisible.length > limit || !storeExhausted;
     const page = allVisible.length > limit ? allVisible.slice(allVisible.length - limit) : allVisible;
 
-    const supplementProjectionByOriginal = new Map<
-      string,
-      Awaited<ReturnType<typeof projectFreshnessSupplementForHistory>>
-    >();
-    if (opts.freshnessClosureStore) {
-      try {
-        const supplements = await opts.freshnessClosureStore.listSupplementsByThread(resolvedThreadId);
-        for (const supplement of supplements) {
-          if (supplement.userId !== userId) continue;
-          const projection = await projectFreshnessSupplementForHistory(supplement, opts.messageStore);
-          const current = supplementProjectionByOriginal.get(supplement.originalMessageId);
-          if (
-            !current ||
-            projection.seq > current.seq ||
-            (projection.seq === current.seq && projection.updatedAt > current.updatedAt)
-          ) {
-            supplementProjectionByOriginal.set(supplement.originalMessageId, projection);
-          }
-        }
-      } catch (err) {
-        log.warn({ err, threadId: resolvedThreadId }, 'F254 supplement history hydration failed');
-      }
-    }
-
     // Map chat messages (union type allows summary items to be pushed later)
     type TimelineItem = {
       id: string;
@@ -2519,106 +1116,103 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       catId: string | null;
       content: string;
       timestamp: number;
+      lifecycle?: StoredMessage['lifecycle'];
       summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
       [key: string]: unknown;
     };
-    const chatItems: TimelineItem[] = page.map((m) => ({
-      id: m.id,
-      type: (m.catId
-        ? isSystemUserMessage(m)
-          ? 'system'
-          : 'assistant'
-        : m.source
-          ? 'connector'
-          : isSystemUserMessage(m)
-            ? 'system'
-            : 'user') as TimelineItem['type'],
-      catId: m.catId,
-      content: m.content,
-      ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
-      ...(m.toolEvents ? { toolEvents: m.toolEvents } : {}),
-      ...(m.metadata ? { metadata: m.metadata } : {}),
-      ...(m.origin ? { origin: m.origin } : {}),
-      ...(m.thinking ? { thinking: m.thinking } : {}),
-      ...(m.extra?.semanticEvent ||
-      m.extra?.liveCompanion?.identity ||
-      m.extra?.rich ||
-      isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId) ||
-      m.extra?.coordination ||
-      m.extra?.isExplicitPost ||
-      m.extra?.stream ||
-      m.extra?.targetCats ||
-      m.extra?.messageBundle ||
-      m.extra?.contentModificationRequestV1 ||
-      m.extra?.scheduler ||
-      m.extra?.systemKind ||
-      m.extra?.systemInfo ||
-      m.extra?.a2aRouting ||
-      m.extra?.freshness ||
-      m.extra?.supplement ||
-      m.extra?.causal ||
-      m.extra?.turnExecution ||
-      m.extra?.auxiliaryTurnExecutions ||
-      supplementProjectionByOriginal.has(m.id) ||
-      m.queueCustody ||
-      m.recall ||
-      m.extra?.recovery
-        ? {
-            extra: {
-              ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
-              ...(m.extra?.liveCompanion?.identity
-                ? { liveCompanion: { identity: m.extra.liveCompanion.identity } }
-                : {}),
-              ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
-              ...(isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId)
-                ? { crossPost: m.extra!.crossPost! }
-                : {}),
-              ...(m.extra?.coordination ? { coordination: m.extra.coordination } : {}),
-              ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
-              ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
-              ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
-              ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
-              ...(m.extra?.contentModificationRequestV1
-                ? { contentModificationRequestV1: m.extra.contentModificationRequestV1 }
-                : {}),
-              ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
-              ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
-              ...(m.extra?.systemInfo ? { systemInfo: m.extra.systemInfo } : {}),
-              ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
-              ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
-              ...(m.extra?.supplement ? { supplement: m.extra.supplement } : {}),
-              ...(m.extra?.causal ? { causal: m.extra.causal } : {}),
-              ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
-              ...(m.extra?.auxiliaryTurnExecutions ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions } : {}),
-              ...(supplementProjectionByOriginal.has(m.id)
-                ? { freshnessSupplement: supplementProjectionByOriginal.get(m.id) }
-                : {}),
-              ...(m.queueCustody ? { queueReceipt: projectQueueReceipt(m.queueCustody) } : {}),
-              ...(m.recall ? { recall: m.recall } : {}),
-              ...(m.extra?.recovery ? { recovery: projectRecoveryForHistory(m.extra.recovery) } : {}),
-            },
-          }
-        : {}),
-      ...(m.visibility ? { visibility: m.visibility } : {}),
-      ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
-      ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
-      ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
-      ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
-      ...(m.source
-        ? {
-            source: {
-              connector: m.source.connector,
-              label: m.source.label,
-              icon: m.source.icon,
-              ...(m.source.url ? { url: m.source.url } : {}),
-              ...(m.source.meta ? { meta: m.source.meta } : {}),
-              ...(m.source.sender ? { sender: m.source.sender } : {}),
-            },
-          }
-        : {}),
-      ...(m.replyTo ? { replyTo: m.replyTo } : {}),
-      timestamp: m.timestamp,
-    }));
+    const chatItems: TimelineItem[] = page.map((m) => {
+      const from = messageFrom(m);
+      // Same shared rule the client hydration paths use; `messageFrom` always names a sender here.
+      const type: TimelineItem['type'] = timelineMessageKind(from, Boolean(m.source)) ?? 'user';
+      return {
+        id: m.id,
+        type,
+        from,
+        catId: m.catId,
+        content: m.content,
+        ...(m.lifecycle ? { lifecycle: m.lifecycle } : {}),
+        ...(m.lifecycle?.kind === 'delivery_failure' ? { variant: 'error' } : {}),
+        ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+        ...(m.toolEvents ? { toolEvents: m.toolEvents } : {}),
+        ...(m.metadata ? { metadata: m.metadata } : {}),
+        ...(m.origin ? { origin: m.origin } : {}),
+        ...(m.thinking ? { thinking: m.thinking } : {}),
+        ...(m.extra?.semanticEvent ||
+        m.extra?.liveCompanion ||
+        m.extra?.contentModificationRequestV1 ||
+        m.extra?.systemInfo ||
+        m.extra?.rich ||
+        m.extra?.routingWarnings ||
+        isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId) ||
+        m.extra?.coordination ||
+        m.extra?.isExplicitPost ||
+        m.extra?.stream ||
+        m.extra?.targetCats ||
+        m.extra?.messageBundle ||
+        m.extra?.scheduler ||
+        m.extra?.systemKind ||
+        m.extra?.a2aRouting ||
+        m.extra?.freshness ||
+        m.extra?.causal ||
+        m.extra?.turnExecution ||
+        m.extra?.auxiliaryTurnExecutions ||
+        m.recall ||
+        m.extra?.recovery
+          ? {
+              extra: {
+                ...(m.extra?.semanticEvent ? { semanticEvent: m.extra.semanticEvent } : {}),
+                ...(m.extra?.liveCompanion?.identity
+                  ? { liveCompanion: { identity: m.extra.liveCompanion.identity } }
+                  : {}),
+                ...(m.extra?.contentModificationRequestV1
+                  ? { contentModificationRequestV1: m.extra.contentModificationRequestV1 }
+                  : {}),
+                ...(m.extra?.systemInfo ? { systemInfo: m.extra.systemInfo } : {}),
+                ...(m.extra?.rich ? { rich: m.extra.rich } : {}),
+                ...(m.extra?.routingWarnings ? { routingWarnings: m.extra.routingWarnings } : {}),
+                ...(isCrossThreadProvenance(m.extra?.crossPost?.sourceThreadId, m.threadId)
+                  ? { crossPost: m.extra!.crossPost! }
+                  : {}),
+                ...(m.extra?.coordination ? { coordination: m.extra.coordination } : {}),
+                ...(m.extra?.isExplicitPost ? { isExplicitPost: true } : {}),
+                ...(m.extra?.stream ? { stream: m.extra.stream } : {}),
+                ...(m.extra?.targetCats ? { targetCats: m.extra.targetCats } : {}),
+                ...(m.extra?.messageBundle ? { messageBundle: m.extra.messageBundle } : {}),
+                ...(m.extra?.scheduler ? { scheduler: m.extra.scheduler } : {}),
+                ...(m.extra?.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                ...(m.extra?.a2aRouting ? { a2aRouting: m.extra.a2aRouting } : {}),
+                ...(m.extra?.freshness ? { freshness: m.extra.freshness } : {}),
+                ...(m.extra?.causal ? { causal: m.extra.causal } : {}),
+                ...(m.extra?.turnExecution ? { turnExecution: m.extra.turnExecution } : {}),
+                ...(m.extra?.auxiliaryTurnExecutions
+                  ? { auxiliaryTurnExecutions: m.extra.auxiliaryTurnExecutions }
+                  : {}),
+                ...(m.recall ? { recall: m.recall } : {}),
+                ...(m.extra?.recovery ? { recovery: projectRecoveryForHistory(m.extra.recovery) } : {}),
+              },
+            }
+          : {}),
+        ...(m.visibility ? { visibility: m.visibility } : {}),
+        ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
+        ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
+        ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+        ...(m.timelineOrderAt !== undefined ? { timelineOrderAt: m.timelineOrderAt } : {}),
+        ...(m.source
+          ? {
+              source: {
+                connector: m.source.connector,
+                label: m.source.label,
+                icon: m.source.icon,
+                ...(m.source.url ? { url: m.source.url } : {}),
+                ...(m.source.meta ? { meta: m.source.meta } : {}),
+                ...(m.source.sender ? { sender: m.source.sender } : {}),
+              },
+            }
+          : {}),
+        ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+        timestamp: m.timestamp,
+      };
+    });
 
     // F121: Hydrate reply previews for messages with replyTo
     const replyItems = chatItems.filter((item) => item.replyTo);
@@ -2643,185 +1237,32 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
       );
     }
 
-    // #80: Merge active streaming drafts (first page only — no before cursor)
-    if (!before && opts.draftStore) {
-      const draftStore = opts.draftStore;
-      const drafts = await draftStore.getByThread(userId, resolvedThreadId);
-      let activeDrafts = drafts;
-      // #80 fix-B diagnostic: trace draft merge for F5 recovery verification
-      if (drafts.length > 0) {
-        request.log.info(
-          { threadId: resolvedThreadId, draftCount: drafts.length, draftIds: drafts.map((d) => d.invocationId) },
-          '#80 draft merge: found active drafts',
-        );
-        // P1-2 dedup: filter out drafts whose invocationId matches a formal message.
-        // F194 Phase Z3 P1-3 (砚砚 R): formal set MUST collect both `invocationId` (parent SoT) and
-        // `turnInvocationId` (Z3 dual id, where draft.invocationId === turnInvocationId for new
-        // formal messages). Without this, append-success-but-draft-not-yet-deleted window double-shows
-        // formal + draft for the same turn.
-        const formalInvocationIds = new Set<string>();
-        for (const m of page) {
-          const parentInv = m.extra?.stream?.invocationId;
-          const turnInv = m.extra?.stream?.turnInvocationId;
-          if (parentInv) formalInvocationIds.add(parentInv);
-          if (turnInv) formalInvocationIds.add(turnInv);
-        }
-        activeDrafts = drafts.filter((d) => !formalInvocationIds.has(d.invocationId));
-        // Cloud R4 P2: if drafts survive page-level dedup, widen the check to cover
-        // formal messages pushed off the first page (race window: TTL > page depth).
-        // Cloud R5 P2: wider window must always exceed page limit (limit max=200 → worst case 800).
-        if (activeDrafts.length > 0 && page.length >= limit) {
-          const widerLimit = Math.max(200, limit * 4);
-          const wider = await opts.messageStore.getByThread(resolvedThreadId, widerLimit, userId, browserTimelineRead);
-          for (const m of wider) {
-            const parentInv = m.extra?.stream?.invocationId;
-            const turnInv = m.extra?.stream?.turnInvocationId;
-            if (parentInv) formalInvocationIds.add(parentInv);
-            if (turnInv) formalInvocationIds.add(turnInv);
-          }
-          activeDrafts = activeDrafts.filter((d) => !formalInvocationIds.has(d.invocationId));
+    // #80 / F117: a streaming draft is only the in-flight body of its durable response R.
+    // R is admitted empty as a processing lifecycle response whose lifecycle.invocationId is
+    // the child turn id that keys DraftStore, so a draft folds into R by that exact id on
+    // whichever page holds R — a long turn pushed to an older page by newer messages still
+    // reads its body. A draft without a processing R on this page is ignored here: it never
+    // becomes a standalone record and this read never deletes it.
+    if (opts.draftStore) {
+      const processingResponseIndexByInvocationId = new Map<string, number>();
+      for (const [index, item] of chatItems.entries()) {
+        if (item.lifecycle?.kind === 'response' && item.lifecycle.status === 'processing') {
+          processingResponseIndexByInvocationId.set(item.lifecycle.invocationId, index);
         }
       }
-
-      // F194 Phase B step 2b: canonical getThreadLiveInvocations helper.
-      // Cloud R17 P1: helper MUST run even when activeDrafts is empty — zombies
-      // (record running + no fresh draft + age past grace) are exactly the empty-drafts
-      // case. Skipping the helper here means /messages never reconciles them; only /queue
-      // would, and a thread that's read but not queue-checked stays phantom forever.
-      //
-      // AC-B5 preservation (砚砚 R6 P1 fix): gate only requires `invocationRecordStore` —
-      // tracker is OPTIONAL. Embedded modes / legacy tests that wire recordStore but not
-      // tracker still get zombie detection + orphan filtering.
-      if (opts.invocationRecordStore) {
-        const recordStore = opts.invocationRecordStore;
-        const tracker = opts.invocationTracker;
-        const draftsForHelper = activeDrafts; // already deduped against formal messages (or empty)
-        try {
-          const liveness = await getThreadLiveInvocations(resolvedThreadId, userId, {
-            listRunningRecords: (tid, uid) => recordStore.listRunningByThread(tid, uid),
-            getActiveSlots: (tid) => tracker?.getActiveSlots(tid) ?? [],
-            getTrackerUserId: (tid, cid) => tracker?.getUserId(tid, cid) ?? null,
-            getDrafts: () => draftsForHelper,
-            ...(turnExecutionStore
-              ? { listTurnExecutionsByParent: (parentId: string) => turnExecutionStore.listByParent(parentId) }
-              : {}),
-            // F194 Phase Z (KD-22): namespace bridge — child registry id → parent recordStore id.
-            // Wraps existing InvocationRegistry.getRecord (parentInvocationId field) + getLatestId.
-            // Helper uses these to detect parent+child execution chain liveness and cat-slot reuse
-            // zombies (砚砚 R1 P1-1: 结构化 dep, not boolean black-box).
-            getTurnInvocation: async (id) => {
-              const rec = await opts.registry.getRecord(id);
-              if (!rec) return null;
-              return {
-                parentInvocationId: rec.parentInvocationId,
-                threadId: rec.threadId,
-                userId: rec.userId,
-                catId: rec.catId,
-                createdAt: rec.createdAt,
-              };
-            },
-            getLatestTurnInvocationId: (tid, cat) => opts.registry.getLatestId(tid, cat),
-            // F194 AC-B12: route diagnostic events into request log. NB: do NOT spread
-            // `source: 'F194'` — that would clobber LivenessEvent.source (record+draft /
-            // record-only / tracker+draft / null), losing the diagnostic. Use `feature`.
-            onLog: (event) => request.log.info({ ...event, feature: 'F194' }, 'F194 liveness event'),
-          });
-          const liveInvocationIds = new Set(liveness.active.map((s) => s.invocationId));
-          const orphanDrafts = activeDrafts.filter((d) => !liveInvocationIds.has(d.invocationId));
-          activeDrafts = activeDrafts.filter((d) => liveInvocationIds.has(d.invocationId));
-          // Zombie candidates remain diagnostic-only here. Explicit owner reconciliation
-          // is serialized outside the GET path so reads cannot terminate provider work.
-          if (orphanDrafts.length > 0) {
-            request.log.info(
-              {
-                threadId: resolvedThreadId,
-                orphanCount: orphanDrafts.length,
-                draftIds: orphanDrafts.map((d) => d.invocationId),
-                cleanup: 'helper-canonical',
-              },
-              '#80 draft merge: filtered orphan drafts (F194 helper-canonical)',
-            );
-          }
-        } catch (err) {
-          // F194 AC-B13: fail-open + fallback metric — record/tracker error must not 500
-          // the read endpoint, but split-brain protection is bypassed during fallback.
-          request.log.warn(
-            {
-              err,
-              kind: 'liveness_fallback',
-              threadId: resolvedThreadId,
-              userId,
-              feature: 'F194',
-              endpoint: '/messages',
-              draftCount: activeDrafts.length,
-            },
-            '#80 draft merge: F194 helper threw, fall-open keep all drafts',
-          );
+      if (processingResponseIndexByInvocationId.size > 0) {
+        const drafts = await opts.draftStore.getByThread(userId, resolvedThreadId);
+        for (const d of drafts) {
+          const index = processingResponseIndexByInvocationId.get(d.invocationId);
+          if (index === undefined) continue;
+          chatItems[index] = {
+            ...chatItems[index],
+            content: d.content,
+            isDraft: true,
+            ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
+            ...(d.thinking ? { thinking: d.thinking } : {}),
+          };
         }
-      }
-
-      // P2: stable sort by updatedAt for parallel multi-cat drafts
-      activeDrafts.sort((a, b) => a.updatedAt - b.updatedAt);
-      if (activeDrafts.length > 0) {
-        request.log.info(
-          { threadId: resolvedThreadId, mergedCount: activeDrafts.length, cats: activeDrafts.map((d) => d.catId) },
-          '#80 draft merge: merging drafts into response',
-        );
-      }
-      const draftTurnExecutions = new Map<string, Awaited<ReturnType<ITurnExecutionStore['get']>>>();
-      if (turnExecutionStore) {
-        await Promise.all(
-          activeDrafts.map(async (draft) => {
-            try {
-              const execution = await turnExecutionStore.get(draft.invocationId);
-              if (
-                execution &&
-                execution.threadId === resolvedThreadId &&
-                execution.userId === userId &&
-                execution.catId === draft.catId
-              ) {
-                draftTurnExecutions.set(draft.invocationId, execution);
-              }
-            } catch (err) {
-              request.log.warn(
-                {
-                  err,
-                  threadId: resolvedThreadId,
-                  invocationId: draft.invocationId,
-                  feature: 'F194',
-                },
-                '#80 draft merge: turn execution identity lookup failed',
-              );
-            }
-          }),
-        );
-      }
-
-      for (const d of activeDrafts) {
-        const turnExecution = draftTurnExecutions.get(d.invocationId);
-        chatItems.push({
-          id: `draft-${d.invocationId}`,
-          type: 'assistant',
-          catId: d.catId as string | null,
-          content: d.content,
-          timestamp: d.updatedAt,
-          isDraft: true,
-          origin: 'stream',
-          // DraftStore is keyed by the child turn id. Preserve the real dual identity
-          // whenever TurnExecutionStore can resolve it: the active slot uses the parent
-          // invocation while the visible bubble uses the child turn. Collapsing both
-          // fields to the child makes the pending-member projection see two unrelated
-          // Kimi invocations and render a duplicate placeholder beside live tool output.
-          extra: {
-            stream: {
-              invocationId: turnExecution?.parentInvocationId ?? d.invocationId,
-              turnInvocationId: d.invocationId,
-            },
-            ...(turnExecution ? { turnExecution: projectTurnExecutionMessage(turnExecution) } : {}),
-          },
-          ...(d.toolEvents ? { toolEvents: d.toolEvents } : {}),
-          ...(d.thinking ? { thinking: d.thinking } : {}),
-        });
       }
     }
 
@@ -2834,182 +1275,3 @@ export const messagesRoutes: FastifyPluginAsync<MessagesRoutesOptions> = async (
     });
   });
 };
-
-/** @internal exported for testing — do not use outside of test. */
-export async function cleanupStreamingOnFailure(
-  threadId: string,
-  invocationId: string,
-  streamStartPromise: Promise<void> | undefined,
-  opts: MessagesRoutesOptions,
-  logger: typeof log,
-): Promise<void> {
-  if (!opts.streamingHook) return;
-  try {
-    if (streamStartPromise) {
-      await Promise.race([streamStartPromise, new Promise<void>((r) => setTimeout(r, STREAM_START_TIMEOUT_MS))]);
-    }
-    await opts.streamingHook.onStreamEnd(threadId, '', invocationId);
-    await opts.streamingHook.cleanupPlaceholders?.(threadId, invocationId);
-  } catch (err) {
-    logger.warn({ err, threadId }, '[messages] cleanupStreamingOnFailure failed');
-  }
-}
-
-/** @internal exported for testing — do not use outside of test. */
-export async function deliverOutboundFromWeb(
-  threadId: string,
-  primaryCat: string,
-  invocationId: string,
-  collectedTextParts: string[],
-  outboundTurns: Array<{ catId: string; textParts: string[]; richBlocks?: unknown[] }>,
-  persistenceContext: PersistenceContext,
-  streamStartPromise: Promise<void> | undefined,
-  opts: MessagesRoutesOptions,
-  logger: typeof log,
-): Promise<void> {
-  const deliverableTurns = outboundTurns.filter((turn) =>
-    isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[turn.catId]),
-  );
-  const finalContent =
-    outboundTurns.length > 0
-      ? flattenTurnTextParts(deliverableTurns)
-      : isConnectorDeliverable(persistenceContext.outputCommitDecisions?.[primaryCat])
-        ? flattenTextParts(collectedTextParts)
-        : '';
-  const outputDecisionEntries = Object.entries(persistenceContext.outputCommitDecisions ?? {});
-  const supersededOutput = outputDecisionEntries.find(([, decision]) => decision.kind === 'superseded_positive_stale');
-  const blockedOutput = outputDecisionEntries.find(([, decision]) => decision.kind === 'blocked_known_closure');
-  const hasKnownUndeliverableOutput = outputDecisionEntries.some(([, decision]) => !isConnectorDeliverable(decision));
-
-  if (opts.streamingHook) {
-    if (streamStartPromise) {
-      await Promise.race([
-        streamStartPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, STREAM_START_TIMEOUT_MS)),
-      ]);
-    }
-    if (blockedOutput?.[1].kind === 'blocked_known_closure' && opts.streamingHook.onClosureBlocked) {
-      await opts.streamingHook
-        .onClosureBlocked(threadId, blockedOutput[0] as CatId, blockedOutput[1].reason, invocationId)
-        .catch((err) => logger.warn({ err, threadId }, '[messages] blocked connector projection failed'));
-    } else if (supersededOutput?.[1].kind === 'superseded_positive_stale' && opts.streamingHook.onClosureCatchingUp) {
-      await opts.streamingHook
-        .onClosureCatchingUp(threadId, supersededOutput[0] as CatId, invocationId)
-        .catch((err) => logger.warn({ err, threadId }, '[messages] catch connector projection failed'));
-    } else {
-      await opts.streamingHook.onStreamEnd(threadId, finalContent, invocationId).catch((err) => {
-        logger.warn({ err, threadId }, '[messages] StreamingHook.onStreamEnd failed');
-      });
-    }
-  }
-
-  const hasContent = finalContent.length > 0 || deliverableTurns.some((turn) => (turn.richBlocks?.length ?? 0) > 0);
-  if (!opts.outboundHook || !hasContent) {
-    if (!hasKnownUndeliverableOutput && opts.streamingHook?.cleanupPlaceholders) {
-      await opts.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
-        logger.warn({ err, threadId }, '[messages] StreamingHook.cleanupPlaceholders failed (silent)');
-      });
-    }
-    return;
-  }
-
-  let threadMeta: { threadShortId: string; threadTitle?: string; deepLinkUrl?: string } | undefined;
-  try {
-    const LOOKUP_TIMEOUT_MS = 2000;
-    const thread = opts.threadStore?.get(threadId);
-    if (thread) {
-      const lookupPromise = Promise.resolve(thread).catch(() => undefined);
-      const timeout = new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), LOOKUP_TIMEOUT_MS));
-      const resolved = await Promise.race([lookupPromise, timeout]);
-      if (resolved) {
-        const frontendBase = resolveFrontendBaseUrl(process.env);
-        threadMeta = {
-          threadShortId: threadId.slice(0, 15),
-          threadTitle: resolved.title ?? undefined,
-          deepLinkUrl: buildThreadDeepLink(frontendBase, threadId),
-        };
-      }
-    }
-  } catch {
-    logger.warn({ threadId }, '[messages] threadMeta lookup failed');
-  }
-
-  const DELIVER_TIMEOUT_MS = 10_000;
-  const nonEmptyTurns = deliverableTurns.filter(
-    (t) => t.textParts.length > 0 || (t.richBlocks && t.richBlocks.length > 0),
-  );
-
-  let deliveryFailed = false;
-  const inflightDeliverPromises: Promise<void>[] = [];
-
-  if (nonEmptyTurns.length > 1) {
-    for (const turn of nonEmptyTurns) {
-      const turnContent = turn.textParts.join('');
-      const deliverPromise = opts.outboundHook.deliver(threadId, turnContent, turn.catId, turn.richBlocks, threadMeta);
-      inflightDeliverPromises.push(deliverPromise);
-      try {
-        await Promise.race([
-          deliverPromise,
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
-        ]);
-      } catch (err) {
-        deliveryFailed = true;
-        logger.error({ err, threadId, catId: turn.catId }, '[messages] Outbound delivery error');
-      }
-    }
-  } else if (nonEmptyTurns.length === 1) {
-    const turn = nonEmptyTurns[0];
-    const richBlocks = persistenceContext.richBlocks ?? turn.richBlocks;
-    const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, turn.catId, richBlocks, threadMeta);
-    inflightDeliverPromises.push(deliverPromise);
-    try {
-      await Promise.race([
-        deliverPromise,
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
-      ]);
-    } catch (err) {
-      deliveryFailed = true;
-      logger.error({ err, threadId }, '[messages] Outbound delivery error');
-    }
-  } else {
-    const richBlocks = persistenceContext.richBlocks;
-    if (richBlocks) {
-      const deliverPromise = opts.outboundHook.deliver(threadId, finalContent, primaryCat, richBlocks, threadMeta);
-      inflightDeliverPromises.push(deliverPromise);
-      try {
-        await Promise.race([
-          deliverPromise,
-          new Promise<void>((_, reject) => setTimeout(() => reject(new Error('deliver timeout')), DELIVER_TIMEOUT_MS)),
-        ]);
-      } catch (err) {
-        deliveryFailed = true;
-        logger.error({ err, threadId }, '[messages] Outbound delivery error');
-      }
-    }
-  }
-
-  if (!deliveryFailed && opts.streamingHook?.cleanupPlaceholders) {
-    await opts.streamingHook.cleanupPlaceholders(threadId, invocationId).catch((err) => {
-      logger.warn({ err, threadId }, '[messages] StreamingHook.cleanupPlaceholders failed');
-    });
-  } else if (deliveryFailed && opts.streamingHook?.cleanupPlaceholders) {
-    const cleanupFn = opts.streamingHook.cleanupPlaceholders.bind(opts.streamingHook);
-    Promise.allSettled(inflightDeliverPromises).then((results) => {
-      if (results.every((r) => r.status === 'fulfilled')) {
-        cleanupFn(threadId, invocationId).catch((err) => {
-          logger.warn({ err, threadId }, '[messages] Late-success placeholder cleanup failed');
-        });
-      }
-    });
-  }
-
-  // F151: Signal adapters that this invocation's delivery batch is complete.
-  // chainDone = no more active or queued invocations for this thread.
-  if (opts.streamingHook?.notifyDeliveryBatchDone) {
-    const threadStillBusy =
-      (opts.invocationTracker?.has(threadId) ?? false) || (opts.queueProcessor?.isThreadBusy(threadId) ?? false);
-    await opts.streamingHook.notifyDeliveryBatchDone(threadId, !threadStillBusy).catch((err) => {
-      logger.warn({ err, threadId }, '[messages] notifyDeliveryBatchDone failed');
-    });
-  }
-}

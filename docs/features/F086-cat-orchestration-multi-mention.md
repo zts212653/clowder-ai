@@ -6,12 +6,14 @@ topics: [collaboration, routing, mcp, multi-mention, orchestration, meta-cogniti
 doc_kind: done
 created: 2026-03-08
 completed: 2026-03-09
-tips_exempt: "Renewed 2026-09-04 for the current F308 public-link projection only; no user-facing capability or action changed."
+tips_exempt: "Renewed 2026-09-09 for the F117/ADR-043 lifecycle calibration: exact-target replay prevention, Queue/History identity convergence, and MCP Freshness/HELD retirement harden existing multi-mention delivery without adding a new user-invokable action or discovery surface."
 ---
 
 # F086 Cat Orchestration — 猫猫自主协作 + 元认知系统
 
 > **Status**: done | **Owner**: 三猫
+
+> ⚠️ **2026-09-20 delivery calibration**：本文关于 `WorklistRegistry`、独立 multi-mention 状态机、per-target `TargetStatus` 与 read/handled Queue receipt 的段落只保留为演进历史。当前所有文本 `@`、structured multi-mention、用户与 connector 输入都进入 F117 / ADR-043 的单一 durable Queue：一条 source 一条 entry，`targets[]` 只保存 pending recipients，actual dispatch / response terminal 归 History lifecycle。当前真相源见 [F117](F117-message-delivery-lifecycle.md)、[ADR-043](../decisions/043-queue-durable-single-ledger.md) 与 [A2A protocol](../architecture/a2a-protocol.md)。
 
 ## Why
 
@@ -56,6 +58,14 @@ operator experience：
 ### M1 编排运行时 — 多重 @ + 回流路由
 
 **目标**：最小闭环的多猫协作工具。
+
+> **2026-09-09 F117/ADR-043 current calibration**：一次 multi-mention 先创建一条真实、公开、可引用的
+> Agent source message；它的正文必须与 Queue payload 完全一致，`replyTo` / causal trigger 指向发起者当前
+> response。该 source message 与一条 `targets[]` 只含 pending recipients 的 Queue entry 原子提交。
+> `sourceRecordId` 永远指向这条真实 History source；不得把发起者 response 的 id 绑给另一段 synthetic
+> `[Multi-Mention ...]` Queue-only 正文。每个 target 的 actual delivery 仍只写 History `dispatchRefs`，已投递
+> target 的重放幂等跳过。MCP `multi_mention` 本身是纯发送原语，不顺便检查发起猫 inbox、不 HELD，也不附加
+> freshness 补救教学。
 
 #### MCP 工具设计
 
@@ -265,6 +275,8 @@ operator指出：Ragdoll在采访时没有先搜索了解知识体系现状就�
 - [x] 超时默认 8m（3~20m 可配），超时立即回流已有结果
 - [x] 审计 envelope：initiator/callbackTo/idempotencyKey/triggerType/searchEvidenceRefs/overrideReason
 - [x] 可观测性：状态机变迁日志 + 审计字段（structured log in route handler）
+- [x] F117 calibration：multi-mention 的 Queue source 是一条正文一致、可引用的真实 Agent History message，且 Message + single-source `targets[]` entry 原子 admission；callback response 只作 parent lineage
+- [x] exact replay：已存在 `sourceRecordId × targetCatId` dispatch 时不重复唤起；MCP 工具不承担 inbox freshness/HELD 副作用
 - [x] 上线验收指标：
   - 回流成功率 ≥ 90%（done/(done+failed) 在首 20 次调用内）
   - 超时率 ≤ 20%（timeout/total）
@@ -406,9 +418,9 @@ F086 multi_mention（MCP 工具）:
 
 ---
 
-## Follow-up: Per-Target Queued Message State (ADR-040)
+## Historical follow-up (superseded): Per-Target Queued Message State (ADR-040)
 
-> Added 2026-07-01 | Source: F254 D1.2 dogfood + 斑斑/Maine Coon consensus
+> Added 2026-07-01 | Superseded 2026-09-02 by ADR-043 / F117 Phase D. The checklist below is not pending work.
 
 F254 实测发现 queued 消息的 read/handled/target consumed 语义混在一起，导致重复唤醒或多目标吞并。ADR-040 统一定义了四层状态分离模型。
 

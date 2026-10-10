@@ -1,21 +1,24 @@
 /**
- * F194 Phase B AC-B3 / AC-B4 — paired-route consistency regression.
+ * F194 Phase B AC-B3 / AC-B4 → F117 KD-23 — paired /messages + /queue liveness.
  *
- * Spec contract (`docs/features/F194-invocation-liveness-canonical-read-model.md:190-191`):
- *   AC-B3: under (record running + tracker missing + fresh draft), `/api/messages` and
- *          `/api/threads/:threadId/queue` MUST agree on liveness — the draft must surface
- *          on /messages AND the cat must surface in /queue.activeInvocations.
- *   AC-B4: under (record running + tracker missing + no fresh draft + age past zombie grace),
- *          BOTH endpoints MUST filter the invocation out (no draft, no active slot).
+ * F117 KD-23: a member is processing only while someone verifiably runs its turn (this process's
+ * tracker slot, a live CLI owner, or, while no complete owner snapshot can tell, a running child).
+ * A streamed draft is not liveness. So:
+ *   AC-B3: with only a draft, /messages still renders the turn's processing response R with the
+ *          streamed body (F117: a draft is the body of that R, never a `draft-*` record), and
+ *          /queue lists nobody as processing. The active-execution read-repair settles such a
+ *          record once a complete owner snapshot shows no owner.
+ *   AC-B4: with neither an owner nor a draft, neither endpoint shows the turn.
+ * Reads never write lifecycle truth: only the owner reaper and read-repair end records.
  *
- * 砚砚 R8 P1: queue-only regression cannot prove paired consistency. This file registers
- * messagesRoutes + queueRoutes against the SAME (recordStore, draftStore, tracker) fixture
- * and asserts both endpoints' liveness views agree.
+ * 砚砚 R8 P1: queue-only regression cannot prove paired behaviour. This file registers
+ * messagesRoutes + queueRoutes against the SAME (recordStore, draftStore, tracker) fixture.
  */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';
+import { canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { DraftStore } = await import('../dist/domains/cats/services/stores/ports/DraftStore.js');
 const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
@@ -28,6 +31,7 @@ const USER_ID = 'user-1';
 const UNDECLARED_FRESHNESS_CARRIER_CAPABILITY = {
   provider: 'other',
   carrier: 'other',
+  activeInvocationGuidance: 'undeclared',
   deliverySemantics: 'undeclared',
 };
 
@@ -82,10 +86,11 @@ function makeRecordStore(records = []) {
   };
 }
 
-function makeTracker({ activeSlotsByThread = {}, userIds = {} } = {}) {
+function makeTracker({ activeSlotsByThread = {}, userIds = {}, executionIds = {} } = {}) {
   return {
     has: () => false,
     getUserId: (tid, cid) => userIds[`${tid}:${cid}`] ?? null,
+    getExecutionId: (tid, cid) => executionIds[`${tid}:${cid}`],
     cancel: () => ({ cancelled: false, catIds: [] }),
     getActiveSlots: (tid) => activeSlotsByThread[tid] ?? [],
   };
@@ -113,9 +118,40 @@ function makeRecord({
   };
 }
 
-async function buildPairedApp({ recordStore, draftStore, tracker, turnExecutionStore, registry = makeStubRegistry() }) {
+/** F117: the durable processing response R a dispatched turn owns; its draft folds into R. */
+function appendProcessingResponse(messageStore, { invocationId, catId, timestamp }) {
+  return messageStore.append(
+    canonicalTestMessageInput({
+      userId: USER_ID,
+      catId,
+      content: '',
+      mentions: [],
+      timestamp,
+      threadId: THREAD_ID,
+      origin: 'stream',
+      lifecycle: {
+        kind: 'response',
+        orderKey: `${timestamp}:${invocationId}`,
+        invocationId,
+        targetId: catId,
+        inputEntryIds: [`entry-${invocationId}`],
+        inputMessageIds: [`source-${invocationId}`],
+        status: 'processing',
+        startedAt: timestamp,
+      },
+    }),
+  );
+}
+
+async function buildPairedApp({
+  recordStore,
+  draftStore,
+  tracker,
+  turnExecutionStore,
+  registry = makeStubRegistry(),
+  messageStore = new MessageStore(),
+}) {
   const app = Fastify({ logger: false });
-  const messageStore = new MessageStore();
   await app.register(messagesRoutes, {
     registry,
     messageStore,
@@ -146,7 +182,6 @@ async function buildPairedApp({ recordStore, draftStore, tracker, turnExecutionS
     socketManager: makeStubSocketManager(),
     invocationRecordStore: recordStore,
     draftStore,
-    invocationRegistry: registry,
     ...(turnExecutionStore ? { turnExecutionStore } : {}),
   });
   await app.ready();
@@ -172,7 +207,7 @@ async function injectQueue(app) {
 }
 
 describe('F194 Phase B — paired /messages + /queue canonical liveness consistency', () => {
-  it('AC-B3: record running + tracker missing + fresh draft → BOTH endpoints surface the invocation', async () => {
+  it('AC-B3 (F117 KD-23): with only a draft, /messages renders the processing R and /queue lists nobody', async () => {
     const now = 1_000_000;
     const record = makeRecord({ id: 'inv-running', updatedAt: now - 60_000 });
     const draftStore = new DraftStore();
@@ -187,45 +222,44 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     });
     const recordStore = makeRecordStore([record]);
     const tracker = makeTracker(); // empty — split-brain reproducer
+    const messageStore = new MessageStore();
+    const response = appendProcessingResponse(messageStore, {
+      invocationId: 'inv-running',
+      catId: 'opus',
+      timestamp: now - 50_000,
+    });
 
     const origNow = Date.now;
     Date.now = () => now;
     let app;
     try {
-      app = await buildPairedApp({ recordStore, draftStore, tracker });
+      app = await buildPairedApp({ recordStore, draftStore, tracker, messageStore });
       const msgs = await injectMessages(app);
       const queue = await injectQueue(app);
 
       assert.equal(msgs.statusCode, 200);
       assert.equal(queue.statusCode, 200);
 
-      // /messages: draft-{invocationId} must appear in chatItems
-      const draftItem =
-        msgs.body.find?.((m) => m.id === 'draft-inv-running') ??
-        msgs.body.messages?.find?.((m) => m.id === 'draft-inv-running');
-      assert.ok(draftItem, '/messages must surface the live draft (canonical record+draft)');
+      // /messages: the live draft is the body of the turn's processing response, not a draft-* record
+      const draftItem = msgs.body.messages.find((m) => m.id === response.id);
+      assert.ok(draftItem, '/messages must render the processing R with its streamed body');
       assert.equal(draftItem.isDraft, true);
+      assert.equal(draftItem.content, 'streaming...');
       assert.equal(draftItem.catId, 'opus');
-
-      // /queue: activeInvocations must contain opus active slot
-      assert.equal(queue.body.activeInvocations.length, 1, '/queue must surface invocation as active');
-      assert.equal(queue.body.activeInvocations[0].catId, 'opus');
-
-      // Hard consistency assertion: both endpoints agree the invocation is live
-      const messagesLiveCats = new Set([draftItem].map((m) => m.catId));
-      const queueLiveCats = new Set(queue.body.activeInvocations.map((s) => s.catId));
-      assert.deepEqual(
-        [...messagesLiveCats].sort(),
-        [...queueLiveCats].sort(),
-        'AC-B3: messages and queue must agree on which cats are live',
+      assert.equal(
+        msgs.body.messages.some((m) => m.id.startsWith('draft-')),
+        false,
       );
+
+      // /queue: a streamed draft does not prove anyone still runs the turn
+      assert.deepEqual(queue.body.activeInvocations, [], 'KD-23: nobody verifiably runs this turn');
     } finally {
       Date.now = origNow;
       if (app) await app.close();
     }
   });
 
-  it('GET /queue reports a zombie diagnostically without terminal side effects', async () => {
+  it('GET /queue has no terminal side effects on a running record nobody holds', async () => {
     const now = 10_000_000;
     const zombieRecord = makeRecord({
       id: 'inv-zombie-cleanup',
@@ -286,7 +320,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
 
       const queueRes = await injectQueue(app);
       assert.equal(queueRes.statusCode, 200);
-      assert.equal(queueRes.body.activeInvocations.length, 0, 'zombie not surfaced as active');
+      assert.equal(queueRes.body.activeInvocations.length, 0, 'nobody holds it: not listed as active');
 
       await new Promise((resolve) => setImmediate(resolve));
 
@@ -299,7 +333,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     }
   });
 
-  it('GET /messages stays side-effect free when a zombie has no draft', async () => {
+  it('GET /messages stays side-effect free for a running record nobody holds', async () => {
     const now = 20_000_000;
     const zombieRecord = makeRecord({
       id: 'inv-zombie-no-drafts',
@@ -369,7 +403,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     }
   });
 
-  it('AC-B4: record running + tracker missing + no fresh draft + age > zombie grace → BOTH endpoints filter', async () => {
+  it('AC-B4 (F117 KD-23): a running record nobody holds and without a draft is on neither endpoint', async () => {
     const now = 10_000_000;
     const zombieRecord = makeRecord({
       id: 'inv-zombie',
@@ -391,7 +425,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       assert.equal(queue.statusCode, 200);
 
       // /messages: no draft surfaces (no draft in store anyway, but also no orphan resurrection)
-      const draftItems = (msgs.body.messages ?? msgs.body ?? []).filter?.((m) => m.id?.startsWith?.('draft-')) ?? [];
+      const draftItems = msgs.body.messages.filter((m) => m.isDraft === true || m.id.startsWith('draft-'));
       assert.equal(draftItems.length, 0, '/messages must not surface zombie draft');
 
       // /queue: no active invocations (zombie record filtered)
@@ -406,7 +440,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     }
   });
 
-  it('durable running child prevents read-triggered zombie reconciliation on both routes', async () => {
+  it('a durable running child is never reconciled by a read on either route', async () => {
     const now = 30_000_000;
     const parentId = 'parent-handoff-gap';
     const childId = 'child-handoff-fable';
@@ -486,7 +520,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     }
   });
 
-  it('running durable child prevents cross-parent same-cat UI dedup from reconciling its parent', async () => {
+  it("the slot this process holds outranks an older parent's unverified child, and reads reconcile neither", async () => {
     const now = 35_000_000;
     const oldParentId = 'parent-preempted-finalizing';
     const newParentId = 'parent-current-slot-owner';
@@ -512,26 +546,21 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
       },
     };
     const draftStore = new DraftStore();
-    draftStore.upsert({
-      userId: USER_ID,
+    // F117 KD-23: the new parent is the current owner because this process's tracker holds its slot.
+    const activeRun = {
       threadId: THREAD_ID,
+      targetId: 'fable5',
       invocationId: newChildId,
-      catId: 'fable5',
-      content: 'new owner streaming',
-      createdAt: newChildCreatedAt,
-      updatedAt: now - 100,
-    });
-    const registry = makeStubRegistry({
-      turns: {
-        [newChildId]: {
-          parentInvocationId: newParentId,
-          threadId: THREAD_ID,
-          userId: USER_ID,
-          catId: 'fable5',
-          createdAt: newChildCreatedAt,
-        },
-      },
-      latestByCat: { [`${THREAD_ID}:fable5`]: newChildId },
+      responseMessageId: 'response-new-fable',
+      inputEntryIds: [],
+      inputMessageIds: [],
+      privateInputEntryIds: [],
+      startedAt: newChildCreatedAt,
+    };
+    const tracker = makeTracker({
+      activeSlotsByThread: { [THREAD_ID]: [{ catId: 'fable5', startedAt: newChildCreatedAt, activeRun }] },
+      userIds: { [`${THREAD_ID}:fable5`]: USER_ID },
+      executionIds: { [`${THREAD_ID}:fable5`]: newParentId },
     });
     const turnExecutionStore = {
       listByParent: async (parentId) =>
@@ -555,13 +584,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
     Date.now = () => now;
     let app;
     try {
-      app = await buildPairedApp({
-        recordStore,
-        draftStore,
-        tracker: makeTracker(),
-        turnExecutionStore,
-        registry,
-      });
+      app = await buildPairedApp({ recordStore, draftStore, tracker, turnExecutionStore });
 
       const messages = await injectMessages(app);
       assert.equal(messages.statusCode, 200);
@@ -576,6 +599,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
           startedAt: newChildCreatedAt,
           executionId: newParentId,
           turnInvocationId: newChildId,
+          activeRun,
           freshnessCarrierCapability: UNDECLARED_FRESHNESS_CARRIER_CAPABILITY,
         },
       ]);
@@ -617,7 +641,7 @@ describe('F194 Phase B — paired /messages + /queue canonical liveness consiste
 
       const messages = await injectMessages(app);
       const queue = await injectQueue(app);
-      assert.equal(messages.statusCode, 200, '/messages uses its existing fail-open path');
+      assert.equal(messages.statusCode, 200, '/messages does not depend on the durable-child ledger');
       assert.equal(queue.statusCode, 200, '/queue uses its existing tracker-only fallback');
       assert.deepEqual(queue.body.activeInvocations, []);
       await new Promise((resolve) => setTimeout(resolve, 25));

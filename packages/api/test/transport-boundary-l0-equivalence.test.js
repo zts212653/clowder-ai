@@ -73,9 +73,9 @@ describe('Transport boundary + L0 equivalence', () => {
       }
     });
 
-    it('exactly 46 hooks in the pipeline (no transport leakage)', () => {
+    it('exactly 45 hooks in the pipeline (no transport leakage)', () => {
       const allHooks = registry.getAllHooks();
-      assert.equal(allHooks.length, 46, `Expected 46 hooks, got ${allHooks.length}`);
+      assert.equal(allHooks.length, 45, `Expected 45 hooks, got ${allHooks.length}`);
     });
   });
 
@@ -163,7 +163,6 @@ describe('Transport boundary + L0 equivalence', () => {
         conciergeLines: null,
         worldContext: null,
         alwaysOnDocsBlock: null,
-        activeSignalsBlock: null,
         a2aBallCheckContent: null,
         handoffDecisionTreeContent: null,
         coCreatorFirstMention: '@lang',

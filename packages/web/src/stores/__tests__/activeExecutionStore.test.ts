@@ -45,6 +45,17 @@ function response(executions: ActiveExecutionProjection[]): ActiveExecutionListR
 describe('F295 activeExecutionStore', () => {
   beforeEach(() => useActiveExecutionStore.getState().reset());
 
+  it('does not let an in-flight snapshot resurrect an exact canceled slot or erase its sibling', () => {
+    const store = useActiveExecutionStore.getState();
+    const first = live('same-parent', 100, 'opus');
+    const sibling = live('same-parent', 100, 'astra');
+    store.applySnapshot('thread-a', store.beginHydration('thread-a', '/project/cafe'), response([first, sibling]));
+    const stale = store.beginHydration('thread-a', '/project/cafe');
+    store.settleCancellation(first);
+    store.applySnapshot('thread-a', stale, response([first]));
+    expect(Object.values(useActiveExecutionStore.getState().executionsByKey)).toEqual([sibling]);
+  });
+
   it('retains the project snapshot and exact cancellation during same-project navigation', () => {
     const store = useActiveExecutionStore.getState();
     const execution = live('inv-still-running', 100);

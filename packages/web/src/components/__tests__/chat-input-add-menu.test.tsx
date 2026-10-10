@@ -2,6 +2,24 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInputAddMenu } from '@/components/ChatInputAddMenu';
+import type { MessageDispositionPreferenceController } from '@/hooks/useMessageDispositionPreference';
+
+function createMessageDisposition(): MessageDispositionPreferenceController {
+  return {
+    snapshot: {
+      productDefault: 'next_work',
+      global: null,
+      thread: null,
+      effective: 'next_work',
+      source: 'product',
+    },
+    effective: 'next_work',
+    source: 'product',
+    loading: false,
+    error: null,
+    setPreference: vi.fn(async () => true),
+  };
+}
 
 describe('ChatInputAddMenu', () => {
   let container: HTMLDivElement;
@@ -35,6 +53,7 @@ describe('ChatInputAddMenu', () => {
       onWhisperToggle: vi.fn(),
       onGameClick: vi.fn(),
       onClose: vi.fn(),
+      messageDisposition: createMessageDisposition(),
       ...props,
     };
     act(() => root.render(<ChatInputAddMenu {...defaults} />));
@@ -43,12 +62,34 @@ describe('ChatInputAddMenu', () => {
 
   it('groups context, upload and optional modes behind one menu', () => {
     render();
-    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(4);
+    const menu = container.querySelector('[data-testid="composer-add-menu"]');
+    expect(container.querySelectorAll('[role="menuitem"]')).toHaveLength(5);
+    expect(menu?.textContent?.startsWith('添加')).toBe(false);
+    expect(menu?.className).not.toContain('border-cafe');
+    expect(menu?.className).toContain('bg-cafe-surface-canvas');
     expect(container.textContent).toContain('引用 Thread 或文件');
     expect(container.textContent).toContain('上传附件');
     expect(container.textContent).toContain('图片、文档或压缩包，最多 5 个');
     expect(container.textContent).toContain('悄悄话');
     expect(container.textContent).toContain('游戏');
+    expect(container.textContent).toContain('发送策略');
+    expect(container.textContent).toContain('排队等待');
+  });
+
+  it('edits message strategy from the add menu without requiring active work', async () => {
+    const callbacks = render();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="message-disposition-trigger"]')?.click();
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="message-disposition-panel"]')).not.toBeNull();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-disposition-option="continue_current"]')?.click();
+      await Promise.resolve();
+    });
+    expect(callbacks.messageDisposition.setPreference).toHaveBeenCalledWith('thread', 'continue_current');
+    expect(container.querySelector('[data-testid="message-disposition-trigger"]')).not.toBeNull();
   });
 
   it('closes before routing a selected action', () => {

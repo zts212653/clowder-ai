@@ -42,7 +42,14 @@ function buildDeps() {
     resolveLiveExecutions: mock.fn(async (threadId, userId) => {
       const execution = executions.get(threadId);
       if (!execution || userId !== USER_ID) return [];
-      return [{ ...execution, ownerUserId: USER_ID, controlSource: 'tracker' }];
+      return [
+        {
+          ...execution,
+          invocationId: `child-${execution.executionId}`,
+          ownerUserId: USER_ID,
+          controlSource: 'tracker',
+        },
+      ];
     }),
     cancelExactLiveInvocation: mock.fn(async () => ({ cancelled: true })),
   };
@@ -77,6 +84,37 @@ describe('F295 user/project active execution resource', () => {
 
   afterEach(async () => {
     await app?.close();
+  });
+
+  it('keeps pre-admission tracker reservations out of running replies without dropping exact cancellation', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async (threadId) =>
+      threadId === 'thread-a'
+        ? [
+            {
+              catId: 'codex-sol',
+              executionId: 'inv-a',
+              startedAt: 100,
+              ownerUserId: USER_ID,
+              controlSource: 'tracker',
+            },
+          ]
+        : [],
+    );
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/executions/active?projectPath=%2Fproject%2Fcafe',
+      headers: { 'x-cat-cafe-user': USER_ID },
+    });
+    assert.equal(list.statusCode, 200, list.body);
+    assert.deepEqual(list.json().executions, []);
+    const cancel = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol' },
+    });
+    assert.equal(cancel.statusCode, 200, cancel.body);
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 1);
   });
 
   it('a frozen child selector cannot cancel a replacement child under the same parent execution', async () => {
@@ -161,6 +199,111 @@ describe('F295 user/project active execution resource', () => {
     assert.equal(stale.statusCode, 409, stale.body);
     assert.equal(stale.json().code, 'EXECUTION_REPLACED');
     assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+  });
+
+  it('a frozen child selector never inherits the legacy per-cat replacement intent', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'new-parent',
+        invocationId: 'new-child',
+        startedAt: 200,
+        ownerUserId: USER_ID,
+      },
+    ]);
+    deps.reconcileInactiveLiveInvocation = mock.fn(async () => ({ reconciled: true }));
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+    });
+    assert.equal(response.statusCode, 409, response.body);
+    assert.equal(response.json().code, 'EXECUTION_REPLACED');
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+    assert.equal(deps.reconcileInactiveLiveInvocation.mock.callCount(), 0);
+  });
+
+  it('an absent frozen child with incomplete control truth cannot trigger legacy read-repair', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => []);
+    deps.isLiveExecutionControlPlaneComplete = async () => false;
+    deps.reconcileInactiveLiveInvocation = mock.fn(async () => ({ reconciled: true }));
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+    });
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(deps.reconcileInactiveLiveInvocation.mock.callCount(), 0);
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+  });
+
+  it('unknown canonical child truth refuses an exact Stop without replacing its authority', async () => {
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'inv-a',
+        invocationId: 'child-original',
+        startedAt: 100,
+        ownerUserId: USER_ID,
+      },
+    ]);
+    deps.turnExecutions.get.mock.mockImplementation(async () => null);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/threads/thread-a/executions/live/inv-a/cancel',
+      headers: { 'x-cat-cafe-user': USER_ID },
+      payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+    });
+    assert.equal(response.statusCode, 503, response.body);
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+  });
+
+  it('native control receipts preserve the exact authorized child and observe only a real cancel', async () => {
+    await app.close();
+    let authorized = false;
+    const port = {
+      authorize: mock.fn(() => authorized),
+      observe: mock.fn(),
+    };
+    deps.controlReceipts = () => port;
+    deps.resolveLiveExecutions.mock.mockImplementation(async () => [
+      {
+        catId: 'codex-sol',
+        executionId: 'inv-a',
+        invocationId: 'child-original',
+        startedAt: 100,
+        ownerUserId: USER_ID,
+      },
+    ]);
+    app = Fastify();
+    registerActiveExecutionRoutes(app, deps);
+    const cancel = () =>
+      app.inject({
+        method: 'POST',
+        url: '/api/threads/thread-a/executions/live/inv-a/cancel?controlReceiptRef=owned-receipt',
+        headers: { 'x-cat-cafe-user': USER_ID },
+        payload: { catId: 'codex-sol', expectedInvocationId: 'child-original' },
+      });
+    assert.equal((await cancel()).statusCode, 409);
+    assert.equal(deps.cancelExactLiveInvocation.mock.callCount(), 0);
+    assert.equal(port.observe.mock.callCount(), 0);
+    authorized = true;
+    const success = await cancel();
+    assert.equal(success.statusCode, 200, success.body);
+    assert.deepEqual(port.authorize.mock.calls.at(-1).arguments, [
+      'owned-receipt',
+      USER_ID,
+      {
+        kind: 'live',
+        threadId: 'thread-a',
+        executionId: 'inv-a',
+        catId: 'codex-sol',
+        invocationId: 'child-original',
+      },
+    ]);
+    assert.deepEqual(port.observe.mock.calls.at(-1).arguments, ['owned-receipt', USER_ID, 200, true, undefined]);
   });
 
   it('emits queryable stage traces without encoding a latency threshold', async () => {

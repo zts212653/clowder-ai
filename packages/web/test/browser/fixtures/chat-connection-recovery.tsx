@@ -66,8 +66,7 @@ function ScrollConversation({ activeThread }: { activeThread: string }) {
       <button
         type="button"
         onClick={() => {
-          useChatStore.getState().replaceThreadMessageId(activeThread, 'scroll-5', 'settled-reading');
-          useChatStore.getState().patchThreadMessage(activeThread, 'settled-reading', { isStreaming: false });
+          useChatStore.getState().patchThreadMessage(activeThread, 'scroll-5', { isStreaming: false });
         }}
       >
         Finalize reading message

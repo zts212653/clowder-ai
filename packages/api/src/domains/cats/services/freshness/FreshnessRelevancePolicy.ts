@@ -1,4 +1,4 @@
-import type { FreshnessReadableMessage } from './checkFreshnessForPostMessage.js';
+import type { FreshnessReadableMessage } from './freshness-unseen-source.js';
 
 export type FreshnessRelevanceReason =
   | 'relevant'
@@ -44,7 +44,12 @@ export function decideFreshnessRelevance(
 ): FreshnessRelevanceDecision {
   if (context.sameLiveCallExposure) return { relevant: false, reason: 'same_live_call_exposure' };
   const freshness = message.extra?.freshness;
-  if (freshness?.kind === 'closure_replacement' && freshness.targetCatId !== context.catId) {
+  if (
+    freshness &&
+    'kind' in freshness &&
+    freshness.kind === 'closure_replacement' &&
+    freshness.targetCatId !== context.catId
+  ) {
     return { relevant: false, reason: 'closure_replacement_for_other_cat' };
   }
 

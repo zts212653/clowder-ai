@@ -94,7 +94,7 @@ export async function materializePreparationSubmission(input: MaterializationInp
   const result = await input.dependencies.messageStore.appendIdempotent({
     userId: input.ownerUserId,
     threadId: origin.threadId,
-    catId: createCatId(input.submission.authorCatId),
+    from: { kind: 'agent', catId: createCatId(input.submission.authorCatId) },
     content: `准备提交 · ${input.submission.title}\n${input.submission.body.summary}`,
     mentions: [],
     timestamp: Date.parse(input.envelope.occurredAt),

@@ -1,74 +1,99 @@
-import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
-import { LiveCarrierOperationGate } from '../src/domains/concierge/live/LiveCarrierOperationGate.ts';
 import { LiveCompanionSessions } from '../src/domains/concierge/live/LiveCompanionSessions.ts';
-import { createA2ADispositionAuth, createA2ADispositionHarness } from './helpers/a2a-dispatch-disposition-harness.js';
-import { createLiveDispatchReceiptFixture } from './helpers/f317-live-dispatch-receipt-fixture.mjs';
+import {
+  assertDeliveredLiveSource as delivered,
+  createCanonicalLiveSourceFixture as fixture,
+  assertPendingLiveSource as pending,
+} from './helpers/1398-live-source-fixture.mjs';
 
+const intent = { requested: 'continue_current', boundParentInvocationId: 'live-parent' };
 for (const termination of ['stop', 'fail']) {
-  test(`an admitted disposition survives immediate ${termination} before its first microtask`, async () => {
+  test('an authenticated, admitted body delivery drains through immediate native ' + termination, async (t) => {
     const sessions = new LiveCompanionSessions();
-    const h = await createLiveDispatchReceiptFixture({
-      isLiveCarrierInvocation: sessions.isActiveCarrier.bind(sessions),
+    const f = await fixture(intent, 'agent', {
       withLiveCarrierOperation: sessions.withCarrierOperation.bind(sessions),
     });
+    t.after(async () => {
+      await sessions.close();
+      await f.close();
+    });
     const call = await sessions.prepare({
-      binding: { userId: 'user-1', threadId: 'thread-1', catId: 'codex-sol', callId: 'call' },
-      messageStore: h.messageStore,
+      binding: { userId: 'owner', threadId: 'home', catId: 'codex-astra', callId: 'call' },
+      messageStore: f.store,
       mcpDistDir: resolve('../mcp-server/dist'),
       allowedDirectories: [resolve('../../docs')],
       verifyNativeBinding: async () => true,
       publish() {},
     });
+    await sessions.claim(call.id, 'owner', 'home', ['codex-astra']);
+    await call.configure({
+      CAT_CAFE_API_URL: 'http://localhost:3012',
+      CAT_CAFE_USER_ID: 'owner',
+      CAT_CAFE_THREAD_ID: 'home',
+      CAT_CAFE_CAT_ID: 'codex-astra',
+      CAT_CAFE_INVOCATION_ID: f.auth.invocationId,
+      CAT_CAFE_CALLBACK_TOKEN: f.auth.callbackToken,
+    });
+    await call.ready('native', { request: async () => ({}), submitText: async () => 'unused' });
+    const commit = f.store.commitLifecycleAppendAdmission.bind(f.store);
+    let enter, release;
+    const entered = new Promise((r) => {
+      enter = r;
+    });
+    const barrier = new Promise((r) => {
+      release = r;
+    });
+    f.store.commitLifecycleAppendAdmission = async (input) => {
+      enter();
+      await barrier;
+      return commit(input);
+    };
+    const accepted = f.read().then((r) => r);
+    await entered;
+    let drained = false;
+    const stopped = (termination === 'stop' ? call.stop() : call.fail(new Error('fixture failure'))).then(() => {
+      drained = true;
+    });
     try {
-      sessions.claim(call.id, 'user-1', 'thread-1', ['codex-sol']);
-      await call.configure({
-        CAT_CAFE_API_URL: 'http://localhost:3012',
-        CAT_CAFE_USER_ID: 'user-1',
-        CAT_CAFE_THREAD_ID: 'thread-1',
-        CAT_CAFE_CAT_ID: 'codex-sol',
-        CAT_CAFE_INVOCATION_ID: 'inv-1',
-        CAT_CAFE_CALLBACK_TOKEN: 'test-secret',
-      });
-      await call.ready('native', { request: async () => ({}), submitText: async () => 'unused' });
-      const auth = createA2ADispositionAuth(h);
-      const pending = h.service.completeAdopted(auth, h.source.id, 'completed');
-      const stopped = termination === 'stop' ? call.stop() : call.fail(new Error('fixture failure'));
-      await assert.rejects(h.service.completeAdopted(auth, h.source.id, 'completed'), /closing|unavailable/);
-      const result = await pending;
-      await stopped;
-      assert.equal(result.outcome, 'applied');
-      assert.deepEqual(h.messageStore.getById(h.source.id).queueCustody.handledByCatIds, ['codex-sol']);
-      assert.equal(h.eventLog.events.filter((event) => event.kind === 'ball.dispatch_dispositioned').length, 1);
-      assert.equal(await sessions.isActiveCarrier(auth), false);
+      assert.equal((await f.read()).statusCode, 409);
+      assert.equal(drained, false, 'native terminal waits for the accepted durable admission');
     } finally {
-      await sessions.close();
+      release();
     }
+    assert.equal((await accepted).statusCode, 200);
+    await stopped;
+    await delivered(f);
+    assert.equal((await f.read()).statusCode, 409);
+    assert.equal(f.store.getByThread('home', 30, 'owner').filter((m) => m.lifecycle?.kind === 'response').length, 1);
+    assert.equal(
+      f.store.getById(f.response.id).lifecycle.status,
+      'processing',
+      'source delivery does not itself terminalize the independent native execution',
+    );
   });
 }
 
-for (const scenario of ['wrong-scope', 'stale-invocation', 'missing-read']) {
-  test(`admission lease does not authorize ${scenario}`, async () => {
-    const gate = new LiveCarrierOperationGate();
-    const h = await createA2ADispositionHarness({
-      registry: { isLatest: async () => scenario !== 'stale-invocation' },
-      isLiveCarrierInvocation: async () => true,
-      withLiveCarrierOperation: (query, operation) =>
-        gate.runForCarrier(scenario === 'wrong-scope' ? { ...query, threadId: 'foreign' } : query, operation),
-      getReadEvidenceForMessage: async () => null,
-    });
-    await assert.rejects(
-      h.service.completeAdopted(createA2ADispositionAuth(h), h.source.id, 'completed'),
-      new RegExp(
-        scenario === 'wrong-scope'
-          ? 'not_live_carrier'
-          : scenario === 'stale-invocation'
-            ? 'stale_invocation'
-            : 'not_read',
-      ),
-    );
-    assert.equal(h.eventLog.events.filter((event) => event.kind === 'ball.dispatch_dispositioned').length, 0);
+test('a request that has not authenticated before the closing fence acquires no pending source', async (t) => {
+  const f = await fixture(intent);
+  t.after(f.close);
+  f.gate.close();
+  const scheduled = f.read();
+  assert.equal((await scheduled).statusCode, 409);
+  await pending(f);
+  assert.deepEqual(f.store.getById(f.response.id).lifecycle.inputMessageIds, []);
+});
+
+test('invalid callback credentials cannot borrow the live lease or mutate source ownership', async (t) => {
+  const f = await fixture(intent);
+  t.after(f.close);
+  const denied = await f.app.inject({
+    method: 'GET',
+    url: '/api/callbacks/thread-context?responseMode=full',
+    headers: { 'x-invocation-id': f.auth.invocationId, 'x-callback-token': 'wrong' },
   });
-}
+  assert.equal(denied.statusCode, 401);
+  await pending(f);
+  assert.deepEqual(f.store.getById(f.response.id).lifecycle.inputMessageIds, []);
+});

@@ -132,7 +132,7 @@ function formatA2AFollowupAvailable(
 }
 
 function formatWarning(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
-  if (parsed?.type !== 'warning') return null;
+  if (parsed?.type !== 'warning' || parsed.presentation !== 'user_action_required') return null;
 
   const warningText = typeof parsed.message === 'string' ? parsed.message : '';
   return {
@@ -146,37 +146,6 @@ function formatCloudBridgeStatus(parsed: Record<string, unknown>): VisibleSystem
   const message = typeof parsed.message === 'string' ? parsed.message : '';
   if (!message) return null;
   return { content: message, variant: 'info' };
-}
-
-export function formatSessionSealRequested(
-  parsed: Record<string, unknown>,
-  resolveCatName: ResolveCatName = identityCatName,
-): VisibleSystemInfoResult | null {
-  if (parsed?.type !== 'session_seal_requested') return null;
-
-  const catId = typeof parsed.catId === 'string' ? parsed.catId : 'unknown';
-  const sessionSeq = typeof parsed.sessionSeq === 'number' ? parsed.sessionSeq : '?';
-  const continuityDiagnostics =
-    typeof parsed.continuityDiagnostics === 'object' && parsed.continuityDiagnostics !== null
-      ? (parsed.continuityDiagnostics as Record<string, unknown>)
-      : undefined;
-  if (continuityDiagnostics?.source === 'runtime_replacement') {
-    return {
-      content: `${resolveCatName(catId)} 的会话 #${sessionSeq} 已自动接力；新会话已在本轮继续运行`,
-      variant: 'info',
-    };
-  }
-  const healthSnapshot =
-    typeof parsed.healthSnapshot === 'object' && parsed.healthSnapshot !== null
-      ? (parsed.healthSnapshot as Record<string, unknown>)
-      : undefined;
-  const fillRatio = healthSnapshot?.fillRatio;
-  const pct = typeof fillRatio === 'number' ? Math.round(fillRatio * 100) : '?';
-
-  return {
-    content: `${resolveCatName(catId)} 的会话 #${sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`,
-    variant: 'info',
-  };
 }
 
 export function formatGovernanceBlocked(parsed: Record<string, unknown>): VisibleSystemInfoResult | null {
@@ -213,25 +182,9 @@ function formatInvocationPreempted(parsed: Record<string, unknown>): VisibleSyst
   };
 }
 
-function formatSilentCompletion(
-  parsed: Record<string, unknown>,
-  resolveCatName: ResolveCatName,
-  fallbackCatId?: string,
-): VisibleSystemInfoResult | null {
-  if (parsed?.type !== 'silent_completion') return null;
-
-  const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-  const catId = typeof parsed.catId === 'string' ? parsed.catId : (fallbackCatId ?? 'Cat');
-  return {
-    content: detail || `${resolveCatName(catId)} completed without a text response.`,
-    variant: 'info',
-  };
-}
-
 export function formatVisibleSystemInfo(
   parsed: Record<string, unknown>,
   resolveCatName: ResolveCatName = identityCatName,
-  fallbackCatId?: string,
 ): VisibleSystemInfoResult | null {
   return (
     formatA2AFollowupAvailable(parsed, resolveCatName) ??
@@ -242,8 +195,7 @@ export function formatVisibleSystemInfo(
     (parsed?.type === 'a2a_role_rejected' ? formatRoleRejected(parsed, resolveCatName) : null) ??
     formatRoutingPreflight(parsed, resolveCatName) ??
     formatModeSwitchProposal(parsed, resolveCatName) ??
-    formatInvocationPreempted(parsed) ??
-    formatSilentCompletion(parsed, resolveCatName, fallbackCatId)
+    formatInvocationPreempted(parsed)
   );
 }
 

@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, describe, it } from 'node:test';
 
-import { InMemoryFreshnessClosureStore } from '../../dist/domains/cats/services/freshness/closure/FreshnessClosureStore.js';
 import { FreshnessReplayProviderImpl } from '../../dist/infrastructure/harness-eval/freshness/freshness-replay-provider.js';
 import { loadEvalHubSummary } from '../../dist/infrastructure/harness-eval/hub/eval-hub-read-model.js';
 import { createFreshnessGeneratorAdapter } from '../../dist/infrastructure/harness-eval/publish-verdict/freshness-generator-adapter.js';
@@ -67,12 +66,16 @@ const sourceRefs = {
   windowEndMs: 2_000,
 };
 
-function matureProvider(store = new InMemoryFreshnessClosureStore()) {
+function matureProvider() {
   return new FreshnessReplayProviderImpl({
-    store,
     fixtureRoot,
     queueLifecycleSource: {
-      async listOwnerQueueCustodyLifecycles() {
+      async listOwnerDurableEntries() {
+        return [];
+      },
+    },
+    messageLifecycleSource: {
+      async listOwnerMessagesInWindow() {
         return [];
       },
     },
@@ -97,35 +100,8 @@ before(() => {
 after(() => rmSync(root, { recursive: true, force: true }));
 
 describe('publish_verdict eval:freshness', () => {
-  it('resolves server-owned replay evidence and writes a hashed four-part bundle', async () => {
-    const store = new InMemoryFreshnessClosureStore();
-    await store.openOrAdvance({
-      closureId: 'closure-live-healthy',
-      userId: 'user-1',
-      threadId: 'thread-live',
-      catId: 'codex-sol',
-      invocationId: 'base-1',
-      originTriggerMessageId: 'msg-origin',
-      draftContent: 'base',
-      requiredMessageIds: ['msg-frontier'],
-      requiredFrontierMessageId: 'msg-frontier',
-      observedRawFrontierMessageId: 'msg-frontier',
-      now: 1_100,
-    });
-    await store.claimAttempt('closure-live-healthy', {
-      invocationId: 'success-1',
-      inputFrontierMessageId: 'msg-frontier',
-      observedRawFrontierMessageId: 'msg-frontier',
-      now: 1_200,
-    });
-    await store.commit('closure-live-healthy', {
-      invocationId: 'success-1',
-      messageId: 'message-final',
-      observedRawFrontierMessageId: 'msg-frontier',
-      evidenceRefs: ['append:message-final'],
-      now: 1_300,
-    });
-    const provider = matureProvider(store);
+  it('writes a hashed four-part bundle from fixture-only replay evidence', async () => {
+    const provider = matureProvider();
     const generator = createFreshnessGeneratorAdapter(provider);
     let isolatedRoot;
     const gitPublisher = {
@@ -156,11 +132,11 @@ describe('publish_verdict eval:freshness', () => {
       assert.ok(existsSync(join(bundle, file)), `${file} must exist`);
     }
     const snapshot = JSON.parse(readFileSync(join(bundle, 'snapshot.json'), 'utf8'));
-    assert.equal(snapshot.replayVerdict, 'healthy');
-    assert.equal(snapshot.healthy, true);
-    assert.equal(snapshot.components[0].activationCounts.eligible_samples, 9);
+    assert.equal(snapshot.replayVerdict, 'no_data');
+    assert.equal(snapshot.healthy, false);
+    assert.equal(snapshot.components[0].activationCounts.eligible_samples, 8);
     assert.equal(snapshot.components[0].activationCounts.fixture_samples, 8);
-    assert.equal(snapshot.components[0].activationCounts.live_samples, 1);
+    assert.equal(snapshot.components[0].activationCounts.live_samples, 0);
     const provenance = JSON.parse(readFileSync(join(bundle, 'provenance.json'), 'utf8'));
     assert.match(provenance.rawInputs[0].sha256, /^[0-9a-f]{64}$/);
     const verdictPath = join(isolatedRoot, 'docs', 'harness-feedback', 'verdicts', 'vhp-freshness-e2e-test.md');
@@ -169,7 +145,7 @@ describe('publish_verdict eval:freshness', () => {
     assert.match(markdown, /- Harness: F254\/freshness-closure-replay \(freshness closure replay\)/);
     assert.match(markdown, /- Re-eval: no friction at 2026-06-12T11:00:00.000Z/);
     assert.match(markdown, /\nEvidence:\n/);
-    assert.match(markdown, /- Derived replay: `healthy`/);
+    assert.match(markdown, /- Derived replay: `no_data`/);
 
     const summary = loadEvalHubSummary({
       harnessFeedbackRoot: join(isolatedRoot, 'docs', 'harness-feedback'),

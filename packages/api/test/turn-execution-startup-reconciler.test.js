@@ -48,6 +48,86 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.equal((await store.get('ordinary-live-owner')).status, 'running');
   });
 
+  test('F117 KD-21: settles each ended turn response and isolates a failing one', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput('ordinary-a', 10));
+    await store.createRunning(runningInput('ordinary-b', 20));
+    await store.createRunning(runningInput('ordinary-protected', 30));
+    await store.createRunning(runningInput('ordinary-after-start', 150));
+    const settled = [];
+    const reconciler = new TurnExecutionStartupReconciler({
+      store,
+      now: () => 200,
+      settleEndedTurnResponse: async (turn) => {
+        settled.push({ invocationId: turn.invocationId, status: turn.status, terminalReason: turn.terminalReason });
+        if (turn.invocationId === 'ordinary-a') throw new Error('commit rejected');
+        await store.clearResponsePending(turn.invocationId);
+      },
+    });
+
+    const result = await reconciler.reconcile({
+      processStartedAt: 100,
+      protectedInvocationIds: ['ordinary-protected'],
+    });
+
+    assert.deepEqual(result.invocationIds, ['ordinary-a', 'ordinary-b']);
+    assert.deepEqual(settled, [
+      { invocationId: 'ordinary-a', status: 'interrupted', terminalReason: 'process_restart' },
+      { invocationId: 'ordinary-b', status: 'interrupted', terminalReason: 'process_restart' },
+    ]);
+    assert.deepEqual(result.responseSettlementFailures, [
+      { invocationId: 'ordinary-a', error: 'Error: commit rejected' },
+    ]);
+    assert.equal(result.settledResponseCount, 1);
+    assert.deepEqual(
+      store.listResponsePending().map((turn) => turn.invocationId),
+      ['ordinary-a'],
+      'the failed settlement keeps its turn in the ledger',
+    );
+  });
+
+  test('F117 KD-21: an incomplete owner snapshot still settles ended turns but interrupts nothing', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput('ordinary-running', 10));
+    await store.createRunning(runningInput('ordinary-ended', 20));
+    await store.transitionTerminal('ordinary-ended', { status: 'failed', endedAt: 30, terminalReason: 'x' });
+    const settled = [];
+    const reconciler = new TurnExecutionStartupReconciler({
+      store,
+      settleEndedTurnResponse: async (turn) => {
+        settled.push(turn.invocationId);
+        await store.clearResponsePending(turn.invocationId);
+      },
+    });
+
+    const pass = await reconciler.settleEndedTurnResponses({ processStartedAt: 100 });
+
+    assert.deepEqual(pass, { settledResponseCount: 1, responseSettlementFailures: [] });
+    assert.deepEqual(settled, ['ordinary-ended']);
+    assert.equal((await store.get('ordinary-running')).status, 'running');
+  });
+
+  test('F117 KD-21: an unreadable ledger is reported without failing startup recovery', async () => {
+    const store = new InMemoryTurnExecutionStore();
+    await store.createRunning(runningInput('ordinary-a', 10));
+    const reconciler = new TurnExecutionStartupReconciler({
+      store: {
+        interruptRunningBefore: (cutoff, input) => store.interruptRunningBefore(cutoff, input),
+        listResponsePending: async () => {
+          throw new Error('corrupt ledger record');
+        },
+      },
+      now: () => 200,
+      settleEndedTurnResponse: async () => assert.fail('nothing can settle without the ledger'),
+    });
+
+    const result = await reconciler.reconcile({ processStartedAt: 100 });
+
+    assert.deepEqual(result.invocationIds, ['ordinary-a']);
+    assert.equal(result.settledResponseCount, 0);
+    assert.equal(result.responseLedgerError, 'Error: corrupt ledger record');
+  });
+
   test('production wiring recovers children after listen and before queue resume', () => {
     const source = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8');
     const listenBoundary = source.indexOf('address = await listenBeforeTurnExecutionRecovery');
@@ -88,11 +168,14 @@ describe('TurnExecutionStartupReconciler', () => {
     assert.deepEqual(result, {
       interruptedCount: 2,
       invocationIds: ['guard-boundary', 'ordinary-exact-process-start'],
+      settledResponseCount: 0,
+      responseSettlementFailures: [],
       reconciledAt: 200,
     });
     assert.equal((await store.get('ordinary-old')).status, 'succeeded');
     assert.deepEqual(await store.get('guard-boundary'), {
       ...runningInput('guard-boundary', 100),
+      outputFence: 'open',
       status: 'interrupted',
       endedAt: 200,
       terminalReason: 'process_restart',

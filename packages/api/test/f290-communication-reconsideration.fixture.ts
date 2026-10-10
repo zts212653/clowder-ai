@@ -5,8 +5,11 @@ import Fastify from 'fastify';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { InvocationRegistry } from '../src/domains/cats/services/agents/invocation/InvocationRegistry.js';
 import { InvocationTracker } from '../src/domains/cats/services/agents/invocation/InvocationTracker.js';
-import { QueuedMessageCustodyCoordinator } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { QueueProcessor } from '../src/domains/cats/services/agents/invocation/QueueProcessor.js';
+import { InMemoryQueueLedgerStore } from '../src/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
+import type { RouteOptions } from '../src/domains/cats/services/agents/routing/route-helpers.js';
+import { InMemoryTurnExecutionStore } from '../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
+import { settleLifecycleResponseInputs } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import { registerCollectiveParticipationCallbacks } from '../src/routes/callback-collective-participation-routes.js';
 import { registerCollectiveOwnerWorkReconsiderationRoutes } from '../src/routes/collective-owner-work-reconsideration.js';
 import { fixture as manualFixture } from './f290-communication-manual-admission.fixture.js';
@@ -16,7 +19,13 @@ import { CAT } from './f290-communication-validation.host.js';
 /** Real QueueProcessor/Registry/current-context/Connector/Service. Only owner session, model and invocation-record store are fixtures. */
 export async function fixture() {
   const f = await manualFixture();
-  const queue = new InvocationQueue();
+  const ledger = new InMemoryQueueLedgerStore();
+  const queue = new InvocationQueue(ledger, {
+    onAdmitted: ({ threadId, entries }) => {
+      if (enabled) void processor.requestDrain(threadId, entries[0]!.owner.userId).catch(() => {});
+    },
+  });
+  const turns = new InMemoryTurnExecutionStore();
   const registry = new InvocationRegistry();
   const records = new Map<string, Record<string, unknown>>();
   const runs: string[] = [];
@@ -24,6 +33,12 @@ export async function fixture() {
   let enabled = false;
   const reconsiderHooks: { beforeThreadRead?: () => Promise<void> } = {};
   const router = {
+    async resolveExplicitTargets(targets: readonly string[]) {
+      return [...targets];
+    },
+    async resolveConversationTargetsAtAdmission(targets: readonly string[]) {
+      return [...targets];
+    },
     async *routeExecution(
       userId: string,
       _content: string,
@@ -31,21 +46,14 @@ export async function fixture() {
       messageId: string | null,
       cats: string[],
       _intent: unknown,
-      options?: Record<string, unknown>,
+      options?: RouteOptions,
     ) {
       assert.equal(cats[0], CAT);
       assert.ok(messageId);
       const trigger = await f.host.messages.getById(messageId);
       assert.ok(trigger);
       const source = collectiveSourceIdentitySchema.parse(trigger.source?.meta?.participation);
-      await (options?.onPromptMessagesExposed as (input: unknown) => Promise<unknown>)?.({
-        threadId,
-        userId,
-        catId: CAT,
-        invocationId: String(options?.parentInvocationId),
-        messageIds: [trigger.id],
-        seenAt: Date.now(),
-      });
+      await f.host.context.resolvePublic({ userId, threadId, catId: CAT, originTriggerMessageId: trigger.id });
       const created = await registry.create(
         userId,
         CAT,
@@ -61,6 +69,36 @@ export async function fixture() {
       const verified = await registry.verify(created.invocationId, created.callbackToken);
       assert.ok(verified.ok);
       f.world.turns.set(created.invocationId, { catId: CAT, status: 'running' });
+      const parentInvocationId = String(options?.parentInvocationId);
+      const startedAt = Date.now();
+      turns.createRunning({
+        invocationId: created.invocationId,
+        parentInvocationId,
+        threadId,
+        userId,
+        catId: CAT,
+        startedAt,
+        executionKind: 'ordinary',
+        causal: { triggerMessageId: trigger.id },
+      });
+      const receiver = await options?.onLifecycleInvocationStarted?.({
+        threadId,
+        userId,
+        catId: CAT,
+        invocationId: created.invocationId,
+        parentInvocationId,
+        startedAt,
+      });
+      assert.ok(receiver);
+      await options?.onPromptMessagesExposed?.({
+        threadId,
+        userId,
+        catId: CAT,
+        invocationId: created.invocationId,
+        messageIds: [trigger.id],
+        seenAt: Date.now(),
+      });
+      let failed = true;
       try {
         const auth = verified.record;
         const current = await f.host.context.current(auth);
@@ -86,11 +124,27 @@ export async function fixture() {
           });
           runs.push(proposal.workId);
         }
+        failed = false;
       } finally {
+        turns.transitionTerminal(created.invocationId, {
+          status: failed ? 'failed' : 'succeeded',
+          terminalReason: 'scripted_classification',
+          endedAt: Date.now(),
+        });
+        const terminal = await f.host.messages.commitLifecycleResponseTerminal(receiver.responseMessageId, {
+          invocationId: created.invocationId,
+          status: failed ? 'failed' : 'completed',
+          completedAt: Date.now(),
+          content: 'Scripted public classification',
+          mentions: [],
+          origin: 'stream',
+        });
+        assert.ok(terminal.kind === 'applied' || terminal.kind === 'replayed');
+        await settleLifecycleResponseInputs(f.host.messages, terminal.message, receiver.responseMessageId);
         f.world.endTurn(created.invocationId);
       }
       yield { type: 'text', catId: CAT, content: 'The current public request was classified.', timestamp: Date.now() };
-      yield { type: 'done', catId: CAT, content: '', timestamp: Date.now() };
+      yield { type: 'done', catId: CAT, invocationId: created.invocationId, content: '', timestamp: Date.now() };
     },
     async ackCollectedCursors() {},
   };
@@ -119,7 +173,7 @@ export async function fixture() {
       },
     },
     messageStore: f.host.messages,
-    queueCustodyCoordinator: new QueuedMessageCustodyCoordinator({ messageStore: f.host.messages }),
+    turnExecutionStore: turns,
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
     log: {
       info() {},
@@ -149,9 +203,6 @@ export async function fixture() {
     },
     reconsideration: {
       queue,
-      processor: {
-        processNext: (...args) => (enabled ? processor.processNext(...args) : Promise.resolve({ started: false })),
-      },
     },
   });
   await registerCollectiveParticipationCallbacks(app, { registry, context: f.host.context });
@@ -215,6 +266,7 @@ export async function fixture() {
   return {
     ...f,
     queue,
+    ledger,
     processor,
     runs,
     logs,

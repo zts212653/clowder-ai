@@ -7,7 +7,9 @@
  * Key design decisions:
  * - userId-scoped for isolation (R1 P1-1)
  * - invocationId as primary identifier (supports parallel streaming)
- * - TTL-based auto-cleanup (300s) with explicit delete on completion
+ * - F117 KD-21/KD-23: no expiry. A draft lives exactly as long as its response R is processing; the
+ *   R's terminal commit deletes it, and a turn leaves the response-pending ledger only after its
+ *   draft is gone, so a failed delete is retried by the next settlement instead of leaking.
  */
 
 import type { CatId } from '@cat-cafe/shared';
@@ -30,10 +32,8 @@ export interface DraftRecord {
  * Methods return Promise to accommodate async Redis operations.
  */
 export interface IDraftStore {
-  /** Write/update draft (upsert semantics), reset TTL */
+  /** Write/update draft (upsert semantics) */
   upsert(draft: DraftRecord): void | Promise<void>;
-  /** Renew TTL without updating content (keeps draft alive during tool calls) */
-  touch(userId: string, threadId: string, invocationId: string): void | Promise<void>;
   /** Get all active drafts for a user+thread */
   getByThread(userId: string, threadId: string): DraftRecord[] | Promise<DraftRecord[]>;
   /** Delete a single draft (on stream completion) */
@@ -42,20 +42,9 @@ export interface IDraftStore {
   deleteByThread(userId: string, threadId: string): void | Promise<void>;
 }
 
-/** Default TTL for drafts: 5 minutes (300 seconds) */
-const DEFAULT_DRAFT_TTL_MS = 300_000;
-
-/**
- * In-memory DraftStore implementation.
- * Uses Map with TTL simulation via updatedAt + reap on read.
- */
+/** In-memory DraftStore implementation. */
 export class DraftStore implements IDraftStore {
   private drafts = new Map<string, DraftRecord>();
-  private ttlMs: number;
-
-  constructor(options?: { ttlMs?: number }) {
-    this.ttlMs = options?.ttlMs ?? DEFAULT_DRAFT_TTL_MS;
-  }
 
   private key(userId: string, threadId: string, invocationId: string): string {
     return `${userId}:${threadId}:${invocationId}`;
@@ -70,25 +59,11 @@ export class DraftStore implements IDraftStore {
     });
   }
 
-  touch(userId: string, threadId: string, invocationId: string): void {
-    const k = this.key(userId, threadId, invocationId);
-    const existing = this.drafts.get(k);
-    if (existing) {
-      existing.updatedAt = Date.now();
-    }
-  }
-
   getByThread(userId: string, threadId: string): DraftRecord[] {
-    const now = Date.now();
     const results: DraftRecord[] = [];
     const prefix = `${userId}:${threadId}:`;
     for (const [k, v] of this.drafts) {
-      if (!k.startsWith(prefix)) continue;
-      if (now - v.updatedAt > this.ttlMs) {
-        this.drafts.delete(k);
-        continue;
-      }
-      results.push(v);
+      if (k.startsWith(prefix)) results.push(v);
     }
     return results;
   }

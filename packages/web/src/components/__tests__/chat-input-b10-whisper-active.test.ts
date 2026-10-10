@@ -159,10 +159,11 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
       activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
       hasActiveInvocation: true,
     });
-    // Before whisper mode: product-default next-work placeholder (cat is active)
+    // Before whisper mode: ordinary placeholder; no guide-capable active member is declared
     act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    const textarea = container.querySelector('textarea')!;
-    expect(textarea.placeholder).toContain('下一件工作');
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea');
+    if (!textarea) throw new Error('textarea missing');
+    expect(textarea.placeholder).toBe('输入消息... (@ 召唤猫猫 · /thread 引用对话)');
 
     // Enter whisper mode — default is no selection (F108B P1-1 fix)
     enterWhisperMode();

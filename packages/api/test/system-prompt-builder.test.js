@@ -1367,8 +1367,8 @@ describe('SystemPromptBuilder', () => {
         { catId: 'codex', lastMessageAt: 1000, messageCount: 3 },
       ],
     });
-    assert.match(ctx, /最近活跃：布偶猫\(opus\)\n|最近活跃：布偶猫\(opus\)$/, 'Should inject displayName(id) format');
-    assert.ok(!ctx.includes('最近活跃：缅因猫(codex)'), 'Self (codex) should not appear as most recently active');
+    assert.match(ctx, /最近发言：布偶猫\(opus\)\n|最近发言：布偶猫\(opus\)$/, 'Should inject displayName(id) format');
+    assert.ok(!ctx.includes('最近发言：缅因猫(codex)'), 'Self (codex) should not appear as most recent speaker');
   });
 
   test('buildInvocationContext skips self in activity list', async () => {
@@ -1386,7 +1386,7 @@ describe('SystemPromptBuilder', () => {
       ],
     });
     // opus is self and most-recent, should be skipped; codex is next
-    assert.match(ctx, /最近活跃：缅因猫\(codex\)\n|最近活跃：缅因猫\(codex\)$/, 'Should inject displayName(id) format');
+    assert.match(ctx, /最近发言：缅因猫\(codex\)\n|最近发言：缅因猫\(codex\)$/, 'Should inject displayName(id) format');
   });
 
   test('buildInvocationContext omits hint when activeParticipants absent', async () => {
@@ -1397,7 +1397,7 @@ describe('SystemPromptBuilder', () => {
       teammates: [],
       mcpAvailable: false,
     });
-    assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no activeParticipants');
+    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no activeParticipants');
   });
 
   test('buildInvocationContext omits hint when only self has activity', async () => {
@@ -1414,7 +1414,7 @@ describe('SystemPromptBuilder', () => {
         { catId: 'codex', lastMessageAt: 0, messageCount: 0 },
       ],
     });
-    assert.ok(!ctx.includes('最近活跃'), 'Should not inject when no non-self participant has activity');
+    assert.ok(!ctx.includes('最近发言'), 'Should not inject when no non-self participant has activity');
   });
 
   test('buildSystemPrompt size with activeParticipants stays under full runtime prompt budget after Magic Words + runtime prompt growth', async () => {

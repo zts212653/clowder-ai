@@ -28,7 +28,7 @@ export interface AggregatorZombie {
   threadId: string;
   catId: string | null;
   recordUpdatedAt: number;
-  detail?: string; // 如 'no_tracker_no_fresh_draft' / 'spend-limit'
+  detail?: string; // failed 记录的失败原因，如 'provider_error' / 'spend-limit'
 }
 
 export interface AggregatorExpiredHold {

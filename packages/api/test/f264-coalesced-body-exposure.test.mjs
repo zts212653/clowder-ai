@@ -1,151 +1,47 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createCanonicalLiveSourceFixture as fixture } from './helpers/1398-live-source-fixture.mjs';
 
-import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
-import {
-  createCrossThreadQueueEntryFromCustody,
-  createInitialCrossThreadQueuedMessageCustody,
-  QueuedMessageCustodyCoordinator,
-} from '../dist/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
-
-function requireEntry(queue, entryId) {
-  const entry = queue.getEntrySnapshot('thread-1', 'user-1', entryId);
-  assert.ok(entry, `missing Queue entry ${entryId}`);
-  return entry;
-}
-
-function appendSource(messages, content, timestamp) {
-  return messages.append({
-    userId: 'user-1',
-    catId: 'codex-sol',
-    content,
-    mentions: ['codex-astra'],
-    timestamp,
-    threadId: 'thread-1',
-    deliveryStatus: 'queued',
-    extra: {
-      crossPost: {
-        sourceThreadId: 'thread-source',
-        sourceInvocationId: 'parent-1',
-        effectClass: 'fyi',
-      },
+test('a source appended after delivery keeps its own pending entry until exact response admission', async (t) => {
+  const f = await fixture({ requested: 'continue_current', boundParentInvocationId: 'live-parent' }, 'agent');
+  t.after(f.close);
+  assert.equal((await f.read()).statusCode, 200);
+  const from = { kind: 'agent', catId: 'opus' };
+  const second = await f.queue.send(
+    f.store,
+    {
+      userId: 'owner',
+      threadId: 'home',
+      from,
+      content: 'second source',
+      mentions: ['codex-astra'],
+      timestamp: Date.now(),
+      deliveryStatus: 'queued',
     },
-  });
-}
-
-test('coalescing requires a fresh per-source body exposure from the same invocation', async () => {
-  const targetCatId = 'codex-astra';
-  const invocationId = 'inv-existing';
-  const queue = new InvocationQueue();
-  const messages = new MessageStore();
-  let now = 150;
-  const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages, now: () => now });
-
-  const first = appendSource(messages, 'first source', 100);
-  const admitted = queue.enqueue({
-    ownerAuthProvenance: 'unknown',
-    threadId: 'thread-1',
-    userId: 'user-1',
-    content: first.content,
-    source: 'agent',
-    sourceCategory: 'a2a',
-    targetCats: [targetCatId],
-    intent: 'execute',
-    autoExecute: true,
-    callerCatId: 'codex-sol',
-    a2aParentInvocationId: 'parent-1',
-    a2aTriggerMessageId: first.id,
-  }).entry;
-  queue.backfillMessageId('thread-1', 'user-1', admitted.id, first.id);
-  let carrier = requireEntry(queue, admitted.id);
-  assert.equal(
-    messages.initializeQueueCustody(
-      first.id,
-      createInitialCrossThreadQueuedMessageCustody(first.id, [carrier], {
-        requestedTargetCats: [targetCatId],
-        createdAt: first.timestamp,
-      }),
-    ).kind,
-    'initialized',
+    {
+      userId: 'owner',
+      threadId: 'home',
+      kind: 'conversation_input',
+      from,
+      content: 'second source',
+      targetCats: ['codex-astra'],
+      ownerAuthProvenance: 'strict',
+      intent: 'execute',
+      authorIntentByCatId: { 'codex-astra': { requested: 'continue_current', boundParentInvocationId: 'live-parent' } },
+    },
   );
-
-  queue.markQueuedSeen('thread-1', 'user-1', admitted.id, targetCatId, invocationId, now);
-  carrier = requireEntry(queue, admitted.id);
-  await coordinator.persistEntry(carrier);
-  assert.deepEqual(messages.getById(first.id).queueCustody.bodyExposures, [{ targetCatId, invocationId, seenAt: 150 }]);
-
-  const second = appendSource(messages, 'second source', 200);
-  assert.equal(
-    queue.coalesceContentIntoQueuedAgent(
-      'thread-1',
-      'user-1',
-      admitted.id,
-      second.content,
-      second.id,
-      'codex-sol',
-      'parent-1',
-      'unknown',
-      targetCatId,
-    ),
-    true,
-  );
-  carrier = requireEntry(queue, admitted.id);
-  assert.equal(
-    messages.initializeQueueCustody(
-      second.id,
-      createInitialCrossThreadQueuedMessageCustody(second.id, [carrier], {
-        requestedTargetCats: [targetCatId],
-        createdAt: second.timestamp,
-      }),
-    ).kind,
-    'initialized',
-  );
-  const recoveredBeforeReread = createCrossThreadQueueEntryFromCustody(
-    [messages.getById(first.id), messages.getById(second.id)],
-    admitted.id,
-  );
-  assert.deepEqual(
-    recoveredBeforeReread.queuedBodyExposures,
-    [],
-    'an old source exposure cannot cover content appended after that read',
-  );
-
-  now = 250;
-  queue.markQueuedSeen('thread-1', 'user-1', admitted.id, targetCatId, invocationId, now);
-  carrier = requireEntry(queue, admitted.id);
-  await coordinator.persistEntry(carrier);
-
-  assert.deepEqual(
-    messages.getById(first.id).queueCustody.bodyExposures,
-    [{ targetCatId, invocationId, seenAt: 150 }],
-    'the first source keeps its append-only first exposure',
-  );
-  assert.deepEqual(
-    messages.getById(second.id).queueCustody.bodyExposures,
-    [{ targetCatId, invocationId, seenAt: 250 }],
-    'the appended source must receive evidence from a read after it existed',
-  );
-  assert.deepEqual(carrier.queuedBodyExposures, [{ targetCatId, invocationId, seenAt: 250 }]);
-
-  now = 300;
-  assert.equal(
-    queue.markQueuedSeen('thread-1', 'user-1', admitted.id, targetCatId, invocationId, now),
-    false,
-    'a repeat read remains idempotent',
-  );
-  await coordinator.persistEntry(requireEntry(queue, admitted.id));
-  assert.deepEqual(messages.getById(second.id).queueCustody.bodyExposures, [
-    { targetCatId, invocationId, seenAt: 250 },
-  ]);
-
-  const recovered = createCrossThreadQueueEntryFromCustody(
-    [messages.getById(first.id), messages.getById(second.id)],
-    admitted.id,
-  );
-  assert.deepEqual(
-    recovered.queuedBodyExposures,
-    [{ targetCatId, invocationId, seenAt: 250 }],
-    'restart must recover only an exposure that covers every coalesced source',
-  );
+  assert.ok(second.message && second.entry);
+  assert.notEqual(second.entry.id, f.entry.id, 'distinct source bodies never coalesce into a single pending owner');
+  assert.equal(f.store.getById(second.message.id).lifecycle.dispatchRefs.length, 0);
+  assert.deepEqual((await f.queue.getDurableEntry('home', second.entry.id)).targets, ['codex-astra']);
+  assert.equal((await f.read()).statusCode, 200);
+  const first = f.store.getById(f.message.id),
+    last = f.store.getById(second.message.id);
+  assert.equal(first.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
+  assert.equal(last.lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
+  assert.equal(await f.queue.getDurableEntry('home', second.entry.id), null);
+  assert.deepEqual((await f.queue.getDurableEntry('home', f.entry.id)).targets, ['kimi']);
+  assert.equal((await f.read()).statusCode, 200);
+  assert.equal(last.lifecycle.dispatchRefs.length, 1);
+  assert.equal(f.store.getById(f.response.id).lifecycle.status, 'processing');
 });

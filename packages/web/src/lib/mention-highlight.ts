@@ -7,6 +7,7 @@
 
 import { escapeRegExp } from '@cat-cafe/shared';
 import type { CatData } from '@/hooks/useCatData';
+import { formatCatDisplayName } from '@/lib/cat-display-name';
 import { CO_CREATOR_MENTION_COLOR as CO_CREATOR_MENTION } from '@/lib/color-defaults';
 
 // ── Internal builders ───────────────────────────────────
@@ -44,11 +45,15 @@ const DEFAULT_CO_CREATOR_MENTION_PATTERNS = ['@co-creator', '@co-creator'];
 // ── Module-level cache (populated by refreshMentionData after /api/cats fetch) ─
 
 // Include co-creator as pseudo-cat so @co-creator highlights gold
-let _cats: Array<{ id: string; mentionPatterns: string[]; color: { primary: string } }> = [];
+let _cats: CatData[] = [];
 let _coCreatorMentionPatterns = [...DEFAULT_CO_CREATOR_MENTION_PATTERNS];
 let _mentionToCat = buildMentionToCat([]);
 let _mentionRe = buildMentionRe(_mentionToCat);
 let _mentionColor = buildMentionColor([]);
+let _mentionLabel: Record<string, string> = {};
+let _displayMentionToCat: Record<string, string> = {};
+let _displayMentionRe = buildMentionRe(_displayMentionToCat);
+let _canonicalOnlyMentionAliases = new Set<string>();
 
 function normalizeCoCreatorMentionPatterns(mentionPatterns: readonly string[]): string[] {
   const normalized = mentionPatterns
@@ -70,6 +75,15 @@ function rebuildMentionCache(): void {
   _mentionToCat = buildMentionToCat(all);
   _mentionRe = buildMentionRe(_mentionToCat);
   _mentionColor = buildMentionColor(all);
+  _mentionLabel = Object.fromEntries(_cats.map((cat) => [cat.id, formatCatDisplayName(cat)]));
+  const canonicalMentionToCat = Object.fromEntries(_cats.map((cat) => [cat.id.toLowerCase(), cat.id]));
+  // Display may humanize a canonical id preserved in prose, but routing
+  // projections must continue to mirror the server's mentionPatterns exactly.
+  _displayMentionToCat = { ...canonicalMentionToCat, ..._mentionToCat };
+  _displayMentionRe = buildMentionRe(_displayMentionToCat);
+  _canonicalOnlyMentionAliases = new Set(
+    Object.keys(canonicalMentionToCat).filter((alias) => _mentionToCat[alias] === undefined),
+  );
 }
 
 rebuildMentionCache();
@@ -101,6 +115,25 @@ export function getMentionToCat(): Record<string, string> {
 /** Map catId → primary color hex (e.g. "#9B7EBD") */
 export function getMentionColor(): Record<string, string> {
   return _mentionColor;
+}
+
+/** Human-facing labels for canonical catIds embedded in message prose. */
+export function getMentionLabel(): Record<string, string> {
+  return _mentionLabel;
+}
+
+/** Display-only mention grammar, including canonical member ids preserved in prose. */
+export function getDisplayMentionRe(): RegExp {
+  return _displayMentionRe;
+}
+
+export function getDisplayMentionToCat(): Record<string, string> {
+  return _displayMentionToCat;
+}
+
+/** True when an alias came only from the canonical-id display fallback. */
+export function isCanonicalOnlyMentionAlias(alias: string): boolean {
+  return _canonicalOnlyMentionAliases.has(alias.toLowerCase());
 }
 
 export function resetMentionDataForTest(): void {

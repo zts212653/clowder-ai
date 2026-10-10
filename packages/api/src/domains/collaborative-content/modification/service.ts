@@ -3,6 +3,7 @@ import {
   type ContentModificationRequestView,
   contentModificationRequestSchema,
 } from '@cat-cafe/shared';
+import type { QueueTargetExecutionReadPort } from '../../cats/services/agents/invocation/queue-ledger/QueueTargetExecutionView.js';
 import type { IMessageStore } from '../../cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../cats/services/stores/ports/TaskStore.js';
 import type { ITurnExecutionStore } from '../../cats/services/stores/ports/TurnExecutionStore.js';
@@ -47,6 +48,7 @@ export class ContentModificationService {
     private readonly deps: {
       store: ArtifactReviewStore;
       messages: IMessageStore;
+      queue?: QueueTargetExecutionReadPort;
       turnExecutions?: Pick<ITurnExecutionStore, 'get'>;
       tasks: ITaskStore;
       lifecycle: EntrustedWorkLifecycleService;

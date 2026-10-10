@@ -236,8 +236,8 @@ export class CallbackAuthSystemMessageNotifier {
     try {
       const block = buildAuthFailureBlock({ ...params, failedAt: now });
       stored = await this.messageStore.append({
+        from: { kind: 'system', service: 'callback-auth' },
         userId: params.userId,
-        catId: null,
         content: `[callback-auth] ${params.tool} → ${params.reason}${params.fallbackOk ? ' (fallback ok)' : ''}`,
         mentions: [],
         timestamp: now,
@@ -263,6 +263,7 @@ export class CallbackAuthSystemMessageNotifier {
       threadId: params.threadId,
       message: {
         id: stored.id,
+        from: stored.from,
         type: 'connector',
         content: stored.content,
         source: CALLBACK_AUTH_SOURCE,

@@ -257,7 +257,7 @@ describe('what buildCSS emits for it', () => {
 
 describe('the rule that uses it', () => {
   const globals = readFileSync(join(import.meta.dirname, '../../../app/globals.css'), 'utf8');
-  const start = globals.indexOf('[data-lineage-focus="true"]');
+  const start = globals.indexOf('[data-message-jump-focus="true"]::after');
   const rule = globals.slice(start, globals.indexOf('}', start));
 
   it('draws the ring in the human hue and chroma at the drawn lightness, not in the raw bubble role', () => {

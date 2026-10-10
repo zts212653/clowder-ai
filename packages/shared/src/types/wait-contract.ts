@@ -42,7 +42,20 @@ export interface UnifiedAwaitStateV1<SubjectRef extends string, Baseline, Predic
   readonly createdAt: number;
 }
 
-export type WaitOutcomeDelivery = 'pending' | 'delivered' | 'not_applicable' | 'legacy_unfenced';
+/**
+ * Delivery outbox truth, shared by the bounded wait domains. Suppression and
+ * immutable Queue conflicts are settled outcomes, never successful delivery.
+ * Legacy readers test exactly `pending`, so unknown terminal values fail closed.
+ * An exclusive publish claim is not a delivery state: old readers must still
+ * see a claimed-but-unsent outcome as deliverable after rollback.
+ */
+export type WaitOutcomeDelivery =
+  | 'pending'
+  | 'delivered'
+  | 'suppressed'
+  | 'not_applicable'
+  | 'legacy_unfenced'
+  | 'queue_conflict';
 
 export interface WaitOutcomeBaseV1<SubjectRef extends string> {
   readonly v: 1;

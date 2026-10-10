@@ -1,17 +1,21 @@
 import {
+  advanceTurnOutputFence,
   assertCoveredMessageIds,
+  assertCreatableOutputFence,
   assertCreateTurnExecutionInput,
   assertTurnExecutionTerminalInput,
   type BindCoveredMessageIdsResult,
   type CreateTurnExecutionInput,
   type CreateTurnExecutionResult,
   cloneTurnExecutionRecord,
+  createdOutputFence,
   type InterruptRunningTurnExecutionsInput,
   type ITurnExecutionStore,
   serializeTurnExecutionIdentity,
   type TransitionTurnExecutionResult,
   type TurnExecutionRecord,
   type TurnExecutionTerminalInput,
+  type TurnOutputFenceVerdict,
 } from '../ports/TurnExecutionStore.js';
 
 function sortRecords(records: TurnExecutionRecord[]): TurnExecutionRecord[] {
@@ -24,9 +28,11 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
   private readonly records = new Map<string, TurnExecutionRecord>();
   private readonly immutableIdentities = new Map<string, string>();
   private readonly parentIndex = new Map<string, Set<string>>();
+  private readonly responsePending = new Set<string>();
 
   createRunning(input: CreateTurnExecutionInput): CreateTurnExecutionResult {
     assertCreateTurnExecutionInput(input);
+    assertCreatableOutputFence(input);
     const existing = this.records.get(input.invocationId);
     if (existing) {
       return {
@@ -38,7 +44,7 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
       };
     }
 
-    const record = cloneTurnExecutionRecord({ ...input, status: 'running' });
+    const record = cloneTurnExecutionRecord({ ...input, outputFence: createdOutputFence(input), status: 'running' });
     this.records.set(input.invocationId, record);
     this.immutableIdentities.set(input.invocationId, serializeTurnExecutionIdentity(input));
     const childIds = this.parentIndex.get(input.parentInvocationId) ?? new Set<string>();
@@ -96,7 +102,30 @@ export class InMemoryTurnExecutionStore implements ITurnExecutionStore {
     record.status = input.status;
     record.endedAt = input.endedAt;
     if (input.terminalReason !== undefined) record.terminalReason = input.terminalReason;
+    this.responsePending.add(invocationId);
     return { outcome: 'transitioned', record: cloneTurnExecutionRecord(record) };
+  }
+
+  listResponsePending(): TurnExecutionRecord[] {
+    return sortRecords(
+      [...this.responsePending]
+        .map((invocationId) => this.records.get(invocationId))
+        .filter((record): record is TurnExecutionRecord => record !== undefined)
+        .map(cloneTurnExecutionRecord),
+    );
+  }
+
+  clearResponsePending(invocationId: string): void {
+    this.responsePending.delete(invocationId);
+  }
+
+  settleOutputFence(invocationId: string, verdict: TurnOutputFenceVerdict): TurnExecutionRecord | null {
+    if (verdict !== 'allowed' && verdict !== 'rejected') throw new Error(`invalid output fence verdict: ${verdict}`);
+    const record = this.records.get(invocationId);
+    if (!record) return null;
+    const next = advanceTurnOutputFence(record.outputFence, verdict);
+    if (next !== undefined) record.outputFence = next;
+    return cloneTurnExecutionRecord(record);
   }
 
   interruptRunningBefore(cutoffStartedAt: number, input: InterruptRunningTurnExecutionsInput): TurnExecutionRecord[] {

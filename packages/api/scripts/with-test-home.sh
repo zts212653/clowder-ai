@@ -51,11 +51,9 @@ unset API_SERVER_HOST
 unset DEFAULT_CAT_ID
 
 # REDIS_URL is a runtime binding like the variables above, but unsetting it is
-# not enough: packages/shared/src/utils/redis.ts resolves
-# `process.env['REDIS_URL'] ?? 'redis://localhost:6399'`, so an absent value
-# selects the sanctuary. Unset is the most dangerous state here, not the safest,
-# and the variable must be pinned rather than stripped. Iron rule 1: development
-# uses 6398 only.
+# not enough: an absent URL can select a shared default endpoint. Nor is 6398
+# proof of an owned test store: another checkout may be using it. Non-Redis
+# suites must have a non-connectable binding, and discard inherited data paths.
 #
 # This is the single pin for every test entrypoint that goes through this
 # wrapper, sharded or not. run-isolated-redis-tests.sh deliberately exports its
@@ -66,6 +64,9 @@ unset DEFAULT_CAT_ID
 # packages/api/scripts/public-test-isolation-preflight.mjs, which rewrites them
 # to a non-connectable endpoint. This pin is the floor, that rewrite is the
 # stricter case; they are not duplicates of each other.
-export REDIS_URL="redis://127.0.0.1:6398"
+if [[ "${CAT_CAFE_REDIS_TEST_ISOLATED:-}" != "1" ]]; then
+  unset REDIS_PORT REDIS_DATA_DIR REDIS_BACKUP_DIR REDIS_KEY_PREFIX
+  export REDIS_URL="redis://127.0.0.1:0"
+fi
 
 exec "$@"

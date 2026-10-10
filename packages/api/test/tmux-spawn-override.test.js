@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import { AgentPaneRegistry } from '../dist/domains/terminal/agent-pane-registry.js';
+import { buildTmuxAgentCarrierExitError } from '../dist/domains/terminal/tmux-agent-carrier-session.js';
 import { createTmuxSpawnOverride } from '../dist/domains/terminal/tmux-agent-spawner.js';
 import { TmuxGateway } from '../dist/domains/terminal/tmux-gateway.js';
 
@@ -56,6 +57,15 @@ describe('createTmuxSpawnOverride', () => {
 
     const jsonEvents = events.filter((e) => e.type === 'ok');
     assert.equal(jsonEvents.length, 1);
+  });
+
+  it('sanitizes tmux carrier stderr before taking its tail excerpt', async () => {
+    const token = `sk-${'X'.repeat(40)}`;
+    const stderr = `${'A'.repeat(1_100)}${token}${'B'.repeat(980)}`;
+    const error = buildTmuxAgentCarrierExitError(1, stderr);
+
+    assert.doesNotMatch(error.message, /X{8,}/);
+    assert.match(error.message, /\[TOKEN_REDACTED\]/);
   });
 
   it('the app-server tmux carrier applies the same cat CLI process context', () => {

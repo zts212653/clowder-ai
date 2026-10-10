@@ -30,7 +30,6 @@ import {
   flattenWorldContext,
   formatAlwaysOnDocs,
   formatHandleFreeLabel,
-  formatSignalsBlock,
   PROVIDER_LABELS,
   resolveActiveParticipants,
   resolveDirectMessage,
@@ -145,7 +144,6 @@ export function assembleForSession(catId: CatId, options?: StaticIdentityOptions
     conciergeLines: null,
     worldContext: null,
     alwaysOnDocsBlock: null,
-    activeSignalsBlock: null,
     a2aBallCheckContent: null,
     handoffDecisionTreeContent: null,
   };
@@ -219,8 +217,6 @@ export function assembleForTurn(context: InvocationContext): AssemblerInput {
     worldContext: context.worldContext ? flattenWorldContext(context.worldContext) : null,
     alwaysOnDocsBlock:
       context.alwaysOnDocs && context.alwaysOnDocs.length > 0 ? formatAlwaysOnDocs(context.alwaysOnDocs) : null,
-    activeSignalsBlock:
-      context.activeSignals && context.activeSignals.length > 0 ? formatSignalsBlock(context.activeSignals) : null,
     a2aBallCheckContent: shouldA2A ? loadA2aBallCheck() || null : null,
     handoffDecisionTreeContent: null,
   };

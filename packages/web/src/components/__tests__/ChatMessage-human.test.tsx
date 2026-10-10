@@ -21,11 +21,19 @@ const timeText = (ts: number) =>
   new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
 function own(id: string, overrides: Partial<ChatMessageData> = {}): ChatMessageData {
-  return { id, type: 'user', content: `内容 ${id}`, timestamp: T, ...overrides };
+  return {
+    id,
+    type: 'user',
+    from: { kind: 'user', userId: 'test-user' },
+    content: `内容 ${id}`,
+    timestamp: T,
+    ...overrides,
+  };
 }
 const catReply = (id: string): ChatMessageData => ({
   id,
   type: 'assistant',
+  from: { kind: 'agent', catId: 'opus' },
   catId: 'opus',
   content: `猫 ${id}`,
   timestamp: T + 1000,

@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { CANONICAL_TOOL_REGISTRY } from '../src/canonical-server-tools.js';
-import type { McpSurfaceSnapshot } from '../src/tool-governance-snapshot.js';
+import { resolveMcpImplementationCatalog } from '../src/tool-governance-implementation.js';
+import { createMcpSurfaceSnapshot, type McpSurfaceSnapshot } from '../src/tool-governance-snapshot.js';
 
 const repoRoot = resolve(import.meta.dirname, '../../..');
 // Home intake keeps Clowder AI's newer household-specific opensource-ops policy; this regression owns only the runtime/server-inference boundary.
@@ -25,6 +26,26 @@ async function readText(...segments: string[]): Promise<string> {
 }
 
 describe('#1387 opensource-ops surface regression', () => {
+  it('exported snapshot matches every current tool schema, description and actual implementation', async () => {
+    const baseline = JSON.parse(
+      await readText('packages/mcp-server/governance/mcp-surface-baseline.json'),
+    ) as McpSurfaceSnapshot;
+    const implementationCatalog = await resolveMcpImplementationCatalog({
+      repoRoot,
+      definitions: CANONICAL_TOOL_REGISTRY,
+      loadRuntimeModule: async (ref) => {
+        const moduleSpecifier = /^module:(.+)#[^#]+$/.exec(ref)?.[1];
+        assert.ok(moduleSpecifier?.startsWith('./'), `invalid implementation ref: ${ref}`);
+        return import(new URL(`../src/${moduleSpecifier.slice(2)}`, import.meta.url));
+      },
+    });
+    // The marker is historical home provenance, not a public ancestry claim.
+    const current = createMcpSurfaceSnapshot(CANONICAL_TOOL_REGISTRY, {
+      protectedBaseSha: baseline.protectedBaseSha,
+      implementationCatalog,
+    });
+    assert.deepEqual(baseline, current);
+  });
   it('cat_cafe_propose_thread source description does not contain stale server-inference phrases', () => {
     const definition = CANONICAL_TOOL_REGISTRY.find((d) => d.name === 'cat_cafe_propose_thread');
     assert.ok(definition, 'cat_cafe_propose_thread must be registered');

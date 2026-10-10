@@ -113,13 +113,12 @@ vi.mock('@/hooks/useAgentMessages', () => ({
   useAgentMessages: () => ({
     handleAgentMessage: vi.fn(),
     handleStop: vi.fn(),
-    resetRefs: vi.fn(),
-    resetTimeout: vi.fn(),
-    clearDoneTimeout: vi.fn(),
   }),
 }));
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages: [],
+    handleReadingIntent: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: null },
@@ -166,8 +165,6 @@ vi.mock('../components/ChatInput', () => ({ ChatInput: () => null }));
 vi.mock('../components/ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
 vi.mock('../components/ThreadSidebar', () => ({ ThreadSidebar: () => null }));
 vi.mock('../components/RightStatusPanel', () => ({ RightStatusPanel: () => null }));
-vi.mock('../components/ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('../components/ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../components/MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../components/MessageActions', () => ({
   MessageActions: ({ children }: { children: React.ReactNode }) => children,

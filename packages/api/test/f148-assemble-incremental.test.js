@@ -1,6 +1,7 @@
 // @ts-check
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { adaptMessageStore, canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 const { assembleIncrementalContext: assembleIncrementalContextWithoutCapacity } = await import(
   '../dist/domains/cats/services/agents/routing/route-helpers.js'
@@ -116,7 +117,7 @@ function buildDeps(messageStore, deliveryCursorStore, options = {}) {
 
 describe('F148: assembleIncrementalContext — smart window integration', () => {
   test('F296 AC-A3: stale artifact alone cannot become command-like truth source', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 1);
 
@@ -146,7 +147,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A6: warm path (≤15 msgs) produces unchanged output format', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const msgs = seedMessages(messageStore, 10);
 
@@ -163,7 +164,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A1: cold mention produces far fewer tokens than flat delivery would', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
 
     // Create 100 messages with substantial content (cold mention scenario)
@@ -197,7 +198,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A2: smart window preserves semantic chains', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
 
     // 20 msgs, last 2 are tool_use → tool_result
@@ -230,7 +231,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A3: tombstone contains all required fields', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 30);
 
@@ -246,7 +247,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A4: evidence recall fail-open on store error', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 20);
 
@@ -270,7 +271,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('AC-A5: tool payload scrub on non-terminal messages', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
 
     const baseTs = Date.now() - 20 * 60_000;
@@ -310,7 +311,7 @@ describe('F148: assembleIncrementalContext — smart window integration', () => 
   });
 
   test('no evidenceStore: cold path works without it', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 20);
 
@@ -334,7 +335,7 @@ function result_is_smart_window(result) {
 
 describe('F148 review fixes', () => {
   test('P1-1: threadStore.get() throwing does NOT crash assembleIncrementalContext', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 20);
 
@@ -356,7 +357,7 @@ describe('F148 review fixes', () => {
   });
 
   test('P1-2: effectiveMaxContextTokens hard cap — graduated degradation', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 30);
 
@@ -399,7 +400,7 @@ describe('F148 review fixes', () => {
     // 10 messages with ~11K chars each ≈ 17K tokens, but count (10) < threshold (15)
     // First 6 msgs are old, then a 20-min silence gap, then 4 recent msgs
     // Token trigger should activate smart window → burst captures last 4, omits first 6 → tombstone
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
 
     const fatContent = 'Redis lock contention analysis. '.repeat(350); // ~11K chars ≈ 1750 tokens each
@@ -432,7 +433,7 @@ describe('F148 review fixes', () => {
   test('P1-review: count > threshold triggers smart window regardless of content size', async () => {
     // 20 msgs: count (20) > threshold (15) → must enter smart window via count trigger.
     // Deterministic behavioral check — no wall-clock assertion.
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
 
     const now = Date.now();
@@ -458,7 +459,7 @@ describe('F148 review fixes', () => {
 
   test('AC-C2+C3: cold mention includes anchors with primacy', async () => {
     // 30 msgs with time gap, msg[0] has code block (thread opener), msg[5] has @-mention
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const now = Date.now();
 
@@ -507,7 +508,7 @@ describe('F148 review fixes', () => {
   test('cloud-P1: anchor content is sanitized (no history envelope injection)', async () => {
     // If an omitted message contains fake history envelope markers,
     // they must NOT appear raw in the context output via anchors.
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const now = Date.now();
 
@@ -618,7 +619,7 @@ After text`;
   // --- Phase D: Coverage Map + Thread Memory injection ---
 
   test('AC-D2: smart window includes coverage map JSON', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -644,7 +645,7 @@ After text`;
   });
 
   test('AC-D2: smart window includes thread memory when available', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -669,7 +670,7 @@ After text`;
   });
 
   test('AC-D2: coverage map threadMemory field reflects availability', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -692,7 +693,7 @@ After text`;
   });
 
   test('P2-2: threadMemory exceeding maxThreadMemoryTokens is trimmed', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -726,7 +727,7 @@ After text`;
   });
 
   test('P1-new: single-line threadMemory exceeding maxThreadMemoryTokens is hard-capped', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -758,7 +759,7 @@ After text`;
   });
 
   test('cloud-P1: CJK token-dense single-line threadMemory is hard-capped', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -787,7 +788,7 @@ After text`;
   });
 
   test('P1: threadMemory with envelope poison is sanitized', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -818,7 +819,7 @@ After text`;
 
 describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   test('AC-E coverageMap is present when smart window triggers', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -837,7 +838,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   });
 
   test('briefingContext includes threadMemorySummary when threadStore has memory', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -860,7 +861,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   });
 
   test('briefingContext includes anchorSummaries from omitted messages', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 50 * 60_000;
     // First message with high importance (code block + mentions)
@@ -884,7 +885,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   });
 
   test('VG-1 + F296 AC-A1: coverageMap counts 2 recall candidates without carrying their titles', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -915,7 +916,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   });
 
   test('VG-1: recall pointer counts 0 when no evidence store', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 30; i++) {
@@ -936,7 +937,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
   });
 
   test('coverageMap is undefined on warm path', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 10);
     const deps = buildDeps(messageStore, deliveryCursorStore);
@@ -949,7 +950,7 @@ describe('F148 Phase E: coverageMap on IncrementalContextResult', () => {
 describe('F148 Phase E: AC-E2 anti-pollution — briefing excluded from all recall paths', () => {
   test('briefing messages excluded from messageStore query used by evidence indexer', async () => {
     // Simulates the messageListFn pattern: getByThread → filter origin=briefing
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const baseTs = Date.now() - 5 * 60_000;
     messageStore.append(mockMsg({ content: 'normal msg', timestamp: baseTs }));
     messageStore.append(mockMsg({ content: 'briefing card content', timestamp: baseTs + 60_000, origin: 'briefing' }));
@@ -965,7 +966,7 @@ describe('F148 Phase E: AC-E2 anti-pollution — briefing excluded from all reca
 
 describe('F148 Phase E: origin briefing filter (AC-E2)', () => {
   test('messages with origin=briefing are excluded from incremental context', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 5 * 60_000;
     // Normal message
@@ -983,7 +984,7 @@ describe('F148 Phase E: origin briefing filter (AC-E2)', () => {
   });
 
   test('briefing messages excluded even in smart window path', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 30 * 60_000;
     for (let i = 0; i < 28; i++) {
@@ -1006,7 +1007,7 @@ describe('F148 Phase E: origin briefing filter (AC-E2)', () => {
 
 describe('assembleIncrementalContext — unread visible message contract', () => {
   test('play mode preserves every unread visible user and cat message in timeline order', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const baseTs = Date.now() - 3_000;
     const firstUserMessage = await messageStore.append(
@@ -1049,26 +1050,30 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('keeps same-route output isolated unless it is the exact A2A trigger', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-same-route';
     const userId = 'user-same-route';
-    const current = messageStore.append({
-      userId,
-      catId: null,
-      content: '@opus then @codex solve independently',
-      mentions: ['opus', 'codex'],
-      timestamp: 1,
-      threadId,
-    });
-    const earlierOutput = messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'opus first-pass answer',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 2,
-      threadId,
-    });
+    const current = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: '@opus then @codex solve independently',
+        mentions: ['opus', 'codex'],
+        timestamp: 1,
+        threadId,
+      }),
+    );
+    const earlierOutput = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'opus first-pass answer',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 2,
+        threadId,
+      }),
+    );
     const deps = buildDeps(messageStore, new DeliveryCursorStore());
 
     const isolated = await assembleIncrementalContext(deps, userId, threadId, 'codex', current.id, 'play', {
@@ -1083,8 +1088,38 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
     assert.ok(directHandoff.contextText.includes('opus first-pass answer'));
   });
 
+  test('does not repeat the current direct user request as a co-creator baton', async () => {
+    const messageStore = adaptMessageStore(new MessageStore());
+    const threadId = 'thread-direct-current-request';
+    const userId = 'user-direct-current-request';
+    const current = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: '@opus inspect this exact request',
+        mentions: ['opus'],
+        timestamp: 1,
+        threadId,
+      }),
+    );
+
+    const result = await assembleIncrementalContext(
+      buildDeps(messageStore, new DeliveryCursorStore()),
+      userId,
+      threadId,
+      'opus',
+      current.id,
+      'play',
+      { contextProjection: coldProjection('serial') },
+    );
+
+    assert.ok(result.contextText.includes(current.content));
+    assert.ok(!result.contextText.includes('传球: co-creator'));
+    assert.ok(!result.contextText.includes(`原文: "${current.content}"`));
+  });
+
   test('defers a parallel sibling reply without consuming it before a later directed synthesis turn', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     const threadId = 'thread-parallel-sibling-delivery';
     const userId = 'user-parallel-sibling-delivery';
@@ -1153,7 +1188,7 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('does not defer explicitly directed or causally independent cat output', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-parallel-sibling-counterexamples';
     const userId = 'user-parallel-sibling-counterexamples';
     const source = messageStore.append({
@@ -1202,7 +1237,7 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('projects the complete causal reply and public output after a newer user turn targets the receiver', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-directed-window-regression';
     const userId = 'user-directed-window-regression';
     const fableOutput = messageStore.append({
@@ -1269,7 +1304,7 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('server-authored causal reply metadata, not replyTo alone, creates a directed same-route projection', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-directed-causal-projection';
     const userId = 'user-directed-causal-projection';
     const current = messageStore.append({
@@ -1326,7 +1361,7 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('emits bounded content-free message refs and filter reasons for the final projection', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-projection-audit';
     const userId = 'user-projection-audit';
     for (let index = 0; index < 24; index++) {
@@ -1358,35 +1393,41 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('does not advance the cursor past an earlier same-route output withheld in play mode', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-same-route-boundary';
     const userId = 'user-same-route-boundary';
-    const current = messageStore.append({
-      userId,
-      catId: null,
-      content: '@opus then @codex continue the chain',
-      mentions: ['opus', 'codex'],
-      timestamp: 1,
-      threadId,
-    });
-    const earlierOutput = messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'opus earlier output must remain unread',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 2,
-      threadId,
-    });
-    const exactTrigger = messageStore.append({
-      userId,
-      catId: 'fable-5',
-      content: '@codex exact handoff',
-      mentions: ['codex'],
-      origin: 'stream',
-      timestamp: 3,
-      threadId,
-    });
+    const current = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: null,
+        content: '@opus then @codex continue the chain',
+        mentions: ['opus', 'codex'],
+        timestamp: 1,
+        threadId,
+      }),
+    );
+    const earlierOutput = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'opus earlier output must remain unread',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 2,
+        threadId,
+      }),
+    );
+    const exactTrigger = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'fable-5',
+        content: '@codex exact handoff',
+        mentions: ['codex'],
+        origin: 'stream',
+        timestamp: 3,
+        threadId,
+      }),
+    );
     const deps = buildDeps(messageStore, new DeliveryCursorStore());
 
     const result = await assembleIncrementalContext(deps, userId, threadId, 'codex', exactTrigger.id, 'play', {
@@ -1404,38 +1445,44 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
   });
 
   test('applies the same withheld-message cursor cap on the cold smart-window path', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const threadId = 'thread-same-route-cold-boundary';
     const userId = 'user-same-route-cold-boundary';
     let precedingMessage;
     for (let index = 0; index < 16; index++) {
-      precedingMessage = messageStore.append({
-        userId,
-        catId: null,
-        content: `older visible message ${index}`,
-        mentions: [],
-        timestamp: index + 1,
-        threadId,
-      });
+      precedingMessage = messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: `older visible message ${index}`,
+          mentions: [],
+          timestamp: index + 1,
+          threadId,
+        }),
+      );
     }
-    const earlierOutput = messageStore.append({
-      userId,
-      catId: 'opus',
-      content: 'withheld cold-path output',
-      mentions: [],
-      origin: 'stream',
-      timestamp: 17,
-      threadId,
-    });
-    const exactTrigger = messageStore.append({
-      userId,
-      catId: 'fable-5',
-      content: '@codex cold exact handoff',
-      mentions: ['codex'],
-      origin: 'stream',
-      timestamp: 18,
-      threadId,
-    });
+    const earlierOutput = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'opus',
+        content: 'withheld cold-path output',
+        mentions: [],
+        origin: 'stream',
+        timestamp: 17,
+        threadId,
+      }),
+    );
+    const exactTrigger = messageStore.append(
+      canonicalTestMessageInput({
+        userId,
+        catId: 'fable-5',
+        content: '@codex cold exact handoff',
+        mentions: ['codex'],
+        origin: 'stream',
+        timestamp: 18,
+        threadId,
+      }),
+    );
     const deps = buildDeps(messageStore, new DeliveryCursorStore(), {
       threadStore: mockThreadStore('Cold boundary thread'),
     });
@@ -1454,7 +1501,7 @@ describe('assembleIncrementalContext — unread visible message contract', () =>
 
 describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
   test('cloud-P1: malformed decisions (non-array) are ignored, briefing still builds', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 20);
 
@@ -1487,7 +1534,7 @@ describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
   });
 
   test('coverageMap.threadMemory includes decisions when threadMemory has them', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const deliveryCursorStore = new DeliveryCursorStore();
     seedMessages(messageStore, 20);
 
@@ -1524,7 +1571,7 @@ describe('VG-3 P1-1: coverageMap threadMemory decisions passthrough', () => {
 
 describe('assembleIncrementalContext — system error exclusion', () => {
   test('excludes userId=system error messages from incremental context', async () => {
-    const messageStore = new MessageStore();
+    const messageStore = adaptMessageStore(new MessageStore());
     const cursorStore = new DeliveryCursorStore();
 
     // User message

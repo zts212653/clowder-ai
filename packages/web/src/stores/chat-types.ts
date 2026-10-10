@@ -1,16 +1,20 @@
 import type {
+  CatRoutingError,
   CliDiagnostics,
   ContextAttachment,
   CrossThreadCoordination,
   CustodyOfferV1,
-  FreshnessSupplementProjection,
+  LifecycleActiveRun,
+  LifecycleAppendAction,
+  LifecycleStoredMessageMetadata,
   MessageBundleCarrierV1,
   MessageContent,
+  MessageFrom,
   MessageMediaPublicationSource,
   ProviderSemanticEvent,
   ProviderSubexecutionSemanticEvent,
   PublishedFreshnessAnnotation,
-  QueueMessageReceipt,
+  QueueAuthorIntentReceipt,
   QueueRecoveryAction,
   ReplyPreview,
   SchedulerMessageExtra,
@@ -286,6 +290,8 @@ export type MessagePublicationOrigin = Pick<
 
 export interface ChatMessage {
   id: string;
+  /** RFC #1356 canonical sender identity for persisted messages. */
+  from?: MessageFrom;
   /** Client-only exact persisted records folded into this canonical bubble. */
   projectionSourceMessageIds?: string[];
   /** Client projection coordinates only; the content owner still verifies each original persisted item. */
@@ -295,6 +301,8 @@ export interface ChatMessage {
   variant?: 'error' | 'info' | 'tool' | 'evidence' | 'a2a_followup' | 'governance_blocked';
   catId?: string;
   content: string;
+  /** #1354: canonical Queue → History → Active Run lifecycle projection. */
+  lifecycle?: LifecycleStoredMessageMetadata;
   /** F97: External connector source. Present when type='connector' */
   source?: ConnectorSourceData;
   contentBlocks?: MessageContent[];
@@ -316,16 +324,18 @@ export interface ChatMessage {
   evidence?: EvidenceData;
   /** F22+F52+F098-C1: Rich blocks + cross-thread origin + explicit targets */
   extra?: {
+    /** F310 source-owner projection; the card rehydrates canonical state before acting. */
+    custodyOfferV1?: CustodyOfferV1;
+    /** F306 durable projection input shared by live, hydration, callback and replay. */
+    semanticEvent?: ProviderSemanticEvent;
+    rich?: { v: 1; blocks: RichBlock[] };
+    /** #1354 structured routing feedback retained with the exact input message. */
+    routingWarnings?: readonly CatRoutingError[];
     /** F317: Host-saved identity for this Live turn; never infer old identity from today's config. */
     liveCompanion?: {
       modality: 'voice' | 'result';
       identity?: import('@cat-cafe/shared').CompanionIdentitySnapshotV1;
     };
-    /** F306 durable projection input shared by live, hydration, callback and replay. */
-    semanticEvent?: ProviderSemanticEvent;
-    rich?: { v: 1; blocks: RichBlock[] };
-    /** F310 source-owner projection; the card rehydrates canonical state before acting. */
-    custodyOfferV1?: CustodyOfferV1;
     contentModificationRequestV1?: import('@cat-cafe/shared').ContentModificationSourceMessageV1;
     crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
     /** F081: Stream identity for continuity / hydration reconcile.
@@ -334,15 +344,9 @@ export interface ChatMessage {
      *    - `turnInvocationId` is the per-cat-turn invocation id (bubble identity stable key — required
      *      for same-parent multi-turn-same-cat bubbles to NOT merge; see砚砚 catch 2026-05-09 17:32)
      *  Frontend `getBubbleInvocationId` prefers `turnInvocationId` (fallback `invocationId` for legacy).
-     *  F194 Phase Z11: when projection merges a stream record + a post_message callback into one
-     *  canonical bubble (Z8 KD-27), the bubble origin becomes `callback`. ChatMessage then loses the
-     *  CLI Output stdout (it only feeds content to toCliEvents when origin==='stream'). To keep CLI
-     *  Output behavior consistent regardless of post_msg, projection exposes:
-     *    - `cliStdout`: the stream-origin content portion → ChatMessage feeds this to the CLI Output
-     *    - `speechContent`: the callback-origin content portion → ChatMessage renders this as the
-     *      main bubble body (the post_msg speech), instead of the full concat
-     *  Both are set ONLY when a group contains BOTH stream and callback records (the merge case);
-     *  pure-stream / pure-callback groups leave them undefined so existing rendering is unchanged. */
+     *  Legacy persisted records may contain merged stream/callback projections.
+     *  `cliStdout` and `speechContent` preserve their historical rendering; new callback
+     *  messages and final responses have independent identities and are not merged. */
     stream?: {
       invocationId?: string;
       turnInvocationId?: string;
@@ -374,33 +378,10 @@ export interface ChatMessage {
       reasonKind: 'needs_bootstrap' | 'needs_confirmation' | 'files_missing';
       invocationId?: string;
     };
-    /** F254 Phase E: identity-bound catch projection, rebuilt from closure truth. */
-    freshnessClosure?: {
-      closureId: string;
-      status: 'catching_up' | 'blocked';
-      sourceInvocationId?: string;
-      sourceMessageId?: string;
-      turnInvocationId?: string;
-      originTriggerMessageId?: string | null;
-      blockedReason?: string;
-      replayUnsafeToolNames?: string[];
-      updatedAt?: number;
-      /** Shared schema guarantees null origin only for pre-lineage legacy data. */
-      legacy?: boolean;
-    };
     /** ADR-042 exact-boundary fact attached to every glass-box-published answer. */
     freshness?: PublishedFreshnessAnnotation;
-    /** ADR-042 additive reply provenance; separate from recovery provenance. */
-    supplement?: {
-      lineageId: string;
-      supplementId: string;
-      seq: 1 | 2;
-      originalMessageId: string;
-    };
-    /** Durable supplement lifecycle projected onto the published original. */
-    freshnessSupplement?: FreshnessSupplementProjection;
-    /** F264: server-derived durable per-target message receipt. */
-    queueReceipt?: QueueMessageReceipt;
+    /** Fresh source created by an owner-authorized cloud delivery retry. */
+    cloudBridgeRetry?: import('@cat-cafe/shared').CloudBridgeRetryV1;
     /** F264 Gap F: content-free message recall truth projected for the owner timeline. */
     recall?: {
       version: 1;
@@ -419,29 +400,18 @@ export interface ChatMessage {
     /**
      * F173 a2a-handoff bug fix: marker for system messages that must be
      * timestamp-ordered into the message list (not appended at end).
-     * a2a_handoff: routing pill (for example "缅因猫(codex) → 布偶猫(Opus 4.7)")
-     * emitted by route-serial,
+     * a2a_handoff: parallel routing pill (for example "缅因猫(codex) ⇉ 布偶猫(Opus 4.7)")
      * which can arrive after the next cat's stream bubble due to WebSocket
      * pipeline race; without marker it ends up visually after the bubble it
      * should precede.
      */
-    systemKind?: 'a2a_routing' | 'context_briefing' | 'freshness_closure';
+    systemKind?: 'a2a_routing' | 'context_briefing';
     /** Machine-readable A2A route metadata. The visible pill text is human-readable; this survives F5. */
     a2aRouting?: { fromCatId?: string; targetCatId?: string; invocationId?: string; routing?: A2ARoutingProjection };
     /** F254 incident salvage: durable provenance for a message restored at its original time. */
     recovery?: MessageRecoveryExtra;
     /** Original visible system_info payload; content remains the persisted fallback copy. */
     systemInfo?: SystemInfoProjection;
-    /** Rebuildable projection of canonical InvocationRecord truth after the UI wait window expires. */
-    invocationReconciliation?: {
-      v: 1;
-      invocationId: string;
-      catIds: string[];
-      turnInvocationIds: string[];
-      phase: 'running' | 'succeeded' | 'failed' | 'canceled' | 'unknown_running';
-      reason?: 'record_not_found' | 'record_unavailable' | 'record_mismatch';
-      updatedAt: number;
-    };
     /** Invocation-scoped transient provider reconnect lifecycle. Raw attempts stay as evidence. */
     providerRecovery?: {
       v: 1;
@@ -715,6 +685,8 @@ export interface CatInvocationInfo {
    *  Stamped into formal/live message `extra.stream.turnInvocationId` so frontend bubble dedup
    *  uses the turn dimension (prevents same-parent multi-turn-same-cat bubble merge). */
   turnInvocationId?: string;
+  /** Exact server-owned working identity. Dynamic UI must fail closed without it. */
+  activeRun?: LifecycleActiveRun;
   durationMs?: number;
   startedAt?: number;
   usage?: TokenUsage;
@@ -822,20 +794,17 @@ export interface QueueEntry {
   content: string;
   messageId: string | null;
   mergedMessageIds: string[];
-  source: 'user' | 'connector' | 'agent';
+  from: MessageFrom;
   targetCats: string[];
+  /** #1354 structured routing feedback retained on the inline Queue payload. */
+  routingWarnings?: readonly CatRoutingError[];
   intent: string;
-  status: 'queued' | 'processing';
-  /** F254 canonical per-target read projection, hydrated from GET /queue after F5. */
-  targetStates?: Record<
-    string,
-    'queued' | 'notified' | 'awakened' | 'seen' | 'failed' | 'steering' | 'withdrawn' | 'handled'
-  >;
+  status: 'queued';
+  /** Pending-target delivery preference. History dispatchRefs own actual delivery. */
+  authorIntentByTarget?: Record<string, QueueAuthorIntentReceipt>;
   createdAt: number;
   /** F122B: auto-execute without waiting for steer */
   autoExecute?: boolean;
-  /** F122B: which cat initiated this entry (for A2A handoff display) */
-  callerCatId?: string;
   /** F175: dequeue priority */
   priority?: 'urgent' | 'normal';
   /** F175: source category for visual grouping */
@@ -844,18 +813,21 @@ export interface QueueEntry {
   continuationKey?: string;
   /** F175: explicit dequeue position from drag-reorder */
   position?: number;
-  /** #706: Server-enriched message preview for QueuePanel display + recall-edit.
-   *  Attached by emitQueueUpdated() at push time via messageStore join. */
+  /** #706: HTTP-enriched History preview for QueuePanel display + recall-edit.
+   *  Mutation SSE publishes pending targets without waiting for this join. */
   messagePreview?: {
     contentBlocks?: ReadonlyArray<MessageContent>;
     replyTo?: string;
     /** Stored connector identity; lets the row reuse the timeline bubble's summary. */
     connector?: string;
+    source?: import('@cat-cafe/shared').ConnectorSource;
   };
-  /** F264: same durable receipt projection used by the terminal timeline bubble. */
-  queueReceipt?: QueueMessageReceipt;
   /** Server-owned executable recovery projection; absent only on legacy cached snapshots. */
   recoveryActions?: QueueRecoveryAction[];
+  /** Server-authored explicit lifecycle actions; never inferred from client liveness. */
+  lifecycleActions?: {
+    append?: LifecycleAppendAction;
+  };
 }
 
 /** #706: Typed composer draft for recall-edit and cross-feature insert.
@@ -913,9 +885,6 @@ export interface TrueRecallResponse {
   queue: QueueEntry[];
   clientSnapshot?: ComposerDraftInsert['clientSnapshot'];
 }
-
-/** F39: Message delivery mode — undefined = smart default, 'queue' = enqueue, 'force' = cancel + execute */
-export type DeliveryMode = 'queue' | 'force' | undefined;
 
 /** F101: Current game state in a thread */
 export type GameState = {
@@ -1021,10 +990,6 @@ export interface ThreadState {
   lastActivity: number;
   /** F39: Message queue entries for this thread */
   queue: QueueEntry[];
-  /** F39: Whether the queue is paused (e.g. after cancel/failure) */
-  queuePaused: boolean;
-  /** F39: Why the queue is paused */
-  queuePauseReason?: 'canceled' | 'failed';
   /** F39: Whether the queue is full (MAX_QUEUE_DEPTH reached) */
   queueFull: boolean;
   /** F39: Who triggered the full warning */
@@ -1136,7 +1101,6 @@ export const DEFAULT_THREAD_STATE: ThreadState = {
   lastActivity: 0,
   queue: [],
   activeInvocations: {},
-  queuePaused: false,
   queueFull: false,
   workspaceWorktreeId: null,
   workspaceOpenTabs: [],

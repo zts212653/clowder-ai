@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import './helpers/setup-cat-registry.js';
 import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { CONCIERGE_CONFIG_DEFAULTS, createCatId } from '@cat-cafe/shared';

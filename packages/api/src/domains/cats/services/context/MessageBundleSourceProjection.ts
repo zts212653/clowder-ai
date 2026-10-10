@@ -5,6 +5,7 @@ import {
   projectMarkdownReadableText,
   type RichBlock,
 } from '@cat-cafe/shared';
+import { messageFrom } from '../stores/message-from.js';
 import type { StoredMessage, StoredToolEvent } from '../stores/ports/MessageStore.js';
 import type { Thread } from '../stores/ports/ThreadStore.js';
 import {
@@ -213,14 +214,18 @@ export function readRichBlockFallback(block: RichBlock): string {
   }
 }
 
-export function projectMessageBundleReadableContent(
+export function projectMessageBundleReadableContentWithCoverage(
   message: Pick<StoredMessage, 'content' | 'contentBlocks' | 'extra'>,
-): string {
+): { content: string; fullyRepresented: boolean } {
   const parts: string[] = [];
+  let fullyRepresented = true;
   if (message.content.trim()) parts.push(message.content);
   for (const block of message.contentBlocks ?? []) {
     const fallback = readContentBlockFallback(block);
-    if (!fallback?.trim()) continue;
+    if (!fallback?.trim()) {
+      fullyRepresented = false;
+      continue;
+    }
     if (block.type === 'text' && message.content.trim()) continue;
     parts.push(fallback);
   }
@@ -228,7 +233,13 @@ export function projectMessageBundleReadableContent(
     const fallback = readRichBlockFallback(block);
     if (fallback?.trim()) parts.push(fallback);
   }
-  return parts.join('\n');
+  return { content: parts.join('\n'), fullyRepresented };
+}
+
+export function projectMessageBundleReadableContent(
+  message: Pick<StoredMessage, 'content' | 'contentBlocks' | 'extra'>,
+): string {
+  return projectMessageBundleReadableContentWithCoverage(message).content;
 }
 
 /**
@@ -273,12 +284,11 @@ export function isAccessibleSourceRecord(
   sourceThreadId: string,
   auth: MessageSelectionAuth,
 ): message is StoredMessage {
+  const from = message ? messageFrom(message) : null;
   const ownerAuthored =
     message?.userId === auth.userId &&
-    message.userId !== 'system' &&
-    message.userId !== 'scheduler' &&
-    message.catId !== 'system' &&
-    message.source === undefined &&
+    from?.kind !== 'system' &&
+    from?.kind !== 'external' &&
     message.origin !== 'briefing';
   const managedHoldConnector = message ? isOwnerVisibleManagedHoldConnector(message, auth.userId) : false;
   return Boolean(

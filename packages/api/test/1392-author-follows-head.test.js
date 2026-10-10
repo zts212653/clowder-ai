@@ -15,7 +15,7 @@ import { describe, it } from 'node:test';
  * and the conflict path. Only the stores are in memory.
  */
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { expandGitHubPrTrackingGoal } = await import('../../shared/dist/types/github-wait.js');
 
@@ -33,7 +33,7 @@ function authorDefaultWhen() {
 
 async function tracked(when = authorDefaultWhen()) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const connector = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'pr_tracking',
     subjectKey: SUBJECT,
@@ -67,7 +67,7 @@ async function tracked(when = authorDefaultWhen()) {
   let clock = 1_000;
   const lifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: connector.deliveryDeps,
     log,
     now: () => {
       clock += 1_000;
@@ -86,7 +86,7 @@ async function tracked(when = authorDefaultWhen()) {
       facts: { headSha, conflict: { mergeState } },
       collectorPatch: { conflict: { mergeState, lastFingerprint: `${headSha}:${mergeState}` } },
     });
-  const contents = () => messageStore.getByThread('thread_1').map((message) => message.content);
+  const contents = () => connector.contents('thread_1');
   return { taskStore, task, observeCi, observeConflict, contents };
 }
 

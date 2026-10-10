@@ -22,7 +22,7 @@ it('retains the server-owned modification-source carrier across live/history rec
     extra: { targetCats: ['codex-astra'] },
   };
   const history: ChatMessage = { ...current, extra: { contentModificationRequestV1: metadata } };
-  expect(
-    mergeReplaceHydrationMessages([history], [current], {}).messages[0]?.extra?.contentModificationRequestV1,
-  ).toEqual(metadata);
+  expect(mergeReplaceHydrationMessages([history], [current]).messages[0]?.extra?.contentModificationRequestV1).toEqual(
+    metadata,
+  );
 });

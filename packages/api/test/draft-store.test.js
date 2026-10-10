@@ -7,7 +7,7 @@ describe('DraftStore (in-memory)', () => {
   let store;
 
   beforeEach(() => {
-    store = new DraftStore({ ttlMs: 5000 });
+    store = new DraftStore();
   });
 
   const makeDraft = (overrides = {}) => ({
@@ -58,35 +58,14 @@ describe('DraftStore (in-memory)', () => {
     });
   });
 
-  describe('touch', () => {
-    it('updates the updatedAt timestamp', () => {
-      const oldTime = Date.now() - 3000;
-      store.upsert(makeDraft({ updatedAt: oldTime }));
-      store.touch('user-1', 'thread-1', 'inv-1');
+  describe('no expiry (F117 KD-23)', () => {
+    it('keeps a draft that has not been written for longer than the old 300-second expiry', () => {
+      const writtenLongAgo = Date.now() - 60 * 60_000;
+      store.upsert(makeDraft({ updatedAt: writtenLongAgo }));
       const drafts = store.getByThread('user-1', 'thread-1');
-      assert.equal(drafts.length, 1);
-      assert(drafts[0].updatedAt > oldTime, 'updatedAt should be refreshed');
-    });
-
-    it('no-op for non-existent draft', () => {
-      // Should not throw
-      store.touch('user-1', 'thread-1', 'no-such-inv');
-    });
-  });
-
-  describe('TTL expiration', () => {
-    it('expired drafts are filtered on read', () => {
-      const expiredTime = Date.now() - 10_000; // 10s ago, TTL is 5s
-      store.upsert(makeDraft({ updatedAt: expiredTime }));
-      const drafts = store.getByThread('user-1', 'thread-1');
-      assert.equal(drafts.length, 0);
-      assert.equal(store.size, 0, 'expired entry should be purged');
-    });
-
-    it('non-expired drafts are returned', () => {
-      store.upsert(makeDraft({ updatedAt: Date.now() }));
-      const drafts = store.getByThread('user-1', 'thread-1');
-      assert.equal(drafts.length, 1);
+      assert.equal(drafts.length, 1, 'a silent turn keeps its streamed body until its R ends');
+      assert.equal(drafts[0].content, 'Hello world');
+      assert.equal(typeof store.touch, 'undefined', 'nothing renews a draft on a timer any more');
     });
   });
 

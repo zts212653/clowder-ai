@@ -4,18 +4,14 @@
  */
 
 import crypto from 'node:crypto';
-import type { CatConfig, CatId, OutputCommitDecision, RoutingPreflightDecisionV1 } from '@cat-cafe/shared';
+import type { CatConfig, CatId, OutputCommitDecision } from '@cat-cafe/shared';
 import { catRegistry, resolveWorkflowSopSkill } from '@cat-cafe/shared';
 import {
   deriveHistoryContextTokenCeiling,
   resolvePromptInputCeilingTokens,
 } from '../../../../../config/context-capacity.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
-import {
-  ROUTE_HAS_A2A_HANDOFF,
-  ROUTE_TOTAL_CATS_INVOKED,
-  ROUTE_TOTAL_TOKENS,
-} from '../../../../../infrastructure/telemetry/genai-semconv.js';
+import { ROUTE_TOTAL_CATS_INVOKED, ROUTE_TOTAL_TOKENS } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
   conciergeVerifiedToolActions,
   conciergeVerifiedToolTargetsPerReply,
@@ -47,14 +43,6 @@ import { sharedEventStore, sharedNudgeCooldown } from '../../../../memory/entity
 import type { PushRecallPresentation } from '../../../../memory/f200-types.js';
 import type { PreparedProactiveMemoryNudge } from '../../../../memory/ProactiveMemoryNudgeService.js';
 import { mergePushRecallPresentations, triggerRecallCorrelation } from '../../../../memory/recall-correlation-hook.js';
-import { drainCapturedTraces } from '../../../../prompt-hooks/PipelinePromptBuilder.js';
-import { getTraceStore } from '../../../../prompt-hooks/trace-bootstrap.js';
-// F237: Injection trace (v0 — fire-and-forget observability)
-import { buildTraceDetail, buildTraceSummary, collectTrace } from '../../../../prompt-hooks/trace-collector.js';
-import {
-  preflightRoutingDispatch,
-  routingDispatchPreflightReceipt,
-} from '../../../../routing-context/RoutingDispatchPreflightPort.js';
 import { assembleContext } from '../../context/ContextAssembler.js';
 import {
   buildInvocationContext,
@@ -62,15 +50,14 @@ import {
   buildStaticIdentityPackOnly,
   type InvocationContext,
 } from '../../context/SystemPromptBuilder.js';
-import { checkStreamOutputFreshness } from '../../freshness/checkStreamOutputFreshness.js';
 import { mayDeleteDraft } from '../../freshness/FreshnessDraftCustody.js';
-import type { FreshnessEvaluation } from '../../freshness/glass-box/FreshnessOutputCommitCoordinator.js';
-import { findReplayUnsafeToolNames } from '../../freshness/tool-replay-safety.js';
 import { formatDegradationMessage } from '../../orchestration/DegradationPolicy.js';
 import { mergePresentationCounts, type PresentationCounts } from '../../session/context/context-surface-projection.js';
 import { buildSessionBootstrap, MAX_SESSION_BOOTSTRAP_TOKENS } from '../../session/SessionBootstrap.js';
 import { createMessageDeliveryBoundary } from '../../stores/message-delivery-boundary.js';
+import { messageFrom } from '../../stores/message-from.js';
 import type { AppendMessageInput, StoredToolEvent } from '../../stores/ports/MessageStore.js';
+import { commitLifecycleResponseFromAppendInput } from '../../stores/ports/MessageStore.js';
 import type { Thread, ThreadRoutingPolicyV1 } from '../../stores/ports/ThreadStore.js';
 import {
   projectTurnExecutionMessage,
@@ -98,7 +85,13 @@ import {
 } from '../invocation/invocation-capacity-snapshot.js';
 import { type InvocationParams, invokeSingleCat } from '../invocation/invoke-single-cat.js';
 import { buildMcpCallbackInstructions, needsMcpInjection } from '../invocation/McpPromptInjector.js';
+import {
+  MEMBER_TIMEOUT_REASON,
+  type MemberTimeoutEvent,
+  memberTimeoutErrorText,
+} from '../invocation/member-output-timeout.js';
 import { getRichBlockBuffer } from '../invocation/RichBlockBuffer.js';
+import { recordTurnOutputVerdict, requireTurnOutputAllowed } from '../invocation/response-draft-settlement.js';
 import { resolveManagedSessionPolicySnapshot } from '../invocation/session-policy-snapshot.js';
 import { mergeStreams } from '../invocation/stream-merge.js';
 import { resolveDefaultClaudeMcpServerPath } from '../providers/ClaudeAgentService.js';
@@ -109,6 +102,8 @@ import { type ContextEvalInput, extractContextEvalSignals } from './context-eval
 import { buildBriefingMessage } from './format-briefing.js';
 import { isDirectOwnerDispositionOrigin } from './human-disposition-invocation-origin.js';
 import { persistUserFacingSystemInfoNotices } from './persist-system-info-warnings.js';
+import { appendRemoteCancellationNotice, createRemoteCancellationObserver } from './remote-cancellation.js';
+import { resolveResponseTerminal, stoppedByMemberTimeout } from './response-terminal.js';
 import { extractRichFromText, isValidRichBlock } from './rich-block-extract.js';
 import type { RouteOptions, RouteStrategyDeps } from './route-helpers.js';
 import {
@@ -119,7 +114,6 @@ import {
   createIdempotentPendingProjectionQueue,
   createLeakedToolCallStreamStripper,
   detectContextDegradation,
-  explicitApprovedTasteCueSeeds,
   explicitPromptForIncrementalContext,
   getService,
   getThreadBootcampMemberCount,
@@ -137,9 +131,8 @@ import {
   toStoredToolEvent,
   upsertMaxBoundary,
 } from './route-helpers.js';
-import { isRoutingOwnerAttempt } from './routing-owner-attempt.js';
-import { routingPreflightNotice } from './routing-preflight-notice.js';
 import { appendThinkingChunk, renderThinkingChunks } from './thinking-chunks.js';
+import { withTimeoutDiagnostics } from './timeout-diagnostics-metadata.js';
 import { buildVoteTally, checkVoteCompletion, extractVoteFromText, VOTE_RESULT_SOURCE } from './vote-intercept.js';
 
 const log = createModuleLogger('route-parallel');
@@ -198,44 +191,10 @@ export async function* routeParallel(
     modeSystemPrompt,
     modeSystemPromptByCat,
   } = options;
-  let routingDispatchPreflightDecision: RoutingPreflightDecisionV1 | undefined;
-  if (deps.routingDispatchPreflight) {
-    const requestedTargetCats = [...targetCats];
-    const routingPreflight = await preflightRoutingDispatch(deps.routingDispatchPreflight, {
-      ownerId: userId,
-      targetCatIds: requestedTargetCats,
-      ...(isRoutingOwnerAttempt(options) ? { ownerRequestedAttempt: true } : {}),
-      ...(options.routingContextIntent ? { intent: options.routingContextIntent } : {}),
-    });
-    routingDispatchPreflightDecision = routingPreflight;
-    for (const targetCatId of requestedTargetCats) {
-      const receipt = routingDispatchPreflightReceipt(routingPreflight, targetCatId);
-      if (receipt.target.disposition === 'allowed') continue;
-      const notice = await routingPreflightNotice(deps, options, routingPreflight, targetCatId, threadId, true);
-      if (notice) yield notice;
-      if (receipt.target.disposition === 'rejected') {
-        yield {
-          type: 'error',
-          catId: targetCatId,
-          errorCode: 'routing_preflight_rejected',
-          error: '本次未执行：成员当前不可用。恢复后可重试原消息。',
-          timestamp: Date.now(),
-        };
-      }
-    }
-    targetCats = requestedTargetCats.filter(
-      (catId) => routingPreflight.targets.find((target) => target.targetCatId === catId)?.disposition !== 'rejected',
-    );
-    if (targetCats.length === 0) {
-      const terminalCatId = requestedTargetCats[0];
-      if (terminalCatId) yield { type: 'done', catId: terminalCatId, isFinal: true, timestamp: Date.now() };
-      return;
-    }
-  }
+
   const ownerAuthProvenance = options.ownerAuthProvenance ?? 'unknown';
   const thinkingMode = options.thinkingMode ?? 'play';
-  const isFreshnessSupplement = Boolean(options.freshnessSupplementId);
-  const turnExecutionKind = isFreshnessSupplement ? 'freshness_supplement' : 'ordinary';
+  const turnExecutionKind = 'ordinary';
   const exactA2ACallerCatId = options.a2aTriggerMessageId ? options.a2aCallerCatId : undefined;
   const bridgeMentioningCatId =
     options.cloudDispatchProvenance?.calledByCatId ?? (options.a2aTriggerMessageId ? exactA2ACallerCatId : userId);
@@ -246,102 +205,6 @@ export async function* routeParallel(
   const incrementalMode = Boolean(currentUserMessageId && deps.deliveryCursorStore);
   const parallelBatchId = options.parallelBatchId ?? crypto.randomUUID();
   const exactPromptMessageIdsByCat = new Map<string, string[]>();
-
-  const evaluateParallelFreshness = async (
-    catId: CatId,
-    invocationId: string,
-    priorFrontierMessageId: string | null,
-  ): Promise<FreshnessEvaluation> => {
-    const freshness = await checkStreamOutputFreshness({
-      userId,
-      catId,
-      threadId,
-      currentTriggerMessageId: currentUserMessageId,
-      parallelBatchId,
-      coveredMessageIds: exactPromptMessageIdsByCat.get(catId as string) ?? [],
-      throughMessageId: priorFrontierMessageId,
-      cursorStore: deps.deliveryCursorStore!,
-      messageStore: deps.messageStore,
-      messageFilter: (raw: Record<string, unknown>) => {
-        if (raw.userId === 'system' || raw.origin === 'briefing') return false;
-        const viewer =
-          thinkingMode === 'play' ? ({ type: 'cat' as const, catId } as const) : ({ type: 'user' as const } as const);
-        if (
-          !canViewMessage(
-            raw as unknown as Parameters<typeof canViewMessage>[0],
-            viewer as Parameters<typeof canViewMessage>[1],
-          )
-        )
-          return false;
-        return true;
-      },
-      queueChecker: getQueuedFreshnessMessagesForCat
-        ? {
-            getQueuedForThread: (tid, uid, targetCatId) =>
-              getQueuedFreshnessMessagesForCat(tid, uid, targetCatId, options.parentInvocationId),
-          }
-        : undefined,
-      onEvent: deps.freshnessEventLog
-        ? (event) => {
-            deps.freshnessEventLog!.append({ ...event, invocationId, catId }, { ownerUserId: userId }).catch(() => {});
-          }
-        : undefined,
-    });
-    return { freshness, rawFrontierMessageId: priorFrontierMessageId };
-  };
-
-  const enqueueParallelSupplement = async (
-    decision: Extract<OutputCommitDecision, { kind: 'published_with_unseen' }>,
-    catId: string,
-  ): Promise<void> => {
-    if (!deps.freshnessOutputCommitCoordinator) return;
-    const supplement = await deps.freshnessOutputCommitCoordinator.getSupplement(decision.offeredSupplementId);
-    if (!supplement || supplement.status !== 'pending') return;
-    if (!options.freshnessReinvokeEnqueue) {
-      await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'scheduler_unavailable');
-      return;
-    }
-    try {
-      const enqueueResult = options.freshnessReinvokeEnqueue({
-        threadId,
-        userId,
-        ownerAuthProvenance,
-        content: `[Freshness Supplement ${supplement.id}]`,
-        source: 'agent',
-        sourceCategory: 'freshness',
-        targetCats: [catId],
-        callerCatId: catId,
-        autoExecute: true,
-        priority: 'normal',
-        intent: 'execute',
-        idempotencyKey: supplement.id,
-        freshnessSupplementId: supplement.id,
-        freshnessSupplementLineageId: supplement.lineageId,
-        freshnessSupplementSeq: supplement.seq,
-        readOnlyToolPolicy: {
-          mode: 'read_only',
-          replayDeniedToolNames: supplement.replayUnsafeToolNames,
-        },
-        freshnessContext: {
-          sourceNoticeIds: [],
-          senders: [],
-          reason: 'parallel_published_with_unseen',
-        },
-      });
-      if (enqueueResult?.outcome === 'full') {
-        await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'queue_full');
-      }
-    } catch (err) {
-      try {
-        await deps.freshnessOutputCommitCoordinator.failSupplement(supplement.id, 'scheduler_unavailable');
-      } catch (terminalErr) {
-        log.error(
-          { err, terminalErr, supplementId: supplement.id },
-          '[F254] parallel supplement enqueue and terminal persistence both failed',
-        );
-      }
-    }
-  };
 
   const degradationMsgs: AgentMessage[] = [];
   const boundaryByCat = new Map<CatId, string | undefined>();
@@ -548,12 +411,6 @@ export async function* routeParallel(
   }
   if (deps.invocationDeps.memoryCuePromptService) {
     memoryCueOpportunitySeeds.push(
-      ...explicitApprovedTasteCueSeeds({
-        message,
-        sourceMessageId: currentUserMessageId,
-        ownerOriginEligible: options.frustrationAutoIssueEligible !== false,
-        occurredAt: cueOccurredAt,
-      }),
       ...judgmentSurfaceCueSeeds({
         sopStageHint,
         promptTags: options.frustrationAutoIssueEligible !== false ? promptTags : undefined,
@@ -573,10 +430,21 @@ export async function* routeParallel(
   // F148 OQ-2: briefing→invocation link per cat (must be before Promise.all — TDZ fix)
   const catBriefingMessageId = new Map<string, string>();
   const pushRecallPresentationsByCat = new Map<string, PushRecallPresentation[]>();
+  const catOutputMessageId = new Map<string, string>();
   // F148 OQ-2: Collect tool names and coverage maps per cat for context eval
   const catToolNames = new Map<string, string[]>();
   const catCoverageMap = new Map<string, ContextEvalInput['coverageMap']>();
   const unavailableCats = new Set<CatId>();
+  // F117 KD-22: kept per cat when its output timeout fires, before the cat is stopped.
+  const catMemberTimeout = new Map<string, MemberTimeoutEvent>();
+  const catRemoteCancellation = new Map<string, ReturnType<typeof createRemoteCancellationObserver>>();
+  const onMemberTimeoutFor = (catId: CatId) =>
+    options.stopMember
+      ? (timeout: MemberTimeoutEvent): void => {
+          catMemberTimeout.set(catId as string, timeout);
+          options.stopMember?.(catId as string, timeout.executionId);
+        }
+      : undefined;
 
   const streams = await Promise.all(
     targetCats.map(async (catId) => {
@@ -606,7 +474,6 @@ export async function* routeParallel(
       } catch (error) {
         if (!(error instanceof AgentServiceUnavailableError)) throw error;
         unavailableCats.add(catId);
-        // Keep registration rejection in the per-cat completion pipeline, without aborting siblings' preparation.
         return (async function* unavailableMember(): AsyncGenerator<AgentMessage> {
           yield { type: 'error', catId, content: error.message, error: error.message, timestamp: Date.now() };
           yield { type: 'done', catId, timestamp: Date.now() };
@@ -653,9 +520,6 @@ export async function* routeParallel(
       const staticIdentity = hasNativeL0
         ? buildStaticIdentityPackOnly(catId, { packBlocks })
         : buildStaticIdentity(catId, { mcpAvailable, packBlocks });
-      // F237: drain session trace IMMEDIATELY — before any await that could let
-      // another parallel cat overwrite the module-global capture buffer.
-      drainCapturedTraces();
       // F041: inject HTTP callback only when MCP is NOT actually available (fallback)
       const mcpInstructions = needsMcpInjection(mcpAvailable, catConfig?.clientId)
         ? buildMcpCallbackInstructions({
@@ -663,26 +527,7 @@ export async function* routeParallel(
             teammates: teammates.map((id) => id as string),
           })
         : '';
-      // F091: Inject linked signal articles into context
-      let activeSignals:
-        | readonly {
-            id: string;
-            title: string;
-            source: string;
-            tier: number;
-            contentSnippet: string;
-            note?: string | undefined;
-            relatedDiscussions?: readonly { sessionId: string; snippet: string; score: number }[] | undefined;
-          }[]
-        | undefined;
-      if (deps.invocationDeps.signalArticleLookup) {
-        try {
-          const signals = await deps.invocationDeps.signalArticleLookup(threadId);
-          if (signals.length > 0) activeSignals = signals;
-        } catch {
-          /* best-effort: signal lookup failure does not block invocation */
-        }
-      }
+      // Signal articles are retrieved through explicit signal tools, not ordinary delivery.
 
       // F163 AC-A3: always_on constitutional docs injection (fail-open, flag-gated)
       // shadow: query but do NOT inject into prompt (record-only for experiment diff)
@@ -723,7 +568,6 @@ export async function* routeParallel(
           ...(activeParticipants.length > 0 ? { activeParticipants } : {}),
           ...(routingPolicy ? { routingPolicy } : {}),
           ...(sopStageHint ? { sopStageHint } : {}),
-          ...(activeSignals ? { activeSignals } : {}),
           ...(voiceMode ? { voiceMode } : {}),
           ...(bootcampState ? { bootcampState, threadId, bootcampMemberCount } : {}),
           ...(alwaysOnDocs && alwaysOnInjectionMode === 'on' ? { alwaysOnDocs } : {}),
@@ -734,13 +578,6 @@ export async function* routeParallel(
       ]
         .filter(Boolean)
         .join('\n\n');
-      // F237: drain turn trace IMMEDIATELY — same race-safety as session drain above.
-      drainCapturedTraces();
-
-      // F237 Phase 2: Pipeline trace capture drained above (lines 250, 322) to prevent
-      // stale module-global buffer in concurrent Promise.all execution. Persistence is
-      // handled by the v0 trace path below (after all route-level content is assembled).
-
       const continuityCapsule = buildCapsuleFromRouteState({
         threadId,
         catId: catId as string,
@@ -818,38 +655,6 @@ export async function* routeParallel(
         } catch {
           // Best-effort: bootstrap failure doesn't block invocation
         }
-      }
-
-      // F237: fire-and-forget injection trace persist (v0 — observability only)
-      // Placed after bootstrapCtx so per-turn trace covers ALL route-level
-      // injected system/control content (invocation + mode prompt + bootstrap + MCP).
-      // Skip if cat is already cancelled (avoid phantom trace for turns that never happen).
-      const preTraceSignal = signalForCat?.(catId) ?? signal;
-      try {
-        const traceStore = getTraceStore();
-        if (traceStore && !preTraceSignal?.aborted) {
-          const traceTurnId = crypto.randomUUID();
-          const traceModePrompt = modeSystemPromptByCat?.[catId as string] ?? modeSystemPrompt ?? '';
-          const traceTurnContent = [invocationContext, traceModePrompt, bootstrapCtx, mcpInstructions]
-            .filter(Boolean)
-            .join('\n\n---\n\n');
-          const collected = collectTrace(catId as string, staticIdentity, traceTurnContent, hasNativeL0, {
-            mcpAvailable,
-            packBlocks,
-          });
-          const traceMeta = { turnId: traceTurnId, threadId, catId: catId as string };
-          const summary = buildTraceSummary(collected, traceMeta);
-          const detail = buildTraceDetail(collected, traceMeta);
-          traceStore.persist(summary, detail).catch((err) => {
-            log.warn({ err, threadId, catId }, '[F237] injection trace persist failed (fire-and-forget)');
-          });
-        }
-        // v0 collectTrace → buildStaticIdentity(annotateSegments: true) re-populates
-        // the module-global capturedSessionTrace without draining. Clear it so the next
-        // invocation (especially native-L0 pack-only) doesn't persist stale session traces.
-        if (deps.injectionTraceStore) drainCapturedTraces();
-      } catch {
-        /* F237: trace collection must never break invocation */
       }
 
       let prompt: string;
@@ -1030,8 +835,6 @@ export async function* routeParallel(
           exactPromptMessageIds = collectExactPromptMessageIds(
             incrementallyExposedMessageIds,
             explicitlyExposedMessageIds,
-            options.freshnessSupplementRequiredMessageIds ?? [],
-            options.freshnessClosureRequiredMessageIds ?? [],
           );
           exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
           return {
@@ -1128,12 +931,10 @@ export async function* routeParallel(
           : undefined;
 
       if (!incrementalMode) {
-        exactPromptMessageIds = collectExactPromptMessageIds(
-          options.persistedPromptMessageIds ?? [],
-          [currentUserMessageId, options.a2aTriggerMessageId],
-          options.freshnessSupplementRequiredMessageIds ?? [],
-          options.freshnessClosureRequiredMessageIds ?? [],
-        );
+        exactPromptMessageIds = collectExactPromptMessageIds(options.persistedPromptMessageIds ?? [], [
+          currentUserMessageId,
+          options.a2aTriggerMessageId,
+        ]);
         exactPromptMessageIdsByCat.set(catId as string, exactPromptMessageIds);
       }
 
@@ -1148,10 +949,11 @@ export async function* routeParallel(
       if (catSignal?.aborted) {
         return (async function* skipCancelledCat(): AsyncGenerator<AgentMessage> {})();
       }
+      const onMemberTimeout = onMemberTimeoutFor(catId);
+      const remoteCancellation = createRemoteCancellationObserver();
+      catRemoteCancellation.set(catId, remoteCancellation);
       const invocationStream = invokeSingleCat(deps.invocationDeps, {
         ...(options.routeIntent ? { routeIntent: options.routeIntent } : {}),
-        ...(options.routingContextIntent ? { routingContextIntent: options.routingContextIntent } : {}),
-        ...(routingDispatchPreflightDecision ? { routingDispatchPreflightDecision } : {}),
         catId,
         service,
         capacitySnapshot,
@@ -1167,6 +969,8 @@ export async function* routeParallel(
         ...(targetContentBlocks ? { contentBlocks: targetContentBlocks } : {}),
         ...(targetUploadDir ? { uploadDir: targetUploadDir } : {}),
         ...(catSignal ? { signal: catSignal } : {}),
+        ...(onMemberTimeout ? { onMemberTimeout } : {}),
+        onRemoteExecutionDispatched: remoteCancellation.onDispatched,
         ...(staticIdentity ? { systemPrompt: staticIdentity } : {}),
         // F194 Phase Z2 (砚砚 catch 2026-05-09)：parallel route 必须传 parentInvocationId，
         // 与 route-serial.ts:725 对齐。否则 child registry record 缺 parentInvocationId →
@@ -1193,12 +997,18 @@ export async function* routeParallel(
         ...(options.toolExecutionPolicy ? { toolExecutionPolicy: options.toolExecutionPolicy } : {}),
         ...(options.executionScope ? { executionScope: options.executionScope } : {}),
         executionKind: turnExecutionKind,
+        ...(options.beforeOutputCommit ? { outputFenced: true } : {}),
         executionCausal: {
           ...(bridgeTriggerMessageId ? { triggerMessageId: bridgeTriggerMessageId } : {}),
-          ...(options.freshnessSupplementId ? { freshnessSupplementId: options.freshnessSupplementId } : {}),
         },
         promptMessageIds: exactPromptMessageIds,
         ...(options.onPromptMessagesExposed ? { onPromptMessagesExposed: options.onPromptMessagesExposed } : {}),
+        ...(options.onLifecycleInvocationStarted
+          ? { onLifecycleInvocationStarted: options.onLifecycleInvocationStarted }
+          : {}),
+        ...(options.onAgentClientActiveRunReady
+          ? { onAgentClientActiveRunReady: options.onAgentClientActiveRunReady }
+          : {}),
         isLastCat: false,
       });
       return (async function* withContextProjectionMessages(): AsyncGenerator<AgentMessage> {
@@ -1245,6 +1055,7 @@ export async function* routeParallel(
   const catActivityUpdated = new Set<string>();
   // F22 R2 P1-1: Capture own invocationId per cat from stream
   const catInvocationId = new Map<string, string>();
+  const catLifecycleResponse = new Map<string, { messageId: string; priorFrontierMessageId: string | null }>();
   const turnExecutionProjectionByInvocation = new Map<string, TurnExecutionMessageProjection>();
   const projectLiveTurnExecution = (event: AgentMessage, invocationId: string | undefined): AgentMessage => {
     if (!deps.invocationDeps.turnExecutionStore || !invocationId) return event;
@@ -1272,12 +1083,6 @@ export async function* routeParallel(
   const FLUSH_INTERVAL_MS = 2000;
   const FLUSH_CHAR_DELTA = 2000;
   const noop = () => {};
-
-  // Issue #83: Independent keepalive timer — touch draft every 60s during long tool calls.
-  const KEEPALIVE_INTERVAL_MS = 60_000;
-  let keepaliveTimer: ReturnType<typeof setInterval> | undefined;
-  // Track which cats have had their keepalive started
-  let keepaliveStarted = false;
 
   function getPayloadStripper(catId: string) {
     let stripper = catPayloadStrippers.get(catId);
@@ -1357,6 +1162,17 @@ export async function* routeParallel(
             parsed.invocationId.length > 0
           ) {
             catInvocationId.set(effectiveMsg.catId, parsed.invocationId);
+            if (
+              typeof effectiveMsg.lifecycleResponseMessageId === 'string' &&
+              effectiveMsg.lifecycleResponseMessageId.length > 0 &&
+              (effectiveMsg.lifecyclePriorFrontierMessageId === null ||
+                typeof effectiveMsg.lifecyclePriorFrontierMessageId === 'string')
+            ) {
+              catLifecycleResponse.set(effectiveMsg.catId, {
+                messageId: effectiveMsg.lifecycleResponseMessageId,
+                priorFrontierMessageId: effectiveMsg.lifecyclePriorFrontierMessageId,
+              });
+            }
             if (deps.invocationDeps.turnExecutionStore) {
               turnExecutionProjectionByInvocation.set(parsed.invocationId, {
                 invocationId: parsed.invocationId,
@@ -1366,15 +1182,6 @@ export async function* routeParallel(
             }
             // #80 fix: seed flush baseline so interval triggers after FLUSH_INTERVAL_MS
             catFlushTime.set(effectiveMsg.catId, Date.now());
-            // Issue #83: Start a single keepalive timer that touches all active drafts.
-            if (deps.draftStore && !keepaliveStarted) {
-              keepaliveStarted = true;
-              keepaliveTimer = setInterval(() => {
-                for (const [, invId] of catInvocationId) {
-                  deps.draftStore!.touch(userId, threadId, invId)?.catch?.(noop);
-                }
-              }, KEEPALIVE_INTERVAL_MS);
-            }
           }
         } catch {
           /* ignore parse errors */
@@ -1414,6 +1221,9 @@ export async function* routeParallel(
           if (parsed.type === 'invocation_usage' && parsed.usage) {
             routeTotalTokens += (parsed.usage.inputTokens ?? 0) + (parsed.usage.outputTokens ?? 0);
           }
+          // F118 AC-C3 / F117: timeout diagnostics persist with the response they explain.
+          const catMetadata = withTimeoutDiagnostics(catMeta.get(effectiveMsg.catId), parsed);
+          if (catMetadata) catMeta.set(effectiveMsg.catId, catMetadata);
         } catch {
           /* ignore parse errors */
         }
@@ -1690,13 +1500,15 @@ export async function* routeParallel(
               ?.catch?.(noop);
             catFlushLen.set(effectiveMsg.catId, curText.length);
             catFlushToolLen.set(effectiveMsg.catId, curToolLen);
-          } else {
-            deps.draftStore.touch(userId, threadId, invId)?.catch?.(noop);
           }
           catFlushTime.set(effectiveMsg.catId, now);
         }
       }
 
+      // A provider error with an admitted lifecycle response belongs to that
+      // response bubble. Keep accumulating it for terminal persistence, but do
+      // not project a second live-only system error surface.
+      if (effectiveMsg.type === 'error' && effectiveMsg.catId && catLifecycleResponse.has(effectiveMsg.catId)) continue;
       if (effectiveMsg.type === 'text' && !effectiveMsg.content) continue;
       // F194 Phase Z9 砚砚 R1 P1-1: stamp ownInvocationId on yielded events
       // (same as route-serial.ts). CLI text/done/tool events don't carry
@@ -1741,9 +1553,8 @@ export async function* routeParallel(
       const ownInvId = catInvocationId.get(msg.catId);
       let turnStoredMessageId: string | undefined;
       if (ownInvId) completedCatInvocationIds.push([msg.catId, ownInvId]);
-      // Issue #83 P2 fix: Remove completed cat from keepalive set.
-      // Without this, the shared keepalive timer would touch() a deleted draft,
-      // recreating an orphan Redis hash key via HSET.
+      // Forget the completed cat's turn: a late event for it must not upsert its draft again after R's
+      // commit deleted it. Drafts no longer expire (F117 KD-23), so a recreated one would leak.
       catInvocationId.delete(msg.catId);
       const bufferedBlocks = getRichBlockBuffer().consume(threadId, msg.catId, ownInvId);
       // #573 parallel variant: socket broadcasts in messages.ts use the OUTER
@@ -1770,11 +1581,54 @@ export async function* routeParallel(
       const actionOutputCommitAllowed = options.beforeOutputCommit
         ? await options.beforeOutputCommit(msg.catId as CatId)
         : true;
-      const targetSucceeded =
-        actionOutputCommitAllowed &&
-        !catHadError.has(msg.catId) &&
-        !msg.errorCode &&
-        !(signalForCat?.(msg.catId) ?? signal)?.aborted;
+      // F117 KD-21: the allowed verdict becomes the turn's durable truth before anything visible, so
+      // a settlement after a crash in between publishes the approved draft. A write that fails throws:
+      // the output stays uncommitted and the execution's failure path settles R. Without a turn store
+      // no child was recorded, so there is no fence to write and no settlement that could read one.
+      const fencedTurnStore = deps.invocationDeps.turnExecutionStore;
+      if (options.beforeOutputCommit && actionOutputCommitAllowed && ownInvId && fencedTurnStore) {
+        await requireTurnOutputAllowed(fencedTurnStore, ownInvId);
+      }
+      const lifecycleAdmission = catLifecycleResponse.get(msg.catId);
+      const completedSignal = signalForCat?.(msg.catId as CatId) ?? signal;
+      // F117 KD-22: a member stopped by its output timeout failed, like a provider failure. Its own
+      // error after the stop was dropped above, so its failure text and diagnostics come from what
+      // its timer kept before stopping it.
+      const memberTimeout = stoppedByMemberTimeout(completedSignal) ? catMemberTimeout.get(msg.catId) : undefined;
+      if (memberTimeout) {
+        catHadError.add(msg.catId);
+        catHadProviderError.add(msg.catId);
+        const priorErrorText = catErrorText.get(msg.catId) ?? '';
+        const timeoutText = memberTimeoutErrorText(memberTimeout.diagnostics);
+        catErrorText.set(msg.catId, `${priorErrorText}${priorErrorText ? '\n' : ''}${timeoutText}`);
+        catMeta.set(msg.catId, {
+          ...(catMeta.get(msg.catId) ?? { provider: '', model: '' }),
+          timeoutDiagnostics: memberTimeout.diagnostics,
+        });
+      }
+      const cancellationDiagnostics = catRemoteCancellation.get(msg.catId)?.afterAbort(completedSignal);
+      if (cancellationDiagnostics) {
+        catMeta.set(msg.catId, {
+          ...(catMeta.get(msg.catId) ?? { provider: '', model: '' }),
+          cancellationDiagnostics,
+        });
+      }
+      const { status: lifecycleTerminalStatus, reason: lifecycleTerminalReason } = resolveResponseTerminal({
+        aborted: completedSignal?.aborted === true,
+        abortReason: completedSignal?.reason,
+        failed: catHadProviderError.has(msg.catId) || (typeof msg.errorCode === 'string' && msg.errorCode.length > 0),
+        errorCode: msg.errorCode,
+        outputCommitRejected: !actionOutputCommitAllowed,
+      });
+      const lifecycleResponse =
+        lifecycleAdmission && ownInvId
+          ? {
+              ...lifecycleAdmission,
+              status: lifecycleTerminalStatus,
+              completedAt: Math.max(Date.now(), invocationStartedAt),
+              ...(lifecycleTerminalReason ? { reason: lifecycleTerminalReason } : {}),
+            }
+          : undefined;
       const deliveryBoundary = createMessageDeliveryBoundary({
         cursor: boundaryByCat.get(msg.catId as CatId),
         userId,
@@ -1782,27 +1636,81 @@ export async function* routeParallel(
         catId: msg.catId as CatId,
         turnInvocationId: ownInvId,
         sourceMessageId: currentUserMessageId ?? options.a2aTriggerMessageId,
-        succeeded: targetSucceeded,
+        succeeded:
+          actionOutputCommitAllowed && !catHadError.has(msg.catId) && !msg.errorCode && !completedSignal?.aborted,
       });
+      const providerFailureText = catErrorText.get(msg.catId);
+      const terminalFailureContent = cancellationDiagnostics
+        ? appendRemoteCancellationNotice(providerFailureText ?? '')
+        : lifecycleResponse && providerFailureText
+          ? providerFailureText
+          : undefined;
+      const failedA2AReportCommit =
+        lifecycleResponse?.status === 'failed' &&
+        options.a2aTriggerMessageId &&
+        exactA2ACallerCatId &&
+        !options.a2aFailureReport
+          ? async (message: AppendMessageInput) => {
+              if (!options.commitFailedA2AReport) {
+                throw new Error('failed response A2A report admission unavailable');
+              }
+              return options.commitFailedA2AReport({
+                responseMessageId: lifecycleResponse.messageId,
+                invocationId: ownInvId!,
+                terminal: {
+                  status: 'failed',
+                  completedAt: lifecycleResponse.completedAt,
+                  ...(lifecycleResponse.reason ? { reason: lifecycleResponse.reason } : {}),
+                },
+                message,
+                userId,
+                ownerAuthProvenance,
+                threadId,
+                reporterCatId: msg.catId as CatId,
+                predecessorCatId: exactA2ACallerCatId as CatId,
+                ...(options.parentInvocationId ? { parentInvocationId: options.parentInvocationId } : {}),
+              });
+            }
+          : undefined;
       if (!actionOutputCommitAllowed) {
         catProducedOutput = Boolean(
           text || bufferedBlocks.length > 0 || (catToolEvents.get(msg.catId)?.length ?? 0) > 0,
         );
         if (options.persistenceContext) options.persistenceContext.actionOutputCommitRejected = true;
+        if (lifecycleResponse && ownInvId) {
+          // F117 KD-21: the rejection is the turn's durable truth before R commits, so no later
+          // settlement can publish this draft even if the commit below fails.
+          await recordTurnOutputVerdict(deps.invocationDeps.turnExecutionStore, ownInvId, 'rejected', (err) =>
+            log.warn({ err, catId: msg.catId, invocationId: ownInvId }, 'rejected output fence verdict not recorded'),
+          );
+          await commitLifecycleResponseFromAppendInput(
+            deps.messageStore,
+            lifecycleResponse.messageId,
+            ownInvId,
+            lifecycleResponse,
+            {
+              from: { kind: 'agent', catId: msg.catId as CatId },
+              userId,
+              content: '',
+              mentions: [],
+              origin: 'stream',
+              timestamp: invocationStartedAt,
+              threadId,
+            },
+          );
+          // F117 KD-21: R is terminal and its output was rejected, so its draft has no reader left.
+          deps.draftStore?.delete(userId, threadId, ownInvId)?.catch?.(noop);
+        }
       } else if (text) {
         catProducedOutput = true;
         const meta = catMeta.get(msg.catId);
         const sanitized = sanitizeInjectedContent(text);
         // F22: Extract cc_rich blocks from text + merge with buffered
-        let { cleanText: storedContent, blocks: textBlocks } = isFreshnessSupplement
-          ? { cleanText: sanitized, blocks: [] }
-          : extractRichFromText(sanitized);
-        let allRichBlocks = isFreshnessSupplement
-          ? []
-          : [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
+        let { cleanText: storedContent, blocks: textBlocks } = extractRichFromText(sanitized);
+        let allRichBlocks = [...bufferedBlocks, ...textBlocks, ...(catStreamRichBlocks.get(msg.catId) ?? [])];
         // F34-b: synthesize text-only audio blocks (voice messages)
         // F111: skip synthesis in voiceMode — frontend streams via /api/tts/stream
-        if (!isFreshnessSupplement && !voiceMode) {
+        if (!voiceMode) {
           const voiceSynth = getVoiceBlockSynthesizer();
           if (voiceSynth && allRichBlocks.some((b) => b.kind === 'audio' && 'text' in b)) {
             try {
@@ -1814,7 +1722,6 @@ export async function* routeParallel(
         }
         const catTools = catToolEvents.get(msg.catId);
         const conciergeActionSourceContent =
-          !isFreshnessSupplement &&
           'conciergeConfig' in conciergeCtx &&
           conciergeContextForCat(conciergeCtx, msg.catId as string)?.conciergeConfig &&
           storedContent
@@ -1836,7 +1743,7 @@ export async function* routeParallel(
         // F079 Phase 2: Vote interception for parallel routing.
         // @all / multi-cat requests route here, so [VOTE:xxx] must be handled too.
         const votedOption = extractVoteFromText(storedContent);
-        if (!isFreshnessSupplement && votedOption && deps.invocationDeps.threadStore) {
+        if (votedOption && deps.invocationDeps.threadStore) {
           try {
             const voteState = await deps.invocationDeps.threadStore.getVotingState(threadId);
             if (voteState && voteState.status === 'active' && voteState.options.includes(votedOption)) {
@@ -1878,8 +1785,8 @@ export async function* routeParallel(
                   // Gap 3: persist separate connector message for ConnectorBubble rendering
                   try {
                     const stored = await deps.messageStore.append({
+                      from: { kind: 'system', service: 'vote' },
                       userId,
-                      catId: null,
                       content: `投票结果: ${voteState.question}`,
                       mentions: [],
                       timestamp: Date.now(),
@@ -1893,6 +1800,7 @@ export async function* routeParallel(
                         threadId,
                         message: {
                           id: stored.id,
+                          from: stored.from,
                           type: 'connector',
                           content: stored.content,
                           source: VOTE_RESULT_SOURCE,
@@ -1977,9 +1885,9 @@ export async function* routeParallel(
         let outputCommitDecision: OutputCommitDecision | undefined;
         try {
           const streamMessageInput: AppendMessageInput = {
+            from: { kind: 'agent', catId: msg.catId as CatId },
             userId,
-            catId: msg.catId as CatId,
-            content: persistedContent,
+            content: terminalFailureContent ? `${storedContent}\n\n${terminalFailureContent}` : storedContent,
             mentions: [],
             origin: 'stream',
             timestamp: invocationStartedAt,
@@ -2014,7 +1922,7 @@ export async function* routeParallel(
             },
           };
           let storedMsg = null;
-          if (deps.freshnessOutputCommitCoordinator && deps.deliveryCursorStore && ownInvId) {
+          if (deps.freshnessOutputCommitCoordinator && ownInvId) {
             outputCommitDecision = await deps.freshnessOutputCommitCoordinator.commit({
               userId,
               threadId,
@@ -2022,13 +1930,9 @@ export async function* routeParallel(
               invocationId: options.parentInvocationId ?? ownInvId,
               turnInvocationId: ownInvId,
               originTriggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
-              freshnessClosureId: options.freshnessClosureId,
-              freshnessSupplementId: options.freshnessSupplementId,
               message: streamMessageInput,
-              replayUnsafeToolNames: findReplayUnsafeToolNames(catToolNames.get(msg.catId) ?? []),
-              commitRecheckLimit: 10 + targetCats.length,
-              evaluateFreshness: (priorFrontierMessageId) =>
-                evaluateParallelFreshness(msg.catId as CatId, ownInvId, priorFrontierMessageId),
+              ...(lifecycleResponse ? { lifecycleResponse } : {}),
+              ...(failedA2AReportCommit ? { commitLifecycleResponse: failedA2AReportCommit } : {}),
             });
             if (options.persistenceContext) {
               options.persistenceContext.outputCommitDecisions = {
@@ -2036,22 +1940,22 @@ export async function* routeParallel(
                 [msg.catId]: outputCommitDecision,
               };
             }
-            if (
-              outputCommitDecision.kind === 'committed_fresh' ||
-              outputCommitDecision.kind === 'committed_degraded_unknown' ||
-              outputCommitDecision.kind === 'published_with_unseen'
-            ) {
-              storedMsg = await deps.messageStore.getById(outputCommitDecision.messageId);
-            }
+            storedMsg = await deps.messageStore.getById(outputCommitDecision.messageId);
+          } else if (lifecycleResponse && ownInvId) {
+            storedMsg = failedA2AReportCommit
+              ? await failedA2AReportCommit(streamMessageInput)
+              : await commitLifecycleResponseFromAppendInput(
+                  deps.messageStore,
+                  lifecycleResponse.messageId,
+                  ownInvId,
+                  lifecycleResponse,
+                  streamMessageInput,
+                );
           } else {
             storedMsg = await deps.messageStore.append(streamMessageInput);
           }
 
           turnStoredMessageId = storedMsg?.id;
-
-          if (outputCommitDecision?.kind === 'published_with_unseen') {
-            await enqueueParallelSupplement(outputCommitDecision, msg.catId);
-          }
 
           const triagePlanStore = deps.invocationDeps.conciergeTriagePlanStore;
           if (storedMsg && triagePlanStore && triagePlanIdsToLink.length > 0) {
@@ -2118,35 +2022,17 @@ export async function* routeParallel(
           hasRichBlocks ||
           (catTools?.length ?? 0) > 0 ||
           Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
-        const isFreshnessClosureSuccessor = Boolean(options.freshnessClosureRequiredMessageIds?.length);
-        const shouldEmitSilentCompletion =
-          (catTools?.length ?? 0) > 0 && !hasRichBlocks && !sawUserFacingSystemInfo && !isFreshnessClosureSuccessor;
-
-        // Diagnostic: if cat ran tools but produced no text, emit a system_info so the
-        // user sees *something* instead of a silent vanish (bugfix: silent-exit P1).
-        if (shouldEmitSilentCompletion) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId: msg.catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${msg.catId} completed with tool calls but no text response.`,
-              toolCount: catTools?.length ?? 0,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
-        }
-
-        if (shouldPersistNoTextMessage || sawUserFacingSystemInfo || shouldEmitSilentCompletion) {
+        // A transport/status notice cannot acknowledge a business guide outcome.
+        if (shouldPersistNoTextMessage) {
           catProducedOutput = true;
         }
 
-        if (shouldPersistNoTextMessage) {
+        if (shouldPersistNoTextMessage || lifecycleResponse || cancellationDiagnostics) {
           try {
             const noTextMessageInput: AppendMessageInput = {
+              from: { kind: 'agent', catId: msg.catId as CatId },
               userId,
-              catId: msg.catId as CatId,
-              content: '',
+              content: cancellationDiagnostics ? (terminalFailureContent ?? '') : '',
               mentions: [],
               origin: 'stream',
               timestamp: invocationStartedAt,
@@ -2184,16 +2070,9 @@ export async function* routeParallel(
             };
             const answerBearingNoText =
               hasRichBlocks || Boolean(thinking && renderThinkingChunks(thinking).trim().length > 0);
-            const replayUnsafeToolNames = findReplayUnsafeToolNames(catToolNames.get(msg.catId) ?? []);
-            const requiresFreshnessGate = answerBearingNoText || replayUnsafeToolNames.length > 0;
             let storedNoText = null;
             let noTextOutputCommitDecision: OutputCommitDecision | undefined;
-            if (
-              requiresFreshnessGate &&
-              deps.freshnessOutputCommitCoordinator &&
-              deps.deliveryCursorStore &&
-              ownInvId
-            ) {
+            if (answerBearingNoText && deps.freshnessOutputCommitCoordinator && ownInvId) {
               const decision = await deps.freshnessOutputCommitCoordinator.commit({
                 userId,
                 threadId,
@@ -2201,13 +2080,9 @@ export async function* routeParallel(
                 invocationId: options.parentInvocationId ?? ownInvId,
                 turnInvocationId: ownInvId,
                 originTriggerMessageId: currentUserMessageId ?? options.a2aTriggerMessageId ?? null,
-                freshnessClosureId: options.freshnessClosureId,
-                freshnessSupplementId: options.freshnessSupplementId,
                 message: noTextMessageInput,
-                replayUnsafeToolNames,
-                commitRecheckLimit: 10 + targetCats.length,
-                evaluateFreshness: (priorFrontierMessageId) =>
-                  evaluateParallelFreshness(msg.catId as CatId, ownInvId, priorFrontierMessageId),
+                ...(lifecycleResponse ? { lifecycleResponse } : {}),
+                ...(failedA2AReportCommit ? { commitLifecycleResponse: failedA2AReportCommit } : {}),
               });
               noTextOutputCommitDecision = decision;
               if (options.persistenceContext) {
@@ -2216,16 +2091,17 @@ export async function* routeParallel(
                   [msg.catId]: decision,
                 };
               }
-              if (
-                decision.kind === 'committed_fresh' ||
-                decision.kind === 'committed_degraded_unknown' ||
-                decision.kind === 'published_with_unseen'
-              ) {
-                storedNoText = await deps.messageStore.getById(decision.messageId);
-                if (decision.kind === 'published_with_unseen') {
-                  await enqueueParallelSupplement(decision, msg.catId);
-                }
-              }
+              storedNoText = await deps.messageStore.getById(decision.messageId);
+            } else if (lifecycleResponse && ownInvId) {
+              storedNoText = failedA2AReportCommit
+                ? await failedA2AReportCommit(noTextMessageInput)
+                : await commitLifecycleResponseFromAppendInput(
+                    deps.messageStore,
+                    lifecycleResponse.messageId,
+                    ownInvId,
+                    lifecycleResponse,
+                    noTextMessageInput,
+                  );
             } else {
               // Reviewed read-only tool-only audit remains non-routable and does not become
               // a normal answer. Unknown or mutating tools enter the freshness gate above.
@@ -2273,20 +2149,7 @@ export async function* routeParallel(
               });
             }
           }
-        } else if (!sawUserFacingSystemInfo && !isFreshnessClosureSuccessor) {
-          yield {
-            type: 'system_info' as AgentMessageType,
-            catId: msg.catId,
-            content: JSON.stringify({
-              type: 'silent_completion',
-              detail: `${msg.catId} completed without textual output.`,
-              toolCount: catToolEvents.get(msg.catId)?.length ?? 0,
-              provider: catMeta.get(msg.catId)?.provider,
-              model: catMeta.get(msg.catId)?.model,
-              invocationId: ownInvId,
-            }),
-            timestamp: Date.now(),
-          } as AgentMessage;
+        } else if (!sawUserFacingSystemInfo) {
           // No persisted message for fully silent turns.
           if (deps.draftStore && ownInvId) {
             deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2297,21 +2160,21 @@ export async function* routeParallel(
       } else {
         // hadError but toolEvents exist — persist tool record so refresh shows what was attempted
         const catTools = catToolEvents.get(msg.catId);
-        if (catTools && catTools.length > 0) {
+        if ((catTools && catTools.length > 0) || lifecycleResponse) {
           const meta = catMeta.get(msg.catId);
           const thinking = catThinking.get(msg.catId);
           try {
-            const storedToolError = await deps.messageStore.append({
+            const errorMessageInput: AppendMessageInput = {
+              from: { kind: 'agent', catId: msg.catId as CatId },
               userId,
-              catId: msg.catId as CatId,
-              content: '',
+              content: terminalFailureContent ?? '',
               mentions: [],
               origin: 'stream',
               timestamp: invocationStartedAt,
               threadId,
               ...(thinking && thinking.length > 0 ? { thinking: renderThinkingChunks(thinking) } : {}),
               ...(meta ? { metadata: meta } : {}),
-              toolEvents: catTools,
+              ...(catTools && catTools.length > 0 ? { toolEvents: catTools } : {}),
               ...(persistedInvocationId || turnExecution || msg.tracing
                 ? {
                     extra: {
@@ -2329,8 +2192,23 @@ export async function* routeParallel(
                     },
                   }
                 : {}),
-            });
-            turnStoredMessageId = storedToolError.id;
+            };
+            let storedErrorTools;
+            if (lifecycleResponse && ownInvId) {
+              storedErrorTools = failedA2AReportCommit
+                ? await failedA2AReportCommit(errorMessageInput)
+                : await commitLifecycleResponseFromAppendInput(
+                    deps.messageStore,
+                    lifecycleResponse.messageId,
+                    ownInvId,
+                    lifecycleResponse,
+                    errorMessageInput,
+                  );
+            } else {
+              storedErrorTools = await deps.messageStore.append(errorMessageInput);
+            }
+            catOutputMessageId.set(msg.catId, storedErrorTools.id);
+            turnStoredMessageId = storedErrorTools.id;
             // #80: Clean up draft only after successful append
             if (deps.draftStore && ownInvId) {
               deps.draftStore.delete(userId, threadId, ownInvId)?.catch?.(noop);
@@ -2362,6 +2240,9 @@ export async function* routeParallel(
         }
       }
 
+      const errorText = catErrorText.get(msg.catId);
+      const lifecycleErrorOwnedByResponse =
+        lifecycleResponse !== undefined && lifecycleResponse.messageId === turnStoredMessageId;
       await persistUserFacingSystemInfoNotices({
         messageStore: deps.messageStore,
         threadId,
@@ -2369,22 +2250,25 @@ export async function* routeParallel(
         contents: catUserFacingSystemInfoContents.get(msg.catId) ?? [],
         ...(bridgeTriggerMessageId ? { expectedSourceMessageId: bridgeTriggerMessageId } : {}),
         ...(ownInvId ? { expectedDispatchInvocationId: ownInvId } : {}),
+        ...(lifecycleErrorOwnedByResponse ? { responseMessageId: lifecycleResponse!.messageId } : {}),
         ...(options.persistenceContext ? { persistenceContext: options.persistenceContext } : {}),
       });
       catUserFacingSystemInfoContents.delete(msg.catId);
 
       // Persist error as system message so it survives F5 reload but does NOT
-      // re-enter the prompt as a cat message. Preserve ordinary provider error persistence;
-      // only registration diagnostics use the output fence, as in route-serial's early rejection path.
+      // re-enter the prompt as a cat message (aligned with route-serial.ts).
       // Previously errors were mixed into catText and persisted with userId=user,
       // which polluted the conversation history and caused "context poisoning".
-      const errorText = catErrorText.get(msg.catId);
-      if (errorText && (!unavailableCats.has(msg.catId) || actionOutputCommitAllowed)) {
+      if (
+        errorText &&
+        !lifecycleErrorOwnedByResponse &&
+        (!unavailableCats.has(msg.catId) || actionOutputCommitAllowed)
+      ) {
         const cliDiag = catCliDiagnostics.get(msg.catId);
         try {
           await deps.messageStore.append({
+            from: { kind: 'system', service: 'agent-error' },
             userId: 'system',
-            catId: null,
             content: `Error: ${errorText}`,
             mentions: [],
             origin: 'stream',
@@ -2441,7 +2325,8 @@ export async function* routeParallel(
           }
           if (
             deps.deliveryCursorStore &&
-            (!options.cursorBoundaries || (targetSucceeded && (turnStoredMessageId || !catProducedOutput)))
+            (!options.cursorBoundaries ||
+              (lifecycleTerminalStatus === 'completed' && (turnStoredMessageId || !catProducedOutput)))
           ) {
             // A completed target must commit before done releases its slot,
             // independently of a hanging sibling or the parent finalizer.
@@ -2497,9 +2382,31 @@ export async function* routeParallel(
       // invocationId → downstream broadcaster falls back to parent → bubble
       // identity / liveness wrongly attached to parent (instead of own turn).
       const stampedDone = ownInvId && !msg.invocationId ? { ...msg, invocationId: ownInvId } : msg;
+      // F117 KD-22: the response is committed; report the timeout before the done, so the Queue
+      // counts this member failed (not cancelled) and releases its slot. The done names the
+      // timeout, as a failed provider turn's done names its failure, so the Queue settles the
+      // entry failed from it rather than throwing and broadcasting a second error.
+      if (memberTimeout) {
+        yield {
+          type: 'error' as const,
+          catId: msg.catId,
+          error: cancellationDiagnostics
+            ? appendRemoteCancellationNotice(memberTimeoutErrorText(memberTimeout.diagnostics))
+            : memberTimeoutErrorText(memberTimeout.diagnostics),
+          metadata: catMeta.get(msg.catId),
+          ...(ownInvId ? { invocationId: ownInvId } : {}),
+          timestamp: Date.now(),
+        };
+      }
+      if (cancellationDiagnostics) {
+        const stored = turnStoredMessageId ? await deps.messageStore.getById(turnStoredMessageId) : undefined;
+        persistedDoneContent = stored?.content ?? appendRemoteCancellationNotice(text ?? '');
+      }
       yield projectLiveTurnExecution(
         {
           ...stampedDone,
+          ...(cancellationDiagnostics ? { metadata: catMeta.get(msg.catId) } : {}),
+          ...(memberTimeout && stampedDone.errorCode === undefined ? { errorCode: MEMBER_TIMEOUT_REASON } : {}),
           ...(persistedDoneContent !== undefined ? { content: persistedDoneContent } : {}),
           ...(turnStoredMessageId ? { messageId: turnStoredMessageId } : {}),
           ...(await storedMessageTimestamp(deps.messageStore, turnStoredMessageId)),
@@ -2536,8 +2443,6 @@ export async function* routeParallel(
   if (options.routeSpan) {
     options.routeSpan.setAttribute(ROUTE_TOTAL_CATS_INVOKED, completedCount);
     options.routeSpan.setAttribute(ROUTE_TOTAL_TOKENS, routeTotalTokens);
-    // Parallel routes never produce A2A handoffs (MVP safety boundary)
-    options.routeSpan.setAttribute(ROUTE_HAS_A2A_HANDOFF, false);
   }
 
   // F200 AC-A1: fire-and-forget recall correlation after all cats complete.
@@ -2573,11 +2478,5 @@ export async function* routeParallel(
       isFinal: true,
       timestamp: Date.now(),
     } as AgentMessage;
-  }
-
-  // Issue #83: Stop keepalive timer — streaming loop has exited.
-  if (keepaliveTimer) {
-    clearInterval(keepaliveTimer);
-    keepaliveTimer = undefined;
   }
 }

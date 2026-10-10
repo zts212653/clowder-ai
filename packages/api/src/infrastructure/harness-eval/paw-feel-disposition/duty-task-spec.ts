@@ -124,7 +124,6 @@ export function createPawFeelDutyTaskSpec(options: PawFeelDutyTaskSpecOptions): 
         }
         await options.watermarkStore.markAwaitingReceipt(signal.watermark, requireNow(now).iso);
         await options.receiptReconciler.reconcile('scheduler:paw-feel-disposition-duty');
-        if (!context.invokeTrigger) throw new Error('paw-feel duty invocation is unavailable');
         const reason =
           `F278 duty inbox has ${signal.reviewBundleCount} review bundle(s) / ` +
           `${signal.rawSignalCount} raw signal(s); open the bundle-first inbox and review original evidence; ` +
@@ -134,17 +133,17 @@ export function createPawFeelDutyTaskSpec(options: PawFeelDutyTaskSpecOptions): 
           'blocker with evidence; signature-waiting must continue to an exact independent signature or blocker; owner, task, ' +
           'transport receipt, or chat prose alone is not a terminal condition; if the invocation budget is near, ' +
           'use a structured continuation instead of waiting for the next duty cron';
-        await Promise.resolve(
-          context.invokeTrigger.trigger(
-            signal.systemThreadId,
-            signal.targetCatId,
-            options.ownerUserId,
-            reason,
-            messageId,
-            undefined,
-            { sourceCategory: 'scheduled', reason },
-          ),
-        );
+        // RFC §5.4: the duty instruction is the target's exact input, never thread content. The
+        // public notice above is a History-only message; this is its `private_input` sibling.
+        if (!context.deliverPrivate) throw new Error('paw-feel duty invocation is unavailable');
+        await context.deliverPrivate({
+          threadId: signal.systemThreadId,
+          userId: options.ownerUserId,
+          targetCatId: signal.targetCatId,
+          content: reason,
+          sourceCategory: 'scheduled',
+          idempotencyKey: `paw-feel-duty:${signal.watermark}`,
+        });
       },
     },
     state: { runLedger: 'sqlite' },

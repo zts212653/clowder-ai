@@ -50,13 +50,6 @@ interface CloudBindingsResponse {
   code?: string;
 }
 
-interface RetryAuthorityResponse {
-  attemptId?: unknown;
-  error?: string;
-  code?: string;
-  targetState?: string;
-}
-
 function safeDisplayTitle(value: unknown): string | undefined {
   if (typeof value !== 'string' || value.length > 160) return undefined;
   const invalid = Array.from(value).some((character) => {
@@ -79,31 +72,8 @@ function canonicalTimestamp(value: unknown): string | undefined {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value ? value : undefined;
 }
 
-function safeAttemptId(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 && value.length <= 512 ? value : undefined;
-}
-
 function deniesOwnerAccess(response: Response | null): boolean {
   return response?.status === 401 || response?.status === 403;
-}
-
-function projectRetryState(
-  response: Response | null,
-  body: RetryAuthorityResponse | undefined,
-): Pick<Extract<RecoveryLoadState, { kind: 'ready' }>, 'hydratedAttemptId' | 'retryStateError' | 'retryState'> {
-  const hydratedAttemptId = response?.ok ? safeAttemptId(body?.attemptId) : undefined;
-  if (hydratedAttemptId) return { hydratedAttemptId, retryState: 'ready' };
-  if (response?.status === 409 && ['queued', 'starting', 'appended'].includes(body?.targetState ?? '')) {
-    return { retryState: 'pending' };
-  }
-  if (!response?.ok) {
-    const retryStateError =
-      response?.status === 409 || response?.status === 404
-        ? '无法确认这条旧消息的发送状态。连接会话不会重发它。'
-        : (body?.error ?? `可重试状态读取失败 (${response?.status ?? 'unknown'})`);
-    return { retryStateError, retryState: 'unavailable' };
-  }
-  return { retryState: 'unavailable', retryStateError: '暂时无法确认发送状态。连接会话不会重发原消息。' };
 }
 
 function authorizedCandidates(value: unknown): AuthorizedConversationCandidate[] {
@@ -131,26 +101,20 @@ export async function readRecoveryState(
   signal: AbortSignal,
   syncTitles = false,
 ): Promise<RecoveryLoadState | null> {
-  const retryAuthorityRequest = apiFetch(
-    `/api/messages/${encodeURIComponent(identity.sourceMessageId)}/queue-targets/${encodeURIComponent(identity.targetCatId)}/retry-authority`,
-    { signal },
-  );
-  const [pluginResponse, bindingResponse, retryAuthorityResponse] = await Promise.all([
+  const [pluginResponse, bindingResponse] = await Promise.all([
     syncTitles
       ? apiFetch('/api/plugins/personal-chrome/refresh-titles', { method: 'POST', signal })
       : apiFetch('/api/plugins/personal-chrome', { signal }),
     apiFetch(`/api/threads/${encodeURIComponent(identity.threadId)}/cloud-bindings`, { signal }),
-    retryAuthorityRequest,
   ]);
   if (signal.aborted) return null;
-  if ([pluginResponse, bindingResponse, retryAuthorityResponse].some(deniesOwnerAccess)) {
+  if ([pluginResponse, bindingResponse].some(deniesOwnerAccess)) {
     return { kind: 'unauthorized' };
   }
 
-  const [pluginBody, bindingBody, retryAuthorityBody] = await Promise.all([
+  const [pluginBody, bindingBody] = await Promise.all([
     pluginResponse.json().catch(() => ({})) as Promise<PersonalChromeStateResponse>,
     bindingResponse.json().catch(() => ({})) as Promise<CloudBindingsResponse>,
-    retryAuthorityResponse?.json().catch(() => ({})) as Promise<RetryAuthorityResponse | undefined>,
   ]);
   if (signal.aborted) return null;
   if (!pluginResponse.ok) {
@@ -163,7 +127,6 @@ export async function readRecoveryState(
   const candidates = authorizedCandidates(pluginBody.authorization?.conversations);
   const rawBinding = bindingBody.bindings?.['gpt-pro'];
   const binding = rawBinding === undefined ? null : parseChatGptConversationUrl(rawBinding);
-  const retryState = projectRetryState(retryAuthorityResponse, retryAuthorityBody);
   return {
     kind: 'ready',
     candidates,
@@ -171,7 +134,12 @@ export async function readRecoveryState(
       binding && candidates.some((candidate) => candidate.conversationId === binding.conversationId)
         ? binding.conversationId
         : null,
-    ...retryState,
+    ...(identity.attemptId
+      ? { hydratedAttemptId: identity.attemptId, retryState: 'ready' as const }
+      : {
+          retryState: 'unavailable' as const,
+          retryStateError: '这条消息缺少可验证的发送记录，请查看最新状态。',
+        }),
     ...projectPersonalChromeRecoveryStatus(pluginBody),
   };
 }
@@ -206,7 +174,7 @@ async function retryExactSource(args: {
 }): Promise<boolean> {
   const { sourceMessageId, targetCatId, attemptId } = args.identity;
   const response = await apiFetch(
-    `/api/messages/${encodeURIComponent(sourceMessageId)}/queue-targets/${encodeURIComponent(targetCatId)}/retry`,
+    `/api/messages/${encodeURIComponent(sourceMessageId)}/delivery-targets/${encodeURIComponent(targetCatId)}/retry`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -216,9 +184,10 @@ async function retryExactSource(args: {
   const body = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
   if (!args.isCurrent()) return false;
   if (response.ok) return true;
-  const stale =
-    response.status === 409 &&
-    (body.code === 'QUEUE_RETRY_AUTHORITY_STALE' || body.code === 'QUEUE_TARGET_NOT_RETRYABLE');
+  // This exact endpoint reserves 409 for an immutable retry fence that no
+  // longer matches. Treat the status as authoritative even if an intermediary
+  // strips the structured body; retrying the same stale attempt cannot heal it.
+  const stale = response.status === 409;
   if (stale) throw new RecoveryReconciliationRequired();
   throw new Error(body.error ?? '重新发送未成功');
 }

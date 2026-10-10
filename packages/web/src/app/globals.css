@@ -2,16 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
-[data-lineage-focus="true"] {
-  /* The human's hue and chroma (cocoa, or the config's colour), at the lightness the theme floors at 3:1 (F322). */
-  outline: 2px solid
+[data-message-jump-focus="true"] {
+  position: relative;
+}
+
+[data-message-jump-focus="true"]::after {
+  position: absolute;
+  z-index: 20;
+  inset: -3px;
+  border: 2px solid
     oklch(
       var(--cat-lineage-l, var(--cat-bubble-l, 0.62)) calc(var(--cocreator-chroma) * var(--cat-bubble-cmul, 1))
         var(--cocreator-hue)
     );
-  outline-offset: 3px;
+  border-left: 0;
   border-radius: 0.75rem;
-  transition: outline-color 160ms ease;
+  pointer-events: none;
+  content: "";
 }
 
 /* Design tokens live in theme-tokens.css (imported via layout.tsx) */

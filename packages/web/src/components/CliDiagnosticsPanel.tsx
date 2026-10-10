@@ -90,7 +90,6 @@ const REASON_PALETTE: Record<CliErrorReasonCode, Palette> = {
   server_overloaded: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_response_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   cli_stall_timeout: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
-  active_writer_recovery: { ...PALETTE_TRANSIENT, Icon: HourglassIcon },
   // Tier 3 — system / environment
   spawn_failed: { ...PALETTE_SYSTEM, Icon: TerminalIcon },
   missing_rollout: { ...PALETTE_SYSTEM, Icon: FileXIcon },
@@ -266,6 +265,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
           <button
             type="button"
             data-testid="cli-diagnostics-toggle"
+            aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             className="flex items-center gap-1.5 cursor-pointer bg-transparent border-none p-0 self-start"
           >
@@ -277,7 +277,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
               查看详细错误
             </span>
           </button>
-          {expanded && (
+          {expanded && hasExcerpt && (
             <pre
               data-testid="cli-diagnostics-excerpt"
               className="rounded-lg overflow-x-auto whitespace-pre-wrap break-words text-xs font-mono m-0"
@@ -294,7 +294,7 @@ export function CliDiagnosticsPanel({ errorMessage, diagnostics, dedupCount }: C
         </>
       )}
 
-      {/* debugRef strip — always shown (no secrets, safe to expose) */}
+      {/* Standalone error metadata */}
       <div
         data-testid="cli-diagnostics-debug-ref"
         className="flex flex-wrap gap-x-3 gap-y-1 text-xs"

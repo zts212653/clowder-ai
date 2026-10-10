@@ -87,7 +87,7 @@ export function ChatContextPicker({
       data-testid="chat-context-picker"
       role="dialog"
       aria-label="添加上下文"
-      className="absolute bottom-full left-4 mb-2 z-20 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-cafe bg-cafe-surface-elevated shadow-lg"
+      className="absolute bottom-full left-4 mb-2 z-20 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-cafe bg-cafe-surface-canvas shadow-lg"
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.preventDefault();

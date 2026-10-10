@@ -1,7 +1,6 @@
 import type { CatId, TurnExecutionRecord } from '@cat-cafe/shared';
 import type { InvocationRecord } from '../../stores/ports/InvocationRecordStore.js';
 import type { CodexAppServerLifecycleSnapshot } from '../providers/CodexAppServerLifecycle.js';
-import type { ZombieRecord } from './getThreadLiveInvocations.js';
 import {
   collectInvocationOwnerCandidates,
   type InvocationOwnerTrackerLike,
@@ -10,7 +9,7 @@ import {
 } from './InvocationOwnerLeaseCandidates.js';
 import { DEFAULT_INVOCATION_SLOT_TTL_MS } from './InvocationTracker.js';
 import { type ExitedChildRecovery, retireExitedChildExecutions } from './RetireExitedChildExecutions.js';
-import type { ReconcileZombieResult } from './reconcileZombies.js';
+import type { ReconcileZombieResult, ZombieRecord } from './reconcileZombies.js';
 
 interface InvocationOwnerReaperLog {
   info(obj: unknown, message?: string): void;
@@ -35,7 +34,7 @@ export interface InvocationOwnerReaperOptions extends ExitedChildRecovery {
   /** Queue reservations whose tracker owner was installed but later disappeared. */
   listStaleProcessingLeases?: (now?: number) => StaleProcessingOwnerLease[];
   /** Pre-provider reservations are safe to recover without probing provider lifecycle. */
-  reapStalePrestartReservations?: (now?: number) => number;
+  reapStalePrestartReservations?: (now?: number) => number | Promise<number>;
   ownerLeaseTtlMs?: number;
   now?: () => number;
   log: InvocationOwnerReaperLog;
@@ -80,7 +79,7 @@ export class InvocationOwnerReaper {
   async runOnce(): Promise<InvocationOwnerReaperRunResult> {
     const now = this.now();
     const result = emptyResult();
-    result.prestartReaped = this.options.reapStalePrestartReservations?.(now) ?? 0;
+    result.prestartReaped = (await this.options.reapStalePrestartReservations?.(now)) ?? 0;
     const candidates = await this.collectCandidates(now, result);
     result.scanned = candidates.length;
 

@@ -38,7 +38,7 @@ test('cloud replies to the human persist without routing to a cat, with optional
   for (const content of ['在呢，You。', '@co-creator\n在呢。']) {
     const source = messageStore.append({
       userId: 'alice',
-      catId: null,
+      from: { kind: 'user', userId: 'alice' },
       threadId: thread.id,
       content: '@gpt-pro 砚砚喵',
       mentions: ['gpt-pro'],

@@ -1,72 +1,68 @@
-import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DispatchReceiptService } from '../dist/domains/ball-custody/DispatchReceiptService.js';
-import { createA2ADispositionAuth } from './helpers/a2a-dispatch-disposition-harness.js';
-import { createLiveDispatchReceiptFixture } from './helpers/f317-live-dispatch-receipt-fixture.mjs';
+import { createCanonicalLiveSourceFixture as fixture } from './helpers/1398-live-source-fixture.mjs';
 
-test('event-first repair rejects a later ordinary outcome instead of accepting a timestamp as terminal identity', async () => {
-  const h = await createLiveDispatchReceiptFixture({ failReceipt: true });
-  const auth = createA2ADispositionAuth(h);
-  await assert.rejects(h.service.completeAdopted(auth, h.source.id, 'completed'), /receipt unavailable/);
-  const outcome = {
-    invocationId: 'inv-1',
-    disposition: 'completed_with_turn',
-    handledAt: Date.now() + 100,
-    evidenceRef: { kind: 'invocation_lineage', invocationId: 'inv-1' },
-  };
-  await h.coordinator.commitSuccessfulTargetsForMessages(
-    h.queue.getEntrySnapshot('thread-1', 'user-1', h.entry.id),
-    [h.source.id],
-    ['codex-sol'],
-    'inv-1',
-    outcome.handledAt,
-    { [h.source.id]: { 'codex-sol': outcome } },
-  );
-  const before = h.messageStore.getById(h.source.id).queueCustody;
-  assert.deepEqual(before.targetOutcomeByCatId['codex-sol'], outcome);
-  const receipts = new DispatchReceiptService({
-    messageStore: h.messageStore,
-    queue: h.queue,
-    coordinator: h.coordinator,
-    eventLog: h.eventLog,
-    onSettled() {
-      assert.fail('conflicting receipt must not publish success');
-    },
-  });
-  await assert.rejects(
-    receipts.repair({ threadId: 'thread-1', catId: 'codex-sol', sourceMessageId: h.source.id }),
-    /conflicts with an existing outcome/,
-  );
-  assert.deepEqual(h.messageStore.getById(h.source.id).queueCustody, before);
-  assert.equal(h.eventLog.events.filter((event) => event.kind === 'ball.dispatch_dispositioned').length, 1);
-});
-
+const intent = { requested: 'continue_current', boundParentInvocationId: 'live-parent' };
+// Old event-first repair had two terminal owners. The same conflict protection
+// now belongs to immutable response identity, source dispatchRef and terminal CAS.
 for (const patch of [
-  { sourceMessageId: 'another-source' },
-  { handoffEventId: 'another-handoff' },
-  { invocationId: 'another-invocation' },
-  { dispositionEventId: 'another-terminal' },
-  { disposition: 'handled' },
-  { dispositionAt: -1 },
+  { invocationId: 'other-child' },
+  { targetId: 'kimi' },
+  { responseMessageId: 'missing-response' },
 ]) {
-  test(`receipt replay rejects mismatched ${Object.keys(patch)[0]} even with the original event ID`, async () => {
-    const h = await createLiveDispatchReceiptFixture();
-    await h.service.completeAdopted(createA2ADispositionAuth(h), h.source.id, 'completed');
-    const source = structuredClone(h.messageStore.getById(h.source.id));
-    Object.assign(source.queueCustody.targetOutcomeByCatId['codex-sol'].evidenceRef, patch);
-    const receipts = new DispatchReceiptService({
-      messageStore: { getById: async () => source },
-      queue: h.queue,
-      coordinator: h.coordinator,
-      eventLog: h.eventLog,
-      onSettled() {
-        assert.fail('conflicting receipt must not publish success');
-      },
+  test('a later timestamp cannot redirect committed Live input to ' + JSON.stringify(patch), async (t) => {
+    const f = await fixture(intent, 'agent');
+    t.after(f.close);
+    assert.equal((await f.read()).statusCode, 200);
+    const before = [structuredClone(f.store.getById(f.message.id)), structuredClone(f.store.getById(f.response.id))];
+    const result = await f.store.commitLifecycleAppendAdmission({
+      threadId: 'home',
+      entryId: f.entry.id,
+      inputMessageIds: [f.message.id],
+      runs: [
+        {
+          targetId: 'codex-astra',
+          invocationId: f.auth.invocationId,
+          responseMessageId: f.response.id,
+          dispatchedAt: Date.now() + 1000,
+          ...patch,
+        },
+      ],
     });
-    await assert.rejects(
-      receipts.repair({ threadId: 'thread-1', catId: 'codex-sol', sourceMessageId: h.source.id }),
-      /conflicts with an existing outcome/,
+    assert.ok(result.kind === 'conflict' || result.kind === 'not_found', JSON.stringify(result));
+    assert.deepEqual([f.store.getById(f.message.id), f.store.getById(f.response.id)], before);
+    assert.deepEqual((await f.queue.getDurableEntry('home', f.entry.id)).targets, ['kimi']);
+  });
+}
+
+for (const patch of [{ invocationId: 'other-child' }, { status: 'failed' }, { status: 'interrupted' }]) {
+  test('terminal recovery cannot replace the original result with ' + JSON.stringify(patch), async (t) => {
+    const f = await fixture(intent, 'agent');
+    t.after(f.close);
+    assert.equal((await f.read()).statusCode, 200);
+    const terminal = {
+      invocationId: f.auth.invocationId,
+      status: 'completed',
+      completedAt: Date.now(),
+      content: 'original result',
+      extra: f.response.extra,
+      mentions: [],
+      origin: 'stream',
+    };
+    assert.equal((await f.store.commitLifecycleResponseTerminal(f.response.id, terminal)).kind, 'applied');
+    const before = structuredClone(f.store.getById(f.response.id));
+    assert.equal(
+      (
+        await f.store.commitLifecycleResponseTerminal(f.response.id, {
+          ...terminal,
+          ...patch,
+          completedAt: Date.now() + 1000,
+          content: 'competing result',
+        })
+      ).kind,
+      'conflict',
     );
+    assert.deepEqual(f.store.getById(f.response.id), before);
+    assert.equal(f.store.getById(f.message.id).lifecycle.dispatchRefs[0].statusMessageId, f.response.id);
   });
 }

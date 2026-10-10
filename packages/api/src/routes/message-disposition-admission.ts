@@ -1,7 +1,16 @@
-/** F264: resolve scoped author preference and bind current-work intent to an exact live parent. */
+/** F264: bind an explicit single-message choice to its exact live parent. Defaults are snapshotted by common Queue admission. */
 
-import type { CatId, FreshnessCarrierCapability, MessageWorkDisposition, QueueAuthorIntent } from '@cat-cafe/shared';
-import { resolveMessageDispositionPreference } from '../config/user-preferences-store.js';
+import {
+  type CatId,
+  type FreshnessCarrierCapability,
+  type MessageWorkDisposition,
+  type QueueAuthorIntent,
+  supportsActiveInvocationGuidance,
+} from '@cat-cafe/shared';
+import {
+  MESSAGE_DISPOSITION_PRODUCT_DEFAULT,
+  resolveMessageDispositionPreference,
+} from '../config/user-preferences-store.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 
 type ExactParentTracker = Pick<InvocationTracker, 'has' | 'getUserId' | 'getExecutionId'>;
@@ -10,6 +19,7 @@ const UNDECLARED_CARRIER_CAPABILITY: FreshnessCarrierCapability = {
   provider: 'other',
   carrier: 'other',
   deliverySemantics: 'undeclared',
+  activeInvocationGuidance: 'undeclared',
 };
 
 type FreshnessCapabilityOwner = {
@@ -31,8 +41,25 @@ export function resolveMessageDispositionForAdmission(input: {
   threadId: string;
 }): MessageWorkDisposition {
   if (input.explicit) return input.explicit;
-  if (!input.projectRoot) return 'next_work';
+  if (!input.projectRoot) return MESSAGE_DISPOSITION_PRODUCT_DEFAULT;
   return resolveMessageDispositionPreference(input.projectRoot, input.threadId).effective;
+}
+
+export interface QueueAdmissionPolicyContext {
+  projectRoot?: string;
+  resolveTargets?: (
+    requested: readonly string[],
+    threadId: string,
+    content?: string,
+    exact?: boolean,
+  ) => Promise<string[]>;
+  onAdmitted?: (admission: {
+    threadId: string;
+    entries: readonly import('../domains/cats/services/agents/invocation/InvocationQueue.js').QueueEntry[];
+    message?: import('../domains/cats/services/stores/ports/MessageStore.js').StoredMessage;
+  }) => void;
+  invocationTracker?: ExactParentTracker;
+  resolveCarrierCapability?: (catId: CatId) => FreshnessCarrierCapability | undefined;
 }
 
 export function resolveQueueAuthorIntentByCatId(input: {
@@ -51,7 +78,7 @@ export function resolveQueueAuthorIntentByCatId(input: {
       if (input.requested === 'next_work') {
         return [catId, { requested: 'next_work', carrierCapability } satisfies QueueAuthorIntent];
       }
-      if (carrierCapability.deliverySemantics !== 'exact_active_turn') {
+      if (!supportsActiveInvocationGuidance(carrierCapability)) {
         return [
           catId,
           {
@@ -59,7 +86,7 @@ export function resolveQueueAuthorIntentByCatId(input: {
             carrierCapability,
             fallbackAt: now,
             fallbackReason:
-              carrierCapability.deliverySemantics === 'undeclared'
+              carrierCapability.activeInvocationGuidance === 'undeclared'
                 ? 'carrier_capability_undeclared'
                 : 'unsupported_carrier',
           } satisfies QueueAuthorIntent,

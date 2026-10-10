@@ -47,14 +47,16 @@ export function useThreadChatSelection(messages: readonly ChatMessage[]) {
     });
   }, []);
 
+  // Drop selected ids whose messages went away or stopped being selectable. Decide before calling setState: while a
+  // reply streams, `messages` changes on nearly every commit and this component usually has work pending, so React
+  // cannot skip an updater that returns the same Set; each call would be a real update scheduled from the commit
+  // phase, and a long chain of them trips React's nested-update limit (F117 baseline B).
   useEffect(() => {
-    setSelectedMessageIds((current) => {
-      const selectableIds = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
-      const next = new Set([...current].filter((messageId) => selectableIds.has(messageId)));
-      if (next.size === current.size && [...next].every((messageId) => current.has(messageId))) return current;
-      return next;
-    });
-  }, [messages]);
+    if (selectedMessageIds.size === 0) return;
+    const selectableIds = new Set(messages.filter(isMessageSelectableForBundle).map((message) => message.id));
+    if ([...selectedMessageIds].every((messageId) => selectableIds.has(messageId))) return;
+    setSelectedMessageIds((current) => new Set([...current].filter((messageId) => selectableIds.has(messageId))));
+  }, [messages, selectedMessageIds]);
 
   return {
     selectionMode,

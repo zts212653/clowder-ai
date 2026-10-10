@@ -2,8 +2,8 @@
  * F297 (PR #3748 R4 P1-2) — live-invocation 执行面的 domain-owned 投影。
  *
  * 本模块只回答一个问题：**这条 thread 上，canonical live invocation 有哪些？**
- * 真相源是 record + tracker + draft（+ F194 child bridge / registry namespace bridge），
- * 算法全部委托给 `getThreadLiveInvocations`，此处不复制任何 liveness 规则。
+ * 真相源是 record + 本进程 tracker 槽位 + durable running 子轮（F117 KD-23：不读草稿、不看时间戳），
+ * 算法全部委托给 `getThreadLiveInvocations`；R 已终局的成员在此过滤掉。
  *
  * 与 `active-execution-service.ts` 的职责切分（R4 P1-2 要求，用来消除 453 行聚集）：
  * 本文件 = 单执行面的 projection + registry port + strict/fail-open adapter；
@@ -11,19 +11,51 @@
  * 从 `routes/queue.ts` 原样迁移的既有兼容逻辑，不是本 PR 新增的代偿层。
  */
 
-import type { IDraftStore } from '../../stores/ports/DraftStore.js';
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import type { IInvocationRecordStore } from '../../stores/ports/InvocationRecordStore.js';
+import type { IMessageStore } from '../../stores/ports/MessageStore.js';
 import type { ITurnExecutionStore } from '../../stores/ports/TurnExecutionStore.js';
+import type { AgentClientActiveRunDispatcher } from '../../types.js';
 import type { CodexAppServerLifecycleSnapshot } from '../providers/CodexAppServerLifecycle.js';
 import { getCodexAppServerLifecycle } from '../providers/CodexAppServerLifecycleRegistry.js';
-import { getThreadLiveInvocations } from './getThreadLiveInvocations.js';
+import {
+  getThreadLiveInvocations,
+  type LiveInvocation,
+  type LivenessSource,
+  type OwnerSnapshot,
+} from './getThreadLiveInvocations.js';
 import { projectInvocationSettlement } from './InvocationSettlementProjection.js';
+
+/**
+ * F117 KD-23: how strongly each source proves a member processing. A slot this process holds, or a
+ * live CLI owner, verifies the turn; a slot whose record is not running yet is this process's own
+ * pre-start window; a running child only stands in for an owner nobody could verify.
+ */
+const EVIDENCE_RANK: Record<LivenessSource, number> = {
+  'record+tracker': 2,
+  'record+owner': 2,
+  'tracker-only': 1,
+  'parent+child-execution': 0,
+  'record-only': 0,
+};
+
+/** The candidate a cat's single slot shows: the strongest evidence, then the earliest start. */
+function outranks(candidate: LiveInvocation, current: LiveInvocation): boolean {
+  const byEvidence = EVIDENCE_RANK[candidate.source] - EVIDENCE_RANK[current.source];
+  return byEvidence !== 0 ? byEvidence > 0 : candidate.startedAt < current.startedAt;
+}
+
+export type { OwnerSnapshot } from './getThreadLiveInvocations.js';
 
 /** 进程内 tracker slot（控制面，非 lifecycle 真相源）。 */
 export interface InvocationTrackerLike {
   has(threadId: string, catId?: string): boolean;
   getUserId(threadId: string, catId: string): string | null;
   getExecutionId?(threadId: string, catId: string): string | undefined;
+  /** Canceled tombstones remain observable while provider teardown commits its durable terminal. */
+  getSlotState(threadId: string, catId: string): 'active' | 'canceled' | 'absent';
+  /** Optional exact identity for a canceled tombstone; absence must fail closed to repair. */
+  getCanceledSlotIdentity?(threadId: string, catId: string): { executionId: string; userId: string } | undefined;
   cancel(
     threadId: string,
     catId: string,
@@ -31,7 +63,9 @@ export interface InvocationTrackerLike {
     abortReason?: string,
   ): { cancelled: boolean; catIds: string[]; executionIds?: string[] };
   /** Issue #83: Get all active slots for a thread (F5 refresh recovery) */
-  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number }>;
+  getActiveSlots(threadId: string): Array<{ catId: string; startedAt: number; activeRun?: LifecycleActiveRun }>;
+  /** Exact live provider seam; absence means explicit Append is unsupported now. */
+  getAgentClientActiveRunDispatcher?(threadId: string, catId: string): AgentClientActiveRunDispatcher | undefined;
   /** 稀疏候选索引：本进程持有 slot 的 thread。 */
   listActiveThreadIds?(): string[];
   /** F-invocation-stale-recovery: Cancel ALL active slots for a thread (abort controllers + delete slots). */
@@ -69,6 +103,7 @@ export interface ActiveInvocationProjection {
   turnInvocationId?: string;
   appServerLifecycle?: CodexAppServerLifecycleSnapshot;
   freshnessCarrierCapability?: import('@cat-cafe/shared').FreshnessCarrierCapability;
+  activeRun?: LifecycleActiveRun;
 }
 
 export interface LifecycleProjectionCandidate {
@@ -76,6 +111,7 @@ export interface LifecycleProjectionCandidate {
   startedAt: number;
   lifecycleOwnerId?: string;
   turnInvocationId?: string;
+  activeRun?: LifecycleActiveRun;
 }
 
 export function getRequestOwnedTrackerExecutionId(
@@ -92,12 +128,13 @@ function resolveLifecycleOwnerId(
   threadId: string,
   userId: string,
   catId: string,
-  canonicalExecutionId: string,
+  canonicalExecutionId: string | undefined,
   invocationTracker: InvocationTrackerLike,
-): string {
+): string | undefined {
   // The tracker is the current control-plane owner during replacement windows. When it has
   // no same-user bound execution yet, the canonical read model still carries the exact parent
-  // owner. Never borrow a tracker owner from another user on a shared/default thread.
+  // owner. Never borrow a tracker owner from another user on a shared/default thread. When
+  // neither names one, the slot stays owner-less and routes show it unresolved.
   return getRequestOwnedTrackerExecutionId(threadId, userId, catId, invocationTracker) ?? canonicalExecutionId;
 }
 
@@ -128,12 +165,70 @@ export function trackerProjectionCandidates(
   });
 }
 
+/** Reads a response R's lifecycle status by message id. */
+export type ResponseStatusReader = (responseMessageId: string) => Promise<'processing' | 'terminal' | 'absent'>;
+
+/** The ResponseStatusReader over the message store that holds R. */
+export function responseStatusFromMessages(messageStore: Pick<IMessageStore, 'getById'>): ResponseStatusReader {
+  return async (responseMessageId) => {
+    const message = await Promise.resolve(messageStore.getById(responseMessageId));
+    if (message?.lifecycle?.kind !== 'response') return 'absent';
+    return message.lifecycle.status === 'processing' ? 'processing' : 'terminal';
+  };
+}
+
 /**
- * F194 Phase B: produce canonical activeInvocations using getThreadLiveInvocations helper
- * (record + tracker + draft 收口为单一 read model). Falls back to tracker-only when the
- * record/draft stores aren't wired (legacy unit tests, embedded modes), preserving the
- * pre-F194 contract. Helper exceptions degrade to fallback + warn log; the endpoint never
- * 500s on a liveness lookup error.
+ * F117 KD-23: a member is processing only while its R is. The tracker's activeRun names R once the
+ * member has one; between R's terminal commit and the execution retiring its slot, the slot is still
+ * held, so R's own status decides. A durable running child needs no check: invoke-single-cat ends the
+ * child turn before the route commits R.
+ */
+async function withoutTerminalResponses(
+  active: readonly LiveInvocation[],
+  responseStatus: ResponseStatusReader,
+): Promise<LiveInvocation[]> {
+  const statuses = await Promise.all(
+    active.map((live) => (live.responseMessageId ? responseStatus(live.responseMessageId) : 'processing')),
+  );
+  return active.filter((_, index) => statuses[index] !== 'terminal');
+}
+
+/**
+ * The lifecycle candidate a cat's slot shows. The control-plane owner is the tracker's execution,
+ * else the canonical one; the child turn is named only while that owner is the canonical execution.
+ */
+function lifecycleCandidate(
+  threadId: string,
+  userId: string,
+  live: LiveInvocation,
+  invocationTracker: InvocationTrackerLike,
+  trackerActiveRunByCatId: ReadonlyMap<string, LifecycleActiveRun>,
+): LifecycleProjectionCandidate {
+  const lifecycleOwnerId = resolveLifecycleOwnerId(threadId, userId, live.catId, live.executionId, invocationTracker);
+  const turnInvocationId =
+    live.executionId !== undefined && live.invocationId !== live.executionId && lifecycleOwnerId === live.executionId
+      ? live.invocationId
+      : undefined;
+  const activeRun = trackerActiveRunByCatId.get(live.catId);
+  const exactActiveRun =
+    activeRun && (activeRun.invocationId === live.invocationId || activeRun.invocationId === turnInvocationId)
+      ? activeRun
+      : undefined;
+  return {
+    catId: live.catId,
+    startedAt: live.startedAt,
+    ...(lifecycleOwnerId ? { lifecycleOwnerId } : {}),
+    ...(turnInvocationId ? { turnInvocationId } : {}),
+    ...(exactActiveRun ? { activeRun: exactActiveRun } : {}),
+  };
+}
+
+/**
+ * F194 Phase B / F117 KD-23: produce canonical activeInvocations using the getThreadLiveInvocations
+ * helper (running record + this process's tracker slot or a durable running child). Falls back to
+ * tracker-only when the record store isn't wired (legacy unit tests, embedded modes), preserving the
+ * pre-F194 contract. Helper exceptions degrade to fallback + warn log in `resolveActiveInvocations`;
+ * the endpoint never 500s on a liveness lookup error.
  *
  * 注意本函数**只认识 live invocation 一张脸**。managed command / standalone running child
  * 由 `createActiveExecutionService` 的另外两条通道定性，不要试图在这里补。
@@ -143,96 +238,64 @@ export async function resolveActiveInvocationsStrict(
   userId: string,
   invocationTracker: InvocationTrackerLike,
   recordStore: IInvocationRecordStore | undefined,
-  draftStore: IDraftStore | undefined,
+  responseStatus: ResponseStatusReader | undefined,
   turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
-  log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
-  invocationRegistry?: InvocationRegistryPort,
+  /** F117 KD-23: the caller's CLI owner snapshot; without a complete one, running members stay listed unverified. */
+  ownerSnapshot?: OwnerSnapshot,
 ): Promise<ActiveInvocationProjection[]> {
-  if (!recordStore || !draftStore) {
+  if (!recordStore) {
     return projectActiveInvocations(threadId, trackerProjectionCandidates(threadId, userId, invocationTracker));
   }
-  {
-    const childrenByParent = new Map<string, Awaited<ReturnType<ITurnExecutionStore['listByParent']>>>();
-    const result = await getThreadLiveInvocations(threadId, userId, {
-      listRunningRecords: (tid, uid) => recordStore.listRunningByThread(tid, uid),
-      getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
-      getTrackerUserId: (tid, cid) => invocationTracker.getUserId(tid, cid),
-      getDrafts: (uid, tid) => draftStore.getByThread(uid, tid),
-      ...(turnExecutionStore
-        ? {
-            listTurnExecutionsByParent: async (parentId: string) => {
-              const children = await turnExecutionStore.listByParent(parentId);
-              childrenByParent.set(parentId, children);
-              return children;
-            },
-          }
-        : {}),
-      // F194 Phase Z (KD-22): namespace bridge — parent recordStore invocation ↔ per-cat-turn
-      // child registry invocation. Wraps InvocationRegistry.getRecord (parentInvocationId field)
-      // + getLatestId. Optional — when absent, helper falls back to legacy single-namespace path.
-      ...(invocationRegistry
-        ? {
-            getTurnInvocation: async (id: string) => {
-              const rec = await invocationRegistry.getRecord(id);
-              if (!rec) return null;
-              return {
-                parentInvocationId: rec.parentInvocationId,
-                threadId: rec.threadId,
-                userId: rec.userId,
-                catId: rec.catId,
-                createdAt: rec.createdAt,
-              };
-            },
-            getLatestTurnInvocationId: (tid: string, cat: string) => invocationRegistry.getLatestId(tid, cat),
-          }
-        : {}),
-      // F194 AC-B12: route diagnostic events into request log. NB: do NOT spread `source: 'F194'`
-      // — that would clobber LivenessEvent.source (record+draft / record-only / tracker+draft / null),
-      // losing the most diagnostic field. Use `feature` for the F194 marker instead.
-      onLog: (event) => log.info({ ...event, feature: 'F194' }, 'F194 liveness event'),
-    });
-    // Zombie candidates are diagnostic output only. The explicit owner reaper owns
-    // all terminal writes; GET /queue remains observational.
-    // 砚砚 R5 P2: filter null catId — frontend turns queue.activeInvocations[].catId into a
-    // real target cat slot identifier (replaceThreadTargetCats / hydrated-{threadId}-{catId}).
-    // null catId can only happen for the corner case where a record has no targetCats AND no
-    // draft — those entries can't surface as actionable queue slots, so drop them here.
-    //
-    // Cloud R15 P2: dedup by catId. Helper can yield multiple LiveInvocations for the same cat
-    // during recovery windows (e.g., two concurrent `running` records). Frontend
-    // replaceThreadTargetCats treats activeInvocations[].catId as cat-level state, so duplicates
-    // would render the same cat slot twice. Keep earliest startedAt as the canonical slot age.
-    const byCatId = new Map<string, LifecycleProjectionCandidate>();
-    for (const s of result.active) {
-      if (s.catId === null || s.catId === undefined) continue;
-      const existing = byCatId.get(s.catId);
-      if (!existing || s.startedAt < existing.startedAt) {
-        const lifecycleOwnerId = resolveLifecycleOwnerId(threadId, userId, s.catId, s.executionId, invocationTracker);
-        const turnInvocationId =
-          s.invocationId !== s.executionId && lifecycleOwnerId === s.executionId ? s.invocationId : undefined;
-        byCatId.set(s.catId, {
-          catId: s.catId,
-          startedAt: s.startedAt,
-          lifecycleOwnerId,
-          ...(turnInvocationId ? { turnInvocationId } : {}),
-        });
-      }
-    }
-    return projectActiveInvocations(threadId, Array.from(byCatId.values())).map((slot) => {
-      if (!slot.executionId || !slot.turnInvocationId) return slot;
-      const settlement = projectInvocationSettlement(
-        {
-          threadId,
-          userId,
-          catId: slot.catId,
-          executionId: slot.executionId,
-          turnInvocationId: slot.turnInvocationId,
-        },
-        childrenByParent.get(slot.executionId) ?? [],
-      );
-      return settlement ? { ...slot, settlement } : slot;
-    });
+  const childrenByParent = new Map<string, Awaited<ReturnType<ITurnExecutionStore['listByParent']>>>();
+  const result = await getThreadLiveInvocations(threadId, userId, {
+    listRunningRecords: (tid, uid) => recordStore.listRunningByThread(tid, uid),
+    getActiveSlots: (tid) => invocationTracker.getActiveSlots(tid),
+    getTrackerUserId: (tid, cid) => invocationTracker.getUserId(tid, cid),
+    getTrackerExecutionId: (tid, cid) => invocationTracker.getExecutionId?.(tid, cid),
+    ...(turnExecutionStore
+      ? {
+          listTurnExecutionsByParent: async (parentId: string) => {
+            const children = await turnExecutionStore.listByParent(parentId);
+            childrenByParent.set(parentId, children);
+            return children;
+          },
+        }
+      : {}),
+    ...(ownerSnapshot ? { ownerSnapshot } : {}),
+  });
+  const active = responseStatus ? await withoutTerminalResponses(result.active, responseStatus) : result.active;
+  // Read the dynamic Active Run only after the asynchronous canonical liveness
+  // snapshot. Child admission can bind the run while record/child stores are
+  // being read; taking this map before the await returns a torn `/queue`
+  // projection (new child identity + missing run), which then erases the newer
+  // websocket run during authoritative frontend hydration.
+  const trackerActiveRunByCatId = new Map(
+    invocationTracker
+      .getActiveSlots(threadId)
+      .filter((slot): slot is typeof slot & { activeRun: LifecycleActiveRun } => Boolean(slot.activeRun))
+      .map((slot) => [slot.catId, slot.activeRun]),
+  );
+  // Cloud R15 P2: dedup by catId. The helper can yield more than one LiveInvocation for the same cat
+  // (e.g. two running records, one proven by a durable child). Frontend replaceThreadTargetCats treats
+  // activeInvocations[].catId as cat-level state, so duplicates would render the same cat slot twice.
+  // F117 KD-23: the slot shows the strongest evidence, so an unverified child of an older execution
+  // never hides the execution this process runs; within the same evidence, the earliest start wins.
+  const chosen = new Map<string, LiveInvocation>();
+  for (const s of active) {
+    const existing = chosen.get(s.catId);
+    if (!existing || outranks(s, existing)) chosen.set(s.catId, s);
   }
+  const candidates = Array.from(chosen.values(), (live) =>
+    lifecycleCandidate(threadId, userId, live, invocationTracker, trackerActiveRunByCatId),
+  );
+  return projectActiveInvocations(threadId, candidates).map((slot) => {
+    if (!slot.executionId || !slot.turnInvocationId) return slot;
+    const settlement = projectInvocationSettlement(
+      { threadId, userId, catId: slot.catId, executionId: slot.executionId, turnInvocationId: slot.turnInvocationId },
+      childrenByParent.get(slot.executionId) ?? [],
+    );
+    return settlement ? { ...slot, settlement } : slot;
+  });
 }
 
 /**
@@ -248,10 +311,10 @@ export async function resolveActiveInvocations(
   userId: string,
   invocationTracker: InvocationTrackerLike,
   recordStore: IInvocationRecordStore | undefined,
-  draftStore: IDraftStore | undefined,
+  responseStatus: ResponseStatusReader | undefined,
   turnExecutionStore: Pick<ITurnExecutionStore, 'listByParent'> | undefined,
   log: { info: (obj: unknown, msg?: string) => void; warn: (obj: unknown, msg?: string) => void },
-  invocationRegistry?: InvocationRegistryPort,
+  ownerSnapshot?: OwnerSnapshot,
 ): Promise<ActiveInvocationProjection[]> {
   try {
     return await resolveActiveInvocationsStrict(
@@ -259,10 +322,9 @@ export async function resolveActiveInvocations(
       userId,
       invocationTracker,
       recordStore,
-      draftStore,
+      responseStatus,
       turnExecutionStore,
-      log,
-      invocationRegistry,
+      ownerSnapshot,
     );
   } catch (err) {
     // F194 AC-B13: fallback metric — split-brain protection bypassed when this fires.

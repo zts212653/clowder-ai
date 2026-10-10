@@ -25,10 +25,14 @@ test('terminal report and timeout wake the original owner once, retaining the ca
   assert.equal(f.wakes[0][1], f.actor.catId);
   const wakeMessage = f.messages.getById(f.wakes[0][4]);
   assert.equal(
-    wakeMessage?.queueCustody?.sourceCategory,
+    f.admissions[0]?.input.sourceCategory,
     'producer_return',
     'development-return producer must classify its wake',
   );
+  assert.equal(wakeMessage?.lifecycle?.kind, 'input');
+  assert.equal(Object.hasOwn(wakeMessage, 'queueCustody'), false);
+  await f.transport.waitForAwakening(wakeMessage.id);
+  assert.equal(f.transport.starts.length, 1);
   assert.equal(f.tasks.get(f.input.taskId).threadId, f.actor.threadId);
   assert.equal(f.tasks.get(f.input.taskId).entrustedWork.revision, 1, 'waking never updates or completes Task');
   assert.equal(f.service.read(registration.registrationId).status, 'delivered');

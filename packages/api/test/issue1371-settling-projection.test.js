@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { realDeps, realPresenceSource, startRunningRecordWithDraft } from './helpers/f297-presence-fixtures.js';
+import { realDeps, realPresenceSource, startRunningRecord } from './helpers/f297-presence-fixtures.js';
 
 const { queueRoutes } = await import('../dist/routes/queue.js');
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
@@ -17,7 +17,7 @@ const { recordCodexAppServerLifecycle, clearCodexAppServerLifecycle } = await im
 test('canonical projection identifies finished primary while exact same-parent guard is running', async () => {
   const deps = await realDeps();
   const scope = { threadId: 'settling-thread', userId: 'alice', catId: 'opus5' };
-  const parentInvocationId = await startRunningRecordWithDraft(deps, scope);
+  const parentInvocationId = await startRunningRecord(deps, scope);
   deps.invocationTracker.start(scope.threadId, scope.catId, scope.userId, [scope.catId], parentInvocationId);
   await deps.turnExecutionStore.createRunning({
     ...scope,

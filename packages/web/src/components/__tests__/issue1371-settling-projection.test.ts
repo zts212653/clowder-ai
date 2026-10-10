@@ -1,60 +1,59 @@
+import type { LifecycleActiveRun } from '@cat-cafe/shared';
 import { describe, expect, it } from 'vitest';
-import type { QueueEntry } from '@/stores/chat-types';
-import {
-  collectSettlingInvocationIds,
-  projectQueueEntryForActions,
-  receiptTargetStateLabel,
-} from '../queue-receipt-projection';
+import type { ChatMessage } from '@/stores/chat-types';
+import { projectMessageDispatchAvatars } from '../MessageDispatchAvatars';
 
-describe('exact source settling presentation', () => {
-  const target = { catId: 'opus5', state: 'seen' as const, invocationId: 'primary', seenAt: 100 };
-  const entry: QueueEntry = {
-    id: 'queue',
-    threadId: 't',
-    userId: 'u',
-    content: 'review',
-    messageId: 'm',
-    mergedMessageIds: [],
-    source: 'agent',
-    intent: 'execute',
-    status: 'queued',
-    createdAt: 1,
-    targetCats: ['opus5'],
-    targetStates: { opus5: 'seen' },
-    queueReceipt: {
-      version: 1,
-      entryId: 'queue',
-      scope: 'cross_thread_delivery',
-      targets: [target],
-      reminderAttempts: [],
-    },
-  };
-  it('shows finishing, not an ended-turn recovery action', () => {
-    const live = new Set(['parent', 'guard']);
-    const settling = new Set(['primary']);
-    expect(receiptTargetStateLabel(target, live, 'cross_thread_delivery', false, settling)).toBe(
-      '正在收尾 · 等待本轮完成',
-    );
-    expect(projectQueueEntryForActions(entry, live, settling)).toBeNull();
+const source: ChatMessage = {
+  id: 'm',
+  type: 'user',
+  content: 'review',
+  timestamp: 1,
+  lifecycle: {
+    kind: 'input',
+    orderKey: '1:m',
+    dispatchRefs: [{ targetId: 'opus5', phase: 'dispatched', statusMessageId: 'r', dispatchedAt: 2 }],
+  },
+};
+const response: ChatMessage = {
+  id: 'r',
+  type: 'assistant',
+  catId: 'opus5',
+  content: '',
+  timestamp: 2,
+  lifecycle: {
+    kind: 'response',
+    orderKey: '2:r',
+    invocationId: 'primary',
+    targetId: 'opus5',
+    inputEntryIds: ['queue'],
+    inputMessageIds: ['m'],
+    status: 'processing',
+    startedAt: 2,
+  },
+};
+const run: LifecycleActiveRun = {
+  threadId: 't',
+  targetId: 'opus5',
+  invocationId: 'primary',
+  responseMessageId: 'r',
+  inputEntryIds: ['queue'],
+  inputMessageIds: ['m'],
+  privateInputEntryIds: [],
+  startedAt: 2,
+};
+describe('exact delivery remains owned by its response', () => {
+  it('has one processing state while the exact response is active', () => {
+    expect(projectMessageDispatchAvatars(source, [response], [run])[0]?.phase).toBe('processing');
   });
-  it('restores unresolved presentation when the exact settlement proof disappears', () => {
-    expect(projectQueueEntryForActions(entry, new Set(['other-parent']), new Set())).not.toBeNull();
-    expect(receiptTargetStateLabel(target, new Set(), undefined, false, new Set())).toContain('尚未确认处理完成');
-  });
-  it('rejects stale parent and child projections after websocket replacement', () => {
-    const info = {
-      invocationId: 'parent',
-      turnInvocationId: 'guard',
-      settlement: { activeTurnInvocationId: 'guard', completedTurnInvocationIds: ['primary'] },
-    };
-    expect([...collectSettlingInvocationIds({ parent: { catId: 'opus5' } }, { opus5: info })]).toEqual(['primary']);
-    expect(collectSettlingInvocationIds({ other: { catId: 'opus5' } }, { opus5: info }).size).toBe(0);
-    expect(
-      collectSettlingInvocationIds(
-        { parent: { catId: 'opus5' } },
-        { opus5: { ...info, turnInvocationId: 'new-child' } },
-      ).size,
-    ).toBe(0);
-    expect(collectSettlingInvocationIds({}, { opus5: info }).size).toBe(0);
+  it.each(
+    [[], [{ ...run, invocationId: 'other' }], [{ ...run, responseMessageId: 'other' }], [run, run]].map((runs) => ({
+      runs,
+    })),
+  )('missing, replaced or ambiguous execution cannot turn a delivered message into another pending input', ({
+    runs,
+  }) => {
+    const projected = projectMessageDispatchAvatars(source, [response], runs);
+    expect(projected).toHaveLength(1);
+    expect(projected[0]?.phase).toBe('delivered');
   });
 });

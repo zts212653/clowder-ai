@@ -6,13 +6,14 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CatData } from '@/hooks/useCatData';
 
 vi.mock('next/link', () => ({
   default: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) =>
     React.createElement('a', { href, ...rest }, children),
 }));
 
-const TEST_CATS = [
+const TEST_CATS: CatData[] = [
   {
     id: 'opus',
     displayName: '布偶猫',
@@ -21,6 +22,7 @@ const TEST_CATS = [
     breedDisplayName: '布偶猫',
     color: { primary: '#FFAB91', secondary: '#8D6E63' },
     clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'claude-opus-4-6',
     isDefaultVariant: true,
     mentionPatterns: ['opus'],
@@ -37,6 +39,7 @@ const TEST_CATS = [
     breedDisplayName: '缅因猫',
     color: { primary: '#66BB6A', secondary: '#2E7D32' },
     clientId: 'openai',
+    carrier: 'cli',
     defaultModel: 'gpt-5.3-codex',
     isDefaultVariant: true,
     mentionPatterns: ['codex'],
@@ -53,6 +56,7 @@ const TEST_CATS = [
     breedDisplayName: '暹罗猫',
     color: { primary: '#81D4FA', secondary: '#0277BD' },
     clientId: 'google',
+    carrier: 'cli',
     defaultModel: 'gemini-2.5-pro',
     isDefaultVariant: true,
     mentionPatterns: ['gemini'],

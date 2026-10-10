@@ -26,17 +26,21 @@ const threadReadOptions = {
 describe('F128 proposal seed race — orphan carrier rollback', () => {
   test('race: concurrent terminal transition after enqueue rolls back orphan carrier', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     let proposalEnqueueAttempt = 0;
-    const originalEnqueue = invocationQueue.enqueue.bind(invocationQueue);
-    invocationQueue.enqueue = (input) => {
+    const originalAdmission = invocationQueue.send.bind(invocationQueue);
+    invocationQueue.send = async (messageStore, message, input) => {
       if (input.idempotencyKey?.startsWith('proposal-initial:')) {
         proposalEnqueueAttempt += 1;
         if (proposalEnqueueAttempt === 1) {
           return { outcome: 'full' };
         }
       }
-      return originalEnqueue(input);
+      return originalAdmission(messageStore, message, input);
     };
 
     const processCalls = [];
@@ -50,7 +54,6 @@ describe('F128 proposal seed race — orphan carrier rollback', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
 
     const source = await ctx.threadStore.create('alice', 'Source');
@@ -74,12 +77,13 @@ describe('F128 proposal seed race — orphan carrier rollback', () => {
     const seed = await ctx.messageStore.getByIdempotencyKey('alice', childId, `proposal-initial:${proposalId}`);
     assert.ok(seed, 'queue-full seed must be materialized with an idempotency key');
 
-    // Simulate another worker completing the seed after this reconcile enqueued a
-    // fresh carrier but before the seed could be admitted. The prepareQueueAdmission
-    // call sees a terminal seed, ensureExistingSeedAdmitted returns 'complete', and
-    // executeQueuedDispatch must roll the orphan carrier back.
-    const originalPrepare = ctx.messageStore.prepareQueueAdmission.bind(ctx.messageStore);
-    ctx.messageStore.prepareQueueAdmission = async (id) => {
+    // Simulate another worker completing the seed after reconcile read it but
+    // before the atomic existing-message/ledger admission wins. The storage CAS
+    // rejects the losing admission and removes its staged ledger row.
+    const originalExistingAdmission = ctx.messageStore.enqueueExistingMessageWithQueueLedgerAdmission.bind(
+      ctx.messageStore,
+    );
+    ctx.messageStore.enqueueExistingMessageWithQueueLedgerAdmission = async (id, entries, ledgerStore, maxDepth) => {
       if (id === seed.id) {
         const msg = await ctx.messageStore.getById(id);
         if (msg && msg.deliveryStatus !== 'delivered' && msg.deliveryStatus !== 'canceled') {
@@ -87,7 +91,7 @@ describe('F128 proposal seed race — orphan carrier rollback', () => {
           msg.deliveredAt = Date.now();
         }
       }
-      return originalPrepare(id);
+      return originalExistingAdmission(id, entries, ledgerStore, maxDepth);
     };
 
     const second = await ctx.approve('alice', proposalId);

@@ -49,7 +49,6 @@ import {
   isLivenessWarning,
   spawnCli,
 } from '../../../../../utils/cli-spawn.js';
-import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
 import { readJsonlTail } from '../../../../../utils/jsonl-tail-reader.js';
 import { sanitizeCliStderr } from '../../../../../utils/sanitize-cli-stderr.js';
@@ -350,11 +349,6 @@ function readLatestGeminiContextTokens(
   return [...candidates]
     .reverse()
     .find((message) => matchesCurrentAssistantText(message.content, normalizedAssistantText))?.tokens?.input;
-}
-
-function formatAgyPrintTimeout(timeoutMs: number): string | null {
-  if (timeoutMs <= 0) return null;
-  return `${Math.max(1, Math.ceil(timeoutMs / 1000))}s`;
 }
 
 function appendAgyMcpIdentityContract(prompt: string, catId: CatId, hasCallbackEnv: boolean): string {
@@ -942,8 +936,8 @@ export class GeminiAgentService implements AgentService {
     effectivePrompt = appendLocalImagePathHints(effectivePrompt, imagePaths);
     effectivePrompt = appendAgyMcpIdentityContract(effectivePrompt, this.catId, options?.callbackEnv !== undefined);
 
-    const timeoutMs = resolveCliTimeoutMs(undefined);
-    const printTimeout = formatAgyPrintTimeout(timeoutMs);
+    // F117 KD-22: AGY runs until its turn completes (`--print-timeout` defaults to 0); the member's
+    // one timeout is its invocation's, so neither AGY nor cli-spawn gets a second one.
     const agyLogPath = options?.agyLogPathOverride ?? join(tmpdir(), `cat-cafe-agy-${randomUUID()}.log`);
     const args: string[] = ['--add-dir', workingDirectory];
     if (agyProfile?.autoApprove && !readOnly) {
@@ -952,9 +946,6 @@ export class GeminiAgentService implements AgentService {
     if (readOnly) args.push('--mode', 'plan');
     for (const dir of imageAccessDirs) {
       args.push('--add-dir', dir);
-    }
-    if (printTimeout) {
-      args.push('--print-timeout', printTimeout);
     }
     if (agyModel) {
       args.push('--model', agyModel);
@@ -1176,7 +1167,6 @@ export class GeminiAgentService implements AgentService {
         args,
         outputMode: 'plainText' as const,
         cwd: agySpawnCwd,
-        timeoutMs,
         ...(childEnv ? { env: childEnv } : {}),
         ...(options?.signal ? { signal: options.signal } : {}),
         ...(options?.invocationId ? { invocationId: options.invocationId } : {}),

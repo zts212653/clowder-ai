@@ -36,8 +36,6 @@ export type CliErrorReasonCode =
    *  per se but surfaced via cliDiagnostics so users get evidence instead of generic
    *  "completed without textual output" message. */
   | 'silent_completion'
-  /** Codex preserved the native session after a bounded active-writer recovery refusal. */
-  | 'active_writer_recovery'
   /** Phase H (Sol runtime forensics 2026-07-09): upstream provider (Codex 0.98+) sent
    *  `{type:"error", message:"This content was flagged for possible cybersecurity risk..."}`
    *  followed by `turn.failed` + exit 1. NOT a Clowder AI bug — upstream policy engine decision.
@@ -51,8 +49,6 @@ export type CliErrorReasonCode =
    *  OFF the transient-exit retry in invoke-helpers.isTransientCliExitCode1. Distinct from
    *  invalid_config (a config *file* is malformed) and spawn_failed (binary missing). */
   | 'incompatible_cli_arguments';
-
-export type CliActiveWriterRecoveryState = 'owner_busy' | 'retiring' | 'external_or_unknown';
 
 /**
  * Structured CLI error payload (Phase A KD-1 white-list admission).
@@ -83,10 +79,6 @@ export interface CliDiagnostics {
    *  malformed payloads (no source) AND fails closed when older clients see a future
    *  source value they don't recognize (e.g. a hypothetical 'pii_redacted'). */
   excerptSource?: 'classifier' | 'cc_structured' | 'unknown_raw';
-  /** Present only for typed active_writer_recovery diagnostics. */
-  activeWriterRecovery?: {
-    state: CliActiveWriterRecoveryState;
-  };
   /** Debug correlation metadata — safe to expose */
   debugRef: {
     command: string;

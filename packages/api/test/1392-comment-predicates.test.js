@@ -157,11 +157,11 @@ describe('#1392 AC-3 — positive audiences', () => {
 describe('#1392 AC-6 — the real chain delivers review comments to the owner', () => {
   async function tracked(when) {
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
     const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
     const { ReviewFeedbackRouter } = await import('../dist/infrastructure/email/ReviewFeedbackRouter.js');
     const taskStore = new TaskStore();
-    const messageStore = new MessageStore();
+    const harness = connectorDeliveryHarness();
     const log = { info() {}, warn() {}, error() {} };
     const task = await taskStore.create({
       kind: 'pr_tracking',
@@ -188,12 +188,12 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     });
     const lifecycle = new GitHubWaitLifecycleService({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       now: () => 500,
       log,
     });
-    const router = new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log });
-    return { router, messageStore, taskStore, task };
+    const router = new ReviewFeedbackRouter({ deliveryDeps: harness.deliveryDeps, waitLifecycle: lifecycle, log });
+    return { router, harness, taskStore, task };
   }
 
   const signal = (newComments, cursors) => ({
@@ -208,7 +208,7 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
   });
 
   it('end to end: an inline review comment wakes the owner', async () => {
-    const { router, messageStore, task } = await tracked([inline(['reviewer'])]);
+    const { router, harness, task } = await tracked([inline(['reviewer'])]);
     const nit = {
       id: 51,
       author: 'reviewer',
@@ -221,13 +221,13 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     const result = await router.route(signal([nit], { inline: 51, conversation: 900 }), { taskId: task.id });
 
     assert.equal(result.kind, 'notified', 'the inline comment must not be absorbed as a cursor move');
-    const delivered = messageStore.getByThread('thread_1');
+    const delivered = harness.deliveries('thread_1');
     assert.equal(delivered.length, 1);
     assert.match(delivered[0].content, /inline/i);
   });
 
   it('end to end: a conversation comment wakes the owner', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['maintainer'])]);
+    const { router, harness, task } = await tracked([conversation(['maintainer'])]);
     const reply = {
       id: 901,
       author: 'maintainer',
@@ -239,11 +239,11 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
     const result = await router.route(signal([reply], { inline: 50, conversation: 901 }), { taskId: task.id });
 
     assert.equal(result.kind, 'notified');
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
   });
 
   it('AC-3 end to end: a comment from outside the frozen audience reaches nobody', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['maintainer'])]);
+    const { router, harness, task } = await tracked([conversation(['maintainer'])]);
     const bystander = {
       id: 901,
       author: 'bystander',
@@ -254,11 +254,11 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
 
     await router.route(signal([bystander], { inline: 50, conversation: 901 }), { taskId: task.id });
 
-    assert.equal(messageStore.getByThread('thread_1').length, 0, 'the owner named who they are waiting on');
+    assert.equal(harness.deliveries('thread_1').length, 0, 'the owner named who they are waiting on');
   });
 
   it('the comment body is never copied into the delivered message', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['maintainer'])]);
+    const { router, harness, task } = await tracked([conversation(['maintainer'])]);
     const SENTINEL = 'UNTRUSTED_BODY__1392_c3f1';
     await router.route(
       signal(
@@ -275,7 +275,7 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
       ),
       { taskId: task.id },
     );
-    assert.doesNotMatch(messageStore.getByThread('thread_1')[0].content, new RegExp(SENTINEL));
+    assert.doesNotMatch(harness.deliveries('thread_1')[0].content, new RegExp(SENTINEL));
   });
   /*
    * #1392 AC-3/6/7 — clowder-ai#1477, as a real acceptance sample rather than an invented one.
@@ -300,14 +300,14 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
   };
 
   it('#1477: the named author replies while HEAD never moves, and the owner is woken anyway', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['pr-author']), { kind: 'pr_head_changed' }]);
+    const { router, harness, task } = await tracked([conversation(['pr-author']), { kind: 'pr_head_changed' }]);
 
     const result = await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), {
       taskId: task.id,
     });
 
     assert.equal(result.kind, 'notified', 'an author receipt must not be absorbed as a cursor move');
-    const delivered = messageStore.getByThread('thread_1');
+    const delivered = harness.deliveries('thread_1');
     assert.equal(delivered.length, 1);
     assert.match(
       delivered[0].content,
@@ -330,11 +330,11 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
   });
 
   it('#1477: the wake points at the comment and never repeats what it claimed', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['pr-author'])]);
+    const { router, harness, task } = await tracked([conversation(['pr-author'])]);
 
     await router.route(signal([AUTHOR_RECEIPT], { inline: 50, conversation: 901 }), { taskId: task.id });
 
-    const content = messageStore.getByThread('thread_1')[0].content;
+    const content = harness.deliveries('thread_1')[0].content;
     assert.match(
       content,
       /github:pr-comment:901/,
@@ -348,13 +348,13 @@ describe('#1392 AC-6 — the real chain delivers review comments to the owner', 
   });
 
   it('#1477: a comment already present at registration cannot impersonate the reply being waited on', async () => {
-    const { router, messageStore, task } = await tracked([conversation(['pr-author'])]);
+    const { router, harness, task } = await tracked([conversation(['pr-author'])]);
     const history = { ...AUTHOR_RECEIPT, id: 900, createdAt: '2026-09-17T00:00:00Z' };
 
     await router.route(signal([history], { inline: 50, conversation: 900 }), { taskId: task.id });
 
     assert.equal(
-      messageStore.getByThread('thread_1').length,
+      harness.deliveries('thread_1').length,
       0,
       'the frontier was frozen at registration; history is not news',
     );

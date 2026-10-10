@@ -96,6 +96,14 @@ describe('F088 Phase B+4 Integration', () => {
           return { id: `msg-${Date.now()}` };
         },
       },
+      // Admission to the Queue is the wake; the router crosses this seam, not a separate trigger.
+      persistedQueueDelivery: {
+        async deliver(input) {
+          const id = `msg-${Date.now()}`;
+          triggerCalls.push([input.threadId, input.targetCatId, input.ownerUserId, input.content, id]);
+          return { state: 'started', entryId: `entry-${id}`, message: { id, ...input } };
+        },
+      },
       threadStore,
       invokeTrigger: {
         trigger(...args) {

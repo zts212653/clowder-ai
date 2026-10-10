@@ -70,11 +70,13 @@ const registry = {
   diff: (event) => workspaceProjection('augment', event.summary),
   reasoning: (event) => workspaceProjection('suppress', event.summary),
   warning: (event) =>
-    timelineProjection(
-      'replace',
-      event.severity === 'warning' ? `警告：${event.message}` : event.message,
-      event.severity,
-    ),
+    event.category === 'model_reroute'
+      ? entityProjection(event.message, event.severity)
+      : timelineProjection(
+          'replace',
+          event.severity === 'warning' ? `警告：${event.message}` : event.message,
+          event.severity,
+        ),
   guardian: (event) => workspaceProjection('suppress', event.summary, event.outcome === 'fail' ? 'error' : 'info'),
   capability: (event) => entityProjection(`${event.capability}：${event.availability}`),
   goal: (event) => entityProjection(event.state === 'cleared' ? '当前目标已清除' : `当前目标：${event.objective}`),

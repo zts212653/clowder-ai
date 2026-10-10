@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { CatData } from '@/hooks/useCatData';
 import { primeCoCreatorConfigCache, resetCoCreatorConfigCacheForTest } from '@/hooks/useCoCreatorConfig';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
+import { computeCliDiagnosticsDedup } from '@/utils/cli-diagnostics-dedup';
 
 const chatStoreState = vi.hoisted(() => ({ messages: [] as unknown[] }));
 
@@ -26,6 +27,8 @@ vi.mock('@/stores/chatStore', () => ({
       currentThreadId: null,
       isLoadingThreads: false,
       messages: chatStoreState.messages,
+      catInvocations: {},
+      threadStates: {},
       globalBubbleDefaults: { thinking: 'collapsed', cliOutput: 'collapsed' },
     }),
   resolveBubbleExpanded: (
@@ -93,6 +96,7 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
   let ChatMessage: React.FC<{
     message: ChatMessageType;
     getCatById: (id: string) => CatData | undefined;
+    timelineMessages?: readonly ChatMessageType[];
     hideDiagnosticsPanel?: boolean;
     dedupCount?: number;
   }>;
@@ -155,50 +159,202 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
     expect(container.querySelector('[data-testid="cli-diagnostics-banner"]')?.textContent).toContain('API 认证失败');
   });
 
-  it('keeps an exact-child absorption footer below a classified terminal error receipt', () => {
+  it('keeps terminal status out of the response body because the source receipt owns it', () => {
+    render({
+      id: 'response-owned-failure',
+      from: { kind: 'agent', catId: 'opus' },
+      type: 'assistant',
+      catId: 'opus',
+      content: 'Error: init_failure: CLI crashed',
+      origin: 'stream',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'response',
+        orderKey: '100:child-owned-failure',
+        invocationId: 'child-owned-failure',
+        targetId: 'opus',
+        inputEntryIds: ['entry-1'],
+        inputMessageIds: ['source-1'],
+        status: 'failed',
+        startedAt: 100,
+        completedAt: 120,
+        reason: 'provider_error',
+      },
+    });
+
+    expect(container.querySelector('[data-lifecycle-terminal-status]')).toBeNull();
+    expect(container.textContent).toContain('init_failure: CLI crashed');
+    expect(container.textContent).toContain('布偶猫');
+    expect(container.textContent).not.toContain('CLI Output');
+  });
+
+  it('does not render a lifecycle delivery-failure carrier as a standalone system warning', () => {
+    const failure: ChatMessageType = {
+      id: 'delivery-failure-carrier',
+      from: { kind: 'system', service: 'message-delivery' },
+      type: 'system',
+      variant: 'error',
+      content: 'opus 的当前 Agent Client 已关闭，消息未追加到该回合。',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'delivery_failure',
+        orderKey: '120:delivery-failure-carrier',
+        status: 'failed',
+        sourceEntryId: 'entry-1',
+        inputMessageId: 'source-1',
+        requestedTargets: ['opus'],
+        reason: 'control_carrier_replaced',
+        createdAt: 120,
+      },
+    };
+    chatStoreState.messages = [
+      {
+        id: 'source-1',
+        from: { kind: 'agent', catId: 'codex' },
+        type: 'assistant',
+        catId: 'codex',
+        content: '@opus 处理',
+        timestamp: 100,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '100:source-turn',
+          invocationId: 'source-turn',
+          targetId: 'codex',
+          inputEntryIds: ['source-entry'],
+          inputMessageIds: ['root-1'],
+          status: 'completed',
+          startedAt: 90,
+          completedAt: 100,
+          dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'delivery-failure-carrier' }],
+        },
+      },
+      failure,
+    ];
+    render(failure);
+
+    expect(container.textContent).not.toContain('Agent Client 已关闭');
+    expect(container.querySelector('[data-message-id="delivery-failure-carrier"]')).toBeNull();
+  });
+
+  it('keeps an origin delivery failure visible when no source member can absorb it', () => {
+    const failure: ChatMessageType = {
+      id: 'origin-delivery-failure',
+      from: { kind: 'system', service: 'message-delivery' },
+      type: 'system',
+      variant: 'error',
+      content: '唤起 opus 失败：目标当前不可用',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'delivery_failure',
+        orderKey: '120:origin-delivery-failure',
+        status: 'failed',
+        sourceEntryId: 'entry-origin',
+        inputMessageId: 'origin-source',
+        requestedTargets: ['opus'],
+        reason: 'invalid_explicit_target',
+        createdAt: 120,
+      },
+    };
+    chatStoreState.messages = [
+      {
+        id: 'origin-source',
+        type: 'user',
+        content: '@opus 请处理',
+        timestamp: 100,
+        lifecycle: {
+          kind: 'input',
+          orderKey: '100:origin-source',
+          dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'origin-delivery-failure' }],
+        },
+      },
+      failure,
+    ];
+    render(failure);
+
+    expect(container.textContent).toContain('唤起 opus 失败');
+    expect(container.querySelector('[data-message-id="origin-delivery-failure"]')).toBeTruthy();
+  });
+
+  it('keeps a targetless origin delivery failure visible instead of vacuously absorbing it', () => {
+    const failure: ChatMessageType = {
+      id: 'targetless-origin-failure',
+      from: { kind: 'system', service: 'message-delivery' },
+      type: 'system',
+      variant: 'error',
+      content: '唤起处理成员失败：没有可用目标',
+      timestamp: 120,
+      lifecycle: {
+        kind: 'delivery_failure',
+        orderKey: '120:targetless-origin-failure',
+        status: 'failed',
+        sourceEntryId: 'entry-origin',
+        inputMessageId: 'origin-source',
+        requestedTargets: [],
+        reason: 'no_available_target',
+        createdAt: 120,
+      },
+    };
+    chatStoreState.messages = [
+      {
+        id: 'origin-source',
+        type: 'user',
+        content: '请处理',
+        timestamp: 100,
+        lifecycle: { kind: 'input', orderKey: '100:origin-source', dispatchRefs: [] },
+      },
+      failure,
+    ];
+    render(failure);
+
+    expect(container.textContent).toContain('唤起处理成员失败');
+    expect(container.querySelector('[data-message-id="targetless-origin-failure"]')).toBeTruthy();
+  });
+
+  it('does not append a second absorption surface below classified terminal diagnostics', () => {
     const invocationId = 'child-gap-f-error';
     const sourceMessage = {
       id: 'source-gap-f-error',
       type: 'user',
       content: '失败前已经读取的补充',
       timestamp: 100,
-      extra: {
-        queueReceipt: {
-          version: 1,
-          entryId: 'entry-gap-f-error',
-          targets: [
-            {
-              catId: 'opus',
-              state: 'seen',
-              invocationId,
-              seenAt: 120,
-            },
-          ],
-          reminderAttempts: [],
-        },
+      lifecycle: {
+        kind: 'input',
+        orderKey: '100:source-gap-f-error',
+        dispatchRefs: [{ targetId: 'opus', phase: 'settled', statusMessageId: 'msg-err', dispatchedAt: 115 }],
       },
     } as ChatMessageType;
-    const terminalMessage = makeErrorMessage({
-      cliDiagnostics: {
-        reasonCode: 'auth_failed',
-        publicSummary: 'API 认证失败',
-        publicHint: '检查 API key',
-        debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId },
-      },
-      turnExecution: {
+    const terminalMessage: ChatMessageType = {
+      ...makeErrorMessage({
+        cliDiagnostics: {
+          reasonCode: 'auth_failed',
+          publicSummary: 'API 认证失败',
+          publicHint: '检查 API key',
+          debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId },
+        },
+        turnExecution: {
+          invocationId,
+          parentInvocationId: 'parent-gap-f-error',
+          executionKind: 'ordinary',
+        },
+      }),
+      lifecycle: {
+        kind: 'response',
+        orderKey: `120:${invocationId}`,
         invocationId,
-        parentInvocationId: 'parent-gap-f-error',
-        executionKind: 'ordinary',
+        targetId: 'opus',
+        inputEntryIds: ['entry-gap-f-error'],
+        inputMessageIds: [sourceMessage.id],
+        status: 'failed',
+        startedAt: 115,
+        completedAt: 120,
       },
-    });
+    };
     chatStoreState.messages = [sourceMessage, terminalMessage];
 
     render(terminalMessage);
 
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeTruthy();
-    expect(container.querySelector(`[data-turn-absorption-invocation="${invocationId}"]`)?.textContent).toContain(
-      '本轮处理了 0/1 条补充',
-    );
+    expect(container.querySelector(`[data-turn-absorption-invocation="${invocationId}"]`)).toBeNull();
   });
 
   it('system_info silent_completion + cliDiagnostics → CliDiagnosticsPanel mounts without error variant', () => {
@@ -356,5 +512,118 @@ describe('F212 Phase B — ChatMessage routes cliDiagnostics to folded panel', (
 
     expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
     expect(container.querySelector('[data-message-id="dup-msg-unclassified"]')).toBeTruthy();
+  });
+
+  describe('F117: a response owns its complete failure body', () => {
+    const timeoutDiagnostics = {
+      silenceDurationMs: 1_800_000,
+      processAlive: true,
+      lastEventType: 'thread.started',
+      invocationId: 'turn-timeout',
+    };
+    const classifiedCli: CliDiagnostics = {
+      reasonCode: 'auth_failed',
+      publicSummary: 'API 认证失败',
+      publicHint: '检查 API key',
+      debugRef: { command: 'codex', exitCode: 1, signal: null, invocationId: 'turn-timeout' },
+    };
+    // A timeout the classifier could not name (Phase A emits this on __cliTimeout).
+    const unclassifiedCli: CliDiagnostics = {
+      publicSummary: '未识别的 CLI 错误',
+      publicHint: '详细诊断信息见后端日志',
+      debugRef: { command: 'codex', exitCode: null, signal: 'SIGTERM', invocationId: 'turn-timeout' },
+    };
+
+    function failedResponse(
+      content: string,
+      status: 'failed' | 'interrupted' | 'completed' = 'failed',
+      extra: ChatMessageType['extra'] = { timeoutDiagnostics },
+    ): ChatMessageType {
+      return {
+        id: 'response-timeout',
+        from: { kind: 'agent', catId: 'opus' },
+        type: 'assistant',
+        catId: 'opus',
+        content,
+        origin: 'stream',
+        timestamp: 120,
+        lifecycle: {
+          kind: 'response',
+          orderKey: '100:turn-timeout',
+          invocationId: 'turn-timeout',
+          targetId: 'opus',
+          inputEntryIds: ['entry-1'],
+          inputMessageIds: ['source-1'],
+          status,
+          startedAt: 100,
+          completedAt: 120,
+          ...(status === 'completed' ? {} : { reason: 'provider_error' }),
+        },
+        extra,
+      } as ChatMessageType;
+    }
+
+    function renderResponse(
+      message: ChatMessageType,
+      props: { hideDiagnosticsPanel?: boolean; dedupCount?: number } = {},
+    ): void {
+      act(() => {
+        root.render(
+          React.createElement(ChatMessage, {
+            message,
+            getCatById: (id: string) => (id === 'opus' ? opusCat() : undefined),
+            ...props,
+          }),
+        );
+      });
+    }
+
+    it.each([
+      ['failed', { cliDiagnostics: classifiedCli, timeoutDiagnostics }],
+      ['failed', { cliDiagnostics: unclassifiedCli, timeoutDiagnostics }],
+      ['failed', { cliDiagnostics: unclassifiedCli }],
+      ['interrupted', { cliDiagnostics: classifiedCli }],
+      ['completed', { cliDiagnostics: classifiedCli, timeoutDiagnostics }],
+    ] as const)('%s preserves the body without a second diagnostic surface', (status, extra) => {
+      const message = failedResponse('partial answer\ncomplete original failure', status, extra);
+      renderResponse(message);
+      expect(container.textContent).toContain('partial answer');
+      expect(container.textContent).toContain('complete original failure');
+      expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+      expect(container.querySelector('[data-testid="timeout-diagnostics"]')).toBeNull();
+      expect(message.extra).toBe(extra);
+    });
+
+    it.each([
+      ['failed', '回复失败。'],
+      ['interrupted', '回复已中断。'],
+    ] as const)('an empty historic %s response keeps its single lifecycle notice', (status, label) => {
+      renderResponse(failedResponse('', status, { cliDiagnostics: classifiedCli, timeoutDiagnostics }));
+      expect(container.textContent).toContain(label);
+      expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+      expect(container.querySelector('[data-testid="timeout-diagnostics"]')).toBeNull();
+      expect(container.querySelector('[data-message-id="response-timeout"]')).toBeTruthy();
+    });
+
+    it('independent failed responses keep both bodies and anchors without a duplicate group', () => {
+      const rows = ['first-r', 'second-r'].map((id) => ({
+        ...failedResponse(`complete failure from ${id}`, 'failed', { cliDiagnostics: classifiedCli }),
+        id,
+      }));
+      const dedup = computeCliDiagnosticsDedup(rows);
+      expect(dedup.size).toBe(0);
+      act(() =>
+        root.render(
+          rows.map((message) => (
+            <ChatMessage key={message.id} message={message} timelineMessages={rows} getCatById={() => opusCat()} />
+          )),
+        ),
+      );
+      for (const message of rows) {
+        expect(container.querySelector(`[data-message-id="${message.id}"]`)?.textContent).toContain(message.content);
+      }
+      expect(container.querySelector('[data-testid="cli-diagnostics"]')).toBeNull();
+      expect(container.textContent).not.toContain('×2');
+    });
   });
 });

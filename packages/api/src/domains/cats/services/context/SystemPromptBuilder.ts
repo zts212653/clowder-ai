@@ -134,25 +134,6 @@ export interface InvocationContext {
     readonly featureId: string;
   };
   /**
-   * F091: Active Signal articles in discussion context.
-   * Injected when co-creator links a Signal article in the thread.
-   */
-  activeSignals?: readonly {
-    readonly id: string;
-    readonly title: string;
-    readonly source: string;
-    readonly tier: number;
-    readonly contentSnippet: string;
-    readonly note?: string | undefined;
-    readonly relatedDiscussions?:
-      | readonly {
-          readonly sessionId: string;
-          readonly snippet: string;
-          readonly score: number;
-        }[]
-      | undefined;
-  }[];
-  /**
    * F092: Voice companion mode.
    * When true, cats should prioritize audio rich blocks for spoken output.
    */

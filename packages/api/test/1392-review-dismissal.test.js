@@ -13,7 +13,7 @@ import { describe, it } from 'node:test';
  * Real registration, collector, router and lifecycle; only GitHub and the stores are fakes.
  */
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { readGitHubWaitBaseline } = await import('../dist/domains/github-signals/GitHubWaitBaselineReader.js');
 const { renewPrWaitBaseline } = await import('../dist/domains/github-signals/GitHubWaitRenewalBaseline.js');
@@ -61,7 +61,7 @@ async function trackedPr(github, { when = authorDefaultWhen(), baseline: adjustB
     },
   );
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const connector = connectorDeliveryHarness();
   const task = await taskStore.create({
     kind: 'pr_tracking',
     subjectKey: SUBJECT,
@@ -85,13 +85,17 @@ async function trackedPr(github, { when = authorDefaultWhen(), baseline: adjustB
       },
     },
   });
-  const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: { messageStore }, log });
+  const lifecycle = new GitHubWaitLifecycleService({ taskStore, deliveryDeps: connector.deliveryDeps, log });
   const spec = createReviewFeedbackTaskSpec({
     taskStore,
     fetchPrMetadata: async () => ({ headSha: HEAD, prState: 'open' }),
     fetchComments: async () => [],
     fetchReviews: github.fetchReviews,
-    reviewFeedbackRouter: new ReviewFeedbackRouter({ deliveryDeps: { messageStore }, waitLifecycle: lifecycle, log }),
+    reviewFeedbackRouter: new ReviewFeedbackRouter({
+      deliveryDeps: connector.deliveryDeps,
+      waitLifecycle: lifecycle,
+      log,
+    }),
     log,
   });
   const reviewPoll = async () => {
@@ -106,7 +110,7 @@ async function trackedPr(github, { when = authorDefaultWhen(), baseline: adjustB
       facts: { headSha: HEAD, ci: { bucket, fingerprint: `${HEAD}:${bucket}`, blockerCount: 0 } },
       collectorPatch: { ci: { headSha: HEAD, lastFingerprint: `${HEAD}:${bucket}`, lastBucket: bucket } },
     });
-  const contents = () => messageStore.getByThread(THREAD).map((message) => message.content);
+  const contents = () => connector.contents(THREAD);
   return { reviewPoll, observeCi, contents, taskStore, task };
 }
 

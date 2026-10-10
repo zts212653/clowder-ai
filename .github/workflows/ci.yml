@@ -141,6 +141,13 @@ jobs:
         with:
           name: public-test-plan-${{ github.sha }}
           path: ${{ runner.temp }}/public-test
+      - name: Install owned Redis test executables
+        if: matrix.lane != 'serial-shared'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y redis-server
+        # Tests start their own temporary instances. External-network isolation
+        # remains enforced by the lane wrapper; this is not a shared Redis service.
       - name: Run shared-resource public-test lane
         if: matrix.lane == 'serial-shared'
         run: >-

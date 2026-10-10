@@ -3267,9 +3267,9 @@ describe('#1186: iterator lease cleanup (Pool at capacity regression)', () => {
   });
 });
 
-// #1186: TTL propagation — AcpAgentService threads idleTtlMs to promptStream
-describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () => {
-  it('passes configured idleTtlMs as idleStallMs, timeoutMs = idleTtlMs + 60s to promptStream', async () => {
+// F117: the pool's idle TTL must not become a running member's timeout.
+describe('F117: ACP prompt uses only the member-level no-output timeout', () => {
+  it('does not pass configured pool idleTtlMs as a prompt deadline', async () => {
     let capturedPromptStreamOpts = null;
     const fakeClient = {
       recentCapacitySignal: null,
@@ -3313,12 +3313,8 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
     }
 
     assert.ok(capturedPromptStreamOpts, 'promptStream must receive options');
-    assert.equal(capturedPromptStreamOpts.idleStallMs, 1_800_000, 'idleStallMs = configured idleTtlMs');
-    assert.equal(
-      capturedPromptStreamOpts.timeoutMs,
-      1_800_000 + 60_000,
-      'timeoutMs = idleTtlMs + 60s margin (budget must exceed stall)',
-    );
+    assert.equal(capturedPromptStreamOpts.idleStallMs, 0, 'client idle stall disabled for this member turn');
+    assert.equal(capturedPromptStreamOpts.timeoutMs, 0, 'client turn budget disabled for this member turn');
   });
 
   it('resolves DEFAULT_ACP_IDLE_TTL_MS (30m) when idleTtlMs is omitted from config', async () => {
@@ -3365,16 +3361,8 @@ describe('#1186: idleTtlMs propagation (AcpAgentService → promptStream)', () =
     }
 
     assert.ok(capturedPromptStreamOpts, 'promptStream must receive options even without explicit idleTtlMs');
-    assert.equal(
-      capturedPromptStreamOpts.idleStallMs,
-      DEFAULT_ACP_IDLE_TTL_MS,
-      `idleStallMs should be DEFAULT_ACP_IDLE_TTL_MS (${DEFAULT_ACP_IDLE_TTL_MS}), got ${capturedPromptStreamOpts.idleStallMs}`,
-    );
-    assert.equal(
-      capturedPromptStreamOpts.timeoutMs,
-      DEFAULT_ACP_IDLE_TTL_MS + 60_000,
-      `timeoutMs should be DEFAULT_ACP_IDLE_TTL_MS + 60s (${DEFAULT_ACP_IDLE_TTL_MS + 60_000}), got ${capturedPromptStreamOpts.timeoutMs}`,
-    );
+    assert.equal(capturedPromptStreamOpts.idleStallMs, 0);
+    assert.equal(capturedPromptStreamOpts.timeoutMs, 0);
   });
 });
 
@@ -3645,9 +3633,10 @@ describe('#1186: error-driven lease cleanup (finally releases without manual .re
 //   - acp-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs'
 //   - acp-httpstream-client.test.js: '#1186: zero-first-event produces AcpStreamIdleError at configured idleStallMs (HTTP)'
 //   - acp-client.test.js: 'F149: idle watchdog injects stream_idle_stall and terminates stream'
-// This test verifies the service-level wiring: idleTtlMs + 60s stagger and error mapping.
-describe('#1186: idle stall fires before turn budget (P2)', () => {
-  it('service passes timeoutMs > idleStallMs and maps idle stall to stream_idle_stall error', async () => {
+// Legacy client error mapping remains explicit even though the service no longer
+// enables that timer for a running member.
+describe('F117: ACP legacy idle error mapping', () => {
+  it('disables the client deadlines and still maps an explicit idle error', async () => {
     let capturedOpts = null;
     const { AcpStreamIdleError } = await import('../../dist/domains/cats/services/agents/providers/acp/AcpClient.js');
 
@@ -3665,18 +3654,14 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
             cancelSession() {},
             async *promptStream(sessionId, text, options) {
               capturedOpts = options;
-              // Verify the stagger invariant
-              assert.ok(
-                options.timeoutMs > options.idleStallMs,
-                `timeoutMs (${options.timeoutMs}) must exceed idleStallMs (${options.idleStallMs})`,
-              );
-              assert.equal(options.timeoutMs - options.idleStallMs, 60_000, 'Stagger must be exactly 60s');
+              assert.equal(options.timeoutMs, 0);
+              assert.equal(options.idleStallMs, 0);
               // Simulate idle stall (what the real transport would do)
               yield {
                 sessionId,
                 update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'start' } },
               };
-              throw new AcpStreamIdleError(sessionId, options.idleStallMs, 1, options.idleStallMs);
+              throw new AcpStreamIdleError(sessionId, 200, 1, 200);
             },
           },
           release: () => {},
@@ -3696,8 +3681,8 @@ describe('#1186: idle stall fires before turn budget (P2)', () => {
 
     // Verify opts passed correctly
     assert.ok(capturedOpts, 'promptStream must receive options');
-    assert.equal(capturedOpts.idleStallMs, 200, 'idleStallMs = idleTtlMs');
-    assert.equal(capturedOpts.timeoutMs, 60_200, 'timeoutMs = idleTtlMs + 60_000');
+    assert.equal(capturedOpts.idleStallMs, 0);
+    assert.equal(capturedOpts.timeoutMs, 0);
 
     // Error should map to stream_idle_stall (not turn_budget_exceeded)
     const errorMsg = msgs.find((m) => m.type === 'error');

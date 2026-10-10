@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
@@ -29,7 +29,7 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
     await rm(join(projectRoot, '.cat-cafe'), { recursive: true, force: true });
   });
 
-  it('defaults to next-work and reports the product source', async () => {
+  it('defaults to queued work and reports the product source', async () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/config/message-disposition?threadId=thread-a',
@@ -42,7 +42,6 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
       thread: null,
       effective: 'next_work',
       source: 'product',
-      onboardingSeen: false,
     });
   });
 
@@ -68,7 +67,6 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
       thread: 'next_work',
       effective: 'next_work',
       source: 'thread',
-      onboardingSeen: false,
     });
 
     res = await app.inject({
@@ -80,28 +78,6 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
     assert.equal(res.statusCode, 200, res.payload);
     assert.equal(JSON.parse(res.payload).effective, 'continue_current');
     assert.equal(JSON.parse(res.payload).source, 'global');
-  });
-
-  it('persists onboarding monotonically and preserves unrelated preferences', async () => {
-    const headers = { 'x-cat-cafe-user': OWNER_ID };
-    await app.inject({
-      method: 'PUT',
-      url: '/api/config/cat-order',
-      headers,
-      payload: { catOrder: [] },
-    });
-    const res = await app.inject({
-      method: 'PUT',
-      url: '/api/config/message-disposition',
-      headers,
-      payload: { scope: 'onboarding', seen: true },
-    });
-
-    assert.equal(res.statusCode, 200, res.payload);
-    assert.equal(JSON.parse(res.payload).onboardingSeen, true);
-    const raw = JSON.parse(await readFile(join(projectRoot, '.cat-cafe', 'user-preferences.json'), 'utf-8'));
-    assert.deepEqual(raw.catOrder, []);
-    assert.equal(raw.messageDisposition.onboardingSeen, true);
   });
 
   it('rejects non-owner writes and invalid dispositions', async () => {
@@ -120,5 +96,13 @@ describe('GET/PUT /api/config/message-disposition (F264)', () => {
       payload: { scope: 'global', disposition: 'magic' },
     });
     assert.equal(invalid.statusCode, 400);
+
+    const retiredOnboarding = await app.inject({
+      method: 'PUT',
+      url: '/api/config/message-disposition',
+      headers: { 'x-cat-cafe-user': OWNER_ID },
+      payload: { scope: 'onboarding', seen: true },
+    });
+    assert.equal(retiredOnboarding.statusCode, 400);
   });
 });

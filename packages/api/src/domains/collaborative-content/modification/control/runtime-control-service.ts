@@ -43,8 +43,14 @@ export class ModificationRuntimeControlService {
       const entry = this.deps.queue?.getEntrySnapshot(view.record.payload.threadId, principal.userId, target.entryId);
       if (
         !entry ||
-        ![entry.messageId, ...(entry.mergedMessageIds ?? [])].includes(target.messageId) ||
-        !entry.allTargetCats?.some((cat) => cat === view.record.payload.targetCatId)
+        entry.id !== target.entryId ||
+        entry.status !== 'queued' ||
+        entry.owner.kind !== 'user' ||
+        entry.owner.userId !== principal.userId ||
+        entry.threadId !== view.record.payload.threadId ||
+        entry.payload.messageId !== target.messageId ||
+        entry.payload.sourceRecordId !== target.messageId ||
+        !entry.targets.includes(view.record.payload.targetCatId)
       )
         throw new ContentModificationJournalError('invalid_progress');
       // The native DELETE performs the atomic exclusive-source check immediately before removal.
@@ -58,6 +64,7 @@ export class ModificationRuntimeControlService {
         const turn = await this.deps.turns?.get(action.target.invocationId);
         const executionState =
           turn &&
+          turn.invocationId === action.target.invocationId &&
           turn.parentInvocationId === action.target.executionId &&
           turn.threadId === action.threadId &&
           turn.catId === action.catId &&

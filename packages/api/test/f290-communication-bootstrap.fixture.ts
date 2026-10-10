@@ -63,7 +63,6 @@ export async function bootstrapFixture({ persistBirth = true } = {}) {
     messageStore: messages,
     threadStore: threads,
     invocationQueue: queue,
-    queueProcessor: { async processNext() {} },
   });
   const admission = new CollectiveWorkAdmission({ connector: () => cafe.connector, authority, tasks, dispatcher });
   const persist = async (eventId: string) => {
@@ -76,7 +75,7 @@ export async function bootstrapFixture({ persistBirth = true } = {}) {
       await messages.appendIdempotent({
         userId: cafe.ownerUserId,
         threadId: endpoint.id,
-        catId: null,
+        from: { kind: 'external', connectorId: 'collective' },
         mentions: [],
         timestamp: Date.parse(event.acceptedAt),
         content: event.body,

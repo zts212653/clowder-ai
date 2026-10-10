@@ -44,7 +44,7 @@ export async function consumeRealtimeCompanionEvent(
   const stored = await dependencies.messageStore.append({
     userId: session.userId,
     threadId: session.threadId,
-    catId: createCatId(session.catId),
+    from: { kind: 'agent', catId: createCatId(session.catId) },
     content: event.text,
     mentions: [],
     timestamp: event.occurredAt,

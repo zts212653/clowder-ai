@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,4 +7,4 @@ import { join } from 'node:path';
 const outbox = mkdtempSync(join(tmpdir(), 'cat-cafe-mcp-test-outbox-'));
 process.env.CAT_CAFE_CALLBACK_OUTBOX_DIR = outbox;
 process.env.CAT_CAFE_CALLBACK_OUTBOX_ENABLED = 'true';
-process.once('exit', () => rmSync(outbox, { recursive: true, force: true }));
+process.once('exit', () => console.info(`Retained isolated callback outbox: ${outbox}`));

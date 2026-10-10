@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCatId } from '@cat-cafe/shared';
-import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { createInitialQueuedMessageCustody } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { LiveRecoveryReader } from '../src/domains/concierge/live/recovery/LiveRecoveryReader.js';
 import type { LiveRecoveryCursor } from '../src/domains/concierge/live/recovery/live-recovery-contract.js';
 import { recoveryFixture, scope } from './helpers/f317-recovery-fixture.js';
@@ -210,27 +208,29 @@ test('current thread legacy tasks survive missing owner metadata; explicit forei
 
 test('queued unread user sources remain body-free references with unknown playback and successor responsibility', async () => {
   const f = recoveryFixture();
-  const entry = new InvocationQueue().enqueue({
-    threadId: scope.threadId,
-    userId: scope.userId,
-    source: 'user',
-    ownerAuthProvenance: 'strict',
-    content: 'never leak this unread body',
-    targetCats: [scope.catId],
-    intent: 'coordinate',
-  }).entry;
-  assert.ok(entry);
-  const queue = createInitialQueuedMessageCustody(entry);
-  const source = f.messages.append({
-    userId: scope.userId,
-    threadId: scope.threadId,
-    catId: null,
-    content: 'never leak this unread body',
-    mentions: [scope.catId],
-    timestamp: 1,
-    deliveryStatus: 'queued',
-    queueCustody: queue,
-  });
+  const admission = await f.queue.send(
+    f.messages,
+    {
+      userId: scope.userId,
+      threadId: scope.threadId,
+      from: { kind: 'user', userId: scope.userId },
+      content: 'never leak this unread body',
+      mentions: [scope.catId],
+      timestamp: 1,
+      deliveryStatus: 'queued',
+    },
+    {
+      threadId: scope.threadId,
+      userId: scope.userId,
+      from: { kind: 'user', userId: scope.userId },
+      kind: 'conversation_input',
+      ownerAuthProvenance: 'strict',
+      content: 'never leak this unread body',
+      targetCats: [scope.catId],
+      intent: 'coordinate',
+    },
+  );
+  const source = admission.message;
   const before = JSON.stringify(f.messages.getById(source.id));
   const result = await new LiveRecoveryReader(f.options).read(scope, request());
   assert.equal(result.inbox.items[0]?.messageId, source.id);
@@ -238,4 +238,5 @@ test('queued unread user sources remain body-free references with unknown playba
   assert.equal(result.inbox.items[0]?.facts.playback, 'unknown');
   assert.equal(JSON.stringify(result).includes('never leak'), false);
   assert.equal(JSON.stringify(f.messages.getById(source.id)), before);
+  assert.equal((await f.queue.getDurableEntry(scope.threadId, admission.entry.id))?.status, 'queued');
 });

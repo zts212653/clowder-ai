@@ -198,14 +198,19 @@ describe('MCP Server Tool Registration', () => {
     assert.match(tool.description, /resume capsule/i);
   });
 
-  test('thread-context description does not discourage the full contiguous freshness path', async () => {
+  test('thread-context description documents the explicit full catch-up path without freshness prompting', async () => {
     const { callbackTools } = await import('../dist/tools/callback-tools.js');
     const tool = callbackTools.find((candidate) => candidate.name === 'cat_cafe_get_thread_context');
     assert.ok(tool);
-    assert.match(tool.description, /freshness notice/i);
+    assert.doesNotMatch(tool.description, /freshness notice/i);
     assert.match(tool.description, /readIntent="unread"/);
     assert.equal(tool.inputSchema.readIntent.parse(undefined), 'history');
     assert.match(tool.description, /same-target queued bodies/i);
+    assert.match(tool.description, /complete catch-up/i);
+    assert.match(tool.description, /contextScope="unread_delta"/);
+    assert.match(tool.description, /hasMore=false.*not all thread history/i);
+    assert.match(tool.inputSchema.responseMode.description, /contextScope="unread_delta"/);
+    assert.match(tool.inputSchema.responseMode.description, /hasMore=false.*all thread history/i);
     assert.match(tool.description, /GOTCHA:/);
     assert.match(tool.description, /cursor.*limit/i);
     assert.match(tool.inputSchema.cursor.description, /same.*limit/i);

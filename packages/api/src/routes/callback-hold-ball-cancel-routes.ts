@@ -30,7 +30,7 @@ import {
   isPendingHoldBallTask,
   readHoldLifecycle,
 } from './hold-ball-cancel.js';
-import { HOLD_BALL_SOURCE } from './hold-ball-source.js';
+import { formatHoldOwnerName, persistHoldTerminalVisibility } from './hold-ball-terminal-visibility.js';
 
 const log = createModuleLogger('routes/callback-hold-ball-cancel');
 
@@ -230,10 +230,11 @@ function resolveDurableHoldCancellationState(
 }
 
 function cancellationVisibilityMessage(catId: string, state: DurableHoldCancellationState): string {
-  if (state === 'ordinary_cancelled') return `🏓 ${catId} 持球已取消`;
-  if (state === 'durable_pending') return `🏓 ${catId} 持球取消已受理，等待 durable gate 终止`;
-  if (state === 'durable_cancelled') return `🏓 ${catId} 持球已取消`;
-  return `🏓 ${catId} 持球取消尚未受理，请重试或检查 durable gate 身份`;
+  const catName = formatHoldOwnerName(catId);
+  if (state === 'ordinary_cancelled') return `🏓 ${catName} 持球已取消`;
+  if (state === 'durable_pending') return `🏓 ${catName} 持球取消已受理，等待 durable gate 终止`;
+  if (state === 'durable_cancelled') return `🏓 ${catName} 持球已取消`;
+  return `🏓 ${catName} 持球取消尚未受理，请重试或检查 durable gate 身份`;
 }
 
 export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBallCancelRouteDeps): void {
@@ -389,25 +390,18 @@ export function registerHoldBallCancelRoutes(app: FastifyInstance, deps: HoldBal
 
       try {
         const cancelMessage = cancellationVisibilityMessage(catId, cancellationState);
-        const stored = await messageStore.append({
-          userId: 'system',
-          catId: null,
-          content: cancelMessage,
-          mentions: [],
-          timestamp: Date.now(),
-          threadId,
-          source: HOLD_BALL_SOURCE,
-        });
-        socketManager.broadcastToRoom(`thread:${threadId}`, 'connector_message', {
-          threadId,
-          message: {
-            id: stored.id,
-            type: 'connector',
-            content: stored.content,
-            source: HOLD_BALL_SOURCE,
-            timestamp: stored.timestamp,
+        await persistHoldTerminalVisibility(
+          { messageStore, socketManager },
+          {
+            taskId,
+            threadId,
+            userId: access.owner.userId ?? access.actor.userId,
+            content: cancelMessage,
+            catId,
+            outcome: cancellationState,
+            idempotencySuffix: 'cancel',
           },
-        });
+        );
       } catch (err) {
         log.warn({ taskId, threadId, err }, 'F167 Phase J: failed to post hold cancel visibility message');
       }

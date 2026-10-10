@@ -79,7 +79,12 @@ describe('Workspace running work counts cat/thread work, retaining exact activit
     expect(container.querySelectorAll('a')).toHaveLength(1);
     expect(container.querySelector('a')?.getAttribute('href')).toBe('/thread/thread-a');
     expect(container.textContent).toContain('回复中');
-    expect(container.textContent).toContain('后台 · 测试');
+    const activities = Array.from(
+      container.querySelectorAll('[data-testid="workspace-running-activity"]'),
+      (row) => row.textContent,
+    );
+    expect(activities).toEqual(expect.arrayContaining([expect.stringContaining('实时回合')]));
+    expect(activities).toEqual(expect.arrayContaining([expect.stringContaining('托管命令 · 测试')]));
     const details = container.querySelector<HTMLButtonElement>('[data-testid="workspace-open-running-object"]');
     act(() => details?.click());
     expect(onSelect).toHaveBeenCalledExactlyOnceWith(turn);

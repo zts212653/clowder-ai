@@ -1,502 +1,105 @@
 /**
- * TD112: Store-level assistant bubble dedup invariant
+ * Chat store: a message's identity is its server id, and nothing else.
  *
- * Tests that addMessage / addMessageToThread prevent two assistant text
- * bubbles from the same (catId, invocationId) from coexisting in the store.
+ * addMessage / addMessageToThread never fold two messages with different ids
+ * into one bubble, whatever they share (cat, invocation, origin, timing,
+ * arrival order). Every event names the message it belongs to, so a
+ * post_message is always its own message beside the turn's response. The one
+ * dedup left is an exact-id replay, which adds nothing.
+ *
+ * (Replaces the TD112 cross-id merge tests; the filename is historical.)
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/stores/chat-types';
 import { useChatStore } from '@/stores/chatStore';
 
-function makMsg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
-  return { id, type: 'assistant', content: `msg-${id}`, timestamp: Date.now(), ...overrides };
+const ACTIVE = 'thread-A';
+const BG = 'thread-B';
+const T0 = 1_760_000_000_000;
+const INV_1 = { stream: { invocationId: 'inv-1', turnInvocationId: 'turn-1' } };
+const INV_2 = { stream: { invocationId: 'inv-2', turnInvocationId: 'turn-2' } };
+
+/** An assistant message from one cat; `at` = ms after T0 (every row sits inside 8s). */
+function catMsg(id: string, origin: 'stream' | 'callback', at: number, extra?: ChatMessage['extra']): ChatMessage {
+  return {
+    id,
+    type: 'assistant',
+    catId: 'opus',
+    origin,
+    content: `${origin} body of ${id}`,
+    timestamp: T0 + at,
+    extra,
+  };
 }
 
-describe('TD112: addMessage store-level dedup', () => {
+function userMsg(id: string): ChatMessage {
+  return { id, type: 'user', content: 'same words', timestamp: T0 };
+}
+
+/** Distinct ids, however alike: each must land as its own record, in arrival order. */
+const DISTINCT_IDS: Array<[string, ChatMessage[]]> = [
+  ['stream then callback of one invocation', [catMsg('s1', 'stream', 0, INV_1), catMsg('c1', 'callback', 1000, INV_1)]],
+  ['callback then stream of one invocation', [catMsg('c1', 'callback', 0, INV_1), catMsg('s1', 'stream', 1000, INV_1)]],
+  [
+    'two callbacks (post_messages) of one invocation',
+    [catMsg('c1', 'callback', 0, INV_1), catMsg('c2', 'callback', 500, INV_1)],
+  ],
+  ['invocationless stream then callback 3s later', [catMsg('s1', 'stream', 0), catMsg('c1', 'callback', 3000)]],
+  [
+    'an out-of-order inv-1 callback after the inv-2 stream',
+    [catMsg('s1', 'stream', 0, INV_1), catMsg('s2', 'stream', 1000, INV_2), catMsg('c1', 'callback', 2000, INV_1)],
+  ],
+  ['user messages with identical text', [userMsg('u1'), userMsg('u2')]],
+];
+
+type Target = { name: string; add: (msg: ChatMessage) => void; read: () => ChatMessage[] | undefined };
+
+const TARGETS: Target[] = [
+  {
+    name: 'active thread (addMessage)',
+    add: (msg) => useChatStore.getState().addMessage(msg),
+    read: () => useChatStore.getState().messages,
+  },
+  {
+    name: 'background thread (addMessageToThread)',
+    add: (msg) => useChatStore.getState().addMessageToThread(BG, msg),
+    read: () => useChatStore.getState().threadStates[BG]?.messages,
+  },
+];
+
+describe('chat store: message identity is the server id', () => {
   beforeEach(() => {
-    useChatStore.setState({ messages: [], currentThreadId: 'thread-A' });
+    useChatStore.setState({ messages: [], currentThreadId: ACTIVE, threadStates: {} });
   });
 
-  it('hard rule: merges when catId + invocationId match (different msg IDs)', () => {
-    const store = useChatStore.getState();
+  describe.each(TARGETS)('$name', ({ add, read }) => {
+    it.each(DISTINCT_IDS)('keeps %s as separate records', (_label, msgs) => {
+      for (const msg of msgs) add(msg);
+      // Same count and order; each record keeps its own id, origin and content.
+      expect(read()).toEqual(msgs);
+    });
 
-    // Stream bubble with invocationId
-    store.addMessage(
-      makMsg('msg-stream-1', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'stream text...',
-        extra: { stream: { invocationId: 'inv-42' } },
-      }),
-    );
-
-    // Callback with different ID but same catId + invocationId
-    store.addMessage(
-      makMsg('cb-1', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'final callback text',
-        extra: { stream: { invocationId: 'inv-42' } },
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(1);
-    // Merged: callback content wins, original ID preserved
-    expect(msgs[0]!.content).toBe('final callback text');
-    expect(msgs[0]!.id).toBe('msg-stream-1');
-    expect(msgs[0]!.origin).toBe('callback');
-  });
-
-  it('hard rule: allows different invocationIds from same cat', () => {
-    const store = useChatStore.getState();
-
-    store.addMessage(
-      makMsg('msg-1', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'first response',
-        extra: { stream: { invocationId: 'inv-1' } },
-      }),
-    );
-    store.addMessage(
-      makMsg('msg-2', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'second response',
-        extra: { stream: { invocationId: 'inv-2' } },
-      }),
-    );
-
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('soft rule: merges callback→stream upgrade (invocationless, within 8s)', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    // Stream placeholder without invocationId
-    store.addMessage(
-      makMsg('msg-stream-noid', {
-        catId: 'opus',
-        origin: 'stream',
-        content: 'streaming...',
-        timestamp: now,
-      }),
-    );
-
-    // Callback arrives 3s later, no invocationId
-    store.addMessage(
-      makMsg('cb-noid', {
-        catId: 'opus',
-        origin: 'callback',
-        content: 'final text',
-        timestamp: now + 3000,
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]!.content).toBe('final text');
-    expect(msgs[0]!.origin).toBe('callback');
-  });
-
-  it('soft rule: does NOT merge if time gap > 8s', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    store.addMessage(
-      makMsg('msg-old', {
-        catId: 'opus',
-        origin: 'stream',
-        content: 'old message',
-        timestamp: now,
-      }),
-    );
-
-    // Callback arrives 10s later → too far, should NOT merge
-    store.addMessage(
-      makMsg('cb-late', {
-        catId: 'opus',
-        origin: 'callback',
-        content: 'late callback',
-        timestamp: now + 10_000,
-      }),
-    );
-
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('soft rule: does NOT merge two callbacks (no stream→callback upgrade)', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    store.addMessage(
-      makMsg('cb-1', {
-        catId: 'opus',
-        origin: 'callback',
-        content: '收到，我看下',
-        timestamp: now,
-      }),
-    );
-
-    // Another callback within 8s — should NOT merge (both are callback)
-    store.addMessage(
-      makMsg('cb-2', {
-        catId: 'opus',
-        origin: 'callback',
-        content: '收到，我看下另一个问题',
-        timestamp: now + 2000,
-      }),
-    );
-
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('soft rule: does NOT merge if visibility differs', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    store.addMessage(
-      makMsg('msg-public', {
-        catId: 'opus',
-        origin: 'stream',
-        content: 'public stream',
-        visibility: 'public',
-        timestamp: now,
-      }),
-    );
-
-    store.addMessage(
-      makMsg('cb-whisper', {
-        catId: 'opus',
-        origin: 'callback',
-        content: 'whisper callback',
-        visibility: 'whisper',
-        timestamp: now + 2000,
-      }),
-    );
-
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('hard rule: merges out-of-order callback past newer stream (cloud P1)', () => {
-    const store = useChatStore.getState();
-
-    // Stream inv-1, then stream inv-2 (different invocations)
-    store.addMessage(
-      makMsg('stream-1', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'first invocation',
-        extra: { stream: { invocationId: 'inv-1' } },
-      }),
-    );
-    store.addMessage(
-      makMsg('stream-2', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'second invocation',
-        extra: { stream: { invocationId: 'inv-2' } },
-      }),
-    );
-
-    // Callback for inv-1 arrives AFTER inv-2's stream — must scan past inv-2
-    store.addMessage(
-      makMsg('cb-inv1', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'callback for first',
-        extra: { stream: { invocationId: 'inv-1' } },
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(2);
-    // inv-1 was merged, inv-2 untouched
-    expect(msgs[0]!.content).toBe('callback for first');
-    expect(msgs[0]!.id).toBe('stream-1');
-    expect(msgs[1]!.content).toBe('second invocation');
-  });
-
-  it('hard rule takes priority over bridge rule (cloud P1 round 3)', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    // 1. Callback with inv-1
-    store.addMessage(
-      makMsg('cb-first', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'first callback',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: now,
-      }),
-    );
-    // 2. Stream without invocationId (newer)
-    store.addMessage(
-      makMsg('stream-noid', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'invocationless stream',
-        timestamp: now + 1000,
-      }),
-    );
-    // 3. Another callback with inv-1 → should merge into #1 (hard rule),
-    //    NOT into #2 (bridge rule)
-    store.addMessage(
-      makMsg('cb-second', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'second callback for inv-1',
-        extra: { stream: { invocationId: 'inv-1' } },
-        timestamp: now + 2000,
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(2);
-    // Hard rule merged into first bubble (inv-1)
-    expect(msgs[0]!.id).toBe('cb-first');
-    expect(msgs[0]!.content).toBe('second callback for inv-1');
-    // Invocationless stream untouched
-    expect(msgs[1]!.id).toBe('stream-noid');
-    expect(msgs[1]!.content).toBe('invocationless stream');
-  });
-
-  it('callback with invocationId does NOT soft-merge into invocationless stream (strict rule)', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    // Stream placeholder created before invocation_created (no invocationId)
-    store.addMessage(
-      makMsg('stream-noid', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'streaming...',
-        timestamp: now,
-      }),
-    );
-
-    // Callback arrives with invocationId — Phase 1 (hard) won't match,
-    // Phase 2 (soft bridge) is blocked for callbacks with invocationId.
-    // Hook layer handles legitimate late-bind merges; store must not override.
-    store.addMessage(
-      makMsg('cb-with-id', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'final text',
-        extra: { stream: { invocationId: 'inv-late' } },
-        timestamp: now + 3000,
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(2);
-    expect(msgs[0]!.id).toBe('stream-noid');
-    expect(msgs[1]!.id).toBe('cb-with-id');
-  });
-
-  it('bridge rule: does NOT merge if time gap > 8s', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    store.addMessage(
-      makMsg('old-stream', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'old',
-        timestamp: now,
-      }),
-    );
-
-    store.addMessage(
-      makMsg('late-cb', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'late',
-        extra: { stream: { invocationId: 'inv-x' } },
-        timestamp: now + 10_000,
-      }),
-    );
-
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('callbacks with invocationId create standalone bubbles even with intervening stream (strict rule)', () => {
-    const store = useChatStore.getState();
-    const now = Date.now();
-
-    // 1. Stream placeholder (no invocationId)
-    store.addMessage(
-      makMsg('stream-noid', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'streaming...',
-        replyTo: 'u1',
-        timestamp: now,
-      }),
-    );
-    // 2. Callback from same cat (has invocationId — blocked from soft bridge)
-    store.addMessage(
-      makMsg('cb-unrelated', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'unrelated response',
-        extra: { stream: { invocationId: 'inv-b' } },
-        replyTo: 'u2',
-        timestamp: now + 1000,
-      }),
-    );
-    // 3. Another callback with invocationId — also blocked from soft bridge
-    store.addMessage(
-      makMsg('cb-target', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'final for stream',
-        extra: { stream: { invocationId: 'inv-a' } },
-        replyTo: 'u1',
-        timestamp: now + 2000,
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    // All three are separate — no soft bridge for callbacks with invocationId
-    expect(msgs).toHaveLength(3);
-    expect(msgs[0]!.id).toBe('stream-noid');
-    expect(msgs[1]!.id).toBe('cb-unrelated');
-    expect(msgs[2]!.id).toBe('cb-target');
-  });
-
-  it('does not affect non-assistant messages', () => {
-    const store = useChatStore.getState();
-    store.addMessage(makMsg('u1', { type: 'user', content: 'hello' }));
-    store.addMessage(makMsg('u2', { type: 'user', content: 'hello again' }));
-    expect(useChatStore.getState().messages).toHaveLength(2);
-  });
-
-  it('still deduplicates by exact ID', () => {
-    const store = useChatStore.getState();
-    store.addMessage(makMsg('same-id', { catId: 'opus' }));
-    store.addMessage(makMsg('same-id', { catId: 'opus' }));
-    expect(useChatStore.getState().messages).toHaveLength(1);
-  });
-});
-
-describe('TD112: addMessageToThread store-level dedup', () => {
-  beforeEach(() => {
-    useChatStore.setState({
-      messages: [],
-      currentThreadId: 'thread-A',
-      threadStates: {},
+    it('adds nothing for an exact-id replay', () => {
+      const first = catMsg('s1', 'stream', 0, INV_1);
+      const second = catMsg('c1', 'callback', 1000, INV_1);
+      add(first);
+      add(second);
+      const before = useChatStore.getState();
+      add({ ...first });
+      // No write at all: no extra record, nothing overwritten, no unread bump.
+      expect(useChatStore.getState()).toBe(before);
+      expect(read()).toEqual([first, second]);
     });
   });
 
-  it('hard rule: merges in background thread', () => {
+  it('background: a distinct message raises unread like any other (no merge suppression)', () => {
     const store = useChatStore.getState();
-
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-stream', {
-        catId: 'gpt52',
-        origin: 'stream',
-        content: 'stream...',
-        extra: { stream: { invocationId: 'inv-99' } },
-      }),
-    );
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-cb', {
-        catId: 'gpt52',
-        origin: 'callback',
-        content: 'final',
-        extra: { stream: { invocationId: 'inv-99' } },
-      }),
-    );
-
-    const msgs = useChatStore.getState().threadStates['thread-B']?.messages;
-    expect(msgs).toHaveLength(1);
-    expect(msgs![0]!.content).toBe('final');
-  });
-
-  it('hard rule: merges in active thread via addMessageToThread', () => {
-    const store = useChatStore.getState();
-
-    store.addMessageToThread(
-      'thread-A',
-      makMsg('active-stream', {
-        catId: 'opus',
-        origin: 'stream',
-        content: 'streaming...',
-        extra: { stream: { invocationId: 'inv-77' } },
-      }),
-    );
-    store.addMessageToThread(
-      'thread-A',
-      makMsg('active-cb', {
-        catId: 'opus',
-        origin: 'callback',
-        content: 'done!',
-        extra: { stream: { invocationId: 'inv-77' } },
-      }),
-    );
-
-    const msgs = useChatStore.getState().messages;
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]!.content).toBe('done!');
-  });
-
-  it('background dedup does NOT increment unreadCount', () => {
-    const store = useChatStore.getState();
-
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-s', {
-        catId: 'gpt52',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-100' } },
-      }),
-    );
-    // This second message merges → should NOT increment unread
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-c', {
-        catId: 'gpt52',
-        origin: 'callback',
-        extra: { stream: { invocationId: 'inv-100' } },
-      }),
-    );
-
-    expect(useChatStore.getState().threadStates['thread-B']?.unreadCount).toBe(1);
-  });
-
-  it('background dedup propagates hasUserMention on merge (cloud P1)', () => {
-    const store = useChatStore.getState();
-
-    // Stream without mention
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-no-mention', {
-        catId: 'gpt52',
-        origin: 'stream',
-        extra: { stream: { invocationId: 'inv-mention' } },
-      }),
-    );
-
-    // Callback with mention — merged, but hasUserMention must propagate
-    store.addMessageToThread(
-      'thread-B',
-      makMsg('bg-mention', {
-        catId: 'gpt52',
-        origin: 'callback',
-        mentionsUser: true,
-        extra: { stream: { invocationId: 'inv-mention' } },
-      }),
-    );
-
-    const ts = useChatStore.getState().threadStates['thread-B'];
-    expect(ts?.messages).toHaveLength(1);
-    expect(ts?.hasUserMention).toBe(true);
+    store.addMessageToThread(BG, catMsg('s1', 'stream', 0, INV_1));
+    store.addMessageToThread(BG, { ...catMsg('c1', 'callback', 1000, INV_1), mentionsUser: true });
+    const thread = useChatStore.getState().threadStates[BG];
+    expect(thread?.messages).toHaveLength(2);
+    expect(thread?.unreadCount).toBe(2);
+    expect(thread?.hasUserMention).toBe(true);
   });
 });

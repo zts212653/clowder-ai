@@ -1,174 +1,142 @@
-/**
- * F167 carrier refresh — recognising a refreshable carrier.
- *
- * `handled` is a message-custody fact ("this target consumed its source"). It does not by itself
- * prove the provider execution ended, and it cannot tell a normal completion from an explicit
- * cancel. A handled carrier is refreshable only when the InvocationRecord created from the very same
- * carrier key independently shows a successful terminal execution for that exact target.
- */
 import assert from 'node:assert/strict';
-import { describe, test } from 'node:test';
-import { buildActionSuccessorFence } from '../dist/domains/ball-custody/ActionSuccessorAdmissionContract.js';
-import { resolveDirectActionSuccessorCarrier } from '../dist/domains/ball-custody/DirectActionSuccessorCarrierRecovery.js';
-import {
-  carrier,
-  lease,
-  oldInvocationKey,
-  record,
-  recordStore,
-  request,
-} from './helpers/direct-action-carrier-fixtures.js';
+import { test } from 'node:test';
+import { canonicalActionFixture, refreshed, unavailable } from './helpers/canonical-action-history-fixtures.js';
 
-function resolve(current, messages, store, overrides = {}) {
-  return resolveDirectActionSuccessorCarrier({
-    lease: current,
-    admissionInput: request(current, overrides),
-    messageStore: { getByThreadAfter: async () => messages },
-    invocationRecordStore: store,
-  });
-}
+test('completed canonical History refreshes only the exact target', async () => {
+  const f = await canonicalActionFixture();
+  assert.deepEqual(await f.resolve(), refreshed(f));
+});
 
-describe('F167 refreshable handled carrier', () => {
-  test('a handled carrier whose own InvocationRecord succeeded for that exact target is refresh_handled', async () => {
-    const current = lease();
-    const store = recordStore(new Map([[oldInvocationKey(current, 'codex-sol'), record(current, 'codex-sol')]]));
+test('missing bound parent cannot prove refresh or terminal success', async () => {
+  const f = await canonicalActionFixture();
+  assert.deepEqual(await f.resolve({ invocationRecordStore: { get: () => null } }), unavailable('carrier_missing'));
+});
 
-    const decision = await resolve(current, [carrier(current, 'codex-sol', 'handled')], store);
-
-    assert.deepEqual(decision, {
-      disposition: 'refresh_handled',
-      fence: buildActionSuccessorFence(current, current.dispatchId),
-    });
-    // The record is looked up by the exact carrier-derived key, scoped to the holder thread and tenant.
-    assert.deepEqual(store.calls, [
-      { threadId: 'thread-holder', userId: 'user-1', key: oldInvocationKey(current, 'codex-sol') },
-    ]);
-  });
-
-  test('handled alone is not enough: a missing record is execution_unconfirmed, never terminal and never refreshable', async () => {
-    const current = lease();
-    const decision = await resolve(current, [carrier(current, 'codex-sol', 'handled')], recordStore(new Map()));
-    assert.deepEqual(decision, { disposition: 'unavailable', reason: 'execution_unconfirmed' });
-  });
-
-  test('an execution that is not a settled success is execution_unconfirmed (still running, replayable, or no per-target proof)', async () => {
-    const current = lease();
-    const key = oldInvocationKey(current, 'codex-sol');
-    const cases = {
-      running: record(current, 'codex-sol', { status: 'running', successfulCatIds: undefined }),
-      queued: record(current, 'codex-sol', { status: 'queued', successfulCatIds: undefined }),
-      failed: record(current, 'codex-sol', { status: 'failed', successfulCatIds: [] }),
-      'succeeded without per-target evidence': record(current, 'codex-sol', { successfulCatIds: undefined }),
-      'succeeded for another cat': record(current, 'codex-sol', { successfulCatIds: ['someone-else'] }),
-    };
-    for (const [name, value] of Object.entries(cases)) {
-      const decision = await resolve(
-        current,
-        [carrier(current, 'codex-sol', 'handled')],
-        recordStore(new Map([[key, value]])),
-      );
-      assert.deepEqual(decision, { disposition: 'unavailable', reason: 'execution_unconfirmed' }, name);
-    }
-  });
-
-  test('an explicitly canceled execution is terminal, not refreshable', async () => {
-    const current = lease();
-    const key = oldInvocationKey(current, 'codex-sol');
-    const canceled = record(current, 'codex-sol', { status: 'canceled', successfulCatIds: undefined });
-    const decision = await resolve(
-      current,
-      [carrier(current, 'codex-sol', 'handled')],
-      recordStore(new Map([[key, canceled]])),
+test('running, queued, failed and missing per-target parent success cannot prove completion', async () => {
+  const f = await canonicalActionFixture();
+  for (const drift of [
+    { status: 'running' },
+    { status: 'queued' },
+    { status: 'failed' },
+    { successfulCatIds: undefined },
+    { successfulCatIds: ['opus'] },
+  ])
+    assert.deepEqual(
+      await f.resolve({ invocationRecordStore: { get: (id) => ({ ...f.records.get(id), ...drift }) } }),
+      unavailable('execution_unconfirmed'),
+      JSON.stringify(drift),
     );
-    assert.deepEqual(decision, { disposition: 'unavailable', reason: 'carrier_terminal' });
-  });
+});
 
-  test('a withdrawn carrier stays carrier_terminal and never even consults the execution record', async () => {
-    const current = lease();
-    const store = recordStore(new Map([[oldInvocationKey(current, 'codex-sol'), record(current, 'codex-sol')]]));
-    const decision = await resolve(current, [carrier(current, 'codex-sol', 'withdrawn')], store);
-    assert.deepEqual(decision, { disposition: 'unavailable', reason: 'carrier_terminal' });
-    assert.deepEqual(store.calls, []);
-  });
+test('explicit cancellation is terminal and never refreshes', async () => {
+  const f = await canonicalActionFixture({ status: 'canceled' });
+  assert.deepEqual(await f.resolve(), unavailable('carrier_terminal'));
+});
 
-  test('live, interrupted and failed carriers keep their existing decisions without consulting the record', async () => {
-    const current = lease();
-    const store = recordStore(new Map());
-    const fence = buildActionSuccessorFence(current, current.dispatchId);
-    assert.deepEqual(await resolve(current, [carrier(current, 'codex-sol', 'queued')], store), {
-      disposition: 'live',
-      fence,
-    });
-    assert.deepEqual(await resolve(current, [carrier(current, 'codex-sol', 'failed')], store), {
-      disposition: 'unavailable',
-      reason: 'carrier_failed',
-    });
-    assert.deepEqual(await resolve(current, [], store), { disposition: 'unavailable', reason: 'carrier_missing' });
-    assert.deepEqual(store.calls, []);
-  });
+test('canceled History defeats a stale pending snapshot', async () => {
+  const f = await canonicalActionFixture({ status: 'canceled' });
+  assert.deepEqual(
+    await f.resolve({ invocationQueue: { listAllDurable: async () => [f.admitted.entry] } }),
+    unavailable('carrier_terminal'),
+  );
+});
 
-  test('a failing record lookup is an explicit lookup_failed, whether it throws or rejects', async () => {
-    const current = lease();
-    for (const options of [{ throws: true }, { rejects: true }]) {
-      const decision = await resolve(
-        current,
-        [carrier(current, 'codex-sol', 'handled')],
-        recordStore(new Map(), options),
-      );
-      assert.deepEqual(decision, { disposition: 'unavailable', reason: 'lookup_failed' }, JSON.stringify(options));
-    }
-  });
-
-  test('without exact request authority nothing is consulted and nothing is refreshable', async () => {
-    const current = lease();
-    const store = recordStore(new Map([[oldInvocationKey(current, 'codex-sol'), record(current, 'codex-sol')]]));
-    for (const change of [{ actorCatId: 'opus' }, { targetThreadId: 'thread-other' }, { holderCatIds: ['kimi'] }]) {
-      const decision = await resolve(current, [carrier(current, 'codex-sol', 'handled')], store, change);
-      assert.deepEqual(decision, { disposition: 'unavailable', reason: 'authority_mismatch' }, JSON.stringify(change));
-    }
-    assert.deepEqual(store.calls, []);
-  });
-
-  test('a handled carrier of another generation is not evidence for this one', async () => {
-    const current = lease({ generation: 2, revision: 9 });
-    const old = lease();
-    const store = recordStore(new Map([[oldInvocationKey(old, 'codex-sol'), record(old, 'codex-sol')]]));
-    const decision = await resolve(current, [carrier(old, 'codex-sol', 'handled')], store);
-    assert.deepEqual(decision, { disposition: 'unavailable', reason: 'carrier_missing' });
-    assert.deepEqual(store.calls, []);
-  });
-
-  test('parallel holders refresh only when EVERY holder is handled and confirmed; one live holder blocks it', async () => {
-    const parallel = lease({
-      mode: 'parallel',
-      holderCatIds: ['codex-sol', 'opus'],
-      parallelIntent: 'independent implementation',
-    });
-    const asked = { action: { ...request(parallel).action, parallelIntent: 'independent implementation' } };
-    const both = new Map(['codex-sol', 'opus'].map((cat) => [oldInvocationKey(parallel, cat), record(parallel, cat)]));
-
-    const ok = await resolve(
-      parallel,
-      [carrier(parallel, 'codex-sol', 'handled'), carrier(parallel, 'opus', 'handled')],
-      recordStore(both),
-      asked,
+test('pending, interrupted, failed and missing sources keep distinct decisions', async () => {
+  for (const [status, result] of [
+    ['pending', 'live'],
+    ['interrupted', 'restart_interrupted'],
+    ['failed', 'carrier_failed'],
+  ]) {
+    const f = await canonicalActionFixture({ status });
+    assert.deepEqual(
+      await f.resolve(),
+      ['live', 'restart_interrupted'].includes(result) ? { disposition: result, fence: f.fence } : unavailable(result),
     );
-    assert.equal(ok.disposition, 'refresh_handled');
+  }
+  const f = await canonicalActionFixture();
+  assert.deepEqual(
+    await f.resolve({ messageStore: { getByThreadAfter: async () => [], getById: () => null } }),
+    unavailable('carrier_missing'),
+  );
+});
 
-    const oneLive = await resolve(
-      parallel,
-      [carrier(parallel, 'codex-sol', 'handled'), carrier(parallel, 'opus', 'queued')],
-      recordStore(both),
-      asked,
+test('throwing and rejecting record lookup really call the record dependency', async () => {
+  const f = await canonicalActionFixture();
+  for (const rejects of [false, true]) {
+    let calls = 0;
+    assert.deepEqual(
+      await f.resolve({
+        invocationRecordStore: {
+          get: () => {
+            calls++;
+            if (rejects) return Promise.reject(Error('record failure'));
+            throw Error('record failure');
+          },
+        },
+      }),
+      unavailable('lookup_failed'),
     );
-    assert.deepEqual(oneLive, { disposition: 'unavailable', reason: 'carrier_terminal' });
+    assert.equal(calls, 1);
+  }
+});
 
-    const oneUnconfirmed = await resolve(
-      parallel,
-      [carrier(parallel, 'codex-sol', 'handled'), carrier(parallel, 'opus', 'handled')],
-      recordStore(new Map([[oldInvocationKey(parallel, 'codex-sol'), record(parallel, 'codex-sol')]])),
-      asked,
+test('request authority mismatch reads no Queue, History or execution dependencies', async () => {
+  const f = await canonicalActionFixture();
+  let calls = 0;
+  const fail = () => {
+    calls++;
+    throw Error('must not consult');
+  };
+  for (const change of [{ actorCatId: 'opus' }, { targetThreadId: 'other' }, { holderCatIds: ['kimi'] }])
+    assert.deepEqual(
+      await f.resolve(
+        {
+          invocationQueue: { listAllDurable: fail },
+          messageStore: { getByThreadAfter: fail, getById: fail },
+          invocationRecordStore: { get: fail },
+          turnExecutionStore: { get: fail },
+        },
+        change,
+      ),
+      unavailable('authority_mismatch'),
     );
-    assert.deepEqual(oneUnconfirmed, { disposition: 'unavailable', reason: 'execution_unconfirmed' });
+  assert.equal(calls, 0);
+});
+
+test('another generation cannot lend its delivered source and execution', async () => {
+  const f = await canonicalActionFixture();
+  assert.deepEqual(
+    await f.resolve({ lease: { ...f.current, generation: 2, revision: 9 } }),
+    unavailable('carrier_missing'),
+  );
+});
+
+test('parallel success requires every holder; live mix and missing proof refuse refresh', async () => {
+  const f = await canonicalActionFixture({
+    leaseChanges: { mode: 'parallel', holderCatIds: ['codex-sol', 'opus'], parallelIntent: 'independent work' },
   });
+  assert.deepEqual(await f.resolve(), refreshed(f));
+  const opus = f.executions.get('opus');
+  assert.deepEqual(
+    await f.resolve({
+      messageStore: {
+        getByThreadAfter: (...args) => f.messages.getByThreadAfter(...args),
+        getById: (id) => {
+          const m = f.messages.getById(id);
+          return id === opus.responseId ? { ...m, lifecycle: { ...m.lifecycle, status: 'processing' } } : m;
+        },
+      },
+      turnExecutionStore: {
+        get: (id) => (id === opus.childId ? { ...f.turns.get(id), status: 'running' } : f.turns.get(id)),
+      },
+      invocationRecordStore: {
+        get: (id) => (id === opus.parentId ? { ...f.records.get(id), status: 'running' } : f.records.get(id)),
+      },
+    }),
+    unavailable('carrier_mixed'),
+  );
+  assert.deepEqual(
+    await f.resolve({ invocationRecordStore: { get: (id) => (id === opus.parentId ? null : f.records.get(id)) } }),
+    unavailable('carrier_missing'),
+  );
 });

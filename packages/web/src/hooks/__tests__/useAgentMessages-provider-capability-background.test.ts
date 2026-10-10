@@ -17,17 +17,12 @@ import { type BackgroundAgentMessage, handleBackgroundAgentMessage } from '@/hoo
 import { useChatStore } from '@/stores/chatStore';
 
 let bgTestSeq = 0;
-const bgStreamRefs = new Map<string, { id: string; threadId: string; catId: string }>();
-const finalizedBgRefs = new Map<string, string>();
 
 function dispatchBg(msg: BackgroundAgentMessage) {
   handleBackgroundAgentMessage(msg, {
     store: useChatStore.getState(),
-    bgStreamRefs,
-    finalizedBgRefs,
     nextBgSeq: () => bgTestSeq++,
     addToast: () => {},
-    clearDoneTimeout: () => {},
   });
 }
 
@@ -48,8 +43,6 @@ describe('#939 part A (background chain): provider_capability silent consume + i
       threads: [],
     });
     bgTestSeq = 0;
-    bgStreamRefs.clear();
-    finalizedBgRefs.clear();
   });
 
   it('projects provider-neutral warning through the same registry in a background thread', () => {

@@ -9,6 +9,7 @@ const FAKE_CATS: CatData[] = [
     color: { primary: '#5B9BD5', secondary: '#D6E9F8' },
     mentionPatterns: ['暹罗', '暹罗猫', 'gemini'],
     clientId: 'google',
+    carrier: 'cli',
     defaultModel: 'gemini-3-pro',
     avatar: '/avatars/gemini.png',
     roleDescription: '视觉设计师',
@@ -20,10 +21,12 @@ const MIXED_CATS: CatData[] = [
   ...FAKE_CATS,
   {
     id: 'opus-fast',
-    displayName: '布偶猫(快)',
+    displayName: '布偶猫',
+    variantLabel: '快',
     color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
     mentionPatterns: [],
     clientId: 'anthropic',
+    carrier: 'cli',
     defaultModel: 'opus-fast',
     avatar: '/avatars/opus.png',
     roleDescription: '快速变体',
@@ -35,6 +38,7 @@ const MIXED_CATS: CatData[] = [
     color: { primary: '#F59E0B', secondary: '#FDE68A' },
     mentionPatterns: ['spark'],
     clientId: 'openai',
+    carrier: 'cli',
     defaultModel: 'gpt-5.4-mini',
     avatar: '/avatars/spark.png',
     roleDescription: '精确点改',
@@ -97,7 +101,7 @@ describe('buildCatOptions vs buildWhisperOptions split', () => {
     expect(options).toHaveLength(2);
     const fast = options.find((o) => o.id === 'opus-fast');
     expect(fast).toBeDefined();
-    expect(fast?.label).toBe('@布偶猫(快)');
+    expect(fast?.label).toBe('@布偶猫（快）');
     expect(fast?.insert).toBe(''); // no mentionPatterns → empty insert
     expect(options.map((option) => option.id)).not.toContain('spark');
   });

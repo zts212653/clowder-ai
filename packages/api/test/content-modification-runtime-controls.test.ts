@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
+import { PersistedQueueDelivery } from '../src/domains/cats/services/agents/invocation/PersistedQueueDelivery.js';
 import { ModificationRuntimeControlStore } from '../src/domains/collaborative-content/modification/control/runtime-control-store.js';
 import { type QueueRoutesOptions, queueRoutes } from '../src/routes/queue.js';
 import { cancellationFixture } from './helpers/content-modification-cancellation-fixture.js';
@@ -9,9 +10,10 @@ import { cancellationFixture } from './helpers/content-modification-cancellation
 test('whole-execution confirmation persists the exact original child and cannot be retargeted on retry', async (t) => {
   const f = await cancellationFixture(t);
   const submitted = await f.integration.requests.submit(f.payload, f.human);
-  assert.ok(submitted.delivery?.messageId);
+  assert.ok(submitted.delivery?.messageId, JSON.stringify({ submitted, errors: f.errors.map(String) }));
   const childId = await f.dispatch.waitForAwakening(submitted.delivery.messageId);
-  const child = f.dispatch.turns.get(childId)!;
+  const child = f.dispatch.turns.get(childId);
+  assert.ok(child);
   const confirm = (invocationId = childId) =>
     f.app.inject({
       method: 'POST',
@@ -33,6 +35,16 @@ test('whole-execution confirmation persists the exact original child and cannot 
     headers: { 'x-cat-cafe-user': 'operator' },
   });
   assert.deepEqual(detail.json().runtimeControls, [{ ...first.json(), executionState: 'running' }]);
+  const originalGet = f.dispatch.turns.get.bind(f.dispatch.turns);
+  f.dispatch.turns.get = (id) => {
+    const found = originalGet(id);
+    return found ? { ...found, invocationId: 'different-child' } : found;
+  };
+  try {
+    assert.equal((await f.integration.runtimeControls.list(f.requestId, 'operator'))[0].executionState, 'unknown');
+  } finally {
+    f.dispatch.turns.get = originalGet;
+  }
   const foreign = await f.app.inject({
     method: 'POST',
     url: `/api/content-modifications/${f.requestId}/runtime-controls`,
@@ -52,7 +64,6 @@ async function nativeFixture(t: Parameters<typeof cancellationFixture>[0]) {
     messageStore: f.messages,
     turnExecutionStore: f.dispatch.turns,
     invocationRecordStore: f.dispatch.records,
-    queueCustodyCoordinator: f.dispatch.coordinator,
     controlReceipts: () => f.integration.runtimeControls,
     socketManager: {
       emitToUser() {},
@@ -70,27 +81,30 @@ async function nativeFixture(t: Parameters<typeof cancellationFixture>[0]) {
   return { ...f, detail };
 }
 
-for (const merged of [false, true])
-  test(`native queue acknowledgement survives another connection (merged=${merged})`, async (t) => {
+for (const expanded of [false, true])
+  test(`native queue acknowledgement survives another connection (target scope expanded=${expanded})`, async (t) => {
     const f = await nativeFixture(t);
     f.dispatch.tracker.start(f.thread.id, 'codex-astra', 'operator', ['codex-astra'], 'occupied-parent');
     const submitted = await f.integration.requests.submit(f.payload, f.human);
-    assert.ok(submitted.delivery?.messageId);
+    assert.ok(submitted.delivery?.messageId, JSON.stringify({ submitted, errors: f.errors.map(String) }));
     const messageId = submitted.delivery.messageId;
-    const entry = f.queue.findEntryWithMessageId(f.thread.id, messageId)!;
+    const entry = f.queue.findEntryWithMessageId(f.thread.id, messageId);
     assert.ok(entry);
-    if (merged) {
-      const another = f.messages.append({
-        userId: 'operator',
-        threadId: f.thread.id,
-        catId: null,
-        content: '另一项请求',
-        mentions: ['codex-astra'],
-        timestamp: Date.now(),
-      });
-      f.queue.backfillMessageId(f.thread.id, 'operator', entry.id, another.id);
-      await f.dispatch.coordinator.persistEntry(f.queue.getEntrySnapshot(f.thread.id, 'operator', entry.id)!);
-    }
+    const unrelated = await new PersistedQueueDelivery({
+      messages: f.messages,
+      queue: f.queue,
+      progress: async () => {},
+    }).deliver({
+      ownerUserId: 'operator',
+      threadId: f.thread.id,
+      targetCatId: 'codex-astra',
+      ownerAuthProvenance: 'strict',
+      idempotencyKey: 'native-control:unrelated',
+      content: '独立请求',
+      sourceCategory: 'producer_return',
+      source: { connector: 'content-review', label: '独立请求', meta: {} },
+    });
+    assert.ok(unrelated.entryId && unrelated.message);
     assert.equal((await f.cancel()).statusCode, 200);
     const confirm = (kind: string) =>
       f.app.inject({
@@ -99,15 +113,46 @@ for (const merged of [false, true])
         headers: { 'x-cat-cafe-user': 'operator' },
         payload: { kind, entryId: entry.id, messageId },
       });
+    const originalSnapshot = f.queue.getEntrySnapshot.bind(f.queue);
+    for (const [name, altered] of [
+      ['entry', { ...entry, id: 'foreign' }],
+      ['claimed row', { ...entry, status: 'claimed' }],
+      ['owner', { ...entry, owner: { kind: 'user', userId: 'foreign' } }],
+      ['system owner', { ...entry, owner: { kind: 'system', service: 'foreign' } }],
+      ['thread', { ...entry, threadId: 'foreign' }],
+      ['message', { ...entry, payload: { ...entry.payload, messageId: 'foreign' } }],
+      ['source record', { ...entry, payload: { ...entry.payload, sourceRecordId: 'foreign' } }],
+      ['target', { ...entry, targets: ['opus'] }],
+    ] as const) {
+      f.queue.getEntrySnapshot = () => structuredClone(altered) as typeof entry;
+      try {
+        assert.equal((await confirm('withdraw_single')).statusCode, 409, name);
+      } finally {
+        f.queue.getEntrySnapshot = originalSnapshot;
+      }
+    }
     const single = await confirm('withdraw_single');
     assert.equal(single.statusCode, 200, single.body);
+    if (expanded) {
+      // Canonical Queue never merges source messages. Widen the pending target
+      // scope after confirmation to exercise the same stale exclusive-delete fence.
+      const changed = await f.queue.reconcileQueuedMessageTargetsDurable(
+        f.thread.id,
+        'operator',
+        entry.id,
+        ['codex'],
+        [],
+        {},
+      );
+      assert.equal(changed.outcome, 'updated');
+    }
     const scopedUrl = `/api/threads/${f.thread.id}/queue/${entry.id}?controlReceiptRef=${encodeURIComponent(single.json().receiptRef)}&expectedSourceMessageId=${messageId}&expectedTargetCatId=codex-astra`;
     const foreign = await f.app.inject({ method: 'DELETE', url: scopedUrl, headers: { 'x-cat-cafe-user': 'other' } });
     assert.equal(foreign.statusCode, 409);
     assert.ok(f.queue.getEntrySnapshot(f.thread.id, 'operator', entry.id));
-    if (!merged) {
-      const original = f.dispatch.coordinator.withdrawEntry.bind(f.dispatch.coordinator);
-      f.dispatch.coordinator.withdrawEntry = async () => {
+    if (!expanded) {
+      const original = f.queue.commitClaimedWithdrawal.bind(f.queue);
+      f.queue.commitClaimedWithdrawal = async () => {
         throw new Error('owner unavailable');
       };
       const unavailable = await f.app.inject({
@@ -120,7 +165,7 @@ for (const merged of [false, true])
       assert.equal(observed.state, 'confirmed');
       assert.equal(observed.observation.code, 'QUEUE_WITHDRAWAL_FAILED');
       assert.ok(f.queue.getEntrySnapshot(f.thread.id, 'operator', entry.id));
-      f.dispatch.coordinator.withdrawEntry = original;
+      f.queue.commitClaimedWithdrawal = original;
     }
     const wrongScope = await f.app.inject({
       method: 'DELETE',
@@ -134,11 +179,11 @@ for (const merged of [false, true])
       url: scopedUrl,
       headers: { 'x-cat-cafe-user': 'operator' },
     });
-    assert.equal(removed.statusCode, merged ? 409 : 200, removed.body);
+    assert.equal(removed.statusCode, expanded ? 409 : 200, removed.body);
     const actions = (await f.detail()).runtimeControls;
-    assert.equal(actions[0].state, merged ? 'confirmed' : 'acknowledged');
+    assert.equal(actions[0].state, expanded ? 'confirmed' : 'acknowledged');
     let acknowledgedRef = single.json().receiptRef;
-    if (merged) {
+    if (expanded) {
       assert.equal(actions[0].observation.code, 'ENTRY_SCOPE_CHANGED');
       assert.ok(f.queue.getEntrySnapshot(f.thread.id, 'operator', entry.id));
       const whole = await confirm('withdraw_queue');
@@ -168,4 +213,9 @@ for (const merged of [false, true])
     }
     assert.equal(f.queue.getEntrySnapshot(f.thread.id, 'operator', entry.id), null);
     assert.ok(f.messages.getById(messageId), 'withdrawal preserves author history');
+    assert.ok(
+      await f.queue.getDurableEntry(f.thread.id, unrelated.entryId),
+      'exact withdrawal preserves unrelated source',
+    );
+    assert.notEqual(f.messages.getById(unrelated.message.id)?.deliveryStatus, 'canceled');
   });

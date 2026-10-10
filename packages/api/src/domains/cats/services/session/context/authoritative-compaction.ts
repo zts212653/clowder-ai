@@ -48,8 +48,10 @@ function resolveClaudeHookSupport(input: {
  * authority by having its event delivery dynamically proven end to end, never
  * by declaring `observesCompression=true` or by appearing in a schema enum.
  *
- * Two carriers currently qualify: the Claude print carrier (typed boundary +
- * authenticated project hook) and the Codex app-server (F296 B4 Gate 0).
+ * Three carriers currently qualify: the Claude print carrier (typed boundary +
+ * authenticated project hook), the Claude Agent SDK carrier (typed boundary +
+ * the PreCompact hook it runs in-process, F117 K2, f117-notes/phase2b-sdk-precompact)
+ * and the Codex app-server (F296 B4 Gate 0).
  */
 export function resolveAuthoritativeCompactionSupport(input: {
   readonly capability: AgentContextCapability;
@@ -70,7 +72,7 @@ export function resolveAuthoritativeCompactionSupport(input: {
   } = input;
   if (
     capability.provider === 'anthropic' &&
-    capability.carrier === 'print_sdk' &&
+    (capability.carrier === 'print_sdk' || capability.carrier === 'agent_sdk') &&
     (eventSource === 'claude_compact_boundary' || eventSource === 'claude_precompact_hook')
   ) {
     return resolveClaudeHookSupport({

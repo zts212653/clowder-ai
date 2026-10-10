@@ -20,6 +20,7 @@ async function firstReceipt(f: Awaited<ReturnType<typeof bootstrapFixture>>, tas
   assert.ok(admission && admission.basis === 'authorized_source');
   const message = await f.messages.getById(admission.authorityRef.slice('message:'.length));
   assert.ok(message?.extra?.collectiveOwnerAdmissionV1);
+  assert.deepEqual(message.from, { kind: 'user', userId: task.userId });
   return message;
 }
 
@@ -51,6 +52,8 @@ test('first Host Task is born under current g2 execution after g1 was revoked be
     assert.equal(auth.collectiveWorkBinding?.executionRevision, 2);
     const privateBinding = await f.context.resolvePrivate(auth, 'callback');
     assert.ok(privateBinding?.work.executionRef);
+    const executionReceipt = await f.messages.getById(privateBinding.work.executionRef.slice('message:'.length));
+    assert.deepEqual(executionReceipt?.from, { kind: 'user', userId: f.cafe.ownerUserId });
     assert.equal(privateBinding.sourceRef, `message:${continued.source.id}`);
     const actual = workOf(f.world, f.work.workId);
     assert.deepEqual(
@@ -77,7 +80,7 @@ test('first Host Task is born under current g2 execution after g1 was revoked be
       await f.messages.appendIdempotent({
         userId: f.cafe.ownerUserId,
         threadId: task.threadId,
-        catId: null,
+        from: { kind: 'system', service: 'collective-work' },
         mentions: [CAT],
         content: 'obsolete g1 carrier',
         timestamp: Date.now(),
@@ -257,6 +260,11 @@ test('a cold Host uses the actual inbox first assignment only as lineage when g1
     const lineageRef = task.entrustedWork.admission.sourceRefs[0];
     assert.ok(lineageRef?.startsWith('message:'));
     const lineage = await f.messages.getById(lineageRef.slice('message:'.length));
+    assert.deepEqual(lineage?.from, {
+      kind: 'external',
+      connectorId: 'collective',
+      sender: lineage?.source?.sender,
+    });
     assert.equal(lineage?.source?.meta?.eventId, f.work.assignmentEventId);
     assert.equal(lineage?.source?.meta?.participation?.participationRevision, 1);
     assert.equal(workOf(f.world, f.work.workId).acceptance?.hostAdmission, undefined);

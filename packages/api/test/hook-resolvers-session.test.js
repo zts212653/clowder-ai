@@ -59,7 +59,6 @@ function makeInput(overrides = {}) {
     conciergeLines: null,
     worldContext: null,
     alwaysOnDocsBlock: null,
-    activeSignalsBlock: null,
     a2aBallCheckContent: null,
     handoffDecisionTreeContent: null,
     coCreatorFirstMention: '@lang',

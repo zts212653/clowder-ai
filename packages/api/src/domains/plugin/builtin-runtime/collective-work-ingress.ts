@@ -22,7 +22,7 @@ export async function persistCollectiveWorkNotice(
   const stored = await options.messageStore.appendIdempotent({
     threadId,
     userId: route.localOwnerUserId,
-    catId: null,
+    from: { kind: 'external', connectorId: 'collective', sender: source.sender },
     content: event.body,
     source,
     mentions: [],

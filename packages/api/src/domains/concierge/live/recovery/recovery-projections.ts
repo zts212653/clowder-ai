@@ -1,5 +1,5 @@
 import type { SettledApprovalHubItem, TaskItem } from '@cat-cafe/shared';
-import { canViewMessage, isDurablyReadableByCat } from '../../../cats/services/stores/visibility.js';
+import { canViewMessage, isTimelinePublished } from '../../../cats/services/stores/visibility.js';
 import type { LiveInboxScope } from '../inbox/live-inbox-contract.js';
 import { type LiveRecoveryOptions, recoveryExcerpt } from './live-recovery-contract.js';
 
@@ -19,9 +19,10 @@ export class RecoveryProjections {
       message.deletedAt === undefined &&
       !message.recall &&
       message.deliveryStatus !== 'canceled' &&
-      !message.queueCustody?.withdrawnByCatIds?.includes(this.scope.catId) &&
       canViewMessage(message, { type: 'cat', catId: this.scope.catId }) &&
-      isDurablyReadableByCat(message, this.scope.catId)
+      // Full exposure is committed as History delivery by the canonical child;
+      // old per-message Queue bodyExposures are not a second visibility owner.
+      isTimelinePublished(message)
     );
   }
 

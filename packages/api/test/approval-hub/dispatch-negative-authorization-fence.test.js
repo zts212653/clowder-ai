@@ -52,12 +52,14 @@ function createMockRouter() {
 async function createFixture(t, options = {}) {
   const [
     { InvocationRegistry },
+    { InvocationQueue },
     { MessageStore },
     { ThreadStore },
     { InMemoryDispatchProposalStore },
     { callbacksRoutes },
   ] = await Promise.all([
     import('../../dist/domains/cats/services/agents/invocation/InvocationRegistry.js'),
+    import('../../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
     import('../../dist/domains/cats/services/stores/ports/MessageStore.js'),
     import('../../dist/domains/cats/services/stores/ports/ThreadStore.js'),
     import('../../dist/domains/approval-hub/stores/ports/IDispatchProposalStore.js'),
@@ -65,6 +67,7 @@ async function createFixture(t, options = {}) {
   ]);
 
   const registry = new InvocationRegistry();
+  const invocationQueue = new InvocationQueue();
   const messageStore = new MessageStore();
   const threadStore = new ThreadStore();
   const dispatchProposalStore = new InMemoryDispatchProposalStore();
@@ -83,6 +86,8 @@ async function createFixture(t, options = {}) {
     threadStore,
     dispatchProposalStore,
     invocationRecordStore,
+    invocationQueue,
+    queueProcessor: { async requestDrain() {} },
     router: createMockRouter(),
     socketManager: { broadcastAgentMessage() {}, broadcastToRoom() {}, emitToUser() {} },
     approvalIngress: { async publish() {} },
@@ -111,8 +116,6 @@ async function createFixture(t, options = {}) {
               };
             },
           },
-          invocationQueue: {},
-          queueProcessor: {},
         }
       : {}),
   });

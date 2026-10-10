@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
-const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
 const { MemoryWaitLifecycleEventLog } = await import('../dist/domains/ball-custody/WaitLifecycleEventLog.js');
 const { GitHubWaitLifecycleService } = await import('../dist/domains/github-signals/GitHubWaitLifecycleService.js');
 const { DistillationCheckpoint, InMemoryOpportunityStore } = await import(
@@ -36,10 +36,10 @@ function awaitState(when) {
 
 async function setup(when, routerOverrides = {}) {
   const taskStore = new TaskStore();
-  const messageStore = new MessageStore();
+  const harness = connectorDeliveryHarness();
   const lifecycle = new GitHubWaitLifecycleService({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     eventLog: new MemoryWaitLifecycleEventLog(),
     now: () => 500,
     log: { info() {}, warn() {}, error() {} },
@@ -60,7 +60,7 @@ async function setup(when, routerOverrides = {}) {
   const events = [];
   const router = new CiCdRouter({
     taskStore,
-    deliveryDeps: { messageStore },
+    deliveryDeps: harness.deliveryDeps,
     waitLifecycle: lifecycle,
     log: { info() {}, warn() {}, error() {} },
     onPrLifecycle: (event) => {
@@ -69,7 +69,7 @@ async function setup(when, routerOverrides = {}) {
     },
     ...routerOverrides,
   });
-  return { taskStore, messageStore, task, router, events, lifecycle };
+  return { taskStore, harness, task, router, events, lifecycle };
 }
 
 function poll(overrides = {}) {
@@ -160,24 +160,24 @@ describe('CiCdRouter F280 typed waits', () => {
   });
 
   test('CI pass wakes an explicit CI waiter exactly once', async () => {
-    const { router, messageStore } = await setup([{ kind: 'pr_ci_terminal' }]);
+    const { router, harness } = await setup([{ kind: 'pr_ci_terminal' }]);
     const first = await router.route(poll());
     const replay = await router.route(poll());
     assert.equal(first.kind, 'notified');
     assert.notEqual(replay.kind, 'notified');
     assert.match(first.content, /CI pending → pass/);
-    assert.equal(messageStore.getByThread('thread_1').length, 1);
+    assert.equal(harness.deliveries('thread_1').length, 1);
   });
 
   test('CI pass does not wake a reviewer waiting only for a new HEAD', async () => {
-    const { router, messageStore, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
+    const { router, harness, taskStore, task } = await setup([{ kind: 'pr_head_changed' }]);
     assert.equal((await router.route(poll())).kind, 'skipped');
-    assert.equal(messageStore.getByThread('thread_1').length, 0);
+    assert.equal(harness.deliveries('thread_1').length, 0);
     assert.equal((await taskStore.get(task.id)).automationState.ci.lastBucket, 'pass');
   });
 
   test('a renewed HEAD wait still advances external-case CI projection without another wake', async () => {
-    const { taskStore, messageStore, task, lifecycle } = await setup([{ kind: 'pr_head_changed' }]);
+    const { taskStore, harness, task, lifecycle } = await setup([{ kind: 'pr_head_changed' }]);
     const headSha = 'bbb2222';
     const waitResult = await lifecycle.observe({
       taskId: task.id,
@@ -204,7 +204,7 @@ describe('CiCdRouter F280 typed waits', () => {
     const projected = [];
     const router = new CiCdRouter({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       waitLifecycle: lifecycle,
       externalReviewCoordinator: {
         recordCi: async (facts) => {
@@ -224,7 +224,7 @@ describe('CiCdRouter F280 typed waits', () => {
     assert.equal(projected.length, 1);
     assert.equal(projected[0].headSha, headSha);
     assert.equal((await taskStore.get(task.id)).automationState.ci.headSha, headSha);
-    assert.equal(messageStore.getByThread('thread_1').length, 1, 'only the original HEAD wake is delivered');
+    assert.equal(harness.deliveries('thread_1').length, 1, 'only the original HEAD wake is delivered');
   });
 
   test('merged PR consumes the wait, marks done, and emits world truth once', async () => {
@@ -255,17 +255,9 @@ describe('CiCdRouter F280 typed waits', () => {
 
   test('terminal delivery failure recovers every merge world-truth effect exactly once after restart', async () => {
     const taskStore = new TaskStore();
-    const storedMessages = new MessageStore();
-    let failDelivery = true;
-    const messageStore = {
-      append: async (input) => {
-        if (failDelivery) {
-          failDelivery = false;
-          throw new Error('connector unavailable');
-        }
-        return storedMessages.append(input);
-      },
-    };
+    // One transient Queue-admission failure, then the durable path recovers the same envelope.
+    const harness = connectorDeliveryHarness();
+    harness.failNextDeliveries(1);
     const task = await taskStore.create({
       kind: 'pr_tracking',
       subjectKey: 'pr:owner/repo#7',
@@ -294,10 +286,10 @@ describe('CiCdRouter F280 typed waits', () => {
     };
     const options = () => ({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       waitLifecycle: new GitHubWaitLifecycleService({
         taskStore,
-        deliveryDeps: { messageStore },
+        deliveryDeps: harness.deliveryDeps,
         eventLog: new MemoryWaitLifecycleEventLog(),
         now: () => 500,
         log: { info() {}, warn() {}, error() {} },
@@ -322,7 +314,9 @@ describe('CiCdRouter F280 typed waits', () => {
     });
     const terminalPoll = poll({ prState: 'merged', aggregateBucket: 'pending' });
 
-    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /connector unavailable/);
+    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /queue admission unavailable/);
+    // A failed send leaves the outcome claimed but still `pending`, so every reader — including an
+    // older binary that only knows `pending` — keeps treating it as deliverable.
     assert.equal((await taskStore.get(task.id)).automationState.waitOutcome.delivery, 'pending');
 
     await new CiCdRouter(options()).route(terminalPoll);
@@ -336,11 +330,9 @@ describe('CiCdRouter F280 typed waits', () => {
 
   test('concurrent recovery and a lost receipt still commit each terminal effect exactly once', async () => {
     const taskStore = new TaskStore();
-    const messageStore = {
-      append: async () => {
-        throw new Error('connector unavailable');
-      },
-    };
+    // Queue admission never succeeds here: the terminal effects must still commit exactly once.
+    const harness = connectorDeliveryHarness();
+    harness.failNextDeliveries(Number.MAX_SAFE_INTEGER);
     const task = await taskStore.create({
       kind: 'pr_tracking',
       subjectKey: 'pr:owner/repo#7',
@@ -390,10 +382,10 @@ describe('CiCdRouter F280 typed waits', () => {
     };
     const options = () => ({
       taskStore,
-      deliveryDeps: { messageStore },
+      deliveryDeps: harness.deliveryDeps,
       waitLifecycle: new GitHubWaitLifecycleService({
         taskStore,
-        deliveryDeps: { messageStore },
+        deliveryDeps: harness.deliveryDeps,
         eventLog: new MemoryWaitLifecycleEventLog(),
         now: () => 500,
         log: { info() {}, warn() {}, error() {} },
@@ -427,7 +419,7 @@ describe('CiCdRouter F280 typed waits', () => {
       automationState: { ...stored.automationState, ci: ciWithoutReceipt },
       status: 'done',
     });
-    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /connector unavailable/);
+    await assert.rejects(() => new CiCdRouter(options()).route(terminalPoll), /queue admission unavailable/);
 
     assert.equal(lifecycleCommits.size, 1);
     assert.equal((await opportunityStore.listPending()).length, 1);

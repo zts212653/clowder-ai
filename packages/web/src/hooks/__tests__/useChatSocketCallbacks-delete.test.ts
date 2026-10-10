@@ -47,8 +47,6 @@ function HookHost({ threadId }: { threadId: string }) {
     threadId,
     userId: 'user-1',
     handleAgentMessage: vi.fn(() => true) as unknown as SocketCallbacks['onMessage'],
-    resetTimeout: vi.fn(),
-    clearDoneTimeout: vi.fn(),
   });
   return null;
 }

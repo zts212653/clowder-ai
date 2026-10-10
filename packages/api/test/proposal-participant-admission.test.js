@@ -22,7 +22,11 @@ function participantEvents(ctx, threadId) {
 describe('F128 proposal approval — participant admission', () => {
   test('no @ + preferredCats persists the final chain starter before Queue starts', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     let ctx;
     const processSnapshots = [];
     const persistOptions = [];
@@ -45,7 +49,6 @@ describe('F128 proposal approval — participant admission', () => {
     ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const proposed = await ctx.propose({
@@ -72,7 +75,11 @@ describe('F128 proposal approval — participant admission', () => {
 
   test('preferredCats override does not persist a narrative raw-message mention', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     let ctx;
     const router = {
       async resolveTargetsAndIntent(_content, threadId, options) {
@@ -88,7 +95,6 @@ describe('F128 proposal approval — participant admission', () => {
     ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const proposed = await ctx.propose({
@@ -100,12 +106,19 @@ describe('F128 proposal approval — participant admission', () => {
     const approved = await ctx.approve('alice', proposed.json().proposalId);
     const threadId = approved.json().threadId;
     assert.deepEqual(await ctx.threadStore.getParticipants(threadId), ['kimi']);
-    assert.deepEqual(invocationQueue.list(threadId, 'alice')[0].targetCats, ['kimi']);
+    assert.deepEqual(
+      invocationQueue.list(threadId, 'alice').flatMap((entry) => entry.targets),
+      ['kimi'],
+    );
   });
 
   test('#ideate persists every final parallel target with one user-scoped event', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     let ctx;
     const snapshots = [];
     const router = {
@@ -122,7 +135,6 @@ describe('F128 proposal approval — participant admission', () => {
     ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const proposed = await ctx.propose({
@@ -140,11 +152,9 @@ describe('F128 proposal approval — participant admission', () => {
 
   test('queue rejection leaves no participant or participant event', async () => {
     const invocationQueue = {
-      enqueue() {
-        return { outcome: 'full' };
+      async send() {
+        return { outcome: 'full', entries: [] };
       },
-      backfillMessageId() {},
-      rollbackEnqueue() {},
     };
     const router = {
       async resolveTargetsAndIntent() {
@@ -159,7 +169,6 @@ describe('F128 proposal approval — participant admission', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
     });
     const source = await ctx.threadStore.create('alice', 'Source');
     const proposed = await ctx.propose({
@@ -178,7 +187,11 @@ describe('F128 proposal approval — participant admission', () => {
 
   test('Sidebar snapshot keeps C2 participants while presence transitions working → idle', async () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
-    const invocationQueue = new InvocationQueue();
+    const invocationQueue = new InvocationQueue(undefined, {
+      onAdmitted: ({ threadId, entries }) => {
+        void queueProcessor.processNext(threadId, entries[0].owner.userId).catch(() => {});
+      },
+    });
     const workingThreads = new Set();
     const router = {
       async resolveTargetsAndIntent() {
@@ -203,7 +216,6 @@ describe('F128 proposal approval — participant admission', () => {
     const ctx = await createProposalTestContext({
       routerOverride: router,
       invocationQueueOverride: invocationQueue,
-      queueProcessorOverride: queueProcessor,
       sidebarPresenceSourceOverride: presenceSource,
     });
     const source = await ctx.threadStore.create('alice', 'Source');

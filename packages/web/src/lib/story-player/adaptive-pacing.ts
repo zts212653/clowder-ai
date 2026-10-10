@@ -51,6 +51,7 @@ const CAT_HANDLES = [
   'gemini25',
   'gemini35',
   'operator',
+  'co-creator',
   'l\\.s\\.',
   'you',
   'antigravity',

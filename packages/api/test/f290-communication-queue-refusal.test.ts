@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,53 +11,45 @@ import {
   type InvocationDeps,
   invokeSingleCat,
 } from '../src/domains/cats/services/agents/invocation/invoke-single-cat.js';
-import {
-  createInitialQueuedMessageCustody,
-  QueuedMessageCustodyCoordinator,
-} from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
-import {
-  buildQueueEntry,
-  groupActiveMessages,
-} from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyStartupQueueEntry.js';
 import { QueueProcessor, type RouterLike } from '../src/domains/cats/services/agents/invocation/QueueProcessor.js';
+import { InMemoryQueueLedgerStore } from '../src/domains/cats/services/agents/invocation/queue-ledger/InMemoryQueueLedgerStore.js';
 import { InMemoryTurnExecutionStore } from '../src/domains/cats/services/stores/memory/InMemoryTurnExecutionStore.js';
 import { InvocationRecordStore } from '../src/domains/cats/services/stores/ports/InvocationRecordStore.js';
-import { MessageStore } from '../src/domains/cats/services/stores/ports/MessageStore.js';
+import { MessageStore, settleLifecycleResponseInputs } from '../src/domains/cats/services/stores/ports/MessageStore.js';
 import './helpers/setup-cat-registry.js';
 
-const catId = createCatId('codex-sol');
-const threadId = 'private-queue';
-const userId = 'owner';
-
-function required<T>(value: T | null | undefined): T {
-  assert.ok(value);
-  return value;
-}
-
-async function waitFor(predicate: () => boolean, label: string) {
-  const deadline = Date.now() + 2_000;
-  while (!predicate()) {
-    if (Date.now() >= deadline) assert.fail(`Queue transition timed out: ${label}`);
+const catId = createCatId('codex-sol'),
+  threadId = 'private-queue',
+  userId = 'owner';
+async function until(predicate: () => boolean | Promise<boolean>, label: string) {
+  for (let i = 0; i < 400; i++) {
+    if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+  assert.fail('Queue transition timed out: ' + label);
 }
-
-function fixture(refuse: (source: string) => unknown, unsupported = false) {
-  const queue = new InvocationQueue();
-  const messages = new MessageStore();
-  const records = new InvocationRecordStore();
-  const turns = new InMemoryTurnExecutionStore();
-  const coordinator = new QueuedMessageCustodyCoordinator({ messageStore: messages });
-  const routed: string[] = [];
-  const delivered: string[] = [];
-  const parentIds: string[] = [];
+function fixture(refuse: (source: string) => unknown, unsupported = false, retryDelayMs = 60_000) {
+  const ledger = new InMemoryQueueLedgerStore();
+  const queue = new InvocationQueue(ledger),
+    messages = new MessageStore();
+  const records = new InvocationRecordStore(),
+    turns = new InMemoryTurnExecutionStore();
+  const routed: string[] = [],
+    delivered: string[] = [],
+    parentIds: string[] = [],
+    errors: unknown[] = [];
   let modelStarts = 0;
   const router: RouterLike = {
+    async resolveExplicitTargets(targets) {
+      return [...targets];
+    },
+    async resolveConversationTargetsAtAdmission(targets) {
+      return [...targets];
+    },
     async *routeExecution(_user, content, _thread, messageId, targets, _intent, options) {
       routed.push(content);
       const refusal = refuse(content);
       if (refusal || unsupported) {
-        // Exercise the real pre-provider authority/support boundary. No model is called.
         const deps = {
           collectiveContext: () => ({
             async resolvePrivate() {
@@ -69,7 +61,7 @@ function fixture(refuse: (source: string) => unknown, unsupported = false) {
           }),
         } as unknown as InvocationDeps;
         try {
-          for await (const event of invokeSingleCat(deps, {
+          yield* invokeSingleCat(deps, {
             catId,
             userId,
             threadId,
@@ -79,38 +71,37 @@ function fixture(refuse: (source: string) => unknown, unsupported = false) {
             service: {
               supportsToolExecutionPolicy: () => false,
               async *invoke() {
-                modelStarts += 1;
-                yield {
-                  type: 'error' as const,
-                  catId,
-                  error: 'fixture provider must remain blocked',
-                  timestamp: Date.now(),
-                };
+                modelStarts++;
               },
             },
-          }))
-            yield { ...event };
+          });
         } finally {
-          // Production routeSerial guarantees a done frame even before a refusal propagates.
           yield { type: 'done', catId, isFinal: true, timestamp: Date.now() };
         }
-        assert.fail('The private refusal must throw before provider creation');
+        assert.fail('Private refusal must stop before provider creation');
       }
-      // A deterministic transport completion supplies real child/custody evidence,
-      // without fabricating a successful private Task or launching any model.
-      const invocationId = randomUUID();
-      const parentInvocationId = String(options?.parentInvocationId);
-      const startedAt = Date.now();
+      const invocationId = randomUUID(),
+        parentInvocationId = String(options?.parentInvocationId),
+        startedAt = Date.now();
       turns.createRunning({
         invocationId,
         parentInvocationId,
         threadId,
         userId,
         catId,
-        startedAt,
         executionKind: 'ordinary',
+        startedAt,
         causal: { triggerMessageId: messageId ?? undefined },
       });
+      const admission = await options!.onLifecycleInvocationStarted!({
+        invocationId,
+        parentInvocationId,
+        threadId,
+        userId,
+        catId,
+        startedAt,
+      });
+      assert.ok(admission);
       yield {
         type: 'system_info',
         catId,
@@ -118,230 +109,250 @@ function fixture(refuse: (source: string) => unknown, unsupported = false) {
         turnInvocationId: invocationId,
         turnExecutionStartedAt: startedAt,
         timestamp: startedAt,
+        responseMessageId: admission.responseMessageId,
         extra: { turnExecution: { executionKind: 'ordinary', invocationId, parentInvocationId } },
       };
-      const expose = options?.onPromptMessagesExposed as (input: unknown) => Promise<unknown>;
-      await expose({
-        threadId,
-        userId,
-        catId,
-        invocationId,
-        messageIds: options?.persistedPromptMessageIds,
-        seenAt: Date.now(),
-      });
       delivered.push(content);
       turns.transitionTerminal(invocationId, {
         status: 'succeeded',
         terminalReason: 'fixture_delivery_complete',
         endedAt: Date.now(),
       });
+      const terminal = messages.commitLifecycleResponseTerminal(admission.responseMessageId, {
+        invocationId,
+        status: 'completed',
+        completedAt: Date.now(),
+        content: 'transport result',
+        mentions: [],
+        origin: 'stream',
+      });
+      assert.equal(terminal.kind, 'applied');
+      if (terminal.kind === 'applied')
+        await settleLifecycleResponseInputs(messages, terminal.message, admission.responseMessageId);
       yield { type: 'done', catId: targets[0], invocationId, timestamp: Date.now() };
     },
     async ackCollectedCursors() {},
   };
-  const processor = new QueueProcessor({
-    queue,
-    invocationTracker: new InvocationTracker(),
-    messageStore: messages,
-    queueCustodyCoordinator: coordinator,
-    turnExecutionStore: turns,
-    router,
-    invocationRecordStore: {
-      async create(input) {
-        const result = records.create(input as Parameters<InvocationRecordStore['create']>[0]);
-        parentIds.push(result.invocationId);
-        return result;
-      },
-      get: (id) => records.get(id),
-      async update(id, input) {
-        return records.update(id, input as Parameters<InvocationRecordStore['update']>[1]);
-      },
-    },
-    socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
-    log: { info() {}, warn() {}, error() {} },
-  });
-  function enqueue(content: string) {
-    const result = queue.enqueue({
-      threadId,
-      userId,
-      ownerAuthProvenance: 'unknown',
-      executionScope: 'collective-work',
-      content,
-      source: 'connector',
-      targetCats: [catId],
-      intent: 'execute',
-      autoExecute: true,
-      idempotencyKey: `source:${content}`,
-    });
-    assert.ok(result.entry);
-    const entry = result.entry;
-    const [taskId, revision] = content.split('@');
-    const message = messages.append({
-      userId,
-      threadId,
-      catId: null,
-      content,
-      mentions: [catId],
-      timestamp: entry.createdAt,
-      deliveryStatus: 'queued',
-      queueCustody: createInitialQueuedMessageCustody(entry),
-      extra: {
-        collectiveWorkInvocationV1: {
-          v: 1,
-          taskId: required(taskId),
-          observedRevision: Number(revision),
-          resultRevision: 1,
-          executionRevision: Number(revision),
-          executionRef: `message:admission-${content}`,
+  const processor = new QueueProcessor(
+    {
+      queue,
+      invocationTracker: new InvocationTracker(),
+      messageStore: messages,
+      turnExecutionStore: turns,
+      router,
+      invocationRecordStore: {
+        async create(input) {
+          const result = records.create(input as Parameters<InvocationRecordStore['create']>[0]);
+          parentIds.push(result.invocationId);
+          return result;
+        },
+        get: (id) => records.get(id),
+        async update(id, input) {
+          return records.update(id, input as Parameters<InvocationRecordStore['update']>[1]);
         },
       },
-    });
-    queue.backfillMessageId(threadId, userId, entry.id, message.id);
-    return { entry, message };
+      socketManager: { emitToUser() {}, broadcastAgentMessage() {}, broadcastToRoom() {} },
+      log: {
+        info() {},
+        warn() {},
+        error(value) {
+          errors.push(value);
+        },
+      },
+    },
+    { retryDeferral: { baseDelayMs: retryDelayMs } },
+  );
+  async function enqueue(content: string) {
+    const [taskId, revision] = content.split('@');
+    return queue.send(
+      messages,
+      {
+        userId,
+        threadId,
+        from: { kind: 'system', service: 'collective-work' },
+        content,
+        mentions: [catId],
+        timestamp: Date.now(),
+        deliveryStatus: 'queued',
+        extra: {
+          collectiveWorkInvocationV1: {
+            v: 1,
+            taskId: taskId!,
+            observedRevision: Number(revision),
+            resultRevision: 1,
+            executionRevision: Number(revision),
+            executionRef: 'message:admission-' + content,
+          },
+        },
+      },
+      {
+        kind: 'conversation_input',
+        threadId,
+        userId,
+        from: { kind: 'system', service: 'collective-work' },
+        ownerAuthProvenance: 'unknown',
+        executionScope: 'collective-work',
+        content,
+        targetCats: [catId],
+        intent: 'execute',
+        idempotencyKey: 'source:' + content,
+      },
+    );
+  }
+  async function cold() {
+    const restarted = new InvocationQueue(ledger);
+    await restarted.hydrateFromLedger(messages);
+    return restarted.list(threadId, userId);
   }
   return {
     queue,
     messages,
     records,
-    coordinator,
     processor,
     routed,
     delivered,
+    errors,
     enqueue,
-    parentRecords: () => parentIds.map((id) => required(records.get(id))),
+    cold,
+    parentRecords: () => parentIds.map((id) => records.get(id)!),
     modelStarts: () => modelStarts,
   };
 }
 
 for (const code of ['WORK_EXECUTION_NOT_CURRENT', 'OWNER_ADMISSION_UNAVAILABLE']) {
-  test(`a permanent ${code} retires stale A@1 durably and lets current A@2 and B proceed`, async () => {
+  test('a permanent ' + code + ' retires only stale A@1 and lets current A@2 and B proceed', async () => {
     const f = fixture((source) => (source === 'task-A@1' ? Object.assign(new Error(code), { code }) : undefined));
-    const stale = f.enqueue('task-A@1');
-    const current = f.enqueue('task-A@2');
-    const independent = f.enqueue('task-B@1');
-    assert.equal((await f.processor.processNext(threadId, userId)).started, true);
-    await waitFor(
-      () => f.messages.getById(stale.message.id)?.deliveryStatus === 'canceled',
-      'stale source cancellation',
-    );
-    await waitFor(() => f.queue.list(threadId, userId).length === 0, 'new current and independent source completion');
+    const stale = await f.enqueue('task-A@1'),
+      current = await f.enqueue('task-A@2'),
+      independent = await f.enqueue('task-B@1');
+    await f.processor.requestDrain(threadId, userId);
+    await until(() => f.messages.getById(stale.message.id)?.deliveryStatus === 'canceled', 'stale cancellation');
+    await until(() => f.queue.list(threadId, userId).length === 0, 'remaining delivery');
     assert.deepEqual(f.routed, ['task-A@1', 'task-A@2', 'task-B@1']);
     assert.deepEqual(f.delivered, ['task-A@2', 'task-B@1']);
     assert.equal(f.modelStarts(), 0);
-    const refused = required(f.messages.getById(stale.message.id));
+    const refused = f.messages.getById(stale.message.id)!;
     assert.equal(refused.queueCustody, undefined);
     assert.equal(refused.content, stale.message.content);
+    assert.equal(refused.lifecycle?.kind, 'input');
     assert.equal(f.messages.getById(current.message.id)?.deliveryStatus, 'delivered');
     assert.equal(f.messages.getById(independent.message.id)?.deliveryStatus, 'delivered');
-    const sourceRows = [stale, current, independent].map(({ message }) => required(f.messages.getById(message.id)));
-    const recovered = [...groupActiveMessages(sourceRows)].map(([id, rows]) => buildQueueEntry(rows, id));
-    assert.deepEqual(recovered, [], 'restart must never reconstruct the refused old source');
+    assert.deepEqual(await f.cold(), []);
     const record = f.parentRecords().find((row) => row.userMessageId === stale.message.id);
-    assert.equal(record?.status, 'canceled');
+    assert.equal(record?.status, 'failed');
     assert.match(record?.error ?? '', /collective_private_work_refused/);
-    assert.equal(f.processor.isPaused(threadId, catId), false);
+    assert.equal(f.routed.filter((content) => content === 'task-A@1').length, 1);
   });
 }
 
-test('an unsupported private provider is terminal for its exact carrier, without reporting successful work', async () => {
+test('an unsupported private provider retires its exact source without reporting successful Work', async () => {
   const root = await mkdtemp(join(tmpdir(), 'f290-queue-refusal-'));
   const previous = process.env.CAT_CAFE_DATA_DIR;
   process.env.CAT_CAFE_DATA_DIR = root;
   try {
     const f = fixture(() => undefined, true);
-    const source = f.enqueue('task-A@1');
-    assert.equal((await f.processor.processNext(threadId, userId)).started, true);
-    await waitFor(
-      () => f.messages.getById(source.message.id)?.deliveryStatus === 'canceled',
-      'unsupported provider cancellation',
-    );
-    await waitFor(() => f.queue.list(threadId, userId).length === 0, 'unsupported carrier removal');
+    const source = await f.enqueue('task-A@1');
+    await f.processor.requestDrain(threadId, userId);
+    await until(() => f.messages.getById(source.message.id)?.deliveryStatus === 'canceled', 'unsupported cancellation');
+    await until(() => f.queue.list(threadId, userId).length === 0, 'unsupported retirement');
     assert.deepEqual(f.delivered, []);
     assert.equal(f.modelStarts(), 0);
-    assert.equal(f.parentRecords()[0]?.status, 'canceled');
+    assert.equal(f.parentRecords()[0]?.status, 'failed');
     assert.match(f.parentRecords()[0]?.error ?? '', /private_provider_unsupported/);
+    assert.deepEqual(await f.cold(), []);
   } finally {
     if (previous === undefined) delete process.env.CAT_CAFE_DATA_DIR;
     else process.env.CAT_CAFE_DATA_DIR = previous;
-    await rm(root, { recursive: true, force: true });
+    // The private-work fixture directory remains available for audit.
   }
 });
 
-test('a Service transport failure retains and retries the exact source when the transport recovers', async () => {
+test('temporary Service failure preserves the exact pending source and retries after its bounded backoff', async () => {
   let unavailable = true;
-  const f = fixture(() =>
-    unavailable ? Object.assign(new Error('authority transport unavailable'), { code: 'ECONNRESET' }) : undefined,
+  const f = fixture(
+    () =>
+      unavailable ? Object.assign(new Error('authority transport unavailable'), { code: 'ECONNRESET' }) : undefined,
+    false,
+    200,
   );
-  const source = f.enqueue('task-A@2');
-  assert.equal((await f.processor.processNext(threadId, userId)).started, true);
-  await waitFor(
-    () => f.messages.getById(source.message.id)?.queueCustody?.targetAttempts?.at(-1)?.state === 'failed',
-    'retryable failure receipt',
-  );
-  const retained = required(f.messages.getById(source.message.id));
-  assert.equal(retained.deliveryStatus, 'queued');
-  assert.equal(retained.queueCustody?.entryId, source.entry.id);
+  const source = await f.enqueue('task-A@2');
+  await f.processor.requestDrain(threadId, userId);
+  await until(() => f.parentRecords()[0]?.status === 'failed', 'failed attempt');
+  await until(() => f.queue.list(threadId, userId)[0]?.status === 'queued', 'claim restored');
+  assert.equal(f.messages.getById(source.message.id)?.deliveryStatus, 'queued');
   assert.deepEqual(
-    f.queue.list(threadId, userId).map((entry) => entry.id),
-    [source.entry.id],
+    (await f.cold()).map((row) => row.id),
+    [source.entry!.id],
   );
   assert.deepEqual(f.delivered, []);
-  const expectedAttemptId = required(retained.queueCustody?.targetAttempts?.at(-1)).id;
   unavailable = false;
-  const retried = await f.processor.retryFailedTarget(
-    threadId,
-    userId,
-    source.entry.id,
-    catId,
-    expectedAttemptId,
-    async (transitions) => {
-      for (const transition of transitions) {
-        const committed = f.messages.transitionQueueCustody(transition.messageId, {
-          expectedRevision: transition.current.revision,
-          next: transition.next,
-        });
-        assert.equal(committed.kind, 'updated');
-      }
-      return { outcome: 'committed' };
-    },
-  );
-  assert.equal(retried.outcome, 'retried');
-  await waitFor(
-    () => f.messages.getById(source.message.id)?.deliveryStatus === 'delivered',
-    'recovered source completion',
-  );
+  await f.processor.requestDrain(threadId, userId);
+  await until(() => f.messages.getById(source.message.id)?.deliveryStatus === 'delivered', 'recovered delivery');
   assert.deepEqual(f.routed, ['task-A@2', 'task-A@2']);
   assert.deepEqual(f.delivered, ['task-A@2']);
-  assert.equal(f.messages.getById(source.message.id)?.queueCustody?.entryId, source.entry.id);
-  assert.equal(f.messages.getByThreadAfter(threadId).length, 1, 'retry must retain the same durable message');
+  assert.equal(f.messages.getById(source.message.id)?.lifecycle?.dispatchRefs?.length, 1);
+  assert.equal(f.messages.getByThread(threadId, 50, userId).filter((m) => m.lifecycle?.kind === 'response').length, 1);
+});
+
+test('unknown History at pending retry preserves its exact claim until cold recovery, without starting a receiver', async () => {
+  const f = fixture(
+    () => Object.assign(new Error('authority transport unavailable'), { code: 'ECONNRESET' }),
+    false,
+    50,
+  );
+  const source = await f.enqueue('task-A@2');
+  const create = f.records.create.bind(f.records);
+  const read = f.messages.getById.bind(f.messages);
+  let unavailable = false;
+  let replayObserved = false;
+  f.records.create = (input) => {
+    const result = create(input);
+    if (result.outcome === 'duplicate') {
+      unavailable = true;
+      replayObserved = true;
+    }
+    return result;
+  };
+  f.messages.getById = (id) => {
+    if (unavailable && id === source.message.id) throw new Error('fixture History read unavailable');
+    return read(id);
+  };
+  await f.processor.requestDrain(threadId, userId);
+  await until(
+    async () => replayObserved && (await f.queue.getDurableEntry(threadId, source.entry!.id))?.status === 'claimed',
+    'unknown retry claim',
+  );
+  assert.deepEqual(f.routed, ['task-A@2']);
+  assert.deepEqual(f.delivered, []);
+  assert.equal(read(source.message.id)?.deliveryStatus, 'queued');
+  assert.equal(read(source.message.id)?.lifecycle?.dispatchRefs?.length ?? 0, 0);
+  unavailable = false;
+  assert.deepEqual(
+    (await f.cold()).map((row) => [row.id, row.status]),
+    [[source.entry!.id, 'queued']],
+  );
 });
 
 for (const unavailableWriter of ['terminal-record', 'source-cancellation']) {
-  test(`a ${unavailableWriter} outage preserves refused source custody instead of consuming it`, async () => {
+  test('a ' + unavailableWriter + ' outage keeps the refused source recoverable instead of consuming it', async () => {
     const f = fixture(() => Object.assign(new Error('stale source'), { code: 'WORK_EXECUTION_NOT_CURRENT' }));
-    const source = f.enqueue('task-A@1');
+    const source = await f.enqueue('task-A@1');
     if (unavailableWriter === 'terminal-record') {
       const update = f.records.update.bind(f.records);
-      f.records.update = (id, input) => (input.status === 'canceled' ? null : update(id, input));
-    } else {
+      f.records.update = (id, input) => (input.status === 'failed' ? null : update(id, input));
+    } else
       f.messages.markCanceled = () => {
         throw new Error('source writer unavailable');
       };
-    }
-    assert.equal((await f.processor.processNext(threadId, userId)).started, true);
-    await waitFor(
-      () => f.messages.getById(source.message.id)?.queueCustody?.targetAttempts?.at(-1)?.state === 'failed',
-      'failed terminal writer retained custody',
-    );
-    const retained = required(f.messages.getById(source.message.id));
-    assert.equal(retained.deliveryStatus, 'queued');
-    assert.equal(retained.queueCustody?.entryId, source.entry.id);
+    await f.processor.requestDrain(threadId, userId);
+    await until(() => f.errors.length > 0, 'failed closed settlement');
+    assert.equal(f.messages.getById(source.message.id)?.deliveryStatus, 'queued');
     assert.deepEqual(
-      f.queue.list(threadId, userId).map((entry) => [entry.id, entry.status]),
-      [[source.entry.id, 'queued']],
+      (await f.cold()).map((row) => row.id),
+      [source.entry!.id],
     );
-    assert.deepEqual(f.routed, ['task-A@1']);
     assert.deepEqual(f.delivered, []);
     assert.equal(f.modelStarts(), 0);
+    assert.equal(f.messages.getById(source.message.id)?.lifecycle?.dispatchRefs?.length ?? 0, 0);
   });
 }

@@ -12,15 +12,11 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { buildActionSuccessorFence } from '../dist/domains/ball-custody/ActionSuccessorAdmissionContract.js';
+import { actionSuccessorInvocationKeyForTarget } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
+import { queueEntryId } from '../dist/domains/cats/services/agents/invocation/queue-ledger/QueueLedger.js';
 import { MAX_REFRESH_ATTEMPTS, resolveSafeWaitCarrier } from '../dist/routes/callback-action-carrier-resolution.js';
-import {
-  carrier,
-  lease,
-  oldInvocationKey,
-  record,
-  recordStore,
-  request,
-} from './helpers/direct-action-carrier-fixtures.js';
+import { lease, request } from './helpers/direct-action-carrier-fixtures.js';
 
 const HOLDER = 'codex-sol';
 
@@ -40,12 +36,95 @@ function scriptedLeaseStore(...answers) {
   };
 }
 
-function resolve({ observed, messages, leaseStore, records }) {
-  return resolveSafeWaitCarrier({
-    messageStore: { getByThreadAfter: async () => messages },
-    invocationRecordStore: recordStore(
-      records ?? new Map([[oldInvocationKey(observed, HOLDER), record(observed, HOLDER)]]),
+/** The resolver reads Queue pending work or exact source → response → child → parent evidence. */
+function carrier(current, catId, state) {
+  const id = `source-${current.generation}-${catId}`;
+  const scope = { userId: current.tenantScope, threadId: current.holderThreadId };
+  const source = {
+    id,
+    ...scope,
+    catId: current.predecessorCatId,
+    from: { kind: 'agent', catId: current.predecessorCatId },
+    content: 'Implement task',
+    mentions: [catId],
+    timestamp: 100,
+  };
+  const entry = {
+    id: queueEntryId(id),
+    ...scope,
+    owner: { kind: 'user', userId: scope.userId },
+    status: 'queued',
+    targets: [catId],
+    payload: { messageId: id, sourceRecordId: id },
+    execution: { actionSuccessorFence: buildActionSuccessorFence(current, current.dispatchId) },
+  };
+  if (state === 'queued') return { source, entry };
+  const childId = `child-${current.generation}-${catId}`;
+  const parentId = `parent-${current.generation}-${catId}`;
+  const response = {
+    id: `response-${current.generation}-${catId}`,
+    ...scope,
+    catId,
+    from: { kind: 'agent', catId },
+    lifecycle: {
+      kind: 'response',
+      invocationId: childId,
+      targetId: catId,
+      inputMessageIds: [id],
+      inputEntryIds: [entry.id],
+      status: 'completed',
+    },
+  };
+  source.lifecycle = {
+    kind: 'input',
+    orderKey: `100:${id}`,
+    dispatchRefs: [{ targetId: catId, phase: 'settled', statusMessageId: response.id, dispatchedAt: 110 }],
+  };
+  const child = {
+    invocationId: childId,
+    parentInvocationId: parentId,
+    ...scope,
+    catId,
+    status: 'succeeded',
+    causal: { triggerMessageId: id },
+  };
+  const parent = {
+    id: parentId,
+    ...scope,
+    targetCats: [catId],
+    successfulCatIds: [catId],
+    status: 'succeeded',
+    idempotencyKey: actionSuccessorInvocationKeyForTarget(id, catId),
+    actionLeaseCarrier: { kind: 'action_successor', leaseId: current.leaseId, generation: current.generation },
+  };
+  return { source, response, child, parent };
+}
+
+function resolve({ observed, messages, leaseStore }) {
+  const byId = new Map(
+    messages.flatMap((value) =>
+      value.response
+        ? [
+            [value.source.id, value.source],
+            [value.response.id, value.response],
+          ]
+        : [[value.source.id, value.source]],
     ),
+  );
+  const parents = new Map(messages.filter((value) => value.parent).map((value) => [value.parent.id, value.parent]));
+  const children = new Map(
+    messages.filter((value) => value.child).map((value) => [value.child.invocationId, value.child]),
+  );
+  return resolveSafeWaitCarrier({
+    invocationQueue: {
+      listAllDurable: async () => messages.filter((value) => value.entry).map((value) => value.entry),
+    },
+    messageStore: {
+      getByThreadAfter: async () => messages.map((value) => value.source),
+      getById: async (id) => byId.get(id) ?? null,
+    },
+    invocationRecordStore: { get: async (id) => parents.get(id) ?? null },
+    turnExecutionStore: { get: async (id) => children.get(id) ?? null },
     leaseStore,
     lease: observed,
     admissionInput: request(observed),
@@ -111,16 +190,10 @@ describe('F167 safe_wait is only answered from the lease that is in the store no
     const observed = lease();
     const winner = lease({ generation: 2, revision: observed.revision + 1, dispatchId: 'post:winner-dispatch' });
     const leaseStore = scriptedLeaseStore({ outcome: 'stale_generation', lease: winner });
-    const records = new Map([
-      [oldInvocationKey(observed, HOLDER), record(observed, HOLDER)],
-      [oldInvocationKey(winner, HOLDER), record(winner, HOLDER)],
-    ]);
-
     const resolution = await resolve({
       observed,
       messages: [carrier(observed, HOLDER, 'handled'), carrier(winner, HOLDER, 'handled')],
       leaseStore,
-      records,
     });
 
     assert.equal(resolution.kind, 'respond');
@@ -176,7 +249,6 @@ describe('F167 safe_wait is only answered from the lease that is in the store no
 
     const resolution = await resolveSafeWaitCarrier({
       messageStore: { getByThreadAfter: async () => [carrier(observed, HOLDER, 'handled')] },
-      invocationRecordStore: recordStore(new Map()),
       leaseStore,
       lease: observed,
       admissionInput: request(observed, { actorCatId: 'someone-else' }),

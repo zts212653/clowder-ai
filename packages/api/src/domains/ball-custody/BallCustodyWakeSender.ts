@@ -1,12 +1,11 @@
 import { SCHEDULER_TRIGGER_PREFIX } from '@cat-cafe/shared';
-import type { DeliverOpts, ScheduleInvokeTrigger } from '../../infrastructure/scheduler/types.js';
+import type { DeliverOpts } from '../../infrastructure/scheduler/types.js';
 import type { BallCustodyWakeAdmissionReceipt, BallCustodyWakeSender } from './BallCustodyProbeScheduler.js';
 
 export interface SchedulerBallCustodyWakeSenderOptions {
   readonly deliver: (opts: DeliverOpts) => Promise<string>;
   /** Reads History back so retries dispatch the exact body accepted by idempotent persistence. */
   readonly readPersistedContent: (messageId: string) => Promise<string | null>;
-  readonly invokeTrigger?: ScheduleInvokeTrigger;
   readonly defaultUserId?: string;
   readonly logger?: {
     warn?: (obj: unknown, msg?: string) => void;
@@ -31,53 +30,25 @@ export class SchedulerBallCustodyWakeSender implements BallCustodyWakeSender {
       .filter((line): line is string => typeof line === 'string')
       .join('\n');
 
-    const messageId = await this.opts.deliver({
-      threadId: input.task.threadId,
-      content,
-      userId: 'scheduler',
-      idempotencyKey: `ball-custody-wake:${input.task.id}:${
-        input.projection.blockedSinceAt ?? input.projection.lastStateChangeAt
-      }`,
-      extra: { scheduler: { hiddenTrigger: true } },
-    });
-    let persistedContent: string | null;
+    // RFC §5.2: one envelope, one atomic Message + Queue admission. The old shape persisted the
+    // wake, read it back to prove exactness, then admitted it — three steps to patch the window
+    // between the first two. Writing the message and its Queue row together removes the window,
+    // so there is nothing to read back and nothing to leave unadmitted.
     try {
-      persistedContent = await this.opts.readPersistedContent(messageId);
-    } catch (err) {
-      this.opts.logger?.warn?.(
-        { err, taskId: input.task.id, messageId },
-        'F298: persisted wake could not be read back for exact admission',
-      );
-      return { kind: 'not_admitted', messageId, reason: 'persisted_message_unavailable' };
-    }
-    if (persistedContent === null) {
-      return { kind: 'not_admitted', messageId, reason: 'persisted_message_unavailable' };
-    }
-
-    if (!this.opts.invokeTrigger) {
-      return { kind: 'not_admitted', messageId, reason: 'trigger_unavailable' };
-    }
-
-    try {
-      const outcome = await this.opts.invokeTrigger.trigger(
-        input.task.threadId,
-        ownerCatId,
+      const messageId = await this.opts.deliver({
+        threadId: input.task.threadId,
+        content,
         userId,
-        persistedContent,
-        messageId,
-        undefined,
-        {
-          priority: 'normal',
-          reason: 'f233_ball_custody_probe_satisfied',
-          sourceCategory: 'scheduled',
-        },
-      );
-      return outcome === 'full'
-        ? { kind: 'not_admitted', messageId, reason: 'queue_full' }
-        : { kind: 'admitted', messageId, outcome };
+        targetCatId: ownerCatId,
+        sourceCategory: 'scheduled',
+        idempotencyKey: `ball-custody-wake:${input.task.id}:${
+          input.projection.blockedSinceAt ?? input.projection.lastStateChangeAt
+        }`,
+      });
+      return { kind: 'admitted', messageId, outcome: 'enqueued' };
     } catch (err) {
-      this.opts.logger?.warn?.({ err, taskId: input.task.id, ownerCatId }, 'F233 PR4: wake invokeTrigger failed');
-      return { kind: 'not_admitted', messageId, reason: 'invoke_failed' };
+      this.opts.logger?.warn?.({ err, taskId: input.task.id, ownerCatId }, 'F233 PR4: wake admission failed');
+      return { kind: 'not_admitted', messageId: '', reason: 'invoke_failed' };
     }
   }
 }

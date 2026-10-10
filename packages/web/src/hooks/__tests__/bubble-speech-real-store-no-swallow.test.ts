@@ -11,41 +11,33 @@
  * against the REAL chatStore (no mock — a mocked addMessage hid the TD112
  * hard-merge in an earlier fix attempt, gpt52 R1 catch):
  *
- *   1. TD112: two explicit posts under one turn key stay separate; same-id
- *      replay still dedupes; callback→stream finalize upgrade still merges.
+ *   1. Two explicit posts under one turn stay separate messages; same-id
+ *      replay adds nothing. Nothing merges a post into the response.
  *   2. Queued delivery (persisted isExplicitPost shape vs live stream bubble)
  *      stays standalone — markMessagesDelivered routes through this dedup.
- *   3. Background thread: explicit posts land immediately while the stream is
- *      open (no defer-Map overwrite), and follow-up work-log chunks survive
- *      (no replaced-invocation suppression).
+ *   3. Background thread: explicit posts land immediately beside the response
+ *      R while it streams, and later work-log chunks still land in R.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { configureDebug } from '@/debug/invocationEventDebug';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
-import { resetSharedReplacedInvocations } from '../shared-replaced-invocations';
 import { type BackgroundAgentMessage, handleBackgroundAgentMessage } from '../useAgentMessages';
 
 let testBgSeq = 0;
-const testBgStreamRefs = new Map<string, { id: string; threadId: string; catId: string }>();
-const testBgFinalizedRefs = new Map<string, string>();
-const testPendingCallbacks = new Map<string, BackgroundAgentMessage>();
 
 function dispatchBg(msg: BackgroundAgentMessage) {
   handleBackgroundAgentMessage(msg, {
     store: useChatStore.getState(),
-    bgStreamRefs: testBgStreamRefs,
-    finalizedBgRefs: testBgFinalizedRefs,
     nextBgSeq: () => testBgSeq++,
     addToast: () => {},
-    clearDoneTimeout: () => {},
-    pendingCallbacks: testPendingCallbacks,
   });
 }
 
 const BG_THREAD = 'thread-bg';
 const PARENT_INV = 'parent-chain-inv-9';
 const TURN_INV = 'turn-inv-9';
+const RESPONSE_ID = 'resp-turn-inv-9';
 
 describe('F194 speech vs real store dedup (no mock — gpt52 R1)', () => {
   beforeEach(() => {
@@ -73,10 +65,6 @@ describe('F194 speech vs real store dedup (no mock — gpt52 R1)', () => {
     });
     useToastStore.setState({ toasts: [] });
     testBgSeq = 0;
-    testBgStreamRefs.clear();
-    testBgFinalizedRefs.clear();
-    testPendingCallbacks.clear();
-    resetSharedReplacedInvocations();
   });
 
   describe('TD112 dedup guard (chatStore.addMessage, real semantics)', () => {
@@ -164,44 +152,16 @@ describe('F194 speech vs real store dedup (no mock — gpt52 R1)', () => {
       expect(msgs.find((m) => m.id === `msg-${TURN_INV}-sonnet`)?.content).toBe('流式工作日志');
       expect(msgs.find((m) => m.id === 'srv-queued-speech')?.content).toBe('排队探针');
     });
-
-    it('callback→stream finalize upgrade still merges (TD112 original purpose)', () => {
-      useChatStore.getState().addMessage({
-        id: `msg-${TURN_INV}-sonnet`,
-        type: 'assistant',
-        catId: 'sonnet',
-        content: 'streaming...',
-        origin: 'stream',
-        isStreaming: true,
-        extra: { stream: { invocationId: PARENT_INV, turnInvocationId: TURN_INV } },
-        timestamp: 1000,
-      });
-      useChatStore.getState().addMessage({
-        id: 'srv-final-1',
-        type: 'assistant',
-        catId: 'sonnet',
-        content: 'final answer',
-        origin: 'callback',
-        isStreaming: false,
-        extra: { stream: { invocationId: PARENT_INV, turnInvocationId: TURN_INV } },
-        timestamp: 2000,
-      });
-      // Incoming callback vs existing STREAM bubble under the same key → merge
-      // (the finalize upgrade TD112 was built for). One record remains.
-      const sameTurn = useChatStore.getState().messages.filter((m) => m.extra?.stream?.turnInvocationId === TURN_INV);
-      expect(sameTurn).toHaveLength(1);
-    });
   });
 
   describe('background thread speech (gpt52 R1 P1-2)', () => {
     function bgStreamPrelude() {
-      // bg work-log bubbles are created by STREAM TEXT chunks (bg thinking events
-      // don't write store rows — verified by dump). This also arms the real
-      // isBackgroundCallbackStillStreaming=true condition the defer path keys on.
+      // The turn's work log streams into its response R, named by every stream event.
       dispatchBg({
         type: 'text',
         catId: 'sonnet',
         content: '后台流式工作日志',
+        messageId: RESPONSE_ID,
         invocationId: PARENT_INV,
         turnInvocationId: TURN_INV,
         origin: 'stream',
@@ -237,36 +197,32 @@ describe('F194 speech vs real store dedup (no mock — gpt52 R1)', () => {
       bgSpeech('后台探针A', 'srv-bg-A', 2000);
       bgSpeech('后台探针B', 'srv-bg-B', 3000);
 
-      // RED before fix: deferBackgroundCallbackIfStreamOpen swallows both into
-      // the pending Map (keyed without messageId — B overwrites A), nothing
-      // renders until done.
-      expect(testPendingCallbacks.size).toBe(0);
       const contents = bgRows().map((m) => m.content);
       expect(contents).toContain('后台探针A');
       expect(contents).toContain('后台探针B');
-      // Stream work-log record survives alongside.
-      expect(bgRows().some((m) => m.origin === 'stream')).toBe(true);
+      // The response R survives beside the posts and is still streaming.
+      const response = bgRows().find((m) => m.id === RESPONSE_ID);
+      expect(response?.content).toBe('后台流式工作日志');
+      expect(response?.isStreaming).toBe(true);
     });
 
     it('stream chunks AFTER speech still land in the work-log bubble (gpt52 R2 P1-2)', () => {
       bgStreamPrelude();
       bgSpeech('后台探针A', 'srv-bg-A', 2000);
-      // RED before fix: the no-target branch tail unconditionally
-      // markReplacedInvocation(turn) → this follow-up work-log chunk is dropped
-      // by shouldSuppressLateBackgroundStreamChunk.
       dispatchBg({
         type: 'text',
         catId: 'sonnet',
         content: '后续工作日志尾巴',
+        messageId: RESPONSE_ID,
         invocationId: PARENT_INV,
         turnInvocationId: TURN_INV,
         origin: 'stream',
         threadId: BG_THREAD,
         timestamp: 3000,
       });
-      const streamRows = bgRows().filter((m) => m.origin === 'stream');
-      expect(streamRows.length).toBeGreaterThan(0);
-      expect(streamRows.map((m) => m.content).join('\n')).toContain('后续工作日志尾巴');
+      const response = bgRows().find((m) => m.id === RESPONSE_ID);
+      expect(response?.content).toBe('后台流式工作日志后续工作日志尾巴');
+      expect(bgRows().find((m) => m.id === 'srv-bg-A')?.content).toBe('后台探针A');
     });
 
     it('bg speech replay by same messageId is idempotent', () => {

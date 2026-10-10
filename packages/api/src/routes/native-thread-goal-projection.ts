@@ -92,8 +92,8 @@ export async function appendGoalEvent(
   const projection = projectProviderSemanticEvent(event);
   if (projection.status !== 'projected') throw new Error('invalid_goal_semantic_event');
   const stored = await options.messageStore.append({
+    from: { kind: 'agent', catId: createCatId(catId) },
     userId: access.userId,
-    catId: createCatId(catId),
     threadId: access.threadId,
     content: projection.content,
     mentions: [],

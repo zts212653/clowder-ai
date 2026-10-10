@@ -1,5 +1,5 @@
 /**
- * Tests for #117: ParallelStatusBar only showing single cat.
+ * Tests for #117: independent-sampling status merging across members.
  *
  * Root cause: setTargetCats uses replace semantics — when multi-mention
  * dispatches emit per-cat intent_mode events, each one overwrites the

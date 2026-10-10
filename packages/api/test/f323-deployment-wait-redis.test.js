@@ -1,24 +1,115 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { describe, test } from 'node:test';
-import { createRedisClient } from '@cat-cafe/shared/utils';
-import { createTypedWaitRegistration } from '../dist/domains/ball-custody/TypedWaitRegistration.js';
+import { resolveTypedWaitContinuation } from '../dist/domains/ball-custody/TypedWaitContinuation.js';
+import {
+  createTypedWaitRegistration,
+  isLiveTypedWaitRegistration,
+} from '../dist/domains/ball-custody/TypedWaitRegistration.js';
 import { RedisTaskStore } from '../dist/domains/cats/services/stores/redis/RedisTaskStore.js';
-import { readRedisTypedWaitCustodyGuards } from '../dist/domains/cats/services/stores/redis/RedisTypedWaitCustodyGuard.js';
 import { TaskKeys } from '../dist/domains/cats/services/stores/redis-keys/task-keys.js';
 import { DeploymentWaitLifecycleService } from '../dist/domains/runtime-deployment/DeploymentWaitLifecycleService.js';
-import {
-  assertRedisIsolationOrThrow,
-  cleanupClientKeyspace,
-  redisIsolationSkipReason,
-} from './helpers/redis-test-helpers.js';
+import { ownedRedisFixture } from './helpers/owned-redis-fixture.js';
 
-describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReason(process.env.REDIS_URL) }, () => {
+const fixture = ownedRedisFixture('a2a-deployment-task');
+
+describe('F323 deployment wait Redis aggregate', () => {
+  for (const race of ['owner', 'generation']) {
+    test(`canonical Redis WATCH rejects ${race} drift after the Task snapshot read`, async (t) => {
+      const redis = fixture.client(`f323-watch-${randomUUID()}:`);
+      t.after(() => redis.quit());
+      const store = new RedisTaskStore(redis);
+      const task = await store.create({
+        kind: 'work',
+        threadId: 'thread-watch',
+        title: 'Verify',
+        ownerCatId: 'codex-sol',
+        why: 'wait for runtime',
+        createdBy: 'codex-sol',
+        userId: 'user-1',
+      });
+      const active = {
+        v: 1,
+        generation: 1,
+        subjectRef: 'deployment:abc123def456:runtime',
+        ownerFence: { kind: 'containing_task', generation: 1 },
+        baseline: { bootSequence: 1, bootId: 'boot-1', capturedAt: 100 },
+        continuation: {
+          when: [{ kind: 'new_ready_boot', services: ['api'] }],
+          // biome-ignore lint/suspicious/noThenProperty: F280 frozen continuation field.
+          then: 'verify',
+        },
+        autoRenew: false,
+        createdAt: 100,
+      };
+      const receipt = createTypedWaitRegistration({
+        task,
+        active,
+        invocationId: 'child-1',
+        source: { kind: 'primary', sourceMessageId: 'source-1' },
+      });
+      const installed = await store.replaceDeploymentWaitIfGeneration(task.id, {
+        expectedGeneration: null,
+        expectedDeploymentWait: task.deploymentWait,
+        deploymentWait: { await: active },
+        waitRegistration: receipt,
+      });
+      assert.ok(installed);
+      const identity = {
+        userId: 'user-1',
+        catId: 'codex-sol',
+        threadId: task.threadId,
+        invocationId: 'child-1',
+        sourceMessageId: 'source-1',
+      };
+      assert.equal((await resolveTypedWaitContinuation({ taskStore: store, ...identity })).kind, 'bypass');
+      const duplicate = redis.duplicate.bind(redis);
+      let injected = false;
+      let winningRaw;
+      redis.duplicate = (...args) => {
+        const session = duplicate(...args);
+        const read = session.hgetall.bind(session);
+        session.hgetall = async (key) => {
+          const stale = await read(key);
+          if (!injected && key === TaskKeys.detail(task.id)) {
+            injected = true;
+            if (race === 'owner') await new RedisTaskStore(redis).update(task.id, { ownerCatId: 'kimi' });
+            else
+              assert.ok(
+                await new RedisTaskStore(redis).replaceDeploymentWaitIfGeneration(task.id, {
+                  expectedGeneration: 1,
+                  expectedDeploymentWait: installed.deploymentWait,
+                  expectedUpdatedAt: installed.updatedAt,
+                  deploymentWait: {
+                    await: { ...active, generation: 2, ownerFence: { kind: 'containing_task', generation: 2 } },
+                  },
+                }),
+              );
+            winningRaw = await redis.hgetall(key);
+          }
+          return stale;
+        };
+        return session;
+      };
+      const result = await store.replaceDeploymentWaitIfGeneration(task.id, {
+        expectedGeneration: 1,
+        expectedDeploymentWait: installed.deploymentWait,
+        expectedUpdatedAt: installed.updatedAt,
+        deploymentWait: { await: { ...active, generation: 3, ownerFence: { kind: 'containing_task', generation: 3 } } },
+      });
+      assert.equal(injected, true, 'race occurs on the actual WATCH session after its read, not via sleep');
+      assert.equal(result, null, 'stale contender cannot overwrite the winning Task aggregate');
+      assert.deepEqual(await redis.hgetall(TaskKeys.detail(task.id)), winningRaw);
+      assert.equal(
+        (await resolveTypedWaitContinuation({ taskStore: new RedisTaskStore(redis), ...identity })).kind,
+        'reject',
+      );
+    });
+  }
+
   test('persists the work wait and private receipt without TTL, with one CAS winner', async (t) => {
-    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'f323-deployment-wait');
-    const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `f323-wait-${randomUUID()}:` });
+    const redis = fixture.client(`f323-wait-${randomUUID()}:`);
     t.after(async () => {
-      await cleanupClientKeyspace(redis);
       await redis.quit();
     });
     const store = new RedisTaskStore(redis, { ttlSeconds: 1 });
@@ -73,9 +164,32 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
         sourceMessageId: 'msg-1',
       },
     };
-    const proof = await readRedisTypedWaitCustodyGuards(redis, [guard]);
-    assert.equal(proof.witnesses[0].stateField, 'deploymentWait');
-    assert.equal(proof.witnesses[0].expiresAt, undefined, 'persistent waits omit the optional deadline');
+    const cold = new RedisTaskStore(redis);
+    const snapshot = await cold.getWaitRegistration(task.id);
+    assert.equal(isLiveTypedWaitRegistration(snapshot, guard.identity, Date.now(), guard.reference), true);
+    assert.equal(snapshot.receipt.expiresAt, undefined, 'persistent waits omit the optional deadline');
+    assert.deepEqual(await resolveTypedWaitContinuation({ taskStore: cold, ...guard.identity }), {
+      kind: 'bypass',
+      reference: guard.reference,
+    });
+    const rawBefore = await redis.hgetall(TaskKeys.detail(task.id));
+    for (const override of [
+      { invocationId: 'parent-not-child' },
+      { sourceMessageId: 'sibling-message' },
+      { userId: 'other-user' },
+      { catId: 'kimi' },
+      { threadId: 'other-thread' },
+    ]) {
+      assert.equal(
+        (await resolveTypedWaitContinuation({ taskStore: cold, ...guard.identity, ...override })).kind,
+        'reject',
+      );
+      assert.deepEqual(
+        await redis.hgetall(TaskKeys.detail(task.id)),
+        rawBefore,
+        'reject is a private read, not a Queue/Task writer',
+      );
+    }
 
     const matched = await store.replaceDeploymentWaitIfGeneration(task.id, {
       expectedGeneration: 1,
@@ -100,7 +214,14 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
     assert.ok(matched);
     assert.equal(await redis.ttl(TaskKeys.detail(task.id)), -1, 'deployment outcome history remains durable');
     assert.deepEqual((await new RedisTaskStore(redis).getWaitRegistration(task.id)).receipt, receipt);
-    await assert.rejects(readRedisTypedWaitCustodyGuards(redis, [guard]), /typed wait/);
+    assert.equal(
+      isLiveTypedWaitRegistration(await cold.getWaitRegistration(task.id), guard.identity, Date.now(), guard.reference),
+      false,
+    );
+    assert.deepEqual(await resolveTypedWaitContinuation({ taskStore: cold, ...guard.identity }), {
+      kind: 'reject',
+      reason: 'no_candidate',
+    });
 
     const current = await store.get(task.id);
     const candidates = ['b', 'c'].map((digit) => {
@@ -123,6 +244,28 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
     );
     assert.equal(results.filter(Boolean).length, 1);
     assert.equal((await store.get(task.id)).deploymentWait.await.generation, 2);
+    const winning = candidates[results.findIndex(Boolean)];
+    const winningReceipt = (await cold.getWaitRegistration(task.id)).receipt;
+    assert.deepEqual(
+      winningReceipt,
+      winning.waitRegistration,
+      'winner stores its own private receipt, never the losing candidate',
+    );
+    assert.deepEqual(await resolveTypedWaitContinuation({ taskStore: cold, ...guard.identity }), {
+      kind: 'reject',
+      reason: 'no_candidate',
+    });
+    assert.equal(
+      (
+        await resolveTypedWaitContinuation({
+          taskStore: cold,
+          ...guard.identity,
+          invocationId: winningReceipt.invocationId,
+          sourceMessageId: winningReceipt.source.sourceMessageId,
+        })
+      ).kind,
+      'bypass',
+    );
 
     const completed = await store.update(task.id, { status: 'done' });
     assert.equal(completed.deploymentWait.await, undefined);
@@ -132,10 +275,8 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
   });
 
   test('entrusted closure atomically consumes an armed deployment wait', async (t) => {
-    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'f323-deployment-close');
-    const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `f323-close-${randomUUID()}:` });
+    const redis = fixture.client(`f323-close-${randomUUID()}:`);
     t.after(async () => {
-      await cleanupClientKeyspace(redis);
       await redis.quit();
     });
     const store = new RedisTaskStore(redis);
@@ -200,10 +341,8 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
   });
 
   test('subject upsert transfers an armed wait without overwriting a concurrent generation', async (t) => {
-    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'f323-subject-upsert');
-    const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `f323-subject-${randomUUID()}:` });
+    const redis = fixture.client(`f323-subject-${randomUUID()}:`);
     t.after(async () => {
-      await cleanupClientKeyspace(redis);
       await redis.quit();
     });
     const store = new RedisTaskStore(redis);
@@ -247,10 +386,8 @@ describe('F323 deployment wait Redis aggregate', { skip: redisIsolationSkipReaso
     assert.equal((await new RedisTaskStore(redis).get(task.id)).deploymentWait.waitOutcome.reason, 'owner_changed');
   });
   test('same-millisecond Redis CAS cannot revive a cancelled wait from a stale snapshot', async (t) => {
-    assertRedisIsolationOrThrow(process.env.REDIS_URL, 'f323-deployment-wait-same-ms');
-    const redis = createRedisClient({ url: process.env.REDIS_URL, keyPrefix: `f323-cas-${randomUUID()}:` });
+    const redis = fixture.client(`f323-cas-${randomUUID()}:`);
     t.after(async () => {
-      await cleanupClientKeyspace(redis);
       await redis.quit();
     });
     const originalNow = Date.now;

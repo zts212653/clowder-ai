@@ -5,15 +5,14 @@
  * a guard, a confirmation or a word of toast copy, so the old panel and the one-row surface press the very
  * same endpoints. (Steer, retry and force-reset keep living in useQueueActionConvergence.)
  */
-import type { QueueRecoveryAction } from '@cat-cafe/shared';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { composerInsertFromRecall, requestTrueRecall, TrueRecallRequestError } from '@/utils/true-recall';
-import { recoveryNoStartCopy, reminderResultCopy } from './queue-toast-copy';
+import { recoveryNoStartCopy } from './queue-toast-copy';
 import type { QueueView } from './useQueueView';
 
 export function useQueueCommands(
@@ -25,18 +24,19 @@ export function useQueueCommands(
   const setQueue = useChatStore((s) => s.setQueue);
   const setPendingChatInsert = useChatStore((s) => s.setPendingChatInsert);
   const addToast = useToastStore((s) => s.addToast);
-  const [remindingTargetKeys, setRemindingTargetKeys] = useState<Set<string>>(() => new Set());
 
   const handleRemove = useCallback(
-    async (action: Extract<QueueRecoveryAction, { kind: 'withdraw' }>) => {
+    async (entryId: string) => {
       if (!queueKnown) return;
       const prevQueue = queue;
       setQueue(
         threadId,
-        prevQueue.filter((e) => e.id !== action.entryId),
+        prevQueue.filter((e) => e.id !== entryId),
       );
       try {
-        const res = await apiFetch(action.request.path, { method: action.request.method });
+        const res = await apiFetch(`/api/threads/${threadId}/queue/${encodeURIComponent(entryId)}`, {
+          method: 'DELETE',
+        });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           setQueue(threadId, prevQueue);
@@ -52,7 +52,7 @@ export function useQueueCommands(
         addToast({
           type: 'success',
           title: '已停止后续处理',
-          message: '原消息与已经发生的读取事实仍保留在历史中',
+          message: '原消息与已发生的投递仍保留在历史中',
           threadId,
           duration: 3000,
         });
@@ -101,7 +101,7 @@ export function useQueueCommands(
           title: result.verdict === 'exposed' ? '正文已撤回 · 猫曾读取' : '已撤回并回填输入框',
           message:
             result.verdict === 'exposed'
-              ? '未读猫已停止后续处理；已读回合不会被普通撤回中断。'
+              ? '未投递目标已停止后续处理；正在处理的回合不会被普通撤回中断。'
               : '正文已从消息历史转移到持久草稿，可修改后重新发送。',
           threadId,
           duration: 4000,
@@ -165,7 +165,7 @@ export function useQueueCommands(
       addToast({
         type: 'success',
         title: '已全部停止后续处理',
-        message: '原消息与已经发生的读取事实仍保留在历史中',
+        message: '原消息与已发生的投递仍保留在历史中',
         threadId,
         duration: 3000,
       });
@@ -179,46 +179,6 @@ export function useQueueCommands(
       });
     }
   }, [addToast, queueKnown, setQueue, threadId]);
-
-  const handleRemind = useCallback(
-    async (entryId: string, targetCatId: string) => {
-      if (!queueKnown) return;
-      const key = `${entryId}:${targetCatId}`;
-      setRemindingTargetKeys((current) => new Set(current).add(key));
-      try {
-        const res = await apiFetch(`/api/threads/${threadId}/queue/${entryId}/remind`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetCatId }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const message =
-            data?.code === 'NO_ACTIVE_INVOCATION'
-              ? '这只猫当前没有可接收提醒的工作轮次。'
-              : (data?.error ?? '提醒请求没有完成，请重试。');
-          addToast({ type: 'error', title: '提醒未送达', message, threadId, duration: 5000 });
-          return;
-        }
-        addToast({ ...reminderResultCopy(data?.state), threadId, duration: 3000 });
-      } catch {
-        addToast({
-          type: 'error',
-          title: '提醒未送达',
-          message: '提醒请求没有完成，请重试。',
-          threadId,
-          duration: 5000,
-        });
-      } finally {
-        setRemindingTargetKeys((current) => {
-          const next = new Set(current);
-          next.delete(key);
-          return next;
-        });
-      }
-    },
-    [addToast, queueKnown, threadId],
-  );
 
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
@@ -263,12 +223,10 @@ export function useQueueCommands(
   );
 
   return {
-    remindingTargetKeys,
     handleRemove,
     handleRecallEdit,
     handleContinue,
     handleClear,
-    handleRemind,
     handleDragEnd,
   };
 }

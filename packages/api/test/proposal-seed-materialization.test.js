@@ -17,11 +17,6 @@ describe('F128 proposal seed materialization', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const ctx = await createProposalTestContext({
       invocationQueueOverride: new InvocationQueue(),
-      queueProcessorOverride: {
-        async processNext() {
-          return { started: true };
-        },
-      },
     });
     const source = await ctx.threadStore.create('alice', 'Community gatekeeper');
     const contentBlocks = [
@@ -67,11 +62,6 @@ describe('F128 proposal seed materialization', () => {
     const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
     const ctx = await createProposalTestContext({
       invocationQueueOverride: new InvocationQueue(),
-      queueProcessorOverride: {
-        async processNext() {
-          return { started: true };
-        },
-      },
     });
     const source = await ctx.threadStore.create('alice', 'Community gatekeeper');
     const contentBlocks = [

@@ -5,8 +5,8 @@
  * Consumed by B1 (notice frequency gating) and B3 (re-invoke trigger).
  *
  * Uses Redis HASH per invocation (key: freshness:state:{invocationId}).
- * TTL = 30 minutes (invocation timeout, auto-cleanup — not permanent like
- * BallCustodyEventLog). This is operational state, not user-visible data.
+ * TTL = 30 minutes (auto-cleanup — not permanent like BallCustodyEventLog; unrelated to
+ * CLI_TIMEOUT_MS, which defaults to 0). This is operational state, not user-visible data.
  *
  * Design decision (opus-47 insight, KD-7): hot path counters are separated
  * from the cold path event log (FreshnessAttentionEventLog). B3 re-invoke

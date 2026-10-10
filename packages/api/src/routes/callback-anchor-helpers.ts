@@ -11,7 +11,21 @@
  * must never pretend to be the whole thing.
  */
 
-import type { TaskItem } from '@cat-cafe/shared';
+import type { MessageContent, TaskItem } from '@cat-cafe/shared';
+
+/** Read-only search/preview text. Full drills retain raw content and structured provenance. */
+export function callbackMessageText(item: { content: string; contentBlocks?: readonly MessageContent[] }): string {
+  const parts = [item.content];
+  for (const block of item.contentBlocks ?? []) {
+    if (block.type !== 'context_attachment' || block.attachment.kind !== 'quote') continue;
+    const quote = block.attachment;
+    // The paired comment is the user's intent; a long quoted source must not
+    // consume the head preview before that intent becomes visible.
+    if (quote.comment !== undefined) parts.push(`[评论]\n${quote.comment}`);
+    parts.push(`[引用]\n${quote.text}`);
+  }
+  return parts.filter((part) => part.length > 0).join('\n\n');
+}
 
 /** Max chars kept in an anchor preview (~70 tokens). Single tunable source. */
 export const PREVIEW_MAX_CHARS = 280;
@@ -91,6 +105,7 @@ export interface AnchorableMessage {
   userId: string;
   catId: string | null;
   content: string;
+  contentBlocks?: readonly MessageContent[];
   timestamp: number;
 }
 
@@ -128,17 +143,18 @@ export function anchorThreadMessage(
     imageUrls?: string[];
   },
 ): AnchoredThreadMessage {
+  const text = callbackMessageText(item);
   const { preview, truncated } =
     opts.keywordTerms && opts.keywordTerms.length > 0
-      ? truncateAroundMatch(item.content, opts.keywordTerms)
-      : truncateHead(item.content);
+      ? truncateAroundMatch(text, opts.keywordTerms)
+      : truncateHead(text);
   return {
     id: item.id,
     threadId: opts.effectiveThreadId,
     timestamp: item.timestamp,
     speaker: opts.speaker,
     preview,
-    contentLength: item.content.length,
+    contentLength: text.length,
     truncated,
     drillDown: messageDrillDown(item.id, opts.agentKeyCatId),
     ...(opts.imagePaths && opts.imagePaths.length > 0 ? { imagePaths: opts.imagePaths } : {}),

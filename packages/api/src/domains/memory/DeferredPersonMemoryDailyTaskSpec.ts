@@ -176,7 +176,7 @@ export function createDeferredPersonMemoryDailyTaskSpec(
         const processingThreadId = await deps.ensureSystemThread();
         const items: DeferredPersonMemoryDailyItem[] = [];
         try {
-          if (!context.deliver || !context.invokeTrigger) {
+          if (!context.deliver) {
             throw new Error('deferred person-memory daily clerk execution ports unavailable');
           }
           for (const receiptId of signal.receiptIds) {
@@ -190,14 +190,15 @@ export function createDeferredPersonMemoryDailyTaskSpec(
           const writeOpportunityReentries = items.flatMap((item) =>
             item.writeOpportunityReentry ? [item.writeOpportunityReentry] : [],
           );
+          // RFC §5.2: one envelope names the clerk and is admitted atomically; drain owes the wake.
           const messageId = await context.deliver({
             threadId: processingThreadId,
             content,
-            userId: 'scheduler',
-            extra: {
-              scheduler: { hiddenTrigger: true },
-              ...(writeOpportunityReentries.length > 0 ? { writeOpportunityReentries } : {}),
-            },
+            userId: deps.ownerUserId,
+            targetCatId: processorCatId,
+            sourceCategory: 'scheduled',
+            idempotencyKey: `deferred-person-memory:${items.map((item) => item.claimId).join(',')}`,
+            ...(writeOpportunityReentries.length > 0 ? { extra: { writeOpportunityReentries } } : {}),
           });
           for (const item of items) {
             const bound = await deps.receiptStore.bindProcessingMessage({
@@ -213,16 +214,6 @@ export function createDeferredPersonMemoryDailyTaskSpec(
               throw new Error(`deferred receipt ${item.receiptId} could not bind its processing message`);
             }
           }
-          const outcome = await context.invokeTrigger.trigger(
-            processingThreadId,
-            processorCatId,
-            deps.ownerUserId,
-            content,
-            messageId,
-            undefined,
-            { sourceCategory: 'scheduled', reason: 'F276 deferred known-person delta clerk' },
-          );
-          if (outcome === 'full') throw new Error('deferred person-memory processor queue is full');
         } catch (error) {
           await Promise.all(
             items.map((item) => deps.receiptStore.release(item.ownerUserId, item.receiptId, item.claimId, now())),

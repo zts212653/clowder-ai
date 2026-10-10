@@ -19,7 +19,7 @@ function noopLog() {
 
 function mockMessageStore() {
   const messages = [];
-  return {
+  const store = {
     messages,
     async append(input) {
       const msg = { id: `msg-${messages.length + 1}`, ...input };
@@ -27,6 +27,37 @@ function mockMessageStore() {
       return msg;
     },
   };
+  // RFC §5.1: the router hands an envelope to the one durable-admission component. The recorded
+  // shape keeps the same observable facts a queued source carried before it was split in two.
+  // Queued inputs are tracked separately from History-only writes (command exchanges), because
+  // RFC §5.3 keeps a message that needs no member action out of the Queue by design.
+  store.admitted = [];
+  store.delivery = {
+    async deliver(input) {
+      store.requests ??= [];
+      store.requests.push(input);
+      input = { ...input, targetCatId: input.targetCatId ?? this.defaultTarget ?? 'opus' };
+      const msg = {
+        id: `msg-${messages.length + 1}`,
+        ...input,
+        userId: input.ownerUserId,
+        mentions: [input.targetCatId],
+        deliveryStatus: 'queued',
+        // Mirrors PersistedQueueDelivery: `from` is derived from the envelope's source.
+        from: { kind: 'external', connectorId: input.source.connector },
+      };
+      messages.push(msg);
+      store.admitted.push(msg);
+      return { state: 'started', entryId: `entry-${messages.length}`, message: msg };
+    },
+  };
+  return store;
+}
+
+/** Both host seams a connector router needs, backed by one recorded timeline. */
+function mockConnectorStores() {
+  const store = mockMessageStore();
+  return { messageStore: store, persistedQueueDelivery: store.delivery };
 }
 
 function mockThreadStore() {
@@ -123,7 +154,7 @@ describe('ConnectorRouter Hub thread race protection', () => {
     const router = new ConnectorRouter({
       bindingStore,
       dedup: new InboundMessageDedup(),
-      messageStore: mockMessageStore(),
+      ...mockConnectorStores(),
       threadStore: racingThreadStore,
       invokeTrigger: mockTrigger(),
       socketManager: mockSocketManager(),
@@ -199,7 +230,7 @@ describe('ConnectorRouter Hub thread race protection', () => {
     const router = new ConnectorRouter({
       bindingStore,
       dedup: new InboundMessageDedup(),
-      messageStore: mockMessageStore(),
+      ...mockConnectorStores(),
       threadStore,
       invokeTrigger: mockTrigger(),
       socketManager: mockSocketManager(),
@@ -303,7 +334,7 @@ describe('ConnectorRouter Hub thread race protection', () => {
     const router = new ConnectorRouter({
       bindingStore,
       dedup: new InboundMessageDedup(),
-      messageStore: mockMessageStore(),
+      ...mockConnectorStores(),
       threadStore,
       invokeTrigger: mockTrigger(),
       socketManager: mockSocketManager(),

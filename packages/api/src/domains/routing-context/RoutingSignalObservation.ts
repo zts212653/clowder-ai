@@ -88,9 +88,7 @@ const dispatchTerminalObservationV1Schema = z
     kind: z.literal('dispatch_terminal'),
     catId: ownerIdSchema,
     status: z.enum(['succeeded', 'failed', 'canceled', 'interrupted']),
-    failureClass: z
-      .enum(['quota_exhausted', 'authentication_rejected', 'provider_unreachable', 'provider_timeout'])
-      .optional(),
+    failureClass: z.enum(['quota_exhausted', 'authentication_rejected', 'provider_unreachable']).optional(),
     failureObservedAt: epochMsSchema.optional(),
     preflightDecision: routingPreflightDecisionV1Schema,
   })

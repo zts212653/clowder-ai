@@ -102,13 +102,6 @@ function decodeInvocationRecord(data: Record<string, string>, expectedId: string
     ...(data.executionStartedAt ? { executionStartedAt: parseInt(data.executionStartedAt, 10) } : {}),
     ...(usageByCat ? { usageByCat } : {}),
     ...(data.usageRecordedAt ? { usageRecordedAt: parseInt(data.usageRecordedAt, 10) } : {}),
-    ...(data.freshnessClosureId ? { freshnessClosureId: data.freshnessClosureId } : {}),
-    ...(data.freshnessInputFrontierMessageId
-      ? { freshnessInputFrontierMessageId: data.freshnessInputFrontierMessageId }
-      : {}),
-    ...(data.freshnessClosureStatus
-      ? { freshnessClosureStatus: data.freshnessClosureStatus as InvocationRecord['freshnessClosureStatus'] }
-      : {}),
     actionLeaseCarrier,
     ...(waitContinuationCarrier ? { waitContinuationCarrier } : {}),
     createdAt,

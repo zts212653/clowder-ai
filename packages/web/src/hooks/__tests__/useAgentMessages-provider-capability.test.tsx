@@ -124,6 +124,7 @@ describe('#939 part A: provider_capability frontend consumption', () => {
     // The bug: a raw-JSON system bubble surfaced with "thinking: unavailable",
     // which users read as "thinking failed". After the fix, no bubble.
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     // Data is preserved on the invocation snapshot for a future capability UI.
     expect(mockSetCatInvocation).toHaveBeenCalledWith(
       'kimi',
@@ -157,6 +158,7 @@ describe('#939 part A: provider_capability frontend consumption', () => {
       });
     });
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     expect(mockSetCatInvocation).toHaveBeenCalledWith(
       'kimi',
       expect.objectContaining({
@@ -198,8 +200,9 @@ describe('#939 part A: provider_capability frontend consumption', () => {
       });
     });
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     // Final merged snapshot has both capabilities.
-    expect(catInvocations['kimi']?.providerCapabilities).toEqual(
+    expect(catInvocations.kimi?.providerCapabilities).toEqual(
       expect.objectContaining({
         thinking: expect.objectContaining({ reason: 'reason-thinking' }),
         image_input: expect.objectContaining({ reason: 'reason-image' }),
@@ -237,7 +240,7 @@ describe('#939 part A: provider_capability frontend consumption', () => {
         }),
       });
     });
-    expect(catInvocations['kimi']?.providerCapabilities).toEqual(
+    expect(catInvocations.kimi?.providerCapabilities).toEqual(
       expect.objectContaining({
         thinking: expect.objectContaining({ status: 'available', reason: 'second' }),
       }),
@@ -262,6 +265,7 @@ describe('#939 part A: provider_capability frontend consumption', () => {
       });
     });
     expect(mockAddMessage).not.toHaveBeenCalled();
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
     expect(mockSetCatInvocation).toHaveBeenCalledWith(
       'kimi',
       expect.objectContaining({

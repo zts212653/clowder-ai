@@ -10,6 +10,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import type { ProcessActivity } from './process-activity-registry.js';
 
 export type LivenessState = 'active' | 'busy-silent' | 'idle-silent' | 'dead';
 
@@ -117,6 +118,15 @@ export class ProcessLivenessProbe {
     while (this.sampling && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
+  }
+
+  /**
+   * F117 KD-22: whether the process (with its direct children) is still using CPU, whatever it
+   * printed recently — the member output timeout defers only for this, never for mere stdout.
+   */
+  activity(): ProcessActivity {
+    if (!this.pidAlive) return 'dead';
+    return this.cpuGrowing ? 'busy' : 'idle';
   }
 
   /** Whether bounded extension applies (busy-silent) */

@@ -110,12 +110,12 @@ vi.mock('@/hooks/useAgentMessages', () => ({
   useAgentMessages: () => ({
     handleAgentMessage: vi.fn(),
     handleStop: vi.fn(),
-    resetRefs: vi.fn(),
-    resetTimeout: vi.fn(),
   }),
 }));
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: () => ({
+    messages: mockStoreState().messages,
+    handleReadingIntent: vi.fn(),
     handleScroll: vi.fn(),
     scrollContainerRef: { current: null },
     messagesEndRef: { current: null },
@@ -228,8 +228,6 @@ vi.mock('../workspace/ContextualWorkspaceChrome', () => ({
     ),
 }));
 vi.mock('../workspace/TranscriptPanel', () => ({ TranscriptPanel: () => null }));
-vi.mock('../ParallelStatusBar', () => ({ ParallelStatusBar: () => null }));
-vi.mock('../ThinkingIndicator', () => ({ ThinkingIndicator: () => null }));
 vi.mock('../MessageNavigator', () => ({ MessageNavigator: () => null }));
 vi.mock('../MessageActions', () => ({
   MessageActions: ({
@@ -496,11 +494,10 @@ describe('ChatContainer mobile interactions', () => {
         content: 'follow-up',
         messageId: 'queued-user',
         mergedMessageIds: [],
-        source: 'user',
+        from: { kind: 'user', userId: 'test-user' },
         targetCats: ['opus'],
         intent: 'execute',
         status: 'queued',
-        targetStates: { opus: 'queued' },
         createdAt: 1000,
       },
     ];

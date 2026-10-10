@@ -10,11 +10,7 @@
  * - Content: string | ContentBlock[] → string
  */
 
-import {
-  formatGovernanceBlocked,
-  formatSessionSealRequested,
-  formatVisibleSystemInfo,
-} from '@/hooks/system-info-visible';
+import { formatGovernanceBlocked, formatVisibleSystemInfo } from '@/hooks/system-info-visible';
 import { resolveProviderSemanticMessage } from '@/lib/provider-semantic-registry';
 import type { RawTranscriptEvent, ReplayEvent, ReplayEventType } from './types';
 
@@ -154,9 +150,6 @@ function tryParseSystemInfoContent(event: Record<string, unknown>): Record<strin
 function formatReplayVisibleSystemInfo(parsed: Record<string, unknown>) {
   const liveVisible = formatVisibleSystemInfo(parsed);
   if (liveVisible) return liveVisible;
-
-  const sessionSeal = formatSessionSealRequested(parsed);
-  if (sessionSeal) return sessionSeal;
 
   return formatGovernanceBlocked(parsed);
 }

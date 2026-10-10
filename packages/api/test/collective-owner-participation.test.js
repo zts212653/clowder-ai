@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import './helpers/setup-cat-registry.js';
-import { InvocationQueue } from '../dist/domains/cats/services/agents/invocation/InvocationQueue.js';
 import { MessageStore } from '../dist/domains/cats/services/stores/ports/MessageStore.js';
 import { TaskStore } from '../dist/domains/cats/services/stores/ports/TaskStore.js';
 import { ThreadStore } from '../dist/domains/cats/services/stores/ports/ThreadStore.js';
@@ -14,17 +13,24 @@ import { CollectiveWorkDispatcher } from '../dist/domains/plugin/builtin-runtime
 import { CollectiveWorkResultReconciler } from '../dist/domains/plugin/builtin-runtime/collective-work-result-reconciler.js';
 import { registerCollectiveOwnerParticipationRoutes } from '../dist/routes/collective-owner-participation-routes.js';
 import { registerCollectiveWorkResultRoutes } from '../dist/routes/collective-work-result-routes.js';
+import { adaptMessageStore } from './helpers/message-from-fixtures.js';
+import { createPersistedQueueFixture } from './helpers/persisted-queue-fixture.ts';
 import { readHeaders, writeHeaders } from './plugin-official-routes.fixture.js';
 
 const userId = writeHeaders['x-test-session-user'];
 const base = '/api/plugins/collective-connector/con_aaaaaaaa';
 async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
+  const admittedWorkSourceIds = new Set();
+  const persisted = createPersistedQueueFixture(messages, {
+    onAdmitted: (message) => {
+      if (message?.extra?.collectiveWorkInvocationV1) admittedWorkSourceIds.add(message.id);
+    },
+  });
   const tasks = new TaskStore();
   const threads = new ThreadStore();
   let route;
   let published = false;
-  let starts = 0;
   let inbox = [];
   let assignedWork;
   let cats = [
@@ -103,12 +109,7 @@ async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
     context: () => context,
     messageStore: messages,
     threadStore: threads,
-    invocationQueue: new InvocationQueue(),
-    queueProcessor: {
-      async processNext() {
-        starts++;
-      },
-    },
+    invocationQueue: persisted.queue,
   });
   const app = Fastify();
   app.addHook('preHandler', async (request) => {
@@ -131,6 +132,7 @@ async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
     context,
     work,
     dispatcher,
+    queue: persisted.queue,
   });
   registerCollectiveWorkResultRoutes(app, {
     connector: () => connector,
@@ -156,33 +158,33 @@ async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
     });
   const post = (path, payload) =>
     app.inject({ method: 'POST', url: `${base}${path}`, headers: writeHeaders, remoteAddress: '127.0.0.1', payload });
-  const source = (participation = {}, meta = {}) =>
-    messages.append({
-      userId,
-      threadId: route.defaultIngressThreadId,
-      catId: null,
-      mentions: [],
-      timestamp: Date.now(),
-      content: 'Prepare an answer',
-      source: {
-        connector: 'collective',
-        label: 'Collective',
-        meta: {
-          ...meta,
-          participation: {
-            serviceInstanceId: 'svc_aaaaaaaa',
-            collectiveId: 'col_aaaaaaaa',
-            connectionId: 'con_aaaaaaaa',
-            catId: 'codex-sol',
-            eventId: 'evt_aaaaaaaa',
-            participationRevision: route.revision,
-            location: { channelId: 'a' },
-            actor: { kind: 'human', humanId: 'human_bbbbbbbb', displayName: 'Guest' },
-            ...participation,
-          },
+  const sourceInput = (participation = {}, meta = {}) => ({
+    userId,
+    threadId: route.defaultIngressThreadId,
+    catId: null,
+    mentions: [],
+    timestamp: Date.now(),
+    content: 'Prepare an answer',
+    source: {
+      connector: 'collective',
+      label: 'Collective',
+      meta: {
+        ...meta,
+        participation: {
+          serviceInstanceId: 'svc_aaaaaaaa',
+          collectiveId: 'col_aaaaaaaa',
+          connectionId: 'con_aaaaaaaa',
+          catId: 'codex-sol',
+          eventId: 'evt_aaaaaaaa',
+          participationRevision: route.revision,
+          location: { channelId: 'a' },
+          actor: { kind: 'human', humanId: 'human_bbbbbbbb', displayName: 'Guest' },
+          ...participation,
         },
       },
-    });
+    },
+  });
+  const source = (...args) => messages.append(sourceInput(...args));
   const committedSource = () => {
     const committed = source(
       { actor: { kind: 'human', humanId: 'human_aaaaaaaa', displayName: 'Owner' } },
@@ -194,6 +196,7 @@ async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
   };
   return {
     app,
+    persisted,
     put,
     post,
     reconcile,
@@ -202,8 +205,9 @@ async function harness(delayThreadWrites = false, initialExcludedCatIds = []) {
     tasks,
     threads,
     source,
+    sourceInput,
     committedSource,
-    starts: () => starts,
+    workSources: () => admittedWorkSourceIds.size,
     route: () => route,
     setCats(next) {
       cats = next;
@@ -474,26 +478,29 @@ test('owner view distinguishes a routed named request, private execution, and a 
   const f = await harness();
   try {
     assert.equal((await f.reconcile({ expectedRevision: 0, channelIds: ['a'] })).statusCode, 200);
-    const source = f.source({ eventId: 'evt_progress' });
     const threadId = f.route().channelRoutes.a.threadId;
-    const originalGetById = f.messages.getById.bind(f.messages);
-    let catProgress = {
+    const input = {
+      ...f.sourceInput({ eventId: 'evt_progress' }),
+      threadId,
+      from: { kind: 'external', connectorId: 'collective' },
+      mentions: ['codex-sol'],
+      deliveryStatus: 'queued',
+      idempotencyKey: 'collective:progress',
+    };
+    const admitted = await f.persisted.queue.send(f.messages, input, {
+      threadId,
+      userId,
+      from: input.from,
+      content: input.content,
+      targetCats: ['codex-sol'],
+      kind: 'conversation_input',
+      intent: 'execute',
+      ownerAuthProvenance: 'unknown',
       executionScope: 'collective-participation',
-      allTargetCats: ['codex-sol'],
-      status: 'processing',
-      seenByCatIds: [],
-      failedByCatIds: [],
-      handledByCatIds: [],
-    };
-    f.messages.getById = (id) => {
-      const message = originalGetById(id);
-      return id === source.id && message
-        ? {
-            ...message,
-            queueCustody: catProgress,
-          }
-        : message;
-    };
+    });
+    assert.equal(admitted.outcome, 'enqueued');
+    const source = admitted.message;
+    const originalGetById = f.messages.getById.bind(f.messages);
     const requestItem = {
       event: {
         serviceInstanceId: 'svc_aaaaaaaa',
@@ -527,14 +534,39 @@ test('owner view distinguishes a routed named request, private execution, and a 
       });
     let response = await read();
     assert.equal(response.json().requests[0].execution.stage, 'queued');
-    catProgress = { ...catProgress, seenByCatIds: ['codex-sol'] };
+    await f.persisted.processor.progressOwnedCarrier(admitted.entry, 'codex-sol');
+    await f.persisted.waitForAwakening(source.id);
     response = await read();
     assert.equal(response.json().requests[0].execution.stage, 'started');
-    catProgress = {
-      ...catProgress,
-      status: 'terminal',
-      handledByCatIds: ['codex-sol'],
-      targetOutcomeByCatId: { 'codex-sol': { disposition: 'completed_with_turn' } },
+    const startedRef = originalGetById(source.id).lifecycle.dispatchRefs[0];
+    const receiver = originalGetById(startedRef.statusMessageId);
+    for (const foreign of [
+      { ...receiver, userId: 'foreign' },
+      { ...receiver, threadId: 'foreign' },
+      { ...receiver, catId: 'codex-terra' },
+      { ...receiver, lifecycle: { ...receiver.lifecycle, targetId: 'codex-terra' } },
+      { ...receiver, lifecycle: { ...receiver.lifecycle, inputMessageIds: ['foreign'] } },
+    ]) {
+      f.messages.getById = (id) => (id === startedRef.statusMessageId ? foreign : originalGetById(id));
+      response = await read();
+      assert.equal(
+        response.json().requests[0].execution,
+        undefined,
+        'foreign receiver must not supply owner execution progress',
+      );
+      assert.equal(response.json().requests[0].response, undefined, 'private History is not a public Service reply');
+    }
+    f.messages.getById = originalGetById;
+    await f.persisted.close();
+    response = await read();
+    assert.equal(response.json().requests[0].execution.stage, 'failed');
+    const ref = originalGetById(source.id).lifecycle.dispatchRefs[0];
+    // Completion presentation matrix, not a successful provider or private Task verdict.
+    f.messages.getById = (id) => {
+      const message = originalGetById(id);
+      return id === ref.statusMessageId && message
+        ? { ...message, lifecycle: { ...message.lifecycle, status: 'completed' } }
+        : message;
     };
     response = await read();
     assert.equal(response.statusCode, 200, response.payload);
@@ -553,16 +585,12 @@ test('owner view distinguishes a routed named request, private execution, and a 
                 participation: { ...message.source.meta.participation, eventId: 'evt_other' },
               },
             },
-            queueCustody: catProgress,
           }
         : message;
     };
     response = await read();
     assert.equal(response.json().requests[0].execution, undefined);
-    f.messages.getById = (id) => {
-      const message = originalGetById(id);
-      return id === source.id && message ? { ...message, queueCustody: catProgress } : message;
-    };
+    f.messages.getById = originalGetById;
     const reply = (eventId, catId, connectionId = 'con_aaaaaaaa') => ({
       event: {
         ...requestItem.event,
@@ -597,6 +625,7 @@ test('owner view distinguishes a routed named request, private execution, and a 
     response = await read();
     assert.equal(response.json().requests[0].response.eventId, 'evt_target_reply');
   } finally {
+    await f.persisted.close();
     await f.app.close();
   }
 });
@@ -713,7 +742,7 @@ test('concurrent owner retries cannot create orphan public or private Threads', 
     );
     assert.equal(f.threads.list(userId).length, 2);
     assert.equal(f.tasks.listByKind('work').length, 1);
-    assert.equal(f.starts(), 1);
+    assert.equal(f.workSources(), 1);
   } finally {
     await f.app.close();
   }
@@ -769,7 +798,7 @@ test('the real owner action admits one canonical Work and resumes its exact sour
     const second = await f.post('/work/admit', { ...payload, requestId: randomUUID() });
     assert.equal(second.statusCode, 200, second.payload);
     assert.equal(first.json().messageId, second.json().messageId);
-    assert.equal(f.starts(), 1);
+    assert.equal(f.workSources(), 1);
     assert.equal(f.tasks.listByKind('work').length, 1);
     const task = f.tasks.listByKind('work')[0];
     assert.deepEqual(task.entrustedWork.admission.sourceRefs, [`message:${source.id}`]);
@@ -783,14 +812,14 @@ test('the real owner action admits one canonical Work and resumes its exact sour
     });
     assert.equal(resumed.statusCode, 200, resumed.payload);
     assert.equal(f.messages.getById(resumed.json().messageId).extra.collectiveWorkInvocationV1.resultRevision, 2);
-    assert.equal(f.starts(), 2);
+    assert.equal(f.workSources(), 2);
     const forged = await f.post('/work/resume', { taskId: task.id, observedRevision: 999, requestId: randomUUID() });
     assert.equal(forged.statusCode, 409);
-    assert.equal(f.starts(), 2);
+    assert.equal(f.workSources(), 2);
     await f.put({ ...join, enabled: false, expectedRevision: 1 });
     const revoked = await f.post('/work/resume', { taskId: task.id, observedRevision: 1, requestId: randomUUID() });
     assert.equal(revoked.statusCode, 409);
-    assert.equal(f.starts(), 2);
+    assert.equal(f.workSources(), 2);
     assert.equal(f.tasks.get(task.id).status, 'todo');
     assert.ok(f.messages.getById(source.id));
   } finally {
@@ -817,7 +846,7 @@ test('manual resume fails closed while Service revision feedback has not reached
 
     assert.equal(resumed.statusCode, 409, resumed.payload);
     assert.equal(resumed.json().code, 'COLLECTIVE_WORK_CONTINUATION_UNAVAILABLE');
-    assert.equal(f.starts(), 1);
+    assert.equal(f.workSources(), 1);
   } finally {
     await f.app.close();
   }
@@ -845,7 +874,7 @@ test('manual resume rejects a retained revision notice after the revised Service
 
     assert.equal(resumed.statusCode, 409, resumed.payload);
     assert.equal(resumed.json().code, 'COLLECTIVE_WORK_CONTINUATION_UNAVAILABLE');
-    assert.equal(f.starts(), 1);
+    assert.equal(f.workSources(), 1);
   } finally {
     await f.app.close();
   }

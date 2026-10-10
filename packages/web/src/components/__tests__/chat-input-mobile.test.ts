@@ -167,14 +167,15 @@ describe('ChatInput composer layout', () => {
   it('keeps the active invocation stop affordance visible while preserving hover and keyboard focus styling', () => {
     render({ hasActiveInvocation: true });
 
-    const stopButton = Array.from(container.querySelectorAll('button[aria-label="Stop generation"]')).find((button) =>
-      button.className.includes('bg-conn-red-text'),
-    ) as HTMLButtonElement | undefined;
+    const stopButtons = container.querySelectorAll('button[aria-label="Stop generation"]');
+    expect(stopButtons).toHaveLength(1);
+    const stopButton = stopButtons[0] as HTMLButtonElement;
     expect(stopButton).toBeTruthy();
     expect(stopButton?.disabled).toBe(true);
     expect(stopButton?.className).not.toContain('opacity-0');
-    expect(stopButton?.className).toContain('bg-conn-red-text');
     expect(stopButton?.className).toContain('hover:bg-conn-red-hover');
+    expect(stopButton?.querySelector('svg rect')).not.toBeNull();
+    expect(stopButton?.title).toBe('正在确认可停止的运行状态');
     expect(stopButton?.className).toContain('focus-visible:ring-2');
   });
 });

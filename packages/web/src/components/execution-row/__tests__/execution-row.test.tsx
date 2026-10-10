@@ -22,7 +22,14 @@ vi.mock('@/utils/api-client', () => ({ apiFetch: mocks.apiFetch }));
 vi.mock('@/hooks/useCatData', () => ({
   formatCatName: (cat: { displayName?: string; id: string }) => cat.displayName ?? cat.id,
   useCatData: () => ({
-    cats: [],
+    cats: [
+      {
+        id: 'opus',
+        displayName: 'opus',
+        color: { primary: '#9B7EBD' },
+        messageDeliveryCapabilities: { guideReply: true },
+      },
+    ],
     getCatById: (id: string) => ({ id, displayName: id, color: { primary: '#9B7EBD' } }),
   }),
 }));
@@ -58,7 +65,7 @@ function entry(id: string, over: Partial<QueueEntry> = {}): QueueEntry {
     content: `message ${id}`,
     messageId: `m-${id}`,
     mergedMessageIds: [],
-    source: 'user',
+    from: { kind: 'user', userId: 'u1' },
     targetCats: ['opus'],
     intent: 'execute',
     status: 'queued',
@@ -71,7 +78,6 @@ function seed(options: {
   executions?: ActiveExecutionProjection[];
   catStatuses?: Record<string, CatStatusType>;
   queue?: QueueEntry[];
-  paused?: boolean;
   hydration?: 'ready' | 'error';
 }) {
   const store = useActiveExecutionStore.getState();
@@ -92,8 +98,6 @@ function seed(options: {
     catInvocations: {},
     threadStates: {},
     queue: options.queue ?? [],
-    queuePaused: options.paused ?? false,
-    queuePauseReason: options.paused ? 'canceled' : undefined,
   } as never);
 }
 
@@ -207,53 +211,20 @@ describe('ExecutionRow (F322 original-B)', () => {
     expect($('execution-row-force-reset')).toBeNull();
   });
 
-  it('15 a stuck message runs its projected action through the queue convergence (same request, same toast)', async () => {
-    const stuck = entry('q-stuck', {
-      status: 'processing',
-      recoveryActions: [
-        {
-          id: 'queue-force-reset:q-stuck:1',
-          entryId: 'q-stuck',
-          kind: 'force_reset',
-          request: { method: 'POST', path: `/api/threads/${THREAD}/force-reset` },
-        },
-      ],
-    });
-    seed({ queue: [stuck] });
+  it('waiting inputs do not own an execution reset; orphaned pending work can resume', async () => {
+    seed({ queue: [entry('a'), entry('b')] });
     await render();
-    expect($('execution-row-text')?.textContent).toBe('1 件处理卡住');
-    await click($('execution-row-force-reset'));
-    await click(dialogConfirm() ?? null);
-    expect(calls()).toContain(`POST /api/threads/${THREAD}/force-reset`);
-    expect(calls()).toContain(`GET /api/threads/${THREAD}/queue`);
-    expect(toastTitles()).toEqual(['已恢复']);
+    expect($('execution-row-text')?.textContent).toBe('排队 2');
+    expect($('execution-row-force-reset')).toBeNull();
+    expect($('execution-row-resume')?.textContent).toBe('恢复');
+    expect(calls()).toEqual([]);
   });
 
-  it('15b with a stuck message the row offers 强制重置 only; 恢复 waits in the panel header', async () => {
-    const stuck = entry('q-stuck', {
-      status: 'processing',
-      recoveryActions: [
-        {
-          id: 'queue-force-reset:q-stuck:1',
-          entryId: 'q-stuck',
-          kind: 'force_reset',
-          request: { method: 'POST', path: `/api/threads/${THREAD}/force-reset` },
-        },
-      ],
-    });
-    seed({ queue: [stuck, entry('a')] });
+  it('pending work offers recovery through queue/next without a parallel paused outcome', async () => {
+    seed({ queue: [entry('a'), entry('b')] });
     await render();
-    expect($('execution-row-force-reset')).not.toBeNull();
-    expect($('execution-row-resume')).toBeNull();
-    await click($('execution-row-toggle'));
-    expect($('execution-row-queue-resume')?.textContent).toBe('恢复');
-  });
-
-  it('14/17 a paused queue says so, keeps the reason, and 继续 posts queue/next', async () => {
-    seed({ queue: [entry('a'), entry('b')], paused: true });
-    await render();
-    expect($('execution-row-text')?.textContent).toBe('排队已暂停 · 2 条');
-    expect($('execution-row-text')?.getAttribute('title')).toBe('当前调用已取消');
+    expect($('execution-row-text')?.textContent).toBe('排队 2');
+    expect($('execution-row-text')?.getAttribute('title')).toBe(null);
     mocks.apiFetch.mockImplementation(async () => json({ started: true }));
     await click($('execution-row-resume'));
     expect(calls()).toContain(`POST /api/threads/${THREAD}/queue/next`);
@@ -303,6 +274,16 @@ describe('ExecutionRow (F322 original-B)', () => {
   });
 
   it('10 steer inside the new panel asks first, and only the confirmation posts', async () => {
+    mocks.apiFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/cats')) return json({ participants: [{ catId: 'opus', lastMessageAt: 1 }] });
+      if (path.endsWith('/targets'))
+        return json(
+          init?.method === 'POST'
+            ? { targets: [{ entryId: 'q1', targetCatId: 'opus', strategy: 'guide_reply' }] }
+            : { sourceRecordId: 'm-q1', targets: [{ targetCatId: 'opus', state: 'pending', actionable: true }] },
+        );
+      return json({ queue: [], activeInvocations: [] });
+    });
     const queued = entry('q1', {
       recoveryActions: [
         {
@@ -320,7 +301,8 @@ describe('ExecutionRow (F322 original-B)', () => {
     expect(calls().filter((c) => c.endsWith('/steer'))).toEqual([]);
     expect($('steer-confirm')).not.toBeNull();
     await click($('steer-confirm'));
-    expect(calls()).toContain(`POST /api/threads/${THREAD}/queue/q1/steer`);
+    expect(calls()).toContain(`POST /api/threads/${THREAD}/queue/q1/targets`);
+    expect(calls()).toContain(`POST /api/threads/${THREAD}/queue/q1/continue`);
   });
 
   it('3  several runs: no single ■ on the row; each run has its own in the panel', async () => {

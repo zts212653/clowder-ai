@@ -35,7 +35,7 @@ test('future relative time stays risk-targeted across past aspect, past matrix, 
     for (let i = 0; i < 30; i += 1) {
       const candidate = messages.append({
         userId: 'owner-1',
-        catId: null,
+        from: { kind: 'user', userId: 'owner-1' },
         content,
         mentions: ['codex-sol'],
         timestamp: cohort.startedAt + 1,

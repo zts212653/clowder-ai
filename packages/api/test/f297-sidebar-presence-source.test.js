@@ -13,24 +13,17 @@ import {
   realDeps,
   realPresenceSource,
   runningManagedCommandTask,
-  startRunningRecordWithDraft,
+  startHeldRunningRecord,
+  startRunningChild,
+  startRunningRecord,
 } from './helpers/f297-presence-fixtures.js';
 
 describe('F297 production presence source (real service, no classifier stub)', () => {
-  it('R1: a real tracker slot + draft surfaces as working through the real composition', async () => {
+  it('R1: a running record whose slot the real tracker holds surfaces as working through the real composition', async () => {
     const deps = await realDeps();
-    // NB: tracker slot **alone** is not canonical liveness — F194 treats the tracker as the
-    // control plane, not lifecycle truth. 前两轮测试之所以看起来能过，是因为它把 classifier
-    // stub 成"读 tracker slot"，等于用假 classifier 复述了自己的假设。真实路径要 tracker+draft。
-    deps.invocationTracker.start('thread_live', 'opus5', 'alice');
-    await deps.draftStore.upsert({
-      userId: 'alice',
-      threadId: 'thread_live',
-      invocationId: 'inv_live',
-      catId: 'opus5',
-      content: 'thinking…',
-      updatedAt: Date.now(),
-    });
+    // F117 KD-23: the slot this process holds for a running record's execution is what proves the
+    // member processing. A streamed draft is not liveness, so none is created here.
+    await startHeldRunningRecord(deps, { threadId: 'thread_live', userId: 'alice', catId: 'opus5' });
     const { source } = await realPresenceSource(deps);
 
     const presence = await source.getPresence(['thread_live', 'thread_quiet'], 'alice');
@@ -38,21 +31,47 @@ describe('F297 production presence source (real service, no classifier stub)', (
     assert.deepEqual(presence.get('thread_live')?.cats, ['opus5']);
     assert.equal(presence.has('thread_quiet'), false, 'a thread without any execution must not be reported active');
   });
-
-  it('R2 P1-1: tracker empty but a running record + fresh draft exists → working', async () => {
+  it("R2 P1-1: tracker empty but the running record's durable child still runs → working", async () => {
     const deps = await realDeps();
-    await startRunningRecordWithDraft(deps, { threadId: 'thread_record', userId: 'alice', catId: 'opus5' });
+    const parent = await startRunningRecord(deps, { threadId: 'thread_record', userId: 'alice', catId: 'opus5' });
+    await startRunningChild(deps, {
+      parentInvocationId: parent,
+      threadId: 'thread_record',
+      userId: 'alice',
+      catId: 'opus5',
+      invocationId: 'child_record',
+    });
     const { source } = await realPresenceSource(deps);
 
     const presence = await source.getPresence(['thread_record'], 'alice');
     assert.equal(
       presence.get('thread_record')?.status,
       'working',
-      'record+draft canonical active must never fall through to terminal activity',
+      'a running child with no verifiable owner must never fall through to terminal activity',
     );
     assert.deepEqual(presence.get('thread_record')?.cats, ['opus5']);
   });
 
+  it('F117 KD-23: a running record with only a draft is not working', async () => {
+    const deps = await realDeps();
+    const parent = await startRunningRecord(deps, { threadId: 'thread_draft', userId: 'alice', catId: 'opus5' });
+    await deps.draftStore.upsert({
+      userId: 'alice',
+      threadId: 'thread_draft',
+      invocationId: parent,
+      catId: 'opus5',
+      content: 'thinking…',
+      updatedAt: Date.now(),
+    });
+    const { source } = await realPresenceSource(deps);
+
+    const presence = await source.getPresence(['thread_draft'], 'alice');
+    assert.notEqual(
+      presence.get('thread_draft')?.status,
+      'working',
+      'a streamed draft does not prove anyone runs the turn',
+    );
+  });
   it('R3 P1-1: a running managed command is qualified by the REAL pipeline, not just nominated', async () => {
     const deps = await realDeps();
     deps.tasks = [
@@ -127,15 +146,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
 
   it('R3: the three execution faces union rather than shadow each other', async () => {
     const deps = await realDeps();
-    deps.invocationTracker.start('thread_all', 'opus5', 'alice');
-    await deps.draftStore.upsert({
-      userId: 'alice',
-      threadId: 'thread_all',
-      invocationId: 'inv_all',
-      catId: 'opus5',
-      content: 'thinking…',
-      updatedAt: Date.now(),
-    });
+    await startHeldRunningRecord(deps, { threadId: 'thread_all', userId: 'alice', catId: 'opus5' });
     deps.tasks = [runningManagedCommandTask({ id: 't1', threadId: 'thread_all', catId: 'gpt52', userId: 'alice' })];
     await deps.turnExecutionStore.createRunning({
       invocationId: 'child_x',
@@ -324,7 +335,7 @@ describe('F297 production presence source (real service, no classifier stub)', (
       'alice',
       deps.invocationTracker,
       deps.recordStore,
-      deps.draftStore,
+      undefined,
       deps.turnExecutionStore,
       {
         info() {},

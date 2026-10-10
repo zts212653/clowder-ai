@@ -9,6 +9,7 @@ import type {
   InvocationRecord,
   InvocationRegistry,
 } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { collectAllThreadMessages } from '../domains/cats/services/agents/routing/thread-artifacts-aggregator.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -33,6 +34,7 @@ const generateDocumentSchema = z.object({
   baseName: z.string().min(1).max(200),
 });
 interface DocumentRouteDeps {
+  readonly invocationTracker?: Pick<InvocationTracker, 'getLifecycleResponseMessageId'>;
   readonly registry: InvocationRegistry;
   readonly socketManager: Pick<SocketManager, 'broadcastAgentMessage'>;
   readonly threadStore?: Pick<IThreadStore, 'get'>;
@@ -219,6 +221,11 @@ async function publishDocument(
         .status(409)
         .send({ code: 'RICH_BLOCK_INVOCATION_COMPLETE', error: 'Invocation has already completed' });
     }
+    const responseMessageId = deps.invocationTracker?.getLifecycleResponseMessageId(
+      record.threadId,
+      record.catId,
+      record.invocationId,
+    );
     if (addResult === 'added')
       deps.socketManager.broadcastAgentMessage(
         {
@@ -226,6 +233,7 @@ async function publishDocument(
           catId: record.catId,
           content: JSON.stringify({ type: 'rich_block', block: fileBlock }),
           invocationId: record.invocationId,
+          ...(responseMessageId ? { messageId: responseMessageId } : {}),
           timestamp: Date.now(),
         },
         record.threadId,

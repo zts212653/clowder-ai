@@ -18,7 +18,6 @@ const mockSetMessageUsage = vi.fn();
 const mockRequestStreamCatchUp = vi.fn();
 const mockSetMessageMetadata = vi.fn();
 const mockSetMessageThinking = vi.fn();
-const mockSetMessageStreamInvocation = vi.fn();
 const mockRemoveActiveInvocation = vi.fn();
 const mockAddActiveInvocation = vi.fn();
 const mockReplaceThreadTargetCats = vi.fn();
@@ -36,8 +35,6 @@ const storeState = {
     catId?: string;
     content: string;
     isStreaming?: boolean;
-    origin?: string;
-    extra?: { stream?: { invocationId?: string } };
     timestamp: number;
   }>,
   catInvocations: {
@@ -66,7 +63,6 @@ const storeState = {
   requestStreamCatchUp: mockRequestStreamCatchUp,
   setMessageMetadata: mockSetMessageMetadata,
   setMessageThinking: mockSetMessageThinking,
-  setMessageStreamInvocation: mockSetMessageStreamInvocation,
   removeActiveInvocation: mockRemoveActiveInvocation,
   addActiveInvocation: mockAddActiveInvocation,
   replaceThreadTargetCats: mockReplaceThreadTargetCats,
@@ -135,7 +131,7 @@ describe('useAgentMessages system_info invocation_created', () => {
     mockAddMessage.mockClear();
     mockSetCatStatus.mockClear();
     mockSetCatInvocation.mockClear();
-    mockSetMessageStreamInvocation.mockClear();
+    mockAddMessageToThread.mockClear();
     mockRemoveActiveInvocation.mockClear();
     mockAddActiveInvocation.mockClear();
     mockReplaceThreadTargetCats.mockClear();
@@ -177,181 +173,8 @@ describe('useAgentMessages system_info invocation_created', () => {
       (call) => call[0]?.type === 'system' && String(call[0]?.content).includes('"invocation_created"'),
     );
     expect(rawJsonBubble).toBeUndefined();
-  });
-
-  it('binds stream invocation identity onto an existing placeholder bubble when invocation_created arrives late', () => {
-    storeState.messages = [
-      {
-        id: 'msg-live-1',
-        type: 'assistant',
-        catId: 'codex',
-        content: 'partial chunk',
-        isStreaming: true,
-        timestamp: Date.now(),
-      },
-    ];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'system_info',
-        catId: 'codex',
-        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-new-2' }),
-      });
-    });
-
-    expect(mockSetMessageStreamInvocation).toHaveBeenCalledWith('msg-live-1', 'inv-new-2');
-  });
-
-  it('updates activeRefs to the rebound bubble even when it was NOT the prior activeRef target (cloud P1#9, PR#1352)', () => {
-    // Cloud Codex P1#9: when invocation_created rebinds an unbound placeholder that's
-    // NOT the current activeRefs target, activeRefs stays pointing at the OLD bubble.
-    // Subsequent invocationless events would reuse the stale ref → cross-invocation
-    // merge/ghost. Fix: always update activeRefs to the rebound bubble.
-    //
-    // Verification: after invocation_created with two unbound bubbles, an invocationless
-    // tool_use must target the NEWEST (rebound) bubble's id, not the older one.
-    const olderUnboundId = 'msg-older-unbound';
-    const newerUnboundId = 'msg-newer-unbound';
-    const replaceCalls: Array<[string, string]> = [];
-    (storeState as Record<string, unknown>).replaceMessageId = vi.fn((from: string, to: string) => {
-      replaceCalls.push([from, to]);
-      storeState.messages = storeState.messages.map((m) => (m.id === from ? { ...m, id: to } : m));
-    });
-    storeState.messages = [
-      {
-        id: olderUnboundId,
-        type: 'assistant',
-        catId: 'codex',
-        content: 'older unbound',
-        isStreaming: true,
-        origin: 'stream',
-        timestamp: Date.now() - 30_000,
-      } as (typeof storeState.messages)[number],
-      {
-        id: newerUnboundId,
-        type: 'assistant',
-        catId: 'codex',
-        content: 'newer unbound',
-        isStreaming: true,
-        origin: 'stream',
-        timestamp: Date.now(),
-      } as (typeof storeState.messages)[number],
-    ];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'system_info',
-        catId: 'codex',
-        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-rebind' }),
-      });
-    });
-
-    // Rebind targeted the NEWEST (newerUnboundId).
-    const reboundCall = replaceCalls.find(([from]) => from === newerUnboundId);
-    expect(reboundCall, 'rebind must target newest unbound bubble').toBeTruthy();
-    const reboundId = reboundCall![1];
-
-    // Invocationless follow-up must hit the REBOUND id, NOT the older bubble.
-    mockAppendToolEvent.mockClear();
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'tool_use',
-        catId: 'codex',
-        toolName: 'follow_up',
-        toolInput: {},
-      });
-    });
-    expect(
-      mockAppendToolEvent.mock.calls.some((c: unknown[]) => c[0] === olderUnboundId),
-      'follow-up must NOT target older bubble',
-    ).toBe(false);
-    expect(
-      mockAppendToolEvent.mock.calls.some((c: unknown[]) => c[0] === reboundId),
-      'follow-up should target rebound (live) bubble',
-    ).toBe(true);
-  });
-
-  it('rebinds the NEWEST unbound stream bubble (cloud P1, PR#1352) — not the oldest', () => {
-    // Cloud Codex P1 on PR#1352: invocation_created scanned messagesSnapshot
-    // oldest → newest and captured the FIRST unbound placeholder. Under reconnect/
-    // hydration, multiple unbound streaming bubbles can exist for the same cat —
-    // the historical one would get bound, leaving the active live bubble unbound
-    // and reintroducing the ghost/split.
-    //
-    // Fix: prefer activeRefs target if unbound; else iterate newest → oldest.
-    const oldStaleId = 'msg-stale-historical-unbound';
-    const liveActiveId = 'msg-live-active-unbound';
-    const replaceCalls: Array<[string, string]> = [];
-    mockSetMessageStreamInvocation.mockImplementation(() => {
-      // No-op for this test's purpose (we assert via mockSetMessageStreamInvocation calls).
-    });
-    // Track replaceMessageId calls (id transition for unbound → deterministic).
-    const replaceFn = vi.fn((from: string, to: string) => {
-      replaceCalls.push([from, to]);
-    });
-    // Inject replaceMessageId into store — this test's storeState doesn't have it
-    // wired by default, so add it locally.
-    (storeState as Record<string, unknown>).replaceMessageId = replaceFn;
-
-    storeState.messages = [
-      {
-        id: oldStaleId,
-        type: 'assistant',
-        catId: 'codex',
-        content: 'historical unbound bubble (e.g. survived hydration)',
-        isStreaming: true,
-        origin: 'stream',
-        timestamp: Date.now() - 60_000,
-      } as (typeof storeState.messages)[number],
-      {
-        id: liveActiveId,
-        type: 'assistant',
-        catId: 'codex',
-        content: 'live active bubble for the new invocation',
-        isStreaming: true,
-        origin: 'stream',
-        timestamp: Date.now(),
-      } as (typeof storeState.messages)[number],
-    ];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'system_info',
-        catId: 'codex',
-        content: JSON.stringify({ type: 'invocation_created', invocationId: 'inv-fresh' }),
-      });
-    });
-
-    // The LIVE bubble (newest unbound) must get the invocationId binding.
-    // The historical stale bubble must NOT be picked up.
-    const bindCalls = mockSetMessageStreamInvocation.mock.calls.filter((c) => c[1] === 'inv-fresh');
-    expect(bindCalls, 'exactly one bubble should be bound to inv-fresh').toHaveLength(1);
-    const boundOriginalId = bindCalls[0][0];
-    // boundOriginalId might be liveActiveId itself (if deterministic id derivation hit
-    // fallback) OR the deterministic form. We assert via the upstream replace path:
-    // either replaceMessageId was called from liveActiveId → deterministic, OR the
-    // stream invocation was set directly on liveActiveId.
-    const replacedFromLive = replaceCalls.some(([from]) => from === liveActiveId);
-    const directBindOnLive = boundOriginalId === liveActiveId;
-    expect(replacedFromLive || directBindOnLive, 'live (newest) bubble must be the rebind target').toBe(true);
-    // Critically, the historical stale one is NOT touched.
-    const replacedFromStale = replaceCalls.some(([from]) => from === oldStaleId);
-    expect(replacedFromStale, 'historical stale bubble must NOT be replaced').toBe(false);
-    expect(
-      mockSetMessageStreamInvocation.mock.calls.some(([id]) => id === oldStaleId),
-      'historical stale bubble must NOT receive invocationId binding',
-    ).toBe(false);
+    // invocation_created is status-only: it never creates or binds a response bubble.
+    expect(mockAddMessageToThread).not.toHaveBeenCalled();
   });
 
   it('migrates the active slot and displayed target during sequential handoff recovery', () => {
@@ -383,7 +206,7 @@ describe('useAgentMessages system_info invocation_created', () => {
     expect(storeState.targetCats).toEqual(['opus']);
   });
 
-  it('migrates the active slot as soon as a2a_handoff announces the next cat', () => {
+  it('treats a2a_handoff as a projection without mutating invocation ownership', () => {
     storeState.activeInvocations = {
       'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
     };
@@ -397,30 +220,26 @@ describe('useAgentMessages system_info invocation_created', () => {
       captured?.handleAgentMessage({
         type: 'a2a_handoff',
         catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        invocationId: 'inv-root',
+        content: '缅因猫 ⇉ 布偶猫',
         targetCatId: 'opus',
+        routing: { mode: 'parallel', index: 1, total: 2 },
         timestamp: 123999,
       } as never);
     });
 
-    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(mockSetCatStatus).toHaveBeenCalledWith('opus', 'spawning');
+    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
+    expect(mockAddActiveInvocation).not.toHaveBeenCalled();
+    expect(mockReplaceThreadTargetCats).not.toHaveBeenCalled();
+    expect(mockSetCatStatus).not.toHaveBeenCalled();
     expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
+      catId: 'codex',
       mode: 'execute',
       startedAt: 123456,
     });
-    expect(storeState.targetCats).toEqual(['opus']);
-    expect(storeState.catStatuses.opus).toBe('spawning');
+    expect(storeState.targetCats).toEqual(['codex']);
   });
 
-  // F086/F216 (#1291): a serial dispatch announces EVERY queued leg up front, but only 第 1 棒
-  // actually starts. Migrating ownership on each announced leg made the UI show the LAST target
-  // as active while the runtime was still running the FIRST — two arrows, one invocation.
-  it('serial 第 1 棒 migrates the active slot', () => {
+  it('parallel routing projection never steals the active slot', () => {
     storeState.activeInvocations = {
       'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
     };
@@ -434,36 +253,9 @@ describe('useAgentMessages system_info invocation_created', () => {
       captured?.handleAgentMessage({
         type: 'a2a_handoff',
         catId: 'codex',
-        content: '缅因猫 → 布偶猫（串行 1/2）',
-        invocationId: 'inv-root',
-        targetCatId: 'opus',
-        routing: { mode: 'serial', index: 1, total: 2 },
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(storeState.targetCats).toEqual(['opus']);
-  });
-
-  it('serial 第 2 棒 is announced but must NOT steal the active slot', () => {
-    storeState.activeInvocations = {
-      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
-    };
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 ⇢ 暹罗猫（串行 2/2·排队中）',
-        invocationId: 'inv-root',
+        content: '缅因猫 ⇉ 暹罗猫（并行 2/2）',
         targetCatId: 'gemini',
-        routing: { mode: 'serial', index: 2, total: 2 },
+        routing: { mode: 'parallel', index: 2, total: 2 },
         timestamp: 124000,
       } as never);
     });
@@ -476,66 +268,6 @@ describe('useAgentMessages system_info invocation_created', () => {
       startedAt: 123456,
     });
     expect(storeState.targetCats).toEqual(['codex']);
-  });
-
-  it('migrates legacy a2a_handoff without invocationId by resolving the current cat active slot', () => {
-    storeState.activeInvocations = {
-      'inv-root': { catId: 'codex', mode: 'execute', startedAt: 123456 },
-    };
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        targetCatId: 'opus',
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockRemoveActiveInvocation).toHaveBeenCalledWith('inv-root');
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute', 123456);
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
-      mode: 'execute',
-      startedAt: 123456,
-    });
-    expect(storeState.targetCats).toEqual(['opus']);
-  });
-
-  it('keeps the cancel affordance during the handoff gap after the previous cat slot is cleared', () => {
-    storeState.activeInvocations = {};
-    storeState.targetCats = ['codex'];
-
-    act(() => {
-      root.render(React.createElement(Harness));
-    });
-
-    act(() => {
-      captured?.handleAgentMessage({
-        type: 'a2a_handoff',
-        catId: 'codex',
-        content: '缅因猫 → 布偶猫',
-        invocationId: 'inv-root',
-        targetCatId: 'opus',
-        timestamp: 123999,
-      } as never);
-    });
-
-    expect(mockRemoveActiveInvocation).not.toHaveBeenCalled();
-    expect(mockAddActiveInvocation).toHaveBeenCalledWith('inv-root', 'opus', 'execute');
-    expect(mockReplaceThreadTargetCats).toHaveBeenCalledWith('thread-1', ['opus']);
-    expect(storeState.activeInvocations['inv-root']).toEqual({
-      catId: 'opus',
-      mode: 'execute',
-    });
-    expect(storeState.targetCats).toEqual(['opus']);
   });
 
   it('does not rewrite slots for cats that already have an explicit parallel slot', () => {

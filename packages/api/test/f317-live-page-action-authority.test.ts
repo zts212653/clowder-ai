@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { InvocationQueue } from '../src/domains/cats/services/agents/invocation/InvocationQueue.js';
-import { createInitialQueuedMessageCustody } from '../src/domains/cats/services/agents/invocation/QueuedMessageCustodyCoordinator.js';
 import { LivePageActionApprovalLedger } from '../src/domains/concierge/live/host/live-page-action-approval-ledger.js';
 import { LivePageActionAuthority } from '../src/domains/concierge/live/host/live-page-action-authority.js';
 import { appendUser, fixture, issueFixtureApproval, scope } from './helpers/f317-page-action-fixture.js';
@@ -31,26 +30,31 @@ test('a newer owner turn or revoked approval cannot commit an old action', async
     });
     if (change === 'new_request') appendUser(f.store, 'I changed my mind', 'owner-request-2');
     if (change === 'queued_request') {
-      const entry = new InvocationQueue().enqueue({
-        userId: scope.userId,
-        threadId: scope.threadId,
-        source: 'user',
-        ownerAuthProvenance: 'strict',
-        content: 'Wait, do something else first',
-        targetCats: [scope.catId],
-        intent: 'coordinate',
-      }).entry;
-      assert.ok(entry);
-      f.store.append({
-        userId: scope.userId,
-        threadId: scope.threadId,
-        catId: null,
-        content: 'Wait, do something else first',
-        mentions: [scope.catId],
-        timestamp: Date.now(),
-        deliveryStatus: 'queued',
-        queueCustody: createInitialQueuedMessageCustody(entry),
-      });
+      const queue = new InvocationQueue();
+      const content = 'Wait, do something else first';
+      const from = { kind: 'user' as const, userId: scope.userId };
+      await queue.send(
+        f.store,
+        {
+          userId: scope.userId,
+          threadId: scope.threadId,
+          from,
+          content,
+          mentions: [scope.catId],
+          timestamp: Date.now(),
+          deliveryStatus: 'queued',
+        },
+        {
+          kind: 'conversation_input',
+          userId: scope.userId,
+          threadId: scope.threadId,
+          from,
+          ownerAuthProvenance: 'strict',
+          content,
+          targetCats: [scope.catId],
+          intent: 'coordinate',
+        },
+      );
     }
     if (change === 'revoke_approval') f.revokeApproval();
     if (change === 'new_generation') f.changeScope();

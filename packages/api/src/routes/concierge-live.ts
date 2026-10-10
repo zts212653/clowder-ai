@@ -32,7 +32,10 @@ interface Options {
   threadService: Pick<ConciergeThreadService, 'getOrCreate' | 'isCurrent'>;
   sessionChainStore: Pick<ISessionChainStore, 'getActive'>;
   messageStore: Pick<IMessageStore, 'appendIdempotent' | 'getByThread' | 'getByThreadAfter' | 'getById'>;
-  invocationQueue: Pick<InvocationQueue, 'getQueuedBodyMessagesForCat' | 'getEntrySnapshot'>;
+  invocationQueue: Pick<
+    InvocationQueue,
+    'getQueuedBodyMessagesForCat' | 'getEntrySnapshot' | 'getDurableEntriesForMessages'
+  >;
   recovery: Pick<LiveRecoveryOptions, 'tasks' | 'approvals' | 'epochs'>;
   progressOwnedCarrier(entry: QueueEntry, catId: string): Promise<unknown>;
   mcpDistDir: string;
@@ -201,11 +204,7 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
                 scope.userId,
                 reference.queueEntryId,
               );
-              if (
-                !entry ||
-                !entry.targetCats.includes(scope.catId) ||
-                (entry.messageId !== reference.messageId && !entry.mergedMessageIds?.includes(reference.messageId))
-              )
+              if (!entry || !entry.targets.includes(scope.catId) || entry.payload.messageId !== reference.messageId)
                 continue;
               await options.progressOwnedCarrier(entry, scope.catId);
             }
@@ -245,12 +244,11 @@ export const conciergeLiveRoutes: FastifyPluginAsync<Options> = async (app, opti
         payload: {
           content: `@${catId}\n开始语音交流。${parsed.data.allowHomeReads ? '已允许查询家里资料' : '未开放家里资料'}；屏幕只在另行选择后共享。`,
           threadId,
-          deliveryMode: 'immediate',
           idempotencyKey: call.id,
         },
       });
       const admitted = admission.json();
-      if (admission.statusCode !== 200 || admitted.status !== 'processing') {
+      if (admission.statusCode !== 202 || admitted.status !== 'queued') {
         await call.fail(new Error('Host did not admit Live'));
         return reply
           .code(admission.statusCode >= 400 ? admission.statusCode : 409)

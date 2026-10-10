@@ -217,8 +217,16 @@ describe('fetchThreadReplayEvents', () => {
         return new Response(
           JSON.stringify({
             messages: [
-              { id: 'new_user', type: 'user', content: 'newer user', timestamp: 2000, deliveredAt: 9000 },
-              { id: 'new_opus', type: 'assistant', catId: 'opus', content: 'newer opus', timestamp: 2100 },
+              {
+                id: 'new_opus',
+                type: 'assistant',
+                catId: 'opus',
+                content: 'newer opus',
+                timestamp: 2000,
+                timelineOrderAt: 9000,
+                lifecycle: { status: 'completed', completedAt: 9500 },
+              },
+              { id: 'new_user', type: 'user', content: 'newer user', timestamp: 9600 },
             ],
             hasMore: true,
           }),
@@ -226,7 +234,7 @@ describe('fetchThreadReplayEvents', () => {
         );
       }
 
-      if (path === '/api/messages?threadId=thread_1&limit=10000&before=9000%3Anew_user') {
+      if (path === '/api/messages?threadId=thread_1&limit=10000&before=9000%3Anew_opus') {
         return new Response(
           JSON.stringify({
             messages: [

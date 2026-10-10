@@ -93,7 +93,7 @@ describe('RepoScanTaskSpec', () => {
       bindingStore: createMockBindingStore(bindings),
       deliverFn: async (_deps, input) => {
         deliveredMessages.push(input);
-        return { messageId: `msg-${deliveredMessages.length}`, content: input.content };
+        return { messageId: `msg-${deliveredMessages.length}`, content: input.content, admitted: true };
       },
       deliveryDeps: {},
       invokeTrigger: {
@@ -367,7 +367,7 @@ describe('RepoScanTaskSpec', () => {
       const { opts, reconciliationDedup } = createOpts({
         deliverFn: async (_deps, input) => {
           controller.abort(new DOMException('scheduler timeout', 'AbortError'));
-          return { messageId: 'msg-delivered-before-timeout', content: input.content };
+          return { messageId: 'msg-delivered-before-timeout', content: input.content, admitted: true };
         },
       });
       const spec = createRepoScanTaskSpec(opts);
@@ -388,23 +388,29 @@ describe('RepoScanTaskSpec', () => {
       );
     });
 
-    it('triggers cat after delivery', async () => {
-      const { opts, triggerCalls } = createOpts();
+    // Admission IS the wake: the reconciliation envelope reaching the Queue is what starts the cat.
+    it('admits the reconciliation envelope that starts the cat', async () => {
+      const { opts, deliveredMessages } = createOpts();
       const spec = createRepoScanTaskSpec(opts);
       const gateResult = await spec.admission.gate(gateCtx());
       const workItem = gateResult.workItems[0];
 
       await spec.run.execute(workItem.signal, workItem.subjectKey, { assignedCatId: null });
 
-      assert.equal(triggerCalls.length, 1);
-      assert.equal(triggerCalls[0][0], 'thread-inbox-1'); // threadId
-      assert.equal(triggerCalls[0][1], 'cat-maine-coon'); // catId
+      assert.equal(deliveredMessages.length, 1);
+      assert.equal(deliveredMessages[0].threadId, 'thread-inbox-1');
+      assert.equal(deliveredMessages[0].catId, 'cat-maine-coon');
     });
 
     it('re-resolves the repo inbox owner for every delivery and wake', async () => {
+      const { connectorDeliveryHarness } = await import('./helpers/connector-delivery-harness.js');
+      const { deliverConnectorMessage } = await import('../dist/infrastructure/email/deliver-connector-message.js');
+      const harness = connectorDeliveryHarness();
       let currentOwner = 'codex-sol';
       const resolverCalls = [];
-      const { opts, deliveredMessages, triggerCalls } = createOpts({
+      const { opts, triggerCalls } = createOpts({
+        deliverFn: deliverConnectorMessage,
+        deliveryDeps: harness.deliveryDeps,
         inboxCatId: 'stale-env-owner',
         async resolveInboxCatId(repoFullName) {
           resolverCalls.push(repoFullName);
@@ -424,13 +430,14 @@ describe('RepoScanTaskSpec', () => {
 
       assert.deepEqual(resolverCalls, ['owner/repo', 'owner/repo']);
       assert.deepEqual(
-        deliveredMessages.map((message) => message.catId),
+        harness.admitted('thread-inbox-1', 'user-maintainer').map((entry) => entry.targets[0]),
         ['codex-sol', 'codex61-sol'],
       );
       assert.deepEqual(
-        triggerCalls.map((call) => call[1]),
+        harness.wakes.map((wake) => wake.catId),
         ['codex-sol', 'codex61-sol'],
       );
+      assert.deepEqual(triggerCalls, [], 'Queue admission owns wake; no second trigger');
     });
 
     it('skips delivery if no inbox thread exists for repo', async () => {

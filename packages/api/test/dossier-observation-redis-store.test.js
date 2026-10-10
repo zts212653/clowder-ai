@@ -2,7 +2,7 @@
  * F208 Phase D: RedisDossierObservationStore integration test.
  *
  * Verifies Redis persistence (Iron Rule #5: TTL=0 user state).
- * Uses test Redis infrastructure (port 6398, never 6399).
+ * Runs only against an isolated test Redis (test:redis); an inherited address never qualifies.
  *
  * Covers P0 review finding: production store must persist observations
  * across restarts — in-memory store is insufficient.
@@ -10,10 +10,13 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import Redis from 'ioredis';
+import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const TEST_PREFIX = `test:dossier-obs:${Date.now()}:`;
 
-describe('RedisDossierObservationStore', () => {
+const REDIS_URL = process.env.REDIS_URL;
+
+describe('RedisDossierObservationStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
   /** @type {import('ioredis').default} */
   let redis;
   /** @type {import('../src/domains/cats/services/stores/redis/RedisDossierObservationStore.js').RedisDossierObservationStore} */
@@ -21,7 +24,8 @@ describe('RedisDossierObservationStore', () => {
   let connectionFailed = false;
 
   before(async () => {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6398';
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisDossierObservationStore');
+    const redisUrl = REDIS_URL;
     redis = new Redis(redisUrl, {
       keyPrefix: TEST_PREFIX,
       lazyConnect: true,

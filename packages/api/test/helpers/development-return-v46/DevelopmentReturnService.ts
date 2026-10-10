@@ -10,7 +10,6 @@ import type { DevelopmentWorkActor } from '../../../src/domains/cats/services/st
 import type { IMessageStore } from '../../../src/domains/cats/services/stores/ports/MessageStore.js';
 import { deriveGrowingSourceMessageRevision } from '../../../src/domains/cats/services/stores/ports/MessageStore.js';
 import type { IProposalStore } from '../../../src/domains/cats/services/stores/ports/ProposalStore.js';
-import { projectQueueReceipt } from '../../../src/domains/cats/services/stores/ports/queued-message-receipt.js';
 import type { ITaskStore } from '../../../src/domains/cats/services/stores/ports/TaskStoreContract.js';
 import type { IThreadStore } from '../../../src/domains/cats/services/stores/ports/ThreadStore.js';
 import { publishDevelopmentReturnRetirement } from '../../../src/infrastructure/scheduler/development-return/DevelopmentReturnRetirement.js';
@@ -19,6 +18,7 @@ import { createDevelopmentReturnTemplate } from '../../../src/infrastructure/sch
 import type { ExecuteContext } from '../../../src/infrastructure/scheduler/types.js';
 import { developmentReturnCurrentRevision, prepareDevelopmentReturn } from './DevelopmentReturnAuthority.js';
 import type { DynamicTaskStore } from './DynamicTaskStore.js';
+import { projectQueueReceipt } from './queued-message-receipt.mjs';
 
 export interface DevelopmentReturnDeps {
   emit: (ownerUserId: string, event: string, data: unknown) => void;

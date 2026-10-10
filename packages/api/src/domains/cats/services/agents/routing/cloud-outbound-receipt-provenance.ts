@@ -89,11 +89,18 @@ async function resolveReceiptSource(
     isInternalNonQuotableParent(queued) ||
     queued.userId === 'scheduler' ||
     !canQuoteInPublicReply(queued) ||
-    !targetCatId ||
-    !queued.queueCustody?.bodyExposures?.some(
-      (exposure) => exposure.targetCatId === targetCatId && exposure.invocationId === dispatchInvocationId,
-    )
+    !targetCatId
   )
     return null;
+  const dispatch = queued.lifecycle?.dispatchRefs?.find((ref) => ref.targetId === targetCatId);
+  if (!dispatch) return null;
+  const response = await store.getById(dispatch.statusMessageId);
+  if (
+    response?.lifecycle?.kind !== 'response' ||
+    response.lifecycle.targetId !== targetCatId ||
+    response.lifecycle.producerInvocationId !== dispatchInvocationId
+  ) {
+    return null;
+  }
   return queued;
 }

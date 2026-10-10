@@ -10,6 +10,7 @@ import type { LimbInvocationContext } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { InvocationRecord as CallbackInvocationRecord } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import { messageFrom } from '../domains/cats/services/stores/message-from.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { LimbEmbodimentBindingStore } from '../domains/limb/LimbEmbodimentBindingStore.js';
@@ -82,7 +83,12 @@ async function resolveLimbInvocationContext(
   }
 
   const message = await messageStore.getById(invocation.userMessageId);
-  if (!message || message.catId !== null || message.userId !== record.userId || message.threadId !== record.threadId) {
+  if (
+    !message ||
+    messageFrom(message).kind !== 'user' ||
+    message.userId !== record.userId ||
+    message.threadId !== record.threadId
+  ) {
     return context;
   }
 

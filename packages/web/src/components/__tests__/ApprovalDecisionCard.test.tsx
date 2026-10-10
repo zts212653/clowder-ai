@@ -96,10 +96,7 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
       resolve(process.cwd(), 'src/app/dev/f305-approval-design-gate/candidate-card.tsx'),
       'utf8',
     );
-    const demoContract = readFileSync(
-      resolve(process.cwd(), '../../docs/discussions/2026-08-22-f305-ui-design-gate-closure/demo-contract.md'),
-      'utf8',
-    );
+    // The private design archive is excluded from this public checkout; runtime contracts stay here.
     const workspacePane = readFileSync(resolve(process.cwd(), 'src/components/ApprovalPendingPane.tsx'), 'utf8');
     const mobileDrawer = readFileSync(resolve(process.cwd(), 'src/components/ApprovalHubDrawer.tsx'), 'utf8');
 
@@ -117,7 +114,6 @@ describe('F305 ApprovalDecisionCard presentation contract', () => {
     expect(meetingAdapter).toMatch(/<ApprovalDecisionCard/);
     expect(candidate).toMatch(/<ApprovalDecisionCard/);
     expect(candidate).not.toMatch(/MeetingIntake(?:Summary|Form|RepairActions)/);
-    expect(demoContract).toContain('冻结为设计证据快照');
     expect(workspacePane).toMatch(/<ApprovalItemCard/);
     expect(mobileDrawer).toMatch(/<ApprovalItemCard/);
   });

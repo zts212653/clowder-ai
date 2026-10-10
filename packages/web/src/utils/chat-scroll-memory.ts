@@ -1,4 +1,3 @@
-import { getBubbleIdentityKey } from '@/debug/bubbleIdentity';
 import type { ChatMessage } from '@/stores/chat-types';
 import { getMessageTimelineOrderTime } from '@/stores/message-timeline';
 import type { MessageScrollAnchor } from './scrollToMessage';
@@ -40,8 +39,21 @@ function parseState(raw: string | null): SavedScrollState | undefined {
     messageAnchor: {
       messageId: anchor.messageId,
       viewportOffsetPx: anchor.viewportOffsetPx,
-      ...('bubbleKey' in anchor && typeof anchor.bubbleKey === 'string' && anchor.bubbleKey
-        ? { bubbleKey: anchor.bubbleKey }
+      ...('blockIndex' in anchor &&
+      typeof anchor.blockIndex === 'number' &&
+      Number.isInteger(anchor.blockIndex) &&
+      anchor.blockIndex >= 0 &&
+      'blockFingerprint' in anchor &&
+      typeof anchor.blockFingerprint === 'string' &&
+      anchor.blockFingerprint &&
+      'blockViewportOffsetPx' in anchor &&
+      typeof anchor.blockViewportOffsetPx === 'number' &&
+      Number.isFinite(anchor.blockViewportOffsetPx)
+        ? {
+            blockIndex: anchor.blockIndex,
+            blockFingerprint: anchor.blockFingerprint,
+            blockViewportOffsetPx: anchor.blockViewportOffsetPx,
+          }
         : {}),
       ...('timelineOrderAt' in anchor &&
       typeof anchor.timelineOrderAt === 'number' &&
@@ -58,24 +70,19 @@ export function describeChatReadingAnchor(
 ): MessageScrollAnchor {
   const message = messages.find((message) => message.id === anchor.messageId);
   if (!message) return anchor;
-  const bubbleKey = getBubbleIdentityKey(message);
   return {
     ...anchor,
-    bubbleKey,
     timelineOrderAt: getMessageTimelineOrderTime(message),
   };
 }
 
-/** Resolve only the exact id or a unique identity from the existing bubble owner. */
+/** A reading position belongs to one persisted message; a shared invocation never aliases another record. */
 export function resolveChatReadingAnchor(
   anchor: MessageScrollAnchor,
   messages: readonly ChatMessage[],
 ): MessageScrollAnchor | undefined {
   if (messages.some((message) => message.id === anchor.messageId)) return describeChatReadingAnchor(anchor, messages);
-  if (!anchor.bubbleKey) return undefined;
-  const matches = messages.filter((message) => getBubbleIdentityKey(message) === anchor.bubbleKey);
-  if (matches.length !== 1) return undefined;
-  return describeChatReadingAnchor({ ...anchor, messageId: matches[0].id }, messages);
+  return undefined;
 }
 
 /** After a missing identity is covered, keep its place using the next timeline survivor. */

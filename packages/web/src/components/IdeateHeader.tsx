@@ -1,22 +1,13 @@
-'use client';
-
-import { PawIcon } from './icons/PawIcon';
-
 /**
- * IdeateHeader — 独立观点采样横幅
- * Shown when parallel (ideate) mode is active.
- * Displays above the message area with a gradient background.
+ * A single mode marker for independent sampling. Per-member execution,
+ * cancellation, and usage already have canonical homes in message bubbles and
+ * the composer, so this header must not duplicate them.
  */
 export function IdeateHeader() {
   return (
-    <div className="px-5 py-2.5 bg-gradient-to-r from-opus-bg via-codex-bg to-gemini-bg border-b border-cafe">
-      <div className="flex items-center gap-2">
-        <span className="animate-pulse">
-          <PawIcon className="text-base" />
-        </span>
-        <span className="text-sm font-medium text-cafe-secondary">独立观点采样中</span>
-        <span className="text-xs text-cafe-muted">猫猫们各自独立思考中...</span>
-      </div>
+    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 border-b border-cafe bg-cafe-surface px-5 py-2">
+      <span className="text-sm font-medium text-cafe-secondary">独立观点采样</span>
+      <span className="text-xs text-cafe-muted">本轮各成员独立思考并分别回答，彼此不会互相触发</span>
     </div>
   );
 }

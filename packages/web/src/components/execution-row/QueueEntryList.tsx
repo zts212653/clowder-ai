@@ -5,28 +5,26 @@
  */
 import { closestCenter, DndContext, type DragEndEvent, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { useCatData } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
-import { SortableQueueEntryRow } from '../QueueEntryRow';
+import { useThreadMessages } from '@/hooks/useThreadScopedSelectors';
+import { deliveredTargetIdsFromHistory, SortableQueueEntryRow } from '../QueueEntryRow';
 import type { useQueueActionConvergence } from '../useQueueActionConvergence';
 import type { useQueueCommands } from './useQueueCommands';
 import type { QueueView } from './useQueueView';
 
 interface QueueEntryListProps {
-  view: Pick<
-    QueueView,
-    'visibleEntries' | 'queuePaused' | 'activeInvocationIdByCatId' | 'activeCarrierCapabilityByCatId'
-  >;
+  view: Pick<QueueView, 'threadId' | 'visibleEntries'>;
   commands: ReturnType<typeof useQueueCommands>;
-  convergence: Pick<
-    ReturnType<typeof useQueueActionConvergence>,
-    'handleSteerOpen' | 'handleRetry' | 'handleForceResetOpen' | 'retryingAttemptIds' | 'resettingActionIds'
-  >;
+  convergence: Pick<ReturnType<typeof useQueueActionConvergence>, 'handleSteerOpen'>;
   resolveCatName: (catId: string) => string;
   className: string;
 }
 
 export function QueueEntryList({ view, commands, convergence, resolveCatName, className }: QueueEntryListProps) {
   const coCreator = useCoCreatorConfig();
+  const timelineMessages = useThreadMessages(view.threadId);
+  const { cats } = useCatData();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const entryIds = view.visibleEntries.filter((entry) => entry.status === 'queued').map((entry) => entry.id);
   const onDragEnd = (event: DragEndEvent) => void commands.handleDragEnd(event);
@@ -43,21 +41,17 @@ export function QueueEntryList({ view, commands, convergence, resolveCatName, cl
                 key={entry.id}
                 entry={entry}
                 index={idx}
-                isPaused={view.queuePaused}
                 imageCount={imageCount}
                 ownerName={coCreator.name}
+                ownerAvatar={coCreator.avatar}
+                deliveredTargetIds={
+                  entry.messageId ? deliveredTargetIdsFromHistory(entry.messageId, timelineMessages) : []
+                }
                 resolveCatName={resolveCatName}
+                resolveCatAvatar={(id) => cats.find((cat) => cat.id === id)?.avatar}
                 onRemove={commands.handleRemove}
                 onRecallEdit={commands.handleRecallEdit}
                 onSteer={convergence.handleSteerOpen}
-                onRetry={convergence.handleRetry}
-                onForceReset={convergence.handleForceResetOpen}
-                onRemind={commands.handleRemind}
-                activeInvocationIdByCatId={view.activeInvocationIdByCatId}
-                activeCarrierCapabilityByCatId={view.activeCarrierCapabilityByCatId}
-                remindingTargetKeys={commands.remindingTargetKeys}
-                retryingAttemptIds={convergence.retryingAttemptIds}
-                resettingActionIds={convergence.resettingActionIds}
               />
             );
           })}

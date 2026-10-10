@@ -12,6 +12,7 @@ import { InboundMessageDedup } from '../dist/infrastructure/connectors/InboundMe
 import { FeishuAdapter } from '../dist/infrastructure/connectors/im-connectors/feishu/FeishuAdapter.js';
 import { TelegramAdapter } from '../dist/infrastructure/connectors/im-connectors/telegram/TelegramAdapter.js';
 import { OutboundDeliveryHook } from '../dist/infrastructure/connectors/OutboundDeliveryHook.js';
+import { connectorDeliveryHarness } from './helpers/connector-delivery-harness.js';
 
 function assertFeishuCardContains(content, expectedHeader, expectedBody) {
   const parsed = JSON.parse(content);
@@ -37,17 +38,8 @@ function buildTestHarness() {
   const log = noopLog();
   const bindingStore = new MemoryConnectorThreadBindingStore();
   const dedup = new InboundMessageDedup();
-  const messageStore = {
-    messages: [],
-    async append(input) {
-      const msg = {
-        id: `msg-${this.messages.length + 1}`,
-        ...input,
-      };
-      this.messages.push(msg);
-      return msg;
-    },
-  };
+  const deliveryHarness = connectorDeliveryHarness();
+  const messageStore = deliveryHarness.messageStore;
   let threadCounter = 0;
   const threadStore = {
     create(userId, title) {
@@ -55,12 +47,7 @@ function buildTestHarness() {
       return { id: `thread-${threadCounter}`, createdBy: userId, title };
     },
   };
-  const triggerCalls = [];
-  const invokeTrigger = {
-    trigger(threadId, catId, userId, message, messageId) {
-      triggerCalls.push({ threadId, catId, userId, message, messageId });
-    },
-  };
+  const triggerCalls = deliveryHarness.wakes;
   const broadcasts = [];
   const socketManager = {
     broadcastToRoom(room, event, data) {
@@ -92,12 +79,16 @@ function buildTestHarness() {
     log,
   });
 
+  // Exercise real PersistedQueueDelivery → common send → Message + Queue admission.
+  // The shared Queue resolver, not this connector fixture, selects the default target.
+  const persistedQueueDelivery = deliveryHarness.delivery;
+
   const router = new ConnectorRouter({
     bindingStore,
     dedup,
     messageStore,
+    persistedQueueDelivery,
     threadStore,
-    invokeTrigger,
     socketManager,
     defaultUserId: 'owner-1',
     defaultCatId: 'opus',
@@ -110,6 +101,10 @@ function buildTestHarness() {
     bindingStore,
     messageStore,
     triggerCalls,
+    messages: () =>
+      Array.from({ length: threadCounter }, (_, index) => `thread-${index + 1}`).flatMap((threadId) =>
+        messageStore.getByThreadIncludingQueued(threadId, 100, 'owner-1'),
+      ),
     telegramSent,
     feishuSent,
     broadcasts,
@@ -141,9 +136,9 @@ describe('F088 Gateway Integration', () => {
       assert.ok(result.threadId);
 
       // 3. Verify message posted to store
-      assert.equal(h.messageStore.messages.length, 1);
-      assert.equal(h.messageStore.messages[0].source.connector, 'telegram');
-      assert.equal(h.messageStore.messages[0].content, 'Hello from Telegram!');
+      assert.equal(h.messages().length, 1);
+      assert.equal(h.messages()[0].source.connector, 'telegram');
+      assert.equal(h.messages()[0].content, 'Hello from Telegram!');
 
       // 4. Verify cat invocation triggered
       assert.equal(h.triggerCalls.length, 1);
@@ -189,8 +184,8 @@ describe('F088 Gateway Integration', () => {
       assert.equal(result.kind, 'routed');
 
       // 3. Verify connector source
-      assert.equal(h.messageStore.messages[0].source.connector, 'feishu');
-      assert.equal(h.messageStore.messages[0].source.label, '飞书');
+      assert.equal(h.messages()[0].source.connector, 'feishu');
+      assert.equal(h.messages()[0].source.label, '飞书');
 
       // 4. Outbound delivery
       await h.outboundHook.deliver(result.threadId, '猫猫回复！');
@@ -210,7 +205,7 @@ describe('F088 Gateway Integration', () => {
       assert.equal(r1.kind, 'routed');
       assert.equal(r2.kind, 'skipped');
       assert.equal(h.triggerCalls.length, 1);
-      assert.equal(h.messageStore.messages.length, 1);
+      assert.equal(h.messages().length, 1);
     });
   });
 
@@ -224,7 +219,7 @@ describe('F088 Gateway Integration', () => {
       assert.equal(r1.kind, 'routed');
       assert.equal(r2.kind, 'routed');
       assert.equal(r1.threadId, r2.threadId);
-      assert.equal(h.messageStore.messages.length, 2);
+      assert.equal(h.messages().length, 2);
     });
   });
 
@@ -284,7 +279,7 @@ describe('F088 Gateway Integration', () => {
       assert.equal(h.triggerCalls[0].catId, 'codex');
 
       // 3. Verify mentions stored in message
-      assert.deepEqual(h.messageStore.messages[0].mentions, ['codex']);
+      assert.deepEqual(h.messages()[0].mentions, ['codex']);
 
       // 4. Simulate outbound with codex identity
       await h.outboundHook.deliver(r.threadId, 'LGTM!', 'codex');
@@ -298,7 +293,7 @@ describe('F088 Gateway Integration', () => {
       const r = await h.router.route('feishu', 'fs-chat', '@布偶猫 帮我看看这个', 'fs-mention-1');
       assert.equal(r.kind, 'routed');
       assert.equal(h.triggerCalls[0].catId, 'opus');
-      assert.deepEqual(h.messageStore.messages[0].mentions, ['opus']);
+      assert.deepEqual(h.messages()[0].mentions, ['opus']);
 
       await h.outboundHook.deliver(r.threadId, '好的！', 'opus');
       assertFeishuCardContains(h.feishuSent[0].content, '🐱 布偶猫', '好的！');

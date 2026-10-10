@@ -28,13 +28,7 @@ import type {
   MessageMetadata,
   PreparedProviderRequestV1,
 } from '../../../types.js';
-import {
-  ACP_PROMPT_TIMEOUT_MARGIN_MS,
-  type AcpCapacitySignal,
-  AcpProtocolError,
-  AcpStreamIdleError,
-  AcpTimeoutError,
-} from './AcpClient.js';
+import { type AcpCapacitySignal, AcpProtocolError, AcpStreamIdleError, AcpTimeoutError } from './AcpClient.js';
 import { type AcpLease, type AcpProcessPool, DEFAULT_ACP_IDLE_TTL_MS, type PoolKey } from './AcpProcessPool.js';
 import {
   bindSessionCredentialFile,
@@ -583,13 +577,11 @@ export class AcpAgentService implements AgentService {
       promptStreamStartedAt = Date.now();
       // Prompt digest: length + hash only (snippets gated by AUDIT_LOG_INCLUDE_PROMPT_SNIPPETS)
       const promptDigest = createPromptDigest(effectivePrompt);
-      // #1186: Thread resolved idle TTL to promptStream so the watchdog respects
-      // the member's ACP Idle TTL (or 30m default) instead of hardcoded 90s/180s.
-      // Turn budget (timeoutMs) must exceed idle stall so AcpStreamIdleError fires
-      // first with configuredIdleStallMs. Add 60s margin to avoid timer races.
+      // The pool idle TTL governs warm processes, not an active member turn.
+      // MemberOutputTimeout is the sole no-output deadline for this invocation.
       const promptStreamOpts = {
-        idleStallMs: this.idleTtlMs,
-        timeoutMs: this.idleTtlMs + ACP_PROMPT_TIMEOUT_MARGIN_MS,
+        idleStallMs: 0,
+        timeoutMs: 0,
       };
       // Busy-retry phase tracking: attempts re-mark the prompt active; the
       // backoff window downgrades to busy_backoff so abort cannot cancel/seal
@@ -945,6 +937,7 @@ function makeCapacityWarning(
     catId,
     content: JSON.stringify({
       type: 'warning',
+      presentation: 'transient_status',
       message: `${providerName} 服务端容量不足，正在重试 (${signal.message.slice(0, 100)})`,
     }),
     metadata,

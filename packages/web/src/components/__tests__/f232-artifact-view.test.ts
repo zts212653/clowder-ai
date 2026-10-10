@@ -159,7 +159,7 @@ describe('F232 polish: artifactActionLabel — 类型化按钮文案', () => {
 
 describe('F232 AC-A7 prRefToUrl — PR ref → GitHub url', () => {
   it('org/repo#123 → github pull url', () => {
-    expect(prRefToUrl('zts212653/cat-cafe#2247')).toBe('https://github.com/zts212653/clowder-ai/pull/2247');
+    expect(prRefToUrl('zts212653/clowder-ai#2247')).toBe('https://github.com/zts212653/clowder-ai/pull/2247');
   });
 
   it('malformed ref → undefined', () => {

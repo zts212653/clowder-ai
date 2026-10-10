@@ -14,7 +14,7 @@ import {
   realDeps,
   realPresenceSource,
   runningManagedCommandTask,
-  startRunningRecordWithDraft,
+  startHeldRunningRecord,
 } from './helpers/f297-presence-fixtures.js';
 
 describe('F297 terminal presence semantics (C10 lifecycle witness)', () => {
@@ -124,7 +124,7 @@ describe('F297 terminal presence semantics (C10 lifecycle witness)', () => {
       status: 'succeeded',
       successfulCatIds: ['opus5'],
     });
-    await startRunningRecordWithDraft(deps, {
+    await startHeldRunningRecord(deps, {
       threadId: 'thread_running_again',
       userId: 'alice',
       catId: 'codex-sol',

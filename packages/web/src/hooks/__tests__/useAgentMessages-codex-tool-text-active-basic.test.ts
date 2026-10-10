@@ -1,17 +1,21 @@
-import { describe, expect, it } from 'vitest';
-import { deriveBubbleId } from '@/debug/bubbleIdentity';
-import { getActiveBubble } from '@/hooks/thread-runtime-ledger';
-import { getThreadRuntimeLedger } from '@/hooks/thread-runtime-singleton';
+import { describe, expect, it, vi } from 'vitest';
+import { selectThreadMessages } from '@/hooks/useThreadScopedSelectors';
 import { useChatStore } from '@/stores/chatStore';
-import { flatCodexStreamBubbles, installActiveHarness } from './useAgentMessages-codex-tool-text-convergence.helpers';
+import {
+  flatCodexStreamBubbles,
+  installActiveHarness,
+  seedProcessingResponse,
+} from './useAgentMessages-codex-tool-text-convergence.helpers';
 
 const THREAD = 'thread-1';
+const RESPONSE = 'resp-1';
 
 function tool(parent: string, ts: number, turn?: string) {
   return {
     type: 'tool_use' as const,
     catId: 'codex' as const,
     threadId: THREAD,
+    messageId: RESPONSE,
     toolName: 'shell',
     toolInput: { command: 'rg --files' },
     invocationId: parent,
@@ -25,6 +29,7 @@ function text(parent: string, content: string, ts: number, turn?: string) {
     type: 'text' as const,
     catId: 'codex' as const,
     threadId: THREAD,
+    messageId: RESPONSE,
     content,
     origin: 'stream' as const,
     invocationId: parent,
@@ -33,22 +38,10 @@ function text(parent: string, content: string, ts: number, turn?: string) {
   };
 }
 
-function invocationCreated(parent: string, turn: string, ts = 1050) {
-  return {
-    type: 'system_info' as const,
-    catId: 'codex' as const,
-    threadId: THREAD,
-    content: JSON.stringify({ type: 'invocation_created', catId: 'codex', invocationId: turn }),
-    invocationId: parent,
-    turnInvocationId: turn,
-    timestamp: ts,
-  };
-}
-
-describe('Codex active path — tool work-log + text converge', () => {
+describe('Codex active path — tool work-log + text land in the named response', () => {
   const harness = installActiveHarness();
 
-  it('attaches a suppressed child event to the live root bubble without mixing child prose into root text', () => {
+  it('attaches a suppressed child event to the root response without mixing child prose into root text', () => {
     const parent = 'parent-subexecution-active';
     const turn = 'turn-subexecution-active';
     const childEvent = {
@@ -70,11 +63,15 @@ describe('Codex active path — tool work-log + text converge', () => {
       messagePhase: 'final_answer' as const,
     };
 
+    // Child-execution metadata describes the response; it never creates it, so R is present
+    // as its lifecycle snapshot publishes it at dispatch.
+    seedProcessingResponse(THREAD, RESPONSE, 'codex', turn);
     harness.render();
     harness.send({
       type: 'system_info',
       catId: 'codex',
       threadId: THREAD,
+      messageId: RESPONSE,
       invocationId: parent,
       turnInvocationId: turn,
       timestamp: 1010,
@@ -87,36 +84,17 @@ describe('Codex active path — tool work-log + text converge', () => {
     });
     harness.send(text(parent, 'root final survives', 1020, turn));
 
-    const rootBubble = flatCodexStreamBubbles()[0];
-    expect(rootBubble?.content).toBe('root final survives');
-    expect(rootBubble?.metadata?.subexecutionEvents).toEqual([childEvent]);
+    const rootResponse = useChatStore.getState().messages.find((message) => message.id === RESPONSE);
+    expect(rootResponse?.content).toBe('root final survives');
+    expect(rootResponse?.metadata?.subexecutionEvents).toEqual([childEvent]);
     expect(useChatStore.getState().messages.some((message) => message.content.includes('Approve from child'))).toBe(
       false,
     );
   });
 
-  it('[real shape] tool_use + text both carrying turn id stay ONE stream bubble', () => {
-    const PARENT = 'parent-inv-a2a';
-    const TURN = 'turn-inv-codex';
-
-    useChatStore.setState({
-      catInvocations: { codex: { invocationId: PARENT, turnInvocationId: TURN } },
-    });
-
-    harness.render();
-    harness.send(tool(PARENT, 1000, TURN));
-    harness.send(text(PARENT, '我来查，不靠记忆猜。', 1100, TURN));
-
-    const streamBubbles = flatCodexStreamBubbles();
-    expect(streamBubbles).toHaveLength(1);
-    expect(streamBubbles[0]!.content).toContain('我来查');
-    expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
-  });
-
   it('keeps a file_change tool card when its semantic diff augments the native carrier', () => {
     const parent = 'parent-file-change';
     const turn = 'turn-file-change';
-    useChatStore.setState({ catInvocations: { codex: { invocationId: parent, turnInvocationId: turn } } });
     harness.render();
     harness.send({
       ...tool(parent, 1000, turn),
@@ -133,105 +111,39 @@ describe('Codex active path — tool work-log + text converge', () => {
     });
 
     const streamBubbles = flatCodexStreamBubbles();
-    expect(streamBubbles).toHaveLength(1);
+    expect(streamBubbles.map((message) => message.id)).toEqual([RESPONSE]);
     expect(streamBubbles[0]?.toolEvents?.some((event) => event.label.includes('file_change'))).toBe(true);
     expect(useChatStore.getState().messages.some((message) => message.id === 'semantic:diff-active-1')).toBe(false);
   });
 
-  it('[multi-round-trip] two tool+text round-trips on one turn stay ONE stream bubble', () => {
-    const PARENT = 'parent-inv-a2a';
-    const TURN = 'turn-inv-codex';
+  it('moves a processing response behind later messages when a tool event proves new activity', () => {
+    const parent = 'parent-live-order';
+    const turn = 'turn-live-order';
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      harness.render();
+      harness.send(tool(parent, 1_000, turn));
+      expect(flatCodexStreamBubbles().map((message) => message.id)).toEqual([RESPONSE]);
 
-    useChatStore.setState({
-      catInvocations: { codex: { invocationId: PARENT, turnInvocationId: TURN } },
-    });
+      useChatStore.getState().addMessage({
+        id: 'user-after-first-tool',
+        type: 'user',
+        content: 'new context',
+        timestamp: 2_000,
+      });
+      expect(selectThreadMessages(useChatStore.getState(), THREAD).at(-1)?.id).toBe('user-after-first-tool');
 
-    harness.render();
-    harness.send(tool(PARENT, 1000, TURN));
-    harness.send(text(PARENT, '先看一下。', 1050, TURN));
-    harness.send({
-      ...tool(PARENT, 1100, TURN),
-      toolInput: { command: 'cat foo' },
-    });
-    harness.send(text(PARENT, '结论是这样的，详细说明……', 1150, TURN));
+      vi.setSystemTime(3_000);
+      harness.send(tool(parent, 3_000, turn));
 
-    const streamBubbles = flatCodexStreamBubbles();
-    expect(streamBubbles).toHaveLength(1);
-    expect(streamBubbles[0]!.content).toContain('先看一下');
-    expect(streamBubbles[0]!.content).toContain('结论是这样的');
-  });
-
-  it('[race] tool_use before turn id resolvable + later text(turn) converge to ONE bubble', () => {
-    const PARENT = 'parent-inv-a2a';
-    const TURN = 'turn-inv-codex';
-
-    harness.render();
-    harness.send(tool(PARENT, 1000));
-    harness.send(invocationCreated(PARENT, TURN));
-    harness.send(text(PARENT, '我来查，不靠记忆猜。', 1100, TURN));
-
-    const streamBubbles = flatCodexStreamBubbles();
-    expect(streamBubbles).toHaveLength(1);
-    expect(streamBubbles[0]!.content).toContain('我来查');
-    expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
-  });
-
-  it('[race + immediate usage] writes usage to the turn-rebound work-log bubble', () => {
-    const PARENT = 'parent-inv-a2a';
-    const TURN = 'turn-current-usage';
-
-    harness.render();
-    harness.send(tool(PARENT, 1000));
-    harness.send(invocationCreated(PARENT, TURN));
-
-    expect(getActiveBubble(getThreadRuntimeLedger(), THREAD, 'codex')).toMatchObject({
-      messageId: deriveBubbleId(TURN, 'codex', () => 'unused'),
-      invocationId: PARENT,
-      seedSource: 'bound',
-    });
-
-    harness.send({
-      type: 'system_info' as const,
-      catId: 'codex' as const,
-      threadId: THREAD,
-      content: JSON.stringify({
-        type: 'invocation_usage',
-        usage: { inputTokens: 123, outputTokens: 7, cacheReadTokens: 99 },
-        model: 'gpt-5.5',
-        provider: 'openai',
-      }),
-      invocationId: PARENT,
-      turnInvocationId: TURN,
-      timestamp: 1060,
-    });
-
-    const currentTurn = useChatStore
-      .getState()
-      .messages.find((m) => m.type === 'assistant' && m.extra?.stream?.turnInvocationId === TURN);
-
-    expect(currentTurn).toBeDefined();
-    expect(currentTurn!.metadata).toMatchObject({
-      model: 'gpt-5.5',
-      provider: 'openai',
-      usage: { inputTokens: 123, outputTokens: 7, cacheReadTokens: 99 },
-    });
-  });
-
-  it('[text-first race] text-created parent-only seed stays fresh for later tool events', () => {
-    const PARENT = 'parent-text-first';
-    const TURN = 'turn-text-first';
-
-    harness.render();
-    harness.send(text(PARENT, '先说一句。', 1000));
-    harness.send(tool(PARENT, 1010));
-    harness.send(invocationCreated(PARENT, TURN));
-    harness.send(text(PARENT, '继续补充。', 1100, TURN));
-
-    const streamBubbles = flatCodexStreamBubbles();
-    expect(streamBubbles).toHaveLength(1);
-    expect(streamBubbles[0]!.content).toContain('先说一句');
-    expect(streamBubbles[0]!.content).toContain('继续补充');
-    expect(streamBubbles[0]!.toolEvents?.length ?? 0).toBeGreaterThan(0);
-    expect(streamBubbles[0]!.extra?.stream?.turnInvocationId).toBe(TURN);
+      expect(selectThreadMessages(useChatStore.getState(), THREAD).at(-1)).toMatchObject({
+        id: RESPONSE,
+        timestamp: 3_000,
+        timelineOrderAt: 3_000,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

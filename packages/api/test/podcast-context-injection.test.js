@@ -18,82 +18,32 @@ const VALID_PODCAST_JSON = JSON.stringify({
   totalDuration: 20,
 });
 
-/** Build instrumented fake deps that capture the prompt sent to routeExecution. */
+/** Build instrumented fake deps that capture the private Queue prompt. */
 function buildCapturingDeps(callLog) {
+  let completionHook;
   return {
-    messageStore: {
-      append(msg) {
-        callLog.push({ op: 'append', content: msg.content, threadId: msg.threadId });
-        return { id: 'msg-001', ...msg };
+    invocationQueue: {
+      async enqueueDurable(input) {
+        callLog.push({ op: 'enqueue', content: input.content, input });
+        return { outcome: 'enqueued', entry: { id: 'entry-context', status: 'queued' } };
       },
-      getByThread(threadId, limit) {
-        callLog.push({ op: 'getByThread', threadId, limit });
-        // Return simulated study thread messages
-        return [
-          {
-            id: 'msg-study-1',
-            threadId,
-            userId: 'user-1',
-            catId: null,
-            content: '我觉得这篇文章的核心观点是分布式系统中的 CAP 定理权衡',
-            mentions: [],
-            timestamp: 1000,
-          },
-          {
-            id: 'msg-study-2',
-            threadId,
-            userId: 'user-1',
-            catId: 'opus',
-            content: '确实，作者特别强调了在实际生产中，可用性通常比一致性更重要',
-            mentions: [],
-            timestamp: 2000,
-          },
-          {
-            id: 'msg-study-3',
-            threadId,
-            userId: 'user-1',
-            catId: null,
-            content: '但是金融场景下一致性不能妥协',
-            mentions: [],
-            timestamp: 3000,
-          },
-        ];
+      getEntrySnapshot() {
+        return null;
+      },
+      removeEntrySnapshotIfUnchanged() {
+        return false;
       },
     },
-    router: {
-      async *routeExecution(_userId, message, _threadId, _userMessageId, _targetCats, _intent, _options) {
-        callLog.push({
-          op: 'routeExecution',
-          promptReceived: message,
-        });
-        yield { type: 'text', content: VALID_PODCAST_JSON };
+    queueProcessor: {
+      registerEntryCompleteHook(_entryId, hook) {
+        completionHook = hook;
       },
-    },
-    invocationRecordStore: {
-      create(_input) {
-        callLog.push({ op: 'create' });
-        return { outcome: 'created', invocationId: 'inv-001' };
+      unregisterEntryCompleteHook() {
+        completionHook = undefined;
       },
-      update(_id, patch) {
-        callLog.push({ op: 'update', ...patch });
-        return {};
+      async requestDrain() {
+        completionHook?.('entry-context', 'succeeded', VALID_PODCAST_JSON);
       },
-    },
-    invocationTracker: {
-      acquireExecutionAdmission() {
-        return { release() {} };
-      },
-      start() {
-        return new AbortController();
-      },
-      startAll() {
-        return new AbortController();
-      },
-      tryStartThreadAll() {
-        return new AbortController();
-      },
-      complete() {},
-      completeAll() {},
     },
   };
 }
@@ -116,9 +66,11 @@ describe('F091 Phase 8: threadContext injection into podcast prompt', () => {
 
     await generateScriptViaThread(request, 'thread-ctx', deps);
 
-    const appendCall = callLog.find((c) => c.op === 'append');
-    assert.ok(appendCall, 'must append prompt message');
-    const prompt = appendCall.content;
+    const enqueueCall = callLog.find((c) => c.op === 'enqueue');
+    assert.ok(enqueueCall, 'must enqueue the private prompt');
+    assert.equal(enqueueCall.input.kind, 'private_input');
+    assert.deepEqual(enqueueCall.input.from, { kind: 'system', service: 'podcast-generator' });
+    const prompt = enqueueCall.content;
 
     // threadContext must appear in the prompt
     assert.ok(prompt.includes('CAP 定理在金融场景下的特殊需求'), 'prompt must include threadContext content');

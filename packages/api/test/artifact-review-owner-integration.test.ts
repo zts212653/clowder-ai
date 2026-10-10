@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -27,7 +27,7 @@ async function setup(t: { after: (fn: () => Promise<void>) => void }) {
   const { principal: _principal, ...prepare } = f.prepare;
   t.after(async () => {
     store.close();
-    await rm(root, { recursive: true, force: true });
+    console.info('Retained artifact-review owner SQLite fixture:', root);
   });
   const view = await reviews.prepare(prepare, reviewHuman);
   return { ...f, root, store, reviews, producer, view };

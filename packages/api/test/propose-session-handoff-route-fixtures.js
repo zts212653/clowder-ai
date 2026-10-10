@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import { adaptMessageStore, canonicalTestMessageInput } from './helpers/message-from-fixtures.js';
 
 export const ACTIVE = {
   id: 'sess_active',
@@ -10,7 +11,7 @@ export const ACTIVE = {
 
 export async function createMessageStore() {
   const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
-  return new MessageStore();
+  return adaptMessageStore(new MessageStore());
 }
 
 export async function createHandoffStore() {
@@ -62,14 +63,16 @@ export async function buildCtx({ messageStoreOverride, sessionChainStoreOverride
     const key = payload.clientRequestId ? `${userId}:${catId}:${threadId}:${payload.clientRequestId}` : undefined;
     let origin = key ? originByRequest.get(key) : undefined;
     if (!origin) {
-      origin = await messageStore.append({
-        userId,
-        catId: null,
-        content: 'Please hand off this session',
-        mentions: [],
-        timestamp: Date.now(),
-        threadId,
-      });
+      origin = await messageStore.append(
+        canonicalTestMessageInput({
+          userId,
+          catId: null,
+          content: 'Please hand off this session',
+          mentions: [],
+          timestamp: Date.now(),
+          threadId,
+        }),
+      );
       if (key) originByRequest.set(key, origin);
     }
     const { invocationId, callbackToken } = await registry.create(userId, catId, threadId, undefined, origin.id);

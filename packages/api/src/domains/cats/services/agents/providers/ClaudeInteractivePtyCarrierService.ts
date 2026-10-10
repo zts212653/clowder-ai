@@ -10,7 +10,7 @@
  *   - Hook sidechannel: Stop/PostToolUse hooks write structured JSON to sidecar jsonl
  *   - TranscriptTailer reads sidecar (not transcript) for output events
  *   - hookEntriesToAgentMessages transforms hook events to AgentMessages
- *   - Terminal state: Stop hook event + silence fallback
+ *   - Terminal state: Stop hook event only; invocation owner handles no-output timeout
  *   - Cancel: options.signal → driver.cancel() (ESC) → drain → driver.dispose()
  *   - Usage: degraded (hooks carry no token data)
  *
@@ -72,8 +72,6 @@ export interface ClaudeInteractivePtyCarrierServiceOptions {
   catId?: CatId;
   /** Test seam: polling interval for TranscriptTailer (ms). Default 500. */
   pollIntervalMs?: number;
-  /** Test seam: terminal timeout (silence fallback, ms). Default 5 min. */
-  terminalTimeoutMs?: number;
   /** Test seam: working directory for PtyDriver (default to resolved cwd). */
   cwd?: string;
   /** Test seam: inject a custom PtyDriver factory. Default creates real PtyDriver. */
@@ -102,7 +100,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: used via `const { model } = this` destructuring in invoke()
   private readonly model: string;
   private readonly pollIntervalMs: number;
-  private readonly terminalTimeoutMs: number;
   private readonly cwd: string;
   private readonly driverFactory: (opts: PtyDriverOptions) => PtyDriver;
   private readonly transcriptDirOverride: string | undefined;
@@ -116,7 +113,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
     this.catId = options?.catId ?? createCatId('opus');
     this.model = getCatModel(this.catId) ?? 'claude-opus-4-8';
     this.pollIntervalMs = options?.pollIntervalMs ?? 500;
-    this.terminalTimeoutMs = options?.terminalTimeoutMs ?? 5 * 60 * 1_000; // 5 min
     this.cwd = options?.cwd ?? process.cwd();
     this.driverFactory = options?.driverFactory ?? ((opts) => new PtyDriver(opts));
     this.transcriptDirOverride = options?.transcriptDirOverride;
@@ -160,7 +156,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
    */
   // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: async generator with cancellation, multiple error paths, and inline polling loop — extracting would worsen readability
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
-    const { catId, model, pollIntervalMs, terminalTimeoutMs } = this;
+    const { catId, model, pollIntervalMs } = this;
     const readOnly = options?.toolExecutionPolicy?.mode === 'read_only';
 
     // ─── Env construction (F230 D3 + KD-7: reuse buildClaudeEnvOverrides) ─────
@@ -384,7 +380,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
       // ─── Tail hook sidecar (F230 B-hook: replaces transcript tailing) ─────────
       // Sidecar is always fresh per invocation (created empty by setupHookInfrastructure).
       const tailer = new TranscriptTailer(sidecarPath, 0);
-      let lastActivityMs = Date.now();
       let terminal = false;
       let hookSessionId: string | undefined;
       let hookEntrypoint: string | undefined;
@@ -411,8 +406,6 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
           entries = await tailer.readNew({ includeTrailingPartial: true });
         }
         if (entries.length > 0) {
-          lastActivityMs = Date.now();
-
           // Extract hook session_id and propagate to session_init (R2 P1-3)
           if (!hookSessionId) {
             hookSessionId = extractSessionIdFromHookEntries(entries);
@@ -450,12 +443,7 @@ export class ClaudeInteractivePtyCarrierService implements AgentService {
         if (evalTailer) await ingestEvalEntries(evalTailer);
 
         if (entries.length === 0) {
-          if (Date.now() - lastActivityMs > terminalTimeoutMs) {
-            log.warn({ catId, sessionId, terminalTimeoutMs }, 'hook sidecar silence timeout, treating as done');
-            terminal = true;
-          } else {
-            await sleep(pollIntervalMs);
-          }
+          await sleep(pollIntervalMs);
         }
       }
 

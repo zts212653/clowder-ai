@@ -2,11 +2,7 @@ import { type RoutingPreflightDecisionV1, routingPreflightDecisionV1Schema } fro
 import { z } from 'zod';
 import type { RoutingSignalEventAppendResult } from './RoutingSignalEventStore.js';
 
-export type RoutingDispatchFailureClass =
-  | 'quota_exhausted'
-  | 'authentication_rejected'
-  | 'provider_unreachable'
-  | 'provider_timeout';
+export type RoutingDispatchFailureClass = 'quota_exhausted' | 'authentication_rejected' | 'provider_unreachable';
 
 export interface RoutingDispatchFailureEvidence {
   cliReasonCode?: string;
@@ -34,12 +30,7 @@ export interface RoutingDispatchTerminalObserver {
 const boundedId = z.string().trim().min(1).max(200);
 const ownerId = z.string().trim().min(1).max(120);
 const boundedRef = z.string().trim().min(1).max(500);
-const failureClassSchema = z.enum([
-  'quota_exhausted',
-  'authentication_rejected',
-  'provider_unreachable',
-  'provider_timeout',
-]);
+const failureClassSchema = z.enum(['quota_exhausted', 'authentication_rejected', 'provider_unreachable']);
 
 export const routingDispatchTerminalEvidenceSchema = z
   .object({
@@ -101,8 +92,6 @@ const CLI_FAILURE_CLASSES: Readonly<Record<string, RoutingDispatchFailureClass>>
   quota_exceeded: 'quota_exhausted',
   auth_failed: 'authentication_rejected',
   network_error: 'provider_unreachable',
-  cli_response_timeout: 'provider_timeout',
-  cli_stall_timeout: 'provider_timeout',
 };
 
 const PROVIDER_FAILURE_CLASSES: Readonly<Record<string, RoutingDispatchFailureClass>> = {
@@ -113,13 +102,6 @@ const PROVIDER_FAILURE_CLASSES: Readonly<Record<string, RoutingDispatchFailureCl
   network_error: 'provider_unreachable',
   provider_unreachable: 'provider_unreachable',
   runtime_disconnected: 'provider_unreachable',
-  stream_idle_stall: 'provider_timeout',
-  turn_budget_exceeded: 'provider_timeout',
-  provider_timeout: 'provider_timeout',
-};
-
-const TERMINAL_FAILURE_CLASSES: Readonly<Record<string, RoutingDispatchFailureClass>> = {
-  invocation_timeout: 'provider_timeout',
 };
 
 export function classifyRoutingDispatchFailure(
@@ -133,6 +115,7 @@ export function classifyRoutingDispatchFailure(
     const classified = PROVIDER_FAILURE_CLASSES[evidence.providerErrorCode];
     if (classified) return classified;
   }
-  if (evidence.terminalReason) return TERMINAL_FAILURE_CLASSES[evidence.terminalReason];
+  // Execution/output deadlines describe this invocation, not provider or member
+  // availability. Its durable failed response and predecessor return own recovery.
   return undefined;
 }

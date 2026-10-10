@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { clearAuthTestNamespace, createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
+import { createAuthTestNamespace } from './helpers/redis-auth-namespace.js';
 import { assertRedisIsolationOrThrow, redisIsolationSkipReason } from './helpers/redis-test-helpers.js';
 
 const backends = [
@@ -43,11 +43,8 @@ if (!redisIsolationSkipReason(_redisUrl)) {
       return {
         backend: new RedisAuthInvocationBackend(redis),
         cleanup: async () => {
-          try {
-            await clearAuthTestNamespace(redis, namespace);
-          } finally {
-            await redis.quit();
-          }
+          console.info(`Retained auth contract namespace: ${namespace}`);
+          await redis.quit();
         },
       };
     },

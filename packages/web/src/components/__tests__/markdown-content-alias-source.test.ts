@@ -17,6 +17,7 @@ describe('MarkdownContent alias source', () => {
         mentionPatterns: ['@opus', '@布偶猫', '@测试布偶别名'],
         color: { primary: '#9B7EBD', secondary: '#C8B6E2' },
         clientId: 'anthropic',
+        carrier: 'cli',
         defaultModel: 'test-model',
         avatar: '',
         roleDescription: '',

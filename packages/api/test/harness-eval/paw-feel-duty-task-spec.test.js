@@ -202,10 +202,8 @@ describe('F278 paw-feel duty task', () => {
         delivered.push(input);
         return 'notice-message-1';
       },
-      invokeTrigger: {
-        async trigger(...args) {
-          invoked.push(args);
-        },
+      async deliverPrivate(input) {
+        invoked.push(input);
       },
     });
 
@@ -218,15 +216,16 @@ describe('F278 paw-feel duty task', () => {
     assert.match(delivered[0].content, /预算将尽.*结构化续跑.*下一轮 cron/);
     assert.doesNotMatch(delivered[0].content, /owner\/task\/lease\/proposal blocker/);
     assert.equal((delivered[0].content.match(/- message-1/g) ?? []).length, 1);
+    // RFC §5.4: the duty instruction is the target's exact input, admitted as a private sibling.
     assert.equal(invoked.length, 1);
-    assert.equal(invoked[0][0], 'thread_eval_friction');
-    assert.equal(invoked[0][1], 'codex-sol');
-    assert.match(invoked[0][3], /1 review bundle\(s\) \/ 2 raw signal\(s\)/i);
-    assert.match(invoked[0][3], /10\/20\/50-item slices are execution limits, not a terminal condition/i);
-    assert.match(invoked[0][3], /real task \+ named owner \+ active F167 lease/i);
-    assert.match(invoked[0][3], /durable proposal awaiting operator approval/i);
-    assert.match(invoked[0][3], /signature-waiting must continue.*independent signature or blocker/i);
-    assert.match(invoked[0][3], /structured continuation instead of waiting for the next duty cron/i);
+    assert.equal(invoked[0].threadId, 'thread_eval_friction');
+    assert.equal(invoked[0].targetCatId, 'codex-sol');
+    assert.match(invoked[0].content, /1 review bundle\(s\) \/ 2 raw signal\(s\)/i);
+    assert.match(invoked[0].content, /10\/20\/50-item slices are execution limits, not a terminal condition/i);
+    assert.match(invoked[0].content, /real task \+ named owner \+ active F167 lease/i);
+    assert.match(invoked[0].content, /durable proposal awaiting operator approval/i);
+    assert.match(invoked[0].content, /signature-waiting must continue.*independent signature or blocker/i);
+    assert.match(invoked[0].content, /structured continuation instead of waiting for the next duty cron/i);
     assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
 
     const retryGate = await fixture.task.admission.gate({ taskId: fixture.task.id, lastRunAt: 1, tickCount: 2 });
@@ -238,10 +237,8 @@ describe('F278 paw-feel duty task', () => {
       async deliver() {
         assert.fail('awaiting receipt recovery must reuse the durable notice');
       },
-      invokeTrigger: {
-        async trigger(...args) {
-          invoked.push(args);
-        },
+      async deliverPrivate(input) {
+        invoked.push(input);
       },
     });
     assert.equal(invoked.length, 2);
@@ -264,10 +261,8 @@ describe('F278 paw-feel duty task', () => {
         delivered.push(input);
         return 'notice-message-1';
       },
-      invokeTrigger: {
-        async trigger() {
-          assert.fail('missing duty must not guess an invocation target');
-        },
+      async deliverPrivate() {
+        assert.fail('missing duty must not guess an invocation target');
       },
     });
 
@@ -297,14 +292,12 @@ describe('F278 paw-feel duty task', () => {
       async deliver() {
         assert.fail('duty configuration must reuse the durable red notice');
       },
-      invokeTrigger: {
-        async trigger(...args) {
-          invoked.push(args);
-        },
+      async deliverPrivate(input) {
+        invoked.push(input);
       },
     });
     assert.equal(invoked.length, 1);
-    assert.equal(invoked[0][1], 'codex-sol');
+    assert.equal(invoked[0].targetCatId, 'codex-sol');
     assert.equal(fixture.watermarkStore.current.status, 'awaiting_receipt');
   });
 
@@ -319,10 +312,8 @@ describe('F278 paw-feel duty task', () => {
           deliveries += 1;
           return 'notice-message-1';
         },
-        invokeTrigger: {
-          async trigger() {
-            throw new Error('wake unavailable');
-          },
+        async deliverPrivate() {
+          throw new Error('wake unavailable');
         },
       }),
       /wake unavailable/,
@@ -338,7 +329,7 @@ describe('F278 paw-feel duty task', () => {
         deliveries += 1;
         return 'duplicate';
       },
-      invokeTrigger: { async trigger() {} },
+      async deliverPrivate() {},
     });
 
     assert.equal(deliveries, 1);
@@ -363,10 +354,8 @@ describe('F278 paw-feel duty task', () => {
         async deliver() {
           return 'notice-message-1';
         },
-        invokeTrigger: {
-          async trigger() {
-            throw new Error('usage limit');
-          },
+        async deliverPrivate() {
+          throw new Error('usage limit');
         },
       }),
       /usage limit/,

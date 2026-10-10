@@ -12,6 +12,7 @@ import { F232PreparedArtifactReader } from '../dist/domains/growing/F232Prepared
 import { CollectiveCurrentContext } from '../dist/domains/plugin/builtin-runtime/collective-current-context.js';
 import { CollectiveWorkAuthority } from '../dist/domains/plugin/builtin-runtime/collective-work-authority.js';
 import { CollectiveWorkDispatcher } from '../dist/domains/plugin/builtin-runtime/collective-work-dispatcher.js';
+import { adaptMessageStore } from './helpers/message-from-fixtures.js';
 
 catRegistry.register('codex-astra', {
   ...catRegistry.tryGet('codex-sol').config,
@@ -21,7 +22,7 @@ catRegistry.register('codex-astra', {
 });
 
 function fixture() {
-  const messages = new MessageStore();
+  const messages = adaptMessageStore(new MessageStore());
   const tasks = new TaskStore();
   const operations = new Map();
   const source = {
@@ -225,7 +226,7 @@ async function privateAuth(f, result, revision = result.revision, resultRevision
   const trigger = f.messages.append({
     userId: 'owner',
     threadId: 'private',
-    catId: null,
+    from: { kind: 'system', service: 'collective-work' },
     content: 'Resume current Work',
     mentions: [],
     timestamp: Date.now(),
@@ -386,30 +387,27 @@ test('admission response loss and Host restart recover one durable execution ins
   const f = fixture();
   const result = await admit(f);
   const task = f.tasks.get(result.subjectRef.slice(10));
-  let starts = 0;
+  const workSources = () =>
+    f.messages.getByThreadIncludingQueued(task.threadId).filter((message) => message.extra?.collectiveWorkInvocationV1)
+      .length;
   const restart = () =>
     new CollectiveWorkDispatcher({
       context: f.restart,
       messageStore: f.messages,
       threadStore: { get: () => ({ createdBy: 'owner', participants: ['codex-astra'] }) },
       invocationQueue: new InvocationQueue(),
-      queueProcessor: {
-        async processNext() {
-          starts++;
-        },
-      },
     });
   const first = await restart().dispatch(task, 'owner', result.revision, { kind: 'admission' });
   f.messages.getById(first.messageId).deliveryStatus = 'delivered';
   const replay = await restart().dispatch(task, 'owner', result.revision, { kind: 'admission' });
   assert.equal(replay.messageId, first.messageId);
-  assert.equal(starts, 1);
+  assert.equal(workSources(), 1);
   // An explicit owner retry has its own stable request, and retrying that request is also durable.
   const resume = { kind: 'resume', requestId: randomUUID() };
   const next = await restart().dispatch(task, 'owner', result.revision, resume);
   assert.notEqual(next.messageId, first.messageId);
   await restart().dispatch(task, 'owner', result.revision, resume);
-  assert.equal(starts, 2);
+  assert.equal(workSources(), 2);
 });
 
 test('Work revision and restart re-sign refs while preserving the same result operation and original author', async () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -67,7 +67,7 @@ test('durable F195 transcript reaches only the explicitly shared private Live us
     detach: (grant) => sessions.detach(grant),
     isAttached: (grant) => sessions.isAttached(grant),
   });
-  sessions.claim(call.id, 'owner', 'home', [catId]);
+  await sessions.claim(call.id, 'owner', 'home', [catId]);
   await call.configure({
     CAT_CAFE_API_URL: 'http://localhost:3012',
     CAT_CAFE_USER_ID: 'owner',
@@ -162,6 +162,6 @@ test('durable F195 transcript reaches only the explicitly shared private Live us
     assert.equal(privateWrites.length, 1, 'late source data cannot enter a revoked Live call');
   } finally {
     await sessions.close();
-    await rm(root, { recursive: true, force: true });
+    console.info(`Retained synthetic meeting transcript: ${root}`);
   }
 });
