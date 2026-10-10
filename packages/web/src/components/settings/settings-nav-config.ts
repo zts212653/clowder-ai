@@ -12,7 +12,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: '成员与运行时',
     icon: 'users',
     color: 'var(--color-opus-primary)',
-    description: '成员名册、runtime 结构配置，以及只读路由账本。',
+    description: '选择猫猫伙伴，设置使用的工具、模型和职责。',
   },
   {
     id: 'profiles',
@@ -26,7 +26,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     label: '账户与密钥',
     icon: 'key',
     color: 'var(--color-opus-primary)',
-    description: '模型账户、凭据和执行身份的归属关系。',
+    description: '管理工具使用的账户和服务连接。',
   },
   {
     id: 'im',

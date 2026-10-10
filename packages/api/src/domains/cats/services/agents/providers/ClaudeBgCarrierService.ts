@@ -372,7 +372,7 @@ export class ClaudeBgCarrierService implements AgentService {
       // before detaching worker daemon). Remove prompt positional from argv;
       // stream content via stdin (set up below).
       const args = useEnvModelOverride ? ['--bg'] : ['--bg', '--model', effectiveModel];
-      args.push('--effort', effortLevel);
+      if (effortLevel) args.push('--effort', effortLevel);
       // F203 Phase C: native system role from compiled L0 file (above).
       args.push('--system-prompt-file', l0Path);
 

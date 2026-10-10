@@ -85,3 +85,8 @@ export function getAcpWarning(client: string, acpEnabled: boolean): string | nul
   }
   return null;
 }
+
+/** Escape the editor tokenizer syntax so persisted argv round-trips unchanged. */
+export function serializeCommandArgs(args: readonly string[]): string {
+  return args.map((arg) => (/[\\\s"']/.test(arg) ? JSON.stringify(arg) : arg)).join(' ');
+}

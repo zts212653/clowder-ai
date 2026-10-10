@@ -22,6 +22,24 @@ const SENSITIVE_ENV_KEYS = [
 
 function readProcessIdentity(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
+  if (process.platform === 'win32') {
+    const result = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `$p = Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}'; if ($p) { @{ processStartedAt = $p.CreationDate.ToUniversalTime().ToString('o'); processCommand = $p.CommandLine } | ConvertTo-Json -Compress }`,
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 5_000 },
+    );
+    try {
+      const identity = JSON.parse(result.stdout);
+      return identity.processStartedAt && identity.processCommand ? identity : null;
+    } catch {
+      return null;
+    }
+  }
   const started = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8' });
   const command = spawnSync('ps', ['-p', String(pid), '-o', 'command='], { encoding: 'utf8' });
   if (started.status !== 0 || command.status !== 0) return null;
@@ -223,6 +241,7 @@ export async function launchDetached(config) {
     child = spawn(config.command[0], config.command.slice(1), {
       cwd: config.cwd,
       detached: true,
+      windowsHide: true,
       env: cleanChildEnv(),
       stdio: ['ignore', logFd, logFd],
     });

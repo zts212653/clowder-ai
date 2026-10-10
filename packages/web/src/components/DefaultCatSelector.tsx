@@ -28,6 +28,7 @@ export function DefaultCatSelector({
   saveError,
   onRetry,
 }: DefaultCatSelectorProps) {
+  const labelId = useId();
   const currentCat = cats.find((c) => c.id === currentDefaultCatId);
   const valueInList = currentDefaultCatId && cats.some((c) => c.id === currentDefaultCatId);
 
@@ -53,10 +54,12 @@ export function DefaultCatSelector({
           {saveError}
         </div>
       )}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-bold text-cafe-black">全局默认猫</h3>
-          <p className="text-xs text-cafe-muted mt-0.5">新 thread 没有历史时，默认由这只猫回复</p>
+          <h3 id={labelId} className="text-sm font-bold text-cafe-black">
+            默认回复伙伴
+          </h3>
+          <p className="text-xs text-cafe-muted mt-0.5">新对话未指定伙伴时，由这位伙伴回复</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {currentCat && (
@@ -68,10 +71,11 @@ export function DefaultCatSelector({
           )}
           <select
             data-testid="default-cat-select"
+            aria-labelledby={labelId}
             value={valueInList ? currentDefaultCatId : ''}
             disabled={isLoading}
             onChange={(e) => onSelect(e.target.value)}
-            className={`h-[34px] w-[220px] rounded-[10px] border-transparent bg-[var(--console-field-bg)] px-3 py-1 text-compact text-cafe
+            className={`min-h-11 w-full sm:w-[220px] rounded-[10px] border-transparent bg-[var(--console-field-bg)] px-3 py-1 text-compact text-cafe
               focus:outline-none focus:ring-1 focus:ring-[var(--console-input-stroke)]
               ${isLoading ? 'opacity-50 cursor-wait' : 'cursor-pointer'}`}
           >
@@ -91,3 +95,5 @@ export function DefaultCatSelector({
     </div>
   );
 }
+
+import { useId } from 'react';

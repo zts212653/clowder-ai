@@ -107,6 +107,7 @@ function resolveAcpBootstrap(
 }
 
 function resolveAcpAccount(projectRoot: string, config: CatConfig): AcpAccountContext {
+  if (config.configurationSource === 'native_tool' && !config.accountRef) return { account: null };
   const catId = config.id;
   const accountRef = resolveBoundAccountRefForCat(projectRoot, catId, config);
   const builtinClient = resolveBuiltinClientForProvider(config.clientId);

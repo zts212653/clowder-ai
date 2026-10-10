@@ -3,12 +3,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import { HubAccountItem } from './HubAccountItem';
-import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
+import type { AccountsResponse, BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
 import { normalizeBuiltinClientIds, resolveAccountActionId } from './hub-accounts.view';
 import { SettingsPrimaryButton, SettingsStatusStrip } from './settings/primitives';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from './UnifiedAuthModal';
 
-export function HubAccountsTab() {
+export function HubAccountsTab({
+  initialClientId,
+  toolLabel,
+}: {
+  initialClientId?: BuiltinAccountClient;
+  toolLabel?: string;
+} = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AccountsResponse | null>(null);
@@ -101,6 +107,11 @@ export function HubAccountsTab() {
 
   return (
     <div className="space-y-4">
+      {toolLabel && (
+        <SettingsStatusStrip tone="muted">
+          正在管理 {toolLabel} 的连接。使用工具已有配置时，无需在这里重复添加认证。
+        </SettingsStatusStrip>
+      )}
       {error && <SettingsStatusStrip tone="error">{error}</SettingsStatusStrip>}
 
       {(data.unavailableAccounts?.length ?? 0) > 0 && (
@@ -153,6 +164,7 @@ export function HubAccountsTab() {
         }}
         onCreated={handleAuthCreated}
         editProfile={editTarget}
+        initialClientId={editTarget ? undefined : initialClientId}
       />
     </div>
   );

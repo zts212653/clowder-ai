@@ -1,0 +1,257 @@
+/* Client 探测场景样式 */
+
+.container {
+  min-height: 100vh;
+  background: #fffdfa;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 24px 32px;
+  border-bottom: 1px solid #e4d9d0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #211b18;
+}
+
+.mockBadge {
+  background: #fff3c9;
+  color: #855e16;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.scene {
+  flex: 1;
+  padding: 32px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.scene h2 {
+  margin: 0 0 8px;
+  font-size: 21px;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: #776d66;
+  line-height: 1.6;
+}
+
+.notice {
+  background: #fff0e6;
+  border-left: 4px solid #c45f35;
+  padding: 16px;
+  margin-bottom: 24px;
+  border-radius: 0 8px 8px 0;
+}
+
+.error {
+  margin-top: 12px;
+  color: #c4223c;
+  font-size: 14px;
+}
+
+.stage {
+  background: #fff;
+  border: 1px solid #e4d9d0;
+  border-radius: 12px;
+  padding: 24px;
+  min-height: 300px;
+}
+
+.loading {
+  text-align: center;
+  color: #776d66;
+  padding: 40px 0;
+}
+
+.noClients {
+  text-align: center;
+  padding: 20px;
+}
+
+.noClients p {
+  margin: 0 0 20px;
+  color: #776d66;
+  line-height: 1.6;
+}
+
+.installLinks {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.installLinks a {
+  color: #c45f35;
+  text-decoration: none;
+  padding: 8px 16px;
+  border: 1px solid #c45f35;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.installLinks a:hover {
+  background: #c45f35;
+  color: #fff;
+}
+
+.clients {
+  display: grid;
+  gap: 12px;
+}
+
+.client {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #e4d9d0;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.client.ready {
+  background: #e8f6ed;
+  border-color: #b8ddc4;
+}
+
+.client input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.client input[type='checkbox']:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.clientInfo {
+  flex: 1;
+}
+
+.clientInfo strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.clientInfo small {
+  display: block;
+  color: #776d66;
+  font-size: 13px;
+}
+
+.state {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.stateOk {
+  color: #227449;
+  background: #e8f6ed;
+  font-weight: 700;
+}
+
+.statePending {
+  color: #94651d;
+  background: #fff3c9;
+}
+
+.loginButton {
+  background: #fff;
+  border: 1px solid #d7c9bf;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.loginButton:hover {
+  background: #f5f0eb;
+}
+
+.actions {
+  margin-top: 24px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.button {
+  background: #fff;
+  border: 1px solid #d7c9bf;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: #f5f0eb;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.primaryButton {
+  background: #c45f35;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: #a84d28;
+}
+
+.primaryButton:disabled {
+  background: #d7c9bf;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .scene {
+    padding: 20px 16px;
+  }
+
+  .client {
+    flex-wrap: wrap;
+  }
+
+  .state {
+    order: -1;
+    margin-left: 0;
+    margin-bottom: 8px;
+  }
+}

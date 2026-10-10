@@ -1,0 +1,19 @@
+# First-run quest entry reminder. It is intentionally non-blocking.
+schemaVersion: 1
+id: first-run-entry
+name: 首次协作入口
+description: 创建真实伙伴后，提醒发送第一句话和成员、账号入口
+nonBlocking: true
+steps:
+  - id: send-first-message
+    target: chat.input
+    tips: 你的真实伙伴已经准备好了，在这里发送第一句话即可开始协作
+    advance: next
+  - id: members-entry
+    target: rail.members
+    tips: 「成员」里可以邀请更多伙伴、调整分工。你现在就可以继续输入和发送。
+    advance: next
+  - id: accounts-entry
+    target: rail.accounts
+    tips: 「密钥」里管理账号认证和模型。已登录的客户端可以直接复用，不必重新填写 key。
+    advance: next

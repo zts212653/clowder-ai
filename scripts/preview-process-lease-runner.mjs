@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 const TERM_GRACE_MS = 3_000;
 
@@ -18,6 +18,10 @@ function parseArgs(argv) {
 function signalOwnedChild(child, signal) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      return;
+    }
     process.kill(process.platform === 'win32' ? child.pid : -child.pid, signal);
   } catch (error) {
     if (error?.code !== 'ESRCH') throw error;
@@ -48,6 +52,7 @@ async function main() {
   const { command, expiresAt } = parseArgs(process.argv.slice(2));
   const child = spawn(command[0], command.slice(1), {
     detached: process.platform !== 'win32',
+    windowsHide: true,
     stdio: 'inherit',
     env: { ...process.env, CAT_CAFE_PREVIEW_EXPIRES_AT: new Date(expiresAt).toISOString() },
   });

@@ -15,6 +15,7 @@ import { apiFetch } from '@/utils/api-client';
 import { refreshSpeechAliases } from '@/utils/transcription-corrector';
 
 export interface CatData {
+  configurationRevision?: string;
   id: string;
   name?: string;
   displayName: string;
@@ -25,6 +26,7 @@ export interface CatData {
   accountRef?: string;
   /** clowder-ai#340 P5: CLI client identity (renamed from provider). */
   clientId: string;
+  configurationSource?: 'native_tool' | 'managed_account';
   defaultModel: string;
   cli?: {
     command?: string;

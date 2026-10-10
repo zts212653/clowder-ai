@@ -318,6 +318,24 @@ export class CodexAppServerClient {
       });
       const threadId = verdict.threadId;
       activeThreadId = threadId;
+      if (input.collaborationMode) {
+        const adopted = asCodexAppServerRecord(verdict.raw);
+        const mode = input.collaborationMode;
+        const model = mode.settings.model || (typeof adopted?.model === 'string' ? adopted.model : '');
+        if (!model) throw new Error('Codex collaboration mode requires an adopted model');
+        const effort = mode.settings.reasoning_effort ?? adopted?.reasoningEffort;
+        input = {
+          ...input,
+          collaborationMode: {
+            ...mode,
+            settings: {
+              ...mode.settings,
+              model,
+              ...(typeof effort === 'string' && effort ? { reasoning_effort: effort } : {}),
+            },
+          },
+        };
+      }
       yield this.lifecycle.event(this.lifecycle.transition('thread_ready', { threadId }));
       this.lifecycle.armInactivityTimeout(timeoutMs, timeoutHandler);
       yield {

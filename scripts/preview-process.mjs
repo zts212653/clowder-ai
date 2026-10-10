@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -128,6 +129,12 @@ function ownsManagedProcess(config, record) {
 function killOwnedGroup(record, signal, ownershipAlreadyProven = false) {
   if (!ownershipAlreadyProven && !ownsProcess(record)) return false;
   try {
+    if (process.platform === 'win32') {
+      return (
+        spawnSync('taskkill.exe', ['/PID', String(record.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+          .status === 0
+      );
+    }
     process.kill(process.platform === 'win32' ? record.pid : -record.pid, signal);
     return true;
   } catch {

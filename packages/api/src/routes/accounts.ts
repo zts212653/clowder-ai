@@ -25,8 +25,8 @@ import { resolveUserId } from '../utils/request-identity.js';
 // clowder-ai#340: Derive client identity from well-known account IDs, not stored protocol.
 /** Synthesize a ProviderProfileView-compatible object from AccountConfig. */
 function accountToView(id: string, account: AccountConfig, apiKeyPresent: boolean) {
-  const isBuiltin = account.authType === 'oauth';
   const builtinClient = builtinAccountFamilyForRef(id);
+  const isBuiltin = builtinClient !== null;
   const clientId = account.clientId ?? (isBuiltin ? builtinClient : undefined);
   return {
     id,

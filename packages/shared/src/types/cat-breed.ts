@@ -64,6 +64,8 @@ export interface CatVariant {
   readonly mentionPatterns?: readonly string[];
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
+  /** Native tools own authentication and omitted model/effort defaults. */
+  readonly configurationSource?: 'native_tool' | 'managed_account';
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */
   readonly clientId: ClientId;
   readonly defaultModel: string;

@@ -4,7 +4,12 @@ import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { isDirectLoopbackRequest } from '../utils/loopback-request.js';
 
-const COOKIE_NAME = 'cat_cafe_session';
+export function resolveSessionCookieName(env: NodeJS.ProcessEnv = process.env): string {
+  const name = env.CAT_CAFE_SESSION_COOKIE_NAME?.trim() || 'cat_cafe_session';
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(name)) throw new Error('Invalid session cookie name');
+  return name;
+}
+const COOKIE_NAME = resolveSessionCookieName();
 const TOKEN_BYTES = 32;
 const DEFAULT_USER_ID = 'default-user';
 const UNPAIRED_USER_ID = 'unpaired-user';

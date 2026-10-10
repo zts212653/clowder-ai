@@ -92,7 +92,16 @@ export function IdentitySection({
             ariaLabel="Name"
             value={form.name}
             onChange={(value) => {
-              onChange({ name: value, displayName: value, catId: autoSlug(value, form.catId) });
+              const catId = autoSlug(value, form.catId);
+              const useDefaultAlias =
+                form.configurationSource === 'native_tool' &&
+                (!form.mentionPatterns || form.mentionPatterns === '@' + form.catId);
+              onChange({
+                name: value,
+                displayName: value,
+                catId,
+                ...(useDefaultAlias ? { mentionPatterns: '@' + catId } : {}),
+              });
             }}
             required
             placeholder="成员显示名称，如 我的助手"

@@ -52,8 +52,10 @@ export interface CodexCarrierTruth {
 export function resolveCodexCarrierTruth(
   perCatCarrier: CodexCarrierMode | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  configurationSource?: 'native_tool' | 'managed_account',
 ): CodexCarrierTruth {
   if (perCatCarrier !== undefined) return { effective: perCatCarrier, source: 'per-cat' };
+  if (configurationSource === 'native_tool') return { effective: 'app_server', source: 'default' };
   const raw = env.CAT_CAFE_CODEX_CARRIER?.trim();
   if (raw) return { effective: raw === 'app_server' ? 'app_server' : 'exec_json', source: 'env' };
   return { effective: 'exec_json', source: 'default' };

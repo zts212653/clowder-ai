@@ -84,6 +84,49 @@ async function withTimeout(promise, ms, message) {
 }
 
 describe('AcpHttpStreamClient', () => {
+  it('preserves opaque configuration receipts and negotiates resume', async () => {
+    const requests = [];
+    const options = [
+      { id: 'model', category: 'model', currentValue: ' wire ', options: [{ value: ' wire ' }, { value: '' }] },
+    ];
+    server = await startJsonRpcServer((message) => {
+      requests.push(message);
+      return {
+        jsonrpc: '2.0',
+        id: message.id,
+        result:
+          message.method === 'initialize'
+            ? { ...INIT_RESULT, agentCapabilities: { sessionCapabilities: { resume: {} } } }
+            : { configOptions: options },
+      };
+    });
+    const { child, agentStdout } = createMockChild();
+    const port = serverPort(server);
+    client = new AcpHttpStreamClient({
+      command: 'fake-http-acp',
+      args: [],
+      cwd: '/tmp',
+      spawnFn: () => {
+        setImmediate(() => agentStdout.write('Listening on port ' + port + '\n'));
+        return child;
+      },
+      portDiscoveryTimeoutMs: 500,
+    });
+    await client.initialize();
+    const resumed = await client.loadSession('existing');
+    assert.equal(resumed.sessionId, 'existing');
+    assert.ok(requests.some((message) => message.method === 'session/resume'));
+    await client.loadSession('existing');
+    assert.equal(requests.filter((message) => message.method === 'session/resume').length, 1, 'reuse active session');
+    for (const value of [' wire ', '']) {
+      const receipt = await client.setSessionConfigOption('existing', ' model ', value);
+      assert.deepEqual(receipt.configOptions, options);
+      const sent = requests.at(-1);
+      assert.equal(sent.params.configId, 'model');
+      assert.equal(sent.params.value, value);
+    }
+  });
+
   let client = null;
   let server = null;
 

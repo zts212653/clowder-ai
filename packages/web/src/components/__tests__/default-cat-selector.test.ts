@@ -143,7 +143,7 @@ describe('DefaultCatSelector (F154 Phase B, AC-B2)', () => {
         }),
       );
     });
-    expect(container.textContent).toContain('新 thread');
+    expect(container.textContent).toContain('新对话未指定伙伴');
   });
 
   it('calls onSelect when changing dropdown value', () => {

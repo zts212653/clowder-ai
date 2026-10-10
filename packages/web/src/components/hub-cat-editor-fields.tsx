@@ -234,12 +234,14 @@ export function RangeField({
   );
 }
 
-export function PersistenceBanner() {
+export function PersistenceBanner({ nativeTool = false }: { nativeTool?: boolean }) {
   return (
     <div className="rounded-[16px] bg-[var(--console-persistence-bg)] p-4 shadow-[0_6px_18px_rgba(198,95,61,0.09)]">
       <p className="text-compact font-extrabold text-[var(--cafe-accent)]">运行时持久化</p>
       <p className="mt-1.5 text-xs font-bold leading-5 text-[var(--cafe-accent)]">
-        所有配置修改在运行时即时生效，并自动持久化到 `.cat-cafe/cat-catalog.json` 文件。重启后自动恢复，无需手动保存。
+        {nativeTool
+          ? '保存角色偏好后，下一次新对话采用。当前回合和历史对话保留；不会修改本机工具的配置文件。'
+          : '所有配置修改在运行时即时生效，并自动持久化到 `.cat-cafe/cat-catalog.json` 文件。重启后自动恢复，无需手动保存。'}
       </p>
     </div>
   );

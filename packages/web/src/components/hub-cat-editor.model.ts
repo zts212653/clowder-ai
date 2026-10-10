@@ -7,7 +7,7 @@ import {
 import type { CatData } from '@/hooks/useCatData';
 import { UNKNOWN_CAT_COLOR } from '@/lib/color-defaults';
 import type { BuiltinAccountClient, ProfileItem } from './hub-accounts.types';
-import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient } from './hub-cat-editor.acp';
+import { defaultAcpCommandForClient, defaultAcpStartupArgsForClient, serializeCommandArgs } from './hub-cat-editor.acp';
 import { defaultMcpSupportForClient } from './hub-cat-editor.protocols';
 import type { CatStrategyEntry, StrategyType } from './hub-strategy-types';
 
@@ -32,6 +32,7 @@ export interface HubCatEditorFormState {
   caution: string;
   strengths: string;
   clientId: ClientId;
+  configurationSource?: 'native_tool' | 'managed_account';
   accountRef: string;
   defaultModel: string;
   commandArgs: string;
@@ -370,6 +371,11 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     caution: cat?.caution ?? '',
     strengths: cat?.strengths?.join(', ') ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
+    configurationSource:
+      cat?.configurationSource ??
+      (cat || createDraft?.accountRef || (createDraft && !['anthropic', 'openai', 'acp'].includes(createDraft.clientId))
+        ? 'managed_account'
+        : 'native_tool'),
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',
@@ -385,7 +391,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
       acpConfig?.command ??
       defaultAcpCommandForClient((cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic'),
     acpStartupArgs:
-      acpConfig?.startupArgs?.join(' ') ??
+      (acpConfig?.startupArgs ? serializeCommandArgs(acpConfig.startupArgs) : undefined) ??
       defaultAcpStartupArgsForClient(
         (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
         (acpConfig?.transport as 'stdio' | 'httpstream' | undefined) ?? 'stdio',

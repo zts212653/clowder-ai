@@ -39,6 +39,7 @@ import {
 import { AdvancedRuntimeSection } from './hub-cat-editor-advanced';
 import { PersistenceBanner } from './hub-cat-editor-fields';
 import type { CatStrategyEntry } from './hub-strategy-types';
+import { NativeRuntimeSection } from './NativeRuntimeSection';
 import { readApiError } from './settings/settings-utils';
 import { UnifiedAuthModal } from './UnifiedAuthModal';
 import { useConfirm } from './useConfirm';
@@ -94,7 +95,8 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     return selectedProfile?.models ?? [];
   }, [form.clientId, selectedProfile]);
   const protectedCloudIdentity = cat?.identityProtection?.kind === 'builtin-cloud' ? cat.identityProtection : null;
-  const showCodexSettings = form.clientId === 'openai' && !protectedCloudIdentity;
+  const showCodexSettings =
+    form.clientId === 'openai' && !protectedCloudIdentity && form.configurationSource !== 'native_tool';
   const codexSettingsEditable = !showCodexSettings || codexSettingsBaseline !== null;
 
   // Alias uniqueness: collect all patterns from OTHER cats (lowercase for comparison)
@@ -264,6 +266,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   }, [cat, open, showCodexSettings]);
 
   useEffect(() => {
+    if (form.configurationSource === 'native_tool') return;
     if (form.clientId === 'antigravity') {
       setForm((prev) => (prev.accountRef === '' ? prev : { ...prev, accountRef: '' }));
       return;
@@ -283,13 +286,14 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
       if (prev.accountRef === nextProfile.id) return prev;
       return { ...prev, accountRef: nextProfile.id };
     });
-  }, [availableProfiles, cat, draft, form.clientId]);
+  }, [availableProfiles, cat, draft, form.clientId, form.configurationSource]);
 
   // Auto-fill first available model only on profile/client change — NOT when
   // the user clears the field. Previous code had form.defaultModel in deps,
   // which re-filled immediately after the user cleared the input (#802).
   useEffect(() => {
-    if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
+    if (form.configurationSource === 'native_tool' || form.clientId === 'antigravity' || modelOptions.length === 0)
+      return;
     setForm((prev) => {
       if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
       return { ...prev, defaultModel: modelOptions[0] ?? '' };
@@ -297,7 +301,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
     // excludes form.defaultModel: auto-fill runs on profile change, not on
     // user clearing the model input.
-  }, [form.clientId, modelOptions]);
+  }, [form.clientId, modelOptions, form.configurationSource]);
 
   useEffect(() => {
     if (form.clientId !== 'antigravity') return;
@@ -314,7 +318,11 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
   const createAccountClient: BuiltinAccountClient | undefined =
     form.clientId === 'antigravity' ? undefined : form.clientId === 'catagent' ? 'anthropic' : form.clientId;
   const hasEmptyCreatableAccounts =
-    !cat && !loadingProfiles && createAccountClient !== undefined && availableProfiles.length === 0;
+    form.configurationSource !== 'native_tool' &&
+    !cat &&
+    !loadingProfiles &&
+    createAccountClient !== undefined &&
+    availableProfiles.length === 0;
   const saveBlockedByProfileBinding = hasEmptyCreatableAccounts;
 
   const patchForm = (patch: Partial<HubCatEditorFormState>) => {
@@ -441,7 +449,11 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
         errors.identity = true;
         errorMessages.push('角色描述');
       }
-      if (!form.defaultModel.trim() && selectedProfile?.authType === 'api_key') {
+      if (
+        form.configurationSource !== 'native_tool' &&
+        !form.defaultModel.trim() &&
+        selectedProfile?.authType === 'api_key'
+      ) {
         errors.account = true;
         errorMessages.push('Model');
       } else if (
@@ -704,16 +716,18 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
               onRestore={() => handleRestoreBuiltinCloudIdentity(cat.id)}
             />
           ) : (
-            <AccountSection
-              form={form}
-              hasError={fieldErrors.account}
-              modelOptions={modelOptions}
-              availableProfiles={availableProfiles}
-              loadingProfiles={hasEmptyCreatableAccounts ? true : loadingProfiles}
-              effectiveCodexCarrier={cat?.codexCarrier}
-              codexLocalCapable={cat ? cat.cli != null : true}
-              onChange={patchForm}
-            />
+            <NativeRuntimeSection form={form} onChange={patchForm}>
+              <AccountSection
+                form={form}
+                hasError={fieldErrors.account}
+                modelOptions={modelOptions}
+                availableProfiles={availableProfiles}
+                loadingProfiles={hasEmptyCreatableAccounts ? true : loadingProfiles}
+                effectiveCodexCarrier={cat?.codexCarrier}
+                codexLocalCapable={cat ? cat.cli != null : true}
+                onChange={patchForm}
+              />
+            </NativeRuntimeSection>
           )}
           {hasEmptyCreatableAccounts ? (
             <section
@@ -763,7 +777,7 @@ export function HubCatEditor({ cat, draft, existingCats, hasDossier, open, onClo
               onCodexChange={patchCodex}
             />
           ) : null}
-          <PersistenceBanner />
+          <PersistenceBanner nativeTool={form.configurationSource === 'native_tool'} />
           {error ? <p className="rounded-2xl bg-conn-red-bg px-4 py-3 text-sm text-conn-red-text">{error}</p> : null}
         </div>
 

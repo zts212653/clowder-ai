@@ -1,5 +1,6 @@
 'use client';
 
+import { useRouter } from 'next/navigation';
 import type { ReactNode, Ref } from 'react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
@@ -15,7 +16,6 @@ import { ChatInput } from '../ChatInput';
 import { ChatMessageRow } from '../ChatMessageRow';
 import { ConnectionStatusBar } from '../ConnectionStatusBar';
 import { buildChatTimelineProjectionKey } from '../chat-timeline-projection-key';
-import { HubCatEditor } from '../HubCatEditor';
 import { HubCoCreatorEditor } from '../HubCoCreatorEditor';
 import { PawIcon } from '../icons/PawIcon';
 import { MessageNavigator } from '../MessageNavigator';
@@ -80,6 +80,7 @@ export interface ThreadChatSurfaceProps {
   acceptUnscopedInteractiveSend?: boolean;
   onComposerFocusChange?: (focused: boolean) => void;
   onActivity?: (activity: ThreadChatActivity) => void;
+  onRealMessageSent?: () => void;
 }
 
 export function ThreadChatSurface({
@@ -98,6 +99,7 @@ export function ThreadChatSurface({
   acceptUnscopedInteractiveSend = false,
   onComposerFocusChange,
   onActivity,
+  onRealMessageSent,
 }: ThreadChatSurfaceProps) {
   // The composer is told it is hosted with the one execution row only in the new shell (see ChatInput `presentation`).
   const composerPresentation = useShellPresentation();
@@ -117,11 +119,10 @@ export function ThreadChatSurface({
   } = useChatHistory(threadId);
   const { handleSend, uploadStatus, uploadError } = useSendMessage(threadId);
   const interactiveSendContext = `thread-chat-surface:${useId()}`;
-  const { getCatById, refresh: refreshCats } = useCatData();
+  const { getCatById } = useCatData();
+  const router = useRouter();
   const coCreator = useCoCreatorConfig();
-  const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [coCreatorEditorOpen, setCoCreatorEditorOpen] = useState(false);
-  const editingCat = editingCatId ? (getCatById(editingCatId) ?? null) : null;
   const connectionStatus = useConnectionStatus(socketConnected);
   const uiThinkingExpandedByDefault = useChatStore((state) => state.uiThinkingExpandedByDefault);
   const isOfflineSnapshot = useChatStore((state) => state.isOfflineSnapshot);
@@ -144,7 +145,10 @@ export function ThreadChatSurface({
     [timelineProjectionKey],
   );
   const selection = useThreadChatSelection(messages);
-  const handleEditCat = useCallback((catId: string) => setEditingCatId(catId), []);
+  const handleEditCat = useCallback(
+    (catId: string) => router.push(`/settings?s=members&shell=v2&cat=${encodeURIComponent(catId)}`),
+    [router],
+  );
   const handleEditCoCreator = useCallback(() => setCoCreatorEditorOpen(true), []);
   const projectedEmptyState = emptyState ?? (
     <div className={density === 'compact' ? 'mt-4 text-center' : 'mt-20 text-center'}>
@@ -166,7 +170,9 @@ export function ThreadChatSurface({
         !detail.sendContext &&
         (!detail.targetThreadId || detail.targetThreadId === threadId);
       if ((!ownsContext && !ownsUnscoped) || !detail.text) return;
-      handleSend(detail.text);
+      void handleSend(detail.text).then((sent) => {
+        if (sent) onRealMessageSent?.();
+      });
     };
     window.addEventListener('cat-cafe:interactive-send', handleInteractiveSend);
     return () => window.removeEventListener('cat-cafe:interactive-send', handleInteractiveSend);
@@ -284,8 +290,16 @@ export function ThreadChatSurface({
               key={threadId}
               presentation={composerPresentation}
               threadId={threadId}
-              onSend={(content, images, whisper, deliveryMode, replyToId, messageDisposition, contextAttachments) =>
-                handleSend(
+              onSend={async (
+                content,
+                images,
+                whisper,
+                deliveryMode,
+                replyToId,
+                messageDisposition,
+                contextAttachments,
+              ) => {
+                const sent = await handleSend(
                   content,
                   images,
                   undefined,
@@ -294,8 +308,10 @@ export function ThreadChatSurface({
                   replyToId,
                   messageDisposition,
                   contextAttachments,
-                )
-              }
+                );
+                if (sent) onRealMessageSent?.();
+                return sent;
+              }}
               disabled={connectionStatus.isReadonly}
               hasActiveInvocation={hasActiveInvocation}
               uploadStatus={uploadStatus}
@@ -316,18 +332,6 @@ export function ThreadChatSurface({
           onSuccess={selection.clearMessageSelection}
         />
       </div>
-      {editingCat && (
-        <HubCatEditor
-          open
-          cat={editingCat}
-          draft={null}
-          onClose={() => setEditingCatId(null)}
-          onSaved={async () => {
-            await refreshCats();
-            setEditingCatId(null);
-          }}
-        />
-      )}
       <HubCoCreatorEditor
         open={coCreatorEditorOpen}
         coCreator={coCreator}

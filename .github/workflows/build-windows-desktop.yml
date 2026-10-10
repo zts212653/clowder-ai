@@ -75,6 +75,7 @@ jobs:
 
       - name: Build Windows installer
         env:
+          NODE_OPTIONS: --max-old-space-size=4096
           CATCAFE_VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh

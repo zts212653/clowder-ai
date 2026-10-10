@@ -4,6 +4,19 @@
 # among the returned guide descriptions instead of keyword-resolving an intent.
 
 guides:
+  - id: first-run-entry
+    name: 首次协作入口
+    description: 创建真实伙伴后提醒发送第一句话
+    flow_file: flows/first-run-entry.yaml
+    keywords:
+      - first run
+      - 首次协作
+      - onboarding
+    category: bootcamp
+    priority: P0
+    cross_system: false
+    estimated_time: 1min
+
   - id: add-member
     name: 添加成员
     description: 引导你完成新成员的创建和配置

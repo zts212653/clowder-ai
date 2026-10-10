@@ -29,6 +29,16 @@ describe('F155 guide registry loader target validation', async () => {
     }
   });
 
+  test('first-run entry is non-blocking and explains both pinned settings entries', () => {
+    const flow = loadGuideFlow('first-run-entry');
+    assert.equal(flow.nonBlocking, true);
+    assert.deepEqual(
+      flow.steps.map((step) => step.target),
+      ['chat.input', 'rail.members', 'rail.accounts'],
+    );
+    assert.equal(loadGuideFlow('add-member').nonBlocking, undefined, 'existing guides retain their blocking behavior');
+  });
+
   test('loaded add-member flow goes straight from add-member CTA into the member editor', () => {
     const flow = loadGuideFlow('add-member');
     const createIndex = flow.steps.findIndex((step) => step.id === 'click-add-member');

@@ -48,6 +48,7 @@ describe('FirstRunQuestWizard', () => {
   let root: Root;
 
   beforeEach(() => {
+    localStorage.clear();
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -59,7 +60,7 @@ describe('FirstRunQuestWizard', () => {
     container.remove();
   });
 
-  it('renders template step on open and loads templates', async () => {
+  it('renders the three-cat demo on first open', async () => {
     mockApiFetch.mockImplementation(async (url) => {
       if (typeof url === 'string' && url.includes('/api/cat-templates')) {
         return jsonResponse({
@@ -85,12 +86,13 @@ describe('FirstRunQuestWizard', () => {
     await flushEffects();
 
     // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('选择角色模板');
-    expect(document.body.textContent).toContain('布偶猫');
-    expect(document.body.textContent).toContain('宪宪');
+    expect(document.body.textContent).toContain('认识你的协作团队');
+    expect(document.body.textContent).toContain('规划猫');
+    expect(document.body.textContent).toContain('实现猫');
+    expect(document.body.textContent).toContain('审查猫');
   });
 
-  it('shows step title for template step', async () => {
+  it('enters the template step after the demo', async () => {
     mockApiFetch.mockResolvedValue(jsonResponse({ templates: [] }));
 
     await act(async () => {
@@ -99,23 +101,37 @@ describe('FirstRunQuestWizard', () => {
     await flushEffects();
 
     // FirstRunQuestWizard uses createPortal to document.body
-    expect(document.body.textContent).toContain('第 1 步');
-    expect(document.body.textContent).toContain('选择角色模板');
-  });
-
-  it('shows empty state when no templates available', async () => {
-    mockApiFetch.mockResolvedValue(jsonResponse({ templates: [] }));
-
+    const demoButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('开始演示'),
+    );
+    expect(demoButton).toBeTruthy();
     await act(async () => {
-      root.render(<WizardHost />);
+      for (let i = 0; i < 4; i += 1) demoButton?.click();
     });
     await flushEffects();
-
-    // FirstRunQuestWizard uses createPortal to document.body
+    expect(document.body.textContent).toContain('选择团队角色');
     expect(document.body.textContent).toContain('暂无可用角色模板');
   });
 
-  it('handles template API errors gracefully', async () => {
+  it('shows empty state when no templates are available after the demo', async () => {
+    mockApiFetch.mockResolvedValue(jsonResponse({ templates: [] }));
+
+    await act(async () => {
+      root.render(<WizardHost />);
+    });
+    await flushEffects();
+
+    const demoButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('开始演示'),
+    );
+    await act(async () => {
+      for (let i = 0; i < 4; i += 1) demoButton?.click();
+    });
+    await flushEffects();
+    expect(document.body.textContent).toContain('暂无可用角色模板');
+  });
+
+  it('handles template API errors gracefully after the demo', async () => {
     mockApiFetch.mockRejectedValue(new Error('Network error'));
 
     await act(async () => {
@@ -123,8 +139,13 @@ describe('FirstRunQuestWizard', () => {
     });
     await flushEffects();
 
-    // Should degrade gracefully, not crash
-    // FirstRunQuestWizard uses createPortal to document.body
+    const demoButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('开始演示'),
+    );
+    await act(async () => {
+      for (let i = 0; i < 4; i += 1) demoButton?.click();
+    });
+    await flushEffects();
     expect(document.body.textContent).toContain('暂无可用角色模板');
   });
 
@@ -156,6 +177,7 @@ describe('FirstRunQuestWizard', () => {
               label: 'Claude',
               cli: 'claude',
               installed: true,
+              authenticated: true,
               hasApiKey: false,
             },
           ],
@@ -197,6 +219,13 @@ describe('FirstRunQuestWizard', () => {
 
     await act(async () => {
       root.render(<WizardHost />);
+    });
+    await flushEffects();
+
+    const demoButton = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.includes('开始演示'));
+    expect(demoButton).toBeTruthy();
+    await act(async () => {
+      for (let i = 0; i < 4; i += 1) demoButton?.click();
     });
     await flushEffects();
 

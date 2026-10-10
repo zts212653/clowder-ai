@@ -2195,7 +2195,8 @@ async function main(): Promise<void> {
             service = new CodexAgentService({
               catId,
               appServerHostPool,
-              carrierMode: resolveCodexCarrierTruth(config.cli?.carrier).effective,
+              carrierMode: resolveCodexCarrierTruth(config.cli?.carrier, process.env, config.configurationSource)
+                .effective,
               nativeRealtimeCompanionEnabled,
             });
             break;

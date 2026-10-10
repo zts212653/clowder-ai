@@ -1,0 +1,167 @@
+/* 成员交接场景样式 */
+
+.container {
+  min-height: 100vh;
+  background: #fffdfa;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 24px 32px;
+  border-bottom: 1px solid #e4d9d0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #211b18;
+}
+
+.mockBadge {
+  background: #fff3c9;
+  color: #855e16;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.scene {
+  flex: 1;
+  padding: 32px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.scene h2 {
+  margin: 0 0 8px;
+  font-size: 21px;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: #776d66;
+  line-height: 1.6;
+}
+
+.stage {
+  background: #fff;
+  border: 1px solid #e4d9d0;
+  border-radius: 12px;
+  padding: 24px;
+  min-height: 300px;
+}
+
+.handoff {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 24px;
+  background: #f4f8fc;
+  border: 1px solid #d9e4ef;
+  border-radius: 10px;
+}
+
+.face {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 28px;
+  font-weight: 800;
+  border: 4px solid #fff;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.siamese {
+  background: #d7ba85;
+}
+
+.handoffText {
+  flex: 1;
+}
+
+.handoffText b {
+  display: block;
+  font-size: 16px;
+  margin-bottom: 12px;
+  line-height: 1.4;
+}
+
+.handoffText p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+  color: #211b18;
+}
+
+.handoffText p:last-child {
+  margin-bottom: 0;
+}
+
+.boundary {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #d9e4ef;
+  color: #776d66;
+  font-style: italic;
+}
+
+.error {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #ffe6e6;
+  border-left: 4px solid #c4223c;
+  color: #c4223c;
+  border-radius: 0 8px 8px 0;
+}
+
+.actions {
+  margin-top: 24px;
+  display: flex;
+  gap: 12px;
+}
+
+.primaryButton {
+  background: #c45f35;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 24px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primaryButton:hover:not(:disabled) {
+  background: #a84d28;
+}
+
+.primaryButton:disabled {
+  background: #d7c9bf;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .scene {
+    padding: 20px 16px;
+  }
+
+  .handoff {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+}

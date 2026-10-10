@@ -9,6 +9,8 @@ const messages = [
   { id: 'a1', type: 'assistant', content: 'recovered', timestamp: 4 },
 ] as const;
 const handleSend = vi.hoisted(() => vi.fn());
+const navigate = vi.hoisted(() => vi.fn());
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: navigate }) }));
 
 vi.mock('@/hooks/useThreadScopedSelectors', () => ({
   useThreadMessages: () => messages,
@@ -61,10 +63,12 @@ vi.mock('../../ChatMessageRow', () => ({
     message,
     sendContext,
     confirmations,
+    onEditCat,
   }: {
     message: (typeof messages)[number];
     sendContext?: string;
     confirmations?: unknown[];
+    onEditCat: (catId: string) => void;
   }) => (
     <article
       data-thread-chat-message-id={message.id}
@@ -74,6 +78,9 @@ vi.mock('../../ChatMessageRow', () => ({
       data-confirmation-count={confirmations?.length ?? 0}
     >
       {message.content}
+      {message.type === 'assistant' && (
+        <button type="button" aria-label="编辑伙伴" onClick={() => onEditCat('codex')} />
+      )}
     </article>
   ),
 }));
@@ -90,6 +97,8 @@ let root: Root;
 
 beforeEach(() => {
   handleSend.mockClear();
+  handleSend.mockResolvedValue(true);
+  navigate.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -112,6 +121,12 @@ function manifest(scope: Element): string[] {
 }
 
 describe('ThreadChatSurface density contract', () => {
+  it('opens the same member settings page from a chat nameplate', async () => {
+    await act(async () => root.render(<ThreadChatSurface threadId="thread-parity" density="full" />));
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="编辑伙伴"]')!;
+    await act(async () => button.click());
+    expect(navigate).toHaveBeenCalledWith('/settings?s=members&shell=v2&cat=codex');
+  });
   it('keeps one mounted conversation surface and canonical composer when history becomes inert', async () => {
     await act(async () => {
       root.render(<ThreadChatSurface threadId="thread-parity" density="full" presentation="composer-only" />);

@@ -50,6 +50,7 @@ function GuideOverlayInner() {
   const setPhase = useGuideStore((s) => s.setPhase);
   const completionPersisted = useGuideStore((s) => s.completionPersisted);
   const completionFailed = useGuideStore((s) => s.completionFailed);
+  const nonBlocking = session?.flow.nonBlocking === true;
 
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [hudSize, setHudSize] = useState<{ width: number; height: number }>({ width: 280, height: 160 });
@@ -62,6 +63,7 @@ function GuideOverlayInner() {
   const liveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (nonBlocking) return;
     previousFocusRef.current = document.activeElement;
     requestAnimationFrame(() => {
       const hud = hudRef.current;
@@ -76,7 +78,7 @@ function GuideOverlayInner() {
         previousFocus.focus();
       }
     };
-  }, []);
+  }, [nonBlocking]);
 
   const currentStep =
     session && session.currentStepIndex < session.flow.steps.length
@@ -188,7 +190,7 @@ function GuideOverlayInner() {
   useGuideAutoAdvance(currentStep, advanceStep, session?.phase === 'active');
 
   useEffect(() => {
-    if (!session || !currentStep) return;
+    if (!session || !currentStep || nonBlocking) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -239,7 +241,7 @@ function GuideOverlayInner() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [session, currentStep]);
+  }, [session, currentStep, nonBlocking]);
 
   const dismissWithReconciliation = () => {
     if (session?.threadId && session.flow.id) {
@@ -283,7 +285,7 @@ function GuideOverlayInner() {
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {liveAnnouncement}
       </div>
-      <GuideOverlaySpotlight targetRect={targetRect} />
+      {!nonBlocking && <GuideOverlaySpotlight targetRect={targetRect} />}
       <GuideHUD
         ref={hudRef}
         step={currentStep}

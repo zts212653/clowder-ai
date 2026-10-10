@@ -11,6 +11,8 @@ export interface ProfileItem {
   authType: ProfileAuthType;
   kind: ProfileKind;
   builtin: boolean;
+  /** First-run view of a detected CLI login; no stored account record exists. */
+  syntheticNative?: true;
   mode: ProfileMode;
   clientId?: BuiltinAccountClient;
   baseUrl?: string;

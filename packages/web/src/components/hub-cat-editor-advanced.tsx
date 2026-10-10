@@ -79,7 +79,7 @@ export function AdvancedRuntimeSection({
           填写正整数 = Manual 模式，作为该成员的上下文窗口大小。留空或填 0 = Auto，由运行时自动探测。
         </p>
         <ContextWindowCompatibilityNotice cat={cat} form={form} />
-        {cliExtensionsAvailable && cliEffortOptions ? (
+        {form.configurationSource !== 'native_tool' && cliExtensionsAvailable && cliEffortOptions ? (
           <>
             <TextField
               label="CLI Effort"

@@ -1,5 +1,30 @@
 [
   {
+    "id": "capability-native-runtime-role-config",
+    "kind": "capability",
+    "sourceRef": {
+      "path": "docs/plans/issue-1466-native-runtime-role-config.md",
+      "anchor": "本机工具配置入口"
+    },
+    "structureSource": {
+      "path": "packages/web/src/components/NativeRuntimeSection.tsx",
+      "anchor": "NativeRuntimeSection"
+    },
+    "bodySource": {
+      "path": "docs/plans/issue-1466-native-runtime-role-config.md",
+      "anchor": "本机工具配置入口"
+    },
+    "contexts": ["concierge_open", "feature_dev"],
+    "audience": ["cvo"],
+    "body": "已经装好并登录 Codex、Claude Code 或 DSH？打开设置里的成员，选择本机工具即可继承工具配置；只想为某个角色调整模型或思考强度时，再展开高级配置分别覆盖。",
+    "action": {
+      "type": "open_concierge_draft",
+      "label": "配置本机工具成员",
+      "draftPrompt": "请帮我在设置的成员中选择本机工具，继承工具的模型与思考强度，并说明怎样为单个角色分别覆盖和恢复继承。请保留已有 DSH 启动配置和账号，不修改 CLI 认证文件。"
+    },
+    "owner": "codex"
+  },
+  {
     "id": "capability-find-earlier-message-query",
     "kind": "capability",
     "sourceRef": {

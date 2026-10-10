@@ -22,6 +22,20 @@ import { throwIfStoreReadAborted } from './StoreReadOptions.js';
 /** Default thread ID for the lobby (backwards-compatible single-thread mode) */
 export const DEFAULT_THREAD_ID = 'default';
 
+/** Stable, user-scoped identity for a first-run thread retry. */
+export function onboardingThreadId(userId: string, journeyId: string): string {
+  // Preserve every code point in a reversible, key-safe representation. The
+  // previous cleanup + truncation mapped `user.a`/`usera` and long journeys to
+  // the same Redis key, which could return another user's thread on retry.
+  const encode = (value: string) => Buffer.from(value, 'utf8').toString('base64url') || 'unknown';
+  return `onboarding-${encode(userId)}-${encode(journeyId)}`;
+}
+
+export interface EnsureOnboardingThreadResult {
+  thread: Thread;
+  created: boolean;
+}
+
 /** Canonical first-message title derivation shared by append, recovery, and true recall. */
 export function deriveAutoThreadTitle(content: string): string | null {
   const normalized = content.trim();
@@ -388,6 +402,7 @@ export interface BootcampStateV1 {
   envCheck?: Record<string, { ok: boolean; version?: string; note?: string }>;
   advancedFeatures?: Record<string, 'available' | 'unavailable' | 'skipped'>;
   startedAt: number;
+  journeyId?: string;
   completedAt?: number;
 }
 
@@ -893,6 +908,14 @@ export interface IThreadStore {
    * Returns the thread (existing or newly created).
    */
   ensureThread(threadId: string, title: string): Thread | Promise<Thread>;
+  /** First-run onboarding creation with a store-level journey idempotency key. */
+  ensureOnboardingThread?(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState: BootcampStateV1,
+  ): EnsureOnboardingThreadResult | Promise<EnsureOnboardingThreadResult>;
   ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread | Promise<Thread>;
   updateLastActive(threadId: string): void | Promise<void>;
   delete(threadId: string): boolean | Promise<boolean>;
@@ -1016,6 +1039,32 @@ export class ThreadStore implements IThreadStore {
     };
     this.threads.set(threadId, thread);
     return thread;
+  }
+
+  ensureOnboardingThread(
+    userId: string,
+    journeyId: string,
+    title: string,
+    projectPath: string,
+    bootcampState: BootcampStateV1,
+  ): EnsureOnboardingThreadResult {
+    const threadId = onboardingThreadId(userId, journeyId);
+    const existing = this.threads.get(threadId);
+    if (existing) return { thread: existing, created: false };
+    this.evictIfNeeded();
+    const now = Date.now();
+    const thread: Thread = {
+      id: threadId,
+      projectPath,
+      title,
+      createdBy: userId,
+      participants: [],
+      lastActiveAt: now,
+      createdAt: now,
+      bootcampState,
+    };
+    this.threads.set(threadId, thread);
+    return { thread, created: true };
   }
 
   ensureExternalRuntimeAnchorThread(runtime: ExternalRuntimeAnchorRuntime, userId: string): Thread {

@@ -55,6 +55,8 @@ export const ACP_METHODS = {
   authenticate: 'authenticate',
   sessionNew: 'session/new',
   sessionLoad: 'session/load',
+  sessionResume: 'session/resume',
+  sessionClose: 'session/close',
   sessionPrompt: 'session/prompt',
   sessionCancel: 'session/cancel', // notification (no response)
   sessionSetMode: 'session/set_mode',
@@ -84,7 +86,12 @@ export interface AcpInitializeResult {
     version: string;
   };
   agentCapabilities: {
-    loadSession: boolean;
+    loadSession?: boolean;
+    sessionCapabilities?: {
+      resume?: Record<string, unknown>;
+      list?: Record<string, unknown>;
+      close?: Record<string, unknown>;
+    };
     promptCapabilities?: {
       image?: boolean;
       audio?: boolean;
