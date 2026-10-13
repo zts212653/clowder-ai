@@ -350,7 +350,10 @@ export class ConnectorCommandLayer {
     chatIdArg?: string,
   ): Promise<CommandResult> {
     if (!(await this.isAdminSender(connectorId, senderId))) {
-      return { kind: 'allow-group', response: '🔒 此命令仅管理员可用。' };
+      const hint = senderId
+        ? `你的 open_id: ${senderId}，请在 Hub 权限管理中添加此 ID。`
+        : '无法识别发送者（请从群聊中发送此命令）。';
+      return { kind: 'allow-group', response: `🔒 此命令仅管理员可用。${hint}` };
     }
     const store = this.deps.permissionStore;
     if (!store) {
@@ -372,7 +375,10 @@ export class ConnectorCommandLayer {
     chatIdArg?: string,
   ): Promise<CommandResult> {
     if (!(await this.isAdminSender(connectorId, senderId))) {
-      return { kind: 'deny-group', response: '🔒 此命令仅管理员可用。' };
+      const hint = senderId
+        ? `你的 open_id: ${senderId}，请在 Hub 权限管理中添加此 ID。`
+        : '无法识别发送者（请从群聊中发送此命令）。';
+      return { kind: 'deny-group', response: `🔒 此命令仅管理员可用。${hint}` };
     }
     const store = this.deps.permissionStore;
     if (!store) {
