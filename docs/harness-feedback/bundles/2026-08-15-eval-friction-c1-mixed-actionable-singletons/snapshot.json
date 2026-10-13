@@ -1,0 +1,27 @@
+{
+  "verdictId": "2026-08-15-eval-friction-c1-mixed-actionable-singletons",
+  "evalSnapshotId": "eval-F245-2026-08-15",
+  "featureId": "F245",
+  "generatedAt": "2026-08-15T03:09:02.052Z",
+  "window": {
+    "startMs": 1786503600000,
+    "endMs": 1786762800000,
+    "durationHours": 72
+  },
+  "components": [
+    {
+      "id": "friction-rollup",
+      "name": "friction rollup (Top-N + sensorForm)",
+      "confidence": "low",
+      "activationCounts": {},
+      "frictionCounts": {
+        "cluster_count": 2,
+        "top_cluster_count": 2,
+        "tail_cluster_count": 0,
+        "tail_signal_count": 0,
+        "cluster_c03def938f44": 1,
+        "cluster_cd494b7db6bf": 1
+      }
+    }
+  ]
+}

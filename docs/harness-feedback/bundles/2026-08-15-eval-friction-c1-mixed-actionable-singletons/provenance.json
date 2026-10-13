@@ -1,0 +1,29 @@
+{
+  "verdictId": "2026-08-15-eval-friction-c1-mixed-actionable-singletons",
+  "rawInputs": [
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-15-eval-friction-c1-mixed-actionable-singletons/raw/rollup-report.json",
+      "sha256": "f08507431ab9d2c36c277f25e6488a9ba619fb146c443f80bfdec24756cebc42"
+    },
+    {
+      "path": "docs/harness-feedback/bundles/2026-08-15-eval-friction-c1-mixed-actionable-singletons/raw/measurement-validity.json",
+      "sha256": "de6e862b0bb2894f2a513db3e654fef5ec154fb44f6772906592b5d65877a78a"
+    }
+  ],
+  "generatedAt": "2026-08-15T03:09:02.052Z",
+  "generator": {
+    "name": "eval-friction-live-verdict",
+    "version": "2"
+  },
+  "sanitizeRulesVersion": "f267-friction-measurement-v1",
+  "sourceThreadId": "thread_eval_friction",
+  "sourceMessageId": "0001786762799726-000047-24c21855",
+  "sourceRefs": {
+    "kind": "friction-rollup-snapshot",
+    "windowStartMs": 1786503600000,
+    "windowEndMs": 1786762800000,
+    "topN": 10,
+    "tokenCap": 4000
+  },
+  "publishFallback": "manual-worktree"
+}
