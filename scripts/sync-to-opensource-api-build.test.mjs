@@ -100,9 +100,9 @@ describe('public API build projection', { skip: !existsSync(syncScript) }, () =>
       const expected = structuredClone(pkg);
       expected.scripts.build = 'tsc';
       if (name === 'mcp-server') {
-        expected.scripts = Object.fromEntries(
-          Object.entries(expected.scripts).filter(([key]) => !key.startsWith('governance:')),
-        );
+        delete expected.scripts['governance:attest-bootstrap'];
+        assert.equal(typeof expected.scripts['governance:write'], 'string');
+        assert.equal(typeof expected.scripts['governance:check'], 'string');
       }
       assert.deepEqual(
         JSON.parse(readFileSync(resolve(directory, 'packages', name, 'package.json'), 'utf8')),

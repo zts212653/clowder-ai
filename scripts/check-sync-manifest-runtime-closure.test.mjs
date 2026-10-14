@@ -506,6 +506,17 @@ describe('outbound sync runtime closure', { skip: !isHomeRepo && 'sync manifest 
     assert.ok(!isExported(localEnvironment), `${localEnvironment} must never be exported from source`);
   });
 
+  it('preserves the generated public MCP baseline without transferring bootstrap authority', () => {
+    const targetOwned = new Set(manifest.target_owned_files ?? []);
+    const baseline = 'packages/mcp-server/governance/mcp-surface-baseline.json';
+    const attestation = 'packages/mcp-server/governance/mcp-surface-bootstrap-attestation.json';
+
+    assert.ok(isExported(baseline), 'a new public target must receive the source baseline before projection');
+    assert.ok(targetOwned.has(baseline), 'an established public target must retain its reviewed projected baseline');
+    assert.ok(isExported(attestation), 'the source attestation must remain exported');
+    assert.ok(!targetOwned.has(attestation), 'public sync must never preserve a target-authored bootstrap attestation');
+  });
+
   it('preserves target-owned file metadata across backup and restore', () => {
     const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
     const backupFunction = syncScript.match(/backup_target_owned_items\(\) \{[\s\S]*?\n\}/)?.[0] ?? '';

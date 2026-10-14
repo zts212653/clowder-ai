@@ -81,7 +81,7 @@ function isVerificationDoc(frontmatter) {
   const docType = String(frontmatter?.doc_type ?? '')
     .trim()
     .toLowerCase();
-  return docKind === 'verification' || docType === 'verification';
+  return docKind === 'verification' || docKind === 'mcp-evidence' || docType === 'verification';
 }
 
 function parseStatus(content) {

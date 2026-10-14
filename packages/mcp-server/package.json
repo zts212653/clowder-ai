@@ -10,6 +10,8 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
+    "governance:write": "tsc && node dist/tool-governance-cli.js write",
+    "governance:check": "pnpm run build && node dist/tool-governance-cli.js check",
     "test": "pnpm run build && node --import ./test/helpers/isolate-callback-outbox.mjs --import tsx --test test/*.test.js test/*.test.ts"
   },
   "dependencies": {

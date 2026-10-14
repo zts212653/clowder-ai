@@ -1,12 +1,27 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "featureId": "F286",
   "targetRepository": "zts212653/cat-cafe",
   "targetRef": "origin/main",
   "bootstrapFrom": "265f7b998f7b8cae81d26d88db58351cf02b030d",
+  "exportedTargets": [
+    {
+      "targetRepository": "zts212653/clowder-ai",
+      "targetRef": "origin/main",
+      "bootstrapCommit": "5115761a67dd30a6a7af57a9bb4c07c4f5dd5762",
+      "bootstrapParent": "69efbd889d30aad8074922c88b159b674e69e614",
+      "sourceSnapshot": "f0186f814dacf37885419a54ebe44466439df09c",
+      "projectionCommit": "acbe72825628f268560d5d6059d608a7983a78e2",
+      "projectionParent": "dc582b899ebdcb6f7bb3c6abf2eb81090f8c1c3d",
+      "projectionSourceSnapshot": "7e813d323070433ed9b48bfc2b48bebb45151b0d",
+      "legacyBaselineDigest": "sha256:a2398c0f860006f33b7418db2e539ef1513d4f8692a3c07d7ea0a309bad5ab7f",
+      "projectedBaselineDigest": "sha256:b286a3d6420a560b5aa776faae123ecafa62961cef80face57535f7e5cf03dbd",
+      "provenanceManifestVersion": 3
+    }
+  ],
   "cvoAuthorizationRef": "message:0001785600399637-001062-9b03f289",
   "adrAuthorizationRef": "adr:44",
   "expectedAbsentBaselinePath": "packages/mcp-server/governance/mcp-surface-baseline.json",
   "owner": "architecture-cell:mcp-surface-governance",
-  "attestationSourceDigest": "sha256:67ca45135accd5b030f197debbe62dc4a847c410258abce7f069e5de8a572a26"
+  "attestationSourceDigest": "sha256:a8928fd510d87a55b5213950acb04845cf8174017c512691e8ca4c94e58f95b0"
 }

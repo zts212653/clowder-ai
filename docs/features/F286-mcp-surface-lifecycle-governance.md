@@ -8,7 +8,7 @@ description: "Govern the Clowder AI MCP surface as typed resource lifecycles wit
 description_source: human
 description_author: codex-sol
 description_updated_at: 2026-08-01T10:03:45Z
-tips_exempt: "Renewed 2026-09-27 for F324 Phase A: existing MCP readers and their response guard now bound full output with exact source continuations where available; this adds no user-invokable workflow or Hub discovery moment."
+tips_exempt: "Renewed 2026-10-13 for AC-B4: exported bootstrap lineage, the target-owned public baseline projection, and claim-only evidence stubs are internal MCP governance and sync verification; they add no user-invokable workflow or discovery moment."
 ---
 
 # F286: MCP Surface Lifecycle Governance
@@ -103,6 +103,18 @@ That pilot landed atomically in PR #3947: final HEAD `e9184caf4065ba3de3883e820f
 
 F324 Phase A 的既有读取工具入参增加 `charOffset` 或 `offset` 后，`cat_cafe_read_file_slice`、`cat_cafe_list_events` 与四个 session 读工具按 F286 admission 从 protected-base `migration-candidate` 晋为 canonical；同名工具继续保留原 read authority/risk/runtime profiles，无新顶层身份。`governance:write` 只更新规范快照，`governance:check` 验证新增/删除身份与 resource action/profile/schema delivery delta。输出字节预算由源 reader 和 `server-toolsets.ts` 的最终负例保护共同验证，写回执及已记正文曝光的读回执不被末端改报失败。
 
+### Exported repository proof boundary
+
+The public `clowder-ai` repository keeps the original home bootstrap SHA as its protected-source coordinate; it does not pretend that a private/source commit belongs to public Git history. The immutable bootstrap attestation instead carries one closed exported-target mapping:
+
+- the exact public commit that first introduced the source attestation/baseline, its parent, and the source snapshot recorded by that commit's `.sync-provenance.json`;
+- the exact later source-sync commit used for the first executable public projection, its source snapshot, and the digests of both the legacy exported baseline and the accepted public projection;
+- source-side proof that both named source snapshots descend from the original home bootstrap, plus public-side proof that both named public commits belong to the protected target history.
+
+Only that exact legacy→projection transition may substitute the current checked-in public baseline for the target's legacy source-shaped baseline. A changed digest, stale target, missing history, altered provenance, or unrelated repository fails closed. After the projection lands, public `governance:write` and `governance:check` use the ordinary reviewed-baseline lifecycle; bootstrap minting remains source-only. Full sync preserves the generated public baseline as target-owned instead of overwriting it with home implementation bytes.
+
+Public export also emits an evidence-only Feature stub when a below-tier, non-private Feature document carries accepted MCP admission/selector claims. The stub contains only those claims and public metadata; it never exports the private product narrative. `sync: false` remains an absolute exclusion.
+
 ## User Journey
 
 `user_journey_exempt: F286 is internal agent-surface governance. Phase A changes documentation and admission policy only; it adds no direct end-user UI or workflow.`
@@ -171,6 +183,7 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 - [x] AC-B1: All 130 registered semantics carry a canonical certificate derived through `defineMcpTool()` / the protected migration factory; the registry, annotations, profiles, SDK registration, and implementation bindings are executable projections rather than parallel inventories.
 - [x] AC-B2: RED→GREEN tests reject an unjustified existing-family verb, unrelated admission evidence, mixed authority/risk lifecycle variants, unresolved handler bindings, and a same-schema handler swap; exact subject-bound accepted evidence passes.
 - [x] AC-B3: `pnpm check:mcp-surface-governance` regenerates the committed protected-base witness, verifies exact protocol/handler parity, reports identity/resource-action/profile/description deltas, and requires exact atomic manifests for semantic or profile projection removal with fixed-root stale-reference, no-overlap, rollback, and layer guards.
+- [x] AC-B4: A clean public checkout validates the source-issued bootstrap through exact public Git/provenance coordinates, accepts only the attested initial public baseline projection, rejects forged/stale/cross-lineage proof, and then retains a normal reviewed public write/check lifecycle without exporting bootstrap authority or private Feature narrative.
 
 ### Phase C（Pilot Migration）
 
@@ -207,6 +220,7 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 | Low-ranked usage is mistaken for zero | F150 top-20 caveat is a hard provenance field; absence alone cannot authorize deletion |
 | Registry becomes a second stale list | Derive it from canonical tool definitions and fail registration drift mechanically |
 | A removed surface is resurrected by another layer | Cross-layer absence guard covers registration, lazy discovery, catalogs/provisioning, L0/skills, deterministic fixtures, and declared eval consumers |
+| Source bootstrap SHA is unavailable in an exported repository | Attest the exact source→public history mapping and initial projection digest; never guess a public ancestor, export home history, or skip ancestry |
 
 ## Key Decisions
 
@@ -222,6 +236,7 @@ Why: existing cells own capability execution (`hub-action-surface`), plugin reso
 | KD-8 | The first atomic pilot is a direct sunset of the generic `permission` family, with no canonical replacement | Fresh root census found no product consumer; operator says current need is absent. Approval Hub remains the pattern for future feature-specific typed gates, not a migration target for dead generic state | 2026-08-24 |
 | KD-9 | Phase D separates availability from schema delivery and uses provider-native discovery; current host delivery is version-attested rather than stored as a universal per-tool fact | Claude/Codex carriers already deliver MCP schemas differently, so the old exposure enum cannot truthfully encode both authorization and context delivery | 2026-08-29 |
 | KD-10 | Natural Claude/Codex history is a discovery prior only; Signals is the bounded controlled family, and 57/111 candidates stay out of scope | Provider/model/task confounds and F150 rank censoring make no-signal evidence too weak to waive deterministic profile/discovery proof | 2026-08-29 |
+| KD-11 | Exported repositories keep the home protected-source SHA but prove their own lineage through source-attested public introduction/projection commits; the generated public baseline becomes target-owned after the exact first projection | Re-signing to an invented public ancestor loses source authority, while replaying home implementation digests makes public sanitization unverifiable | 2026-10-13 |
 
 ## Review Gate
 

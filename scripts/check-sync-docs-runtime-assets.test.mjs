@@ -386,19 +386,29 @@ describe('sync-to-opensource.sh source-only guard contract', () => {
     );
   });
 
-  it('strips home-attested MCP governance commands from the public package surface', () => {
+  it('exports public MCP baseline write/check but not bootstrap minting', () => {
     const syncScript = readFileSync(SYNC_SCRIPT_PATH, 'utf8');
     const match = syncScript.match(/const internalScripts = \[([\s\S]*?)\];/);
     assert.ok(match, 'internalScripts array not found in sync-to-opensource.sh');
-    assert.match(
+    assert.doesNotMatch(
       match[1],
       /["']check:mcp-surface-governance["']/,
-      'the root public check chain must not execute a governance attestation bound to cat-cafe origin/main',
+      'the root public check chain must retain the source-attested, public-verifiable check',
     );
     assert.match(
       syncScript,
+      /delete pkg\.scripts\[["']governance:attest-bootstrap["']\]/,
+      'public @cat-cafe/mcp-server must not advertise bootstrap authority',
+    );
+    assert.match(
+      syncScript,
+      /["']governance:write["'], ["']governance:check["']/,
+      'public @cat-cafe/mcp-server must retain reviewed baseline writes and checks',
+    );
+    assert.doesNotMatch(
+      syncScript,
       /key\.startsWith\(["']governance:["']\)/,
-      'public @cat-cafe/mcp-server package scripts must not advertise home-bound governance commands',
+      'the public transform must not delete governance:check together with home-only writers',
     );
   });
 

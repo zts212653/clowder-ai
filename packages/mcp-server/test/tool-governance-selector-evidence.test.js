@@ -61,3 +61,32 @@ it('rejects another document impersonating the canonical architecture evidence a
     await assert.rejects(resolveToolGovernanceEvidence({ repoRoot, refs: [ref] }), /canonical source path/);
   });
 });
+
+it('accepts a claim-only exported Feature evidence projection', async () => {
+  const repoRoot = await mkdtemp(join(tmpdir(), 'f286-exported-selector-'));
+  const relativePath = 'docs/features/F999-exported-evidence.md';
+  const evidenceRef = `file:${relativePath}`;
+  const content = `---
+feature_ids: [F999]
+doc_kind: mcp-evidence
+mcp_selector_status: accepted
+mcp_selector_claims:
+  - ref: ${evidenceRef}
+    toolName: cat_cafe_search_evidence
+    resourceFamily: evidence-navigation
+    field: mode
+    role: read-strategy
+    decision: accepted
+---
+# Exported evidence
+`;
+  try {
+    await mkdir(join(repoRoot, 'docs/features'), { recursive: true });
+    await writeFile(join(repoRoot, relativePath), content);
+    const catalog = await resolveToolGovernanceEvidence({ repoRoot, refs: [evidenceRef] });
+    assert.equal(catalog.existingRefs.has(evidenceRef), true);
+    assert.equal(catalog.selectorClaims.get(evidenceRef)?.[0]?.subject.field, 'mode');
+  } finally {
+    await rm(repoRoot, { recursive: true, force: true });
+  }
+});
