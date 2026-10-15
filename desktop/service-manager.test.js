@@ -27,6 +27,30 @@ function seedMirrorSource(root, name, probeFile = '.keep') {
   writeFileSync(path.join(dir, probeFile), `${name}\n`, 'utf-8');
 }
 
+test('desktop API grants IM autostart and preserves an explicit launcher override', async () => {
+  const userDataRoot = await mkdtemp(path.join(tmpdir(), 'desktop-im-env-'));
+  const previous = process.env.CONNECTOR_GATEWAY_AUTOSTART;
+  const manager = new ServiceManager(userDataRoot, { frontendPort: 3101, apiPort: 3102 });
+  try {
+    for (const [override, expected] of [
+      [undefined, '1'],
+      ['', '1'],
+      ['0', '0'],
+      ['false', 'false'],
+      ['1', '1'],
+    ]) {
+      if (override === undefined) delete process.env.CONNECTOR_GATEWAY_AUTOSTART;
+      else process.env.CONNECTOR_GATEWAY_AUTOSTART = override;
+      assert.equal(manager._buildApiEnv(userDataRoot).CONNECTOR_GATEWAY_AUTOSTART, expected);
+      assert.equal(process.env.CONNECTOR_GATEWAY_AUTOSTART, override, 'do not mutate the desktop parent environment');
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CONNECTOR_GATEWAY_AUTOSTART;
+    else process.env.CONNECTOR_GATEWAY_AUTOSTART = previous;
+    rmSync(userDataRoot, { recursive: true, force: true });
+  }
+});
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once('error', reject);
